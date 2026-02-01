@@ -233,7 +233,6 @@
   .tool-result {
     color: var(--text-dim);
     font-size: .62rem;
-    max-width: 400px;
     white-space: pre-wrap;
     word-break: break-word;
   }
@@ -328,6 +327,16 @@
     return s.length > 120 ? s.slice(0, 120) + '...' : s;
   }
 
+  function fmtResult(text) {
+    if (text == null) return '-';
+    // Try to detect and pretty-print JSON
+    const trimmed = text.trim();
+    if ((trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('"')) ) {
+      try { return JSON.stringify(JSON.parse(trimmed), null, 2); } catch {}
+    }
+    return text;
+  }
+
   // Track which entries are expanded by requestId
   const expandedIds = new Set();
 
@@ -351,10 +360,10 @@
     for (const t of e.tools) {
       toolRows += '<tr' + (t.isError ? ' class="tool-error"' : '') + '>'
         + '<td>' + esc(t.tool) + '</td>'
-        + '<td class="tool-args" title="' + esc(JSON.stringify(t.args)) + '">' + esc(fmtArgs(t.args)) + '</td>'
+        + '<td class="tool-args" title="' + esc(JSON.stringify(t.args, null, 2)) + '">' + esc(fmtArgs(t.args)) + '</td>'
         + '<td>' + (t.durationMs != null ? fmtDuration(t.durationMs) : '-') + '</td>'
         + '<td>' + (t.isError ? 'ERR' : 'ok') + '</td>'
-        + '<td class="tool-result">' + (t.result != null ? esc(t.result) : '-') + '</td>'
+        + '<td class="tool-result">' + esc(fmtResult(t.result)) + '</td>'
         + '</tr>';
     }
 
