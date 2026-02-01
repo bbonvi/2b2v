@@ -1,8 +1,8 @@
-FROM oven/bun:1.3-alpine AS base
+FROM oven/bun:1.3-debian AS base
 WORKDIR /app
 
 # Install sharp native deps
-RUN apk add --no-cache vips-dev
+RUN apt-get update && apt-get install -y --no-install-recommends libvips-dev && rm -rf /var/lib/apt/lists/*
 
 # --- Install dependencies ---
 FROM base AS deps

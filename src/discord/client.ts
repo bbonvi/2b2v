@@ -41,7 +41,7 @@ let messageContentWarningEmitted = false;
 export function createDiscordClient(_config: GlobalConfig, log: Logger): Client {
   const client = new Client(buildClientOptions());
 
-  client.once("ready", (c) => {
+  client.once("clientReady", (c) => {
     log.info("discord client ready", {
       user: c.user.tag,
       guilds: c.guilds.cache.size,
