@@ -186,4 +186,32 @@ describe("handleMessage", () => {
     expect(result.triggered).toBe(true);
     expect(result.agentRan).toBe(true);
   });
+
+  test("accepts logger with logTokenUsage", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
+    const logSpy = {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      logTokenUsage: () => {},
+      child: () => logSpy,
+    };
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({
+        triggers: { mention: true, keywords: [], randomChance: 0 },
+      }),
+      promptContext: makePromptContext(),
+      sender,
+      log: logSpy as unknown as import("../logger").Logger,
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      deps
+    );
+    expect(result.triggered).toBe(true);
+    expect(result.agentRan).toBe(true);
+  });
 });

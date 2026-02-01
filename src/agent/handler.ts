@@ -102,9 +102,22 @@ export async function handleMessage(
         case "tool_execution_end":
           agentLog.debug("tool_result", { tool: e.toolName, isError: e.isError });
           break;
-        case "message_end":
+        case "message_end": {
           agentLog.debug("message_end", { message: e.message });
+          const msg2 = e.message as Record<string, unknown>;
+          if (msg2.role === "assistant" && msg2.usage !== undefined) {
+            const usage = msg2.usage as Record<string, unknown>;
+            const cost = usage.cost as Record<string, unknown> | undefined;
+            agentLog.logTokenUsage({
+              model: (msg2.model as string) ?? "unknown",
+              promptTokens: (usage.input as number) ?? 0,
+              completionTokens: (usage.output as number) ?? 0,
+              totalTokens: (usage.totalTokens as number) ?? 0,
+              estimatedCostUsd: cost?.total as number | undefined,
+            });
+          }
           break;
+        }
         case "turn_start":
         case "turn_end":
         case "message_start":
