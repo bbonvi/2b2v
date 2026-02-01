@@ -38,3 +38,5 @@ export { trimChatHistory } from "./context-trimming.ts";
 export { resizeImageToContent } from "./vision.ts";
 
 export { createMemoryTools, type MemoryToolsDeps } from "./memory-tools.ts";
+
+export { createSearchTool, type SearchToolDeps } from "./search-tool.ts";

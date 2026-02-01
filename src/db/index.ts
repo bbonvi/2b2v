@@ -25,3 +25,9 @@ export {
   hasMessageEmbedding,
   type EmbeddingSearchResult,
 } from "./embedding-repository";
+
+export {
+  searchMessages,
+  type MessageSearchFilter,
+  type MessageSearchResult,
+} from "./message-repository";
