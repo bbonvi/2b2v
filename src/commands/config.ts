@@ -69,10 +69,16 @@ export function validateConfigValue(key: string, value: string): string | null {
 
   switch (key) {
     case "model":
-    case "thinkingLevel":
-      // Any non-empty string is acceptable
       if (value === "") return "Value must not be empty.";
       return null;
+
+    case "thinkingLevel": {
+      const validLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+      if (!validLevels.includes(value)) {
+        return `Invalid thinking level. Must be one of: ${validLevels.join(", ")}`;
+      }
+      return null;
+    }
 
     case "timezone":
       if (value === "") return "Timezone must not be empty.";

@@ -5,6 +5,7 @@ import {
   createMemory,
   updateMemory,
   deleteMemory,
+  getMemory,
   listMemories,
   type MemoryScope,
   type MemoryRow,
@@ -81,6 +82,20 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
       const p = params as SaveMemoryParams;
 
       if (p.id !== undefined) {
+        // Verify the memory belongs to this guild before allowing mutation
+        const existing = getMemory(db, p.id);
+        if (existing === null) {
+          return Promise.resolve({
+            content: [{ type: "text", text: `Memory ${p.id} not found.` }],
+            details: { memoryId: p.id, action: "update", success: false },
+          });
+        }
+        if (existing.guildId !== null && existing.guildId !== guildId) {
+          return Promise.resolve({
+            content: [{ type: "text", text: `Memory ${p.id} not found.` }],
+            details: { memoryId: p.id, action: "update", success: false },
+          });
+        }
         const updated = updateMemory(db, p.id, {
           content: p.content,
           shortDescription: p.shortDescription,
@@ -120,6 +135,14 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     parameters: DeleteMemorySchema,
     execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: string; success: boolean }>> => {
       const p = params as DeleteMemoryParams;
+      // Verify the memory belongs to this guild before allowing deletion
+      const existing = getMemory(db, p.id);
+      if (existing === null || (existing.guildId !== null && existing.guildId !== guildId)) {
+        return Promise.resolve({
+          content: [{ type: "text", text: `Memory ${p.id} not found.` }],
+          details: { memoryId: p.id, success: false },
+        });
+      }
       const deleted = deleteMemory(db, p.id);
       return Promise.resolve({
         content: [{ type: "text", text: deleted ? `Deleted memory ${p.id}.` : `Memory ${p.id} not found.` }],

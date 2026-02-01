@@ -85,9 +85,14 @@ describe("validateConfigValue", () => {
     expect(validateConfigValue("model", "")).not.toBeNull();
   });
 
-  test("validates thinkingLevel as non-empty string", () => {
+  test("validates thinkingLevel against known levels", () => {
     expect(validateConfigValue("thinkingLevel", "high")).toBeNull();
+    expect(validateConfigValue("thinkingLevel", "off")).toBeNull();
+    expect(validateConfigValue("thinkingLevel", "medium")).toBeNull();
+    expect(validateConfigValue("thinkingLevel", "xhigh")).toBeNull();
     expect(validateConfigValue("thinkingLevel", "")).not.toBeNull();
+    expect(validateConfigValue("thinkingLevel", "turbo")).not.toBeNull();
+    expect(validateConfigValue("thinkingLevel", "max")).not.toBeNull();
   });
 
   test("validates timezone as non-empty string", () => {

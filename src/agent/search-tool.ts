@@ -5,6 +5,7 @@ import type { Database } from "../db/database";
 import type { EmbeddingPipeline } from "../embeddings/pipeline";
 import { searchMessages, type MessageSearchResult } from "../db/message-repository";
 
+
 export interface SearchToolDeps {
   db: Database;
   qdrant: QdrantClient;
@@ -43,22 +44,33 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         beforeMs?: number;
         limit?: number;
       };
-      const limit = p.limit ?? 10;
+      const limit = Math.max(1, Math.min(p.limit ?? 10, 50));
 
-      const embedResult = await embed.embed([p.query]);
-      const queryVec = embedResult[0];
-      if (queryVec === undefined) {
+      let queryVec: Float32Array;
+      try {
+        const embedResult = await embed.embed([p.query]);
+        const vec = embedResult[0];
+        if (vec === undefined) {
+          return { content: [{ type: "text", text: "Failed to generate embedding for query." }], details: undefined };
+        }
+        queryVec = vec;
+      } catch {
         return { content: [{ type: "text", text: "Failed to generate embedding for query." }], details: undefined };
       }
 
-      const results = await searchMessages(db, qdrant, queryVec, {
-        guildId,
-        userId: p.userId,
-        channelId: p.channelId,
-        after: p.afterMs,
-        before: p.beforeMs,
-        limit,
-      });
+      let results: MessageSearchResult[];
+      try {
+        results = await searchMessages(db, qdrant, queryVec, {
+          guildId,
+          userId: p.userId,
+          channelId: p.channelId,
+          after: p.afterMs,
+          before: p.beforeMs,
+          limit,
+        });
+      } catch {
+        return { content: [{ type: "text", text: "Search is temporarily unavailable." }], details: undefined };
+      }
 
       if (results.length === 0) {
         return { content: [{ type: "text", text: "No messages found matching your query." }], details: undefined };

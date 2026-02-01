@@ -2,6 +2,7 @@ import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import { createDatabase, type Database } from "../db/database";
 import { createMemoryTools } from "./memory-tools";
 import { getMemory, listMemories } from "../db/memory-repository";
+
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 
 let db: Database;
@@ -79,9 +80,56 @@ describe("save_memory tool", () => {
     expect(mem).not.toBeNull();
     expect(mem?.content).toBe("Updated");
   });
+
+  test("rejects update of memory belonging to another guild", async () => {
+    const toolsG1 = createMemoryTools({ db, guildId: "g1" });
+    const toolsG2 = createMemoryTools({ db, guildId: "g2" });
+    const saveG1 = findTool(toolsG1, "save_memory");
+    const saveG2 = findTool(toolsG2, "save_memory");
+
+    const createResult = await saveG1.execute("tc-x1", {
+      scope: "guild_bot",
+      content: "G1 secret",
+    }, new AbortController().signal);
+    const id = (createResult.details as { memoryId: string }).memoryId;
+
+    // G2 tries to update G1's memory
+    const updateResult = await saveG2.execute("tc-x2", {
+      scope: "guild_bot",
+      content: "Hijacked",
+      id,
+    }, new AbortController().signal);
+    const text = (updateResult.content[0] as { text: string }).text;
+    expect(text).toContain("not found");
+    expect((updateResult.details as { success: boolean }).success).toBe(false);
+
+    // Verify original unchanged
+    const mem = getMemory(db, id);
+    expect(mem?.content).toBe("G1 secret");
+  });
 });
 
 describe("delete_memory tool", () => {
+  test("rejects deletion of memory belonging to another guild", async () => {
+    const toolsG1 = createMemoryTools({ db, guildId: "g1" });
+    const toolsG2 = createMemoryTools({ db, guildId: "g2" });
+    const saveG1 = findTool(toolsG1, "save_memory");
+    const deleteG2 = findTool(toolsG2, "delete_memory");
+
+    const createResult = await saveG1.execute("tc-x3", {
+      scope: "guild_bot",
+      content: "G1 data",
+    }, new AbortController().signal);
+    const id = (createResult.details as { memoryId: string }).memoryId;
+
+    const deleteResult = await deleteG2.execute("tc-x4", { id }, new AbortController().signal);
+    const text = (deleteResult.content[0] as { text: string }).text;
+    expect(text).toContain("not found");
+
+    // Verify still exists
+    expect(getMemory(db, id)).not.toBeNull();
+  });
+
   test("deletes an existing memory", async () => {
     const tools = createMemoryTools({ db, guildId: "g1" });
     const saveTool = findTool(tools, "save_memory");
