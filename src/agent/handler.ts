@@ -104,16 +104,16 @@ export async function handleMessage(
           break;
         case "message_end": {
           agentLog.debug("message_end", { message: e.message });
-          const msg2 = e.message as Record<string, unknown>;
+          const msg2 = e.message as unknown as Record<string, unknown>;
           if (msg2.role === "assistant" && msg2.usage !== undefined) {
             const usage = msg2.usage as Record<string, unknown>;
             const cost = usage.cost as Record<string, unknown> | undefined;
             agentLog.logTokenUsage({
-              model: (msg2.model as string) ?? "unknown",
-              promptTokens: (usage.input as number) ?? 0,
-              completionTokens: (usage.output as number) ?? 0,
-              totalTokens: (usage.totalTokens as number) ?? 0,
-              estimatedCostUsd: cost?.total as number | undefined,
+              model: typeof msg2.model === "string" ? msg2.model : "unknown",
+              promptTokens: typeof usage.input === "number" ? usage.input : 0,
+              completionTokens: typeof usage.output === "number" ? usage.output : 0,
+              totalTokens: typeof usage.totalTokens === "number" ? usage.totalTokens : 0,
+              estimatedCostUsd: typeof cost?.total === "number" ? cost.total : undefined,
             });
           }
           break;

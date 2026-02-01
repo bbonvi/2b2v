@@ -5,6 +5,7 @@ import { handleMessage, type IncomingMessage, type HandlerDeps } from "./handler
 import type { PromptContext } from "./prompt.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { MessageSender } from "./send-messages-tool.ts";
+import type { Logger } from "../logger.ts";
 
 function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
   return {
@@ -204,7 +205,7 @@ describe("handleMessage", () => {
       }),
       promptContext: makePromptContext(),
       sender,
-      log: logSpy as unknown as import("../logger").Logger,
+      log: logSpy as unknown as Logger,
     };
 
     const result = await handleMessage(
