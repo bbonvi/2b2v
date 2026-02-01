@@ -26,9 +26,6 @@ services:
     image: qdrant/qdrant:latest
     volumes:
       - dev-qdrant-data:/qdrant/storage
-    ports:
-      - "6333:6333"
-      - "6334:6334"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/healthz"]
       interval: 5s

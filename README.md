@@ -193,17 +193,12 @@ When chat history exceeds `trim.trimTrigger` messages, it is chunked down to `tr
 ## Testing
 
 ```bash
-bun test                # run all tests
-bun run check           # tsc --noEmit && eslint
+make test               # starts Qdrant container if needed, runs all tests
+make test-unit          # runs only non-Qdrant tests (no container needed)
+make check              # tsc --noEmit && eslint
 ```
 
-Tests requiring Qdrant need a running container:
-
-```bash
-docker run -d --name qdrant-test -p 6333:6333 -p 6334:6334 qdrant/qdrant:latest
-```
-
-Tests default to `QDRANT_URL=http://qdrant-test.orb.local:6333`. Override with `QDRANT_URL` env var if needed.
+`make test` automatically starts a `qdrant-test` container and sets `QDRANT_URL` for the test run, overriding any `.env` value. Manage the container manually with `make qdrant-up` / `make qdrant-down`.
 
 ## Known limitations
 
