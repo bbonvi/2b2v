@@ -10,6 +10,7 @@ import { getEmbeddingPipeline, disposePipeline } from "./embeddings/pipeline";
 import { createEmbeddingQueue, type EmbeddingQueue } from "./embeddings/queue";
 import { createDiscordClient, loginDiscordClient } from "./discord/client";
 import { translateInbound, translateOutbound, buildDisplayNameContext, type InboundResolvers, type OutboundResolvers } from "./discord/translation";
+import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { handleMessage, type IncomingMessage, type HandlerDeps } from "./agent/handler";
@@ -139,7 +140,12 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
     log.info("schedule fired", { scheduleId: schedule.id, guildId: schedule.guildId });
     const channel = client.channels.cache.get(schedule.channelId);
     if (channel !== undefined && "send" in channel) {
-      void (channel as TextChannel).send(schedule.messageContent).catch((err: unknown) => {
+      const scheduleChunks = splitMessage(schedule.messageContent);
+      void (async () => {
+        for (const chunk of scheduleChunks) {
+          await (channel as TextChannel).send(chunk);
+        }
+      })().catch((err: unknown) => {
         log.error("failed to send scheduled message", {
           scheduleId: schedule.id,
           error: err instanceof Error ? err.message : String(err),
@@ -573,15 +579,21 @@ client.on("messageCreate", (message: Message) => void (async () => {
 
     const sender: MessageSender = async (text, reply, _signal) => {
       const translated = translateOutbound(text, outboundResolvers);
-      const sent = reply
-        ? await message.reply(translated)
-        : await channelObj.send(translated);
-      storeBotMessage(sent.id, translated, text);
+      const chunks = splitMessage(translated);
+      let firstId = "";
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i] as string;
+        const sent = (reply && i === 0)
+          ? await message.reply(chunk)
+          : await channelObj.send(chunk);
+        if (i === 0) firstId = sent.id;
+        storeBotMessage(sent.id, chunk, i === 0 ? text : chunk);
+      }
       const botHistory = getChatHistory(channelId);
       botHistory.push({ author: client.user?.username ?? "bot", content: text, isBot: true });
       // Re-trigger typing after send — Discord clears the indicator when a message is sent
       fireTyping();
-      return { sentMessageId: sent.id };
+      return { sentMessageId: firstId };
     };
 
     // Build prompt context
