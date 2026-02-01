@@ -1,12 +1,9 @@
 import { Database as BunDatabase } from "bun:sqlite";
-import * as sqliteVec from "sqlite-vec";
 
 export interface Database {
   raw: BunDatabase;
   close(): void;
 }
-
-const EMBEDDING_DIMENSIONS = 1024; // bge-m3 output size
 
 const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS memories (
@@ -52,9 +49,6 @@ const SCHEMA_SQL = `
 export function createDatabase(dbPath: string): Database {
   const raw = new BunDatabase(dbPath);
 
-  // Load sqlite-vec extension
-  sqliteVec.load(raw);
-
   // Performance pragmas
   raw.exec("PRAGMA journal_mode = WAL");
   raw.exec("PRAGMA foreign_keys = ON");
@@ -62,21 +56,6 @@ export function createDatabase(dbPath: string): Database {
 
   // Create core tables
   raw.exec(SCHEMA_SQL);
-
-  // Create vec0 virtual tables for embeddings
-  raw.exec(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings USING vec0(
-      memory_id TEXT PRIMARY KEY,
-      embedding float[${EMBEDDING_DIMENSIONS}]
-    );
-  `);
-
-  raw.exec(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS message_embeddings USING vec0(
-      message_id TEXT PRIMARY KEY,
-      embedding float[${EMBEDDING_DIMENSIONS}]
-    );
-  `);
 
   return {
     raw,

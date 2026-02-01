@@ -15,8 +15,8 @@ All features described below are planned. Implementation is in progress.
 - Bun + discord.js runtime
 - OpenRouter LLM with per-guild model overrides and passthrough params
 - Persona-driven system prompt with cache-aware context window trimming
-- Memory system with SQLite + sqlite-vec (user, guild, global, journal)
-- Semantic search over translated message history with filters
+- Memory system with SQLite + Qdrant (user, guild, global, journal)
+- Semantic search over message history via Qdrant with pre-filtered KNN
 - Discord markup translation (mentions, channels, emojis, timestamps)
 - Scheduling with Croner (recurring, one-off, relative time)
 - Brave Search API tool

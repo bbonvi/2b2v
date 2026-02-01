@@ -40,19 +40,6 @@ describe("database initialization", () => {
     expect(info?.name).toBe("messages");
   });
 
-  test("creates memory_embeddings virtual table", () => {
-    const info = db.raw
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_embeddings'")
-      .get() as { name: string } | undefined;
-    expect(info?.name).toBe("memory_embeddings");
-  });
-
-  test("creates message_embeddings virtual table", () => {
-    const info = db.raw
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='message_embeddings'")
-      .get() as { name: string } | undefined;
-    expect(info?.name).toBe("message_embeddings");
-  });
 });
 
 describe("memories table", () => {
