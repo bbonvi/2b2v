@@ -472,6 +472,15 @@ client.on("messageCreate", (message: Message) => void (async () => {
     const inboundResolvers = buildInboundResolvers(guild);
     const translatedContent = translateInbound(message.content, inboundResolvers);
 
+    // Append to in-memory chat history (before DB insert so cold-start
+    // hydration doesn't include the current message, avoiding duplicates)
+    const history = getChatHistory(channelId);
+    history.push({
+      author: message.author.username,
+      content: translatedContent,
+      isBot: false,
+    });
+
     // Store message in SQLite
     const now = Date.now();
     db.raw
@@ -497,14 +506,6 @@ client.on("messageCreate", (message: Message) => void (async () => {
         messageId: message.id,
         error: err instanceof Error ? err.message : String(err),
       });
-    });
-
-    // Append to in-memory chat history
-    const history = getChatHistory(channelId);
-    history.push({
-      author: message.author.username,
-      content: translatedContent,
-      isBot: false,
     });
 
     // Process images for multimodal
