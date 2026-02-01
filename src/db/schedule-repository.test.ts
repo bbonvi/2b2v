@@ -268,6 +268,7 @@ describe("listSchedules", () => {
 
     const g1Schedules = listSchedules(db, { guildId: "g1" });
     expect(g1Schedules).toHaveLength(1);
+    if (!g1Schedules[0]) throw new Error("unreachable");
     expect(g1Schedules[0].messageContent).toBe("g1 schedule");
   });
 
@@ -293,6 +294,7 @@ describe("listSchedules", () => {
 
     const adminOnly = listSchedules(db, { guildId: "g1", source: "admin" });
     expect(adminOnly).toHaveLength(1);
+    if (!adminOnly[0]) throw new Error("unreachable");
     expect(adminOnly[0].source).toBe("admin");
   });
 
@@ -319,6 +321,7 @@ describe("listSchedules", () => {
 
     const enabledOnly = listSchedules(db, { guildId: "g1", enabled: true });
     expect(enabledOnly).toHaveLength(1);
+    if (!enabledOnly[0]) throw new Error("unreachable");
     expect(enabledOnly[0].messageContent).toBe("active");
   });
 
@@ -348,6 +351,7 @@ describe("listSchedules", () => {
     });
 
     const all = listSchedules(db, { guildId: "g1" });
+    if (!all[0] || !all[1]) throw new Error("unreachable");
     expect(all[0].messageContent).toBe("first");
     expect(all[1].messageContent).toBe("second");
   });

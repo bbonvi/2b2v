@@ -137,8 +137,10 @@ describe("updateMemory", () => {
     expect(updated).toBe(true);
 
     const mem = getMemory(db, id);
-    expect(mem?.content).toBe("New content");
-    expect(mem?.updatedAt).toBeGreaterThanOrEqual(mem?.createdAt);
+    expect(mem).not.toBeNull();
+    if (!mem) throw new Error("unreachable");
+    expect(mem.content).toBe("New content");
+    expect(mem.updatedAt).toBeGreaterThanOrEqual(mem.createdAt);
   });
 
   test("updates journal descriptions", () => {
@@ -215,6 +217,8 @@ describe("listMemories", () => {
 
     const results = listMemories(db, { scope: "guild_bot", guildId: "g1" });
     expect(results).toHaveLength(1);
+    expect(results[0]).toBeDefined();
+    if (!results[0]) throw new Error("unreachable");
     expect(results[0].content).toBe("X");
   });
 
@@ -236,6 +240,8 @@ describe("listMemories", () => {
 
     const results = listMemories(db, { scope: "journal" });
     expect(results).toHaveLength(1);
+    expect(results[0]).toBeDefined();
+    if (!results[0]) throw new Error("unreachable");
     expect(results[0].shortDescription).toBe("Short A");
   });
 
@@ -253,6 +259,8 @@ describe("listMemories", () => {
 
     const results = listMemories(db, { scope: "global_bot" });
     expect(results).toHaveLength(1);
+    expect(results[0]).toBeDefined();
+    if (!results[0]) throw new Error("unreachable");
     expect(results[0].content).toBe("Current");
   });
 

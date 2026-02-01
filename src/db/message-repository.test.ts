@@ -9,6 +9,13 @@ import { createMockPipeline } from "../embeddings/test-utils";
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
 const mockPipeline = createMockPipeline();
 
+async function embedOne(text: string): Promise<Float32Array> {
+  const vecs = await mockPipeline.embed([text]);
+  const vec = vecs[0];
+  if (!vec) throw new Error("unreachable: embed returned empty");
+  return vec;
+}
+
 let db: Database;
 let qdrant: QdrantClient;
 
@@ -54,7 +61,9 @@ function insertMessage(
 
 async function insertWithEmbedding(id: string, text: string, opts: Parameters<typeof insertMessage>[1] = {}) {
   insertMessage(id, { ...opts, translatedContent: text });
-  const [vec] = await mockPipeline.embed([text]);
+  const vecs = await mockPipeline.embed([text]);
+  const vec = vecs[0];
+  if (!vec) throw new Error("unreachable: embed returned empty");
   const guildId = opts.guildId ?? "g1";
   const channelId = opts.channelId ?? "c1";
   const userId = opts.userId ?? "u1";
@@ -85,10 +94,11 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m2", "quantum physics lecture notes");
     await insertWithEmbedding("m3", "puppies and kittens having fun");
 
-    const [queryVec] = await mockPipeline.embed(["cats and dogs"]);
+    const queryVec = await embedOne("cats and dogs");
     const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
 
     expect(results.length).toBe(3);
+    if (!results[0]) throw new Error("unreachable");
     expect(results[0].id).toBe("m1");
   });
 
@@ -96,10 +106,11 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m1", "hello world", { guildId: "g1" });
     await insertWithEmbedding("m2", "hello world again", { guildId: "g2" });
 
-    const [queryVec] = await mockPipeline.embed(["hello"]);
+    const queryVec = await embedOne("hello");
     const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
 
     expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
     expect(results[0].id).toBe("m1");
   });
 
@@ -107,10 +118,11 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m1", "programming tips", { userId: "u1" });
     await insertWithEmbedding("m2", "programming advice", { userId: "u2" });
 
-    const [queryVec] = await mockPipeline.embed(["programming"]);
+    const queryVec = await embedOne("programming");
     const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", userId: "u1", limit: 10 });
 
     expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
     expect(results[0].id).toBe("m1");
   });
 
@@ -118,10 +130,11 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m1", "music discussion", { channelId: "c1" });
     await insertWithEmbedding("m2", "music reviews", { channelId: "c2" });
 
-    const [queryVec] = await mockPipeline.embed(["music"]);
+    const queryVec = await embedOne("music");
     const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", channelId: "c1", limit: 10 });
 
     expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
     expect(results[0].id).toBe("m1");
   });
 
@@ -129,10 +142,11 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m1", "old message about food", { createdAt: now - 10 * hour });
     await insertWithEmbedding("m2", "recent message about food", { createdAt: now - 1 * hour });
 
-    const [queryVec] = await mockPipeline.embed(["food"]);
+    const queryVec = await embedOne("food");
     const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", after: now - 2 * hour, limit: 10 });
 
     expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
     expect(results[0].id).toBe("m2");
   });
 
@@ -140,10 +154,11 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m1", "old message about food", { createdAt: now - 10 * hour });
     await insertWithEmbedding("m2", "recent message about food", { createdAt: now - 1 * hour });
 
-    const [queryVec] = await mockPipeline.embed(["food"]);
+    const queryVec = await embedOne("food");
     const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", before: now - 5 * hour, limit: 10 });
 
     expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
     expect(results[0].id).toBe("m1");
   });
 
@@ -152,7 +167,7 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m2", "afternoon coffee break", { createdAt: now - 5 * hour });
     await insertWithEmbedding("m3", "evening coffee ritual", { createdAt: now - 1 * hour });
 
-    const [queryVec] = await mockPipeline.embed(["coffee"]);
+    const queryVec = await embedOne("coffee");
     const results = await searchMessages(db, qdrant, queryVec, {
       guildId: "g1",
       after: now - 8 * hour,
@@ -161,6 +176,7 @@ describe("searchMessages", () => {
     });
 
     expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
     expect(results[0].id).toBe("m2");
   });
 
@@ -169,7 +185,7 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m2", "alpha topic two");
     await insertWithEmbedding("m3", "alpha topic three");
 
-    const [queryVec] = await mockPipeline.embed(["alpha"]);
+    const queryVec = await embedOne("alpha");
     const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 2 });
 
     expect(results.length).toBe(2);
@@ -183,10 +199,11 @@ describe("searchMessages", () => {
       createdAt: now - 3 * hour,
     });
 
-    const [queryVec] = await mockPipeline.embed(["detailed content"]);
+    const queryVec = await embedOne("detailed content");
     const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
 
     expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
     expect(results[0]).toMatchObject({
       id: "m1",
       channelId: "c5",
@@ -199,7 +216,7 @@ describe("searchMessages", () => {
   });
 
   test("returns empty array when no matches", async () => {
-    const [queryVec] = await mockPipeline.embed(["anything"]);
+    const queryVec = await embedOne("anything");
     const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
 
     expect(results).toEqual([]);
@@ -222,7 +239,7 @@ describe("searchMessages", () => {
       guildId: "g1", userId: "u1", channelId: "c1", createdAt: now - 20 * hour,
     });
 
-    const [queryVec] = await mockPipeline.embed(["the answer"]);
+    const queryVec = await embedOne("the answer");
     const results = await searchMessages(db, qdrant, queryVec, {
       guildId: "g1",
       userId: "u1",
@@ -233,6 +250,7 @@ describe("searchMessages", () => {
     });
 
     expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
     expect(results[0].id).toBe("target");
   });
 });

@@ -81,7 +81,7 @@ export function getSchedule(db: Database, id: string): ScheduleRow | null {
 
 export function updateSchedule(db: Database, id: string, input: UpdateScheduleInput): boolean {
   const sets: string[] = [];
-  const params: unknown[] = [];
+  const params: (string | number | null)[] = [];
 
   if (input.cronExpression !== undefined) {
     sets.push("cron_expression = ?");
@@ -125,7 +125,7 @@ export function deleteSchedule(db: Database, id: string): boolean {
 
 export function listSchedules(db: Database, filter: ListSchedulesFilter): ScheduleRow[] {
   const conditions = ["guild_id = ?"];
-  const params: unknown[] = [filter.guildId];
+  const params: (string | number | null)[] = [filter.guildId];
 
   if (filter.source !== undefined) {
     conditions.push("source = ?");

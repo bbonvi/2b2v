@@ -85,7 +85,7 @@ export function createMemory(db: Database, input: CreateMemoryInput): string {
 /** Update fields on an existing memory. Returns true if the row existed. */
 export function updateMemory(db: Database, id: string, input: UpdateMemoryInput): boolean {
   const sets: string[] = [];
-  const params: unknown[] = [];
+  const params: (string | number | null)[] = [];
 
   if (input.content !== undefined) {
     sets.push("content = ?");
@@ -128,7 +128,7 @@ export function getMemory(db: Database, id: string): MemoryRow | null {
 /** List memories matching the filter. Excludes expired entries. */
 export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRow[] {
   const conditions = ["scope = ?"];
-  const params: unknown[] = [filter.scope];
+  const params: (string | number | null)[] = [filter.scope];
 
   if (filter.guildId !== undefined) {
     conditions.push("guild_id = ?");
