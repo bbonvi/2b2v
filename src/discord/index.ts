@@ -5,3 +5,11 @@ export {
   createDiscordClient,
   loginDiscordClient,
 } from "./client.ts";
+
+export {
+  translateInbound,
+  resolveDiscordTimestamp,
+  buildDisplayNameContext,
+  type InboundResolvers,
+  type UserInfo,
+} from "./translation.ts";
