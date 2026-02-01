@@ -41,7 +41,7 @@ export async function createEmbeddingPipeline(options: PipelineOptions = {}): Pr
       if (texts.length === 0) return [];
 
       const output = await extractor(texts, { pooling: "cls", normalize: true });
-      const data = output.ort_tensor.cpuData as Float32Array;
+      const data = output.data as Float32Array;
       const results: Float32Array[] = [];
 
       for (let i = 0; i < texts.length; i++) {
