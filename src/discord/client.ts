@@ -5,6 +5,7 @@ import {
   type ClientOptions,
 } from "discord.js";
 import type { GlobalConfig } from "../config/types.ts";
+import type { Logger } from "../logger";
 
 export const REQUIRED_INTENTS = [
   GatewayIntentBits.Guilds,
@@ -37,19 +38,14 @@ let messageContentWarningEmitted = false;
  * Create and configure the Discord client.
  * Does NOT call login — caller is responsible for that.
  */
-export function createDiscordClient(_config: GlobalConfig): Client {
+export function createDiscordClient(_config: GlobalConfig, log: Logger): Client {
   const client = new Client(buildClientOptions());
 
   client.once("ready", (c) => {
-    console.log(
-      JSON.stringify({
-        level: "info",
-        msg: "discord client ready",
-        user: c.user.tag,
-        guilds: c.guilds.cache.size,
-        timestamp: new Date().toISOString(),
-      })
-    );
+    log.info("discord client ready", {
+      user: c.user.tag,
+      guilds: c.guilds.cache.size,
+    });
   });
 
   // Detect missing Message Content intent on first message with empty content
@@ -57,13 +53,7 @@ export function createDiscordClient(_config: GlobalConfig): Client {
     if (message.author.bot) return;
     if (!messageContentWarningEmitted && !checkMessageContentIntent(message.content)) {
       messageContentWarningEmitted = true;
-      console.log(
-        JSON.stringify({
-          level: "warn",
-          msg: "Message Content intent appears missing — message content is empty. Bot will operate in degraded mode.",
-          timestamp: new Date().toISOString(),
-        })
-      );
+      log.warn("Message Content intent appears missing — message content is empty. Bot will operate in degraded mode.");
     }
   });
 

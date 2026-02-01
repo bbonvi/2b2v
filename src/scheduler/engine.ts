@@ -14,8 +14,14 @@ export interface ScheduleFireEvent {
 export interface SchedulerEngineOptions {
   db: Database;
   onFire: (event: ScheduleFireEvent) => void;
+  log?: SchedulerLogger;
   /** Not currently used; reserved for future polling. */
   pollIntervalMs?: number;
+}
+
+/** Minimal logging interface to avoid hard dependency on logger module. */
+export interface SchedulerLogger {
+  error(msg: string, fields?: Record<string, unknown>): void;
 }
 
 interface ActiveJob {
@@ -36,9 +42,12 @@ export interface SchedulerEngine {
 export function createSchedulerEngine(
   options: SchedulerEngineOptions
 ): SchedulerEngine {
-  const { db, onFire } = options;
+  const { db, onFire, log } = options;
   const jobs = new Map<string, ActiveJob>();
   let running = false;
+
+  const noopLog: SchedulerLogger = { error: () => {} };
+  const logger = log ?? noopLog;
 
   function loadAll(): void {
     // Load all enabled schedules across all guilds.
@@ -67,20 +76,21 @@ export function createSchedulerEngine(
         const cron = new Cron(schedule.cronExpression, {
           timezone: schedule.timezone,
           catch: (err) => {
-            console.error(
-              `Cron error for schedule ${schedule.id}:`,
-              err
-            );
+            logger.error("cron execution error", {
+              scheduleId: schedule.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
           },
         }, () => {
           fire(schedule.id);
         });
         jobs.set(schedule.id, { cron, scheduleId: schedule.id });
       } catch (err) {
-        console.error(
-          `Invalid cron expression for schedule ${schedule.id}: ${schedule.cronExpression}`,
-          err
-        );
+        logger.error("invalid cron expression", {
+          scheduleId: schedule.id,
+          cronExpression: schedule.cronExpression,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     } else if (schedule.type === "one_off" && schedule.runAt !== null) {
       const delayMs = schedule.runAt - Date.now();
