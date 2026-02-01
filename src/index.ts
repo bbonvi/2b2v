@@ -526,6 +526,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
       promptContext,
       sender,
       extraTools,
+      log: log.child({ guildId, channelId }),
     };
 
     // Run the handler

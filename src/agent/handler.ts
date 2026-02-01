@@ -6,6 +6,7 @@ import { assembleSystemPrompt, type PromptContext } from "./prompt.ts";
 import { createSendMessagesTool, type MessageSender } from "./send-messages-tool.ts";
 import { resolveGuildModel, buildStreamOptions } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
+import type { Logger } from "../logger.ts";
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 
 /** Minimal abstraction over a Discord message for the handler. */
@@ -29,6 +30,8 @@ export interface HandlerDeps {
   sender: MessageSender;
   /** Additional tools beyond send_messages (memory, search, etc.). */
   extraTools?: AgentTool[];
+  /** Logger for agent event tracing. */
+  log?: Logger;
 }
 
 export interface HandleResult {
@@ -81,6 +84,35 @@ export async function handleMessage(
   // The Agent uses streamSimple under the hood which needs these
   // We pass apiKey via getApiKey callback
   agent.getApiKey = () => streamOptions.apiKey;
+
+  if (deps.log !== undefined) {
+    const agentLog = deps.log;
+    agent.subscribe((e) => {
+      switch (e.type) {
+        case "agent_start":
+          agentLog.debug("agent_start");
+          break;
+        case "agent_end":
+          agentLog.debug("agent_end", { messageCount: e.messages.length });
+          break;
+        case "tool_execution_start":
+          agentLog.debug("tool_call", { tool: e.toolName, args: e.args });
+          break;
+        case "tool_execution_end":
+          agentLog.debug("tool_result", { tool: e.toolName, isError: e.isError });
+          break;
+        case "message_end":
+          agentLog.debug("message_end", { message: e.message });
+          break;
+        case "turn_start":
+        case "turn_end":
+        case "message_start":
+        case "message_update":
+        case "tool_execution_update":
+          break;
+      }
+    });
+  }
 
   const userContent = msg.translatedContent;
   await agent.prompt(userContent, msg.images);
