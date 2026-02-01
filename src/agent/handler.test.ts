@@ -117,4 +117,71 @@ describe("handleMessage", () => {
     expect(result.triggerResult).toEqual({ reason: "mention" });
     expect(result.agentRan).toBe(true);
   });
+
+  test("returns triggered=true with keyword trigger", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({
+        triggers: { mention: false, keywords: ["hello"], randomChance: 0 },
+      }),
+      promptContext: makePromptContext(),
+      sender,
+    };
+
+    const result = await handleMessage(
+      makeMessage({ content: "hello bot", translatedContent: "hello bot" }),
+      deps
+    );
+    expect(result.triggered).toBe(true);
+    expect(result.triggerResult).toEqual({ reason: "keyword", keyword: "hello" });
+    expect(result.agentRan).toBe(true);
+  });
+
+  test("returns triggered=false when keyword does not match", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({
+        triggers: { mention: false, keywords: ["goodbye"], randomChance: 0 },
+      }),
+      promptContext: makePromptContext(),
+      sender,
+    };
+
+    const result = await handleMessage(
+      makeMessage({ content: "hello bot", translatedContent: "hello bot" }),
+      deps
+    );
+    expect(result.triggered).toBe(false);
+    expect(result.agentRan).toBe(false);
+  });
+
+  test("passes extraTools to agent without error", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
+    const fakeTool = {
+      name: "fake_tool",
+      label: "Fake",
+      description: "A test tool",
+      parameters: {},
+      execute: async () => ({
+        content: [{ type: "text" as const, text: "ok" }],
+        details: {},
+      }),
+    };
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig(),
+      promptContext: makePromptContext(),
+      sender,
+      extraTools: [fakeTool],
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      deps
+    );
+    expect(result.triggered).toBe(true);
+    expect(result.agentRan).toBe(true);
+  });
 });
