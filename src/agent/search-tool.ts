@@ -34,7 +34,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
     description:
       "Search chat history semantically. Describe what you're looking for in natural language. Optionally filter by user, channel, or time range.",
     parameters: SearchParams,
-    execute: async (_toolCallId, params): Promise<AgentToolResult> => {
+    execute: async (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as {
         query: string;
         userId?: string;
@@ -45,7 +45,11 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
       };
       const limit = p.limit ?? 10;
 
-      const [queryVec] = await embed.embed([p.query]);
+      const embedResult = await embed.embed([p.query]);
+      const queryVec = embedResult[0];
+      if (queryVec === undefined) {
+        return { content: [{ type: "text", text: "Failed to generate embedding for query." }], details: undefined };
+      }
 
       const results = await searchMessages(db, qdrant, queryVec, {
         guildId,
@@ -57,7 +61,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
       });
 
       if (results.length === 0) {
-        return { content: [{ type: "text", text: "No messages found matching your query." }] };
+        return { content: [{ type: "text", text: "No messages found matching your query." }], details: undefined };
       }
 
       const lines = results.map((r) => formatResult(r));

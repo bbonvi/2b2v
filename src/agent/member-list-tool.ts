@@ -24,13 +24,15 @@ export function createMemberListTool(deps: MemberListToolDeps): AgentTool {
   const { guildId, fetchMembers } = deps;
 
   return {
+    name: "list_members",
     label: "list_members",
     description:
       "List server members. Optionally filter to only online members. Returns usernames, display names, and online status.",
     parameters: ListMembersParams,
 
-    async execute(_toolCallId: string, params: { onlineOnly?: boolean }): Promise<AgentToolResult> {
-      const onlineOnly = params.onlineOnly ?? false;
+    async execute(_toolCallId: string, params: unknown): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {
+      const { onlineOnly: rawOnlineOnly } = params as { onlineOnly?: boolean };
+      const onlineOnly = rawOnlineOnly ?? false;
 
       let members: MemberInfo[];
       try {

@@ -25,6 +25,7 @@ export function createBraveSearchTool(deps: BraveSearchToolDeps): AgentTool {
   const fetchResults = deps.fetchResults ?? ((query: string, count: number) => fetchBraveResults(apiKey, query, count));
 
   return {
+    name: "web_search",
     label: "web_search",
     description:
       "Search the web using Brave Search. Returns titles, URLs, and descriptions for each result.",
@@ -32,13 +33,14 @@ export function createBraveSearchTool(deps: BraveSearchToolDeps): AgentTool {
 
     async execute(
       _toolCallId: string,
-      params: { query: string; count?: number }
-    ): Promise<AgentToolResult> {
-      const count = Math.min(params.count ?? 5, 20);
+      params: unknown
+    ): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {
+      const { query, count: rawCount } = params as { query: string; count?: number };
+      const count = Math.min(rawCount ?? 5, 20);
 
       let results: BraveSearchResult[];
       try {
-        results = await fetchResults(params.query, count);
+        results = await fetchResults(query, count);
       } catch {
         return {
           content: [{ type: "text", text: "Unable to perform web search. The Brave Search API may be unavailable or the API key may be invalid." }],

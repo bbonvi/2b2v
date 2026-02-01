@@ -31,6 +31,7 @@ export function createScheduleTool(deps: ScheduleToolDeps): AgentTool {
   const { db, guildId, channelId, timezone, onScheduleCreated } = deps;
 
   return {
+    name: "schedule_message",
     label: "schedule_message",
     description:
       "Schedule a message to be sent in the current channel after a relative delay (e.g. in 30 minutes).",
@@ -38,20 +39,19 @@ export function createScheduleTool(deps: ScheduleToolDeps): AgentTool {
 
     execute(
       _toolCallId: string,
-      params: { amount: number; unit: string; message: string },
-      _signal: AbortSignal,
-      _onUpdate: (text: string) => void
-    ): Promise<AgentToolResult> {
+      rawParams: unknown
+    ): Promise<AgentToolResult<{ scheduleId: string; runAt: number } | { error: boolean }>> {
+      const params = rawParams as { amount: number; unit: string; message: string };
       if (params.amount <= 0) {
-        return { text: "Amount must be positive.", details: { error: true } };
+        return Promise.resolve({ content: [{ type: "text", text: "Amount must be positive." }], details: { error: true } });
       }
 
       const multiplier = UNIT_TO_MS[params.unit];
       if (multiplier === undefined) {
-        return {
-          text: "Invalid unit. Use seconds, minutes, or hours.",
+        return Promise.resolve({
+          content: [{ type: "text", text: "Invalid unit. Use seconds, minutes, or hours." }],
           details: { error: true },
-        };
+        });
       }
 
       const runAt = Date.now() + params.amount * multiplier;
@@ -68,10 +68,10 @@ export function createScheduleTool(deps: ScheduleToolDeps): AgentTool {
       onScheduleCreated?.(id);
 
       const fireDate = new Date(runAt);
-      return {
-        text: `Scheduled message in ${params.amount} ${params.unit} (fires at ${fireDate.toISOString()}).`,
+      return Promise.resolve({
+        content: [{ type: "text", text: `Scheduled message in ${params.amount} ${params.unit} (fires at ${fireDate.toISOString()}).` }],
         details: { scheduleId: id, runAt },
-      };
+      });
     },
   };
 }

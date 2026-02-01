@@ -77,7 +77,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     description:
       "Create or update a memory entry. Use scope 'user' for per-user facts, 'guild_bot' for server knowledge, 'global_bot' for cross-server knowledge, 'journal' for private scratchpad entries. Provide 'id' to update an existing entry.",
     parameters: SaveMemorySchema,
-    execute: (_toolCallId, params): Promise<AgentToolResult> => {
+    execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: string; action: string; success: boolean }>> => {
       const p = params as SaveMemoryParams;
 
       if (p.id !== undefined) {
@@ -118,7 +118,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     label: "Delete Memory",
     description: "Delete a memory entry by its ID.",
     parameters: DeleteMemorySchema,
-    execute: (_toolCallId, params): Promise<AgentToolResult> => {
+    execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: string; success: boolean }>> => {
       const p = params as DeleteMemoryParams;
       const deleted = deleteMemory(db, p.id);
       return Promise.resolve({
@@ -134,7 +134,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     description:
       "List memory entries by scope. For 'user' scope, provide userId. Journal entries show short descriptions only.",
     parameters: ListMemoriesSchema,
-    execute: (_toolCallId, params): Promise<AgentToolResult> => {
+    execute: (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as ListMemoriesParams;
       const scope = p.scope;
       const needsGuild = scope === "user" || scope === "guild_bot";
@@ -147,7 +147,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
       });
 
       if (rows.length === 0) {
-        return Promise.resolve({ content: [{ type: "text", text: `No memories found for scope '${scope}'.` }] });
+        return Promise.resolve({ content: [{ type: "text", text: `No memories found for scope '${scope}'.` }], details: undefined });
       }
 
       const lines = rows.map((r) => formatMemoryLine(r));

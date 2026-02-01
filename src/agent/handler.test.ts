@@ -19,6 +19,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     logLevel: "info",
     dataDir: "./data",
     modelCacheDir: "./model-cache",
+    qdrantUrl: "http://localhost:6333",
     ...overrides,
   };
 }

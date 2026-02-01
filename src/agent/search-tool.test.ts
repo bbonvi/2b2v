@@ -13,6 +13,7 @@ interface SearchResult {
 
 function getResultText(result: SearchResult): string {
   const first = result.content[0];
+  if (first === undefined) return "";
   return first.type === "text" ? first.text : "";
 }
 
@@ -53,9 +54,11 @@ function insertMessage(
     );
 }
 
-async function insertWithEmbedding(id: string, text: string, opts: Parameters<typeof insertMessage>[2] = {}) {
+async function insertWithEmbedding(id: string, text: string, opts: NonNullable<Parameters<typeof insertMessage>[2]> = {}) {
   insertMessage(id, text, opts);
-  const [vec] = await pipeline.embed([text]);
+  const embedResult = await pipeline.embed([text]);
+  const vec = embedResult[0];
+  if (vec === undefined) throw new Error("embed returned empty");
   await upsertPoint(qdrant, id, Array.from(vec), {
     type: "message",
     entity_id: id,

@@ -134,7 +134,10 @@ describe("createMultiMessageSender", () => {
 
     // Each typing must come before its corresponding send
     for (let i = 0; i < sendIndices.length; i++) {
-      expect(typingIndices[i]).toBeLessThan(sendIndices[i]);
+      const ti = typingIndices[i];
+      const si = sendIndices[i];
+      if (ti === undefined || si === undefined) throw new Error("unreachable");
+      expect(ti).toBeLessThan(si);
     }
   });
 });

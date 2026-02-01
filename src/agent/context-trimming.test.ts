@@ -44,8 +44,8 @@ describe("trimChatHistory", () => {
     const msgs = makeMessages(10);
     const result = trimChatHistory(msgs, defaultTrim);
     // Should keep the last 6 messages (indices 4-9)
-    expect(result[0].content).toBe("message 4");
-    expect(result[5].content).toBe("message 9");
+    expect(result[0]?.content).toBe("message 4");
+    expect(result[5]?.content).toBe("message 9");
   });
 
   test("handles empty message array", () => {

@@ -39,17 +39,22 @@ export function createMultiMessageSender(
 
       // Delay before follow-up messages (not the first)
       if (i > 0) {
-        const delayMs = computeDelay(messages[i].text, config);
+        const msg = messages[i];
+        if (msg === undefined) break;
+        const delayMs = computeDelay(msg.text, config);
         await actions.delay(delayMs);
         if (signal !== undefined && signal.aborted) break;
       }
 
       actions.startTyping();
 
+      const currentMsg = messages[i];
+      if (currentMsg === undefined) break;
+
       const id =
         i === 0
-          ? await actions.sendReply(messages[i].text)
-          : await actions.sendMessage(messages[i].text);
+          ? await actions.sendReply(currentMsg.text)
+          : await actions.sendMessage(currentMsg.text);
 
       sentMessageIds.push(id);
     }

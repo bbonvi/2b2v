@@ -38,7 +38,7 @@ describe("save_memory tool", () => {
     // Verify in DB
     const memories = listMemories(db, { scope: "user", guildId: "g1", userId: "u1" });
     expect(memories).toHaveLength(1);
-    expect(memories[0].content).toBe("Prefers dark mode");
+    expect(memories[0]?.content).toBe("Prefers dark mode");
   });
 
   test("creates a journal entry with descriptions", async () => {
@@ -54,7 +54,7 @@ describe("save_memory tool", () => {
 
     const entries = listMemories(db, { scope: "journal" });
     expect(entries).toHaveLength(1);
-    expect(entries[0].shortDescription).toBe("Follow up on Bob");
+    expect(entries[0]?.shortDescription).toBe("Follow up on Bob");
   });
 
   test("updates existing memory when id is provided", async () => {

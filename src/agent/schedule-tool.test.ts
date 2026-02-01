@@ -40,6 +40,7 @@ describe("createScheduleTool (schedule_message)", () => {
     expect(schedules).toHaveLength(1);
 
     const s = schedules[0];
+    if (s === undefined) throw new Error("unreachable");
     expect(s.type).toBe("one_off");
     expect(s.source).toBe("tool");
     expect(s.channelId).toBe("ch-1");
@@ -50,12 +51,13 @@ describe("createScheduleTool (schedule_message)", () => {
     expect(s.runAt).toBeGreaterThanOrEqual(before + 30 * 60_000);
     expect(s.runAt).toBeLessThanOrEqual(Date.now() + 30 * 60_000 + 1000);
 
-    expect(result.text).toContain("Scheduled");
+    expect((result.content[0] as { text: string }).text).toContain("Scheduled");
   });
 
   test("supports seconds unit", async () => {
     await tool.execute("c2", { amount: 45, unit: "seconds", message: "ping" }, new AbortController().signal, () => {});
     const s = listSchedules(db, { guildId: "guild-1" })[0];
+    if (s === undefined) throw new Error("unreachable");
     expect(s.runAt).toBeGreaterThan(Date.now() + 40_000);
     expect(s.runAt).toBeLessThan(Date.now() + 50_000);
   });
@@ -63,6 +65,7 @@ describe("createScheduleTool (schedule_message)", () => {
   test("supports hours unit", async () => {
     await tool.execute("c3", { amount: 2, unit: "hours", message: "reminder" }, new AbortController().signal, () => {});
     const s = listSchedules(db, { guildId: "guild-1" })[0];
+    if (s === undefined) throw new Error("unreachable");
     expect(s.runAt).toBeGreaterThan(Date.now() + 2 * 3600_000 - 1000);
   });
 
@@ -70,18 +73,19 @@ describe("createScheduleTool (schedule_message)", () => {
     await tool.execute("c4", { amount: 10, unit: "minutes", message: "test" }, new AbortController().signal, () => {});
     expect(registeredIds).toHaveLength(1);
     const s = listSchedules(db, { guildId: "guild-1" })[0];
+    if (s === undefined) throw new Error("unreachable");
     expect(registeredIds[0]).toBe(s.id);
   });
 
   test("rejects zero or negative amount", async () => {
     const result = await tool.execute("c5", { amount: 0, unit: "minutes", message: "bad" }, new AbortController().signal, () => {});
-    expect(result.text).toContain("positive");
+    expect((result.content[0] as { text: string }).text).toContain("positive");
     expect(listSchedules(db, { guildId: "guild-1" })).toHaveLength(0);
   });
 
   test("rejects invalid unit", async () => {
     const result = await tool.execute("c6", { amount: 5, unit: "days", message: "bad" }, new AbortController().signal, () => {});
-    expect(result.text).toContain("seconds, minutes, or hours");
+    expect((result.content[0] as { text: string }).text).toContain("seconds, minutes, or hours");
     expect(listSchedules(db, { guildId: "guild-1" })).toHaveLength(0);
   });
 });

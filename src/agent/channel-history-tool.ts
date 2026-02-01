@@ -24,6 +24,7 @@ export function createChannelHistoryTool(deps: ChannelHistoryToolDeps): AgentToo
   const { fetchMessages } = deps;
 
   return {
+    name: "channel_history",
     label: "channel_history",
     description:
       "Fetch recent messages from a Discord channel. Useful for reviewing conversation context in a specific channel.",
@@ -31,13 +32,14 @@ export function createChannelHistoryTool(deps: ChannelHistoryToolDeps): AgentToo
 
     async execute(
       _toolCallId: string,
-      params: { channelId: string; limit?: number }
-    ): Promise<AgentToolResult> {
-      const limit = Math.min(params.limit ?? 50, 100);
+      params: unknown
+    ): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {
+      const { channelId, limit: rawLimit } = params as { channelId: string; limit?: number };
+      const limit = Math.min(rawLimit ?? 50, 100);
 
       let messages: ChannelMessage[];
       try {
-        messages = await fetchMessages(params.channelId, limit);
+        messages = await fetchMessages(channelId, limit);
       } catch {
         return {
           content: [{ type: "text", text: "Unable to fetch channel history. The bot may lack permission to read this channel." }],

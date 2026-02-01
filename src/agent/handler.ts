@@ -63,7 +63,7 @@ export async function handleMessage(
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
   const streamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);
 
-  const sendTool = createSendMessagesTool(deps.sender);
+  const sendTool = createSendMessagesTool(deps.sender) as unknown as AgentTool;
   const tools: AgentTool[] = [sendTool, ...(deps.extraTools ?? [])];
 
   const agent = new Agent({
