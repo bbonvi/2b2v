@@ -45,4 +45,14 @@ describe("createSendMessagesTool", () => {
 
     expect(receivedSignal).toBe(controller.signal);
   });
+
+  test("propagates sender errors", async () => {
+    const sender: MessageSender = () =>
+      Promise.reject(new Error("Discord API unavailable"));
+    const tool = createSendMessagesTool(sender);
+
+    await expect(
+      tool.execute("call-1", { messages: [{ text: "hi" }] })
+    ).rejects.toThrow("Discord API unavailable");
+  });
 });
