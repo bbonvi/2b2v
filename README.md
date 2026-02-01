@@ -3,38 +3,38 @@
 Personal agentic Discord bot that plays a character persona (default: 2B from NieR:Automata) while giving genuinely useful answers. Built for small personal servers with per-guild isolation and a long-lived memory system.
 
 ## What it does
+
 - Responds to @mentions, configurable keywords, or random chance per guild
 - Speaks in character while staying helpful and grounded
-- Splits responses into multiple short messages for a more human feel
+- Splits responses into multiple short messages with natural delays
 - Understands images and sends multimodal context to the LLM
+- Remembers conversations and facts with scoped, searchable memory
+- Schedules messages (recurring, one-off, relative time)
+- Searches the web via Brave Search
+- Inspects server members and channel history when permitted
 
-## Implementation status
-All features described below are planned. Implementation is in progress.
+## Requirements
 
-## Core features
-- Bun + discord.js runtime
-- OpenRouter LLM with per-guild model overrides and passthrough params
-- Persona-driven system prompt with cache-aware context window trimming
-- Memory system with SQLite + Qdrant (user, guild, global, journal)
-- Semantic search over message history via Qdrant with pre-filtered KNN
-- Discord markup translation (mentions, channels, emojis, timestamps)
-- Scheduling with Croner (recurring, one-off, relative time)
-- Brave Search API tool
-- Server awareness tools (member list, channel history search when permitted)
-- Docker compose for dev/prod
+- [Bun](https://bun.sh) 1.3+
+- [Docker](https://www.docker.com/) (for Qdrant)
+- API keys: [Discord](https://discord.com/developers/applications), [OpenRouter](https://openrouter.ai/), [Brave Search](https://brave.com/search/api/) (optional)
 
 ## Quick start
 
 ```bash
-# Copy and fill in secrets
+# 1. Copy and fill in secrets
 cp .env.example .env
 
-# Development (live reload, debug logging)
-# bun install first — dev container bind-mounts host node_modules/
-bun install
+# 2. Create persona and guild config from examples
+cp config/persona.md.example config/persona.md
+cp config/guilds/000000000-example.yaml.example config/guilds/<YOUR_GUILD_ID>-<slug>.yaml
+# Edit both files to match your setup
+
+# 3a. Development (live reload, debug logging)
+bun install   # required — dev container bind-mounts host node_modules/
 docker compose -f docker-compose.dev.yml up --build
 
-# Production
+# 3b. Production
 docker compose up --build -d
 ```
 
@@ -42,9 +42,177 @@ Dev mounts `src/` and `config/` from the host for live editing. Prod copies sour
 
 Both profiles start a Qdrant service and wait for it to be healthy before launching the bot.
 
-## Project docs
-- `.dev/docs/project-overview.md` for the complete architecture overview
-- `.dev/active-missions/` for current execution plans
+## Environment variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DISCORD_TOKEN` | yes | — | Discord bot token |
+| `OPENROUTER_API_KEY` | yes | — | OpenRouter API key |
+| `BRAVE_API_KEY` | no | — | Brave Search API key (enables `web_search` tool) |
+| `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error` |
+| `QDRANT_URL` | no | `http://localhost:6333` | Qdrant server URL |
+| `DATA_DIR` | no | `data` | Directory for SQLite database files |
+| `MODEL_CACHE_DIR` | no | `model-cache` | Directory for embedding model downloads |
+
+## Configuration
+
+### Global defaults
+
+Global defaults (model, thinking level, timezone, trim thresholds, etc.) are set in `src/config/loader.ts` and can be influenced by environment variables. Per-guild configs override these.
+
+### Per-guild config
+
+Each guild has a YAML file at `config/guilds/<id>-<slug>.yaml`. The guild ID is parsed from the filename; the slug is cosmetic.
+
+```yaml
+triggers:
+  mention: true
+  keywords: [2b, yorha]
+  randomChance: 0.02
+model: moonshotai/kimi-k2.5
+thinkingLevel: medium
+timezone: UTC
+trim:
+  trimTrigger: 200
+  trimTarget: 150
+memoryRetentionDays: 180
+adminUserIds: []
+imageMaxDimension: 768
+messageDelay:
+  base: 500
+  perChar: 30
+```
+
+All fields are optional — missing values fall back to global defaults.
+
+### Persona
+
+The persona is a freeform markdown file at `config/persona.md`. It defines the bot's character, tone, and behavioral rules. The real file is gitignored; `config/persona.md.example` is committed as a template.
+
+## Slash commands
+
+All slash commands are admin-only (Discord Administrator permission or per-guild `adminUserIds` fallback). Responses are ephemeral.
+
+### `/status`
+
+Shows uptime and basic stats.
+
+### `/config list | get <key> | set <key> <value>`
+
+View or modify guild settings at runtime. Changes persist to the guild YAML file.
+
+Configurable keys:
+
+| Key | Type | Description |
+|---|---|---|
+| `model` | string | OpenRouter model ID |
+| `thinkingLevel` | string | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `timezone` | string | IANA timezone for schedules |
+| `triggers.mention` | boolean | Respond to @mentions |
+| `triggers.keywords` | string[] | Comma-separated keyword list |
+| `triggers.randomChance` | number | 0–1, probability of random response |
+| `trim.trimTrigger` | number | Message count that triggers trimming |
+| `trim.trimTarget` | number | Message count after trimming |
+| `memoryRetentionDays` | number | Default TTL for non-journal memories |
+| `imageMaxDimension` | number | Max image dimension in pixels before resize |
+| `messageDelay.base` | number | Base delay between messages (ms) |
+| `messageDelay.perChar` | number | Additional delay per character (ms) |
+
+### `/schedule list | add | remove`
+
+Manage scheduled messages for the guild.
+
+- **`add`**: Create a recurring (cron) or one-off (timestamp) schedule. Source is always `admin`.
+- **`list`**: Shows all guild schedules including bot-created ones.
+- **`remove <id>`**: Delete a schedule by ID.
+
+### `/memory-wipe`
+
+Clears all guild-scoped memories and message history. Requires typing `WIPE` as confirmation.
+
+## Agent tools
+
+The bot has access to these tools during conversations. The LLM decides when and how to use them — they are not user-invokable commands.
+
+| Tool | Description |
+|---|---|
+| `send_messages` | Send one or more messages to the channel (first as reply, rest as follow-ups) |
+| `save_memory` | Create or update a scoped memory (user, guild, global, journal) |
+| `delete_memory` | Delete a memory by ID |
+| `list_memories` | List memories filtered by scope and optional user |
+| `search_messages` | Semantic search over message history with guild/user/channel/time filters |
+| `schedule_message` | Schedule a one-off message in N seconds/minutes/hours |
+| `list_members` | List server members (all or online-only) |
+| `channel_history` | Fetch recent messages from the current channel |
+| `web_search` | Search the web via Brave Search API |
+
+## Memory system
+
+Memories are stored in SQLite with four scopes:
+
+- **user** — per-user facts (e.g., preferences, names)
+- **guild_bot** — per-guild bot knowledge
+- **global_bot** — cross-guild bot knowledge
+- **journal** — bot's internal journal entries (no TTL by default)
+
+Default TTL is 180 days for non-journal memories, configurable per guild via `memoryRetentionDays`. Individual entries can override TTL. Expired memories are cleaned up periodically.
+
+## Semantic search
+
+Message history is stored in SQLite (raw + translated content) and embedded via a local `bge-m3` model into Qdrant. Semantic search uses pre-filtered KNN in Qdrant, then joins results back to SQLite for display metadata.
+
+Filters available: guild (always applied), user, channel, time range.
+
+The embedding model is downloaded on first startup and cached in `MODEL_CACHE_DIR`.
+
+## Scheduling
+
+Three scheduling modes:
+
+1. **Cron** — recurring schedules with per-guild timezone support
+2. **One-off** — absolute timestamp, auto-disabled after firing
+3. **Relative** — "in N seconds/minutes/hours" via the `schedule_message` agent tool
+
+Schedules are stored in SQLite and executed by a Croner-based engine. Past one-offs are auto-disabled on startup without firing.
+
+## Translation layer
+
+Discord markup is automatically translated in both directions:
+
+- **Inbound** (Discord → LLM): `<@123>` → `@username`, `<#456>` → `#channel-name`, custom emojis → `:name:`, timestamps → human-readable
+- **Outbound** (LLM → Discord): `@username` → `<@123>`, `#channel` → `<#456>`, `:emoji:` → custom emoji markup
+
+Failed lookups fall back to plain text with warnings logged.
+
+## Context management
+
+The system prompt is composed in order: persona → emoji list → member context → journal summaries → upcoming schedules → chat history. The current message is sent separately as `role=user`.
+
+When chat history exceeds `trim.trimTrigger` messages, it is chunked down to `trim.trimTarget` (keeping newest). This chunked approach maintains system prompt stability for effective prompt caching.
+
+## Testing
+
+```bash
+bun test                # run all tests
+bun run check           # tsc --noEmit && eslint
+```
+
+Tests requiring Qdrant need a running container:
+
+```bash
+docker run -d --name qdrant-test -p 6333:6333 -p 6334:6334 qdrant/qdrant:latest
+```
+
+Tests default to `QDRANT_URL=http://qdrant-test.orb.local:6333`. Override with `QDRANT_URL` env var if needed.
+
+## Known limitations
+
+- Semantic search does not support time-range filtering at the Qdrant level (tracked as v1 TODO; currently filters in application layer)
+- Embedding model download requires internet access on first startup
+- Designed for small personal servers (2–3 guilds, small member count) — not load-tested for large servers
+- No rate limiting on LLM calls beyond OpenRouter's own limits
+- Message content intent required for full functionality; missing intent triggers degraded mode with a runtime warning
 
 ## License
+
 TBD
