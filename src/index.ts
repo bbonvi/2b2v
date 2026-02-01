@@ -404,6 +404,22 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
     qdrant,
     guildId,
     embed: embeddingPipeline,
+    fetchMessage: async (chId, msgId) => {
+      const channel = guild.channels.cache.get(chId);
+      if (channel === undefined || !("messages" in channel)) return null;
+      try {
+        const msg = await (channel as TextChannel).messages.fetch(msgId);
+        return {
+          attachments: [...msg.attachments.values()].map((a) => ({
+            name: a.name,
+            contentType: a.contentType,
+            size: a.size,
+          })),
+        };
+      } catch {
+        return null;
+      }
+    },
   });
 
   const scheduleTool = createScheduleTool({

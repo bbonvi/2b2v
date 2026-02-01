@@ -6,11 +6,18 @@ import type { EmbeddingPipeline } from "../embeddings/pipeline";
 import { searchMessages, type MessageSearchResult } from "../db/message-repository";
 
 
+interface AttachmentInfo {
+  name: string;
+  contentType: string | null;
+  size: number;
+}
+
 export interface SearchToolDeps {
   db: Database;
   qdrant: QdrantClient;
   guildId: string;
   embed: EmbeddingPipeline;
+  fetchMessage?: (channelId: string, messageId: string) => Promise<{ attachments: AttachmentInfo[] } | null>;
 }
 
 const SearchParams = Type.Object({
@@ -76,7 +83,30 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         return { content: [{ type: "text", text: "No messages found matching your query." }], details: undefined };
       }
 
-      const lines = results.map((r) => formatResult(r));
+      // Fetch attachments from Discord if callback provided
+      const attachmentMap = new Map<string, AttachmentInfo[]>();
+      if (deps.fetchMessage !== undefined) {
+        const fetchMsg = deps.fetchMessage;
+        const CONCURRENCY = 5;
+        const queue = [...results];
+        const runBatch = async () => {
+          while (queue.length > 0) {
+            const r = queue.shift();
+            if (r === undefined) break;
+            try {
+              const msg = await fetchMsg(r.channelId, r.id);
+              if (msg !== null && msg.attachments.length > 0) {
+                attachmentMap.set(r.id, msg.attachments);
+              }
+            } catch {
+              // Skip — show text only
+            }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, results.length) }, () => runBatch()));
+      }
+
+      const lines = results.map((r) => formatResult(r, attachmentMap.get(r.id)));
       return {
         content: [{ type: "text", text: lines.join("\n\n") }],
         details: { count: results.length },
@@ -85,7 +115,21 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
   };
 }
 
-function formatResult(r: MessageSearchResult): string {
+function formatResult(r: MessageSearchResult, attachments?: AttachmentInfo[]): string {
   const date = new Date(r.createdAt).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
-  return `[${date}] ${r.authorUsername}: ${r.translatedContent}`;
+  let line = `[${date}] ${r.authorUsername}: ${r.translatedContent}`;
+  if (attachments !== undefined && attachments.length > 0) {
+    for (const a of attachments) {
+      const sizeStr = formatFileSize(a.size);
+      const type = a.contentType ?? "unknown";
+      line += `\n  📎 ${a.name} (${type}, ${sizeStr})`;
+    }
+  }
+  return line;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
