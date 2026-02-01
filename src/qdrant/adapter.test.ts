@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeAll, beforeEach, afterAll } from "bun:test";
-import { QdrantClient } from "@qdrant/js-client-rest";
+import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "./client";
 import {
   upsertPoint,
@@ -23,7 +23,7 @@ function vecToArray(v: Float32Array): number[] {
 
 beforeAll(async () => {
   client = createQdrantClient({ url: QDRANT_URL });
-  try { await client.deleteCollection(COLLECTION_NAME); } catch {}
+  try { await client.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
   await ensureCollection(client);
 });
 
@@ -31,11 +31,11 @@ beforeEach(async () => {
   // Clear all points between tests
   try {
     await client.delete(COLLECTION_NAME, { wait: true, filter: {} });
-  } catch {}
+  } catch { /* expected */ }
 });
 
 afterAll(async () => {
-  try { await client.deleteCollection(COLLECTION_NAME); } catch {}
+  try { await client.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
 });
 
 describe("toPointId", () => {

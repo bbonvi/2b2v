@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeAll, beforeEach, afterAll, afterEach } from "bun:test";
-import { QdrantClient } from "@qdrant/js-client-rest";
+import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
 import { pointExists, searchPoints } from "../qdrant/adapter";
 import { createEmbeddingQueue, type EmbeddingQueue } from "./queue";
@@ -14,14 +14,14 @@ let queue: EmbeddingQueue;
 
 beforeAll(async () => {
   qdrant = createQdrantClient({ url: QDRANT_URL });
-  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch {}
+  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
   await ensureCollection(qdrant);
 });
 
 beforeEach(async () => {
   pipe = createMockPipeline();
   queue = createEmbeddingQueue(pipe, qdrant, { batchSize: 3, flushDelayMs: 10 });
-  try { await qdrant.delete(COLLECTION_NAME, { wait: true, filter: {} }); } catch {}
+  try { await qdrant.delete(COLLECTION_NAME, { wait: true, filter: {} }); } catch { /* expected */ }
 });
 
 afterEach(async () => {
@@ -29,7 +29,7 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch {}
+  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
 });
 
 describe("enqueue and store", () => {
@@ -97,7 +97,7 @@ describe("batching behavior", () => {
   });
 
   test("flushes partial batch after delay", async () => {
-    queue.enqueue({ id: "m1", text: "delayed", target: "memory", metadata: { guild_id: "g1" } });
+    void queue.enqueue({ id: "m1", text: "delayed", target: "memory", metadata: { guild_id: "g1" } });
     await new Promise((r) => setTimeout(r, 50));
     await queue.flush();
 
@@ -113,7 +113,7 @@ describe("error handling", () => {
 
   test("rejects all items in batch on pipeline error", async () => {
     const failPipe: EmbeddingPipeline = {
-      async embed() { throw new Error("model failure"); },
+      embed() { throw new Error("model failure"); },
       async dispose() {},
     };
     const failQueue = createEmbeddingQueue(failPipe, qdrant, { batchSize: 2, flushDelayMs: 5 });
@@ -128,7 +128,7 @@ describe("error handling", () => {
 
 describe("pending count", () => {
   test("returns 0 after flush", async () => {
-    queue.enqueue({ id: "m1", text: "a", target: "memory", metadata: { guild_id: "g1" } });
+    void queue.enqueue({ id: "m1", text: "a", target: "memory", metadata: { guild_id: "g1" } });
     await queue.flush();
     expect(queue.pending()).toBe(0);
   });

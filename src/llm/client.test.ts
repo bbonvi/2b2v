@@ -49,7 +49,7 @@ describe("resolveModel", () => {
 
   test("uses guild model override when provided", () => {
     const guildWithOverride = { ...GUILD, model: "openai/gpt-4o" };
-    const model = resolveModel(guildWithOverride.model!);
+    const model = resolveModel(guildWithOverride.model);
     expect(model.id).toBe("openai/gpt-4o");
   });
 

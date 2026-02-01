@@ -1,4 +1,4 @@
-const pkg = await Bun.file(new URL("../package.json", import.meta.url).pathname).json();
+const pkg = await Bun.file(new URL("../package.json", import.meta.url).pathname).json() as { version?: string };
 const version: string = pkg.version ?? "0.0.0";
 
 const startTime = Date.now();
@@ -16,7 +16,7 @@ console.log(
 
 // Validate critical environment early
 const requiredEnv = ["DISCORD_TOKEN", "OPENROUTER_API_KEY"] as const;
-const missing = requiredEnv.filter((k) => !process.env[k]);
+const missing = requiredEnv.filter((k) => process.env[k] === undefined || process.env[k] === "");
 
 if (missing.length > 0) {
   console.log(

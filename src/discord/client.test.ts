@@ -8,7 +8,7 @@ describe("REQUIRED_INTENTS", () => {
     expect(REQUIRED_INTENTS).toContain(GatewayIntentBits.GuildMessages);
     expect(REQUIRED_INTENTS).toContain(GatewayIntentBits.MessageContent);
     expect(REQUIRED_INTENTS).toContain(GatewayIntentBits.GuildMembers);
-    expect(REQUIRED_INTENTS).toContain(GatewayIntentBits.GuildEmojisAndStickers);
+    expect(REQUIRED_INTENTS).toContain(GatewayIntentBits.GuildExpressions);
   });
 
   test("has no duplicates", () => {

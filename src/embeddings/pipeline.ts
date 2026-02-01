@@ -25,7 +25,7 @@ export async function createEmbeddingPipeline(options: PipelineOptions = {}): Pr
   const model = options.model ?? DEFAULT_MODEL;
   const dtype = options.dtype ?? "q8";
 
-  if (options.cacheDir) {
+  if (options.cacheDir !== undefined && options.cacheDir !== "") {
     env.cacheDir = options.cacheDir;
   }
 
@@ -59,9 +59,7 @@ export async function createEmbeddingPipeline(options: PipelineOptions = {}): Pr
 
 /** Get or create the singleton embedding pipeline. */
 export async function getEmbeddingPipeline(options: PipelineOptions = {}): Promise<EmbeddingPipeline> {
-  if (!singleton) {
-    singleton = await createEmbeddingPipeline(options);
-  }
+  singleton ??= await createEmbeddingPipeline(options);
   return singleton;
 }
 

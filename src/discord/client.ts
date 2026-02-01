@@ -11,7 +11,7 @@ export const REQUIRED_INTENTS = [
   GatewayIntentBits.GuildMessages,
   GatewayIntentBits.MessageContent,
   GatewayIntentBits.GuildMembers,
-  GatewayIntentBits.GuildEmojisAndStickers,
+  GatewayIntentBits.GuildExpressions,
 ] as const;
 
 /**
@@ -37,7 +37,7 @@ let messageContentWarningEmitted = false;
  * Create and configure the Discord client.
  * Does NOT call login — caller is responsible for that.
  */
-export function createDiscordClient(config: GlobalConfig): Client {
+export function createDiscordClient(_config: GlobalConfig): Client {
   const client = new Client(buildClientOptions());
 
   client.once("ready", (c) => {

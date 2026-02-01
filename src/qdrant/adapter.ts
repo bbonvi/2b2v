@@ -125,13 +125,13 @@ export async function searchPoints(
     { key: "guild_id", match: { value: filter.guild_id } },
   ];
 
-  if (options.type) {
+  if (options.type !== undefined) {
     must.push({ key: "type", match: { value: options.type } });
   }
-  if (filter.channel_id) {
+  if (filter.channel_id !== undefined && filter.channel_id !== "") {
     must.push({ key: "channel_id", match: { value: filter.channel_id } });
   }
-  if (filter.user_id) {
+  if (filter.user_id !== undefined && filter.user_id !== "") {
     must.push({ key: "user_id", match: { value: filter.user_id } });
   }
   if (filter.after !== undefined || filter.before !== undefined) {
@@ -150,7 +150,7 @@ export async function searchPoints(
   });
 
   return results.map((r) => ({
-    id: (r.payload as any)?.entity_id ?? (r.id as string),
+    id: ((r.payload as Record<string, unknown>).entity_id as string | undefined) ?? (r.id as string),
     score: r.score,
     payload: r.payload as unknown as PointPayload,
   }));

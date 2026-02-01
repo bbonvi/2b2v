@@ -62,7 +62,7 @@ export function createSchedulerEngine(
     // Skip if already tracked
     if (jobs.has(schedule.id)) return;
 
-    if (schedule.type === "cron" && schedule.cronExpression) {
+    if (schedule.type === "cron" && schedule.cronExpression !== null && schedule.cronExpression !== "") {
       try {
         const cron = new Cron(schedule.cronExpression, {
           timezone: schedule.timezone,
@@ -82,7 +82,7 @@ export function createSchedulerEngine(
           err
         );
       }
-    } else if (schedule.type === "one_off" && schedule.runAt != null) {
+    } else if (schedule.type === "one_off" && schedule.runAt !== null) {
       const delayMs = schedule.runAt - Date.now();
       if (delayMs <= 0) {
         // Past one-off — auto-disable

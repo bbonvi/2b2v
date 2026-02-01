@@ -31,38 +31,38 @@ export function translateInbound(
   content: string,
   resolvers: InboundResolvers
 ): string {
-  if (!content) return content;
+  if (content === "") return content;
 
   let result = content;
 
   // User mentions: <@id> and <@!id>
-  result = result.replace(USER_MENTION, (match, id) => {
+  result = result.replace(USER_MENTION, (match, id: string) => {
     const info = resolvers.user(id);
-    return info ? `@${info.username}` : match;
+    return info !== undefined ? `@${info.username}` : match;
   });
 
   // Channel mentions: <#id>
-  result = result.replace(CHANNEL_MENTION, (match, id) => {
+  result = result.replace(CHANNEL_MENTION, (match, id: string) => {
     const name = resolvers.channel(id);
-    return name ? `#${name}` : match;
+    return name !== undefined ? `#${name}` : match;
   });
 
   // Role mentions: <@&id>
-  result = result.replace(ROLE_MENTION, (match, id) => {
+  result = result.replace(ROLE_MENTION, (match, id: string) => {
     const name = resolvers.role(id);
-    return name ? `@${name}` : match;
+    return name !== undefined ? `@${name}` : match;
   });
 
   // Custom and animated emoji: <:name:id> and <a:name:id>
-  result = result.replace(CUSTOM_EMOJI, (_match, name) => `:${name}:`);
+  result = result.replace(CUSTOM_EMOJI, (_match, name: string) => `:${name}:`);
 
   // Timestamps with style: <t:unix:style>
-  result = result.replace(TIMESTAMP_WITH_STYLE, (_match, unix, style) =>
+  result = result.replace(TIMESTAMP_WITH_STYLE, (_match, unix: string, style: string) =>
     resolveDiscordTimestamp(Number(unix), style)
   );
 
   // Timestamps without style: <t:unix>
-  result = result.replace(TIMESTAMP_NO_STYLE, (_match, unix) =>
+  result = result.replace(TIMESTAMP_NO_STYLE, (_match, unix: string) =>
     resolveDiscordTimestamp(Number(unix))
   );
 
@@ -171,28 +171,28 @@ export function translateOutbound(
   resolvers: OutboundResolvers,
   warnings?: string[]
 ): string {
-  if (!content) return content;
+  if (content === "") return content;
 
   let result = content;
 
   // User mentions: @username → <@id>
-  result = result.replace(OUTBOUND_USER, (match, username) => {
+  result = result.replace(OUTBOUND_USER, (match, username: string) => {
     const id = resolvers.user(username);
-    if (id) return `<@${id}>`;
+    if (id !== undefined) return `<@${id}>`;
     warnings?.push(`Failed to resolve user mention: @${username}`);
     return match;
   });
 
   // Channel mentions: #channel → <#id>
-  result = result.replace(OUTBOUND_CHANNEL, (match, name) => {
+  result = result.replace(OUTBOUND_CHANNEL, (match, name: string) => {
     const id = resolvers.channel(name);
-    if (id) return `<#${id}>`;
+    if (id !== undefined) return `<#${id}>`;
     warnings?.push(`Failed to resolve channel mention: #${name}`);
     return match;
   });
 
   // Custom emoji: :name: → <:name:id> or <a:name:id>
-  result = result.replace(OUTBOUND_EMOJI, (match, name) => {
+  result = result.replace(OUTBOUND_EMOJI, (match, name: string) => {
     const info = resolvers.emoji(name);
     if (info) return info.animated ? `<a:${name}:${info.id}>` : `<:${name}:${info.id}>`;
     warnings?.push(`Failed to resolve emoji: :${name}:`);

@@ -3,7 +3,6 @@ import { createDatabase, type Database } from "../db/database";
 import {
   createSchedule,
   getSchedule,
-  type ScheduleRow,
 } from "../db/schedule-repository";
 import {
   createSchedulerEngine,
@@ -13,7 +12,7 @@ import {
 
 describe("SchedulerEngine", () => {
   let db: Database;
-  let engine: SchedulerEngine;
+  let engine: SchedulerEngine | undefined;
   let fired: ScheduleFireEvent[];
 
   beforeEach(() => {
@@ -22,7 +21,7 @@ describe("SchedulerEngine", () => {
   });
 
   afterEach(() => {
-    engine?.stop();
+    if (engine !== undefined) engine.stop();
   });
 
   function makeEngine(opts?: { pollIntervalMs?: number }) {
@@ -100,7 +99,8 @@ describe("SchedulerEngine", () => {
 
     // Should be disabled in DB
     const row = getSchedule(db, id);
-    expect(row!.enabled).toBe(false);
+    expect(row).not.toBeUndefined();
+    expect(row?.enabled).toBe(false);
     e.stop();
   });
 

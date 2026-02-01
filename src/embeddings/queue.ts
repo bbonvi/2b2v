@@ -51,7 +51,7 @@ export function createEmbeddingQueue(
   const batchSize = options.batchSize ?? 32;
   const flushDelayMs = options.flushDelayMs ?? 100;
 
-  let queue: PendingItem[] = [];
+  const queue: PendingItem[] = [];
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let processing = false;
   let closed = false;
@@ -107,7 +107,7 @@ export function createEmbeddingQueue(
     if (flushTimer !== null) return;
     flushTimer = setTimeout(() => {
       flushTimer = null;
-      drain();
+      void drain();
     }, flushDelayMs);
   }
 
@@ -123,7 +123,7 @@ export function createEmbeddingQueue(
             clearTimeout(flushTimer);
             flushTimer = null;
           }
-          drain();
+          void drain();
         } else {
           scheduleFlush();
         }

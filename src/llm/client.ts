@@ -23,8 +23,9 @@ const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
  * for arbitrary OpenRouter model IDs (the API accepts any valid model string).
  */
 export function resolveModel(modelId: string): LlmModel {
-  const registered = getModel("openrouter", modelId as any);
-  if (registered) return registered as unknown as LlmModel;
+  // getModel's type says it always returns Model, but at runtime it may return undefined for unknown IDs
+  const registered = getModel("openrouter", modelId as Parameters<typeof getModel>[1]) as unknown as LlmModel | undefined;
+  if (registered !== undefined) return registered;
 
   return {
     id: modelId,
