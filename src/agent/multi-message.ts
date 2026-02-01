@@ -35,13 +35,13 @@ export function createMultiMessageSender(
     const sentMessageIds: string[] = [];
 
     for (let i = 0; i < messages.length; i++) {
-      if (signal?.aborted) break;
+      if (signal !== undefined && signal.aborted) break;
 
       // Delay before follow-up messages (not the first)
       if (i > 0) {
         const delayMs = computeDelay(messages[i].text, config);
         await actions.delay(delayMs);
-        if (signal?.aborted) break;
+        if (signal !== undefined && signal.aborted) break;
       }
 
       actions.startTyping();

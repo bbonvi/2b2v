@@ -36,7 +36,7 @@ export function createScheduleTool(deps: ScheduleToolDeps): AgentTool {
       "Schedule a message to be sent in the current channel after a relative delay (e.g. in 30 minutes).",
     parameters: ScheduleMessageParams,
 
-    async execute(
+    execute(
       _toolCallId: string,
       params: { amount: number; unit: string; message: string },
       _signal: AbortSignal,
@@ -47,7 +47,7 @@ export function createScheduleTool(deps: ScheduleToolDeps): AgentTool {
       }
 
       const multiplier = UNIT_TO_MS[params.unit];
-      if (!multiplier) {
+      if (multiplier === undefined) {
         return {
           text: "Invalid unit. Use seconds, minutes, or hours.",
           details: { error: true },

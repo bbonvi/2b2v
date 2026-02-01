@@ -17,8 +17,8 @@ export async function resizeImageToContent(
 ): Promise<ImageContent> {
   let pipeline = sharp(buffer);
   const meta = await pipeline.metadata();
-  const width = meta.width ?? 0;
-  const height = meta.height ?? 0;
+  const width = meta.width;
+  const height = meta.height;
 
   const longest = Math.max(width, height);
   if (longest > maxDimension) {

@@ -35,7 +35,14 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
       "Search chat history semantically. Describe what you're looking for in natural language. Optionally filter by user, channel, or time range.",
     parameters: SearchParams,
     execute: async (_toolCallId, params): Promise<AgentToolResult> => {
-      const p = params as any;
+      const p = params as {
+        query: string;
+        userId?: string;
+        channelId?: string;
+        afterMs?: number;
+        beforeMs?: number;
+        limit?: number;
+      };
       const limit = p.limit ?? 10;
 
       const [queryVec] = await embed.embed([p.query]);

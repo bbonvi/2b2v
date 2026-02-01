@@ -35,20 +35,21 @@ describe("createMultiMessageSender", () => {
     return {
       log,
       delays,
-      sendReply: async (text: string) => {
+      sendReply: (text: string) => {
         log.push({ action: "reply", text });
-        return "reply-id";
+        return Promise.resolve("reply-id");
       },
-      sendMessage: async (text: string) => {
+      sendMessage: (text: string) => {
         log.push({ action: "message", text });
-        return `msg-${log.length}`;
+        return Promise.resolve(`msg-${log.length}`);
       },
       startTyping: () => {
         log.push({ action: "typing" });
       },
-      delay: async (ms: number) => {
+      delay: (ms: number) => {
         delays.push(ms);
         // no actual delay in tests
+        return Promise.resolve();
       },
     };
   }
@@ -102,8 +103,9 @@ describe("createMultiMessageSender", () => {
     const sender = createMultiMessageSender(actions, config);
 
     // Abort before second message
-    actions.delay = async () => {
+    actions.delay = () => {
       controller.abort();
+      return Promise.resolve();
     };
 
     const result = await sender(

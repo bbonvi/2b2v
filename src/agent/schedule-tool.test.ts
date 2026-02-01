@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach } from "bun:test";
 import { createDatabase, type Database } from "../db/database";
-import { listSchedules, type ScheduleRow } from "../db/schedule-repository";
+import { listSchedules } from "../db/schedule-repository";
 import { createScheduleTool, type ScheduleToolDeps } from "./schedule-tool";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 

@@ -3,7 +3,7 @@ import { createSendMessagesTool, type MessageSender } from "./send-messages-tool
 
 describe("createSendMessagesTool", () => {
   test("returns a tool with correct name and description", () => {
-    const sender: MessageSender = async () => ({ sentMessageIds: [] });
+    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
     const tool = createSendMessagesTool(sender);
     expect(tool.name).toBe("send_messages");
     expect(tool.label).toBe("Send Messages");
@@ -12,9 +12,9 @@ describe("createSendMessagesTool", () => {
 
   test("execute calls sender with messages and returns result", async () => {
     const calls: { text: string }[][] = [];
-    const sender: MessageSender = async (msgs) => {
+    const sender: MessageSender = (msgs) => {
       calls.push(msgs);
-      return { sentMessageIds: ["msg-1", "msg-2"] };
+      return Promise.resolve({ sentMessageIds: ["msg-1", "msg-2"] });
     };
     const tool = createSendMessagesTool(sender);
 
@@ -34,9 +34,9 @@ describe("createSendMessagesTool", () => {
 
   test("execute propagates signal to sender", async () => {
     let receivedSignal: AbortSignal | undefined;
-    const sender: MessageSender = async (_msgs, signal) => {
+    const sender: MessageSender = (_msgs, signal) => {
       receivedSignal = signal;
-      return { sentMessageIds: [] };
+      return Promise.resolve({ sentMessageIds: [] });
     };
     const tool = createSendMessagesTool(sender);
     const controller = new AbortController();

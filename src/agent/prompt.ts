@@ -37,11 +37,11 @@ export function formatChatHistory(messages: ChatMessage[]): string {
 export function assembleSystemPrompt(ctx: PromptContext): string {
   const sections: string[] = [ctx.persona];
 
-  if (ctx.emojiContext) {
+  if (ctx.emojiContext !== "") {
     sections.push(`## Available Emojis\n${ctx.emojiContext}`);
   }
 
-  if (ctx.displayNameContext) {
+  if (ctx.displayNameContext !== "") {
     sections.push(`## Server Members\n${ctx.displayNameContext}`);
   }
 
@@ -56,7 +56,7 @@ export function assembleSystemPrompt(ctx: PromptContext): string {
   }
 
   const history = formatChatHistory(ctx.chatHistory);
-  if (history) {
+  if (history !== "") {
     sections.push(`## Chat History\n${history}`);
   }
 
