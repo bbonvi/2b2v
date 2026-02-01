@@ -50,6 +50,9 @@ function makePromptContext(overrides: Partial<PromptContext> = {}): PromptContex
     chatHistory: [],
     emojiContext: "",
     displayNameContext: "",
+    guildId: "test-guild",
+    channelId: "test-channel",
+    timestamp: "2025-01-01T00:00:00.000Z",
     ...overrides,
   };
 }

@@ -90,6 +90,9 @@ describe("assembleSystemPrompt", () => {
       ],
       emojiContext: "",
       displayNameContext: "",
+      guildId: "g1",
+      channelId: "c1",
+      timestamp: "2025-01-01T00:00:00.000Z",
     };
 
     const result = assembleSystemPrompt(ctx);
@@ -117,6 +120,9 @@ describe("assembleSystemPrompt", () => {
       chatHistory: [],
       emojiContext: "",
       displayNameContext: "",
+      guildId: "g1",
+      channelId: "c1",
+      timestamp: "2025-01-01T00:00:00.000Z",
     };
     const result = assembleSystemPrompt(ctx);
     expect(result).not.toContain("## Journal");
@@ -130,6 +136,9 @@ describe("assembleSystemPrompt", () => {
       chatHistory: [],
       emojiContext: "",
       displayNameContext: "",
+      guildId: "g1",
+      channelId: "c1",
+      timestamp: "2025-01-01T00:00:00.000Z",
     };
     const result = assembleSystemPrompt(ctx);
     expect(result).not.toContain("## Upcoming Schedules");
@@ -143,6 +152,9 @@ describe("assembleSystemPrompt", () => {
       chatHistory: [],
       emojiContext: "",
       displayNameContext: "",
+      guildId: "g1",
+      channelId: "c1",
+      timestamp: "2025-01-01T00:00:00.000Z",
     };
     const result = assembleSystemPrompt(ctx);
     expect(result).not.toContain("## Chat History");
@@ -156,6 +168,9 @@ describe("assembleSystemPrompt", () => {
       chatHistory: [],
       emojiContext: ":salute: — military salute\n:pod: — flight unit",
       displayNameContext: "",
+      guildId: "g1",
+      channelId: "c1",
+      timestamp: "2025-01-01T00:00:00.000Z",
     };
     const result = assembleSystemPrompt(ctx);
     expect(result).toContain("## Available Emojis");
@@ -170,6 +185,9 @@ describe("assembleSystemPrompt", () => {
       chatHistory: [],
       emojiContext: "",
       displayNameContext: "@alice — Alice Wonderland\n@bob — Bob Builder",
+      guildId: "g1",
+      channelId: "c1",
+      timestamp: "2025-01-01T00:00:00.000Z",
     };
     const result = assembleSystemPrompt(ctx);
     expect(result).toContain("## Server Members");
@@ -184,6 +202,9 @@ describe("assembleSystemPrompt", () => {
       chatHistory: [{ author: "alice", content: "hi", isBot: false }],
       emojiContext: ":wave: — greeting",
       displayNameContext: "@alice — Alice",
+      guildId: "g1",
+      channelId: "c1",
+      timestamp: "2025-01-01T00:00:00.000Z",
     };
     const result = assembleSystemPrompt(ctx);
 
@@ -192,13 +213,33 @@ describe("assembleSystemPrompt", () => {
     const memberIdx = result.indexOf("## Server Members");
     const journalIdx = result.indexOf("## Journal");
     const schedIdx = result.indexOf("## Upcoming Schedules");
+    const contextIdx = result.indexOf("## Current Context");
     const historyIdx = result.indexOf("## Chat History");
 
     expect(personaIdx).toBeLessThan(emojiIdx);
     expect(emojiIdx).toBeLessThan(memberIdx);
     expect(memberIdx).toBeLessThan(journalIdx);
     expect(journalIdx).toBeLessThan(schedIdx);
-    expect(schedIdx).toBeLessThan(historyIdx);
+    expect(schedIdx).toBeLessThan(contextIdx);
+    expect(contextIdx).toBeLessThan(historyIdx);
+  });
+
+  test("includes current context section with guild, channel, and timestamp", () => {
+    const ctx: PromptContext = {
+      persona: "# 2B",
+      journalSummaries: [],
+      upcomingSchedules: [],
+      chatHistory: [],
+      emojiContext: "",
+      displayNameContext: "",
+      guildId: "guild-123",
+      channelId: "channel-456",
+      timestamp: "2025-06-15T12:30:00.000Z",
+    };
+    const result = assembleSystemPrompt(ctx);
+    expect(result).toContain("## Current Context");
+    expect(result).toContain("Guild: guild-123 | Channel: channel-456");
+    expect(result).toContain("Date/Time: 2025-06-15T12:30:00.000Z");
   });
 
   test("persona-only prompt contains persona and tool instructions", () => {
@@ -209,6 +250,9 @@ describe("assembleSystemPrompt", () => {
       chatHistory: [],
       emojiContext: "",
       displayNameContext: "",
+      guildId: "g1",
+      channelId: "c1",
+      timestamp: "2025-01-01T00:00:00.000Z",
     };
     const result = assembleSystemPrompt(ctx);
     expect(result).toStartWith("# 2B\nI am a combat android.");

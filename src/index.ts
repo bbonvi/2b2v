@@ -103,7 +103,19 @@ const chatHistories = new Map<string, ChatMessage[]>();
 function getChatHistory(channelId: string): ChatMessage[] {
   let history = chatHistories.get(channelId);
   if (history === undefined) {
-    history = [];
+    // Hydrate from SQLite on first access (cold start recovery)
+    const rows = db.raw
+      .prepare(
+        `SELECT author_username, translated_content, is_bot
+         FROM messages
+         WHERE channel_id = ?
+         ORDER BY created_at DESC
+         LIMIT 150`
+      )
+      .all(channelId) as { author_username: string; translated_content: string; is_bot: number }[];
+    history = rows
+      .reverse()
+      .map((r) => ({ author: r.author_username, content: r.translated_content, isBot: r.is_bot === 1 }));
     chatHistories.set(channelId, history);
   }
   return history;
@@ -338,6 +350,9 @@ function buildPromptContext(guildId: string, channelId: string, guild: Guild, gu
     chatHistory: trimmed,
     emojiContext,
     displayNameContext,
+    guildId,
+    channelId,
+    timestamp: new Date().toISOString(),
   };
 }
 

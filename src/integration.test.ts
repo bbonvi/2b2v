@@ -308,6 +308,9 @@ describe("trigger → prompt assembly → trimming pipeline", () => {
         { author: "alice", content: "Hello!", isBot: false },
         { author: "TestBot", content: "Hi Alice!", isBot: true },
       ],
+      guildId: "g1",
+      channelId: "c1",
+      timestamp: "2025-01-01T00:00:00.000Z",
     };
 
     const prompt = assembleSystemPrompt(ctx);
@@ -370,6 +373,9 @@ describe("trigger → prompt assembly → trimming pipeline", () => {
       journalSummaries: [],
       upcomingSchedules: [],
       chatHistory: trimmed,
+      guildId: "g1",
+      channelId: "c1",
+      timestamp: "2025-01-01T00:00:00.000Z",
     });
 
     // Only trimmed messages appear
@@ -387,6 +393,9 @@ describe("trigger → prompt assembly → trimming pipeline", () => {
       journalSummaries: [],
       upcomingSchedules: [],
       chatHistory: [],
+      guildId: "g1",
+      channelId: "c1",
+      timestamp: "2025-01-01T00:00:00.000Z",
     });
 
     expect(prompt).toStartWith("Minimal bot");
@@ -492,6 +501,9 @@ describe("full pipeline: translate → trim → assemble → send", () => {
       journalSummaries: [],
       upcomingSchedules: [],
       chatHistory: trimmed,
+      guildId: "g1",
+      channelId: "c1",
+      timestamp: "2025-01-01T00:00:00.000Z",
     });
 
     expect(prompt).toContain("You are TestBot.");
