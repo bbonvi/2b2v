@@ -20,7 +20,7 @@ import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool"
 import { createChannelHistoryTool, type ChannelMessage } from "./agent/channel-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
 import { resizeImageToContent } from "./agent/vision";
-import { listMemories } from "./db/memory-repository";
+import { listMemories, deleteExpiredMemories } from "./db/memory-repository";
 import { listUpcomingForContext, createSchedule, deleteSchedule, listSchedules } from "./db/schedule-repository";
 import { registerSlashCommands } from "./commands/registry";
 import { createStatusHandler, statusCommandDefinition } from "./commands/status";
@@ -136,6 +136,15 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
 });
 scheduler.start();
 log.info("scheduler started", { jobs: scheduler.activeCount() });
+
+// --- Periodic expired memory cleanup (hourly) ---
+const MEMORY_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const memoryCleanupTimer = setInterval(() => {
+  const deleted = deleteExpiredMemories(db);
+  if (deleted > 0) {
+    log.info("expired memories cleaned", { deleted });
+  }
+}, MEMORY_CLEANUP_INTERVAL_MS);
 
 // --- 13. Create and login Discord client ---
 const client: Client = createDiscordClient(globalConfig, log);
@@ -560,6 +569,7 @@ log.info("health check passed — all systems ready", {
 async function shutdown(signal: string): Promise<void> {
   log.info("shutting down", { signal });
 
+  clearInterval(memoryCleanupTimer);
   scheduler.stop();
   await client.destroy();
   await embeddingQueue.shutdown();
