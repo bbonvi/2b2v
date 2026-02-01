@@ -83,7 +83,7 @@ export async function handleMessage(
   agent.getApiKey = async () => streamOptions.apiKey;
 
   const userContent = msg.translatedContent;
-  await agent.prompt(userContent);
+  await agent.prompt(userContent, msg.images);
 
   return { triggered: true, triggerResult, agentRan: true };
 }

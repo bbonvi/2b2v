@@ -34,3 +34,5 @@ export {
 } from "./multi-message.ts";
 
 export { trimChatHistory } from "./context-trimming.ts";
+
+export { resizeImageToContent } from "./vision.ts";
