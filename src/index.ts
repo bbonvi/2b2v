@@ -3,6 +3,7 @@ import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, saveGuildConfig
 import type { GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
 import { createQdrantClient, ensureCollection, healthCheck } from "./qdrant/client";
+import { deletePoint, toPointId } from "./qdrant/adapter";
 import { getEmbeddingPipeline, disposePipeline } from "./embeddings/pipeline";
 import { createEmbeddingQueue, type EmbeddingQueue } from "./embeddings/queue";
 import { createDiscordClient, loginDiscordClient } from "./discord/client";
@@ -485,12 +486,40 @@ client.on("messageCreate", (message: Message) => void (async () => {
     // Build outbound resolvers for the sender
     const outboundResolvers = buildOutboundResolvers(guild);
 
+    function storeBotMessage(sentId: string, rawContent: string, plainContent: string): void {
+      const ts = Date.now();
+      db.raw
+        .prepare(
+          `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(sentId, guildId, channelId, client.user?.id ?? "", client.user?.username ?? "bot", rawContent, plainContent, 1, ts);
+
+      void embeddingQueue.enqueue({
+        id: sentId,
+        text: plainContent,
+        target: "message",
+        metadata: {
+          guild_id: guildId,
+          channel_id: channelId,
+          user_id: client.user?.id ?? "",
+          created_at: ts,
+        },
+      }).catch((err: unknown) => {
+        log.error("bot message embedding enqueue failed", {
+          messageId: sentId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+
     // Build multi-message sender
     const channelObj = message.channel as TextChannel;
     const channelActions: ChannelActions = {
       sendReply: async (text) => {
         const translated = translateOutbound(text, outboundResolvers);
         const sent = await message.reply(translated);
+        storeBotMessage(sent.id, translated, text);
         // Track bot response in chat history
         const botHistory = getChatHistory(channelId);
         botHistory.push({ author: client.user?.username ?? "bot", content: text, isBot: true });
@@ -499,6 +528,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
       sendMessage: async (text) => {
         const translated = translateOutbound(text, outboundResolvers);
         const sent = await channelObj.send(translated);
+        storeBotMessage(sent.id, translated, text);
         const botHistory = getChatHistory(channelId);
         botHistory.push({ author: client.user?.username ?? "bot", content: text, isBot: true });
         return sent.id;
