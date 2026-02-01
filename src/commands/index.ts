@@ -8,3 +8,9 @@ export {
   type StatusCommandDeps,
 } from "./status.ts";
 export { registerSlashCommands, type CommandRegistryOptions } from "./registry.ts";
+export {
+  memoryWipeCommandDefinition,
+  createMemoryWipeHandler,
+  type MemoryWipeDeps,
+  type WipeResult,
+} from "./memory-wipe.ts";
