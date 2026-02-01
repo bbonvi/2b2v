@@ -153,6 +153,7 @@ Docker-compose Qdrant (`http://qdrant:6333`) is internal-only — no exposed por
 - `createStatusHandler(deps)`, `createMemoryWipeHandler(deps)`, `createScheduleHandler(deps)` — `src/commands/`. Factory pattern: inject deps, return `(ChatInputCommandInteraction) => Promise<void>`. All responses ephemeral.
 - `loadGlobalConfig(env)`, `loadGuildConfigs(dir, global)`, `resolveGuildConfig(global, partial)`, `saveGuildConfig(path, config)` — `src/config/loader.ts`.
 - `translateInbound(text, resolvers)`, `translateOutbound(text, resolvers)` — `src/discord/translation.ts`. Pure functions with injected resolvers.
+- `splitMessage(text, limit?)` — `src/discord/split-message.ts`. Splits text into ≤2000-char chunks (newlines → sentences → hard cut). Used after `translateOutbound` in sender and scheduler.
 - `shouldRespond(input, config, rng?)` — `src/agent/triggers.ts`. Trigger evaluation with priority: mention > keyword > random.
 - `handleMessage(msg, deps)` — `src/agent/handler.ts`. Orchestrates trigger → prompt → agent → response.
 - `createSendMessageTool(sender)` — `src/agent/send-message-tool.ts`. Agent tool: send a single message (reply or normal).

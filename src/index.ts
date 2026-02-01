@@ -15,7 +15,7 @@ import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { handleMessage, type IncomingMessage, type HandlerDeps } from "./agent/handler";
 import type { ChatMessage, PromptContext } from "./agent/prompt";
-import { trimChatHistory } from "./agent/context-trimming";
+
 import type { MessageSender } from "./agent/send-message-tool";
 import { createMemoryTools } from "./agent/memory-tools";
 import { createSearchTool } from "./agent/search-tool";
@@ -98,28 +98,20 @@ try {
 const emojiCache = new EmojiCache();
 const EMOJI_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-// --- 10. Chat history per channel (in-memory ring buffer for context) ---
-const chatHistories = new Map<string, ChatMessage[]>();
-
-function getChatHistory(channelId: string): ChatMessage[] {
-  let history = chatHistories.get(channelId);
-  if (history === undefined) {
-    // Hydrate from SQLite on first access (cold start recovery)
-    const rows = db.raw
-      .prepare(
-        `SELECT author_username, translated_content, is_bot
-         FROM messages
-         WHERE channel_id = ?
-         ORDER BY created_at DESC
-         LIMIT 150`
-      )
-      .all(channelId) as { author_username: string; translated_content: string; is_bot: number }[];
-    history = rows
-      .reverse()
-      .map((r) => ({ author: r.author_username, content: r.translated_content, isBot: r.is_bot === 1 }));
-    chatHistories.set(channelId, history);
-  }
-  return history;
+// --- 10. Chat history per channel (SQLite-backed) ---
+function getChatHistory(channelId: string, limit: number = 150): ChatMessage[] {
+  const rows = db.raw
+    .prepare(
+      `SELECT author_username, translated_content, is_bot
+       FROM messages
+       WHERE channel_id = ?
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(channelId, limit) as { author_username: string; translated_content: string; is_bot: number }[];
+  return rows
+    .reverse()
+    .map((r) => ({ author: r.author_username, content: r.translated_content, isBot: r.is_bot === 1 }));
 }
 
 // --- 11. Guild config resolver ---
@@ -143,7 +135,32 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
       const scheduleChunks = splitMessage(schedule.messageContent);
       void (async () => {
         for (const chunk of scheduleChunks) {
-          await (channel as TextChannel).send(chunk);
+          const sent = await (channel as TextChannel).send(chunk);
+          const ts = Date.now();
+          db.raw
+            .prepare(
+              `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(sent.id, schedule.guildId, schedule.channelId, client.user?.id ?? "", client.user?.username ?? "bot", chunk, chunk, 1, ts);
+
+          void embeddingQueue.enqueue({
+            id: sent.id,
+            text: chunk,
+            target: "message",
+            metadata: {
+              guild_id: schedule.guildId,
+              channel_id: schedule.channelId,
+              user_id: client.user?.id ?? "",
+              created_at: ts,
+            },
+          }).catch((err: unknown) => {
+            log.error("scheduled message embedding enqueue failed", {
+              scheduleId: schedule.id,
+              messageId: sent.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
         }
       })().catch((err: unknown) => {
         log.error("failed to send scheduled message", {
@@ -234,10 +251,7 @@ function setupCommandHandlers(guildId: string): void {
     wipeGuild: (gId) => {
       const memoriesDeleted = (db.raw.prepare("DELETE FROM memories WHERE guild_id = ?").run(gId) as { changes: number }).changes;
       const messagesDeleted = (db.raw.prepare("DELETE FROM messages WHERE guild_id = ?").run(gId) as { changes: number }).changes;
-      // Clear channel histories for this guild
-      for (const [key] of chatHistories) {
-        chatHistories.delete(key);
-      }
+
       return Promise.resolve({ memoriesDeleted, messagesDeleted });
     },
     adminUserIds: config.adminUserIds,
@@ -315,13 +329,8 @@ function refreshEmojiCache(guild: Guild): void {
 
 // --- 19. Build PromptContext for a guild+channel ---
 function buildPromptContext(guildId: string, channelId: string, guild: Guild, guildConfig: GuildConfig): PromptContext {
-  // Chat history with trimming
-  const history = getChatHistory(channelId);
-  const trimmed = trimChatHistory(history, guildConfig.trim);
-  // If trimmed, replace the stored history
-  if (trimmed.length < history.length) {
-    chatHistories.set(channelId, trimmed);
-  }
+  // Chat history from SQLite (already trimmed by LIMIT)
+  const history = getChatHistory(channelId, guildConfig.trim.trimTarget);
 
   // Journal summaries
   const journals = listMemories(db, { scope: "journal" });
@@ -353,7 +362,7 @@ function buildPromptContext(guildId: string, channelId: string, guild: Guild, gu
     persona,
     journalSummaries,
     upcomingSchedules,
-    chatHistory: trimmed,
+    chatHistory: history,
     emojiContext,
     displayNameContext,
     guildId,
@@ -478,15 +487,6 @@ client.on("messageCreate", (message: Message) => void (async () => {
     const inboundResolvers = buildInboundResolvers(guild);
     const translatedContent = translateInbound(message.content, inboundResolvers);
 
-    // Append to in-memory chat history (before DB insert so cold-start
-    // hydration doesn't include the current message, avoiding duplicates)
-    const history = getChatHistory(channelId);
-    history.push({
-      author: message.author.username,
-      content: translatedContent,
-      isBot: false,
-    });
-
     // Store message in SQLite
     const now = Date.now();
     db.raw
@@ -589,8 +589,6 @@ client.on("messageCreate", (message: Message) => void (async () => {
         if (i === 0) firstId = sent.id;
         storeBotMessage(sent.id, chunk, i === 0 ? text : chunk);
       }
-      const botHistory = getChatHistory(channelId);
-      botHistory.push({ author: client.user?.username ?? "bot", content: text, isBot: true });
       // Re-trigger typing after send — Discord clears the indicator when a message is sent
       fireTyping();
       return { sentMessageId: firstId };
