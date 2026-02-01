@@ -80,6 +80,16 @@ describe("configCommandDefinition", () => {
 });
 
 describe("validateConfigValue", () => {
+  test("validates model as non-empty string", () => {
+    expect(validateConfigValue("model", "anthropic/claude-3.5-sonnet")).toBeNull();
+    expect(validateConfigValue("model", "")).not.toBeNull();
+  });
+
+  test("validates thinkingLevel as non-empty string", () => {
+    expect(validateConfigValue("thinkingLevel", "high")).toBeNull();
+    expect(validateConfigValue("thinkingLevel", "")).not.toBeNull();
+  });
+
   test("validates timezone as non-empty string", () => {
     expect(validateConfigValue("timezone", "US/Eastern")).toBeNull();
     expect(validateConfigValue("timezone", "")).not.toBeNull();
@@ -117,6 +127,7 @@ describe("validateConfigValue", () => {
     expect(validateConfigValue("triggers.keywords", "hello,world")).toBeNull();
     expect(validateConfigValue("triggers.keywords", "single")).toBeNull();
     expect(validateConfigValue("triggers.keywords", "")).toBeNull();
+    expect(validateConfigValue("triggers.keywords", "a, b, c")).toBeNull();
   });
 
   test("validates messageDelay.base as non-negative integer", () => {
@@ -274,6 +285,41 @@ describe("createConfigHandler", () => {
     expect(deps.updateGuildConfig).toHaveBeenCalledTimes(1);
     const call = replyArg(interaction) as { content: string };
     expect(call.content).toContain("model");
+  });
+
+  test("set keywords trims whitespace from entries", async () => {
+    const deps = makeDeps();
+    const handler = createConfigHandler(deps);
+    const interaction = makeInteraction({
+      userId: "1",
+      guildId: "guild1",
+      permissionBits: 8n,
+      subcommand: "set",
+      key: "triggers.keywords",
+      value: " hello , world ",
+    });
+    await handler(interaction as never);
+    expect(deps.updateGuildConfig).toHaveBeenCalledTimes(1);
+    const calls = (deps.updateGuildConfig as ReturnType<typeof mock>).mock.calls;
+    const updatedConfig = (calls[0] as unknown[])[1] as GuildConfig;
+    expect(updatedConfig.triggers.keywords).toEqual(["hello", "world"]);
+  });
+
+  test("set empty keywords clears the list", async () => {
+    const deps = makeDeps();
+    const handler = createConfigHandler(deps);
+    const interaction = makeInteraction({
+      userId: "1",
+      guildId: "guild1",
+      permissionBits: 8n,
+      subcommand: "set",
+      key: "triggers.keywords",
+      value: "",
+    });
+    await handler(interaction as never);
+    const calls = (deps.updateGuildConfig as ReturnType<typeof mock>).mock.calls;
+    const updatedConfig = (calls[0] as unknown[])[1] as GuildConfig;
+    expect(updatedConfig.triggers.keywords).toEqual([]);
   });
 
   test("get without key hints user", async () => {

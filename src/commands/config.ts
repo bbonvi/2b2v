@@ -5,6 +5,7 @@ import {
 import { isAdmin, type PermissionContext } from "./permissions.ts";
 import type { GuildConfig } from "../config/types.ts";
 
+// adminUserIds intentionally excluded — prevents privilege escalation via /config set
 export const CONFIGURABLE_KEYS = [
   "model",
   "thinkingLevel",
@@ -24,8 +25,8 @@ export type ConfigKey = (typeof CONFIGURABLE_KEYS)[number];
 
 export interface ConfigCommandDeps {
   getGuildConfig: (guildId: string) => GuildConfig;
-  /** Apply a partial update to the guild config and persist it. */
-  updateGuildConfig: (guildId: string, patch: Partial<GuildConfig>) => void;
+  /** Apply a full updated guild config and persist it. */
+  updateGuildConfig: (guildId: string, config: GuildConfig) => void;
   adminUserIds: string[];
 }
 
