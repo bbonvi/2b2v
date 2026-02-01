@@ -107,6 +107,49 @@ describe("save_memory tool", () => {
     const mem = getMemory(db, id);
     expect(mem?.content).toBe("G1 secret");
   });
+
+  test("calls onMemoryChanged after create", async () => {
+    const changed: { id: string; content: string }[] = [];
+    const tools = createMemoryTools({
+      db,
+      guildId: "g1",
+      onMemoryChanged: (id, content) => { changed.push({ id, content }); },
+    });
+    const saveTool = findTool(tools, "save_memory");
+
+    await saveTool.execute("tc-cb1", {
+      scope: "guild_bot",
+      content: "Embed me",
+    }, new AbortController().signal);
+
+    expect(changed).toHaveLength(1);
+    expect(changed[0]?.content).toBe("Embed me");
+  });
+
+  test("calls onMemoryChanged after update", async () => {
+    const changed: { id: string; content: string }[] = [];
+    const tools = createMemoryTools({
+      db,
+      guildId: "g1",
+      onMemoryChanged: (id, content) => { changed.push({ id, content }); },
+    });
+    const saveTool = findTool(tools, "save_memory");
+
+    const createResult = await saveTool.execute("tc-cb2", {
+      scope: "guild_bot",
+      content: "Original",
+    }, new AbortController().signal);
+    const id = (createResult.details as { memoryId: string }).memoryId;
+
+    await saveTool.execute("tc-cb3", {
+      scope: "guild_bot",
+      content: "Updated",
+      id,
+    }, new AbortController().signal);
+
+    expect(changed).toHaveLength(2);
+    expect(changed[1]?.content).toBe("Updated");
+  });
 });
 
 describe("delete_memory tool", () => {
@@ -154,6 +197,26 @@ describe("delete_memory tool", () => {
     const result = await deleteTool.execute("tc-7", { id: "nonexistent" }, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain("not found");
+  });
+
+  test("calls onMemoryDeleted after delete", async () => {
+    const deleted: string[] = [];
+    const tools = createMemoryTools({
+      db,
+      guildId: "g1",
+      onMemoryDeleted: (id) => { deleted.push(id); },
+    });
+    const saveTool = findTool(tools, "save_memory");
+    const deleteTool = findTool(tools, "delete_memory");
+
+    const createResult = await saveTool.execute("tc-cb4", {
+      scope: "guild_bot",
+      content: "To delete",
+    }, new AbortController().signal);
+    const id = (createResult.details as { memoryId: string }).memoryId;
+
+    await deleteTool.execute("tc-cb5", { id }, new AbortController().signal);
+    expect(deleted).toEqual([id]);
   });
 });
 

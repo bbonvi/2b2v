@@ -15,6 +15,10 @@ export interface MemoryToolsDeps {
   db: Database;
   /** Current guild ID — scoped tools auto-inject this. */
   guildId: string;
+  /** Called after a memory is created or updated, for embedding. */
+  onMemoryChanged?: (memoryId: string, content: string) => void;
+  /** Called after a memory is deleted, for Qdrant cleanup. */
+  onMemoryDeleted?: (memoryId: string) => void;
 }
 
 interface SaveMemoryParams {
@@ -70,7 +74,7 @@ const ListMemoriesSchema = Type.Object({
  * Returns [save_memory, delete_memory, list_memories].
  */
 export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
-  const { db, guildId } = deps;
+  const { db, guildId, onMemoryChanged, onMemoryDeleted } = deps;
 
   const saveMemory: AgentTool = {
     name: "save_memory",
@@ -102,6 +106,9 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
           longDescription: p.longDescription,
           ttlDays: p.ttlDays,
         });
+        if (updated) {
+          onMemoryChanged?.(p.id, p.content);
+        }
         return Promise.resolve({
           content: [{ type: "text", text: updated ? `Saved (updated) memory ${p.id}.` : `Memory ${p.id} not found.` }],
           details: { memoryId: p.id, action: "update", success: updated },
@@ -120,6 +127,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
         sourceMessageId: p.sourceMessageId,
         ttlDays: p.ttlDays,
       });
+      onMemoryChanged?.(id, p.content);
 
       return Promise.resolve({
         content: [{ type: "text", text: `Saved new ${scope} memory ${id}.` }],
@@ -144,6 +152,9 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
         });
       }
       const deleted = deleteMemory(db, p.id);
+      if (deleted) {
+        onMemoryDeleted?.(p.id);
+      }
       return Promise.resolve({
         content: [{ type: "text", text: deleted ? `Deleted memory ${p.id}.` : `Memory ${p.id} not found.` }],
         details: { memoryId: p.id, success: deleted },

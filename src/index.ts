@@ -341,7 +341,31 @@ function buildPromptContext(guildId: string, channelId: string, guild: Guild, gu
 
 // --- 20. Build agent tools for a message context ---
 function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildConfig, guild: Guild) {
-  const memoryTools = createMemoryTools({ db, guildId });
+  const memoryTools = createMemoryTools({
+    db,
+    guildId,
+    onMemoryChanged: (memoryId, content) => {
+      void embeddingQueue.enqueue({
+        id: memoryId,
+        text: content,
+        target: "memory",
+        metadata: { guild_id: guildId },
+      }).catch((err: unknown) => {
+        log.error("memory embedding enqueue failed", {
+          memoryId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    },
+    onMemoryDeleted: (memoryId) => {
+      void deletePoint(qdrant, toPointId(memoryId)).catch((err: unknown) => {
+        log.error("memory qdrant delete failed", {
+          memoryId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    },
+  });
 
   const searchTool = createSearchTool({
     db,
