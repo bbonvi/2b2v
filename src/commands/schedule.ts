@@ -1,0 +1,259 @@
+import {
+  SlashCommandBuilder,
+  type ChatInputCommandInteraction,
+} from "discord.js";
+import { isAdmin, type PermissionContext } from "./permissions.ts";
+import type { Database } from "../db/database.ts";
+import type {
+  ScheduleRow,
+  CreateScheduleInput,
+  ListSchedulesFilter,
+} from "../db/schedule-repository.ts";
+
+export interface ScheduleCommandDeps {
+  listSchedules: (db: Database, filter: ListSchedulesFilter) => ScheduleRow[];
+  createSchedule: (db: Database, input: CreateScheduleInput) => string;
+  deleteSchedule: (db: Database, id: string) => boolean;
+  /** Notify engine that a schedule was created so it can register the job. */
+  onScheduleCreated: (scheduleId: string) => void;
+  /** Notify engine that a schedule was removed so it can unregister the job. */
+  onScheduleRemoved: (scheduleId: string) => void;
+  adminUserIds: string[];
+}
+
+export const scheduleCommandDefinition = new SlashCommandBuilder()
+  .setName("schedule")
+  .setDescription("Manage scheduled messages (admin only)")
+  .addSubcommand((sub) =>
+    sub.setName("list").setDescription("List all schedules for this guild")
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("add")
+      .setDescription("Add a new schedule")
+      .addStringOption((opt) =>
+        opt
+          .setName("type")
+          .setDescription("Schedule type: cron or one_off")
+          .setRequired(true)
+          .addChoices(
+            { name: "cron", value: "cron" },
+            { name: "one_off", value: "one_off" }
+          )
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName("channel")
+          .setDescription("Target channel ID")
+          .setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName("message")
+          .setDescription("Message content to send")
+          .setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName("cron")
+          .setDescription("Cron expression (required for cron type)")
+          .setRequired(false)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName("run-at")
+          .setDescription("ISO 8601 datetime (required for one_off type)")
+          .setRequired(false)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName("timezone")
+          .setDescription("Timezone (defaults to guild timezone)")
+          .setRequired(false)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("remove")
+      .setDescription("Remove a schedule by ID")
+      .addStringOption((opt) =>
+        opt
+          .setName("id")
+          .setDescription("Schedule ID to remove")
+          .setRequired(true)
+      )
+  );
+
+export function formatScheduleRow(row: ScheduleRow): string {
+  const status = row.enabled ? "" : " [disabled]";
+  const timing =
+    row.type === "cron"
+      ? `\`${row.cronExpression ?? "?"}\``
+      : `<t:${Math.floor((row.runAt ?? 0) / 1000)}:F> (${new Date(row.runAt ?? 0).toISOString()})`;
+
+  return `**${row.id}**${status}\nType: ${row.type} | Source: ${row.source} | Timezone: ${row.timezone}\nTiming: ${timing}\nMessage: ${row.messageContent}`;
+}
+
+export function createScheduleHandler(deps: ScheduleCommandDeps) {
+  return async (interaction: ChatInputCommandInteraction): Promise<void> => {
+    const permCtx: PermissionContext = {
+      memberPermissions: interaction.memberPermissions?.bitfield ?? null,
+      userId: interaction.user.id,
+      adminUserIds: deps.adminUserIds,
+    };
+
+    if (!isAdmin(permCtx)) {
+      await interaction.reply({
+        content: "Admin access required.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (interaction.guildId === null) {
+      await interaction.reply({
+        content: "This command can only be used in a guild.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const subcommand = interaction.options.getSubcommand();
+
+    if (subcommand === "list") {
+      const schedules = deps.listSchedules(
+        {} as Database,
+        { guildId: interaction.guildId }
+      );
+
+      if (schedules.length === 0) {
+        await interaction.reply({
+          content: "No schedules found for this guild.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const lines = schedules.map(formatScheduleRow);
+      await interaction.reply({
+        content: lines.join("\n\n"),
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (subcommand === "add") {
+      const type = interaction.options.getString("type");
+      const channelId = interaction.options.getString("channel");
+      const message = interaction.options.getString("message");
+      const cronExpr = interaction.options.getString("cron");
+      const runAtStr = interaction.options.getString("run-at");
+      const timezone = interaction.options.getString("timezone");
+
+      if (message === null || message === "") {
+        await interaction.reply({
+          content: "A message is required.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      if (type === "cron") {
+        if (cronExpr === null || cronExpr === "") {
+          await interaction.reply({
+            content:
+              "A cron expression is required for cron schedules. Use the `cron` option.",
+            ephemeral: true,
+          });
+          return;
+        }
+
+        const id = deps.createSchedule({} as Database, {
+          guildId: interaction.guildId,
+          channelId: channelId ?? interaction.channelId,
+          source: "admin",
+          type: "cron",
+          cronExpression: cronExpr,
+          timezone: timezone ?? "UTC",
+          messageContent: message,
+        });
+
+        deps.onScheduleCreated(id);
+        await interaction.reply({
+          content: `Schedule created: **${id}**\nCron: \`${cronExpr}\``,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      if (type === "one_off") {
+        if (runAtStr === null || runAtStr === "") {
+          await interaction.reply({
+            content:
+              "A run-at datetime is required for one_off schedules. Use the `run-at` option (ISO 8601).",
+            ephemeral: true,
+          });
+          return;
+        }
+
+        const runAtMs = new Date(runAtStr).getTime();
+        if (Number.isNaN(runAtMs)) {
+          await interaction.reply({
+            content: "Invalid datetime. Use ISO 8601 format (e.g. 2025-06-15T10:00:00Z).",
+            ephemeral: true,
+          });
+          return;
+        }
+
+        const id = deps.createSchedule({} as Database, {
+          guildId: interaction.guildId,
+          channelId: channelId ?? interaction.channelId,
+          source: "admin",
+          type: "one_off",
+          runAt: runAtMs,
+          timezone: timezone ?? "UTC",
+          messageContent: message,
+        });
+
+        deps.onScheduleCreated(id);
+        await interaction.reply({
+          content: `Schedule created: **${id}**\nRuns at: ${new Date(runAtMs).toISOString()}`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      await interaction.reply({
+        content: "Invalid type. Use `cron` or `one_off`.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (subcommand === "remove") {
+      const id = interaction.options.getString("id");
+      if (id === null || id === "") {
+        await interaction.reply({
+          content: "A schedule id is required.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const deleted = deps.deleteSchedule({} as Database, id);
+      if (!deleted) {
+        await interaction.reply({
+          content: `Schedule not found: \`${id}\``,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      deps.onScheduleRemoved(id);
+      await interaction.reply({
+        content: `Schedule **${id}** removed.`,
+        ephemeral: true,
+      });
+    }
+  };
+}

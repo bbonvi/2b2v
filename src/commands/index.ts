@@ -23,3 +23,9 @@ export {
   type ConfigCommandDeps,
   type ConfigKey,
 } from "./config.ts";
+export {
+  scheduleCommandDefinition,
+  createScheduleHandler,
+  formatScheduleRow,
+  type ScheduleCommandDeps,
+} from "./schedule.ts";
