@@ -24,7 +24,6 @@ export interface GuildConfig {
   memoryRetentionDays: number;
   adminUserIds: string[];
   imageMaxDimension: number;
-  messageDelay: { base: number; perChar: number };
 }
 
 /** Global configuration loaded from file + env. */
@@ -38,7 +37,6 @@ export interface GlobalConfig {
   defaultTrim: TrimConfig;
   defaultMemoryRetentionDays: number;
   defaultImageMaxDimension: number;
-  defaultMessageDelay: { base: number; perChar: number };
   personaPath: string;
   logLevel: string;
   dataDir: string;
@@ -63,5 +61,4 @@ export interface GuildConfigYaml {
   memoryRetentionDays?: number;
   adminUserIds?: string[];
   imageMaxDimension?: number;
-  messageDelay?: Partial<{ base: number; perChar: number }>;
 }

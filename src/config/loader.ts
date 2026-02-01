@@ -20,8 +20,6 @@ const DEFAULT_TRIM: TrimConfig = {
   trimTarget: 150,
 };
 
-const DEFAULT_MESSAGE_DELAY = { base: 500, perChar: 30 };
-
 /**
  * Build global config from env vars (and defaults for non-secret values).
  * Throws if required secrets are missing.
@@ -45,7 +43,6 @@ export function loadGlobalConfig(
     defaultTrim: { ...DEFAULT_TRIM },
     defaultMemoryRetentionDays: Number(env.MEMORY_RETENTION_DAYS ?? 180),
     defaultImageMaxDimension: Number(env.IMAGE_MAX_DIMENSION ?? 768),
-    defaultMessageDelay: { ...DEFAULT_MESSAGE_DELAY },
     personaPath: env.PERSONA_PATH ?? "config/persona.md",
     logLevel: env.LOG_LEVEL ?? "info",
     dataDir: env.DATA_DIR ?? "data",
@@ -101,10 +98,6 @@ export function resolveGuildConfig(
     memoryRetentionDays: partial.memoryRetentionDays ?? global.defaultMemoryRetentionDays,
     adminUserIds: partial.adminUserIds ?? [],
     imageMaxDimension: partial.imageMaxDimension ?? global.defaultImageMaxDimension,
-    messageDelay: {
-      base: partial.messageDelay?.base ?? global.defaultMessageDelay.base,
-      perChar: partial.messageDelay?.perChar ?? global.defaultMessageDelay.perChar,
-    },
   };
 }
 
@@ -137,7 +130,6 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     memoryRetentionDays: config.memoryRetentionDays,
     adminUserIds: config.adminUserIds.length > 0 ? config.adminUserIds : undefined,
     imageMaxDimension: config.imageMaxDimension,
-    messageDelay: config.messageDelay,
   };
 
   // Strip undefined keys before serializing

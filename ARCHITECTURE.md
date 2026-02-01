@@ -216,9 +216,9 @@ upsertPoints(qdrant, points with payload: {type, entity_id, guild_id, ...})
 
 Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields optional — missing values inherit from global defaults via `resolveGuildConfig()`.
 
-Configurable: `model`, `modelParams`, `thinkingLevel`, `timezone`, `triggers` (mention/keywords/randomChance), `trim` (trimTrigger/trimTarget), `memoryRetentionDays`, `adminUserIds`, `imageMaxDimension`, `messageDelay` (base/perChar).
+Configurable: `model`, `modelParams`, `thinkingLevel`, `timezone`, `triggers` (mention/keywords/randomChance), `trim` (trimTrigger/trimTarget), `memoryRetentionDays`, `adminUserIds`, `imageMaxDimension`.
 
-Hardcoded defaults: `triggers: {mention: true, keywords: [], randomChance: 0}`, `trim: {trimTrigger: 200, trimTarget: 150}`, `messageDelay: {base: 500ms, perChar: 30ms}`.
+Hardcoded defaults: `triggers: {mention: true, keywords: [], randomChance: 0}`, `trim: {trimTrigger: 200, trimTarget: 150}`.
 
 ## Key Patterns
 

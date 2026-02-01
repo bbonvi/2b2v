@@ -78,9 +78,6 @@ trim:
 memoryRetentionDays: 180
 adminUserIds: []
 imageMaxDimension: 768
-messageDelay:
-  base: 500
-  perChar: 30
 ```
 
 All fields are optional — missing values fall back to global defaults.
@@ -115,8 +112,6 @@ Configurable keys:
 | `trim.trimTarget` | number | Message count after trimming |
 | `memoryRetentionDays` | number | Default TTL for non-journal memories |
 | `imageMaxDimension` | number | Max image dimension in pixels before resize |
-| `messageDelay.base` | number | Base delay between messages (ms) |
-| `messageDelay.perChar` | number | Additional delay per character (ms) |
 
 ### `/schedule list | add | remove`
 

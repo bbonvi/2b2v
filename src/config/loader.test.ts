@@ -172,7 +172,7 @@ describe("saveGuildConfig", () => {
       memoryRetentionDays: 180,
       adminUserIds: [],
       imageMaxDimension: 768,
-      messageDelay: { base: 500, perChar: 30 },
+
     };
 
     saveGuildConfig(file, resolved);

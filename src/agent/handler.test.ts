@@ -17,7 +17,6 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultTrim: { trimTrigger: 200, trimTarget: 150 },
     defaultMemoryRetentionDays: 180,
     defaultImageMaxDimension: 768,
-    defaultMessageDelay: { base: 500, perChar: 30 },
     personaPath: "config/persona.md",
     logLevel: "info",
     dataDir: "./data",
@@ -38,7 +37,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     memoryRetentionDays: 180,
     adminUserIds: [],
     imageMaxDimension: 768,
-    messageDelay: { base: 500, perChar: 30 },
+
     ...overrides,
   };
 }

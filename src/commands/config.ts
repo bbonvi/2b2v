@@ -17,8 +17,6 @@ export const CONFIGURABLE_KEYS = [
   "trim.trimTarget",
   "memoryRetentionDays",
   "imageMaxDimension",
-  "messageDelay.base",
-  "messageDelay.perChar",
 ] as const;
 
 export type ConfigKey = (typeof CONFIGURABLE_KEYS)[number];
@@ -128,15 +126,6 @@ export function validateConfigValue(key: string, value: string): string | null {
       return null;
     }
 
-    case "messageDelay.base":
-    case "messageDelay.perChar": {
-      const n = Number(value);
-      if (!Number.isInteger(n) || n < 0) {
-        return "Value must be a non-negative integer.";
-      }
-      return null;
-    }
-
     default:
       return `Unknown key: \`${key}\`.`;
   }
@@ -195,12 +184,6 @@ function applyConfigValue(config: GuildConfig, key: string, value: string): Guil
       break;
     case "imageMaxDimension":
       updated.imageMaxDimension = Number(value);
-      break;
-    case "messageDelay.base":
-      updated.messageDelay = { ...updated.messageDelay, base: Number(value) };
-      break;
-    case "messageDelay.perChar":
-      updated.messageDelay = { ...updated.messageDelay, perChar: Number(value) };
       break;
   }
 

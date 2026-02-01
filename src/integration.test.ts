@@ -7,7 +7,7 @@ import { createMemoryTools } from "./agent/memory-tools.ts";
 import { createScheduleTool } from "./agent/schedule-tool.ts";
 import { assembleSystemPrompt, type PromptContext, type ChatMessage } from "./agent/prompt.ts";
 import { trimChatHistory } from "./agent/context-trimming.ts";
-import { createMultiMessageSender, type ChannelActions, type MessageDelayConfig } from "./agent/multi-message.ts";
+import { createMultiMessageSender, type ChannelActions } from "./agent/multi-message.ts";
 import { shouldRespond, type TriggerInput } from "./agent/triggers.ts";
 import type { TriggerConfig, TrimConfig } from "./config/types.ts";
 
@@ -405,11 +405,9 @@ describe("multi-message sender pipeline", () => {
       sendReply: (text) => { log.push(`reply:${text}`); return Promise.resolve("id-1"); },
       sendMessage: (text) => { log.push(`msg:${text}`); return Promise.resolve(`id-${log.length}`); },
       startTyping: () => { log.push("typing"); },
-      delay: () => { log.push("delay"); return Promise.resolve(); },
     };
 
-    const config: MessageDelayConfig = { base: 0, perChar: 0 };
-    const sender = createMultiMessageSender(actions, config);
+    const sender = createMultiMessageSender(actions);
 
     const result = await sender([
       { text: "Hello!" },
@@ -419,39 +417,39 @@ describe("multi-message sender pipeline", () => {
 
     expect(result.sentMessageIds.length).toBe(3);
 
-    // First message: typing → reply (no delay before first)
+    // First message: typing → reply
     expect(log[0]).toBe("typing");
     expect(log[1]).toBe("reply:Hello!");
-    // Second: delay → typing → msg
-    expect(log[2]).toBe("delay");
-    expect(log[3]).toBe("typing");
-    expect(log[4]).toBe("msg:Follow up");
-    // Third: delay → typing → msg
-    expect(log[5]).toBe("delay");
-    expect(log[6]).toBe("typing");
-    expect(log[7]).toBe("msg:Third message");
+    // Second: typing → msg
+    expect(log[2]).toBe("typing");
+    expect(log[3]).toBe("msg:Follow up");
+    // Third: typing → msg
+    expect(log[4]).toBe("typing");
+    expect(log[5]).toBe("msg:Third message");
   });
 
   test("abort signal stops sending mid-sequence", async () => {
     const controller = new AbortController();
     const sentTexts: string[] = [];
 
+    // Pre-abort before sending
+    controller.abort();
+
     const actions: ChannelActions = {
       sendReply: (text) => { sentTexts.push(text); return Promise.resolve("id-1"); },
       sendMessage: (text) => { sentTexts.push(text); return Promise.resolve("id-2"); },
       startTyping: () => {},
-      delay: () => { controller.abort(); return Promise.resolve(); },
     };
 
-    const sender = createMultiMessageSender(actions, { base: 100, perChar: 0 });
+    const sender = createMultiMessageSender(actions);
     const result = await sender(
       [{ text: "First" }, { text: "Second" }, { text: "Third" }],
       controller.signal
     );
 
-    // Only first message sent; abort fires during delay before second
-    expect(sentTexts).toEqual(["First"]);
-    expect(result.sentMessageIds.length).toBe(1);
+    // Nothing sent; signal was already aborted
+    expect(sentTexts).toEqual([]);
+    expect(result.sentMessageIds.length).toBe(0);
   });
 });
 

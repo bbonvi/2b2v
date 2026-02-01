@@ -20,7 +20,6 @@ function makeGuildConfig(overrides?: Partial<GuildConfig>): GuildConfig {
     memoryRetentionDays: 180,
     adminUserIds: [],
     imageMaxDimension: 768,
-    messageDelay: { base: 500, perChar: 30 },
     ...overrides,
   };
 }
@@ -133,11 +132,6 @@ describe("validateConfigValue", () => {
     expect(validateConfigValue("triggers.keywords", "single")).toBeNull();
     expect(validateConfigValue("triggers.keywords", "")).toBeNull();
     expect(validateConfigValue("triggers.keywords", "a, b, c")).toBeNull();
-  });
-
-  test("validates messageDelay.base as non-negative integer", () => {
-    expect(validateConfigValue("messageDelay.base", "500")).toBeNull();
-    expect(validateConfigValue("messageDelay.base", "-1")).not.toBeNull();
   });
 
   test("rejects unknown keys", () => {

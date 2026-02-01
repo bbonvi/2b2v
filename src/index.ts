@@ -560,10 +560,9 @@ client.on("messageCreate", (message: Message) => void (async () => {
       startTyping: () => {
         void channelObj.sendTyping().catch(() => {});
       },
-      delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     };
 
-    const sender = createMultiMessageSender(channelActions, guildConfig.messageDelay);
+    const sender = createMultiMessageSender(channelActions);
 
     // Build prompt context
     const promptContext = buildPromptContext(guildId, channelId, guild, guildConfig);
