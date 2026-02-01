@@ -6,7 +6,7 @@ import { assembleSystemPrompt, type PromptContext } from "./prompt.ts";
 import { createSendMessageTool, type MessageSender } from "./send-message-tool.ts";
 import { resolveGuildModel, buildStreamOptions } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
-import type { Logger } from "../logger.ts";
+import type { Logger, RequestLog } from "../logger.ts";
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 
 /** Minimal abstraction over a Discord message for the handler. */
@@ -34,6 +34,8 @@ export interface HandlerDeps {
   log?: Logger;
   /** Called when a trigger matches, before the agent runs. Use for typing indicators. */
   onTriggered?: () => void;
+  /** Request-scoped log accumulator. */
+  requestLog?: RequestLog;
 }
 
 export interface HandleResult {
@@ -91,6 +93,7 @@ export async function handleMessage(
 
   if (deps.log !== undefined) {
     const agentLog = deps.log;
+    const reqLog = deps.requestLog;
     agentLog.debug("agent tools", { tools: tools.map((t) => t.name) });
     agent.subscribe((e) => {
       switch (e.type) {
@@ -101,27 +104,14 @@ export async function handleMessage(
           agentLog.debug("agent_end", { messageCount: e.messages.length });
           break;
         case "tool_execution_start":
-          agentLog.debug("tool_call", { tool: e.toolName, args: e.args });
+          reqLog?.recordToolStart(e.toolCallId, e.toolName, e.args);
           break;
         case "tool_execution_end":
-          agentLog.debug("tool_result", { tool: e.toolName, isError: e.isError });
+          reqLog?.recordToolEnd(e.toolCallId, e.isError);
           break;
-        case "message_end": {
-          agentLog.debug("message_end", { message: e.message });
-          const msg2 = e.message as unknown as Record<string, unknown>;
-          if (msg2.role === "assistant" && msg2.usage !== undefined) {
-            const usage = msg2.usage as Record<string, unknown>;
-            const cost = usage.cost as Record<string, unknown> | undefined;
-            agentLog.logTokenUsage({
-              model: typeof msg2.model === "string" ? msg2.model : "unknown",
-              promptTokens: typeof usage.input === "number" ? usage.input : 0,
-              completionTokens: typeof usage.output === "number" ? usage.output : 0,
-              totalTokens: typeof usage.totalTokens === "number" ? usage.totalTokens : 0,
-              estimatedCostUsd: typeof cost?.total === "number" ? cost.total : undefined,
-            });
-          }
+        case "message_end":
+          reqLog?.recordLLMCompletion(e.message as unknown as Record<string, unknown>);
           break;
-        }
         case "turn_start":
         case "turn_end":
         case "message_start":

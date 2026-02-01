@@ -1,4 +1,4 @@
-import { createLogger, type LogLevel } from "./logger";
+import { createLogger, RequestLog, type LogLevel } from "./logger";
 import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, saveGuildConfig } from "./config/loader";
 import type { GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
@@ -582,6 +582,9 @@ client.on("messageCreate", (message: Message) => void (async () => {
       images: images.length > 0 ? images : undefined,
     };
 
+    // Build request log accumulator
+    const requestLog = new RequestLog(guildId, channelId);
+
     // Build handler deps
     const deps: HandlerDeps = {
       globalConfig,
@@ -589,25 +592,25 @@ client.on("messageCreate", (message: Message) => void (async () => {
       promptContext,
       sender,
       extraTools,
-      log: log.child({ guildId, channelId }),
+      log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
       onTriggered: startTyping,
+      requestLog,
     };
 
     // Run the handler — typing starts on trigger via onTriggered callback
     let result;
     try {
       result = await handleMessage(incoming, deps);
+    } catch (err) {
+      requestLog.setError(err instanceof Error ? err.message : String(err));
+      throw err;
     } finally {
       stopTyping();
-    }
-
-    if (result.triggered) {
-      log.debug("message handled", {
-        guildId,
-        channelId,
-        trigger: result.triggerResult,
-        agentRan: result.agentRan,
-      });
+      if (result !== undefined) {
+        requestLog.setTrigger(result.triggerResult);
+        requestLog.setAgentRan(result.agentRan);
+      }
+      requestLog.emit(log);
     }
   } catch (err) {
     log.error("messageCreate handler error", {
