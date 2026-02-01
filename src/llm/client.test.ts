@@ -80,4 +80,9 @@ describe("buildStreamOptions", () => {
     expect(opts.apiKey).toBe("or_key_123");
     expect(opts.temperature).toBeUndefined();
   });
+
+  test("includes cacheRetention for prompt caching", () => {
+    const opts = buildStreamOptions(GLOBAL, GUILD);
+    expect(opts.cacheRetention).toBe("short");
+  });
 });

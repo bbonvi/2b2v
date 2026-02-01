@@ -32,3 +32,5 @@ export {
   type MessageDelayConfig,
   type ChannelActions,
 } from "./multi-message.ts";
+
+export { trimChatHistory } from "./context-trimming.ts";

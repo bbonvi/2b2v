@@ -53,6 +53,7 @@ export function buildStreamOptions(
   const params = guild.modelParams ?? {};
   return {
     apiKey: global.openrouterApiKey,
+    cacheRetention: "short",
     ...params,
   };
 }
