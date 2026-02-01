@@ -23,6 +23,23 @@ All features described below are planned. Implementation is in progress.
 - Server awareness tools (member list, channel history search when permitted)
 - Docker compose for dev/prod
 
+## Quick start
+
+```bash
+# Copy and fill in secrets
+cp .env.example .env
+
+# Development (live reload, debug logging)
+docker compose -f docker-compose.dev.yml up --build
+
+# Production
+docker compose up --build -d
+```
+
+Dev mounts `src/` and `config/` from the host for live editing. Prod copies source into the image and persists data via Docker volumes (`bot-data`, `model-cache`, `qdrant-data`).
+
+Both profiles start a Qdrant service and wait for it to be healthy before launching the bot.
+
 ## Project docs
 - `.dev/docs/project-overview.md` for the complete architecture overview
 - `.dev/active-missions/` for current execution plans
