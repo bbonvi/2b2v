@@ -21,12 +21,14 @@ export interface PointPayload {
 export function toPointId(entityId: string): string {
   const hash = new Uint8Array(16);
   for (let i = 0; i < entityId.length; i++) {
-    hash[i % 16] ^= entityId.charCodeAt(i);
-    hash[i % 16] = (hash[i % 16] * 31 + entityId.charCodeAt(i)) & 0xff;
+    const idx = i % 16;
+    const cur = hash[idx] ?? 0;
+    hash[idx] = (cur ^ entityId.charCodeAt(i));
+    hash[idx] = ((hash[idx] ?? 0) * 31 + entityId.charCodeAt(i)) & 0xff;
   }
   // Set UUID v4 version and variant bits
-  hash[6] = (hash[6] & 0x0f) | 0x40;
-  hash[8] = (hash[8] & 0x3f) | 0x80;
+  hash[6] = ((hash[6] ?? 0) & 0x0f) | 0x40;
+  hash[8] = ((hash[8] ?? 0) & 0x3f) | 0x80;
 
   const hex = Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;

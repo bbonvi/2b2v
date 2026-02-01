@@ -33,7 +33,7 @@ export async function createEmbeddingPipeline(options: PipelineOptions = {}): Pr
   env.allowLocalModels = true;
 
   const extractor: FeatureExtractionPipeline = await pipeline("feature-extraction", model, {
-    dtype,
+    dtype: dtype as "q8" | "auto" | "fp32" | "fp16",
   });
 
   return {

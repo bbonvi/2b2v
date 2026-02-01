@@ -24,7 +24,11 @@ describe("EmojiCache", () => {
     cache.set("guild1", makeEmojis());
     const result = cache.get("guild1");
     expect(result).toHaveLength(3);
-    expect(result?.[0].name).toBe("thumbsup");
+    expect(result).toBeDefined();
+    if (result === undefined) throw new Error("unreachable");
+    const first = result[0];
+    if (first === undefined) throw new Error("unreachable");
+    expect(first.name).toBe("thumbsup");
   });
 
   test("returns undefined for unknown guild", () => {
@@ -35,7 +39,12 @@ describe("EmojiCache", () => {
     cache.set("guild1", makeEmojis());
     cache.set("guild1", [{ name: "new", id: "444", animated: false }]);
     expect(cache.get("guild1")).toHaveLength(1);
-    expect(cache.get("guild1")?.[0].name).toBe("new");
+    const updated = cache.get("guild1");
+    expect(updated).toBeDefined();
+    if (updated === undefined) throw new Error("unreachable");
+    const firstUpdated = updated[0];
+    if (firstUpdated === undefined) throw new Error("unreachable");
+    expect(firstUpdated.name).toBe("new");
   });
 
   test("lookup finds emoji by name", () => {

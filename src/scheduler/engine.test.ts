@@ -82,8 +82,10 @@ describe("SchedulerEngine", () => {
     // Wait up to 2.5 seconds for at least one fire
     await waitFor(() => fired.length > 0, 2500);
     expect(fired.length).toBeGreaterThanOrEqual(1);
-    expect(fired[0].schedule.messageContent).toBe("hello");
-    expect(fired[0].schedule.guildId).toBe("guild-1");
+    const first = fired[0];
+    if (first === undefined) throw new Error("unreachable");
+    expect(first.schedule.messageContent).toBe("hello");
+    expect(first.schedule.guildId).toBe("guild-1");
     e.stop();
   });
 
@@ -95,7 +97,9 @@ describe("SchedulerEngine", () => {
 
     await waitFor(() => fired.length > 0, 2000);
     expect(fired.length).toBe(1);
-    expect(fired[0].schedule.messageContent).toBe("reminder");
+    const oneOff = fired[0];
+    if (oneOff === undefined) throw new Error("unreachable");
+    expect(oneOff.schedule.messageContent).toBe("reminder");
 
     // Should be disabled in DB
     const row = getSchedule(db, id);
@@ -130,7 +134,9 @@ describe("SchedulerEngine", () => {
     const rows = db.raw
       .prepare("SELECT enabled FROM schedules")
       .all() as { enabled: number }[];
-    expect(rows[0].enabled).toBe(0);
+    const row0 = rows[0];
+    if (row0 === undefined) throw new Error("unreachable");
+    expect(row0.enabled).toBe(0);
     e.stop();
   });
 
@@ -204,6 +210,7 @@ describe("SchedulerEngine", () => {
 
     await waitFor(() => fired.length > 0, 2500);
     const event = fired[0];
+    if (event === undefined) throw new Error("unreachable");
     expect(event.schedule.guildId).toBe("guild-1");
     expect(event.schedule.channelId).toBe("ch-1");
     expect(event.schedule.messageContent).toBe("test-msg");

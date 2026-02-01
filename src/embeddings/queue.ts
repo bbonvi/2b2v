@@ -73,7 +73,7 @@ export function createEmbeddingQueue(
         };
         return {
           id: item.id,
-          vector: Array.from(embeddings[i]),
+          vector: Array.from(embeddings[i] ?? new Float32Array(0)),
           payload,
         };
       });

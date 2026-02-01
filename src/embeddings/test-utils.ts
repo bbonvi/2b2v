@@ -11,9 +11,9 @@ export function createMockPipeline(): EmbeddingPipeline {
           vec[i] = Math.sin(text.charCodeAt(i % text.length) * (i + 1) * 0.001);
         }
         let norm = 0;
-        for (let i = 0; i < EMBEDDING_DIMENSIONS; i++) norm += vec[i] * vec[i];
+        for (let i = 0; i < EMBEDDING_DIMENSIONS; i++) { const v = vec[i] ?? 0; norm += v * v; }
         norm = Math.sqrt(norm);
-        if (norm > 0) for (let i = 0; i < EMBEDDING_DIMENSIONS; i++) vec[i] /= norm;
+        if (norm > 0) for (let i = 0; i < EMBEDDING_DIMENSIONS; i++) { vec[i] = (vec[i] ?? 0) / norm; }
         return vec;
       }));
     },

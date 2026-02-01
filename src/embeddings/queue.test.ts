@@ -70,10 +70,15 @@ describe("enqueue and store", () => {
     });
     await queue.flush();
 
-    const [vec] = await pipe.embed(["metadata test"]);
+    const vecs = await pipe.embed(["metadata test"]);
+    const vec = vecs[0];
+    if (vec === undefined) throw new Error("unreachable");
     const results = await searchPoints(qdrant, Array.from(vec), { guild_id: "g1" }, { type: "message" });
     expect(results.length).toBe(1);
-    expect(results[0].payload).toMatchObject({
+    const first = results[0];
+    expect(first).toBeDefined();
+    if (first === undefined) throw new Error("unreachable");
+    expect(first.payload).toMatchObject({
       guild_id: "g1",
       channel_id: "c1",
       user_id: "u1",
