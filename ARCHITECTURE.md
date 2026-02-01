@@ -17,7 +17,7 @@ src/
 │   ├── triggers.ts             Trigger evaluation (mention > keyword > random)
 │   ├── prompt.ts               System prompt assembly (persona + context sections)
 │   ├── context-trimming.ts     Chat history windowing (trimTrigger/trimTarget)
-│   ├── send-messages-tool.ts   Agent tool: send 1+ messages to channel
+│   ├── send-message-tool.ts    Agent tool: send a message to channel
 │   ├── memory-tools.ts         Agent tools: save/delete/list memories (3 tools)
 │   ├── search-tool.ts          Agent tool: semantic search over chat history
 │   ├── schedule-tool.ts        Agent tool: relative one-off scheduling
@@ -25,7 +25,6 @@ src/
 │   ├── channel-history-tool.ts Agent tool: fetch recent channel messages
 │   ├── brave-search-tool.ts    Agent tool: Brave Search API web search
 │   ├── vision.ts               Image resize/format for multimodal input
-│   └── multi-message.ts        Delay-aware batch sender with typing indicators
 │
 ├── commands/                   Admin-only slash commands
 │   ├── registry.ts             Global REST registration via discord.js
@@ -89,13 +88,12 @@ Discord messageCreate event
        │   (guild.model ?? global.defaultModel → pi-ai registry or synthetic fallback)
        │
        ├─ Create Agent (pi-agent-core) with tools:
-       │   send_messages, save/delete/list_memory, search_messages,
+       │   send_message, save/delete/list_memory, search_messages,
        │   schedule_message, list_members, channel_history, web_search
        │
        └─ agent.prompt(translatedContent, images)
             Agent runs agentic loop, calls tools as needed
-            └─ send_messages → createMultiMessageSender → Discord
-               (first as reply, rest as messages, delays + typing)
+            └─ send_message → Discord (reply or normal, with typing)
 ```
 
 ### Semantic Search

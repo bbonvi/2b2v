@@ -4,7 +4,7 @@ import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { handleMessage, type IncomingMessage, type HandlerDeps } from "./handler.ts";
 import type { PromptContext } from "./prompt.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
-import type { MessageSender } from "./send-messages-tool.ts";
+import type { MessageSender } from "./send-message-tool.ts";
 import type { Logger } from "../logger.ts";
 
 function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
@@ -68,7 +68,7 @@ function makeMessage(overrides: Partial<IncomingMessage> = {}): IncomingMessage 
 
 describe("handleMessage", () => {
   test("returns triggered=false when no trigger matches", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig({
@@ -85,7 +85,7 @@ describe("handleMessage", () => {
   });
 
   test("returns triggered=false when author is bot", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig(),
@@ -101,7 +101,7 @@ describe("handleMessage", () => {
   });
 
   test("returns triggered=true with mention trigger", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig({
@@ -121,7 +121,7 @@ describe("handleMessage", () => {
   });
 
   test("returns triggered=true with keyword trigger", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig({
@@ -141,7 +141,7 @@ describe("handleMessage", () => {
   });
 
   test("returns triggered=false when keyword does not match", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig({
@@ -160,7 +160,7 @@ describe("handleMessage", () => {
   });
 
   test("passes extraTools to agent without error", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
     const fakeTool = {
       name: "fake_tool",
       label: "Fake",
@@ -188,7 +188,7 @@ describe("handleMessage", () => {
   });
 
   test("accepts logger with logTokenUsage", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
     const logSpy = {
       debug: () => {},
       info: () => {},

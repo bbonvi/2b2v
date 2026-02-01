@@ -201,7 +201,7 @@ describe("assembleSystemPrompt", () => {
     expect(schedIdx).toBeLessThan(historyIdx);
   });
 
-  test("persona-only prompt contains just the persona", () => {
+  test("persona-only prompt contains persona and tool instructions", () => {
     const ctx: PromptContext = {
       persona: "# 2B\nI am a combat android.",
       journalSummaries: [],
@@ -211,6 +211,11 @@ describe("assembleSystemPrompt", () => {
       displayNameContext: "",
     };
     const result = assembleSystemPrompt(ctx);
-    expect(result).toBe("# 2B\nI am a combat android.");
+    expect(result).toStartWith("# 2B\nI am a combat android.");
+    expect(result).toContain("send_message");
+    expect(result).not.toContain("## Available Emojis");
+    expect(result).not.toContain("## Server Members");
+    expect(result).not.toContain("## Journal");
+    expect(result).not.toContain("## Chat History");
   });
 });

@@ -3,7 +3,7 @@ import type { Message, Model } from "@mariozechner/pi-ai";
 import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
 import { assembleSystemPrompt, type PromptContext } from "./prompt.ts";
-import { createSendMessagesTool, type MessageSender } from "./send-messages-tool.ts";
+import { createSendMessageTool, type MessageSender } from "./send-message-tool.ts";
 import { resolveGuildModel, buildStreamOptions } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { Logger } from "../logger.ts";
@@ -28,7 +28,7 @@ export interface HandlerDeps {
   guildConfig: GuildConfig;
   promptContext: PromptContext;
   sender: MessageSender;
-  /** Additional tools beyond send_messages (memory, search, etc.). */
+  /** Additional tools beyond send_message (memory, search, etc.). */
   extraTools?: AgentTool[];
   /** Logger for agent event tracing. */
   log?: Logger;
@@ -44,7 +44,7 @@ export interface HandleResult {
  * Core message handler. Evaluates triggers, builds agent, runs prompt.
  *
  * Returns whether the bot was triggered and whether the agent ran.
- * The agent may choose not to use send_messages (declining to respond).
+ * The agent may choose not to use send_message (declining to respond).
  */
 export async function handleMessage(
   msg: IncomingMessage,
@@ -66,7 +66,7 @@ export async function handleMessage(
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
   const streamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);
 
-  const sendTool = createSendMessagesTool(deps.sender) as unknown as AgentTool;
+  const sendTool = createSendMessageTool(deps.sender) as unknown as AgentTool;
   const tools: AgentTool[] = [sendTool, ...(deps.extraTools ?? [])];
 
   const agent = new Agent({

@@ -13,7 +13,7 @@ import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine"
 import { handleMessage, type IncomingMessage, type HandlerDeps } from "./agent/handler";
 import type { ChatMessage, PromptContext } from "./agent/prompt";
 import { trimChatHistory } from "./agent/context-trimming";
-import { createMultiMessageSender, type ChannelActions } from "./agent/multi-message";
+import type { MessageSender } from "./agent/send-message-tool";
 import { createMemoryTools } from "./agent/memory-tools";
 import { createSearchTool } from "./agent/search-tool";
 import { createScheduleTool } from "./agent/schedule-tool";
@@ -537,32 +537,19 @@ client.on("messageCreate", (message: Message) => void (async () => {
       });
     }
 
-    // Build multi-message sender
+    // Build message sender
     const channelObj = message.channel as TextChannel;
-    const channelActions: ChannelActions = {
-      sendReply: async (text) => {
-        const translated = translateOutbound(text, outboundResolvers);
-        const sent = await message.reply(translated);
-        storeBotMessage(sent.id, translated, text);
-        // Track bot response in chat history
-        const botHistory = getChatHistory(channelId);
-        botHistory.push({ author: client.user?.username ?? "bot", content: text, isBot: true });
-        return sent.id;
-      },
-      sendMessage: async (text) => {
-        const translated = translateOutbound(text, outboundResolvers);
-        const sent = await channelObj.send(translated);
-        storeBotMessage(sent.id, translated, text);
-        const botHistory = getChatHistory(channelId);
-        botHistory.push({ author: client.user?.username ?? "bot", content: text, isBot: true });
-        return sent.id;
-      },
-      startTyping: () => {
-        void channelObj.sendTyping().catch(() => {});
-      },
+    const sender: MessageSender = async (text, reply, _signal) => {
+      void channelObj.sendTyping().catch(() => {});
+      const translated = translateOutbound(text, outboundResolvers);
+      const sent = reply
+        ? await message.reply(translated)
+        : await channelObj.send(translated);
+      storeBotMessage(sent.id, translated, text);
+      const botHistory = getChatHistory(channelId);
+      botHistory.push({ author: client.user?.username ?? "bot", content: text, isBot: true });
+      return { sentMessageId: sent.id };
     };
-
-    const sender = createMultiMessageSender(channelActions);
 
     // Build prompt context
     const promptContext = buildPromptContext(guildId, channelId, guild, guildConfig);

@@ -155,7 +155,7 @@ Docker-compose Qdrant (`http://qdrant:6333`) is internal-only — no exposed por
 - `translateInbound(text, resolvers)`, `translateOutbound(text, resolvers)` — `src/discord/translation.ts`. Pure functions with injected resolvers.
 - `shouldRespond(input, config, rng?)` — `src/agent/triggers.ts`. Trigger evaluation with priority: mention > keyword > random.
 - `handleMessage(msg, deps)` — `src/agent/handler.ts`. Orchestrates trigger → prompt → agent → response.
-- `createMultiMessageSender(actions)` — `src/agent/multi-message.ts`. Batch sender with typing indicators.
+- `createSendMessageTool(sender)` — `src/agent/send-message-tool.ts`. Agent tool: send a single message (reply or normal).
 - `trimChatHistory(messages, config)` — `src/agent/context-trimming.ts`. Chunked trim by message count.
 - `assembleSystemPrompt(ctx)` — `src/agent/prompt.ts`. Composes persona/emojis/members/journal/schedules/history.
 - `createDatabase(path)` — `src/db/database.ts`. SQLite with WAL mode; memories/messages/schedules tables.

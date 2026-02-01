@@ -7,7 +7,6 @@ import { createMemoryTools } from "./agent/memory-tools.ts";
 import { createScheduleTool } from "./agent/schedule-tool.ts";
 import { assembleSystemPrompt, type PromptContext, type ChatMessage } from "./agent/prompt.ts";
 import { trimChatHistory } from "./agent/context-trimming.ts";
-import { createMultiMessageSender, type ChannelActions } from "./agent/multi-message.ts";
 import { shouldRespond, type TriggerInput } from "./agent/triggers.ts";
 import type { TriggerConfig, TrimConfig } from "./config/types.ts";
 
@@ -390,68 +389,15 @@ describe("trigger → prompt assembly → trimming pipeline", () => {
       chatHistory: [],
     });
 
-    expect(prompt).toBe("Minimal bot");
-    expect(prompt).not.toContain("##");
+    expect(prompt).toStartWith("Minimal bot");
+    expect(prompt).toContain("send_message");
+    expect(prompt).not.toContain("## Available Emojis");
+    expect(prompt).not.toContain("## Server Members");
+    expect(prompt).not.toContain("## Journal");
+    expect(prompt).not.toContain("## Chat History");
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5. Multi-Message Sender Pipeline
-// ---------------------------------------------------------------------------
-describe("multi-message sender pipeline", () => {
-  test("first message is reply, subsequent are normal messages with typing", async () => {
-    const log: string[] = [];
-    const actions: ChannelActions = {
-      sendReply: (text) => { log.push(`reply:${text}`); return Promise.resolve("id-1"); },
-      sendMessage: (text) => { log.push(`msg:${text}`); return Promise.resolve(`id-${log.length}`); },
-      startTyping: () => { log.push("typing"); },
-    };
-
-    const sender = createMultiMessageSender(actions);
-
-    const result = await sender([
-      { text: "Hello!" },
-      { text: "Follow up" },
-      { text: "Third message" },
-    ]);
-
-    expect(result.sentMessageIds.length).toBe(3);
-
-    // First message: typing → reply
-    expect(log[0]).toBe("typing");
-    expect(log[1]).toBe("reply:Hello!");
-    // Second: typing → msg
-    expect(log[2]).toBe("typing");
-    expect(log[3]).toBe("msg:Follow up");
-    // Third: typing → msg
-    expect(log[4]).toBe("typing");
-    expect(log[5]).toBe("msg:Third message");
-  });
-
-  test("abort signal stops sending mid-sequence", async () => {
-    const controller = new AbortController();
-    const sentTexts: string[] = [];
-
-    // Pre-abort before sending
-    controller.abort();
-
-    const actions: ChannelActions = {
-      sendReply: (text) => { sentTexts.push(text); return Promise.resolve("id-1"); },
-      sendMessage: (text) => { sentTexts.push(text); return Promise.resolve("id-2"); },
-      startTyping: () => {},
-    };
-
-    const sender = createMultiMessageSender(actions);
-    const result = await sender(
-      [{ text: "First" }, { text: "Second" }, { text: "Third" }],
-      controller.signal
-    );
-
-    // Nothing sent; signal was already aborted
-    expect(sentTexts).toEqual([]);
-    expect(result.sentMessageIds.length).toBe(0);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // 6. Message Storage → Retrieval Integration

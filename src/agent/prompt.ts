@@ -36,12 +36,14 @@ export function formatChatHistory(messages: ChatMessage[]): string {
  */
 const TOOL_INSTRUCTIONS = `## How You Communicate
 You are a Discord bot. You do NOT have the ability to send messages directly — your text output is invisible to users.
-To send a message, you MUST call the \`send_messages\` tool. This is the ONLY way your words reach the chat.
-If you want to reply, call \`send_messages\`. If you want to stay silent, do not call it.
-You may split long responses into multiple messages. The first message is automatically a reply; subsequent messages are sent as normal channel messages.
+To send a message, you MUST call the \`send_message\` tool. This is the ONLY way your words reach the chat.
+If you want to reply, call \`send_message\` with \`reply: true\`. If you want to ignore user, do not call it (only do it for a good reason; prefer to always reply).
+You may split long responses into multiple \`send_message\` calls. Use \`reply: true\` on the first message when responding to the trigger, and \`reply: false\` for follow-up messages.
+If you want to call additional tools before reply, like web_search, you may want to first use \`send_message\` tool to inform user that you are processing their request. But keep that coherent - as a normal person would.
+If user's request is fully fulfilled do not send them identical information - just stop.
 
 ## Available Tools
-- \`send_messages\` — Send messages to the current channel (REQUIRED for any response)
+- \`send_message\` — Send a message to the current channel (REQUIRED for any response). Set \`reply: true\` to reply to the trigger.
 - \`save_memory\` / \`delete_memory\` / \`list_memories\` — Persist information across conversations
 - \`search_messages\` — Semantic search over past messages in this server
 - \`schedule_message\` — Schedule a message to be sent later

@@ -13,11 +13,11 @@ export {
 } from "./triggers.ts";
 
 export {
-  createSendMessagesTool,
-  type SendMessagesInput,
-  type SendMessagesDetails,
+  createSendMessageTool,
+  type SendMessageInput,
+  type SendMessageDetails,
   type MessageSender,
-} from "./send-messages-tool.ts";
+} from "./send-message-tool.ts";
 
 export {
   handleMessage,
@@ -25,11 +25,6 @@ export {
   type HandlerDeps,
   type HandleResult,
 } from "./handler.ts";
-
-export {
-  createMultiMessageSender,
-  type ChannelActions,
-} from "./multi-message.ts";
 
 export { trimChatHistory } from "./context-trimming.ts";
 
