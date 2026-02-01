@@ -539,8 +539,20 @@ client.on("messageCreate", (message: Message) => void (async () => {
 
     // Build message sender
     const channelObj = message.channel as TextChannel;
+
+    // Continuous typing indicator — re-fires every 8s and after each send
+    const TYPING_INTERVAL_MS = 8_000;
+    let typingTimer: ReturnType<typeof setInterval> | null = null;
+    const fireTyping = (): void => { void channelObj.sendTyping().catch(() => {}); };
+    const startTyping = (): void => {
+      fireTyping();
+      typingTimer = setInterval(fireTyping, TYPING_INTERVAL_MS);
+    };
+    const stopTyping = (): void => {
+      if (typingTimer !== null) { clearInterval(typingTimer); typingTimer = null; }
+    };
+
     const sender: MessageSender = async (text, reply, _signal) => {
-      void channelObj.sendTyping().catch(() => {});
       const translated = translateOutbound(text, outboundResolvers);
       const sent = reply
         ? await message.reply(translated)
@@ -548,6 +560,8 @@ client.on("messageCreate", (message: Message) => void (async () => {
       storeBotMessage(sent.id, translated, text);
       const botHistory = getChatHistory(channelId);
       botHistory.push({ author: client.user?.username ?? "bot", content: text, isBot: true });
+      // Re-trigger typing after send — Discord clears the indicator when a message is sent
+      fireTyping();
       return { sentMessageId: sent.id };
     };
 
@@ -576,10 +590,16 @@ client.on("messageCreate", (message: Message) => void (async () => {
       sender,
       extraTools,
       log: log.child({ guildId, channelId }),
+      onTriggered: startTyping,
     };
 
-    // Run the handler
-    const result = await handleMessage(incoming, deps);
+    // Run the handler — typing starts on trigger via onTriggered callback
+    let result;
+    try {
+      result = await handleMessage(incoming, deps);
+    } finally {
+      stopTyping();
+    }
 
     if (result.triggered) {
       log.debug("message handled", {
