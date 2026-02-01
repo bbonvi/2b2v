@@ -1,11 +1,13 @@
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import type { QdrantClient } from "@qdrant/js-client-rest";
 import type { Database } from "../db/database";
 import type { EmbeddingPipeline } from "../embeddings/pipeline";
 import { searchMessages, type MessageSearchResult } from "../db/message-repository";
 
 export interface SearchToolDeps {
   db: Database;
+  qdrant: QdrantClient;
   guildId: string;
   embed: EmbeddingPipeline;
 }
@@ -21,10 +23,10 @@ const SearchParams = Type.Object({
 
 /**
  * Create a semantic search agent tool bound to a guild context.
- * Embeds the query, runs KNN + metadata filters, returns formatted excerpts.
+ * Embeds the query, runs Qdrant search + SQLite metadata lookup, returns formatted excerpts.
  */
 export function createSearchTool(deps: SearchToolDeps): AgentTool {
-  const { db, guildId, embed } = deps;
+  const { db, qdrant, guildId, embed } = deps;
 
   return {
     name: "search_messages",
@@ -38,7 +40,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
 
       const [queryVec] = await embed.embed([p.query]);
 
-      const results = searchMessages(db, queryVec, {
+      const results = await searchMessages(db, qdrant, queryVec, {
         guildId,
         userId: p.userId,
         channelId: p.channelId,

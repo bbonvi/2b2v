@@ -1,4 +1,6 @@
 import type { Database } from "./database";
+import type { QdrantClient } from "@qdrant/js-client-rest";
+import { searchPoints } from "../qdrant/adapter";
 
 export interface MessageSearchFilter {
   guildId: string;
@@ -18,65 +20,47 @@ export interface MessageSearchResult {
   authorUsername: string;
   translatedContent: string;
   createdAt: number;
-  distance: number;
+  score: number;
 }
 
 /**
- * Semantic search over message embeddings with metadata filters.
+ * Semantic search over messages using Qdrant for vector search
+ * and SQLite for message metadata retrieval.
  *
- * Strategy: over-fetch from vec0 KNN (3x limit), then post-filter via
- * JOIN on the messages table. vec0 cannot apply WHERE on joined columns
- * during KNN scan, so over-fetching compensates for rows eliminated by filters.
+ * Qdrant handles KNN + metadata filtering (guild, channel, user, time range).
+ * SQLite provides translatedContent and authorUsername for display.
  */
-export function searchMessages(
+export async function searchMessages(
   db: Database,
+  qdrant: QdrantClient,
   queryVec: Float32Array,
   filter: MessageSearchFilter,
-): MessageSearchResult[] {
-  const overfetch = filter.limit * 3;
+): Promise<MessageSearchResult[]> {
+  const qdrantResults = await searchPoints(
+    qdrant,
+    Array.from(queryVec),
+    {
+      guild_id: filter.guildId,
+      channel_id: filter.channelId,
+      user_id: filter.userId,
+      after: filter.after,
+      before: filter.before,
+    },
+    { type: "message", limit: filter.limit },
+  );
 
-  // Phase 1: KNN candidates from vec0
-  const candidates = db.raw
-    .prepare(
-      `SELECT message_id, distance
-       FROM message_embeddings
-       WHERE embedding MATCH ?
-       ORDER BY distance
-       LIMIT ?`
-    )
-    .all(queryVec, overfetch) as Array<{ message_id: string; distance: number }>;
+  if (qdrantResults.length === 0) return [];
 
-  if (candidates.length === 0) return [];
-
-  // Phase 2: filter via messages table
-  const placeholders = candidates.map(() => "?").join(",");
-  const conditions = [`m.id IN (${placeholders})`, "m.guild_id = ?"];
-  const params: unknown[] = [...candidates.map((c) => c.message_id), filter.guildId];
-
-  if (filter.userId !== undefined) {
-    conditions.push("m.user_id = ?");
-    params.push(filter.userId);
-  }
-  if (filter.channelId !== undefined) {
-    conditions.push("m.channel_id = ?");
-    params.push(filter.channelId);
-  }
-  if (filter.after !== undefined) {
-    conditions.push("m.created_at > ?");
-    params.push(filter.after);
-  }
-  if (filter.before !== undefined) {
-    conditions.push("m.created_at < ?");
-    params.push(filter.before);
-  }
-
+  // Fetch message details from SQLite
+  const ids = qdrantResults.map((r) => r.id);
+  const placeholders = ids.map(() => "?").join(",");
   const rows = db.raw
     .prepare(
-      `SELECT m.id, m.channel_id, m.user_id, m.author_username, m.translated_content, m.created_at
-       FROM messages m
-       WHERE ${conditions.join(" AND ")}`
+      `SELECT id, channel_id, user_id, author_username, translated_content, created_at
+       FROM messages
+       WHERE id IN (${placeholders})`
     )
-    .all(...params) as Array<{
+    .all(...ids) as Array<{
       id: string;
       channel_id: string;
       user_id: string;
@@ -85,21 +69,23 @@ export function searchMessages(
       created_at: number;
     }>;
 
-  // Build distance lookup from candidates
-  const distMap = new Map(candidates.map((c) => [c.message_id, c.distance]));
+  const rowMap = new Map(rows.map((r) => [r.id, r]));
+  const scoreMap = new Map(qdrantResults.map((r) => [r.id, r.score]));
 
-  // Merge and sort by distance
-  const results: MessageSearchResult[] = rows.map((r) => ({
-    id: r.id,
-    channelId: r.channel_id,
-    userId: r.user_id,
-    authorUsername: r.author_username,
-    translatedContent: r.translated_content,
-    createdAt: r.created_at,
-    distance: distMap.get(r.id)!,
-  }));
+  const results: MessageSearchResult[] = [];
+  for (const qr of qdrantResults) {
+    const row = rowMap.get(qr.id);
+    if (!row) continue; // orphaned Qdrant point — skip
+    results.push({
+      id: row.id,
+      channelId: row.channel_id,
+      userId: row.user_id,
+      authorUsername: row.author_username,
+      translatedContent: row.translated_content,
+      createdAt: row.created_at,
+      score: scoreMap.get(qr.id)!,
+    });
+  }
 
-  results.sort((a, b) => a.distance - b.distance);
-
-  return results.slice(0, filter.limit);
+  return results;
 }

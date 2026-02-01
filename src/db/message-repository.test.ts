@@ -1,14 +1,25 @@
-import { test, expect, beforeEach, describe } from "bun:test";
+import { test, expect, beforeAll, beforeEach, afterAll, describe } from "bun:test";
+import { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "./database";
-import { storeMessageEmbedding } from "./embedding-repository";
-import { searchMessages, type MessageSearchFilter, type MessageSearchResult } from "./message-repository";
+import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
+import { upsertPoint } from "../qdrant/adapter";
+import { searchMessages } from "./message-repository";
 import { createMockPipeline } from "../embeddings/test-utils";
 
-let db: Database;
+const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
 const mockPipeline = createMockPipeline();
+
+let db: Database;
+let qdrant: QdrantClient;
 
 const now = Date.now();
 const hour = 60 * 60 * 1000;
+
+beforeAll(async () => {
+  qdrant = createQdrantClient({ url: QDRANT_URL });
+  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch {}
+  await ensureCollection(qdrant);
+});
 
 function insertMessage(
   id: string,
@@ -44,24 +55,40 @@ function insertMessage(
 async function insertWithEmbedding(id: string, text: string, opts: Parameters<typeof insertMessage>[1] = {}) {
   insertMessage(id, { ...opts, translatedContent: text });
   const [vec] = await mockPipeline.embed([text]);
-  storeMessageEmbedding(db, id, vec);
+  const guildId = opts?.guildId ?? "g1";
+  const channelId = opts?.channelId ?? "c1";
+  const userId = opts?.userId ?? "u1";
+  const createdAt = opts?.createdAt ?? now;
+  await upsertPoint(qdrant, id, Array.from(vec), {
+    type: "message",
+    entity_id: id,
+    guild_id: guildId,
+    channel_id: channelId,
+    user_id: userId,
+    message_id: id,
+    created_at: createdAt,
+  });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   db = createDatabase(":memory:");
+  try { await qdrant.delete(COLLECTION_NAME, { wait: true, filter: {} }); } catch {}
+});
+
+afterAll(async () => {
+  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch {}
 });
 
 describe("searchMessages", () => {
-  test("returns results ordered by semantic distance", async () => {
+  test("returns results ordered by semantic similarity", async () => {
     await insertWithEmbedding("m1", "cats and dogs playing together");
     await insertWithEmbedding("m2", "quantum physics lecture notes");
     await insertWithEmbedding("m3", "puppies and kittens having fun");
 
     const [queryVec] = await mockPipeline.embed(["cats and dogs"]);
-    const results = searchMessages(db, queryVec, { guildId: "g1", limit: 10 });
+    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
 
     expect(results.length).toBe(3);
-    // "cats and dogs playing together" should be closest to "cats and dogs"
     expect(results[0].id).toBe("m1");
   });
 
@@ -70,7 +97,7 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m2", "hello world again", { guildId: "g2" });
 
     const [queryVec] = await mockPipeline.embed(["hello"]);
-    const results = searchMessages(db, queryVec, { guildId: "g1", limit: 10 });
+    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
 
     expect(results.length).toBe(1);
     expect(results[0].id).toBe("m1");
@@ -81,7 +108,7 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m2", "programming advice", { userId: "u2" });
 
     const [queryVec] = await mockPipeline.embed(["programming"]);
-    const results = searchMessages(db, queryVec, { guildId: "g1", userId: "u1", limit: 10 });
+    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", userId: "u1", limit: 10 });
 
     expect(results.length).toBe(1);
     expect(results[0].id).toBe("m1");
@@ -92,7 +119,7 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m2", "music reviews", { channelId: "c2" });
 
     const [queryVec] = await mockPipeline.embed(["music"]);
-    const results = searchMessages(db, queryVec, { guildId: "g1", channelId: "c1", limit: 10 });
+    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", channelId: "c1", limit: 10 });
 
     expect(results.length).toBe(1);
     expect(results[0].id).toBe("m1");
@@ -103,7 +130,7 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m2", "recent message about food", { createdAt: now - 1 * hour });
 
     const [queryVec] = await mockPipeline.embed(["food"]);
-    const results = searchMessages(db, queryVec, { guildId: "g1", after: now - 2 * hour, limit: 10 });
+    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", after: now - 2 * hour, limit: 10 });
 
     expect(results.length).toBe(1);
     expect(results[0].id).toBe("m2");
@@ -114,7 +141,7 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m2", "recent message about food", { createdAt: now - 1 * hour });
 
     const [queryVec] = await mockPipeline.embed(["food"]);
-    const results = searchMessages(db, queryVec, { guildId: "g1", before: now - 5 * hour, limit: 10 });
+    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", before: now - 5 * hour, limit: 10 });
 
     expect(results.length).toBe(1);
     expect(results[0].id).toBe("m1");
@@ -126,7 +153,7 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m3", "evening coffee ritual", { createdAt: now - 1 * hour });
 
     const [queryVec] = await mockPipeline.embed(["coffee"]);
-    const results = searchMessages(db, queryVec, {
+    const results = await searchMessages(db, qdrant, queryVec, {
       guildId: "g1",
       after: now - 8 * hour,
       before: now - 2 * hour,
@@ -143,7 +170,7 @@ describe("searchMessages", () => {
     await insertWithEmbedding("m3", "alpha topic three");
 
     const [queryVec] = await mockPipeline.embed(["alpha"]);
-    const results = searchMessages(db, queryVec, { guildId: "g1", limit: 2 });
+    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 2 });
 
     expect(results.length).toBe(2);
   });
@@ -157,7 +184,7 @@ describe("searchMessages", () => {
     });
 
     const [queryVec] = await mockPipeline.embed(["detailed content"]);
-    const results = searchMessages(db, queryVec, { guildId: "g1", limit: 10 });
+    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
 
     expect(results.length).toBe(1);
     expect(results[0]).toMatchObject({
@@ -168,40 +195,35 @@ describe("searchMessages", () => {
       translatedContent: "detailed content here",
       createdAt: now - 3 * hour,
     });
-    expect(typeof results[0].distance).toBe("number");
+    expect(typeof results[0].score).toBe("number");
   });
 
   test("returns empty array when no matches", async () => {
     const [queryVec] = await mockPipeline.embed(["anything"]);
-    const results = searchMessages(db, queryVec, { guildId: "g1", limit: 10 });
+    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
 
     expect(results).toEqual([]);
   });
 
   test("combines all filters", async () => {
-    // Target: guild g1, user u1, channel c1, within time range
     await insertWithEmbedding("target", "the answer is here", {
       guildId: "g1", userId: "u1", channelId: "c1", createdAt: now - 3 * hour,
     });
-    // Wrong guild
     await insertWithEmbedding("wrong-guild", "the answer is here", {
       guildId: "g2", userId: "u1", channelId: "c1", createdAt: now - 3 * hour,
     });
-    // Wrong user
     await insertWithEmbedding("wrong-user", "the answer is here", {
       guildId: "g1", userId: "u2", channelId: "c1", createdAt: now - 3 * hour,
     });
-    // Wrong channel
     await insertWithEmbedding("wrong-channel", "the answer is here", {
       guildId: "g1", userId: "u1", channelId: "c2", createdAt: now - 3 * hour,
     });
-    // Wrong time
     await insertWithEmbedding("wrong-time", "the answer is here", {
       guildId: "g1", userId: "u1", channelId: "c1", createdAt: now - 20 * hour,
     });
 
     const [queryVec] = await mockPipeline.embed(["the answer"]);
-    const results = searchMessages(db, queryVec, {
+    const results = await searchMessages(db, qdrant, queryVec, {
       guildId: "g1",
       userId: "u1",
       channelId: "c1",

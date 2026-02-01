@@ -15,18 +15,6 @@ export {
 } from "./memory-repository";
 
 export {
-  storeMemoryEmbedding,
-  storeMessageEmbedding,
-  deleteMemoryEmbedding,
-  deleteMessageEmbedding,
-  searchMemoryEmbeddings,
-  searchMessageEmbeddings,
-  hasMemoryEmbedding,
-  hasMessageEmbedding,
-  type EmbeddingSearchResult,
-} from "./embedding-repository";
-
-export {
   searchMessages,
   type MessageSearchFilter,
   type MessageSearchResult,
