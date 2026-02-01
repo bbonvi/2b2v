@@ -1,0 +1,29 @@
+{
+  "name": "2bv2",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "^0.50.9",
+    "@mariozechner/pi-ai": "^0.50.9",
+    "@sinclair/typebox": "^0.34.48",
+    "better-sqlite3": "^12.6.2",
+    "croner": "^9.1.0",
+    "discord.js": "^14.25.1",
+    "sharp": "^0.34.5",
+    "sqlite-vec": "^0.1.7-alpha.2",
+    "yaml": "^2.8.2"
+  }
+}

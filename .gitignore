@@ -1,0 +1,12 @@
+node_modules/
+.dev/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+config/guilds/*.yaml
+config/persona.md
+dist/
+*.tsbuildinfo
+model-cache/
