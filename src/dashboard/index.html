@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Request Dashboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+  :root {
+    --bg: #08090a;
+    --surface: #0f1012;
+    --surface-2: #161819;
+    --border: #1e2123;
+    --border-active: #2a2d31;
+    --text: #c4c9cf;
+    --text-dim: #6b7280;
+    --text-bright: #e8ecf0;
+    --accent: #3d8bfd;
+    --accent-dim: #1a3a6b;
+    --green: #22c55e;
+    --green-dim: #0a2f1a;
+    --red: #ef4444;
+    --red-dim: #3b1111;
+    --amber: #f59e0b;
+    --amber-dim: #3b2a06;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--mono);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  /* Top bar */
+  .topbar {
+    position: sticky; top: 0; z-index: 100;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 1.25rem;
+    display: flex; align-items: center; gap: 1rem;
+    height: 48px;
+  }
+  .topbar-title {
+    font-size: .7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .18em;
+    color: var(--text-dim);
+    white-space: nowrap;
+    font-family: var(--sans);
+  }
+  .topbar-sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0 }
+
+  .status-badge {
+    display: none;
+    align-items: center; gap: .4rem;
+    font-size: .7rem;
+    color: var(--amber);
+    font-weight: 500;
+  }
+  .status-badge.active { display: flex }
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--amber);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1 }
+    50% { opacity: .3 }
+  }
+
+  .filters {
+    display: flex; gap: .5rem; margin-left: auto; align-items: center;
+  }
+  select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: .7rem;
+    padding: .35rem .5rem;
+    outline: none;
+    cursor: pointer;
+    min-width: 100px;
+    max-width: 180px;
+  }
+  select:focus { border-color: var(--accent) }
+
+  .btn {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: .7rem;
+    padding: .35rem .7rem;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--text-bright) }
+
+  /* Content */
+  .content { padding: 1rem 1.25rem; }
+
+  .log-count {
+    font-size: .65rem;
+    color: var(--text-dim);
+    margin-bottom: .75rem;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+  }
+
+  /* Log entries */
+  .entry {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    margin-bottom: 2px;
+    cursor: pointer;
+    transition: border-color .1s;
+  }
+  .entry:hover { border-color: var(--border-active) }
+  .entry.has-error { border-left: 2px solid var(--red) }
+  .entry.no-agent { opacity: .5 }
+
+  .entry-header {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    padding: .5rem .75rem;
+    font-size: .72rem;
+  }
+  .entry-time {
+    color: var(--text-dim);
+    font-size: .65rem;
+    min-width: 65px;
+  }
+  .entry-user {
+    color: var(--accent);
+    font-weight: 500;
+    min-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .entry-trigger {
+    color: var(--text-dim);
+    font-size: .65rem;
+    background: var(--surface-2);
+    padding: .1rem .4rem;
+    border-radius: 2px;
+  }
+  .entry-stats {
+    display: flex; gap: .75rem;
+    margin-left: auto;
+    font-size: .65rem;
+    color: var(--text-dim);
+  }
+  .entry-stats span { white-space: nowrap }
+  .stat-val { color: var(--text) }
+  .entry-error-badge {
+    background: var(--red-dim);
+    color: var(--red);
+    font-size: .6rem;
+    font-weight: 600;
+    padding: .1rem .35rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  .entry-cost {
+    color: var(--green);
+  }
+
+  /* Expanded detail */
+  .entry-detail {
+    display: none;
+    border-top: 1px solid var(--border);
+    padding: .75rem;
+  }
+  .entry.expanded .entry-detail { display: block }
+
+  .detail-section {
+    margin-bottom: .75rem;
+  }
+  .detail-section:last-child { margin-bottom: 0 }
+  .detail-label {
+    font-size: .6rem;
+    text-transform: uppercase;
+    letter-spacing: .15em;
+    color: var(--text-dim);
+    margin-bottom: .35rem;
+    font-family: var(--sans);
+    font-weight: 600;
+  }
+
+  .detail-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .68rem;
+  }
+  .detail-table th {
+    text-align: left;
+    font-weight: 500;
+    color: var(--text-dim);
+    padding: .25rem .5rem;
+    border-bottom: 1px solid var(--border);
+    font-size: .6rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  .detail-table td {
+    padding: .25rem .5rem;
+    border-bottom: 1px solid #0d0e10;
+    vertical-align: top;
+  }
+  .detail-table tr:last-child td { border-bottom: none }
+  .tool-error { color: var(--red) }
+  .tool-args {
+    color: var(--text-dim);
+    font-size: .62rem;
+    max-width: 400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tool-result {
+    color: var(--text-dim);
+    font-size: .62rem;
+    max-width: 400px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .error-text {
+    color: var(--red);
+    background: var(--red-dim);
+    padding: .35rem .5rem;
+    font-size: .7rem;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 4rem 1rem;
+    color: var(--text-dim);
+    font-size: .75rem;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px }
+  ::-webkit-scrollbar-track { background: var(--bg) }
+  ::-webkit-scrollbar-thumb { background: var(--border-active); border-radius: 3px }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-title">Request Log</div>
+  <div class="topbar-sep"></div>
+  <div class="status-badge" id="status-badge">
+    <div class="status-dot"></div>
+    <span id="status-text">0 active</span>
+  </div>
+  <div class="filters">
+    <select id="f-guild"><option value="">All guilds</option></select>
+    <select id="f-channel"><option value="">All channels</option></select>
+    <select id="f-user"><option value="">All users</option></select>
+    <button class="btn" id="btn-refresh">Refresh</button>
+  </div>
+</div>
+
+<div class="content">
+  <div class="log-count" id="log-count"></div>
+  <div id="log-list"></div>
+</div>
+
+<script>
+(function(){
+  const logList = document.getElementById('log-list');
+  const logCount = document.getElementById('log-count');
+  const fGuild = document.getElementById('f-guild');
+  const fChannel = document.getElementById('f-channel');
+  const fUser = document.getElementById('f-user');
+  const btnRefresh = document.getElementById('btn-refresh');
+  const statusBadge = document.getElementById('status-badge');
+  const statusText = document.getElementById('status-text');
+
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function fmtTime(iso) {
+    const d = new Date(iso);
+    return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function fmtDuration(ms) {
+    if (ms < 1000) return ms + 'ms';
+    return (ms / 1000).toFixed(1) + 's';
+  }
+
+  function fmtCost(calls) {
+    let total = 0;
+    for (const c of calls) {
+      if (c.estimatedCostUsd != null) total += c.estimatedCostUsd;
+    }
+    if (total === 0) return null;
+    return '$' + total.toFixed(4);
+  }
+
+  function fmtTrigger(t) {
+    if (t == null) return 'none';
+    if (typeof t === 'string') return t;
+    if (t.type) return t.type + (t.keyword ? ': ' + t.keyword : '');
+    return JSON.stringify(t);
+  }
+
+  function fmtArgs(args) {
+    if (args == null) return '';
+    const s = JSON.stringify(args);
+    return s.length > 120 ? s.slice(0, 120) + '...' : s;
+  }
+
+  function renderEntry(e) {
+    const cost = fmtCost(e.llmCalls);
+    const hasErr = e.error != null;
+    const cls = ['entry'];
+    if (hasErr) cls.push('has-error');
+    if (!e.agentRan) cls.push('no-agent');
+
+    let toolRows = '';
+    for (const t of e.tools) {
+      toolRows += '<tr' + (t.isError ? ' class="tool-error"' : '') + '>'
+        + '<td>' + esc(t.tool) + '</td>'
+        + '<td class="tool-args" title="' + esc(JSON.stringify(t.args)) + '">' + esc(fmtArgs(t.args)) + '</td>'
+        + '<td>' + (t.durationMs != null ? fmtDuration(t.durationMs) : '-') + '</td>'
+        + '<td>' + (t.isError ? 'ERR' : 'ok') + '</td>'
+        + '<td class="tool-result">' + (t.result != null ? esc(t.result) : '-') + '</td>'
+        + '</tr>';
+    }
+
+    let llmRows = '';
+    for (const l of e.llmCalls) {
+      llmRows += '<tr>'
+        + '<td>' + esc(l.model) + '</td>'
+        + '<td>' + l.promptTokens + ' / ' + l.completionTokens + '</td>'
+        + '<td>' + (l.estimatedCostUsd != null ? '$' + l.estimatedCostUsd.toFixed(4) : '-') + '</td>'
+        + '<td>' + esc(l.stopReason) + '</td>'
+        + '<td>' + esc(l.contentTypes.join(', ')) + '</td>'
+        + '</tr>';
+    }
+
+    return '<div class="' + cls.join(' ') + '" onclick="this.classList.toggle(\'expanded\')">'
+      + '<div class="entry-header">'
+        + '<span class="entry-time">' + fmtTime(e.timestamp) + '</span>'
+        + '<span class="entry-user">' + esc(e.authorUsername) + '</span>'
+        + '<span class="entry-trigger">' + esc(fmtTrigger(e.trigger)) + '</span>'
+        + (hasErr ? '<span class="entry-error-badge">error</span>' : '')
+        + '<div class="entry-stats">'
+          + '<span>' + fmtDuration(e.totalDurationMs) + '</span>'
+          + '<span>T:<span class="stat-val">' + e.tools.length + '</span></span>'
+          + '<span>L:<span class="stat-val">' + e.llmCalls.length + '</span></span>'
+          + (cost ? '<span class="entry-cost">' + cost + '</span>' : '')
+        + '</div>'
+      + '</div>'
+      + '<div class="entry-detail">'
+        + (hasErr ? '<div class="detail-section"><div class="detail-label">Error</div><div class="error-text">' + esc(e.error) + '</div></div>' : '')
+        + (e.tools.length > 0 ? '<div class="detail-section"><div class="detail-label">Tool Calls</div>'
+          + '<table class="detail-table"><tr><th>Tool</th><th>Args</th><th>Duration</th><th>Status</th><th>Result</th></tr>'
+          + toolRows + '</table></div>' : '')
+        + (e.llmCalls.length > 0 ? '<div class="detail-section"><div class="detail-label">LLM Calls</div>'
+          + '<table class="detail-table"><tr><th>Model</th><th>Tokens (in/out)</th><th>Cost</th><th>Stop</th><th>Content Types</th></tr>'
+          + llmRows + '</table></div>' : '')
+      + '</div>'
+    + '</div>';
+  }
+
+  async function fetchLogs() {
+    const params = new URLSearchParams();
+    if (fGuild.value) params.set('guildId', fGuild.value);
+    if (fChannel.value) params.set('channelId', fChannel.value);
+    if (fUser.value) params.set('authorUsername', fUser.value);
+    const r = await fetch('/api/logs?' + params.toString());
+    if (r.status === 401) { location.href = '/login'; return; }
+    const data = await r.json();
+    logCount.textContent = data.length + ' entries';
+    if (data.length === 0) {
+      logList.innerHTML = '<div class="empty-state">No log entries yet. Trigger some bot messages.</div>';
+    } else {
+      logList.innerHTML = data.map(renderEntry).join('');
+    }
+  }
+
+  async function fetchFilters() {
+    const r = await fetch('/api/filters');
+    if (r.status === 401) { location.href = '/login'; return; }
+    const f = await r.json();
+    const gv = fGuild.value, cv = fChannel.value, uv = fUser.value;
+    fGuild.innerHTML = '<option value="">All guilds</option>' + f.guildIds.map(id => '<option value="'+esc(id)+'">'+esc(id)+'</option>').join('');
+    fChannel.innerHTML = '<option value="">All channels</option>' + f.channelIds.map(id => '<option value="'+esc(id)+'">'+esc(id)+'</option>').join('');
+    fUser.innerHTML = '<option value="">All users</option>' + f.usernames.map(u => '<option value="'+esc(u)+'">'+esc(u)+'</option>').join('');
+    fGuild.value = gv; fChannel.value = cv; fUser.value = uv;
+  }
+
+  async function refresh() {
+    await Promise.all([fetchLogs(), fetchFilters()]);
+  }
+
+  btnRefresh.addEventListener('click', refresh);
+  fGuild.addEventListener('change', fetchLogs);
+  fChannel.addEventListener('change', fetchLogs);
+  fUser.addEventListener('change', fetchLogs);
+
+  // Status polling
+  let statusTimer = null;
+  async function pollStatus() {
+    try {
+      const r = await fetch('/api/status');
+      if (!r.ok) return;
+      const d = await r.json();
+      if (d.activeRequests > 0) {
+        statusBadge.classList.add('active');
+        statusText.textContent = d.activeRequests + ' active';
+      } else {
+        statusBadge.classList.remove('active');
+      }
+    } catch {}
+  }
+  function startPolling() { pollStatus(); statusTimer = setInterval(pollStatus, 1000); }
+  function stopPolling() { if (statusTimer) { clearInterval(statusTimer); statusTimer = null; } }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stopPolling(); else startPolling();
+  });
+
+  startPolling();
+  refresh();
+})();
+</script>
+</body>
+</html>

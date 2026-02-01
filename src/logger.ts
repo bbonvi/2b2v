@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { requestLogStore, type RequestLogEntry } from "./dashboard/store";
 
 export const LOG_LEVELS = {
   debug: 0,
@@ -84,6 +85,7 @@ export interface RequestToolCall {
   args: Record<string, unknown>;
   isError?: boolean;
   durationMs?: number;
+  result?: string;
 }
 
 export interface RequestLLMCall {
@@ -124,6 +126,7 @@ export class RequestLog {
   readonly guildId: string;
   readonly channelId: string;
 
+  private authorUsername = "";
   private trigger: unknown = null;
   private agentRan = false;
   private errorMsg: string | null = null;
@@ -136,6 +139,10 @@ export class RequestLog {
     this.startTime = Date.now();
     this.guildId = guildId;
     this.channelId = channelId;
+  }
+
+  setAuthor(username: string): void {
+    this.authorUsername = username;
   }
 
   setTrigger(trigger: unknown): void {
@@ -158,15 +165,31 @@ export class RequestLog {
     });
   }
 
-  recordToolEnd(toolCallId: string, isError: boolean): void {
+  recordToolEnd(toolCallId: string, isError: boolean, rawResult?: unknown): void {
     const pending = this.pendingTools.get(toolCallId);
     if (pending === undefined) return;
     this.pendingTools.delete(toolCallId);
+
+    let resultText: string | undefined;
+    if (rawResult !== null && rawResult !== undefined && typeof rawResult === "object" && "content" in rawResult) {
+      const content = (rawResult as { content: unknown[] }).content;
+      if (Array.isArray(content)) {
+        const text = content
+          .filter((c): c is { type: string; text: string } => typeof c === "object" && c !== null && "text" in c)
+          .map((c) => c.text)
+          .join("\n");
+        if (text.length > 0) {
+          resultText = text.length > 500 ? text.slice(0, 500) + "…" : text;
+        }
+      }
+    }
+
     this.tools.push({
       tool: pending.tool,
       args: pending.args,
       isError: isError || undefined,
       durationMs: Date.now() - pending.startTime,
+      result: resultText,
     });
   }
 
@@ -195,20 +218,29 @@ export class RequestLog {
     });
   }
 
-  emit(logger: Logger): void {
-    const data: Record<string, unknown> = {
+  toEntry(): RequestLogEntry {
+    const entry: RequestLogEntry = {
       requestId: this.requestId,
       guildId: this.guildId,
       channelId: this.channelId,
+      authorUsername: this.authorUsername,
       trigger: this.trigger,
       agentRan: this.agentRan,
       tools: this.tools,
       llmCalls: this.llmCalls,
       totalDurationMs: Date.now() - this.startTime,
+      timestamp: new Date().toISOString(),
     };
     if (this.errorMsg !== null) {
-      data.error = this.errorMsg;
+      entry.error = this.errorMsg;
     }
-    logger.info("request_completed", data);
+    return entry;
+  }
+
+  emit(logger: Logger): void {
+    const entry = this.toEntry();
+    logger.info("request_completed", entry as unknown as Record<string, unknown>);
+
+    requestLogStore.push(entry);
   }
 }

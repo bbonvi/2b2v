@@ -107,7 +107,7 @@ export async function handleMessage(
           reqLog?.recordToolStart(e.toolCallId, e.toolName, e.args);
           break;
         case "tool_execution_end":
-          reqLog?.recordToolEnd(e.toolCallId, e.isError);
+          reqLog?.recordToolEnd(e.toolCallId, e.isError, e.result);
           break;
         case "message_end":
           reqLog?.recordLLMCompletion(e.message as unknown as Record<string, unknown>);

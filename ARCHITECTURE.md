@@ -61,6 +61,11 @@ src/
 │   ├── client.ts               Connection, collection setup (cosine, 1024-dim)
 │   └── adapter.ts              Point CRUD, search, deterministic ID mapping
 │
+├── dashboard/                  Request log dashboard (password-protected)
+│   ├── store.ts               In-memory ring buffer (1000 entries) for request log entries
+│   ├── server.ts              Bun.serve HTTP server with cookie-based auth
+│   └── index.html             Single-file dashboard UI (vanilla JS)
+│
 └── scheduler/                  Job scheduling
     └── engine.ts               Croner (cron) + setTimeout (one-off) orchestration
 ```

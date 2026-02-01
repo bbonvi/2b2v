@@ -1,4 +1,6 @@
 import { createLogger, RequestLog, type LogLevel } from "./logger";
+import { requestLogStore } from "./dashboard/store";
+import { startDashboard } from "./dashboard/server";
 import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, saveGuildConfig } from "./config/loader";
 import type { GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
@@ -448,6 +450,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
     const guild = message.guild;
     const guildId = message.guildId;
     const channelId = message.channelId;
+    requestLogStore.incrementActive();
     const guildConfig = getGuildConfig(guildId);
 
     // Build inbound resolvers and translate
@@ -584,6 +587,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
 
     // Build request log accumulator
     const requestLog = new RequestLog(guildId, channelId);
+    requestLog.setAuthor(message.author.username);
 
     // Build handler deps
     const deps: HandlerDeps = {
@@ -618,6 +622,27 @@ client.on("messageCreate", (message: Message) => void (async () => {
       guildId: message.guildId,
       error: err instanceof Error ? err.message : String(err),
     });
+    // Push minimal error entry for hard failures that bypass RequestLog.emit
+    if (message.guildId !== null) {
+      requestLogStore.push({
+        requestId: crypto.randomUUID(),
+        guildId: message.guildId,
+        channelId: message.channelId,
+        authorUsername: message.author.username,
+        trigger: null,
+        agentRan: false,
+        tools: [],
+        llmCalls: [],
+        totalDurationMs: 0,
+        error: err instanceof Error ? err.message : String(err),
+        timestamp: new Date().toISOString(),
+      });
+    }
+  } finally {
+    // Decrement only if we incremented (i.e. passed the early returns)
+    if (message.guild !== null && message.guildId !== null && !message.author.bot) {
+      requestLogStore.decrementActive();
+    }
   }
 })());
 
@@ -627,6 +652,14 @@ log.info("health check passed — all systems ready", {
   guilds: guildConfigs.size,
   schedulerJobs: scheduler.activeCount(),
 });
+
+// --- Start dashboard ---
+const dashboardPassword = process.env.DASHBOARD_PASSWORD;
+if (dashboardPassword !== undefined && dashboardPassword !== "") {
+  startDashboard({ port: 3000, password: dashboardPassword, log });
+} else {
+  log.info("dashboard disabled (DASHBOARD_PASSWORD not set)");
+}
 
 // --- Graceful shutdown ---
 async function shutdown(signal: string): Promise<void> {
