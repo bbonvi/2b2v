@@ -157,7 +157,7 @@ Docker-compose Qdrant (`http://qdrant:6333`) is internal-only — no exposed por
 - `shouldRespond(input, config, rng?)` — `src/agent/triggers.ts`. Trigger evaluation with priority: mention > keyword > random.
 - `handleMessage(msg, deps)` — `src/agent/handler.ts`. Orchestrates trigger → prompt → agent → response.
 - `createSendMessageTool(sender)` — `src/agent/send-message-tool.ts`. Agent tool: send a single message (reply or normal).
-- `trimChatHistory(messages, config)` — `src/agent/context-trimming.ts`. Chunked trim by message count.
+- `trimChatHistory(messages, config)` — `src/agent/context-trimming.ts`. Chunked trim by message count. Note: chat history now reads directly from SQLite (no in-memory buffer); trimming is handled via SQL `LIMIT`.
 - `assembleSystemPrompt(ctx)` — `src/agent/prompt.ts`. Composes persona/emojis/members/journal/schedules/history.
 - `createDatabase(path)` — `src/db/database.ts`. SQLite with WAL mode; memories/messages/schedules tables.
 - `createMemory/updateMemory/deleteMemory/listMemories/deleteExpiredMemories` — `src/db/memory-repository.ts`.

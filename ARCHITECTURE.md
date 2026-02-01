@@ -16,7 +16,7 @@ src/
 │   ├── handler.ts              Core dispatcher: trigger → prompt → agent → response
 │   ├── triggers.ts             Trigger evaluation (mention > keyword > random)
 │   ├── prompt.ts               System prompt assembly (persona + context sections)
-│   ├── context-trimming.ts     Chat history windowing (trimTrigger/trimTarget)
+│   ├── context-trimming.ts     Chat history windowing (trimTrigger/trimTarget, now via SQL LIMIT)
 │   ├── send-message-tool.ts    Agent tool: send a message to channel
 │   ├── memory-tools.ts         Agent tools: save/delete/list memories (3 tools)
 │   ├── search-tool.ts          Agent tool: semantic search over chat history
@@ -113,6 +113,10 @@ searchPoints(qdrant, vector, {guild_id, channel_id?, user_id?, after?, before?})
 SQLite JOIN: SELECT ... FROM messages WHERE id IN (qdrant_ids)
   ↓
 Merged results: translatedContent + authorUsername + score
+  ↓
+(optional) fetchMessage(channelId, messageId) → attachment metadata from Discord
+  ↓
+Formatted output with attachment info (📎 name, type, size)
 ```
 
 ### Embedding Storage
