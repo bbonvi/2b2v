@@ -174,8 +174,8 @@ describe("createScheduleHandler", () => {
     });
     await handler(interaction as never);
     expect(createFn).toHaveBeenCalled();
-    const args = createFn.mock.calls[0] as unknown as [unknown, Record<string, unknown>];
-    expect(args[1]).toMatchObject({
+    const args = createFn.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(args[0]).toMatchObject({
       guildId: "guild-1",
       source: "admin",
       type: "cron",
@@ -199,9 +199,9 @@ describe("createScheduleHandler", () => {
     });
     await handler(interaction as never);
     expect(createFn).toHaveBeenCalled();
-    const args = createFn.mock.calls[0] as unknown as [unknown, Record<string, unknown>];
-    expect(args[1]).toMatchObject({ type: "one_off" });
-    expect(typeof args[1].runAt).toBe("number");
+    const args = createFn.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(args[0]).toMatchObject({ type: "one_off" });
+    expect(typeof args[0].runAt).toBe("number");
   });
 
   test("add rejects cron without expression", async () => {
@@ -247,7 +247,7 @@ describe("createScheduleHandler", () => {
       options: { id: "sched-1" },
     });
     await handler(interaction as never);
-    expect(deleteFn).toHaveBeenCalledWith(expect.anything(), "sched-1");
+    expect(deleteFn).toHaveBeenCalledWith("sched-1");
     expect(onRemoved).toHaveBeenCalledWith("sched-1");
     expect(replyText(interaction)).toContain("sched-1");
   });

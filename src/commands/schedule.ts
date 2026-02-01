@@ -3,7 +3,6 @@ import {
   type ChatInputCommandInteraction,
 } from "discord.js";
 import { isAdmin, type PermissionContext } from "./permissions.ts";
-import type { Database } from "../db/database.ts";
 import type {
   ScheduleRow,
   CreateScheduleInput,
@@ -11,9 +10,9 @@ import type {
 } from "../db/schedule-repository.ts";
 
 export interface ScheduleCommandDeps {
-  listSchedules: (db: Database, filter: ListSchedulesFilter) => ScheduleRow[];
-  createSchedule: (db: Database, input: CreateScheduleInput) => string;
-  deleteSchedule: (db: Database, id: string) => boolean;
+  listSchedules: (filter: ListSchedulesFilter) => ScheduleRow[];
+  createSchedule: (input: CreateScheduleInput) => string;
+  deleteSchedule: (id: string) => boolean;
   /** Notify engine that a schedule was created so it can register the job. */
   onScheduleCreated: (scheduleId: string) => void;
   /** Notify engine that a schedule was removed so it can unregister the job. */
@@ -121,10 +120,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
     const subcommand = interaction.options.getSubcommand();
 
     if (subcommand === "list") {
-      const schedules = deps.listSchedules(
-        {} as Database,
-        { guildId: interaction.guildId }
-      );
+      const schedules = deps.listSchedules({ guildId: interaction.guildId });
 
       if (schedules.length === 0) {
         await interaction.reply({
@@ -168,7 +164,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
           return;
         }
 
-        const id = deps.createSchedule({} as Database, {
+        const id = deps.createSchedule({
           guildId: interaction.guildId,
           channelId: channelId ?? interaction.channelId,
           source: "admin",
@@ -205,7 +201,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
           return;
         }
 
-        const id = deps.createSchedule({} as Database, {
+        const id = deps.createSchedule({
           guildId: interaction.guildId,
           channelId: channelId ?? interaction.channelId,
           source: "admin",
@@ -240,7 +236,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
         return;
       }
 
-      const deleted = deps.deleteSchedule({} as Database, id);
+      const deleted = deps.deleteSchedule(id);
       if (!deleted) {
         await interaction.reply({
           content: `Schedule not found: \`${id}\``,
