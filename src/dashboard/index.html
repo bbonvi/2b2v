@@ -375,6 +375,7 @@
         + '<td>' + (l.estimatedCostUsd != null ? '$' + l.estimatedCostUsd.toFixed(4) : '-') + '</td>'
         + '<td>' + esc(l.stopReason) + '</td>'
         + '<td>' + esc(l.contentTypes.join(', ')) + '</td>'
+        + '<td class="tool-result">' + (l.outputText != null ? esc(l.outputText) : '<span style="color:var(--text-dim);font-style:italic">no text output</span>') + '</td>'
         + '</tr>';
     }
 
@@ -398,7 +399,7 @@
           + '<table class="detail-table"><tr><th>Tool</th><th>Args</th><th>Duration</th><th>Status</th><th>Result</th></tr>'
           + toolRows + '</table></div>' : '')
         + (e.llmCalls.length > 0 ? '<div class="detail-section"><div class="detail-label">LLM Calls</div>'
-          + '<table class="detail-table"><tr><th>Model</th><th>Tokens (in/out)</th><th>Cost</th><th>Stop</th><th>Content Types</th></tr>'
+          + '<table class="detail-table"><tr><th>Model</th><th>Tokens (in/out)</th><th>Cost</th><th>Stop</th><th>Content Types</th><th>Output</th></tr>'
           + llmRows + '</table></div>' : '')
       + '</div>'
     + '</div>';

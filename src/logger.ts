@@ -96,6 +96,7 @@ export interface RequestLLMCall {
   estimatedCostUsd?: number;
   stopReason: string;
   contentTypes: string[];
+  outputText?: string;
 }
 
 /** Recursively truncate string values in an object to `maxLen` characters. */
@@ -199,14 +200,20 @@ export class RequestLog {
     const cost = usage.cost as Record<string, unknown> | undefined;
     const content = message.content;
     const contentTypes: string[] = [];
+    const textParts: string[] = [];
     if (Array.isArray(content)) {
       for (const block of content) {
-        const t = (block as Record<string, unknown>).type;
+        const b = block as Record<string, unknown>;
+        const t = b.type;
         if (typeof t === "string" && !contentTypes.includes(t)) {
           contentTypes.push(t);
         }
+        if (t === "text" && typeof b.text === "string") {
+          textParts.push(b.text);
+        }
       }
     }
+    const outputText = textParts.join("\n");
     this.llmCalls.push({
       model: typeof message.model === "string" ? message.model : "unknown",
       promptTokens: typeof usage.input === "number" ? usage.input : 0,
@@ -215,6 +222,7 @@ export class RequestLog {
       estimatedCostUsd: typeof cost?.total === "number" ? cost.total : undefined,
       stopReason: typeof message.stopReason === "string" ? message.stopReason : "unknown",
       contentTypes,
+      outputText: outputText.length > 0 ? outputText : undefined,
     });
   }
 
@@ -241,13 +249,19 @@ export class RequestLog {
     const entry = this.toEntry();
     requestLogStore.push(entry);
 
-    // Truncate args/results for the console log line only
+    // Truncate args/results/outputText for the console log line only
+    const truncStr = (s: string | undefined, max: number): string | undefined =>
+      s !== undefined && s.length > max ? s.slice(0, max) + "…" : s;
     const logEntry = {
       ...entry,
       tools: entry.tools.map((t) => ({
         ...t,
         args: truncateArgs(t.args) as Record<string, unknown>,
-        result: t.result !== undefined && t.result.length > 500 ? t.result.slice(0, 500) + "…" : t.result,
+        result: truncStr(t.result, 500),
+      })),
+      llmCalls: entry.llmCalls.map((l) => ({
+        ...l,
+        outputText: truncStr(l.outputText, 300),
       })),
     };
     logger.info("request_completed", logEntry as unknown as Record<string, unknown>);
