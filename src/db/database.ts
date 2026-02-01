@@ -44,6 +44,24 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_messages_user_guild
     ON messages(user_id, guild_id);
+
+  CREATE TABLE IF NOT EXISTS schedules (
+    id                TEXT PRIMARY KEY,
+    guild_id          TEXT NOT NULL,
+    channel_id        TEXT NOT NULL,
+    source            TEXT NOT NULL CHECK(source IN ('admin', 'bot', 'tool')),
+    type              TEXT NOT NULL CHECK(type IN ('cron', 'one_off')),
+    cron_expression   TEXT,
+    run_at            INTEGER,
+    timezone          TEXT NOT NULL DEFAULT 'UTC',
+    message_content   TEXT NOT NULL,
+    enabled           INTEGER NOT NULL DEFAULT 1,
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_schedules_guild_enabled
+    ON schedules(guild_id, enabled);
 `;
 
 export function createDatabase(dbPath: string): Database {
