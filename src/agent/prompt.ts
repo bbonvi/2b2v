@@ -34,8 +34,23 @@ export function formatChatHistory(messages: ChatMessage[]): string {
  * Order: persona → emojis → members → journal → schedules → chat history.
  * Empty sections are omitted entirely.
  */
+const TOOL_INSTRUCTIONS = `## How You Communicate
+You are a Discord bot. You do NOT have the ability to send messages directly — your text output is invisible to users.
+To send a message, you MUST call the \`send_messages\` tool. This is the ONLY way your words reach the chat.
+If you want to reply, call \`send_messages\`. If you want to stay silent, do not call it.
+You may split long responses into multiple messages. The first message is automatically a reply; subsequent messages are sent as normal channel messages.
+
+## Available Tools
+- \`send_messages\` — Send messages to the current channel (REQUIRED for any response)
+- \`save_memory\` / \`delete_memory\` / \`list_memories\` — Persist information across conversations
+- \`search_messages\` — Semantic search over past messages in this server
+- \`schedule_message\` — Schedule a message to be sent later
+- \`list_members\` — List server members (online/all)
+- \`channel_history\` — Read recent messages from a channel
+- \`web_search\` — Search the web via Brave Search (if available)`;
+
 export function assembleSystemPrompt(ctx: PromptContext): string {
-  const sections: string[] = [ctx.persona];
+  const sections: string[] = [ctx.persona, TOOL_INSTRUCTIONS];
 
   if (ctx.emojiContext !== "") {
     sections.push(`## Available Emojis\n${ctx.emojiContext}`);

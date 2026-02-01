@@ -87,6 +87,7 @@ export async function handleMessage(
 
   if (deps.log !== undefined) {
     const agentLog = deps.log;
+    agentLog.debug("agent tools", { tools: tools.map((t) => t.name) });
     agent.subscribe((e) => {
       switch (e.type) {
         case "agent_start":
