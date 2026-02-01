@@ -1,0 +1,119 @@
+import { describe, test, expect, mock } from "bun:test";
+import { handleMessage, type IncomingMessage, type HandlerDeps } from "./handler.ts";
+import type { PromptContext } from "./prompt.ts";
+import type { GlobalConfig, GuildConfig } from "../config/types.ts";
+import type { MessageSender } from "./send-messages-tool.ts";
+
+function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
+  return {
+    discordToken: "test-token",
+    openrouterApiKey: "test-key",
+    defaultModel: "moonshotai/kimi-k2.5",
+    defaultThinkingLevel: "medium",
+    defaultTimezone: "UTC",
+    defaultTrim: { trimTrigger: 200, trimTarget: 150 },
+    defaultMemoryRetentionDays: 180,
+    defaultImageMaxDimension: 768,
+    defaultMessageDelay: { base: 500, perChar: 30 },
+    personaPath: "config/persona.md",
+    logLevel: "info",
+    dataDir: "./data",
+    modelCacheDir: "./model-cache",
+    ...overrides,
+  };
+}
+
+function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
+  return {
+    guildId: "guild-1",
+    slug: "test",
+    triggers: { mention: true, keywords: [], randomChance: 0 },
+    thinkingLevel: "medium",
+    timezone: "UTC",
+    trim: { trimTrigger: 200, trimTarget: 150 },
+    memoryRetentionDays: 180,
+    adminUserIds: [],
+    imageMaxDimension: 768,
+    messageDelay: { base: 500, perChar: 30 },
+    ...overrides,
+  };
+}
+
+function makePromptContext(overrides: Partial<PromptContext> = {}): PromptContext {
+  return {
+    persona: "You are a test bot.",
+    journalSummaries: [],
+    upcomingSchedules: [],
+    chatHistory: [],
+    emojiContext: "",
+    displayNameContext: "",
+    ...overrides,
+  };
+}
+
+function makeMessage(overrides: Partial<IncomingMessage> = {}): IncomingMessage {
+  return {
+    content: "hello bot",
+    authorId: "user-1",
+    authorUsername: "testuser",
+    botUserId: "bot-1",
+    mentionedUserIds: [],
+    translatedContent: "hello bot",
+    ...overrides,
+  };
+}
+
+describe("handleMessage", () => {
+  test("returns triggered=false when no trigger matches", async () => {
+    const sender: MessageSender = async () => ({ sentMessageIds: [] });
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({
+        triggers: { mention: false, keywords: [], randomChance: 0 },
+      }),
+      promptContext: makePromptContext(),
+      sender,
+    };
+
+    const result = await handleMessage(makeMessage(), deps);
+    expect(result.triggered).toBe(false);
+    expect(result.triggerResult).toBeNull();
+    expect(result.agentRan).toBe(false);
+  });
+
+  test("returns triggered=false when author is bot", async () => {
+    const sender: MessageSender = async () => ({ sentMessageIds: [] });
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig(),
+      promptContext: makePromptContext(),
+      sender,
+    };
+
+    const result = await handleMessage(
+      makeMessage({ authorId: "bot-1", botUserId: "bot-1" }),
+      deps
+    );
+    expect(result.triggered).toBe(false);
+  });
+
+  test("returns triggered=true with mention trigger", async () => {
+    const sender: MessageSender = async () => ({ sentMessageIds: [] });
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({
+        triggers: { mention: true, keywords: [], randomChance: 0 },
+      }),
+      promptContext: makePromptContext(),
+      sender,
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      deps
+    );
+    expect(result.triggered).toBe(true);
+    expect(result.triggerResult).toEqual({ reason: "mention" });
+    expect(result.agentRan).toBe(true);
+  });
+});
