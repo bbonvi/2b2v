@@ -6,10 +6,17 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "check": "tsc --noEmit && eslint src/"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@eslint/js": "^9.39.2",
+    "@types/bun": "latest",
+    "eslint": "^9.39.2",
+    "jiti": "^2.6.1",
+    "typescript-eslint": "^8.54.0"
   },
   "peerDependencies": {
     "typescript": "^5"
