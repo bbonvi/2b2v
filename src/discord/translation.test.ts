@@ -1,8 +1,10 @@
 import { describe, test, expect } from "bun:test";
 import {
   translateInbound,
+  translateOutbound,
   resolveDiscordTimestamp,
   type InboundResolvers,
+  type OutboundResolvers,
 } from "./translation.ts";
 
 const resolvers: InboundResolvers = {
@@ -154,6 +156,125 @@ describe("translateInbound with timestamps", () => {
   test("resolves relative timestamp", () => {
     const result = translateInbound("That was <t:1700000000:R>", resolvers);
     expect(result).not.toContain("<t:");
+  });
+});
+
+// --- Outbound translation tests ---
+
+const outboundResolvers: OutboundResolvers = {
+  user: (username) => {
+    const map: Record<string, string> = {
+      alice: "111",
+      bob: "222",
+    };
+    return map[username];
+  },
+  channel: (name) => {
+    const map: Record<string, string> = {
+      general: "333",
+      "off-topic": "444",
+    };
+    return map[name];
+  },
+  emoji: (name) => {
+    const map: Record<string, { id: string; animated: boolean }> = {
+      thumbsup: { id: "999", animated: false },
+      dance: { id: "888", animated: true },
+    };
+    return map[name];
+  },
+};
+
+describe("translateOutbound", () => {
+  test("resolves @username to user mention", () => {
+    expect(translateOutbound("Hello @alice!", outboundResolvers)).toBe(
+      "Hello <@111>!"
+    );
+  });
+
+  test("resolves #channel to channel mention", () => {
+    expect(translateOutbound("See #general", outboundResolvers)).toBe(
+      "See <#333>"
+    );
+  });
+
+  test("resolves :emoji: to custom emoji markup", () => {
+    expect(translateOutbound("Nice :thumbsup:", outboundResolvers)).toBe(
+      "Nice <:thumbsup:999>"
+    );
+  });
+
+  test("resolves animated emoji correctly", () => {
+    expect(translateOutbound("Cool :dance:", outboundResolvers)).toBe(
+      "Cool <a:dance:888>"
+    );
+  });
+
+  test("preserves unknown @username as plain text", () => {
+    expect(translateOutbound("Hello @unknown", outboundResolvers)).toBe(
+      "Hello @unknown"
+    );
+  });
+
+  test("preserves unknown #channel as plain text", () => {
+    expect(translateOutbound("See #secret", outboundResolvers)).toBe(
+      "See #secret"
+    );
+  });
+
+  test("preserves unknown :emoji: as plain text", () => {
+    expect(translateOutbound("Nice :shrug:", outboundResolvers)).toBe(
+      "Nice :shrug:"
+    );
+  });
+
+  test("resolves multiple patterns in one message", () => {
+    const input = "@alice said hi in #general with :thumbsup:";
+    expect(translateOutbound(input, outboundResolvers)).toBe(
+      "<@111> said hi in <#333> with <:thumbsup:999>"
+    );
+  });
+
+  test("handles message with no resolvable patterns", () => {
+    expect(translateOutbound("just plain text", outboundResolvers)).toBe(
+      "just plain text"
+    );
+  });
+
+  test("handles empty string", () => {
+    expect(translateOutbound("", outboundResolvers)).toBe("");
+  });
+
+  test("does not match @username inside email addresses", () => {
+    expect(translateOutbound("email user@alice.com", outboundResolvers)).toBe(
+      "email user@alice.com"
+    );
+  });
+
+  test("matches @username at start of string", () => {
+    expect(translateOutbound("@bob is here", outboundResolvers)).toBe(
+      "<@222> is here"
+    );
+  });
+
+  test("does not resolve channel name with hyphen incorrectly", () => {
+    expect(translateOutbound("See #off-topic", outboundResolvers)).toBe(
+      "See <#444>"
+    );
+  });
+
+  test("collects warnings for failed lookups", () => {
+    const warnings: string[] = [];
+    translateOutbound("@nobody #nowhere :nope:", outboundResolvers, warnings);
+    expect(warnings).toContain("Failed to resolve user mention: @nobody");
+    expect(warnings).toContain("Failed to resolve channel mention: #nowhere");
+    expect(warnings).toContain("Failed to resolve emoji: :nope:");
+  });
+
+  test("no warnings when all lookups succeed", () => {
+    const warnings: string[] = [];
+    translateOutbound("@alice #general :thumbsup:", outboundResolvers, warnings);
+    expect(warnings.length).toBe(0);
   });
 });
 

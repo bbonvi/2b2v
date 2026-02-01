@@ -143,6 +143,65 @@ export function resolveDiscordTimestamp(
   }
 }
 
+// --- Outbound translation (human-readable → Discord markup) ---
+
+export interface OutboundResolvers {
+  /** Resolve a global username to a Discord user ID. */
+  user: (username: string) => string | undefined;
+  /** Resolve a channel name to a Discord channel ID. */
+  channel: (name: string) => string | undefined;
+  /** Resolve an emoji name to its ID and animated flag. */
+  emoji: (name: string) => { id: string; animated: boolean } | undefined;
+}
+
+// Outbound patterns — match human-readable references in LLM output.
+// @username: must be at start of string or preceded by whitespace (avoid emails).
+const OUTBOUND_USER = /(?<=^|(?<=\s))@([\w.]+)/g;
+// #channel: channel names can have hyphens and underscores.
+const OUTBOUND_CHANNEL = /(?<=^|(?<=\s))#([\w-]+)/g;
+// :emoji: standard colon-wrapped name (not already Discord markup).
+const OUTBOUND_EMOJI = /(?<!<a?):(\w+):(?!\d+>)/g;
+
+/**
+ * Translate human-readable text from LLM output back to Discord markup.
+ * Failed lookups are left as plain text; warnings collected in optional array.
+ */
+export function translateOutbound(
+  content: string,
+  resolvers: OutboundResolvers,
+  warnings?: string[]
+): string {
+  if (!content) return content;
+
+  let result = content;
+
+  // User mentions: @username → <@id>
+  result = result.replace(OUTBOUND_USER, (match, username) => {
+    const id = resolvers.user(username);
+    if (id) return `<@${id}>`;
+    warnings?.push(`Failed to resolve user mention: @${username}`);
+    return match;
+  });
+
+  // Channel mentions: #channel → <#id>
+  result = result.replace(OUTBOUND_CHANNEL, (match, name) => {
+    const id = resolvers.channel(name);
+    if (id) return `<#${id}>`;
+    warnings?.push(`Failed to resolve channel mention: #${name}`);
+    return match;
+  });
+
+  // Custom emoji: :name: → <:name:id> or <a:name:id>
+  result = result.replace(OUTBOUND_EMOJI, (match, name) => {
+    const info = resolvers.emoji(name);
+    if (info) return info.animated ? `<a:${name}:${info.id}>` : `<:${name}:${info.id}>`;
+    warnings?.push(`Failed to resolve emoji: :${name}:`);
+    return match;
+  });
+
+  return result;
+}
+
 /**
  * Build a display name context block for LLM consumption.
  * Maps @username to display names so the agent knows who is who.
