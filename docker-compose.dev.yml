@@ -3,7 +3,7 @@ services:
     build:
       context: .
       target: base
-    command: ["bun", "--hot", "run", "src/index.ts"]
+    command: ["bun", "--watch", "run", "src/index.ts"]
     env_file: .env
     environment:
       QDRANT_URL: http://qdrant:6333
