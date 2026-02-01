@@ -1,13 +1,21 @@
-import type { Database } from "../db/database";
+import type { QdrantClient } from "@qdrant/js-client-rest";
 import type { EmbeddingPipeline } from "./pipeline";
-import { storeMemoryEmbedding, storeMessageEmbedding } from "../db/embedding-repository";
+import { upsertPoints, type PointPayload } from "../qdrant/adapter";
 
 export type EmbeddingTarget = "memory" | "message";
+
+export interface EmbedRequestMetadata {
+  guild_id?: string;
+  channel_id?: string;
+  user_id?: string;
+  created_at?: number;
+}
 
 export interface EmbedRequest {
   id: string;
   text: string;
   target: EmbeddingTarget;
+  metadata?: EmbedRequestMetadata;
 }
 
 interface PendingItem extends EmbedRequest {
@@ -23,7 +31,7 @@ export interface EmbeddingQueueOptions {
 }
 
 export interface EmbeddingQueue {
-  /** Enqueue a text for embedding. Resolves when stored in DB. */
+  /** Enqueue a text for embedding. Resolves when stored in Qdrant. */
   enqueue(request: EmbedRequest): Promise<void>;
   /** Enqueue multiple items. Resolves when all are stored. */
   enqueueBatch(requests: EmbedRequest[]): Promise<void>;
@@ -37,7 +45,7 @@ export interface EmbeddingQueue {
 
 export function createEmbeddingQueue(
   pipeline: EmbeddingPipeline,
-  db: Database,
+  qdrant: QdrantClient,
   options: EmbeddingQueueOptions = {},
 ): EmbeddingQueue {
   const batchSize = options.batchSize ?? 32;
@@ -53,16 +61,26 @@ export function createEmbeddingQueue(
       const texts = batch.map((item) => item.text);
       const embeddings = await pipeline.embed(texts);
 
-      for (let i = 0; i < batch.length; i++) {
-        const item = batch[i];
-        const embedding = embeddings[i];
+      const points = batch.map((item, i) => {
+        const payload: PointPayload = {
+          type: item.target,
+          entity_id: item.id,
+          guild_id: item.metadata?.guild_id,
+          channel_id: item.metadata?.channel_id,
+          user_id: item.metadata?.user_id,
+          message_id: item.target === "message" ? item.id : undefined,
+          created_at: item.metadata?.created_at,
+        };
+        return {
+          id: item.id,
+          vector: Array.from(embeddings[i]),
+          payload,
+        };
+      });
 
-        if (item.target === "memory") {
-          storeMemoryEmbedding(db, item.id, embedding);
-        } else {
-          storeMessageEmbedding(db, item.id, embedding);
-        }
+      await upsertPoints(qdrant, points);
 
+      for (const item of batch) {
         item.resolve();
       }
     } catch (err) {

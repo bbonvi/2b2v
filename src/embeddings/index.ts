@@ -13,5 +13,6 @@ export {
   type EmbeddingQueue,
   type EmbeddingQueueOptions,
   type EmbedRequest,
+  type EmbedRequestMetadata,
   type EmbeddingTarget,
 } from "./queue";

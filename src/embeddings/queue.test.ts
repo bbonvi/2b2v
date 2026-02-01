@@ -1,84 +1,107 @@
-import { test, expect, describe, beforeEach, afterEach } from "bun:test";
-import { createDatabase, type Database } from "../db/database";
-import { searchMemoryEmbeddings, searchMessageEmbeddings } from "../db/embedding-repository";
+import { test, expect, describe, beforeAll, beforeEach, afterAll, afterEach } from "bun:test";
+import { QdrantClient } from "@qdrant/js-client-rest";
+import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
+import { pointExists, searchPoints } from "../qdrant/adapter";
 import { createEmbeddingQueue, type EmbeddingQueue } from "./queue";
 import { createMockPipeline } from "./test-utils";
 import type { EmbeddingPipeline } from "./pipeline";
 
-let db: Database;
+const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
+
+let qdrant: QdrantClient;
 let pipe: EmbeddingPipeline;
 let queue: EmbeddingQueue;
 
-beforeEach(() => {
-  db = createDatabase(":memory:");
+beforeAll(async () => {
+  qdrant = createQdrantClient({ url: QDRANT_URL });
+  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch {}
+  await ensureCollection(qdrant);
+});
+
+beforeEach(async () => {
   pipe = createMockPipeline();
-  queue = createEmbeddingQueue(pipe, db, { batchSize: 3, flushDelayMs: 10 });
+  queue = createEmbeddingQueue(pipe, qdrant, { batchSize: 3, flushDelayMs: 10 });
+  try { await qdrant.delete(COLLECTION_NAME, { wait: true, filter: {} }); } catch {}
 });
 
 afterEach(async () => {
   await queue.shutdown();
-  db.close();
+});
+
+afterAll(async () => {
+  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch {}
 });
 
 describe("enqueue and store", () => {
-  test("stores a single memory embedding", async () => {
-    await queue.enqueue({ id: "mem-1", text: "test content", target: "memory" });
+  test("stores a single memory embedding in Qdrant", async () => {
+    await queue.enqueue({ id: "mem-1", text: "test content", target: "memory", metadata: { guild_id: "g1" } });
     await queue.flush();
 
-    const results = searchMemoryEmbeddings(db, new Float32Array(1024), 5);
-    expect(results.length).toBe(1);
-    expect(results[0].id).toBe("mem-1");
+    expect(await pointExists(qdrant, "mem-1")).toBe(true);
   });
 
-  test("stores a single message embedding", async () => {
-    await queue.enqueue({ id: "msg-1", text: "hello world", target: "message" });
+  test("stores a single message embedding in Qdrant", async () => {
+    await queue.enqueue({ id: "msg-1", text: "hello world", target: "message", metadata: { guild_id: "g1" } });
     await queue.flush();
 
-    const results = searchMessageEmbeddings(db, new Float32Array(1024), 5);
-    expect(results.length).toBe(1);
-    expect(results[0].id).toBe("msg-1");
+    expect(await pointExists(qdrant, "msg-1")).toBe(true);
   });
 
   test("stores multiple items via enqueueBatch", async () => {
     await queue.enqueueBatch([
-      { id: "mem-1", text: "first", target: "memory" },
-      { id: "mem-2", text: "second", target: "memory" },
-      { id: "msg-1", text: "third", target: "message" },
+      { id: "mem-1", text: "first", target: "memory", metadata: { guild_id: "g1" } },
+      { id: "mem-2", text: "second", target: "memory", metadata: { guild_id: "g1" } },
+      { id: "msg-1", text: "third", target: "message", metadata: { guild_id: "g1" } },
     ]);
     await queue.flush();
 
-    const memResults = searchMemoryEmbeddings(db, new Float32Array(1024), 10);
-    expect(memResults.length).toBe(2);
+    expect(await pointExists(qdrant, "mem-1")).toBe(true);
+    expect(await pointExists(qdrant, "mem-2")).toBe(true);
+    expect(await pointExists(qdrant, "msg-1")).toBe(true);
+  });
 
-    const msgResults = searchMessageEmbeddings(db, new Float32Array(1024), 10);
-    expect(msgResults.length).toBe(1);
+  test("preserves metadata in Qdrant payload", async () => {
+    const now = Date.now();
+    await queue.enqueue({
+      id: "msg-meta",
+      text: "metadata test",
+      target: "message",
+      metadata: { guild_id: "g1", channel_id: "c1", user_id: "u1", created_at: now },
+    });
+    await queue.flush();
+
+    const [vec] = await pipe.embed(["metadata test"]);
+    const results = await searchPoints(qdrant, Array.from(vec), { guild_id: "g1" }, { type: "message" });
+    expect(results.length).toBe(1);
+    expect(results[0].payload).toMatchObject({
+      guild_id: "g1",
+      channel_id: "c1",
+      user_id: "u1",
+      created_at: now,
+    });
   });
 });
 
 describe("batching behavior", () => {
   test("flushes automatically when batch size reached", async () => {
-    // batchSize is 3, so 3 items should trigger immediate flush
     const promises = [
-      queue.enqueue({ id: "m1", text: "a", target: "memory" }),
-      queue.enqueue({ id: "m2", text: "b", target: "memory" }),
-      queue.enqueue({ id: "m3", text: "c", target: "memory" }),
+      queue.enqueue({ id: "m1", text: "a", target: "memory", metadata: { guild_id: "g1" } }),
+      queue.enqueue({ id: "m2", text: "b", target: "memory", metadata: { guild_id: "g1" } }),
+      queue.enqueue({ id: "m3", text: "c", target: "memory", metadata: { guild_id: "g1" } }),
     ];
     await Promise.all(promises);
 
-    const results = searchMemoryEmbeddings(db, new Float32Array(1024), 10);
-    expect(results.length).toBe(3);
+    expect(await pointExists(qdrant, "m1")).toBe(true);
+    expect(await pointExists(qdrant, "m2")).toBe(true);
+    expect(await pointExists(qdrant, "m3")).toBe(true);
   });
 
   test("flushes partial batch after delay", async () => {
-    // Only 1 item (below batchSize of 3), should flush after flushDelayMs
-    queue.enqueue({ id: "m1", text: "delayed", target: "memory" });
-    expect(queue.pending()).toBeGreaterThanOrEqual(0); // may already be processing
+    queue.enqueue({ id: "m1", text: "delayed", target: "memory", metadata: { guild_id: "g1" } });
+    await new Promise((r) => setTimeout(r, 50));
+    await queue.flush();
 
-    await new Promise((r) => setTimeout(r, 50)); // wait for flush delay
-    await queue.flush(); // ensure fully drained
-
-    const results = searchMemoryEmbeddings(db, new Float32Array(1024), 10);
-    expect(results.length).toBe(1);
+    expect(await pointExists(qdrant, "m1")).toBe(true);
   });
 });
 
@@ -93,7 +116,7 @@ describe("error handling", () => {
       async embed() { throw new Error("model failure"); },
       async dispose() {},
     };
-    const failQueue = createEmbeddingQueue(failPipe, db, { batchSize: 2, flushDelayMs: 5 });
+    const failQueue = createEmbeddingQueue(failPipe, qdrant, { batchSize: 2, flushDelayMs: 5 });
 
     const result = failQueue.enqueue({ id: "x", text: "fail", target: "memory" });
     await failQueue.flush();
@@ -105,7 +128,7 @@ describe("error handling", () => {
 
 describe("pending count", () => {
   test("returns 0 after flush", async () => {
-    queue.enqueue({ id: "m1", text: "a", target: "memory" });
+    queue.enqueue({ id: "m1", text: "a", target: "memory", metadata: { guild_id: "g1" } });
     await queue.flush();
     expect(queue.pending()).toBe(0);
   });
