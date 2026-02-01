@@ -40,3 +40,5 @@ export { resizeImageToContent } from "./vision.ts";
 export { createMemoryTools, type MemoryToolsDeps } from "./memory-tools.ts";
 
 export { createSearchTool, type SearchToolDeps } from "./search-tool.ts";
+
+export { createScheduleTool, type ScheduleToolDeps } from "./schedule-tool.ts";
