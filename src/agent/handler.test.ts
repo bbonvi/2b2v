@@ -1,4 +1,6 @@
 import { describe, test, expect } from "bun:test";
+import { Type } from "@sinclair/typebox";
+import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { handleMessage, type IncomingMessage, type HandlerDeps } from "./handler.ts";
 import type { PromptContext } from "./prompt.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
@@ -163,18 +165,18 @@ describe("handleMessage", () => {
       name: "fake_tool",
       label: "Fake",
       description: "A test tool",
-      parameters: {},
-      execute: async () => ({
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({
         content: [{ type: "text" as const, text: "ok" }],
         details: {},
       }),
-    };
+    } as const;
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig(),
       promptContext: makePromptContext(),
       sender,
-      extraTools: [fakeTool],
+      extraTools: [fakeTool as unknown as AgentTool],
     };
 
     const result = await handleMessage(

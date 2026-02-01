@@ -4,7 +4,7 @@ import { registerSlashCommands } from "./registry.ts";
 // Mock discord.js REST — we intercept the put call
 const putMock = mock(() => Promise.resolve([{ id: "cmd-1" }, { id: "cmd-2" }]));
 
-mock.module("discord.js", () => ({
+void mock.module("discord.js", () => ({
   REST: class {
     setToken(_token: string) {
       return this;
@@ -34,7 +34,7 @@ describe("registerSlashCommands", () => {
   });
 
   test("returns 0 when REST result is not an array", async () => {
-    putMock.mockResolvedValueOnce({ message: "ok" });
+    putMock.mockResolvedValueOnce({ message: "ok" } as unknown as { id: string }[]);
 
     const count = await registerSlashCommands({
       token: "test-token",
@@ -48,6 +48,7 @@ describe("registerSlashCommands", () => {
   test("propagates REST errors", async () => {
     putMock.mockRejectedValueOnce(new Error("Unauthorized"));
 
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects is async
     await expect(
       registerSlashCommands({
         token: "bad-token",

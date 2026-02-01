@@ -51,6 +51,7 @@ describe("createSendMessagesTool", () => {
       Promise.reject(new Error("Discord API unavailable"));
     const tool = createSendMessagesTool(sender);
 
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects is async
     await expect(
       tool.execute("call-1", { messages: [{ text: "hi" }] })
     ).rejects.toThrow("Discord API unavailable");
