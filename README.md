@@ -30,6 +30,7 @@ All features described below are planned. Implementation is in progress.
 cp .env.example .env
 
 # Development (live reload, debug logging)
+bun install
 docker compose -f docker-compose.dev.yml up --build
 
 # Production
