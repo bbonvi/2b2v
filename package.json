@@ -19,6 +19,7 @@
     "@huggingface/transformers": "^3.8.1",
     "@mariozechner/pi-agent-core": "^0.50.9",
     "@mariozechner/pi-ai": "^0.50.9",
+    "@qdrant/js-client-rest": "^1.16.2",
     "@sinclair/typebox": "^0.34.48",
     "better-sqlite3": "^12.6.2",
     "croner": "^9.1.0",

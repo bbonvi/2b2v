@@ -50,6 +50,7 @@ export function loadGlobalConfig(
     logLevel: env.LOG_LEVEL ?? "info",
     dataDir: env.DATA_DIR ?? "data",
     modelCacheDir: env.MODEL_CACHE_DIR ?? "model-cache",
+    qdrantUrl: env.QDRANT_URL ?? "http://localhost:6333",
   };
 }
 

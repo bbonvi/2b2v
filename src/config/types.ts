@@ -43,6 +43,7 @@ export interface GlobalConfig {
   logLevel: string;
   dataDir: string;
   modelCacheDir: string;
+  qdrantUrl: string;
 }
 
 /** Full resolved app config. */
