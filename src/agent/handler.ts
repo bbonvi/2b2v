@@ -45,6 +45,37 @@ export interface HandleResult {
 }
 
 /**
+ * Patch the tools array's `find` method to tolerate whitespace in LLM-returned
+ * tool names. pi-agent-core does `tools.find(t => t.name === toolCall.name)` —
+ * if the model returns `" send_message"` (leading space), the exact match fails.
+ * This fallback probes common whitespace variants so the real tool is found.
+ */
+export function patchToolLookup(tools: AgentTool[]): void {
+  const nativeFind = Array.prototype.find;
+  const WS = ["", " ", "  "];
+  Object.defineProperty(tools, "find", {
+    value(predicate: (value: AgentTool, index: number, array: AgentTool[]) => boolean) {
+      const exact = nativeFind.call(this, predicate) as AgentTool | undefined;
+      if (exact !== undefined) return exact;
+      for (const tool of this as AgentTool[]) {
+        for (const pre of WS) {
+          for (const suf of WS) {
+            if (pre === "" && suf === "") continue;
+            const probe = Object.create(tool, {
+              name: { value: `${pre}${tool.name}${suf}`, enumerable: true },
+            }) as AgentTool;
+            if (predicate(probe, 0, this as AgentTool[])) return tool;
+          }
+        }
+      }
+      return undefined;
+    },
+    writable: true,
+    configurable: true,
+  });
+}
+
+/**
  * Core message handler. Evaluates triggers, builds agent, runs prompt.
  *
  * Returns whether the bot was triggered and whether the agent ran.
@@ -74,6 +105,7 @@ export async function handleMessage(
 
   const sendTool = createSendMessageTool(deps.sender) as unknown as AgentTool;
   const tools: AgentTool[] = [sendTool, ...(deps.extraTools ?? [])];
+  patchToolLookup(tools);
 
   const agent = new Agent({
     initialState: {
