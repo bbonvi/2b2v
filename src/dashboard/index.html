@@ -328,12 +328,24 @@
     return s.length > 120 ? s.slice(0, 120) + '...' : s;
   }
 
+  // Track which entries are expanded by requestId
+  const expandedIds = new Set();
+
+  function toggleExpand(requestId) {
+    if (expandedIds.has(requestId)) expandedIds.delete(requestId);
+    else expandedIds.add(requestId);
+    // Toggle DOM directly for instant feedback (no re-render wait)
+    const el = document.querySelector('[data-rid="' + requestId + '"]');
+    if (el) el.classList.toggle('expanded');
+  }
+
   function renderEntry(e) {
     const cost = fmtCost(e.llmCalls);
     const hasErr = e.error != null;
     const cls = ['entry'];
     if (hasErr) cls.push('has-error');
     if (!e.agentRan) cls.push('no-agent');
+    if (expandedIds.has(e.requestId)) cls.push('expanded');
 
     let toolRows = '';
     for (const t of e.tools) {
@@ -357,7 +369,8 @@
         + '</tr>';
     }
 
-    return '<div class="' + cls.join(' ') + '" onclick="this.classList.toggle(\'expanded\')">'
+    const rid = esc(e.requestId);
+    return '<div class="' + cls.join(' ') + '" data-rid="' + rid + '" onclick="window.__toggleExpand(\'' + rid + '\')">'
       + '<div class="entry-header">'
         + '<span class="entry-time">' + fmtTime(e.timestamp) + '</span>'
         + '<span class="entry-user">' + esc(e.authorUsername) + '</span>'
@@ -381,6 +394,11 @@
       + '</div>'
     + '</div>';
   }
+  // Expose toggle for inline onclick
+  window.__toggleExpand = toggleExpand;
+
+  // Last-seen data fingerprint to skip redundant DOM writes
+  let lastLogHash = '';
 
   async function fetchLogs() {
     const params = new URLSearchParams();
@@ -390,11 +408,20 @@
     const r = await fetch('/api/logs?' + params.toString());
     if (r.status === 401) { location.href = '/login'; return; }
     const data = await r.json();
+
+    // Cheap fingerprint: count + newest requestId. Skip re-render if unchanged.
+    const hash = data.length + ':' + (data.length > 0 ? data[0].requestId : '');
+    if (hash === lastLogHash) return;
+    lastLogHash = hash;
+
     logCount.textContent = data.length + ' entries';
     if (data.length === 0) {
       logList.innerHTML = '<div class="empty-state">No log entries yet. Trigger some bot messages.</div>';
     } else {
+      // Preserve scroll position
+      const scrollY = window.scrollY;
       logList.innerHTML = data.map(renderEntry).join('');
+      window.scrollTo(0, scrollY);
     }
   }
 
@@ -413,35 +440,39 @@
     await Promise.all([fetchLogs(), fetchFilters()]);
   }
 
-  btnRefresh.addEventListener('click', refresh);
-  fGuild.addEventListener('change', fetchLogs);
-  fChannel.addEventListener('change', fetchLogs);
-  fUser.addEventListener('change', fetchLogs);
+  btnRefresh.addEventListener('click', () => { lastLogHash = ''; refresh(); });
+  fGuild.addEventListener('change', () => { lastLogHash = ''; fetchLogs(); });
+  fChannel.addEventListener('change', () => { lastLogHash = ''; fetchLogs(); });
+  fUser.addEventListener('change', () => { lastLogHash = ''; fetchLogs(); });
 
-  // Status polling
-  let statusTimer = null;
-  async function pollStatus() {
+  // Unified polling: status + logs every 1s
+  let pollTimer = null;
+  async function poll() {
     try {
-      const r = await fetch('/api/status');
-      if (!r.ok) return;
-      const d = await r.json();
-      if (d.activeRequests > 0) {
-        statusBadge.classList.add('active');
-        statusText.textContent = d.activeRequests + ' active';
-      } else {
-        statusBadge.classList.remove('active');
+      const [statusRes] = await Promise.all([
+        fetch('/api/status'),
+        fetchLogs(),
+      ]);
+      if (statusRes.ok) {
+        const d = await statusRes.json();
+        if (d.activeRequests > 0) {
+          statusBadge.classList.add('active');
+          statusText.textContent = d.activeRequests + ' active';
+        } else {
+          statusBadge.classList.remove('active');
+        }
       }
     } catch {}
   }
-  function startPolling() { pollStatus(); statusTimer = setInterval(pollStatus, 1000); }
-  function stopPolling() { if (statusTimer) { clearInterval(statusTimer); statusTimer = null; } }
+  function startPolling() { poll(); pollTimer = setInterval(poll, 1000); }
+  function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) stopPolling(); else startPolling();
+    if (document.hidden) stopPolling(); else { lastLogHash = ''; startPolling(); }
   });
 
+  fetchFilters();
   startPolling();
-  refresh();
 })();
 </script>
 </body>
