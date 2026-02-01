@@ -25,3 +25,10 @@ export {
   type HandlerDeps,
   type HandleResult,
 } from "./handler.ts";
+
+export {
+  computeDelay,
+  createMultiMessageSender,
+  type MessageDelayConfig,
+  type ChannelActions,
+} from "./multi-message.ts";
