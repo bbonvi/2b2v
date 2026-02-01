@@ -1,12 +1,13 @@
 import { test, expect, describe } from "bun:test";
 import { createMemberListTool, type MemberListToolDeps, type MemberInfo } from "./member-list-tool";
+import type { TextContent } from "@mariozechner/pi-ai";
 
 function makeDeps(members: MemberInfo[]): MemberListToolDeps {
   return {
     guildId: "g1",
-    fetchMembers: async (_guildId, onlineOnly) => {
-      if (onlineOnly) return members.filter((m) => m.status !== "offline");
-      return members;
+    fetchMembers: (_guildId, onlineOnly) => {
+      if (onlineOnly) return Promise.resolve(members.filter((m) => m.status !== "offline"));
+      return Promise.resolve(members);
     },
   };
 }
@@ -28,33 +29,33 @@ describe("createMemberListTool", () => {
   test("lists all members when onlineOnly is false", async () => {
     const tool = createMemberListTool(makeDeps(MEMBERS));
     const result = await tool.execute("tc1", { onlineOnly: false }, AbortSignal.timeout(5000));
-    const text = (result.content?.[0] as any)?.text ?? result.text ?? "";
+    const text = (result.content[0] as TextContent).text;
     expect(text).toContain("alice");
     expect(text).toContain("bob");
     expect(text).toContain("botty");
-    expect(result.details?.count).toBe(3);
+    expect((result.details as { count: number }).count).toBe(3);
   });
 
   test("lists only online members when onlineOnly is true", async () => {
     const tool = createMemberListTool(makeDeps(MEMBERS));
     const result = await tool.execute("tc1", { onlineOnly: true }, AbortSignal.timeout(5000));
-    const text = (result.content?.[0] as any)?.text ?? result.text ?? "";
+    const text = (result.content[0] as TextContent).text;
     expect(text).toContain("alice");
     expect(text).not.toContain("bob");
     expect(text).toContain("botty");
-    expect(result.details?.count).toBe(2);
+    expect((result.details as { count: number }).count).toBe(2);
   });
 
   test("defaults onlineOnly to false", async () => {
     const tool = createMemberListTool(makeDeps(MEMBERS));
     const result = await tool.execute("tc1", {}, AbortSignal.timeout(5000));
-    expect(result.details?.count).toBe(3);
+    expect((result.details as { count: number }).count).toBe(3);
   });
 
   test("includes display name and bot marker in output", async () => {
     const tool = createMemberListTool(makeDeps(MEMBERS));
     const result = await tool.execute("tc1", { onlineOnly: true }, AbortSignal.timeout(5000));
-    const text = (result.content?.[0] as any)?.text ?? result.text ?? "";
+    const text = (result.content[0] as TextContent).text;
     expect(text).toContain("Alice A");
     expect(text).toContain("[BOT]");
   });
@@ -62,19 +63,19 @@ describe("createMemberListTool", () => {
   test("handles empty member list", async () => {
     const tool = createMemberListTool(makeDeps([]));
     const result = await tool.execute("tc1", {}, AbortSignal.timeout(5000));
-    const text = (result.content?.[0] as any)?.text ?? result.text ?? "";
+    const text = (result.content[0] as TextContent).text;
     expect(text).toContain("No members");
-    expect(result.details?.count).toBe(0);
+    expect((result.details as { count: number }).count).toBe(0);
   });
 
   test("degrades gracefully when fetchMembers throws", async () => {
     const deps: MemberListToolDeps = {
       guildId: "g1",
-      fetchMembers: async () => { throw new Error("Missing Access"); },
+      fetchMembers: () => { throw new Error("Missing Access"); },
     };
     const tool = createMemberListTool(deps);
     const result = await tool.execute("tc1", {}, AbortSignal.timeout(5000));
-    const text = (result.content?.[0] as any)?.text ?? result.text ?? "";
+    const text = (result.content[0] as TextContent).text;
     expect(text).toContain("Unable to fetch");
   });
 });

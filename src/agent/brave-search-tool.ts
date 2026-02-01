@@ -62,6 +62,18 @@ export function createBraveSearchTool(deps: BraveSearchToolDeps): AgentTool {
   };
 }
 
+interface BraveWebResult {
+  title?: string;
+  url?: string;
+  description?: string;
+}
+
+interface BraveSearchResponse {
+  web?: {
+    results?: BraveWebResult[];
+  };
+}
+
 /** Default implementation that calls the Brave Search Web API. */
 async function fetchBraveResults(apiKey: string, query: string, count: number): Promise<BraveSearchResult[]> {
   const url = new URL("https://api.search.brave.com/res/v1/web/search");
@@ -80,10 +92,10 @@ async function fetchBraveResults(apiKey: string, query: string, count: number): 
     throw new Error(`Brave Search API error: ${res.status} ${res.statusText}`);
   }
 
-  const data = await res.json() as any;
+  const data = await res.json() as BraveSearchResponse;
   const webResults = data.web?.results ?? [];
 
-  return webResults.map((r: any) => ({
+  return webResults.map((r) => ({
     title: r.title ?? "",
     url: r.url ?? "",
     description: r.description ?? "",

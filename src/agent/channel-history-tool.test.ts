@@ -4,11 +4,12 @@ import {
   type ChannelHistoryToolDeps,
   type ChannelMessage,
 } from "./channel-history-tool";
+import type { TextContent } from "@mariozechner/pi-ai";
 
 function makeDeps(messages: ChannelMessage[]): ChannelHistoryToolDeps {
   return {
     guildId: "g1",
-    fetchMessages: async (_channelId, _limit) => messages,
+    fetchMessages: (_channelId, _limit) => Promise.resolve(messages),
   };
 }
 
@@ -29,20 +30,20 @@ describe("createChannelHistoryTool", () => {
   test("returns channel messages", async () => {
     const tool = createChannelHistoryTool(makeDeps(MESSAGES));
     const result = await tool.execute("tc1", { channelId: "c1" }, AbortSignal.timeout(5000));
-    const text = (result.content?.[0] as any)?.text ?? result.text ?? "";
+    const text = (result.content[0] as TextContent).text;
     expect(text).toContain("alice");
     expect(text).toContain("Hello world");
     expect(text).toContain("bob");
-    expect(result.details?.count).toBe(3);
+    expect((result.details as { count: number }).count).toBe(3);
   });
 
   test("respects limit parameter", async () => {
     let passedLimit: number | undefined;
     const deps: ChannelHistoryToolDeps = {
       guildId: "g1",
-      fetchMessages: async (_channelId, limit) => {
+      fetchMessages: (_channelId, limit) => {
         passedLimit = limit;
-        return MESSAGES.slice(0, limit);
+        return Promise.resolve(MESSAGES.slice(0, limit));
       },
     };
     const tool = createChannelHistoryTool(deps);
@@ -54,9 +55,9 @@ describe("createChannelHistoryTool", () => {
     let passedLimit: number | undefined;
     const deps: ChannelHistoryToolDeps = {
       guildId: "g1",
-      fetchMessages: async (_channelId, limit) => {
+      fetchMessages: (_channelId, limit) => {
         passedLimit = limit;
-        return MESSAGES;
+        return Promise.resolve(MESSAGES);
       },
     };
     const tool = createChannelHistoryTool(deps);
@@ -67,26 +68,26 @@ describe("createChannelHistoryTool", () => {
   test("handles empty results", async () => {
     const tool = createChannelHistoryTool(makeDeps([]));
     const result = await tool.execute("tc1", { channelId: "c1" }, AbortSignal.timeout(5000));
-    const text = (result.content?.[0] as any)?.text ?? result.text ?? "";
+    const text = (result.content[0] as TextContent).text;
     expect(text).toContain("No messages");
-    expect(result.details?.count).toBe(0);
+    expect((result.details as { count: number }).count).toBe(0);
   });
 
   test("degrades gracefully when fetchMessages throws", async () => {
     const deps: ChannelHistoryToolDeps = {
       guildId: "g1",
-      fetchMessages: async () => { throw new Error("Missing Access"); },
+      fetchMessages: () => { throw new Error("Missing Access"); },
     };
     const tool = createChannelHistoryTool(deps);
     const result = await tool.execute("tc1", { channelId: "c1" }, AbortSignal.timeout(5000));
-    const text = (result.content?.[0] as any)?.text ?? result.text ?? "";
+    const text = (result.content[0] as TextContent).text;
     expect(text).toContain("Unable to fetch");
   });
 
   test("formats messages with timestamps", async () => {
     const tool = createChannelHistoryTool(makeDeps(MESSAGES));
     const result = await tool.execute("tc1", { channelId: "c1" }, AbortSignal.timeout(5000));
-    const text = (result.content?.[0] as any)?.text ?? result.text ?? "";
+    const text = (result.content[0] as TextContent).text;
     expect(text).toContain("UTC");
     expect(text).toContain("alice: Hello world");
   });

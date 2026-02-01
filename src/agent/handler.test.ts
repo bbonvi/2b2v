@@ -1,4 +1,4 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { handleMessage, type IncomingMessage, type HandlerDeps } from "./handler.ts";
 import type { PromptContext } from "./prompt.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
@@ -65,7 +65,7 @@ function makeMessage(overrides: Partial<IncomingMessage> = {}): IncomingMessage 
 
 describe("handleMessage", () => {
   test("returns triggered=false when no trigger matches", async () => {
-    const sender: MessageSender = async () => ({ sentMessageIds: [] });
+    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig({
@@ -82,7 +82,7 @@ describe("handleMessage", () => {
   });
 
   test("returns triggered=false when author is bot", async () => {
-    const sender: MessageSender = async () => ({ sentMessageIds: [] });
+    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig(),
@@ -98,7 +98,7 @@ describe("handleMessage", () => {
   });
 
   test("returns triggered=true with mention trigger", async () => {
-    const sender: MessageSender = async () => ({ sentMessageIds: [] });
+    const sender: MessageSender = () => Promise.resolve({ sentMessageIds: [] });
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig({

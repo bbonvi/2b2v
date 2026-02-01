@@ -1,8 +1,8 @@
 import { Agent } from "@mariozechner/pi-agent-core";
-import type { Message } from "@mariozechner/pi-ai";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { Message, Model } from "@mariozechner/pi-ai";
+import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
-import { assembleSystemPrompt, type PromptContext, type ChatMessage } from "./prompt.ts";
+import { assembleSystemPrompt, type PromptContext } from "./prompt.ts";
 import { createSendMessagesTool, type MessageSender } from "./send-messages-tool.ts";
 import { resolveGuildModel, buildStreamOptions } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
@@ -28,7 +28,7 @@ export interface HandlerDeps {
   promptContext: PromptContext;
   sender: MessageSender;
   /** Additional tools beyond send_messages (memory, search, etc.). */
-  extraTools?: any[];
+  extraTools?: AgentTool[];
 }
 
 export interface HandleResult {
@@ -64,12 +64,12 @@ export async function handleMessage(
   const streamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);
 
   const sendTool = createSendMessagesTool(deps.sender);
-  const tools = [sendTool, ...(deps.extraTools ?? [])];
+  const tools: AgentTool[] = [sendTool, ...(deps.extraTools ?? [])];
 
   const agent = new Agent({
     initialState: {
       systemPrompt,
-      model: model as any,
+      model: model as unknown as Model<never>,
       thinkingLevel: deps.guildConfig.thinkingLevel as ThinkingLevel,
       tools,
       messages: [],
@@ -80,7 +80,7 @@ export async function handleMessage(
   // Set stream options (apiKey etc.)
   // The Agent uses streamSimple under the hood which needs these
   // We pass apiKey via getApiKey callback
-  agent.getApiKey = async () => streamOptions.apiKey;
+  agent.getApiKey = () => streamOptions.apiKey;
 
   const userContent = msg.translatedContent;
   await agent.prompt(userContent, msg.images);
@@ -95,8 +95,7 @@ function defaultConvertToLlm(messages: AgentMessage[]): Message[] {
   return messages.filter(
     (m): m is Message =>
       typeof m === "object" &&
-      m !== null &&
       "role" in m &&
-      (m.role === "user" || m.role === "assistant" || m.role === "toolResult")
+      ["user", "assistant", "toolResult"].includes((m as { role: string }).role)
   );
 }

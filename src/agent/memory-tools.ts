@@ -16,7 +16,28 @@ export interface MemoryToolsDeps {
   guildId: string;
 }
 
-const SaveMemoryParams = Type.Object({
+interface SaveMemoryParams {
+  scope: MemoryScope;
+  content: string;
+  userId?: string;
+  id?: string;
+  shortDescription?: string;
+  longDescription?: string;
+  ttlDays?: number | null;
+  sourceMessageId?: string;
+}
+
+interface DeleteMemoryParams {
+  id: string;
+}
+
+interface ListMemoriesParams {
+  scope: MemoryScope;
+  userId?: string;
+  limit?: number;
+}
+
+const SaveMemorySchema = Type.Object({
   scope: Type.Union(
     [Type.Literal("user"), Type.Literal("guild_bot"), Type.Literal("global_bot"), Type.Literal("journal")],
     { description: "Memory scope. 'user' = per-user per-guild, 'guild_bot' = per-guild bot knowledge, 'global_bot' = cross-guild bot knowledge, 'journal' = bot-private scratchpad." }
@@ -30,11 +51,11 @@ const SaveMemoryParams = Type.Object({
   sourceMessageId: Type.Optional(Type.String({ description: "Discord message ID that triggered this memory." })),
 });
 
-const DeleteMemoryParams = Type.Object({
+const DeleteMemorySchema = Type.Object({
   id: Type.String({ description: "Memory ID to delete." }),
 });
 
-const ListMemoriesParams = Type.Object({
+const ListMemoriesSchema = Type.Object({
   scope: Type.Union(
     [Type.Literal("user"), Type.Literal("guild_bot"), Type.Literal("global_bot"), Type.Literal("journal")],
     { description: "Memory scope to list." }
@@ -55,24 +76,24 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     label: "Save Memory",
     description:
       "Create or update a memory entry. Use scope 'user' for per-user facts, 'guild_bot' for server knowledge, 'global_bot' for cross-server knowledge, 'journal' for private scratchpad entries. Provide 'id' to update an existing entry.",
-    parameters: SaveMemoryParams,
-    execute: async (_toolCallId, params): Promise<AgentToolResult> => {
-      const p = params as any;
+    parameters: SaveMemorySchema,
+    execute: (_toolCallId, params): Promise<AgentToolResult> => {
+      const p = params as SaveMemoryParams;
 
-      if (p.id) {
+      if (p.id !== undefined) {
         const updated = updateMemory(db, p.id, {
           content: p.content,
           shortDescription: p.shortDescription,
           longDescription: p.longDescription,
           ttlDays: p.ttlDays,
         });
-        return {
+        return Promise.resolve({
           content: [{ type: "text", text: updated ? `Saved (updated) memory ${p.id}.` : `Memory ${p.id} not found.` }],
           details: { memoryId: p.id, action: "update", success: updated },
-        };
+        });
       }
 
-      const scope = p.scope as MemoryScope;
+      const scope = p.scope;
       const needsGuild = scope === "user" || scope === "guild_bot";
       const id = createMemory(db, {
         scope,
@@ -85,10 +106,10 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
         ttlDays: p.ttlDays,
       });
 
-      return {
+      return Promise.resolve({
         content: [{ type: "text", text: `Saved new ${scope} memory ${id}.` }],
         details: { memoryId: id, action: "create", success: true },
-      };
+      });
     },
   };
 
@@ -96,14 +117,14 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     name: "delete_memory",
     label: "Delete Memory",
     description: "Delete a memory entry by its ID.",
-    parameters: DeleteMemoryParams,
-    execute: async (_toolCallId, params): Promise<AgentToolResult> => {
-      const p = params as any;
+    parameters: DeleteMemorySchema,
+    execute: (_toolCallId, params): Promise<AgentToolResult> => {
+      const p = params as DeleteMemoryParams;
       const deleted = deleteMemory(db, p.id);
-      return {
+      return Promise.resolve({
         content: [{ type: "text", text: deleted ? `Deleted memory ${p.id}.` : `Memory ${p.id} not found.` }],
         details: { memoryId: p.id, success: deleted },
-      };
+      });
     },
   };
 
@@ -112,10 +133,10 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     label: "List Memories",
     description:
       "List memory entries by scope. For 'user' scope, provide userId. Journal entries show short descriptions only.",
-    parameters: ListMemoriesParams,
-    execute: async (_toolCallId, params): Promise<AgentToolResult> => {
-      const p = params as any;
-      const scope = p.scope as MemoryScope;
+    parameters: ListMemoriesSchema,
+    execute: (_toolCallId, params): Promise<AgentToolResult> => {
+      const p = params as ListMemoriesParams;
+      const scope = p.scope;
       const needsGuild = scope === "user" || scope === "guild_bot";
 
       const rows = listMemories(db, {
@@ -126,14 +147,14 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
       });
 
       if (rows.length === 0) {
-        return { content: [{ type: "text", text: `No memories found for scope '${scope}'.` }] };
+        return Promise.resolve({ content: [{ type: "text", text: `No memories found for scope '${scope}'.` }] });
       }
 
       const lines = rows.map((r) => formatMemoryLine(r));
-      return {
+      return Promise.resolve({
         content: [{ type: "text", text: lines.join("\n") }],
         details: { count: rows.length },
-      };
+      });
     },
   };
 
@@ -145,7 +166,7 @@ function formatMemoryLine(row: MemoryRow): string {
     return `[${row.id}] ${row.shortDescription ?? "(no description)"}`;
   }
   const parts = [`[${row.id}]`];
-  if (row.userId) parts.push(`user:${row.userId}`);
+  if (row.userId !== null) parts.push(`user:${row.userId}`);
   parts.push(row.content);
   return parts.join(" ");
 }
