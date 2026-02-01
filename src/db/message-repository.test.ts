@@ -1,5 +1,5 @@
 import { test, expect, beforeAll, beforeEach, afterAll, describe } from "bun:test";
-import { QdrantClient } from "@qdrant/js-client-rest";
+import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "./database";
 import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
@@ -17,7 +17,7 @@ const hour = 60 * 60 * 1000;
 
 beforeAll(async () => {
   qdrant = createQdrantClient({ url: QDRANT_URL });
-  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch {}
+  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
   await ensureCollection(qdrant);
 });
 
@@ -47,7 +47,7 @@ function insertMessage(
       opts.authorUsername ?? "alice",
       opts.rawContent ?? `raw ${id}`,
       opts.translatedContent ?? `translated ${id}`,
-      opts.isBot ? 1 : 0,
+      opts.isBot === true ? 1 : 0,
       opts.createdAt ?? now
     );
 }
@@ -55,10 +55,10 @@ function insertMessage(
 async function insertWithEmbedding(id: string, text: string, opts: Parameters<typeof insertMessage>[1] = {}) {
   insertMessage(id, { ...opts, translatedContent: text });
   const [vec] = await mockPipeline.embed([text]);
-  const guildId = opts?.guildId ?? "g1";
-  const channelId = opts?.channelId ?? "c1";
-  const userId = opts?.userId ?? "u1";
-  const createdAt = opts?.createdAt ?? now;
+  const guildId = opts.guildId ?? "g1";
+  const channelId = opts.channelId ?? "c1";
+  const userId = opts.userId ?? "u1";
+  const createdAt = opts.createdAt ?? now;
   await upsertPoint(qdrant, id, Array.from(vec), {
     type: "message",
     entity_id: id,
@@ -72,11 +72,11 @@ async function insertWithEmbedding(id: string, text: string, opts: Parameters<ty
 
 beforeEach(async () => {
   db = createDatabase(":memory:");
-  try { await qdrant.delete(COLLECTION_NAME, { wait: true, filter: {} }); } catch {}
+  try { await qdrant.delete(COLLECTION_NAME, { wait: true, filter: {} }); } catch { /* expected */ }
 });
 
 afterAll(async () => {
-  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch {}
+  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
 });
 
 describe("searchMessages", () => {

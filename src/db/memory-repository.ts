@@ -144,7 +144,7 @@ export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRo
   params.push(Date.now());
 
   let sql = `SELECT * FROM memories WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC`;
-  if (filter.limit) {
+  if (filter.limit !== undefined && filter.limit > 0) {
     sql += ` LIMIT ?`;
     params.push(filter.limit);
   }

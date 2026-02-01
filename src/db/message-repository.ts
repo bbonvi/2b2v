@@ -83,7 +83,7 @@ export async function searchMessages(
       authorUsername: row.author_username,
       translatedContent: row.translated_content,
       createdAt: row.created_at,
-      score: scoreMap.get(qr.id)!,
+      score: scoreMap.get(qr.id) ?? 0,
     });
   }
 

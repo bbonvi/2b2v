@@ -68,12 +68,12 @@ export function createDatabase(dbPath: string): Database {
   const raw = new BunDatabase(dbPath);
 
   // Performance pragmas
-  raw.exec("PRAGMA journal_mode = WAL");
-  raw.exec("PRAGMA foreign_keys = ON");
-  raw.exec("PRAGMA synchronous = NORMAL");
+  raw.run("PRAGMA journal_mode = WAL");
+  raw.run("PRAGMA foreign_keys = ON");
+  raw.run("PRAGMA synchronous = NORMAL");
 
   // Create core tables
-  raw.exec(SCHEMA_SQL);
+  raw.run(SCHEMA_SQL);
 
   return {
     raw,

@@ -30,10 +30,10 @@ export function loadGlobalConfig(
   env: Record<string, string | undefined> = process.env as Record<string, string | undefined>
 ): GlobalConfig {
   const discordToken = env.DISCORD_TOKEN;
-  if (!discordToken) throw new Error("DISCORD_TOKEN is required");
+  if (discordToken === undefined || discordToken === "") throw new Error("DISCORD_TOKEN is required");
 
   const openrouterApiKey = env.OPENROUTER_API_KEY;
-  if (!openrouterApiKey) throw new Error("OPENROUTER_API_KEY is required");
+  if (openrouterApiKey === undefined || openrouterApiKey === "") throw new Error("OPENROUTER_API_KEY is required");
 
   return {
     discordToken,
@@ -141,6 +141,6 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
   };
 
   // Strip undefined keys before serializing
-  const clean = JSON.parse(JSON.stringify(yaml));
+  const clean = JSON.parse(JSON.stringify(yaml)) as GuildConfigYaml;
   writeFileSync(filePath, stringify(clean));
 }

@@ -36,17 +36,17 @@ describe("createSchedule", () => {
     expect(id).toBeString();
     const row = getSchedule(db, id);
     expect(row).not.toBeNull();
-    expect(row!.guildId).toBe("guild-1");
-    expect(row!.channelId).toBe("ch-1");
-    expect(row!.source).toBe("admin");
-    expect(row!.type).toBe("cron");
-    expect(row!.cronExpression).toBe("0 9 * * *");
-    expect(row!.runAt).toBeNull();
-    expect(row!.timezone).toBe("America/New_York");
-    expect(row!.messageContent).toBe("Good morning!");
-    expect(row!.enabled).toBe(true);
-    expect(row!.createdAt).toBeNumber();
-    expect(row!.updatedAt).toBeNumber();
+    expect(row?.guildId).toBe("guild-1");
+    expect(row?.channelId).toBe("ch-1");
+    expect(row?.source).toBe("admin");
+    expect(row?.type).toBe("cron");
+    expect(row?.cronExpression).toBe("0 9 * * *");
+    expect(row?.runAt).toBeNull();
+    expect(row?.timezone).toBe("America/New_York");
+    expect(row?.messageContent).toBe("Good morning!");
+    expect(row?.enabled).toBe(true);
+    expect(row?.createdAt).toBeNumber();
+    expect(row?.updatedAt).toBeNumber();
   });
 
   test("creates a one-off schedule with run_at timestamp", () => {
@@ -62,9 +62,9 @@ describe("createSchedule", () => {
     });
 
     const row = getSchedule(db, id);
-    expect(row!.type).toBe("one_off");
-    expect(row!.runAt).toBe(runAt);
-    expect(row!.cronExpression).toBeNull();
+    expect(row?.type).toBe("one_off");
+    expect(row?.runAt).toBe(runAt);
+    expect(row?.cronExpression).toBeNull();
   });
 
   test("creates a tool-created schedule", () => {
@@ -79,8 +79,8 @@ describe("createSchedule", () => {
     });
 
     const row = getSchedule(db, id);
-    expect(row!.source).toBe("tool");
-    expect(row!.guildId).toBe("guild-2");
+    expect(row?.source).toBe("tool");
+    expect(row?.guildId).toBe("guild-2");
   });
 
   test("defaults enabled to true", () => {
@@ -93,7 +93,7 @@ describe("createSchedule", () => {
       timezone: "UTC",
       messageContent: "test",
     });
-    expect(getSchedule(db, id)!.enabled).toBe(true);
+    expect(getSchedule(db, id)?.enabled).toBe(true);
   });
 
   test("allows explicit enabled=false", () => {
@@ -107,7 +107,7 @@ describe("createSchedule", () => {
       messageContent: "test",
       enabled: false,
     });
-    expect(getSchedule(db, id)!.enabled).toBe(false);
+    expect(getSchedule(db, id)?.enabled).toBe(false);
   });
 
   test("rejects invalid source value", () => {
@@ -159,7 +159,7 @@ describe("updateSchedule", () => {
 
     const updated = updateSchedule(db, id, { messageContent: "new" });
     expect(updated).toBe(true);
-    expect(getSchedule(db, id)!.messageContent).toBe("new");
+    expect(getSchedule(db, id)?.messageContent).toBe("new");
   });
 
   test("updates enabled flag", () => {
@@ -174,10 +174,10 @@ describe("updateSchedule", () => {
     });
 
     updateSchedule(db, id, { enabled: false });
-    expect(getSchedule(db, id)!.enabled).toBe(false);
+    expect(getSchedule(db, id)?.enabled).toBe(false);
 
     updateSchedule(db, id, { enabled: true });
-    expect(getSchedule(db, id)!.enabled).toBe(true);
+    expect(getSchedule(db, id)?.enabled).toBe(true);
   });
 
   test("updates cron expression and timezone", () => {
@@ -195,9 +195,10 @@ describe("updateSchedule", () => {
       cronExpression: "30 18 * * 5",
       timezone: "Europe/London",
     });
-    const row = getSchedule(db, id)!;
-    expect(row.cronExpression).toBe("30 18 * * 5");
-    expect(row.timezone).toBe("Europe/London");
+    const row = getSchedule(db, id);
+    expect(row).not.toBeNull();
+    expect(row?.cronExpression).toBe("30 18 * * 5");
+    expect(row?.timezone).toBe("Europe/London");
   });
 
   test("updates updatedAt timestamp", () => {
@@ -210,12 +211,11 @@ describe("updateSchedule", () => {
       timezone: "UTC",
       messageContent: "test",
     });
-    const before = getSchedule(db, id)!.updatedAt;
+    const before = getSchedule(db, id)?.updatedAt ?? 0;
 
     // Small delay to ensure timestamp changes
-    const later = before + 10;
     updateSchedule(db, id, { messageContent: "changed" });
-    const after = getSchedule(db, id)!.updatedAt;
+    const after = getSchedule(db, id)?.updatedAt ?? 0;
     expect(after).toBeGreaterThanOrEqual(before);
   });
 
@@ -328,7 +328,7 @@ describe("listSchedules", () => {
 
   test("orders by created_at ascending", () => {
     // Create in known order
-    const id1 = createSchedule(db, {
+    const _id1 = createSchedule(db, {
       guildId: "g1",
       channelId: "c1",
       source: "admin",
@@ -337,7 +337,7 @@ describe("listSchedules", () => {
       timezone: "UTC",
       messageContent: "first",
     });
-    const id2 = createSchedule(db, {
+    const _id2 = createSchedule(db, {
       guildId: "g1",
       channelId: "c1",
       source: "bot",

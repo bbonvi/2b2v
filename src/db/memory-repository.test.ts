@@ -7,8 +7,6 @@ import {
   getMemory,
   listMemories,
   deleteExpiredMemories,
-  type MemoryScope,
-  type CreateMemoryInput,
 } from "./memory-repository";
 
 let db: Database;
@@ -35,12 +33,12 @@ describe("createMemory", () => {
 
     const mem = getMemory(db, id);
     expect(mem).not.toBeNull();
-    expect(mem!.scope).toBe("user");
-    expect(mem!.guildId).toBe("g1");
-    expect(mem!.userId).toBe("u1");
-    expect(mem!.content).toBe("Likes pizza");
-    expect(mem!.expiresAt).toBeGreaterThanOrEqual(before + DEFAULT_TTL_MS - 1000);
-    expect(mem!.expiresAt).toBeLessThanOrEqual(Date.now() + DEFAULT_TTL_MS + 1000);
+    expect(mem?.scope).toBe("user");
+    expect(mem?.guildId).toBe("g1");
+    expect(mem?.userId).toBe("u1");
+    expect(mem?.content).toBe("Likes pizza");
+    expect(mem?.expiresAt).toBeGreaterThanOrEqual(before + DEFAULT_TTL_MS - 1000);
+    expect(mem?.expiresAt).toBeLessThanOrEqual(Date.now() + DEFAULT_TTL_MS + 1000);
   });
 
   test("creates a guild_bot memory", () => {
@@ -51,9 +49,9 @@ describe("createMemory", () => {
     });
 
     const mem = getMemory(db, id);
-    expect(mem!.scope).toBe("guild_bot");
-    expect(mem!.guildId).toBe("g1");
-    expect(mem!.userId).toBeNull();
+    expect(mem?.scope).toBe("guild_bot");
+    expect(mem?.guildId).toBe("g1");
+    expect(mem?.userId).toBeNull();
   });
 
   test("creates a global_bot memory", () => {
@@ -63,8 +61,8 @@ describe("createMemory", () => {
     });
 
     const mem = getMemory(db, id);
-    expect(mem!.scope).toBe("global_bot");
-    expect(mem!.guildId).toBeNull();
+    expect(mem?.scope).toBe("global_bot");
+    expect(mem?.guildId).toBeNull();
   });
 
   test("creates a journal entry with short and long descriptions", () => {
@@ -76,11 +74,11 @@ describe("createMemory", () => {
     });
 
     const mem = getMemory(db, id);
-    expect(mem!.scope).toBe("journal");
-    expect(mem!.shortDescription).toBe("Check on Alice");
-    expect(mem!.longDescription).toContain("Rust project");
+    expect(mem?.scope).toBe("journal");
+    expect(mem?.shortDescription).toBe("Check on Alice");
+    expect(mem?.longDescription).toContain("Rust project");
     // Journal entries have no TTL by default
-    expect(mem!.expiresAt).toBeNull();
+    expect(mem?.expiresAt).toBeNull();
   });
 
   test("accepts custom TTL in days", () => {
@@ -95,8 +93,8 @@ describe("createMemory", () => {
 
     const mem = getMemory(db, id);
     const expectedExpiry = before + 30 * 24 * 60 * 60 * 1000;
-    expect(mem!.expiresAt).toBeGreaterThanOrEqual(expectedExpiry - 1000);
-    expect(mem!.expiresAt).toBeLessThanOrEqual(expectedExpiry + 1000);
+    expect(mem?.expiresAt).toBeGreaterThanOrEqual(expectedExpiry - 1000);
+    expect(mem?.expiresAt).toBeLessThanOrEqual(expectedExpiry + 1000);
   });
 
   test("accepts null TTL to disable expiry", () => {
@@ -109,7 +107,7 @@ describe("createMemory", () => {
     });
 
     const mem = getMemory(db, id);
-    expect(mem!.expiresAt).toBeNull();
+    expect(mem?.expiresAt).toBeNull();
   });
 
   test("stores source_message_id when provided", () => {
@@ -122,7 +120,7 @@ describe("createMemory", () => {
     });
 
     const mem = getMemory(db, id);
-    expect(mem!.sourceMessageId).toBe("msg-99");
+    expect(mem?.sourceMessageId).toBe("msg-99");
   });
 });
 
@@ -139,8 +137,8 @@ describe("updateMemory", () => {
     expect(updated).toBe(true);
 
     const mem = getMemory(db, id);
-    expect(mem!.content).toBe("New content");
-    expect(mem!.updatedAt).toBeGreaterThanOrEqual(mem!.createdAt);
+    expect(mem?.content).toBe("New content");
+    expect(mem?.updatedAt).toBeGreaterThanOrEqual(mem?.createdAt);
   });
 
   test("updates journal descriptions", () => {
@@ -157,8 +155,8 @@ describe("updateMemory", () => {
     });
 
     const mem = getMemory(db, id);
-    expect(mem!.shortDescription).toBe("New short");
-    expect(mem!.longDescription).toBe("New long");
+    expect(mem?.shortDescription).toBe("New short");
+    expect(mem?.longDescription).toBe("New long");
   });
 
   test("updates TTL", () => {
@@ -173,8 +171,8 @@ describe("updateMemory", () => {
 
     const mem = getMemory(db, id);
     const expected = Date.now() + 7 * 24 * 60 * 60 * 1000;
-    expect(mem!.expiresAt).toBeGreaterThanOrEqual(expected - 1000);
-    expect(mem!.expiresAt).toBeLessThanOrEqual(expected + 1000);
+    expect(mem?.expiresAt).toBeGreaterThanOrEqual(expected - 1000);
+    expect(mem?.expiresAt).toBeLessThanOrEqual(expected + 1000);
   });
 
   test("returns false for non-existent id", () => {

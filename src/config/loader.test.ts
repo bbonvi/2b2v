@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { join } from "path";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
+import type { GuildConfig, GuildConfigYaml } from "./types.ts";
 import { loadGlobalConfig, loadGuildConfigs, loadGuildConfigFile, resolveGuildConfig, saveGuildConfig } from "./loader.ts";
 
 const TEST_DIR = join(import.meta.dir, "../../.test-config");
@@ -89,13 +90,13 @@ describe("resolveGuildConfig", () => {
       DISCORD_TOKEN: "t",
       OPENROUTER_API_KEY: "k",
     });
-    const partial = {
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
       guildId: "42",
       slug: "test",
       model: "custom/model",
       triggers: { keywords: ["bot"] },
     };
-    const resolved = resolveGuildConfig(global, partial as any);
+    const resolved = resolveGuildConfig(global, partial);
     expect(resolved.guildId).toBe("42");
     expect(resolved.model).toBe("custom/model");
     expect(resolved.triggers.keywords).toEqual(["bot"]);
@@ -122,8 +123,12 @@ describe("loadGuildConfigs", () => {
     });
     const guilds = loadGuildConfigs(GUILDS_DIR, global);
     expect(guilds.size).toBe(2);
-    expect(guilds.get("1")!.timezone).toBe("Europe/Berlin");
-    expect(guilds.get("2")!.model).toBe("openai/gpt-4o");
+    const g1 = guilds.get("1");
+    const g2 = guilds.get("2");
+    expect(g1).not.toBeNull();
+    expect(g2).not.toBeNull();
+    expect(g1?.timezone).toBe("Europe/Berlin");
+    expect(g2?.model).toBe("openai/gpt-4o");
   });
 
   test("returns empty map when directory is empty", () => {
@@ -156,7 +161,7 @@ describe("saveGuildConfig", () => {
     const file = join(GUILDS_DIR, "50-save.yaml");
     writeFileSync(file, "timezone: UTC\n");
 
-    const resolved: any = {
+    const resolved: GuildConfig = {
       guildId: "50",
       slug: "save",
       triggers: { mention: true, keywords: ["hey"], randomChance: 0.1 },
