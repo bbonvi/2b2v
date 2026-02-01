@@ -160,7 +160,7 @@ export class RequestLog {
   recordToolStart(toolCallId: string, toolName: string, args: unknown): void {
     this.pendingTools.set(toolCallId, {
       tool: toolName,
-      args: truncateArgs(args) as Record<string, unknown>,
+      args: (args ?? {}) as Record<string, unknown>,
       startTime: Date.now(),
     });
   }
@@ -179,7 +179,7 @@ export class RequestLog {
           .map((c) => c.text)
           .join("\n");
         if (text.length > 0) {
-          resultText = text.length > 500 ? text.slice(0, 500) + "…" : text;
+          resultText = text;
         }
       }
     }
@@ -239,8 +239,17 @@ export class RequestLog {
 
   emit(logger: Logger): void {
     const entry = this.toEntry();
-    logger.info("request_completed", entry as unknown as Record<string, unknown>);
-
     requestLogStore.push(entry);
+
+    // Truncate args/results for the console log line only
+    const logEntry = {
+      ...entry,
+      tools: entry.tools.map((t) => ({
+        ...t,
+        args: truncateArgs(t.args) as Record<string, unknown>,
+        result: t.result !== undefined && t.result.length > 500 ? t.result.slice(0, 500) + "…" : t.result,
+      })),
+    };
+    logger.info("request_completed", logEntry as unknown as Record<string, unknown>);
   }
 }

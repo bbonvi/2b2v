@@ -360,7 +360,7 @@
     for (const t of e.tools) {
       toolRows += '<tr' + (t.isError ? ' class="tool-error"' : '') + '>'
         + '<td>' + esc(t.tool) + '</td>'
-        + '<td class="tool-args" title="' + esc(JSON.stringify(t.args, null, 2)) + '">' + esc(fmtArgs(t.args)) + '</td>'
+        + '<td class="tool-result">' + esc(JSON.stringify(t.args, null, 2)) + '</td>'
         + '<td>' + (t.durationMs != null ? fmtDuration(t.durationMs) : '-') + '</td>'
         + '<td>' + (t.isError ? 'ERR' : 'ok') + '</td>'
         + '<td class="tool-result">' + esc(fmtResult(t.result)) + '</td>'
