@@ -15,3 +15,5 @@ export {
   type OutboundResolvers,
   type UserInfo,
 } from "./translation.ts";
+
+export { EmojiCache, buildEmojiContext, type EmojiEntry } from "./emoji-cache.ts";
