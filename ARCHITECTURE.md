@@ -1,6 +1,6 @@
 # Architecture
 
-Agentic Discord bot (~9,900 lines TypeScript, 81 files) that embodies a character persona while providing useful responses. Per-guild isolation, long-lived memory, semantic search, scheduling, and multi-tool agent capabilities.
+Agentic Discord bot (~11,000 lines TypeScript, 95+ files) that embodies a character persona while providing useful responses. Per-guild isolation, long-lived memory, semantic search, scheduling, and multi-tool agent capabilities.
 
 **Runtime:** Bun 1.3+ · **LLM:** OpenRouter (any model) · **Vectors:** Qdrant · **DB:** SQLite (WAL) · **Agent:** pi-agent-core
 
@@ -15,8 +15,18 @@ src/
 ├── agent/                      Message handling & LLM orchestration
 │   ├── handler.ts              Core dispatcher: trigger → prompt → agent → response
 │   ├── triggers.ts             Trigger evaluation (mention > keyword > random)
-│   ├── prompt.ts               System prompt assembly (persona + context sections)
-│   ├── context-trimming.ts     Chat history windowing (trimTrigger/trimTarget, now via SQL LIMIT)
+│   ├── prompt.ts               System prompt & tool instructions (legacy assembly + TOOL_INSTRUCTIONS export)
+│   ├── context-assembly.ts     Structured multi-section context with cache_control metadata
+│   ├── context-trimming.ts     Legacy count-based trimming (kept for compat, unused by handler)
+│   ├── history-types.ts        HistoryMessage, SliceResult, HistoryProcessingConfig, FormattedLine
+│   ├── history-slicing.ts      Deterministic sort + older/newer slice algorithm
+│   ├── history-merge.ts        Consecutive plain-message merging by author
+│   ├── history-trimming.ts     Whitespace normalization + char-limit trimming with markers
+│   ├── history-dates.ts        Deterministic date stamp insertion for older slice
+│   ├── history-formatting.ts   Line grammar formatting + OLDER_LEGEND constant
+│   ├── history-replies.ts      Reply metadata resolution (quotes, missing targets)
+│   ├── reply-target-fallback.ts Discord API fallback for missing reply targets
+│   ├── read-images-tool.ts     Agent tool: fetch stored images by ID (base64)
 │   ├── send-message-tool.ts    Agent tool: send a message to channel
 │   ├── memory-tools.ts         Agent tools: save/delete/list memories (3 tools)
 │   ├── search-tool.ts          Agent tool: search chat history (semantic, literal, or ID-based)
@@ -24,7 +34,6 @@ src/
 │   ├── member-list-tool.ts     Agent tool: server member roster
 │   ├── channel-history-tool.ts Agent tool: fetch recent channel messages
 │   ├── brave-search-tool.ts    Agent tool: Brave Search API web search
-│   ├── vision.ts               Image resize/format for multimodal input
 │
 ├── commands/                   Admin-only slash commands
 │   ├── registry.ts             Global REST registration via discord.js
@@ -39,10 +48,13 @@ src/
 │   └── loader.ts               Env loading, YAML parsing, merge resolution, persistence
 │
 ├── db/                         SQLite data layer
-│   ├── database.ts             Schema init (WAL, 3 tables, indexes)
+│   ├── database.ts             Schema init (WAL, 4 tables, indexes)
 │   ├── memory-repository.ts    CRUD + TTL + scoped listing
 │   ├── message-repository.ts   Hybrid Qdrant KNN → SQLite JOIN search
-│   └── schedule-repository.ts  CRUD + enabled filtering
+│   ├── schedule-repository.ts  CRUD + enabled filtering
+│   ├── image-repository.ts     Image metadata CRUD (insert, query by message/ID)
+│   ├── image-storage.ts        Deterministic image path: attachments/{guild}-{channel}/images/{id}.jpg
+│   └── image-ingest.ts         Download → resize → JPEG q=85 → persist pipeline
 │
 ├── discord/                    Discord.js utilities
 │   ├── client.ts               Client creation, intents, login
@@ -86,17 +98,22 @@ Discord messageCreate event
        ├─ shouldRespond(input, triggers) → mention|keyword|random|null
        │   (returns null → silent; priority: mention > keyword > random)
        │
-       ├─ assembleSystemPrompt(ctx)
-       │   Sections: persona, emojis, members, journal, schedules, history
+       ├─ assembleContext(input) → AssembledContext
+       │   Ordered sections with cache_control metadata:
+       │   persona → tools → emojis → members → journal → schedules
+       │   → older history (cached) → newer history (uncached) → current context
+       │   Serialized via contextToSystemPrompt() into single string
+       │   (pi-agent-core only supports systemPrompt: string)
        │
        ├─ resolveGuildModel(global, guild) → LlmModel
        │   (guild.model ?? global.defaultModel → pi-ai registry or synthetic fallback)
        │
        ├─ Create Agent (pi-agent-core) with tools:
        │   send_message, save/delete/list_memory, search_messages,
-       │   schedule_message, list_members, channel_history, web_search
+       │   schedule_message, list_members, channel_history, web_search, read_images
        │
-       └─ agent.prompt(translatedContent, images)
+       └─ agent.prompt(translatedContent)
+            No inline images — LLM uses read_images tool on demand
             Agent runs agentic loop, calls tools as needed
             └─ send_message → Discord (reply or normal, with typing)
 ```
@@ -150,6 +167,55 @@ pipeline.embed(texts[]) → Float32Array[]
   ↓
 upsertPoints(qdrant, points with payload: {type, entity_id, guild_id, ...})
 ```
+
+### Context Assembly
+
+```
+buildContext(deps) → AssembledContext
+  │
+  ├─ Deterministic sorting (emojis, members, journal, schedules)
+  ├─ assembleContext({ persona, toolInstructions, emojis, members,
+  │     journalSummaries, upcomingSchedules, olderHistory,
+  │     newerHistory, currentContext, userMessage })
+  │
+  └─ AssembledContext
+       ├─ sections[]: ContextSection { label, text, cached }
+       └─ userMessage: string (role=user)
+```
+
+Sections ordered for Anthropic prefix-based prompt caching: stable cached sections first (persona, tools, emojis, members, journal, schedules, older history), then uncached (newer history, current context). Empty sections omitted. Currently serialized to a single string via `contextToSystemPrompt()` since `pi-agent-core` only supports `systemPrompt: string`.
+
+### History Processing Pipeline
+
+```
+Raw messages from SQLite
+  │
+  ├─ 1. fetchMissingReplyTargets() — Discord API fallback for missing reply_to_id targets
+  ├─ 2. Filter out latest user message ID
+  ├─ 3. sortMessages() — timestamp ASC, message ID tie-break
+  ├─ 4. mergeConsecutiveMessages() — same author, plain, within gap threshold
+  ├─ 5. Detach latest user message
+  ├─ 6. sliceHistory() — deterministic older/newer split
+  ├─ 7. trimMessages() — normalize whitespace + char limit with markers
+  ├─ 8. resolveReplies() — quote embedding based on slice position
+  ├─ 9. insertDateStamps() — sparse 5-min interval, older slice only
+  └─ 10. formatMessageLine() — deterministic grammar with meta key order
+```
+
+All D/E modules are pure functions (except `fetchMissingReplyTargets` which has side effects). History slicing: older = `trimTarget - windowSize` messages (cached, stable), newer = `windowSize` messages (uncached, recent).
+
+### Image Ingest
+
+```
+Discord attachment (message event or API fallback)
+  │
+  ├─ processImageBuffer(buffer) — resize to imageMaxDimension, JPEG q=85
+  ├─ insertImage(db, metadata) → autoincrement ID
+  ├─ imagePath(attachmentsDir, guildId, channelId, imageId) → deterministic path
+  └─ Write to disk: attachments/{guildId}-{channelId}/images/{imageId}.jpg
+```
+
+No inline images in LLM context. Messages reference `image_ids`; LLM retrieves via `read_images` tool.
 
 ## Database Schema
 
@@ -209,6 +275,23 @@ upsertPoints(qdrant, points with payload: {type, entity_id, guild_id, ...})
 
 **Indexes:** `(guild_id, enabled)`
 
+### images
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | INTEGER PK AUTOINCREMENT | Global unique, never-reused |
+| message_id | TEXT | Discord snowflake (owning message) |
+| guild_id | TEXT | |
+| channel_id | TEXT | |
+| caption | TEXT | nullable; TBD captioning model |
+| path | TEXT | Disk path (set after write) |
+| mime | TEXT | Always `image/jpeg` |
+| width | INTEGER | Post-resize |
+| height | INTEGER | Post-resize |
+| created_at | INTEGER | epoch ms |
+
+**Indexes:** `(message_id)`, `(guild_id, channel_id)`
+
 ## Qdrant Collection
 
 - **Name:** `embeddings`
@@ -242,9 +325,9 @@ upsertPoints(qdrant, points with payload: {type, entity_id, guild_id, ...})
 
 Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields optional — missing values inherit from global defaults via `resolveGuildConfig()`.
 
-Configurable: `model`, `modelParams`, `thinkingLevel`, `timezone`, `triggers` (mention/keywords/randomChance), `trim` (trimTrigger/trimTarget), `memoryRetentionDays`, `adminUserIds`, `imageMaxDimension`.
+Configurable: `model`, `modelParams`, `thinkingLevel`, `timezone`, `triggers` (mention/keywords/randomChance), `trim` (trimTrigger/trimTarget/windowSize/messageCharLimit/replyQuoteChars), `memoryRetentionDays`, `adminUserIds`, `imageMaxDimension`, `mergeMessageGapSeconds`, `imageReadMaxPerCall`, `imageCaptioningEnabled`, `attachmentsDir`.
 
-Hardcoded defaults: `triggers: {mention: true, keywords: [], randomChance: 0}`, `trim: {trimTrigger: 200, trimTarget: 150}`.
+Hardcoded defaults: `triggers: {mention: true, keywords: [], randomChance: 0}`, `trim: {trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50}`, `mergeMessageGapSeconds: 120`, `imageReadMaxPerCall: 10`, `imageCaptioningEnabled: false`, `attachmentsDir: ${DATA_DIR}/attachments`.
 
 ## Key Patterns
 
@@ -320,7 +403,11 @@ Hybrid `croner` (cron with timezone) + `setTimeout` (one-off). Jobs registered d
 
 - **Runner:** `make test`
 - **Unit tests:** co-located `.test.ts` files per module
-- **Integration tests:** `src/integration.test.ts` (full pipeline)
+- **Integration tests:** `src/integration.test.ts` (full pipeline), `src/agent/integration-images.test.ts` (image tools + Discord fallback)
+- **History processing tests:** 68 tests across 5 files (slicing, merge, trim, dates, formatting) — all deterministic, pure-function tests
+- **Reply embedding tests:** 18 tests in `history-replies.test.ts` — position-aware quoting, cross-slice, missing targets
+- **Discord fallback tests:** 11 tests in `reply-target-fallback.test.ts` — mocked Discord API, DB persistence, image attachment processing
+- **Image tool tests:** 8 unit + 8 integration tests for `read_images` (real SQLite in integration)
 - **Database tests:** in-memory SQLite (`:memory:`)
 - **Qdrant tests:** require running container (`docker run -d --name qdrant-test -p 6333:6333 qdrant/qdrant:latest`), default URL `http://qdrant-test.orb.local:6333`
 - **Mock pipeline:** `src/embeddings/test-utils.ts` — deterministic sin-hash embeddings, no model download

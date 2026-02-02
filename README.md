@@ -7,7 +7,7 @@ Personal agentic Discord bot that plays a character persona (default: 2B from Ni
 - Responds to @mentions, configurable keywords, or random chance per guild
 - Speaks in character while staying helpful and grounded
 - Splits responses into multiple short messages with natural delays
-- Understands images and sends multimodal context to the LLM
+- Stores images locally with stable IDs; LLM retrieves on demand via `read_images` tool
 - Remembers conversations and facts with scoped, searchable memory
 - Schedules messages (recurring, one-off, relative time)
 - Searches the web via Brave Search
@@ -75,9 +75,14 @@ timezone: UTC
 trim:
   trimTrigger: 200
   trimTarget: 150
+  windowSize: 20
+  messageCharLimit: 200
+  replyQuoteChars: 50
+mergeMessageGapSeconds: 120
 memoryRetentionDays: 180
 adminUserIds: []
 imageMaxDimension: 768
+imageReadMaxPerCall: 10
 ```
 
 All fields are optional — missing values fall back to global defaults.
@@ -112,6 +117,13 @@ Configurable keys:
 | `trim.trimTarget` | number | Message count after trimming |
 | `memoryRetentionDays` | number | Default TTL for non-journal memories |
 | `imageMaxDimension` | number | Max image dimension in pixels before resize |
+| `trim.windowSize` | number | Recent (uncached) history window size |
+| `trim.messageCharLimit` | number | Max chars per message before trimming |
+| `trim.replyQuoteChars` | number | Max chars for reply quotes |
+| `mergeMessageGapSeconds` | number | Max gap for merging consecutive messages |
+| `imageReadMaxPerCall` | number | Max images per `read_images` call |
+| `imageCaptioningEnabled` | boolean | Enable image captioning (TBD) |
+| `attachmentsDir` | string | Image storage directory |
 
 ### `/schedule list | add | remove`
 
@@ -139,6 +151,7 @@ The bot has access to these tools during conversations. The LLM decides when and
 | `schedule_message` | Schedule a one-off message in N seconds/minutes/hours |
 | `list_members` | List server members (all or online-only) |
 | `channel_history` | Fetch recent messages from the current channel |
+| `read_images` | Retrieve stored images by ID (base64) |
 | `web_search` | Search the web via Brave Search API |
 
 ## Memory system
@@ -181,9 +194,15 @@ Failed lookups fall back to plain text with warnings logged.
 
 ## Context management
 
-The system prompt is composed in order: persona → emoji list → member context → journal summaries → upcoming schedules → chat history. The current message is sent separately as `role=user`.
+The system prompt is composed as ordered sections: persona → tool instructions → emojis → members → journal summaries → upcoming schedules → older history → newer history → current context. The current message is sent as `role=user`. Each section carries `cache_control` metadata; stable sections (persona through older history) are cached, newer history and current context are uncached. Sections are ordered to maximize Anthropic's prefix-based prompt caching.
 
-When chat history exceeds `trim.trimTrigger` messages, it is chunked down to `trim.trimTarget` (keeping newest). This chunked approach maintains system prompt stability for effective prompt caching.
+Chat history is split into two deterministic slices:
+- **Older** (cached): `trimTarget - windowSize` messages, stable between trim events
+- **Newer** (uncached): `windowSize` most recent messages
+
+When history reaches `trimTrigger`, the oldest messages are dropped to `trimTarget`. Consecutive plain messages by the same author within `mergeMessageGapSeconds` are merged. Long messages are trimmed to `messageCharLimit` with a marker including the message ID for later retrieval via `search_messages(id)`.
+
+Reply context is embedded with short quotes (capped at `replyQuoteChars`). Missing reply targets are fetched from Discord API and persisted. No inline images in context — messages reference `image_ids`, and the LLM uses `read_images` to fetch on demand.
 
 ## Testing
 
