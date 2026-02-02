@@ -139,10 +139,10 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
           const ts = Date.now();
           db.raw
             .prepare(
-              `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             )
-            .run(sent.id, schedule.guildId, schedule.channelId, client.user?.id ?? "", client.user?.username ?? "bot", chunk, chunk, 1, ts);
+            .run(sent.id, schedule.guildId, schedule.channelId, client.user?.id ?? "", client.user?.username ?? "bot", chunk, chunk, 1, ts, null);
 
           void embeddingQueue.enqueue({
             id: sent.id,
@@ -507,10 +507,10 @@ client.on("messageCreate", (message: Message) => void (async () => {
     const now = Date.now();
     db.raw
       .prepare(
-        `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(message.id, guildId, channelId, message.author.id, message.author.username, message.content, translatedContent, 0, now);
+      .run(message.id, guildId, channelId, message.author.id, message.author.username, message.content, translatedContent, 0, now, message.reference?.messageId ?? null);
 
     // Enqueue for embedding
     void embeddingQueue.enqueue({
@@ -555,10 +555,10 @@ client.on("messageCreate", (message: Message) => void (async () => {
       const ts = Date.now();
       db.raw
         .prepare(
-          `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(sentId, guildId, channelId, client.user?.id ?? "", client.user?.username ?? "bot", rawContent, plainContent, 1, ts);
+        .run(sentId, guildId, channelId, client.user?.id ?? "", client.user?.username ?? "bot", rawContent, plainContent, 1, ts, null);
 
       void embeddingQueue.enqueue({
         id: sentId,

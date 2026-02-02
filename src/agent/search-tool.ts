@@ -147,7 +147,8 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
 
 function formatResult(r: MessageSearchResult, attachments?: AttachmentInfo[]): string {
   const date = new Date(r.createdAt).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
-  let line = `[${date}] ${r.authorUsername}: ${r.translatedContent}`;
+  const replyTag = r.replyToId !== null ? ` (reply to ${r.replyToId})` : "";
+  let line = `[${date}] ${r.authorUsername}${replyTag}: ${r.translatedContent}`;
   if (attachments !== undefined && attachments.length > 0) {
     for (const a of attachments) {
       const sizeStr = formatFileSize(a.size);

@@ -20,6 +20,7 @@ export interface MessageSearchResult {
   authorUsername: string;
   translatedContent: string;
   createdAt: number;
+  replyToId: string | null;
   score: number;
 }
 
@@ -56,7 +57,7 @@ export async function searchMessages(
   const placeholders = ids.map(() => "?").join(",");
   const rows = db.raw
     .prepare(
-      `SELECT id, channel_id, user_id, author_username, translated_content, created_at
+      `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
        FROM messages
        WHERE id IN (${placeholders})`
     )
@@ -67,6 +68,7 @@ export async function searchMessages(
       author_username: string;
       translated_content: string;
       created_at: number;
+      reply_to_id: string | null;
     }>;
 
   const rowMap = new Map(rows.map((r) => [r.id, r]));
@@ -83,6 +85,7 @@ export async function searchMessages(
       authorUsername: row.author_username,
       translatedContent: row.translated_content,
       createdAt: row.created_at,
+      replyToId: row.reply_to_id,
       score: scoreMap.get(qr.id) ?? 0,
     });
   }
@@ -101,7 +104,7 @@ export function getMessageById(
 ): MessageSearchResult | null {
   const row = db.raw
     .prepare(
-      `SELECT id, channel_id, user_id, author_username, translated_content, created_at
+      `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
        FROM messages
        WHERE id = ? AND guild_id = ?`
     )
@@ -112,6 +115,7 @@ export function getMessageById(
       author_username: string;
       translated_content: string;
       created_at: number;
+      reply_to_id: string | null;
     } | null;
 
   if (row === null) return null;
@@ -123,6 +127,7 @@ export function getMessageById(
     authorUsername: row.author_username,
     translatedContent: row.translated_content,
     createdAt: row.created_at,
+    replyToId: row.reply_to_id,
     score: 1.0,
   };
 }
@@ -167,7 +172,7 @@ export function searchMessagesLiteral(
     params.push(filter.before);
   }
 
-  const sql = `SELECT id, channel_id, user_id, author_username, translated_content, created_at
+  const sql = `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
     FROM messages
     WHERE ${conditions.join(" AND ")}
     ORDER BY created_at ASC
@@ -181,6 +186,7 @@ export function searchMessagesLiteral(
     author_username: string;
     translated_content: string;
     created_at: number;
+    reply_to_id: string | null;
   }>;
 
   return rows.map((row) => ({
@@ -190,6 +196,7 @@ export function searchMessagesLiteral(
     authorUsername: row.author_username,
     translatedContent: row.translated_content,
     createdAt: row.created_at,
+    replyToId: row.reply_to_id,
     score: 1.0,
   }));
 }

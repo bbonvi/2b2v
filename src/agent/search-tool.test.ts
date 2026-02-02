@@ -35,12 +35,12 @@ beforeAll(async () => {
 function insertMessage(
   id: string,
   text: string,
-  opts: { guildId?: string; channelId?: string; userId?: string; authorUsername?: string; createdAt?: number } = {}
+  opts: { guildId?: string; channelId?: string; userId?: string; authorUsername?: string; createdAt?: number; replyToId?: string | null } = {}
 ) {
   db.raw
     .prepare(
-      `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`
+      `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
     )
     .run(
       id,
@@ -50,7 +50,8 @@ function insertMessage(
       opts.authorUsername ?? "alice",
       `raw ${id}`,
       text,
-      opts.createdAt ?? now
+      opts.createdAt ?? now,
+      opts.replyToId ?? null
     );
 }
 
@@ -144,6 +145,27 @@ describe("createSearchTool", () => {
     const text = getResultText(result);
     expect(text).toContain("bob");
     expect(result.details.count).toBe(1);
+  });
+});
+
+describe("reply-to display", () => {
+  test("shows reply-to ID in formatted output", async () => {
+    insertMessage("m-parent", "parent message");
+    insertMessage("m-reply", "replying here", { replyToId: "m-parent" });
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", embed: pipeline });
+    const result = await tool.execute("tc1", { query: "m-reply", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+    expect(text).toContain("(reply to m-parent)");
+    expect(text).toContain("replying here");
+  });
+
+  test("omits reply tag when not a reply", async () => {
+    insertMessage("m-solo", "standalone message");
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", embed: pipeline });
+    const result = await tool.execute("tc1", { query: "m-solo", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+    expect(text).not.toContain("reply to");
+    expect(text).toContain("standalone message");
   });
 });
 

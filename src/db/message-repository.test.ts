@@ -39,12 +39,13 @@ function insertMessage(
     translatedContent?: string;
     isBot?: boolean;
     createdAt?: number;
+    replyToId?: string | null;
   } = {}
 ) {
   db.raw
     .prepare(
-      `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -55,7 +56,8 @@ function insertMessage(
       opts.rawContent ?? `raw ${id}`,
       opts.translatedContent ?? `translated ${id}`,
       opts.isBot === true ? 1 : 0,
-      opts.createdAt ?? now
+      opts.createdAt ?? now,
+      opts.replyToId ?? null
     );
 }
 
@@ -279,6 +281,21 @@ describe("getMessageById", () => {
     const result = getMessageById(db, "nonexistent", "g1");
     expect(result).toBeNull();
   });
+
+  test("returns replyToId when message is a reply", () => {
+    insertMessage("m1", { guildId: "g1", translatedContent: "original" });
+    insertMessage("m2", { guildId: "g1", translatedContent: "reply", replyToId: "m1" });
+    const result = getMessageById(db, "m2", "g1");
+    if (result === null) throw new Error("unreachable");
+    expect(result.replyToId).toBe("m1");
+  });
+
+  test("returns null replyToId when message is not a reply", () => {
+    insertMessage("m1", { guildId: "g1", translatedContent: "standalone" });
+    const result = getMessageById(db, "m1", "g1");
+    if (result === null) throw new Error("unreachable");
+    expect(result.replyToId).toBeNull();
+  });
 });
 
 describe("searchMessagesLiteral", () => {
@@ -369,6 +386,15 @@ describe("searchMessagesLiteral", () => {
   test("returns empty array when no matches", () => {
     const results = searchMessagesLiteral(db, "nonexistent", { guildId: "g1", limit: 10 });
     expect(results).toEqual([]);
+  });
+
+  test("returns replyToId in literal search results", () => {
+    insertMessage("m1", { guildId: "g1", translatedContent: "original msg" });
+    insertMessage("m2", { guildId: "g1", translatedContent: "reply msg", replyToId: "m1" });
+    const results = searchMessagesLiteral(db, "reply msg", { guildId: "g1", limit: 10 });
+    expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
+    expect(results[0].replyToId).toBe("m1");
   });
 
   test("combines all filters", () => {

@@ -36,7 +36,8 @@ const SCHEMA_SQL = `
     raw_content         TEXT NOT NULL,
     translated_content  TEXT NOT NULL,
     is_bot              INTEGER NOT NULL DEFAULT 0,
-    created_at          INTEGER NOT NULL
+    created_at          INTEGER NOT NULL,
+    reply_to_id         TEXT
   );
 
   CREATE INDEX IF NOT EXISTS idx_messages_guild_channel_time
@@ -74,6 +75,9 @@ export function createDatabase(dbPath: string): Database {
 
   // Create core tables
   raw.run(SCHEMA_SQL);
+
+  // Idempotent migration: add reply_to_id to existing databases
+  try { raw.run("ALTER TABLE messages ADD COLUMN reply_to_id TEXT"); } catch { /* already exists */ }
 
   return {
     raw,
