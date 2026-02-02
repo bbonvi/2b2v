@@ -63,6 +63,25 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_schedules_guild_enabled
     ON schedules(guild_id, enabled);
+
+  CREATE TABLE IF NOT EXISTS images (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id  TEXT NOT NULL,
+    guild_id    TEXT NOT NULL,
+    channel_id  TEXT NOT NULL,
+    caption     TEXT,
+    path        TEXT NOT NULL,
+    mime        TEXT NOT NULL DEFAULT 'image/jpeg',
+    width       INTEGER NOT NULL,
+    height      INTEGER NOT NULL,
+    created_at  INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_images_message_id
+    ON images(message_id);
+
+  CREATE INDEX IF NOT EXISTS idx_images_guild_channel
+    ON images(guild_id, channel_id);
 `;
 
 export function createDatabase(dbPath: string): Database {
