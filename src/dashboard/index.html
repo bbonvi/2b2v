@@ -553,10 +553,16 @@
   // Format payload for display: pretty-print content strings, truncate base64 images
   function formatPayload(obj) {
     return JSON.stringify(obj, function(key, value) {
-      // Truncate base64 image data
-      if (key === 'data' && typeof value === 'string' && value.length > 200) {
-        var preview = value.substring(0, 80);
-        return '[base64 ' + Math.round(value.length / 1024) + 'KB] ' + preview + '…';
+      // Truncate base64 image data (covers "data" field and data-URI in "url")
+      if (typeof value === 'string') {
+        if (key === 'data' && value.length > 200) {
+          return '[base64 ' + Math.round(value.length / 1024) + 'KB]';
+        }
+        var dataUriMatch = key === 'url' && value.match(/^data:([^;]+);base64,/);
+        if (dataUriMatch) {
+          var b64 = value.substring(dataUriMatch[0].length);
+          return 'data:' + dataUriMatch[1] + ';base64,[' + Math.round(b64.length / 1024) + 'KB truncated]';
+        }
       }
       return value;
     }, 2)
