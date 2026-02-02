@@ -29,6 +29,7 @@ import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool"
 import { createChannelHistoryTool, type ChannelMessage } from "./agent/channel-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
 import { createReadImagesTool } from "./agent/read-images-tool";
+import { createStartTypingTool } from "./agent/start-typing-tool";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
 import { listMemories, deleteExpiredMemories } from "./db/memory-repository";
@@ -412,6 +413,7 @@ async function buildContext(
     olderHistory: olderText,
     newerHistory: newerText,
     currentContext,
+    lateInstruction: "IMPORTANT: Always call `start_typing` immediately before each `send_message`.",
     userMessage,
   });
 }
@@ -647,9 +649,6 @@ client.on("messageCreate", (message: Message) => void (async () => {
     const channelObj = message.channel as TextChannel;
 
     const sender: MessageSender = async (text, reply, _signal) => {
-      // Brief delay so the typing indicator (fired on tool_execution_start) arrives
-      // at Discord before the message — prevents sendTyping/send race condition.
-      await new Promise((resolve) => setTimeout(resolve, 200));
       const translated = translateOutbound(text, outboundResolvers);
       const chunks = splitMessage(translated);
       let firstId = "";
@@ -728,8 +727,11 @@ client.on("messageCreate", (message: Message) => void (async () => {
     // Build assembled context
     const context = await buildContext(guildId, channelId, guild, guildConfig, translatedContent, latestUserMessage, replyFallbackDeps);
 
-    // Build agent tools
-    const extraTools = buildAgentTools(guildId, channelId, guildConfig, guild);
+    // Build agent tools (including start_typing wired to the channel)
+    const startTypingTool = createStartTypingTool(() => {
+      void channelObj.sendTyping().catch(() => {});
+    });
+    const extraTools = [...buildAgentTools(guildId, channelId, guildConfig, guild), startTypingTool];
 
     // Build incoming message
     const incoming: IncomingMessage = {

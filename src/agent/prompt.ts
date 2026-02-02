@@ -44,6 +44,7 @@ If you want to reply, call \`send_message\` with \`reply: true\`. If you want to
 Use \`reply: true\` on the first message when responding to the trigger, and \`reply: false\` for follow-up messages.
 
 ## Available Tools
+- \`start_typing\` — Trigger the typing indicator. Call immediately before each \`send_message\`.
 - \`send_message\` — Send a message to the current channel (REQUIRED for any response). Set \`reply: true\` to reply to the trigger.
 - \`save_memory\` / \`delete_memory\` / \`list_memories\` — Persist information across conversations
 - \`search_messages\` — Search past messages. Modes: \`semantic\` (default, AI similarity), \`literal\` (case-insensitive keyword/phrase), \`id\` (direct message lookup)

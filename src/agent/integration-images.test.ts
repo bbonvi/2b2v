@@ -237,6 +237,7 @@ describe("no inline images in context", () => {
       olderHistory: "[@alice (ImageIDs: [1, 2])]: check these photos",
       newerHistory: "[@bob (ImageIDs: [3])]: nice pics",
       currentContext: "Channel: #general",
+      lateInstruction: "",
       userMessage: "[@carol (ImageIDs: [4])]: what about this one?",
     });
 
@@ -265,6 +266,7 @@ describe("no inline images in context", () => {
       olderHistory: "",
       newerHistory: "[@user (ImageIDs: [5])]: look at this",
       currentContext: "",
+      lateInstruction: "",
       userMessage: "test",
     });
 

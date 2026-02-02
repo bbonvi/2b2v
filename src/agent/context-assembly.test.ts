@@ -17,6 +17,7 @@ function makeInput(overrides: Partial<ContextAssemblyInput> = {}): ContextAssemb
     olderHistory: "## Chat History (Older)\nLegend: ...\n[@alice]: hello",
     newerHistory: "## Chat History (Recent)\n[@bob]: hi there",
     currentContext: "Guild: g1 | Channel: c1\nDate/Time: 2026-01-01T00:00:00Z",
+    lateInstruction: "",
     userMessage: "[@carol]: what's up?",
     ...overrides,
   };
@@ -256,5 +257,23 @@ describe("contextToSystemPrompt", () => {
     const emojiIdx = prompt.indexOf("## Available Emojis");
     expect(toolIdx).toBeLessThan(instrIdx);
     expect(instrIdx).toBeLessThan(emojiIdx);
+  });
+
+  test("late instruction appears after current context", () => {
+    const ctx = assembleContext(makeInput({
+      lateInstruction: "Always call start_typing before send_message.",
+    }));
+    const prompt = contextToSystemPrompt(ctx);
+    const contextIdx = prompt.indexOf("Guild: g1 | Channel: c1");
+    const lateIdx = prompt.indexOf("Always call start_typing before send_message.");
+    expect(contextIdx).toBeGreaterThan(-1);
+    expect(lateIdx).toBeGreaterThan(-1);
+    expect(lateIdx).toBeGreaterThan(contextIdx);
+  });
+
+  test("late instruction is omitted when empty", () => {
+    const ctx = assembleContext(makeInput({ lateInstruction: "" }));
+    const labels = ctx.sections.map((s) => s.label);
+    expect(labels).not.toContain("Late Instruction");
   });
 });

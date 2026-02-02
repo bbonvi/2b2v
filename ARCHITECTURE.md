@@ -110,12 +110,13 @@ Discord messageCreate event
        │   (guild.model ?? global.defaultModel → pi-ai registry or synthetic fallback)
        │
        ├─ Create Agent (pi-agent-core) with tools:
-       │   send_message, save/delete/list_memory, search_messages,
+       │   start_typing, send_message, save/delete/list_memory, search_messages,
        │   schedule_message, list_members, channel_history, web_search, read_images
        │
         └─ agent.prompt(translatedContent)
             No inline images — LLM uses read_images tool on demand
             Agent runs agentic loop, calls tools as needed
+            ├─ start_typing → channel.sendTyping() (typing indicator)
             └─ send_message → Discord (reply or normal)
 ```
 
@@ -177,14 +178,16 @@ buildContext(deps) → AssembledContext
   ├─ Deterministic sorting (emojis, members, journal, schedules)
   ├─ assembleContext({ persona, toolInstructions, instructions, emojis,
   │     members, journalSummaries, upcomingSchedules, olderHistory,
-  │     newerHistory, currentContext, userMessage })
+  │     newerHistory, currentContext, lateInstruction, userMessage })
   │
   └─ AssembledContext
        ├─ sections[]: ContextSection { label, text, cached }
        └─ userMessage: string (role=user)
 ```
 
-Sections ordered for Anthropic prefix-based prompt caching: stable cached sections first (persona, tools, instructions, emojis, members, journal, schedules, older history), then uncached (newer history, current context). Empty sections omitted. Currently serialized to a single string via `contextToSystemPrompt()` since `pi-agent-core` only supports `systemPrompt: string`.
+Sections ordered for Anthropic prefix-based prompt caching: stable cached sections first (persona, tools, instructions, emojis, members, journal, schedules, older history), then uncached (newer history, current context, late instruction). Empty sections omitted. Currently serialized to a single string via `contextToSystemPrompt()` since `pi-agent-core` only supports `systemPrompt: string`.
+
+**Typing indicator:** Driven exclusively by the `start_typing` agent tool. A late instruction after chat history tells the agent to call `start_typing` immediately before each `send_message`. No runtime typing lifecycle — the agent controls when typing appears.
 
 ### History Processing Pipeline
 

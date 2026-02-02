@@ -35,6 +35,8 @@ export interface ContextAssemblyInput {
   olderHistory: string;
   newerHistory: string;
   currentContext: string;
+  /** Optional high-priority instruction placed after all history/context sections. */
+  lateInstruction: string;
   userMessage: string;
 }
 
@@ -52,6 +54,7 @@ export interface ContextAssemblyInput {
  * 8. Chat History — Older (cached)
  * 9. Chat History — Newer (uncached)
  * 10. Current Context (uncached)
+ * 11. Late Instruction (uncached) — if any
  *
  * Empty sections are omitted entirely.
  */
@@ -80,6 +83,7 @@ export function assembleContext(input: ContextAssemblyInput): AssembledContext {
   add("Chat History — Older", input.olderHistory, true);
   add("Chat History — Newer", input.newerHistory, false);
   add("Current Context", input.currentContext, false);
+  add("Late Instruction", input.lateInstruction, false);
 
   return {
     sections,
