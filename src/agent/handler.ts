@@ -33,9 +33,9 @@ export interface HandlerDeps {
   log?: Logger;
   /** Called when a trigger matches, before the agent runs. Use for typing indicators. */
   onTriggered?: () => void;
-  /** Called to resume typing indicator (delayed restart after message delivery). */
+  /** Called when send_message is about to execute — start typing indicator. */
   onTypingStart?: () => void;
-  /** Called to stop typing indicator (message delivered, agent idle, or loop ended). */
+  /** Called when send_message finishes executing — stop typing indicator. */
   onTypingStop?: () => void;
   /** Request-scoped log accumulator. */
   requestLog?: RequestLog;
@@ -135,32 +135,13 @@ export async function handleMessage(
 
   agent.getApiKey = () => streamOptions.apiKey;
 
-  // Typing lifecycle: stop before send (prevent race), delayed restart after send,
-  // cancel restart on empty turn or agent end.
-  const TYPING_RESTART_DELAY_MS = 3_000;
-  let restartTimer: ReturnType<typeof setTimeout> | null = null;
-  let ended = false;
-  const clearRestart = (): void => {
-    if (restartTimer !== null) { clearTimeout(restartTimer); restartTimer = null; }
-  };
+  // Typing lifecycle: start on tool_execution_start(send_message), stop on end.
+  // The sender has a brief delay so sendTyping arrives at Discord before the message.
   agent.subscribe((e) => {
     if (e.type === "tool_execution_start" && e.toolName === "send_message") {
-      clearRestart();
-      deps.onTypingStop?.();
+      deps.onTypingStart?.();
     }
     if (e.type === "tool_execution_end" && e.toolName === "send_message") {
-      restartTimer = setTimeout(() => {
-        restartTimer = null;
-        if (!ended) deps.onTypingStart?.();
-      }, TYPING_RESTART_DELAY_MS);
-    }
-    if (e.type === "turn_end" && (e as { toolResults: unknown[] }).toolResults.length === 0) {
-      clearRestart();
-      deps.onTypingStop?.();
-    }
-    if (e.type === "agent_end") {
-      ended = true;
-      clearRestart();
       deps.onTypingStop?.();
     }
   });
