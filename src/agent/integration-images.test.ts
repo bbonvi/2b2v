@@ -271,6 +271,7 @@ describe("no inline images in context", () => {
       expect(typeof section.text).toBe("string");
       expect(section.text).not.toContain("data:image");
       // Ensure no binary-looking data leaked in
+      // eslint-disable-next-line no-control-regex
       expect(section.text).not.toMatch(/[\x00-\x08\x0E-\x1F]/);
     }
   });
