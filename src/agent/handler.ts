@@ -136,8 +136,9 @@ export async function handleMessage(
   agent.getApiKey = () => streamOptions.apiKey;
 
   let typingActive = false;
-  // Prevents restarting typing after a send_message unless more tool work actually begins.
+  // Prevents restarting typing after a send_message unless more visible work actually begins.
   let allowTyping = true;
+  const quietTools = new Set(["save_memory", "delete_memory", "list_memories"]);
   const startTyping = (): void => {
     if (!allowTyping || typingActive) return;
     typingActive = true;
@@ -169,6 +170,9 @@ export async function handleMessage(
       if (e.toolName === "send_message") {
         // Discord typing can't be canceled; suppress restarts until real work resumes.
         allowTyping = false;
+        stopTyping();
+      } else if (quietTools.has(e.toolName)) {
+        // Silent tools (e.g. save_memory) shouldn't surface typing after responses.
         stopTyping();
       } else {
         allowTyping = true;

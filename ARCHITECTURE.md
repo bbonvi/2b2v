@@ -122,6 +122,7 @@ Typing indicator behavior is driven by agent events: typing starts on turn/messa
 pauses before `send_message` to avoid sendTyping/message races, and is suppressed after
 the final send until another non-send tool actually begins. This avoids Discord’s
 “ghost typing” window after the last message.
+Memory tools (save/delete/list) are treated as silent and do not trigger typing.
 ```
 
 ### Message Search (Multi-Mode)
