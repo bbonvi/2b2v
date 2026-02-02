@@ -41,33 +41,54 @@ describe("createMemory", () => {
     expect(mem?.expiresAt).toBeLessThanOrEqual(Date.now() + DEFAULT_TTL_MS + 1000);
   });
 
-  test("creates a guild_bot memory", () => {
+  test("user scope requires guildId and userId", () => {
     const id = createMemory(db, {
-      scope: "guild_bot",
+      scope: "user",
       guildId: "g1",
-      content: "Movie night is Fridays",
+      userId: "u1",
+      content: "Test memory",
     });
 
     const mem = getMemory(db, id);
-    expect(mem?.scope).toBe("guild_bot");
+    expect(mem?.scope).toBe("user");
     expect(mem?.guildId).toBe("g1");
-    expect(mem?.userId).toBeNull();
+    expect(mem?.userId).toBe("u1");
   });
 
-  test("creates a global_bot memory", () => {
+  test("user scope supports shortDescription and longDescription", () => {
     const id = createMemory(db, {
-      scope: "global_bot",
-      content: "Users prefer concise answers",
+      scope: "user",
+      guildId: "g1",
+      userId: "u1",
+      content: "Main content",
+      shortDescription: "Short summary",
+      longDescription: "Detailed explanation of the memory",
     });
 
     const mem = getMemory(db, id);
-    expect(mem?.scope).toBe("global_bot");
-    expect(mem?.guildId).toBeNull();
+    expect(mem?.shortDescription).toBe("Short summary");
+    expect(mem?.longDescription).toBe("Detailed explanation of the memory");
   });
 
-  test("creates a journal entry with short and long descriptions", () => {
+  test("user scope has 180d default TTL", () => {
+    const before = Date.now();
+    const id = createMemory(db, {
+      scope: "user",
+      guildId: "g1",
+      userId: "u1",
+      content: "Test",
+    });
+
+    const mem = getMemory(db, id);
+    expect(mem?.expiresAt).toBeGreaterThanOrEqual(before + DEFAULT_TTL_MS - 1000);
+    expect(mem?.expiresAt).toBeLessThanOrEqual(Date.now() + DEFAULT_TTL_MS + 1000);
+  });
+
+  test("creates a journal entry with guildId and userId", () => {
     const id = createMemory(db, {
       scope: "journal",
+      guildId: "g1",
+      userId: "u1",
       content: "",
       shortDescription: "Check on Alice",
       longDescription: "Alice mentioned a Rust project last Tuesday. Follow up.",
@@ -75,10 +96,55 @@ describe("createMemory", () => {
 
     const mem = getMemory(db, id);
     expect(mem?.scope).toBe("journal");
+    expect(mem?.guildId).toBe("g1");
+    expect(mem?.userId).toBe("u1");
     expect(mem?.shortDescription).toBe("Check on Alice");
     expect(mem?.longDescription).toContain("Rust project");
-    // Journal entries have no TTL by default
-    expect(mem?.expiresAt).toBeNull();
+  });
+
+  test("journal scope requires guildId and userId", () => {
+    const id = createMemory(db, {
+      scope: "journal",
+      guildId: "g1",
+      userId: "u1",
+      content: "Journal entry",
+    });
+
+    const mem = getMemory(db, id);
+    expect(mem?.scope).toBe("journal");
+    expect(mem?.guildId).toBe("g1");
+    expect(mem?.userId).toBe("u1");
+  });
+
+  test("journal scope supports shortDescription and longDescription", () => {
+    const id = createMemory(db, {
+      scope: "journal",
+      guildId: "g1",
+      userId: "u1",
+      content: "",
+      shortDescription: "Meeting notes",
+      longDescription: "Discussed project timeline and deliverables for Q1",
+    });
+
+    const mem = getMemory(db, id);
+    expect(mem?.shortDescription).toBe("Meeting notes");
+    expect(mem?.longDescription).toContain("timeline");
+  });
+
+  test("journal scope has 180d default TTL", () => {
+    const before = Date.now();
+    const id = createMemory(db, {
+      scope: "journal",
+      guildId: "g1",
+      userId: "u1",
+      content: "",
+      shortDescription: "Short",
+      longDescription: "Long",
+    });
+
+    const mem = getMemory(db, id);
+    expect(mem?.expiresAt).toBeGreaterThanOrEqual(before + DEFAULT_TTL_MS - 1000);
+    expect(mem?.expiresAt).toBeLessThanOrEqual(Date.now() + DEFAULT_TTL_MS + 1000);
   });
 
   test("accepts custom TTL in days", () => {
@@ -146,7 +212,29 @@ describe("updateMemory", () => {
   test("updates journal descriptions", () => {
     const id = createMemory(db, {
       scope: "journal",
+      guildId: "g1",
+      userId: "u1",
       content: "",
+      shortDescription: "Old short",
+      longDescription: "Old long",
+    });
+
+    updateMemory(db, id, {
+      shortDescription: "New short",
+      longDescription: "New long",
+    });
+
+    const mem = getMemory(db, id);
+    expect(mem?.shortDescription).toBe("New short");
+    expect(mem?.longDescription).toBe("New long");
+  });
+
+  test("updates user memory descriptions", () => {
+    const id = createMemory(db, {
+      scope: "user",
+      guildId: "g1",
+      userId: "u1",
+      content: "Content",
       shortDescription: "Old short",
       longDescription: "Old long",
     });
@@ -186,7 +274,9 @@ describe("updateMemory", () => {
 describe("deleteMemory", () => {
   test("deletes an existing memory", () => {
     const id = createMemory(db, {
-      scope: "global_bot",
+      scope: "user",
+      guildId: "g1",
+      userId: "u1",
       content: "To be deleted",
     });
 
@@ -211,38 +301,43 @@ describe("listMemories", () => {
     expect(results.map((r) => r.content).sort()).toEqual(["A", "B"]);
   });
 
-  test("lists guild_bot memories for a guild", () => {
-    createMemory(db, { scope: "guild_bot", guildId: "g1", content: "X" });
-    createMemory(db, { scope: "guild_bot", guildId: "g2", content: "Y" });
+  test("lists journal entries for a guild", () => {
+    createMemory(db, { scope: "journal", guildId: "g1", userId: "u1", content: "X" });
+    createMemory(db, { scope: "journal", guildId: "g2", userId: "u2", content: "Y" });
 
-    const results = listMemories(db, { scope: "guild_bot", guildId: "g1" });
+    const results = listMemories(db, { scope: "journal", guildId: "g1" });
     expect(results).toHaveLength(1);
     expect(results[0]).toBeDefined();
     if (!results[0]) throw new Error("unreachable");
     expect(results[0].content).toBe("X");
   });
 
-  test("lists global_bot memories", () => {
-    createMemory(db, { scope: "global_bot", content: "G1" });
-    createMemory(db, { scope: "global_bot", content: "G2" });
-
-    const results = listMemories(db, { scope: "global_bot" });
-    expect(results).toHaveLength(2);
-  });
-
   test("lists journal entries with descriptions", () => {
     createMemory(db, {
       scope: "journal",
+      guildId: "g1",
+      userId: "u1",
       content: "",
       shortDescription: "Short A",
       longDescription: "Long A",
     });
 
-    const results = listMemories(db, { scope: "journal" });
+    const results = listMemories(db, { scope: "journal", guildId: "g1" });
     expect(results).toHaveLength(1);
     expect(results[0]).toBeDefined();
     if (!results[0]) throw new Error("unreachable");
     expect(results[0].shortDescription).toBe("Short A");
+  });
+
+  test("filters journal by userId when provided", () => {
+    createMemory(db, { scope: "journal", guildId: "g1", userId: "u1", content: "Entry 1" });
+    createMemory(db, { scope: "journal", guildId: "g1", userId: "u2", content: "Entry 2" });
+
+    const results = listMemories(db, { scope: "journal", guildId: "g1", userId: "u1" });
+    expect(results).toHaveLength(1);
+    expect(results[0]).toBeDefined();
+    if (!results[0]) throw new Error("unreachable");
+    expect(results[0].content).toBe("Entry 1");
   });
 
   test("excludes expired memories", () => {
@@ -253,11 +348,11 @@ describe("listMemories", () => {
         `INSERT INTO memories (id, scope, guild_id, user_id, content, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("expired-1", "global_bot", null, null, "Old", null, null, null, now - 100000, now - 100000, now - 1000);
+      .run("expired-1", "user", "g1", "u1", "Old", null, null, null, now - 100000, now - 100000, now - 1000);
 
-    createMemory(db, { scope: "global_bot", content: "Current" });
+    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", content: "Current" });
 
-    const results = listMemories(db, { scope: "global_bot" });
+    const results = listMemories(db, { scope: "user", guildId: "g1", userId: "u1" });
     expect(results).toHaveLength(1);
     expect(results[0]).toBeDefined();
     if (!results[0]) throw new Error("unreachable");
@@ -266,10 +361,10 @@ describe("listMemories", () => {
 
   test("respects limit parameter", () => {
     for (let i = 0; i < 5; i++) {
-      createMemory(db, { scope: "global_bot", content: `Item ${i}` });
+      createMemory(db, { scope: "user", guildId: "g1", userId: "u1", content: `Item ${i}` });
     }
 
-    const results = listMemories(db, { scope: "global_bot", limit: 3 });
+    const results = listMemories(db, { scope: "user", guildId: "g1", userId: "u1", limit: 3 });
     expect(results).toHaveLength(3);
   });
 });
@@ -284,13 +379,13 @@ describe("deleteExpiredMemories", () => {
       )
       .run("exp-1", "user", "g1", "u1", "Expired", null, null, null, now, now, now - 1000);
 
-    createMemory(db, { scope: "global_bot", content: "Still valid" });
+    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", content: "Still valid" });
 
     const count = deleteExpiredMemories(db);
     expect(count).toBe(1);
     expect(getMemory(db, "exp-1")).toBeNull();
 
-    const remaining = listMemories(db, { scope: "global_bot" });
+    const remaining = listMemories(db, { scope: "user", guildId: "g1", userId: "u1" });
     expect(remaining).toHaveLength(1);
   });
 });
