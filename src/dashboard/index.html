@@ -401,6 +401,9 @@
     if (el) el.classList.toggle('expanded');
   }
 
+  // Store payloads by key for modal lookup (avoids inline JSON escaping issues)
+  const payloadStore = new Map();
+
   function renderEntry(e) {
     const cost = fmtCost(e.llmCalls);
     const hasErr = e.error != null;
@@ -421,7 +424,14 @@
     }
 
     let llmRows = '';
-    for (const l of e.llmCalls) {
+    for (let li = 0; li < e.llmCalls.length; li++) {
+      const l = e.llmCalls[li];
+      let payloadCell = '-';
+      if (l.requestPayload != null) {
+        const pkey = e.requestId + ':' + li;
+        payloadStore.set(pkey, l.requestPayload);
+        payloadCell = '<button class="btn btn-sm" onclick="event.stopPropagation(); window.__showPayload(\'' + esc(pkey) + '\')">payload</button>';
+      }
       llmRows += '<tr>'
         + '<td>' + esc(l.model) + '</td>'
         + '<td>' + l.promptTokens + ' / ' + l.completionTokens + '</td>'
@@ -429,7 +439,7 @@
         + '<td>' + esc(l.stopReason) + '</td>'
         + '<td>' + esc(l.contentTypes.join(', ')) + '</td>'
         + '<td class="tool-result">' + (l.outputText != null ? esc(l.outputText) : '<span style="color:var(--text-dim);font-style:italic">no text output</span>') + '</td>'
-        + '<td>' + (l.requestPayload != null ? '<button class="btn btn-sm" onclick="event.stopPropagation(); window.__showPayload(' + esc(JSON.stringify(JSON.stringify(l.requestPayload))) + ')">payload</button>' : '-') + '</td>'
+        + '<td>' + payloadCell + '</td>'
         + '</tr>';
     }
 
@@ -540,13 +550,10 @@
   const modalBody = document.getElementById('modal-body');
   const modalClose = document.getElementById('modal-close');
 
-  window.__showPayload = function(payloadJson) {
-    try {
-      const parsed = JSON.parse(payloadJson);
-      modalBody.textContent = JSON.stringify(parsed, null, 2);
-    } catch(_) {
-      modalBody.textContent = payloadJson;
-    }
+  window.__showPayload = function(key) {
+    const payload = payloadStore.get(key);
+    if (payload == null) return;
+    modalBody.textContent = JSON.stringify(payload, null, 2);
     modalOverlay.style.display = 'flex';
   };
 
