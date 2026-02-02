@@ -338,4 +338,25 @@ describe("resolveReplies", () => {
     });
     expect(result.newer.get("102")?.quote).toBe("line1 line2 tab");
   });
+
+  test("newer: reply resolves via extraLookup for fetched reply targets", () => {
+    // m1 is only in extraLookup (fetched from Discord, not in any slice)
+    // m2 is in newer and replies to m1
+    const m1 = msg({ id: "100", author: "alice", content: "the original message" });
+    const m2 = msg({ id: "200", author: "bob", replyToId: "100", content: "reply to alice" });
+    const result = resolveReplies({
+      older: [],
+      newer: [m2],
+      latestUserMessage: null,
+      replyQuoteChars: 80,
+      captioningEnabled: false,
+      extraLookup: [m1],
+    });
+    const ctx = result.newer.get("200");
+    if (ctx === undefined) throw new Error("unreachable");
+    expect(ctx.targetAuthor).toBe("alice");
+    expect(ctx.quote).toBe("the original message");
+    expect(ctx.missingTarget).toBe(false);
+    expect(ctx.replyMsgId).toBe("100");
+  });
 });

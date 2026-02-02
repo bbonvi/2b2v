@@ -14,9 +14,12 @@ import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { handleMessage, type IncomingMessage, type HandlerDeps } from "./agent/handler";
-import type { ChatMessage } from "./agent/prompt";
 import { TOOL_INSTRUCTIONS } from "./agent/prompt";
 import { assembleContext, type AssembledContext } from "./agent/context-assembly";
+import type { HistoryMessage } from "./agent/history-types";
+import { getHistoryMessages } from "./db/message-repository";
+import { processHistory } from "./agent/history-pipeline";
+import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
 import type { MessageSender } from "./agent/send-message-tool";
 import { createMemoryTools } from "./agent/memory-tools";
@@ -103,23 +106,7 @@ try {
 const emojiCache = new EmojiCache();
 const EMOJI_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-// --- 10. Chat history per channel (SQLite-backed) ---
-function getChatHistory(channelId: string, limit: number = 150): ChatMessage[] {
-  const rows = db.raw
-    .prepare(
-      `SELECT author_username, translated_content, is_bot
-       FROM messages
-       WHERE channel_id = ?
-       ORDER BY created_at DESC
-       LIMIT ?`
-    )
-    .all(channelId, limit) as { author_username: string; translated_content: string; is_bot: number }[];
-  return rows
-    .reverse()
-    .map((r) => ({ author: r.author_username, content: r.translated_content, isBot: r.is_bot === 1 }));
-}
-
-// --- 11. Guild config resolver ---
+// --- 10. Guild config resolver ---
 function getGuildConfig(guildId: string): GuildConfig {
   const existing = guildConfigs.get(guildId);
   if (existing !== undefined) return existing;
@@ -333,12 +320,30 @@ function refreshEmojiCache(guild: Guild): void {
 }
 
 // --- 19. Build assembled context for a guild+channel ---
-function buildContext(guildId: string, channelId: string, guild: Guild, guildConfig: GuildConfig, userMessage: string): AssembledContext {
-  // Chat history from SQLite (already trimmed by LIMIT)
-  const history = getChatHistory(channelId, guildConfig.trim.trimTarget);
-  const historyText = history.length > 0
-    ? history.map((m) => `${m.author}: ${m.content}`).join("\n")
-    : "";
+async function buildContext(
+  guildId: string,
+  channelId: string,
+  guild: Guild,
+  guildConfig: GuildConfig,
+  userMessage: string,
+  latestUserMessage: HistoryMessage,
+  replyFallbackDeps: ReplyFallbackDeps,
+): Promise<AssembledContext> {
+  // Chat history via the full processing pipeline
+  const historyMessages = getHistoryMessages(db, channelId, guildConfig.trim.trimTrigger);
+  const historyWithoutLatest = historyMessages.filter((m) => m.id !== latestUserMessage.id);
+  const { olderText, newerText } = await processHistory(
+    historyWithoutLatest,
+    latestUserMessage,
+    {
+      trim: guildConfig.trim,
+      mergeMessageGapSeconds: guildConfig.mergeMessageGapSeconds,
+      timezone: guildConfig.timezone,
+      imageCaptioningEnabled: guildConfig.imageCaptioningEnabled,
+      replyQuoteChars: guildConfig.trim.replyQuoteChars,
+    },
+    replyFallbackDeps,
+  );
 
   // Journal summaries — sorted by updatedAt ascending, then ID
   const journals = listMemories(db, { scope: "journal" })
@@ -398,8 +403,8 @@ function buildContext(guildId: string, channelId: string, guild: Guild, guildCon
     members: displayNameContext,
     journalSummaries,
     upcomingSchedules,
-    olderHistory: "",
-    newerHistory: historyText !== "" ? `## Chat History\n${historyText}` : "",
+    olderHistory: olderText,
+    newerHistory: newerText,
     currentContext,
     userMessage,
   });
@@ -659,8 +664,68 @@ client.on("messageCreate", (message: Message) => void (async () => {
       return { sentMessageId: firstId };
     };
 
+    // Build latest user message as HistoryMessage for pipeline
+    const latestUserMessage: HistoryMessage = {
+      id: message.id,
+      author: message.author.username,
+      authorId: message.author.id,
+      content: translatedContent,
+      isBot: false,
+      timestamp: now,
+      replyToId: message.reference?.messageId ?? null,
+      imageIds: [],
+      captions: [],
+      hasEmbeds: message.embeds.length > 0,
+    };
+
+    // Build reply fallback deps for fetching missing reply targets
+    const replyFallbackDeps: ReplyFallbackDeps = {
+      db,
+      guildId,
+      channelId,
+      fetchDiscordMessage: async (chId, msgId) => {
+        const ch = guild.channels.cache.get(chId);
+        if (ch === undefined || !("messages" in ch)) return null;
+        try {
+          const fetched = await (ch as TextChannel).messages.fetch(msgId);
+          return {
+            id: fetched.id,
+            authorId: fetched.author.id,
+            authorUsername: fetched.author.username,
+            content: fetched.content,
+            timestamp: fetched.createdTimestamp,
+            isBot: fetched.author.bot,
+            replyToId: fetched.reference?.messageId ?? null,
+            attachments: [...fetched.attachments.values()].map((a) => ({
+              url: a.url,
+              contentType: a.contentType,
+            })),
+          };
+        } catch {
+          return null;
+        }
+      },
+      enqueueEmbedding: async (id, text, metadata) => {
+        await embeddingQueue.enqueue({
+          id,
+          text,
+          target: "message",
+          metadata,
+        });
+      },
+      processImage: async (url, contentType, messageId) => {
+        await processAndStoreImage(ingestDeps, {
+          url,
+          mimeType: contentType,
+          messageId,
+          guildId,
+          channelId,
+        });
+      },
+    };
+
     // Build assembled context
-    const context = buildContext(guildId, channelId, guild, guildConfig, translatedContent);
+    const context = await buildContext(guildId, channelId, guild, guildConfig, translatedContent, latestUserMessage, replyFallbackDeps);
 
     // Build agent tools
     const extraTools = buildAgentTools(guildId, channelId, guildConfig, guild);

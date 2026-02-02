@@ -3,7 +3,7 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "./database";
 import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
-import { searchMessages, getMessageById, searchMessagesLiteral } from "./message-repository";
+import { searchMessages, getMessageById, searchMessagesLiteral, getHistoryMessages } from "./message-repository";
 import { createMockPipeline } from "../embeddings/test-utils";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
@@ -410,5 +410,135 @@ describe("searchMessagesLiteral", () => {
     expect(results.length).toBe(1);
     if (!results[0]) throw new Error("unreachable");
     expect(results[0].id).toBe("target");
+  });
+});
+
+describe("getHistoryMessages", () => {
+  function insertImage(
+    messageId: string,
+    opts: {
+      guildId?: string;
+      channelId?: string;
+      caption?: string | null;
+      path?: string;
+      mime?: string;
+      width?: number;
+      height?: number;
+    } = {}
+  ): number {
+    const result = db.raw
+      .prepare(
+        `INSERT INTO images (message_id, guild_id, channel_id, caption, path, mime, width, height, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        messageId,
+        opts.guildId ?? "g1",
+        opts.channelId ?? "c1",
+        opts.caption ?? null,
+        opts.path ?? "/tmp/img.jpg",
+        opts.mime ?? "image/jpeg",
+        opts.width ?? 100,
+        opts.height ?? 100,
+        now
+      );
+    return Number(result.lastInsertRowid);
+  }
+
+  test("returns correct HistoryMessage shape with all fields mapped", () => {
+    insertMessage("m1", {
+      channelId: "c1",
+      userId: "u1",
+      authorUsername: "alice",
+      translatedContent: "hello world",
+      isBot: false,
+      createdAt: now - 1 * hour,
+      replyToId: "m0",
+    });
+
+    const results = getHistoryMessages(db, "c1", 10);
+    expect(results.length).toBe(1);
+
+    const m = results[0];
+    if (m === undefined) throw new Error("unreachable");
+    expect(m).toEqual({
+      id: "m1",
+      author: "alice",
+      authorId: "u1",
+      content: "hello world",
+      isBot: false,
+      timestamp: now - 1 * hour,
+      replyToId: "m0",
+      imageIds: [],
+      captions: [],
+      hasEmbeds: false,
+    });
+  });
+
+  test("images grouped correctly per message (imageIds + captions parallel arrays)", () => {
+    insertMessage("m1", { channelId: "c1", createdAt: now - 2 * hour });
+    insertMessage("m2", { channelId: "c1", createdAt: now - 1 * hour });
+
+    const imgId1 = insertImage("m1", { caption: "cat photo" });
+    const imgId2 = insertImage("m1", { caption: "dog photo" });
+    const imgId3 = insertImage("m2", { caption: "bird photo" });
+
+    const results = getHistoryMessages(db, "c1", 10);
+    expect(results.length).toBe(2);
+
+    const msg1 = results[0];
+    if (msg1 === undefined) throw new Error("unreachable");
+    expect(msg1.id).toBe("m1");
+    expect(msg1.imageIds).toEqual([imgId1, imgId2]);
+    expect(msg1.captions).toEqual(["cat photo", "dog photo"]);
+
+    const msg2 = results[1];
+    if (msg2 === undefined) throw new Error("unreachable");
+    expect(msg2.id).toBe("m2");
+    expect(msg2.imageIds).toEqual([imgId3]);
+    expect(msg2.captions).toEqual(["bird photo"]);
+  });
+
+  test("messages without images have empty imageIds/captions", () => {
+    insertMessage("m1", { channelId: "c1", createdAt: now });
+
+    const results = getHistoryMessages(db, "c1", 10);
+    expect(results.length).toBe(1);
+
+    const m = results[0];
+    if (m === undefined) throw new Error("unreachable");
+    expect(m.imageIds).toEqual([]);
+    expect(m.captions).toEqual([]);
+  });
+
+  test("respects limit parameter", () => {
+    insertMessage("m1", { channelId: "c1", createdAt: now - 3 * hour });
+    insertMessage("m2", { channelId: "c1", createdAt: now - 2 * hour });
+    insertMessage("m3", { channelId: "c1", createdAt: now - 1 * hour });
+
+    const results = getHistoryMessages(db, "c1", 2);
+    expect(results.length).toBe(2);
+    // Limit takes most recent, then reverses to chronological
+    expect(results.map((r) => r.id)).toEqual(["m2", "m3"]);
+  });
+
+  test("chronological order (oldest first)", () => {
+    insertMessage("m1", { channelId: "c1", createdAt: now - 1 * hour });
+    insertMessage("m2", { channelId: "c1", createdAt: now - 3 * hour });
+    insertMessage("m3", { channelId: "c1", createdAt: now - 2 * hour });
+
+    const results = getHistoryMessages(db, "c1", 10);
+    expect(results.map((r) => r.id)).toEqual(["m2", "m3", "m1"]);
+  });
+
+  test("hasEmbeds is always false", () => {
+    insertMessage("m1", { channelId: "c1", createdAt: now });
+    insertMessage("m2", { channelId: "c1", createdAt: now - 1 * hour });
+    insertImage("m1", { caption: "with image" });
+
+    const results = getHistoryMessages(db, "c1", 10);
+    for (const msg of results) {
+      expect(msg.hasEmbeds).toBe(false);
+    }
   });
 });

@@ -1,6 +1,7 @@
 import type { Database } from "./database";
 import type { QdrantClient } from "@qdrant/js-client-rest";
 import { searchPoints } from "../qdrant/adapter";
+import type { HistoryMessage } from "../agent/history-types";
 
 export interface MessageSearchFilter {
   guildId: string;
@@ -130,6 +131,85 @@ export function getMessageById(
     replyToId: row.reply_to_id,
     score: 1.0,
   };
+}
+
+/**
+ * Fetch recent messages from a channel as HistoryMessage[], suitable for the
+ * history processing pipeline.
+ *
+ * Two-query strategy: messages first, then batch image lookup.
+ * Returns chronological order (oldest first).
+ */
+export function getHistoryMessages(
+  db: Database,
+  channelId: string,
+  limit: number,
+): HistoryMessage[] {
+  const rows = db.raw
+    .prepare(
+      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id
+       FROM messages
+       WHERE channel_id = ?
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(channelId, limit) as Array<{
+      id: string;
+      author_username: string;
+      user_id: string;
+      translated_content: string;
+      is_bot: number;
+      created_at: number;
+      reply_to_id: string | null;
+    }>;
+
+  // Reverse to chronological order
+  rows.reverse();
+
+  if (rows.length === 0) return [];
+
+  // Batch fetch images for all messages
+  const messageIds = rows.map((r) => r.id);
+  const placeholders = messageIds.map(() => "?").join(",");
+  const imageRows = db.raw
+    .prepare(
+      `SELECT message_id, id, caption
+       FROM images
+       WHERE message_id IN (${placeholders})
+       ORDER BY id ASC`
+    )
+    .all(...messageIds) as Array<{
+      message_id: string;
+      id: number;
+      caption: string | null;
+    }>;
+
+  // Group images by message_id
+  const imageMap = new Map<string, Array<{ id: number; caption: string | null }>>();
+  for (const img of imageRows) {
+    let arr = imageMap.get(img.message_id);
+    if (arr === undefined) {
+      arr = [];
+      imageMap.set(img.message_id, arr);
+    }
+    arr.push({ id: img.id, caption: img.caption });
+  }
+
+  return rows.map((r) => {
+    const images = imageMap.get(r.id) ?? [];
+    return {
+      id: r.id,
+      author: r.author_username,
+      authorId: r.user_id,
+      content: r.translated_content,
+      isBot: r.is_bot === 1,
+      timestamp: r.created_at,
+      replyToId: r.reply_to_id,
+      imageIds: images.map((i) => i.id),
+      captions: images.map((i) => i.caption ?? ""),
+      hasEmbeds: false,
+    };
+  });
 }
 
 /**

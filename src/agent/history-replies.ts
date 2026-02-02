@@ -15,6 +15,8 @@ export interface ResolveRepliesInput {
    * before messageCharLimit trimming is applied."
    */
   normalizedContentMap?: Map<string, string>;
+  /** Additional messages for lookup only (e.g. fetched reply targets). Not iterated for output. */
+  extraLookup?: HistoryMessage[];
 }
 
 export interface ResolveRepliesResult {
@@ -48,8 +50,12 @@ function buildLookup(
   older: HistoryMessage[],
   newer: HistoryMessage[],
   latestUserMessage: HistoryMessage | null,
+  extra?: HistoryMessage[],
 ): Map<string, HistoryMessage> {
   const map = new Map<string, HistoryMessage>();
+  if (extra !== undefined) {
+    for (const m of extra) map.set(m.id, m);
+  }
   for (const m of older) map.set(m.id, m);
   for (const m of newer) map.set(m.id, m);
   if (latestUserMessage !== null) map.set(latestUserMessage.id, latestUserMessage);
@@ -119,8 +125,8 @@ function buildReplyContext(
  * - Quotes: derived from normalized content, truncated to replyQuoteChars.
  */
 export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult {
-  const { older, newer, latestUserMessage, replyQuoteChars, captioningEnabled, normalizedContentMap } = input;
-  const lookup = buildLookup(older, newer, latestUserMessage);
+  const { older, newer, latestUserMessage, replyQuoteChars, captioningEnabled, normalizedContentMap, extraLookup } = input;
+  const lookup = buildLookup(older, newer, latestUserMessage, extraLookup);
 
   const olderMap = new Map<string, ReplyContext>();
   for (const m of older) {
