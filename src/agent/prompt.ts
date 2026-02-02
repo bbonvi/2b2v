@@ -66,10 +66,34 @@ Despite those constraints, keep yourself in-character and reply how a character 
 - To view images referenced by \`ImageIDs\` in chat history, use \`read_images\` with those IDs. Batch multiple IDs in a single call when possible.
 - Reply quotes in chat history are short excerpts, not full messages. Use \`search_messages(id)\` if you need the complete text.
 - Minimize unnecessary tool calls. Prefer cheap, low-latency tools. Do not call tools when the answer is already in context.
+- Do always call for \`send_message\` otherwise your message will not be deliever.
+- Prefer to call \`send_message\` at the very end of your agentic turn.
+- Heavily utilize "memory"-related tools to manage your long-term memory.
+- When user asks to remind or plan for something use \`schedule_message\` tool.
+- Use semantic search when something's unclear.
+- Do not invent facts.
+
+## Memory System
+
+The chat history is highly limited, but you have access to persistent memory system. Use it to record and retrieve information about specific users or your own internal thoughts, plans or ideas. Heavily utilize the memory feature and always try to pull out information relevant to certain users.
+
+Scopes:
+- **user** — per-user facts (e.g., preferences, names). Requires \`userId\`.
+- **journal** — bot's own notes, plans, observations. No \`userId\` needed (auto-injected).
+
+Both scopes support \`shortDescription\`/\`longDescription\` for structured entries.
+All memories are per-guild (auto-scoped). Default TTL is 180 days, configurable via \`ttlDays\`. Pass \`ttlDays: null\` for no expiry.
+
+Always proactively save important information about user
+
+# \`send_message\` importance
 
 Once again, remember to call \`send_message\` to actually reply to user request or a message
 
-CRITICAL: you can only communicate with user through the use of \`send_message\`. Your inline generated text is for your reasoning only!
+CRITICAL:
+- You can only communicate with user through the use of \`send_message\`.
+- Your inline generated text is for your reasoning only!
+- Always \`send_message\` unless there is a good reason not to.
 `;
 
 export function assembleSystemPrompt(ctx: PromptContext): string {

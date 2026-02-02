@@ -15,6 +15,8 @@ export interface MemoryToolsDeps {
   db: Database;
   /** Current guild ID — scoped tools auto-inject this. */
   guildId: string;
+  /** Bot's own user ID — auto-injected as userId for journal scope. */
+  botUserId: string;
   /** Called after a memory is created or updated, for embedding. */
   onMemoryChanged?: (memoryId: string, content: string) => void;
   /** Called after a memory is deleted, for Qdrant cleanup. */
@@ -44,15 +46,15 @@ interface ListMemoriesParams {
 
 const SaveMemorySchema = Type.Object({
   scope: Type.Union(
-    [Type.Literal("user"), Type.Literal("guild_bot"), Type.Literal("global_bot"), Type.Literal("journal")],
-    { description: "Memory scope. 'user' = per-user per-guild, 'guild_bot' = per-guild bot knowledge, 'global_bot' = cross-guild bot knowledge, 'journal' = bot-private scratchpad." }
+    [Type.Literal("user"), Type.Literal("journal")],
+    { description: "Memory scope. 'user' = per-user facts (requires userId), 'journal' = bot's own notes (no userId needed)." }
   ),
   content: Type.String({ description: "Memory content. For journal entries, leave empty and use shortDescription/longDescription instead." }),
   userId: Type.Optional(Type.String({ description: "Target user ID. Required for scope 'user'." })),
   id: Type.Optional(Type.String({ description: "Existing memory ID to update. Omit to create new." })),
-  shortDescription: Type.Optional(Type.String({ description: "Short description (journal only). Always visible in context." })),
-  longDescription: Type.Optional(Type.String({ description: "Long description (journal only). Pulled on demand." })),
-  ttlDays: Type.Optional(Type.Union([Type.Number(), Type.Null()], { description: "Days until expiry. Default 180 for non-journal. Pass null for no expiry." })),
+  shortDescription: Type.Optional(Type.String({ description: "Short description. Always visible in context." })),
+  longDescription: Type.Optional(Type.String({ description: "Long description. Pulled on demand." })),
+  ttlDays: Type.Optional(Type.Union([Type.Number(), Type.Null()], { description: "Days until expiry. Default 180. Pass null for no expiry." })),
   sourceMessageId: Type.Optional(Type.String({ description: "Discord message ID that triggered this memory." })),
 });
 
@@ -62,7 +64,7 @@ const DeleteMemorySchema = Type.Object({
 
 const ListMemoriesSchema = Type.Object({
   scope: Type.Union(
-    [Type.Literal("user"), Type.Literal("guild_bot"), Type.Literal("global_bot"), Type.Literal("journal")],
+    [Type.Literal("user"), Type.Literal("journal")],
     { description: "Memory scope to list." }
   ),
   userId: Type.Optional(Type.String({ description: "Filter by user ID (for scope 'user')." })),
@@ -74,13 +76,13 @@ const ListMemoriesSchema = Type.Object({
  * Returns [save_memory, delete_memory, list_memories].
  */
 export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
-  const { db, guildId, onMemoryChanged, onMemoryDeleted } = deps;
+  const { db, guildId, botUserId, onMemoryChanged, onMemoryDeleted } = deps;
 
   const saveMemory: AgentTool = {
     name: "save_memory",
     label: "Save Memory",
     description:
-      "Create or update a memory entry. Use scope 'user' for per-user facts, 'guild_bot' for server knowledge, 'global_bot' for cross-server knowledge, 'journal' for private scratchpad entries. Provide 'id' to update an existing entry.",
+      "Create or update a memory entry. Use scope 'user' for per-user facts (requires userId), 'journal' for bot's own notes. Provide 'id' to update an existing entry.",
     parameters: SaveMemorySchema,
     execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: string; action: string; success: boolean }>> => {
       const p = params as SaveMemoryParams;
@@ -116,11 +118,11 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
       }
 
       const scope = p.scope;
-      const needsGuild = scope === "user" || scope === "guild_bot";
+      const userId = scope === "journal" ? botUserId : p.userId ?? "";
       const id = createMemory(db, {
         scope,
-        guildId: needsGuild ? guildId : undefined,
-        userId: p.userId,
+        guildId,
+        userId,
         content: p.content,
         shortDescription: p.shortDescription,
         longDescription: p.longDescription,
@@ -145,7 +147,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
       const p = params as DeleteMemoryParams;
       // Verify the memory belongs to this guild before allowing deletion
       const existing = getMemory(db, p.id);
-      if (existing === null || (existing.guildId !== null && existing.guildId !== guildId)) {
+      if (existing === null || existing.guildId !== guildId) {
         return Promise.resolve({
           content: [{ type: "text", text: `Memory ${p.id} not found.` }],
           details: { memoryId: p.id, success: false },
@@ -171,12 +173,12 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     execute: (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as ListMemoriesParams;
       const scope = p.scope;
-      const needsGuild = scope === "user" || scope === "guild_bot";
+      const userId = scope === "journal" ? botUserId : p.userId;
 
       const rows = listMemories(db, {
         scope,
-        guildId: needsGuild ? guildId : undefined,
-        userId: p.userId,
+        guildId,
+        userId,
         limit: p.limit ?? 50,
       });
 
@@ -196,11 +198,12 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
 }
 
 function formatMemoryLine(row: MemoryRow): string {
-  if (row.scope === "journal") {
-    return `[${row.id}] ${row.shortDescription ?? "(no description)"}`;
-  }
   const parts = [`[${row.id}]`];
-  if (row.userId !== null) parts.push(`user:${row.userId}`);
-  parts.push(row.content);
+  if (row.scope === "user" && row.userId !== null) parts.push(`user:${row.userId}`);
+  if (row.shortDescription !== null && row.shortDescription !== "") {
+    parts.push(row.shortDescription);
+  } else {
+    parts.push(row.content);
+  }
   return parts.join(" ");
 }

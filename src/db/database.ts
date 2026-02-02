@@ -8,7 +8,7 @@ export interface Database {
 const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS memories (
     id                TEXT PRIMARY KEY,
-    scope             TEXT NOT NULL CHECK(scope IN ('user', 'guild_bot', 'global_bot', 'journal')),
+    scope             TEXT NOT NULL CHECK(scope IN ('user', 'journal')),
     guild_id          TEXT,
     user_id           TEXT,
     content           TEXT NOT NULL DEFAULT '',

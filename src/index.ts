@@ -346,7 +346,8 @@ async function buildContext(
   );
 
   // Journal summaries — sorted by updatedAt ascending, then ID
-  const journals = listMemories(db, { scope: "journal" })
+  const botUserId = client.user?.id ?? "";
+  const journals = listMemories(db, { scope: "journal", guildId, userId: botUserId })
     .filter((m) => m.shortDescription !== null && m.shortDescription !== "")
     .sort((a, b) => {
       const ud = a.updatedAt - b.updatedAt;
@@ -415,6 +416,7 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
   const memoryTools = createMemoryTools({
     db,
     guildId,
+    botUserId: client.user?.id ?? "",
     onMemoryChanged: (memoryId, content) => {
       void embeddingQueue.enqueue({
         id: memoryId,

@@ -1,6 +1,6 @@
 import type { Database } from "./database";
 
-export type MemoryScope = "user" | "guild_bot" | "global_bot" | "journal";
+export type MemoryScope = "user" | "journal";
 
 const DEFAULT_TTL_DAYS = 180; // 6 months
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -21,13 +21,13 @@ export interface MemoryRow {
 
 export interface CreateMemoryInput {
   scope: MemoryScope;
-  guildId?: string;
-  userId?: string;
+  guildId: string;
+  userId: string;
   content: string;
   shortDescription?: string;
   longDescription?: string;
   sourceMessageId?: string;
-  /** Days until expiry. Default 180 for non-journal, null for journal. Pass null to disable. */
+  /** Days until expiry. Default 180. Pass null to disable. */
   ttlDays?: number | null;
 }
 
@@ -41,16 +41,14 @@ export interface UpdateMemoryInput {
 
 export interface ListMemoriesFilter {
   scope: MemoryScope;
-  guildId?: string;
+  guildId: string;
   userId?: string;
   limit?: number;
 }
 
-function computeExpiry(scope: MemoryScope, ttlDays?: number | null): number | null {
+function computeExpiry(_scope: MemoryScope, ttlDays?: number | null): number | null {
   if (ttlDays === null) return null;
   if (ttlDays !== undefined) return Date.now() + ttlDays * MS_PER_DAY;
-  // Default: journal has no expiry, others get 6 months
-  if (scope === "journal") return null;
   return Date.now() + DEFAULT_TTL_DAYS * MS_PER_DAY;
 }
 
@@ -68,8 +66,8 @@ export function createMemory(db: Database, input: CreateMemoryInput): string {
     .run(
       id,
       input.scope,
-      input.guildId ?? null,
-      input.userId ?? null,
+      input.guildId,
+      input.userId,
       input.content,
       input.shortDescription ?? null,
       input.longDescription ?? null,
@@ -130,10 +128,9 @@ export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRo
   const conditions = ["scope = ?"];
   const params: (string | number | null)[] = [filter.scope];
 
-  if (filter.guildId !== undefined) {
-    conditions.push("guild_id = ?");
-    params.push(filter.guildId);
-  }
+  conditions.push("guild_id = ?");
+  params.push(filter.guildId);
+
   if (filter.userId !== undefined) {
     conditions.push("user_id = ?");
     params.push(filter.userId);

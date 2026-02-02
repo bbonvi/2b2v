@@ -227,16 +227,16 @@ No inline images in LLM context. Messages reference `image_ids`; LLM retrieves v
 | Column | Type | Notes |
 |--------|------|-------|
 | id | TEXT PK | UUID |
-| scope | TEXT | `user` · `guild_bot` · `global_bot` · `journal` |
-| guild_id | TEXT | nullable; required for user/guild_bot |
-| user_id | TEXT | nullable; required for user scope |
+| scope | TEXT | `user` · `journal` |
+| guild_id | TEXT | required; all memories are per-guild |
+| user_id | TEXT | required; for journal scope = bot's own user ID |
 | content | TEXT | primary content |
-| short_description | TEXT | journal summary |
-| long_description | TEXT | journal detail |
+| short_description | TEXT | summary (both scopes) |
+| long_description | TEXT | detail (both scopes) |
 | source_message_id | TEXT | originating message ref |
 | created_at | INTEGER | epoch ms |
 | updated_at | INTEGER | epoch ms |
-| expires_at | INTEGER | nullable; 180d default, null for journal |
+| expires_at | INTEGER | nullable; 180d default for all scopes |
 
 **Indexes:** `(scope, guild_id, user_id)`, `(expires_at) WHERE expires_at IS NOT NULL`
 

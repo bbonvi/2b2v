@@ -69,39 +69,41 @@ describe("memories table", () => {
         `INSERT INTO memories (id, scope, guild_id, user_id, content, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("j-1", "journal", null, null, "", "Follow up on Alice's project", "Alice mentioned she's working on a Rust compiler. Check in next week.", null, now, now, null);
+      .run("j-1", "journal", "guild-1", "user-1", "", "Follow up on Alice's project", "Alice mentioned she's working on a Rust compiler. Check in next week.", null, now, now, null);
 
     const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get("j-1") as Record<string, unknown>;
     expect(row.scope).toBe("journal");
     expect(row.short_description).toBe("Follow up on Alice's project");
     expect(row.long_description).toContain("Rust compiler");
-    expect(row.guild_id).toBeNull();
+    expect(row.guild_id).toBe("guild-1");
+    expect(row.user_id).toBe("user-1");
     expect(row.expires_at).toBeNull();
   });
 
-  test("inserts guild_bot and global_bot scoped memories", () => {
+  test("rejects guild_bot scope due to CHECK constraint", () => {
     const now = Date.now();
-    db.raw
-      .prepare(
-        `INSERT INTO memories (id, scope, guild_id, user_id, content, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run("gb-1", "guild_bot", "guild-1", null, "Movie night is every Friday", null, null, null, now, now, null);
+    const insert = () =>
+      db.raw
+        .prepare(
+          `INSERT INTO memories (id, scope, guild_id, user_id, content, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run("gb-1", "guild_bot", "guild-1", null, "Movie night is every Friday", null, null, null, now, now, null);
 
-    db.raw
-      .prepare(
-        `INSERT INTO memories (id, scope, guild_id, user_id, content, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run("glb-1", "global_bot", null, null, "Users generally prefer concise answers", null, null, null, now, now, null);
+    expect(insert).toThrow();
+  });
 
-    const guild = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get("gb-1") as Record<string, unknown>;
-    expect(guild.scope).toBe("guild_bot");
-    expect(guild.guild_id).toBe("guild-1");
+  test("rejects global_bot scope due to CHECK constraint", () => {
+    const now = Date.now();
+    const insert = () =>
+      db.raw
+        .prepare(
+          `INSERT INTO memories (id, scope, guild_id, user_id, content, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run("glb-1", "global_bot", null, null, "Users generally prefer concise answers", null, null, null, now, now, null);
 
-    const global = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get("glb-1") as Record<string, unknown>;
-    expect(global.scope).toBe("global_bot");
-    expect(global.guild_id).toBeNull();
+    expect(insert).toThrow();
   });
 
   test("enforces unique id constraint", () => {
