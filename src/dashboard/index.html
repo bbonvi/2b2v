@@ -123,7 +123,6 @@
     background: var(--surface);
     border: 1px solid var(--border);
     margin-bottom: 2px;
-    cursor: pointer;
     transition: border-color .1s;
   }
   .entry:hover { border-color: var(--border-active) }
@@ -136,6 +135,7 @@
     gap: .75rem;
     padding: .5rem .75rem;
     font-size: .72rem;
+    cursor: pointer;
   }
   .entry-time {
     color: var(--text-dim);
@@ -250,6 +250,49 @@
     font-size: .75rem;
   }
 
+  .btn-sm { font-size: .6rem; padding: .15rem .4rem; }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,.7);
+    display: flex; align-items: center; justify-content: center;
+    padding: 2rem;
+  }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    width: 100%; max-width: 900px;
+    max-height: 90vh;
+    display: flex; flex-direction: column;
+  }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: .5rem .75rem;
+    border-bottom: 1px solid var(--border);
+    font-size: .7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--text-dim);
+    font-family: var(--sans);
+  }
+  .modal-close {
+    background: none; border: none; color: var(--text-dim);
+    font-size: 1.2rem; cursor: pointer; padding: 0 .25rem;
+  }
+  .modal-close:hover { color: var(--text-bright); }
+  .modal-body {
+    flex: 1; overflow: auto;
+    padding: .75rem;
+    font-size: .65rem;
+    line-height: 1.6;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+  }
+
   /* Scrollbar */
   ::-webkit-scrollbar { width: 6px }
   ::-webkit-scrollbar-track { background: var(--bg) }
@@ -276,6 +319,16 @@
 <div class="content">
   <div class="log-count" id="log-count"></div>
   <div id="log-list"></div>
+</div>
+
+<div class="modal-overlay" id="modal-overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">LLM Request Payload</span>
+      <button class="modal-close" id="modal-close">&times;</button>
+    </div>
+    <pre class="modal-body" id="modal-body"></pre>
+  </div>
 </div>
 
 <script>
@@ -376,12 +429,13 @@
         + '<td>' + esc(l.stopReason) + '</td>'
         + '<td>' + esc(l.contentTypes.join(', ')) + '</td>'
         + '<td class="tool-result">' + (l.outputText != null ? esc(l.outputText) : '<span style="color:var(--text-dim);font-style:italic">no text output</span>') + '</td>'
+        + '<td>' + (l.requestPayload != null ? '<button class="btn btn-sm" onclick="event.stopPropagation(); window.__showPayload(' + esc(JSON.stringify(JSON.stringify(l.requestPayload))) + ')">payload</button>' : '-') + '</td>'
         + '</tr>';
     }
 
     const rid = esc(e.requestId);
-    return '<div class="' + cls.join(' ') + '" data-rid="' + rid + '" onclick="window.__toggleExpand(\'' + rid + '\')">'
-      + '<div class="entry-header">'
+    return '<div class="' + cls.join(' ') + '" data-rid="' + rid + '">'
+      + '<div class="entry-header" onclick="window.__toggleExpand(\'' + rid + '\')">'
         + '<span class="entry-time">' + fmtTime(e.timestamp) + '</span>'
         + '<span class="entry-user">' + esc(e.authorUsername) + '</span>'
         + '<span class="entry-trigger">' + esc(fmtTrigger(e.trigger)) + '</span>'
@@ -399,7 +453,7 @@
           + '<table class="detail-table"><tr><th>Tool</th><th>Args</th><th>Duration</th><th>Status</th><th>Result</th></tr>'
           + toolRows + '</table></div>' : '')
         + (e.llmCalls.length > 0 ? '<div class="detail-section"><div class="detail-label">LLM Calls</div>'
-          + '<table class="detail-table"><tr><th>Model</th><th>Tokens (in/out)</th><th>Cost</th><th>Stop</th><th>Content Types</th><th>Output</th></tr>'
+          + '<table class="detail-table"><tr><th>Model</th><th>Tokens (in/out)</th><th>Cost</th><th>Stop</th><th>Content Types</th><th>Output</th><th>Payload</th></tr>'
           + llmRows + '</table></div>' : '')
       + '</div>'
     + '</div>';
@@ -479,6 +533,29 @@
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) stopPolling(); else { lastLogHash = ''; startPolling(); }
+  });
+
+  // Modal for LLM request payloads
+  const modalOverlay = document.getElementById('modal-overlay');
+  const modalBody = document.getElementById('modal-body');
+  const modalClose = document.getElementById('modal-close');
+
+  window.__showPayload = function(payloadJson) {
+    try {
+      const parsed = JSON.parse(payloadJson);
+      modalBody.textContent = JSON.stringify(parsed, null, 2);
+    } catch(_) {
+      modalBody.textContent = payloadJson;
+    }
+    modalOverlay.style.display = 'flex';
+  };
+
+  modalClose.addEventListener('click', function() { modalOverlay.style.display = 'none'; });
+  modalOverlay.addEventListener('click', function(e) {
+    if (e.target === modalOverlay) modalOverlay.style.display = 'none';
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') modalOverlay.style.display = 'none';
   });
 
   fetchFilters();

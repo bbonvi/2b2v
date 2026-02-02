@@ -336,6 +336,54 @@ describe("RequestLog", () => {
     expect(entry.error).toBe("something broke");
   });
 
+  test("recordLLMRequest attaches payload to next LLM completion", () => {
+    const rl = new RequestLog("g1", "c1");
+    const payload = { model: "test", messages: [{ role: "user", content: "hi" }], tools: [] };
+    rl.recordLLMRequest(payload);
+    rl.recordLLMCompletion({
+      role: "assistant",
+      model: "test-model",
+      content: [{ type: "text", text: "hello" }],
+      usage: { input: 10, output: 5, totalTokens: 15 },
+      stopReason: "stop",
+    });
+
+    const entry = rl.toEntry();
+    expect(entry.llmCalls[0]?.requestPayload).toEqual(payload);
+  });
+
+  test("requestPayload resets after consumption", () => {
+    const rl = new RequestLog("g1", "c1");
+    rl.recordLLMRequest({ msg: "first" });
+    rl.recordLLMCompletion({
+      role: "assistant", model: "m", content: [],
+      usage: { input: 1, output: 1, totalTokens: 2 }, stopReason: "stop",
+    });
+    rl.recordLLMCompletion({
+      role: "assistant", model: "m", content: [],
+      usage: { input: 1, output: 1, totalTokens: 2 }, stopReason: "stop",
+    });
+
+    const entry = rl.toEntry();
+    expect(entry.llmCalls[0]?.requestPayload).toEqual({ msg: "first" });
+    expect(entry.llmCalls[1]?.requestPayload).toBeUndefined();
+  });
+
+  test("emit excludes requestPayload from console log", () => {
+    const logger = createLogger({ level: "info" });
+    const rl = new RequestLog("g1", "c1");
+    rl.recordLLMRequest({ huge: "payload data" });
+    rl.recordLLMCompletion({
+      role: "assistant", model: "m", content: [{ type: "text", text: "hi" }],
+      usage: { input: 10, output: 5, totalTokens: 15 }, stopReason: "stop",
+    });
+    rl.emit(logger);
+
+    const logOutput = lastLog();
+    const llmCalls = logOutput.llmCalls as Array<Record<string, unknown>>;
+    expect(llmCalls[0]?.requestPayload).toBeUndefined();
+  });
+
   test("tool error marked with isError", () => {
     const logger = createLogger({ level: "info" });
     const rl = new RequestLog("g1", "c1");

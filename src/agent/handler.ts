@@ -1,5 +1,6 @@
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { Message, Model } from "@mariozechner/pi-ai";
+import { streamSimple } from "@mariozechner/pi-ai";
 import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
 import { assembleSystemPrompt, type PromptContext } from "./prompt.ts";
@@ -107,6 +108,17 @@ export async function handleMessage(
   const tools: AgentTool[] = [sendTool, ...(deps.extraTools ?? [])];
   patchToolLookup(tools);
 
+  const reqLog = deps.requestLog;
+  const wrappedStreamFn: typeof streamSimple = (model_, context, options) => {
+    return streamSimple(model_, context, {
+      ...options,
+      ...streamOptions,
+      onPayload: (payload: unknown) => {
+        reqLog?.recordLLMRequest(payload);
+      },
+    });
+  };
+
   const agent = new Agent({
     initialState: {
       systemPrompt,
@@ -116,11 +128,9 @@ export async function handleMessage(
       messages: [],
     },
     convertToLlm: defaultConvertToLlm,
+    streamFn: wrappedStreamFn,
   });
 
-  // Set stream options (apiKey etc.)
-  // The Agent uses streamSimple under the hood which needs these
-  // We pass apiKey via getApiKey callback
   agent.getApiKey = () => streamOptions.apiKey;
 
   if (deps.log !== undefined) {

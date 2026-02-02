@@ -97,6 +97,7 @@ export interface RequestLLMCall {
   stopReason: string;
   contentTypes: string[];
   outputText?: string;
+  requestPayload?: unknown;
 }
 
 /** Recursively truncate string values in an object to `maxLen` characters. */
@@ -134,6 +135,7 @@ export class RequestLog {
   private tools: RequestToolCall[] = [];
   private llmCalls: RequestLLMCall[] = [];
   private pendingTools = new Map<string, { tool: string; args: Record<string, unknown>; startTime: number }>();
+  private pendingPayload: unknown = null;
 
   constructor(guildId: string, channelId: string) {
     this.requestId = randomUUID();
@@ -194,6 +196,10 @@ export class RequestLog {
     });
   }
 
+  recordLLMRequest(payload: unknown): void {
+    this.pendingPayload = payload;
+  }
+
   recordLLMCompletion(message: Record<string, unknown>): void {
     if (message.role !== "assistant" || message.usage === undefined) return;
     const usage = message.usage as Record<string, unknown>;
@@ -223,7 +229,9 @@ export class RequestLog {
       stopReason: typeof message.stopReason === "string" ? message.stopReason : "unknown",
       contentTypes,
       outputText: outputText.length > 0 ? outputText : undefined,
+      requestPayload: this.pendingPayload ?? undefined,
     });
+    this.pendingPayload = null;
   }
 
   toEntry(): RequestLogEntry {
@@ -262,6 +270,7 @@ export class RequestLog {
       llmCalls: entry.llmCalls.map((l) => ({
         ...l,
         outputText: truncStr(l.outputText, 300),
+        requestPayload: undefined,
       })),
     };
     logger.info("request_completed", logEntry as unknown as Record<string, unknown>);
