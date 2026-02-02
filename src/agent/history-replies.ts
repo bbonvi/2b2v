@@ -8,6 +8,13 @@ export interface ResolveRepliesInput {
   latestUserMessage: HistoryMessage | null;
   replyQuoteChars: number;
   captioningEnabled: boolean;
+  /**
+   * Optional map of message ID → normalized-but-untrimmed content.
+   * When provided, quotes are derived from this map instead of message.content.
+   * Per spec: "Reply quotes MUST be derived from the normalized original content
+   * before messageCharLimit trimming is applied."
+   */
+  normalizedContentMap?: Map<string, string>;
 }
 
 export interface ResolveRepliesResult {
@@ -62,6 +69,7 @@ function buildReplyContext(
   immediatelyPreviousId: string | null,
   replyQuoteChars: number,
   captioningEnabled: boolean,
+  normalizedContentMap: Map<string, string> | undefined,
 ): ReplyContext | null {
   if (message.replyToId === null) return null;
 
@@ -84,7 +92,8 @@ function buildReplyContext(
   if (!isOlderSlice) {
     const isImmediatePrevious = immediatelyPreviousId === message.replyToId;
     if (!isImmediatePrevious) {
-      const normalized = normalizeForQuote(target.content);
+      const raw = normalizedContentMap?.get(target.id) ?? target.content;
+      const normalized = normalizeForQuote(raw);
       quote = truncateQuote(normalized, replyQuoteChars);
     }
   }
@@ -110,12 +119,12 @@ function buildReplyContext(
  * - Quotes: derived from normalized content, truncated to replyQuoteChars.
  */
 export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult {
-  const { older, newer, latestUserMessage, replyQuoteChars, captioningEnabled } = input;
+  const { older, newer, latestUserMessage, replyQuoteChars, captioningEnabled, normalizedContentMap } = input;
   const lookup = buildLookup(older, newer, latestUserMessage);
 
   const olderMap = new Map<string, ReplyContext>();
   for (const m of older) {
-    const ctx = buildReplyContext(m, lookup, true, null, replyQuoteChars, captioningEnabled);
+    const ctx = buildReplyContext(m, lookup, true, null, replyQuoteChars, captioningEnabled, normalizedContentMap);
     if (ctx !== null) olderMap.set(m.id, ctx);
   }
 
@@ -125,7 +134,7 @@ export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult
     if (m === undefined) continue;
     const prev = i > 0 ? newer[i - 1] : undefined;
     const prevId = prev !== undefined ? prev.id : null;
-    const ctx = buildReplyContext(m, lookup, false, prevId, replyQuoteChars, captioningEnabled);
+    const ctx = buildReplyContext(m, lookup, false, prevId, replyQuoteChars, captioningEnabled, normalizedContentMap);
     if (ctx !== null) newerMap.set(m.id, ctx);
   }
 
@@ -140,6 +149,7 @@ export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult
       prevId,
       replyQuoteChars,
       captioningEnabled,
+      normalizedContentMap,
     );
   }
 

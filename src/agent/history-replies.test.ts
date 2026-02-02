@@ -288,6 +288,41 @@ describe("resolveReplies", () => {
     expect(result.newer.get("100")?.quote).toBe("self-reply");
   });
 
+  // --- normalizedContentMap: pre-trimmed content for quotes ---
+
+  test("normalizedContentMap overrides target content for quote extraction", () => {
+    // Simulate: m1 has been trimmed in the slice, but original content is in the map
+    const m1 = msg({ id: "100", author: "alice", content: "trimmed… [trimmed 50 chars; MsgID: 100]" });
+    const m2 = msg({ id: "101", author: "carol", content: "filler" });
+    const m3 = msg({ id: "102", author: "bob", replyToId: "100", content: "reply" });
+    const contentMap = new Map([["100", "the original full content before trimming"]]);
+    const result = resolveReplies({
+      older: [],
+      newer: [m1, m2, m3],
+      latestUserMessage: null,
+      replyQuoteChars: 50,
+      captioningEnabled: false,
+      normalizedContentMap: contentMap,
+    });
+    expect(result.newer.get("102")?.quote).toBe("the original full content before trimming");
+  });
+
+  test("normalizedContentMap falls back to target.content when ID not in map", () => {
+    const m1 = msg({ id: "100", author: "alice", content: "fallback content" });
+    const m2 = msg({ id: "101", author: "carol", content: "filler" });
+    const m3 = msg({ id: "102", author: "bob", replyToId: "100", content: "reply" });
+    const contentMap = new Map<string, string>(); // empty map
+    const result = resolveReplies({
+      older: [],
+      newer: [m1, m2, m3],
+      latestUserMessage: null,
+      replyQuoteChars: 50,
+      captioningEnabled: false,
+      normalizedContentMap: contentMap,
+    });
+    expect(result.newer.get("102")?.quote).toBe("fallback content");
+  });
+
   // --- Whitespace normalization in quotes ---
 
   test("quote content is whitespace-normalized", () => {
