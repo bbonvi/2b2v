@@ -550,10 +550,29 @@
   const modalBody = document.getElementById('modal-body');
   const modalClose = document.getElementById('modal-close');
 
+  // Format payload for display: pretty-print content strings, truncate base64 images
+  function formatPayload(obj) {
+    return JSON.stringify(obj, function(key, value) {
+      // Truncate base64 image data
+      if (key === 'data' && typeof value === 'string' && value.length > 200) {
+        var preview = value.substring(0, 80);
+        return '[base64 ' + Math.round(value.length / 1024) + 'KB] ' + preview + '…';
+      }
+      return value;
+    }, 2)
+    // After JSON.stringify, unescape \n inside "content": "..." string values
+    // so they render as actual newlines in the <pre> block
+    .replace(/"content": "((?:[^"\\]|\\.)*)"/g, function(match, inner) {
+      if (inner.indexOf('\\n') === -1) return match;
+      var unescaped = inner.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+      return '"content": "' + unescaped + '"';
+    });
+  }
+
   window.__showPayload = function(key) {
     const payload = payloadStore.get(key);
     if (payload == null) return;
-    modalBody.textContent = JSON.stringify(payload, null, 2);
+    modalBody.textContent = formatPayload(payload);
     modalOverlay.style.display = 'flex';
   };
 
