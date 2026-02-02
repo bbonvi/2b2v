@@ -651,6 +651,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
     let typingTimer: ReturnType<typeof setInterval> | null = null;
     const fireTyping = (): void => { void channelObj.sendTyping().catch(() => {}); };
     const startTyping = (): void => {
+      if (typingTimer !== null) { clearInterval(typingTimer); }
       fireTyping();
       typingTimer = setInterval(fireTyping, TYPING_INTERVAL_MS);
     };
