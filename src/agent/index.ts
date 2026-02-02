@@ -49,4 +49,6 @@ export { createChannelHistoryTool, type ChannelHistoryToolDeps, type ChannelMess
 
 export { createBraveSearchTool, type BraveSearchToolDeps, type BraveSearchResult } from "./brave-search-tool.ts";
 
+export { createReadImagesTool, type ReadImagesToolDeps } from "./read-images-tool.ts";
+
 export { fetchMissingReplyTargets, type ReplyFallbackDeps, type FetchedDiscordMessage } from "./reply-target-fallback.ts";

@@ -25,6 +25,8 @@ import { createScheduleTool } from "./agent/schedule-tool";
 import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool";
 import { createChannelHistoryTool, type ChannelMessage } from "./agent/channel-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
+import { createReadImagesTool } from "./agent/read-images-tool";
+import { getImageById } from "./db/image-repository";
 import { processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
 import { listMemories, deleteExpiredMemories } from "./db/memory-repository";
 import { listUpcomingForContext, createSchedule, deleteSchedule, listSchedules } from "./db/schedule-repository";
@@ -507,7 +509,19 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
     },
   });
 
-  const tools = [...memoryTools, searchTool, scheduleTool, memberListTool, channelHistoryTool];
+  const readImagesTool = createReadImagesTool({
+    imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
+    getImageById: (id: number) => getImageById(db, id),
+    readFile: (path: string) => {
+      try {
+        return Buffer.from(readFileSync(path));
+      } catch {
+        return null;
+      }
+    },
+  });
+
+  const tools = [...memoryTools, searchTool, scheduleTool, memberListTool, channelHistoryTool, readImagesTool];
 
   // Brave search if API key configured
   if (globalConfig.braveApiKey !== undefined && globalConfig.braveApiKey !== "") {
