@@ -10,6 +10,7 @@ services:
       DATA_DIR: /app/data
       MODEL_CACHE_DIR: /app/model-cache
       LOG_LEVEL: debug
+      UNSAFELY_BYPASS_DASHBOARD_AUTH: "true"
     volumes:
       - ./src:/app/src
       - ./config:/app/config

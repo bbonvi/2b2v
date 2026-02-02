@@ -5,6 +5,7 @@ import dashboard from "./index.html";
 interface DashboardOptions {
   port: number;
   password: string;
+  bypassAuth?: boolean;
   log?: Logger;
 }
 
@@ -34,7 +35,13 @@ function json(data: unknown, status = 200, headers: Record<string, string> = {})
 }
 
 export function startDashboard(opts: DashboardOptions): void {
-  const { port, password, log } = opts;
+  const { port, password, bypassAuth = false, log } = opts;
+
+  function requireAuth(req: Request): Response | null {
+    if (bypassAuth) return null;
+    if (!isAuthenticated(req)) return json({ error: "Unauthorized" }, 401);
+    return null;
+  }
 
   Bun.serve({
     port,
@@ -60,7 +67,8 @@ export function startDashboard(opts: DashboardOptions): void {
       },
 
       "/api/logs": (req) => {
-        if (!isAuthenticated(req)) return json({ error: "Unauthorized" }, 401);
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
         const url = new URL(req.url);
         const filters: { guildId?: string; channelId?: string; authorUsername?: string } = {};
         const guildId = url.searchParams.get("guildId");
@@ -73,18 +81,20 @@ export function startDashboard(opts: DashboardOptions): void {
       },
 
       "/api/filters": (req) => {
-        if (!isAuthenticated(req)) return json({ error: "Unauthorized" }, 401);
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
         return json(requestLogStore.getFilterOptions());
       },
 
       "/api/status": (req) => {
-        if (!isAuthenticated(req)) return json({ error: "Unauthorized" }, 401);
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
         return json({ activeRequests: requestLogStore.getActiveCount() });
       },
 
       "/": {
         GET: (req) => {
-          if (!isAuthenticated(req)) {
+          if (!bypassAuth && !isAuthenticated(req)) {
             return Response.redirect("/login", 302);
           }
           return new Response(Bun.file(dashboard.index).stream(), {

@@ -697,7 +697,11 @@ log.info("health check passed — all systems ready", {
 
 // --- Start dashboard ---
 const dashboardPassword = process.env.DASHBOARD_PASSWORD;
-if (dashboardPassword !== undefined && dashboardPassword !== "") {
+const bypassDashboardAuth = process.env.UNSAFELY_BYPASS_DASHBOARD_AUTH === "true";
+if (bypassDashboardAuth) {
+  startDashboard({ port: 3000, password: "", bypassAuth: true, log });
+  log.warn("dashboard started with auth bypass — do not use in production");
+} else if (dashboardPassword !== undefined && dashboardPassword !== "") {
   startDashboard({ port: 3000, password: dashboardPassword, log });
 } else {
   log.info("dashboard disabled (DASHBOARD_PASSWORD not set)");
