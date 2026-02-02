@@ -206,3 +206,75 @@ describe("createSearchTool attachment support", () => {
     expect(text).not.toContain("📎");
   });
 });
+
+describe("search mode: literal", () => {
+  test("finds keyword match without Qdrant", async () => {
+    insertMessage("m1", "the quick brown fox");
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", embed: pipeline });
+    const result = await tool.execute("tc1", { query: "quick brown", mode: "literal" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+    expect(text).toContain("the quick brown fox");
+    expect(result.details.count).toBe(1);
+  });
+
+  test("respects filters in literal mode", async () => {
+    insertMessage("m1", "topic here", { userId: "u1" });
+    insertMessage("m2", "topic here", { userId: "u2" });
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", embed: pipeline });
+    const result = await tool.execute("tc1", { query: "topic", mode: "literal", userId: "u1" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+    expect(text).toContain("topic here");
+    expect(result.details.count).toBe(1);
+  });
+
+  test("returns no-match message for literal mode", async () => {
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", embed: pipeline });
+    const result = await tool.execute("tc1", { query: "nonexistent", mode: "literal" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+    expect(text).toContain("No messages found");
+  });
+});
+
+describe("search mode: id", () => {
+  test("returns single message by ID", async () => {
+    insertMessage("m1", "target content");
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", embed: pipeline });
+    const result = await tool.execute("tc1", { query: "m1", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+    expect(text).toContain("target content");
+    expect(result.details.count).toBe(1);
+  });
+
+  test("returns not found for missing ID", async () => {
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", embed: pipeline });
+    const result = await tool.execute("tc1", { query: "missing", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+    expect(text).toContain("not found");
+  });
+
+  test("enforces guild isolation for ID lookup", async () => {
+    insertMessage("m1", "secret content", { guildId: "g2" });
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", embed: pipeline });
+    const result = await tool.execute("tc1", { query: "m1", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+    expect(text).toContain("not found");
+  });
+});
+
+describe("search mode: default", () => {
+  test("omitted mode defaults to semantic search", async () => {
+    await insertWithEmbedding("m1", "cats playing with yarn");
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", embed: pipeline });
+    const result = await tool.execute("tc1", { query: "cats playing" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+    expect(text).toContain("cats playing with yarn");
+  });
+
+  test("explicit semantic mode works same as default", async () => {
+    await insertWithEmbedding("m1", "dogs running in park");
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", embed: pipeline });
+    const result = await tool.execute("tc1", { query: "dogs running", mode: "semantic" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+    expect(text).toContain("dogs running in park");
+  });
+});

@@ -54,11 +54,17 @@ Despite those constraints, keep yourself in-character and reply how a character 
 ## Available Tools
 - \`send_message\` — Send a message to the current channel (REQUIRED for any response). Set \`reply: true\` to reply to the trigger.
 - \`save_memory\` / \`delete_memory\` / \`list_memories\` — Persist information across conversations
-- \`search_messages\` — Semantic search over past messages in this server
+- \`search_messages\` — Search past messages. Modes: \`semantic\` (default, AI similarity), \`literal\` (case-insensitive keyword/phrase), \`id\` (direct message lookup)
 - \`schedule_message\` — Schedule a message to be sent later
 - \`list_members\` — List server members (online/all)
 - \`channel_history\` — Read recent messages from a channel
-- \`web_search\` — Search the web via Brave Search (if available). Only call once or twice.`;
+- \`web_search\` — Search the web via Brave Search (if available). Only call once or twice.
+
+
+Once again, remember to call \`send_message\` to actually reply to user request or a message
+
+CRITICAL: you can only communicate with user through the use of \`send_message\`. Your inline generated text is for your reasoning only!
+`;
 
 export function assembleSystemPrompt(ctx: PromptContext): string {
   const sections: string[] = [ctx.persona, TOOL_INSTRUCTIONS];

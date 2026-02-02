@@ -89,3 +89,107 @@ export async function searchMessages(
 
   return results;
 }
+
+/**
+ * Direct message lookup by ID within a guild.
+ * No Qdrant or embedding needed — pure SQLite.
+ */
+export function getMessageById(
+  db: Database,
+  messageId: string,
+  guildId: string,
+): MessageSearchResult | null {
+  const row = db.raw
+    .prepare(
+      `SELECT id, channel_id, user_id, author_username, translated_content, created_at
+       FROM messages
+       WHERE id = ? AND guild_id = ?`
+    )
+    .get(messageId, guildId) as {
+      id: string;
+      channel_id: string;
+      user_id: string;
+      author_username: string;
+      translated_content: string;
+      created_at: number;
+    } | null;
+
+  if (row === null) return null;
+
+  return {
+    id: row.id,
+    channelId: row.channel_id,
+    userId: row.user_id,
+    authorUsername: row.author_username,
+    translatedContent: row.translated_content,
+    createdAt: row.created_at,
+    score: 1.0,
+  };
+}
+
+/**
+ * Literal keyword/phrase search over messages using SQLite LIKE.
+ * Case-insensitive substring match. No Qdrant or embedding needed.
+ * Results ordered by created_at ASC (chronological reading order).
+ */
+export function searchMessagesLiteral(
+  db: Database,
+  query: string,
+  filter: MessageSearchFilter,
+): MessageSearchResult[] {
+  // Escape LIKE special characters, then wrap in % for substring match
+  const escaped = query
+    .replace(/\\/g, "\\\\")
+    .replace(/%/g, "\\%")
+    .replace(/_/g, "\\_");
+  const pattern = `%${escaped}%`;
+
+  const conditions: string[] = ["guild_id = ?"];
+  const params: (string | number)[] = [filter.guildId];
+
+  conditions.push("translated_content LIKE ? ESCAPE '\\'");
+  params.push(pattern);
+
+  if (filter.channelId !== undefined) {
+    conditions.push("channel_id = ?");
+    params.push(filter.channelId);
+  }
+  if (filter.userId !== undefined) {
+    conditions.push("user_id = ?");
+    params.push(filter.userId);
+  }
+  if (filter.after !== undefined) {
+    conditions.push("created_at > ?");
+    params.push(filter.after);
+  }
+  if (filter.before !== undefined) {
+    conditions.push("created_at < ?");
+    params.push(filter.before);
+  }
+
+  const sql = `SELECT id, channel_id, user_id, author_username, translated_content, created_at
+    FROM messages
+    WHERE ${conditions.join(" AND ")}
+    ORDER BY created_at ASC
+    LIMIT ?`;
+  params.push(filter.limit);
+
+  const rows = db.raw.prepare(sql).all(...params) as Array<{
+    id: string;
+    channel_id: string;
+    user_id: string;
+    author_username: string;
+    translated_content: string;
+    created_at: number;
+  }>;
+
+  return rows.map((row) => ({
+    id: row.id,
+    channelId: row.channel_id,
+    userId: row.user_id,
+    authorUsername: row.author_username,
+    translatedContent: row.translated_content,
+    createdAt: row.created_at,
+    score: 1.0,
+  }));
+}

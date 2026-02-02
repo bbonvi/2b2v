@@ -3,7 +3,7 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "./database";
 import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
-import { searchMessages } from "./message-repository";
+import { searchMessages, getMessageById, searchMessagesLiteral } from "./message-repository";
 import { createMockPipeline } from "../embeddings/test-utils";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
@@ -249,6 +249,138 @@ describe("searchMessages", () => {
       limit: 10,
     });
 
+    expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
+    expect(results[0].id).toBe("target");
+  });
+});
+
+describe("getMessageById", () => {
+  test("returns message when found in guild", () => {
+    insertMessage("m1", { guildId: "g1", channelId: "c1", userId: "u1", authorUsername: "alice", translatedContent: "hello world", createdAt: now });
+    const result = getMessageById(db, "m1", "g1");
+    if (result === null) throw new Error("unreachable");
+    expect(result.id).toBe("m1");
+    expect(result.channelId).toBe("c1");
+    expect(result.userId).toBe("u1");
+    expect(result.authorUsername).toBe("alice");
+    expect(result.translatedContent).toBe("hello world");
+    expect(result.createdAt).toBe(now);
+    expect(result.score).toBe(1.0);
+  });
+
+  test("returns null for wrong guild", () => {
+    insertMessage("m1", { guildId: "g1" });
+    const result = getMessageById(db, "m1", "g2");
+    expect(result).toBeNull();
+  });
+
+  test("returns null for missing ID", () => {
+    const result = getMessageById(db, "nonexistent", "g1");
+    expect(result).toBeNull();
+  });
+});
+
+describe("searchMessagesLiteral", () => {
+  test("finds exact match", () => {
+    insertMessage("m1", { guildId: "g1", translatedContent: "hello world" });
+    const results = searchMessagesLiteral(db, "hello world", { guildId: "g1", limit: 10 });
+    expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
+    expect(results[0].id).toBe("m1");
+    expect(results[0].score).toBe(1.0);
+  });
+
+  test("finds substring match", () => {
+    insertMessage("m1", { guildId: "g1", translatedContent: "I love cats and dogs" });
+    const results = searchMessagesLiteral(db, "cats", { guildId: "g1", limit: 10 });
+    expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
+    expect(results[0].id).toBe("m1");
+  });
+
+  test("case-insensitive matching", () => {
+    insertMessage("m1", { guildId: "g1", translatedContent: "Hello World" });
+    const results = searchMessagesLiteral(db, "hello world", { guildId: "g1", limit: 10 });
+    expect(results.length).toBe(1);
+  });
+
+  test("guild isolation", () => {
+    insertMessage("m1", { guildId: "g1", translatedContent: "secret data" });
+    insertMessage("m2", { guildId: "g2", translatedContent: "secret data" });
+    const results = searchMessagesLiteral(db, "secret", { guildId: "g1", limit: 10 });
+    expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
+    expect(results[0].id).toBe("m1");
+  });
+
+  test("filters by userId", () => {
+    insertMessage("m1", { guildId: "g1", userId: "u1", translatedContent: "topic A" });
+    insertMessage("m2", { guildId: "g1", userId: "u2", translatedContent: "topic A" });
+    const results = searchMessagesLiteral(db, "topic", { guildId: "g1", userId: "u1", limit: 10 });
+    expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
+    expect(results[0].id).toBe("m1");
+  });
+
+  test("filters by channelId", () => {
+    insertMessage("m1", { guildId: "g1", channelId: "c1", translatedContent: "topic B" });
+    insertMessage("m2", { guildId: "g1", channelId: "c2", translatedContent: "topic B" });
+    const results = searchMessagesLiteral(db, "topic", { guildId: "g1", channelId: "c1", limit: 10 });
+    expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
+    expect(results[0].id).toBe("m1");
+  });
+
+  test("filters by time range", () => {
+    insertMessage("m1", { guildId: "g1", translatedContent: "old msg", createdAt: now - 10 * hour });
+    insertMessage("m2", { guildId: "g1", translatedContent: "new msg", createdAt: now - 1 * hour });
+    const results = searchMessagesLiteral(db, "msg", { guildId: "g1", after: now - 2 * hour, limit: 10 });
+    expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
+    expect(results[0].id).toBe("m2");
+  });
+
+  test("respects limit", () => {
+    insertMessage("m1", { guildId: "g1", translatedContent: "alpha one", createdAt: now - 3 * hour });
+    insertMessage("m2", { guildId: "g1", translatedContent: "alpha two", createdAt: now - 2 * hour });
+    insertMessage("m3", { guildId: "g1", translatedContent: "alpha three", createdAt: now - 1 * hour });
+    const results = searchMessagesLiteral(db, "alpha", { guildId: "g1", limit: 2 });
+    expect(results.length).toBe(2);
+  });
+
+  test("returns results in chronological order (oldest first)", () => {
+    insertMessage("m1", { guildId: "g1", translatedContent: "alpha first", createdAt: now - 3 * hour });
+    insertMessage("m2", { guildId: "g1", translatedContent: "alpha second", createdAt: now - 1 * hour });
+    insertMessage("m3", { guildId: "g1", translatedContent: "alpha third", createdAt: now - 2 * hour });
+    const results = searchMessagesLiteral(db, "alpha", { guildId: "g1", limit: 10 });
+    expect(results.map((r) => r.id)).toEqual(["m1", "m3", "m2"]);
+  });
+
+  test("escapes special LIKE characters % and _", () => {
+    insertMessage("m1", { guildId: "g1", translatedContent: "100% done" });
+    insertMessage("m2", { guildId: "g1", translatedContent: "100 done" });
+    const results = searchMessagesLiteral(db, "100%", { guildId: "g1", limit: 10 });
+    expect(results.length).toBe(1);
+    if (!results[0]) throw new Error("unreachable");
+    expect(results[0].id).toBe("m1");
+  });
+
+  test("returns empty array when no matches", () => {
+    const results = searchMessagesLiteral(db, "nonexistent", { guildId: "g1", limit: 10 });
+    expect(results).toEqual([]);
+  });
+
+  test("combines all filters", () => {
+    insertMessage("target", { guildId: "g1", userId: "u1", channelId: "c1", translatedContent: "findme", createdAt: now - 3 * hour });
+    insertMessage("wrong-guild", { guildId: "g2", userId: "u1", channelId: "c1", translatedContent: "findme", createdAt: now - 3 * hour });
+    insertMessage("wrong-user", { guildId: "g1", userId: "u2", channelId: "c1", translatedContent: "findme", createdAt: now - 3 * hour });
+    insertMessage("wrong-channel", { guildId: "g1", userId: "u1", channelId: "c2", translatedContent: "findme", createdAt: now - 3 * hour });
+    insertMessage("wrong-time", { guildId: "g1", userId: "u1", channelId: "c1", translatedContent: "findme", createdAt: now - 20 * hour });
+    const results = searchMessagesLiteral(db, "findme", {
+      guildId: "g1", userId: "u1", channelId: "c1",
+      after: now - 5 * hour, before: now - 1 * hour, limit: 10,
+    });
     expect(results.length).toBe(1);
     if (!results[0]) throw new Error("unreachable");
     expect(results[0].id).toBe("target");

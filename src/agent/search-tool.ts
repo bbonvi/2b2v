@@ -3,7 +3,7 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { QdrantClient } from "@qdrant/js-client-rest";
 import type { Database } from "../db/database";
 import type { EmbeddingPipeline } from "../embeddings/pipeline";
-import { searchMessages, type MessageSearchResult } from "../db/message-repository";
+import { searchMessages, getMessageById, searchMessagesLiteral, type MessageSearchResult } from "../db/message-repository";
 
 
 interface AttachmentInfo {
@@ -21,7 +21,12 @@ export interface SearchToolDeps {
 }
 
 const SearchParams = Type.Object({
-  query: Type.String({ description: "Semantic search query describing what you're looking for." }),
+  mode: Type.Optional(Type.Union([
+    Type.Literal("semantic"),
+    Type.Literal("literal"),
+    Type.Literal("id"),
+  ], { description: "Search mode. 'semantic' (default): AI similarity search. 'literal': exact keyword/phrase match (case-insensitive). 'id': direct message ID lookup." })),
+  query: Type.String({ description: "Search query, keyword/phrase, or message ID depending on mode." }),
   userId: Type.Optional(Type.String({ description: "Filter results to a specific user ID." })),
   channelId: Type.Optional(Type.String({ description: "Filter results to a specific channel ID." })),
   afterMs: Type.Optional(Type.Number({ description: "Only messages after this epoch ms timestamp." })),
@@ -40,10 +45,11 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
     name: "search_messages",
     label: "Search Messages",
     description:
-      "Search chat history semantically. Describe what you're looking for in natural language. Optionally filter by user, channel, or time range.",
+      "Search chat history. Modes: 'semantic' (default) — AI similarity search with natural language; 'literal' — case-insensitive keyword/phrase match; 'id' — direct message lookup by ID. Optionally filter by user, channel, or time range.",
     parameters: SearchParams,
     execute: async (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as {
+        mode?: "semantic" | "literal" | "id";
         query: string;
         userId?: string;
         channelId?: string;
@@ -51,32 +57,56 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         beforeMs?: number;
         limit?: number;
       };
+      const mode = p.mode ?? "semantic";
       const limit = Math.max(1, Math.min(p.limit ?? 10, 50));
 
-      let queryVec: Float32Array;
-      try {
-        const embedResult = await embed.embed([p.query]);
-        const vec = embedResult[0];
-        if (vec === undefined) {
+      let results: MessageSearchResult[];
+
+      if (mode === "id") {
+        const result = getMessageById(db, p.query, guildId);
+        if (result === null) {
+          return { content: [{ type: "text", text: "Message not found." }], details: undefined };
+        }
+        results = [result];
+      } else if (mode === "literal") {
+        try {
+          results = searchMessagesLiteral(db, p.query, {
+            guildId,
+            userId: p.userId,
+            channelId: p.channelId,
+            after: p.afterMs,
+            before: p.beforeMs,
+            limit,
+          });
+        } catch {
+          return { content: [{ type: "text", text: "Search is temporarily unavailable." }], details: undefined };
+        }
+      } else {
+        // semantic mode
+        let queryVec: Float32Array;
+        try {
+          const embedResult = await embed.embed([p.query]);
+          const vec = embedResult[0];
+          if (vec === undefined) {
+            return { content: [{ type: "text", text: "Failed to generate embedding for query." }], details: undefined };
+          }
+          queryVec = vec;
+        } catch {
           return { content: [{ type: "text", text: "Failed to generate embedding for query." }], details: undefined };
         }
-        queryVec = vec;
-      } catch {
-        return { content: [{ type: "text", text: "Failed to generate embedding for query." }], details: undefined };
-      }
 
-      let results: MessageSearchResult[];
-      try {
-        results = await searchMessages(db, qdrant, queryVec, {
-          guildId,
-          userId: p.userId,
-          channelId: p.channelId,
-          after: p.afterMs,
-          before: p.beforeMs,
-          limit,
-        });
-      } catch {
-        return { content: [{ type: "text", text: "Search is temporarily unavailable." }], details: undefined };
+        try {
+          results = await searchMessages(db, qdrant, queryVec, {
+            guildId,
+            userId: p.userId,
+            channelId: p.channelId,
+            after: p.afterMs,
+            before: p.beforeMs,
+            limit,
+          });
+        } catch {
+          return { content: [{ type: "text", text: "Search is temporarily unavailable." }], details: undefined };
+        }
       }
 
       if (results.length === 0) {
