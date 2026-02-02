@@ -131,7 +131,7 @@ The bot has access to these tools during conversations. The LLM decides when and
 
 | Tool | Description |
 |---|---|
-| `send_messages` | Send one or more messages to the channel (first as reply, rest as follow-ups) |
+| `send_message` | Send message to the channel |
 | `save_memory` | Create or update a scoped memory (user, guild, global, journal) |
 | `delete_memory` | Delete a memory by ID |
 | `list_memories` | List memories filtered by scope and optional user |
