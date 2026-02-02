@@ -38,8 +38,8 @@ export async function processImageBuffer(
 ): Promise<ProcessedImage> {
   let pipeline = sharp(buffer);
   const meta = await pipeline.metadata();
-  const w = meta.width ?? 0;
-  const h = meta.height ?? 0;
+  const w = meta.width;
+  const h = meta.height;
 
   const longest = Math.max(w, h);
   if (longest > maxDimension) {
@@ -60,8 +60,8 @@ export async function processImageBuffer(
   return {
     data: Buffer.from(outputBuffer),
     mime: "image/jpeg",
-    width: outputMeta.width ?? 0,
-    height: outputMeta.height ?? 0,
+    width: outputMeta.width,
+    height: outputMeta.height,
   };
 }
 

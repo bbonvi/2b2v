@@ -42,7 +42,7 @@ describe("processImageBuffer", () => {
     const meta = await sharp(result.data).metadata();
     expect(meta.format).toBe("jpeg");
     // Longest side should be <= 600
-    expect(Math.max(meta.width ?? 0, meta.height ?? 0)).toBeLessThanOrEqual(600);
+    expect(Math.max(meta.width, meta.height)).toBeLessThanOrEqual(600);
     expect(meta.width).toBe(600);
   });
 
@@ -99,9 +99,9 @@ describe("processAndStoreImage", () => {
 
   test("downloads, processes, writes to disk, and inserts DB record", async () => {
     const testBuffer = await createTestImage(800, 600);
-    const fakeFetch = async (_url: string) => ({
-      ok: true,
-      arrayBuffer: async () => testBuffer.buffer.slice(testBuffer.byteOffset, testBuffer.byteOffset + testBuffer.byteLength),
+    const fakeFetch = (_url: string) => Promise.resolve({
+      ok: true as const,
+      arrayBuffer: () => Promise.resolve(testBuffer.buffer.slice(testBuffer.byteOffset, testBuffer.byteOffset + testBuffer.byteLength)),
     });
 
     const deps: ImageIngestDeps = {
@@ -141,9 +141,9 @@ describe("processAndStoreImage", () => {
 
   test("creates directory structure if missing", async () => {
     const testBuffer = await createTestImage(200, 200);
-    const fakeFetch = async (_url: string) => ({
-      ok: true,
-      arrayBuffer: async () => testBuffer.buffer.slice(testBuffer.byteOffset, testBuffer.byteOffset + testBuffer.byteLength),
+    const fakeFetch = (_url: string) => Promise.resolve({
+      ok: true as const,
+      arrayBuffer: () => Promise.resolve(testBuffer.buffer.slice(testBuffer.byteOffset, testBuffer.byteOffset + testBuffer.byteLength)),
     });
 
     const freshDir = join(tmpdir(), `fresh-${randomUUID()}`);
@@ -167,11 +167,11 @@ describe("processAndStoreImage", () => {
     expect(existsSync(record.path)).toBe(true);
   });
 
-  test("throws on fetch failure", async () => {
-    const fakeFetch = async (_url: string) => ({
-      ok: false,
+  test("throws on fetch failure", () => {
+    const fakeFetch = (_url: string) => Promise.resolve({
+      ok: false as const,
       status: 404,
-      arrayBuffer: async () => new ArrayBuffer(0),
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
     });
 
     const deps: ImageIngestDeps = {
@@ -181,7 +181,7 @@ describe("processAndStoreImage", () => {
       fetchFn: fakeFetch as ImageIngestDeps["fetchFn"],
     };
 
-    await expect(
+    expect(
       processAndStoreImage(deps, {
         url: "https://example.com/missing.png",
         mimeType: "image/png",
@@ -194,9 +194,9 @@ describe("processAndStoreImage", () => {
 
   test("multiple images for same message get sequential IDs", async () => {
     const testBuffer = await createTestImage(100, 100);
-    const fakeFetch = async (_url: string) => ({
-      ok: true,
-      arrayBuffer: async () => testBuffer.buffer.slice(testBuffer.byteOffset, testBuffer.byteOffset + testBuffer.byteLength),
+    const fakeFetch = (_url: string) => Promise.resolve({
+      ok: true as const,
+      arrayBuffer: () => Promise.resolve(testBuffer.buffer.slice(testBuffer.byteOffset, testBuffer.byteOffset + testBuffer.byteLength)),
     });
 
     const deps: ImageIngestDeps = {

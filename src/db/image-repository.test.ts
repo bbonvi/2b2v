@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import { createDatabase, type Database } from "./database.ts";
-import { insertImage, getImagesByMessageId, getImageById, type ImageRecord } from "./image-repository.ts";
+import { insertImage, getImagesByMessageId, getImageById } from "./image-repository.ts";
 import { join } from "path";
 import { tmpdir } from "os";
 import { randomUUID } from "crypto";
