@@ -29,7 +29,7 @@ import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool"
 import { createChannelHistoryTool, type ChannelMessage } from "./agent/channel-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
 import { createReadImagesTool } from "./agent/read-images-tool";
-import { getImageById } from "./db/image-repository";
+import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
 import { listMemories, deleteExpiredMemories } from "./db/memory-repository";
 import { listUpcomingForContext, createSchedule, deleteSchedule, listSchedules } from "./db/schedule-repository";
@@ -588,19 +588,23 @@ client.on("messageCreate", (message: Message) => void (async () => {
       maxDimension: guildConfig.imageMaxDimension,
       fetchFn: fetch,
     };
+    const imageIngestPromises: Promise<void>[] = [];
     for (const attachment of message.attachments.values()) {
       const contentType = attachment.contentType ?? "";
       if (!contentType.startsWith("image/")) continue;
-      void processAndStoreImage(
-        ingestDeps,
-        { url: attachment.url, mimeType: contentType, messageId: message.id, guildId, channelId },
-      ).catch((err: unknown) => {
-        log.warn("image ingest failed", {
-          attachmentId: attachment.id,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
+      imageIngestPromises.push(
+        processAndStoreImage(
+          ingestDeps,
+          { url: attachment.url, mimeType: contentType, messageId: message.id, guildId, channelId },
+        ).then(() => undefined).catch((err: unknown) => {
+          log.warn("image ingest failed", {
+            attachmentId: attachment.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }),
+      );
     }
+    await Promise.allSettled(imageIngestPromises);
 
     // Build outbound resolvers for the sender
     const outboundResolvers = buildOutboundResolvers(guild);
@@ -665,6 +669,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
     };
 
     // Build latest user message as HistoryMessage for pipeline
+    const ingestedImages = getImagesByMessageId(db, message.id);
     const latestUserMessage: HistoryMessage = {
       id: message.id,
       author: message.author.username,
@@ -673,8 +678,8 @@ client.on("messageCreate", (message: Message) => void (async () => {
       isBot: false,
       timestamp: now,
       replyToId: message.reference?.messageId ?? null,
-      imageIds: [],
-      captions: [],
+      imageIds: ingestedImages.map((img) => img.id),
+      captions: ingestedImages.map((img) => img.caption).filter((c): c is string => c !== null),
       hasEmbeds: message.embeds.length > 0,
     };
 
