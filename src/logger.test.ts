@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach, afterEach, spyOn, type Mock } from "bun:test";
 import { createLogger, LOG_LEVELS, RequestLog, truncateArgs } from "./logger";
+import { requestLogStore } from "./dashboard/store";
 
 let stdoutSpy: Mock<typeof process.stdout.write>;
 let stderrSpy: Mock<typeof process.stderr.write>;
@@ -394,5 +395,26 @@ describe("RequestLog", () => {
     const entry = lastLog();
     const tools = entry.tools as Array<Record<string, unknown>>;
     expect(tools[0]?.isError).toBe(true);
+  });
+
+  test("emit does NOT push to requestLogStore when agentRan=false and no error", () => {
+    const logger = createLogger({ level: "info" });
+    const before = requestLogStore.query({}).length;
+    const rl = new RequestLog("g1", "c1");
+    rl.setAgentRan(false);
+    rl.emit(logger);
+
+    expect(requestLogStore.query({}).length).toBe(before);
+  });
+
+  test("emit DOES push to requestLogStore when agentRan=false but error is set", () => {
+    const logger = createLogger({ level: "info" });
+    const before = requestLogStore.query({}).length;
+    const rl = new RequestLog("g1", "c1");
+    rl.setAgentRan(false);
+    rl.setError("handler crashed");
+    rl.emit(logger);
+
+    expect(requestLogStore.query({}).length).toBe(before + 1);
   });
 });

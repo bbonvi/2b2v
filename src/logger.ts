@@ -255,7 +255,9 @@ export class RequestLog {
 
   emit(logger: Logger): void {
     const entry = this.toEntry();
-    requestLogStore.push(entry);
+    if (entry.agentRan || entry.error !== undefined) {
+      requestLogStore.push(entry);
+    }
 
     // Truncate args/results/outputText for the console log line only
     const truncStr = (s: string | undefined, max: number): string | undefined =>
