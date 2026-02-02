@@ -1,6 +1,6 @@
 # Architecture
 
-Agentic Discord bot (~15,700 lines TypeScript, 108 files) that embodies a character persona while providing useful responses. Per-guild isolation, long-lived memory, semantic search, scheduling, and multi-tool agent capabilities.
+Agentic Discord bot (~16,900 lines TypeScript, 111 files) that embodies a character persona while providing useful responses. Per-guild isolation, long-lived memory, semantic search, scheduling, and multi-tool agent capabilities.
 
 **Runtime:** Bun 1.3+ · **LLM:** OpenRouter (any model) · **Vectors:** Qdrant · **DB:** SQLite (WAL) · **Agent:** pi-agent-core
 
@@ -26,6 +26,7 @@ src/
 │   ├── history-formatting.ts   Line grammar formatting + OLDER_LEGEND constant
 │   ├── history-replies.ts      Reply metadata resolution (quotes, missing targets)
 │   ├── reply-target-fallback.ts Discord API fallback for missing reply targets
+│   ├── history-pipeline.ts     Pipeline orchestrator: wires all history modules into processHistory()
 │   ├── read-images-tool.ts     Agent tool: fetch stored images by ID (base64)
 │   ├── send-message-tool.ts    Agent tool: send a message to channel
 │   ├── memory-tools.ts         Agent tools: save/delete/list memories (3 tools)
@@ -405,8 +406,10 @@ Hybrid `croner` (cron with timezone) + `setTimeout` (one-off). Jobs registered d
 - **Unit tests:** co-located `.test.ts` files per module
 - **Integration tests:** `src/integration.test.ts` (full pipeline), `src/agent/integration-images.test.ts` (image tools + Discord fallback)
 - **History processing tests:** 68 tests across 5 files (slicing, merge, trim, dates, formatting) — all deterministic, pure-function tests
-- **Reply embedding tests:** 18 tests in `history-replies.test.ts` — position-aware quoting, cross-slice, missing targets
+- **Reply tests:** 19 tests in `history-replies.test.ts` — position-aware quoting, cross-slice, missing targets, extraLookup
+- **Pipeline orchestrator tests:** 8 tests in `history-pipeline.test.ts` — end-to-end formatting, slicing, merge, trim markers, reply metadata
 - **Discord fallback tests:** 11 tests in `reply-target-fallback.test.ts` — mocked Discord API, DB persistence, image attachment processing
+- **Message repository tests:** 35 tests including 6 for `getHistoryMessages` (shape, images, limit, order)
 - **Image tool tests:** 8 unit + 8 integration tests for `read_images` (real SQLite in integration)
 - **Database tests:** in-memory SQLite (`:memory:`)
 - **Qdrant tests:** require running container (`docker run -d --name qdrant-test -p 6333:6333 qdrant/qdrant:latest`), default URL `http://qdrant-test.orb.local:6333`
