@@ -356,7 +356,7 @@ async function buildContext(
     .filter((m) => m.shortDescription !== "")
     .sort((a, b) => {
       const ud = a.updatedAt - b.updatedAt;
-      return ud !== 0 ? ud : a.id.localeCompare(b.id);
+      return ud !== 0 ? ud : a.id - b.id;
     });
   const journalSummaries = journals
     .map((m) => `- [${m.id}] ${m.shortDescription}`)
@@ -426,7 +426,7 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
     botUserId: client.user?.id ?? "",
     onMemoryChanged: (memoryId, text) => {
       void embeddingQueue.enqueue({
-        id: memoryId,
+        id: String(memoryId),
         text,
         target: "memory",
         metadata: { guild_id: guildId },
@@ -438,7 +438,7 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
       });
     },
     onMemoryDeleted: (memoryId) => {
-      void deletePoint(qdrant, toPointId(memoryId)).catch((err: unknown) => {
+      void deletePoint(qdrant, toPointId(String(memoryId))).catch((err: unknown) => {
         log.error("memory qdrant delete failed", {
           memoryId,
           error: err instanceof Error ? err.message : String(err),

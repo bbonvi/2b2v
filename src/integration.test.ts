@@ -119,7 +119,7 @@ describe("memory tools → DB roundtrip", () => {
       shortDescription: "Integration test memory",
       userId: "user-42",
     });
-    const memoryId = (saveResult.details as { memoryId: string }).memoryId;
+    const memoryId = (saveResult.details as { memoryId: number }).memoryId;
     expect(memoryId).toBeTruthy();
 
     // Verify in DB directly
@@ -152,7 +152,7 @@ describe("memory tools → DB roundtrip", () => {
       shortDescription: "original",
       userId: USER_ID,
     });
-    const id = (r1.details as { memoryId: string }).memoryId;
+    const id = (r1.details as { memoryId: number }).memoryId;
 
     // Update
     await saveTool.execute("tc-2", {
@@ -176,7 +176,7 @@ describe("memory tools → DB roundtrip", () => {
       shortDescription: "Test journal",
       longDescription: "Detailed entry for integration test",
     });
-    const id = (r.details as { memoryId: string }).memoryId;
+    const id = (r.details as { memoryId: number }).memoryId;
     const row = getMemory(db, id);
     expect(row?.expiresAt).not.toBeNull();
     // Verify it's approximately 180 days from now

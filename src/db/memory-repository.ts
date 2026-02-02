@@ -6,7 +6,7 @@ const DEFAULT_TTL_DAYS = 180; // 6 months
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export interface MemoryRow {
-  id: string;
+  id: number;
   scope: MemoryScope;
   guildId: string | null;
   userId: string | null;
@@ -50,18 +50,16 @@ function computeExpiry(_scope: MemoryScope, ttlDays?: number | null): number | n
 }
 
 /** Create a memory entry. Returns the generated ID. */
-export function createMemory(db: Database, input: CreateMemoryInput): string {
-  const id = crypto.randomUUID();
+export function createMemory(db: Database, input: CreateMemoryInput): number {
   const now = Date.now();
   const expiresAt = computeExpiry(input.scope, input.ttlDays);
 
-  db.raw
+  const result = db.raw
     .prepare(
-      `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
-      id,
       input.scope,
       input.guildId,
       input.userId,
@@ -73,11 +71,11 @@ export function createMemory(db: Database, input: CreateMemoryInput): string {
       expiresAt
     );
 
-  return id;
+  return Number(result.lastInsertRowid);
 }
 
 /** Update fields on an existing memory. Returns true if the row existed. */
-export function updateMemory(db: Database, id: string, input: UpdateMemoryInput): boolean {
+export function updateMemory(db: Database, id: number, input: UpdateMemoryInput): boolean {
   const sets: string[] = [];
   const params: (string | number | null)[] = [];
 
@@ -103,13 +101,13 @@ export function updateMemory(db: Database, id: string, input: UpdateMemoryInput)
 }
 
 /** Delete a memory by ID. Returns true if the row existed. */
-export function deleteMemory(db: Database, id: string): boolean {
+export function deleteMemory(db: Database, id: number): boolean {
   const result = db.raw.prepare("DELETE FROM memories WHERE id = ?").run(id);
   return result.changes > 0;
 }
 
 /** Get a single memory by ID. Returns null if not found. */
-export function getMemory(db: Database, id: string): MemoryRow | null {
+export function getMemory(db: Database, id: number): MemoryRow | null {
   const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get(id) as Record<string, unknown> | null;
   if (!row) return null;
   return mapRow(row);
@@ -152,7 +150,7 @@ export function deleteExpiredMemories(db: Database): number {
 
 function mapRow(row: Record<string, unknown>): MemoryRow {
   return {
-    id: row.id as string,
+    id: Number(row.id),
     scope: row.scope as MemoryScope,
     guildId: row.guild_id as string | null,
     userId: row.user_id as string | null,

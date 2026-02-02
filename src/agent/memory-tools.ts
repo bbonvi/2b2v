@@ -18,23 +18,23 @@ export interface MemoryToolsDeps {
   /** Bot's own user ID — auto-injected as userId for journal scope. */
   botUserId: string;
   /** Called after a memory is created or updated, for embedding. */
-  onMemoryChanged?: (memoryId: string, text: string) => void;
+  onMemoryChanged?: (memoryId: number, text: string) => void;
   /** Called after a memory is deleted, for Qdrant cleanup. */
-  onMemoryDeleted?: (memoryId: string) => void;
+  onMemoryDeleted?: (memoryId: number) => void;
 }
 
 interface SaveMemoryParams {
   scope: MemoryScope;
   shortDescription: string;
   userId?: string;
-  id?: string;
+  id?: number;
   longDescription?: string;
   ttlDays?: number | null;
   sourceMessageId?: string;
 }
 
 interface DeleteMemoryParams {
-  id: string;
+  id: number;
 }
 
 interface ListMemoriesParams {
@@ -50,14 +50,14 @@ const SaveMemorySchema = Type.Object({
   ),
   shortDescription: Type.String({ description: "Primary memory text. Always visible in context." }),
   userId: Type.Optional(Type.String({ description: "Target user ID. Required for scope 'user'." })),
-  id: Type.Optional(Type.String({ description: "Existing memory ID to update. Omit to create new." })),
+  id: Type.Optional(Type.Integer({ description: "Existing memory ID to update. Omit to create new." })),
   longDescription: Type.Optional(Type.String({ description: "Long description. Pulled on demand." })),
   ttlDays: Type.Optional(Type.Union([Type.Number(), Type.Null()], { description: "Days until expiry. Default 180. Pass null for no expiry." })),
   sourceMessageId: Type.Optional(Type.String({ description: "Discord message ID that triggered this memory." })),
 });
 
 const DeleteMemorySchema = Type.Object({
-  id: Type.String({ description: "Memory ID to delete." }),
+  id: Type.Integer({ description: "Memory ID to delete." }),
 });
 
 const ListMemoriesSchema = Type.Object({
@@ -88,7 +88,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     description:
       "Create or update a memory entry. Use scope 'user' for per-user facts (requires userId), 'journal' for bot's own notes. Provide 'id' to update an existing entry.",
     parameters: SaveMemorySchema,
-    execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: string; action: string; success: boolean }>> => {
+    execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: number; action: string; success: boolean }>> => {
       const p = params as SaveMemoryParams;
 
       if (p.id !== undefined) {
@@ -145,7 +145,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     label: "Delete Memory",
     description: "Delete a memory entry by its ID.",
     parameters: DeleteMemorySchema,
-    execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: string; success: boolean }>> => {
+    execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: number; success: boolean }>> => {
       const p = params as DeleteMemoryParams;
       // Verify the memory belongs to this guild before allowing deletion
       const existing = getMemory(db, p.id);

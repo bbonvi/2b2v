@@ -82,7 +82,7 @@ describe("save_memory tool", () => {
       userId: "u1",
       shortDescription: "Original",
     }, new AbortController().signal);
-    const id = (createResult.details as { memoryId: string }).memoryId;
+    const id = (createResult.details as { memoryId: number }).memoryId;
 
     // Update
     await saveTool.execute("tc-5", {
@@ -108,7 +108,7 @@ describe("save_memory tool", () => {
       userId: "u1",
       shortDescription: "G1 secret",
     }, new AbortController().signal);
-    const id = (createResult.details as { memoryId: string }).memoryId;
+    const id = (createResult.details as { memoryId: number }).memoryId;
 
     // G2 tries to update G1's memory
     const updateResult = await saveG2.execute("tc-7", {
@@ -127,7 +127,7 @@ describe("save_memory tool", () => {
   });
 
   test("calls onMemoryChanged after create", async () => {
-    const changed: { id: string; text: string }[] = [];
+    const changed: { id: number; text: string }[] = [];
     const tools = createMemoryTools({
       db,
       guildId: "g1",
@@ -147,7 +147,7 @@ describe("save_memory tool", () => {
   });
 
   test("calls onMemoryChanged after update", async () => {
-    const changed: { id: string; text: string }[] = [];
+    const changed: { id: number; text: string }[] = [];
     const tools = createMemoryTools({
       db,
       guildId: "g1",
@@ -161,7 +161,7 @@ describe("save_memory tool", () => {
       userId: "u1",
       shortDescription: "Original",
     }, new AbortController().signal);
-    const id = (createResult.details as { memoryId: string }).memoryId;
+    const id = (createResult.details as { memoryId: number }).memoryId;
 
     await saveTool.execute("tc-10", {
       scope: "user",
@@ -187,7 +187,7 @@ describe("delete_memory tool", () => {
       userId: "u1",
       shortDescription: "G1 data",
     }, new AbortController().signal);
-    const id = (createResult.details as { memoryId: string }).memoryId;
+    const id = (createResult.details as { memoryId: number }).memoryId;
 
     const deleteResult = await deleteG2.execute("tc-12", { id }, new AbortController().signal);
     const text = (deleteResult.content[0] as { text: string }).text;
@@ -207,7 +207,7 @@ describe("delete_memory tool", () => {
       userId: "u1",
       shortDescription: "To delete",
     }, new AbortController().signal);
-    const id = (createResult.details as { memoryId: string }).memoryId;
+    const id = (createResult.details as { memoryId: number }).memoryId;
 
     const deleteResult = await deleteTool.execute("tc-14", { id }, new AbortController().signal);
     const text = (deleteResult.content[0] as { text: string }).text;
@@ -219,13 +219,13 @@ describe("delete_memory tool", () => {
     const tools = createMemoryTools({ db, guildId: "g1", botUserId: "bot-1" });
     const deleteTool = findTool(tools, "delete_memory");
 
-    const result = await deleteTool.execute("tc-15", { id: "nonexistent" }, new AbortController().signal);
+    const result = await deleteTool.execute("tc-15", { id: 999999 }, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain("not found");
   });
 
   test("calls onMemoryDeleted after delete", async () => {
-    const deleted: string[] = [];
+    const deleted: number[] = [];
     const tools = createMemoryTools({
       db,
       guildId: "g1",
@@ -240,7 +240,7 @@ describe("delete_memory tool", () => {
       userId: "u1",
       shortDescription: "To delete",
     }, new AbortController().signal);
-    const id = (createResult.details as { memoryId: string }).memoryId;
+    const id = (createResult.details as { memoryId: number }).memoryId;
 
     await deleteTool.execute("tc-17", { id }, new AbortController().signal);
     expect(deleted).toEqual([id]);

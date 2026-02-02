@@ -260,7 +260,7 @@ describe("updateMemory", () => {
   });
 
   test("returns false for non-existent id", () => {
-    const result = updateMemory(db, "nonexistent", { shortDescription: "x" });
+    const result = updateMemory(db, 999999, { shortDescription: "x" });
     expect(result).toBe(false);
   });
 });
@@ -280,7 +280,7 @@ describe("deleteMemory", () => {
   });
 
   test("returns false for non-existent id", () => {
-    expect(deleteMemory(db, "nonexistent")).toBe(false);
+    expect(deleteMemory(db, 999999)).toBe(false);
   });
 });
 
@@ -338,10 +338,10 @@ describe("listMemories", () => {
     const now = Date.now();
     db.raw
       .prepare(
-        `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("expired-1", "user", "g1", "u1", "Old", null, null, now - 100000, now - 100000, now - 1000);
+      .run("user", "g1", "u1", "Old", null, null, now - 100000, now - 100000, now - 1000);
 
     createMemory(db, { scope: "user", guildId: "g1", userId: "u1", shortDescription: "Current" });
 
@@ -365,18 +365,19 @@ describe("listMemories", () => {
 describe("deleteExpiredMemories", () => {
   test("removes memories past their expiry", () => {
     const now = Date.now();
-    db.raw
+    const expResult = db.raw
       .prepare(
-        `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("exp-1", "user", "g1", "u1", "Expired", null, null, now, now, now - 1000);
+      .run("user", "g1", "u1", "Expired", null, null, now, now, now - 1000);
+    const expiredId = Number(expResult.lastInsertRowid);
 
     createMemory(db, { scope: "user", guildId: "g1", userId: "u1", shortDescription: "Still valid" });
 
     const count = deleteExpiredMemories(db);
     expect(count).toBe(1);
-    expect(getMemory(db, "exp-1")).toBeNull();
+    expect(getMemory(db, expiredId)).toBeNull();
 
     const remaining = listMemories(db, { scope: "user", guildId: "g1", userId: "u1" });
     expect(remaining).toHaveLength(1);
