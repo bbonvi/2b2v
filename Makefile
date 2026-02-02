@@ -5,8 +5,13 @@ QDRANT_URL := http://qdrant-test.orb.local:6333
 .PHONY: test test-unit qdrant-up qdrant-down qdrant-ensure check lint
 
 # Run all tests (starts Qdrant if needed)
+# Supports: make test, make test src/agent/, make test src/agent/foo.test.ts
 test: qdrant-ensure
-	QDRANT_URL=$(QDRANT_URL) bun test
+	QDRANT_URL=$(QDRANT_URL) bun test $(filter-out test,$(MAKECMDGOALS))
+
+# Swallow extra positional args (e.g. file paths after `make test`)
+%:
+	@:
 
 # Run only non-Qdrant unit tests (no container needed)
 test-unit:
