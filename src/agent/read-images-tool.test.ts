@@ -36,36 +36,44 @@ describe("createReadImagesTool", () => {
     expect(tool.name).toBe("read_images");
   });
 
-  test("returns ordered results for valid IDs", async () => {
+  test("returns ImageContent blocks for valid IDs", async () => {
     const result = await tool.execute("call-1", { image_ids: [2, 1] });
-    const text = (result.content[0] as { type: "text"; text: string }).text;
-    const parsed = JSON.parse(text) as unknown[];
-    expect(parsed).toHaveLength(2);
+    // Each found image produces 2 content blocks: text metadata + image
+    expect(result.content).toHaveLength(4);
 
-    const first = parsed[0] as { id: number; mime: string; width: number; height: number; data_base64: string };
-    expect(first.id).toBe(2);
-    expect(first.mime).toBe("image/jpeg");
-    expect(first.width).toBe(400);
-    expect(first.height).toBe(300);
-    expect(first.data_base64).toBe(Buffer.from("fake-image-2").toString("base64"));
+    // First image: id=2
+    const meta0 = result.content[0] as { type: "text"; text: string };
+    expect(meta0.type).toBe("text");
+    const parsed0 = JSON.parse(meta0.text) as { id: number; width: number; height: number };
+    expect(parsed0.id).toBe(2);
+    expect(parsed0.width).toBe(400);
+    expect(parsed0.height).toBe(300);
 
-    const second = parsed[1] as { id: number; mime: string; width: number; height: number; data_base64: string };
-    expect(second.id).toBe(1);
-    expect(second.data_base64).toBe(Buffer.from("fake-image-1").toString("base64"));
+    const img0 = result.content[1] as { type: "image"; data: string; mimeType: string };
+    expect(img0.type).toBe("image");
+    expect(img0.mimeType).toBe("image/jpeg");
+    expect(img0.data).toBe(Buffer.from("fake-image-2").toString("base64"));
+
+    // Second image: id=1
+    const meta1 = result.content[2] as { type: "text"; text: string };
+    const parsed1 = JSON.parse(meta1.text) as { id: number };
+    expect(parsed1.id).toBe(1);
+
+    const img1 = result.content[3] as { type: "image"; data: string; mimeType: string };
+    expect(img1.type).toBe("image");
+    expect(img1.data).toBe(Buffer.from("fake-image-1").toString("base64"));
   });
 
-  test("returns not_found for missing IDs", async () => {
+  test("returns text-only not_found for missing IDs", async () => {
     const result = await tool.execute("call-2", { image_ids: [1, 999] });
-    const parsed = JSON.parse((result.content[0] as { type: "text"; text: string }).text) as unknown[];
-    expect(parsed).toHaveLength(2);
+    // id=1: text + image = 2 blocks; id=999: text only = 1 block
+    expect(result.content).toHaveLength(3);
 
-    const first = parsed[0] as { id: number };
-    expect(first.id).toBe(1);
-    expect("data_base64" in first).toBe(true);
-
-    const second = parsed[1] as { id: number; error: string };
-    expect(second.id).toBe(999);
-    expect(second.error).toBe("not_found");
+    const errBlock = result.content[2] as { type: "text"; text: string };
+    expect(errBlock.type).toBe("text");
+    const parsed = JSON.parse(errBlock.text) as { id: number; error: string };
+    expect(parsed.id).toBe(999);
+    expect(parsed.error).toBe("not_found");
   });
 
   test("returns not_found when file is missing on disk", async () => {
@@ -75,8 +83,8 @@ describe("createReadImagesTool", () => {
     tool = createReadImagesTool(deps);
 
     const result = await tool.execute("call-3", { image_ids: [1] });
-    const parsed = JSON.parse((result.content[0] as { type: "text"; text: string }).text) as unknown[];
-    const entry = parsed[0] as { id: number; error: string };
+    expect(result.content).toHaveLength(1);
+    const entry = JSON.parse((result.content[0] as { type: "text"; text: string }).text) as { id: number; error: string };
     expect(entry.id).toBe(1);
     expect(entry.error).toBe("not_found");
   });
@@ -88,23 +96,31 @@ describe("createReadImagesTool", () => {
     expect(() => tool.execute("call-4", { image_ids: [1, 2, 5] })).toThrow("Maximum is 2");
   });
 
-  test("returns empty array for empty input", async () => {
+  test("returns empty content for empty input", async () => {
     const result = await tool.execute("call-5", { image_ids: [] });
-    const parsed = JSON.parse((result.content[0] as { type: "text"; text: string }).text) as unknown[];
-    expect(parsed).toEqual([]);
+    expect(result.content).toEqual([]);
   });
 
   test("preserves input order exactly", async () => {
     const result = await tool.execute("call-6", { image_ids: [5, 1, 2] });
-    const parsed = JSON.parse((result.content[0] as { type: "text"; text: string }).text) as Array<{ id: number }>;
-    expect(parsed.map((r) => r.id)).toEqual([5, 1, 2]);
+    // 3 images × 2 blocks each = 6 blocks
+    expect(result.content).toHaveLength(6);
+
+    const ids = [0, 2, 4].map((i) => {
+      const block = result.content[i] as { type: "text"; text: string };
+      return (JSON.parse(block.text) as { id: number }).id;
+    });
+    expect(ids).toEqual([5, 1, 2]);
   });
 
   test("handles duplicate IDs", async () => {
     const result = await tool.execute("call-7", { image_ids: [1, 1] });
-    const parsed = JSON.parse((result.content[0] as { type: "text"; text: string }).text) as Array<{ id: number }>;
-    expect(parsed).toHaveLength(2);
-    expect(parsed[0]?.id).toBe(1);
-    expect(parsed[1]?.id).toBe(1);
+    // 2 images × 2 blocks each = 4 blocks
+    expect(result.content).toHaveLength(4);
+
+    const meta0 = JSON.parse((result.content[0] as { type: "text"; text: string }).text) as { id: number };
+    const meta1 = JSON.parse((result.content[2] as { type: "text"; text: string }).text) as { id: number };
+    expect(meta0.id).toBe(1);
+    expect(meta1.id).toBe(1);
   });
 });

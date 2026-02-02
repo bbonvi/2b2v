@@ -1,5 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 
 const ReadImagesParams = Type.Object({
   image_ids: Type.Array(Type.Number(), {
@@ -13,16 +14,12 @@ export interface ReadImagesToolDeps {
   readFile: (path: string) => Buffer | null;
 }
 
-type SuccessEntry = { id: number; mime: string; width: number; height: number; data_base64: string };
-type ErrorEntry = { id: number; error: "not_found" };
-type ResultEntry = SuccessEntry | ErrorEntry;
-
 export function createReadImagesTool(deps: ReadImagesToolDeps): AgentTool {
   return {
     name: "read_images",
     label: "Read Images",
     description:
-      "Retrieve stored images by their IDs. Returns base64-encoded image data with metadata. Use this to view images referenced by image_ids in chat history.",
+      "Retrieve stored images by their IDs. Returns image data with metadata. Use this to view images referenced by image_ids in chat history.",
     parameters: ReadImagesParams,
     execute: (
       _toolCallId,
@@ -37,32 +34,31 @@ export function createReadImagesTool(deps: ReadImagesToolDeps): AgentTool {
         );
       }
 
-      const results: ResultEntry[] = [];
+      const content: (TextContent | ImageContent)[] = [];
+      let count = 0;
       for (const id of ids) {
         const record = deps.getImageById(id);
         if (record === null) {
-          results.push({ id, error: "not_found" });
+          content.push({ type: "text", text: JSON.stringify({ id, error: "not_found" }) });
+          count++;
           continue;
         }
 
         const buf = deps.readFile(record.path);
         if (buf === null) {
-          results.push({ id, error: "not_found" });
+          content.push({ type: "text", text: JSON.stringify({ id, error: "not_found" }) });
+          count++;
           continue;
         }
 
-        results.push({
-          id: record.id,
-          mime: record.mime,
-          width: record.width,
-          height: record.height,
-          data_base64: buf.toString("base64"),
-        });
+        content.push({ type: "text", text: JSON.stringify({ id: record.id, width: record.width, height: record.height }) });
+        content.push({ type: "image", data: buf.toString("base64"), mimeType: record.mime });
+        count++;
       }
 
       return Promise.resolve({
-        content: [{ type: "text", text: JSON.stringify(results) }],
-        details: { count: results.length },
+        content,
+        details: { count },
       });
     },
   };
