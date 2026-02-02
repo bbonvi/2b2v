@@ -660,9 +660,9 @@ client.on("messageCreate", (message: Message) => void (async () => {
     };
 
     const sender: MessageSender = async (text, reply, _signal) => {
-      // Brief delay so the typing indicator (fired on tool_execution_start) arrives
-      // at Discord before the message — prevents sendTyping/send race condition.
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      // Await typing indicator before sending — guarantees Discord receives
+      // the typing POST before the message POST (no race condition).
+      await channelObj.sendTyping().catch(() => {});
       const translated = translateOutbound(text, outboundResolvers);
       const chunks = splitMessage(translated);
       let firstId = "";
