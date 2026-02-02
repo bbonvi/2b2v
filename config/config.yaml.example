@@ -1,0 +1,63 @@
+# Main bot configuration — config/config.yaml
+# All fields are optional. Missing values use hardcoded defaults.
+# Secrets (DISCORD_TOKEN, OPENROUTER_API_KEY, BRAVE_API_KEY) remain in env vars / .env.
+# QDRANT_URL can be set here or as an env var (env takes priority).
+
+# LLM model (OpenRouter model ID)
+model: moonshotai/kimi-k2.5
+
+# Thinking/reasoning level for the model
+thinkingLevel: medium
+
+# Default timezone for guilds that don't override
+timezone: UTC
+
+# Context window trimming thresholds
+trim:
+  trimTrigger: 200       # Start trimming when history exceeds this many messages
+  trimTarget: 150        # Trim down to this many messages
+  windowSize: 20         # Recent messages kept uncached (newer slice)
+  messageCharLimit: 200  # Max chars per message before truncation
+  replyQuoteChars: 50    # Max chars for reply quote excerpts
+
+# Default trigger settings (guilds can override)
+triggers:
+  mention: true          # Respond when @mentioned
+  keywords: []           # Keywords that trigger a response
+  randomChance: 0        # 0–1 probability of responding to any message
+
+# Memory retention in days (0 = no expiry)
+memoryRetentionDays: 180
+
+# Max image dimension (larger images resized to fit)
+imageMaxDimension: 768
+
+# Max seconds between messages to merge consecutive same-author messages
+mergeMessageGapSeconds: 120
+
+# Max images the LLM can read in a single read_images call
+imageReadMaxPerCall: 10
+
+# Enable automatic image captioning (requires captioning model)
+imageCaptioningEnabled: false
+
+# Path to the persona markdown file
+personaPath: config/persona.md
+
+# Custom instructions injected into the LLM context (after tool instructions).
+# Use instructionsPath to load from a file, or instructions for inline text.
+# instructionsPath takes priority over inline instructions.
+# instructionsPath: config/instructions.md
+instructions: ""
+
+# Log level: debug | info | warn | error
+logLevel: info
+
+# Directory for SQLite database and attachments
+dataDir: data
+
+# Directory for caching embedding model files
+modelCacheDir: model-cache
+
+# Qdrant vector database URL (env var QDRANT_URL takes priority)
+qdrantUrl: http://localhost:6333

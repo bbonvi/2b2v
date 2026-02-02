@@ -9,6 +9,7 @@ function makeInput(overrides: Partial<ContextAssemblyInput> = {}): ContextAssemb
   return {
     persona: "You are a test bot.",
     toolInstructions: "## How You Communicate\nUse send_message.",
+    instructions: "",
     emojis: ":wave: — custom emoji",
     members: "@alice — Alice\n@bob — Bob",
     journalSummaries: "- User likes cats",
@@ -22,7 +23,7 @@ function makeInput(overrides: Partial<ContextAssemblyInput> = {}): ContextAssemb
 }
 
 describe("assembleContext", () => {
-  test("produces all 9 sections in correct order when all inputs present", () => {
+  test("produces all 9 sections in correct order when all inputs present (no instructions)", () => {
     const result = assembleContext(makeInput());
     expect(result.sections).toHaveLength(9);
     const labels = result.sections.map((s) => s.label);
@@ -37,6 +38,32 @@ describe("assembleContext", () => {
       "Chat History — Newer",
       "Current Context",
     ]);
+  });
+
+  test("produces 10 sections when instructions present", () => {
+    const result = assembleContext(makeInput({ instructions: "Be concise and helpful." }));
+    expect(result.sections).toHaveLength(10);
+    const labels = result.sections.map((s) => s.label);
+    expect(labels).toEqual([
+      "Persona",
+      "Tool Instructions",
+      "Instructions",
+      "Available Emojis",
+      "Server Members",
+      "Journal Summaries",
+      "Upcoming Schedules",
+      "Chat History — Older",
+      "Chat History — Newer",
+      "Current Context",
+    ]);
+  });
+
+  test("instructions section is cached and has header", () => {
+    const result = assembleContext(makeInput({ instructions: "Custom instructions" }));
+    const section = result.sections.find((s) => s.label === "Instructions");
+    expect(section).toBeDefined();
+    expect(section?.cached).toBe(true);
+    expect(section?.text).toBe("## Instructions\nCustom instructions");
   });
 
   test("returns userMessage separately from sections", () => {
@@ -64,13 +91,14 @@ describe("assembleContext", () => {
   });
 
   test("marks stable sections as cached", () => {
-    const result = assembleContext(makeInput());
+    const result = assembleContext(makeInput({ instructions: "test" }));
     const cachedLabels = result.sections
       .filter((s) => s.cached)
       .map((s) => s.label);
     expect(cachedLabels).toEqual([
       "Persona",
       "Tool Instructions",
+      "Instructions",
       "Available Emojis",
       "Server Members",
       "Journal Summaries",
@@ -143,6 +171,7 @@ describe("assembleContext", () => {
     const result = assembleContext(
       makeInput({
         toolInstructions: "",
+        instructions: "",
         emojis: "",
         members: "",
         journalSummaries: "",
@@ -162,6 +191,7 @@ describe("assembleContext", () => {
       makeInput({
         persona: "",
         toolInstructions: "",
+        instructions: "",
         emojis: "",
         members: "",
         journalSummaries: "",
@@ -197,6 +227,7 @@ describe("contextToSystemPrompt", () => {
     const ctx = assembleContext(makeInput({
       persona: "",
       toolInstructions: "",
+      instructions: "",
       emojis: "",
       members: "",
       journalSummaries: "",
@@ -215,5 +246,15 @@ describe("contextToSystemPrompt", () => {
     const personaIdx = prompt.indexOf("You are a test bot.");
     const contextIdx = prompt.indexOf("Guild: g1 | Channel: c1");
     expect(personaIdx).toBeLessThan(contextIdx);
+  });
+
+  test("instructions section appears between tool instructions and emojis", () => {
+    const ctx = assembleContext(makeInput({ instructions: "Be brief." }));
+    const prompt = contextToSystemPrompt(ctx);
+    const toolIdx = prompt.indexOf("## How You Communicate");
+    const instrIdx = prompt.indexOf("## Instructions\nBe brief.");
+    const emojiIdx = prompt.indexOf("## Available Emojis");
+    expect(toolIdx).toBeLessThan(instrIdx);
+    expect(instrIdx).toBeLessThan(emojiIdx);
   });
 });

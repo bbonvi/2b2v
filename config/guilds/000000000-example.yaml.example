@@ -1,13 +1,56 @@
+# Per-guild configuration — config/guilds/{guildId}-{slug}.yaml
+# All fields are optional. Missing values inherit from config/config.yaml defaults.
+
+# Trigger settings — when should the bot respond?
 triggers:
-  mention: true
-  keywords: [2b, yorha]
-  randomChance: 0.02
+  mention: true            # Respond when @mentioned
+  keywords: [2b, yorha]   # Keywords that trigger a response
+  randomChance: 0.02       # 0–1 probability of responding to any message
+
+# LLM model override (OpenRouter model ID). Omit to use global default.
 model: moonshotai/kimi-k2.5
+
+# Additional model parameters passed to OpenRouter (temperature, top_p, etc.)
+# modelParams:
+#   temperature: 0.8
+
+# Thinking/reasoning level for the model
 thinkingLevel: medium
+
+# Guild timezone (used for date stamps in history and scheduling)
 timezone: UTC
+
+# Context window trimming thresholds
 trim:
   trimTrigger: 200
   trimTarget: 150
+  windowSize: 20
+  messageCharLimit: 200
+  replyQuoteChars: 50
+
+# Memory retention in days
 memoryRetentionDays: 180
+
+# Discord user IDs with admin access to bot commands
 adminUserIds: []
+
+# Max image dimension (images resized to fit)
 imageMaxDimension: 768
+
+# Max seconds between messages for same-author merge
+mergeMessageGapSeconds: 120
+
+# Max images per read_images tool call
+imageReadMaxPerCall: 10
+
+# Enable automatic image captioning
+imageCaptioningEnabled: false
+
+# Custom attachments directory (default: {dataDir}/attachments)
+# attachmentsDir: data/attachments
+
+# Guild-specific instructions injected into LLM context.
+# instructionsPath takes priority over inline instructions.
+# Falls back to global defaultInstructions if neither is set.
+# instructionsPath: config/guilds/my-guild-instructions.md
+# instructions: "Be extra friendly in this server."

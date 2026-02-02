@@ -31,6 +31,7 @@ export interface GuildConfig {
   imageReadMaxPerCall: number;
   imageCaptioningEnabled: boolean;
   attachmentsDir: string;
+  instructions: string;
 }
 
 /** Global configuration loaded from file + env. */
@@ -42,12 +43,14 @@ export interface GlobalConfig {
   defaultThinkingLevel: string;
   defaultTimezone: string;
   defaultTrim: TrimConfig;
+  defaultTriggers: TriggerConfig;
   defaultMemoryRetentionDays: number;
   defaultImageMaxDimension: number;
   defaultMergeMessageGapSeconds: number;
   defaultImageReadMaxPerCall: number;
   defaultImageCaptioningEnabled: boolean;
   defaultAttachmentsDir: string;
+  defaultInstructions: string;
   personaPath: string;
   logLevel: string;
   dataDir: string;
@@ -76,4 +79,28 @@ export interface GuildConfigYaml {
   imageReadMaxPerCall?: number;
   imageCaptioningEnabled?: boolean;
   attachmentsDir?: string;
+  instructions?: string;
+  instructionsPath?: string;
+}
+
+/** Raw shape of the main config YAML file (config/config.yaml). All optional. */
+export interface MainConfigYaml {
+  model?: string;
+  thinkingLevel?: string;
+  timezone?: string;
+  trim?: Partial<TrimConfig>;
+  triggers?: Partial<TriggerConfig>;
+  memoryRetentionDays?: number;
+  imageMaxDimension?: number;
+  mergeMessageGapSeconds?: number;
+  imageReadMaxPerCall?: number;
+  imageCaptioningEnabled?: boolean;
+  attachmentsDir?: string;
+  personaPath?: string;
+  instructions?: string;
+  instructionsPath?: string;
+  logLevel?: string;
+  dataDir?: string;
+  modelCacheDir?: string;
+  qdrantUrl?: string;
 }

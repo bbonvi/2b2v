@@ -15,12 +15,14 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultThinkingLevel: "medium",
     defaultTimezone: "UTC",
     defaultTrim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
+    defaultTriggers: { mention: true, keywords: [], randomChance: 0 },
     defaultMemoryRetentionDays: 180,
     defaultImageMaxDimension: 768,
     defaultMergeMessageGapSeconds: 120,
     defaultImageReadMaxPerCall: 10,
     defaultImageCaptioningEnabled: false,
     defaultAttachmentsDir: "data/attachments",
+    defaultInstructions: "",
     personaPath: "config/persona.md",
     logLevel: "info",
     dataDir: "./data",
@@ -45,6 +47,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     imageReadMaxPerCall: 10,
     imageCaptioningEnabled: false,
     attachmentsDir: "data/attachments",
+    instructions: "",
 
     ...overrides,
   };

@@ -175,8 +175,8 @@ upsertPoints(qdrant, points with payload: {type, entity_id, guild_id, ...})
 buildContext(deps) → AssembledContext
   │
   ├─ Deterministic sorting (emojis, members, journal, schedules)
-  ├─ assembleContext({ persona, toolInstructions, emojis, members,
-  │     journalSummaries, upcomingSchedules, olderHistory,
+  ├─ assembleContext({ persona, toolInstructions, instructions, emojis,
+  │     members, journalSummaries, upcomingSchedules, olderHistory,
   │     newerHistory, currentContext, userMessage })
   │
   └─ AssembledContext
@@ -184,7 +184,7 @@ buildContext(deps) → AssembledContext
        └─ userMessage: string (role=user)
 ```
 
-Sections ordered for Anthropic prefix-based prompt caching: stable cached sections first (persona, tools, emojis, members, journal, schedules, older history), then uncached (newer history, current context). Empty sections omitted. Currently serialized to a single string via `contextToSystemPrompt()` since `pi-agent-core` only supports `systemPrompt: string`.
+Sections ordered for Anthropic prefix-based prompt caching: stable cached sections first (persona, tools, instructions, emojis, members, journal, schedules, older history), then uncached (newer history, current context). Empty sections omitted. Currently serialized to a single string via `contextToSystemPrompt()` since `pi-agent-core` only supports `systemPrompt: string`.
 
 ### History Processing Pipeline
 
@@ -302,33 +302,38 @@ No inline images in LLM context. Messages reference `image_ids`; LLM retrieves v
 
 ## Configuration
 
-### Two-tier: Global → Per-Guild
+### Three-tier: Main YAML → Per-Guild YAML → Env Vars (secrets only)
 
-**Global** (environment variables):
+**Main config** (`config/config.yaml`):
 
-| Variable | Required | Default |
-|----------|----------|---------|
-| `DISCORD_TOKEN` | yes | — |
-| `OPENROUTER_API_KEY` | yes | — |
-| `BRAVE_API_KEY` | no | — |
-| `DEFAULT_MODEL` | no | `moonshotai/kimi-k2.5` |
-| `DEFAULT_THINKING_LEVEL` | no | `medium` |
-| `DEFAULT_TIMEZONE` | no | `UTC` |
-| `MEMORY_RETENTION_DAYS` | no | `180` |
-| `IMAGE_MAX_DIMENSION` | no | `768` |
-| `PERSONA_PATH` | no | `config/persona.md` |
-| `LOG_LEVEL` | no | `info` |
-| `DATA_DIR` | no | `data` |
-| `MODEL_CACHE_DIR` | no | `model-cache` |
-| `QDRANT_URL` | no | `http://localhost:6333` |
+All non-secret defaults in a single YAML file. Missing file = hardcoded defaults. See `config/config.yaml.example` for all fields with comments.
+
+Key fields: `model`, `thinkingLevel`, `timezone`, `trim`, `triggers`, `memoryRetentionDays`, `imageMaxDimension`, `mergeMessageGapSeconds`, `imageReadMaxPerCall`, `imageCaptioningEnabled`, `personaPath`, `instructions`, `instructionsPath`, `logLevel`, `dataDir`, `modelCacheDir`, `qdrantUrl`.
+
+**Environment variables** (secrets and infrastructure):
+
+| Variable | Required | Notes |
+|----------|----------|-------|
+| `DISCORD_TOKEN` | yes | Discord bot token |
+| `OPENROUTER_API_KEY` | yes | OpenRouter API key |
+| `BRAVE_API_KEY` | no | Brave Search API key |
+| `QDRANT_URL` | no | Overrides YAML `qdrantUrl` (infrastructure-dependent) |
+| `DASHBOARD_PASSWORD` | no | Dashboard auth |
+| `UNSAFELY_BYPASS_DASHBOARD_AUTH` | no | Dev-only dashboard bypass |
 
 **Per-guild** (YAML files in `config/guilds/`):
 
-Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields optional — missing values inherit from global defaults via `resolveGuildConfig()`.
+Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields optional — missing values inherit from main config defaults via `resolveGuildConfig()`. See `config/guilds/000000000-example.yaml.example` for all fields.
 
-Configurable: `model`, `modelParams`, `thinkingLevel`, `timezone`, `triggers` (mention/keywords/randomChance), `trim` (trimTrigger/trimTarget/windowSize/messageCharLimit/replyQuoteChars), `memoryRetentionDays`, `adminUserIds`, `imageMaxDimension`, `mergeMessageGapSeconds`, `imageReadMaxPerCall`, `imageCaptioningEnabled`, `attachmentsDir`.
+Configurable: `model`, `modelParams`, `thinkingLevel`, `timezone`, `triggers` (mention/keywords/randomChance), `trim` (trimTrigger/trimTarget/windowSize/messageCharLimit/replyQuoteChars), `memoryRetentionDays`, `adminUserIds`, `imageMaxDimension`, `mergeMessageGapSeconds`, `imageReadMaxPerCall`, `imageCaptioningEnabled`, `attachmentsDir`, `instructions`, `instructionsPath`.
 
-Hardcoded defaults: `triggers: {mention: true, keywords: [], randomChance: 0}`, `trim: {trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50}`, `mergeMessageGapSeconds: 120`, `imageReadMaxPerCall: 10`, `imageCaptioningEnabled: false`, `attachmentsDir: ${DATA_DIR}/attachments`.
+**Instructions**: Custom text injected into LLM context (after tool instructions, before emojis). `instructionsPath` loads from a file; `instructions` provides inline text. `instructionsPath` takes priority. Guild-level overrides global default.
+
+### Hot-Reload
+
+`fs.watch("config", { recursive: true })` watches the entire `config/` directory. Changes debounced at 500ms. On trigger: reloads main config → persona → all guild configs. Malformed YAML or missing files keep last known good config.
+
+Hardcoded defaults: `triggers: {mention: true, keywords: [], randomChance: 0}`, `trim: {trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50}`, `mergeMessageGapSeconds: 120`, `imageReadMaxPerCall: 10`, `imageCaptioningEnabled: false`, `attachmentsDir: ${dataDir}/attachments`.
 
 ## Key Patterns
 

@@ -39,7 +39,7 @@ import { createConfigHandler, configCommandDefinition } from "./commands/config"
 import { createScheduleHandler, scheduleCommandDefinition } from "./commands/schedule";
 import { createMemoryWipeHandler, memoryWipeCommandDefinition } from "./commands/memory-wipe";
 import { join } from "path";
-import { mkdirSync, existsSync, readFileSync } from "fs";
+import { mkdirSync, existsSync, readFileSync, watch } from "fs";
 import type { Database } from "./db/database";
 import type { ChatInputCommandInteraction, Client, Guild, Message, TextChannel } from "discord.js";
 
@@ -57,7 +57,7 @@ log.info("bot starting", {
 });
 
 // --- 1. Load global config (throws on missing secrets) ---
-const globalConfig = loadGlobalConfig();
+let globalConfig = loadGlobalConfig();
 validateTrimConfig(globalConfig.defaultTrim);
 log.info("config loaded", { model: globalConfig.defaultModel, qdrant: globalConfig.qdrantUrl });
 
@@ -94,13 +94,17 @@ const guildConfigs = loadGuildConfigs(guildsDir, globalConfig);
 log.info("guild configs loaded", { count: guildConfigs.size });
 
 // --- 8. Load persona ---
-let persona = "";
-try {
-  persona = readFileSync(globalConfig.personaPath, "utf-8").trim();
-  log.info("persona loaded", { path: globalConfig.personaPath, length: persona.length });
-} catch {
-  log.warn("persona file not found, using empty persona", { path: globalConfig.personaPath });
+function loadPersonaFile(path: string): string {
+  try {
+    const content = readFileSync(path, "utf-8").trim();
+    log.info("persona loaded", { path, length: content.length });
+    return content;
+  } catch {
+    log.warn("persona file not found, using empty persona", { path });
+    return "";
+  }
 }
+let persona = loadPersonaFile(globalConfig.personaPath);
 
 // --- 9. Emoji cache ---
 const emojiCache = new EmojiCache();
@@ -400,6 +404,7 @@ async function buildContext(
   return assembleContext({
     persona,
     toolInstructions: TOOL_INSTRUCTIONS,
+    instructions: guildConfig.instructions,
     emojis: emojiContext,
     members: displayNameContext,
     journalSummaries,
@@ -807,6 +812,45 @@ client.on("messageCreate", (message: Message) => void (async () => {
     }
   }
 })());
+
+// --- Hot-reload config watcher ---
+const CONFIG_RELOAD_DEBOUNCE_MS = 500;
+let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+function reloadConfigs(): void {
+  try {
+    const newGlobal = loadGlobalConfig(
+      process.env as Record<string, string | undefined>,
+    );
+    validateTrimConfig(newGlobal.defaultTrim);
+    globalConfig = newGlobal;
+    persona = loadPersonaFile(globalConfig.personaPath);
+
+    // Reload guild configs — clear and rebuild
+    const newGuilds = loadGuildConfigs(guildsDir, globalConfig);
+    guildConfigs.clear();
+    for (const [id, cfg] of newGuilds) {
+      guildConfigs.set(id, cfg);
+    }
+
+    log.info("config hot-reloaded", { model: globalConfig.defaultModel, guilds: guildConfigs.size });
+  } catch (err) {
+    log.error("config hot-reload failed, keeping previous config", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+if (existsSync("config")) {
+  const watcher = watch("config", { recursive: true }, (_event, _filename) => {
+    if (reloadTimer !== null) clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(reloadConfigs, CONFIG_RELOAD_DEBOUNCE_MS);
+  });
+
+  // Prevent watcher from keeping the process alive during shutdown
+  watcher.unref();
+  log.info("config hot-reload watcher started");
+}
 
 // --- Health check summary ---
 log.info("health check passed — all systems ready", {

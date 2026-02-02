@@ -229,6 +229,7 @@ describe("no inline images in context", () => {
     const ctx = assembleContext({
       persona: "You are TestBot.",
       toolInstructions: "Use tools wisely.",
+      instructions: "",
       emojis: ":wave: — greeting",
       members: "@alice — Alice",
       journalSummaries: "",
@@ -256,6 +257,7 @@ describe("no inline images in context", () => {
     const ctx = assembleContext({
       persona: "Bot",
       toolInstructions: "Tools",
+      instructions: "",
       emojis: "",
       members: "",
       journalSummaries: "",

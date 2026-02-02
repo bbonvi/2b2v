@@ -1,0 +1,10 @@
+# Custom Instructions
+
+These instructions are injected into the LLM context after the tool instructions.
+Use this to provide behavioral guidelines, response style preferences, or domain-specific context.
+
+## Example
+
+- Always respond in the same language the user writes in.
+- Keep responses under 200 words unless the user asks for detail.
+- When discussing technical topics, include code examples.

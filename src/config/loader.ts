@@ -5,6 +5,7 @@ import type {
   GlobalConfig,
   GuildConfig,
   GuildConfigYaml,
+  MainConfigYaml,
   TriggerConfig,
   TrimConfig,
 } from "./types.ts";
@@ -24,11 +25,50 @@ const DEFAULT_TRIM: TrimConfig = {
 };
 
 /**
- * Build global config from env vars (and defaults for non-secret values).
+ * Load and parse the main config YAML file.
+ * Returns an empty object if the file does not exist.
+ * Throws on malformed YAML.
+ */
+export function loadMainConfig(configPath: string = "config/config.yaml"): MainConfigYaml {
+  if (!existsSync(configPath)) return {};
+  const raw = readFileSync(configPath, "utf-8");
+  return (parse(raw) ?? {}) as MainConfigYaml;
+}
+
+/**
+ * Read an instructions file, returning its trimmed content.
+ * Returns empty string if the path is empty or the file does not exist.
+ */
+export function readInstructionsFile(filePath: string): string {
+  if (filePath === "") return "";
+  if (!existsSync(filePath)) return "";
+  return readFileSync(filePath, "utf-8").trim();
+}
+
+/**
+ * Resolve instructions from inline text and/or file path.
+ * instructionsPath takes priority over inline instructions.
+ * Returns empty string if neither is set.
+ */
+export function resolveInstructions(
+  instructions: string | undefined,
+  instructionsPath: string | undefined,
+): string {
+  if (instructionsPath !== undefined && instructionsPath !== "") {
+    const fromFile = readInstructionsFile(instructionsPath);
+    if (fromFile !== "") return fromFile;
+  }
+  return instructions ?? "";
+}
+
+/**
+ * Build global config from main YAML config + env vars.
+ * YAML provides non-secret defaults; env vars provide secrets and infrastructure overrides.
  * Throws if required secrets are missing.
  */
 export function loadGlobalConfig(
-  env: Record<string, string | undefined> = process.env as Record<string, string | undefined>
+  env: Record<string, string | undefined> = process.env as Record<string, string | undefined>,
+  configPath: string = "config/config.yaml",
 ): GlobalConfig {
   const discordToken = env.DISCORD_TOKEN;
   if (discordToken === undefined || discordToken === "") throw new Error("DISCORD_TOKEN is required");
@@ -36,25 +76,44 @@ export function loadGlobalConfig(
   const openrouterApiKey = env.OPENROUTER_API_KEY;
   if (openrouterApiKey === undefined || openrouterApiKey === "") throw new Error("OPENROUTER_API_KEY is required");
 
+  const yaml = loadMainConfig(configPath);
+
+  const dataDir = yaml.dataDir ?? "data";
+  const defaultAttachmentsDir = yaml.attachmentsDir ?? `${dataDir}/attachments`;
+
+  const defaultInstructions = resolveInstructions(yaml.instructions, yaml.instructionsPath);
+
   return {
     discordToken,
     openrouterApiKey,
     braveApiKey: env.BRAVE_API_KEY,
-    defaultModel: env.DEFAULT_MODEL ?? "moonshotai/kimi-k2.5",
-    defaultThinkingLevel: env.DEFAULT_THINKING_LEVEL ?? "medium",
-    defaultTimezone: env.DEFAULT_TIMEZONE ?? "UTC",
-    defaultTrim: { ...DEFAULT_TRIM },
-    defaultMemoryRetentionDays: Number(env.MEMORY_RETENTION_DAYS ?? 180),
-    defaultImageMaxDimension: Number(env.IMAGE_MAX_DIMENSION ?? 768),
-    defaultMergeMessageGapSeconds: Number(env.MERGE_MESSAGE_GAP_SECONDS ?? 120),
-    defaultImageReadMaxPerCall: Number(env.IMAGE_READ_MAX_PER_CALL ?? 10),
-    defaultImageCaptioningEnabled: env.IMAGE_CAPTIONING_ENABLED === "true",
-    defaultAttachmentsDir: env.ATTACHMENTS_DIR ?? (env.DATA_DIR !== undefined && env.DATA_DIR !== "" ? `${env.DATA_DIR}/attachments` : "data/attachments"),
-    personaPath: env.PERSONA_PATH ?? "config/persona.md",
-    logLevel: env.LOG_LEVEL ?? "info",
-    dataDir: env.DATA_DIR ?? "data",
-    modelCacheDir: env.MODEL_CACHE_DIR ?? "model-cache",
-    qdrantUrl: env.QDRANT_URL ?? "http://localhost:6333",
+    defaultModel: yaml.model ?? "moonshotai/kimi-k2.5",
+    defaultThinkingLevel: yaml.thinkingLevel ?? "medium",
+    defaultTimezone: yaml.timezone ?? "UTC",
+    defaultTrim: {
+      trimTrigger: yaml.trim?.trimTrigger ?? DEFAULT_TRIM.trimTrigger,
+      trimTarget: yaml.trim?.trimTarget ?? DEFAULT_TRIM.trimTarget,
+      windowSize: yaml.trim?.windowSize ?? DEFAULT_TRIM.windowSize,
+      messageCharLimit: yaml.trim?.messageCharLimit ?? DEFAULT_TRIM.messageCharLimit,
+      replyQuoteChars: yaml.trim?.replyQuoteChars ?? DEFAULT_TRIM.replyQuoteChars,
+    },
+    defaultTriggers: {
+      mention: yaml.triggers?.mention ?? DEFAULT_TRIGGER.mention,
+      keywords: yaml.triggers?.keywords ?? [...DEFAULT_TRIGGER.keywords],
+      randomChance: yaml.triggers?.randomChance ?? DEFAULT_TRIGGER.randomChance,
+    },
+    defaultMemoryRetentionDays: yaml.memoryRetentionDays ?? 180,
+    defaultImageMaxDimension: yaml.imageMaxDimension ?? 768,
+    defaultMergeMessageGapSeconds: yaml.mergeMessageGapSeconds ?? 120,
+    defaultImageReadMaxPerCall: yaml.imageReadMaxPerCall ?? 10,
+    defaultImageCaptioningEnabled: yaml.imageCaptioningEnabled ?? false,
+    defaultAttachmentsDir,
+    defaultInstructions,
+    personaPath: yaml.personaPath ?? "config/persona.md",
+    logLevel: yaml.logLevel ?? "info",
+    dataDir,
+    modelCacheDir: yaml.modelCacheDir ?? "model-cache",
+    qdrantUrl: env.QDRANT_URL ?? yaml.qdrantUrl ?? "http://localhost:6333",
   };
 }
 
@@ -86,13 +145,15 @@ export function resolveGuildConfig(
   global: GlobalConfig,
   partial: GuildConfigYaml & { guildId: string; slug: string }
 ): GuildConfig {
+  const instructions = resolveInstructions(partial.instructions, partial.instructionsPath);
+
   return {
     guildId: partial.guildId,
     slug: partial.slug,
     triggers: {
-      mention: partial.triggers?.mention ?? DEFAULT_TRIGGER.mention,
-      keywords: partial.triggers?.keywords ?? [...DEFAULT_TRIGGER.keywords],
-      randomChance: partial.triggers?.randomChance ?? DEFAULT_TRIGGER.randomChance,
+      mention: partial.triggers?.mention ?? global.defaultTriggers.mention,
+      keywords: partial.triggers?.keywords ?? [...global.defaultTriggers.keywords],
+      randomChance: partial.triggers?.randomChance ?? global.defaultTriggers.randomChance,
     },
     model: partial.model,
     modelParams: partial.modelParams,
@@ -112,6 +173,7 @@ export function resolveGuildConfig(
     imageReadMaxPerCall: partial.imageReadMaxPerCall ?? global.defaultImageReadMaxPerCall,
     imageCaptioningEnabled: partial.imageCaptioningEnabled ?? global.defaultImageCaptioningEnabled,
     attachmentsDir: partial.attachmentsDir ?? global.defaultAttachmentsDir,
+    instructions: instructions !== "" ? instructions : global.defaultInstructions,
   };
 }
 
@@ -161,6 +223,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     imageReadMaxPerCall: config.imageReadMaxPerCall,
     imageCaptioningEnabled: config.imageCaptioningEnabled,
     attachmentsDir: config.attachmentsDir,
+    instructions: config.instructions !== "" ? config.instructions : undefined,
   };
 
   // Strip undefined keys before serializing

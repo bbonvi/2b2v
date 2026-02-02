@@ -27,6 +27,7 @@ export interface AssembledContext {
 export interface ContextAssemblyInput {
   persona: string;
   toolInstructions: string;
+  instructions: string;
   emojis: string;
   members: string;
   journalSummaries: string;
@@ -43,13 +44,14 @@ export interface ContextAssemblyInput {
  * Section order per spec:
  * 1. Persona (cached)
  * 2. Tool Instructions (cached)
- * 3. Available Emojis (cached)
- * 4. Server Members (cached)
- * 5. Journal Summaries (cached) — if any
- * 6. Upcoming Schedules (cached) — if any
- * 7. Chat History — Older (cached)
- * 8. Chat History — Newer (uncached)
- * 9. Current Context (uncached)
+ * 3. Instructions (cached) — if any
+ * 4. Available Emojis (cached)
+ * 5. Server Members (cached)
+ * 6. Journal Summaries (cached) — if any
+ * 7. Upcoming Schedules (cached) — if any
+ * 8. Chat History — Older (cached)
+ * 9. Chat History — Newer (uncached)
+ * 10. Current Context (uncached)
  *
  * Empty sections are omitted entirely.
  */
@@ -70,6 +72,7 @@ export function assembleContext(input: ContextAssemblyInput): AssembledContext {
 
   add("Persona", input.persona, true);
   add("Tool Instructions", input.toolInstructions, true);
+  addWithHeader("Instructions", "## Instructions", input.instructions, true);
   addWithHeader("Available Emojis", "## Available Emojis", input.emojis, true);
   addWithHeader("Server Members", "## Server Members", input.members, true);
   addWithHeader("Journal Summaries", "## Journal", input.journalSummaries, true);

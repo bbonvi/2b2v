@@ -24,6 +24,7 @@ function makeGuildConfig(overrides?: Partial<GuildConfig>): GuildConfig {
     imageReadMaxPerCall: 10,
     imageCaptioningEnabled: false,
     attachmentsDir: "data/attachments",
+    instructions: "",
     ...overrides,
   };
 }
