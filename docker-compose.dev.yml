@@ -20,7 +20,7 @@ services:
       - dev-data:/app/data
       - dev-model-cache:/app/model-cache
     ports:
-      - "3000:3000"
+      - "31456:3000"
     depends_on:
       qdrant:
         condition: service_healthy
