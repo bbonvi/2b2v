@@ -187,7 +187,7 @@ buildContext(deps) → AssembledContext
 
 Sections ordered for Anthropic prefix-based prompt caching: stable cached sections first (persona, tools, instructions, emojis, members, journal, schedules, older history), then uncached (newer history, current context, late instruction). Empty sections omitted. Currently serialized to a single string via `contextToSystemPrompt()` since `pi-agent-core` only supports `systemPrompt: string`.
 
-**Typing indicator:** Driven exclusively by the `start_typing` agent tool. A late instruction after chat history tells the agent to call `start_typing` immediately before each `send_message`. No runtime typing lifecycle — the agent controls when typing appears.
+**Typing indicator:** On trigger, the runtime polls `channel.sendTyping()` on an interval until the first assistant response event arrives (or a max timeout), then stops. The `start_typing` agent tool can still trigger an immediate typing pulse right before `send_message`. A late instruction after chat history tells the agent to call `start_typing` immediately before each `send_message`.
 
 ### History Processing Pipeline
 

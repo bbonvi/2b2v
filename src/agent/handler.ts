@@ -33,6 +33,10 @@ export interface HandlerDeps {
   log?: Logger;
   /** Called when a trigger matches, before the agent runs. Use for eager typing. */
   onTriggered?: () => void;
+  /** Called when the first assistant response starts streaming. */
+  onAssistantResponseStart?: () => void;
+  /** Called when the agent finishes, regardless of response. */
+  onAgentEnd?: () => void;
   /** Request-scoped log accumulator. */
   requestLog?: RequestLog;
 }
@@ -130,6 +134,26 @@ export async function handleMessage(
   });
 
   agent.getApiKey = () => streamOptions.apiKey;
+
+  let assistantResponseNotified = false;
+  agent.subscribe((e) => {
+    if (assistantResponseNotified) {
+      if (e.type === "agent_end") deps.onAgentEnd?.();
+      return;
+    }
+
+    if (e.type === "message_start" && "role" in e.message && e.message.role === "assistant") {
+      assistantResponseNotified = true;
+      deps.onAssistantResponseStart?.();
+    }
+    if (e.type === "message_update" && "role" in e.message && e.message.role === "assistant") {
+      assistantResponseNotified = true;
+      deps.onAssistantResponseStart?.();
+    }
+    if (e.type === "agent_end") {
+      deps.onAgentEnd?.();
+    }
+  });
 
   if (deps.log !== undefined) {
     const agentLog = deps.log;

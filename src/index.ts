@@ -649,6 +649,10 @@ client.on("messageCreate", (message: Message) => void (async () => {
     const channelObj = message.channel as TextChannel;
 
     const sender: MessageSender = async (text, reply, _signal) => {
+      const sinceTypingMs = Date.now() - lastTypingAt;
+      if (sinceTypingMs >= 0 && sinceTypingMs < 200) {
+        await new Promise((resolve) => setTimeout(resolve, 200 - sinceTypingMs));
+      }
       const translated = translateOutbound(text, outboundResolvers);
       const chunks = splitMessage(translated);
       let firstId = "";
@@ -727,11 +731,40 @@ client.on("messageCreate", (message: Message) => void (async () => {
     // Build assembled context
     const context = await buildContext(guildId, channelId, guild, guildConfig, translatedContent, latestUserMessage, replyFallbackDeps);
 
-    // Build agent tools (including start_typing wired to the channel)
-    const startTypingTool = createStartTypingTool(() => {
+    let lastTypingAt = 0;
+    const sendTypingNow = (): void => {
+      lastTypingAt = Date.now();
       void channelObj.sendTyping().catch(() => {});
-    });
+    };
+
+    // Build agent tools (including start_typing wired to the channel)
+    const startTypingTool = createStartTypingTool(sendTypingNow);
     const extraTools = [...buildAgentTools(guildId, channelId, guildConfig, guild), startTypingTool];
+
+    const TYPING_INTERVAL_MS = 8_000;
+    const TYPING_MAX_MS = 30_000;
+    let typingTimer: ReturnType<typeof setInterval> | null = null;
+    let typingTimeout: ReturnType<typeof setTimeout> | null = null;
+    const startTypingLoop = (): void => {
+      if (typingTimer !== null) return;
+      sendTypingNow();
+      typingTimer = setInterval(() => {
+        sendTypingNow();
+      }, TYPING_INTERVAL_MS);
+      typingTimeout = setTimeout(() => {
+        stopTypingLoop();
+      }, TYPING_MAX_MS);
+    };
+    const stopTypingLoop = (): void => {
+      if (typingTimer !== null) {
+        clearInterval(typingTimer);
+        typingTimer = null;
+      }
+      if (typingTimeout !== null) {
+        clearTimeout(typingTimeout);
+        typingTimeout = null;
+      }
+    };
 
     // Build incoming message
     const incoming: IncomingMessage = {
@@ -755,7 +788,9 @@ client.on("messageCreate", (message: Message) => void (async () => {
       sender,
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
-      onTriggered: () => { void channelObj.sendTyping().catch(() => {}); },
+      onTriggered: startTypingLoop,
+      onAssistantResponseStart: stopTypingLoop,
+      onAgentEnd: stopTypingLoop,
       requestLog,
     };
 
@@ -767,6 +802,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
       requestLog.setError(err instanceof Error ? err.message : String(err));
       throw err;
     } finally {
+      stopTypingLoop();
       if (result !== undefined) {
         requestLog.setTrigger(result.triggerResult);
         requestLog.setAgentRan(result.agentRan);
