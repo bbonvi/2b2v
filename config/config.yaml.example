@@ -1,7 +1,5 @@
 # Main bot configuration — config/config.yaml
 # All fields are optional. Missing values use hardcoded defaults.
-# Secrets (DISCORD_TOKEN, OPENROUTER_API_KEY, BRAVE_API_KEY) remain in env vars / .env.
-# QDRANT_URL can be set here or as an env var (env takes priority).
 
 # LLM model (OpenRouter model ID)
 model: moonshotai/kimi-k2.5
@@ -47,7 +45,7 @@ personaPath: config/persona.md
 # Custom instructions injected into the LLM context (after tool instructions).
 # Use instructionsPath to load from a file, or instructions for inline text.
 # instructionsPath takes priority over inline instructions.
-# instructionsPath: config/instructions.md
+instructionsPath: config/instructions.md
 instructions: ""
 
 # Log level: debug | info | warn | error

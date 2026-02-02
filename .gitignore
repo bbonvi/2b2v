@@ -5,8 +5,8 @@ node_modules/
 *.db-wal
 *.db-shm
 .env
-config/guilds/*.yaml
-config/persona.md
+config/**/*.md
+config/**/*.yaml
 dist/
 *.tsbuildinfo
 model-cache/
