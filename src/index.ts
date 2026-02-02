@@ -359,7 +359,7 @@ async function buildContext(
       return ud !== 0 ? ud : a.id.localeCompare(b.id);
     });
   const journalSummaries = journals
-    .map((m) => `- ${m.shortDescription}`)
+    .map((m) => `- [${m.id}] ${m.shortDescription}`)
     .join("\n");
 
   // Upcoming schedules — one-off by runAt then ID; cron by expression then ID; one-off first

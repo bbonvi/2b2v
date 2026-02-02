@@ -33,9 +33,9 @@ describe("assembleContext", () => {
       "Tool Instructions",
       "Available Emojis",
       "Server Members",
-      "Journal Summaries",
       "Upcoming Schedules",
       "Chat History — Older",
+      "Journal Summaries",
       "Chat History — Newer",
       "Current Context",
     ]);
@@ -51,9 +51,9 @@ describe("assembleContext", () => {
       "Instructions",
       "Available Emojis",
       "Server Members",
-      "Journal Summaries",
       "Upcoming Schedules",
       "Chat History — Older",
+      "Journal Summaries",
       "Chat History — Newer",
       "Current Context",
     ]);
@@ -102,7 +102,6 @@ describe("assembleContext", () => {
       "Instructions",
       "Available Emojis",
       "Server Members",
-      "Journal Summaries",
       "Upcoming Schedules",
       "Chat History — Older",
     ]);
@@ -114,6 +113,7 @@ describe("assembleContext", () => {
       .filter((s) => !s.cached)
       .map((s) => s.label);
     expect(uncachedLabels).toEqual([
+      "Journal Summaries",
       "Chat History — Newer",
       "Current Context",
     ]);

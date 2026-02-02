@@ -49,9 +49,9 @@ export interface ContextAssemblyInput {
  * 3. Instructions (cached) — if any
  * 4. Available Emojis (cached)
  * 5. Server Members (cached)
- * 6. Journal Summaries (cached) — if any
- * 7. Upcoming Schedules (cached) — if any
- * 8. Chat History — Older (cached)
+ * 6. Upcoming Schedules (cached) — if any
+ * 7. Chat History — Older (cached)
+ * 8. Journal Summaries (uncached) — if any
  * 9. Chat History — Newer (uncached)
  * 10. Current Context (uncached)
  * 11. Late Instruction (uncached) — if any
@@ -78,9 +78,9 @@ export function assembleContext(input: ContextAssemblyInput): AssembledContext {
   addWithHeader("Instructions", "## Instructions", input.instructions, true);
   addWithHeader("Available Emojis", "## Available Emojis", input.emojis, true);
   addWithHeader("Server Members", "## Server Members", input.members, true);
-  addWithHeader("Journal Summaries", "## Journal", input.journalSummaries, true);
   addWithHeader("Upcoming Schedules", "## Upcoming Schedules", input.upcomingSchedules, true);
   add("Chat History — Older", input.olderHistory, true);
+  addWithHeader("Journal Summaries", "## Journal", input.journalSummaries, false);
   add("Chat History — Newer", input.newerHistory, false);
   add("Current Context", input.currentContext, false);
   add("Late Instruction", input.lateInstruction, false);
