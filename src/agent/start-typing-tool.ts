@@ -1,3 +1,4 @@
+import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 
 /** Callback that fires the Discord typing indicator. */
@@ -13,7 +14,7 @@ export function createStartTypingTool(onTyping: TypingCallback): AgentTool {
     label: "Start Typing",
     description:
       "Trigger the typing indicator in the current Discord channel. Call this immediately before each send_message.",
-    parameters: {} as never,
+    parameters: Type.Object({}),
     execute: (): Promise<AgentToolResult<Record<string, never>>> => {
       onTyping();
       return Promise.resolve({

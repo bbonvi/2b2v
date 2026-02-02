@@ -755,6 +755,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
       sender,
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
+      onTriggered: () => { void channelObj.sendTyping().catch(() => {}); },
       requestLog,
     };
 

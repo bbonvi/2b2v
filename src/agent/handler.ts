@@ -31,6 +31,8 @@ export interface HandlerDeps {
   extraTools?: AgentTool[];
   /** Logger for agent event tracing. */
   log?: Logger;
+  /** Called when a trigger matches, before the agent runs. Use for eager typing. */
+  onTriggered?: () => void;
   /** Request-scoped log accumulator. */
   requestLog?: RequestLog;
 }
@@ -93,6 +95,8 @@ export async function handleMessage(
   if (!triggerResult) {
     return { triggered: false, triggerResult: null, agentRan: false };
   }
+
+  deps.onTriggered?.();
 
   const systemPrompt = contextToSystemPrompt(deps.context);
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
