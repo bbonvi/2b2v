@@ -186,6 +186,7 @@ upsertPoints(qdrant, points with payload: {type, entity_id, guild_id, ...})
 | translated_content | TEXT | human-readable (`@username`) |
 | is_bot | INTEGER | 0 or 1 |
 | created_at | INTEGER | epoch ms |
+| reply_to_id | TEXT | nullable; Discord message ID of replied-to message |
 
 **Indexes:** `(guild_id, channel_id, created_at)`, `(user_id, guild_id)`
 
