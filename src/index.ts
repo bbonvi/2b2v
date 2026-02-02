@@ -670,8 +670,6 @@ client.on("messageCreate", (message: Message) => void (async () => {
         if (i === 0) firstId = sent.id;
         storeBotMessage(sent.id, chunk, i === 0 ? text : chunk);
       }
-      // Re-trigger typing after send — Discord clears the indicator when a message is sent
-      fireTyping();
       return { sentMessageId: firstId };
     };
 
@@ -765,6 +763,8 @@ client.on("messageCreate", (message: Message) => void (async () => {
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
       onTriggered: startTyping,
+      onTypingStart: startTyping,
+      onTypingStop: stopTyping,
       requestLog,
     };
 
