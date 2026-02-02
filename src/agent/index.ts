@@ -2,9 +2,18 @@ export {
   loadPersona,
   assembleSystemPrompt,
   formatChatHistory,
+  TOOL_INSTRUCTIONS,
   type PromptContext,
   type ChatMessage,
 } from "./prompt.ts";
+
+export {
+  assembleContext,
+  contextToSystemPrompt,
+  type ContextSection,
+  type AssembledContext,
+  type ContextAssemblyInput,
+} from "./context-assembly.ts";
 
 export {
   shouldRespond,

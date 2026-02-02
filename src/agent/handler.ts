@@ -3,7 +3,7 @@ import type { Message, Model } from "@mariozechner/pi-ai";
 import { streamSimple } from "@mariozechner/pi-ai";
 import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
-import { assembleSystemPrompt, type PromptContext } from "./prompt.ts";
+import { contextToSystemPrompt, type AssembledContext } from "./context-assembly.ts";
 import { createSendMessageTool, type MessageSender } from "./send-message-tool.ts";
 import { resolveGuildModel, buildStreamOptions } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
@@ -19,7 +19,7 @@ export interface IncomingMessage {
   mentionedUserIds: string[];
   /** Pre-translated (inbound) content for LLM consumption. */
   translatedContent: string;
-  /** Multimodal image blocks, if any (handled by C.5 later). */
+  /** Multimodal image blocks, if any. */
   images?: { type: "image"; data: string; mimeType: string }[];
 }
 
@@ -27,7 +27,7 @@ export interface IncomingMessage {
 export interface HandlerDeps {
   globalConfig: GlobalConfig;
   guildConfig: GuildConfig;
-  promptContext: PromptContext;
+  context: AssembledContext;
   sender: MessageSender;
   /** Additional tools beyond send_message (memory, search, etc.). */
   extraTools?: AgentTool[];
@@ -100,7 +100,7 @@ export async function handleMessage(
 
   deps.onTriggered?.();
 
-  const systemPrompt = assembleSystemPrompt(deps.promptContext);
+  const systemPrompt = contextToSystemPrompt(deps.context);
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
   const streamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);
 
@@ -164,7 +164,7 @@ export async function handleMessage(
     });
   }
 
-  const userContent = msg.translatedContent;
+  const userContent = deps.context.userMessage !== "" ? deps.context.userMessage : msg.translatedContent;
   await agent.prompt(userContent, msg.images);
 
   return { triggered: true, triggerResult, agentRan: true };

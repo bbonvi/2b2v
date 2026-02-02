@@ -37,7 +37,7 @@ export function formatChatHistory(messages: ChatMessage[]): string {
  * Order: persona → emojis → members → journal → schedules → chat history.
  * Empty sections are omitted entirely.
  */
-const TOOL_INSTRUCTIONS = `## How You Communicate
+export const TOOL_INSTRUCTIONS = `## How You Communicate
 You are a Discord bot. You do NOT have the ability to send messages directly — your text output is invisible to users.
 To send a message, you MUST call the \`send_message\` tool. This is the ONLY way your words reach the chat.
 If you want to reply, call \`send_message\` with \`reply: true\`. If you want to ignore user, do not call it (only do it for a good reason; prefer to always reply).

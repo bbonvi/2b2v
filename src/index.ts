@@ -1,7 +1,7 @@
 import { createLogger, RequestLog, type LogLevel } from "./logger";
 import { requestLogStore } from "./dashboard/store";
 import { startDashboard } from "./dashboard/server";
-import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, saveGuildConfig } from "./config/loader";
+import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, saveGuildConfig, validateTrimConfig } from "./config/loader";
 import type { GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
 import { createQdrantClient, ensureCollection, healthCheck } from "./qdrant/client";
@@ -14,7 +14,9 @@ import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { handleMessage, type IncomingMessage, type HandlerDeps } from "./agent/handler";
-import type { ChatMessage, PromptContext } from "./agent/prompt";
+import type { ChatMessage } from "./agent/prompt";
+import { TOOL_INSTRUCTIONS } from "./agent/prompt";
+import { assembleContext, type AssembledContext } from "./agent/context-assembly";
 
 import type { MessageSender } from "./agent/send-message-tool";
 import { createMemoryTools } from "./agent/memory-tools";
@@ -52,6 +54,7 @@ log.info("bot starting", {
 
 // --- 1. Load global config (throws on missing secrets) ---
 const globalConfig = loadGlobalConfig();
+validateTrimConfig(globalConfig.defaultTrim);
 log.info("config loaded", { model: globalConfig.defaultModel, qdrant: globalConfig.qdrantUrl });
 
 // --- 2. Ensure data directory exists ---
@@ -328,24 +331,28 @@ function refreshEmojiCache(guild: Guild): void {
   emojiCache.set(guild.id, emojis);
 }
 
-// --- 19. Build PromptContext for a guild+channel ---
-function buildPromptContext(guildId: string, channelId: string, guild: Guild, guildConfig: GuildConfig): PromptContext {
+// --- 19. Build assembled context for a guild+channel ---
+function buildContext(guildId: string, channelId: string, guild: Guild, guildConfig: GuildConfig, userMessage: string): AssembledContext {
   // Chat history from SQLite (already trimmed by LIMIT)
   const history = getChatHistory(channelId, guildConfig.trim.trimTarget);
+  const historyText = history.length > 0
+    ? history.map((m) => `${m.author}: ${m.content}`).join("\n")
+    : "";
 
   // Journal summaries
   const journals = listMemories(db, { scope: "journal" });
   const journalSummaries = journals
     .filter((m) => m.shortDescription !== null && m.shortDescription !== "")
-    .map((m) => m.shortDescription as string);
+    .map((m) => `- ${m.shortDescription as string}`)
+    .join("\n");
 
   // Upcoming schedules
   const upcoming = listUpcomingForContext(db, guildId);
   const upcomingSchedules = upcoming.map((s) => {
-    if (s.type === "cron") return `[cron] ${s.cronExpression ?? "?"}: ${s.messageContent}`;
+    if (s.type === "cron") return `- [cron] ${s.cronExpression ?? "?"}: ${s.messageContent}`;
     const runDate = s.runAt !== null ? new Date(s.runAt).toISOString() : "?";
-    return `[one-off at ${runDate}]: ${s.messageContent}`;
-  });
+    return `- [one-off at ${runDate}]: ${s.messageContent}`;
+  }).join("\n");
 
   // Emoji context
   refreshEmojiCache(guild);
@@ -359,17 +366,21 @@ function buildPromptContext(guildId: string, channelId: string, guild: Guild, gu
   }));
   const displayNameContext = buildDisplayNameContext(members);
 
-  return {
+  // Current context metadata
+  const currentContext = `Guild: ${guildId} | Channel: ${channelId}\nDate/Time: ${new Date().toISOString()}`;
+
+  return assembleContext({
     persona,
+    toolInstructions: TOOL_INSTRUCTIONS,
+    emojis: emojiContext,
+    members: displayNameContext,
     journalSummaries,
     upcomingSchedules,
-    chatHistory: history,
-    emojiContext,
-    displayNameContext,
-    guildId,
-    channelId,
-    timestamp: new Date().toISOString(),
-  };
+    olderHistory: "",
+    newerHistory: historyText !== "" ? `## Chat History\n${historyText}` : "",
+    currentContext,
+    userMessage,
+  });
 }
 
 // --- 20. Build agent tools for a message context ---
@@ -631,8 +642,8 @@ client.on("messageCreate", (message: Message) => void (async () => {
       return { sentMessageId: firstId };
     };
 
-    // Build prompt context
-    const promptContext = buildPromptContext(guildId, channelId, guild, guildConfig);
+    // Build assembled context
+    const context = buildContext(guildId, channelId, guild, guildConfig, translatedContent);
 
     // Build agent tools
     const extraTools = buildAgentTools(guildId, channelId, guildConfig, guild);
@@ -656,7 +667,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
     const deps: HandlerDeps = {
       globalConfig,
       guildConfig,
-      promptContext,
+      context,
       sender,
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),

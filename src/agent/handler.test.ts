@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { handleMessage, patchToolLookup, type IncomingMessage, type HandlerDeps } from "./handler.ts";
-import type { PromptContext } from "./prompt.ts";
+import type { AssembledContext } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { MessageSender } from "./send-message-tool.ts";
 import type { Logger } from "../logger.ts";
@@ -50,17 +50,12 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
   };
 }
 
-function makePromptContext(overrides: Partial<PromptContext> = {}): PromptContext {
+function makeContext(overrides: Partial<AssembledContext> = {}): AssembledContext {
   return {
-    persona: "You are a test bot.",
-    journalSummaries: [],
-    upcomingSchedules: [],
-    chatHistory: [],
-    emojiContext: "",
-    displayNameContext: "",
-    guildId: "test-guild",
-    channelId: "test-channel",
-    timestamp: "2025-01-01T00:00:00.000Z",
+    sections: [
+      { label: "Persona", text: "You are a test bot.", cached: true },
+    ],
+    userMessage: "hello bot",
     ...overrides,
   };
 }
@@ -85,7 +80,7 @@ describe("handleMessage", () => {
       guildConfig: makeGuildConfig({
         triggers: { mention: false, keywords: [], randomChance: 0 },
       }),
-      promptContext: makePromptContext(),
+      context: makeContext(),
       sender,
     };
 
@@ -100,7 +95,7 @@ describe("handleMessage", () => {
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig(),
-      promptContext: makePromptContext(),
+      context: makeContext(),
       sender,
     };
 
@@ -118,7 +113,7 @@ describe("handleMessage", () => {
       guildConfig: makeGuildConfig({
         triggers: { mention: true, keywords: [], randomChance: 0 },
       }),
-      promptContext: makePromptContext(),
+      context: makeContext(),
       sender,
     };
 
@@ -138,7 +133,7 @@ describe("handleMessage", () => {
       guildConfig: makeGuildConfig({
         triggers: { mention: false, keywords: ["hello"], randomChance: 0 },
       }),
-      promptContext: makePromptContext(),
+      context: makeContext(),
       sender,
     };
 
@@ -158,7 +153,7 @@ describe("handleMessage", () => {
       guildConfig: makeGuildConfig({
         triggers: { mention: false, keywords: ["goodbye"], randomChance: 0 },
       }),
-      promptContext: makePromptContext(),
+      context: makeContext(),
       sender,
     };
 
@@ -185,7 +180,7 @@ describe("handleMessage", () => {
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig(),
-      promptContext: makePromptContext(),
+      context: makeContext(),
       sender,
       extraTools: [fakeTool as unknown as AgentTool],
     };
@@ -213,7 +208,7 @@ describe("handleMessage", () => {
       guildConfig: makeGuildConfig({
         triggers: { mention: true, keywords: [], randomChance: 0 },
       }),
-      promptContext: makePromptContext(),
+      context: makeContext(),
       sender,
       log: logSpy as unknown as Logger,
     };
