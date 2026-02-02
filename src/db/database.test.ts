@@ -48,16 +48,16 @@ describe("memories table", () => {
     const expiresAt = now + 180 * 24 * 60 * 60 * 1000; // 6 months
     db.raw
       .prepare(
-        `INSERT INTO memories (id, scope, guild_id, user_id, content, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("mem-1", "user", "guild-1", "user-1", "Prefers dark mode", null, null, "msg-42", now, now, expiresAt);
+      .run("mem-1", "user", "guild-1", "user-1", "Prefers dark mode", null, "msg-42", now, now, expiresAt);
 
     const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get("mem-1") as Record<string, unknown>;
     expect(row.scope).toBe("user");
     expect(row.guild_id).toBe("guild-1");
     expect(row.user_id).toBe("user-1");
-    expect(row.content).toBe("Prefers dark mode");
+    expect(row.short_description).toBe("Prefers dark mode");
     expect(row.source_message_id).toBe("msg-42");
     expect(row.expires_at).toBe(expiresAt);
   });
@@ -66,10 +66,10 @@ describe("memories table", () => {
     const now = Date.now();
     db.raw
       .prepare(
-        `INSERT INTO memories (id, scope, guild_id, user_id, content, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("j-1", "journal", "guild-1", "user-1", "", "Follow up on Alice's project", "Alice mentioned she's working on a Rust compiler. Check in next week.", null, now, now, null);
+      .run("j-1", "journal", "guild-1", "user-1", "Follow up on Alice's project", "Alice mentioned she's working on a Rust compiler. Check in next week.", null, now, now, null);
 
     const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get("j-1") as Record<string, unknown>;
     expect(row.scope).toBe("journal");
@@ -85,10 +85,10 @@ describe("memories table", () => {
     const insert = () =>
       db.raw
         .prepare(
-          `INSERT INTO memories (id, scope, guild_id, user_id, content, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run("gb-1", "guild_bot", "guild-1", null, "Movie night is every Friday", null, null, null, now, now, null);
+        .run("gb-1", "guild_bot", "guild-1", null, "Movie night is every Friday", null, null, now, now, null);
 
     expect(insert).toThrow();
   });
@@ -98,10 +98,10 @@ describe("memories table", () => {
     const insert = () =>
       db.raw
         .prepare(
-          `INSERT INTO memories (id, scope, guild_id, user_id, content, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run("glb-1", "global_bot", null, null, "Users generally prefer concise answers", null, null, null, now, now, null);
+        .run("glb-1", "global_bot", null, null, "Users generally prefer concise answers", null, null, now, now, null);
 
     expect(insert).toThrow();
   });
@@ -111,10 +111,10 @@ describe("memories table", () => {
     const insert = () =>
       db.raw
         .prepare(
-          `INSERT INTO memories (id, scope, guild_id, user_id, content, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run("dup-1", "user", "g1", "u1", "test", null, null, null, now, now, null);
+        .run("dup-1", "user", "g1", "u1", "test", null, null, now, now, null);
 
     insert();
     expect(insert).toThrow();

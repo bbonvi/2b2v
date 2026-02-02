@@ -29,7 +29,7 @@ describe("save_memory tool", () => {
     const result = await saveTool.execute("tc-1", {
       scope: "user",
       userId: "u1",
-      content: "Prefers dark mode",
+      shortDescription: "Prefers dark mode",
     }, new AbortController().signal);
 
     expect(result.content[0]).toMatchObject({ type: "text" });
@@ -39,7 +39,7 @@ describe("save_memory tool", () => {
     // Verify in DB
     const memories = listMemories(db, { scope: "user", guildId: "g1", userId: "u1" });
     expect(memories).toHaveLength(1);
-    expect(memories[0]?.content).toBe("Prefers dark mode");
+    expect(memories[0]?.shortDescription).toBe("Prefers dark mode");
   });
 
   test("creates a journal entry with descriptions", async () => {
@@ -48,7 +48,6 @@ describe("save_memory tool", () => {
 
     await saveTool.execute("tc-2", {
       scope: "journal",
-      content: "",
       shortDescription: "Follow up on Bob",
       longDescription: "Bob asked about the Rust project. Check in next week.",
     }, new AbortController().signal);
@@ -64,7 +63,6 @@ describe("save_memory tool", () => {
 
     await saveTool.execute("tc-3", {
       scope: "journal",
-      content: "Journal entry",
       shortDescription: "Task note",
     }, new AbortController().signal);
 
@@ -82,7 +80,7 @@ describe("save_memory tool", () => {
     const createResult = await saveTool.execute("tc-4", {
       scope: "user",
       userId: "u1",
-      content: "Original",
+      shortDescription: "Original",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: string }).memoryId;
 
@@ -90,13 +88,13 @@ describe("save_memory tool", () => {
     await saveTool.execute("tc-5", {
       scope: "user",
       userId: "u1",
-      content: "Updated",
+      shortDescription: "Updated",
       id,
     }, new AbortController().signal);
 
     const mem = getMemory(db, id);
     expect(mem).not.toBeNull();
-    expect(mem?.content).toBe("Updated");
+    expect(mem?.shortDescription).toBe("Updated");
   });
 
   test("rejects update of memory belonging to another guild", async () => {
@@ -108,7 +106,7 @@ describe("save_memory tool", () => {
     const createResult = await saveG1.execute("tc-6", {
       scope: "user",
       userId: "u1",
-      content: "G1 secret",
+      shortDescription: "G1 secret",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: string }).memoryId;
 
@@ -116,7 +114,7 @@ describe("save_memory tool", () => {
     const updateResult = await saveG2.execute("tc-7", {
       scope: "user",
       userId: "u1",
-      content: "Hijacked",
+      shortDescription: "Hijacked",
       id,
     }, new AbortController().signal);
     const text = (updateResult.content[0] as { text: string }).text;
@@ -125,55 +123,55 @@ describe("save_memory tool", () => {
 
     // Verify original unchanged
     const mem = getMemory(db, id);
-    expect(mem?.content).toBe("G1 secret");
+    expect(mem?.shortDescription).toBe("G1 secret");
   });
 
   test("calls onMemoryChanged after create", async () => {
-    const changed: { id: string; content: string }[] = [];
+    const changed: { id: string; text: string }[] = [];
     const tools = createMemoryTools({
       db,
       guildId: "g1",
       botUserId: "bot-1",
-      onMemoryChanged: (id, content) => { changed.push({ id, content }); },
+      onMemoryChanged: (id, text) => { changed.push({ id, text }); },
     });
     const saveTool = findTool(tools, "save_memory");
 
     await saveTool.execute("tc-8", {
       scope: "user",
       userId: "u1",
-      content: "Embed me",
+      shortDescription: "Embed me",
     }, new AbortController().signal);
 
     expect(changed).toHaveLength(1);
-    expect(changed[0]?.content).toBe("Embed me");
+    expect(changed[0]?.text).toBe("Embed me");
   });
 
   test("calls onMemoryChanged after update", async () => {
-    const changed: { id: string; content: string }[] = [];
+    const changed: { id: string; text: string }[] = [];
     const tools = createMemoryTools({
       db,
       guildId: "g1",
       botUserId: "bot-1",
-      onMemoryChanged: (id, content) => { changed.push({ id, content }); },
+      onMemoryChanged: (id, text) => { changed.push({ id, text }); },
     });
     const saveTool = findTool(tools, "save_memory");
 
     const createResult = await saveTool.execute("tc-9", {
       scope: "user",
       userId: "u1",
-      content: "Original",
+      shortDescription: "Original",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: string }).memoryId;
 
     await saveTool.execute("tc-10", {
       scope: "user",
       userId: "u1",
-      content: "Updated",
+      shortDescription: "Updated",
       id,
     }, new AbortController().signal);
 
     expect(changed).toHaveLength(2);
-    expect(changed[1]?.content).toBe("Updated");
+    expect(changed[1]?.text).toBe("Updated");
   });
 });
 
@@ -187,7 +185,7 @@ describe("delete_memory tool", () => {
     const createResult = await saveG1.execute("tc-11", {
       scope: "user",
       userId: "u1",
-      content: "G1 data",
+      shortDescription: "G1 data",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: string }).memoryId;
 
@@ -207,7 +205,7 @@ describe("delete_memory tool", () => {
     const createResult = await saveTool.execute("tc-13", {
       scope: "user",
       userId: "u1",
-      content: "To delete",
+      shortDescription: "To delete",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: string }).memoryId;
 
@@ -240,7 +238,7 @@ describe("delete_memory tool", () => {
     const createResult = await saveTool.execute("tc-16", {
       scope: "user",
       userId: "u1",
-      content: "To delete",
+      shortDescription: "To delete",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: string }).memoryId;
 
@@ -255,8 +253,8 @@ describe("list_memories tool", () => {
     const saveTool = findTool(tools, "save_memory");
     const listTool = findTool(tools, "list_memories");
 
-    await saveTool.execute("tc-18", { scope: "user", userId: "u1", content: "Fact A" }, new AbortController().signal);
-    await saveTool.execute("tc-19", { scope: "user", userId: "u1", content: "Fact B" }, new AbortController().signal);
+    await saveTool.execute("tc-18", { scope: "user", userId: "u1", shortDescription: "Fact A" }, new AbortController().signal);
+    await saveTool.execute("tc-19", { scope: "user", userId: "u1", shortDescription: "Fact B" }, new AbortController().signal);
 
     const result = await listTool.execute("tc-20", { scope: "user", userId: "u1" }, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
@@ -271,7 +269,6 @@ describe("list_memories tool", () => {
 
     await saveTool.execute("tc-21", {
       scope: "journal",
-      content: "",
       shortDescription: "Task A",
       longDescription: "Details of task A",
     }, new AbortController().signal);
@@ -299,7 +296,7 @@ describe("list_memories tool", () => {
     const listG2 = findTool(toolsG2, "list_memories");
 
     // Create user memory in G1
-    await saveG1.execute("tc-24", { scope: "user", userId: "u1", content: "G1 secret" }, new AbortController().signal);
+    await saveG1.execute("tc-24", { scope: "user", userId: "u1", shortDescription: "G1 secret" }, new AbortController().signal);
 
     // List from G2 — should not see G1's memory
     const result = await listG2.execute("tc-25", { scope: "user", userId: "u1" }, new AbortController().signal);
@@ -314,7 +311,7 @@ describe("list_memories tool", () => {
     const listG2 = findTool(toolsG2, "list_memories");
 
     // Create journal entry in G1
-    await saveG1.execute("tc-26", { scope: "journal", content: "", shortDescription: "G1 task" }, new AbortController().signal);
+    await saveG1.execute("tc-26", { scope: "journal", shortDescription: "G1 task" }, new AbortController().signal);
 
     // List from G2 — should not see G1's journal
     const result = await listG2.execute("tc-27", { scope: "journal" }, new AbortController().signal);

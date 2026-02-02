@@ -116,7 +116,7 @@ describe("memory tools → DB roundtrip", () => {
     // Create
     const saveResult = await saveTool.execute("tc-1", {
       scope: "user",
-      content: "Integration test memory",
+      shortDescription: "Integration test memory",
       userId: "user-42",
     });
     const memoryId = (saveResult.details as { memoryId: string }).memoryId;
@@ -125,7 +125,7 @@ describe("memory tools → DB roundtrip", () => {
     // Verify in DB directly
     const dbRow = getMemory(db, memoryId);
     expect(dbRow).not.toBeNull();
-    expect(dbRow?.content).toBe("Integration test memory");
+    expect(dbRow?.shortDescription).toBe("Integration test memory");
     expect(dbRow?.scope).toBe("user");
     expect(dbRow?.guildId).toBe(GUILD_ID);
 
@@ -149,7 +149,7 @@ describe("memory tools → DB roundtrip", () => {
     // Create
     const r1 = await saveTool.execute("tc-1", {
       scope: "user",
-      content: "original",
+      shortDescription: "original",
       userId: USER_ID,
     });
     const id = (r1.details as { memoryId: string }).memoryId;
@@ -157,12 +157,12 @@ describe("memory tools → DB roundtrip", () => {
     // Update
     await saveTool.execute("tc-2", {
       scope: "user",
-      content: "updated",
+      shortDescription: "updated",
       id,
     });
 
     const row = getMemory(db, id);
-    expect(row?.content).toBe("updated");
+    expect(row?.shortDescription).toBe("updated");
   });
 
   test("journal memory gets 180d TTL by default", async () => {
@@ -173,7 +173,6 @@ describe("memory tools → DB roundtrip", () => {
     const before = Date.now();
     const r = await saveTool.execute("tc-1", {
       scope: "journal",
-      content: "",
       shortDescription: "Test journal",
       longDescription: "Detailed entry for integration test",
     });
@@ -189,16 +188,16 @@ describe("memory tools → DB roundtrip", () => {
   });
 
   test("guild isolation: memories scoped to different guilds are independent", () => {
-    createMemory(db, { scope: "user", guildId: "guild-A", userId: "user-1", content: "A data" });
-    createMemory(db, { scope: "user", guildId: "guild-B", userId: "user-1", content: "B data" });
+    createMemory(db, { scope: "user", guildId: "guild-A", userId: "user-1", shortDescription: "A data" });
+    createMemory(db, { scope: "user", guildId: "guild-B", userId: "user-1", shortDescription: "B data" });
 
     const listA = listMemories(db, { scope: "user", guildId: "guild-A" });
     const listB = listMemories(db, { scope: "user", guildId: "guild-B" });
 
     expect(listA.length).toBe(1);
-    expect(listA[0]?.content).toBe("A data");
+    expect(listA[0]?.shortDescription).toBe("A data");
     expect(listB.length).toBe(1);
-    expect(listB[0]?.content).toBe("B data");
+    expect(listB[0]?.shortDescription).toBe("B data");
   });
 });
 
@@ -459,12 +458,12 @@ describe("message storage and retrieval", () => {
   });
 
   test("message retention: expired memories cleaned up correctly", () => {
-    createMemory(db, { scope: "user", guildId: GUILD_ID, userId: "user-1", content: "expired", ttlDays: -1 });
-    createMemory(db, { scope: "user", guildId: GUILD_ID, userId: "user-1", content: "still valid" });
+    createMemory(db, { scope: "user", guildId: GUILD_ID, userId: "user-1", shortDescription: "expired", ttlDays: -1 });
+    createMemory(db, { scope: "user", guildId: GUILD_ID, userId: "user-1", shortDescription: "still valid" });
 
     // listMemories filters expired; ttlDays=-1 means expiry = now - 1 day (past)
     const all = listMemories(db, { scope: "user", guildId: GUILD_ID });
-    const contents = all.map((m) => m.content);
+    const contents = all.map((m) => m.shortDescription);
     expect(contents).toContain("still valid");
     expect(contents).not.toContain("expired");
   });

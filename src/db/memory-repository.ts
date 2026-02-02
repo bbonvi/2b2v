@@ -10,8 +10,7 @@ export interface MemoryRow {
   scope: MemoryScope;
   guildId: string | null;
   userId: string | null;
-  content: string;
-  shortDescription: string | null;
+  shortDescription: string;
   longDescription: string | null;
   sourceMessageId: string | null;
   createdAt: number;
@@ -23,8 +22,7 @@ export interface CreateMemoryInput {
   scope: MemoryScope;
   guildId: string;
   userId: string;
-  content: string;
-  shortDescription?: string;
+  shortDescription: string;
   longDescription?: string;
   sourceMessageId?: string;
   /** Days until expiry. Default 180. Pass null to disable. */
@@ -32,7 +30,6 @@ export interface CreateMemoryInput {
 }
 
 export interface UpdateMemoryInput {
-  content?: string;
   shortDescription?: string;
   longDescription?: string;
   /** Recompute expiry from now + ttlDays. Pass null to remove expiry. */
@@ -60,16 +57,15 @@ export function createMemory(db: Database, input: CreateMemoryInput): string {
 
   db.raw
     .prepare(
-      `INSERT INTO memories (id, scope, guild_id, user_id, content, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
       input.scope,
       input.guildId,
       input.userId,
-      input.content,
-      input.shortDescription ?? null,
+      input.shortDescription,
       input.longDescription ?? null,
       input.sourceMessageId ?? null,
       now,
@@ -85,10 +81,6 @@ export function updateMemory(db: Database, id: string, input: UpdateMemoryInput)
   const sets: string[] = [];
   const params: (string | number | null)[] = [];
 
-  if (input.content !== undefined) {
-    sets.push("content = ?");
-    params.push(input.content);
-  }
   if (input.shortDescription !== undefined) {
     sets.push("short_description = ?");
     params.push(input.shortDescription);
@@ -164,8 +156,7 @@ function mapRow(row: Record<string, unknown>): MemoryRow {
     scope: row.scope as MemoryScope,
     guildId: row.guild_id as string | null,
     userId: row.user_id as string | null,
-    content: row.content as string,
-    shortDescription: row.short_description as string | null,
+    shortDescription: row.short_description as string,
     longDescription: row.long_description as string | null,
     sourceMessageId: row.source_message_id as string | null,
     createdAt: row.created_at as number,

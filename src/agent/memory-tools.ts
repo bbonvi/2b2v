@@ -18,17 +18,16 @@ export interface MemoryToolsDeps {
   /** Bot's own user ID — auto-injected as userId for journal scope. */
   botUserId: string;
   /** Called after a memory is created or updated, for embedding. */
-  onMemoryChanged?: (memoryId: string, content: string) => void;
+  onMemoryChanged?: (memoryId: string, text: string) => void;
   /** Called after a memory is deleted, for Qdrant cleanup. */
   onMemoryDeleted?: (memoryId: string) => void;
 }
 
 interface SaveMemoryParams {
   scope: MemoryScope;
-  content: string;
+  shortDescription: string;
   userId?: string;
   id?: string;
-  shortDescription?: string;
   longDescription?: string;
   ttlDays?: number | null;
   sourceMessageId?: string;
@@ -49,10 +48,9 @@ const SaveMemorySchema = Type.Object({
     [Type.Literal("user"), Type.Literal("journal")],
     { description: "Memory scope. 'user' = per-user facts (requires userId), 'journal' = bot's own notes (no userId needed)." }
   ),
-  content: Type.String({ description: "Memory content. For journal entries, leave empty and use shortDescription/longDescription instead." }),
+  shortDescription: Type.String({ description: "Primary memory text. Always visible in context." }),
   userId: Type.Optional(Type.String({ description: "Target user ID. Required for scope 'user'." })),
   id: Type.Optional(Type.String({ description: "Existing memory ID to update. Omit to create new." })),
-  shortDescription: Type.Optional(Type.String({ description: "Short description. Always visible in context." })),
   longDescription: Type.Optional(Type.String({ description: "Long description. Pulled on demand." })),
   ttlDays: Type.Optional(Type.Union([Type.Number(), Type.Null()], { description: "Days until expiry. Default 180. Pass null for no expiry." })),
   sourceMessageId: Type.Optional(Type.String({ description: "Discord message ID that triggered this memory." })),
@@ -70,6 +68,12 @@ const ListMemoriesSchema = Type.Object({
   userId: Type.Optional(Type.String({ description: "Filter by user ID (for scope 'user')." })),
   limit: Type.Optional(Type.Number({ description: "Max entries to return. Default 50." })),
 });
+
+function embeddingText(shortDescription: string, longDescription?: string): string {
+  return longDescription !== undefined && longDescription !== ""
+    ? `${shortDescription}\n\n${longDescription}`
+    : shortDescription;
+}
 
 /**
  * Create memory agent tools bound to a guild context.
@@ -103,13 +107,12 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
           });
         }
         const updated = updateMemory(db, p.id, {
-          content: p.content,
           shortDescription: p.shortDescription,
           longDescription: p.longDescription,
           ttlDays: p.ttlDays,
         });
         if (updated) {
-          onMemoryChanged?.(p.id, p.content);
+          onMemoryChanged?.(p.id, embeddingText(p.shortDescription, p.longDescription));
         }
         return Promise.resolve({
           content: [{ type: "text", text: updated ? `Saved (updated) memory ${p.id}.` : `Memory ${p.id} not found.` }],
@@ -123,13 +126,12 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
         scope,
         guildId,
         userId,
-        content: p.content,
         shortDescription: p.shortDescription,
         longDescription: p.longDescription,
         sourceMessageId: p.sourceMessageId,
         ttlDays: p.ttlDays,
       });
-      onMemoryChanged?.(id, p.content);
+      onMemoryChanged?.(id, embeddingText(p.shortDescription, p.longDescription));
 
       return Promise.resolve({
         content: [{ type: "text", text: `Saved new ${scope} memory ${id}.` }],
@@ -200,10 +202,6 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
 function formatMemoryLine(row: MemoryRow): string {
   const parts = [`[${row.id}]`];
   if (row.scope === "user" && row.userId !== null) parts.push(`user:${row.userId}`);
-  if (row.shortDescription !== null && row.shortDescription !== "") {
-    parts.push(row.shortDescription);
-  } else {
-    parts.push(row.content);
-  }
+  parts.push(row.shortDescription);
   return parts.join(" ");
 }

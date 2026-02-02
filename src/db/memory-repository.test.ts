@@ -28,7 +28,7 @@ describe("createMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      content: "Likes pizza",
+      shortDescription: "Likes pizza",
     });
 
     const mem = getMemory(db, id);
@@ -36,7 +36,7 @@ describe("createMemory", () => {
     expect(mem?.scope).toBe("user");
     expect(mem?.guildId).toBe("g1");
     expect(mem?.userId).toBe("u1");
-    expect(mem?.content).toBe("Likes pizza");
+    expect(mem?.shortDescription).toBe("Likes pizza");
     expect(mem?.expiresAt).toBeGreaterThanOrEqual(before + DEFAULT_TTL_MS - 1000);
     expect(mem?.expiresAt).toBeLessThanOrEqual(Date.now() + DEFAULT_TTL_MS + 1000);
   });
@@ -46,7 +46,7 @@ describe("createMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      content: "Test memory",
+      shortDescription: "Test memory",
     });
 
     const mem = getMemory(db, id);
@@ -60,7 +60,6 @@ describe("createMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      content: "Main content",
       shortDescription: "Short summary",
       longDescription: "Detailed explanation of the memory",
     });
@@ -76,7 +75,7 @@ describe("createMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      content: "Test",
+      shortDescription: "Test",
     });
 
     const mem = getMemory(db, id);
@@ -89,7 +88,6 @@ describe("createMemory", () => {
       scope: "journal",
       guildId: "g1",
       userId: "u1",
-      content: "",
       shortDescription: "Check on Alice",
       longDescription: "Alice mentioned a Rust project last Tuesday. Follow up.",
     });
@@ -107,7 +105,7 @@ describe("createMemory", () => {
       scope: "journal",
       guildId: "g1",
       userId: "u1",
-      content: "Journal entry",
+      shortDescription: "Journal entry",
     });
 
     const mem = getMemory(db, id);
@@ -121,7 +119,6 @@ describe("createMemory", () => {
       scope: "journal",
       guildId: "g1",
       userId: "u1",
-      content: "",
       shortDescription: "Meeting notes",
       longDescription: "Discussed project timeline and deliverables for Q1",
     });
@@ -137,7 +134,6 @@ describe("createMemory", () => {
       scope: "journal",
       guildId: "g1",
       userId: "u1",
-      content: "",
       shortDescription: "Short",
       longDescription: "Long",
     });
@@ -153,7 +149,7 @@ describe("createMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      content: "Temporary note",
+      shortDescription: "Temporary note",
       ttlDays: 30,
     });
 
@@ -168,7 +164,7 @@ describe("createMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      content: "Permanent note",
+      shortDescription: "Permanent note",
       ttlDays: null,
     });
 
@@ -181,7 +177,7 @@ describe("createMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      content: "From a specific message",
+      shortDescription: "From a specific message",
       sourceMessageId: "msg-99",
     });
 
@@ -196,16 +192,16 @@ describe("updateMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      content: "Old content",
+      shortDescription: "Old content",
     });
 
-    const updated = updateMemory(db, id, { content: "New content" });
+    const updated = updateMemory(db, id, { shortDescription: "New content" });
     expect(updated).toBe(true);
 
     const mem = getMemory(db, id);
     expect(mem).not.toBeNull();
     if (!mem) throw new Error("unreachable");
-    expect(mem.content).toBe("New content");
+    expect(mem.shortDescription).toBe("New content");
     expect(mem.updatedAt).toBeGreaterThanOrEqual(mem.createdAt);
   });
 
@@ -214,7 +210,6 @@ describe("updateMemory", () => {
       scope: "journal",
       guildId: "g1",
       userId: "u1",
-      content: "",
       shortDescription: "Old short",
       longDescription: "Old long",
     });
@@ -234,7 +229,6 @@ describe("updateMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      content: "Content",
       shortDescription: "Old short",
       longDescription: "Old long",
     });
@@ -254,7 +248,7 @@ describe("updateMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      content: "test",
+      shortDescription: "test",
     });
 
     updateMemory(db, id, { ttlDays: 7 });
@@ -266,7 +260,7 @@ describe("updateMemory", () => {
   });
 
   test("returns false for non-existent id", () => {
-    const result = updateMemory(db, "nonexistent", { content: "x" });
+    const result = updateMemory(db, "nonexistent", { shortDescription: "x" });
     expect(result).toBe(false);
   });
 });
@@ -277,7 +271,7 @@ describe("deleteMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      content: "To be deleted",
+      shortDescription: "To be deleted",
     });
 
     const deleted = deleteMemory(db, id);
@@ -292,24 +286,24 @@ describe("deleteMemory", () => {
 
 describe("listMemories", () => {
   test("lists user memories for a specific guild and user", () => {
-    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", content: "A" });
-    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", content: "B" });
-    createMemory(db, { scope: "user", guildId: "g1", userId: "u2", content: "C" });
+    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", shortDescription: "A" });
+    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", shortDescription: "B" });
+    createMemory(db, { scope: "user", guildId: "g1", userId: "u2", shortDescription: "C" });
 
     const results = listMemories(db, { scope: "user", guildId: "g1", userId: "u1" });
     expect(results).toHaveLength(2);
-    expect(results.map((r) => r.content).sort()).toEqual(["A", "B"]);
+    expect(results.map((r) => r.shortDescription).sort()).toEqual(["A", "B"]);
   });
 
   test("lists journal entries for a guild", () => {
-    createMemory(db, { scope: "journal", guildId: "g1", userId: "u1", content: "X" });
-    createMemory(db, { scope: "journal", guildId: "g2", userId: "u2", content: "Y" });
+    createMemory(db, { scope: "journal", guildId: "g1", userId: "u1", shortDescription: "X" });
+    createMemory(db, { scope: "journal", guildId: "g2", userId: "u2", shortDescription: "Y" });
 
     const results = listMemories(db, { scope: "journal", guildId: "g1" });
     expect(results).toHaveLength(1);
     expect(results[0]).toBeDefined();
     if (!results[0]) throw new Error("unreachable");
-    expect(results[0].content).toBe("X");
+    expect(results[0].shortDescription).toBe("X");
   });
 
   test("lists journal entries with descriptions", () => {
@@ -317,7 +311,6 @@ describe("listMemories", () => {
       scope: "journal",
       guildId: "g1",
       userId: "u1",
-      content: "",
       shortDescription: "Short A",
       longDescription: "Long A",
     });
@@ -330,14 +323,14 @@ describe("listMemories", () => {
   });
 
   test("filters journal by userId when provided", () => {
-    createMemory(db, { scope: "journal", guildId: "g1", userId: "u1", content: "Entry 1" });
-    createMemory(db, { scope: "journal", guildId: "g1", userId: "u2", content: "Entry 2" });
+    createMemory(db, { scope: "journal", guildId: "g1", userId: "u1", shortDescription: "Entry 1" });
+    createMemory(db, { scope: "journal", guildId: "g1", userId: "u2", shortDescription: "Entry 2" });
 
     const results = listMemories(db, { scope: "journal", guildId: "g1", userId: "u1" });
     expect(results).toHaveLength(1);
     expect(results[0]).toBeDefined();
     if (!results[0]) throw new Error("unreachable");
-    expect(results[0].content).toBe("Entry 1");
+    expect(results[0].shortDescription).toBe("Entry 1");
   });
 
   test("excludes expired memories", () => {
@@ -345,23 +338,23 @@ describe("listMemories", () => {
     const now = Date.now();
     db.raw
       .prepare(
-        `INSERT INTO memories (id, scope, guild_id, user_id, content, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("expired-1", "user", "g1", "u1", "Old", null, null, null, now - 100000, now - 100000, now - 1000);
+      .run("expired-1", "user", "g1", "u1", "Old", null, null, now - 100000, now - 100000, now - 1000);
 
-    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", content: "Current" });
+    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", shortDescription: "Current" });
 
     const results = listMemories(db, { scope: "user", guildId: "g1", userId: "u1" });
     expect(results).toHaveLength(1);
     expect(results[0]).toBeDefined();
     if (!results[0]) throw new Error("unreachable");
-    expect(results[0].content).toBe("Current");
+    expect(results[0].shortDescription).toBe("Current");
   });
 
   test("respects limit parameter", () => {
     for (let i = 0; i < 5; i++) {
-      createMemory(db, { scope: "user", guildId: "g1", userId: "u1", content: `Item ${i}` });
+      createMemory(db, { scope: "user", guildId: "g1", userId: "u1", shortDescription: `Item ${i}` });
     }
 
     const results = listMemories(db, { scope: "user", guildId: "g1", userId: "u1", limit: 3 });
@@ -374,12 +367,12 @@ describe("deleteExpiredMemories", () => {
     const now = Date.now();
     db.raw
       .prepare(
-        `INSERT INTO memories (id, scope, guild_id, user_id, content, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("exp-1", "user", "g1", "u1", "Expired", null, null, null, now, now, now - 1000);
+      .run("exp-1", "user", "g1", "u1", "Expired", null, null, now, now, now - 1000);
 
-    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", content: "Still valid" });
+    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", shortDescription: "Still valid" });
 
     const count = deleteExpiredMemories(db);
     expect(count).toBe(1);

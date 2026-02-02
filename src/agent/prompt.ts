@@ -67,7 +67,7 @@ Scopes:
 - **user** — per-user facts (e.g., preferences, names). Requires \`userId\`.
 - **journal** — bot's own notes, plans, observations. No \`userId\` needed (auto-injected).
 
-Both scopes support \`shortDescription\`/\`longDescription\` for structured entries.
+\`shortDescription\` is the primary memory text (required, always visible in context). Use \`longDescription\` for extended details (optional, pulled on demand).
 All memories are per-guild (auto-scoped). Default TTL is 180 days, configurable via \`ttlDays\`. Pass \`ttlDays: null\` for no expiry.
 
 ## CRITICAL: \`send_message\` requirement

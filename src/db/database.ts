@@ -11,8 +11,7 @@ const SCHEMA_SQL = `
     scope             TEXT NOT NULL CHECK(scope IN ('user', 'journal')),
     guild_id          TEXT,
     user_id           TEXT,
-    content           TEXT NOT NULL DEFAULT '',
-    short_description TEXT,
+    short_description TEXT NOT NULL DEFAULT '',
     long_description  TEXT,
     source_message_id TEXT,
     created_at        INTEGER NOT NULL,
@@ -97,6 +96,10 @@ export function createDatabase(dbPath: string): Database {
 
   // Idempotent migration: add reply_to_id to existing databases
   try { raw.run("ALTER TABLE messages ADD COLUMN reply_to_id TEXT"); } catch { /* already exists */ }
+
+  // Migration: remove content column from memories (replaced by short_description)
+  try { raw.run("UPDATE memories SET short_description = content WHERE short_description IS NULL OR short_description = ''"); } catch { /* column may not exist */ }
+  try { raw.run("ALTER TABLE memories DROP COLUMN content"); } catch { /* already dropped */ }
 
   return {
     raw,

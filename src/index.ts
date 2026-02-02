@@ -352,13 +352,13 @@ async function buildContext(
   // Journal summaries — sorted by updatedAt ascending, then ID
   const botUserId = client.user?.id ?? "";
   const journals = listMemories(db, { scope: "journal", guildId, userId: botUserId })
-    .filter((m) => m.shortDescription !== null && m.shortDescription !== "")
+    .filter((m) => m.shortDescription !== "")
     .sort((a, b) => {
       const ud = a.updatedAt - b.updatedAt;
       return ud !== 0 ? ud : a.id.localeCompare(b.id);
     });
   const journalSummaries = journals
-    .map((m) => `- ${m.shortDescription as string}`)
+    .map((m) => `- ${m.shortDescription}`)
     .join("\n");
 
   // Upcoming schedules — one-off by runAt then ID; cron by expression then ID; one-off first
@@ -422,10 +422,10 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
     db,
     guildId,
     botUserId: client.user?.id ?? "",
-    onMemoryChanged: (memoryId, content) => {
+    onMemoryChanged: (memoryId, text) => {
       void embeddingQueue.enqueue({
         id: memoryId,
-        text: content,
+        text,
         target: "memory",
         metadata: { guild_id: guildId },
       }).catch((err: unknown) => {
