@@ -31,12 +31,6 @@ export interface HandlerDeps {
   extraTools?: AgentTool[];
   /** Logger for agent event tracing. */
   log?: Logger;
-  /** Called when a trigger matches, before the agent runs. Use for typing indicators. */
-  onTriggered?: () => void;
-  /** Called when send_message is about to execute — start typing indicator. */
-  onTypingStart?: () => void;
-  /** Called when send_message finishes executing — stop typing indicator. */
-  onTypingStop?: () => void;
   /** Request-scoped log accumulator. */
   requestLog?: RequestLog;
 }
@@ -100,8 +94,6 @@ export async function handleMessage(
     return { triggered: false, triggerResult: null, agentRan: false };
   }
 
-  deps.onTriggered?.();
-
   const systemPrompt = contextToSystemPrompt(deps.context);
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
   const streamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);
@@ -134,58 +126,6 @@ export async function handleMessage(
   });
 
   agent.getApiKey = () => streamOptions.apiKey;
-
-  let typingActive = false;
-  // Prevents restarting typing after a send_message unless more visible work actually begins.
-  let allowTyping = true;
-  const quietTools = new Set(["save_memory", "delete_memory", "list_memories"]);
-  const startTyping = (): void => {
-    if (!allowTyping || typingActive) return;
-    typingActive = true;
-    deps.onTypingStart?.();
-  };
-  const stopTyping = (): void => {
-    if (!typingActive) return;
-    typingActive = false;
-    deps.onTypingStop?.();
-  };
-
-  // Typing lifecycle:
-  // - turn_start/message_update: start typing while agent is actively working
-  // - tool_execution_start(send_message): stop typing and suppress restarts until
-  //   another non-send tool begins (prevents ghost typing after final send)
-  // - tool_execution_start(other): re-enable typing for tool work
-  // - turn_end / agent_end: stop typing
-  agent.subscribe((e) => {
-    if (e.type === "turn_start") {
-      startTyping();
-    }
-    if (e.type === "message_update") {
-      const evt = e.assistantMessageEvent;
-      if (evt.type === "text_delta" || evt.type === "toolcall_start" || evt.type === "toolcall_delta") {
-        startTyping();
-      }
-    }
-    if (e.type === "tool_execution_start") {
-      if (e.toolName === "send_message") {
-        // Discord typing can't be canceled; suppress restarts until real work resumes.
-        allowTyping = false;
-        stopTyping();
-      } else if (quietTools.has(e.toolName)) {
-        // Silent tools (e.g. save_memory) shouldn't surface typing after responses.
-        stopTyping();
-      } else {
-        allowTyping = true;
-        startTyping();
-      }
-    }
-    if (e.type === "turn_end") {
-      stopTyping();
-    }
-    if (e.type === "agent_end") {
-      stopTyping();
-    }
-  });
 
   if (deps.log !== undefined) {
     const agentLog = deps.log;

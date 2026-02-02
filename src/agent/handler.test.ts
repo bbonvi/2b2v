@@ -225,45 +225,6 @@ describe("handleMessage", () => {
   });
 });
 
-describe("typing callbacks", () => {
-  test("typing start/stop counts match (turn lifecycle)", async () => {
-    let stopCount = 0;
-    let startCount = 0;
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "msg-1" });
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({
-        triggers: { mention: true, keywords: [], randomChance: 0 },
-      }),
-      context: makeContext(),
-      sender,
-      onTypingStart: () => { startCount++; },
-      onTypingStop: () => { stopCount++; },
-    };
-
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-    // Each send_message tool call gets one start and one stop
-    expect(startCount).toBe(stopCount);
-  });
-
-  test("typing callbacks are optional — no crash when undefined", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({
-        triggers: { mention: true, keywords: [], randomChance: 0 },
-      }),
-      context: makeContext(),
-      sender,
-      // onTypingStart and onTypingStop intentionally omitted
-    };
-
-    const result = await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-    expect(result.triggered).toBe(true);
-    expect(result.agentRan).toBe(true);
-  });
-});
-
 describe("patchToolLookup", () => {
   function makeTool(name: string): AgentTool {
     return {
