@@ -162,7 +162,9 @@ Docker-compose Qdrant (`http://qdrant:6333`) is internal-only — no exposed por
 - `createDatabase(path)` — `src/db/database.ts`. SQLite with WAL mode; memories/messages/schedules tables.
 - `createMemory/updateMemory/deleteMemory/listMemories/deleteExpiredMemories` — `src/db/memory-repository.ts`.
 - `createSchedule/updateSchedule/deleteSchedule/listSchedules` — `src/db/schedule-repository.ts`.
-- `searchMessages(db, qdrant, vec, filter)` — `src/db/message-repository.ts`. Qdrant KNN → SQLite JOIN.
+- `searchMessages(db, qdrant, vec, filter)` — `src/db/message-repository.ts`. Semantic search: Qdrant KNN → SQLite JOIN.
+- `searchMessagesLiteral(db, query, filter)` — `src/db/message-repository.ts`. Case-insensitive keyword/phrase search via SQLite LIKE. No Qdrant.
+- `getMessageById(db, messageId, guildId)` — `src/db/message-repository.ts`. Direct message lookup by ID within guild. Pure SQLite, no Qdrant.
 - `createQdrantClient/ensureCollection/healthCheck` — `src/qdrant/client.ts`.
 - `upsertPoint/upsertPoints/deletePoint/searchPoints/toPointId` — `src/qdrant/adapter.ts`.
 - `createEmbeddingPipeline/getEmbeddingPipeline` — `src/embeddings/pipeline.ts`. bge-m3 via @huggingface/transformers.

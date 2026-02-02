@@ -19,7 +19,7 @@ src/
 │   ├── context-trimming.ts     Chat history windowing (trimTrigger/trimTarget, now via SQL LIMIT)
 │   ├── send-message-tool.ts    Agent tool: send a message to channel
 │   ├── memory-tools.ts         Agent tools: save/delete/list memories (3 tools)
-│   ├── search-tool.ts          Agent tool: semantic search over chat history
+│   ├── search-tool.ts          Agent tool: search chat history (semantic, literal, or ID-based)
 │   ├── schedule-tool.ts        Agent tool: relative one-off scheduling
 │   ├── member-list-tool.ts     Agent tool: server member roster
 │   ├── channel-history-tool.ts Agent tool: fetch recent channel messages
@@ -101,23 +101,41 @@ Discord messageCreate event
             └─ send_message → Discord (reply or normal, with typing)
 ```
 
-### Semantic Search
+### Message Search (Multi-Mode)
 
+Three search modes via `search_messages` tool:
+
+**Semantic** (`mode: "semantic"`):
 ```
-Query text
-  ↓
-pipeline.embed([query]) → Float32Array (1024-dim)
+Query text → pipeline.embed([query]) → Float32Array (1024-dim)
   ↓
 searchPoints(qdrant, vector, {guild_id, channel_id?, user_id?, after?, before?})
-  ↓ returns (id, score) pairs
+  ↓
 SQLite JOIN: SELECT ... FROM messages WHERE id IN (qdrant_ids)
   ↓
-Merged results: translatedContent + authorUsername + score
-  ↓
-(optional) fetchMessage(channelId, messageId) → attachment metadata from Discord
-  ↓
-Formatted output with attachment info (📎 name, type, size)
+Merged results: translatedContent + authorUsername + relevance_score
 ```
+
+**Literal** (`mode: "literal"`):
+```
+Query string
+  ↓
+SQLite: SELECT ... FROM messages WHERE translated_content LIKE '%query%'
+  ↓
+Results: matches ordered by recency; guild/channel/user filters applied
+```
+
+**ID** (`mode: "id"`):
+```
+Message ID (snowflake)
+  ↓
+SQLite: SELECT ... FROM messages WHERE id = ? AND guild_id = ?
+  ↓
+Result: exact message or null if not found
+```
+
+All modes support optional filters: `channel_id`, `user_id`, `after` (epoch ms), `before` (epoch ms).
+
 
 ### Embedding Storage
 
