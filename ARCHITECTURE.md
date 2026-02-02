@@ -236,8 +236,7 @@ No inline images in LLM context. Messages reference `image_ids`; LLM retrieves v
 | scope | TEXT | `user` · `journal` |
 | guild_id | TEXT | required; all memories are per-guild |
 | user_id | TEXT | required; for journal scope = bot's own user ID |
-| content | TEXT | primary content |
-| short_description | TEXT | summary (both scopes) |
+| short_description | TEXT NOT NULL | primary memory text (required) |
 | long_description | TEXT | detail (both scopes) |
 | source_message_id | TEXT | originating message ref |
 | created_at | INTEGER | epoch ms |
