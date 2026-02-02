@@ -135,14 +135,17 @@ export async function handleMessage(
 
   agent.getApiKey = () => streamOptions.apiKey;
 
-  // Typing lifecycle: start on tool_execution_start(send_message), stop on end.
-  // The sender has a brief delay so sendTyping arrives at Discord before the message.
+  // Typing lifecycle:
+  // - tool_execution_start(send_message): stop typing to prevent sendTyping/message race
+  //   (sender has 200ms delay so the onTriggered/previous sendTyping arrives first)
+  // - tool_execution_end(send_message): restart typing — bot is still working
+  // - finally block in caller: stops typing when agent loop fully ends
   agent.subscribe((e) => {
     if (e.type === "tool_execution_start" && e.toolName === "send_message") {
-      deps.onTypingStart?.();
+      deps.onTypingStop?.();
     }
     if (e.type === "tool_execution_end" && e.toolName === "send_message") {
-      deps.onTypingStop?.();
+      deps.onTypingStart?.();
     }
   });
 
