@@ -226,8 +226,9 @@ describe("handleMessage", () => {
 });
 
 describe("typing callbacks", () => {
-  test("onTypingStop called after send_message tool execution", async () => {
+  test("onTypingStop fires and onTypingStart does not fire after prompt completes", async () => {
     let stopCount = 0;
+    let startCount = 0;
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "msg-1" });
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
@@ -236,12 +237,15 @@ describe("typing callbacks", () => {
       }),
       context: makeContext(),
       sender,
+      onTypingStart: () => { startCount++; },
       onTypingStop: () => { stopCount++; },
     };
 
     await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-    // Agent may or may not call send_message, but callback should not crash
-    expect(stopCount).toBeGreaterThanOrEqual(0);
+    // agent_end fires stopTyping; delayed restart timer should be cancelled
+    expect(stopCount).toBeGreaterThanOrEqual(1);
+    // No delayed restart should have fired (agent ended)
+    expect(startCount).toBe(0);
   });
 
   test("typing callbacks are optional — no crash when undefined", async () => {

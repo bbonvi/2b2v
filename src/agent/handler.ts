@@ -33,7 +33,9 @@ export interface HandlerDeps {
   log?: Logger;
   /** Called when a trigger matches, before the agent runs. Use for typing indicators. */
   onTriggered?: () => void;
-  /** Called when send_message tool finishes executing — stop typing indicator. */
+  /** Called to resume typing indicator (delayed restart after message delivery). */
+  onTypingStart?: () => void;
+  /** Called to stop typing indicator (message delivered, agent idle, or loop ended). */
   onTypingStop?: () => void;
   /** Request-scoped log accumulator. */
   requestLog?: RequestLog;
@@ -133,9 +135,32 @@ export async function handleMessage(
 
   agent.getApiKey = () => streamOptions.apiKey;
 
-  // Stop typing when send_message completes — message is delivered, no need to indicate
+  // Typing lifecycle: stop before send (prevent race), delayed restart after send,
+  // cancel restart on empty turn or agent end.
+  const TYPING_RESTART_DELAY_MS = 3_000;
+  let restartTimer: ReturnType<typeof setTimeout> | null = null;
+  let ended = false;
+  const clearRestart = (): void => {
+    if (restartTimer !== null) { clearTimeout(restartTimer); restartTimer = null; }
+  };
   agent.subscribe((e) => {
+    if (e.type === "tool_execution_start" && e.toolName === "send_message") {
+      clearRestart();
+      deps.onTypingStop?.();
+    }
     if (e.type === "tool_execution_end" && e.toolName === "send_message") {
+      restartTimer = setTimeout(() => {
+        restartTimer = null;
+        if (!ended) deps.onTypingStart?.();
+      }, TYPING_RESTART_DELAY_MS);
+    }
+    if (e.type === "turn_end" && (e as { toolResults: unknown[] }).toolResults.length === 0) {
+      clearRestart();
+      deps.onTypingStop?.();
+    }
+    if (e.type === "agent_end") {
+      ended = true;
+      clearRestart();
       deps.onTypingStop?.();
     }
   });
