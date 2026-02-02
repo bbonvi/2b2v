@@ -37,9 +37,9 @@ export async function processHistory(
   // 4. Slice into older/newer
   const { older, newer } = sliceHistory(merged, config.trim);
 
-  // 5. Trim both slices
+  // 5. Trim older slice only (newer messages kept intact for recency)
   const olderTrimmed = trimMessages(older, config.trim.messageCharLimit);
-  const newerTrimmed = trimMessages(newer, config.trim.messageCharLimit);
+  const newerTrimmed = newer;
 
   // 6. Fetch missing reply targets from Discord
   const allForFallback = [...olderTrimmed, ...newerTrimmed, latestUserMessage];

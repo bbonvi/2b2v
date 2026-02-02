@@ -126,15 +126,43 @@ describe("processHistory", () => {
     expect(result.newerText).toContain("part one [msg-break] part two");
   });
 
-  test("trimmed messages contain [trimmed N chars; MsgID: X]", async () => {
+  test("newer messages are NOT trimmed", async () => {
     const longContent = "a".repeat(600);
     const m1 = msg({ id: "42", content: longContent, timestamp: 1000 });
     const latest = msg({ id: "100", content: "hi", timestamp: 9000 });
 
     const result = await processHistory([m1], latest, defaultConfig, deps);
 
-    // messageCharLimit is 500, so 100 chars trimmed
-    expect(result.newerText).toContain("[trimmed 100 chars; MsgID: 42]");
+    // Newer slice should preserve full content, no trimming marker
+    expect(result.newerText).not.toContain("[trimmed");
+    expect(result.newerText).toContain("a".repeat(600));
+  });
+
+  test("older messages ARE trimmed", async () => {
+    // windowSize=2, trimTarget=5 → olderCount=3
+    const config = {
+      ...defaultConfig,
+      trim: { ...defaultConfig.trim, trimTarget: 5, windowSize: 2, trimTrigger: 20, messageCharLimit: 50 },
+    };
+
+    const messages: HistoryMessage[] = [];
+    for (let i = 0; i < 5; i++) {
+      messages.push(
+        msg({
+          id: String(i + 1),
+          author: `user${i}`,
+          authorId: `uid-${i}`,
+          content: i === 0 ? "x".repeat(100) : `short-${i}`,
+          timestamp: 1000 + i * 600_000,
+        }),
+      );
+    }
+    const latest = msg({ id: "100", content: "latest", timestamp: 1000 + 5 * 600_000 });
+
+    const result = await processHistory(messages, latest, config, deps);
+
+    // First message (in older slice) should be trimmed
+    expect(result.olderText).toContain("[trimmed 50 chars; MsgID: 1]");
   });
 
   test("reply metadata present when replyToId points to message in history", async () => {
