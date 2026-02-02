@@ -48,3 +48,5 @@ export { createMemberListTool, type MemberListToolDeps, type MemberInfo } from "
 export { createChannelHistoryTool, type ChannelHistoryToolDeps, type ChannelMessage } from "./channel-history-tool.ts";
 
 export { createBraveSearchTool, type BraveSearchToolDeps, type BraveSearchResult } from "./brave-search-tool.ts";
+
+export { fetchMissingReplyTargets, type ReplyFallbackDeps, type FetchedDiscordMessage } from "./reply-target-fallback.ts";
