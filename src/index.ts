@@ -339,31 +339,52 @@ function buildContext(guildId: string, channelId: string, guild: Guild, guildCon
     ? history.map((m) => `${m.author}: ${m.content}`).join("\n")
     : "";
 
-  // Journal summaries
-  const journals = listMemories(db, { scope: "journal" });
-  const journalSummaries = journals
+  // Journal summaries — sorted by updatedAt ascending, then ID
+  const journals = listMemories(db, { scope: "journal" })
     .filter((m) => m.shortDescription !== null && m.shortDescription !== "")
+    .sort((a, b) => {
+      const ud = a.updatedAt - b.updatedAt;
+      return ud !== 0 ? ud : a.id.localeCompare(b.id);
+    });
+  const journalSummaries = journals
     .map((m) => `- ${m.shortDescription as string}`)
     .join("\n");
 
-  // Upcoming schedules
-  const upcoming = listUpcomingForContext(db, guildId);
+  // Upcoming schedules — one-off by runAt then ID; cron by expression then ID; one-off first
+  const upcoming = listUpcomingForContext(db, guildId)
+    .sort((a, b) => {
+      const typeOrder = (s: typeof a) => s.type === "cron" ? 1 : 0;
+      const td = typeOrder(a) - typeOrder(b);
+      if (td !== 0) return td;
+      if (a.type === "cron" && b.type === "cron") {
+        const ec = (a.cronExpression ?? "").localeCompare(b.cronExpression ?? "");
+        return ec !== 0 ? ec : a.id.localeCompare(b.id);
+      }
+      const rd = (a.runAt ?? 0) - (b.runAt ?? 0);
+      return rd !== 0 ? rd : a.id.localeCompare(b.id);
+    });
   const upcomingSchedules = upcoming.map((s) => {
     if (s.type === "cron") return `- [cron] ${s.cronExpression ?? "?"}: ${s.messageContent}`;
     const runDate = s.runAt !== null ? new Date(s.runAt).toISOString() : "?";
     return `- [one-off at ${runDate}]: ${s.messageContent}`;
   }).join("\n");
 
-  // Emoji context
+  // Emoji context — sorted by name (case-insensitive), then by ID
   refreshEmojiCache(guild);
-  const emojis = emojiCache.get(guildId) ?? [];
+  const emojis = [...(emojiCache.get(guildId) ?? [])]
+    .sort((a, b) => {
+      const nc = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+      return nc !== 0 ? nc : a.id.localeCompare(b.id);
+    });
   const emojiContext = buildEmojiContext(emojis);
 
-  // Display name context from guild members cache
-  const members = guild.members.cache.map((m) => ({
-    username: m.user.username,
-    displayName: m.displayName,
-  }));
+  // Display name context — sorted by username (case-insensitive), then by member ID
+  const members = [...guild.members.cache.values()]
+    .sort((a, b) => {
+      const uc = a.user.username.toLowerCase().localeCompare(b.user.username.toLowerCase());
+      return uc !== 0 ? uc : a.id.localeCompare(b.id);
+    })
+    .map((m) => ({ username: m.user.username, displayName: m.displayName }));
   const displayNameContext = buildDisplayNameContext(members);
 
   // Current context metadata
