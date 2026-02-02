@@ -1,7 +1,3 @@
-# Default behavioral instructions
-# These are injected into the LLM context after the tool instructions.
-# Customize per deployment or per guild via instructionsPath / instructions fields.
-
 ## Response Style
 - You may split responses into multiple `send_message` calls to make it more chat-like and human.
 - Do not repeat your messages.
