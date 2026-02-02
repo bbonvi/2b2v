@@ -14,8 +14,9 @@ test: qdrant-ensure
 	@:
 
 # Run only non-Qdrant unit tests (no container needed)
+# Supports: make test-unit, make test-unit src/agent/, make test-unit src/agent/foo.test.ts
 test-unit:
-	QDRANT_URL=http://localhost:1 bun test --timeout 5000
+	QDRANT_URL=http://localhost:1 bun test --timeout 5000 $(filter-out test-unit,$(MAKECMDGOALS))
 
 # Type-check + lint
 check:
