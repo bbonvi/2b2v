@@ -9,6 +9,9 @@ export interface TriggerConfig {
 export interface TrimConfig {
   trimTrigger: number;
   trimTarget: number;
+  windowSize: number;
+  messageCharLimit: number;
+  replyQuoteChars: number;
 }
 
 /** Per-guild configuration. Source of truth is the YAML file. */
@@ -24,6 +27,10 @@ export interface GuildConfig {
   memoryRetentionDays: number;
   adminUserIds: string[];
   imageMaxDimension: number;
+  mergeMessageGapSeconds: number;
+  imageReadMaxPerCall: number;
+  imageCaptioningEnabled: boolean;
+  attachmentsDir: string;
 }
 
 /** Global configuration loaded from file + env. */
@@ -37,6 +44,10 @@ export interface GlobalConfig {
   defaultTrim: TrimConfig;
   defaultMemoryRetentionDays: number;
   defaultImageMaxDimension: number;
+  defaultMergeMessageGapSeconds: number;
+  defaultImageReadMaxPerCall: number;
+  defaultImageCaptioningEnabled: boolean;
+  defaultAttachmentsDir: string;
   personaPath: string;
   logLevel: string;
   dataDir: string;
@@ -61,4 +72,8 @@ export interface GuildConfigYaml {
   memoryRetentionDays?: number;
   adminUserIds?: string[];
   imageMaxDimension?: number;
+  mergeMessageGapSeconds?: number;
+  imageReadMaxPerCall?: number;
+  imageCaptioningEnabled?: boolean;
+  attachmentsDir?: string;
 }

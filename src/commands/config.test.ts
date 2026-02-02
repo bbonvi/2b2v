@@ -16,10 +16,14 @@ function makeGuildConfig(overrides?: Partial<GuildConfig>): GuildConfig {
     triggers: { mention: true, keywords: ["hello"], randomChance: 0.05 },
     thinkingLevel: "medium",
     timezone: "UTC",
-    trim: { trimTrigger: 200, trimTarget: 150 },
+    trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
     memoryRetentionDays: 180,
     adminUserIds: [],
     imageMaxDimension: 768,
+    mergeMessageGapSeconds: 120,
+    imageReadMaxPerCall: 10,
+    imageCaptioningEnabled: false,
+    attachmentsDir: "data/attachments",
     ...overrides,
   };
 }

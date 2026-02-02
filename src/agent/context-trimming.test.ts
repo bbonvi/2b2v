@@ -11,7 +11,7 @@ function makeMessages(count: number): ChatMessage[] {
   }));
 }
 
-const defaultTrim: TrimConfig = { trimTrigger: 10, trimTarget: 6 };
+const defaultTrim: TrimConfig = { trimTrigger: 10, trimTarget: 6, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 };
 
 describe("trimChatHistory", () => {
   test("returns messages unchanged when below trim_trigger", () => {
@@ -54,7 +54,7 @@ describe("trimChatHistory", () => {
   });
 
   test("handles trim_target equal to trim_trigger", () => {
-    const trim: TrimConfig = { trimTrigger: 5, trimTarget: 5 };
+    const trim: TrimConfig = { trimTrigger: 5, trimTarget: 5, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 };
     const msgs = makeMessages(5);
     const result = trimChatHistory(msgs, trim);
     // At trigger, trims to target (same value) — keeps all

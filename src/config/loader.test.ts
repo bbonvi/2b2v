@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { join } from "path";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
 import type { GuildConfig, GuildConfigYaml } from "./types.ts";
-import { loadGlobalConfig, loadGuildConfigs, loadGuildConfigFile, resolveGuildConfig, saveGuildConfig } from "./loader.ts";
+import { loadGlobalConfig, loadGuildConfigs, loadGuildConfigFile, resolveGuildConfig, saveGuildConfig, validateTrimConfig } from "./loader.ts";
 
 const TEST_DIR = join(import.meta.dir, "../../.test-config");
 const GUILDS_DIR = join(TEST_DIR, "guilds");
@@ -31,9 +31,22 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultModel).toBe("moonshotai/kimi-k2.5");
     expect(cfg.defaultThinkingLevel).toBe("medium");
     expect(cfg.defaultTimezone).toBe("UTC");
-    expect(cfg.defaultTrim).toEqual({ trimTrigger: 200, trimTarget: 150 });
+    expect(cfg.defaultTrim).toEqual({ trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 });
     expect(cfg.defaultMemoryRetentionDays).toBe(180);
     expect(cfg.defaultImageMaxDimension).toBe(768);
+    expect(cfg.defaultMergeMessageGapSeconds).toBe(120);
+    expect(cfg.defaultImageReadMaxPerCall).toBe(10);
+    expect(cfg.defaultImageCaptioningEnabled).toBe(false);
+    expect(cfg.defaultAttachmentsDir).toBe("data/attachments");
+  });
+
+  test("derives attachmentsDir from DATA_DIR when set", () => {
+    const cfg = loadGlobalConfig({
+      DISCORD_TOKEN: "t",
+      OPENROUTER_API_KEY: "k",
+      DATA_DIR: "/srv/bot-data",
+    });
+    expect(cfg.defaultAttachmentsDir).toBe("/srv/bot-data/attachments");
   });
 
   test("throws on missing DISCORD_TOKEN", () => {
@@ -105,8 +118,36 @@ describe("resolveGuildConfig", () => {
     expect(resolved.triggers.randomChance).toBe(0);
     expect(resolved.thinkingLevel).toBe("medium");
     expect(resolved.timezone).toBe("UTC");
-    expect(resolved.trim).toEqual({ trimTrigger: 200, trimTarget: 150 });
+    expect(resolved.trim).toEqual({ trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 });
     expect(resolved.memoryRetentionDays).toBe(180);
+    expect(resolved.mergeMessageGapSeconds).toBe(120);
+    expect(resolved.imageReadMaxPerCall).toBe(10);
+    expect(resolved.imageCaptioningEnabled).toBe(false);
+    expect(resolved.attachmentsDir).toBe("data/attachments");
+  });
+
+  test("per-guild overrides for new fields", () => {
+    const global = loadGlobalConfig({
+      DISCORD_TOKEN: "t",
+      OPENROUTER_API_KEY: "k",
+    });
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "99",
+      slug: "override",
+      trim: { windowSize: 30, messageCharLimit: 500 },
+      mergeMessageGapSeconds: 60,
+      imageReadMaxPerCall: 5,
+      imageCaptioningEnabled: true,
+      attachmentsDir: "/custom/attachments",
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.trim.windowSize).toBe(30);
+    expect(resolved.trim.messageCharLimit).toBe(500);
+    expect(resolved.trim.replyQuoteChars).toBe(50); // default
+    expect(resolved.mergeMessageGapSeconds).toBe(60);
+    expect(resolved.imageReadMaxPerCall).toBe(5);
+    expect(resolved.imageCaptioningEnabled).toBe(true);
+    expect(resolved.attachmentsDir).toBe("/custom/attachments");
   });
 });
 
@@ -153,6 +194,28 @@ describe("loadGuildConfigs", () => {
   });
 });
 
+describe("validateTrimConfig", () => {
+  test("accepts valid defaults", () => {
+    expect(() => validateTrimConfig({ trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 })).not.toThrow();
+  });
+
+  test("rejects windowSize < 1", () => {
+    expect(() => validateTrimConfig({ trimTrigger: 200, trimTarget: 150, windowSize: 0, messageCharLimit: 200, replyQuoteChars: 50 })).toThrow("windowSize must be at least 1");
+  });
+
+  test("rejects trimTarget < windowSize", () => {
+    expect(() => validateTrimConfig({ trimTrigger: 200, trimTarget: 5, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 })).toThrow("trimTarget must be >= trim.windowSize");
+  });
+
+  test("rejects trimTrigger <= trimTarget", () => {
+    expect(() => validateTrimConfig({ trimTrigger: 150, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 })).toThrow("trimTrigger must be > trim.trimTarget");
+  });
+
+  test("accepts edge case trimTarget == windowSize", () => {
+    expect(() => validateTrimConfig({ trimTrigger: 25, trimTarget: 20, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 })).not.toThrow();
+  });
+});
+
 describe("saveGuildConfig", () => {
   beforeEach(setup);
   afterEach(teardown);
@@ -168,11 +231,14 @@ describe("saveGuildConfig", () => {
       model: "custom/m",
       thinkingLevel: "high",
       timezone: "Asia/Tokyo",
-      trim: { trimTrigger: 200, trimTarget: 150 },
+      trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
       memoryRetentionDays: 180,
       adminUserIds: [],
       imageMaxDimension: 768,
-
+      mergeMessageGapSeconds: 120,
+      imageReadMaxPerCall: 10,
+      imageCaptioningEnabled: false,
+      attachmentsDir: "data/attachments",
     };
 
     saveGuildConfig(file, resolved);

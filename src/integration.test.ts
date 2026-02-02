@@ -341,7 +341,7 @@ describe("trigger → prompt assembly → trimming pipeline", () => {
   });
 
   test("context trimming activates at trigger threshold and preserves newest", () => {
-    const trim: TrimConfig = { trimTrigger: 10, trimTarget: 5 };
+    const trim: TrimConfig = { trimTrigger: 10, trimTarget: 5, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 };
     const messages: ChatMessage[] = Array.from({ length: 12 }, (_, i) => ({
       author: `user-${i}`,
       content: `message-${i}`,
@@ -356,7 +356,7 @@ describe("trigger → prompt assembly → trimming pipeline", () => {
   });
 
   test("trimmed history integrates into assembled prompt", () => {
-    const trim: TrimConfig = { trimTrigger: 5, trimTarget: 3 };
+    const trim: TrimConfig = { trimTrigger: 5, trimTarget: 3, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 };
     const fullHistory: ChatMessage[] = Array.from({ length: 6 }, (_, i) => ({
       author: `user-${i}`,
       content: `msg-${i}`,
@@ -489,7 +489,7 @@ describe("full pipeline: translate → trim → assemble → send", () => {
     }));
 
     // 3. Trim (threshold not reached, so no trim)
-    const trimConfig: TrimConfig = { trimTrigger: 10, trimTarget: 5 };
+    const trimConfig: TrimConfig = { trimTrigger: 10, trimTarget: 5, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 };
     const trimmed = trimChatHistory(chatHistory, trimConfig);
     expect(trimmed.length).toBe(3);
 

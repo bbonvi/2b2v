@@ -18,6 +18,9 @@ const DEFAULT_TRIGGER: TriggerConfig = {
 const DEFAULT_TRIM: TrimConfig = {
   trimTrigger: 200,
   trimTarget: 150,
+  windowSize: 20,
+  messageCharLimit: 200,
+  replyQuoteChars: 50,
 };
 
 /**
@@ -43,6 +46,10 @@ export function loadGlobalConfig(
     defaultTrim: { ...DEFAULT_TRIM },
     defaultMemoryRetentionDays: Number(env.MEMORY_RETENTION_DAYS ?? 180),
     defaultImageMaxDimension: Number(env.IMAGE_MAX_DIMENSION ?? 768),
+    defaultMergeMessageGapSeconds: Number(env.MERGE_MESSAGE_GAP_SECONDS ?? 120),
+    defaultImageReadMaxPerCall: Number(env.IMAGE_READ_MAX_PER_CALL ?? 10),
+    defaultImageCaptioningEnabled: env.IMAGE_CAPTIONING_ENABLED === "true",
+    defaultAttachmentsDir: env.ATTACHMENTS_DIR ?? (env.DATA_DIR !== undefined && env.DATA_DIR !== "" ? `${env.DATA_DIR}/attachments` : "data/attachments"),
     personaPath: env.PERSONA_PATH ?? "config/persona.md",
     logLevel: env.LOG_LEVEL ?? "info",
     dataDir: env.DATA_DIR ?? "data",
@@ -94,11 +101,31 @@ export function resolveGuildConfig(
     trim: {
       trimTrigger: partial.trim?.trimTrigger ?? global.defaultTrim.trimTrigger,
       trimTarget: partial.trim?.trimTarget ?? global.defaultTrim.trimTarget,
+      windowSize: partial.trim?.windowSize ?? global.defaultTrim.windowSize,
+      messageCharLimit: partial.trim?.messageCharLimit ?? global.defaultTrim.messageCharLimit,
+      replyQuoteChars: partial.trim?.replyQuoteChars ?? global.defaultTrim.replyQuoteChars,
     },
     memoryRetentionDays: partial.memoryRetentionDays ?? global.defaultMemoryRetentionDays,
     adminUserIds: partial.adminUserIds ?? [],
     imageMaxDimension: partial.imageMaxDimension ?? global.defaultImageMaxDimension,
+    mergeMessageGapSeconds: partial.mergeMessageGapSeconds ?? global.defaultMergeMessageGapSeconds,
+    imageReadMaxPerCall: partial.imageReadMaxPerCall ?? global.defaultImageReadMaxPerCall,
+    imageCaptioningEnabled: partial.imageCaptioningEnabled ?? global.defaultImageCaptioningEnabled,
+    attachmentsDir: partial.attachmentsDir ?? global.defaultAttachmentsDir,
   };
+}
+
+/** Validate trim config invariants. Throws on violation. */
+export function validateTrimConfig(trim: TrimConfig): void {
+  if (trim.windowSize < 1) {
+    throw new Error("trim.windowSize must be at least 1");
+  }
+  if (trim.trimTarget < trim.windowSize) {
+    throw new Error("trim.trimTarget must be >= trim.windowSize");
+  }
+  if (trim.trimTrigger <= trim.trimTarget) {
+    throw new Error("trim.trimTrigger must be > trim.trimTarget");
+  }
 }
 
 /** Load all guild configs from a directory, resolved against global defaults. */
@@ -130,6 +157,10 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     memoryRetentionDays: config.memoryRetentionDays,
     adminUserIds: config.adminUserIds.length > 0 ? config.adminUserIds : undefined,
     imageMaxDimension: config.imageMaxDimension,
+    mergeMessageGapSeconds: config.mergeMessageGapSeconds,
+    imageReadMaxPerCall: config.imageReadMaxPerCall,
+    imageCaptioningEnabled: config.imageCaptioningEnabled,
+    attachmentsDir: config.attachmentsDir,
   };
 
   // Strip undefined keys before serializing
