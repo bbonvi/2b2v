@@ -318,7 +318,7 @@ Hybrid `croner` (cron with timezone) + `setTimeout` (one-off). Jobs registered d
 
 ## Testing
 
-- **Runner:** `bun test`
+- **Runner:** `make test`
 - **Unit tests:** co-located `.test.ts` files per module
 - **Integration tests:** `src/integration.test.ts` (full pipeline)
 - **Database tests:** in-memory SQLite (`:memory:`)
