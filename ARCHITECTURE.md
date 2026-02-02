@@ -1,6 +1,6 @@
 # Architecture
 
-Agentic Discord bot (~11,000 lines TypeScript, 95+ files) that embodies a character persona while providing useful responses. Per-guild isolation, long-lived memory, semantic search, scheduling, and multi-tool agent capabilities.
+Agentic Discord bot (~15,700 lines TypeScript, 108 files) that embodies a character persona while providing useful responses. Per-guild isolation, long-lived memory, semantic search, scheduling, and multi-tool agent capabilities.
 
 **Runtime:** Bun 1.3+ · **LLM:** OpenRouter (any model) · **Vectors:** Qdrant · **DB:** SQLite (WAL) · **Agent:** pi-agent-core
 
