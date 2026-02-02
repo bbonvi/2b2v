@@ -19,8 +19,6 @@ export interface IncomingMessage {
   mentionedUserIds: string[];
   /** Pre-translated (inbound) content for LLM consumption. */
   translatedContent: string;
-  /** Multimodal image blocks, if any. */
-  images?: { type: "image"; data: string; mimeType: string }[];
 }
 
 /** Dependencies injected into the handler. No direct discord.js coupling. */
@@ -165,7 +163,7 @@ export async function handleMessage(
   }
 
   const userContent = deps.context.userMessage !== "" ? deps.context.userMessage : msg.translatedContent;
-  await agent.prompt(userContent, msg.images);
+  await agent.prompt(userContent);
 
   return { triggered: true, triggerResult, agentRan: true };
 }

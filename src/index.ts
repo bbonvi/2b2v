@@ -25,7 +25,6 @@ import { createScheduleTool } from "./agent/schedule-tool";
 import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool";
 import { createChannelHistoryTool, type ChannelMessage } from "./agent/channel-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
-import { resizeImageToContent } from "./agent/vision";
 import { processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
 import { listMemories, deleteExpiredMemories } from "./db/memory-repository";
 import { listUpcomingForContext, createSchedule, deleteSchedule, listSchedules } from "./db/schedule-repository";
@@ -563,8 +562,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
       });
     });
 
-    // Process and persist images; also build inline blocks for current LLM path
-    const images: { type: "image"; data: string; mimeType: string }[] = [];
+    // Process and persist images (no inline payloads — LLM uses read_images tool)
     const ingestDeps: ImageIngestDeps = {
       db,
       attachmentsDir: guildConfig.attachmentsDir,
@@ -574,31 +572,15 @@ client.on("messageCreate", (message: Message) => void (async () => {
     for (const attachment of message.attachments.values()) {
       const contentType = attachment.contentType ?? "";
       if (!contentType.startsWith("image/")) continue;
-      try {
-        const response = await fetch(attachment.url);
-        const buffer = Buffer.from(await response.arrayBuffer());
-
-        // Persist to disk + DB (fire-and-forget; uses pre-fetched buffer)
-        const bufferCopy = Buffer.from(buffer);
-        void processAndStoreImage(
-          { ...ingestDeps, fetchFn: () => Promise.resolve({ ok: true as const, arrayBuffer: () => Promise.resolve(bufferCopy.buffer.slice(bufferCopy.byteOffset, bufferCopy.byteOffset + bufferCopy.byteLength)) }) },
-          { url: attachment.url, mimeType: contentType, messageId: message.id, guildId, channelId },
-        ).catch((err: unknown) => {
-          log.warn("image ingest failed", {
-            attachmentId: attachment.id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
-
-        // Inline for current LLM consumption (will be removed in context rework)
-        const imageContent = await resizeImageToContent(buffer, contentType, guildConfig.imageMaxDimension);
-        images.push(imageContent);
-      } catch (err) {
-        log.warn("image processing failed", {
+      void processAndStoreImage(
+        ingestDeps,
+        { url: attachment.url, mimeType: contentType, messageId: message.id, guildId, channelId },
+      ).catch((err: unknown) => {
+        log.warn("image ingest failed", {
           attachmentId: attachment.id,
           error: err instanceof Error ? err.message : String(err),
         });
-      }
+      });
     }
 
     // Build outbound resolvers for the sender
@@ -677,7 +659,6 @@ client.on("messageCreate", (message: Message) => void (async () => {
       botUserId: client.user?.id ?? "",
       mentionedUserIds: [...message.mentions.users.keys()],
       translatedContent,
-      images: images.length > 0 ? images : undefined,
     };
 
     // Build request log accumulator
