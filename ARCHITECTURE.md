@@ -117,6 +117,11 @@ Discord messageCreate event
             No inline images — LLM uses read_images tool on demand
             Agent runs agentic loop, calls tools as needed
             └─ send_message → Discord (reply or normal, with typing)
+
+Typing indicator behavior is driven by agent events: typing starts on turn/message activity,
+pauses before `send_message` to avoid sendTyping/message races, and is suppressed after
+the final send until another non-send tool actually begins. This avoids Discord’s
+“ghost typing” window after the last message.
 ```
 
 ### Message Search (Multi-Mode)

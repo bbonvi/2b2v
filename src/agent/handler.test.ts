@@ -226,7 +226,7 @@ describe("handleMessage", () => {
 });
 
 describe("typing callbacks", () => {
-  test("typing start/stop counts match (each send_message gets a start and stop)", async () => {
+  test("typing start/stop counts match (turn lifecycle)", async () => {
     let stopCount = 0;
     let startCount = 0;
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "msg-1" });

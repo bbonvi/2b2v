@@ -135,17 +135,51 @@ export async function handleMessage(
 
   agent.getApiKey = () => streamOptions.apiKey;
 
+  let typingActive = false;
+  // Prevents restarting typing after a send_message unless more tool work actually begins.
+  let allowTyping = true;
+  const startTyping = (): void => {
+    if (!allowTyping || typingActive) return;
+    typingActive = true;
+    deps.onTypingStart?.();
+  };
+  const stopTyping = (): void => {
+    if (!typingActive) return;
+    typingActive = false;
+    deps.onTypingStop?.();
+  };
+
   // Typing lifecycle:
-  // - tool_execution_start(send_message): stop typing to prevent sendTyping/message race
-  //   (sender has 200ms delay so the onTriggered/previous sendTyping arrives first)
-  // - tool_execution_end(send_message): restart typing — bot is still working
-  // - finally block in caller: stops typing when agent loop fully ends
+  // - turn_start/message_update: start typing while agent is actively working
+  // - tool_execution_start(send_message): stop typing and suppress restarts until
+  //   another non-send tool begins (prevents ghost typing after final send)
+  // - tool_execution_start(other): re-enable typing for tool work
+  // - turn_end / agent_end: stop typing
   agent.subscribe((e) => {
-    if (e.type === "tool_execution_start" && e.toolName === "send_message") {
-      deps.onTypingStop?.();
+    if (e.type === "turn_start") {
+      startTyping();
     }
-    if (e.type === "tool_execution_end" && e.toolName === "send_message") {
-      deps.onTypingStart?.();
+    if (e.type === "message_update") {
+      const evt = e.assistantMessageEvent;
+      if (evt.type === "text_delta" || evt.type === "toolcall_start" || evt.type === "toolcall_delta") {
+        startTyping();
+      }
+    }
+    if (e.type === "tool_execution_start") {
+      if (e.toolName === "send_message") {
+        // Discord typing can't be canceled; suppress restarts until real work resumes.
+        allowTyping = false;
+        stopTyping();
+      } else {
+        allowTyping = true;
+        startTyping();
+      }
+    }
+    if (e.type === "turn_end") {
+      stopTyping();
+    }
+    if (e.type === "agent_end") {
+      stopTyping();
     }
   });
 

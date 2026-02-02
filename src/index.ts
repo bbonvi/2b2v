@@ -766,13 +766,12 @@ client.on("messageCreate", (message: Message) => void (async () => {
       sender,
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
-      onTriggered: startTyping,
       onTypingStart: startTyping,
       onTypingStop: stopTyping,
       requestLog,
     };
 
-    // Run the handler — typing starts on trigger via onTriggered callback
+    // Run the handler — typing starts on agent turn_start events
     let result;
     try {
       result = await handleMessage(incoming, deps);
