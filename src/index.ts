@@ -764,7 +764,6 @@ client.on("messageCreate", (message: Message) => void (async () => {
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
       onTriggered: startTyping,
-      onTypingStart: startTyping,
       onTypingStop: stopTyping,
       requestLog,
     };

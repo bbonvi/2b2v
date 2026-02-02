@@ -33,8 +33,6 @@ export interface HandlerDeps {
   log?: Logger;
   /** Called when a trigger matches, before the agent runs. Use for typing indicators. */
   onTriggered?: () => void;
-  /** Called when send_message tool starts executing — resume typing indicator. */
-  onTypingStart?: () => void;
   /** Called when send_message tool finishes executing — stop typing indicator. */
   onTypingStop?: () => void;
   /** Request-scoped log accumulator. */
@@ -135,11 +133,8 @@ export async function handleMessage(
 
   agent.getApiKey = () => streamOptions.apiKey;
 
-  // Event-driven typing: tie indicator to send_message tool lifecycle
+  // Stop typing when send_message completes — message is delivered, no need to indicate
   agent.subscribe((e) => {
-    if (e.type === "tool_execution_start" && e.toolName === "send_message") {
-      deps.onTypingStart?.();
-    }
     if (e.type === "tool_execution_end" && e.toolName === "send_message") {
       deps.onTypingStop?.();
     }
