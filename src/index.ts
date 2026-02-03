@@ -29,6 +29,7 @@ import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool"
 import { createChannelHistoryTool, type ChannelMessage } from "./agent/channel-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
 import { createReadImagesTool } from "./agent/read-images-tool";
+import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createStartTypingTool } from "./agent/start-typing-tool";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
@@ -535,7 +536,9 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
     },
   });
 
-  const tools = [...memoryTools, searchTool, scheduleTool, memberListTool, channelHistoryTool, readImagesTool];
+  const fetchUrlTool = createFetchUrlTool();
+
+  const tools = [...memoryTools, searchTool, scheduleTool, memberListTool, channelHistoryTool, readImagesTool, fetchUrlTool];
 
   // Brave search if API key configured
   if (globalConfig.braveApiKey !== undefined && globalConfig.braveApiKey !== "") {

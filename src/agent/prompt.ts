@@ -53,6 +53,7 @@ Use \`reply: true\` on the first message when responding to the trigger, and \`r
 - \`channel_history\` — Read recent messages from a channel
 - \`read_images\` — Retrieve stored images by their IDs. Pass \`image_ids\` from chat history to view image contents.
 - \`web_search\` — Search the web via Brave Search (if available).
+- \`fetch_url\` — Fetch a URL and extract its readable content as markdown. Use to read articles, documentation, or any webpage.
 
 ## Tool Use Priority
 - To retrieve full content of a trimmed message, use \`search_messages(mode: "id", query: "<MsgID>")\`.

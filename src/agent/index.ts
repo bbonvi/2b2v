@@ -52,3 +52,5 @@ export { createBraveSearchTool, type BraveSearchToolDeps, type BraveSearchResult
 export { createReadImagesTool, type ReadImagesToolDeps } from "./read-images-tool.ts";
 
 export { fetchMissingReplyTargets, type ReplyFallbackDeps, type FetchedDiscordMessage } from "./reply-target-fallback.ts";
+
+export { createFetchUrlTool, type FetchUrlToolDeps } from "./fetch-url-tool.ts";
