@@ -2,7 +2,6 @@ import { describe, test, expect } from "bun:test";
 import {
   createSendMessageTool,
   type MessageSender,
-  type SendMessageToolDeps,
   type VoiceAttachment,
 } from "./send-message-tool.ts";
 import type { TtsResult, TtsConfig } from "../tts/types.ts";
@@ -44,9 +43,9 @@ function createMockGenerateSpeech(result: TtsResult): {
   calls: { text: string; voiceType: string }[];
 } {
   const calls: { text: string; voiceType: string }[] = [];
-  const generate = async (text: string, voiceType: string): Promise<TtsResult> => {
+  const generate = (text: string, voiceType: string): Promise<TtsResult> => {
     calls.push({ text, voiceType });
-    return result;
+    return Promise.resolve(result);
   };
   return { generate, calls };
 }

@@ -21,7 +21,7 @@ import { getHistoryMessages } from "./db/message-repository";
 import { processHistory } from "./agent/history-pipeline";
 import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
-import type { MessageSender, VoiceAttachment } from "./agent/send-message-tool";
+import type { MessageSender } from "./agent/send-message-tool";
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
 import type { TtsResult } from "./tts/types";
 import { createMemoryTools } from "./agent/memory-tools";

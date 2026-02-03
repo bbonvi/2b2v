@@ -15,13 +15,12 @@ const testParams: GenerateSpeechParams = {
 function createMockFetch(
   response: { status: number; body?: ArrayBuffer | null; ok?: boolean }
 ): FetchFn {
-  return async (_url, _options) => {
-    return {
+  return (_url, _options) =>
+    Promise.resolve({
       ok: response.ok ?? (response.status >= 200 && response.status < 300),
       status: response.status,
-      arrayBuffer: async () => response.body ?? new ArrayBuffer(0),
-    } as Response;
-  };
+      arrayBuffer: () => Promise.resolve(response.body ?? new ArrayBuffer(0)),
+    } as Response);
 }
 
 describe("createElevenLabsClient", () => {
@@ -30,14 +29,14 @@ describe("createElevenLabsClient", () => {
       let capturedUrl: string | URL | Request | undefined;
       let capturedOptions: RequestInit | undefined;
 
-      const mockFetch: FetchFn = async (url, options) => {
+      const mockFetch: FetchFn = (url, options) => {
         capturedUrl = url;
         capturedOptions = options;
-        return {
+        return Promise.resolve({
           ok: true,
           status: 200,
-          arrayBuffer: async () => new ArrayBuffer(100),
-        } as Response;
+          arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
+        } as Response);
       };
 
       const client = createElevenLabsClient({
@@ -57,7 +56,7 @@ describe("createElevenLabsClient", () => {
         Accept: "audio/mpeg",
       });
 
-      const body = JSON.parse(capturedOptions?.body as string);
+      const body = JSON.parse(capturedOptions?.body as string) as Record<string, unknown>;
       expect(body).toEqual({
         text: "Hello world",
         model_id: "eleven_flash_v2_5",
@@ -142,14 +141,13 @@ describe("createElevenLabsClient", () => {
     });
 
     test("returns error on timeout", async () => {
-      const slowFetch: FetchFn = async (_url, options) => {
+      const slowFetch: FetchFn = (_url, options) => {
         // Wait for abort
-        await new Promise((_, reject) => {
+        return new Promise((_, reject) => {
           options?.signal?.addEventListener("abort", () => {
             reject(new DOMException("Aborted", "AbortError"));
           });
         });
-        throw new Error("Should not reach here");
       };
 
       const client = createElevenLabsClient({
@@ -167,9 +165,7 @@ describe("createElevenLabsClient", () => {
     });
 
     test("returns error on network failure", async () => {
-      const failingFetch: FetchFn = async () => {
-        throw new TypeError("fetch failed");
-      };
+      const failingFetch: FetchFn = () => Promise.reject(new TypeError("fetch failed"));
 
       const client = createElevenLabsClient({
         apiKey: "test-key",
@@ -187,13 +183,13 @@ describe("createElevenLabsClient", () => {
     test("uses default timeout of 30 seconds", async () => {
       let capturedSignal: AbortSignal | undefined;
 
-      const mockFetch: FetchFn = async (_url, options) => {
+      const mockFetch: FetchFn = (_url, options) => {
         capturedSignal = options?.signal ?? undefined;
-        return {
+        return Promise.resolve({
           ok: true,
           status: 200,
-          arrayBuffer: async () => new ArrayBuffer(0),
-        } as Response;
+          arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+        } as Response);
       };
 
       const client = createElevenLabsClient({
