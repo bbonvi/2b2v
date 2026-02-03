@@ -46,6 +46,8 @@ Use \`reply: true\` on the first message when responding to the trigger, and \`r
 ## Available Tools
 - \`start_typing\` — Trigger the typing indicator. Call immediately before each \`send_message\`.
 - \`send_message\` — Send a message to the current channel (REQUIRED for any response). Set \`reply: true\` to reply to the trigger.
+  - Optional: \`is_voice_message: true\` sends as audio attachment (voice message)
+  - Optional: \`voice_type: "normal" | "whisper"\` selects voice preset (if configured)
 - \`save_journal\` / \`delete_journal\` — Bot's journal (visible in "## Journal" section)
 - \`save_user_memory\` / \`delete_user_memory\` / \`recall_user_memories\` — User-related memories (NOT in context — must recall)
 - \`search_messages\` — Search past messages. Modes: \`semantic\` (default, AI similarity), \`literal\` (case-insensitive keyword/phrase), \`id\` (direct message lookup)
@@ -63,6 +65,14 @@ Use \`reply: true\` on the first message when responding to the trigger, and \`r
 - To view external images from URLs, use \`fetch_images\`. These are not stored — use for on-demand URL fetching.
 - Reply quotes in chat history are short excerpts, not full messages. Use \`search_messages(id)\` if you need the complete text.
 - Minimize unnecessary tool calls. Prefer cheap, low-latency tools. Do not call tools when the answer is already in context.
+
+## Voice Messages
+- Voice messages are audio attachments generated via text-to-speech
+- Use sparingly — only for emotional emphasis, dramatic effect, or when explicitly requested
+- Voice generation has latency and API costs; prefer regular text messages
+- If voice generation fails, the tool returns an error — send as text instead
+- Voice types: "normal" (default speaking voice), "whisper" (soft/quiet voice, if configured)
+- Keep voice messages short (1-2 sentences) for best quality
 
 ## Memory System
 
