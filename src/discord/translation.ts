@@ -205,12 +205,20 @@ export function translateOutbound(
 /**
  * Build a display name context block for LLM consumption.
  * Maps @username to display names so the agent knows who is who.
+ * Optionally includes memory count per user (keyed by userId).
  */
 export function buildDisplayNameContext(
-  users: Array<{ username: string; displayName: string }>
+  users: Array<{ userId?: string; username: string; displayName: string }>,
+  memoryCounts?: Map<string, number>
 ): string {
   if (users.length === 0) return "";
   return users
-    .map((u) => `@${u.username} — ${u.displayName}`)
+    .map((u) => {
+      const count = u.userId !== undefined ? memoryCounts?.get(u.userId) : undefined;
+      if (count !== undefined && count > 0) {
+        return `@${u.username} — ${u.displayName} — ${count} memories`;
+      }
+      return `@${u.username} — ${u.displayName}`;
+    })
     .join("\n");
 }

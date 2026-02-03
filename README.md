@@ -147,10 +147,10 @@ The bot has access to these tools during conversations. The LLM decides when and
 | `send_message` | Send message to the channel |
 | `save_journal` | Create or update a bot journal entry |
 | `delete_journal` | Delete a journal entry by ID |
-| `save_user_memory` | Create or update a user memory |
+| `save_user_memory` | Create or update a user memory (by username) |
 | `delete_user_memory` | Delete a user memory by ID |
-| `recall_user_memories` | Retrieve user memories (not in context by default) |
-| `search_messages` | Semantic search over message history with guild/user/channel/time filters |
+| `recall_user_memories` | Retrieve user memories (by username, not in context by default) |
+| `search_messages` | Semantic search over message history with guild/username/channel/time filters |
 | `schedule_message` | Schedule a one-off message in N seconds/minutes/hours |
 | `list_members` | List server members (all or online-only) |
 | `channel_history` | Fetch recent messages from the current channel |
@@ -162,8 +162,10 @@ The bot has access to these tools during conversations. The LLM decides when and
 
 Memories are stored in SQLite with two scopes:
 
-- **user** — per-user facts (e.g., preferences, names). Requires `userId`. NOT in LLM context — retrieve with `recall_user_memories`.
+- **user** — per-user facts (e.g., preferences, names). Requires `username`. NOT in LLM context — retrieve with `recall_user_memories`.
 - **journal** — bot's internal journal entries. Always visible in LLM context under "## Journal".
+
+The Server Members list shows memory count per user (e.g., `@alice — Alice — 3 memories`), helping the LLM know when to use `recall_user_memories`.
 
 Default TTL is 180 days, configurable per guild via `memoryRetentionDays`. Individual entries can override TTL via `ttlDays` (pass `null` for no expiry). Expired memories are cleaned up periodically.
 

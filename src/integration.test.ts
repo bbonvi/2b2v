@@ -114,9 +114,16 @@ function findTool(tools: ReturnType<typeof createMemoryTools>, name: string) {
   return tool;
 }
 
+// Mock username → userId resolver for tests
+const mockUsers = new Map<string, string>([
+  ["user-42", "uid-42"],
+  ["testuser", USER_ID],
+]);
+const mockResolveUsername = (username: string): string | undefined => mockUsers.get(username);
+
 describe("memory tools → DB roundtrip", () => {
   test("save_user_memory creates entry, recall_user_memories retrieves, delete_user_memory removes", async () => {
-    const tools = createMemoryTools({ db, guildId: GUILD_ID, botUserId: "bot-1" });
+    const tools = createMemoryTools({ db, guildId: GUILD_ID, botUserId: "bot-1", resolveUsername: mockResolveUsername });
     const saveTool = findTool(tools, "save_user_memory");
     const deleteTool = findTool(tools, "delete_user_memory");
     const recallTool = findTool(tools, "recall_user_memories");
@@ -124,7 +131,7 @@ describe("memory tools → DB roundtrip", () => {
     // Create
     const saveResult = await saveTool.execute("tc-1", {
       shortDescription: "Integration test memory",
-      userId: "user-42",
+      username: "user-42",
     });
     const memoryId = (saveResult.details as { memoryId: number }).memoryId;
     expect(memoryId).toBeTruthy();
@@ -138,7 +145,7 @@ describe("memory tools → DB roundtrip", () => {
 
     // Recall via tool
     const recallResult = await recallTool.execute("tc-2", {
-      userId: "user-42",
+      username: "user-42",
     });
     expect((recallResult.details as { count: number } | undefined)?.count).toBe(1);
 
@@ -148,20 +155,20 @@ describe("memory tools → DB roundtrip", () => {
   });
 
   test("save_user_memory with id param updates existing entry", async () => {
-    const tools = createMemoryTools({ db, guildId: GUILD_ID, botUserId: "bot-1" });
+    const tools = createMemoryTools({ db, guildId: GUILD_ID, botUserId: "bot-1", resolveUsername: mockResolveUsername });
     const saveTool = findTool(tools, "save_user_memory");
 
     // Create
     const r1 = await saveTool.execute("tc-1", {
       shortDescription: "original",
-      userId: USER_ID,
+      username: "testuser",
     });
     const id = (r1.details as { memoryId: number }).memoryId;
 
     // Update
     await saveTool.execute("tc-2", {
       shortDescription: "updated",
-      userId: USER_ID,
+      username: "testuser",
       id,
     });
 
@@ -170,7 +177,7 @@ describe("memory tools → DB roundtrip", () => {
   });
 
   test("save_journal gets 180d TTL by default", async () => {
-    const tools = createMemoryTools({ db, guildId: GUILD_ID, botUserId: "bot-1" });
+    const tools = createMemoryTools({ db, guildId: GUILD_ID, botUserId: "bot-1", resolveUsername: mockResolveUsername });
     const saveTool = findTool(tools, "save_journal");
 
     const before = Date.now();

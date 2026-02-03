@@ -47,7 +47,7 @@ Use \`reply: true\` on the first message when responding to the trigger, and \`r
 - \`start_typing\` — Trigger the typing indicator. Call immediately before each \`send_message\`.
 - \`send_message\` — Send a message to the current channel (REQUIRED for any response). Set \`reply: true\` to reply to the trigger.
 - \`save_journal\` / \`delete_journal\` — Bot's journal (visible in "## Journal" section)
-- \`save_user_memory\` / \`delete_user_memory\` / \`recall_user_memories\` — User memories (NOT in context — must recall)
+- \`save_user_memory\` / \`delete_user_memory\` / \`recall_user_memories\` — User-related memories (NOT in context — must recall)
 - \`search_messages\` — Search past messages. Modes: \`semantic\` (default, AI similarity), \`literal\` (case-insensitive keyword/phrase), \`id\` (direct message lookup)
 - \`schedule_message\` — Schedule a message to be sent later
 - \`list_members\` — List server members (online/all)
@@ -74,11 +74,13 @@ Two separate persistent memory systems:
 - Use \`delete_journal\` to remove entries
 
 ### User Memories
-- \`save_user_memory\` — Record facts about users (requires \`userId\`). Pass \`id\` to update existing entry.
+- \`save_user_memory\` — Record facts about users (requires \`username\`). Pass \`id\` to update existing entry.
 - User memories are **NOT in context** — call \`recall_user_memories\` to retrieve
 - Use this when you need information about a user
+- The Server Members list shows memory count per user (e.g., "— 3 memories")
 
 Common fields:
+- \`username\` — Target user's @username from chat (required for user memories)
 - \`shortDescription\` — Primary text (required)
 - \`longDescription\` — Extended details (optional)
 - \`ttlDays\` — Days until expiry (default 180, null = no expiry)

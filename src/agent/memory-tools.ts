@@ -16,6 +16,8 @@ export interface MemoryToolsDeps {
   guildId: string;
   /** Bot's own user ID — auto-injected as userId for journal scope. */
   botUserId: string;
+  /** Resolve username to userId. Returns undefined if not found. */
+  resolveUsername: (username: string) => string | undefined;
   /** Called after a memory is created or updated, for embedding. */
   onMemoryChanged?: (memoryId: number, text: string) => void;
   /** Called after a memory is deleted, for Qdrant cleanup. */
@@ -55,7 +57,7 @@ const DeleteJournalSchema = Type.Object({
 // ---------------------------------------------------------------------------
 
 interface SaveUserMemoryParams {
-  userId: string;
+  username: string;
   shortDescription: string;
   id?: number;
   longDescription?: string;
@@ -68,12 +70,12 @@ interface DeleteUserMemoryParams {
 }
 
 interface RecallUserMemoriesParams {
-  userId?: string;
+  username?: string;
   limit?: number;
 }
 
 const SaveUserMemorySchema = Type.Object({
-  userId: Type.String({ description: "Target user ID (required)." }),
+  username: Type.String({ description: "Target username (required). Use the @username from chat history." }),
   shortDescription: Type.String({ description: "Primary memory text." }),
   id: Type.Optional(Type.Integer({ description: "Existing memory ID to update. Omit to create new." })),
   longDescription: Type.Optional(Type.String({ description: "Extended details (optional)." })),
@@ -86,7 +88,7 @@ const DeleteUserMemorySchema = Type.Object({
 });
 
 const RecallUserMemoriesSchema = Type.Object({
-  userId: Type.Optional(Type.String({ description: "Filter by user ID. Omit to list all user memories in this guild." })),
+  username: Type.Optional(Type.String({ description: "Filter by username. Omit to list all user memories in this guild." })),
   limit: Type.Optional(Type.Number({ description: "Max entries to return. Default 50." })),
 });
 
@@ -116,7 +118,7 @@ function formatMemoryLine(row: MemoryRow): string {
  * Returns 5 tools: save_journal, delete_journal, save_user_memory, delete_user_memory, recall_user_memories.
  */
 export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
-  const { db, guildId, botUserId, onMemoryChanged, onMemoryDeleted } = deps;
+  const { db, guildId, botUserId, resolveUsername, onMemoryChanged, onMemoryDeleted } = deps;
 
   // -------------------------------------------------------------------------
   // save_journal
@@ -230,6 +232,15 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: number; action: string; success: boolean }>> => {
       const p = params as SaveUserMemoryParams;
 
+      // Resolve username to userId
+      const userId = resolveUsername(p.username);
+      if (userId === undefined) {
+        return Promise.resolve({
+          content: [{ type: "text", text: `User '${p.username}' not found.` }],
+          details: { memoryId: -1, action: "create", success: false },
+        });
+      }
+
       if (p.id !== undefined) {
         // Verify the memory belongs to this guild AND is a user memory
         const existing = getMemory(db, p.id);
@@ -269,7 +280,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
       const id = createMemory(db, {
         scope: "user",
         guildId,
-        userId: p.userId,
+        userId,
         shortDescription: p.shortDescription,
         longDescription: p.longDescription,
         sourceMessageId: p.sourceMessageId,
@@ -278,7 +289,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
       onMemoryChanged?.(id, embeddingText(p.shortDescription, p.longDescription));
 
       return Promise.resolve({
-        content: [{ type: "text", text: `Saved new user memory ${id}.` }],
+        content: [{ type: "text", text: `Saved new user memory ${id} for @${p.username}.` }],
         details: { memoryId: id, action: "create", success: true },
       });
     },
@@ -325,21 +336,33 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     name: "recall_user_memories",
     label: "Recall User Memories",
     description:
-      "Retrieve stored user memories. User memories are NOT in context by default — call this to discover them. Optionally filter by userId.",
+      "Retrieve stored user memories. User memories are NOT in context by default — call this to discover them. Optionally filter by username.",
     parameters: RecallUserMemoriesSchema,
     execute: (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as RecallUserMemoriesParams;
 
+      // Resolve username to userId if provided
+      let userId: string | undefined;
+      if (p.username !== undefined) {
+        userId = resolveUsername(p.username);
+        if (userId === undefined) {
+          return Promise.resolve({
+            content: [{ type: "text", text: `User '${p.username}' not found.` }],
+            details: undefined,
+          });
+        }
+      }
+
       const rows = listMemories(db, {
         scope: "user",
         guildId,
-        userId: p.userId,
+        userId,
         limit: p.limit ?? 50,
       });
 
       if (rows.length === 0) {
-        const msg = p.userId !== undefined
-          ? `No user memories found for user ${p.userId}.`
+        const msg = p.username !== undefined
+          ? `No user memories found for @${p.username}.`
           : "No user memories found.";
         return Promise.resolve({ content: [{ type: "text", text: msg }], details: undefined });
       }

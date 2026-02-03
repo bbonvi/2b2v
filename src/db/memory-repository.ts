@@ -148,6 +148,24 @@ export function deleteExpiredMemories(db: Database): number {
   return result.changes;
 }
 
+/** Count user memories per userId in a guild. Returns Map<userId, count>. */
+export function countUserMemoriesByUser(db: Database, guildId: string): Map<string, number> {
+  const rows = db.raw
+    .prepare(
+      `SELECT user_id, COUNT(*) as count FROM memories
+       WHERE scope = 'user' AND guild_id = ?
+       AND (expires_at IS NULL OR expires_at > ?)
+       GROUP BY user_id`
+    )
+    .all(guildId, Date.now()) as Array<{ user_id: string; count: number }>;
+
+  const result = new Map<string, number>();
+  for (const row of rows) {
+    result.set(row.user_id, row.count);
+  }
+  return result;
+}
+
 function mapRow(row: Record<string, unknown>): MemoryRow {
   return {
     id: Number(row.id),

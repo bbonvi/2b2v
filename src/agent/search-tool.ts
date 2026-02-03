@@ -17,6 +17,8 @@ export interface SearchToolDeps {
   qdrant: QdrantClient;
   guildId: string;
   embed: EmbeddingPipeline;
+  /** Resolve username to userId. Returns undefined if not found. */
+  resolveUsername: (username: string) => string | undefined;
   fetchMessage?: (channelId: string, messageId: string) => Promise<{ attachments: AttachmentInfo[] } | null>;
 }
 
@@ -27,7 +29,7 @@ const SearchParams = Type.Object({
     Type.Literal("id"),
   ], { description: "Search mode. 'semantic' (default): AI similarity search. 'literal': exact keyword/phrase match (case-insensitive). 'id': direct message ID lookup." })),
   query: Type.String({ description: "Search query, keyword/phrase, or message ID depending on mode." }),
-  userId: Type.Optional(Type.String({ description: "Filter results to a specific user ID." })),
+  username: Type.Optional(Type.String({ description: "Filter results to a specific username." })),
   channelId: Type.Optional(Type.String({ description: "Filter results to a specific channel ID." })),
   afterMs: Type.Optional(Type.Number({ description: "Only messages after this epoch ms timestamp." })),
   beforeMs: Type.Optional(Type.Number({ description: "Only messages before this epoch ms timestamp." })),
@@ -39,19 +41,19 @@ const SearchParams = Type.Object({
  * Embeds the query, runs Qdrant search + SQLite metadata lookup, returns formatted excerpts.
  */
 export function createSearchTool(deps: SearchToolDeps): AgentTool {
-  const { db, qdrant, guildId, embed } = deps;
+  const { db, qdrant, guildId, embed, resolveUsername } = deps;
 
   return {
     name: "search_messages",
     label: "Search Messages",
     description:
-      "Search chat history. Modes: 'semantic' (default) — AI similarity search with natural language; 'literal' — case-insensitive keyword/phrase match; 'id' — direct message lookup by ID. Optionally filter by user, channel, or time range.",
+      "Search chat history. Modes: 'semantic' (default) — AI similarity search with natural language; 'literal' — case-insensitive keyword/phrase match; 'id' — direct message lookup by ID. Optionally filter by username, channel, or time range.",
     parameters: SearchParams,
     execute: async (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as {
         mode?: "semantic" | "literal" | "id";
         query: string;
-        userId?: string;
+        username?: string;
         channelId?: string;
         afterMs?: number;
         beforeMs?: number;
@@ -59,6 +61,15 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
       };
       const mode = p.mode ?? "semantic";
       const limit = Math.max(1, Math.min(p.limit ?? 10, 50));
+
+      // Resolve username to userId if provided
+      let userId: string | undefined;
+      if (p.username !== undefined) {
+        userId = resolveUsername(p.username);
+        if (userId === undefined) {
+          return { content: [{ type: "text", text: `User '${p.username}' not found.` }], details: undefined };
+        }
+      }
 
       let results: MessageSearchResult[];
 
@@ -72,7 +83,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         try {
           results = searchMessagesLiteral(db, p.query, {
             guildId,
-            userId: p.userId,
+            userId: userId,
             channelId: p.channelId,
             after: p.afterMs,
             before: p.beforeMs,
@@ -98,7 +109,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         try {
           results = await searchMessages(db, qdrant, queryVec, {
             guildId,
-            userId: p.userId,
+            userId: userId,
             channelId: p.channelId,
             after: p.afterMs,
             before: p.beforeMs,

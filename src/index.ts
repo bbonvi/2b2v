@@ -34,7 +34,7 @@ import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createStartTypingTool } from "./agent/start-typing-tool";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
-import { listMemories, deleteExpiredMemories } from "./db/memory-repository";
+import { listMemories, deleteExpiredMemories, countUserMemoriesByUser } from "./db/memory-repository";
 import { listUpcomingForContext, createSchedule, deleteSchedule, listSchedules } from "./db/schedule-repository";
 import { registerSlashCommands } from "./commands/registry";
 import { createStatusHandler, statusCommandDefinition } from "./commands/status";
@@ -398,8 +398,9 @@ async function buildContext(
       const uc = a.user.username.toLowerCase().localeCompare(b.user.username.toLowerCase());
       return uc !== 0 ? uc : a.id.localeCompare(b.id);
     })
-    .map((m) => ({ username: m.user.username, displayName: m.displayName }));
-  const displayNameContext = buildDisplayNameContext(members);
+    .map((m) => ({ userId: m.user.id, username: m.user.username, displayName: m.displayName }));
+  const memoryCounts = countUserMemoriesByUser(db, guildId);
+  const displayNameContext = buildDisplayNameContext(members, memoryCounts);
 
   // Current context metadata
   const currentContext = `Guild: ${guildId} | Channel: ${channelId}\nDate/Time: ${new Date().toISOString()}`;
@@ -422,10 +423,17 @@ async function buildContext(
 
 // --- 20. Build agent tools for a message context ---
 function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildConfig, guild: Guild) {
+  // Resolve username to userId using guild member cache
+  const resolveUsername = (username: string): string | undefined => {
+    const member = guild.members.cache.find((m) => m.user.username === username);
+    return member?.user.id;
+  };
+
   const memoryTools = createMemoryTools({
     db,
     guildId,
     botUserId: client.user?.id ?? "",
+    resolveUsername,
     onMemoryChanged: (memoryId, text) => {
       void embeddingQueue.enqueue({
         id: String(memoryId),
@@ -454,6 +462,7 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
     qdrant,
     guildId,
     embed: embeddingPipeline,
+    resolveUsername,
     fetchMessage: async (chId, msgId) => {
       const channel = guild.channels.cache.get(chId);
       if (channel === undefined || !("messages" in channel)) return null;
