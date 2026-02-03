@@ -640,6 +640,33 @@ client.on("messageCreate", (message: Message) => void (async () => {
         }),
       );
     }
+
+    // Extract images from embeds (Tenor/Giphy GIFs appear here, not in attachments)
+    for (const embed of message.embeds) {
+      const embedUrl = embed.image?.url ?? embed.thumbnail?.url;
+      if (embedUrl === undefined) continue;
+
+      // Infer MIME type from URL; default to image/png
+      const mimeGuess = embedUrl.includes(".gif") ? "image/gif"
+                      : embedUrl.includes(".webp") ? "image/webp"
+                      : "image/png";
+
+      imageIngestPromises.push(
+        processAndStoreImage(ingestDeps, {
+          url: embedUrl,
+          mimeType: mimeGuess,
+          messageId: message.id,
+          guildId,
+          channelId,
+        }).then(() => undefined).catch((err: unknown) => {
+          log.warn("embed image ingest failed", {
+            embedUrl,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }),
+      );
+    }
+
     await Promise.allSettled(imageIngestPromises);
 
     // Build outbound resolvers for the sender

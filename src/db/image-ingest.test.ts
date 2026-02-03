@@ -33,6 +33,17 @@ async function createTestImage(width: number, height: number, format: "png" | "j
   return Buffer.from(await pipeline.jpeg().toBuffer());
 }
 
+async function createTestGif(width: number, height: number): Promise<Buffer> {
+  return sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background: { r: 255, g: 0, b: 0, alpha: 1 },
+    },
+  }).gif().toBuffer();
+}
+
 describe("processImageBuffer", () => {
   test("converts PNG to JPEG q=85 and resizes", async () => {
     const input = await createTestImage(1200, 800);
@@ -81,6 +92,19 @@ describe("processImageBuffer", () => {
 
     expect(result.width).toBe(100);
     expect(result.height).toBe(80);
+  });
+
+  test("converts GIF to JPEG", async () => {
+    const input = await createTestGif(100, 100);
+    const result = await processImageBuffer(input, "image/gif", 800);
+
+    expect(result.mime).toBe("image/jpeg");
+    expect(result.width).toBe(100);
+    expect(result.height).toBe(100);
+
+    // Verify output is JPEG format
+    const meta = await sharp(result.data).metadata();
+    expect(meta.format).toBe("jpeg");
   });
 });
 

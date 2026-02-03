@@ -30,6 +30,10 @@ export interface ImageIngestInput {
 /**
  * Process an image buffer: resize to maxDimension, convert to JPEG q=85.
  * Pure transform — no IO.
+ *
+ * For animated formats (GIF, animated WebP), sharp extracts only the first
+ * frame by default (pages=1, page=0). This is intentional — the bot stores
+ * static snapshots for LLM context, not playable animations.
  */
 export async function processImageBuffer(
   buffer: Buffer,

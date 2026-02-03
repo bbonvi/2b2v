@@ -15,6 +15,10 @@ export interface FetchedDiscordMessage {
     url: string;
     contentType: string | null;
   }>;
+  embeds?: Array<{
+    image?: { url: string };
+    thumbnail?: { url: string };
+  }>;
 }
 
 /** Dependencies injected for testability. */
@@ -120,6 +124,20 @@ export async function fetchMissingReplyTargets(
       if (!ct.startsWith("image/")) continue;
       void deps.processImage(att.url, ct, discordMsg.id).catch(() => {
         // Image ingest failure is non-fatal
+      });
+    }
+
+    // Ingest embed images (Tenor/Giphy GIFs)
+    for (const embed of discordMsg.embeds ?? []) {
+      const embedUrl = embed.image?.url ?? embed.thumbnail?.url;
+      if (embedUrl === undefined) continue;
+
+      const mimeGuess = embedUrl.includes(".gif") ? "image/gif"
+                      : embedUrl.includes(".webp") ? "image/webp"
+                      : "image/png";
+
+      void deps.processImage(embedUrl, mimeGuess, discordMsg.id).catch(() => {
+        // Embed image ingest failure is non-fatal
       });
     }
 
