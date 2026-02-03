@@ -50,6 +50,7 @@ Both profiles start a Qdrant service and wait for it to be healthy before launch
 | `DISCORD_TOKEN` | yes | — | Discord bot token |
 | `OPENROUTER_API_KEY` | yes | — | OpenRouter API key |
 | `BRAVE_API_KEY` | no | — | Brave Search API key (enables `web_search` tool) |
+| `ELEVENLABS_API_KEY` | no | — | ElevenLabs API key (enables voice messages) |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error` |
 | `QDRANT_URL` | no | `http://localhost:6333` | Qdrant server URL |
 | `DATA_DIR` | no | `data` | Directory for SQLite database files |
@@ -156,7 +157,10 @@ The bot has access to these tools during conversations. The LLM decides when and
 | `channel_history` | Fetch recent messages from the current channel |
 | `read_chat_images` | Retrieve stored chat images by ID (base64) |
 | `fetch_images` | Fetch external images by URL (ephemeral, not stored) |
+| `fetch_url` | Fetch a URL and extract its readable content as markdown |
 | `web_search` | Search the web via Brave Search API |
+
+Note: `send_message` supports optional voice message parameters (`is_voice_message`, `voice_type`) when TTS is configured.
 
 ## Memory system
 

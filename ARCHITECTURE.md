@@ -80,8 +80,12 @@ src/
 │   ├── server.ts              Bun.serve HTTP server with cookie-based auth
 │   └── index.html             Single-file dashboard UI (vanilla JS)
 │
-└── scheduler/                  Job scheduling
-    └── engine.ts               Croner (cron) + setTimeout (one-off) orchestration
+├── scheduler/                  Job scheduling
+│   └── engine.ts               Croner (cron) + setTimeout (one-off) orchestration
+│
+└── tts/                        Text-to-speech voice message generation
+    ├── types.ts                VoicePreset, TtsConfig, TtsResult types
+    └── client.ts               ElevenLabs API client (injectable fetch)
 ```
 
 ## Core Dataflows
@@ -311,7 +315,7 @@ No inline images in LLM context. Messages reference `image_ids`; LLM retrieves v
 
 All non-secret defaults in a single YAML file. Missing file = hardcoded defaults. See `config/config.yaml.example` for all fields with comments.
 
-Key fields: `model`, `thinkingLevel`, `timezone`, `trim`, `triggers`, `memoryRetentionDays`, `imageMaxDimension`, `mergeMessageGapSeconds`, `imageReadMaxPerCall`, `imageCaptioningEnabled`, `personaPath`, `instructions`, `instructionsPath`, `logLevel`, `dataDir`, `modelCacheDir`, `qdrantUrl`.
+Key fields: `model`, `thinkingLevel`, `timezone`, `trim`, `triggers`, `memoryRetentionDays`, `imageMaxDimension`, `mergeMessageGapSeconds`, `imageReadMaxPerCall`, `imageCaptioningEnabled`, `tts`, `personaPath`, `instructions`, `instructionsPath`, `logLevel`, `dataDir`, `modelCacheDir`, `qdrantUrl`.
 
 **Environment variables** (secrets and infrastructure):
 
@@ -323,12 +327,13 @@ Key fields: `model`, `thinkingLevel`, `timezone`, `trim`, `triggers`, `memoryRet
 | `QDRANT_URL` | no | Overrides YAML `qdrantUrl` (infrastructure-dependent) |
 | `DASHBOARD_PASSWORD` | no | Dashboard auth |
 | `UNSAFELY_BYPASS_DASHBOARD_AUTH` | no | Dev-only dashboard bypass |
+| `ELEVENLABS_API_KEY` | no | ElevenLabs API key for voice message generation |
 
 **Per-guild** (YAML files in `config/guilds/`):
 
 Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields optional — missing values inherit from main config defaults via `resolveGuildConfig()`. See `config/guilds/000000000-example.yaml.example` for all fields.
 
-Configurable: `model`, `modelParams`, `thinkingLevel`, `timezone`, `triggers` (mention/keywords/randomChance), `trim` (trimTrigger/trimTarget/windowSize/messageCharLimit/replyQuoteChars), `memoryRetentionDays`, `adminUserIds`, `imageMaxDimension`, `mergeMessageGapSeconds`, `imageReadMaxPerCall`, `imageCaptioningEnabled`, `attachmentsDir`, `instructions`, `instructionsPath`.
+Configurable: `model`, `modelParams`, `thinkingLevel`, `timezone`, `triggers` (mention/keywords/randomChance), `trim` (trimTrigger/trimTarget/windowSize/messageCharLimit/replyQuoteChars), `memoryRetentionDays`, `adminUserIds`, `imageMaxDimension`, `mergeMessageGapSeconds`, `imageReadMaxPerCall`, `imageCaptioningEnabled`, `attachmentsDir`, `instructions`, `instructionsPath`, `tts` (enabled/voices).
 
 **Instructions**: Custom text injected into LLM context (after tool instructions, before emojis). `instructionsPath` loads from a file; `instructions` provides inline text. `instructionsPath` takes priority. Guild-level overrides global default.
 

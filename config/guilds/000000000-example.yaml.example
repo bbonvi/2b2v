@@ -54,3 +54,14 @@ imageCaptioningEnabled: false
 # Falls back to global defaultInstructions if neither is set.
 # instructionsPath: config/guilds/my-guild-instructions.md
 # instructions: "Be extra friendly in this server."
+
+# Per-guild TTS configuration (overrides global defaults)
+# tts:
+#   enabled: true
+#   voices:
+#     normal:
+#       voiceId: abc123  # Different voice for this guild
+#       speed: 1.0
+#       stability: 0.7
+#       similarityBoost: 0.8
+#       model: eleven_flash_v2_5

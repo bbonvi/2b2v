@@ -39,6 +39,24 @@ imageReadMaxPerCall: 10
 # Enable automatic image captioning (requires captioning model)
 imageCaptioningEnabled: false
 
+# ElevenLabs text-to-speech configuration (requires ELEVENLABS_API_KEY env var)
+# When enabled, the bot can send voice messages as audio attachments
+tts:
+  enabled: true
+  voices:
+    normal:
+      voiceId: WAhoMTNdLdMoq1j3wf3I  # Your ElevenLabs voice ID
+      speed: 1.1
+      stability: 0.80
+      similarityBoost: 0.75
+      model: eleven_flash_v2_5
+    whisper:
+      voiceId: sH0WdfE5fsKuM2otdQZr  # Optional whisper voice ID
+      speed: 1.05
+      stability: 0.5
+      similarityBoost: 0.4
+      model: eleven_flash_v2_5
+
 # Path to the persona markdown file
 personaPath: config/persona.md
 
