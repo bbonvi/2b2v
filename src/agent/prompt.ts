@@ -51,13 +51,15 @@ Use \`reply: true\` on the first message when responding to the trigger, and \`r
 - \`schedule_message\` — Schedule a message to be sent later
 - \`list_members\` — List server members (online/all)
 - \`channel_history\` — Read recent messages from a channel
-- \`read_images\` — Retrieve stored images by their IDs. Pass \`image_ids\` from chat history to view image contents.
+- \`read_chat_images\` — Retrieve stored images by their IDs from chat history. Pass \`image_ids\` from chat history to view image contents.
+- \`fetch_images\` — Fetch external images by URL. Downloads and returns base64. Does NOT store — ephemeral fetch only.
 - \`web_search\` — Search the web via Brave Search (if available).
 - \`fetch_url\` — Fetch a URL and extract its readable content as markdown. Use to read articles, documentation, or any webpage.
 
 ## Tool Use Priority
 - To retrieve full content of a trimmed message, use \`search_messages(mode: "id", query: "<MsgID>")\`.
-- To view images referenced by \`ImageIDs\` in chat history, use \`read_images\` with those IDs. Batch multiple IDs in a single call when possible.
+- To view images referenced by \`ImageIDs\` in chat history, use \`read_chat_images\` with those IDs. Batch multiple IDs in a single call when possible.
+- To view external images from URLs, use \`fetch_images\`. These are not stored — use for on-demand URL fetching.
 - Reply quotes in chat history are short excerpts, not full messages. Use \`search_messages(id)\` if you need the complete text.
 - Minimize unnecessary tool calls. Prefer cheap, low-latency tools. Do not call tools when the answer is already in context.
 

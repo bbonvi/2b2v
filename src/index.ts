@@ -28,7 +28,8 @@ import { createScheduleTool } from "./agent/schedule-tool";
 import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool";
 import { createChannelHistoryTool, type ChannelMessage } from "./agent/channel-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
-import { createReadImagesTool } from "./agent/read-images-tool";
+import { createReadChatImagesTool } from "./agent/read-chat-images-tool";
+import { createFetchImagesTool } from "./agent/fetch-images-tool";
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createStartTypingTool } from "./agent/start-typing-tool";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
@@ -524,7 +525,7 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
     },
   });
 
-  const readImagesTool = createReadImagesTool({
+  const readChatImagesTool = createReadChatImagesTool({
     imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
     getImageById: (id: number) => getImageById(db, id),
     readFile: (path: string) => {
@@ -536,9 +537,14 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
     },
   });
 
+  const fetchImagesTool = createFetchImagesTool({
+    maxImagesPerCall: 5,
+    maxDimension: guildConfig.imageMaxDimension,
+  });
+
   const fetchUrlTool = createFetchUrlTool();
 
-  const tools = [...memoryTools, searchTool, scheduleTool, memberListTool, channelHistoryTool, readImagesTool, fetchUrlTool];
+  const tools = [...memoryTools, searchTool, scheduleTool, memberListTool, channelHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool];
 
   // Brave search if API key configured
   if (globalConfig.braveApiKey !== undefined && globalConfig.braveApiKey !== "") {

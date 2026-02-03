@@ -33,7 +33,7 @@ imageMaxDimension: 768
 # Max seconds between messages to merge consecutive same-author messages
 mergeMessageGapSeconds: 120
 
-# Max images the LLM can read in a single read_images call
+# Max images the LLM can read in a single read_chat_images call
 imageReadMaxPerCall: 10
 
 # Enable automatic image captioning (requires captioning model)

@@ -7,7 +7,8 @@ Personal agentic Discord bot that plays a character persona (default: 2B from Ni
 - Responds to @mentions, configurable keywords, or random chance per guild
 - Speaks in character while staying helpful and grounded
 - Splits responses into multiple short messages with natural delays
-- Stores images locally with stable IDs; LLM retrieves on demand via `read_images` tool
+- Stores images locally with stable IDs; LLM retrieves on demand via `read_chat_images` tool
+- Fetches external images by URL via `fetch_images` tool (ephemeral, not stored)
 - Remembers conversations and facts with scoped, searchable memory
 - Schedules messages (recurring, one-off, relative time)
 - Searches the web via Brave Search
@@ -121,7 +122,7 @@ Configurable keys:
 | `trim.messageCharLimit` | number | Max chars per message before trimming |
 | `trim.replyQuoteChars` | number | Max chars for reply quotes |
 | `mergeMessageGapSeconds` | number | Max gap for merging consecutive messages |
-| `imageReadMaxPerCall` | number | Max images per `read_images` call |
+| `imageReadMaxPerCall` | number | Max images per `read_chat_images` call |
 | `imageCaptioningEnabled` | boolean | Enable image captioning (TBD) |
 | `attachmentsDir` | string | Image storage directory |
 
@@ -151,7 +152,8 @@ The bot has access to these tools during conversations. The LLM decides when and
 | `schedule_message` | Schedule a one-off message in N seconds/minutes/hours |
 | `list_members` | List server members (all or online-only) |
 | `channel_history` | Fetch recent messages from the current channel |
-| `read_images` | Retrieve stored images by ID (base64) |
+| `read_chat_images` | Retrieve stored chat images by ID (base64) |
+| `fetch_images` | Fetch external images by URL (ephemeral, not stored) |
 | `web_search` | Search the web via Brave Search API |
 
 ## Memory system
@@ -202,7 +204,7 @@ Chat history is split into two deterministic slices:
 
 When history reaches `trimTrigger`, the oldest messages are dropped to `trimTarget`. Consecutive plain messages by the same author within `mergeMessageGapSeconds` are merged. Long messages are trimmed to `messageCharLimit` with a marker including the message ID for later retrieval via `search_messages(id)`.
 
-Reply context is embedded with short quotes (capped at `replyQuoteChars`). Missing reply targets are fetched from Discord API and persisted. No inline images in context — messages reference `image_ids`, and the LLM uses `read_images` to fetch on demand.
+Reply context is embedded with short quotes (capped at `replyQuoteChars`). Missing reply targets are fetched from Discord API and persisted. No inline images in context — messages reference `image_ids`, and the LLM uses `read_chat_images` to fetch stored images on demand, or `fetch_images` to fetch external URLs (ephemeral, not stored).
 
 ## Testing
 

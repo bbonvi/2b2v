@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { createReadImagesTool, type ReadImagesToolDeps } from "./read-images-tool.ts";
+import { createReadChatImagesTool, type ReadChatImagesToolDeps } from "./read-chat-images-tool.ts";
 
 // Fake image records keyed by ID
 const fakeImages = new Map<number, { id: number; mime: string; width: number; height: number; path: string }>([
@@ -16,7 +16,7 @@ const fakeFiles = new Map<string, Buffer>([
   ["/tmp/test-images/5.jpg", Buffer.from("fake-image-5")],
 ]);
 
-function makeDeps(overrides?: Partial<ReadImagesToolDeps>): ReadImagesToolDeps {
+function makeDeps(overrides?: Partial<ReadChatImagesToolDeps>): ReadChatImagesToolDeps {
   return {
     imageReadMaxPerCall: 10,
     getImageById: (id: number) => fakeImages.get(id) ?? null,
@@ -25,15 +25,15 @@ function makeDeps(overrides?: Partial<ReadImagesToolDeps>): ReadImagesToolDeps {
   };
 }
 
-describe("createReadImagesTool", () => {
+describe("createReadChatImagesTool", () => {
   let tool: AgentTool;
 
   beforeEach(() => {
-    tool = createReadImagesTool(makeDeps());
+    tool = createReadChatImagesTool(makeDeps());
   });
 
   test("returns tool with correct name", () => {
-    expect(tool.name).toBe("read_images");
+    expect(tool.name).toBe("read_chat_images");
   });
 
   test("returns ImageContent blocks for valid IDs", async () => {
@@ -80,7 +80,7 @@ describe("createReadImagesTool", () => {
     const deps = makeDeps({
       readFile: () => null,
     });
-    tool = createReadImagesTool(deps);
+    tool = createReadChatImagesTool(deps);
 
     const result = await tool.execute("call-3", { image_ids: [1] });
     expect(result.content).toHaveLength(1);
@@ -91,7 +91,7 @@ describe("createReadImagesTool", () => {
 
   test("throws when exceeding max per call", () => {
     const deps = makeDeps({ imageReadMaxPerCall: 2 });
-    tool = createReadImagesTool(deps);
+    tool = createReadChatImagesTool(deps);
 
     expect(() => tool.execute("call-4", { image_ids: [1, 2, 5] })).toThrow("Maximum is 2");
   });

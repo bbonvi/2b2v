@@ -27,7 +27,8 @@ src/
 │   ├── history-replies.ts      Reply metadata resolution (quotes, missing targets)
 │   ├── reply-target-fallback.ts Discord API fallback for missing reply targets
 │   ├── history-pipeline.ts     Pipeline orchestrator: wires all history modules into processHistory()
-│   ├── read-images-tool.ts     Agent tool: fetch stored images by ID (base64)
+│   ├── read-chat-images-tool.ts Agent tool: fetch stored chat images by ID (base64)
+│   ├── fetch-images-tool.ts    Agent tool: fetch external images by URL (ephemeral)
 │   ├── send-message-tool.ts    Agent tool: send a message to channel
 │   ├── memory-tools.ts         Agent tools: save/delete/list memories (3 tools)
 │   ├── search-tool.ts          Agent tool: search chat history (semantic, literal, or ID-based)
@@ -111,10 +112,10 @@ Discord messageCreate event
        │
        ├─ Create Agent (pi-agent-core) with tools:
        │   start_typing, send_message, save/delete/list_memory, search_messages,
-       │   schedule_message, list_members, channel_history, web_search, read_images
+       │   schedule_message, list_members, channel_history, web_search, read_chat_images, fetch_images
        │
         └─ agent.prompt(translatedContent)
-            No inline images — LLM uses read_images tool on demand
+            No inline images — LLM uses read_chat_images tool on demand
             Agent runs agentic loop, calls tools as needed
             ├─ start_typing → channel.sendTyping() (typing indicator)
             └─ send_message → Discord (reply or normal)
@@ -219,7 +220,7 @@ Discord attachment (message event or API fallback)
   └─ Write to disk: attachments/{guildId}-{channelId}/images/{imageId}.jpg
 ```
 
-No inline images in LLM context. Messages reference `image_ids`; LLM retrieves via `read_images` tool.
+No inline images in LLM context. Messages reference `image_ids`; LLM retrieves via `read_chat_images` tool. External URL images fetched ephemeral via `fetch_images`.
 
 ## Database Schema
 
@@ -417,7 +418,7 @@ Hybrid `croner` (cron with timezone) + `setTimeout` (one-off). Jobs registered d
 - **Pipeline orchestrator tests:** 8 tests in `history-pipeline.test.ts` — end-to-end formatting, slicing, merge, trim markers, reply metadata
 - **Discord fallback tests:** 11 tests in `reply-target-fallback.test.ts` — mocked Discord API, DB persistence, image attachment processing
 - **Message repository tests:** 35 tests including 6 for `getHistoryMessages` (shape, images, limit, order)
-- **Image tool tests:** 8 unit + 8 integration tests for `read_images` (real SQLite in integration)
+- **Image tool tests:** 8 unit + 8 integration tests for `read_chat_images` (real SQLite in integration), 10 unit tests for `fetch_images`
 - **Database tests:** in-memory SQLite (`:memory:`)
 - **Qdrant tests:** require running container (`docker run -d --name qdrant-test -p 6333:6333 qdrant/qdrant:latest`), default URL `http://qdrant-test.orb.local:6333`
 - **Mock pipeline:** `src/embeddings/test-utils.ts` — deterministic sin-hash embeddings, no model download

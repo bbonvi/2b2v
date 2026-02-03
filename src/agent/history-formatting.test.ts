@@ -172,6 +172,6 @@ describe("OLDER_LEGEND", () => {
     expect(OLDER_LEGEND).toContain("[DATE ...]");
     expect(OLDER_LEGEND).toContain("[msg-break]");
     expect(OLDER_LEGEND).toContain("search_messages(id)");
-    expect(OLDER_LEGEND).toContain("read_images([id])");
+    expect(OLDER_LEGEND).toContain("read_chat_images([id])");
   });
 });

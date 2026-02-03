@@ -2,25 +2,25 @@ import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 
-const ReadImagesParams = Type.Object({
+const ReadChatImagesParams = Type.Object({
   image_ids: Type.Array(Type.Number(), {
     description: "Array of image IDs to retrieve.",
   }),
 });
 
-export interface ReadImagesToolDeps {
+export interface ReadChatImagesToolDeps {
   imageReadMaxPerCall: number;
   getImageById: (id: number) => { id: number; mime: string; width: number; height: number; path: string } | null;
   readFile: (path: string) => Buffer | null;
 }
 
-export function createReadImagesTool(deps: ReadImagesToolDeps): AgentTool {
+export function createReadChatImagesTool(deps: ReadChatImagesToolDeps): AgentTool {
   return {
-    name: "read_images",
-    label: "Read Images",
+    name: "read_chat_images",
+    label: "Read Chat Images",
     description:
-      "Retrieve stored images by their IDs. Returns image data with metadata. Use this to view images referenced by image_ids in chat history.",
-    parameters: ReadImagesParams,
+      "Retrieve stored images by their IDs from chat history. Returns image data with metadata. Use this to view images referenced by image_ids in chat history.",
+    parameters: ReadChatImagesParams,
     execute: (
       _toolCallId,
       params,

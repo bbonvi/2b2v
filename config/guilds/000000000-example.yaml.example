@@ -40,7 +40,7 @@ imageMaxDimension: 768
 # Max seconds between messages for same-author merge
 mergeMessageGapSeconds: 120
 
-# Max images per read_images tool call
+# Max images per read_chat_images tool call
 imageReadMaxPerCall: 10
 
 # Enable automatic image captioning

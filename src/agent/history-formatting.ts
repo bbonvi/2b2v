@@ -65,5 +65,5 @@ export function formatMessageLine(input: FormatInput): string {
 /** The legend block prepended to the older slice. */
 export const OLDER_LEGEND = [
   "Legend: [@author to @target (Quote/ReplyMsgID/ReplyImageIDs/ReplyCaptions/ImageIDs/Captions)]: content",
-  "Legend: Dates use [DATE ...]. Merged messages use [msg-break]. Quotes are excerpts; use search_messages(id). Images use read_images([id]).",
+  "Legend: Dates use [DATE ...]. Merged messages use [msg-break]. Quotes are excerpts; use search_messages(id). Images use read_chat_images([id]).",
 ].join("\n");

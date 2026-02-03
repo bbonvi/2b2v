@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { createDatabase, type Database } from "../db/database.ts";
 import { insertImage, getImageById } from "../db/image-repository.ts";
-import { createReadImagesTool, type ReadImagesToolDeps } from "./read-images-tool.ts";
+import { createReadChatImagesTool, type ReadChatImagesToolDeps } from "./read-chat-images-tool.ts";
 import { fetchMissingReplyTargets, type ReplyFallbackDeps, type FetchedDiscordMessage } from "./reply-target-fallback.ts";
 import { assembleContext, contextToSystemPrompt } from "./context-assembly.ts";
 import type { HistoryMessage } from "./history-types.ts";
@@ -50,9 +50,9 @@ function makeMsg(overrides: Partial<HistoryMessage> & { id: string }): HistoryMe
 }
 
 // ---------------------------------------------------------------------------
-// 1. read_images tool with real SQLite
+// 1. read_chat_images tool with real SQLite
 // ---------------------------------------------------------------------------
-describe("read_images tool with real DB", () => {
+describe("read_chat_images tool with real DB", () => {
   test("retrieves images inserted via image-repository", async () => {
     const img1 = insertTestImage(db, "msg-1", { path: "/tmp/test/1.jpg" });
     const img2 = insertTestImage(db, "msg-1", { path: "/tmp/test/2.jpg", width: 320, height: 240 });
@@ -62,7 +62,7 @@ describe("read_images tool with real DB", () => {
       ["/tmp/test/2.jpg", Buffer.from("data-2")],
     ]);
 
-    const deps: ReadImagesToolDeps = {
+    const deps: ReadChatImagesToolDeps = {
       imageReadMaxPerCall: 10,
       getImageById: (id: number) => {
         const rec = getImageById(db, id);
@@ -71,7 +71,7 @@ describe("read_images tool with real DB", () => {
       readFile: (path: string) => fakeFiles.get(path) ?? null,
     };
 
-    const tool = createReadImagesTool(deps);
+    const tool = createReadChatImagesTool(deps);
     const result = await tool.execute("c1", { image_ids: [img2.id, img1.id] });
 
     // Tool returns alternating text (metadata) + image (data) content items
@@ -100,7 +100,7 @@ describe("read_images tool with real DB", () => {
   });
 
   test("returns not_found for IDs not in DB", async () => {
-    const deps: ReadImagesToolDeps = {
+    const deps: ReadChatImagesToolDeps = {
       imageReadMaxPerCall: 10,
       getImageById: (id: number) => {
         const rec = getImageById(db, id);
@@ -109,7 +109,7 @@ describe("read_images tool with real DB", () => {
       readFile: () => null,
     };
 
-    const tool = createReadImagesTool(deps);
+    const tool = createReadChatImagesTool(deps);
     const result = await tool.execute("c2", { image_ids: [9999] });
 
     // For not_found, only a text content item with error is returned (no image)
@@ -132,7 +132,7 @@ describe("read_images tool with real DB", () => {
 // ---------------------------------------------------------------------------
 // 2. Discord fallback persists and tool can read afterward
 // ---------------------------------------------------------------------------
-describe("Discord fallback → read_images integration", () => {
+describe("Discord fallback → read_chat_images integration", () => {
   test("fetched reply target with image attachments persists message to DB", async () => {
     const processedImages: Array<{ url: string; messageId: string }> = [];
 
