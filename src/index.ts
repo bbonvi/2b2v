@@ -21,7 +21,9 @@ import { getHistoryMessages } from "./db/message-repository";
 import { processHistory } from "./agent/history-pipeline";
 import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
-import type { MessageSender } from "./agent/send-message-tool";
+import type { MessageSender, VoiceAttachment } from "./agent/send-message-tool";
+import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
+import type { TtsResult } from "./tts/types";
 import { createMemoryTools } from "./agent/memory-tools";
 import { createSearchTool } from "./agent/search-tool";
 import { createScheduleTool } from "./agent/schedule-tool";
@@ -44,7 +46,7 @@ import { createMemoryWipeHandler, memoryWipeCommandDefinition } from "./commands
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch } from "fs";
 import type { Database } from "./db/database";
-import type { ChatInputCommandInteraction, Client, Guild, Message, TextChannel } from "discord.js";
+import { AttachmentBuilder, type ChatInputCommandInteraction, type Client, type Guild, type Message, type TextChannel } from "discord.js";
 
 const pkg = await Bun.file(new URL("../package.json", import.meta.url).pathname).json() as { version?: string };
 const version: string = pkg.version ?? "0.0.0";
@@ -112,6 +114,13 @@ let persona = loadPersonaFile(globalConfig.personaPath);
 // --- 9. Emoji cache ---
 const emojiCache = new EmojiCache();
 const EMOJI_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+// --- 9b. TTS client (optional) ---
+let ttsClient: ElevenLabsClient | undefined;
+if (globalConfig.elevenLabsApiKey !== undefined && globalConfig.elevenLabsApiKey !== "") {
+  ttsClient = createElevenLabsClient({ apiKey: globalConfig.elevenLabsApiKey });
+  log.info("tts client ready");
+}
 
 // --- 10. Guild config resolver ---
 function getGuildConfig(guildId: string): GuildConfig {
@@ -666,11 +675,23 @@ client.on("messageCreate", (message: Message) => void (async () => {
     // Build message sender
     const channelObj = message.channel as TextChannel;
 
-    const sender: MessageSender = async (text, reply, _signal) => {
+    const sender: MessageSender = async (text, reply, voice, _signal) => {
       const sinceTypingMs = Date.now() - lastTypingAt;
       if (sinceTypingMs >= 0 && sinceTypingMs < 200) {
         await new Promise((resolve) => setTimeout(resolve, 200 - sinceTypingMs));
       }
+
+      // Voice message path: send audio attachment
+      if (voice !== undefined) {
+        const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
+        const sent = reply
+          ? await message.reply({ files: [attachment] })
+          : await channelObj.send({ files: [attachment] });
+        storeBotMessage(sent.id, "[Voice Message]", text);
+        return { sentMessageId: sent.id };
+      }
+
+      // Text message path
       const translated = translateOutbound(text, outboundResolvers);
       const chunks = splitMessage(translated);
       let firstId = "";
@@ -798,6 +819,29 @@ client.on("messageCreate", (message: Message) => void (async () => {
     const requestLog = new RequestLog(guildId, channelId);
     requestLog.setAuthor(message.author.username);
 
+    // Build TTS dependencies
+    const ttsEnabled = ttsClient !== undefined && guildConfig.tts?.enabled === true;
+    const generateSpeech = ttsEnabled && ttsClient !== undefined && guildConfig.tts !== undefined
+      ? async (text: string, voiceType: string): Promise<TtsResult> => {
+          const preset = voiceType === "whisper"
+            ? guildConfig.tts?.voices.whisper
+            : guildConfig.tts?.voices.normal;
+          if (preset === undefined) {
+            return { ok: false, error: `Voice type "${voiceType}" not configured` };
+          }
+          return ttsClient.generate({
+            text,
+            voiceId: preset.voiceId,
+            model: preset.model,
+            voiceSettings: {
+              stability: preset.stability,
+              similarityBoost: preset.similarityBoost,
+              speed: preset.speed,
+            },
+          });
+        }
+      : undefined;
+
     // Build handler deps
     const deps: HandlerDeps = {
       globalConfig,
@@ -810,6 +854,9 @@ client.on("messageCreate", (message: Message) => void (async () => {
       onAssistantResponseStart: stopTypingLoop,
       onAgentEnd: stopTypingLoop,
       requestLog,
+      ttsEnabled,
+      ttsConfig: guildConfig.tts,
+      generateSpeech,
     };
 
     // Run the handler

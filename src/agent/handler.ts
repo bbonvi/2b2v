@@ -4,7 +4,8 @@ import { streamSimple } from "@mariozechner/pi-ai";
 import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
 import { contextToSystemPrompt, type AssembledContext } from "./context-assembly.ts";
-import { createSendMessageTool, type MessageSender } from "./send-message-tool.ts";
+import { createSendMessageTool, type MessageSender, type SendMessageToolDeps } from "./send-message-tool.ts";
+import type { TtsConfig, TtsResult } from "../tts/types.ts";
 import { resolveGuildModel, buildStreamOptions } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { Logger, RequestLog } from "../logger.ts";
@@ -39,6 +40,12 @@ export interface HandlerDeps {
   onAgentEnd?: () => void;
   /** Request-scoped log accumulator. */
   requestLog?: RequestLog;
+  /** TTS configuration for voice messages. */
+  ttsConfig?: TtsConfig;
+  /** Whether TTS is enabled (requires API key + config). */
+  ttsEnabled?: boolean;
+  /** Function to generate speech from text (injected by caller). */
+  generateSpeech?: (text: string, voiceType: string) => Promise<TtsResult>;
 }
 
 export interface HandleResult {
@@ -106,7 +113,13 @@ export async function handleMessage(
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
   const streamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);
 
-  const sendTool = createSendMessageTool(deps.sender) as unknown as AgentTool;
+  const sendToolDeps: SendMessageToolDeps = {
+    sender: deps.sender,
+    ttsEnabled: deps.ttsEnabled ?? false,
+    ttsConfig: deps.ttsConfig,
+    generateSpeech: deps.generateSpeech,
+  };
+  const sendTool = createSendMessageTool(sendToolDeps) as unknown as AgentTool;
   const tools: AgentTool[] = [sendTool, ...(deps.extraTools ?? [])];
   patchToolLookup(tools);
 

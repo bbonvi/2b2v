@@ -1,8 +1,14 @@
 import type { TtsResult } from "./types.ts";
 
+/** Minimal fetch-like function signature for dependency injection. */
+export type FetchFn = (
+  url: string | URL | Request,
+  init?: RequestInit
+) => Promise<Response>;
+
 export interface ElevenLabsClientDeps {
   apiKey: string;
-  fetchFn?: typeof fetch;
+  fetchFn?: FetchFn;
   timeoutMs?: number;
 }
 

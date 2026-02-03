@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { createElevenLabsClient, type GenerateSpeechParams } from "./client.ts";
+import { createElevenLabsClient, type GenerateSpeechParams, type FetchFn } from "./client.ts";
 
 const testParams: GenerateSpeechParams = {
   text: "Hello world",
@@ -14,7 +14,7 @@ const testParams: GenerateSpeechParams = {
 
 function createMockFetch(
   response: { status: number; body?: ArrayBuffer | null; ok?: boolean }
-): typeof fetch {
+): FetchFn {
   return async (_url, _options) => {
     return {
       ok: response.ok ?? (response.status >= 200 && response.status < 300),
@@ -27,11 +27,11 @@ function createMockFetch(
 describe("createElevenLabsClient", () => {
   describe("generate", () => {
     test("sends correct request to ElevenLabs API", async () => {
-      let capturedUrl: string | undefined;
+      let capturedUrl: string | URL | Request | undefined;
       let capturedOptions: RequestInit | undefined;
 
-      const mockFetch: typeof fetch = async (url, options) => {
-        capturedUrl = url as string;
+      const mockFetch: FetchFn = async (url, options) => {
+        capturedUrl = url;
         capturedOptions = options;
         return {
           ok: true,
@@ -142,7 +142,7 @@ describe("createElevenLabsClient", () => {
     });
 
     test("returns error on timeout", async () => {
-      const slowFetch: typeof fetch = async (_url, options) => {
+      const slowFetch: FetchFn = async (_url, options) => {
         // Wait for abort
         await new Promise((_, reject) => {
           options?.signal?.addEventListener("abort", () => {
@@ -167,7 +167,7 @@ describe("createElevenLabsClient", () => {
     });
 
     test("returns error on network failure", async () => {
-      const failingFetch: typeof fetch = async () => {
+      const failingFetch: FetchFn = async () => {
         throw new TypeError("fetch failed");
       };
 
@@ -187,8 +187,8 @@ describe("createElevenLabsClient", () => {
     test("uses default timeout of 30 seconds", async () => {
       let capturedSignal: AbortSignal | undefined;
 
-      const mockFetch: typeof fetch = async (_url, options) => {
-        capturedSignal = options?.signal;
+      const mockFetch: FetchFn = async (_url, options) => {
+        capturedSignal = options?.signal ?? undefined;
         return {
           ok: true,
           status: 200,
