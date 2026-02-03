@@ -284,7 +284,7 @@ describe("buildDisplayNameContext", () => {
     users: Array<{ username: string; displayName: string }>
   ) => string;
 
-  test("formats user list for LLM context", async () => {
+  test("formats user list for LLM context with legend", async () => {
     const mod = await import("./translation.ts");
     buildDisplayNameContext = mod.buildDisplayNameContext;
 
@@ -292,10 +292,12 @@ describe("buildDisplayNameContext", () => {
       { username: "alice", displayName: "Alice Wonder" },
       { username: "bob", displayName: "Bob Builder" },
     ]);
-    expect(result).toContain("@alice");
-    expect(result).toContain("Alice Wonder");
-    expect(result).toContain("@bob");
-    expect(result).toContain("Bob Builder");
+    // Legend present
+    expect(result).toContain("Legend: [@username] — [display name] — [memories]");
+    expect(result).toContain("recall_user_memories(username)");
+    // User entries
+    expect(result).toContain("@alice — Alice Wonder");
+    expect(result).toContain("@bob — Bob Builder");
   });
 
   test("returns empty string for empty list", async () => {

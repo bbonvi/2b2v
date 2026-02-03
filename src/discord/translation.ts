@@ -202,6 +202,9 @@ export function translateOutbound(
   return result;
 }
 
+const MEMBER_LIST_LEGEND = `Legend: [@username] — [display name] — [memories]
+        Use \`recall_user_memories(username)\` to read a user's memories.`;
+
 /**
  * Build a display name context block for LLM consumption.
  * Maps @username to display names so the agent knows who is who.
@@ -212,13 +215,12 @@ export function buildDisplayNameContext(
   memoryCounts?: Map<string, number>
 ): string {
   if (users.length === 0) return "";
-  return users
-    .map((u) => {
-      const count = u.userId !== undefined ? memoryCounts?.get(u.userId) : undefined;
-      if (count !== undefined && count > 0) {
-        return `@${u.username} — ${u.displayName} — ${count} memories`;
-      }
-      return `@${u.username} — ${u.displayName}`;
-    })
-    .join("\n");
+  const lines = users.map((u) => {
+    const count = u.userId !== undefined ? memoryCounts?.get(u.userId) : undefined;
+    if (count !== undefined && count > 0) {
+      return `@${u.username} — ${u.displayName} — ${count} memories`;
+    }
+    return `@${u.username} — ${u.displayName}`;
+  });
+  return `${MEMBER_LIST_LEGEND}\n\n${lines.join("\n")}`;
 }

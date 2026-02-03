@@ -100,7 +100,11 @@ describe("translation → message storage pipeline", () => {
       { username: "alice", displayName: "Alice W" },
       { username: "bob", displayName: "Bob X" },
     ]);
-    expect(ctx).toBe("@alice — Alice W\n@bob — Bob X");
+    // Legend + user entries
+    expect(ctx).toContain("Legend: [@username] — [display name] — [memories]");
+    expect(ctx).toContain("recall_user_memories(username)");
+    expect(ctx).toContain("@alice — Alice W");
+    expect(ctx).toContain("@bob — Bob X");
   });
 });
 
