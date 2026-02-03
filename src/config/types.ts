@@ -1,3 +1,5 @@
+import type { TtsConfig, VoicePreset } from "../tts/types.ts";
+
 /** Trigger configuration per guild. All independently toggleable. */
 export interface TriggerConfig {
   mention: boolean;
@@ -32,6 +34,7 @@ export interface GuildConfig {
   imageCaptioningEnabled: boolean;
   attachmentsDir: string;
   instructions: string;
+  tts?: TtsConfig;
 }
 
 /** Global configuration loaded from file + env. */
@@ -56,6 +59,8 @@ export interface GlobalConfig {
   dataDir: string;
   modelCacheDir: string;
   qdrantUrl: string;
+  elevenLabsApiKey?: string;
+  defaultTts?: TtsConfig;
 }
 
 /** Full resolved app config. */
@@ -81,6 +86,7 @@ export interface GuildConfigYaml {
   attachmentsDir?: string;
   instructions?: string;
   instructionsPath?: string;
+  tts?: Partial<TtsConfig> & { voices?: { normal?: Partial<VoicePreset>; whisper?: Partial<VoicePreset> } };
 }
 
 /** Raw shape of the main config YAML file (config/config.yaml). All optional. */
@@ -103,4 +109,5 @@ export interface MainConfigYaml {
   dataDir?: string;
   modelCacheDir?: string;
   qdrantUrl?: string;
+  tts?: Partial<TtsConfig> & { voices?: { normal?: Partial<VoicePreset>; whisper?: Partial<VoicePreset> } };
 }
