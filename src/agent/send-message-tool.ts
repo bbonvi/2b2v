@@ -1,5 +1,6 @@
 import { Type, type Static } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import type { TtsResult, TtsConfig } from "../tts/types.ts";
 
 const SendMessageParams = Type.Object({
   text: Type.String({ description: "Message text to send" }),
@@ -7,13 +8,33 @@ const SendMessageParams = Type.Object({
     description: "When true, send as a reply to the trigger message. When false, send as a normal channel message.",
     default: false,
   }),
+  is_voice_message: Type.Optional(
+    Type.Boolean({
+      description: "When true, send as a voice message (audio attachment) instead of text. Use sparingly.",
+      default: false,
+    })
+  ),
+  voice_type: Type.Optional(
+    Type.Union([Type.Literal("normal"), Type.Literal("whisper")], {
+      description: "Voice preset to use. 'whisper' only available if configured.",
+    })
+  ),
 });
 
 export type SendMessageInput = Static<typeof SendMessageParams>;
 
+/** Attachment data for a voice message. */
+export interface VoiceAttachment {
+  buffer: Buffer;
+  filename: string;
+  contentType: string;
+}
+
 /** Details returned from the send_message tool execution. */
 export interface SendMessageDetails {
   sentMessageId: string;
+  voiceGenerated?: boolean;
+  voiceError?: string;
 }
 
 /**
@@ -23,37 +44,98 @@ export interface SendMessageDetails {
 export type MessageSender = (
   text: string,
   reply: boolean,
+  voice?: VoiceAttachment,
   signal?: AbortSignal
 ) => Promise<{ sentMessageId: string }>;
+
+/** Dependencies for the send_message tool. */
+export interface SendMessageToolDeps {
+  sender: MessageSender;
+  ttsEnabled: boolean;
+  ttsConfig?: TtsConfig;
+  generateSpeech?: (text: string, voiceType: string) => Promise<TtsResult>;
+}
 
 /**
  * Create the send_message AgentTool with an injected sender.
  * Pure factory — no Discord dependency at construction time.
  */
 export function createSendMessageTool(
-  sender: MessageSender
+  deps: SendMessageToolDeps
 ): AgentTool<typeof SendMessageParams, SendMessageDetails> {
+  const { sender, ttsEnabled, ttsConfig, generateSpeech } = deps;
+
   return {
     name: "send_message",
     label: "Send Message",
     description:
-      "Send a message to the current Discord channel. Set reply=true to reply to the trigger message, or reply=false for a normal channel message. Call multiple times to send multiple messages.",
+      "Send a message to the current Discord channel. Set reply=true to reply to the trigger message, or reply=false for a normal channel message. Call multiple times to send multiple messages. Optional: is_voice_message=true sends as audio attachment.",
     parameters: SendMessageParams,
     execute: async (
       _toolCallId,
       params,
       signal
     ): Promise<AgentToolResult<SendMessageDetails>> => {
-      const result = await sender(params.text, params.reply, signal);
+      const { text, reply, is_voice_message, voice_type } = params;
+
+      // Text-only path (default)
+      if (is_voice_message !== true) {
+        const result = await sender(text, reply, undefined, signal);
+        return {
+          content: [{ type: "text", text: "Message sent." }],
+          details: { sentMessageId: result.sentMessageId },
+        };
+      }
+
+      // Voice message path
+      if (!ttsEnabled) {
+        return {
+          content: [{ type: "text", text: "Voice messages are not enabled for this server. Message not sent." }],
+          details: { sentMessageId: "", voiceError: "Voice messages are not enabled for this server." },
+        };
+      }
+
+      if (generateSpeech === undefined) {
+        return {
+          content: [{ type: "text", text: "Voice generation unavailable (no API key). Message not sent." }],
+          details: { sentMessageId: "", voiceError: "Voice generation unavailable (no API key)." },
+        };
+      }
+
+      const selectedType = voice_type ?? "normal";
+
+      // Validate voice type is configured
+      if (selectedType === "whisper" && ttsConfig?.voices.whisper === undefined) {
+        return {
+          content: [{ type: "text", text: "Voice type 'whisper' is not configured. Message not sent." }],
+          details: { sentMessageId: "", voiceError: "Voice type 'whisper' is not configured." },
+        };
+      }
+
+      // Generate audio
+      const ttsResult = await generateSpeech(text, selectedType);
+
+      if (!ttsResult.ok) {
+        return {
+          content: [{ type: "text", text: `Voice generation failed: ${ttsResult.error}. Message not sent.` }],
+          details: { sentMessageId: "", voiceError: ttsResult.error },
+        };
+      }
+
+      // Send voice message
+      const voiceAttachment: VoiceAttachment = {
+        buffer: ttsResult.buffer,
+        filename: "voice_message.mp3",
+        contentType: ttsResult.contentType,
+      };
+
+      const result = await sender(text, reply, voiceAttachment, signal);
+
       return {
-        content: [
-          {
-            type: "text",
-            text: `Message sent.`,
-          },
-        ],
+        content: [{ type: "text", text: "Voice message sent." }],
         details: {
           sentMessageId: result.sentMessageId,
+          voiceGenerated: true,
         },
       };
     },

@@ -1,70 +1,280 @@
 import { describe, test, expect } from "bun:test";
-import { createSendMessageTool, type MessageSender } from "./send-message-tool.ts";
+import {
+  createSendMessageTool,
+  type MessageSender,
+  type SendMessageToolDeps,
+  type VoiceAttachment,
+} from "./send-message-tool.ts";
+import type { TtsResult, TtsConfig } from "../tts/types.ts";
+
+const defaultTtsConfig: TtsConfig = {
+  enabled: true,
+  voices: {
+    normal: {
+      voiceId: "normal-voice-id",
+      speed: 1.0,
+      stability: 0.5,
+      similarityBoost: 0.75,
+      model: "eleven_flash_v2_5",
+    },
+    whisper: {
+      voiceId: "whisper-voice-id",
+      speed: 1.0,
+      stability: 0.3,
+      similarityBoost: 0.4,
+      model: "eleven_flash_v2_5",
+    },
+  },
+};
+
+function createMockSender(): {
+  sender: MessageSender;
+  calls: { text: string; reply: boolean; voice?: VoiceAttachment }[];
+} {
+  const calls: { text: string; reply: boolean; voice?: VoiceAttachment }[] = [];
+  const sender: MessageSender = (text, reply, voice) => {
+    calls.push({ text, reply, voice });
+    return Promise.resolve({ sentMessageId: "msg-1" });
+  };
+  return { sender, calls };
+}
+
+function createMockGenerateSpeech(result: TtsResult): {
+  generate: (text: string, voiceType: string) => Promise<TtsResult>;
+  calls: { text: string; voiceType: string }[];
+} {
+  const calls: { text: string; voiceType: string }[] = [];
+  const generate = async (text: string, voiceType: string): Promise<TtsResult> => {
+    calls.push({ text, voiceType });
+    return result;
+  };
+  return { generate, calls };
+}
 
 describe("createSendMessageTool", () => {
   test("returns a tool with correct name and description", () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
-    const tool = createSendMessageTool(sender);
+    const { sender } = createMockSender();
+    const tool = createSendMessageTool({ sender, ttsEnabled: false });
     expect(tool.name).toBe("send_message");
     expect(tool.label).toBe("Send Message");
     expect(tool.description).toContain("reply");
+    expect(tool.description).toContain("is_voice_message");
   });
 
-  test("execute calls sender with text and reply=false by default", async () => {
-    const calls: { text: string; reply: boolean }[] = [];
-    const sender: MessageSender = (text, reply) => {
-      calls.push({ text, reply });
-      return Promise.resolve({ sentMessageId: "msg-1" });
-    };
-    const tool = createSendMessageTool(sender);
+  describe("text message (default behavior)", () => {
+    test("execute calls sender with text and reply=false by default", async () => {
+      const { sender, calls } = createMockSender();
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
 
-    const result = await tool.execute("call-1", { text: "Hello", reply: false });
+      const result = await tool.execute("call-1", { text: "Hello", reply: false });
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toEqual({ text: "Hello", reply: false });
-    expect(result.details.sentMessageId).toBe("msg-1");
-    expect(result.content[0]).toEqual({
-      type: "text",
-      text: "Message sent.",
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toEqual({ text: "Hello", reply: false, voice: undefined });
+      expect(result.details.sentMessageId).toBe("msg-1");
+      expect(result.content[0]).toEqual({
+        type: "text",
+        text: "Message sent.",
+      });
+    });
+
+    test("execute passes reply=true to sender", async () => {
+      const { sender, calls } = createMockSender();
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+
+      const result = await tool.execute("call-1", { text: "Hi there", reply: true });
+
+      expect(calls[0]).toEqual({ text: "Hi there", reply: true, voice: undefined });
+      expect(result.details.sentMessageId).toBe("msg-1");
+    });
+
+    test("execute propagates signal to sender", async () => {
+      let receivedSignal: AbortSignal | undefined;
+      const sender: MessageSender = (_text, _reply, _voice, signal) => {
+        receivedSignal = signal;
+        return Promise.resolve({ sentMessageId: "" });
+      };
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+      const controller = new AbortController();
+
+      await tool.execute("call-1", { text: "hi", reply: false }, controller.signal);
+
+      expect(receivedSignal).toBe(controller.signal);
+    });
+
+    test("propagates sender errors", async () => {
+      const sender: MessageSender = () => Promise.reject(new Error("Discord API unavailable"));
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+
+      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects is async
+      await expect(tool.execute("call-1", { text: "hi", reply: false })).rejects.toThrow("Discord API unavailable");
+    });
+
+    test("is_voice_message=false behaves like text message", async () => {
+      const { sender, calls } = createMockSender();
+      const tool = createSendMessageTool({ sender, ttsEnabled: true, ttsConfig: defaultTtsConfig });
+
+      const result = await tool.execute("call-1", { text: "Hello", reply: false, is_voice_message: false });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.voice).toBeUndefined();
+      expect(result.content[0]).toEqual({ type: "text", text: "Message sent." });
     });
   });
 
-  test("execute passes reply=true to sender", async () => {
-    const calls: { text: string; reply: boolean }[] = [];
-    const sender: MessageSender = (text, reply) => {
-      calls.push({ text, reply });
-      return Promise.resolve({ sentMessageId: "reply-1" });
-    };
-    const tool = createSendMessageTool(sender);
+  describe("voice message", () => {
+    test("returns error when TTS is disabled", async () => {
+      const { sender, calls } = createMockSender();
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
 
-    const result = await tool.execute("call-1", { text: "Hi there", reply: true });
+      const result = await tool.execute("call-1", { text: "Hello", reply: false, is_voice_message: true });
 
-    expect(calls[0]).toEqual({ text: "Hi there", reply: true });
-    expect(result.details.sentMessageId).toBe("reply-1");
-  });
+      expect(calls).toHaveLength(0);
+      expect(result.details.sentMessageId).toBe("");
+      expect(result.details.voiceError).toBe("Voice messages are not enabled for this server.");
+      expect(result.content[0]).toEqual({
+        type: "text",
+        text: "Voice messages are not enabled for this server. Message not sent.",
+      });
+    });
 
-  test("execute propagates signal to sender", async () => {
-    let receivedSignal: AbortSignal | undefined;
-    const sender: MessageSender = (_text, _reply, signal) => {
-      receivedSignal = signal;
-      return Promise.resolve({ sentMessageId: "" });
-    };
-    const tool = createSendMessageTool(sender);
-    const controller = new AbortController();
+    test("returns error when generateSpeech is not provided", async () => {
+      const { sender, calls } = createMockSender();
+      const tool = createSendMessageTool({
+        sender,
+        ttsEnabled: true,
+        ttsConfig: defaultTtsConfig,
+        // generateSpeech not provided
+      });
 
-    await tool.execute("call-1", { text: "hi", reply: false }, controller.signal);
+      const result = await tool.execute("call-1", { text: "Hello", reply: false, is_voice_message: true });
 
-    expect(receivedSignal).toBe(controller.signal);
-  });
+      expect(calls).toHaveLength(0);
+      expect(result.details.voiceError).toBe("Voice generation unavailable (no API key).");
+    });
 
-  test("propagates sender errors", async () => {
-    const sender: MessageSender = () =>
-      Promise.reject(new Error("Discord API unavailable"));
-    const tool = createSendMessageTool(sender);
+    test("returns error when whisper voice is not configured", async () => {
+      const { sender, calls } = createMockSender();
+      const { generate } = createMockGenerateSpeech({ ok: true, buffer: Buffer.from(""), contentType: "audio/mpeg" });
+      const ttsConfigNoWhisper: TtsConfig = {
+        enabled: true,
+        voices: {
+          normal: defaultTtsConfig.voices.normal,
+          // whisper not configured
+        },
+      };
 
-    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects is async
-    await expect(
-      tool.execute("call-1", { text: "hi", reply: false })
-    ).rejects.toThrow("Discord API unavailable");
+      const tool = createSendMessageTool({
+        sender,
+        ttsEnabled: true,
+        ttsConfig: ttsConfigNoWhisper,
+        generateSpeech: generate,
+      });
+
+      const result = await tool.execute("call-1", {
+        text: "Hello",
+        reply: false,
+        is_voice_message: true,
+        voice_type: "whisper",
+      });
+
+      expect(calls).toHaveLength(0);
+      expect(result.details.voiceError).toBe("Voice type 'whisper' is not configured.");
+    });
+
+    test("returns error when voice generation fails", async () => {
+      const { sender, calls } = createMockSender();
+      const { generate } = createMockGenerateSpeech({ ok: false, error: "ElevenLabs rate limit exceeded" });
+
+      const tool = createSendMessageTool({
+        sender,
+        ttsEnabled: true,
+        ttsConfig: defaultTtsConfig,
+        generateSpeech: generate,
+      });
+
+      const result = await tool.execute("call-1", { text: "Hello", reply: false, is_voice_message: true });
+
+      expect(calls).toHaveLength(0);
+      expect(result.details.voiceError).toBe("ElevenLabs rate limit exceeded");
+      expect(result.content[0]).toEqual({
+        type: "text",
+        text: "Voice generation failed: ElevenLabs rate limit exceeded. Message not sent.",
+      });
+    });
+
+    test("sends voice message on successful generation", async () => {
+      const { sender, calls } = createMockSender();
+      const audioBuffer = Buffer.from([0x49, 0x44, 0x33]);
+      const { generate, calls: speechCalls } = createMockGenerateSpeech({
+        ok: true,
+        buffer: audioBuffer,
+        contentType: "audio/mpeg",
+      });
+
+      const tool = createSendMessageTool({
+        sender,
+        ttsEnabled: true,
+        ttsConfig: defaultTtsConfig,
+        generateSpeech: generate,
+      });
+
+      const result = await tool.execute("call-1", { text: "Hello world", reply: true, is_voice_message: true });
+
+      expect(speechCalls).toHaveLength(1);
+      expect(speechCalls[0]).toEqual({ text: "Hello world", voiceType: "normal" });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.text).toBe("Hello world");
+      expect(calls[0]?.reply).toBe(true);
+      expect(calls[0]?.voice).toEqual({
+        buffer: audioBuffer,
+        filename: "voice_message.mp3",
+        contentType: "audio/mpeg",
+      });
+
+      expect(result.details.sentMessageId).toBe("msg-1");
+      expect(result.details.voiceGenerated).toBe(true);
+      expect(result.content[0]).toEqual({ type: "text", text: "Voice message sent." });
+    });
+
+    test("uses normal voice type by default", async () => {
+      const { sender } = createMockSender();
+      const { generate, calls: speechCalls } = createMockGenerateSpeech({
+        ok: true,
+        buffer: Buffer.from(""),
+        contentType: "audio/mpeg",
+      });
+
+      const tool = createSendMessageTool({
+        sender,
+        ttsEnabled: true,
+        ttsConfig: defaultTtsConfig,
+        generateSpeech: generate,
+      });
+
+      await tool.execute("call-1", { text: "Hello", reply: false, is_voice_message: true });
+
+      expect(speechCalls[0]?.voiceType).toBe("normal");
+    });
+
+    test("uses whisper voice type when specified", async () => {
+      const { sender } = createMockSender();
+      const { generate, calls: speechCalls } = createMockGenerateSpeech({
+        ok: true,
+        buffer: Buffer.from(""),
+        contentType: "audio/mpeg",
+      });
+
+      const tool = createSendMessageTool({
+        sender,
+        ttsEnabled: true,
+        ttsConfig: defaultTtsConfig,
+        generateSpeech: generate,
+      });
+
+      await tool.execute("call-1", { text: "Psst", reply: false, is_voice_message: true, voice_type: "whisper" });
+
+      expect(speechCalls[0]?.voiceType).toBe("whisper");
+    });
   });
 });

@@ -9,6 +9,7 @@ import type {
   TriggerConfig,
   TrimConfig,
 } from "./types.ts";
+import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 
 const DEFAULT_TRIGGER: TriggerConfig = {
   mention: true,
@@ -23,6 +24,56 @@ const DEFAULT_TRIM: TrimConfig = {
   messageCharLimit: 200,
   replyQuoteChars: 50,
 };
+
+/** Default voice preset values for TTS. */
+const DEFAULT_VOICE_PRESET: VoicePreset = {
+  voiceId: "",
+  speed: 1.0,
+  stability: 0.5,
+  similarityBoost: 0.75,
+  model: "eleven_flash_v2_5",
+};
+
+/**
+ * Resolve a partial VoicePreset from YAML against defaults.
+ * Returns undefined if voiceId is not set (required field).
+ */
+function resolveVoicePreset(partial: Partial<VoicePreset> | undefined): VoicePreset | undefined {
+  if (partial === undefined || partial.voiceId === undefined || partial.voiceId === "") {
+    return undefined;
+  }
+  return {
+    voiceId: partial.voiceId,
+    speed: partial.speed ?? DEFAULT_VOICE_PRESET.speed,
+    stability: partial.stability ?? DEFAULT_VOICE_PRESET.stability,
+    similarityBoost: partial.similarityBoost ?? DEFAULT_VOICE_PRESET.similarityBoost,
+    model: partial.model ?? DEFAULT_VOICE_PRESET.model,
+  };
+}
+
+/**
+ * Resolve TTS config from YAML partial.
+ * Returns undefined if TTS is not enabled or no normal voice is configured.
+ */
+function resolveTtsConfig(
+  partial: MainConfigYaml["tts"] | GuildConfigYaml["tts"] | undefined
+): TtsConfig | undefined {
+  if (partial === undefined) return undefined;
+  if (partial.enabled !== true) return undefined;
+
+  const normalVoice = resolveVoicePreset(partial.voices?.normal);
+  if (normalVoice === undefined) return undefined;
+
+  const whisperVoice = resolveVoicePreset(partial.voices?.whisper);
+
+  return {
+    enabled: true,
+    voices: {
+      normal: normalVoice,
+      ...(whisperVoice !== undefined ? { whisper: whisperVoice } : {}),
+    },
+  };
+}
 
 /**
  * Load and parse the main config YAML file.
@@ -114,6 +165,8 @@ export function loadGlobalConfig(
     dataDir,
     modelCacheDir: yaml.modelCacheDir ?? "model-cache",
     qdrantUrl: env.QDRANT_URL ?? yaml.qdrantUrl ?? "http://localhost:6333",
+    elevenLabsApiKey: env.ELEVENLABS_API_KEY,
+    defaultTts: resolveTtsConfig(yaml.tts),
   };
 }
 
@@ -174,6 +227,7 @@ export function resolveGuildConfig(
     imageCaptioningEnabled: partial.imageCaptioningEnabled ?? global.defaultImageCaptioningEnabled,
     attachmentsDir: partial.attachmentsDir ?? global.defaultAttachmentsDir,
     instructions: instructions !== "" ? instructions : global.defaultInstructions,
+    tts: resolveTtsConfig(partial.tts) ?? global.defaultTts,
   };
 }
 
@@ -224,6 +278,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     imageCaptioningEnabled: config.imageCaptioningEnabled,
     attachmentsDir: config.attachmentsDir,
     instructions: config.instructions !== "" ? config.instructions : undefined,
+    tts: config.tts,
   };
 
   // Strip undefined keys before serializing
