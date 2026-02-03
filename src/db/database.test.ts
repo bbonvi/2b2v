@@ -46,14 +46,15 @@ describe("memories table", () => {
   test("inserts and retrieves a user-scoped memory", () => {
     const now = Date.now();
     const expiresAt = now + 180 * 24 * 60 * 60 * 1000; // 6 months
-    db.raw
+    const result = db.raw
       .prepare(
-        `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("mem-1", "user", "guild-1", "user-1", "Prefers dark mode", null, "msg-42", now, now, expiresAt);
+      .run("user", "guild-1", "user-1", "Prefers dark mode", null, "msg-42", now, now, expiresAt);
 
-    const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get("mem-1") as Record<string, unknown>;
+    const memId = Number(result.lastInsertRowid);
+    const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get(memId) as Record<string, unknown>;
     expect(row.scope).toBe("user");
     expect(row.guild_id).toBe("guild-1");
     expect(row.user_id).toBe("user-1");
@@ -64,14 +65,15 @@ describe("memories table", () => {
 
   test("inserts a journal entry with short and long descriptions", () => {
     const now = Date.now();
-    db.raw
+    const result = db.raw
       .prepare(
-        `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("j-1", "journal", "guild-1", "user-1", "Follow up on Alice's project", "Alice mentioned she's working on a Rust compiler. Check in next week.", null, now, now, null);
+      .run("journal", "guild-1", "user-1", "Follow up on Alice's project", "Alice mentioned she's working on a Rust compiler. Check in next week.", null, now, now, null);
 
-    const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get("j-1") as Record<string, unknown>;
+    const memId = Number(result.lastInsertRowid);
+    const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get(memId) as Record<string, unknown>;
     expect(row.scope).toBe("journal");
     expect(row.short_description).toBe("Follow up on Alice's project");
     expect(row.long_description).toContain("Rust compiler");
@@ -106,18 +108,20 @@ describe("memories table", () => {
     expect(insert).toThrow();
   });
 
-  test("enforces unique id constraint", () => {
+  test("autoincrement produces unique sequential IDs", () => {
     const now = Date.now();
-    const insert = () =>
-      db.raw
-        .prepare(
-          `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run("dup-1", "user", "g1", "u1", "test", null, null, now, now, null);
+    const insert = db.raw.prepare(
+      `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
 
-    insert();
-    expect(insert).toThrow();
+    const r1 = insert.run("user", "g1", "u1", "first", null, null, now, now, null);
+    const r2 = insert.run("user", "g1", "u1", "second", null, null, now, now, null);
+    const r3 = insert.run("user", "g1", "u1", "third", null, null, now, now, null);
+
+    expect(Number(r1.lastInsertRowid)).toBe(1);
+    expect(Number(r2.lastInsertRowid)).toBe(2);
+    expect(Number(r3.lastInsertRowid)).toBe(3);
   });
 
   test("scope_guild_user index supports efficient queries", () => {

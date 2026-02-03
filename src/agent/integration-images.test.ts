@@ -73,16 +73,30 @@ describe("read_images tool with real DB", () => {
 
     const tool = createReadImagesTool(deps);
     const result = await tool.execute("c1", { image_ids: [img2.id, img1.id] });
-    const parsed = JSON.parse((result.content[0] as { type: "text"; text: string }).text) as Array<Record<string, unknown>>;
 
-    expect(parsed).toHaveLength(2);
-    // Order matches input (img2 first)
-    expect(parsed[0]?.id).toBe(img2.id);
-    expect(parsed[0]?.width).toBe(320);
-    expect(parsed[0]?.data_base64).toBe(Buffer.from("data-2").toString("base64"));
+    // Tool returns alternating text (metadata) + image (data) content items
+    // For 2 images: [text, image, text, image]
+    expect(result.content).toHaveLength(4);
 
-    expect(parsed[1]?.id).toBe(img1.id);
-    expect(parsed[1]?.width).toBe(640);
+    // First image metadata (img2)
+    const meta1 = JSON.parse((result.content[0] as { type: "text"; text: string }).text) as Record<string, unknown>;
+    expect(meta1.id).toBe(img2.id);
+    expect(meta1.width).toBe(320);
+
+    // First image data (img2)
+    const img2Data = result.content[1] as { type: "image"; data: string; mimeType: string };
+    expect(img2Data.type).toBe("image");
+    expect(img2Data.data).toBe(Buffer.from("data-2").toString("base64"));
+
+    // Second image metadata (img1)
+    const meta2 = JSON.parse((result.content[2] as { type: "text"; text: string }).text) as Record<string, unknown>;
+    expect(meta2.id).toBe(img1.id);
+    expect(meta2.width).toBe(640);
+
+    // Second image data (img1)
+    const img1Data = result.content[3] as { type: "image"; data: string; mimeType: string };
+    expect(img1Data.type).toBe("image");
+    expect(img1Data.data).toBe(Buffer.from("data-1").toString("base64"));
   });
 
   test("returns not_found for IDs not in DB", async () => {
@@ -97,10 +111,12 @@ describe("read_images tool with real DB", () => {
 
     const tool = createReadImagesTool(deps);
     const result = await tool.execute("c2", { image_ids: [9999] });
-    const parsed = JSON.parse((result.content[0] as { type: "text"; text: string }).text) as Array<Record<string, unknown>>;
 
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0]?.error).toBe("not_found");
+    // For not_found, only a text content item with error is returned (no image)
+    expect(result.content).toHaveLength(1);
+    const parsed = JSON.parse((result.content[0] as { type: "text"; text: string }).text) as Record<string, unknown>;
+    expect(parsed.id).toBe(9999);
+    expect(parsed.error).toBe("not_found");
   });
 
   test("image IDs are sequential across messages", () => {

@@ -15,8 +15,10 @@ test: qdrant-ensure
 
 # Run only non-Qdrant unit tests (no container needed)
 # Supports: make test-unit, make test-unit src/agent/, make test-unit src/agent/foo.test.ts
+# Excludes *.integration.test.ts files which require Qdrant
+UNIT_TEST_FILES := $(shell find src -name '*.test.ts' ! -name '*.integration.test.ts')
 test-unit:
-	QDRANT_URL=http://localhost:1 bun test --timeout 5000 $(filter-out test-unit,$(MAKECMDGOALS))
+	bun test --timeout 5000 $(if $(filter-out test-unit,$(MAKECMDGOALS)),$(filter-out test-unit,$(MAKECMDGOALS)),$(UNIT_TEST_FILES))
 
 # Type-check + lint
 check:
