@@ -125,7 +125,8 @@ describe("assembleSystemPrompt", () => {
       timestamp: "2025-01-01T00:00:00.000Z",
     };
     const result = assembleSystemPrompt(ctx);
-    expect(result).not.toContain("## Journal");
+    // Use "\n## X\n" pattern to match actual sections, not TOOL_INSTRUCTIONS references
+    expect(result).not.toContain("\n## Journal\n");
   });
 
   test("omits schedules section when no entries", () => {
@@ -208,13 +209,14 @@ describe("assembleSystemPrompt", () => {
     };
     const result = assembleSystemPrompt(ctx);
 
+    // Use "\n## X\n" pattern to match actual sections, not TOOL_INSTRUCTIONS references
     const personaIdx = result.indexOf("# 2B");
-    const emojiIdx = result.indexOf("## Available Emojis");
-    const memberIdx = result.indexOf("## Server Members");
-    const journalIdx = result.indexOf("## Journal");
-    const schedIdx = result.indexOf("## Upcoming Schedules");
-    const contextIdx = result.indexOf("## Current Context");
-    const historyIdx = result.indexOf("## Chat History");
+    const emojiIdx = result.indexOf("\n## Available Emojis\n");
+    const memberIdx = result.indexOf("\n## Server Members\n");
+    const journalIdx = result.indexOf("\n## Journal\n");
+    const schedIdx = result.indexOf("\n## Upcoming Schedules\n");
+    const contextIdx = result.indexOf("\n## Current Context\n");
+    const historyIdx = result.indexOf("\n## Chat History\n");
 
     expect(personaIdx).toBeLessThan(emojiIdx);
     expect(emojiIdx).toBeLessThan(memberIdx);
@@ -257,9 +259,10 @@ describe("assembleSystemPrompt", () => {
     const result = assembleSystemPrompt(ctx);
     expect(result).toStartWith("# 2B\nI am a combat android.");
     expect(result).toContain("send_message");
-    expect(result).not.toContain("## Available Emojis");
-    expect(result).not.toContain("## Server Members");
-    expect(result).not.toContain("## Journal");
-    expect(result).not.toContain("## Chat History");
+    // Use "\n## X\n" pattern to match actual sections, not TOOL_INSTRUCTIONS references
+    expect(result).not.toContain("\n## Available Emojis\n");
+    expect(result).not.toContain("\n## Server Members\n");
+    expect(result).not.toContain("\n## Journal\n");
+    expect(result).not.toContain("\n## Chat History\n");
   });
 });

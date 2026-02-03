@@ -30,7 +30,7 @@ src/
 │   ├── read-chat-images-tool.ts Agent tool: fetch stored chat images by ID (base64)
 │   ├── fetch-images-tool.ts    Agent tool: fetch external images by URL (ephemeral)
 │   ├── send-message-tool.ts    Agent tool: send a message to channel
-│   ├── memory-tools.ts         Agent tools: save/delete/list memories (3 tools)
+│   ├── memory-tools.ts         Agent tools: journal (2) + user memory (3) = 5 tools
 │   ├── search-tool.ts          Agent tool: search chat history (semantic, literal, or ID-based)
 │   ├── schedule-tool.ts        Agent tool: relative one-off scheduling
 │   ├── member-list-tool.ts     Agent tool: server member roster
@@ -111,7 +111,7 @@ Discord messageCreate event
        │   (guild.model ?? global.defaultModel → pi-ai registry or synthetic fallback)
        │
        ├─ Create Agent (pi-agent-core) with tools:
-       │   start_typing, send_message, save/delete/list_memory, search_messages,
+       │   start_typing, send_message, journal tools (2), user memory tools (3), search_messages,
        │   schedule_message, list_members, channel_history, web_search, read_chat_images, fetch_images
        │
         └─ agent.prompt(translatedContent)

@@ -46,7 +46,8 @@ Use \`reply: true\` on the first message when responding to the trigger, and \`r
 ## Available Tools
 - \`start_typing\` — Trigger the typing indicator. Call immediately before each \`send_message\`.
 - \`send_message\` — Send a message to the current channel (REQUIRED for any response). Set \`reply: true\` to reply to the trigger.
-- \`save_memory\` / \`delete_memory\` / \`list_memories\` — Persist information across conversations
+- \`save_journal\` / \`delete_journal\` — Bot's journal (visible in "## Journal" section)
+- \`save_user_memory\` / \`delete_user_memory\` / \`recall_user_memories\` — User memories (NOT in context — must recall)
 - \`search_messages\` — Search past messages. Modes: \`semantic\` (default, AI similarity), \`literal\` (case-insensitive keyword/phrase), \`id\` (direct message lookup)
 - \`schedule_message\` — Schedule a message to be sent later
 - \`list_members\` — List server members (online/all)
@@ -65,14 +66,25 @@ Use \`reply: true\` on the first message when responding to the trigger, and \`r
 
 ## Memory System
 
-Persistent memory system for recording and retrieving information across conversations.
+Two separate persistent memory systems:
 
-Scopes:
-- **user** — per-user facts (e.g., preferences, names). Requires \`userId\`.
-- **journal** — bot's own notes, plans, observations. No \`userId\` needed (auto-injected).
+### Journal (Bot's Notes)
+- \`save_journal\` — Record observations, plans, notes. Pass \`id\` to update existing entry.
+- Journal entries are **always visible** in "## Journal" section
+- Use \`delete_journal\` to remove entries
 
-\`shortDescription\` is the primary memory text (required, always visible in context). Use \`longDescription\` for extended details (optional, pulled on demand).
-All memories are per-guild (auto-scoped). Default TTL is 180 days, configurable via \`ttlDays\`. Pass \`ttlDays: null\` for no expiry.
+### User Memories
+- \`save_user_memory\` — Record facts about users (requires \`userId\`). Pass \`id\` to update existing entry.
+- User memories are **NOT in context** — call \`recall_user_memories\` to retrieve
+- Use this when you need information about a user
+
+Common fields:
+- \`shortDescription\` — Primary text (required)
+- \`longDescription\` — Extended details (optional)
+- \`ttlDays\` — Days until expiry (default 180, null = no expiry)
+- \`id\` — Existing memory ID to update (omit to create new)
+
+All memories are per-guild (auto-scoped).
 
 ## CRITICAL: \`send_message\` requirement
 - You can only communicate with users through the \`send_message\` tool.

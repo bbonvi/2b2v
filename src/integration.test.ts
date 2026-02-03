@@ -107,15 +107,22 @@ describe("translation → message storage pipeline", () => {
 // ---------------------------------------------------------------------------
 // 2. Memory Tools → DB Roundtrip
 // ---------------------------------------------------------------------------
+
+function findTool(tools: ReturnType<typeof createMemoryTools>, name: string) {
+  const tool = tools.find((t) => t.name === name);
+  if (!tool) throw new Error(`Tool ${name} not found`);
+  return tool;
+}
+
 describe("memory tools → DB roundtrip", () => {
-  test("save_memory creates entry, list_memories retrieves, delete_memory removes", async () => {
+  test("save_user_memory creates entry, recall_user_memories retrieves, delete_user_memory removes", async () => {
     const tools = createMemoryTools({ db, guildId: GUILD_ID, botUserId: "bot-1" });
-    const [saveTool, deleteTool, listTool] = tools;
-    if (!saveTool || !deleteTool || !listTool) throw new Error("Tools not created");
+    const saveTool = findTool(tools, "save_user_memory");
+    const deleteTool = findTool(tools, "delete_user_memory");
+    const recallTool = findTool(tools, "recall_user_memories");
 
     // Create
     const saveResult = await saveTool.execute("tc-1", {
-      scope: "user",
       shortDescription: "Integration test memory",
       userId: "user-42",
     });
@@ -129,26 +136,23 @@ describe("memory tools → DB roundtrip", () => {
     expect(dbRow?.scope).toBe("user");
     expect(dbRow?.guildId).toBe(GUILD_ID);
 
-    // List via tool
-    const listResult = await listTool.execute("tc-2", {
-      scope: "user",
-      guildId: GUILD_ID,
+    // Recall via tool
+    const recallResult = await recallTool.execute("tc-2", {
+      userId: "user-42",
     });
-    expect((listResult.details as { count: number } | undefined)?.count).toBe(1);
+    expect((recallResult.details as { count: number } | undefined)?.count).toBe(1);
 
     // Delete via tool
     await deleteTool.execute("tc-3", { id: memoryId });
     expect(getMemory(db, memoryId)).toBeNull();
   });
 
-  test("save_memory with id param updates existing entry", async () => {
+  test("save_user_memory with id param updates existing entry", async () => {
     const tools = createMemoryTools({ db, guildId: GUILD_ID, botUserId: "bot-1" });
-    const [saveTool] = tools;
-    if (!saveTool) throw new Error("Tool not created");
+    const saveTool = findTool(tools, "save_user_memory");
 
     // Create
     const r1 = await saveTool.execute("tc-1", {
-      scope: "user",
       shortDescription: "original",
       userId: USER_ID,
     });
@@ -156,8 +160,8 @@ describe("memory tools → DB roundtrip", () => {
 
     // Update
     await saveTool.execute("tc-2", {
-      scope: "user",
       shortDescription: "updated",
+      userId: USER_ID,
       id,
     });
 
@@ -165,14 +169,12 @@ describe("memory tools → DB roundtrip", () => {
     expect(row?.shortDescription).toBe("updated");
   });
 
-  test("journal memory gets 180d TTL by default", async () => {
+  test("save_journal gets 180d TTL by default", async () => {
     const tools = createMemoryTools({ db, guildId: GUILD_ID, botUserId: "bot-1" });
-    const [saveTool] = tools;
-    if (!saveTool) throw new Error("Tool not created");
+    const saveTool = findTool(tools, "save_journal");
 
     const before = Date.now();
     const r = await saveTool.execute("tc-1", {
-      scope: "journal",
       shortDescription: "Test journal",
       longDescription: "Detailed entry for integration test",
     });
@@ -335,12 +337,12 @@ describe("trigger → prompt assembly → trimming pipeline", () => {
     expect(prompt).toContain("## Chat History");
     expect(prompt).toContain("alice: Hello!");
 
-    // Verify section ordering
-    const emojiIdx = prompt.indexOf("## Available Emojis");
-    const membersIdx = prompt.indexOf("## Server Members");
-    const journalIdx = prompt.indexOf("## Journal");
-    const schedulesIdx = prompt.indexOf("## Upcoming Schedules");
-    const historyIdx = prompt.indexOf("## Chat History");
+    // Verify section ordering (use "\n## X\n" pattern to match actual sections, not TOOL_INSTRUCTIONS references)
+    const emojiIdx = prompt.indexOf("\n## Available Emojis\n");
+    const membersIdx = prompt.indexOf("\n## Server Members\n");
+    const journalIdx = prompt.indexOf("\n## Journal\n");
+    const schedulesIdx = prompt.indexOf("\n## Upcoming Schedules\n");
+    const historyIdx = prompt.indexOf("\n## Chat History\n");
     expect(emojiIdx).toBeLessThan(membersIdx);
     expect(membersIdx).toBeLessThan(journalIdx);
     expect(journalIdx).toBeLessThan(schedulesIdx);
@@ -407,10 +409,11 @@ describe("trigger → prompt assembly → trimming pipeline", () => {
 
     expect(prompt).toStartWith("Minimal bot");
     expect(prompt).toContain("send_message");
-    expect(prompt).not.toContain("## Available Emojis");
-    expect(prompt).not.toContain("## Server Members");
-    expect(prompt).not.toContain("## Journal");
-    expect(prompt).not.toContain("## Chat History");
+    // Use "\n## X\n" pattern to check for actual sections (not TOOL_INSTRUCTIONS references)
+    expect(prompt).not.toContain("\n## Available Emojis\n");
+    expect(prompt).not.toContain("\n## Server Members\n");
+    expect(prompt).not.toContain("\n## Journal\n");
+    expect(prompt).not.toContain("\n## Chat History\n");
   });
 });
 
