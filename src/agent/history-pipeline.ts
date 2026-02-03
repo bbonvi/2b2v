@@ -82,21 +82,28 @@ export async function processHistory(
     olderText = `## Chat History — Older\n${lines.join("\n")}`;
   }
 
-  // 10. Format newer slice (no date stamps)
+  // 10. Format newer slice with date stamps
   let newerText = "";
   const newerMessages = [...newerTrimmed, latestUserMessage];
   if (newerMessages.length > 0) {
+    const newerDateEntries = insertDateStamps(newerMessages, config.timezone);
     const lines: string[] = [];
-    for (const m of newerMessages) {
-      let reply = replyResult.newer.get(m.id) ?? null;
-      if (m.id === latestUserMessage.id && reply === null) {
-        reply = replyResult.latestUser;
+    for (const entry of newerDateEntries) {
+      if (entry.type === "date") {
+        lines.push(entry.text);
+      } else {
+        const m = newerMessages[entry.index];
+        if (m === undefined) continue;
+        let reply = replyResult.newer.get(m.id) ?? null;
+        if (m.id === latestUserMessage.id && reply === null) {
+          reply = replyResult.latestUser;
+        }
+        lines.push(formatMessageLine({
+          message: m,
+          reply,
+          captioningEnabled: config.imageCaptioningEnabled,
+        }));
       }
-      lines.push(formatMessageLine({
-        message: m,
-        reply,
-        captioningEnabled: config.imageCaptioningEnabled,
-      }));
     }
     newerText = `## Chat History\n${lines.join("\n")}`;
   }

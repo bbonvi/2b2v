@@ -212,4 +212,33 @@ describe("processHistory", () => {
     expect(result.newerText).toContain("latest");
     expect(result.newerText).not.toContain("content-2");
   });
+
+  test("newer slice includes date stamps when temporal gaps exist", async () => {
+    // Two messages 10 minutes apart in newer slice should get separate date stamps
+    const m1 = msg({ id: "1", content: "first", timestamp: 1000 });
+    const m2 = msg({ id: "2", content: "second", timestamp: 1000 + 10 * 60_000 }); // 10 min later
+    const latest = msg({ id: "100", content: "last", timestamp: 1000 + 20 * 60_000 }); // 20 min later
+
+    const result = await processHistory([m1, m2], latest, defaultConfig, deps);
+
+    // Should have date stamps in newer slice (>= 5 min gaps)
+    expect(result.newerText).toContain("[DATE");
+    // Count date stamps - should be 3 (one for each message with >= 5 min gap)
+    const dateMatches = result.newerText.match(/\[DATE/g);
+    expect(dateMatches?.length).toBe(3);
+  });
+
+  test("newer slice has single date stamp when messages are close together", async () => {
+    // Messages within 5 minutes should share a date stamp
+    const m1 = msg({ id: "1", content: "first", timestamp: 1000 });
+    const m2 = msg({ id: "2", content: "second", timestamp: 1000 + 2 * 60_000 }); // 2 min later
+    const latest = msg({ id: "100", content: "last", timestamp: 1000 + 4 * 60_000 }); // 4 min later
+
+    const result = await processHistory([m1, m2], latest, defaultConfig, deps);
+
+    // Should have only one date stamp (all within 5 min of first)
+    expect(result.newerText).toContain("[DATE");
+    const dateMatches = result.newerText.match(/\[DATE/g);
+    expect(dateMatches?.length).toBe(1);
+  });
 });

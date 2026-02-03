@@ -22,7 +22,7 @@ src/
 │   ├── history-slicing.ts      Deterministic sort + older/newer slice algorithm
 │   ├── history-merge.ts        Consecutive plain-message merging by author
 │   ├── history-trimming.ts     Whitespace normalization + char-limit trimming with markers
-│   ├── history-dates.ts        Deterministic date stamp insertion for older slice
+│   ├── history-dates.ts        Deterministic date stamp insertion (5-min sparse intervals)
 │   ├── history-formatting.ts   Line grammar formatting + OLDER_LEGEND constant
 │   ├── history-replies.ts      Reply metadata resolution (quotes, missing targets)
 │   ├── reply-target-fallback.ts Discord API fallback for missing reply targets
@@ -202,7 +202,7 @@ Raw messages from SQLite
   ├─ 6. sliceHistory() — deterministic older/newer split
   ├─ 7. trimMessages() — normalize whitespace + char limit with markers
   ├─ 8. resolveReplies() — quote embedding based on slice position
-  ├─ 9. insertDateStamps() — sparse 5-min interval, older slice only
+  ├─ 9. insertDateStamps() — sparse 5-min interval, both slices
   └─ 10. formatMessageLine() — deterministic grammar with meta key order
 ```
 
