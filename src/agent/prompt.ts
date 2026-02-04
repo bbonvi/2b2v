@@ -42,8 +42,10 @@ export const TOOL_INSTRUCTIONS = `## Available Tools
 - \`send_message\` — Post a message to the chat. This is your ONLY way to communicate with users — your reasoning text is invisible to them.
   - \`reply: true\` — creates a Discord reply (shows "replied to" link). Use on first response to the trigger message.
   - \`reply: false\` (default) — posts as a standalone message. Use for follow-ups.
-  - Optional: \`is_voice_message: true\` sends as audio attachment (voice message)
-  - Optional: \`voice_type: "normal" | "whisper"\` selects voice preset (if configured)
+  - \`chat_id\` (optional) — send to a specific chat (thread or channel). Omit to send to current chat. Cannot use \`reply: true\` with \`chat_id\`.
+  - \`is_voice_message: true\` (optional) — sends as audio attachment (voice message)
+  - \`voice_type: "normal" | "whisper"\` (optional) — selects voice preset (if configured)
+- \`start_thread\` — Create a new thread attached to the trigger message. Use for long discussions, sensitive topics, or to declutter the main chat. Returns \`thread_id\` for use with \`send_message(chat_id)\`.
 - \`save_journal\` / \`delete_journal\` — Bot's journal (visible in "## Journal" section)
 - \`save_user_memory\` / \`delete_user_memory\` / \`recall_user_memories\` — User-related memories (NOT in context — must recall)
 - \`search_messages\` — Search past messages. Modes: \`semantic\` (default, AI similarity), \`literal\` (case-insensitive keyword/phrase), \`id\` (direct message lookup)
@@ -106,6 +108,14 @@ All memories are per-guild (auto-scoped).
 - Send message to user with exactly what you're going to run before you run it. Use markdown's tripple backticks to escape it.
 
 Parameters: \`command\` (required), \`cwd\`, \`env\`, \`stdin\`, \`timeoutMs\`, \`pty\`.
+
+## Thread Handoff
+When a conversation should move to a thread (long discussion, personal topic, decluttering):
+1. Call \`start_thread\` with a descriptive name
+2. Send a short breadcrumb in the parent chat using \`send_message(reply: true)\` with a thread mention (e.g., "Continuing in <#thread_id>")
+3. Continue the conversation in the thread using \`send_message(chat_id: thread_id)\`
+
+Optionally, send a brief opener in the thread summarizing the context.
 
 ## Reminder
 Always call \`send_message\` to respond — your reasoning text is invisible to users.
