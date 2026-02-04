@@ -1,5 +1,15 @@
 import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 
+/** UI language for VPN panel. */
+export type UiLang = "en" | "ru";
+
+/** VPN configuration (WireGuard profile management). */
+export interface VpnConfig {
+  enabled: boolean;
+  apiUrl: string;
+  vpnPeer: string;
+}
+
 /** Trigger configuration per guild. All independently toggleable. */
 export interface TriggerConfig {
   mention: boolean;
@@ -61,10 +71,10 @@ export interface GlobalConfig {
   qdrantUrl: string;
   elevenLabsApiKey?: string;
   defaultTts?: TtsConfig;
-  /** VPN API base URL. */
-  vpnApiUrl: string;
-  /** VPN endpoint host for WireGuard configs. */
-  vpnPeer: string;
+  /** UI language for VPN panel. */
+  uiLang: UiLang;
+  /** VPN configuration. Undefined when disabled. */
+  vpn?: VpnConfig;
 }
 
 /** Full resolved app config. */
@@ -114,6 +124,10 @@ export interface MainConfigYaml {
   modelCacheDir?: string;
   qdrantUrl?: string;
   tts?: Partial<TtsConfig> & { voices?: { normal?: Partial<VoicePreset>; whisper?: Partial<VoicePreset> } };
-  vpnApiUrl?: string;
-  vpnPeer?: string;
+  uiLang?: string;
+  vpn?: {
+    enabled?: boolean;
+    apiUrl?: string;
+    vpnPeer?: string;
+  };
 }

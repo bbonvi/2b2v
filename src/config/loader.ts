@@ -8,6 +8,8 @@ import type {
   MainConfigYaml,
   TriggerConfig,
   TrimConfig,
+  UiLang,
+  VpnConfig,
 } from "./types.ts";
 import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 
@@ -73,6 +75,30 @@ function resolveTtsConfig(
       ...(whisperVoice !== undefined ? { whisper: whisperVoice } : {}),
     },
   };
+}
+
+/**
+ * Resolve VPN config from YAML partial.
+ * Returns undefined if VPN is not enabled.
+ */
+function resolveVpnConfig(
+  partial: MainConfigYaml["vpn"] | undefined
+): VpnConfig | undefined {
+  if (partial?.enabled !== true) return undefined;
+  return {
+    enabled: true,
+    apiUrl: partial.apiUrl ?? "",
+    vpnPeer: partial.vpnPeer ?? "",
+  };
+}
+
+/**
+ * Validate VPN config. Throws if enabled but missing required fields.
+ */
+export function validateVpnConfig(vpn: VpnConfig | undefined): void {
+  if (vpn === undefined || !vpn.enabled) return;
+  if (vpn.apiUrl === "") throw new Error("vpn.apiUrl required when vpn.enabled");
+  if (vpn.vpnPeer === "") throw new Error("vpn.vpnPeer required when vpn.enabled");
 }
 
 /**
@@ -167,8 +193,8 @@ export function loadGlobalConfig(
     qdrantUrl: env.QDRANT_URL ?? yaml.qdrantUrl ?? "http://localhost:6333",
     elevenLabsApiKey: env.ELEVENLABS_API_KEY,
     defaultTts: resolveTtsConfig(yaml.tts),
-    vpnApiUrl: env.VPN_API_URL ?? yaml.vpnApiUrl ?? "https://2b.lmao13.co",
-    vpnPeer: env.VPN_PEER ?? env.PEER ?? yaml.vpnPeer ?? "195.2.71.75",
+    uiLang: (yaml.uiLang === "ru" ? "ru" : "en") as UiLang,
+    vpn: resolveVpnConfig(yaml.vpn),
   };
 }
 

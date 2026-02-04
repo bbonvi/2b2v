@@ -120,7 +120,7 @@ describe("createSearchTool", () => {
   });
 
   test("passes optional filters through", async () => {
-    await insertWithEmbedding("m1", "food topic", { username: "u1", channelId: "c1" });
+    await insertWithEmbedding("m1", "food topic", { authorUsername: "u1", channelId: "c1" });
     await insertWithEmbedding("m2", "food topic again", { userId: "u2", channelId: "c1" });
 
     const tool = createSearchTool({ db, qdrant, guildId: "g1", embed: pipeline, resolveUsername: mockResolveUsername });

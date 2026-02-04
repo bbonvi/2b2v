@@ -78,8 +78,12 @@ modelCacheDir: model-cache
 # Qdrant vector database URL (env var QDRANT_URL takes priority)
 qdrantUrl: http://localhost:6333
 
-# VPN API URL (env var VPN_API_URL takes priority)
-vpnApiUrl: https://2b.lmao13.co
+# UI language for VPN panel ("en" or "ru")
+uiLang: en
 
-# VPN endpoint host for WireGuard configs (env var VPN_PEER takes priority)
-vpnPeer: 195.2.71.75
+# VPN configuration (WireGuard profile management)
+# Set enabled: true to enable /vpn command
+vpn:
+  enabled: false
+  apiUrl: ""      # Required when enabled (e.g., https://your-vpn-api.example.com)
+  vpnPeer: ""     # Required when enabled (WireGuard endpoint host)

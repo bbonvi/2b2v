@@ -5,10 +5,11 @@ import type {
 } from "discord.js";
 import type { Logger } from "../logger.ts";
 import type { VpnClient } from "./api-client.ts";
-import type { SessionStore, VpnSession } from "./session.ts";
+import type { SessionStore } from "./session.ts";
 import { parseCustomId } from "./session.ts";
-import { mapVpnError, VPN_ERRORS } from "./errors.ts";
+import { mapVpnError } from "./errors.ts";
 import { logVpnCommand, logVpnApiError } from "./logger.ts";
+import type { VpnLocale } from "./i18n.ts";
 import {
   buildHomePanel,
   buildHelpPanel,
@@ -23,10 +24,12 @@ import {
 } from "./ui.ts";
 
 export interface VpnHandlerDeps {
-  client: VpnClient;
+  client: VpnClient | null;
   sessionStore: SessionStore;
   vpnPeer: string;
   log: Logger;
+  locale: VpnLocale;
+  enabled: boolean;
 }
 
 /**
@@ -36,13 +39,19 @@ export async function handleVpnCommand(
   interaction: ChatInputCommandInteraction,
   deps: VpnHandlerDeps,
 ): Promise<void> {
-  const { client, sessionStore, log } = deps;
+  const { client, sessionStore, log, locale, enabled } = deps;
   const userId = interaction.user.id;
   const guildId = interaction.guildId;
 
   // Guild-only check
   if (guildId === null) {
-    await interaction.reply({ content: VPN_ERRORS.NOT_IN_GUILD, ephemeral: true });
+    await interaction.reply({ content: locale.notInGuild, ephemeral: true });
+    return;
+  }
+
+  // Enabled check
+  if (!enabled || client === null) {
+    await interaction.reply({ content: locale.vpnDisabled, ephemeral: true });
     return;
   }
 
@@ -52,11 +61,8 @@ export async function handleVpnCommand(
   await interaction.deferReply({ ephemeral: true });
 
   try {
-    // Fetch or create user
-    let user = await client.getUser(userId);
-    if (user === null) {
-      user = await client.createUser(userId, interaction.user.username);
-    }
+    // Ensure user exists
+    const _user = await client.getUser(userId) ?? await client.createUser(userId, interaction.user.username);
 
     // Fetch servers and profiles
     const [servers, profiles] = await Promise.all([
@@ -70,10 +76,10 @@ export async function handleVpnCommand(
     session.profiles = profiles;
 
     // Edit the deferred reply with home panel
-    await interaction.editReply(buildHomePanel(session));
+    await interaction.editReply(buildHomePanel(session, locale));
   } catch (err) {
     logVpnApiError(log, err as Parameters<typeof logVpnApiError>[1], userId, guildId);
-    await interaction.editReply({ content: mapVpnError(err) });
+    await interaction.editReply({ content: mapVpnError(err, locale) });
   }
 }
 
@@ -85,7 +91,7 @@ export async function handleVpnComponent(
   interaction: ButtonInteraction | StringSelectMenuInteraction,
   deps: VpnHandlerDeps,
 ): Promise<boolean> {
-  const { client, sessionStore, vpnPeer, log } = deps;
+  const { client, sessionStore, vpnPeer, log, locale, enabled } = deps;
   const parsed = parseCustomId(interaction.customId);
   if (parsed === null) {
     return false; // Not a VPN interaction
@@ -95,16 +101,22 @@ export async function handleVpnComponent(
   const userId = interaction.user.id;
   const guildId = interaction.guildId ?? "";
 
+  // Enabled check
+  if (!enabled || client === null) {
+    await interaction.reply({ content: locale.vpnDisabled, ephemeral: true });
+    return true;
+  }
+
   // Session lookup
   const session = sessionStore.get(sessionId);
   if (session === undefined) {
-    await interaction.reply({ content: VPN_ERRORS.SESSION_EXPIRED, ephemeral: true });
+    await interaction.reply({ content: locale.sessionExpired, ephemeral: true });
     return true;
   }
 
   // User gating
   if (!sessionStore.isOwner(sessionId, userId)) {
-    await interaction.reply({ content: VPN_ERRORS.USER_MISMATCH, ephemeral: true });
+    await interaction.reply({ content: locale.userMismatch, ephemeral: true });
     return true;
   }
 
@@ -119,21 +131,21 @@ export async function handleVpnComponent(
       case "home": {
         // Refresh profiles and show home (deferred)
         session.profiles = await client.listProfiles(userId);
-        await interaction.editReply(buildHomePanel(session));
+        await interaction.editReply(buildHomePanel(session, locale));
         break;
       }
 
       case "help": {
-        await interaction.update(buildHelpPanel(session));
+        await interaction.update(buildHelpPanel(session, locale));
         break;
       }
 
       case "create_menu": {
         // Check cap before showing create menu
         if (session.profiles.length >= PROFILE_CAP) {
-          await interaction.update(buildProfileListPanel(session));
+          await interaction.update(buildProfileListPanel(session, locale));
         } else {
-          await interaction.update(buildCreatePanel(session));
+          await interaction.update(buildCreatePanel(session, locale));
         }
         break;
       }
@@ -141,13 +153,13 @@ export async function handleVpnComponent(
       case "create": {
         // Create profile on server specified by param (deferred)
         if (param === undefined) {
-          await interaction.editReply(buildErrorPanel(session, "Сервер не указан."));
+          await interaction.editReply(buildErrorPanel(session, locale.serverNotSpecified, locale));
           break;
         }
 
         // Double-check cap
         if (session.profiles.length >= PROFILE_CAP) {
-          await interaction.editReply(buildErrorPanel(session, VPN_ERRORS.PROFILE_LIMIT));
+          await interaction.editReply(buildErrorPanel(session, locale.profileLimit, locale));
           break;
         }
 
@@ -158,7 +170,7 @@ export async function handleVpnComponent(
         session.currentProfile = newProfile;
         session.currentServer = session.servers.find((s) => s.public_name === param) ?? null;
 
-        await interaction.editReply(buildManageProfilePanel(session));
+        await interaction.editReply(buildManageProfilePanel(session, locale));
         break;
       }
 
@@ -167,39 +179,39 @@ export async function handleVpnComponent(
         session.profiles = await client.listProfiles(userId);
         session.currentProfile = null;
         session.currentServer = null;
-        await interaction.editReply(buildProfileListPanel(session));
+        await interaction.editReply(buildProfileListPanel(session, locale));
         break;
       }
 
       case "manage": {
         // Show manage panel for profile specified by param (server_name|address)
         if (param === undefined) {
-          await interaction.update(buildErrorPanel(session, "Профиль не указан."));
+          await interaction.update(buildErrorPanel(session, locale.profileNotSpecified, locale));
           break;
         }
 
         const profile = decodeProfileId(session.profiles, param);
         if (profile === undefined) {
-          await interaction.update(buildErrorPanel(session, "Профиль не найден."));
+          await interaction.update(buildErrorPanel(session, locale.profileNotFound, locale));
           break;
         }
 
         session.currentProfile = profile;
         session.currentServer = session.servers.find((s) => s.public_name === profile.server_name) ?? null;
-        await interaction.update(buildManageProfilePanel(session));
+        await interaction.update(buildManageProfilePanel(session, locale));
         break;
       }
 
       case "qr": {
         // Show QR for current profile (param is server_name|address)
         if (param === undefined) {
-          await interaction.update(buildErrorPanel(session, "Профиль не указан."));
+          await interaction.update(buildErrorPanel(session, locale.profileNotSpecified, locale));
           break;
         }
 
         const profile = decodeProfileId(session.profiles, param);
         if (profile === undefined) {
-          await interaction.update(buildErrorPanel(session, "Профиль не найден."));
+          await interaction.update(buildErrorPanel(session, locale.profileNotFound, locale));
           break;
         }
 
@@ -207,7 +219,8 @@ export async function handleVpnComponent(
         session.currentServer = session.servers.find((s) => s.public_name === profile.server_name) ?? null;
 
         logVpnCommand(log, "qr", userId, guildId, { profile: profile.name });
-        const qrPanel = await buildQrPanel(session, vpnPeer);
+        const qrPanel = await buildQrPanel(session, vpnPeer, locale);
+        // eslint-disable-next-line @typescript-eslint/no-deprecated -- type cast, not deprecated usage
         await interaction.update(qrPanel as Parameters<typeof interaction.update>[0]);
         break;
       }
@@ -215,13 +228,13 @@ export async function handleVpnComponent(
       case "download": {
         // Show download for current profile (param is server_name|address)
         if (param === undefined) {
-          await interaction.update(buildErrorPanel(session, "Профиль не указан."));
+          await interaction.update(buildErrorPanel(session, locale.profileNotSpecified, locale));
           break;
         }
 
         const profile = decodeProfileId(session.profiles, param);
         if (profile === undefined) {
-          await interaction.update(buildErrorPanel(session, "Профиль не найден."));
+          await interaction.update(buildErrorPanel(session, locale.profileNotFound, locale));
           break;
         }
 
@@ -229,7 +242,8 @@ export async function handleVpnComponent(
         session.currentServer = session.servers.find((s) => s.public_name === profile.server_name) ?? null;
 
         logVpnCommand(log, "download", userId, guildId, { profile: profile.name });
-        const downloadPanel = buildDownloadPanel(session, vpnPeer);
+        const downloadPanel = buildDownloadPanel(session, vpnPeer, locale);
+        // eslint-disable-next-line @typescript-eslint/no-deprecated -- type cast, not deprecated usage
         await interaction.update(downloadPanel as Parameters<typeof interaction.update>[0]);
         break;
       }
@@ -237,13 +251,13 @@ export async function handleVpnComponent(
       case "delete": {
         // Delete profile specified by param (server_name|address, deferred)
         if (param === undefined) {
-          await interaction.editReply(buildErrorPanel(session, "Профиль не указан."));
+          await interaction.editReply(buildErrorPanel(session, locale.profileNotSpecified, locale));
           break;
         }
 
         const profile = decodeProfileId(session.profiles, param);
         if (profile === undefined) {
-          await interaction.editReply(buildErrorPanel(session, "Профиль не найден."));
+          await interaction.editReply(buildErrorPanel(session, locale.profileNotFound, locale));
           break;
         }
 
@@ -253,22 +267,22 @@ export async function handleVpnComponent(
         session.currentProfile = null;
         session.currentServer = null;
 
-        await interaction.editReply(buildProfileListPanel(session));
+        await interaction.editReply(buildProfileListPanel(session, locale));
         break;
       }
 
       default: {
-        await interaction.update(buildErrorPanel(session, "Неизвестное действие."));
+        await interaction.update(buildErrorPanel(session, locale.unknownAction, locale));
       }
     }
   } catch (err) {
     logVpnApiError(log, err as Parameters<typeof logVpnApiError>[1], userId, guildId);
-    const errorPanel = buildErrorPanel(session, mapVpnError(err));
+    const errorPanel = buildErrorPanel(session, mapVpnError(err, locale), locale);
     if (needsDefer) {
       await interaction.editReply(errorPanel).catch(() => {});
     } else {
       await interaction.update(errorPanel).catch(() =>
-        interaction.reply({ content: mapVpnError(err), ephemeral: true }).catch(() => {}),
+        interaction.reply({ content: mapVpnError(err, locale), ephemeral: true }).catch(() => {}),
       );
     }
   }

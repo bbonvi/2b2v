@@ -28,8 +28,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     dataDir: "./data",
     modelCacheDir: "./model-cache",
     qdrantUrl: "http://localhost:6333",
-    vpnApiUrl: "https://2b.lmao13.co",
-    vpnPeer: "195.2.71.75",
+    uiLang: "en",
     ...overrides,
   };
 }

@@ -55,8 +55,6 @@ Both profiles start a Qdrant service and wait for it to be healthy before launch
 | `QDRANT_URL` | no | `http://localhost:6333` | Qdrant server URL |
 | `DATA_DIR` | no | `data` | Directory for SQLite database files |
 | `MODEL_CACHE_DIR` | no | `model-cache` | Directory for embedding model downloads |
-| `VPN_API_URL` | no | `https://2b.lmao13.co` | VPN API endpoint for profile management |
-| `VPN_PEER` | no | `195.2.71.75` | WireGuard endpoint host for generated configs |
 
 ## Configuration
 
@@ -149,7 +147,7 @@ WireGuard VPN profile management (available to all users). Opens an interactive 
 - **List profiles** — View existing profiles, download config (zip), show QR code, or delete
 - **Help** — Usage instructions (Russian)
 
-Each user can have up to 20 profiles. The UI is ephemeral and only the invoking user can interact with it. Requires `VPN_API_URL` to be reachable (defaults to the existing 2b VPN API).
+Each user can have up to 16 profiles. The UI is ephemeral and only the invoking user can interact with it. Requires `vpn.enabled: true` and valid `vpn.apiUrl`/`vpn.vpnPeer` in config.
 
 ## Agent tools
 

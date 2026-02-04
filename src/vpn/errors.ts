@@ -1,31 +1,20 @@
 import { VpnApiError, VpnTimeoutError } from "./api-client.ts";
-
-/** Russian error messages for VPN UI. */
-export const VPN_ERRORS = {
-  TIMEOUT: "Сервер VPN не отвечает. Попробуйте позже.",
-  SERVER_ERROR: "Ошибка сервера VPN. Попробуйте позже.",
-  NETWORK_ERROR: "Не удалось связаться с сервером VPN.",
-  UNKNOWN: "Произошла неизвестная ошибка.",
-  PROFILE_LIMIT: "Достигнут лимит профилей (20). Удалите один из существующих.",
-  USER_MISMATCH: "Эта панель принадлежит другому пользователю.",
-  SESSION_EXPIRED: "Сессия истекла. Используйте /vpn снова.",
-  NOT_IN_GUILD: "Команда /vpn доступна только на сервере.",
-} as const;
+import type { VpnLocale } from "./i18n.ts";
 
 /**
- * Map a VPN error to a user-friendly Russian message.
+ * Map a VPN error to a user-friendly message using the provided locale.
  */
-export function mapVpnError(error: unknown): string {
+export function mapVpnError(error: unknown, locale: VpnLocale): string {
   if (error instanceof VpnTimeoutError) {
-    return VPN_ERRORS.TIMEOUT;
+    return locale.timeout;
   }
 
   if (error instanceof VpnApiError) {
     if (error.statusCode !== null && error.statusCode >= 500) {
-      return VPN_ERRORS.SERVER_ERROR;
+      return locale.serverError;
     }
-    return VPN_ERRORS.NETWORK_ERROR;
+    return locale.networkError;
   }
 
-  return VPN_ERRORS.UNKNOWN;
+  return locale.unknown;
 }

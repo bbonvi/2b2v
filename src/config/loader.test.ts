@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { join } from "path";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
 import type { GuildConfig, GuildConfigYaml } from "./types.ts";
-import { loadGlobalConfig, loadGuildConfigs, loadGuildConfigFile, loadMainConfig, resolveGuildConfig, resolveInstructions, saveGuildConfig, validateTrimConfig } from "./loader.ts";
+import { loadGlobalConfig, loadGuildConfigs, loadGuildConfigFile, loadMainConfig, resolveGuildConfig, resolveInstructions, saveGuildConfig, validateTrimConfig, validateVpnConfig } from "./loader.ts";
 
 const TEST_DIR = join(import.meta.dir, "../../.test-config");
 const GUILDS_DIR = join(TEST_DIR, "guilds");
@@ -452,5 +452,79 @@ describe("saveGuildConfig", () => {
 
     const reloaded = loadGuildConfigFile(file);
     expect(reloaded.instructions).toBe("Custom guild instructions");
+  });
+});
+
+describe("validateVpnConfig", () => {
+  test("accepts undefined (disabled)", () => {
+    expect(() => validateVpnConfig(undefined)).not.toThrow();
+  });
+
+  test("accepts enabled=false with empty fields", () => {
+    expect(() => validateVpnConfig({ enabled: false, apiUrl: "", vpnPeer: "" })).not.toThrow();
+  });
+
+  test("accepts valid enabled config", () => {
+    expect(() => validateVpnConfig({ enabled: true, apiUrl: "https://vpn.example.com", vpnPeer: "1.2.3.4" })).not.toThrow();
+  });
+
+  test("rejects enabled with empty apiUrl", () => {
+    expect(() => validateVpnConfig({ enabled: true, apiUrl: "", vpnPeer: "1.2.3.4" })).toThrow("vpn.apiUrl required when vpn.enabled");
+  });
+
+  test("rejects enabled with empty vpnPeer", () => {
+    expect(() => validateVpnConfig({ enabled: true, apiUrl: "https://vpn.example.com", vpnPeer: "" })).toThrow("vpn.vpnPeer required when vpn.enabled");
+  });
+});
+
+describe("loadGlobalConfig vpn", () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  const BASE_ENV = { DISCORD_TOKEN: "tok_test", OPENROUTER_API_KEY: "or_test" };
+
+  test("vpn is undefined when not in YAML", () => {
+    const cfg = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "nonexistent.yaml"));
+    expect(cfg.vpn).toBeUndefined();
+  });
+
+  test("vpn is undefined when enabled is false", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "vpn:\n  enabled: false\n  apiUrl: https://test.com\n  vpnPeer: 1.2.3.4\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.vpn).toBeUndefined();
+  });
+
+  test("vpn is resolved when enabled is true", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "vpn:\n  enabled: true\n  apiUrl: https://vpn.example.com\n  vpnPeer: 5.6.7.8\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.vpn).toEqual({ enabled: true, apiUrl: "https://vpn.example.com", vpnPeer: "5.6.7.8" });
+  });
+
+  test("vpn fields default to empty strings when enabled", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "vpn:\n  enabled: true\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.vpn).toEqual({ enabled: true, apiUrl: "", vpnPeer: "" });
+  });
+
+  test("uiLang defaults to en", () => {
+    const cfg = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "nonexistent.yaml"));
+    expect(cfg.uiLang).toBe("en");
+  });
+
+  test("uiLang parses ru", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "uiLang: ru\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.uiLang).toBe("ru");
+  });
+
+  test("uiLang defaults to en for invalid values", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "uiLang: fr\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.uiLang).toBe("en");
   });
 });

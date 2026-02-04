@@ -3,7 +3,6 @@ import {
   createSessionStore,
   encodeCustomId,
   parseCustomId,
-  type VpnSession,
   type SessionStore,
 } from "./session.ts";
 

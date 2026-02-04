@@ -1,5 +1,6 @@
 # Per-guild configuration — config/guilds/{guildId}-{slug}.yaml
 # All fields are optional. Missing values inherit from config/config.yaml defaults.
+# Note: uiLang and vpn settings are global-only (set in config/config.yaml).
 
 # Trigger settings — when should the bot respond?
 triggers:

@@ -4,18 +4,14 @@ import {
   ButtonStyle,
   AttachmentBuilder,
   type MessageEditOptions,
-  type InteractionReplyOptions,
 } from "discord.js";
-import type { Peer, WgServer } from "./types.ts";
+import type { Peer } from "./types.ts";
 import type { VpnSession } from "./session.ts";
 import { encodeCustomId } from "./session.ts";
 import { peerToConfig } from "./config-builder.ts";
 import { generateQr } from "./qr.ts";
 import { generateZip } from "./zip.ts";
-
-const PROFILE_CAP = 16;
-
-const PROFILE_INFO = "**ВАЖНО**: вам нужен ОДИН профиль на ОДНО устройство. То есть, для смартфона и компьютера понадобится два отдельных профиля. В противном случае, VPN работать не будет.";
+import { PROFILE_CAP, type VpnLocale } from "./i18n.ts";
 
 /** Encode a profile identifier for use in customId. Format: server_name|address */
 export function encodeProfileId(profile: Peer): string {
@@ -39,22 +35,22 @@ export function getFlag(serverName: string): string {
 }
 
 /** Build the home panel (main menu). */
-export function buildHomePanel(session: VpnSession): MessageEditOptions {
-  const count = `${session.profiles.length}/${PROFILE_CAP} профилей`;
-  const content = `## VPN панель\n${count}\n\n.`;
+export function buildHomePanel(session: VpnSession, locale: VpnLocale): MessageEditOptions {
+  const count = locale.profileCount(session.profiles.length, PROFILE_CAP);
+  const content = `## ${locale.panelTitle}\n${count}\n\n.`;
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "create_menu"))
-      .setLabel("Создать профиль")
+      .setLabel(locale.createProfile)
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "list"))
-      .setLabel("Показать профили")
+      .setLabel(locale.showProfiles)
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "help"))
-      .setLabel("Помощь")
+      .setLabel(locale.help)
       .setEmoji("\u{2753}")
       .setStyle(ButtonStyle.Secondary),
   );
@@ -63,40 +59,37 @@ export function buildHomePanel(session: VpnSession): MessageEditOptions {
 }
 
 /** Build the help panel. */
-export function buildHelpPanel(session: VpnSession): MessageEditOptions {
-  const content = `# Помощь
+export function buildHelpPanel(session: VpnSession, locale: VpnLocale): MessageEditOptions {
+  const content = `# ${locale.helpTitle}
 
-## Как использовать VPN панель
+## How to use VPN panel
 
-### Установить клиент WireGuard
-- [\u{1FA9F} Windows](<https://download.wireguard.com/windows-client/wireguard-installer.exe>)
-- [\u{1F308} MacOS](<https://itunes.apple.com/us/app/wireguard/id1451685025?ls=1&mt=12>)
-- [\u{1F916} Android](<https://play.google.com/store/apps/details?id=com.wireguard.android>)
-- [\u{1F34F} iOS](<https://itunes.apple.com/us/app/wireguard/id1441195209?ls=1&mt=8>)
+### ${locale.helpInstallClient}
+- [\u{1FA9F} ${locale.clientWindows}](<https://download.wireguard.com/windows-client/wireguard-installer.exe>)
+- [\u{1F308} ${locale.clientMacOS}](<https://itunes.apple.com/us/app/wireguard/id1451685025?ls=1&mt=12>)
+- [\u{1F916} ${locale.clientAndroid}](<https://play.google.com/store/apps/details?id=com.wireguard.android>)
+- [\u{1F34F} ${locale.clientiOS}](<https://itunes.apple.com/us/app/wireguard/id1441195209?ls=1&mt=8>)
 
-### Создать профиль
+### ${locale.createProfile}
 
-1. Нажмите кнопку «Создать профиль»
-2. Выберите регион
-3. Нажмите кнопку «Показать QR-код», чтобы отсканировать с мобильного клиента WireGuard
-4. Нажмите кнопку «Скачать профиль», чтобы импортировать в WireGuard клиент на десктопе
+${locale.helpCreateProfile}
 
-### Блокировки
+### Blocking
 
-Несмотря на блокировку WireGuard в России, эти профили работают у большинства интернет провайдеров, в том числе мобильных. Секрет в том, что трафик проходит через виртуальную машину в России и передается на сервера в Европе.
+${locale.helpBlocking}
 
-### Почему WireGuard, а не vless/vmess/shadowsocks?
-WireGuard в разы быстрее, обеспечивает наименьшую задержку, потребляет меньше ресурсов, бережнее обращается с аккумулятором телефона, проще в настройке и как правило вызывает меньше проблем
+### Why WireGuard?
+${locale.helpWhyWireguard}
 
-### Приватность и безопасность
-Приватные ключи ваших профилей хранятся на той же машине, где лежит WireGuard сервер. Это сделано для упрощения работы с профилями.
+### Privacy and Security
+${locale.helpPrivacy}
 
 .`;
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "home"))
-      .setLabel("Назад")
+      .setLabel(locale.back)
       .setEmoji("\u{1F3E0}")
       .setStyle(ButtonStyle.Secondary),
   );
@@ -105,8 +98,8 @@ WireGuard в разы быстрее, обеспечивает наименьш�
 }
 
 /** Build the server selection panel for creating a profile. */
-export function buildCreatePanel(session: VpnSession): MessageEditOptions {
-  const content = "## Выберите регион:\n\n.";
+export function buildCreatePanel(session: VpnSession, locale: VpnLocale): MessageEditOptions {
+  const content = `## ${locale.selectRegion}\n\n.`;
 
   // Max 20 servers (4 rows × 5 buttons), 1 row reserved for back button
   const serverButtons = session.servers.slice(0, 20).map((server) =>
@@ -119,7 +112,7 @@ export function buildCreatePanel(session: VpnSession): MessageEditOptions {
 
   const homeButton = new ButtonBuilder()
     .setCustomId(encodeCustomId(session.id, "home"))
-    .setLabel("Назад")
+    .setLabel(locale.back)
     .setEmoji("\u{1F3E0}")
     .setStyle(ButtonStyle.Secondary);
 
@@ -134,9 +127,9 @@ export function buildCreatePanel(session: VpnSession): MessageEditOptions {
 }
 
 /** Build the profile list panel. */
-export function buildProfileListPanel(session: VpnSession): MessageEditOptions {
-  const count = `${session.profiles.length}/${PROFILE_CAP}`;
-  const content = `## Профили:\n${count}\n\n.`;
+export function buildProfileListPanel(session: VpnSession, locale: VpnLocale): MessageEditOptions {
+  const count = locale.profileCount(session.profiles.length, PROFILE_CAP);
+  const content = `## ${locale.profilesTitle}\n${count}\n\n.`;
 
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
 
@@ -160,7 +153,7 @@ export function buildProfileListPanel(session: VpnSession): MessageEditOptions {
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(encodeCustomId(session.id, "home"))
-        .setLabel("Назад")
+        .setLabel(locale.back)
         .setEmoji("\u{1F3E0}")
         .setStyle(ButtonStyle.Secondary),
     ),
@@ -170,34 +163,34 @@ export function buildProfileListPanel(session: VpnSession): MessageEditOptions {
 }
 
 /** Build the manage profile panel. */
-export function buildManageProfilePanel(session: VpnSession): MessageEditOptions {
+export function buildManageProfilePanel(session: VpnSession, locale: VpnLocale): MessageEditOptions {
   const profile = session.currentProfile;
   if (profile === null) {
-    return { content: "Профиль не найден.", components: [], attachments: [] };
+    return { content: locale.profileNotFound, components: [], attachments: [] };
   }
 
-  const content = `## Профиль "${profile.name}"\n\n${PROFILE_INFO}\n\n.`;
+  const content = `## Profile "${profile.name}"\n\n${locale.profileInfo}\n\n.`;
 
   const profileId = encodeProfileId(profile);
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "qr", profileId))
-      .setLabel("Показать QR-код")
+      .setLabel(locale.showQrCode)
       .setEmoji("\u{1F533}")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "download", profileId))
-      .setLabel("Скачать профиль")
+      .setLabel(locale.downloadProfile)
       .setEmoji("\u{1F4BE}")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "delete", profileId))
-      .setLabel("Удалить")
+      .setLabel(locale.delete)
       .setEmoji("\u{1F5D1}")
       .setStyle(ButtonStyle.Danger),
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "list"))
-      .setLabel("Назад")
+      .setLabel(locale.back)
       .setEmoji("\u{1F3E0}")
       .setStyle(ButtonStyle.Secondary),
   );
@@ -209,25 +202,26 @@ export function buildManageProfilePanel(session: VpnSession): MessageEditOptions
 export async function buildQrPanel(
   session: VpnSession,
   vpnPeer: string,
+  locale: VpnLocale,
 ): Promise<MessageEditOptions> {
   const profile = session.currentProfile;
   const server = session.currentServer;
   if (profile === null || server === null) {
-    return { content: "Профиль не найден.", components: [], attachments: [] };
+    return { content: locale.profileNotFound, components: [], attachments: [] };
   }
 
   const configText = peerToConfig(profile, server, vpnPeer);
   const qrBuffer = await generateQr(configText);
   const attachment = new AttachmentBuilder(qrBuffer, { name: "qr.png" });
 
-  const content = `## Профиль "${profile.name}"
+  const content = `## Profile "${profile.name}"
 
-${PROFILE_INFO}
+${locale.profileInfo}
 
-## Отсканируйте QR-код через мобильное приложение WireGuard
+## ${locale.scanQrInstruction}
 
-- [\u{1F916} Android](<https://play.google.com/store/apps/details?id=com.wireguard.android>)
-- [\u{1F34F} iOS](<https://itunes.apple.com/us/app/wireguard/id1441195209?ls=1&mt=8>)
+- [\u{1F916} ${locale.clientAndroid}](<https://play.google.com/store/apps/details?id=com.wireguard.android>)
+- [\u{1F34F} ${locale.clientiOS}](<https://itunes.apple.com/us/app/wireguard/id1441195209?ls=1&mt=8>)
 
 .`;
 
@@ -235,17 +229,17 @@ ${PROFILE_INFO}
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "download", profileId))
-      .setLabel("Скачать профиль")
+      .setLabel(locale.downloadProfile)
       .setEmoji("\u{1F4BE}")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "delete", profileId))
-      .setLabel("Удалить")
+      .setLabel(locale.delete)
       .setEmoji("\u{1F5D1}")
       .setStyle(ButtonStyle.Danger),
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "list"))
-      .setLabel("Назад")
+      .setLabel(locale.back)
       .setEmoji("\u{1F3E0}")
       .setStyle(ButtonStyle.Secondary),
   );
@@ -257,25 +251,26 @@ ${PROFILE_INFO}
 export function buildDownloadPanel(
   session: VpnSession,
   vpnPeer: string,
+  locale: VpnLocale,
 ): MessageEditOptions {
   const profile = session.currentProfile;
   const server = session.currentServer;
   if (profile === null || server === null) {
-    return { content: "Профиль не найден.", components: [], attachments: [] };
+    return { content: locale.profileNotFound, components: [], attachments: [] };
   }
 
   const configText = peerToConfig(profile, server, vpnPeer);
   const zipBuffer = generateZip(configText, `2b-${server.public_name}.conf`);
   const attachment = new AttachmentBuilder(zipBuffer, { name: `2b-${server.public_name}.zip` });
 
-  const content = `## Профиль "${profile.name}"
+  const content = `## Profile "${profile.name}"
 
-${PROFILE_INFO}
+${locale.profileInfo}
 
-## Скачайте приложенный файл и импортируйте в клиент WireGuard
+## ${locale.downloadInstruction}
 
-- [\u{1FA9F} Windows](<https://download.wireguard.com/windows-client/wireguard-installer.exe>)
-- [\u{1F308} MacOS](<https://itunes.apple.com/us/app/wireguard/id1451685025?ls=1&mt=12>)
+- [\u{1FA9F} ${locale.clientWindows}](<https://download.wireguard.com/windows-client/wireguard-installer.exe>)
+- [\u{1F308} ${locale.clientMacOS}](<https://itunes.apple.com/us/app/wireguard/id1451685025?ls=1&mt=12>)
 
 .`;
 
@@ -283,17 +278,17 @@ ${PROFILE_INFO}
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "qr", profileId))
-      .setLabel("Показать QR-код")
+      .setLabel(locale.showQrCode)
       .setEmoji("\u{1F533}")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "delete", profileId))
-      .setLabel("Удалить")
+      .setLabel(locale.delete)
       .setEmoji("\u{1F5D1}")
       .setStyle(ButtonStyle.Danger),
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "list"))
-      .setLabel("Назад")
+      .setLabel(locale.back)
       .setEmoji("\u{1F3E0}")
       .setStyle(ButtonStyle.Secondary),
   );
@@ -302,13 +297,13 @@ ${PROFILE_INFO}
 }
 
 /** Build an error panel with a message. */
-export function buildErrorPanel(session: VpnSession, errorMessage: string): MessageEditOptions {
-  const content = `## Ошибка\n\n${errorMessage}\n\n.`;
+export function buildErrorPanel(session: VpnSession, errorMessage: string, locale: VpnLocale): MessageEditOptions {
+  const content = `## ${locale.errorTitle}\n\n${errorMessage}\n\n.`;
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeCustomId(session.id, "home"))
-      .setLabel("Назад")
+      .setLabel(locale.back)
       .setEmoji("\u{1F3E0}")
       .setStyle(ButtonStyle.Secondary),
   );

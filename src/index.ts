@@ -1,7 +1,7 @@
 import { createLogger, RequestLog, type LogLevel } from "./logger";
 import { requestLogStore } from "./dashboard/store";
 import { startDashboard } from "./dashboard/server";
-import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, saveGuildConfig, validateTrimConfig } from "./config/loader";
+import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, saveGuildConfig, validateTrimConfig, validateVpnConfig } from "./config/loader";
 import type { GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
 import { createQdrantClient, ensureCollection, healthCheck } from "./qdrant/client";
@@ -44,9 +44,10 @@ import { createConfigHandler, configCommandDefinition } from "./commands/config"
 import { createScheduleHandler, scheduleCommandDefinition } from "./commands/schedule";
 import { createMemoryWipeHandler, memoryWipeCommandDefinition } from "./commands/memory-wipe";
 import { vpnCommandDefinition } from "./commands/vpn";
-import { createVpnClient } from "./vpn/api-client";
+import { createVpnClient, type VpnClient } from "./vpn/api-client";
 import { createSessionStore, type SessionStore } from "./vpn/session";
 import { handleVpnCommand, handleVpnComponent, type VpnHandlerDeps } from "./vpn/handler";
+import { getVpnLocale } from "./vpn/i18n";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch } from "fs";
 import type { Database } from "./db/database";
@@ -68,6 +69,7 @@ log.info("bot starting", {
 // --- 1. Load global config (throws on missing secrets) ---
 let globalConfig = loadGlobalConfig();
 validateTrimConfig(globalConfig.defaultTrim);
+validateVpnConfig(globalConfig.vpn);
 log.info("config loaded", { model: globalConfig.defaultModel, qdrant: globalConfig.qdrantUrl });
 
 // --- 2. Ensure data directory exists ---
@@ -127,9 +129,16 @@ if (globalConfig.elevenLabsApiKey !== undefined && globalConfig.elevenLabsApiKey
 }
 
 // --- 9c. VPN client and session store ---
-const vpnClient = createVpnClient(globalConfig.vpnApiUrl);
+const vpnConfig = globalConfig.vpn;
+const vpnEnabled = vpnConfig !== undefined;
+const vpnClient: VpnClient | null = vpnEnabled ? createVpnClient(vpnConfig.apiUrl) : null;
 const vpnSessionStore: SessionStore = createSessionStore();
-log.info("vpn client ready", { apiUrl: globalConfig.vpnApiUrl });
+
+if (vpnEnabled) {
+  log.info("vpn client ready", { apiUrl: vpnConfig.apiUrl });
+} else {
+  log.info("vpn disabled");
+}
 
 // Periodic VPN session cleanup (every 5 minutes)
 const VPN_SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
@@ -289,8 +298,10 @@ client.on("interactionCreate", (interaction) => void (async () => {
     const vpnDeps: VpnHandlerDeps = {
       client: vpnClient,
       sessionStore: vpnSessionStore,
-      vpnPeer: globalConfig.vpnPeer,
+      vpnPeer: vpnConfig?.vpnPeer ?? "",
       log: log.child({ component: "vpn" }),
+      locale: getVpnLocale(globalConfig.uiLang),
+      enabled: vpnEnabled,
     };
     try {
       const handled = await handleVpnComponent(interaction, vpnDeps);
@@ -315,8 +326,10 @@ client.on("interactionCreate", (interaction) => void (async () => {
     const vpnDeps: VpnHandlerDeps = {
       client: vpnClient,
       sessionStore: vpnSessionStore,
-      vpnPeer: globalConfig.vpnPeer,
+      vpnPeer: vpnConfig?.vpnPeer ?? "",
       log: log.child({ component: "vpn" }),
+      locale: getVpnLocale(globalConfig.uiLang),
+      enabled: vpnEnabled,
     };
     try {
       await handleVpnCommand(interaction, vpnDeps);
