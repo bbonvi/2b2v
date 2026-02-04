@@ -7,12 +7,11 @@ Personal agentic Discord bot that plays a character persona (default: 2B from Ni
 - Responds to @mentions, configurable keywords, or random chance per guild
 - Speaks in character while staying helpful and grounded
 - Splits responses into multiple short messages with natural delays
-- Stores images locally with stable IDs; LLM retrieves on demand via `read_chat_images` tool
-- Fetches external images by URL via `fetch_images` tool (ephemeral, not stored)
 - Remembers conversations and facts with scoped, searchable memory
+- Stores and recalls images shared in chats
 - Schedules messages (recurring, one-off, relative time)
 - Searches the web via Brave Search
-- Inspects server members and channel history when permitted
+- Can reference server members and channel history when permitted
 
 ## Requirements
 
@@ -39,9 +38,7 @@ docker compose -f docker-compose.dev.yml up --build
 docker compose up --build -d
 ```
 
-Dev mounts `src/` and `config/` from the host for live editing. Prod copies source into the image and persists data via Docker volumes (`bot-data`, `model-cache`, `qdrant-data`).
-
-Both profiles start a Qdrant service and wait for it to be healthy before launching the bot.
+Use the dev compose file for live reload, and the production compose file for long-running deployments.
 
 ## Environment variables
 
@@ -49,7 +46,7 @@ Both profiles start a Qdrant service and wait for it to be healthy before launch
 |---|---|---|---|
 | `DISCORD_TOKEN` | yes | — | Discord bot token |
 | `OPENROUTER_API_KEY` | yes | — | OpenRouter API key |
-| `BRAVE_API_KEY` | no | — | Brave Search API key (enables `web_search` tool) |
+| `BRAVE_API_KEY` | no | — | Brave Search API key (enables web search) |
 | `ELEVENLABS_API_KEY` | no | — | ElevenLabs API key (enables voice messages) |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error` |
 | `QDRANT_URL` | no | `http://localhost:6333` | Qdrant server URL |
@@ -58,9 +55,9 @@ Both profiles start a Qdrant service and wait for it to be healthy before launch
 
 ## Configuration
 
-### Global defaults
+### Main config (optional)
 
-Global defaults (model, thinking level, timezone, trim thresholds, etc.) are set in `src/config/loader.ts` and can be influenced by environment variables. Per-guild configs override these.
+Global defaults live in `config/config.yaml` (optional). See `config/config.yaml.example` for the full list of fields. Per-guild configs override these defaults.
 
 ### Per-guild config
 
@@ -123,7 +120,7 @@ Configurable keys:
 | `trim.messageCharLimit` | number | Max chars per message before trimming |
 | `trim.replyQuoteChars` | number | Max chars for reply quotes |
 | `mergeMessageGapSeconds` | number | Max gap for merging consecutive messages |
-| `imageReadMaxPerCall` | number | Max images per `read_chat_images` call |
+| `imageReadMaxPerCall` | number | Max images per image read |
 | `imageCaptioningEnabled` | boolean | Enable image captioning (TBD) |
 | `attachmentsDir` | string | Image storage directory |
 
@@ -149,125 +146,17 @@ WireGuard VPN profile management (available to all users). Opens an interactive 
 
 Each user can have up to 16 profiles. The UI is ephemeral and only the invoking user can interact with it. Requires `vpn.enabled: true` and valid `vpn.apiUrl`/`vpn.vpnPeer` in config.
 
-## Agent tools
+## Architecture
 
-The bot has access to these tools during conversations. The LLM decides when and how to use them — they are not user-invokable commands.
-
-| Tool | Description |
-|---|---|
-| `send_message` | Send message to chat (optional `chat_id` for threads/other channels) |
-| `start_thread` | Create a thread on the trigger message for long/private discussions |
-| `save_journal` | Create or update a bot journal entry |
-| `delete_journal` | Delete a journal entry by ID |
-| `save_user_memory` | Create or update a user memory (by username) |
-| `delete_user_memory` | Delete a user memory by ID |
-| `recall_user_memories` | Retrieve user memories (by username, not in context by default) |
-| `search_messages` | Semantic search over message history with guild/username/channel/time filters |
-| `schedule_message` | Schedule a one-off message in N seconds/minutes/hours |
-| `list_members` | List server members (all or online-only) |
-| `chat_history` | Fetch recent messages from a chat (channel, thread, or DM) |
-| `read_chat_images` | Retrieve stored chat images by ID (base64) |
-| `fetch_images` | Fetch external images by URL (ephemeral, not stored) |
-| `fetch_url` | Fetch a URL and extract its readable content as markdown |
-| `web_search` | Search the web via Brave Search API |
-| `bash` | Execute shell commands in isolated container (disabled by default; IPs redacted, output truncated, command blocklist enforced) |
-
-Note: `send_message` supports `chat_id` for routing to threads/channels, and optional voice message parameters (`is_voice_message`, `voice_type`) when TTS is configured.
-
-### Bash tool
-
-The `bash` tool executes shell commands in an isolated Ubuntu container via SSH. It's disabled by default for security.
-
-**Enabling:**
-1. Set `bashTool.enabled: true` in `config/config.yaml` (global)
-2. Set `bashTool.enabled: true` in the guild config (per-guild)
-3. Run with Docker Compose — the `bash-vm` service must be running
-
-Both global and guild configs must enable the tool for it to be available.
-
-**Constraints:**
-- **Timeout**: 5 seconds max. Commands exceeding this are terminated (SIGTERM, then SIGKILL after 2s).
-- **Output**: Truncated to 4000 chars. All IPv4/IPv6 addresses are redacted to `[IP]`.
-- **Blocklist**: Commands matching blocked patterns are rejected before execution. Default patterns block: shutdown/reboot, iptables/firewall, network interface tools (ifconfig, ip, ss, netstat), systemctl/service, container tools (docker, kubectl), kernel modules (modprobe), mount/umount, and sshd attacks.
-- **Stderr**: Not captured by default. Redirect with `2>&1` if needed.
-- **No state persistence**: Each command runs in a fresh SSH session. Filesystem persists only while the container is running.
-
-**Network isolation:**
-The `bash-vm` container can reach the public internet but cannot connect to the bot, host, Qdrant, or other internal services. Egress filtering blocks private ranges (10.x, 172.16.x, 192.168.x, etc.).
-
-**Troubleshooting:**
-- **Tool not appearing**: Check both global and guild `bashTool.enabled: true`. Verify `bash-vm` service is running (`docker compose ps`).
-- **SSH connection failed**: Ensure the bot can reach `bash-vm:22`. Check SSH key volume is mounted correctly (`ssh-keys` volume).
-- **Command blocked**: The blocklist is enforced before execution. Blocked patterns cannot be bypassed. Review `bashTool.blocklist` in config.
-- **Timeout**: Long-running commands are terminated. For commands that might exceed 5s, consider breaking them into smaller steps.
-
-## Memory system
-
-Memories are stored in SQLite with two scopes:
-
-- **user** — per-user facts (e.g., preferences, names). Requires `username`. NOT in LLM context — retrieve with `recall_user_memories`.
-- **journal** — bot's internal journal entries. Always visible in LLM context under "## Journal".
-
-The Server Members list shows memory count per user (e.g., `@alice — Alice — 3 memories`), helping the LLM know when to use `recall_user_memories`.
-
-Default TTL is 180 days, configurable per guild via `memoryRetentionDays`. Individual entries can override TTL via `ttlDays` (pass `null` for no expiry). Expired memories are cleaned up periodically.
-
-## Semantic search
-
-Message history is stored in SQLite (raw + translated content) and embedded via a local `bge-m3` model into Qdrant. Semantic search uses pre-filtered KNN in Qdrant, then joins results back to SQLite for display metadata.
-
-Filters available: guild (always applied), user, channel, time range.
-
-The embedding model is downloaded on first startup and cached in `MODEL_CACHE_DIR`.
-
-## Scheduling
-
-Three scheduling modes:
-
-1. **Cron** — recurring schedules with per-guild timezone support
-2. **One-off** — absolute timestamp, auto-disabled after firing
-3. **Relative** — "in N seconds/minutes/hours" via the `schedule_message` agent tool
-
-Schedules are stored in SQLite and executed by a Croner-based engine. Past one-offs are auto-disabled on startup without firing.
-
-## Translation layer
-
-Discord markup is automatically translated in both directions:
-
-- **Inbound** (Discord → LLM): `<@123>` → `@username`, `<#456>` → `#channel-name`, custom emojis → `:name:`, timestamps → human-readable
-- **Outbound** (LLM → Discord): `@username` → `<@123>`, `#channel` → `<#456>`, `:emoji:` → custom emoji markup
-
-Failed lookups fall back to plain text with warnings logged.
-
-## Context management
-
-The system prompt is composed as ordered sections: persona → tool instructions → emojis → members → journal summaries → upcoming schedules → older history → newer history → current context. The current message is sent as `role=user`. Each section carries `cache_control` metadata; stable sections (persona through older history) are cached, newer history and current context are uncached. Sections are ordered to maximize Anthropic's prefix-based prompt caching.
-
-Chat history is split into two deterministic slices:
-- **Older** (cached): `trimTarget - windowSize` messages, stable between trim events
-- **Newer** (uncached): `windowSize` most recent messages
-
-When history reaches `trimTrigger`, the oldest messages are dropped to `trimTarget`. Consecutive plain messages by the same author within `mergeMessageGapSeconds` are merged. Long messages are trimmed to `messageCharLimit` with a marker including the message ID for later retrieval via `search_messages(id)`.
-
-Reply context is embedded with short quotes (capped at `replyQuoteChars`). Missing reply targets are fetched from Discord API and persisted. No inline images in context — messages reference `image_ids`, and the LLM uses `read_chat_images` to fetch stored images on demand, or `fetch_images` to fetch external URLs (ephemeral, not stored).
-
-## Testing
-
-```bash
-make test               # starts Qdrant container if needed, runs all tests
-make test-unit          # runs only non-Qdrant tests (no container needed)
-make check              # tsc --noEmit && eslint
-```
-
-`make test` automatically starts a `qdrant-test` container and sets `QDRANT_URL` for the test run, overriding any `.env` value. Manage the container manually with `make qdrant-up` / `make qdrant-down`.
+See `ARCHITECTURE.md` for system design, core flows, and component boundaries.
 
 ## Known limitations
 
-- Semantic search does not support time-range filtering at the Qdrant level (tracked as v1 TODO; currently filters in application layer)
+- Semantic search time-range filtering is approximate
 - Embedding model download requires internet access on first startup
 - Designed for small personal servers (2–3 guilds, small member count) — not load-tested for large servers
 - No rate limiting on LLM calls beyond OpenRouter's own limits
-- Message content intent required for full functionality; missing intent triggers degraded mode with a runtime warning
+- Requires Discord message content intent for full functionality
 
 ## License
 
