@@ -2,6 +2,49 @@ import type { HistoryMessage } from "./history-types.ts";
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
+// Time unit thresholds in milliseconds
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+const WEEK_MS = 7 * DAY_MS;
+const MONTH_MS = 30 * DAY_MS;
+const YEAR_MS = 365 * DAY_MS;
+
+/**
+ * Compact relative time: "<1m ago", "5m ago", "2h ago", "3d ago", "2w ago", "1mo ago", "1y ago"
+ * @param timestampMs - Unix timestamp in milliseconds
+ * @param nowMs - Optional for testing determinism (defaults to Date.now())
+ */
+export function formatRelativeAgo(timestampMs: number, nowMs?: number): string {
+  const now = nowMs ?? Date.now();
+  const elapsed = now - timestampMs;
+
+  if (elapsed < MINUTE_MS) return "<1m ago";
+  if (elapsed < HOUR_MS) return `${Math.floor(elapsed / MINUTE_MS)}m ago`;
+  if (elapsed < DAY_MS) return `${Math.floor(elapsed / HOUR_MS)}h ago`;
+  if (elapsed < WEEK_MS) return `${Math.floor(elapsed / DAY_MS)}d ago`;
+  if (elapsed < MONTH_MS) return `${Math.floor(elapsed / WEEK_MS)}w ago`;
+  if (elapsed < YEAR_MS) return `${Math.floor(elapsed / MONTH_MS)}mo ago`;
+  return `${Math.floor(elapsed / YEAR_MS)}y ago`;
+}
+
+/**
+ * Format memory timestamps for context display.
+ * Returns "(Created: Xago)" or "(Created: Xago; Updated: Yago)"
+ */
+export function formatMemoryTimestamps(
+  createdAt: number,
+  updatedAt: number,
+  nowMs?: number,
+): string {
+  const created = formatRelativeAgo(createdAt, nowMs);
+  if (updatedAt === createdAt) {
+    return `(Created: ${created})`;
+  }
+  const updated = formatRelativeAgo(updatedAt, nowMs);
+  return `(Created: ${created}; Updated: ${updated})`;
+}
+
 /**
  * Format a timestamp as a deterministic date stamp: `[DATE YYYY-MM-DD HH:mm Z]`
  * Uses the guild timezone with UTC fallback if invalid.

@@ -9,6 +9,7 @@ import {
   listMemories,
   type MemoryRow,
 } from "../db/memory-repository";
+import { formatMemoryTimestamps } from "./history-dates";
 
 export interface MemoryToolsDeps {
   db: Database;
@@ -104,6 +105,7 @@ function embeddingText(shortDescription: string, longDescription?: string): stri
 
 function formatMemoryLine(row: MemoryRow): string {
   const parts = [`[${row.id}]`];
+  parts.push(formatMemoryTimestamps(row.createdAt, row.updatedAt));
   if (row.scope === "user" && row.userId !== null) parts.push(`user:${row.userId}`);
   parts.push(row.shortDescription);
   return parts.join(" ");

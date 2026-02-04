@@ -19,6 +19,7 @@ import { assembleContext, type AssembledContext } from "./agent/context-assembly
 import type { HistoryMessage } from "./agent/history-types";
 import { getHistoryMessages } from "./db/message-repository";
 import { processHistory } from "./agent/history-pipeline";
+import { formatMemoryTimestamps } from "./agent/history-dates";
 import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
 import type { MessageSender } from "./agent/send-message-tool";
@@ -447,7 +448,7 @@ async function buildContext(
       return ud !== 0 ? ud : a.id - b.id;
     });
   const journalSummaries = journals
-    .map((m) => `- [${m.id}] ${m.shortDescription}`)
+    .map((m) => `- [${m.id}] ${formatMemoryTimestamps(m.createdAt, m.updatedAt)} ${m.shortDescription}`)
     .join("\n");
 
   // Upcoming schedules — one-off by runAt then ID; cron by expression then ID; one-off first

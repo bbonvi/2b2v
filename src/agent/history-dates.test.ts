@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { formatDateStamp, insertDateStamps } from "./history-dates.ts";
+import { formatDateStamp, insertDateStamps, formatRelativeAgo, formatMemoryTimestamps } from "./history-dates.ts";
 import type { HistoryMessage } from "./history-types.ts";
 
 function msg(id: string, timestamp: number): HistoryMessage {
@@ -123,5 +123,114 @@ describe("insertDateStamps", () => {
     // first always, then every >=5 min gap
     // idx0=0, idx1=3, idx2=6 (6-0=6>=5 → stamp), idx3=9, idx4=12 (12-6=6>=5 → stamp), etc
     expect(dateCount).toBe(5);
+  });
+});
+
+describe("formatRelativeAgo", () => {
+  const MINUTE = 60 * 1000;
+  const HOUR = 60 * MINUTE;
+  const DAY = 24 * HOUR;
+  const WEEK = 7 * DAY;
+  const MONTH = 30 * DAY;
+  const YEAR = 365 * DAY;
+
+  test("less than 1 minute returns '<1m ago'", () => {
+    const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+    expect(formatRelativeAgo(now - 0, now)).toBe("<1m ago");
+    expect(formatRelativeAgo(now - 30_000, now)).toBe("<1m ago");
+    expect(formatRelativeAgo(now - 59_999, now)).toBe("<1m ago");
+  });
+
+  test("minutes: 1m to 59m", () => {
+    const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+    expect(formatRelativeAgo(now - MINUTE, now)).toBe("1m ago");
+    expect(formatRelativeAgo(now - 5 * MINUTE, now)).toBe("5m ago");
+    expect(formatRelativeAgo(now - 59 * MINUTE, now)).toBe("59m ago");
+  });
+
+  test("hours: 1h to 23h", () => {
+    const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+    expect(formatRelativeAgo(now - HOUR, now)).toBe("1h ago");
+    expect(formatRelativeAgo(now - 2 * HOUR, now)).toBe("2h ago");
+    expect(formatRelativeAgo(now - 23 * HOUR, now)).toBe("23h ago");
+  });
+
+  test("days: 1d to 6d", () => {
+    const now = Date.UTC(2026, 0, 10, 12, 0, 0);
+    expect(formatRelativeAgo(now - DAY, now)).toBe("1d ago");
+    expect(formatRelativeAgo(now - 3 * DAY, now)).toBe("3d ago");
+    expect(formatRelativeAgo(now - 6 * DAY, now)).toBe("6d ago");
+  });
+
+  test("weeks: 1w to 4w", () => {
+    const now = Date.UTC(2026, 1, 1, 12, 0, 0);
+    expect(formatRelativeAgo(now - WEEK, now)).toBe("1w ago");
+    expect(formatRelativeAgo(now - 2 * WEEK, now)).toBe("2w ago");
+    expect(formatRelativeAgo(now - 4 * WEEK, now)).toBe("4w ago");
+  });
+
+  test("months: 1mo to 11mo", () => {
+    const now = Date.UTC(2026, 11, 1, 12, 0, 0);
+    expect(formatRelativeAgo(now - MONTH, now)).toBe("1mo ago");
+    expect(formatRelativeAgo(now - 3 * MONTH, now)).toBe("3mo ago");
+    expect(formatRelativeAgo(now - 11 * MONTH, now)).toBe("11mo ago");
+  });
+
+  test("years: 1y and beyond", () => {
+    const now = Date.UTC(2028, 0, 1, 12, 0, 0);
+    expect(formatRelativeAgo(now - YEAR, now)).toBe("1y ago");
+    expect(formatRelativeAgo(now - 2 * YEAR, now)).toBe("2y ago");
+  });
+
+  test("boundary: exactly at threshold switches to larger unit", () => {
+    const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+    // Exactly 60 minutes = 1h
+    expect(formatRelativeAgo(now - 60 * MINUTE, now)).toBe("1h ago");
+    // Exactly 24 hours = 1d
+    expect(formatRelativeAgo(now - 24 * HOUR, now)).toBe("1d ago");
+    // Exactly 7 days = 1w
+    expect(formatRelativeAgo(now - 7 * DAY, now)).toBe("1w ago");
+  });
+
+  test("deterministic with nowMs injection", () => {
+    const timestamp = Date.UTC(2026, 0, 1, 10, 0, 0);
+    const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+    expect(formatRelativeAgo(timestamp, now)).toBe("2h ago");
+    expect(formatRelativeAgo(timestamp, now)).toBe("2h ago");
+  });
+});
+
+describe("formatMemoryTimestamps", () => {
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+
+  test("created only when timestamps match", () => {
+    const now = Date.UTC(2026, 0, 10, 12, 0, 0);
+    const created = now - 5 * DAY;
+    expect(formatMemoryTimestamps(created, created, now)).toBe("(Created: 5d ago)");
+  });
+
+  test("both timestamps when updated differs", () => {
+    const now = Date.UTC(2026, 0, 10, 12, 0, 0);
+    const created = now - 5 * DAY;
+    const updated = now - 2 * HOUR;
+    expect(formatMemoryTimestamps(created, updated, now)).toBe("(Created: 5d ago; Updated: 2h ago)");
+  });
+
+  test("recent creation and update", () => {
+    const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+    const created = now - 1 * HOUR;
+    const updated = now - 10 * 60 * 1000; // 10 minutes
+    expect(formatMemoryTimestamps(created, updated, now)).toBe("(Created: 1h ago; Updated: 10m ago)");
+  });
+
+  test("deterministic with nowMs injection", () => {
+    const now = Date.UTC(2026, 0, 10, 12, 0, 0);
+    const created = now - 3 * DAY;
+    const updated = now - 1 * DAY;
+    const result1 = formatMemoryTimestamps(created, updated, now);
+    const result2 = formatMemoryTimestamps(created, updated, now);
+    expect(result1).toBe(result2);
+    expect(result1).toBe("(Created: 3d ago; Updated: 1d ago)");
   });
 });
