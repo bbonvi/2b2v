@@ -3,6 +3,24 @@ import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 /** UI language for VPN panel. */
 export type UiLang = "en" | "ru";
 
+/** Bash tool configuration. Controls remote shell execution via SSH. */
+export interface BashToolConfig {
+  /** Whether the bash tool is enabled. Both global and guild must be true for tool to be available. */
+  enabled: boolean;
+  /** SSH connection settings for the bash-vm service. */
+  ssh: {
+    host: string;
+    port: number;
+    user: string;
+  };
+  /** Command execution timeout in milliseconds. Default 5000. */
+  timeoutMs: number;
+  /** Max output characters after redaction. Default 4000. */
+  outputLimit: number;
+  /** Regex patterns for blocked commands. Commands matching any pattern are rejected. */
+  blocklist: string[];
+}
+
 /** VPN configuration (WireGuard profile management). */
 export interface VpnConfig {
   enabled: boolean;
@@ -45,6 +63,8 @@ export interface GuildConfig {
   attachmentsDir: string;
   instructions: string;
   tts?: TtsConfig;
+  /** Bash tool configuration. Undefined when disabled for this guild. */
+  bashTool?: BashToolConfig;
 }
 
 /** Global configuration loaded from file + env. */
@@ -75,6 +95,8 @@ export interface GlobalConfig {
   uiLang: UiLang;
   /** VPN configuration. Undefined when disabled. */
   vpn?: VpnConfig;
+  /** Default bash tool configuration. Undefined when disabled globally. */
+  defaultBashTool?: BashToolConfig;
 }
 
 /** Full resolved app config. */
@@ -101,6 +123,9 @@ export interface GuildConfigYaml {
   instructions?: string;
   instructionsPath?: string;
   tts?: Partial<TtsConfig> & { voices?: { normal?: Partial<VoicePreset>; whisper?: Partial<VoicePreset> } };
+  bashTool?: {
+    enabled?: boolean;
+  };
 }
 
 /** Raw shape of the main config YAML file (config/config.yaml). All optional. */
@@ -129,5 +154,16 @@ export interface MainConfigYaml {
     enabled?: boolean;
     apiUrl?: string;
     vpnPeer?: string;
+  };
+  bashTool?: {
+    enabled?: boolean;
+    ssh?: {
+      host?: string;
+      port?: number;
+      user?: string;
+    };
+    timeoutMs?: number;
+    outputLimit?: number;
+    blocklist?: string[];
   };
 }

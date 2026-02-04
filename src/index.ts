@@ -1,7 +1,7 @@
 import { createLogger, RequestLog, type LogLevel } from "./logger";
 import { requestLogStore } from "./dashboard/store";
 import { startDashboard } from "./dashboard/server";
-import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, saveGuildConfig, validateTrimConfig, validateVpnConfig } from "./config/loader";
+import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, saveGuildConfig, validateTrimConfig, validateVpnConfig, validateBashToolConfig } from "./config/loader";
 import type { GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
 import { createQdrantClient, ensureCollection, healthCheck } from "./qdrant/client";
@@ -71,6 +71,7 @@ log.info("bot starting", {
 let globalConfig = loadGlobalConfig();
 validateTrimConfig(globalConfig.defaultTrim);
 validateVpnConfig(globalConfig.vpn);
+validateBashToolConfig(globalConfig.defaultBashTool);
 log.info("config loaded", { model: globalConfig.defaultModel, qdrant: globalConfig.qdrantUrl });
 
 // --- 2. Ensure data directory exists ---

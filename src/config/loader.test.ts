@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { join } from "path";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
 import type { GuildConfig, GuildConfigYaml } from "./types.ts";
-import { loadGlobalConfig, loadGuildConfigs, loadGuildConfigFile, loadMainConfig, resolveGuildConfig, resolveInstructions, saveGuildConfig, validateTrimConfig, validateVpnConfig } from "./loader.ts";
+import { loadGlobalConfig, loadGuildConfigs, loadGuildConfigFile, loadMainConfig, resolveGuildConfig, resolveInstructions, saveGuildConfig, validateTrimConfig, validateVpnConfig, validateBashToolConfig } from "./loader.ts";
 
 const TEST_DIR = join(import.meta.dir, "../../.test-config");
 const GUILDS_DIR = join(TEST_DIR, "guilds");
@@ -526,5 +526,278 @@ describe("loadGlobalConfig vpn", () => {
     writeFileSync(file, "uiLang: fr\n");
     const cfg = loadGlobalConfig(BASE_ENV, file);
     expect(cfg.uiLang).toBe("en");
+  });
+});
+
+describe("validateBashToolConfig", () => {
+  test("accepts undefined (disabled)", () => {
+    expect(() => validateBashToolConfig(undefined)).not.toThrow();
+  });
+
+  test("accepts enabled=false with any fields", () => {
+    expect(() => validateBashToolConfig({
+      enabled: false,
+      ssh: { host: "", port: 0, user: "" },
+      timeoutMs: 0,
+      outputLimit: 0,
+      blocklist: [],
+    })).not.toThrow();
+  });
+
+  test("accepts valid enabled config", () => {
+    expect(() => validateBashToolConfig({
+      enabled: true,
+      ssh: { host: "bash-vm", port: 22, user: "user" },
+      timeoutMs: 5000,
+      outputLimit: 4000,
+      blocklist: ["\\bshutdown\\b"],
+    })).not.toThrow();
+  });
+
+  test("rejects enabled with empty ssh.host", () => {
+    expect(() => validateBashToolConfig({
+      enabled: true,
+      ssh: { host: "", port: 22, user: "user" },
+      timeoutMs: 5000,
+      outputLimit: 4000,
+      blocklist: [],
+    })).toThrow("bashTool.ssh.host required when bashTool.enabled");
+  });
+
+  test("rejects enabled with invalid ssh.port", () => {
+    expect(() => validateBashToolConfig({
+      enabled: true,
+      ssh: { host: "bash-vm", port: 0, user: "user" },
+      timeoutMs: 5000,
+      outputLimit: 4000,
+      blocklist: [],
+    })).toThrow("bashTool.ssh.port must be 1-65535");
+  });
+
+  test("rejects enabled with ssh.port > 65535", () => {
+    expect(() => validateBashToolConfig({
+      enabled: true,
+      ssh: { host: "bash-vm", port: 70000, user: "user" },
+      timeoutMs: 5000,
+      outputLimit: 4000,
+      blocklist: [],
+    })).toThrow("bashTool.ssh.port must be 1-65535");
+  });
+
+  test("rejects enabled with empty ssh.user", () => {
+    expect(() => validateBashToolConfig({
+      enabled: true,
+      ssh: { host: "bash-vm", port: 22, user: "" },
+      timeoutMs: 5000,
+      outputLimit: 4000,
+      blocklist: [],
+    })).toThrow("bashTool.ssh.user required when bashTool.enabled");
+  });
+
+  test("rejects enabled with non-positive timeoutMs", () => {
+    expect(() => validateBashToolConfig({
+      enabled: true,
+      ssh: { host: "bash-vm", port: 22, user: "user" },
+      timeoutMs: 0,
+      outputLimit: 4000,
+      blocklist: [],
+    })).toThrow("bashTool.timeoutMs must be positive");
+  });
+
+  test("rejects enabled with non-positive outputLimit", () => {
+    expect(() => validateBashToolConfig({
+      enabled: true,
+      ssh: { host: "bash-vm", port: 22, user: "user" },
+      timeoutMs: 5000,
+      outputLimit: 0,
+      blocklist: [],
+    })).toThrow("bashTool.outputLimit must be positive");
+  });
+
+  test("rejects invalid regex in blocklist", () => {
+    expect(() => validateBashToolConfig({
+      enabled: true,
+      ssh: { host: "bash-vm", port: 22, user: "user" },
+      timeoutMs: 5000,
+      outputLimit: 4000,
+      blocklist: ["[invalid("],
+    })).toThrow("bashTool.blocklist contains invalid regex");
+  });
+});
+
+describe("loadGlobalConfig bashTool", () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  const BASE_ENV = { DISCORD_TOKEN: "tok_test", OPENROUTER_API_KEY: "or_test" };
+
+  test("bashTool is undefined when not in YAML", () => {
+    const cfg = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "nonexistent.yaml"));
+    expect(cfg.defaultBashTool).toBeUndefined();
+  });
+
+  test("bashTool is undefined when enabled is false", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "bashTool:\n  enabled: false\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultBashTool).toBeUndefined();
+  });
+
+  test("bashTool is resolved with defaults when enabled is true", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "bashTool:\n  enabled: true\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultBashTool).toBeDefined();
+    expect(cfg.defaultBashTool?.enabled).toBe(true);
+    expect(cfg.defaultBashTool?.ssh.host).toBe("bash-vm");
+    expect(cfg.defaultBashTool?.ssh.port).toBe(22);
+    expect(cfg.defaultBashTool?.ssh.user).toBe("user");
+    expect(cfg.defaultBashTool?.timeoutMs).toBe(5000);
+    expect(cfg.defaultBashTool?.outputLimit).toBe(4000);
+    expect(cfg.defaultBashTool?.blocklist.length).toBeGreaterThan(0);
+  });
+
+  test("bashTool ssh config is customizable", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "bashTool:\n  enabled: true\n  ssh:\n    host: custom-host\n    port: 2222\n    user: admin\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultBashTool?.ssh.host).toBe("custom-host");
+    expect(cfg.defaultBashTool?.ssh.port).toBe(2222);
+    expect(cfg.defaultBashTool?.ssh.user).toBe("admin");
+  });
+
+  test("bashTool timeoutMs and outputLimit are customizable", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "bashTool:\n  enabled: true\n  timeoutMs: 10000\n  outputLimit: 8000\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultBashTool?.timeoutMs).toBe(10000);
+    expect(cfg.defaultBashTool?.outputLimit).toBe(8000);
+  });
+
+  test("bashTool blocklist can be overridden", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "bashTool:\n  enabled: true\n  blocklist:\n    - custom-pattern\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultBashTool?.blocklist).toEqual(["custom-pattern"]);
+  });
+});
+
+describe("resolveGuildConfig bashTool", () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  const BASE_ENV = { DISCORD_TOKEN: "t", OPENROUTER_API_KEY: "k" };
+
+  test("guild inherits undefined bashTool when global disabled", () => {
+    const global = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "none.yaml"));
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "42",
+      slug: "test",
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.bashTool).toBeUndefined();
+  });
+
+  test("guild cannot enable bashTool when global disabled", () => {
+    const global = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "none.yaml"));
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "42",
+      slug: "test",
+      bashTool: { enabled: true },
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.bashTool).toBeUndefined();
+  });
+
+  test("guild inherits bashTool when global enabled", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "bashTool:\n  enabled: true\n");
+    const global = loadGlobalConfig(BASE_ENV, file);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "42",
+      slug: "test",
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.bashTool).toBeDefined();
+    expect(resolved.bashTool?.enabled).toBe(true);
+  });
+
+  test("guild can disable bashTool when global enabled", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "bashTool:\n  enabled: true\n");
+    const global = loadGlobalConfig(BASE_ENV, file);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "42",
+      slug: "test",
+      bashTool: { enabled: false },
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.bashTool).toBeUndefined();
+  });
+});
+
+describe("saveGuildConfig bashTool", () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  test("persists bashTool enabled state", () => {
+    const file = join(GUILDS_DIR, "60-bash.yaml");
+    writeFileSync(file, "");
+
+    const resolved: GuildConfig = {
+      guildId: "60",
+      slug: "bash",
+      triggers: { mention: true, keywords: [], randomChance: 0 },
+      thinkingLevel: "medium",
+      timezone: "UTC",
+      trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
+      memoryRetentionDays: 180,
+      adminUserIds: [],
+      imageMaxDimension: 768,
+      mergeMessageGapSeconds: 120,
+      imageReadMaxPerCall: 10,
+      imageCaptioningEnabled: false,
+      attachmentsDir: "data/attachments",
+      instructions: "",
+      bashTool: {
+        enabled: true,
+        ssh: { host: "bash-vm", port: 22, user: "user" },
+        timeoutMs: 5000,
+        outputLimit: 4000,
+        blocklist: [],
+      },
+    };
+
+    saveGuildConfig(file, resolved);
+
+    const reloaded = loadGuildConfigFile(file);
+    expect(reloaded.bashTool?.enabled).toBe(true);
+  });
+
+  test("does not persist bashTool when undefined", () => {
+    const file = join(GUILDS_DIR, "61-no-bash.yaml");
+    writeFileSync(file, "");
+
+    const resolved: GuildConfig = {
+      guildId: "61",
+      slug: "no-bash",
+      triggers: { mention: true, keywords: [], randomChance: 0 },
+      thinkingLevel: "medium",
+      timezone: "UTC",
+      trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
+      memoryRetentionDays: 180,
+      adminUserIds: [],
+      imageMaxDimension: 768,
+      mergeMessageGapSeconds: 120,
+      imageReadMaxPerCall: 10,
+      imageCaptioningEnabled: false,
+      attachmentsDir: "data/attachments",
+      instructions: "",
+    };
+
+    saveGuildConfig(file, resolved);
+
+    const reloaded = loadGuildConfigFile(file);
+    expect(reloaded.bashTool).toBeUndefined();
   });
 });
