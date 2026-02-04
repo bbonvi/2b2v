@@ -88,8 +88,9 @@ export function createStartThreadTool(
           threadName: result.threadName,
         });
       } catch (err) {
-        // Thread created in Discord but failed to persist — log and continue
+        // Thread created in Discord but failed to persist — continue anyway
         // The thread exists, so return success (can be recovered later)
+        // TODO: inject logger via deps instead of console.error
         console.error("Failed to persist thread record:", err);
       }
 
