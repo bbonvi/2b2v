@@ -147,7 +147,7 @@ export function getHistoryMessages(
 ): HistoryMessage[] {
   const rows = db.raw
     .prepare(
-      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id
+      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, related_thread_id
        FROM messages
        WHERE channel_id = ?
        ORDER BY created_at DESC
@@ -161,6 +161,8 @@ export function getHistoryMessages(
       is_bot: number;
       created_at: number;
       reply_to_id: string | null;
+      is_synthetic: number;
+      related_thread_id: string | null;
     }>;
 
   // Reverse to chronological order
@@ -208,6 +210,8 @@ export function getHistoryMessages(
       imageIds: images.map((i) => i.id),
       captions: images.map((i) => i.caption ?? ""),
       hasEmbeds: false,
+      isSynthetic: r.is_synthetic === 1,
+      relatedThreadId: r.related_thread_id,
     };
   });
 }

@@ -14,6 +14,8 @@ function msg(id: string, content: string): HistoryMessage {
     imageIds: [],
     captions: [],
     hasEmbeds: false,
+    isSynthetic: false,
+    relatedThreadId: null,
   };
 }
 

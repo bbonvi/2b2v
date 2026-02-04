@@ -15,6 +15,8 @@ function msg(overrides?: Partial<HistoryMessage>): HistoryMessage {
     imageIds: [],
     captions: [],
     hasEmbeds: false,
+    isSynthetic: false,
+    relatedThreadId: null,
     ...overrides,
   };
 }
@@ -157,6 +159,38 @@ describe("formatMessageLine", () => {
     expect(result).toBe(
       '[@alice to @bob (Quote: "hi"; ReplyMsgID: 99; MissingTarget: true; ReplyImageIDs: [1]; ReplyCaptions: ["cat"]; ImageIDs: [10]; Captions: ["dog"])]: hello'
     );
+  });
+});
+
+describe("synthetic event formatting", () => {
+  test("synthetic event outputs content directly without author prefix", () => {
+    const syntheticMsg = msg({
+      content: "Event: Thread created — Support Thread (thread_id: 123456)",
+      isSynthetic: true,
+      relatedThreadId: "123456",
+    });
+    const input: FormatInput = { message: syntheticMsg, reply: null, captioningEnabled: false };
+    expect(formatMessageLine(input)).toBe("Event: Thread created — Support Thread (thread_id: 123456)");
+  });
+
+  test("synthetic event ignores reply context", () => {
+    const syntheticMsg = msg({
+      content: "Event: Thread created — Help (thread_id: 789)",
+      isSynthetic: true,
+      relatedThreadId: "789",
+      replyToId: "some-msg", // Should be ignored
+    });
+    const reply: ReplyContext = {
+      targetAuthor: "bob",
+      quote: "ignored",
+      replyMsgId: "some-msg",
+      missingTarget: false,
+      replyImageIds: [],
+      replyCaptions: [],
+    };
+    const input: FormatInput = { message: syntheticMsg, reply, captioningEnabled: false };
+    // Output is raw content, not formatted with reply metadata
+    expect(formatMessageLine(input)).toBe("Event: Thread created — Help (thread_id: 789)");
   });
 });
 

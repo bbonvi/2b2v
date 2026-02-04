@@ -22,6 +22,10 @@ export interface HistoryMessage {
   captions: string[];
   /** Whether the message has embeds (prevents merging). */
   hasEmbeds: boolean;
+  /** Whether this is a synthetic event (e.g., thread creation). Prevents merging. */
+  isSynthetic: boolean;
+  /** Thread ID this synthetic event references, or null. */
+  relatedThreadId: string | null;
 }
 
 /** Result of the slicing algorithm. */

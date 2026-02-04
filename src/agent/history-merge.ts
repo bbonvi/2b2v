@@ -1,10 +1,10 @@
 import type { HistoryMessage } from "./history-types.ts";
 
 /**
- * Check if a message is "plain" — no reply, no images, no embeds.
+ * Check if a message is "plain" — no reply, no images, no embeds, not synthetic.
  */
 function isPlain(m: HistoryMessage): boolean {
-  return m.replyToId === null && m.imageIds.length === 0 && !m.hasEmbeds;
+  return m.replyToId === null && m.imageIds.length === 0 && !m.hasEmbeds && !m.isSynthetic;
 }
 
 /**

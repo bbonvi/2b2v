@@ -913,6 +913,8 @@ client.on("messageCreate", (message: Message) => void (async () => {
       imageIds: ingestedImages.map((img) => img.id),
       captions: ingestedImages.map((img) => img.caption).filter((c): c is string => c !== null),
       hasEmbeds: message.embeds.length > 0,
+      isSynthetic: false,
+      relatedThreadId: null,
     };
 
     // Build reply fallback deps for fetching missing reply targets

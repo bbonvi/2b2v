@@ -14,6 +14,8 @@ function msg(id: string, timestamp: number, overrides?: Partial<HistoryMessage>)
     imageIds: [],
     captions: [],
     hasEmbeds: false,
+    isSynthetic: false,
+    relatedThreadId: null,
     ...overrides,
   };
 }
@@ -145,5 +147,38 @@ describe("mergeConsecutiveMessages", () => {
     expect(result).toHaveLength(2);
     expect(result[0]?.content).toBe("content-1 [msg-break] content-2");
     expect(result[1]?.content).toBe("content-3 [msg-break] content-4");
+  });
+
+  test("does not merge synthetic messages", () => {
+    const msgs = [
+      msg("1", 1000),
+      msg("2", 1000 + 30_000, { isSynthetic: true, content: "Event: Thread created" }),
+    ];
+    const result = mergeConsecutiveMessages(msgs, GAP);
+    expect(result).toHaveLength(2);
+    expect(result[0]?.content).toBe("content-1");
+    expect(result[1]?.content).toBe("Event: Thread created");
+  });
+
+  test("synthetic message blocks merge with previous plain message", () => {
+    const msgs = [
+      msg("1", 1000, { isSynthetic: true, content: "Event: Thread created" }),
+      msg("2", 1000 + 30_000), // would merge if first wasn't synthetic
+    ];
+    const result = mergeConsecutiveMessages(msgs, GAP);
+    expect(result).toHaveLength(2);
+  });
+
+  test("plain messages before and after synthetic do not merge through it", () => {
+    const msgs = [
+      msg("1", 1000),
+      msg("2", 1000 + 30_000, { isSynthetic: true, content: "Event: Thread created" }),
+      msg("3", 1000 + 60_000),
+    ];
+    const result = mergeConsecutiveMessages(msgs, GAP);
+    expect(result).toHaveLength(3);
+    expect(result[0]?.content).toBe("content-1");
+    expect(result[1]?.content).toBe("Event: Thread created");
+    expect(result[2]?.content).toBe("content-3");
   });
 });

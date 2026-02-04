@@ -45,6 +45,8 @@ function makeMsg(overrides: Partial<HistoryMessage> & { id: string }): HistoryMe
     imageIds: [],
     captions: [],
     hasEmbeds: false,
+    isSynthetic: false,
+    relatedThreadId: null,
     ...overrides,
   };
 }

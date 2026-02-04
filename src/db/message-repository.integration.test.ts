@@ -505,6 +505,8 @@ describe("getHistoryMessages", () => {
       imageIds: [],
       captions: [],
       hasEmbeds: false,
+      isSynthetic: false,
+      relatedThreadId: null,
     });
   });
 

@@ -152,6 +152,8 @@ export async function fetchMissingReplyTargets(
       imageIds: [], // Images are ingested asynchronously; IDs not available yet
       captions: [],
       hasEmbeds: false,
+      isSynthetic: false, // Fetched messages are real user messages
+      relatedThreadId: null,
     });
   }
 

@@ -15,6 +15,8 @@ function msg(id: string, timestamp: number, overrides?: Partial<HistoryMessage>)
     imageIds: [],
     captions: [],
     hasEmbeds: false,
+    isSynthetic: false,
+    relatedThreadId: null,
     ...overrides,
   };
 }

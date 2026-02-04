@@ -25,10 +25,17 @@ export interface FormatInput {
  * Format a single message line per the deterministic grammar:
  * `[@<author>{ to @<target>}{ (<meta>)}]: <content>`
  *
+ * Synthetic events (e.g., thread creation) are formatted as-is without author prefix.
+ *
  * Meta keys in order: Quote, ReplyMsgID, MissingTarget, ReplyImageIDs, ReplyCaptions, ImageIDs, Captions
  */
 export function formatMessageLine(input: FormatInput): string {
   const { message, reply, captioningEnabled } = input;
+
+  // Synthetic events are pre-formatted, output content directly
+  if (message.isSynthetic) {
+    return message.content;
+  }
 
   const metaParts: string[] = [];
 

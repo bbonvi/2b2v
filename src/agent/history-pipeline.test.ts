@@ -17,6 +17,8 @@ function msg(overrides?: Partial<HistoryMessage>): HistoryMessage {
     imageIds: [],
     captions: [],
     hasEmbeds: false,
+    isSynthetic: false,
+    relatedThreadId: null,
     ...overrides,
   };
 }
