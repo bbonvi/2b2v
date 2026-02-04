@@ -155,7 +155,8 @@ The bot has access to these tools during conversations. The LLM decides when and
 
 | Tool | Description |
 |---|---|
-| `send_message` | Send message to the channel |
+| `send_message` | Send message to chat (optional `chat_id` for threads/other channels) |
+| `start_thread` | Create a thread on the trigger message for long/private discussions |
 | `save_journal` | Create or update a bot journal entry |
 | `delete_journal` | Delete a journal entry by ID |
 | `save_user_memory` | Create or update a user memory (by username) |
@@ -171,7 +172,7 @@ The bot has access to these tools during conversations. The LLM decides when and
 | `web_search` | Search the web via Brave Search API |
 | `bash` | Execute shell commands in isolated container (disabled by default; IPs redacted, output truncated, command blocklist enforced) |
 
-Note: `send_message` supports optional voice message parameters (`is_voice_message`, `voice_type`) when TTS is configured.
+Note: `send_message` supports `chat_id` for routing to threads/channels, and optional voice message parameters (`is_voice_message`, `voice_type`) when TTS is configured.
 
 ### Bash tool
 
