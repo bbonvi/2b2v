@@ -18,6 +18,7 @@ import {
   buildQrPanel,
   buildDownloadPanel,
   buildErrorPanel,
+  decodeProfileId,
   PROFILE_CAP,
 } from "./ui.ts";
 
@@ -47,6 +48,9 @@ export async function handleVpnCommand(
 
   logVpnCommand(log, "invoke", userId, guildId);
 
+  // Defer reply immediately — VPN API calls may be slow
+  await interaction.deferReply({ ephemeral: true });
+
   try {
     // Fetch or create user
     let user = await client.getUser(userId);
@@ -65,11 +69,11 @@ export async function handleVpnCommand(
     session.servers = servers;
     session.profiles = profiles;
 
-    // Reply with home panel
-    await interaction.reply(buildHomePanel(session));
+    // Edit the deferred reply with home panel
+    await interaction.editReply(buildHomePanel(session));
   } catch (err) {
     logVpnApiError(log, err as Parameters<typeof logVpnApiError>[1], userId, guildId);
-    await interaction.reply({ content: mapVpnError(err), ephemeral: true });
+    await interaction.editReply({ content: mapVpnError(err) });
   }
 }
 
@@ -104,12 +108,18 @@ export async function handleVpnComponent(
     return true;
   }
 
+  // Defer update for actions with API calls; instant actions can use update() directly
+  const needsDefer = ["home", "create", "list", "delete"].includes(action);
+  if (needsDefer) {
+    await interaction.deferUpdate();
+  }
+
   try {
     switch (action) {
       case "home": {
-        // Refresh profiles and show home
+        // Refresh profiles and show home (deferred)
         session.profiles = await client.listProfiles(userId);
-        await interaction.update(buildHomePanel(session) as Parameters<typeof interaction.update>[0]);
+        await interaction.editReply(buildHomePanel(session));
         break;
       }
 
@@ -129,15 +139,15 @@ export async function handleVpnComponent(
       }
 
       case "create": {
-        // Create profile on server specified by param
+        // Create profile on server specified by param (deferred)
         if (param === undefined) {
-          await interaction.update(buildErrorPanel(session, "Сервер не указан."));
+          await interaction.editReply(buildErrorPanel(session, "Сервер не указан."));
           break;
         }
 
         // Double-check cap
         if (session.profiles.length >= PROFILE_CAP) {
-          await interaction.update(buildErrorPanel(session, VPN_ERRORS.PROFILE_LIMIT));
+          await interaction.editReply(buildErrorPanel(session, VPN_ERRORS.PROFILE_LIMIT));
           break;
         }
 
@@ -148,26 +158,27 @@ export async function handleVpnComponent(
         session.currentProfile = newProfile;
         session.currentServer = session.servers.find((s) => s.public_name === param) ?? null;
 
-        await interaction.update(buildManageProfilePanel(session));
+        await interaction.editReply(buildManageProfilePanel(session));
         break;
       }
 
       case "list": {
+        // Refresh profiles (deferred)
         session.profiles = await client.listProfiles(userId);
         session.currentProfile = null;
         session.currentServer = null;
-        await interaction.update(buildProfileListPanel(session));
+        await interaction.editReply(buildProfileListPanel(session));
         break;
       }
 
       case "manage": {
-        // Show manage panel for profile specified by param
+        // Show manage panel for profile specified by param (server_name|address)
         if (param === undefined) {
           await interaction.update(buildErrorPanel(session, "Профиль не указан."));
           break;
         }
 
-        const profile = session.profiles.find((p) => p.name === param);
+        const profile = decodeProfileId(session.profiles, param);
         if (profile === undefined) {
           await interaction.update(buildErrorPanel(session, "Профиль не найден."));
           break;
@@ -180,13 +191,13 @@ export async function handleVpnComponent(
       }
 
       case "qr": {
-        // Show QR for current profile
+        // Show QR for current profile (param is server_name|address)
         if (param === undefined) {
           await interaction.update(buildErrorPanel(session, "Профиль не указан."));
           break;
         }
 
-        const profile = session.profiles.find((p) => p.name === param);
+        const profile = decodeProfileId(session.profiles, param);
         if (profile === undefined) {
           await interaction.update(buildErrorPanel(session, "Профиль не найден."));
           break;
@@ -202,13 +213,13 @@ export async function handleVpnComponent(
       }
 
       case "download": {
-        // Show download for current profile
+        // Show download for current profile (param is server_name|address)
         if (param === undefined) {
           await interaction.update(buildErrorPanel(session, "Профиль не указан."));
           break;
         }
 
-        const profile = session.profiles.find((p) => p.name === param);
+        const profile = decodeProfileId(session.profiles, param);
         if (profile === undefined) {
           await interaction.update(buildErrorPanel(session, "Профиль не найден."));
           break;
@@ -224,15 +235,15 @@ export async function handleVpnComponent(
       }
 
       case "delete": {
-        // Delete profile specified by param
+        // Delete profile specified by param (server_name|address, deferred)
         if (param === undefined) {
-          await interaction.update(buildErrorPanel(session, "Профиль не указан."));
+          await interaction.editReply(buildErrorPanel(session, "Сервер не указан."));
           break;
         }
 
-        const profile = session.profiles.find((p) => p.name === param);
+        const profile = decodeProfileId(session.profiles, param);
         if (profile === undefined) {
-          await interaction.update(buildErrorPanel(session, "Профиль не найден."));
+          await interaction.editReply(buildErrorPanel(session, "Профиль не найден."));
           break;
         }
 
@@ -242,7 +253,7 @@ export async function handleVpnComponent(
         session.currentProfile = null;
         session.currentServer = null;
 
-        await interaction.update(buildProfileListPanel(session));
+        await interaction.editReply(buildProfileListPanel(session));
         break;
       }
 
@@ -252,11 +263,13 @@ export async function handleVpnComponent(
     }
   } catch (err) {
     logVpnApiError(log, err as Parameters<typeof logVpnApiError>[1], userId, guildId);
-    try {
-      await interaction.update(buildErrorPanel(session, mapVpnError(err)));
-    } catch {
-      // If update fails, try reply
-      await interaction.reply({ content: mapVpnError(err), ephemeral: true }).catch(() => {});
+    const errorPanel = buildErrorPanel(session, mapVpnError(err));
+    if (needsDefer) {
+      await interaction.editReply(errorPanel).catch(() => {});
+    } else {
+      await interaction.update(errorPanel).catch(() =>
+        interaction.reply({ content: mapVpnError(err), ephemeral: true }).catch(() => {}),
+      );
     }
   }
 
