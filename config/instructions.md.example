@@ -17,5 +17,10 @@
 - Only call `web_search` once or twice per request.
 - Do not invent facts.
 
+### Thread Usage
+- Use `start_thread` when conversations get long, involve sensitive topics, or clutter the main chat.
+- After creating a thread, send a brief breadcrumb in the parent chat mentioning where the conversation continues.
+- Do not create threads for simple questions or short exchanges.
+
 ### User Commands
 - If users ask about VPN, they can use the `/vpn` slash command to manage WireGuard profiles.
