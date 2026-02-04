@@ -32,6 +32,8 @@ export interface ContextAssemblyInput {
   members: string;
   journalSummaries: string;
   upcomingSchedules: string;
+  /** Threads in this chat (for parent channels only). */
+  threadsInChat: string;
   olderHistory: string;
   newerHistory: string;
   currentContext: string;
@@ -50,11 +52,12 @@ export interface ContextAssemblyInput {
  * 4. Available Emojis (cached)
  * 5. Server Members (cached)
  * 6. Upcoming Schedules (cached) — if any
- * 7. Chat History — Older (cached)
- * 8. Journal Summaries (uncached) — if any
- * 9. Chat History — Newer (uncached)
- * 10. Current Context (uncached)
- * 11. Late Instruction (uncached) — if any
+ * 7. Threads In This Chat (uncached) — if any (parent channels only)
+ * 8. Chat History — Older (cached)
+ * 9. Journal Summaries (uncached) — if any
+ * 10. Chat History — Newer (uncached)
+ * 11. Current Context (uncached)
+ * 12. Late Instruction (uncached) — if any
  *
  * Empty sections are omitted entirely.
  */
@@ -79,6 +82,7 @@ export function assembleContext(input: ContextAssemblyInput): AssembledContext {
   addWithHeader("Available Emojis", "## Available Emojis", input.emojis, true);
   addWithHeader("Server Members", "## Server Members", input.members, true);
   addWithHeader("Upcoming Schedules", "## Upcoming Schedules", input.upcomingSchedules, true);
+  addWithHeader("Threads In This Chat", "## Threads In This Chat", input.threadsInChat, false);
   add("Chat History — Older", input.olderHistory, true);
   addWithHeader("Journal Summaries", "## Journal", input.journalSummaries, false);
   add("Chat History — Newer", input.newerHistory, false);

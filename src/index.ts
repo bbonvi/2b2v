@@ -19,7 +19,7 @@ import { assembleContext, type AssembledContext } from "./agent/context-assembly
 import type { HistoryMessage } from "./agent/history-types";
 import { getHistoryMessages } from "./db/message-repository";
 import { processHistory } from "./agent/history-pipeline";
-import { formatMemoryTimestamps } from "./agent/history-dates";
+import { formatMemoryTimestamps, formatRelativeAgo } from "./agent/history-dates";
 import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
 import type { MessageSender } from "./agent/send-message-tool";
@@ -37,7 +37,7 @@ import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createStartTypingTool } from "./agent/start-typing-tool";
 import { createStartThreadTool } from "./agent/start-thread-tool";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
-import { insertThread } from "./db/thread-repository";
+import { insertThread, updateThreadActivity, markBotParticipating, listThreadsForContext } from "./db/thread-repository";
 import { processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
 import { createBashTool } from "./agent/bash-tool";
 import { getSshKeyPaths, ensureSshKeys, createSshConnection, type SshKeyPaths } from "./ssh/client";
@@ -532,6 +532,12 @@ async function buildContext(
   // Current context metadata
   const currentContext = `Guild: ${guildId} | Channel: ${channelId}\nDate/Time: ${new Date().toISOString()}`;
 
+  // Thread list for parent channels (bot-participating threads only)
+  const threads = listThreadsForContext(db, channelId);
+  const threadsInChat = threads
+    .map((t) => `- "${t.threadName}" (thread_id: ${t.threadId}) — ${t.messageCount} msgs, ${formatRelativeAgo(t.lastActivityAt)}`)
+    .join("\n");
+
   return assembleContext({
     persona,
     toolInstructions: TOOL_INSTRUCTIONS,
@@ -540,6 +546,7 @@ async function buildContext(
     members: displayNameContext,
     journalSummaries,
     upcomingSchedules,
+    threadsInChat,
     olderHistory: olderText,
     newerHistory: newerText,
     currentContext,
@@ -743,6 +750,14 @@ client.on("messageCreate", (message: Message) => void (async () => {
       });
     });
 
+    // Update thread activity if message is in a thread
+    if (message.channel.isThread()) {
+      updateThreadActivity(db, channelId, {
+        lastActivityAt: now,
+        lastMessageId: message.id,
+      });
+    }
+
     // Process and persist images (no inline payloads — LLM uses read_images tool)
     const ingestDeps: ImageIngestDeps = {
       db,
@@ -859,6 +874,10 @@ client.on("messageCreate", (message: Message) => void (async () => {
           ? await message.reply({ files: [attachment] })
           : await targetChannel.send({ files: [attachment] });
         storeBotMessage(sent.id, targetChannelId, "[Voice Message]", text);
+        // Mark bot participating if sending to a thread
+        if (targetChannel.isThread()) {
+          markBotParticipating(db, targetChannelId);
+        }
         return { sentMessageId: sent.id };
       }
 
@@ -873,6 +892,10 @@ client.on("messageCreate", (message: Message) => void (async () => {
           : await targetChannel.send(chunk);
         if (i === 0) firstId = sent.id;
         storeBotMessage(sent.id, targetChannelId, chunk, i === 0 ? text : chunk);
+      }
+      // Mark bot participating if sending to a thread
+      if (targetChannel.isThread()) {
+        markBotParticipating(db, targetChannelId);
       }
       return { sentMessageId: firstId };
     };

@@ -14,6 +14,7 @@ function makeInput(overrides: Partial<ContextAssemblyInput> = {}): ContextAssemb
     members: "@alice — Alice\n@bob — Bob",
     journalSummaries: "- User likes cats",
     upcomingSchedules: "- [cron UTC] 0 9 * * *: Good morning",
+    threadsInChat: "",
     olderHistory: "## Chat History (Older)\nLegend: ...\n[@alice]: hello",
     newerHistory: "## Chat History (Recent)\n[@bob]: hi there",
     currentContext: "Guild: g1 | Channel: c1\nDate/Time: 2026-01-01T00:00:00Z",
@@ -143,6 +144,31 @@ describe("assembleContext", () => {
     );
     const section = result.sections.find((s) => s.label === "Upcoming Schedules");
     expect(section?.text).toBe("## Upcoming Schedules\n- [one-off at 2026-01-01] hello");
+  });
+
+  test("wraps threads in chat with section header and is uncached", () => {
+    const result = assembleContext(
+      makeInput({ threadsInChat: '- "Help Thread" (thread_id: 123) — 5 msgs, 2h ago' })
+    );
+    const section = result.sections.find((s) => s.label === "Threads In This Chat");
+    expect(section?.text).toBe('## Threads In This Chat\n- "Help Thread" (thread_id: 123) — 5 msgs, 2h ago');
+    expect(section?.cached).toBe(false);
+  });
+
+  test("threads in chat section appears after schedules and before older history", () => {
+    const result = assembleContext(
+      makeInput({
+        upcomingSchedules: "- schedule",
+        threadsInChat: "- thread",
+        olderHistory: "## Chat History (Older)\nhello",
+      })
+    );
+    const labels = result.sections.map((s) => s.label);
+    const schedulesIdx = labels.indexOf("Upcoming Schedules");
+    const threadsIdx = labels.indexOf("Threads In This Chat");
+    const olderIdx = labels.indexOf("Chat History — Older");
+    expect(threadsIdx).toBeGreaterThan(schedulesIdx);
+    expect(threadsIdx).toBeLessThan(olderIdx);
   });
 
   test("persona and tool instructions pass through without extra wrapping", () => {
