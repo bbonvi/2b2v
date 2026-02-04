@@ -34,7 +34,8 @@ src/
 │   ├── search-tool.ts          Agent tool: search chat history (semantic, literal, or ID-based)
 │   ├── schedule-tool.ts        Agent tool: relative one-off scheduling
 │   ├── member-list-tool.ts     Agent tool: server member roster
-│   ├── channel-history-tool.ts Agent tool: fetch recent channel messages
+│   ├── chat-history-tool.ts    Agent tool: fetch recent chat messages (channel, thread, DM)
+│   ├── start-thread-tool.ts    Agent tool: create thread on trigger message
 │   ├── brave-search-tool.ts    Agent tool: Brave Search API web search
 │
 ├── commands/                   Admin-only slash commands
@@ -115,14 +116,16 @@ Discord messageCreate event
        │   (guild.model ?? global.defaultModel → pi-ai registry or synthetic fallback)
        │
        ├─ Create Agent (pi-agent-core) with tools:
-       │   start_typing, send_message, journal tools (2), user memory tools (3), search_messages,
-       │   schedule_message, list_members, chat_history, web_search, read_chat_images, fetch_images
+       │   start_typing, send_message (supports chat_id routing), start_thread,
+       │   journal tools (2), user memory tools (3), search_messages, schedule_message,
+       │   list_members, chat_history, web_search, read_chat_images, fetch_images
        │
         └─ agent.prompt(translatedContent)
             No inline images — LLM uses read_chat_images tool on demand
             Agent runs agentic loop, calls tools as needed
             ├─ start_typing → channel.sendTyping() (typing indicator)
-            └─ send_message → Discord (reply or normal)
+            ├─ send_message → Discord (reply, normal, or via chat_id to thread)
+            └─ start_thread → message.startThread() + DB persist → thread handoff
 ```
 
 ### Message Search (Multi-Mode)
