@@ -77,3 +77,9 @@ modelCacheDir: model-cache
 
 # Qdrant vector database URL (env var QDRANT_URL takes priority)
 qdrantUrl: http://localhost:6333
+
+# VPN API URL (env var VPN_API_URL takes priority)
+vpnApiUrl: https://2b.lmao13.co
+
+# VPN endpoint host for WireGuard configs (env var VPN_PEER takes priority)
+vpnPeer: 195.2.71.75

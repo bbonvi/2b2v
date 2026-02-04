@@ -167,6 +167,8 @@ export function loadGlobalConfig(
     qdrantUrl: env.QDRANT_URL ?? yaml.qdrantUrl ?? "http://localhost:6333",
     elevenLabsApiKey: env.ELEVENLABS_API_KEY,
     defaultTts: resolveTtsConfig(yaml.tts),
+    vpnApiUrl: env.VPN_API_URL ?? yaml.vpnApiUrl ?? "https://2b.lmao13.co",
+    vpnPeer: env.VPN_PEER ?? env.PEER ?? yaml.vpnPeer ?? "195.2.71.75",
   };
 }
 

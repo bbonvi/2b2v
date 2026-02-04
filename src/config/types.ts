@@ -61,6 +61,10 @@ export interface GlobalConfig {
   qdrantUrl: string;
   elevenLabsApiKey?: string;
   defaultTts?: TtsConfig;
+  /** VPN API base URL. */
+  vpnApiUrl: string;
+  /** VPN endpoint host for WireGuard configs. */
+  vpnPeer: string;
 }
 
 /** Full resolved app config. */
@@ -110,4 +114,6 @@ export interface MainConfigYaml {
   modelCacheDir?: string;
   qdrantUrl?: string;
   tts?: Partial<TtsConfig> & { voices?: { normal?: Partial<VoicePreset>; whisper?: Partial<VoicePreset> } };
+  vpnApiUrl?: string;
+  vpnPeer?: string;
 }
