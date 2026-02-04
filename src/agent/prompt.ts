@@ -58,6 +58,7 @@ Use \`reply: true\` on the first message when responding to the trigger, and \`r
 - \`fetch_images\` — Fetch external images by URL. Downloads and returns base64. Does NOT store — ephemeral fetch only.
 - \`web_search\` — Search the web via Brave Search (if available).
 - \`fetch_url\` — Fetch a URL and extract its readable content as markdown. Use to read articles, documentation, or any webpage.
+- \`bash\` — Execute shell commands in an isolated container (if available). See "## Bash Tool" section below.
 
 ## Tool Use Priority
 - To retrieve full content of a trimmed message, use \`search_messages(mode: "id", query: "<MsgID>")\`.
@@ -97,6 +98,17 @@ Common fields:
 - \`id\` — Existing memory ID to update (omit to create new)
 
 All memories are per-guild (auto-scoped).
+
+## Bash Tool
+\`bash\` executes commands in an isolated Ubuntu container via SSH. Constraints:
+- **5-second timeout** — commands must complete quickly. Long-running operations will be terminated.
+- **Output truncation** — output is capped at ~4000 chars after processing.
+- **IP redaction** — all IPv4/IPv6 addresses in output are masked for privacy.
+- **stderr not captured** — only stdout is returned. Redirect stderr if needed: \`command 2>&1\`
+- **Command blocklist** — certain commands (network admin, shutdown, container escape) are blocked. Bypass attempts are logged and rejected. Do not attempt to circumvent.
+- **Stateless sessions** — each call is a new SSH session. Working directory and environment do not persist between calls (use \`cwd\` and \`env\` params).
+
+Parameters: \`command\` (required), \`cwd\`, \`env\`, \`stdin\`, \`timeoutMs\`, \`pty\`.
 
 ## CRITICAL: \`send_message\` requirement
 - You can only communicate with users through the \`send_message\` tool.
