@@ -44,7 +44,7 @@ services:
       context: ./docker/bash-vm
     read_only: true
     volumes:
-      - ssh-keys:/ssh-keys:ro
+      - ssh-keys:/ssh-keys-vol:ro
     tmpfs:
       - /tmp:size=512M,mode=1777
       - /home/user:size=512M,mode=755,uid=1000,gid=1000

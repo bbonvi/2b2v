@@ -1,14 +1,16 @@
 #!/bin/bash
 set -e
 
-SSH_KEYS_DIR="/ssh-keys"
-AUTHORIZED_KEYS="$SSH_KEYS_DIR/authorized_keys"
+# Volume contains bot's SSH keys - we only need authorized_keys (public key)
+SSH_KEYS_VOL="/ssh-keys-vol"
+SOURCE_AUTH_KEYS="$SSH_KEYS_VOL/authorized_keys"
+TARGET_AUTH_KEYS="/run/authorized_keys"
 
 # Wait for authorized_keys to exist (bot generates on first run)
 echo "bash-vm: Waiting for authorized_keys..."
 timeout=60
 elapsed=0
-while [ ! -f "$AUTHORIZED_KEYS" ]; do
+while [ ! -f "$SOURCE_AUTH_KEYS" ]; do
     sleep 1
     elapsed=$((elapsed + 1))
     if [ $elapsed -ge $timeout ]; then
@@ -19,8 +21,9 @@ done
 
 echo "bash-vm: authorized_keys found"
 
-# Ensure correct permissions (readable by sshd)
-chmod 644 "$AUTHORIZED_KEYS" 2>/dev/null || true
+# Copy ONLY the public key to tmpfs - private keys stay hidden in volume
+cp "$SOURCE_AUTH_KEYS" "$TARGET_AUTH_KEYS"
+chmod 644 "$TARGET_AUTH_KEYS"
 
 # Apply egress filtering if CAP_NET_ADMIN is available
 if command -v iptables &>/dev/null; then
