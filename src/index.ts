@@ -152,12 +152,14 @@ const vpnSessionCleanupTimer = setInterval(() => {
 }, VPN_SESSION_CLEANUP_INTERVAL_MS);
 
 // --- 9d. SSH key setup for bash tool ---
-const bashToolGlobalEnabled = globalConfig.defaultBashTool?.enabled === true;
-const sshKeysDir = join(process.env.SSH_KEYS_DIR ?? "ssh-keys");
+const sshKeysDir = process.env.SSH_KEYS_DIR;
 let sshKeyPaths: SshKeyPaths | undefined;
 let sshClient: SshClient | undefined;
 
-if (bashToolGlobalEnabled) {
+// Always create SSH keys when SSH_KEYS_DIR is set (compose environment with bash-vm).
+// This ensures bash-vm can start (it waits for authorized_keys).
+// The tool itself is only enabled when bashTool.enabled is true.
+if (sshKeysDir !== undefined) {
   sshKeyPaths = getSshKeyPaths(sshKeysDir);
   try {
     ensureSshKeys(sshKeyPaths);

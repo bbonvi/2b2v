@@ -232,7 +232,7 @@ export async function execSshCommand(
     pty?: boolean;
   }
 ): Promise<SshExecResult> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let stdout = "";
     let exitCode: number | null = null;
     let timedOut = false;
@@ -257,9 +257,13 @@ export async function execSshCommand(
       if (resolved) return;
       timedOut = true;
       // Try to kill the process - send SIGTERM first
-      client.exec("pkill -TERM -P $$ 2>/dev/null; sleep 2; pkill -KILL -P $$ 2>/dev/null", () => {
-        // Ignore result
-      });
+      try {
+        client.exec("pkill -TERM -P $$ 2>/dev/null; sleep 2; pkill -KILL -P $$ 2>/dev/null", () => {
+          // Ignore result
+        });
+      } catch {
+        // Client may be disconnected, ignore
+      }
       // Resolve after allowing some time for cleanup
       setTimeout(() => {
         if (!resolved) {
@@ -269,43 +273,49 @@ export async function execSshCommand(
       }, 2500);
     }, options.timeoutMs);
 
-    client.exec(fullCommand, execOptions, (err, stream) => {
-      if (err !== undefined) {
-        clearTimeout(timeoutHandle);
-        if (!resolved) {
-          resolved = true;
-          resolve({ stdout: err.message, exitCode: 1, timedOut: false });
-        }
-        return;
-      }
-
-      const handleStream = (s: ClientChannel) => {
-        if (options.stdin !== undefined) {
-          s.write(options.stdin);
-          s.end();
-        }
-
-        s.on("data", (data: Buffer) => {
-          stdout += data.toString();
-        });
-
-        // Capture stderr to stdout for simplicity (user can redirect in command)
-        s.stderr.on("data", (_data: Buffer) => {
-          // stderr is discarded per spec unless redirected in command
-        });
-
-        s.on("close", (code: number | null) => {
+    try {
+      client.exec(fullCommand, execOptions, (err, stream) => {
+        if (err !== undefined) {
           clearTimeout(timeoutHandle);
           if (!resolved) {
             resolved = true;
-            exitCode = code;
-            resolve({ stdout, exitCode, timedOut });
+            resolve({ stdout: err.message, exitCode: 1, timedOut: false });
           }
-        });
-      };
+          return;
+        }
 
-      handleStream(stream);
-    });
+        const handleStream = (s: ClientChannel) => {
+          if (options.stdin !== undefined) {
+            s.write(options.stdin);
+            s.end();
+          }
+
+          s.on("data", (data: Buffer) => {
+            stdout += data.toString();
+          });
+
+          // Capture stderr to stdout for simplicity (user can redirect in command)
+          s.stderr.on("data", (_data: Buffer) => {
+            // stderr is discarded per spec unless redirected in command
+          });
+
+          s.on("close", (code: number | null) => {
+            clearTimeout(timeoutHandle);
+            if (!resolved) {
+              resolved = true;
+              exitCode = code;
+              resolve({ stdout, exitCode, timedOut });
+            }
+          });
+        };
+
+        handleStream(stream);
+      });
+    } catch (err) {
+      clearTimeout(timeoutHandle);
+      resolved = true;
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
   });
 }
 
