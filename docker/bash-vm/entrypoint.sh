@@ -50,5 +50,8 @@ if command -v iptables &>/dev/null; then
     echo "bash-vm: Egress filtering applied"
 fi
 
+# Create sshd privilege separation directory (tmpfs /run is empty on start)
+mkdir -p /run/sshd
+
 echo "bash-vm: Starting sshd"
 exec /usr/sbin/sshd -D -e
