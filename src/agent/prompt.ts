@@ -107,6 +107,7 @@ All memories are per-guild (auto-scoped).
 - **stderr not captured** — only stdout is returned. Redirect stderr if needed: \`command 2>&1\`
 - **Command blocklist** — certain commands (network admin, shutdown, container escape) are blocked. Bypass attempts are logged and rejected. Do not attempt to circumvent.
 - **Stateless sessions** — each call is a new SSH session. Working directory and environment do not persist between calls (use \`cwd\` and \`env\` params).
+- Tell user exactly what you're going to run before you run it. Use markdown's tripple backticks to escape it.
 
 Parameters: \`command\` (required), \`cwd\`, \`env\`, \`stdin\`, \`timeoutMs\`, \`pty\`.
 
