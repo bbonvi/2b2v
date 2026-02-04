@@ -288,6 +288,89 @@ export function searchMessagesLiteral(
   }));
 }
 
+/**
+ * Fetch parent channel messages before a timestamp for thread pre-context.
+ * Used to show recent parent chat activity when the bot is responding in a thread.
+ *
+ * Returns messages in chronological order (oldest first), excludes synthetic events.
+ */
+export function getParentPreContext(
+  db: Database,
+  parentChatId: string,
+  beforeTimestamp: number,
+  limit: number,
+): HistoryMessage[] {
+  const rows = db.raw
+    .prepare(
+      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, related_thread_id
+       FROM messages
+       WHERE channel_id = ? AND created_at < ? AND is_synthetic = 0
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(parentChatId, beforeTimestamp, limit) as Array<{
+      id: string;
+      author_username: string;
+      user_id: string;
+      translated_content: string;
+      is_bot: number;
+      created_at: number;
+      reply_to_id: string | null;
+      is_synthetic: number;
+      related_thread_id: string | null;
+    }>;
+
+  // Reverse to chronological order (oldest first)
+  rows.reverse();
+
+  if (rows.length === 0) return [];
+
+  // Batch fetch images for all messages
+  const messageIds = rows.map((r) => r.id);
+  const placeholders = messageIds.map(() => "?").join(",");
+  const imageRows = db.raw
+    .prepare(
+      `SELECT message_id, id, caption
+       FROM images
+       WHERE message_id IN (${placeholders})
+       ORDER BY id ASC`
+    )
+    .all(...messageIds) as Array<{
+      message_id: string;
+      id: number;
+      caption: string | null;
+    }>;
+
+  // Group images by message_id
+  const imageMap = new Map<string, Array<{ id: number; caption: string | null }>>();
+  for (const img of imageRows) {
+    let arr = imageMap.get(img.message_id);
+    if (arr === undefined) {
+      arr = [];
+      imageMap.set(img.message_id, arr);
+    }
+    arr.push({ id: img.id, caption: img.caption });
+  }
+
+  return rows.map((r) => {
+    const images = imageMap.get(r.id) ?? [];
+    return {
+      id: r.id,
+      author: r.author_username,
+      authorId: r.user_id,
+      content: r.translated_content,
+      isBot: r.is_bot === 1,
+      timestamp: r.created_at,
+      replyToId: r.reply_to_id,
+      imageIds: images.map((i) => i.id),
+      captions: images.map((i) => i.caption ?? ""),
+      hasEmbeds: false,
+      isSynthetic: r.is_synthetic === 1,
+      relatedThreadId: r.related_thread_id,
+    };
+  });
+}
+
 export interface InsertSyntheticEventInput {
   /** Unique ID for the synthetic event (e.g., generated UUID). */
   id: string;
