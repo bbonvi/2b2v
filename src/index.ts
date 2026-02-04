@@ -836,11 +836,27 @@ client.on("messageCreate", (message: Message) => void (async () => {
       });
     }
 
-    // Build message sender
-    // TODO: Route by chatId instead of always using channelObj
-    const channelObj = message.channel as TextChannel;
+    // Build message sender with chat_id routing
+    const currentChannelObj = message.channel as TextChannel;
 
-    const sender: MessageSender = async (text, reply, _chatId, voice, _signal) => {
+    /** Resolve target channel from chatId or fall back to current channel. */
+    function resolveTargetChannel(chatId: string | undefined): TextChannel {
+      if (chatId === undefined) {
+        return currentChannelObj;
+      }
+      const resolved = guild.channels.cache.get(chatId);
+      if (resolved === undefined) {
+        throw new Error(`Invalid chat_id: channel "${chatId}" not found`);
+      }
+      if (!("send" in resolved)) {
+        throw new Error(`Invalid chat_id: channel "${chatId}" is not a text channel`);
+      }
+      return resolved as TextChannel;
+    }
+
+    const sender: MessageSender = async (text, reply, chatId, voice, _signal) => {
+      const targetChannel = resolveTargetChannel(chatId);
+
       const sinceTypingMs = Date.now() - lastTypingAt;
       if (sinceTypingMs >= 0 && sinceTypingMs < 200) {
         await new Promise((resolve) => setTimeout(resolve, 200 - sinceTypingMs));
@@ -851,7 +867,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
         const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
         const sent = reply
           ? await message.reply({ files: [attachment] })
-          : await channelObj.send({ files: [attachment] });
+          : await targetChannel.send({ files: [attachment] });
         storeBotMessage(sent.id, "[Voice Message]", text);
         return { sentMessageId: sent.id };
       }
@@ -864,7 +880,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
         const chunk = chunks[i] as string;
         const sent = (reply && i === 0)
           ? await message.reply(chunk)
-          : await channelObj.send(chunk);
+          : await targetChannel.send(chunk);
         if (i === 0) firstId = sent.id;
         storeBotMessage(sent.id, chunk, i === 0 ? text : chunk);
       }
@@ -938,7 +954,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
     let lastTypingAt = 0;
     const sendTypingNow = (): void => {
       lastTypingAt = Date.now();
-      void channelObj.sendTyping().catch(() => {});
+      void currentChannelObj.sendTyping().catch(() => {});
     };
 
     // Build agent tools (including start_typing wired to the channel)
