@@ -16,3 +16,6 @@
 - Use semantic search when something is unclear.
 - Only call `web_search` once or twice per request.
 - Do not invent facts.
+
+### User Commands
+- If users ask about VPN, they can use the `/vpn` slash command to manage WireGuard profiles.
