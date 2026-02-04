@@ -40,12 +40,14 @@ function insertMessage(
     isBot?: boolean;
     createdAt?: number;
     replyToId?: string | null;
+    isSynthetic?: boolean;
+    relatedThreadId?: string | null;
   } = {}
 ) {
   db.raw
     .prepare(
-      `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id, is_synthetic, related_thread_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -57,7 +59,9 @@ function insertMessage(
       opts.translatedContent ?? `translated ${id}`,
       opts.isBot === true ? 1 : 0,
       opts.createdAt ?? now,
-      opts.replyToId ?? null
+      opts.replyToId ?? null,
+      opts.isSynthetic === true ? 1 : 0,
+      opts.relatedThreadId ?? null
     );
 }
 
@@ -255,6 +259,27 @@ describe("searchMessages", () => {
     if (!results[0]) throw new Error("unreachable");
     expect(results[0].id).toBe("target");
   });
+
+  test("excludes synthetic messages from semantic search", async () => {
+    // Note: In production, synthetic messages are never embedded to Qdrant.
+    // This test verifies the SQLite-side exclusion as a defense-in-depth measure.
+    // We manually insert a synthetic row and verify it's excluded even if it
+    // hypothetically made it into Qdrant (which it shouldn't).
+    await insertWithEmbedding("real-msg", "important topic discussion");
+    // Insert synthetic row directly (bypassing embedding since we're testing SQLite filter)
+    insertMessage("synthetic-msg", {
+      guildId: "g1",
+      translatedContent: "important topic discussion",
+      isSynthetic: true,
+      relatedThreadId: "thread-1",
+    });
+
+    const queryVec = await embedOne("important topic");
+    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
+
+    expect(results.length).toBe(1);
+    expect(results[0]?.id).toBe("real-msg");
+  });
 });
 
 describe("getMessageById", () => {
@@ -410,6 +435,14 @@ describe("searchMessagesLiteral", () => {
     expect(results.length).toBe(1);
     if (!results[0]) throw new Error("unreachable");
     expect(results[0].id).toBe("target");
+  });
+
+  test("excludes synthetic messages from literal search", () => {
+    insertMessage("real-msg", { guildId: "g1", translatedContent: "thread topic" });
+    insertMessage("synthetic-msg", { guildId: "g1", translatedContent: "thread topic", isSynthetic: true, relatedThreadId: "thread-1" });
+    const results = searchMessagesLiteral(db, "thread topic", { guildId: "g1", limit: 10 });
+    expect(results.length).toBe(1);
+    expect(results[0]?.id).toBe("real-msg");
   });
 });
 

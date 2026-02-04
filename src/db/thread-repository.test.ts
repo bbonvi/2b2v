@@ -183,8 +183,10 @@ describe("listThreadsForContext", () => {
 
     const threads = listThreadsForContext(db, "ch-1");
     expect(threads).toHaveLength(1);
-    expect(threads[0].threadId).toBe("thread-1");
-    expect(threads[0].threadName).toBe("Participating Thread");
+    const t = threads[0];
+    if (t === undefined) throw new Error("unreachable");
+    expect(t.threadId).toBe("thread-1");
+    expect(t.threadName).toBe("Participating Thread");
   });
 
   test("filters by parent chat", () => {
@@ -208,7 +210,9 @@ describe("listThreadsForContext", () => {
 
     const threads = listThreadsForContext(db, "ch-1");
     expect(threads).toHaveLength(1);
-    expect(threads[0].threadId).toBe("thread-1");
+    const t = threads[0];
+    if (t === undefined) throw new Error("unreachable");
+    expect(t.threadId).toBe("thread-1");
   });
 
   test("orders by last activity descending", () => {
@@ -237,8 +241,11 @@ describe("listThreadsForContext", () => {
 
     const threads = listThreadsForContext(db, "ch-1");
     expect(threads).toHaveLength(2);
-    expect(threads[0].threadId).toBe("thread-new");
-    expect(threads[1].threadId).toBe("thread-old");
+    const t0 = threads[0];
+    const t1 = threads[1];
+    if (t0 === undefined || t1 === undefined) throw new Error("unreachable");
+    expect(t0.threadId).toBe("thread-new");
+    expect(t1.threadId).toBe("thread-old");
   });
 
   test("respects limit", () => {

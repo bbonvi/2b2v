@@ -53,14 +53,14 @@ export async function searchMessages(
 
   if (qdrantResults.length === 0) return [];
 
-  // Fetch message details from SQLite
+  // Fetch message details from SQLite, excluding synthetic messages (defense-in-depth)
   const ids = qdrantResults.map((r) => r.id);
   const placeholders = ids.map(() => "?").join(",");
   const rows = db.raw
     .prepare(
       `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
        FROM messages
-       WHERE id IN (${placeholders})`
+       WHERE id IN (${placeholders}) AND is_synthetic = 0`
     )
     .all(...ids) as Array<{
       id: string;
@@ -231,6 +231,9 @@ export function searchMessagesLiteral(
 
   const conditions: string[] = ["guild_id = ?"];
   const params: (string | number)[] = [filter.guildId];
+
+  // Exclude synthetic messages (thread creation events, etc.)
+  conditions.push("is_synthetic = 0");
 
   conditions.push("translated_content LIKE ? ESCAPE '\\'");
   params.push(pattern);
