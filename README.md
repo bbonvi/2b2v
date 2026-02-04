@@ -173,6 +173,33 @@ The bot has access to these tools during conversations. The LLM decides when and
 
 Note: `send_message` supports optional voice message parameters (`is_voice_message`, `voice_type`) when TTS is configured.
 
+### Bash tool
+
+The `bash` tool executes shell commands in an isolated Ubuntu container via SSH. It's disabled by default for security.
+
+**Enabling:**
+1. Set `bashTool.enabled: true` in `config/config.yaml` (global)
+2. Set `bashTool.enabled: true` in the guild config (per-guild)
+3. Run with Docker Compose — the `bash-vm` service must be running
+
+Both global and guild configs must enable the tool for it to be available.
+
+**Constraints:**
+- **Timeout**: 5 seconds max. Commands exceeding this are terminated (SIGTERM, then SIGKILL after 2s).
+- **Output**: Truncated to 4000 chars. All IPv4/IPv6 addresses are redacted to `[IP]`.
+- **Blocklist**: Commands matching blocked patterns are rejected before execution. Default patterns block: shutdown/reboot, iptables/firewall, network interface tools (ifconfig, ip, ss, netstat), systemctl/service, container tools (docker, kubectl), kernel modules (modprobe), mount/umount, and sshd attacks.
+- **Stderr**: Not captured by default. Redirect with `2>&1` if needed.
+- **No state persistence**: Each command runs in a fresh SSH session. Filesystem persists only while the container is running.
+
+**Network isolation:**
+The `bash-vm` container can reach the public internet but cannot connect to the bot, host, Qdrant, or other internal services. Egress filtering blocks private ranges (10.x, 172.16.x, 192.168.x, etc.).
+
+**Troubleshooting:**
+- **Tool not appearing**: Check both global and guild `bashTool.enabled: true`. Verify `bash-vm` service is running (`docker compose ps`).
+- **SSH connection failed**: Ensure the bot can reach `bash-vm:22`. Check SSH key volume is mounted correctly (`ssh-keys` volume).
+- **Command blocked**: The blocklist is enforced before execution. Blocked patterns cannot be bypassed. Review `bashTool.blocklist` in config.
+- **Timeout**: Long-running commands are terminated. For commands that might exceed 5s, consider breaking them into smaller steps.
+
 ## Memory system
 
 Memories are stored in SQLite with two scopes:

@@ -101,8 +101,10 @@ bashTool:
   outputLimit: 4000    # Max chars returned after IP redaction
   blocklist:           # Regex patterns for blocked commands (case-insensitive)
     - "\\b(shutdown|reboot|poweroff|halt|init\\s+[06])\\b"
-    - "\\b(iptables|ip6tables|nft|nftables|ufw|firewall-cmd)\\b"
-    - "\\b(ifconfig|ip\\s+(link|addr|route)|route\\s+(add|del))\\b"
+    - "\\b(iptables|ip6tables|nft|nftables|ufw|firewall-cmd|firewalld)\\b"
+    - "\\b(ifconfig|ip\\s+(link|addr|route)|route\\s+(add|del)|ss|netstat)\\b"
+    - "\\b(sysctl|systemctl|service)\\b"
     - "\\b(docker|podman|kubectl|nsenter|chroot)\\b"
     - "\\b(modprobe|insmod|rmmod|lsmod)\\b"
     - "\\b(mount|umount|mkfs|fdisk|parted)\\b"
+    - "\\b(killall\\s+sshd|pkill\\s+sshd)\\b"
