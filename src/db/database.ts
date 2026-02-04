@@ -36,7 +36,9 @@ const SCHEMA_SQL = `
     translated_content  TEXT NOT NULL,
     is_bot              INTEGER NOT NULL DEFAULT 0,
     created_at          INTEGER NOT NULL,
-    reply_to_id         TEXT
+    reply_to_id         TEXT,
+    is_synthetic        INTEGER NOT NULL DEFAULT 0,
+    related_thread_id   TEXT
   );
 
   CREATE INDEX IF NOT EXISTS idx_messages_guild_channel_time
@@ -96,6 +98,10 @@ export function createDatabase(dbPath: string): Database {
 
   // Idempotent migration: add reply_to_id to existing databases
   try { raw.run("ALTER TABLE messages ADD COLUMN reply_to_id TEXT"); } catch { /* already exists */ }
+
+  // Idempotent migration: add is_synthetic and related_thread_id to existing databases
+  try { raw.run("ALTER TABLE messages ADD COLUMN is_synthetic INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
+  try { raw.run("ALTER TABLE messages ADD COLUMN related_thread_id TEXT"); } catch { /* already exists */ }
 
   // Migration: remove content column from memories (replaced by short_description)
   try { raw.run("UPDATE memories SET short_description = content WHERE short_description IS NULL OR short_description = ''"); } catch { /* column may not exist */ }

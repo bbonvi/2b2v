@@ -150,6 +150,34 @@ describe("messages table", () => {
     expect(row.is_bot).toBe(0);
   });
 
+  test("is_synthetic defaults to 0 for regular messages", () => {
+    const now = Date.now();
+    db.raw
+      .prepare(
+        `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run("msg-syn-1", "guild-1", "ch-1", "user-1", "alice", "Hi", "Hi", 0, now);
+
+    const row = db.raw.prepare("SELECT is_synthetic, related_thread_id FROM messages WHERE id = ?").get("msg-syn-1") as { is_synthetic: number; related_thread_id: string | null };
+    expect(row.is_synthetic).toBe(0);
+    expect(row.related_thread_id).toBeNull();
+  });
+
+  test("synthetic message can be inserted with is_synthetic=1 and related_thread_id", () => {
+    const now = Date.now();
+    db.raw
+      .prepare(
+        `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, is_synthetic, related_thread_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run("msg-syn-2", "guild-1", "ch-1", "bot-id", "Bot", "Thread created", "Thread created", 1, now, 1, "thread-123");
+
+    const row = db.raw.prepare("SELECT is_synthetic, related_thread_id FROM messages WHERE id = ?").get("msg-syn-2") as { is_synthetic: number; related_thread_id: string | null };
+    expect(row.is_synthetic).toBe(1);
+    expect(row.related_thread_id).toBe("thread-123");
+  });
+
   test("enforces unique message id", () => {
     const now = Date.now();
     const insert = () =>
