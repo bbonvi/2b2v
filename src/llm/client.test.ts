@@ -97,4 +97,13 @@ describe("buildStreamOptions", () => {
     const opts = buildStreamOptions(GLOBAL, GUILD);
     expect(opts.cacheRetention).toBe("short");
   });
+
+  test("passes through toolChoice from modelParams", () => {
+    const guildWithToolChoice = {
+      ...GUILD,
+      modelParams: { toolChoice: "required" as const },
+    };
+    const opts = buildStreamOptions(GLOBAL, guildWithToolChoice);
+    expect(opts.toolChoice).toBe("required");
+  });
 });

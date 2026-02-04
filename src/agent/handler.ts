@@ -1,6 +1,6 @@
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { Message, Model } from "@mariozechner/pi-ai";
-import { streamSimple } from "@mariozechner/pi-ai";
+import { streamSimple, type ProviderStreamOptions } from "@mariozechner/pi-ai";
 import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
 import { contextToSystemPrompt, type AssembledContext } from "./context-assembly.ts";
@@ -124,14 +124,19 @@ export async function handleMessage(
   patchToolLookup(tools);
 
   const reqLog = deps.requestLog;
+  let isFirstTurn = true;
   const wrappedStreamFn: typeof streamSimple = (model_, context, options) => {
+    // Force tool call on first turn to ensure the agent acts on user input
+    const toolChoice = isFirstTurn ? "required" : undefined;
+    isFirstTurn = false;
     return streamSimple(model_, context, {
       ...options,
       ...streamOptions,
+      toolChoice,
       onPayload: (payload: unknown) => {
         reqLog?.recordLLMRequest(payload);
       },
-    });
+    } as ProviderStreamOptions);
   };
 
   const agent = new Agent({
