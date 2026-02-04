@@ -1,7 +1,7 @@
 import { Client, type ConnectConfig, type ClientChannel } from "ssh2";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { join } from "path";
-import { generateKeyPairSync } from "crypto";
+import { generateKeyPairSync, createPrivateKey, randomBytes } from "crypto";
 
 /** SSH key pair file paths */
 export interface SshKeyPaths {
@@ -70,8 +70,11 @@ export function ensureSshKeys(paths: SshKeyPaths): void {
   // Convert PEM to OpenSSH format for public key
   const opensshPubKey = pemToOpenSshPublicKey(publicKey);
 
+  // Convert private key to OpenSSH format (ssh2 doesn't support PKCS8 for ED25519)
+  const opensshPrivateKey = pkcs8ToOpenSshPrivateKey(privateKey, publicKey);
+
   // Write keys
-  writeFileSync(paths.privateKey, privateKey, { mode: 0o600 });
+  writeFileSync(paths.privateKey, opensshPrivateKey, { mode: 0o600 });
   writeFileSync(paths.publicKey, opensshPubKey + "\n", { mode: 0o644 });
   writeFileSync(paths.authorizedKeys, opensshPubKey + "\n", { mode: 0o644 });
 }
@@ -98,6 +101,86 @@ function pemToOpenSshPublicKey(pemPublicKey: string): string {
 
   const opensshKey = Buffer.concat([keyTypeLen, keyType, keyLen, keyData]);
   return `ssh-ed25519 ${opensshKey.toString("base64")} bash-tool`;
+}
+
+/**
+ * Convert PKCS8 PEM private key to OpenSSH format.
+ * ssh2 library doesn't support PKCS8 for ED25519, requires OpenSSH format.
+ */
+function pkcs8ToOpenSshPrivateKey(pkcs8Pem: string, spkiPem: string): string {
+  // Extract 32-byte seed from PKCS8 PEM
+  // PKCS8 structure: SEQUENCE { version, AlgorithmIdentifier, OCTET STRING { OCTET STRING { seed } } }
+  // For ED25519, the seed is at offset 16 (after headers) with length 32
+  const keyObj = createPrivateKey(pkcs8Pem);
+  const pkcs8Der = keyObj.export({ type: "pkcs8", format: "der" });
+  // PKCS8 ED25519: 16-byte header + 2-byte OCTET STRING wrapper + 32-byte seed
+  const seed = pkcs8Der.subarray(16 + 2, 16 + 2 + 32);
+
+  // Extract 32-byte public key from SPKI PEM
+  const pubLines = spkiPem.split("\n").filter((l) => !l.startsWith("-----") && l.trim() !== "");
+  const pubDer = Buffer.from(pubLines.join(""), "base64");
+  const pubKey = pubDer.subarray(12); // 12-byte SPKI header for ED25519
+
+  // Build OpenSSH public key blob
+  const keyType = Buffer.from("ssh-ed25519");
+  const pubKeyBlob = Buffer.concat([
+    writeString(keyType),
+    writeString(pubKey),
+  ]);
+
+  // Build private section (unencrypted)
+  const checkInt = randomBytes(4);
+  const privateSection = Buffer.concat([
+    checkInt,
+    checkInt, // repeated for verification
+    writeString(keyType),
+    writeString(pubKey),
+    writeString(Buffer.concat([seed, pubKey])), // ED25519 private = seed (32) + public (32)
+    writeString(Buffer.from("bash-tool")), // comment
+  ]);
+
+  // Add padding (1, 2, 3, ... to reach 8-byte alignment)
+  const blockSize = 8;
+  const padLen = blockSize - (privateSection.length % blockSize);
+  const padding = Buffer.alloc(padLen);
+  for (let i = 0; i < padLen; i++) {
+    padding[i] = i + 1;
+  }
+  const paddedPrivate = Buffer.concat([privateSection, padding]);
+
+  // Build full OpenSSH key
+  const AUTH_MAGIC = Buffer.from("openssh-key-v1\0");
+  const opensshKey = Buffer.concat([
+    AUTH_MAGIC,
+    writeString(Buffer.from("none")), // cipher
+    writeString(Buffer.from("none")), // kdf
+    writeString(Buffer.alloc(0)), // kdf options (empty)
+    writeUint32(1), // number of keys
+    writeString(pubKeyBlob), // public key blob
+    writeString(paddedPrivate), // private section
+  ]);
+
+  // Wrap in PEM
+  const b64 = opensshKey.toString("base64");
+  const lines: string[] = [];
+  for (let i = 0; i < b64.length; i += 70) {
+    lines.push(b64.slice(i, i + 70));
+  }
+  return `-----BEGIN OPENSSH PRIVATE KEY-----\n${lines.join("\n")}\n-----END OPENSSH PRIVATE KEY-----\n`;
+}
+
+/** Write a string in OpenSSH format: 4-byte length (BE) + data */
+function writeString(data: Buffer): Buffer {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length, 0);
+  return Buffer.concat([len, data]);
+}
+
+/** Write a uint32 in big-endian format */
+function writeUint32(value: number): Buffer {
+  const buf = Buffer.alloc(4);
+  buf.writeUInt32BE(value, 0);
+  return buf;
 }
 
 /**

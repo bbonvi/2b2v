@@ -30,9 +30,9 @@ test("ensureSshKeys generates keypair on first run", () => {
   expect(existsSync(paths.publicKey)).toBe(true);
   expect(existsSync(paths.authorizedKeys)).toBe(true);
 
-  // Private key should be PEM format
+  // Private key should be OpenSSH format (required by ssh2 for ED25519)
   const privateKey = readFileSync(paths.privateKey, "utf-8");
-  expect(privateKey).toStartWith("-----BEGIN PRIVATE KEY-----");
+  expect(privateKey).toStartWith("-----BEGIN OPENSSH PRIVATE KEY-----");
 
   // Public key should be OpenSSH format
   const publicKey = readFileSync(paths.publicKey, "utf-8");
