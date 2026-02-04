@@ -116,7 +116,7 @@ Discord messageCreate event
        │
        ├─ Create Agent (pi-agent-core) with tools:
        │   start_typing, send_message, journal tools (2), user memory tools (3), search_messages,
-       │   schedule_message, list_members, channel_history, web_search, read_chat_images, fetch_images
+       │   schedule_message, list_members, chat_history, web_search, read_chat_images, fetch_images
        │
         └─ agent.prompt(translatedContent)
             No inline images — LLM uses read_chat_images tool on demand

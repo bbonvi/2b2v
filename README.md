@@ -164,7 +164,7 @@ The bot has access to these tools during conversations. The LLM decides when and
 | `search_messages` | Semantic search over message history with guild/username/channel/time filters |
 | `schedule_message` | Schedule a one-off message in N seconds/minutes/hours |
 | `list_members` | List server members (all or online-only) |
-| `channel_history` | Fetch recent messages from the current channel |
+| `chat_history` | Fetch recent messages from a chat (channel, thread, or DM) |
 | `read_chat_images` | Retrieve stored chat images by ID (base64) |
 | `fetch_images` | Fetch external images by URL (ephemeral, not stored) |
 | `fetch_url` | Fetch a URL and extract its readable content as markdown |

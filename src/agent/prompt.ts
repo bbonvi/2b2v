@@ -53,7 +53,7 @@ Use \`reply: true\` on the first message when responding to the trigger, and \`r
 - \`search_messages\` — Search past messages. Modes: \`semantic\` (default, AI similarity), \`literal\` (case-insensitive keyword/phrase), \`id\` (direct message lookup)
 - \`schedule_message\` — Schedule a message to be sent later
 - \`list_members\` — List server members (online/all)
-- \`channel_history\` — Read recent messages from a channel
+- \`chat_history\` — Read recent messages from a chat (channel, thread, or DM)
 - \`read_chat_images\` — Retrieve stored images by their IDs from chat history. Pass \`image_ids\` from chat history to view image contents.
 - \`fetch_images\` — Fetch external images by URL. Downloads and returns base64. Does NOT store — ephemeral fetch only.
 - \`web_search\` — Search the web via Brave Search (if available).

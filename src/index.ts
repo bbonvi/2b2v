@@ -29,7 +29,7 @@ import { createMemoryTools } from "./agent/memory-tools";
 import { createSearchTool } from "./agent/search-tool";
 import { createScheduleTool } from "./agent/schedule-tool";
 import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool";
-import { createChannelHistoryTool, type ChannelMessage } from "./agent/channel-history-tool";
+import { createChatHistoryTool, type ChatHistoryMessage } from "./agent/chat-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
 import { createReadChatImagesTool } from "./agent/read-chat-images-tool";
 import { createFetchImagesTool } from "./agent/fetch-images-tool";
@@ -652,14 +652,14 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
     },
   });
 
-  const channelHistoryTool = createChannelHistoryTool({
+  const chatHistoryTool = createChatHistoryTool({
     guildId,
-    fetchMessages: async (chId, limit) => {
-      const channel = guild.channels.cache.get(chId);
+    fetchMessages: async (chatId, limit) => {
+      const channel = guild.channels.cache.get(chatId);
       if (channel === undefined || !("messages" in channel)) return [];
       const textChannel = channel as TextChannel;
       const msgs = await textChannel.messages.fetch({ limit });
-      const result: ChannelMessage[] = [];
+      const result: ChatHistoryMessage[] = [];
       for (const [, msg] of msgs) {
         result.push({
           id: msg.id,
@@ -691,7 +691,7 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
 
   const fetchUrlTool = createFetchUrlTool();
 
-  const tools = [...memoryTools, searchTool, scheduleTool, memberListTool, channelHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool];
+  const tools = [...memoryTools, searchTool, scheduleTool, memberListTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool];
 
   // Brave search if API key configured
   if (globalConfig.braveApiKey !== undefined && globalConfig.braveApiKey !== "") {

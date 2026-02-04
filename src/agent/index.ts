@@ -45,7 +45,7 @@ export { createScheduleTool, type ScheduleToolDeps } from "./schedule-tool.ts";
 
 export { createMemberListTool, type MemberListToolDeps, type MemberInfo } from "./member-list-tool.ts";
 
-export { createChannelHistoryTool, type ChannelHistoryToolDeps, type ChannelMessage } from "./channel-history-tool.ts";
+export { createChatHistoryTool, type ChatHistoryToolDeps, type ChatHistoryMessage } from "./chat-history-tool.ts";
 
 export { createBraveSearchTool, type BraveSearchToolDeps, type BraveSearchResult } from "./brave-search-tool.ts";
 

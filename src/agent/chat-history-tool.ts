@@ -1,55 +1,55 @@
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 
-export interface ChannelMessage {
+export interface ChatHistoryMessage {
   id: string;
   authorUsername: string;
   content: string;
   createdAt: number;
 }
 
-export interface ChannelHistoryToolDeps {
+export interface ChatHistoryToolDeps {
   guildId: string;
-  fetchMessages: (channelId: string, limit: number) => Promise<ChannelMessage[]>;
+  fetchMessages: (chatId: string, limit: number) => Promise<ChatHistoryMessage[]>;
 }
 
-const ChannelHistoryParams = Type.Object({
-  channelId: Type.String({ description: "The channel ID to fetch history from." }),
+const ChatHistoryParams = Type.Object({
+  chat_id: Type.String({ description: "The chat ID to fetch history from (channel, thread, or DM)." }),
   limit: Type.Optional(
     Type.Number({ description: "Maximum number of messages to retrieve. Default: 50, max: 100." })
   ),
 });
 
-export function createChannelHistoryTool(deps: ChannelHistoryToolDeps): AgentTool {
+export function createChatHistoryTool(deps: ChatHistoryToolDeps): AgentTool {
   const { fetchMessages } = deps;
 
   return {
-    name: "channel_history",
-    label: "channel_history",
+    name: "chat_history",
+    label: "chat_history",
     description:
-      "Fetch recent messages from a Discord channel. Useful for reviewing conversation context in a specific channel.",
-    parameters: ChannelHistoryParams,
+      "Fetch recent messages from a Discord chat. Useful for reviewing conversation context in a specific channel, thread, or DM.",
+    parameters: ChatHistoryParams,
 
     async execute(
       _toolCallId: string,
       params: unknown
     ): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {
-      const { channelId, limit: rawLimit } = params as { channelId: string; limit?: number };
+      const { chat_id, limit: rawLimit } = params as { chat_id: string; limit?: number };
       const limit = Math.min(rawLimit ?? 50, 100);
 
-      let messages: ChannelMessage[];
+      let messages: ChatHistoryMessage[];
       try {
-        messages = await fetchMessages(channelId, limit);
+        messages = await fetchMessages(chat_id, limit);
       } catch {
         return {
-          content: [{ type: "text", text: "Unable to fetch channel history. The bot may lack permission to read this channel." }],
+          content: [{ type: "text", text: "Unable to fetch chat history. The bot may lack permission to read this chat." }],
           details: { error: true },
         };
       }
 
       if (messages.length === 0) {
         return {
-          content: [{ type: "text", text: "No messages found in this channel." }],
+          content: [{ type: "text", text: "No messages found in this chat." }],
           details: { count: 0 },
         };
       }
@@ -63,7 +63,7 @@ export function createChannelHistoryTool(deps: ChannelHistoryToolDeps): AgentToo
   };
 }
 
-function formatMessage(m: ChannelMessage): string {
+function formatMessage(m: ChatHistoryMessage): string {
   const date = new Date(m.createdAt).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
   return `[${date}] ${m.authorUsername}: ${m.content}`;
 }
