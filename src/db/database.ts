@@ -83,6 +83,25 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_images_guild_channel
     ON images(guild_id, channel_id);
+
+  CREATE TABLE IF NOT EXISTS threads (
+    thread_id           TEXT PRIMARY KEY,
+    guild_id            TEXT NOT NULL,
+    parent_chat_id      TEXT NOT NULL,
+    starter_message_id  TEXT NOT NULL,
+    thread_name         TEXT NOT NULL,
+    created_at          INTEGER NOT NULL,
+    last_activity_at    INTEGER NOT NULL,
+    message_count       INTEGER NOT NULL DEFAULT 0,
+    last_message_id     TEXT,
+    bot_participating   INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_threads_parent_chat
+    ON threads(parent_chat_id);
+
+  CREATE INDEX IF NOT EXISTS idx_threads_guild
+    ON threads(guild_id);
 `;
 
 export function createDatabase(dbPath: string): Database {

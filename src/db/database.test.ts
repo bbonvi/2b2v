@@ -266,6 +266,61 @@ describe("images table", () => {
   });
 });
 
+describe("threads table", () => {
+  test("creates threads table", () => {
+    const info = db.raw
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='threads'")
+      .get() as { name: string } | undefined;
+    expect(info?.name).toBe("threads");
+  });
+
+  test("inserts and retrieves a thread", () => {
+    const now = Date.now();
+    db.raw
+      .prepare(
+        `INSERT INTO threads (thread_id, guild_id, parent_chat_id, starter_message_id, thread_name, created_at, last_activity_at, message_count, bot_participating)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run("thread-1", "guild-1", "ch-1", "msg-trigger", "Help Thread", now, now, 0, 0);
+
+    const row = db.raw.prepare("SELECT * FROM threads WHERE thread_id = ?").get("thread-1") as Record<string, unknown>;
+    expect(row.guild_id).toBe("guild-1");
+    expect(row.parent_chat_id).toBe("ch-1");
+    expect(row.starter_message_id).toBe("msg-trigger");
+    expect(row.thread_name).toBe("Help Thread");
+    expect(row.bot_participating).toBe(0);
+    expect(row.message_count).toBe(0);
+  });
+
+  test("enforces unique thread_id", () => {
+    const now = Date.now();
+    const insert = () =>
+      db.raw
+        .prepare(
+          `INSERT INTO threads (thread_id, guild_id, parent_chat_id, starter_message_id, thread_name, created_at, last_activity_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run("thread-dup", "g1", "c1", "m1", "Thread", now, now);
+
+    insert();
+    expect(insert).toThrow();
+  });
+
+  test("parent_chat index exists", () => {
+    const idx = db.raw
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_threads_parent_chat'")
+      .get() as { name: string } | undefined;
+    expect(idx?.name).toBe("idx_threads_parent_chat");
+  });
+
+  test("guild index exists", () => {
+    const idx = db.raw
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_threads_guild'")
+      .get() as { name: string } | undefined;
+    expect(idx?.name).toBe("idx_threads_guild");
+  });
+});
+
 describe("in-memory database", () => {
   test("creates database in memory with :memory:", () => {
     const memDb = createDatabase(":memory:");
