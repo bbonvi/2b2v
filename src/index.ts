@@ -152,18 +152,21 @@ const vpnSessionCleanupTimer = setInterval(() => {
 }, VPN_SESSION_CLEANUP_INTERVAL_MS);
 
 // --- 9d. SSH key setup for bash tool ---
-const sshKeysDir = process.env.SSH_KEYS_DIR;
+// SSH_KEYS_LOCAL: bot's private keys (never shared with bash-vm)
+// SSH_KEYS_SHARED: only authorized_keys (mounted read-only by bash-vm)
+const sshKeysLocal = process.env.SSH_KEYS_LOCAL;
+const sshKeysShared = process.env.SSH_KEYS_SHARED;
 let sshKeyPaths: SshKeyPaths | undefined;
 let sshClient: SshClient | undefined;
 
-// Always create SSH keys when SSH_KEYS_DIR is set (compose environment with bash-vm).
-// This ensures bash-vm can start (it waits for authorized_keys).
+// Create SSH keys when both paths are set (compose environment with bash-vm).
+// This ensures bash-vm can start (it waits for authorized_keys in shared dir).
 // The tool itself is only enabled when bashTool.enabled is true.
-if (sshKeysDir !== undefined) {
-  sshKeyPaths = getSshKeyPaths(sshKeysDir);
+if (sshKeysLocal !== undefined && sshKeysShared !== undefined) {
+  sshKeyPaths = getSshKeyPaths(sshKeysLocal, sshKeysShared);
   try {
     ensureSshKeys(sshKeyPaths);
-    log.info("ssh keys ready", { dir: sshKeysDir });
+    log.info("ssh keys ready", { local: sshKeysLocal, shared: sshKeysShared });
   } catch (err) {
     log.error("ssh key setup failed", { error: err instanceof Error ? err.message : String(err) });
     sshKeyPaths = undefined;

@@ -8,12 +8,14 @@ services:
       QDRANT_URL: http://qdrant:6333
       DATA_DIR: /app/data
       MODEL_CACHE_DIR: /app/model-cache
-      SSH_KEYS_DIR: /app/ssh-keys
+      SSH_KEYS_LOCAL: /app/ssh-keys-local
+      SSH_KEYS_SHARED: /app/ssh-keys-shared
     volumes:
       - bot-data:/app/data
       - model-cache:/app/model-cache
       - ./config:/app/config:ro
-      - ssh-keys:/app/ssh-keys
+      - ssh-keys-local:/app/ssh-keys-local
+      - ssh-keys-shared:/app/ssh-keys-shared
     networks:
       - default
       - bash-net
@@ -21,7 +23,7 @@ services:
       qdrant:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "test -f /app/ssh-keys/authorized_keys"]
+      test: ["CMD-SHELL", "test -f /app/ssh-keys-shared/authorized_keys"]
       interval: 2s
       timeout: 2s
       retries: 30
@@ -44,7 +46,7 @@ services:
       context: ./docker/bash-vm
     read_only: true
     volumes:
-      - ssh-keys:/ssh-keys-vol:ro
+      - ssh-keys-shared:/ssh-keys-vol:ro
     tmpfs:
       - /tmp:size=512M,mode=1777
       - /home/user:size=512M,mode=755,uid=1000,gid=1000
@@ -77,4 +79,5 @@ volumes:
   bot-data:
   model-cache:
   qdrant-data:
-  ssh-keys:
+  ssh-keys-local:
+  ssh-keys-shared:

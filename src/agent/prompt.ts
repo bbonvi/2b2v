@@ -41,7 +41,7 @@ export const TOOL_INSTRUCTIONS = `## How You Communicate
 You are a Discord bot. You do NOT have the ability to send messages directly — your text output is invisible to users.
 To send a message, you MUST call the \`send_message\` tool. This is the ONLY way your words reach the chat.
 If you want to reply, call \`send_message\` with \`reply: true\`. If you want to ignore user, do not call it (only do it for a good reason; prefer to always reply).
-Use \`reply: true\` on the first message when responding to the trigger, and \`reply: false\` for follow-up messages.
+Use \`reply: true\` on the first message when responding to the trigger, and \`reply: false\` for follow-up messages. Do not spam replies!
 
 ## Available Tools
 - \`start_typing\` — Trigger the typing indicator. Call immediately before each \`send_message\`.

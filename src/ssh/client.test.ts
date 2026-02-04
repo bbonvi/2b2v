@@ -5,26 +5,29 @@ import { join } from "path";
 import { utils } from "ssh2";
 import { getSshKeyPaths, ensureSshKeys, removeKnownHost } from "./client.ts";
 
-let tempDir: string;
+let localDir: string;
+let sharedDir: string;
 
 beforeEach(() => {
-  tempDir = mkdtempSync(join(tmpdir(), "ssh-test-"));
+  localDir = mkdtempSync(join(tmpdir(), "ssh-local-"));
+  sharedDir = mkdtempSync(join(tmpdir(), "ssh-shared-"));
 });
 
 afterEach(() => {
-  rmSync(tempDir, { recursive: true, force: true });
+  rmSync(localDir, { recursive: true, force: true });
+  rmSync(sharedDir, { recursive: true, force: true });
 });
 
 test("getSshKeyPaths returns expected paths", () => {
-  const paths = getSshKeyPaths("/ssh-keys");
-  expect(paths.privateKey).toBe("/ssh-keys/id_ed25519");
-  expect(paths.publicKey).toBe("/ssh-keys/id_ed25519.pub");
-  expect(paths.authorizedKeys).toBe("/ssh-keys/authorized_keys");
-  expect(paths.knownHosts).toBe("/ssh-keys/known_hosts");
+  const paths = getSshKeyPaths("/local", "/shared");
+  expect(paths.privateKey).toBe("/local/id_ed25519");
+  expect(paths.publicKey).toBe("/local/id_ed25519.pub");
+  expect(paths.knownHosts).toBe("/local/known_hosts");
+  expect(paths.authorizedKeys).toBe("/shared/authorized_keys");
 });
 
 test("ensureSshKeys generates keypair on first run", () => {
-  const paths = getSshKeyPaths(tempDir);
+  const paths = getSshKeyPaths(localDir, sharedDir);
   ensureSshKeys(paths);
 
   expect(existsSync(paths.privateKey)).toBe(true);
@@ -45,7 +48,7 @@ test("ensureSshKeys generates keypair on first run", () => {
 });
 
 test("ensureSshKeys reuses existing keypair", () => {
-  const paths = getSshKeyPaths(tempDir);
+  const paths = getSshKeyPaths(localDir, sharedDir);
   ensureSshKeys(paths);
 
   const originalPrivate = readFileSync(paths.privateKey, "utf-8");
@@ -62,7 +65,7 @@ test("ensureSshKeys reuses existing keypair", () => {
 });
 
 test("ensureSshKeys syncs authorized_keys if out of sync", () => {
-  const paths = getSshKeyPaths(tempDir);
+  const paths = getSshKeyPaths(localDir, sharedDir);
   ensureSshKeys(paths);
 
   const publicKey = readFileSync(paths.publicKey, "utf-8").trim();
@@ -78,7 +81,7 @@ test("ensureSshKeys syncs authorized_keys if out of sync", () => {
 });
 
 test("removeKnownHost removes matching host entry", () => {
-  const paths = getSshKeyPaths(tempDir);
+  const paths = getSshKeyPaths(localDir, sharedDir);
   const knownHostsContent = `
 [bash-vm]:22 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKey==
 other-host ssh-rsa AAAAB3Nz...
@@ -93,14 +96,14 @@ other-host ssh-rsa AAAAB3Nz...
 });
 
 test("removeKnownHost handles non-existent file", () => {
-  const paths = getSshKeyPaths(tempDir);
+  const paths = getSshKeyPaths(localDir, sharedDir);
   // Should not throw
   removeKnownHost(paths.knownHosts, "bash-vm", 22);
   expect(existsSync(paths.knownHosts)).toBe(false);
 });
 
 test("removeKnownHost handles standard port format", () => {
-  const paths = getSshKeyPaths(tempDir);
+  const paths = getSshKeyPaths(localDir, sharedDir);
   const knownHostsContent = `example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKey==
 `;
   writeFileSync(paths.knownHosts, knownHostsContent);
@@ -112,7 +115,7 @@ test("removeKnownHost handles standard port format", () => {
 });
 
 test("generated private key can be parsed by ssh2", () => {
-  const paths = getSshKeyPaths(tempDir);
+  const paths = getSshKeyPaths(localDir, sharedDir);
   ensureSshKeys(paths);
 
   const privateKey = readFileSync(paths.privateKey, "utf-8");

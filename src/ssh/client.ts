@@ -3,12 +3,14 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { join } from "path";
 import { generateKeyPairSync, createPrivateKey, randomBytes } from "crypto";
 
-/** SSH key pair file paths */
+/** SSH key pair file paths - split between local (bot-only) and shared (for bash-vm) */
 export interface SshKeyPaths {
+  // Local to bot container - never shared
   privateKey: string;
   publicKey: string;
-  authorizedKeys: string;
   knownHosts: string;
+  // Shared with bash-vm - only the public key for authentication
+  authorizedKeys: string;
 }
 
 /** SSH connection configuration */
@@ -26,26 +28,34 @@ export interface SshExecResult {
 }
 
 /**
- * Get paths for SSH key files within the ssh-keys volume.
+ * Get paths for SSH key files.
+ * @param localDir - Bot-local directory for private key (not shared with bash-vm)
+ * @param sharedDir - Shared directory for authorized_keys (mounted by bash-vm)
  */
-export function getSshKeyPaths(sshKeysDir: string): SshKeyPaths {
+export function getSshKeyPaths(localDir: string, sharedDir: string): SshKeyPaths {
   return {
-    privateKey: join(sshKeysDir, "id_ed25519"),
-    publicKey: join(sshKeysDir, "id_ed25519.pub"),
-    authorizedKeys: join(sshKeysDir, "authorized_keys"),
-    knownHosts: join(sshKeysDir, "known_hosts"),
+    privateKey: join(localDir, "id_ed25519"),
+    publicKey: join(localDir, "id_ed25519.pub"),
+    knownHosts: join(localDir, "known_hosts"),
+    authorizedKeys: join(sharedDir, "authorized_keys"),
   };
 }
 
 /**
  * Ensure SSH keypair exists. Generates new ED25519 keypair if missing.
- * Also writes the public key to authorized_keys for the bash-vm container.
+ * Private key stays local to bot. Only authorized_keys is written to shared dir.
  */
 export function ensureSshKeys(paths: SshKeyPaths): void {
-  // Create directory if needed
-  const dir = join(paths.privateKey, "..");
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
+  // Create local directory for private key (bot-only)
+  const localDir = join(paths.privateKey, "..");
+  if (!existsSync(localDir)) {
+    mkdirSync(localDir, { recursive: true });
+  }
+
+  // Create shared directory for authorized_keys (mounted by bash-vm)
+  const sharedDir = join(paths.authorizedKeys, "..");
+  if (!existsSync(sharedDir)) {
+    mkdirSync(sharedDir, { recursive: true });
   }
 
   // Check if keys already exist
@@ -73,9 +83,11 @@ export function ensureSshKeys(paths: SshKeyPaths): void {
   // Convert private key to OpenSSH format (ssh2 doesn't support PKCS8 for ED25519)
   const opensshPrivateKey = pkcs8ToOpenSshPrivateKey(privateKey, publicKey);
 
-  // Write keys
+  // Write private key to LOCAL directory only (never shared)
   writeFileSync(paths.privateKey, opensshPrivateKey, { mode: 0o600 });
   writeFileSync(paths.publicKey, opensshPubKey + "\n", { mode: 0o644 });
+
+  // Write ONLY public key to shared directory for bash-vm authentication
   writeFileSync(paths.authorizedKeys, opensshPubKey + "\n", { mode: 0o644 });
 }
 
