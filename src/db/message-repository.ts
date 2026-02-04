@@ -371,6 +371,49 @@ export function getParentPreContext(
   });
 }
 
+export interface ChatHistoryRow {
+  id: string;
+  authorUsername: string;
+  content: string;
+  createdAt: number;
+}
+
+/**
+ * Fetch chat history for the chat_history tool.
+ * Returns messages in reverse chronological order (newest first).
+ *
+ * Note: Includes synthetic events (thread creation, etc.). This is up to debate —
+ * synthetic events could be filtered out if they prove noisy for the LLM.
+ */
+export function getChatHistory(
+  db: Database,
+  guildId: string,
+  chatId: string,
+  limit: number,
+): ChatHistoryRow[] {
+  const rows = db.raw
+    .prepare(
+      `SELECT id, author_username, translated_content, created_at
+       FROM messages
+       WHERE guild_id = ? AND channel_id = ?
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(guildId, chatId, limit) as Array<{
+      id: string;
+      author_username: string;
+      translated_content: string;
+      created_at: number;
+    }>;
+
+  return rows.map((r) => ({
+    id: r.id,
+    authorUsername: r.author_username,
+    content: r.translated_content,
+    createdAt: r.created_at,
+  }));
+}
+
 export interface InsertSyntheticEventInput {
   /** Unique ID for the synthetic event (e.g., generated UUID). */
   id: string;

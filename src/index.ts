@@ -17,7 +17,7 @@ import { handleMessage, type IncomingMessage, type HandlerDeps } from "./agent/h
 import { TOOL_INSTRUCTIONS } from "./agent/prompt";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
-import { getHistoryMessages, insertSyntheticEvent, getParentPreContext } from "./db/message-repository";
+import { getHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory } from "./db/message-repository";
 import { processHistory } from "./agent/history-pipeline";
 import { trimMessages } from "./agent/history-trimming";
 import { formatMessageLine, OLDER_LEGEND } from "./agent/history-formatting";
@@ -32,7 +32,7 @@ import { createMemoryTools } from "./agent/memory-tools";
 import { createSearchTool } from "./agent/search-tool";
 import { createScheduleTool } from "./agent/schedule-tool";
 import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool";
-import { createChatHistoryTool, type ChatHistoryMessage } from "./agent/chat-history-tool";
+import { createChatHistoryTool } from "./agent/chat-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
 import { createReadChatImagesTool } from "./agent/read-chat-images-tool";
 import { createFetchImagesTool } from "./agent/fetch-images-tool";
@@ -703,21 +703,12 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
 
   const chatHistoryTool = createChatHistoryTool({
     guildId,
-    fetchMessages: async (chatId, limit) => {
+    fetchMessages: (chatId, limit) => {
+      // Validate channel is accessible in guild before querying DB
       const channel = guild.channels.cache.get(chatId);
-      if (channel === undefined || !("messages" in channel)) return [];
-      const textChannel = channel as TextChannel;
-      const msgs = await textChannel.messages.fetch({ limit });
-      const result: ChatHistoryMessage[] = [];
-      for (const [, msg] of msgs) {
-        result.push({
-          id: msg.id,
-          authorUsername: msg.author.username,
-          content: msg.content,
-          createdAt: msg.createdTimestamp,
-        });
-      }
-      return result;
+      if (channel === undefined || !("messages" in channel)) return Promise.resolve([]);
+      // Fetch from DB — includes synthetic events (thread creation, etc.)
+      return Promise.resolve(getChatHistory(db, guildId, chatId, limit));
     },
   });
 

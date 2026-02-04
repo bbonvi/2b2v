@@ -3,7 +3,7 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "./database";
 import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
-import { searchMessages, getMessageById, searchMessagesLiteral, getHistoryMessages, insertSyntheticEvent, getParentPreContext } from "./message-repository";
+import { searchMessages, getMessageById, searchMessagesLiteral, getHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory } from "./message-repository";
 import { createMockPipeline } from "../embeddings/test-utils";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
@@ -786,5 +786,73 @@ describe("insertSyntheticEvent", () => {
     const results = searchMessagesLiteral(db, "Bug Report", { guildId: "g1", limit: 10 });
     expect(results.length).toBe(1);
     expect(results[0]?.id).toBe("real-msg");
+  });
+});
+
+describe("getChatHistory", () => {
+  test("returns messages in reverse chronological order (newest first)", () => {
+    const now = Date.now();
+    insertMessage("older", { guildId: "g1", channelId: "c1", createdAt: now - 2000 });
+    insertMessage("newer", { guildId: "g1", channelId: "c1", createdAt: now - 1000 });
+    insertMessage("newest", { guildId: "g1", channelId: "c1", createdAt: now });
+
+    const results = getChatHistory(db, "g1", "c1", 10);
+    expect(results.length).toBe(3);
+    expect(results[0]?.id).toBe("newest");
+    expect(results[1]?.id).toBe("newer");
+    expect(results[2]?.id).toBe("older");
+  });
+
+  test("filters by guild and channel", () => {
+    insertMessage("m1", { guildId: "g1", channelId: "c1" });
+    insertMessage("m2", { guildId: "g1", channelId: "c2" });
+    insertMessage("m3", { guildId: "g2", channelId: "c1" });
+
+    const results = getChatHistory(db, "g1", "c1", 10);
+    expect(results.length).toBe(1);
+    expect(results[0]?.id).toBe("m1");
+  });
+
+  test("respects limit", () => {
+    insertMessage("m1", { guildId: "g1", channelId: "c1", createdAt: Date.now() - 3000 });
+    insertMessage("m2", { guildId: "g1", channelId: "c1", createdAt: Date.now() - 2000 });
+    insertMessage("m3", { guildId: "g1", channelId: "c1", createdAt: Date.now() - 1000 });
+
+    const results = getChatHistory(db, "g1", "c1", 2);
+    expect(results.length).toBe(2);
+    expect(results[0]?.id).toBe("m3");
+    expect(results[1]?.id).toBe("m2");
+  });
+
+  test("includes synthetic events", () => {
+    insertMessage("real-msg", { guildId: "g1", channelId: "c1", createdAt: Date.now() - 1000 });
+    insertSyntheticEvent(db, {
+      id: "syn-event",
+      guildId: "g1",
+      channelId: "c1",
+      botUserId: "bot-123",
+      botUsername: "TestBot",
+      threadId: "thread-456",
+      threadName: "Discussion Thread",
+    });
+
+    const results = getChatHistory(db, "g1", "c1", 10);
+    expect(results.length).toBe(2);
+    // Synthetic event should be included and formatted
+    const syntheticResult = results.find((r) => r.id === "syn-event");
+    expect(syntheticResult).toBeDefined();
+    expect(syntheticResult?.content).toContain("Event: Thread created");
+  });
+
+  test("returns correct ChatHistoryRow structure", () => {
+    insertMessage("m1", { guildId: "g1", channelId: "c1", authorUsername: "alice", translatedContent: "Hello world" });
+
+    const results = getChatHistory(db, "g1", "c1", 10);
+    expect(results.length).toBe(1);
+    const row = results[0];
+    expect(row?.id).toBe("m1");
+    expect(row?.authorUsername).toBe("alice");
+    expect(row?.content).toBe("Hello world");
+    expect(typeof row?.createdAt).toBe("number");
   });
 });
