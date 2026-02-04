@@ -15,10 +15,13 @@ import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { handleMessage, type IncomingMessage, type HandlerDeps } from "./agent/handler";
 import { TOOL_INSTRUCTIONS } from "./agent/prompt";
-import { assembleContext, type AssembledContext } from "./agent/context-assembly";
+import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
-import { getHistoryMessages, insertSyntheticEvent } from "./db/message-repository";
+import { getHistoryMessages, insertSyntheticEvent, getParentPreContext } from "./db/message-repository";
 import { processHistory } from "./agent/history-pipeline";
+import { trimMessages } from "./agent/history-trimming";
+import { formatMessageLine, OLDER_LEGEND } from "./agent/history-formatting";
+import { insertDateStamps } from "./agent/history-dates";
 import { formatMemoryTimestamps, formatRelativeAgo } from "./agent/history-dates";
 import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
@@ -37,7 +40,7 @@ import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createStartTypingTool } from "./agent/start-typing-tool";
 import { createStartThreadTool } from "./agent/start-thread-tool";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
-import { insertThread, updateThreadActivity, markBotParticipating, listThreadsForContext } from "./db/thread-repository";
+import { insertThread, updateThreadActivity, markBotParticipating, listThreadsForContext, getThreadMetadata } from "./db/thread-repository";
 import { processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
 import { createBashTool } from "./agent/bash-tool";
 import { getSshKeyPaths, ensureSshKeys, createSshConnection, type SshKeyPaths } from "./ssh/client";
@@ -462,6 +465,7 @@ async function buildContext(
   userMessage: string,
   latestUserMessage: HistoryMessage,
   replyFallbackDeps: ReplyFallbackDeps,
+  isThread: boolean,
 ): Promise<AssembledContext> {
   // Chat history via the full processing pipeline
   const historyMessages = getHistoryMessages(db, channelId, guildConfig.trim.trimTrigger);
@@ -533,10 +537,57 @@ async function buildContext(
   const currentContext = `Guild: ${guildId} | Channel: ${channelId}\nDate/Time: ${new Date().toISOString()}`;
 
   // Thread list for parent channels (bot-participating threads only)
-  const threads = listThreadsForContext(db, channelId);
-  const threadsInChat = threads
-    .map((t) => `- "${t.threadName}" (thread_id: ${t.threadId}) — ${t.messageCount} msgs, ${formatRelativeAgo(t.lastActivityAt)}`)
-    .join("\n");
+  // Only shown when NOT in a thread
+  let threadsInChat = "";
+  if (!isThread) {
+    const threads = listThreadsForContext(db, channelId);
+    threadsInChat = threads
+      .map((t) => `- "${t.threadName}" (thread_id: ${t.threadId}) — ${t.messageCount} msgs, ${formatRelativeAgo(t.lastActivityAt)}`)
+      .join("\n");
+  }
+
+  // Thread metadata and parent pre-context (only when in a thread)
+  let threadMetadata: ThreadMetadata | undefined;
+  let parentPreContext = "";
+  if (isThread) {
+    const meta = getThreadMetadata(db, channelId);
+    if (meta !== null) {
+      threadMetadata = {
+        parentChatId: meta.parentChatId,
+        threadId: channelId,
+        starterMessageId: meta.starterMessageId,
+        threadName: meta.threadName,
+      };
+
+      // Fetch parent pre-context: last 20 messages before thread creation
+      const PARENT_PRE_CONTEXT_LIMIT = 20;
+      const parentMessages = getParentPreContext(db, meta.parentChatId, meta.createdAt, PARENT_PRE_CONTEXT_LIMIT);
+
+      if (parentMessages.length > 0) {
+        // Apply trimming (same rules as older history)
+        const trimmed = trimMessages(parentMessages, guildConfig.trim.messageCharLimit);
+
+        // Format with date stamps
+        const dateEntries = insertDateStamps(trimmed, guildConfig.timezone);
+        const lines: string[] = [OLDER_LEGEND];
+        for (const entry of dateEntries) {
+          if (entry.type === "date") {
+            lines.push(entry.text);
+          } else {
+            const m = trimmed[entry.index];
+            if (m === undefined) continue;
+            // No reply resolution for parent pre-context (simplified)
+            lines.push(formatMessageLine({
+              message: m,
+              reply: null,
+              captioningEnabled: guildConfig.imageCaptioningEnabled,
+            }));
+          }
+        }
+        parentPreContext = `## Parent Pre-Context\n${lines.join("\n")}`;
+      }
+    }
+  }
 
   return assembleContext({
     persona,
@@ -547,6 +598,8 @@ async function buildContext(
     journalSummaries,
     upcomingSchedules,
     threadsInChat,
+    threadMetadata,
+    parentPreContext,
     olderHistory: olderText,
     newerHistory: newerText,
     currentContext,
@@ -964,7 +1017,8 @@ client.on("messageCreate", (message: Message) => void (async () => {
     };
 
     // Build assembled context
-    const context = await buildContext(guildId, channelId, guild, guildConfig, translatedContent, latestUserMessage, replyFallbackDeps);
+    const isThread = message.channel.isThread();
+    const context = await buildContext(guildId, channelId, guild, guildConfig, translatedContent, latestUserMessage, replyFallbackDeps, isThread);
 
     let lastTypingAt = 0;
     const sendTypingNow = (): void => {

@@ -23,6 +23,14 @@ export interface AssembledContext {
   userMessage: string;
 }
 
+/** Thread metadata for thread context assembly. */
+export interface ThreadMetadata {
+  parentChatId: string;
+  threadId: string;
+  starterMessageId: string;
+  threadName: string;
+}
+
 /** Input for context assembly. All string fields may be empty to indicate omission. */
 export interface ContextAssemblyInput {
   persona: string;
@@ -34,6 +42,10 @@ export interface ContextAssemblyInput {
   upcomingSchedules: string;
   /** Threads in this chat (for parent channels only). */
   threadsInChat: string;
+  /** Thread metadata (for thread channels only). */
+  threadMetadata?: ThreadMetadata;
+  /** Parent channel pre-context (for thread channels only). Formatted history text. */
+  parentPreContext: string;
   olderHistory: string;
   newerHistory: string;
   currentContext: string;
@@ -45,7 +57,7 @@ export interface ContextAssemblyInput {
 /**
  * Assemble structured context from input sections.
  *
- * Section order per spec:
+ * Section order per spec (parent channel):
  * 1. Persona (cached)
  * 2. Tool Instructions (cached)
  * 3. Instructions (cached) — if any
@@ -58,6 +70,21 @@ export interface ContextAssemblyInput {
  * 10. Chat History — Newer (uncached)
  * 11. Current Context (uncached)
  * 12. Late Instruction (uncached) — if any
+ *
+ * Section order per spec (thread channel):
+ * 1. Persona (cached)
+ * 2. Tool Instructions (cached)
+ * 3. Instructions (cached) — if any
+ * 4. Available Emojis (cached)
+ * 5. Server Members (cached)
+ * 6. Upcoming Schedules (cached) — if any
+ * 7. Thread Metadata (uncached) — thread context only
+ * 8. Parent Pre-Context (cached) — thread context only
+ * 9. Chat History — Older (cached)
+ * 10. Journal Summaries (uncached) — if any
+ * 11. Chat History — Newer (uncached)
+ * 12. Current Context (uncached)
+ * 13. Late Instruction (uncached) — if any
  *
  * Empty sections are omitted entirely.
  */
@@ -82,7 +109,23 @@ export function assembleContext(input: ContextAssemblyInput): AssembledContext {
   addWithHeader("Available Emojis", "## Available Emojis", input.emojis, true);
   addWithHeader("Server Members", "## Server Members", input.members, true);
   addWithHeader("Upcoming Schedules", "## Upcoming Schedules", input.upcomingSchedules, true);
+
+  // Parent channel: show threads in this chat
   addWithHeader("Threads In This Chat", "## Threads In This Chat", input.threadsInChat, false);
+
+  // Thread channel: show thread metadata and parent pre-context
+  if (input.threadMetadata !== undefined) {
+    const meta = input.threadMetadata;
+    const metaContent = [
+      `Parent Chat: ${meta.parentChatId}`,
+      `Thread: ${meta.threadId}`,
+      `Starter Message: ${meta.starterMessageId}`,
+      `Thread Name: "${meta.threadName}"`,
+    ].join("\n");
+    addWithHeader("Thread Metadata", "## Thread Metadata", metaContent, false);
+  }
+  add("Parent Pre-Context", input.parentPreContext, true);
+
   add("Chat History — Older", input.olderHistory, true);
   addWithHeader("Journal Summaries", "## Journal", input.journalSummaries, false);
   add("Chat History — Newer", input.newerHistory, false);

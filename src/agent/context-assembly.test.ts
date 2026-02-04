@@ -15,6 +15,7 @@ function makeInput(overrides: Partial<ContextAssemblyInput> = {}): ContextAssemb
     journalSummaries: "- User likes cats",
     upcomingSchedules: "- [cron UTC] 0 9 * * *: Good morning",
     threadsInChat: "",
+    parentPreContext: "",
     olderHistory: "## Chat History (Older)\nLegend: ...\n[@alice]: hello",
     newerHistory: "## Chat History (Recent)\n[@bob]: hi there",
     currentContext: "Guild: g1 | Channel: c1\nDate/Time: 2026-01-01T00:00:00Z",
@@ -169,6 +170,110 @@ describe("assembleContext", () => {
     const olderIdx = labels.indexOf("Chat History — Older");
     expect(threadsIdx).toBeGreaterThan(schedulesIdx);
     expect(threadsIdx).toBeLessThan(olderIdx);
+  });
+
+  test("thread metadata section is uncached and has correct format", () => {
+    const result = assembleContext(
+      makeInput({
+        threadMetadata: {
+          parentChatId: "parent-123",
+          threadId: "thread-456",
+          starterMessageId: "msg-789",
+          threadName: "Help Discussion",
+        },
+      })
+    );
+    const section = result.sections.find((s) => s.label === "Thread Metadata");
+    expect(section).toBeDefined();
+    expect(section?.cached).toBe(false);
+    expect(section?.text).toBe(
+      "## Thread Metadata\n" +
+      "Parent Chat: parent-123\n" +
+      "Thread: thread-456\n" +
+      "Starter Message: msg-789\n" +
+      'Thread Name: "Help Discussion"'
+    );
+  });
+
+  test("thread metadata section appears after schedules", () => {
+    const result = assembleContext(
+      makeInput({
+        upcomingSchedules: "- schedule",
+        threadMetadata: {
+          parentChatId: "p1",
+          threadId: "t1",
+          starterMessageId: "m1",
+          threadName: "Thread",
+        },
+        olderHistory: "## Chat History (Older)\nhello",
+      })
+    );
+    const labels = result.sections.map((s) => s.label);
+    const schedulesIdx = labels.indexOf("Upcoming Schedules");
+    const metaIdx = labels.indexOf("Thread Metadata");
+    const olderIdx = labels.indexOf("Chat History — Older");
+    expect(metaIdx).toBeGreaterThan(schedulesIdx);
+    expect(metaIdx).toBeLessThan(olderIdx);
+  });
+
+  test("thread metadata is omitted when undefined", () => {
+    const result = assembleContext(makeInput({ threadMetadata: undefined }));
+    const labels = result.sections.map((s) => s.label);
+    expect(labels).not.toContain("Thread Metadata");
+  });
+
+  test("parent pre-context section is cached and appears before older history", () => {
+    const result = assembleContext(
+      makeInput({
+        parentPreContext: "## Parent Pre-Context\n[@alice]: context from parent",
+        olderHistory: "## Chat History (Older)\nhello",
+      })
+    );
+    const section = result.sections.find((s) => s.label === "Parent Pre-Context");
+    expect(section).toBeDefined();
+    expect(section?.cached).toBe(true);
+    expect(section?.text).toBe("## Parent Pre-Context\n[@alice]: context from parent");
+
+    const labels = result.sections.map((s) => s.label);
+    const preCtxIdx = labels.indexOf("Parent Pre-Context");
+    const olderIdx = labels.indexOf("Chat History — Older");
+    expect(preCtxIdx).toBeLessThan(olderIdx);
+  });
+
+  test("parent pre-context is omitted when empty", () => {
+    const result = assembleContext(makeInput({ parentPreContext: "" }));
+    const labels = result.sections.map((s) => s.label);
+    expect(labels).not.toContain("Parent Pre-Context");
+  });
+
+  test("thread context has correct section order", () => {
+    const result = assembleContext(
+      makeInput({
+        upcomingSchedules: "- schedule",
+        threadMetadata: {
+          parentChatId: "p1",
+          threadId: "t1",
+          starterMessageId: "m1",
+          threadName: "Thread",
+        },
+        parentPreContext: "## Parent Pre-Context\nparent messages",
+        olderHistory: "## Chat History (Older)\nthread history",
+        newerHistory: "## Chat History (Recent)\nrecent thread",
+      })
+    );
+    const labels = result.sections.map((s) => s.label);
+
+    // Verify order: Schedules < Thread Metadata < Parent Pre-Context < Older < Newer
+    const schedulesIdx = labels.indexOf("Upcoming Schedules");
+    const metaIdx = labels.indexOf("Thread Metadata");
+    const preCtxIdx = labels.indexOf("Parent Pre-Context");
+    const olderIdx = labels.indexOf("Chat History — Older");
+    const newerIdx = labels.indexOf("Chat History — Newer");
+
+    expect(schedulesIdx).toBeLessThan(metaIdx);
+    expect(metaIdx).toBeLessThan(preCtxIdx);
+    expect(preCtxIdx).toBeLessThan(olderIdx);
+    expect(olderIdx).toBeLessThan(newerIdx);
   });
 
   test("persona and tool instructions pass through without extra wrapping", () => {
