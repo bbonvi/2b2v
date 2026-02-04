@@ -35,11 +35,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create non-root user for SSH
 RUN useradd -m -s /bin/bash user
 
-# SSH configuration
-RUN mkdir -p /run/sshd && \
-    mkdir -p /home/user/.ssh && \
-    chmod 700 /home/user/.ssh && \
-    chown user:user /home/user/.ssh
+# SSH configuration (authorized_keys is in /ssh-keys volume, not user home)
+RUN mkdir -p /run/sshd
 
 # sshd config: key auth only, no password, no root login
 RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && \
