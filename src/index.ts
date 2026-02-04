@@ -37,6 +37,9 @@ import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createStartTypingTool } from "./agent/start-typing-tool";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
+import { createBashTool } from "./agent/bash-tool";
+import { getSshKeyPaths, ensureSshKeys, createSshConnection, type SshKeyPaths } from "./ssh/client";
+import type { Client as SshClient } from "ssh2";
 import { listMemories, deleteExpiredMemories, countUserMemoriesByUser } from "./db/memory-repository";
 import { listUpcomingForContext, createSchedule, deleteSchedule, listSchedules } from "./db/schedule-repository";
 import { registerSlashCommands } from "./commands/registry";
@@ -147,6 +150,48 @@ const VPN_SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const vpnSessionCleanupTimer = setInterval(() => {
   vpnSessionStore.cleanExpired();
 }, VPN_SESSION_CLEANUP_INTERVAL_MS);
+
+// --- 9d. SSH key setup for bash tool ---
+const bashToolGlobalEnabled = globalConfig.defaultBashTool?.enabled === true;
+const sshKeysDir = join(process.env.SSH_KEYS_DIR ?? "ssh-keys");
+let sshKeyPaths: SshKeyPaths | undefined;
+let sshClient: SshClient | undefined;
+
+if (bashToolGlobalEnabled) {
+  sshKeyPaths = getSshKeyPaths(sshKeysDir);
+  try {
+    ensureSshKeys(sshKeyPaths);
+    log.info("ssh keys ready", { dir: sshKeysDir });
+  } catch (err) {
+    log.error("ssh key setup failed", { error: err instanceof Error ? err.message : String(err) });
+    sshKeyPaths = undefined;
+  }
+}
+
+/** Get or create SSH client connection to bash-vm. */
+async function getSshClient(): Promise<SshClient> {
+  if (sshKeyPaths === undefined) {
+    throw new Error("SSH keys not configured");
+  }
+  if (globalConfig.defaultBashTool === undefined) {
+    throw new Error("Bash tool not configured");
+  }
+  if (sshClient !== undefined) {
+    return sshClient;
+  }
+  const cfg = globalConfig.defaultBashTool.ssh;
+  sshClient = await createSshConnection(
+    { host: cfg.host, port: cfg.port, username: cfg.user },
+    sshKeyPaths,
+  );
+  sshClient.on("close", () => {
+    sshClient = undefined;
+  });
+  sshClient.on("error", () => {
+    sshClient = undefined;
+  });
+  return sshClient;
+}
 
 // --- 10. Guild config resolver ---
 function getGuildConfig(guildId: string): GuildConfig {
@@ -648,6 +693,14 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
     tools.push(createBraveSearchTool({ apiKey: globalConfig.braveApiKey }));
   }
 
+  // Bash tool if enabled (global + guild)
+  if (guildConfig.bashTool?.enabled === true && sshKeyPaths !== undefined) {
+    tools.push(createBashTool({
+      getClient: getSshClient,
+      config: guildConfig.bashTool,
+    }));
+  }
+
   return tools;
 }
 
@@ -1075,6 +1128,9 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(memoryCleanupTimer);
   clearInterval(vpnSessionCleanupTimer);
   scheduler.stop();
+  if (sshClient !== undefined) {
+    sshClient.end();
+  }
   await client.destroy();
   await embeddingQueue.shutdown();
   await disposePipeline();
