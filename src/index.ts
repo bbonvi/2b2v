@@ -988,15 +988,23 @@ client.on("messageCreate", (message: Message) => void (async () => {
       persistThread: (input) => insertThread(db, input),
       onSuccess: (payload) => {
         // Insert synthetic event in parent chat history
-        insertSyntheticEvent(db, {
-          id: crypto.randomUUID(),
-          guildId,
-          channelId: payload.parentChatId,
-          botUserId: client.user?.id ?? "",
-          botUsername: client.user?.username ?? "bot",
-          threadId: payload.threadId,
-          threadName: payload.threadName,
-        });
+        try {
+          insertSyntheticEvent(db, {
+            id: crypto.randomUUID(),
+            guildId,
+            channelId: payload.parentChatId,
+            botUserId: client.user?.id ?? "",
+            botUsername: client.user?.username ?? "bot",
+            threadId: payload.threadId,
+            threadName: payload.threadName,
+          });
+        } catch (err) {
+          // Thread created successfully — log but don't fail
+          log.error("failed to insert synthetic event for thread", {
+            threadId: payload.threadId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       },
     });
     const extraTools = [...buildAgentTools(guildId, channelId, guildConfig, guild), startTypingTool, startThreadTool];
