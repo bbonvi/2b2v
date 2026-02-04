@@ -809,14 +809,14 @@ client.on("messageCreate", (message: Message) => void (async () => {
     // Build outbound resolvers for the sender
     const outboundResolvers = buildOutboundResolvers(guild);
 
-    function storeBotMessage(sentId: string, rawContent: string, plainContent: string): void {
+    function storeBotMessage(sentId: string, targetChannelId: string, rawContent: string, plainContent: string): void {
       const ts = Date.now();
       db.raw
         .prepare(
           `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(sentId, guildId, channelId, client.user?.id ?? "", client.user?.username ?? "bot", rawContent, plainContent, 1, ts, null);
+        .run(sentId, guildId, targetChannelId, client.user?.id ?? "", client.user?.username ?? "bot", rawContent, plainContent, 1, ts, null);
 
       void embeddingQueue.enqueue({
         id: sentId,
@@ -824,7 +824,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
         target: "message",
         metadata: {
           guild_id: guildId,
-          channel_id: channelId,
+          channel_id: targetChannelId,
           user_id: client.user?.id ?? "",
           created_at: ts,
         },
@@ -856,6 +856,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
 
     const sender: MessageSender = async (text, reply, chatId, voice, _signal) => {
       const targetChannel = resolveTargetChannel(chatId);
+      const targetChannelId = targetChannel.id;
 
       const sinceTypingMs = Date.now() - lastTypingAt;
       if (sinceTypingMs >= 0 && sinceTypingMs < 200) {
@@ -868,7 +869,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
         const sent = reply
           ? await message.reply({ files: [attachment] })
           : await targetChannel.send({ files: [attachment] });
-        storeBotMessage(sent.id, "[Voice Message]", text);
+        storeBotMessage(sent.id, targetChannelId, "[Voice Message]", text);
         return { sentMessageId: sent.id };
       }
 
@@ -882,7 +883,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
           ? await message.reply(chunk)
           : await targetChannel.send(chunk);
         if (i === 0) firstId = sent.id;
-        storeBotMessage(sent.id, chunk, i === 0 ? text : chunk);
+        storeBotMessage(sent.id, targetChannelId, chunk, i === 0 ? text : chunk);
       }
       return { sentMessageId: firstId };
     };
