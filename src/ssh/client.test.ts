@@ -2,6 +2,7 @@ import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { utils } from "ssh2";
 import { getSshKeyPaths, ensureSshKeys, removeKnownHost } from "./client.ts";
 
 let tempDir: string;
@@ -108,4 +109,17 @@ test("removeKnownHost handles standard port format", () => {
 
   const result = readFileSync(paths.knownHosts, "utf-8");
   expect(result.trim()).toBe("");
+});
+
+test("generated private key can be parsed by ssh2", () => {
+  const paths = getSshKeyPaths(tempDir);
+  ensureSshKeys(paths);
+
+  const privateKey = readFileSync(paths.privateKey, "utf-8");
+  const parsed = utils.parseKey(privateKey);
+
+  // parseKey returns Error on failure, key object on success
+  expect(parsed).not.toBeInstanceOf(Error);
+  expect((parsed as { type: string }).type).toBe("ssh-ed25519");
+  expect((parsed as { comment: string }).comment).toBe("bash-tool");
 });

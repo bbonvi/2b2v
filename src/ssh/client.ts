@@ -109,12 +109,17 @@ function pemToOpenSshPublicKey(pemPublicKey: string): string {
  */
 function pkcs8ToOpenSshPrivateKey(pkcs8Pem: string, spkiPem: string): string {
   // Extract 32-byte seed from PKCS8 PEM
-  // PKCS8 structure: SEQUENCE { version, AlgorithmIdentifier, OCTET STRING { OCTET STRING { seed } } }
-  // For ED25519, the seed is at offset 16 (after headers) with length 32
+  // PKCS8 DER structure (48 bytes total):
+  //   30 2e           - SEQUENCE (46 bytes)
+  //   02 01 00        - INTEGER 0 (version)
+  //   30 05 06 03 2b 65 70 - AlgorithmIdentifier (ed25519 OID)
+  //   04 22           - OCTET STRING (34 bytes)
+  //   04 20           - OCTET STRING (32 bytes) - inner wrapper
+  //   <32 bytes>      - the actual seed
+  // Seed starts at offset 16
   const keyObj = createPrivateKey(pkcs8Pem);
   const pkcs8Der = keyObj.export({ type: "pkcs8", format: "der" });
-  // PKCS8 ED25519: 16-byte header + 2-byte OCTET STRING wrapper + 32-byte seed
-  const seed = pkcs8Der.subarray(16 + 2, 16 + 2 + 32);
+  const seed = pkcs8Der.subarray(16, 16 + 32);
 
   // Extract 32-byte public key from SPKI PEM
   const pubLines = spkiPem.split("\n").filter((l) => !l.startsWith("-----") && l.trim() !== "");
