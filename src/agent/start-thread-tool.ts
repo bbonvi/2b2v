@@ -1,0 +1,111 @@
+import { Type, type Static } from "@sinclair/typebox";
+import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+
+const StartThreadParams = Type.Object({
+  name: Type.Optional(
+    Type.String({ description: "Thread title. If omitted, defaults to 'Thread'." })
+  ),
+});
+
+export type StartThreadInput = Static<typeof StartThreadParams>;
+
+/** Details returned from the start_thread tool execution. */
+export interface StartThreadDetails {
+  threadId: string;
+  threadName: string;
+  parentChatId: string;
+}
+
+/**
+ * Callback that creates the Discord thread.
+ * Returns thread metadata on success, throws on failure.
+ */
+export type ThreadCreator = (name: string) => Promise<{
+  threadId: string;
+  threadName: string;
+  parentChatId: string;
+  starterMessageId: string;
+}>;
+
+/**
+ * Callback that persists the thread record to the database.
+ */
+export type ThreadPersister = (input: {
+  threadId: string;
+  guildId: string;
+  parentChatId: string;
+  starterMessageId: string;
+  threadName: string;
+}) => void;
+
+/** Dependencies for the start_thread tool. */
+export interface StartThreadToolDeps {
+  guildId: string;
+  createThread: ThreadCreator;
+  persistThread: ThreadPersister;
+}
+
+/**
+ * Create the start_thread AgentTool.
+ * Creates a public, message-attached thread on the trigger message.
+ */
+export function createStartThreadTool(
+  deps: StartThreadToolDeps
+): AgentTool<typeof StartThreadParams, StartThreadDetails | { error: string }> {
+  const { guildId, createThread, persistThread } = deps;
+
+  return {
+    name: "start_thread",
+    label: "Start Thread",
+    description:
+      "Create a new thread attached to the trigger message. Use when you want to continue a conversation in a separate thread (e.g., for long discussions, private topics, or to avoid cluttering the main chat). Returns the thread_id for use with send_message(chat_id).",
+    parameters: StartThreadParams,
+    execute: async (
+      _toolCallId,
+      params
+    ): Promise<AgentToolResult<StartThreadDetails | { error: string }>> => {
+      const { name } = params;
+      const threadName = name ?? "Thread";
+
+      let result: Awaited<ReturnType<ThreadCreator>>;
+      try {
+        result = await createThread(threadName);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        return {
+          content: [{ type: "text", text: `Failed to create thread: ${message}` }],
+          details: { error: message },
+        };
+      }
+
+      // Persist thread record (bot_participating starts false, set true after first bot message)
+      try {
+        persistThread({
+          threadId: result.threadId,
+          guildId,
+          parentChatId: result.parentChatId,
+          starterMessageId: result.starterMessageId,
+          threadName: result.threadName,
+        });
+      } catch (err) {
+        // Thread created in Discord but failed to persist — log and continue
+        // The thread exists, so return success (can be recovered later)
+        console.error("Failed to persist thread record:", err);
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Thread created: "${result.threadName}" (thread_id: ${result.threadId}). Use send_message(chat_id="${result.threadId}") to post in the thread.`,
+          },
+        ],
+        details: {
+          threadId: result.threadId,
+          threadName: result.threadName,
+          parentChatId: result.parentChatId,
+        },
+      };
+    },
+  };
+}

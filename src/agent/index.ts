@@ -56,3 +56,5 @@ export { createFetchImagesTool, type FetchImagesToolDeps } from "./fetch-images-
 export { fetchMissingReplyTargets, type ReplyFallbackDeps, type FetchedDiscordMessage } from "./reply-target-fallback.ts";
 
 export { createFetchUrlTool, type FetchUrlToolDeps } from "./fetch-url-tool.ts";
+
+export { createStartThreadTool, type StartThreadToolDeps, type StartThreadDetails } from "./start-thread-tool.ts";
