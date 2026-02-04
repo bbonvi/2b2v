@@ -63,13 +63,13 @@ services:
       - bash-net
     cap_add:
       - NET_ADMIN
-    # Resource limits to prevent fork bombs and resource exhaustion
-    pids_limit: 64
+    # Resource limits - watchdog handles runaway processes, limits are safety caps
+    pids_limit: 100
     mem_limit: 512m
     memswap_limit: 512m
     cpus: 1.0
     ulimits:
-      nproc: 64
+      nproc: 100
       nofile:
         soft: 1024
         hard: 4096
