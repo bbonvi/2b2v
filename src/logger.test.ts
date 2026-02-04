@@ -417,4 +417,32 @@ describe("RequestLog", () => {
 
     expect(requestLogStore.query({}).length).toBe(before + 1);
   });
+
+  test("dashboard store receives full tool result while console is truncated", () => {
+    const logger = createLogger({ level: "info" });
+    const before = requestLogStore.query({}).length;
+    const rl = new RequestLog("g1", "c1");
+    rl.setAgentRan(true);
+
+    // Generate a result longer than 500 chars (console truncation threshold)
+    const longResult = "x".repeat(1000);
+    rl.recordToolStart("tc1", "bash", { command: "echo test" });
+    rl.recordToolEnd("tc1", false, {
+      content: [{ type: "text", text: longResult }],
+    });
+    rl.emit(logger);
+
+    // Dashboard store should have full result
+    const storeEntries = requestLogStore.query({});
+    expect(storeEntries.length).toBe(before + 1);
+    const dashboardTools = storeEntries[0]?.tools;
+    expect(dashboardTools?.[0]?.result).toBe(longResult);
+    expect(dashboardTools?.[0]?.result?.length).toBe(1000);
+
+    // Console log should be truncated to 500 chars + ellipsis
+    const consoleEntry = lastLog();
+    const consoleTools = consoleEntry.tools as Array<Record<string, unknown>>;
+    expect((consoleTools[0]?.result as string).length).toBe(501); // 500 + "…"
+    expect((consoleTools[0]?.result as string).endsWith("…")).toBe(true);
+  });
 });

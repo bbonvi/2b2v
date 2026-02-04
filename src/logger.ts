@@ -182,7 +182,8 @@ export class RequestLog {
           .map((c) => c.text)
           .join("\n");
         if (text.length > 0) {
-          resultText = text.length > 500 ? text.slice(0, 500) + "… [truncated]" : text;
+          // Store full result for dashboard; truncation happens in emit() for console
+          resultText = text;
         }
       }
     }
