@@ -61,6 +61,16 @@ services:
       - bash-net
     cap_add:
       - NET_ADMIN
+    # Resource limits to prevent fork bombs and resource exhaustion
+    pids_limit: 64
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.0
+    ulimits:
+      nproc: 64
+      nofile:
+        soft: 1024
+        hard: 4096
     depends_on:
       bot:
         condition: service_healthy

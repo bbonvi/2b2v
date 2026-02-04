@@ -104,7 +104,8 @@ export function validateVpnConfig(vpn: VpnConfig | undefined): void {
 
 /**
  * Default blocklist patterns for the bash tool.
- * Blocks: shutdown/reboot, network/firewall admin, iptables, container escape attempts.
+ * Blocks: shutdown/reboot, network/firewall admin, iptables, container escape attempts,
+ * fork bombs, and resource exhaustion patterns.
  */
 const DEFAULT_BASH_BLOCKLIST: string[] = [
   // System shutdown/reboot
@@ -123,6 +124,10 @@ const DEFAULT_BASH_BLOCKLIST: string[] = [
   "\\b(mount|umount|mkfs|fdisk|parted)\\b",
   // SSH daemon attacks
   "\\b(killall\\s+sshd|pkill\\s+sshd)\\b",
+  // Fork bombs and recursive process spawning
+  ":\\(\\)\\s*\\{.*\\|.*&.*\\}",  // Classic fork bomb :(){ :|:& };:
+  "\\|\\s*:\\s*&",                // Piping to : with background
+  "\\bwhile\\b.*\\bdone\\s*&",    // Backgrounded while loops
 ];
 
 const DEFAULT_BASH_SSH = {

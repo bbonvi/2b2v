@@ -108,3 +108,6 @@ bashTool:
     - "\\b(modprobe|insmod|rmmod|lsmod)\\b"
     - "\\b(mount|umount|mkfs|fdisk|parted)\\b"
     - "\\b(killall\\s+sshd|pkill\\s+sshd)\\b"
+    - ":\\(\\)\\s*\\{.*\\|.*&.*\\}"    # Fork bomb pattern
+    - "\\|\\s*:\\s*&"                  # Pipe to : with background
+    - "\\bwhile\\b.*\\bdone\\s*&"      # Backgrounded while loops
