@@ -126,13 +126,15 @@ export async function handleMessage(
   const reqLog = deps.requestLog;
   let isFirstTurn = true;
   const wrappedStreamFn: typeof streamSimple = (model_, context, options) => {
-    // Force tool call on first turn to ensure the agent acts on user input
-    const toolChoice = isFirstTurn ? "required" : undefined;
+    // Force exactly one tool call on first turn to ensure the agent acts on user input
+    // parallelToolCalls: false prevents runaway duplicate calls from confused models
+    const firstTurn = isFirstTurn;
     isFirstTurn = false;
     return streamSimple(model_, context, {
       ...options,
       ...streamOptions,
-      toolChoice,
+      toolChoice: firstTurn ? "required" : undefined,
+      parallelToolCalls: firstTurn ? false : undefined,
       onPayload: (payload: unknown) => {
         reqLog?.recordLLMRequest(payload);
       },
