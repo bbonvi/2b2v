@@ -837,9 +837,10 @@ client.on("messageCreate", (message: Message) => void (async () => {
     }
 
     // Build message sender
+    // TODO: Route by chatId instead of always using channelObj
     const channelObj = message.channel as TextChannel;
 
-    const sender: MessageSender = async (text, reply, voice, _signal) => {
+    const sender: MessageSender = async (text, reply, _chatId, voice, _signal) => {
       const sinceTypingMs = Date.now() - lastTypingAt;
       if (sinceTypingMs >= 0 && sinceTypingMs < 200) {
         await new Promise((resolve) => setTimeout(resolve, 200 - sinceTypingMs));

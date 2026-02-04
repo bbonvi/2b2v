@@ -8,6 +8,12 @@ const SendMessageParams = Type.Object({
     description: "When true, send as a reply to the trigger message. When false, send as a normal channel message.",
     default: false,
   }),
+  chat_id: Type.Optional(
+    Type.String({
+      description:
+        "Target chat ID (channel, thread, or DM). Omit to send to current chat. Cannot use reply=true with a different chat_id.",
+    })
+  ),
   is_voice_message: Type.Optional(
     Type.Boolean({
       description: "When true, send as a voice message (audio attachment) instead of text. Use sparingly.",
@@ -44,6 +50,7 @@ export interface SendMessageDetails {
 export type MessageSender = (
   text: string,
   reply: boolean,
+  chatId: string | undefined,
   voice?: VoiceAttachment,
   signal?: AbortSignal
 ) => Promise<{ sentMessageId: string }>;
@@ -69,18 +76,31 @@ export function createSendMessageTool(
     name: "send_message",
     label: "Send Message",
     description:
-      "Send a message to the current Discord channel. Set reply=true to reply to the trigger message, or reply=false for a normal channel message. Call multiple times to send multiple messages. Optional: is_voice_message=true sends as audio attachment.",
+      "Send a message. Optionally specify chat_id to send to a thread or other chat. Set reply=true to reply to the trigger message (only valid for current chat). Call multiple times to send multiple messages. Optional: is_voice_message=true sends as audio attachment.",
     parameters: SendMessageParams,
     execute: async (
       _toolCallId,
       params,
       signal
     ): Promise<AgentToolResult<SendMessageDetails>> => {
-      const { text, reply, is_voice_message, voice_type } = params;
+      const { text, reply, chat_id, is_voice_message, voice_type } = params;
+
+      // Reject cross-chat reply: cannot reply to trigger message when targeting a different chat
+      if (chat_id !== undefined && reply) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Cannot use reply=true when sending to a different chat. Set reply=false or omit chat_id.",
+            },
+          ],
+          details: { sentMessageId: "" },
+        };
+      }
 
       // Text-only path (default)
       if (is_voice_message !== true) {
-        const result = await sender(text, reply, undefined, signal);
+        const result = await sender(text, reply, chat_id, undefined, signal);
         return {
           content: [{ type: "text", text: "Message sent." }],
           details: { sentMessageId: result.sentMessageId },
@@ -129,7 +149,7 @@ export function createSendMessageTool(
         contentType: ttsResult.contentType,
       };
 
-      const result = await sender(text, reply, voiceAttachment, signal);
+      const result = await sender(text, reply, chat_id, voiceAttachment, signal);
 
       return {
         content: [{ type: "text", text: "Voice message sent." }],

@@ -26,13 +26,20 @@ const defaultTtsConfig: TtsConfig = {
   },
 };
 
+interface MockSenderCall {
+  text: string;
+  reply: boolean;
+  chatId?: string;
+  voice?: VoiceAttachment;
+}
+
 function createMockSender(): {
   sender: MessageSender;
-  calls: { text: string; reply: boolean; voice?: VoiceAttachment }[];
+  calls: MockSenderCall[];
 } {
-  const calls: { text: string; reply: boolean; voice?: VoiceAttachment }[] = [];
-  const sender: MessageSender = (text, reply, voice) => {
-    calls.push({ text, reply, voice });
+  const calls: MockSenderCall[] = [];
+  const sender: MessageSender = (text, reply, chatId, voice) => {
+    calls.push({ text, reply, chatId, voice });
     return Promise.resolve({ sentMessageId: "msg-1" });
   };
   return { sender, calls };
@@ -68,7 +75,7 @@ describe("createSendMessageTool", () => {
       const result = await tool.execute("call-1", { text: "Hello", reply: false });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual({ text: "Hello", reply: false, voice: undefined });
+      expect(calls[0]).toEqual({ text: "Hello", reply: false, chatId: undefined, voice: undefined });
       expect(result.details.sentMessageId).toBe("msg-1");
       expect(result.content[0]).toEqual({
         type: "text",
@@ -82,13 +89,13 @@ describe("createSendMessageTool", () => {
 
       const result = await tool.execute("call-1", { text: "Hi there", reply: true });
 
-      expect(calls[0]).toEqual({ text: "Hi there", reply: true, voice: undefined });
+      expect(calls[0]).toEqual({ text: "Hi there", reply: true, chatId: undefined, voice: undefined });
       expect(result.details.sentMessageId).toBe("msg-1");
     });
 
     test("execute propagates signal to sender", async () => {
       let receivedSignal: AbortSignal | undefined;
-      const sender: MessageSender = (_text, _reply, _voice, signal) => {
+      const sender: MessageSender = (_text, _reply, _chatId, _voice, signal) => {
         receivedSignal = signal;
         return Promise.resolve({ sentMessageId: "" });
       };
@@ -117,6 +124,97 @@ describe("createSendMessageTool", () => {
       expect(calls).toHaveLength(1);
       expect(calls[0]?.voice).toBeUndefined();
       expect(result.content[0]).toEqual({ type: "text", text: "Message sent." });
+    });
+  });
+
+  describe("chat_id routing", () => {
+    test("passes chat_id to sender when provided", async () => {
+      const { sender, calls } = createMockSender();
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+
+      const result = await tool.execute("call-1", {
+        text: "Hello thread",
+        reply: false,
+        chat_id: "thread-123",
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toEqual({
+        text: "Hello thread",
+        reply: false,
+        chatId: "thread-123",
+        voice: undefined,
+      });
+      expect(result.details.sentMessageId).toBe("msg-1");
+    });
+
+    test("chat_id undefined defaults to current chat (existing behavior)", async () => {
+      const { sender, calls } = createMockSender();
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+
+      await tool.execute("call-1", { text: "Hi", reply: false });
+
+      expect(calls[0]?.chatId).toBeUndefined();
+    });
+
+    test("returns error when chat_id provided with reply=true", async () => {
+      const { sender, calls } = createMockSender();
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+
+      const result = await tool.execute("call-1", {
+        text: "This should fail",
+        reply: true,
+        chat_id: "thread-123",
+      });
+
+      expect(calls).toHaveLength(0);
+      expect(result.details.sentMessageId).toBe("");
+      expect(result.content[0]).toEqual({
+        type: "text",
+        text: "Cannot use reply=true when sending to a different chat. Set reply=false or omit chat_id.",
+      });
+    });
+
+    test("allows reply=false with chat_id", async () => {
+      const { sender, calls } = createMockSender();
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+
+      const result = await tool.execute("call-1", {
+        text: "Continue in thread",
+        reply: false,
+        chat_id: "thread-456",
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.chatId).toBe("thread-456");
+      expect(result.details.sentMessageId).toBe("msg-1");
+    });
+
+    test("passes chat_id through for voice messages", async () => {
+      const { sender, calls } = createMockSender();
+      const { generate } = createMockGenerateSpeech({
+        ok: true,
+        buffer: Buffer.from("audio"),
+        contentType: "audio/mpeg",
+      });
+
+      const tool = createSendMessageTool({
+        sender,
+        ttsEnabled: true,
+        ttsConfig: defaultTtsConfig,
+        generateSpeech: generate,
+      });
+
+      await tool.execute("call-1", {
+        text: "Voice in thread",
+        reply: false,
+        is_voice_message: true,
+        chat_id: "thread-789",
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.chatId).toBe("thread-789");
+      expect(calls[0]?.voice).toBeDefined();
     });
   });
 
