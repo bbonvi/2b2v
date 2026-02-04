@@ -283,3 +283,48 @@ export function searchMessagesLiteral(
     score: 1.0,
   }));
 }
+
+export interface InsertSyntheticEventInput {
+  /** Unique ID for the synthetic event (e.g., generated UUID). */
+  id: string;
+  guildId: string;
+  /** Parent channel where the event is recorded. */
+  channelId: string;
+  /** Bot user ID as the author. */
+  botUserId: string;
+  /** Bot username for display. */
+  botUsername: string;
+  /** Thread ID this event references. */
+  threadId: string;
+  /** Thread name for the event content. */
+  threadName: string;
+}
+
+/**
+ * Insert a synthetic "Event" row for thread creation.
+ * Stored in the parent chat with is_synthetic=1 and related_thread_id set.
+ * Never embedded or included in search results.
+ */
+export function insertSyntheticEvent(db: Database, input: InsertSyntheticEventInput): void {
+  const now = Date.now();
+  const content = `Event: Thread created — ${input.threadName} (thread_id: ${input.threadId})`;
+
+  db.raw
+    .prepare(
+      `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, is_synthetic, related_thread_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      input.id,
+      input.guildId,
+      input.channelId,
+      input.botUserId,
+      input.botUsername,
+      content,
+      content,
+      1,
+      now,
+      1,
+      input.threadId
+    );
+}

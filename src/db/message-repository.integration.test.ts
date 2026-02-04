@@ -3,7 +3,7 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "./database";
 import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
-import { searchMessages, getMessageById, searchMessagesLiteral, getHistoryMessages } from "./message-repository";
+import { searchMessages, getMessageById, searchMessagesLiteral, getHistoryMessages, insertSyntheticEvent } from "./message-repository";
 import { createMockPipeline } from "../embeddings/test-utils";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
@@ -573,5 +573,47 @@ describe("getHistoryMessages", () => {
     for (const msg of results) {
       expect(msg.hasEmbeds).toBe(false);
     }
+  });
+});
+
+describe("insertSyntheticEvent", () => {
+  test("inserts synthetic event with correct format and fields", () => {
+    insertSyntheticEvent(db, {
+      id: "syn-event-1",
+      guildId: "g1",
+      channelId: "c1",
+      botUserId: "bot-123",
+      botUsername: "TestBot",
+      threadId: "thread-456",
+      threadName: "Help Discussion",
+    });
+
+    const row = db.raw.prepare("SELECT * FROM messages WHERE id = ?").get("syn-event-1") as Record<string, unknown>;
+    expect(row.guild_id).toBe("g1");
+    expect(row.channel_id).toBe("c1");
+    expect(row.user_id).toBe("bot-123");
+    expect(row.author_username).toBe("TestBot");
+    expect(row.is_bot).toBe(1);
+    expect(row.is_synthetic).toBe(1);
+    expect(row.related_thread_id).toBe("thread-456");
+    expect(row.translated_content).toBe("Event: Thread created — Help Discussion (thread_id: thread-456)");
+    expect(row.raw_content).toBe("Event: Thread created — Help Discussion (thread_id: thread-456)");
+  });
+
+  test("synthetic event is excluded from literal search", () => {
+    insertSyntheticEvent(db, {
+      id: "syn-event-2",
+      guildId: "g1",
+      channelId: "c1",
+      botUserId: "bot-123",
+      botUsername: "TestBot",
+      threadId: "thread-789",
+      threadName: "Bug Report Thread",
+    });
+    insertMessage("real-msg", { guildId: "g1", translatedContent: "Bug Report Thread discussion" });
+
+    const results = searchMessagesLiteral(db, "Bug Report", { guildId: "g1", limit: 10 });
+    expect(results.length).toBe(1);
+    expect(results[0]?.id).toBe("real-msg");
   });
 });
