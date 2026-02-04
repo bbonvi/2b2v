@@ -237,7 +237,7 @@ export async function handleVpnComponent(
       case "delete": {
         // Delete profile specified by param (server_name|address, deferred)
         if (param === undefined) {
-          await interaction.editReply(buildErrorPanel(session, "Сервер не указан."));
+          await interaction.editReply(buildErrorPanel(session, "Профиль не указан."));
           break;
         }
 
