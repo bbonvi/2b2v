@@ -66,3 +66,8 @@ imageCaptioningEnabled: false
 #       stability: 0.7
 #       similarityBoost: 0.8
 #       model: eleven_flash_v2_5
+
+# Bash tool toggle (global-only settings; guild can only enable/disable)
+# Requires global bashTool.enabled: true and bash-vm service running.
+# bashTool:
+#   enabled: true

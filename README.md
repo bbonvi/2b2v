@@ -169,6 +169,7 @@ The bot has access to these tools during conversations. The LLM decides when and
 | `fetch_images` | Fetch external images by URL (ephemeral, not stored) |
 | `fetch_url` | Fetch a URL and extract its readable content as markdown |
 | `web_search` | Search the web via Brave Search API |
+| `bash` | Execute shell commands in isolated container (disabled by default; IPs redacted, output truncated, command blocklist enforced) |
 
 Note: `send_message` supports optional voice message parameters (`is_voice_message`, `voice_type`) when TTS is configured.
 

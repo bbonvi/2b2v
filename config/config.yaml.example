@@ -87,3 +87,22 @@ vpn:
   enabled: false
   apiUrl: ""      # Required when enabled (e.g., https://your-vpn-api.example.com)
   vpnPeer: ""     # Required when enabled (WireGuard endpoint host)
+
+# Bash tool configuration (remote shell execution via SSH)
+# Requires docker-compose bash-vm service when enabled.
+# Guild configs can only toggle enabled; all other settings are global-only.
+bashTool:
+  enabled: false
+  ssh:
+    host: bash-vm
+    port: 22
+    user: user
+  timeoutMs: 5000      # Max command runtime (capped at 5000)
+  outputLimit: 4000    # Max chars returned after IP redaction
+  blocklist:           # Regex patterns for blocked commands (case-insensitive)
+    - "\\b(shutdown|reboot|poweroff|halt|init\\s+[06])\\b"
+    - "\\b(iptables|ip6tables|nft|nftables|ufw|firewall-cmd)\\b"
+    - "\\b(ifconfig|ip\\s+(link|addr|route)|route\\s+(add|del))\\b"
+    - "\\b(docker|podman|kubectl|nsenter|chroot)\\b"
+    - "\\b(modprobe|insmod|rmmod|lsmod)\\b"
+    - "\\b(mount|umount|mkfs|fdisk|parted)\\b"
