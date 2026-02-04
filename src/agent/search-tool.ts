@@ -30,7 +30,7 @@ const SearchParams = Type.Object({
   ], { description: "Search mode. 'semantic' (default): AI similarity search. 'literal': exact keyword/phrase match (case-insensitive). 'id': direct message ID lookup." })),
   query: Type.String({ description: "Search query, keyword/phrase, or message ID depending on mode." }),
   username: Type.Optional(Type.String({ description: "Filter results to a specific username." })),
-  channelId: Type.Optional(Type.String({ description: "Filter results to a specific channel ID." })),
+  chat_id: Type.Optional(Type.String({ description: "Filter results to a specific chat (channel, thread, or DM)." })),
   afterMs: Type.Optional(Type.Number({ description: "Only messages after this epoch ms timestamp." })),
   beforeMs: Type.Optional(Type.Number({ description: "Only messages before this epoch ms timestamp." })),
   limit: Type.Optional(Type.Number({ description: "Max results to return. Default 10." })),
@@ -47,14 +47,14 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
     name: "search_messages",
     label: "Search Messages",
     description:
-      "Search chat history. Modes: 'semantic' (default) — AI similarity search with natural language; 'literal' — case-insensitive keyword/phrase match; 'id' — direct message lookup by ID. Optionally filter by username, channel, or time range.",
+      "Search chat history. Modes: 'semantic' (default) — AI similarity search with natural language; 'literal' — case-insensitive keyword/phrase match; 'id' — direct message lookup by ID. Optionally filter by username, chat, or time range.",
     parameters: SearchParams,
     execute: async (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as {
         mode?: "semantic" | "literal" | "id";
         query: string;
         username?: string;
-        channelId?: string;
+        chat_id?: string;
         afterMs?: number;
         beforeMs?: number;
         limit?: number;
@@ -84,7 +84,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
           results = searchMessagesLiteral(db, p.query, {
             guildId,
             userId: userId,
-            channelId: p.channelId,
+            channelId: p.chat_id,
             after: p.afterMs,
             before: p.beforeMs,
             limit,
@@ -110,7 +110,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
           results = await searchMessages(db, qdrant, queryVec, {
             guildId,
             userId: userId,
-            channelId: p.channelId,
+            channelId: p.chat_id,
             after: p.afterMs,
             before: p.beforeMs,
             limit,
