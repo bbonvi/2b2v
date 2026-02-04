@@ -132,13 +132,14 @@ describe("createStartThreadTool", () => {
     expect(details.threadId).toBe("thread-123");
   });
 
-  test("includes chat_id usage hint in response", async () => {
+  test("includes chat_id usage hint and parent_chat_id in response", async () => {
     const deps = makeDeps();
     const tool = createStartThreadTool(deps);
     const result = await tool.execute("tc1", { name: "Test" }, AbortSignal.timeout(5000));
 
     const text = (result.content[0] as TextContent).text;
     expect(text).toContain('send_message(chat_id="thread-123")');
+    expect(text).toContain("parent_chat_id: channel-456");
   });
 
   test("calls onSuccess callback after successful creation and persistence", async () => {

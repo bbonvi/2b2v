@@ -918,8 +918,12 @@ client.on("messageCreate", (message: Message) => void (async () => {
           ? await message.reply({ files: [attachment] })
           : await targetChannel.send({ files: [attachment] });
         storeBotMessage(sent.id, targetChannelId, "[Voice Message]", text);
-        // Mark bot participating if sending to a thread
+        // Update thread activity and mark bot participating if sending to a thread
         if (targetChannel.isThread()) {
+          updateThreadActivity(db, targetChannelId, {
+            lastActivityAt: Date.now(),
+            lastMessageId: sent.id,
+          });
           markBotParticipating(db, targetChannelId);
         }
         return { sentMessageId: sent.id };
@@ -937,8 +941,12 @@ client.on("messageCreate", (message: Message) => void (async () => {
         if (i === 0) firstId = sent.id;
         storeBotMessage(sent.id, targetChannelId, chunk, i === 0 ? text : chunk);
       }
-      // Mark bot participating if sending to a thread
+      // Update thread activity and mark bot participating if sending to a thread
       if (targetChannel.isThread()) {
+        updateThreadActivity(db, targetChannelId, {
+          lastActivityAt: Date.now(),
+          lastMessageId: firstId,
+        });
         markBotParticipating(db, targetChannelId);
       }
       return { sentMessageId: firstId };

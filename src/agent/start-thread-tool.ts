@@ -118,7 +118,7 @@ export function createStartThreadTool(deps: StartThreadToolDeps): AgentTool {
         content: [
           {
             type: "text",
-            text: `Thread created: "${result.threadName}" (thread_id: ${result.threadId}). Use send_message(chat_id="${result.threadId}") to post in the thread.`,
+            text: `Thread created: "${result.threadName}" (thread_id: ${result.threadId}, parent_chat_id: ${result.parentChatId}). Use send_message(chat_id="${result.threadId}") to post in the thread.`,
           },
         ],
         details: {

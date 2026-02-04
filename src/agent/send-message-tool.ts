@@ -41,6 +41,7 @@ export interface SendMessageDetails {
   sentMessageId: string;
   voiceGenerated?: boolean;
   voiceError?: string;
+  error?: string;
 }
 
 /**
@@ -100,7 +101,16 @@ export function createSendMessageTool(
 
       // Text-only path (default)
       if (is_voice_message !== true) {
-        const result = await sender(text, reply, chat_id, undefined, signal);
+        let result: { sentMessageId: string };
+        try {
+          result = await sender(text, reply, chat_id, undefined, signal);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          return {
+            content: [{ type: "text", text: `Failed to send message: ${message}` }],
+            details: { sentMessageId: "", error: message },
+          };
+        }
         return {
           content: [{ type: "text", text: "Message sent." }],
           details: { sentMessageId: result.sentMessageId },
@@ -149,7 +159,16 @@ export function createSendMessageTool(
         contentType: ttsResult.contentType,
       };
 
-      const result = await sender(text, reply, chat_id, voiceAttachment, signal);
+      let result: { sentMessageId: string };
+      try {
+        result = await sender(text, reply, chat_id, voiceAttachment, signal);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        return {
+          content: [{ type: "text", text: `Failed to send voice message: ${message}` }],
+          details: { sentMessageId: "", voiceGenerated: true, voiceError: message },
+        };
+      }
 
       return {
         content: [{ type: "text", text: "Voice message sent." }],

@@ -107,12 +107,18 @@ describe("createSendMessageTool", () => {
       expect(receivedSignal).toBe(controller.signal);
     });
 
-    test("propagates sender errors", async () => {
+    test("returns tool error when sender fails", async () => {
       const sender: MessageSender = () => Promise.reject(new Error("Discord API unavailable"));
       const tool = createSendMessageTool({ sender, ttsEnabled: false });
 
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects is async
-      await expect(tool.execute("call-1", { text: "hi", reply: false })).rejects.toThrow("Discord API unavailable");
+      const result = await tool.execute("call-1", { text: "hi", reply: false });
+
+      expect(result.details.sentMessageId).toBe("");
+      expect((result.details as { error?: string }).error).toBe("Discord API unavailable");
+      expect(result.content[0]).toEqual({
+        type: "text",
+        text: "Failed to send message: Discord API unavailable",
+      });
     });
 
     test("is_voice_message=false behaves like text message", async () => {
@@ -215,6 +221,54 @@ describe("createSendMessageTool", () => {
       expect(calls).toHaveLength(1);
       expect(calls[0]?.chatId).toBe("thread-789");
       expect(calls[0]?.voice).toBeDefined();
+    });
+
+    test("returns clear error when sender throws (invalid chat_id)", async () => {
+      const sender: MessageSender = () => Promise.reject(new Error('Invalid chat_id: channel "bad-id" not found'));
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+
+      const result = await tool.execute("call-1", {
+        text: "Hello",
+        reply: false,
+        chat_id: "bad-id",
+      });
+
+      expect(result.details.sentMessageId).toBe("");
+      expect((result.details as { error?: string }).error).toBe('Invalid chat_id: channel "bad-id" not found');
+      expect(result.content[0]).toEqual({
+        type: "text",
+        text: 'Failed to send message: Invalid chat_id: channel "bad-id" not found',
+      });
+    });
+
+    test("returns clear error when voice sender throws (invalid chat_id)", async () => {
+      const sender: MessageSender = () => Promise.reject(new Error('Invalid chat_id: channel "bad-id" not found'));
+      const { generate } = createMockGenerateSpeech({
+        ok: true,
+        buffer: Buffer.from("audio"),
+        contentType: "audio/mpeg",
+      });
+
+      const tool = createSendMessageTool({
+        sender,
+        ttsEnabled: true,
+        ttsConfig: defaultTtsConfig,
+        generateSpeech: generate,
+      });
+
+      const result = await tool.execute("call-1", {
+        text: "Voice hello",
+        reply: false,
+        is_voice_message: true,
+        chat_id: "bad-id",
+      });
+
+      expect(result.details.sentMessageId).toBe("");
+      expect((result.details as { voiceError?: string }).voiceError).toBe('Invalid chat_id: channel "bad-id" not found');
+      expect(result.content[0]).toEqual({
+        type: "text",
+        text: 'Failed to send voice message: Invalid chat_id: channel "bad-id" not found',
+      });
     });
   });
 
