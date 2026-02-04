@@ -15,15 +15,6 @@ export {
   type WipeResult,
 } from "./memory-wipe.ts";
 export {
-  configCommandDefinition,
-  createConfigHandler,
-  CONFIGURABLE_KEYS,
-  validateConfigValue,
-  formatConfigValue,
-  type ConfigCommandDeps,
-  type ConfigKey,
-} from "./config.ts";
-export {
   scheduleCommandDefinition,
   createScheduleHandler,
   formatScheduleRow,

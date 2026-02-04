@@ -98,32 +98,6 @@ Most slash commands are admin-only (Discord Administrator permission or per-guil
 
 Shows uptime and basic stats.
 
-### `/config list | get <key> | set <key> <value>`
-
-View or modify guild settings at runtime. Changes persist to the guild YAML file.
-
-Configurable keys:
-
-| Key | Type | Description |
-|---|---|---|
-| `model` | string | OpenRouter model ID |
-| `thinkingLevel` | string | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `timezone` | string | IANA timezone for schedules |
-| `triggers.mention` | boolean | Respond to @mentions |
-| `triggers.keywords` | string[] | Comma-separated keyword list |
-| `triggers.randomChance` | number | 0–1, probability of random response |
-| `trim.trimTrigger` | number | Message count that triggers trimming |
-| `trim.trimTarget` | number | Message count after trimming |
-| `memoryRetentionDays` | number | Default TTL for non-journal memories |
-| `imageMaxDimension` | number | Max image dimension in pixels before resize |
-| `trim.windowSize` | number | Recent (uncached) history window size |
-| `trim.messageCharLimit` | number | Max chars per message before trimming |
-| `trim.replyQuoteChars` | number | Max chars for reply quotes |
-| `mergeMessageGapSeconds` | number | Max gap for merging consecutive messages |
-| `imageReadMaxPerCall` | number | Max images per image read |
-| `imageCaptioningEnabled` | boolean | Enable image captioning (TBD) |
-| `attachmentsDir` | string | Image storage directory |
-
 ### `/schedule list | add | remove`
 
 Manage scheduled messages for the guild.

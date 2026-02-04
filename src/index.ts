@@ -1,7 +1,7 @@
 import { createLogger, RequestLog, type LogLevel } from "./logger";
 import { requestLogStore } from "./dashboard/store";
 import { startDashboard } from "./dashboard/server";
-import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, saveGuildConfig, validateTrimConfig, validateVpnConfig, validateBashToolConfig } from "./config/loader";
+import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, validateTrimConfig, validateVpnConfig, validateBashToolConfig } from "./config/loader";
 import type { GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
 import { createQdrantClient, ensureCollection, healthCheck } from "./qdrant/client";
@@ -46,7 +46,6 @@ import { listMemories, deleteExpiredMemories, countUserMemoriesByUser } from "./
 import { listUpcomingForContext, createSchedule, deleteSchedule, listSchedules } from "./db/schedule-repository";
 import { registerSlashCommands } from "./commands/registry";
 import { createStatusHandler, statusCommandDefinition } from "./commands/status";
-import { createConfigHandler, configCommandDefinition } from "./commands/config";
 import { createScheduleHandler, scheduleCommandDefinition } from "./commands/schedule";
 import { createMemoryWipeHandler, memoryWipeCommandDefinition } from "./commands/memory-wipe";
 import { vpnCommandDefinition } from "./commands/vpn";
@@ -283,7 +282,6 @@ if (botUser !== null) {
       clientId: botUser.id,
       commands: [
         statusCommandDefinition.toJSON(),
-        configCommandDefinition.toJSON(),
         scheduleCommandDefinition.toJSON(),
         memoryWipeCommandDefinition.toJSON(),
         vpnCommandDefinition.toJSON(),
@@ -311,17 +309,6 @@ function setupCommandHandlers(guildId: string): void {
       memoryCount: (db.raw.prepare("SELECT COUNT(*) as c FROM memories").get() as { c: number }).c,
       scheduleCount: (db.raw.prepare("SELECT COUNT(*) as c FROM schedules WHERE enabled = 1").get() as { c: number }).c,
     }),
-    adminUserIds: config.adminUserIds,
-  }));
-
-  commandHandlers.set("config", createConfigHandler({
-    getGuildConfig,
-    updateGuildConfig: (gId, updated) => {
-      guildConfigs.set(gId, updated);
-      const slug = guildConfigs.get(gId)?.slug ?? "";
-      const filePath = join(guildsDir, `${gId}-${slug}.yaml`);
-      saveGuildConfig(filePath, updated);
-    },
     adminUserIds: config.adminUserIds,
   }));
 
