@@ -47,6 +47,10 @@ RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/s
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Process watchdog - root-only, kills runaway user processes
+COPY proc-watchdog /usr/local/sbin/proc-watchdog
+RUN chmod 700 /usr/local/sbin/proc-watchdog && chown root:root /usr/local/sbin/proc-watchdog
+
 EXPOSE 22
 
 ENTRYPOINT ["/entrypoint.sh"]

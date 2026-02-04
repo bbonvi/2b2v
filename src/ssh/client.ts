@@ -319,6 +319,7 @@ export async function createSshConnection(
 
 /**
  * Execute a command over SSH with timeout handling.
+ * Uses coreutils `timeout` to ensure proper process tree cleanup on timeout.
  * Returns stdout, exit code, and timeout status.
  */
 export async function execSshCommand(
@@ -335,14 +336,21 @@ export async function execSshCommand(
   return new Promise((resolve, reject) => {
     let stdout = "";
     let exitCode: number | null = null;
-    let timedOut = false;
     let resolved = false;
 
-    // Build command with optional cwd and env
-    let fullCommand = command;
+    // Build the inner command with optional cwd
+    let innerCommand = command;
     if (options.cwd !== undefined) {
-      fullCommand = `cd ${shellEscape(options.cwd)} && ${command}`;
+      innerCommand = `cd ${shellEscape(options.cwd)} && ${command}`;
     }
+
+    // Wrap with timeout --kill-after to ensure process tree cleanup
+    // --kill-after sends SIGKILL 2s after initial SIGTERM if still running
+    // --foreground prevents timeout from ignoring signals (needed for non-TTY)
+    const timeoutSec = Math.ceil(options.timeoutMs / 1000);
+    let fullCommand = `timeout --foreground --signal=TERM --kill-after=2 ${timeoutSec} bash -c ${shellEscape(innerCommand)}`;
+
+    // Add env prefix outside timeout wrapper
     if (options.env !== undefined && Object.keys(options.env).length > 0) {
       const envPrefix = Object.entries(options.env)
         .map(([k, v]) => `${k}=${shellEscape(v)}`)
@@ -352,31 +360,9 @@ export async function execSshCommand(
 
     const execOptions = options.pty === true ? { pty: true } : {};
 
-    // Set up timeout
-    const timeoutHandle = setTimeout(() => {
-      if (resolved) return;
-      timedOut = true;
-      // Try to kill the process - send SIGTERM first
-      try {
-        client.exec("pkill -TERM -P $$ 2>/dev/null; sleep 2; pkill -KILL -P $$ 2>/dev/null", () => {
-          // Ignore result
-        });
-      } catch {
-        // Client may be disconnected, ignore
-      }
-      // Resolve after allowing some time for cleanup
-      setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          resolve({ stdout, exitCode, timedOut: true });
-        }
-      }, 2500);
-    }, options.timeoutMs);
-
     try {
       client.exec(fullCommand, execOptions, (err, stream) => {
         if (err !== undefined) {
-          clearTimeout(timeoutHandle);
           if (!resolved) {
             resolved = true;
             resolve({ stdout: err.message, exitCode: 1, timedOut: false });
@@ -400,10 +386,11 @@ export async function execSshCommand(
           });
 
           s.on("close", (code: number | null) => {
-            clearTimeout(timeoutHandle);
             if (!resolved) {
               resolved = true;
               exitCode = code;
+              // timeout exits with 124 (SIGTERM) or 137 (128+SIGKILL=137)
+              const timedOut = code === 124 || code === 137;
               resolve({ stdout, exitCode, timedOut });
             }
           });
@@ -412,7 +399,6 @@ export async function execSshCommand(
         handleStream(stream);
       });
     } catch (err) {
-      clearTimeout(timeoutHandle);
       resolved = true;
       reject(err instanceof Error ? err : new Error(String(err)));
     }

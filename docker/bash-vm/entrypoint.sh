@@ -52,5 +52,9 @@ fi
 # Create sshd privilege separation directory (tmpfs /run is empty on start)
 mkdir -p /run/sshd
 
+# Start process watchdog (root-only daemon that kills runaway user processes)
+/usr/local/sbin/proc-watchdog &
+echo "bash-vm: Process watchdog started"
+
 echo "bash-vm: Starting sshd"
 exec /usr/sbin/sshd -D -e
