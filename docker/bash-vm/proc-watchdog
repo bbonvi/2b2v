@@ -12,7 +12,7 @@ TARGET_USER="user"
 echo "proc-watchdog: started (threshold=$THRESHOLD, interval=${INTERVAL}s)"
 
 while true; do
-  count=$(pgrep -cu "$TARGET_USER" 2>/dev/null || echo 0)
+  count=$(pgrep -cu "$TARGET_USER" 2>/dev/null) || count=0
   if [ "$count" -gt "$THRESHOLD" ]; then
     echo "proc-watchdog: $count processes exceeds threshold $THRESHOLD — killing all $TARGET_USER processes"
     pkill -KILL -u "$TARGET_USER" 2>/dev/null || true
