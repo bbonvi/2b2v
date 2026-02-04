@@ -43,6 +43,10 @@ import { createStatusHandler, statusCommandDefinition } from "./commands/status"
 import { createConfigHandler, configCommandDefinition } from "./commands/config";
 import { createScheduleHandler, scheduleCommandDefinition } from "./commands/schedule";
 import { createMemoryWipeHandler, memoryWipeCommandDefinition } from "./commands/memory-wipe";
+import { vpnCommandDefinition } from "./commands/vpn";
+import { createVpnClient } from "./vpn/api-client";
+import { createSessionStore, type SessionStore } from "./vpn/session";
+import { handleVpnCommand, handleVpnComponent, type VpnHandlerDeps } from "./vpn/handler";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch } from "fs";
 import type { Database } from "./db/database";
@@ -121,6 +125,17 @@ if (globalConfig.elevenLabsApiKey !== undefined && globalConfig.elevenLabsApiKey
   ttsClient = createElevenLabsClient({ apiKey: globalConfig.elevenLabsApiKey });
   log.info("tts client ready");
 }
+
+// --- 9c. VPN client and session store ---
+const vpnClient = createVpnClient(globalConfig.vpnApiUrl);
+const vpnSessionStore: SessionStore = createSessionStore();
+log.info("vpn client ready", { apiUrl: globalConfig.vpnApiUrl });
+
+// Periodic VPN session cleanup (every 5 minutes)
+const VPN_SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+const vpnSessionCleanupTimer = setInterval(() => {
+  vpnSessionStore.cleanExpired();
+}, VPN_SESSION_CLEANUP_INTERVAL_MS);
 
 // --- 10. Guild config resolver ---
 function getGuildConfig(guildId: string): GuildConfig {
@@ -208,6 +223,7 @@ if (botUser !== null) {
         configCommandDefinition.toJSON(),
         scheduleCommandDefinition.toJSON(),
         memoryWipeCommandDefinition.toJSON(),
+        vpnCommandDefinition.toJSON(),
       ],
     });
     log.info("slash commands registered", { count: commandCount });
@@ -268,7 +284,55 @@ function setupCommandHandlers(guildId: string): void {
 
 // --- 16. interactionCreate handler ---
 client.on("interactionCreate", (interaction) => void (async () => {
+  // Handle button/select interactions (VPN UI)
+  if (interaction.isButton() || interaction.isStringSelectMenu()) {
+    const vpnDeps: VpnHandlerDeps = {
+      client: vpnClient,
+      sessionStore: vpnSessionStore,
+      vpnPeer: globalConfig.vpnPeer,
+      log: log.child({ component: "vpn" }),
+    };
+    try {
+      const handled = await handleVpnComponent(interaction, vpnDeps);
+      if (!handled) {
+        // Unknown component interaction
+        log.warn("unknown component interaction", { customId: interaction.customId });
+      }
+    } catch (err) {
+      log.error("component interaction error", {
+        customId: interaction.customId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return;
+  }
+
+  // Handle slash commands
   if (!interaction.isChatInputCommand()) return;
+
+  // Special handling for /vpn (open to all users, no guild config needed)
+  if (interaction.commandName === "vpn") {
+    const vpnDeps: VpnHandlerDeps = {
+      client: vpnClient,
+      sessionStore: vpnSessionStore,
+      vpnPeer: globalConfig.vpnPeer,
+      log: log.child({ component: "vpn" }),
+    };
+    try {
+      await handleVpnCommand(interaction, vpnDeps);
+    } catch (err) {
+      log.error("vpn command error", {
+        guildId: interaction.guildId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: "Произошла ошибка.", ephemeral: true }).catch(() => {});
+      }
+    }
+    return;
+  }
+
+  // Admin commands require guild
   if (interaction.guildId === null) return;
 
   // Rebuild handlers with fresh guild config each time
@@ -994,6 +1058,7 @@ async function shutdown(signal: string): Promise<void> {
   log.info("shutting down", { signal });
 
   clearInterval(memoryCleanupTimer);
+  clearInterval(vpnSessionCleanupTimer);
   scheduler.stop();
   await client.destroy();
   await embeddingQueue.shutdown();
