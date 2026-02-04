@@ -24,6 +24,7 @@ echo "bash-vm: authorized_keys found"
 # Copy ONLY the public key to tmpfs - private keys stay hidden in volume
 cp "$SOURCE_AUTH_KEYS" "$TARGET_AUTH_KEYS"
 chmod 644 "$TARGET_AUTH_KEYS"
+# Note: Private key in volume has mode 600 owned by root, unreadable by user (uid 1000)
 
 # Apply egress filtering if CAP_NET_ADMIN is available
 if command -v iptables &>/dev/null; then
