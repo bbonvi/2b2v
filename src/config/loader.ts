@@ -110,15 +110,19 @@ const DEFAULT_BASH_BLOCKLIST: string[] = [
   // System shutdown/reboot
   "\\b(shutdown|reboot|poweroff|halt|init\\s+[06])\\b",
   // Network/firewall administration
-  "\\b(iptables|ip6tables|nft|nftables|ufw|firewall-cmd)\\b",
-  // Network interface manipulation
-  "\\b(ifconfig|ip\\s+(link|addr|route)|route\\s+(add|del))\\b",
+  "\\b(iptables|ip6tables|nft|nftables|ufw|firewall-cmd|firewalld)\\b",
+  // Network interface and socket tools
+  "\\b(ifconfig|ip\\s+(link|addr|route)|route\\s+(add|del)|ss|netstat)\\b",
+  // System control
+  "\\b(sysctl|systemctl|service)\\b",
   // Container/VM escape attempts
   "\\b(docker|podman|kubectl|nsenter|chroot)\\b",
   // Kernel module manipulation
   "\\b(modprobe|insmod|rmmod|lsmod)\\b",
   // Disk/mount operations
   "\\b(mount|umount|mkfs|fdisk|parted)\\b",
+  // SSH daemon attacks
+  "\\b(killall\\s+sshd|pkill\\s+sshd)\\b",
 ];
 
 const DEFAULT_BASH_SSH = {
