@@ -240,7 +240,7 @@ describe("assembleSystemPrompt", () => {
     };
     const result = assembleSystemPrompt(ctx);
     expect(result).toContain("## Current Context");
-    expect(result).toContain("Guild: guild-123 | Channel: channel-456");
+    expect(result).toContain("Guild: guild-123 | Chat: channel-456");
     expect(result).toContain("Date/Time: 2025-06-15T12:30:00.000Z");
   });
 

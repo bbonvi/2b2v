@@ -37,15 +37,11 @@ export function formatChatHistory(messages: ChatMessage[]): string {
  * Order: persona → emojis → members → journal → schedules → chat history.
  * Empty sections are omitted entirely.
  */
-export const TOOL_INSTRUCTIONS = `## How You Communicate
-You are a Discord bot. You do NOT have the ability to send messages directly — your text output is invisible to users.
-To send a message, you MUST call the \`send_message\` tool. This is the ONLY way your words reach the chat.
-If you want to reply, call \`send_message\` with \`reply: true\`. If you want to ignore user, do not call it (only do it for a good reason; prefer to always reply).
-Use \`reply: true\` on the first message when responding to the trigger, and \`reply: false\` for follow-up messages. Do not spam replies!
-
-## Available Tools
+export const TOOL_INSTRUCTIONS = `## Available Tools
 - \`start_typing\` — Trigger the typing indicator. Call immediately before each \`send_message\`.
-- \`send_message\` — Send a message to the current channel (REQUIRED for any response). Set \`reply: true\` to reply to the trigger.
+- \`send_message\` — Post a message to the chat. This is your ONLY way to communicate with users — your reasoning text is invisible to them.
+  - \`reply: true\` — creates a Discord reply (shows "replied to" link). Use on first response to the trigger message.
+  - \`reply: false\` (default) — posts as a standalone message. Use for follow-ups.
   - Optional: \`is_voice_message: true\` sends as audio attachment (voice message)
   - Optional: \`voice_type: "normal" | "whisper"\` selects voice preset (if configured)
 - \`save_journal\` / \`delete_journal\` — Bot's journal (visible in "## Journal" section)
@@ -111,10 +107,8 @@ All memories are per-guild (auto-scoped).
 
 Parameters: \`command\` (required), \`cwd\`, \`env\`, \`stdin\`, \`timeoutMs\`, \`pty\`.
 
-## CRITICAL: \`send_message\` requirement
-- You can only communicate with users through the \`send_message\` tool.
-- Your inline generated text is for your reasoning only — users cannot see it.
-- Always call \`send_message\` unless there is a good reason not to.
+## Reminder
+Always call \`send_message\` to respond — your reasoning text is invisible to users.
 `;
 
 export function assembleSystemPrompt(ctx: PromptContext): string {
@@ -138,7 +132,7 @@ export function assembleSystemPrompt(ctx: PromptContext): string {
     sections.push(`## Upcoming Schedules\n${items}`);
   }
 
-  sections.push(`## Current Context\nGuild: ${ctx.guildId} | Channel: ${ctx.channelId}\nDate/Time: ${ctx.timestamp}`);
+  sections.push(`## Current Context\nGuild: ${ctx.guildId} | Chat: ${ctx.channelId}\nDate/Time: ${ctx.timestamp}`);
 
   const history = formatChatHistory(ctx.chatHistory);
   if (history !== "") {
