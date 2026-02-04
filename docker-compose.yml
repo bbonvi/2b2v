@@ -45,6 +45,7 @@ services:
     volumes:
       - ssh-keys:/ssh-keys:ro
     networks:
+      - default
       - bash-net
     cap_add:
       - NET_ADMIN
