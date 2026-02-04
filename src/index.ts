@@ -17,7 +17,7 @@ import { handleMessage, type IncomingMessage, type HandlerDeps } from "./agent/h
 import { TOOL_INSTRUCTIONS } from "./agent/prompt";
 import { assembleContext, type AssembledContext } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
-import { getHistoryMessages } from "./db/message-repository";
+import { getHistoryMessages, insertSyntheticEvent } from "./db/message-repository";
 import { processHistory } from "./agent/history-pipeline";
 import { formatMemoryTimestamps, formatRelativeAgo } from "./agent/history-dates";
 import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
@@ -986,6 +986,18 @@ client.on("messageCreate", (message: Message) => void (async () => {
         };
       },
       persistThread: (input) => insertThread(db, input),
+      onSuccess: (payload) => {
+        // Insert synthetic event in parent chat history
+        insertSyntheticEvent(db, {
+          id: crypto.randomUUID(),
+          guildId,
+          channelId: payload.parentChatId,
+          botUserId: client.user?.id ?? "",
+          botUsername: client.user?.username ?? "bot",
+          threadId: payload.threadId,
+          threadName: payload.threadName,
+        });
+      },
     });
     const extraTools = [...buildAgentTools(guildId, channelId, guildConfig, guild), startTypingTool, startThreadTool];
 

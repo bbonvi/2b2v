@@ -140,4 +140,63 @@ describe("createStartThreadTool", () => {
     const text = (result.content[0] as TextContent).text;
     expect(text).toContain('send_message(chat_id="thread-123")');
   });
+
+  test("calls onSuccess callback after successful creation and persistence", async () => {
+    let successPayload: { threadId: string; threadName: string; parentChatId: string } | undefined;
+    const deps = makeDeps({
+      onSuccess: (payload) => {
+        successPayload = payload;
+      },
+    });
+    const tool = createStartThreadTool(deps);
+    await tool.execute("tc1", { name: "My Thread" }, AbortSignal.timeout(5000));
+
+    expect(successPayload).toBeDefined();
+    expect(successPayload?.threadId).toBe("thread-123");
+    expect(successPayload?.threadName).toBe("My Thread");
+    expect(successPayload?.parentChatId).toBe("channel-456");
+  });
+
+  test("does not call onSuccess when createThread fails", async () => {
+    let onSuccessCalled = false;
+    const deps = makeDeps({
+      createThread: () => Promise.reject(new Error("API Error")),
+      onSuccess: () => {
+        onSuccessCalled = true;
+      },
+    });
+    const tool = createStartThreadTool(deps);
+    await tool.execute("tc1", { name: "Test" }, AbortSignal.timeout(5000));
+
+    expect(onSuccessCalled).toBe(false);
+  });
+
+  test("still calls onSuccess when persistThread fails (thread exists)", async () => {
+    let successPayload: { threadId: string; threadName: string; parentChatId: string } | undefined;
+    const deps = makeDeps({
+      persistThread: () => {
+        throw new Error("DB Error");
+      },
+      onSuccess: (payload) => {
+        successPayload = payload;
+      },
+    });
+    const tool = createStartThreadTool(deps);
+    await tool.execute("tc1", { name: "My Thread" }, AbortSignal.timeout(5000));
+
+    // Even though persist failed, onSuccess should fire since thread exists in Discord
+    expect(successPayload).toBeDefined();
+    expect(successPayload?.threadId).toBe("thread-123");
+  });
+
+  test("works without onSuccess callback (backward compatible)", async () => {
+    const deps = makeDeps();
+    // No onSuccess provided
+    const tool = createStartThreadTool(deps);
+    const result = await tool.execute("tc1", { name: "Test" }, AbortSignal.timeout(5000));
+
+    // Should not throw
+    const text = (result.content[0] as TextContent).text;
+    expect(text).toContain("Thread created");
+  });
 });

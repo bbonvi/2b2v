@@ -38,11 +38,23 @@ export type ThreadPersister = (input: {
   threadName: string;
 }) => void;
 
+/**
+ * Callback fired after successful thread creation.
+ * Called even if persistThread fails (thread exists in Discord).
+ */
+export type ThreadSuccessCallback = (payload: {
+  threadId: string;
+  threadName: string;
+  parentChatId: string;
+}) => void;
+
 /** Dependencies for the start_thread tool. */
 export interface StartThreadToolDeps {
   guildId: string;
   createThread: ThreadCreator;
   persistThread: ThreadPersister;
+  /** Optional callback fired after successful thread creation. */
+  onSuccess?: ThreadSuccessCallback;
 }
 
 /**
@@ -50,7 +62,7 @@ export interface StartThreadToolDeps {
  * Creates a public, message-attached thread on the trigger message.
  */
 export function createStartThreadTool(deps: StartThreadToolDeps): AgentTool {
-  const { guildId, createThread, persistThread } = deps;
+  const { guildId, createThread, persistThread, onSuccess } = deps;
 
   return {
     name: "start_thread",
@@ -90,6 +102,16 @@ export function createStartThreadTool(deps: StartThreadToolDeps): AgentTool {
         // The thread exists, so return success (can be recovered later)
         // TODO: inject logger via deps instead of console.error
         console.error("Failed to persist thread record:", err);
+      }
+
+      // Fire success callback (e.g., insert synthetic event in parent chat)
+      // Called even if persist failed since thread exists in Discord
+      if (onSuccess !== undefined) {
+        onSuccess({
+          threadId: result.threadId,
+          threadName: result.threadName,
+          parentChatId: result.parentChatId,
+        });
       }
 
       return {
