@@ -1,16 +1,16 @@
 #!/bin/bash
 set -e
 
-# Volume contains bot's SSH keys - we only need authorized_keys (public key)
-SSH_KEYS_VOL="/ssh-keys-vol"
-SOURCE_AUTH_KEYS="$SSH_KEYS_VOL/authorized_keys"
-TARGET_AUTH_KEYS="/run/authorized_keys"
+# Volume contains bot's SSH keys at /ssh-keys-vol (read-only mount)
+# - authorized_keys: public key, readable by all (644)
+# - id_ed25519: private key, root-only (600) - sandbox user cannot read
+AUTH_KEYS="/ssh-keys-vol/authorized_keys"
 
 # Wait for authorized_keys to exist (bot generates on first run)
 echo "bash-vm: Waiting for authorized_keys..."
 timeout=60
 elapsed=0
-while [ ! -f "$SOURCE_AUTH_KEYS" ]; do
+while [ ! -f "$AUTH_KEYS" ]; do
     sleep 1
     elapsed=$((elapsed + 1))
     if [ $elapsed -ge $timeout ]; then
@@ -20,11 +20,6 @@ while [ ! -f "$SOURCE_AUTH_KEYS" ]; do
 done
 
 echo "bash-vm: authorized_keys found"
-
-# Copy ONLY the public key to tmpfs - private keys stay hidden in volume
-cp "$SOURCE_AUTH_KEYS" "$TARGET_AUTH_KEYS"
-chmod 644 "$TARGET_AUTH_KEYS"
-# Note: Private key in volume has mode 600 owned by root, unreadable by user (uid 1000)
 
 # Apply egress filtering if CAP_NET_ADMIN is available
 if command -v iptables &>/dev/null; then

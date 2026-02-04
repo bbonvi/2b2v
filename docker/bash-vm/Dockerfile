@@ -39,11 +39,10 @@ RUN useradd -m -s /bin/bash user
 RUN mkdir -p /run/sshd
 
 # sshd config: key auth only, no password, no root login
-# AuthorizedKeysFile points to /run (tmpfs) where entrypoint copies only the public key
 RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && \
     sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
     sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config && \
-    echo "AuthorizedKeysFile /run/authorized_keys" >> /etc/ssh/sshd_config
+    echo "AuthorizedKeysFile /ssh-keys-vol/authorized_keys" >> /etc/ssh/sshd_config
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
