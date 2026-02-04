@@ -35,7 +35,9 @@ import { createReadChatImagesTool } from "./agent/read-chat-images-tool";
 import { createFetchImagesTool } from "./agent/fetch-images-tool";
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createStartTypingTool } from "./agent/start-typing-tool";
+import { createStartThreadTool } from "./agent/start-thread-tool";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
+import { insertThread } from "./db/thread-repository";
 import { processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
 import { createBashTool } from "./agent/bash-tool";
 import { getSshKeyPaths, ensureSshKeys, createSshConnection, type SshKeyPaths } from "./ssh/client";
@@ -958,9 +960,22 @@ client.on("messageCreate", (message: Message) => void (async () => {
       void currentChannelObj.sendTyping().catch(() => {});
     };
 
-    // Build agent tools (including start_typing wired to the channel)
+    // Build agent tools (including start_typing and start_thread wired to the message)
     const startTypingTool = createStartTypingTool(sendTypingNow);
-    const extraTools = [...buildAgentTools(guildId, channelId, guildConfig, guild), startTypingTool];
+    const startThreadTool = createStartThreadTool({
+      guildId,
+      createThread: async (name: string) => {
+        const thread = await message.startThread({ name });
+        return {
+          threadId: thread.id,
+          threadName: thread.name,
+          parentChatId: channelId,
+          starterMessageId: message.id,
+        };
+      },
+      persistThread: (input) => insertThread(db, input),
+    });
+    const extraTools = [...buildAgentTools(guildId, channelId, guildConfig, guild), startTypingTool, startThreadTool];
 
     const TYPING_INTERVAL_MS = 8_000;
     const TYPING_MAX_MS = 30_000;

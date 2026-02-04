@@ -49,9 +49,7 @@ export interface StartThreadToolDeps {
  * Create the start_thread AgentTool.
  * Creates a public, message-attached thread on the trigger message.
  */
-export function createStartThreadTool(
-  deps: StartThreadToolDeps
-): AgentTool<typeof StartThreadParams, StartThreadDetails | { error: string }> {
+export function createStartThreadTool(deps: StartThreadToolDeps): AgentTool {
   const { guildId, createThread, persistThread } = deps;
 
   return {
@@ -64,8 +62,8 @@ export function createStartThreadTool(
       _toolCallId,
       params
     ): Promise<AgentToolResult<StartThreadDetails | { error: string }>> => {
-      const { name } = params;
-      const threadName = name ?? "Thread";
+      const p = params as StartThreadInput;
+      const threadName = p.name ?? "Thread";
 
       let result: Awaited<ReturnType<ThreadCreator>>;
       try {
