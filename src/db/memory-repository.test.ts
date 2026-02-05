@@ -28,7 +28,7 @@ describe("createMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "Likes pizza",
+      title: "Likes pizza",
     });
 
     const mem = getMemory(db, id);
@@ -36,7 +36,7 @@ describe("createMemory", () => {
     expect(mem?.scope).toBe("user");
     expect(mem?.guildId).toBe("g1");
     expect(mem?.userId).toBe("u1");
-    expect(mem?.shortDescription).toBe("Likes pizza");
+    expect(mem?.title).toBe("Likes pizza");
     expect(mem?.expiresAt).toBeGreaterThanOrEqual(before + DEFAULT_TTL_MS - 1000);
     expect(mem?.expiresAt).toBeLessThanOrEqual(Date.now() + DEFAULT_TTL_MS + 1000);
   });
@@ -46,7 +46,7 @@ describe("createMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "Test memory",
+      title: "Test memory",
     });
 
     const mem = getMemory(db, id);
@@ -55,18 +55,18 @@ describe("createMemory", () => {
     expect(mem?.userId).toBe("u1");
   });
 
-  test("user scope supports shortDescription and longDescription", () => {
+  test("user scope supports title and content", () => {
     const id = createMemory(db, {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "Short summary",
-      longDescription: "Detailed explanation of the memory",
+      title: "Short summary",
+      content: "Detailed explanation of the memory",
     });
 
     const mem = getMemory(db, id);
-    expect(mem?.shortDescription).toBe("Short summary");
-    expect(mem?.longDescription).toBe("Detailed explanation of the memory");
+    expect(mem?.title).toBe("Short summary");
+    expect(mem?.content).toBe("Detailed explanation of the memory");
   });
 
   test("user scope has 180d default TTL", () => {
@@ -75,7 +75,7 @@ describe("createMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "Test",
+      title: "Test",
     });
 
     const mem = getMemory(db, id);
@@ -88,16 +88,16 @@ describe("createMemory", () => {
       scope: "journal",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "Check on Alice",
-      longDescription: "Alice mentioned a Rust project last Tuesday. Follow up.",
+      title: "Check on Alice",
+      content: "Alice mentioned a Rust project last Tuesday. Follow up.",
     });
 
     const mem = getMemory(db, id);
     expect(mem?.scope).toBe("journal");
     expect(mem?.guildId).toBe("g1");
     expect(mem?.userId).toBe("u1");
-    expect(mem?.shortDescription).toBe("Check on Alice");
-    expect(mem?.longDescription).toContain("Rust project");
+    expect(mem?.title).toBe("Check on Alice");
+    expect(mem?.content).toContain("Rust project");
   });
 
   test("journal scope requires guildId and userId", () => {
@@ -105,7 +105,7 @@ describe("createMemory", () => {
       scope: "journal",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "Journal entry",
+      title: "Journal entry",
     });
 
     const mem = getMemory(db, id);
@@ -114,18 +114,18 @@ describe("createMemory", () => {
     expect(mem?.userId).toBe("u1");
   });
 
-  test("journal scope supports shortDescription and longDescription", () => {
+  test("journal scope supports title and content", () => {
     const id = createMemory(db, {
       scope: "journal",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "Meeting notes",
-      longDescription: "Discussed project timeline and deliverables for Q1",
+      title: "Meeting notes",
+      content: "Discussed project timeline and deliverables for Q1",
     });
 
     const mem = getMemory(db, id);
-    expect(mem?.shortDescription).toBe("Meeting notes");
-    expect(mem?.longDescription).toContain("timeline");
+    expect(mem?.title).toBe("Meeting notes");
+    expect(mem?.content).toContain("timeline");
   });
 
   test("journal scope has 180d default TTL", () => {
@@ -134,8 +134,8 @@ describe("createMemory", () => {
       scope: "journal",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "Short",
-      longDescription: "Long",
+      title: "Short",
+      content: "Long",
     });
 
     const mem = getMemory(db, id);
@@ -149,7 +149,7 @@ describe("createMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "Temporary note",
+      title: "Temporary note",
       ttlDays: 30,
     });
 
@@ -164,7 +164,7 @@ describe("createMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "Permanent note",
+      title: "Permanent note",
       ttlDays: null,
     });
 
@@ -177,7 +177,7 @@ describe("createMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "From a specific message",
+      title: "From a specific message",
       sourceMessageId: "msg-99",
     });
 
@@ -192,16 +192,16 @@ describe("updateMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "Old content",
+      title: "Old content",
     });
 
-    const updated = updateMemory(db, id, { shortDescription: "New content" });
+    const updated = updateMemory(db, id, { title: "New content" });
     expect(updated).toBe(true);
 
     const mem = getMemory(db, id);
     expect(mem).not.toBeNull();
     if (!mem) throw new Error("unreachable");
-    expect(mem.shortDescription).toBe("New content");
+    expect(mem.title).toBe("New content");
     expect(mem.updatedAt).toBeGreaterThanOrEqual(mem.createdAt);
   });
 
@@ -210,18 +210,18 @@ describe("updateMemory", () => {
       scope: "journal",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "Old short",
-      longDescription: "Old long",
+      title: "Old short",
+      content: "Old long",
     });
 
     updateMemory(db, id, {
-      shortDescription: "New short",
-      longDescription: "New long",
+      title: "New short",
+      content: "New long",
     });
 
     const mem = getMemory(db, id);
-    expect(mem?.shortDescription).toBe("New short");
-    expect(mem?.longDescription).toBe("New long");
+    expect(mem?.title).toBe("New short");
+    expect(mem?.content).toBe("New long");
   });
 
   test("updates user memory descriptions", () => {
@@ -229,18 +229,18 @@ describe("updateMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "Old short",
-      longDescription: "Old long",
+      title: "Old short",
+      content: "Old long",
     });
 
     updateMemory(db, id, {
-      shortDescription: "New short",
-      longDescription: "New long",
+      title: "New short",
+      content: "New long",
     });
 
     const mem = getMemory(db, id);
-    expect(mem?.shortDescription).toBe("New short");
-    expect(mem?.longDescription).toBe("New long");
+    expect(mem?.title).toBe("New short");
+    expect(mem?.content).toBe("New long");
   });
 
   test("updates TTL", () => {
@@ -248,7 +248,7 @@ describe("updateMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "test",
+      title: "test",
     });
 
     updateMemory(db, id, { ttlDays: 7 });
@@ -260,7 +260,7 @@ describe("updateMemory", () => {
   });
 
   test("returns false for non-existent id", () => {
-    const result = updateMemory(db, 999999, { shortDescription: "x" });
+    const result = updateMemory(db, 999999, { title: "x" });
     expect(result).toBe(false);
   });
 });
@@ -271,7 +271,7 @@ describe("deleteMemory", () => {
       scope: "user",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "To be deleted",
+      title: "To be deleted",
     });
 
     const deleted = deleteMemory(db, id);
@@ -286,24 +286,24 @@ describe("deleteMemory", () => {
 
 describe("listMemories", () => {
   test("lists user memories for a specific guild and user", () => {
-    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", shortDescription: "A" });
-    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", shortDescription: "B" });
-    createMemory(db, { scope: "user", guildId: "g1", userId: "u2", shortDescription: "C" });
+    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", title: "A" });
+    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", title: "B" });
+    createMemory(db, { scope: "user", guildId: "g1", userId: "u2", title: "C" });
 
     const results = listMemories(db, { scope: "user", guildId: "g1", userId: "u1" });
     expect(results).toHaveLength(2);
-    expect(results.map((r) => r.shortDescription).sort()).toEqual(["A", "B"]);
+    expect(results.map((r) => r.title).sort()).toEqual(["A", "B"]);
   });
 
   test("lists journal entries for a guild", () => {
-    createMemory(db, { scope: "journal", guildId: "g1", userId: "u1", shortDescription: "X" });
-    createMemory(db, { scope: "journal", guildId: "g2", userId: "u2", shortDescription: "Y" });
+    createMemory(db, { scope: "journal", guildId: "g1", userId: "u1", title: "X" });
+    createMemory(db, { scope: "journal", guildId: "g2", userId: "u2", title: "Y" });
 
     const results = listMemories(db, { scope: "journal", guildId: "g1" });
     expect(results).toHaveLength(1);
     expect(results[0]).toBeDefined();
     if (!results[0]) throw new Error("unreachable");
-    expect(results[0].shortDescription).toBe("X");
+    expect(results[0].title).toBe("X");
   });
 
   test("lists journal entries with descriptions", () => {
@@ -311,26 +311,26 @@ describe("listMemories", () => {
       scope: "journal",
       guildId: "g1",
       userId: "u1",
-      shortDescription: "Short A",
-      longDescription: "Long A",
+      title: "Short A",
+      content: "Long A",
     });
 
     const results = listMemories(db, { scope: "journal", guildId: "g1" });
     expect(results).toHaveLength(1);
     expect(results[0]).toBeDefined();
     if (!results[0]) throw new Error("unreachable");
-    expect(results[0].shortDescription).toBe("Short A");
+    expect(results[0].title).toBe("Short A");
   });
 
   test("filters journal by userId when provided", () => {
-    createMemory(db, { scope: "journal", guildId: "g1", userId: "u1", shortDescription: "Entry 1" });
-    createMemory(db, { scope: "journal", guildId: "g1", userId: "u2", shortDescription: "Entry 2" });
+    createMemory(db, { scope: "journal", guildId: "g1", userId: "u1", title: "Entry 1" });
+    createMemory(db, { scope: "journal", guildId: "g1", userId: "u2", title: "Entry 2" });
 
     const results = listMemories(db, { scope: "journal", guildId: "g1", userId: "u1" });
     expect(results).toHaveLength(1);
     expect(results[0]).toBeDefined();
     if (!results[0]) throw new Error("unreachable");
-    expect(results[0].shortDescription).toBe("Entry 1");
+    expect(results[0].title).toBe("Entry 1");
   });
 
   test("excludes expired memories", () => {
@@ -343,18 +343,18 @@ describe("listMemories", () => {
       )
       .run("user", "g1", "u1", "Old", null, null, now - 100000, now - 100000, now - 1000);
 
-    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", shortDescription: "Current" });
+    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", title: "Current" });
 
     const results = listMemories(db, { scope: "user", guildId: "g1", userId: "u1" });
     expect(results).toHaveLength(1);
     expect(results[0]).toBeDefined();
     if (!results[0]) throw new Error("unreachable");
-    expect(results[0].shortDescription).toBe("Current");
+    expect(results[0].title).toBe("Current");
   });
 
   test("respects limit parameter", () => {
     for (let i = 0; i < 5; i++) {
-      createMemory(db, { scope: "user", guildId: "g1", userId: "u1", shortDescription: `Item ${i}` });
+      createMemory(db, { scope: "user", guildId: "g1", userId: "u1", title: `Item ${i}` });
     }
 
     const results = listMemories(db, { scope: "user", guildId: "g1", userId: "u1", limit: 3 });
@@ -373,7 +373,7 @@ describe("deleteExpiredMemories", () => {
       .run("user", "g1", "u1", "Expired", null, null, now, now, now - 1000);
     const expiredId = Number(expResult.lastInsertRowid);
 
-    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", shortDescription: "Still valid" });
+    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", title: "Still valid" });
 
     const count = deleteExpiredMemories(db);
     expect(count).toBe(1);

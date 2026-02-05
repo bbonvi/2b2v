@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { formatDateStamp, insertDateStamps, formatRelativeAgo, formatMemoryTimestamps } from "./history-dates.ts";
+import { formatDateStamp, insertDateStamps, formatRelativeAgo, formatMemoryTimestamps, formatJournalTimestamp } from "./history-dates.ts";
 import type { HistoryMessage } from "./history-types.ts";
 
 function msg(id: string, timestamp: number): HistoryMessage {
@@ -234,5 +234,31 @@ describe("formatMemoryTimestamps", () => {
     const result2 = formatMemoryTimestamps(created, updated, now);
     expect(result1).toBe(result2);
     expect(result1).toBe("(Created: 3d ago; Updated: 1d ago)");
+  });
+});
+
+describe("formatJournalTimestamp", () => {
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+
+  test("formats updatedAt only", () => {
+    const now = Date.UTC(2026, 0, 10, 12, 0, 0);
+    const updated = now - 5 * DAY;
+    expect(formatJournalTimestamp(updated, now)).toBe("(5d ago)");
+  });
+
+  test("recent update", () => {
+    const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+    const updated = now - 10 * 60 * 1000; // 10 minutes
+    expect(formatJournalTimestamp(updated, now)).toBe("(10m ago)");
+  });
+
+  test("deterministic with nowMs injection", () => {
+    const now = Date.UTC(2026, 0, 10, 12, 0, 0);
+    const updated = now - 2 * HOUR;
+    const result1 = formatJournalTimestamp(updated, now);
+    const result2 = formatJournalTimestamp(updated, now);
+    expect(result1).toBe(result2);
+    expect(result1).toBe("(2h ago)");
   });
 });

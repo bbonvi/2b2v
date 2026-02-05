@@ -10,8 +10,8 @@ export interface MemoryRow {
   scope: MemoryScope;
   guildId: string | null;
   userId: string | null;
-  shortDescription: string;
-  longDescription: string | null;
+  title: string;
+  content: string | null;
   sourceMessageId: string | null;
   createdAt: number;
   updatedAt: number;
@@ -22,16 +22,16 @@ export interface CreateMemoryInput {
   scope: MemoryScope;
   guildId: string;
   userId: string;
-  shortDescription: string;
-  longDescription?: string;
+  title: string;
+  content?: string;
   sourceMessageId?: string;
   /** Days until expiry. Default 180. Pass null to disable. */
   ttlDays?: number | null;
 }
 
 export interface UpdateMemoryInput {
-  shortDescription?: string;
-  longDescription?: string;
+  title?: string;
+  content?: string;
   /** Recompute expiry from now + ttlDays. Pass null to remove expiry. */
   ttlDays?: number | null;
 }
@@ -63,8 +63,8 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
       input.scope,
       input.guildId,
       input.userId,
-      input.shortDescription,
-      input.longDescription ?? null,
+      input.title,
+      input.content ?? null,
       input.sourceMessageId ?? null,
       now,
       now,
@@ -79,13 +79,13 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
   const sets: string[] = [];
   const params: (string | number | null)[] = [];
 
-  if (input.shortDescription !== undefined) {
+  if (input.title !== undefined) {
     sets.push("short_description = ?");
-    params.push(input.shortDescription);
+    params.push(input.title);
   }
-  if (input.longDescription !== undefined) {
+  if (input.content !== undefined) {
     sets.push("long_description = ?");
-    params.push(input.longDescription);
+    params.push(input.content);
   }
   if ("ttlDays" in input) {
     sets.push("expires_at = ?");
@@ -172,8 +172,8 @@ function mapRow(row: Record<string, unknown>): MemoryRow {
     scope: row.scope as MemoryScope,
     guildId: row.guild_id as string | null,
     userId: row.user_id as string | null,
-    shortDescription: row.short_description as string,
-    longDescription: row.long_description as string | null,
+    title: row.short_description as string,
+    content: row.long_description as string | null,
     sourceMessageId: row.source_message_id as string | null,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,

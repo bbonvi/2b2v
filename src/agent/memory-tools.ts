@@ -9,7 +9,7 @@ import {
   listMemories,
   type MemoryRow,
 } from "../db/memory-repository";
-import { formatMemoryTimestamps } from "./history-dates";
+import { formatMemoryTimestamps, formatRelativeAgo } from "./history-dates";
 
 export interface MemoryToolsDeps {
   db: Database;
@@ -29,28 +29,36 @@ export interface MemoryToolsDeps {
 // Journal Schemas
 // ---------------------------------------------------------------------------
 
-interface SaveJournalParams {
-  shortDescription: string;
+interface SaveJournalEntryParams {
+  title: string;
+  content: string;
   id?: number;
-  longDescription?: string;
   ttlDays?: number | null;
   sourceMessageId?: string;
 }
 
-interface DeleteJournalParams {
+interface DeleteJournalEntryParams {
   id: number;
 }
 
-const SaveJournalSchema = Type.Object({
-  shortDescription: Type.String({ description: "Primary journal text. Visible in context under '## Journal'." }),
+interface RecallJournalEntryParams {
+  id: number;
+}
+
+const SaveJournalEntrySchema = Type.Object({
+  title: Type.String({ description: "Journal entry title. Visible in context under '## Journal'." }),
+  content: Type.String({ description: "Extended details (required)." }),
   id: Type.Optional(Type.Integer({ description: "Existing journal ID to update. Omit to create new." })),
-  longDescription: Type.Optional(Type.String({ description: "Extended details (optional)." })),
   ttlDays: Type.Optional(Type.Union([Type.Number(), Type.Null()], { description: "Days until expiry. Default 180. Pass null for no expiry." })),
   sourceMessageId: Type.Optional(Type.String({ description: "Discord message ID that triggered this journal entry." })),
 });
 
-const DeleteJournalSchema = Type.Object({
+const DeleteJournalEntrySchema = Type.Object({
   id: Type.Integer({ description: "Journal entry ID to delete." }),
+});
+
+const RecallJournalEntrySchema = Type.Object({
+  id: Type.Integer({ description: "Journal entry ID to retrieve." }),
 });
 
 // ---------------------------------------------------------------------------
@@ -59,9 +67,9 @@ const DeleteJournalSchema = Type.Object({
 
 interface SaveUserMemoryParams {
   username: string;
-  shortDescription: string;
+  title: string;
   id?: number;
-  longDescription?: string;
+  content?: string;
   ttlDays?: number | null;
   sourceMessageId?: string;
 }
@@ -77,9 +85,9 @@ interface RecallUserMemoriesParams {
 
 const SaveUserMemorySchema = Type.Object({
   username: Type.String({ description: "Target username (required). Use the @username from chat history." }),
-  shortDescription: Type.String({ description: "Primary memory text." }),
+  title: Type.String({ description: "Primary memory text." }),
   id: Type.Optional(Type.Integer({ description: "Existing memory ID to update. Omit to create new." })),
-  longDescription: Type.Optional(Type.String({ description: "Extended details (optional)." })),
+  content: Type.Optional(Type.String({ description: "Extended details (optional)." })),
   ttlDays: Type.Optional(Type.Union([Type.Number(), Type.Null()], { description: "Days until expiry. Default 180. Pass null for no expiry." })),
   sourceMessageId: Type.Optional(Type.String({ description: "Discord message ID that triggered this memory." })),
 });
@@ -97,17 +105,17 @@ const RecallUserMemoriesSchema = Type.Object({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function embeddingText(shortDescription: string, longDescription?: string): string {
-  return longDescription !== undefined && longDescription !== ""
-    ? `${shortDescription}\n\n${longDescription}`
-    : shortDescription;
+function embeddingText(title: string, content?: string | null): string {
+  return content !== undefined && content !== null && content !== ""
+    ? `${title}\n\n${content}`
+    : title;
 }
 
 function formatMemoryLine(row: MemoryRow): string {
   const parts = [`[${row.id}]`];
   parts.push(formatMemoryTimestamps(row.createdAt, row.updatedAt));
   if (row.scope === "user" && row.userId !== null) parts.push(`user:${row.userId}`);
-  parts.push(row.shortDescription);
+  parts.push(row.title);
   return parts.join(" ");
 }
 
@@ -117,22 +125,23 @@ function formatMemoryLine(row: MemoryRow): string {
 
 /**
  * Create memory agent tools bound to a guild context.
- * Returns 5 tools: save_journal, delete_journal, save_user_memory, delete_user_memory, recall_user_memories.
+ * Returns 6 tools: save_journal_entry, recall_journal_entry, delete_journal_entry,
+ * save_user_memory, delete_user_memory, recall_user_memories.
  */
 export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
   const { db, guildId, botUserId, resolveUsername, onMemoryChanged, onMemoryDeleted } = deps;
 
   // -------------------------------------------------------------------------
-  // save_journal
+  // save_journal_entry
   // -------------------------------------------------------------------------
-  const saveJournal: AgentTool = {
-    name: "save_journal",
-    label: "Save Journal",
+  const saveJournalEntry: AgentTool = {
+    name: "save_journal_entry",
+    label: "Save Journal Entry",
     description:
       "Create or update a bot journal entry. Journal entries are visible in your context under '## Journal'. Provide 'id' to update an existing entry.",
-    parameters: SaveJournalSchema,
+    parameters: SaveJournalEntrySchema,
     execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: number; action: string; success: boolean }>> => {
-      const p = params as SaveJournalParams;
+      const p = params as SaveJournalEntryParams;
 
       if (p.id !== undefined) {
         // Verify the memory belongs to this guild AND is a journal entry
@@ -156,12 +165,12 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
           });
         }
         const updated = updateMemory(db, p.id, {
-          shortDescription: p.shortDescription,
-          longDescription: p.longDescription,
+          title: p.title,
+          content: p.content,
           ttlDays: p.ttlDays,
         });
         if (updated) {
-          onMemoryChanged?.(p.id, embeddingText(p.shortDescription, p.longDescription));
+          onMemoryChanged?.(p.id, embeddingText(p.title, p.content));
         }
         return Promise.resolve({
           content: [{ type: "text", text: updated ? `Saved (updated) journal entry ${p.id}.` : `Journal entry ${p.id} not found.` }],
@@ -174,12 +183,12 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
         scope: "journal",
         guildId,
         userId: botUserId,
-        shortDescription: p.shortDescription,
-        longDescription: p.longDescription,
+        title: p.title,
+        content: p.content,
         sourceMessageId: p.sourceMessageId,
         ttlDays: p.ttlDays,
       });
-      onMemoryChanged?.(id, embeddingText(p.shortDescription, p.longDescription));
+      onMemoryChanged?.(id, embeddingText(p.title, p.content));
 
       return Promise.resolve({
         content: [{ type: "text", text: `Saved new journal entry ${id}.` }],
@@ -189,15 +198,52 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
   };
 
   // -------------------------------------------------------------------------
-  // delete_journal
+  // recall_journal_entry
   // -------------------------------------------------------------------------
-  const deleteJournal: AgentTool = {
-    name: "delete_journal",
-    label: "Delete Journal",
+  const recallJournalEntry: AgentTool = {
+    name: "recall_journal_entry",
+    label: "Recall Journal Entry",
+    description: "Retrieve a journal entry's full details by its ID. Use this to view the full content of entries shown in '## Journal'.",
+    parameters: RecallJournalEntrySchema,
+    execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: number; found: boolean }>> => {
+      const p = params as RecallJournalEntryParams;
+      const existing = getMemory(db, p.id);
+      if (existing === null || existing.guildId !== guildId) {
+        return Promise.resolve({
+          content: [{ type: "text", text: `Journal entry ${p.id} not found.` }],
+          details: { memoryId: p.id, found: false },
+        });
+      }
+      if (existing.scope !== "journal") {
+        return Promise.resolve({
+          content: [{ type: "text", text: `ID ${p.id} is not a journal entry. Use recall_user_memories for user memories.` }],
+          details: { memoryId: p.id, found: false },
+        });
+      }
+      const lines = [
+        `ID: ${existing.id}`,
+        `Title: ${existing.title}`,
+        `Content: ${existing.content ?? "(none)"}`,
+        `Created: ${formatRelativeAgo(existing.createdAt)}`,
+        `Updated: ${formatRelativeAgo(existing.updatedAt)}`,
+      ];
+      return Promise.resolve({
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: { memoryId: p.id, found: true },
+      });
+    },
+  };
+
+  // -------------------------------------------------------------------------
+  // delete_journal_entry
+  // -------------------------------------------------------------------------
+  const deleteJournalEntry: AgentTool = {
+    name: "delete_journal_entry",
+    label: "Delete Journal Entry",
     description: "Delete a journal entry by its ID.",
-    parameters: DeleteJournalSchema,
+    parameters: DeleteJournalEntrySchema,
     execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: number; success: boolean }>> => {
-      const p = params as DeleteJournalParams;
+      const p = params as DeleteJournalEntryParams;
       const existing = getMemory(db, p.id);
       if (existing === null || existing.guildId !== guildId) {
         return Promise.resolve({
@@ -260,17 +306,17 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
         }
         if (existing.scope !== "user") {
           return Promise.resolve({
-            content: [{ type: "text", text: `ID ${p.id} is not a user memory. Use save_journal to update journal entries.` }],
+            content: [{ type: "text", text: `ID ${p.id} is not a user memory. Use save_journal_entry to update journal entries.` }],
             details: { memoryId: p.id, action: "update", success: false },
           });
         }
         const updated = updateMemory(db, p.id, {
-          shortDescription: p.shortDescription,
-          longDescription: p.longDescription,
+          title: p.title,
+          content: p.content,
           ttlDays: p.ttlDays,
         });
         if (updated) {
-          onMemoryChanged?.(p.id, embeddingText(p.shortDescription, p.longDescription));
+          onMemoryChanged?.(p.id, embeddingText(p.title, p.content));
         }
         return Promise.resolve({
           content: [{ type: "text", text: updated ? `Saved (updated) user memory ${p.id}.` : `User memory ${p.id} not found.` }],
@@ -283,12 +329,12 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
         scope: "user",
         guildId,
         userId,
-        shortDescription: p.shortDescription,
-        longDescription: p.longDescription,
+        title: p.title,
+        content: p.content,
         sourceMessageId: p.sourceMessageId,
         ttlDays: p.ttlDays,
       });
-      onMemoryChanged?.(id, embeddingText(p.shortDescription, p.longDescription));
+      onMemoryChanged?.(id, embeddingText(p.title, p.content));
 
       return Promise.resolve({
         content: [{ type: "text", text: `Saved new user memory ${id} for @${p.username}.` }],
@@ -316,7 +362,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
       }
       if (existing.scope !== "user") {
         return Promise.resolve({
-          content: [{ type: "text", text: `ID ${p.id} is not a user memory. Use delete_journal for journal entries.` }],
+          content: [{ type: "text", text: `ID ${p.id} is not a user memory. Use delete_journal_entry for journal entries.` }],
           details: { memoryId: p.id, success: false },
         });
       }
@@ -377,5 +423,5 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     },
   };
 
-  return [saveJournal, deleteJournal, saveUserMemory, deleteUserMemory, recallUserMemories];
+  return [saveJournalEntry, recallJournalEntry, deleteJournalEntry, saveUserMemory, deleteUserMemory, recallUserMemories];
 }

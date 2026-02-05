@@ -46,6 +46,14 @@ export function formatMemoryTimestamps(
 }
 
 /**
+ * Format a single timestamp for journal context display.
+ * Returns just "(Xago)" based on updatedAt.
+ */
+export function formatJournalTimestamp(updatedAt: number, nowMs?: number): string {
+  return `(${formatRelativeAgo(updatedAt, nowMs)})`;
+}
+
+/**
  * Format a timestamp as a deterministic date stamp: `[DATE YYYY-MM-DD HH:mm Z]`
  * Uses the guild timezone with UTC fallback if invalid.
  */

@@ -46,7 +46,7 @@ export const TOOL_INSTRUCTIONS = `## Available Tools (always use some of them; a
   - \`is_voice_message: true\` (optional) — sends as audio attachment (voice message)
   - \`voice_type: "normal" | "whisper"\` (optional) — selects voice preset (if configured)
 - \`start_thread\` — Create a new thread attached to the trigger message. Use for long discussions, sensitive topics, or to declutter the main chat. Returns \`thread_id\` for use with \`send_message(chat_id)\`.
-- \`save_journal\` / \`delete_journal\` — Bot's journal (visible in "## Journal" section)
+- \`save_journal_entry\` / \`recall_journal_entry\` / \`delete_journal_entry\` — Bot's journal (visible in "## Journal" section)
 - \`save_user_memory\` / \`delete_user_memory\` / \`recall_user_memories\` — User-related memories (NOT in context — must recall)
 - \`search_messages\` — Search past messages. Modes: \`semantic\` (default, AI similarity), \`literal\` (case-insensitive keyword/phrase), \`id\` (direct message lookup)
 - \`schedule_message\` — Schedule a message to be sent later
@@ -78,9 +78,10 @@ export const TOOL_INSTRUCTIONS = `## Available Tools (always use some of them; a
 Two separate persistent memory systems:
 
 ### Journal (Bot's Notes)
-- \`save_journal\` — Record observations, plans, notes. Pass \`id\` to update existing entry.
-- Journal entries are **always visible** in "## Journal" section
-- Use \`delete_journal\` to remove entries
+- \`save_journal_entry\` — Record observations, plans, notes. Pass \`id\` to update existing entry.
+- \`recall_journal_entry\` — Retrieve full journal entry by ID (title + content).
+- Journal entries are **always visible** in "## Journal" section (title only)
+- Use \`delete_journal_entry\` to remove entries
 
 ### User Memories
 - \`save_user_memory\` — Record facts about users (requires \`username\`). Pass \`id\` to update existing entry.
@@ -90,8 +91,8 @@ Two separate persistent memory systems:
 
 Common fields:
 - \`username\` — Target user's @username from chat (required for user memories)
-- \`shortDescription\` — Primary text (required)
-- \`longDescription\` — Extended details (optional)
+- \`title\` — Primary text (required)
+- \`content\` — Extended details (required for journal, optional for user memories)
 - \`ttlDays\` — Days until expiry (default 180, null = no expiry)
 - \`id\` — Existing memory ID to update (omit to create new)
 

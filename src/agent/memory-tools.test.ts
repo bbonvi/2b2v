@@ -43,15 +43,16 @@ function findTool(tools: AgentTool[], name: string): AgentTool {
 }
 
 // ---------------------------------------------------------------------------
-// save_journal tool
+// save_journal_entry tool
 // ---------------------------------------------------------------------------
-describe("save_journal tool", () => {
+describe("save_journal_entry tool", () => {
   test("creates a journal entry", async () => {
     const tools = createMemoryTools(makeDeps());
-    const saveTool = findTool(tools, "save_journal");
+    const saveTool = findTool(tools, "save_journal_entry");
 
     const result = await saveTool.execute("tc-1", {
-      shortDescription: "Follow up on project X",
+      title: "Follow up on project X",
+      content: "Check status with team next week.",
     }, new AbortController().signal);
 
     expect(result.content[0]).toMatchObject({ type: "text" });
@@ -60,29 +61,31 @@ describe("save_journal tool", () => {
 
     const entries = listMemories(db, { scope: "journal", guildId: "g1", userId: "bot-1" });
     expect(entries).toHaveLength(1);
-    expect(entries[0]?.shortDescription).toBe("Follow up on project X");
+    expect(entries[0]?.title).toBe("Follow up on project X");
   });
 
-  test("creates a journal entry with descriptions", async () => {
+  test("creates a journal entry with title and content", async () => {
     const tools = createMemoryTools(makeDeps());
-    const saveTool = findTool(tools, "save_journal");
+    const saveTool = findTool(tools, "save_journal_entry");
 
     await saveTool.execute("tc-2", {
-      shortDescription: "Follow up on Bob",
-      longDescription: "Bob asked about the Rust project. Check in next week.",
+      title: "Follow up on Bob",
+      content: "Bob asked about the Rust project. Check in next week.",
     }, new AbortController().signal);
 
     const entries = listMemories(db, { scope: "journal", guildId: "g1", userId: "bot-1" });
     expect(entries).toHaveLength(1);
-    expect(entries[0]?.shortDescription).toBe("Follow up on Bob");
+    expect(entries[0]?.title).toBe("Follow up on Bob");
+    expect(entries[0]?.content).toBe("Bob asked about the Rust project. Check in next week.");
   });
 
   test("auto-injects botUserId as userId in DB", async () => {
     const tools = createMemoryTools(makeDeps({ botUserId: "bot-xyz" }));
-    const saveTool = findTool(tools, "save_journal");
+    const saveTool = findTool(tools, "save_journal_entry");
 
     await saveTool.execute("tc-3", {
-      shortDescription: "Task note",
+      title: "Task note",
+      content: "Details about the task.",
     }, new AbortController().signal);
 
     const entries = listMemories(db, { scope: "journal", guildId: "g1", userId: "bot-xyz" });
@@ -93,39 +96,44 @@ describe("save_journal tool", () => {
 
   test("updates existing journal entry when id is provided", async () => {
     const tools = createMemoryTools(makeDeps());
-    const saveTool = findTool(tools, "save_journal");
+    const saveTool = findTool(tools, "save_journal_entry");
 
     // Create first
     const createResult = await saveTool.execute("tc-4", {
-      shortDescription: "Original",
+      title: "Original",
+      content: "Original content.",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
     // Update
     await saveTool.execute("tc-5", {
-      shortDescription: "Updated",
+      title: "Updated",
+      content: "Updated content.",
       id,
     }, new AbortController().signal);
 
     const mem = getMemory(db, id);
     expect(mem).not.toBeNull();
-    expect(mem?.shortDescription).toBe("Updated");
+    expect(mem?.title).toBe("Updated");
+    expect(mem?.content).toBe("Updated content.");
   });
 
   test("rejects update of journal belonging to another guild", async () => {
     const toolsG1 = createMemoryTools(makeDeps());
     const toolsG2 = createMemoryTools(makeDeps({ guildId: "g2" }));
-    const saveG1 = findTool(toolsG1, "save_journal");
-    const saveG2 = findTool(toolsG2, "save_journal");
+    const saveG1 = findTool(toolsG1, "save_journal_entry");
+    const saveG2 = findTool(toolsG2, "save_journal_entry");
 
     const createResult = await saveG1.execute("tc-6", {
-      shortDescription: "G1 task",
+      title: "G1 task",
+      content: "G1 content.",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
     // G2 tries to update G1's journal
     const updateResult = await saveG2.execute("tc-7", {
-      shortDescription: "Hijacked",
+      title: "Hijacked",
+      content: "Hijacked content.",
       id,
     }, new AbortController().signal);
     const text = (updateResult.content[0] as { text: string }).text;
@@ -134,24 +142,25 @@ describe("save_journal tool", () => {
 
     // Verify original unchanged
     const mem = getMemory(db, id);
-    expect(mem?.shortDescription).toBe("G1 task");
+    expect(mem?.title).toBe("G1 task");
   });
 
   test("rejects update of user memory ID", async () => {
     const tools = createMemoryTools(makeDeps());
-    const saveJournalTool = findTool(tools, "save_journal");
+    const saveJournalTool = findTool(tools, "save_journal_entry");
     const saveUserTool = findTool(tools, "save_user_memory");
 
     // Create a user memory
     const userResult = await saveUserTool.execute("tc-1", {
       username: "u1",
-      shortDescription: "User fact",
+      title: "User fact",
     }, new AbortController().signal);
     const userId = (userResult.details as { memoryId: number }).memoryId;
 
-    // Try to update it via save_journal
+    // Try to update it via save_journal_entry
     const result = await saveJournalTool.execute("tc-2", {
-      shortDescription: "Hijacked",
+      title: "Hijacked",
+      content: "Hijacked content.",
       id: userId,
     }, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
@@ -164,14 +173,15 @@ describe("save_journal tool", () => {
     const tools = createMemoryTools(makeDeps({
       onMemoryChanged: (id, text) => { changed.push({ id, text }); },
     }));
-    const saveTool = findTool(tools, "save_journal");
+    const saveTool = findTool(tools, "save_journal_entry");
 
     await saveTool.execute("tc-8", {
-      shortDescription: "Embed me",
+      title: "Embed me",
+      content: "Embed content.",
     }, new AbortController().signal);
 
     expect(changed).toHaveLength(1);
-    expect(changed[0]?.text).toBe("Embed me");
+    expect(changed[0]?.text).toBe("Embed me\n\nEmbed content.");
   });
 
   test("calls onMemoryChanged after update", async () => {
@@ -179,34 +189,37 @@ describe("save_journal tool", () => {
     const tools = createMemoryTools(makeDeps({
       onMemoryChanged: (id, text) => { changed.push({ id, text }); },
     }));
-    const saveTool = findTool(tools, "save_journal");
+    const saveTool = findTool(tools, "save_journal_entry");
 
     const createResult = await saveTool.execute("tc-9", {
-      shortDescription: "Original",
+      title: "Original",
+      content: "Original content.",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
     await saveTool.execute("tc-10", {
-      shortDescription: "Updated",
+      title: "Updated",
+      content: "Updated content.",
       id,
     }, new AbortController().signal);
 
     expect(changed).toHaveLength(2);
-    expect(changed[1]?.text).toBe("Updated");
+    expect(changed[1]?.text).toBe("Updated\n\nUpdated content.");
   });
 });
 
 // ---------------------------------------------------------------------------
-// delete_journal tool
+// delete_journal_entry tool
 // ---------------------------------------------------------------------------
-describe("delete_journal tool", () => {
+describe("delete_journal_entry tool", () => {
   test("deletes an existing journal entry", async () => {
     const tools = createMemoryTools(makeDeps());
-    const saveTool = findTool(tools, "save_journal");
-    const deleteTool = findTool(tools, "delete_journal");
+    const saveTool = findTool(tools, "save_journal_entry");
+    const deleteTool = findTool(tools, "delete_journal_entry");
 
     const createResult = await saveTool.execute("tc-1", {
-      shortDescription: "To delete",
+      title: "To delete",
+      content: "Content to delete.",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
@@ -219,11 +232,12 @@ describe("delete_journal tool", () => {
   test("rejects deletion of journal belonging to another guild", async () => {
     const toolsG1 = createMemoryTools(makeDeps());
     const toolsG2 = createMemoryTools(makeDeps({ guildId: "g2" }));
-    const saveG1 = findTool(toolsG1, "save_journal");
-    const deleteG2 = findTool(toolsG2, "delete_journal");
+    const saveG1 = findTool(toolsG1, "save_journal_entry");
+    const deleteG2 = findTool(toolsG2, "delete_journal_entry");
 
     const createResult = await saveG1.execute("tc-1", {
-      shortDescription: "G1 task",
+      title: "G1 task",
+      content: "G1 content.",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
@@ -238,16 +252,16 @@ describe("delete_journal tool", () => {
   test("rejects deletion of user memory ID", async () => {
     const tools = createMemoryTools(makeDeps());
     const saveUserTool = findTool(tools, "save_user_memory");
-    const deleteJournalTool = findTool(tools, "delete_journal");
+    const deleteJournalTool = findTool(tools, "delete_journal_entry");
 
     // Create a user memory
     const userResult = await saveUserTool.execute("tc-1", {
       username: "u1",
-      shortDescription: "User fact",
+      title: "User fact",
     }, new AbortController().signal);
     const userId = (userResult.details as { memoryId: number }).memoryId;
 
-    // Try to delete it via delete_journal
+    // Try to delete it via delete_journal_entry
     const result = await deleteJournalTool.execute("tc-2", { id: userId }, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain("not a journal entry");
@@ -259,7 +273,7 @@ describe("delete_journal tool", () => {
 
   test("reports when journal not found", async () => {
     const tools = createMemoryTools(makeDeps());
-    const deleteTool = findTool(tools, "delete_journal");
+    const deleteTool = findTool(tools, "delete_journal_entry");
 
     const result = await deleteTool.execute("tc-1", { id: 999999 }, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
@@ -271,11 +285,12 @@ describe("delete_journal tool", () => {
     const tools = createMemoryTools(makeDeps({
       onMemoryDeleted: (id) => { deleted.push(id); },
     }));
-    const saveTool = findTool(tools, "save_journal");
-    const deleteTool = findTool(tools, "delete_journal");
+    const saveTool = findTool(tools, "save_journal_entry");
+    const deleteTool = findTool(tools, "delete_journal_entry");
 
     const createResult = await saveTool.execute("tc-1", {
-      shortDescription: "To delete",
+      title: "To delete",
+      content: "Content to delete.",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
@@ -294,7 +309,7 @@ describe("save_user_memory tool", () => {
 
     const result = await saveTool.execute("tc-1", {
       username: "u1",
-      shortDescription: "Prefers dark mode",
+      title: "Prefers dark mode",
     }, new AbortController().signal);
 
     expect(result.content[0]).toMatchObject({ type: "text" });
@@ -304,7 +319,7 @@ describe("save_user_memory tool", () => {
     // Verify in DB (userId is resolved from username "u1" → "uid-1")
     const memories = listMemories(db, { scope: "user", guildId: "g1", userId: "uid-1" });
     expect(memories).toHaveLength(1);
-    expect(memories[0]?.shortDescription).toBe("Prefers dark mode");
+    expect(memories[0]?.title).toBe("Prefers dark mode");
   });
 
   test("updates existing user memory when id is provided", async () => {
@@ -314,20 +329,20 @@ describe("save_user_memory tool", () => {
     // Create first
     const createResult = await saveTool.execute("tc-4", {
       username: "u1",
-      shortDescription: "Original",
+      title: "Original",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
     // Update
     await saveTool.execute("tc-5", {
       username: "u1",
-      shortDescription: "Updated",
+      title: "Updated",
       id,
     }, new AbortController().signal);
 
     const mem = getMemory(db, id);
     expect(mem).not.toBeNull();
-    expect(mem?.shortDescription).toBe("Updated");
+    expect(mem?.title).toBe("Updated");
   });
 
   test("rejects update of user memory belonging to another guild", async () => {
@@ -338,14 +353,14 @@ describe("save_user_memory tool", () => {
 
     const createResult = await saveG1.execute("tc-6", {
       username: "u1",
-      shortDescription: "G1 secret",
+      title: "G1 secret",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
     // G2 tries to update G1's memory
     const updateResult = await saveG2.execute("tc-7", {
       username: "u1",
-      shortDescription: "Hijacked",
+      title: "Hijacked",
       id,
     }, new AbortController().signal);
     const text = (updateResult.content[0] as { text: string }).text;
@@ -354,24 +369,25 @@ describe("save_user_memory tool", () => {
 
     // Verify original unchanged
     const mem = getMemory(db, id);
-    expect(mem?.shortDescription).toBe("G1 secret");
+    expect(mem?.title).toBe("G1 secret");
   });
 
   test("rejects update of journal ID", async () => {
     const tools = createMemoryTools(makeDeps());
-    const saveJournalTool = findTool(tools, "save_journal");
+    const saveJournalTool = findTool(tools, "save_journal_entry");
     const saveUserTool = findTool(tools, "save_user_memory");
 
     // Create a journal entry
     const journalResult = await saveJournalTool.execute("tc-1", {
-      shortDescription: "Journal task",
+      title: "Journal task",
+      content: "Journal content.",
     }, new AbortController().signal);
     const journalId = (journalResult.details as { memoryId: number }).memoryId;
 
     // Try to update it via save_user_memory
     const result = await saveUserTool.execute("tc-2", {
       username: "u1",
-      shortDescription: "Hijacked",
+      title: "Hijacked",
       id: journalId,
     }, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
@@ -388,7 +404,7 @@ describe("save_user_memory tool", () => {
 
     await saveTool.execute("tc-8", {
       username: "u1",
-      shortDescription: "Embed me",
+      title: "Embed me",
     }, new AbortController().signal);
 
     expect(changed).toHaveLength(1);
@@ -404,13 +420,13 @@ describe("save_user_memory tool", () => {
 
     const createResult = await saveTool.execute("tc-9", {
       username: "u1",
-      shortDescription: "Original",
+      title: "Original",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
     await saveTool.execute("tc-10", {
       username: "u1",
-      shortDescription: "Updated",
+      title: "Updated",
       id,
     }, new AbortController().signal);
 
@@ -430,7 +446,7 @@ describe("delete_user_memory tool", () => {
 
     const createResult = await saveTool.execute("tc-1", {
       username: "u1",
-      shortDescription: "To delete",
+      title: "To delete",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
@@ -448,7 +464,7 @@ describe("delete_user_memory tool", () => {
 
     const createResult = await saveG1.execute("tc-11", {
       username: "u1",
-      shortDescription: "G1 data",
+      title: "G1 data",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
@@ -462,12 +478,13 @@ describe("delete_user_memory tool", () => {
 
   test("rejects deletion of journal ID", async () => {
     const tools = createMemoryTools(makeDeps());
-    const saveJournalTool = findTool(tools, "save_journal");
+    const saveJournalTool = findTool(tools, "save_journal_entry");
     const deleteUserTool = findTool(tools, "delete_user_memory");
 
     // Create a journal entry
     const journalResult = await saveJournalTool.execute("tc-1", {
-      shortDescription: "Journal task",
+      title: "Journal task",
+      content: "Journal content.",
     }, new AbortController().signal);
     const journalId = (journalResult.details as { memoryId: number }).memoryId;
 
@@ -500,7 +517,7 @@ describe("delete_user_memory tool", () => {
 
     const createResult = await saveTool.execute("tc-16", {
       username: "u1",
-      shortDescription: "To delete",
+      title: "To delete",
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
@@ -518,8 +535,8 @@ describe("recall_user_memories tool", () => {
     const saveTool = findTool(tools, "save_user_memory");
     const recallTool = findTool(tools, "recall_user_memories");
 
-    await saveTool.execute("tc-1", { username: "u1", shortDescription: "Fact A" }, new AbortController().signal);
-    await saveTool.execute("tc-2", { username: "u1", shortDescription: "Fact B" }, new AbortController().signal);
+    await saveTool.execute("tc-1", { username: "u1", title: "Fact A" }, new AbortController().signal);
+    await saveTool.execute("tc-2", { username: "u1", title: "Fact B" }, new AbortController().signal);
 
     const result = await recallTool.execute("tc-3", { username: "u1" }, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
@@ -532,8 +549,8 @@ describe("recall_user_memories tool", () => {
     const saveTool = findTool(tools, "save_user_memory");
     const recallTool = findTool(tools, "recall_user_memories");
 
-    await saveTool.execute("tc-1", { username: "u1", shortDescription: "User 1 fact" }, new AbortController().signal);
-    await saveTool.execute("tc-2", { username: "u2", shortDescription: "User 2 fact" }, new AbortController().signal);
+    await saveTool.execute("tc-1", { username: "u1", title: "User 1 fact" }, new AbortController().signal);
+    await saveTool.execute("tc-2", { username: "u2", title: "User 2 fact" }, new AbortController().signal);
 
     const result = await recallTool.execute("tc-3", {}, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
@@ -566,7 +583,7 @@ describe("recall_user_memories tool", () => {
     const recallG2 = findTool(toolsG2, "recall_user_memories");
 
     // Create user memory in G1
-    await saveG1.execute("tc-1", { username: "u1", shortDescription: "G1 secret" }, new AbortController().signal);
+    await saveG1.execute("tc-1", { username: "u1", title: "G1 secret" }, new AbortController().signal);
 
     // Recall from G2 — should not see G1's memory
     const result = await recallG2.execute("tc-2", { username: "u1" }, new AbortController().signal);
@@ -576,12 +593,12 @@ describe("recall_user_memories tool", () => {
 
   test("does not include journal entries", async () => {
     const tools = createMemoryTools(makeDeps());
-    const saveJournalTool = findTool(tools, "save_journal");
+    const saveJournalTool = findTool(tools, "save_journal_entry");
     const saveUserTool = findTool(tools, "save_user_memory");
     const recallTool = findTool(tools, "recall_user_memories");
 
-    await saveJournalTool.execute("tc-1", { shortDescription: "Journal task" }, new AbortController().signal);
-    await saveUserTool.execute("tc-2", { username: "u1", shortDescription: "User fact" }, new AbortController().signal);
+    await saveJournalTool.execute("tc-1", { title: "Journal task", content: "Journal content." }, new AbortController().signal);
+    await saveUserTool.execute("tc-2", { username: "u1", title: "User fact" }, new AbortController().signal);
 
     const result = await recallTool.execute("tc-3", {}, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
@@ -591,17 +608,91 @@ describe("recall_user_memories tool", () => {
 });
 
 // ---------------------------------------------------------------------------
+// recall_journal_entry tool
+// ---------------------------------------------------------------------------
+describe("recall_journal_entry tool", () => {
+  test("retrieves journal entry by ID", async () => {
+    const tools = createMemoryTools(makeDeps());
+    const saveTool = findTool(tools, "save_journal_entry");
+    const recallTool = findTool(tools, "recall_journal_entry");
+
+    const createResult = await saveTool.execute("tc-1", {
+      title: "Test entry",
+      content: "Test content here.",
+    }, new AbortController().signal);
+    const id = (createResult.details as { memoryId: number }).memoryId;
+
+    const result = await recallTool.execute("tc-2", { id }, new AbortController().signal);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain(`ID: ${id}`);
+    expect(text).toContain("Title: Test entry");
+    expect(text).toContain("Content: Test content here.");
+    expect(text).toContain("Created:");
+    expect(text).toContain("Updated:");
+    expect((result.details as { found: boolean }).found).toBe(true);
+  });
+
+  test("reports not found for non-existent ID", async () => {
+    const tools = createMemoryTools(makeDeps());
+    const recallTool = findTool(tools, "recall_journal_entry");
+
+    const result = await recallTool.execute("tc-1", { id: 999999 }, new AbortController().signal);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("not found");
+    expect((result.details as { found: boolean }).found).toBe(false);
+  });
+
+  test("rejects recall of journal from another guild", async () => {
+    const toolsG1 = createMemoryTools(makeDeps());
+    const toolsG2 = createMemoryTools(makeDeps({ guildId: "g2" }));
+    const saveG1 = findTool(toolsG1, "save_journal_entry");
+    const recallG2 = findTool(toolsG2, "recall_journal_entry");
+
+    const createResult = await saveG1.execute("tc-1", {
+      title: "G1 journal",
+      content: "G1 content.",
+    }, new AbortController().signal);
+    const id = (createResult.details as { memoryId: number }).memoryId;
+
+    const result = await recallG2.execute("tc-2", { id }, new AbortController().signal);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("not found");
+    expect((result.details as { found: boolean }).found).toBe(false);
+  });
+
+  test("rejects recall of user memory ID", async () => {
+    const tools = createMemoryTools(makeDeps());
+    const saveUserTool = findTool(tools, "save_user_memory");
+    const recallJournalTool = findTool(tools, "recall_journal_entry");
+
+    // Create a user memory
+    const userResult = await saveUserTool.execute("tc-1", {
+      username: "u1",
+      title: "User fact",
+    }, new AbortController().signal);
+    const userId = (userResult.details as { memoryId: number }).memoryId;
+
+    // Try to recall it via recall_journal_entry
+    const result = await recallJournalTool.execute("tc-2", { id: userId }, new AbortController().signal);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("not a journal entry");
+    expect((result.details as { found: boolean }).found).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Factory returns correct tools
 // ---------------------------------------------------------------------------
 describe("createMemoryTools factory", () => {
-  test("returns all 5 tools", () => {
+  test("returns all 6 tools", () => {
     const tools = createMemoryTools(makeDeps());
-    expect(tools).toHaveLength(5);
+    expect(tools).toHaveLength(6);
     expect(tools.map(t => t.name).sort()).toEqual([
-      "delete_journal",
+      "delete_journal_entry",
       "delete_user_memory",
+      "recall_journal_entry",
       "recall_user_memories",
-      "save_journal",
+      "save_journal_entry",
       "save_user_memory",
     ]);
   });

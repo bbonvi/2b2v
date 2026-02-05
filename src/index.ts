@@ -22,7 +22,7 @@ import { processHistory } from "./agent/history-pipeline";
 import { trimMessages } from "./agent/history-trimming";
 import { formatMessageLine, OLDER_LEGEND } from "./agent/history-formatting";
 import { insertDateStamps } from "./agent/history-dates";
-import { formatMemoryTimestamps, formatRelativeAgo } from "./agent/history-dates";
+import { formatRelativeAgo, formatJournalTimestamp } from "./agent/history-dates";
 import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
 import type { MessageSender } from "./agent/send-message-tool";
@@ -687,14 +687,17 @@ async function buildContext(
   // Journal summaries — sorted by updatedAt ascending, then ID
   const botUserId = client.user?.id ?? "";
   const journals = listMemories(db, { scope: "journal", guildId, userId: botUserId })
-    .filter((m) => m.shortDescription !== "")
+    .filter((m) => m.title !== "")
     .sort((a, b) => {
       const ud = a.updatedAt - b.updatedAt;
       return ud !== 0 ? ud : a.id - b.id;
     });
-  const journalSummaries = journals
-    .map((m) => `- [${m.id}] ${formatMemoryTimestamps(m.createdAt, m.updatedAt)} ${m.shortDescription}`)
-    .join("\n");
+  // Format: legend line + entries (no brackets around ID, only updatedAt timestamp)
+  const journalLines = journals.map((m) => `- ${m.id} ${formatJournalTimestamp(m.updatedAt)} ${m.title}`);
+  const journalLegend = "*[ID] ([Last updated]) [Title]; each entry has `content`; use `recall_journal_entry(id)` for full object*";
+  const journalSummaries = journals.length > 0
+    ? [journalLegend, ...journalLines].join("\n")
+    : "";
 
   // Upcoming schedules — one-off by runAt then ID; cron by expression then ID; one-off first
   const upcoming = listUpcomingForContext(db, guildId)
@@ -792,7 +795,7 @@ async function buildContext(
     const lateInstruction = `CRITICAL:
 - Always call \`start_typing\` before each \`send_message\`.
 - ALWAYS USE \`send_message\` TO MAKE AN ACTUAL RESPONSE to a user! OTHERWISE THE REPLY WILL BE LOST!
-- Remember and consider all your \"Available Tools\".
+- Remember and consider all your "Available Tools".
 - Always recall user-related memories before making response.
 - If recallection of event is needed consider using literal search or fallback to semantic one. Try different queries.
 - \`send_message\` HAS to be called!
