@@ -385,6 +385,35 @@ describe("RequestLog", () => {
     expect(llmCalls[0]?.requestPayload).toBeUndefined();
   });
 
+  test("recordLLMCompletion captures responsePayload", () => {
+    const rl = new RequestLog("g1", "c1");
+    const message = {
+      role: "assistant",
+      model: "test-model",
+      content: [{ type: "text", text: "hello" }],
+      usage: { input: 10, output: 5, totalTokens: 15 },
+      stopReason: "stop",
+    };
+    rl.recordLLMCompletion(message);
+
+    const entry = rl.toEntry();
+    expect(entry.llmCalls[0]?.responsePayload).toEqual(message);
+  });
+
+  test("emit excludes responsePayload from console log", () => {
+    const logger = createLogger({ level: "info" });
+    const rl = new RequestLog("g1", "c1");
+    rl.recordLLMCompletion({
+      role: "assistant", model: "m", content: [{ type: "text", text: "hi" }],
+      usage: { input: 10, output: 5, totalTokens: 15 }, stopReason: "stop",
+    });
+    rl.emit(logger);
+
+    const logOutput = lastLog();
+    const llmCalls = logOutput.llmCalls as Array<Record<string, unknown>>;
+    expect(llmCalls[0]?.responsePayload).toBeUndefined();
+  });
+
   test("tool error marked with isError", () => {
     const logger = createLogger({ level: "info" });
     const rl = new RequestLog("g1", "c1");

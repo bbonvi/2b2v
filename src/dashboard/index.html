@@ -427,10 +427,15 @@
     for (let li = 0; li < e.llmCalls.length; li++) {
       const l = e.llmCalls[li];
       let payloadCell = '-';
+      let responseCell = '-';
+      const pkey = e.requestId + ':' + li;
       if (l.requestPayload != null) {
-        const pkey = e.requestId + ':' + li;
-        payloadStore.set(pkey, l.requestPayload);
-        payloadCell = '<button class="btn btn-sm" onclick="event.stopPropagation(); window.__showPayload(\'' + esc(pkey) + '\')">payload</button>';
+        payloadStore.set('req:' + pkey, l.requestPayload);
+        payloadCell = '<button class="btn btn-sm" onclick="event.stopPropagation(); window.__showPayload(\'req:' + esc(pkey) + '\', \'Request\')">request</button>';
+      }
+      if (l.responsePayload != null) {
+        payloadStore.set('res:' + pkey, l.responsePayload);
+        responseCell = '<button class="btn btn-sm" onclick="event.stopPropagation(); window.__showPayload(\'res:' + esc(pkey) + '\', \'Response\')">response</button>';
       }
       llmRows += '<tr>'
         + '<td>' + esc(l.model) + '</td>'
@@ -440,6 +445,7 @@
         + '<td>' + esc(l.contentTypes.join(', ')) + '</td>'
         + '<td class="tool-result">' + (l.outputText != null ? esc(l.outputText) : '<span style="color:var(--text-dim);font-style:italic">no text output</span>') + '</td>'
         + '<td>' + payloadCell + '</td>'
+        + '<td>' + responseCell + '</td>'
         + '</tr>';
     }
 
@@ -463,7 +469,7 @@
           + '<table class="detail-table"><tr><th>Tool</th><th>Args</th><th>Duration</th><th>Status</th><th>Result</th></tr>'
           + toolRows + '</table></div>' : '')
         + (e.llmCalls.length > 0 ? '<div class="detail-section"><div class="detail-label">LLM Calls</div>'
-          + '<table class="detail-table"><tr><th>Model</th><th>Tokens (in/out)</th><th>Cost</th><th>Stop</th><th>Content Types</th><th>Output</th><th>Payload</th></tr>'
+          + '<table class="detail-table"><tr><th>Model</th><th>Tokens (in/out)</th><th>Cost</th><th>Stop</th><th>Content Types</th><th>Output</th><th>Request</th><th>Response</th></tr>'
           + llmRows + '</table></div>' : '')
       + '</div>'
     + '</div>';
@@ -575,9 +581,12 @@
     });
   }
 
-  window.__showPayload = function(key) {
+  const modalTitle = document.querySelector('.modal-title');
+
+  window.__showPayload = function(key, title) {
     const payload = payloadStore.get(key);
     if (payload == null) return;
+    modalTitle.textContent = 'LLM ' + (title || 'Payload');
     modalBody.textContent = formatPayload(payload);
     modalOverlay.style.display = 'flex';
   };

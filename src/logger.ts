@@ -98,6 +98,7 @@ export interface RequestLLMCall {
   contentTypes: string[];
   outputText?: string;
   requestPayload?: unknown;
+  responsePayload?: unknown;
 }
 
 /** Recursively truncate string values in an object to `maxLen` characters. */
@@ -231,6 +232,7 @@ export class RequestLog {
       contentTypes,
       outputText: outputText.length > 0 ? outputText : undefined,
       requestPayload: this.pendingPayload ?? undefined,
+      responsePayload: message,
     });
     this.pendingPayload = null;
   }
@@ -274,6 +276,7 @@ export class RequestLog {
         ...l,
         outputText: truncStr(l.outputText, 300),
         requestPayload: undefined,
+        responsePayload: undefined,
       })),
     };
     logger.info("request_completed", logEntry as unknown as Record<string, unknown>);
