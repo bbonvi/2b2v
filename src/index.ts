@@ -588,6 +588,15 @@ async function buildContext(
       }
     }
   }
+    const lateInstruction = `CRITICAL:
+- Always call \`start_typing\` before each \`send_message\`.
+- ALWAYS USE \`send_message\` TO MAKE AN ACTUAL RESPONSE to a user! OTHERWISE THE REPLY WILL BE LOST!
+- Remember and consider all your \"Available Tools\".
+- Always recall user-related memories before making response.
+- If recallection of event is needed consider using literal search or fallback to semantic one. Try different queries.
+- \`send_message\` HAS to be called!
+- Consider proactively maintaining your journal and delete old unnecessary entries, or merge them.
+`;
 
   return assembleContext({
     persona,
@@ -603,7 +612,7 @@ async function buildContext(
     olderHistory: olderText,
     newerHistory: newerText,
     currentContext,
-    lateInstruction: "IMPORTANT: Always call `start_typing` immediately before each `send_message`.",
+    lateInstruction,
     userMessage,
   });
 }

@@ -37,9 +37,9 @@ export function formatChatHistory(messages: ChatMessage[]): string {
  * Order: persona → emojis → members → journal → schedules → chat history.
  * Empty sections are omitted entirely.
  */
-export const TOOL_INSTRUCTIONS = `## Available Tools
+export const TOOL_INSTRUCTIONS = `## Available Tools (always use some of them; and as much as you need)
 - \`start_typing\` — Trigger the typing indicator. Call immediately before each \`send_message\`.
-- \`send_message\` — Post a message to the chat. This is your ONLY way to communicate with users — your reasoning text is invisible to them.
+- \`send_message\` — Post a message to the chat. This is your ONLY way to communicate with users — your reasoning text is invisible to them. Always use it to make an actual response.
   - \`reply: true\` — creates a Discord reply (shows "replied to" link). Use on first response to the trigger message.
   - \`reply: false\` (default) — posts as a standalone message. Use for follow-ups.
   - \`chat_id\` (optional) — send to a specific chat (thread or channel). Omit to send to current chat. Cannot use \`reply: true\` with \`chat_id\`.
@@ -110,15 +110,22 @@ All memories are per-guild (auto-scoped).
 Parameters: \`command\` (required), \`cwd\`, \`env\`, \`stdin\`, \`timeoutMs\`, \`pty\`.
 
 ## Thread Handoff
-When a conversation should move to a thread (long discussion, personal topic, decluttering):
-1. Call \`start_thread\` with a descriptive name
-2. Send a short breadcrumb in the parent chat using \`send_message(reply: true)\` with a thread mention (e.g., "Continuing in <#thread_id>")
-3. Continue the conversation in the thread using \`send_message(chat_id: thread_id)\`
+When a conversation should move to a thread (long discussion unrelated to current chat flow, researches, long bash tool usage sessions):
+1. Stop whatever you're doing.
+2. Call \`start_thread\` with a descriptive name
+3. Send a short breadcrumb in the parent chat using \`send_message(reply: true)\` with a thread mention (e.g., "Continuing in <#thread_id>")
+4. Continue the conversation in the thread using \`send_message(chat_id: thread_id)\`
 
 Optionally, send a brief opener in the thread summarizing the context.
 
 ## Reminder
 Always call \`send_message\` to respond — your reasoning text is invisible to users.
+\`send_message\` with \`reply\`: true to make an actual reply to a specific person.
+
+## CRITICAL
+- ALWAYS use a tool!
+- ALWAYS \`send_message\` to the channel instead of inlining your responses.
+- ALWAYS \`start_typing\` before \`send_message\`.
 `;
 
 export function assembleSystemPrompt(ctx: PromptContext): string {
