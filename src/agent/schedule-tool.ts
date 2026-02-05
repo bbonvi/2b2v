@@ -24,7 +24,7 @@ const ScheduleMessageParams = Type.Object({
     [Type.Literal("seconds"), Type.Literal("minutes"), Type.Literal("hours")],
     { description: "Time unit: seconds, minutes, or hours." }
   ),
-  message: Type.String({ description: "Message content to send when the schedule fires." }),
+  message: Type.String({ description: "Detailed instruction that will be passed to scheduled message. Write it as an instruction to a future self, not an actual message. Make the instruction fully-featured and comprehensive, provide necessary context." }),
 });
 
 export function createScheduleTool(deps: ScheduleToolDeps): AgentTool {

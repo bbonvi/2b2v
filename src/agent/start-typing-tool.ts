@@ -13,7 +13,7 @@ export function createStartTypingTool(onTyping: TypingCallback): AgentTool {
     name: "start_typing",
     label: "Start Typing",
     description:
-      "Trigger the typing indicator in the current Discord channel. Call this immediately before each send_message.",
+      "Trigger the typing indicator in the current Discord channel. Call this immediately before each send_message. Typing indicator is valid for 10 seconds. Only use if you actually planning on sending a message.",
     parameters: Type.Object({}),
     execute: (): Promise<AgentToolResult<Record<string, never>>> => {
       onTyping();

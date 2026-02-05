@@ -79,7 +79,7 @@ export function createSendMessageTool(
     name: "send_message",
     label: "Send Message",
     description:
-      "Send a message. Optionally specify chat_id to send to a thread or other chat. Set reply=true to reply to the trigger message (only valid for current chat). Call multiple times to send multiple messages. Optional: is_voice_message=true sends as audio attachment.",
+      "Send a message to chat. Optionally specify chat_id to send to a thread or other chat. Set reply=true to reply to the trigger message (only valid for current chat). Call multiple times to send multiple messages. Optional: is_voice_message=true sends as audio attachment. Use `start_typing` before sending a message. Always send_message if you want to communicate something to a user.",
     parameters: SendMessageParams,
     execute: async (
       _toolCallId,

@@ -46,7 +46,7 @@ interface RecallJournalEntryParams {
 
 const SaveJournalEntrySchema = Type.Object({
   title: Type.String({ description: "Journal entry title. Visible in context under '## Journal'." }),
-  content: Type.String({ description: "Extended details (required)." }),
+  content: Type.String({ description: "Extended details (required). Not visible unless \"recalled\"" }),
   id: Type.Optional(Type.Integer({ description: "Existing journal ID to update. Omit to create new." })),
   ttlDays: Type.Optional(Type.Union([Type.Number(), Type.Null()], { description: "Days until expiry. Default 180. Pass null for no expiry." })),
   sourceMessageId: Type.Optional(Type.String({ description: "Discord message ID that triggered this journal entry." })),
