@@ -124,4 +124,36 @@ describe("shouldRespond", () => {
     );
     expect(result).toBeNull();
   });
+
+  test("matches Cyrillic keywords with word boundaries", () => {
+    const result = shouldRespond(
+      makeInput({ content: "привет туби как дела" }),
+      makeTriggers({ keywords: ["туби"] })
+    );
+    expect(result).toEqual({ reason: "keyword", keyword: "туби" });
+  });
+
+  test("Cyrillic keyword at start of message", () => {
+    const result = shouldRespond(
+      makeInput({ content: "Туби, привет!" }),
+      makeTriggers({ keywords: ["туби"] })
+    );
+    expect(result).toEqual({ reason: "keyword", keyword: "туби" });
+  });
+
+  test("Cyrillic keyword requires word boundary", () => {
+    const result = shouldRespond(
+      makeInput({ content: "приветтуби" }),
+      makeTriggers({ keywords: ["туби"] })
+    );
+    expect(result).toBeNull();
+  });
+
+  test("Cyrillic keyword not matched as suffix", () => {
+    const result = shouldRespond(
+      makeInput({ content: "тубика" }),
+      makeTriggers({ keywords: ["туби"] })
+    );
+    expect(result).toBeNull();
+  });
 });

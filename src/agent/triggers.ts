@@ -37,11 +37,15 @@ export function shouldRespond(
   }
 
   // 2. Keyword (word-boundary, case-insensitive)
+  // Uses Unicode property escapes for proper word boundary detection across all scripts
+  // (Cyrillic, Japanese, etc.) — \b only works with ASCII [a-zA-Z0-9_]
   if (triggers.keywords.length > 0 && input.content.length > 0) {
-    const lower = input.content.toLowerCase();
     for (const kw of triggers.keywords) {
-      const pattern = new RegExp(`\\b${escapeRegex(kw)}\\b`, "i");
-      if (pattern.test(lower)) {
+      const pattern = new RegExp(
+        `(?<![\\p{L}\\p{N}])${escapeRegex(kw)}(?![\\p{L}\\p{N}])`,
+        "iu"
+      );
+      if (pattern.test(input.content)) {
         return { reason: "keyword", keyword: kw.toLowerCase() };
       }
     }
