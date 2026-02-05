@@ -44,7 +44,7 @@ export function wrapToolsWithTiming(tools: AgentTool[]): AgentTool[] {
 
         // Append timing note if elapsed >= threshold
         if (elapsed >= TIMING_THRESHOLD_MS) {
-          const note = `*Note for agent: This \`${tool.name}\` took ${formatTiming(elapsed)} to run.*`;
+          const note = `\n*Note for agent: This \`${tool.name}\` took ${formatTiming(elapsed)} to run.*`;
           return {
             ...result,
             content: [...result.content, { type: "text", text: note }],

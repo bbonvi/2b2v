@@ -77,7 +77,7 @@ describe("wrapToolsWithTiming", () => {
     expect(note).toBeDefined();
     expect(note?.type).toBe("text");
     expect((note as { type: "text"; text: string }).text).toMatch(
-      /^\*Note for agent: This `slow_tool` took \d+ms to run\.\*$/
+      /^\n\*Note for agent: This `slow_tool` took \d+ms to run\.\*$/
     );
   });
 
@@ -100,7 +100,7 @@ describe("wrapToolsWithTiming", () => {
     const result2 = await w1.execute("call-2", {}, undefined);
     expect(result2.content).toHaveLength(2); // has timing note
     expect((result2.content[1] as { type: "text"; text: string }).text).toMatch(
-      /^\*Note for agent: This `tool_2` took \d+ms to run\.\*$/
+      /^\n\*Note for agent: This `tool_2` took \d+ms to run\.\*$/
     );
   });
 
@@ -182,7 +182,7 @@ describe("wrapToolsWithTiming", () => {
     expect(result.content).toHaveLength(2);
     // Should be formatted as "1.Xs" (seconds with decimal)
     expect((result.content[1] as { type: "text"; text: string }).text).toMatch(
-      /^\*Note for agent: This `one_second_tool` took 1\.\ds to run\.\*$/
+      /^\n\*Note for agent: This `one_second_tool` took 1\.\ds to run\.\*$/
     );
   });
 });
