@@ -1,8 +1,5 @@
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 
-/** Timing threshold in milliseconds — notes only shown if elapsed >= this value. */
-const TIMING_THRESHOLD_MS = 100;
-
 /**
  * Format elapsed milliseconds for display.
  * - < 1000ms: "Xms"
@@ -23,8 +20,6 @@ export function formatTiming(ms: number): string {
  * Timing measures elapsed time since the previous tool completed (or since
  * wrapper creation for the first call). This tells the agent how long the
  * user has been waiting, accounting for LLM thinking time between tool calls.
- *
- * Notes are only appended if elapsed time >= 100ms.
  */
 export function wrapToolsWithTiming(tools: AgentTool[]): AgentTool[] {
   // Shared mutable state: tracks when last tool execution finished
@@ -42,16 +37,11 @@ export function wrapToolsWithTiming(tools: AgentTool[]): AgentTool[] {
       try {
         const result = await tool.execute(toolCallId, params, signal);
 
-        // Append timing note if elapsed >= threshold
-        if (elapsed >= TIMING_THRESHOLD_MS) {
-          const note = `\n*Note for agent: This \`${tool.name}\` took ${formatTiming(elapsed)} to run.*`;
-          return {
-            ...result,
-            content: [...result.content, { type: "text", text: note }],
-          };
-        }
-
-        return result;
+        const note = `\n*Note for agent: This \`${tool.name}\` took ${formatTiming(elapsed)} to run.*`;
+        return {
+          ...result,
+          content: [...result.content, { type: "text", text: note }],
+        };
       } finally {
         // Always update end time, even on error
         state.lastToolEndTime = Date.now();

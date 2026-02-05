@@ -51,33 +51,19 @@ describe("formatTiming", () => {
 });
 
 describe("wrapToolsWithTiming", () => {
-  test("timing note omitted when elapsed < 100ms", async () => {
+  test("timing note always appended", async () => {
     const tool = createMockTool("fast_tool");
     const wrapped = getWrapped([tool], 0);
 
     const result = await wrapped.execute("call-1", {}, undefined);
 
-    // Should only have original content, no timing note
-    expect(result.content).toHaveLength(1);
-    expect(result.content[0]).toEqual({ type: "text", text: "fast_tool executed" });
-  });
-
-  test("timing note appended when elapsed >= 100ms", async () => {
-    const tool = createMockTool("slow_tool");
-    const wrapped = getWrapped([tool], 0);
-
-    // Wait 150ms before calling — this is the "elapsed since last tool end" gap
-    await new Promise((resolve) => setTimeout(resolve, 150));
-
-    const result = await wrapped.execute("call-1", {}, undefined);
-
     expect(result.content).toHaveLength(2);
-    expect(result.content[0]).toEqual({ type: "text", text: "slow_tool executed" });
+    expect(result.content[0]).toEqual({ type: "text", text: "fast_tool executed" });
     const note = result.content[1];
     expect(note).toBeDefined();
     expect(note?.type).toBe("text");
     expect((note as { type: "text"; text: string }).text).toMatch(
-      /^\n\*Note for agent: This `slow_tool` took \d+ms to run\.\*$/
+      /^\n\*Note for agent: This `fast_tool` took \d+ms to run\.\*$/
     );
   });
 
@@ -89,18 +75,18 @@ describe("wrapToolsWithTiming", () => {
     const w1 = wrapped[1];
     if (w0 === undefined || w1 === undefined) throw new Error("Missing tools");
 
-    // First call — elapsed from wrapper creation (should be < 100ms)
+    // First call — elapsed from wrapper creation
     const result1 = await w0.execute("call-1", {}, undefined);
-    expect(result1.content).toHaveLength(1); // no timing note
+    expect(result1.content).toHaveLength(2);
 
     // Wait 150ms after first tool completes
     await new Promise((resolve) => setTimeout(resolve, 150));
 
     // Second call — elapsed from first tool end (should be >= 150ms)
     const result2 = await w1.execute("call-2", {}, undefined);
-    expect(result2.content).toHaveLength(2); // has timing note
+    expect(result2.content).toHaveLength(2);
     expect((result2.content[1] as { type: "text"; text: string }).text).toMatch(
-      /^\n\*Note for agent: This `tool_2` took \d+ms to run\.\*$/
+      /^\n\*Note for agent: This `tool_2` took 1\d\dms to run\.\*$/
     );
   });
 
@@ -165,9 +151,12 @@ describe("wrapToolsWithTiming", () => {
     // Wait 150ms
     await new Promise((resolve) => setTimeout(resolve, 150));
 
-    // Second call should measure from error tool's end time
+    // Second call should measure from error tool's end time (~150ms)
     const result = await w1.execute("call-2", {}, undefined);
-    expect(result.content).toHaveLength(2); // has timing note
+    expect(result.content).toHaveLength(2);
+    expect((result.content[1] as { type: "text"; text: string }).text).toMatch(
+      /^\n\*Note for agent: This `normal_tool` took 1\d\dms to run\.\*$/
+    );
   });
 
   test("format switches from ms to seconds appropriately", async () => {
