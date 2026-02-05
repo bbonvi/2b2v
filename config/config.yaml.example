@@ -58,6 +58,10 @@ imageCaptioningEnabled: false
 emotes:
   include: false  # Include available server emojis in LLM context (default: false)
 
+# Server members list in LLM context
+members:
+  include: true  # Include server members list in context (default: true)
+
 # Agent tool-calling behavior on first turn
 # Some models need "required" tool choice on first turn to ensure tool use.
 # Some models go haywire with parallel tool calls; disabling prevents that.

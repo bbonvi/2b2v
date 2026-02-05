@@ -34,6 +34,12 @@ export interface EmotesConfig {
   include: boolean;
 }
 
+/** Server members list configuration. */
+export interface MembersConfig {
+  /** Whether to include server members list in LLM context. Default true. */
+  include: boolean;
+}
+
 /** Trigger configuration per guild. All independently toggleable. */
 export interface TriggerConfig {
   mention: boolean;
@@ -82,6 +88,8 @@ export interface GuildConfig {
   bashTool?: BashToolConfig;
   /** Emote/emoji context configuration. */
   emotes: EmotesConfig;
+  /** Server members list configuration. */
+  members: MembersConfig;
   /** Force toolChoice: "required" on first agent turn. */
   forceToolCallFirstRun: boolean;
   /** Disable parallel tool calls on first agent turn. */
@@ -123,6 +131,8 @@ export interface GlobalConfig {
   defaultBashTool?: BashToolConfig;
   /** Default emotes configuration. */
   defaultEmotes: EmotesConfig;
+  /** Default members configuration. */
+  defaultMembers: MembersConfig;
   /** Force toolChoice: "required" on first agent turn. Default false. */
   defaultForceToolCallFirstRun: boolean;
   /** Disable parallel tool calls on first agent turn. Default false. */
@@ -158,6 +168,9 @@ export interface GuildConfigYaml {
     enabled?: boolean;
   };
   emotes?: {
+    include?: boolean;
+  };
+  members?: {
     include?: boolean;
   };
   forceToolCallFirstRun?: boolean;
@@ -206,6 +219,9 @@ export interface MainConfigYaml {
     blocklist?: string[];
   };
   emotes?: {
+    include?: boolean;
+  };
+  members?: {
     include?: boolean;
   };
   forceToolCallFirstRun?: boolean;

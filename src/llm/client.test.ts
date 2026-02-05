@@ -26,6 +26,7 @@ const GLOBAL: GlobalConfig = {
   qdrantUrl: "http://localhost:6333",
   uiLang: "en",
   defaultEmotes: { include: false },
+  defaultMembers: { include: true },
   defaultForceToolCallFirstRun: false,
   defaultDisableParallelToolCallsFirstRun: false,
 };
@@ -46,6 +47,7 @@ const GUILD: GuildConfig = {
   attachmentsDir: "data/attachments",
   instructions: "",
   emotes: { include: false },
+  members: { include: true },
   forceToolCallFirstRun: false,
   disableParallelToolCallsFirstRun: false,
 };

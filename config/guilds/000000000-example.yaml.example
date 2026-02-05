@@ -59,6 +59,10 @@ imageCaptioningEnabled: false
 emotes:
   include: false  # Include available server emojis in LLM context
 
+# Server members list settings
+members:
+  include: true  # Include server members list in context
+
 # Agent tool-calling behavior (overrides global defaults)
 # forceToolCallFirstRun: true
 # disableParallelToolCallsFirstRun: true

@@ -12,6 +12,7 @@ export interface MemberInfo {
 export interface MemberListToolDeps {
   guildId: string;
   fetchMembers: (guildId: string, onlineOnly: boolean) => Promise<MemberInfo[]>;
+  getMemoryCounts: (guildId: string) => Map<string, number>;
 }
 
 const ListMembersParams = Type.Object({
@@ -21,7 +22,7 @@ const ListMembersParams = Type.Object({
 });
 
 export function createMemberListTool(deps: MemberListToolDeps): AgentTool {
-  const { guildId, fetchMembers } = deps;
+  const { guildId, fetchMembers, getMemoryCounts } = deps;
 
   return {
     name: "list_members",
@@ -51,7 +52,8 @@ export function createMemberListTool(deps: MemberListToolDeps): AgentTool {
         };
       }
 
-      const lines = members.map((m) => formatMember(m));
+      const memoryCounts = getMemoryCounts(guildId);
+      const lines = members.map((m) => formatMember(m, memoryCounts.get(m.userId) ?? 0));
       const header = onlineOnly ? `Online members (${members.length}):` : `All members (${members.length}):`;
       return {
         content: [{ type: "text", text: `${header}\n${lines.join("\n")}` }],
@@ -61,8 +63,9 @@ export function createMemberListTool(deps: MemberListToolDeps): AgentTool {
   };
 }
 
-function formatMember(m: MemberInfo): string {
+function formatMember(m: MemberInfo, memoryCount: number): string {
   const bot = m.isBot ? " [BOT]" : "";
   const status = m.status !== "offline" ? ` (${m.status})` : "";
-  return `@${m.username} — ${m.displayName}${bot}${status}`;
+  const memories = memoryCount > 0 ? ` — ${memoryCount} memories` : "";
+  return `@${m.username} — ${m.displayName}${bot}${status}${memories}`;
 }

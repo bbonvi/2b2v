@@ -750,14 +750,18 @@ async function buildContext(
   }
 
   // Display name context — sorted by username (case-insensitive), then by member ID
-  const members = [...guild.members.cache.values()]
-    .sort((a, b) => {
-      const uc = a.user.username.toLowerCase().localeCompare(b.user.username.toLowerCase());
-      return uc !== 0 ? uc : a.id.localeCompare(b.id);
-    })
-    .map((m) => ({ userId: m.user.id, username: m.user.username, displayName: m.displayName }));
-  const memoryCounts = countUserMemoriesByUser(db, guildId);
-  const displayNameContext = buildDisplayNameContext(members, memoryCounts);
+  // Only included when members.include is true
+  let displayNameContext = "";
+  if (guildConfig.members.include) {
+    const members = [...guild.members.cache.values()]
+      .sort((a, b) => {
+        const uc = a.user.username.toLowerCase().localeCompare(b.user.username.toLowerCase());
+        return uc !== 0 ? uc : a.id.localeCompare(b.id);
+      })
+      .map((m) => ({ userId: m.user.id, username: m.user.username, displayName: m.displayName }));
+    const memoryCounts = countUserMemoriesByUser(db, guildId);
+    displayNameContext = buildDisplayNameContext(members, memoryCounts);
+  }
 
   // Current context metadata
   const currentContext = `Guild: ${guildId} | Channel: ${channelId}\nDate/Time: ${new Date().toISOString()}`;
@@ -934,6 +938,7 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
       }
       return members;
     },
+    getMemoryCounts: (gId) => countUserMemoriesByUser(db, gId),
   });
 
   const chatHistoryTool = createChatHistoryTool({

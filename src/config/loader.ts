@@ -13,6 +13,7 @@ import type {
   VpnConfig,
   BashToolConfig,
   EmotesConfig,
+  MembersConfig,
 } from "./types.ts";
 import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 
@@ -140,6 +141,10 @@ const DEFAULT_BASH_SSH = {
 
 const DEFAULT_EMOTES: EmotesConfig = {
   include: false,
+};
+
+const DEFAULT_MEMBERS: MembersConfig = {
+  include: true,
 };
 
 const DEFAULT_BASH_TIMEOUT_MS = 5000;
@@ -311,6 +316,9 @@ export function loadGlobalConfig(
     defaultEmotes: {
       include: yaml.emotes?.include ?? DEFAULT_EMOTES.include,
     },
+    defaultMembers: {
+      include: yaml.members?.include ?? DEFAULT_MEMBERS.include,
+    },
     defaultForceToolCallFirstRun: yaml.forceToolCallFirstRun ?? false,
     defaultDisableParallelToolCallsFirstRun: yaml.disableParallelToolCallsFirstRun ?? false,
   };
@@ -384,6 +392,9 @@ export function resolveGuildConfig(
     emotes: {
       include: partial.emotes?.include ?? global.defaultEmotes.include,
     },
+    members: {
+      include: partial.members?.include ?? global.defaultMembers.include,
+    },
     forceToolCallFirstRun: partial.forceToolCallFirstRun ?? global.defaultForceToolCallFirstRun,
     disableParallelToolCallsFirstRun: partial.disableParallelToolCallsFirstRun ?? global.defaultDisableParallelToolCallsFirstRun,
   };
@@ -448,6 +459,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     tts: config.tts,
     bashTool: config.bashTool !== undefined ? { enabled: config.bashTool.enabled } : undefined,
     emotes: config.emotes,
+    members: config.members,
   };
 
   // Strip undefined keys before serializing

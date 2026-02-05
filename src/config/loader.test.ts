@@ -490,6 +490,7 @@ describe("saveGuildConfig", () => {
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
+      members: { include: true },
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
     };
@@ -525,6 +526,7 @@ describe("saveGuildConfig", () => {
       attachmentsDir: "data/attachments",
       instructions: "Custom guild instructions",
       emotes: { include: false },
+      members: { include: true },
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
     };
@@ -849,6 +851,7 @@ describe("saveGuildConfig bashTool", () => {
         blocklist: [],
       },
       emotes: { include: false },
+      members: { include: true },
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
     };
@@ -880,6 +883,7 @@ describe("saveGuildConfig bashTool", () => {
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
+      members: { include: true },
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
     };
@@ -1094,6 +1098,7 @@ describe("saveGuildConfig emotes", () => {
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: true },
+      members: { include: true },
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
     };
@@ -1132,6 +1137,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
+      members: { include: true },
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
     };
@@ -1163,6 +1169,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
+      members: { include: true },
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
     };
