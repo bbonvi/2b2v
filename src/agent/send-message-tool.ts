@@ -42,11 +42,13 @@ export interface SendMessageDetails {
   voiceGenerated?: boolean;
   voiceError?: string;
   error?: string;
+  unresolvedEmotes?: string[];
 }
 
 /**
  * Callback that performs the actual Discord send.
  * The handler module wires this to real Discord API calls.
+ * Returns sentMessageId and optional warnings (e.g., unresolved emoji names).
  */
 export type MessageSender = (
   text: string,
@@ -54,7 +56,7 @@ export type MessageSender = (
   chatId: string | undefined,
   voice?: VoiceAttachment,
   signal?: AbortSignal
-) => Promise<{ sentMessageId: string }>;
+) => Promise<{ sentMessageId: string; warnings?: string[] }>;
 
 /** Dependencies for the send_message tool. */
 export interface SendMessageToolDeps {
@@ -101,7 +103,7 @@ export function createSendMessageTool(
 
       // Text-only path (default)
       if (is_voice_message !== true) {
-        let result: { sentMessageId: string };
+        let result: { sentMessageId: string; warnings?: string[] };
         try {
           result = await sender(text, reply, chat_id, undefined, signal);
         } catch (err) {
@@ -111,9 +113,23 @@ export function createSendMessageTool(
             details: { sentMessageId: "", error: message },
           };
         }
+
+        // Build result message with optional emoji warning
+        const emoteWarnings = result.warnings ?? [];
+        let resultText = "Message sent.";
+        if (emoteWarnings.length > 0) {
+          const emoteList = emoteWarnings.join(", ");
+          resultText = emoteWarnings.length === 1
+            ? `Message sent. Emote not found: ${emoteList}`
+            : `Message sent. Emotes not found: ${emoteList}`;
+        }
+
         return {
-          content: [{ type: "text", text: "Message sent." }],
-          details: { sentMessageId: result.sentMessageId },
+          content: [{ type: "text", text: resultText }],
+          details: {
+            sentMessageId: result.sentMessageId,
+            ...(emoteWarnings.length > 0 ? { unresolvedEmotes: emoteWarnings } : {}),
+          },
         };
       }
 

@@ -33,14 +33,14 @@ interface MockSenderCall {
   voice?: VoiceAttachment;
 }
 
-function createMockSender(): {
+function createMockSender(warnings?: string[]): {
   sender: MessageSender;
   calls: MockSenderCall[];
 } {
   const calls: MockSenderCall[] = [];
   const sender: MessageSender = (text, reply, chatId, voice) => {
     calls.push({ text, reply, chatId, voice });
-    return Promise.resolve({ sentMessageId: "msg-1" });
+    return Promise.resolve({ sentMessageId: "msg-1", warnings });
   };
   return { sender, calls };
 }
@@ -130,6 +130,42 @@ describe("createSendMessageTool", () => {
       expect(calls).toHaveLength(1);
       expect(calls[0]?.voice).toBeUndefined();
       expect(result.content[0]).toEqual({ type: "text", text: "Message sent." });
+    });
+
+    test("includes single emoji warning in result when sender returns one", async () => {
+      const { sender } = createMockSender([":whatever:"]);
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+
+      const result = await tool.execute("call-1", { text: "Hello :whatever:", reply: false });
+
+      expect(result.content[0]).toEqual({
+        type: "text",
+        text: "Message sent. Emote not found: :whatever:",
+      });
+      expect(result.details.unresolvedEmotes).toEqual([":whatever:"]);
+    });
+
+    test("includes multiple emoji warnings in result when sender returns many", async () => {
+      const { sender } = createMockSender([":foo:", ":bar:"]);
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+
+      const result = await tool.execute("call-1", { text: "Hello :foo: :bar:", reply: false });
+
+      expect(result.content[0]).toEqual({
+        type: "text",
+        text: "Message sent. Emotes not found: :foo:, :bar:",
+      });
+      expect(result.details.unresolvedEmotes).toEqual([":foo:", ":bar:"]);
+    });
+
+    test("result unchanged when sender returns no warnings", async () => {
+      const { sender } = createMockSender();
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+
+      const result = await tool.execute("call-1", { text: "Hello", reply: false });
+
+      expect(result.content[0]).toEqual({ type: "text", text: "Message sent." });
+      expect(result.details.unresolvedEmotes).toBeUndefined();
     });
   });
 

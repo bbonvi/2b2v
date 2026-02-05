@@ -317,7 +317,8 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         }
 
         // Text message path (always send, never reply)
-        const translated = translateOutbound(text, outboundResolvers);
+        const warnings: string[] = [];
+        const translated = translateOutbound(text, outboundResolvers, warnings);
         const chunks = splitMessage(translated);
         let firstId = "";
         for (let i = 0; i < chunks.length; i++) {
@@ -333,7 +334,11 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
           });
           markBotParticipating(db, targetChannelId);
         }
-        return { sentMessageId: firstId };
+        // Filter to emoji warnings only (":name:" format)
+        const emojiWarnings = warnings
+          .filter((w) => w.startsWith("Failed to resolve emoji:"))
+          .map((w) => w.replace("Failed to resolve emoji: ", ""));
+        return { sentMessageId: firstId, warnings: emojiWarnings.length > 0 ? emojiWarnings : undefined };
       };
 
       // Build simplified context for scheduled task
@@ -1160,7 +1165,8 @@ client.on("messageCreate", (message: Message) => void (async () => {
       }
 
       // Text message path
-      const translated = translateOutbound(text, outboundResolvers);
+      const warnings: string[] = [];
+      const translated = translateOutbound(text, outboundResolvers, warnings);
       const chunks = splitMessage(translated);
       let firstId = "";
       for (let i = 0; i < chunks.length; i++) {
@@ -1179,7 +1185,11 @@ client.on("messageCreate", (message: Message) => void (async () => {
         });
         markBotParticipating(db, targetChannelId);
       }
-      return { sentMessageId: firstId };
+      // Filter to emoji warnings only (":name:" format)
+      const emojiWarnings = warnings
+        .filter((w) => w.startsWith("Failed to resolve emoji:"))
+        .map((w) => w.replace("Failed to resolve emoji: ", ""));
+      return { sentMessageId: firstId, warnings: emojiWarnings.length > 0 ? emojiWarnings : undefined };
     };
 
     // Build latest user message as HistoryMessage for pipeline
