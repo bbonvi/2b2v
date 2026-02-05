@@ -9,7 +9,7 @@ import {
   listMemories,
   type MemoryRow,
 } from "../db/memory-repository";
-import { formatMemoryTimestamps, formatRelativeAgo } from "./history-dates";
+import { formatJournalTimestamp, formatRelativeAgo } from "./history-dates";
 
 export interface MemoryToolsDeps {
   db: Database;
@@ -112,11 +112,7 @@ function embeddingText(title: string, content?: string | null): string {
 }
 
 function formatMemoryLine(row: MemoryRow): string {
-  const parts = [`[${row.id}]`];
-  parts.push(formatMemoryTimestamps(row.createdAt, row.updatedAt));
-  if (row.scope === "user" && row.userId !== null) parts.push(`user:${row.userId}`);
-  parts.push(row.title);
-  return parts.join(" ");
+  return `- ${row.id} ${formatJournalTimestamp(row.updatedAt)} ${row.title}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -415,9 +411,10 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
         return Promise.resolve({ content: [{ type: "text", text: msg }], details: undefined });
       }
 
+      const legend = "*[ID] ([Updated]) [Title]; use `save_user_memory(id=N, ...)` to update, `delete_user_memory(id)` to remove*";
       const lines = rows.map((r) => formatMemoryLine(r));
       return Promise.resolve({
-        content: [{ type: "text", text: lines.join("\n") }],
+        content: [{ type: "text", text: `${legend}\n${lines.join("\n")}` }],
         details: { count: rows.length },
       });
     },
