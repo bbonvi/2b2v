@@ -1377,7 +1377,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
       sender,
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
-      onTriggered: startTypingLoop,
+      onTriggered: (trigger) => { if (trigger.reason === "mention") startTypingLoop(); },
       onAssistantResponseStart: stopTypingLoop,
       onAgentEnd: stopTypingLoop,
       requestLog,

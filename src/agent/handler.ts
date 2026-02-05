@@ -34,8 +34,8 @@ export interface HandlerDeps {
   extraTools?: AgentTool[];
   /** Logger for agent event tracing. */
   log?: Logger;
-  /** Called when a trigger matches, before the agent runs. Use for eager typing. */
-  onTriggered?: () => void;
+  /** Called when a trigger matches, before the agent runs. Receives trigger result. */
+  onTriggered?: (result: NonNullable<TriggerResult>) => void;
   /** Called when the first assistant response starts streaming. */
   onAssistantResponseStart?: () => void;
   /** Called when the agent finishes, regardless of response. */
@@ -140,7 +140,7 @@ export async function handleMessage(
     }
   }
 
-  deps.onTriggered?.();
+  deps.onTriggered?.(triggerResult);
 
   // Inject trigger-specific instruction if configured
   const triggerInstruction = deps.triggerInstructions?.[triggerResult.reason];
