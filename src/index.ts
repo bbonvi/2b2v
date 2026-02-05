@@ -718,10 +718,12 @@ async function buildContext(
     return `- [one-off at ${runDate}]: ${s.messageContent}`;
   }).join("\n");
 
-  // Emoji context — only when enabled
+  // Emoji cache refresh (always needed for outbound translation)
+  refreshEmojiCache(guild);
+
+  // Emoji context — only include in prompt when enabled
   let emojiContext = "";
   if (guildConfig.emotes.include) {
-    refreshEmojiCache(guild);
     const emojis = [...(emojiCache.get(guildId) ?? [])]
       .sort((a, b) => {
         const nc = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
