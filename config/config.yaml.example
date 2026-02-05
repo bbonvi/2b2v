@@ -54,6 +54,10 @@ imageReadMaxPerCall: 10
 # Enable automatic image captioning (requires captioning model)
 imageCaptioningEnabled: false
 
+# Emote/emoji settings
+emotes:
+  include: false  # Include available server emojis in LLM context (default: false)
+
 # ElevenLabs text-to-speech configuration (requires ELEVENLABS_API_KEY env var)
 # When enabled, the bot can send voice messages as audio attachments
 tts:

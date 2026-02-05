@@ -718,14 +718,17 @@ async function buildContext(
     return `- [one-off at ${runDate}]: ${s.messageContent}`;
   }).join("\n");
 
-  // Emoji context — sorted by name (case-insensitive), then by ID
-  refreshEmojiCache(guild);
-  const emojis = [...(emojiCache.get(guildId) ?? [])]
-    .sort((a, b) => {
-      const nc = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
-      return nc !== 0 ? nc : a.id.localeCompare(b.id);
-    });
-  const emojiContext = buildEmojiContext(emojis);
+  // Emoji context — only when enabled
+  let emojiContext = "";
+  if (guildConfig.emotes.include) {
+    refreshEmojiCache(guild);
+    const emojis = [...(emojiCache.get(guildId) ?? [])]
+      .sort((a, b) => {
+        const nc = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+        return nc !== 0 ? nc : a.id.localeCompare(b.id);
+      });
+    emojiContext = buildEmojiContext(emojis);
+  }
 
   // Display name context — sorted by username (case-insensitive), then by member ID
   const members = [...guild.members.cache.values()]

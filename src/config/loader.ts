@@ -12,6 +12,7 @@ import type {
   UiLang,
   VpnConfig,
   BashToolConfig,
+  EmotesConfig,
 } from "./types.ts";
 import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 
@@ -135,6 +136,10 @@ const DEFAULT_BASH_SSH = {
   host: "bash-vm",
   port: 22,
   user: "user",
+};
+
+const DEFAULT_EMOTES: EmotesConfig = {
+  include: false,
 };
 
 const DEFAULT_BASH_TIMEOUT_MS = 5000;
@@ -302,6 +307,9 @@ export function loadGlobalConfig(
     uiLang: (yaml.uiLang === "ru" ? "ru" : "en") as UiLang,
     vpn: resolveVpnConfig(yaml.vpn),
     defaultBashTool: resolveBashToolConfig(yaml.bashTool),
+    defaultEmotes: {
+      include: yaml.emotes?.include ?? DEFAULT_EMOTES.include,
+    },
   };
 }
 
@@ -370,6 +378,9 @@ export function resolveGuildConfig(
     instructions: instructions !== "" ? instructions : global.defaultInstructions,
     tts: resolveTtsConfig(partial.tts) ?? global.defaultTts,
     bashTool: resolveGuildBashToolConfig(global.defaultBashTool, partial.bashTool),
+    emotes: {
+      include: partial.emotes?.include ?? global.defaultEmotes.include,
+    },
   };
 }
 
@@ -431,6 +442,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     instructions: config.instructions !== "" ? config.instructions : undefined,
     tts: config.tts,
     bashTool: config.bashTool !== undefined ? { enabled: config.bashTool.enabled } : undefined,
+    emotes: config.emotes,
   };
 
   // Strip undefined keys before serializing

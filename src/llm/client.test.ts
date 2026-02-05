@@ -24,6 +24,7 @@ const GLOBAL: GlobalConfig = {
   modelCacheDir: "model-cache",
   qdrantUrl: "http://localhost:6333",
   uiLang: "en",
+  defaultEmotes: { include: false },
 };
 
 const GUILD: GuildConfig = {
@@ -36,12 +37,12 @@ const GUILD: GuildConfig = {
   memoryRetentionDays: 180,
   adminUserIds: [],
   imageMaxDimension: 768,
-    mergeMessageGapSeconds: 120,
-    imageReadMaxPerCall: 10,
-    imageCaptioningEnabled: false,
-    attachmentsDir: "data/attachments",
-    instructions: "",
-
+  mergeMessageGapSeconds: 120,
+  imageReadMaxPerCall: 10,
+  imageCaptioningEnabled: false,
+  attachmentsDir: "data/attachments",
+  instructions: "",
+  emotes: { include: false },
 };
 
 describe("resolveModel", () => {

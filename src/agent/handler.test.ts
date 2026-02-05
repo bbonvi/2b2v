@@ -30,6 +30,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     modelCacheDir: "./model-cache",
     qdrantUrl: "http://localhost:6333",
     uiLang: "en",
+    defaultEmotes: { include: false },
     ...overrides,
   };
 }
@@ -50,7 +51,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     imageCaptioningEnabled: false,
     attachmentsDir: "data/attachments",
     instructions: "",
-
+    emotes: { include: false },
     ...overrides,
   };
 }

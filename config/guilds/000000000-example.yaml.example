@@ -55,6 +55,10 @@ imageReadMaxPerCall: 10
 # Enable automatic image captioning
 imageCaptioningEnabled: false
 
+# Emote/emoji settings
+emotes:
+  include: false  # Include available server emojis in LLM context
+
 # Custom attachments directory (default: {dataDir}/attachments)
 # attachmentsDir: data/attachments
 

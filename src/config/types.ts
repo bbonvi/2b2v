@@ -28,6 +28,12 @@ export interface VpnConfig {
   vpnPeer: string;
 }
 
+/** Emote/emoji context configuration. */
+export interface EmotesConfig {
+  /** Whether to include available emojis in LLM context. Default false. */
+  include: boolean;
+}
+
 /** Trigger configuration per guild. All independently toggleable. */
 export interface TriggerConfig {
   mention: boolean;
@@ -74,6 +80,8 @@ export interface GuildConfig {
   tts?: TtsConfig;
   /** Bash tool configuration. Undefined when disabled for this guild. */
   bashTool?: BashToolConfig;
+  /** Emote/emoji context configuration. */
+  emotes: EmotesConfig;
 }
 
 /** Global configuration loaded from file + env. */
@@ -108,6 +116,8 @@ export interface GlobalConfig {
   vpn?: VpnConfig;
   /** Default bash tool configuration. Undefined when disabled globally. */
   defaultBashTool?: BashToolConfig;
+  /** Default emotes configuration. */
+  defaultEmotes: EmotesConfig;
 }
 
 /** Full resolved app config. */
@@ -137,6 +147,9 @@ export interface GuildConfigYaml {
   tts?: Partial<TtsConfig> & { voices?: { normal?: Partial<VoicePreset>; whisper?: Partial<VoicePreset> } };
   bashTool?: {
     enabled?: boolean;
+  };
+  emotes?: {
+    include?: boolean;
   };
 }
 
@@ -179,5 +192,8 @@ export interface MainConfigYaml {
     timeoutMs?: number;
     outputLimit?: number;
     blocklist?: string[];
+  };
+  emotes?: {
+    include?: boolean;
   };
 }

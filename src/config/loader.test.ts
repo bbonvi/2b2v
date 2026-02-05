@@ -489,6 +489,7 @@ describe("saveGuildConfig", () => {
       imageCaptioningEnabled: false,
       attachmentsDir: "data/attachments",
       instructions: "",
+      emotes: { include: false },
     };
 
     saveGuildConfig(file, resolved);
@@ -521,6 +522,7 @@ describe("saveGuildConfig", () => {
       imageCaptioningEnabled: false,
       attachmentsDir: "data/attachments",
       instructions: "Custom guild instructions",
+      emotes: { include: false },
     };
 
     saveGuildConfig(file, resolved);
@@ -842,6 +844,7 @@ describe("saveGuildConfig bashTool", () => {
         outputLimit: 4000,
         blocklist: [],
       },
+      emotes: { include: false },
     };
 
     saveGuildConfig(file, resolved);
@@ -870,6 +873,7 @@ describe("saveGuildConfig bashTool", () => {
       imageCaptioningEnabled: false,
       attachmentsDir: "data/attachments",
       instructions: "",
+      emotes: { include: false },
     };
 
     saveGuildConfig(file, resolved);
@@ -978,6 +982,119 @@ describe("resolveGuildConfig triggerInstructions", () => {
   });
 });
 
+describe("loadGlobalConfig emotes", () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  const BASE_ENV = { DISCORD_TOKEN: "tok_test", OPENROUTER_API_KEY: "or_test" };
+
+  test("defaultEmotes.include is false when not in YAML", () => {
+    const cfg = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "nonexistent.yaml"));
+    expect(cfg.defaultEmotes).toEqual({ include: false });
+  });
+
+  test("parses emotes.include from YAML", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "emotes:\n  include: true\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultEmotes.include).toBe(true);
+  });
+
+  test("emotes.include defaults to false when emotes section exists but include not set", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "emotes:\n  somethingElse: true\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultEmotes.include).toBe(false);
+  });
+});
+
+describe("resolveGuildConfig emotes", () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  const BASE_ENV = { DISCORD_TOKEN: "t", OPENROUTER_API_KEY: "k" };
+
+  test("inherits emotes from global when guild does not override", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "emotes:\n  include: true\n");
+    const global = loadGlobalConfig(BASE_ENV, file);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "100",
+      slug: "emotes-inherit",
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.emotes.include).toBe(true);
+  });
+
+  test("guild can override emotes.include", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "emotes:\n  include: true\n");
+    const global = loadGlobalConfig(BASE_ENV, file);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "101",
+      slug: "emotes-override",
+      emotes: { include: false },
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.emotes.include).toBe(false);
+  });
+
+  test("guild can enable emotes when global disabled", () => {
+    const global = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "none.yaml"));
+    expect(global.defaultEmotes.include).toBe(false);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "102",
+      slug: "emotes-enable",
+      emotes: { include: true },
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.emotes.include).toBe(true);
+  });
+
+  test("emotes defaults to { include: false } when neither global nor guild specifies", () => {
+    const global = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "none.yaml"));
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "103",
+      slug: "no-emotes",
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.emotes).toEqual({ include: false });
+  });
+});
+
+describe("saveGuildConfig emotes", () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  test("persists emotes config", () => {
+    const file = join(GUILDS_DIR, "80-emotes.yaml");
+    writeFileSync(file, "");
+
+    const resolved: GuildConfig = {
+      guildId: "80",
+      slug: "emotes",
+      triggers: { mention: true, keywords: [], randomChance: 0 },
+      triggerInstructions: {},
+      timezone: "UTC",
+      trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
+      memoryRetentionDays: 180,
+      adminUserIds: [],
+      imageMaxDimension: 768,
+      mergeMessageGapSeconds: 120,
+      imageReadMaxPerCall: 10,
+      imageCaptioningEnabled: false,
+      attachmentsDir: "data/attachments",
+      instructions: "",
+      emotes: { include: true },
+    };
+
+    saveGuildConfig(file, resolved);
+
+    const reloaded = loadGuildConfigFile(file);
+    expect(reloaded.emotes?.include).toBe(true);
+  });
+});
+
 describe("saveGuildConfig triggerInstructions", () => {
   beforeEach(setup);
   afterEach(teardown);
@@ -1004,6 +1121,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       imageCaptioningEnabled: false,
       attachmentsDir: "data/attachments",
       instructions: "",
+      emotes: { include: false },
     };
 
     saveGuildConfig(file, resolved);
@@ -1032,6 +1150,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       imageCaptioningEnabled: false,
       attachmentsDir: "data/attachments",
       instructions: "",
+      emotes: { include: false },
     };
 
     saveGuildConfig(file, resolved);
