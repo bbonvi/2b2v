@@ -4,8 +4,15 @@
 # LLM model (OpenRouter model ID)
 model: moonshotai/kimi-k2.5
 
-# Thinking/reasoning level for the model
-thinkingLevel: medium
+# Model parameters passed to OpenRouter (guild configs can override)
+# modelParams:
+#   reasoning:
+#     effort: "medium"  # "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+
+# Thinking/reasoning level for the model (optional)
+# When omitted, no thinking/reasoning is requested from the model.
+# Valid values: "minimal" | "low" | "medium" | "high" | "xhigh"
+# thinkingLevel: medium
 
 # Default timezone for guilds that don't override
 timezone: UTC

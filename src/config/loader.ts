@@ -263,7 +263,8 @@ export function loadGlobalConfig(
     openrouterApiKey,
     braveApiKey: env.BRAVE_API_KEY,
     defaultModel: yaml.model ?? "moonshotai/kimi-k2.5",
-    defaultThinkingLevel: yaml.thinkingLevel ?? "medium",
+    defaultModelParams: yaml.modelParams ?? {},
+    defaultThinkingLevel: yaml.thinkingLevel,
     defaultTimezone: yaml.timezone ?? "UTC",
     defaultTrim: {
       trimTrigger: yaml.trim?.trimTrigger ?? DEFAULT_TRIM.trimTrigger,
@@ -336,7 +337,7 @@ export function resolveGuildConfig(
       randomChance: partial.triggers?.randomChance ?? global.defaultTriggers.randomChance,
     },
     model: partial.model,
-    modelParams: partial.modelParams,
+    modelParams: { ...global.defaultModelParams, ...partial.modelParams },
     thinkingLevel: partial.thinkingLevel ?? global.defaultThinkingLevel,
     timezone: partial.timezone ?? global.defaultTimezone,
     trim: {

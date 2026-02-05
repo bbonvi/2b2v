@@ -51,7 +51,7 @@ export interface GuildConfig {
   triggers: TriggerConfig;
   model?: string;
   modelParams?: Record<string, unknown>;
-  thinkingLevel: string;
+  thinkingLevel?: string;
   timezone: string;
   trim: TrimConfig;
   memoryRetentionDays: number;
@@ -73,7 +73,8 @@ export interface GlobalConfig {
   openrouterApiKey: string;
   braveApiKey?: string;
   defaultModel: string;
-  defaultThinkingLevel: string;
+  defaultModelParams: Record<string, unknown>;
+  defaultThinkingLevel?: string;
   defaultTimezone: string;
   defaultTrim: TrimConfig;
   defaultTriggers: TriggerConfig;
@@ -131,6 +132,7 @@ export interface GuildConfigYaml {
 /** Raw shape of the main config YAML file (config/config.yaml). All optional. */
 export interface MainConfigYaml {
   model?: string;
+  modelParams?: Record<string, unknown>;
   thinkingLevel?: string;
   timezone?: string;
   trim?: Partial<TrimConfig>;

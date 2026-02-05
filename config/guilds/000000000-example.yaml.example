@@ -11,12 +11,16 @@ triggers:
 # LLM model override (OpenRouter model ID). Omit to use global default.
 model: moonshotai/kimi-k2.5
 
-# Additional model parameters passed to OpenRouter (temperature, top_p, etc.)
+# Additional model parameters passed to OpenRouter (merges with global defaults)
 # modelParams:
 #   temperature: 0.8
+#   reasoning:
+#     effort: "high"  # Override global reasoning level for this guild
 
-# Thinking/reasoning level for the model
-thinkingLevel: medium
+# Thinking/reasoning level for the model (optional)
+# When omitted, inherits from global config (which may also be omitted, meaning no thinking).
+# Valid values: "minimal" | "low" | "medium" | "high" | "xhigh"
+# thinkingLevel: medium
 
 # Guild timezone (used for date stamps in history and scheduling)
 timezone: UTC

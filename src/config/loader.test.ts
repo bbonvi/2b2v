@@ -94,7 +94,7 @@ describe("loadGlobalConfig", () => {
   test("reads defaults when no YAML file exists", () => {
     const cfg = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "nonexistent.yaml"));
     expect(cfg.defaultModel).toBe("moonshotai/kimi-k2.5");
-    expect(cfg.defaultThinkingLevel).toBe("medium");
+    expect(cfg.defaultThinkingLevel).toBeUndefined();
     expect(cfg.defaultTimezone).toBe("UTC");
     expect(cfg.defaultTrim).toEqual({ trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 });
     expect(cfg.defaultTriggers).toEqual({ mention: true, keywords: [], randomChance: 0 });
@@ -244,7 +244,7 @@ describe("resolveGuildConfig", () => {
     // defaults inherited
     expect(resolved.triggers.mention).toBe(true);
     expect(resolved.triggers.randomChance).toBe(0);
-    expect(resolved.thinkingLevel).toBe("medium");
+    expect(resolved.thinkingLevel).toBeUndefined();
     expect(resolved.timezone).toBe("UTC");
     expect(resolved.trim).toEqual({ trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 });
     expect(resolved.memoryRetentionDays).toBe(180);
@@ -315,6 +315,79 @@ describe("resolveGuildConfig", () => {
     };
     const resolved = resolveGuildConfig(global, partial);
     expect(resolved.instructions).toBe("Global default");
+  });
+
+  test("merges global defaultModelParams with guild modelParams", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "modelParams:\n  reasoning:\n    effort: medium\n  temperature: 0.8\n");
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    expect(global.defaultModelParams).toEqual({ reasoning: { effort: "medium" }, temperature: 0.8 });
+
+    // Guild overrides reasoning but inherits temperature
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "70",
+      slug: "params-merge",
+      modelParams: { reasoning: { effort: "high" }, topP: 0.9 },
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.modelParams).toEqual({
+      reasoning: { effort: "high" },
+      temperature: 0.8,
+      topP: 0.9,
+    });
+  });
+
+  test("guild with no modelParams inherits global defaults", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "modelParams:\n  reasoning:\n    effort: low\n");
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "71",
+      slug: "params-inherit",
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.modelParams).toEqual({ reasoning: { effort: "low" } });
+  });
+
+  test("inherits thinkingLevel from global when guild does not specify", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "thinkingLevel: high\n");
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    expect(global.defaultThinkingLevel).toBe("high");
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "80",
+      slug: "thinking-inherit",
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.thinkingLevel).toBe("high");
+  });
+
+  test("guild thinkingLevel overrides global", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "thinkingLevel: high\n");
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "81",
+      slug: "thinking-override",
+      thinkingLevel: "low",
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.thinkingLevel).toBe("low");
+  });
+
+  test("thinkingLevel remains undefined when neither global nor guild specifies", () => {
+    const global = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "none.yaml"));
+    expect(global.defaultThinkingLevel).toBeUndefined();
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "82",
+      slug: "no-thinking",
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.thinkingLevel).toBeUndefined();
   });
 
   test("inherits trigger defaults from global config YAML", () => {
