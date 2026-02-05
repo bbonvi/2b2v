@@ -187,7 +187,7 @@ export async function handleMessage(
     initialState: {
       systemPrompt,
       model: model as unknown as Model<never>,
-      thinkingLevel: (deps.guildConfig.thinkingLevel || "off") as ThinkingLevel,
+      thinkingLevel: (deps.guildConfig.thinkingLevel ?? "off") as ThinkingLevel,
       tools,
       messages: [],
     },

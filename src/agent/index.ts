@@ -1,5 +1,4 @@
 export {
-  TOOL_INSTRUCTIONS,
   type ChatMessage,
 } from "./prompt.ts";
 

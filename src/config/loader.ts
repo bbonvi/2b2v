@@ -298,6 +298,7 @@ export function loadGlobalConfig(
     defaultAttachmentsDir,
     defaultInstructions,
     personaPath: yaml.personaPath ?? "config/persona.md",
+    toolInstructionsPath: yaml.toolInstructionsPath ?? "config/tool_instructions.md",
     logLevel: yaml.logLevel ?? "info",
     dataDir,
     modelCacheDir: yaml.modelCacheDir ?? "model-cache",

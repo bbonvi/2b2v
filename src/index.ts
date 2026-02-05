@@ -14,7 +14,6 @@ import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { handleMessage, type IncomingMessage, type HandlerDeps } from "./agent/handler";
-import { TOOL_INSTRUCTIONS } from "./agent/prompt";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
 import { getHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory, deleteRecentMessages } from "./db/message-repository";
@@ -125,6 +124,19 @@ function loadPersonaFile(path: string): string {
   }
 }
 let persona = loadPersonaFile(globalConfig.personaPath);
+
+// --- 8b. Load tool instructions ---
+function loadToolInstructionsFile(path: string): string {
+  try {
+    const content = readFileSync(path, "utf-8").trim();
+    log.info("tool instructions loaded", { path, length: content.length });
+    return content;
+  } catch {
+    log.warn("tool instructions file not found, using empty", { path });
+    return "";
+  }
+}
+let toolInstructions = loadToolInstructionsFile(globalConfig.toolInstructionsPath);
 
 // --- 9. Emoji cache ---
 const emojiCache = new EmojiCache();
@@ -809,7 +821,7 @@ async function buildContext(
 
   return assembleContext({
     persona,
-    toolInstructions: TOOL_INSTRUCTIONS,
+    toolInstructions,
     instructions: guildConfig.instructions,
     emojis: emojiContext,
     members: displayNameContext,
@@ -1460,6 +1472,7 @@ function reloadConfigs(): void {
     validateTrimConfig(newGlobal.defaultTrim);
     globalConfig = newGlobal;
     persona = loadPersonaFile(globalConfig.personaPath);
+    toolInstructions = loadToolInstructionsFile(globalConfig.toolInstructionsPath);
 
     // Reload guild configs — clear and rebuild
     const newGuilds = loadGuildConfigs(guildsDir, globalConfig);

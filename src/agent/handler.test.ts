@@ -25,6 +25,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultAttachmentsDir: "data/attachments",
     defaultInstructions: "",
     personaPath: "config/persona.md",
+    toolInstructionsPath: "config/tool_instructions.md",
     logLevel: "info",
     dataDir: "./data",
     modelCacheDir: "./model-cache",

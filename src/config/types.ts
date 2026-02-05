@@ -104,6 +104,7 @@ export interface GlobalConfig {
   defaultAttachmentsDir: string;
   defaultInstructions: string;
   personaPath: string;
+  toolInstructionsPath: string;
   logLevel: string;
   dataDir: string;
   modelCacheDir: string;
@@ -169,6 +170,7 @@ export interface MainConfigYaml {
   imageCaptioningEnabled?: boolean;
   attachmentsDir?: string;
   personaPath?: string;
+  toolInstructionsPath?: string;
   instructions?: string;
   instructionsPath?: string;
   logLevel?: string;

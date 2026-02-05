@@ -79,6 +79,9 @@ tts:
 # Path to the persona markdown file
 personaPath: config/persona.md
 
+# Path to the tool instructions markdown file
+toolInstructionsPath: config/tool_instructions.md
+
 # Custom instructions injected into the LLM context (after tool instructions).
 # Use instructionsPath to load from a file, or instructions for inline text.
 # instructionsPath takes priority over inline instructions.
