@@ -165,7 +165,7 @@ export async function handleMessage(
   const sendTool = createSendMessageTool(sendToolDeps) as unknown as AgentTool;
   const tools: AgentTool[] = [sendTool, ...(deps.extraTools ?? [])];
   patchToolLookup(tools);
-  const timedTools = wrapToolsWithTiming(tools);
+  const { tools: timedTools, state: timingState } = wrapToolsWithTiming(tools);
 
   const reqLog = deps.requestLog;
   let isFirstTurn = true;
@@ -201,6 +201,12 @@ export async function handleMessage(
 
   let assistantResponseNotified = false;
   agent.subscribe((e) => {
+    if (e.type === "message_end") {
+      // Set timing reference when LLM response completes, before tools execute.
+      // This makes tool timing include LLM thinking time.
+      timingState.setReferenceTime();
+    }
+
     if (assistantResponseNotified) {
       if (e.type === "agent_end") deps.onAgentEnd?.();
       return;

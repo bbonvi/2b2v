@@ -14,54 +14,49 @@ export function formatTiming(ms: number): string {
   return `${ms}ms`;
 }
 
+export interface TimingState {
+  /** Set externally when LLM turn ends, before tools execute. */
+  setReferenceTime(): void;
+}
+
 /**
  * Wrap tools to append timing notes to results.
  *
- * Timing measures end-to-end time from batch start to tool completion.
- * A "batch" is a group of tools executing concurrently — all tools in a batch
- * measure from the same reference point (when the first tool started).
- * When the last tool in a batch completes, the reference resets for the next batch.
+ * Timing measures end-to-end time from reference point to tool completion.
+ * The reference point is set externally via `state.setReferenceTime()` — call it
+ * when the LLM response completes (message_end event) to include thinking time.
  *
  * This correctly handles:
- * - Sequential tools: each is its own batch, measures its execution time
- * - Parallel tools: all measure from same start, no race conditions
- * - LLM thinking time: included in the first tool's timing of each batch
+ * - Sequential tools: reference set before each tool batch
+ * - Parallel tools: all measure from same reference point
+ * - LLM thinking time: included when reference is set at message_end
  */
-export function wrapToolsWithTiming(tools: AgentTool[]): AgentTool[] {
-  const state = {
-    referenceTime: 0, // Set when first tool of batch starts
-    activeTools: 0, // Tools currently executing
+export function wrapToolsWithTiming(tools: AgentTool[]): { tools: AgentTool[]; state: TimingState } {
+  let referenceTime = Date.now();
+
+  const state: TimingState = {
+    setReferenceTime() {
+      referenceTime = Date.now();
+    },
   };
 
-  return tools.map((tool) => ({
+  const wrappedTools = tools.map((tool) => ({
     ...tool,
     execute: async (
       toolCallId: string,
       params: unknown,
       signal: AbortSignal | undefined
     ): Promise<AgentToolResult<unknown>> => {
-      // First tool of a new batch — set reference time
-      if (state.activeTools === 0) {
-        state.referenceTime = Date.now();
-      }
-      state.activeTools++;
+      const result = await tool.execute(toolCallId, params, signal);
+      const elapsed = Date.now() - referenceTime;
 
-      try {
-        const result = await tool.execute(toolCallId, params, signal);
-        const elapsed = Date.now() - state.referenceTime;
-
-        const note = `\n*Note to agent: This \`${tool.name}\` tool took ${formatTiming(elapsed)} to run.*`;
-        return {
-          ...result,
-          content: [...result.content, { type: "text", text: note }],
-        };
-      } finally {
-        state.activeTools--;
-        if (state.activeTools === 0) {
-          // Batch complete — set new reference for next batch
-          state.referenceTime = Date.now();
-        }
-      }
+      const note = `\n*Note to agent: This \`${tool.name}\` tool took ${formatTiming(elapsed)} to run.*`;
+      return {
+        ...result,
+        content: [...result.content, { type: "text", text: note }],
+      };
     },
   }));
+
+  return { tools: wrappedTools, state };
 }
