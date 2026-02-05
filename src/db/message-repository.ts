@@ -3,6 +3,11 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 import { searchPoints } from "../qdrant/adapter";
 import type { HistoryMessage } from "../agent/history-types";
 
+export interface DeleteRecentResult {
+  messageIds: string[];
+  imagePaths: string[];
+}
+
 export interface MessageSearchFilter {
   guildId: string;
   userId?: string;
@@ -457,4 +462,40 @@ export function insertSyntheticEvent(db: Database, input: InsertSyntheticEventIn
       1,
       input.threadId
     );
+}
+
+/**
+ * Delete the N most recent messages from a channel.
+ * Returns the deleted message IDs and their associated image file paths
+ * for cleanup by the caller (Qdrant points, file system).
+ */
+export function deleteRecentMessages(
+  db: Database,
+  channelId: string,
+  count: number,
+): DeleteRecentResult {
+  // Get message IDs (newest first)
+  const messageRows = db.raw
+    .prepare(
+      `SELECT id FROM messages WHERE channel_id = ? ORDER BY created_at DESC LIMIT ?`
+    )
+    .all(channelId, count) as Array<{ id: string }>;
+
+  if (messageRows.length === 0) {
+    return { messageIds: [], imagePaths: [] };
+  }
+
+  const messageIds = messageRows.map((r) => r.id);
+  const placeholders = messageIds.map(() => "?").join(",");
+
+  // Get image paths before deletion
+  const imageRows = db.raw
+    .prepare(`SELECT path FROM images WHERE message_id IN (${placeholders})`)
+    .all(...messageIds) as Array<{ path: string }>;
+
+  // Delete images then messages (foreign key order)
+  db.raw.prepare(`DELETE FROM images WHERE message_id IN (${placeholders})`).run(...messageIds);
+  db.raw.prepare(`DELETE FROM messages WHERE id IN (${placeholders})`).run(...messageIds);
+
+  return { messageIds, imagePaths: imageRows.map((r) => r.path) };
 }

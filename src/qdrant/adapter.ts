@@ -97,6 +97,21 @@ export async function deletePoint(
 }
 
 /**
+ * Delete multiple points by entity IDs in a single batch.
+ * Returns silently if any points do not exist.
+ */
+export async function deletePoints(
+  client: QdrantClient,
+  entityIds: string[],
+): Promise<void> {
+  if (entityIds.length === 0) return;
+  await client.delete(COLLECTION_NAME, {
+    wait: true,
+    points: entityIds.map(toPointId),
+  });
+}
+
+/**
  * Check if a point exists by entity ID.
  */
 export async function pointExists(

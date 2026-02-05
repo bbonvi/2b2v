@@ -5,7 +5,7 @@ import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, validateTrimCon
 import type { GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
 import { createQdrantClient, ensureCollection, healthCheck } from "./qdrant/client";
-import { deletePoint, toPointId } from "./qdrant/adapter";
+import { deletePoint, deletePoints, toPointId } from "./qdrant/adapter";
 import { getEmbeddingPipeline, disposePipeline } from "./embeddings/pipeline";
 import { createEmbeddingQueue, type EmbeddingQueue } from "./embeddings/queue";
 import { createDiscordClient, loginDiscordClient } from "./discord/client";
@@ -17,7 +17,7 @@ import { handleMessage, type IncomingMessage, type HandlerDeps } from "./agent/h
 import { TOOL_INSTRUCTIONS } from "./agent/prompt";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
-import { getHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory } from "./db/message-repository";
+import { getHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory, deleteRecentMessages } from "./db/message-repository";
 import { processHistory } from "./agent/history-pipeline";
 import { trimMessages } from "./agent/history-trimming";
 import { formatMessageLine, OLDER_LEGEND } from "./agent/history-formatting";
@@ -57,7 +57,7 @@ import { createSessionStore, type SessionStore } from "./vpn/session";
 import { handleVpnCommand, handleVpnComponent, type VpnHandlerDeps } from "./vpn/handler";
 import { getVpnLocale } from "./vpn/i18n";
 import { join } from "path";
-import { mkdirSync, existsSync, readFileSync, watch } from "fs";
+import { mkdirSync, existsSync, readFileSync, watch, unlinkSync } from "fs";
 import type { Database } from "./db/database";
 import { AttachmentBuilder, type ChatInputCommandInteraction, type Client, type Guild, type Message, type TextChannel } from "discord.js";
 
@@ -217,46 +217,231 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
   db,
   onFire: (event) => {
     const { schedule } = event;
-    log.info("schedule fired", { scheduleId: schedule.id, guildId: schedule.guildId });
-    const channel = client.channels.cache.get(schedule.channelId);
-    if (channel !== undefined && "send" in channel) {
-      const scheduleChunks = splitMessage(schedule.messageContent);
-      void (async () => {
-        for (const chunk of scheduleChunks) {
-          const sent = await (channel as TextChannel).send(chunk);
-          const ts = Date.now();
-          db.raw
-            .prepare(
-              `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-            )
-            .run(sent.id, schedule.guildId, schedule.channelId, client.user?.id ?? "", client.user?.username ?? "bot", chunk, chunk, 1, ts, null);
+    const scheduleLog = log.child({ component: "scheduler", scheduleId: schedule.id });
+    scheduleLog.info("schedule fired", { guildId: schedule.guildId, channelId: schedule.channelId });
 
-          void embeddingQueue.enqueue({
-            id: sent.id,
-            text: chunk,
-            target: "message",
-            metadata: {
-              guild_id: schedule.guildId,
-              channel_id: schedule.channelId,
-              user_id: client.user?.id ?? "",
-              created_at: ts,
-            },
-          }).catch((err: unknown) => {
-            log.error("scheduled message embedding enqueue failed", {
-              scheduleId: schedule.id,
-              messageId: sent.id,
-              error: err instanceof Error ? err.message : String(err),
-            });
+    void (async () => {
+      // Resolve guild and channel
+      const guild = client.guilds.cache.get(schedule.guildId);
+      if (guild === undefined) {
+        scheduleLog.warn("guild not found, skipping scheduled task");
+        return;
+      }
+
+      const channel = guild.channels.cache.get(schedule.channelId);
+      if (channel === undefined || !("send" in channel)) {
+        scheduleLog.warn("channel not found or not sendable, skipping scheduled task");
+        return;
+      }
+
+      const textChannel = channel as TextChannel;
+      const guildId = schedule.guildId;
+      const channelId = schedule.channelId;
+      const guildConfig = getGuildConfig(guildId);
+      const botUserId = client.user?.id ?? "";
+      const botUsername = client.user?.username ?? "bot";
+
+      // Build outbound resolvers for message translation
+      const outboundResolvers = buildOutboundResolvers(guild);
+
+      // Helper to store bot messages (same as messageCreate handler)
+      const storeBotMessage = (sentId: string, targetChannelId: string, rawContent: string, plainContent: string): void => {
+        const ts = Date.now();
+        db.raw
+          .prepare(
+            `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run(sentId, guildId, targetChannelId, botUserId, botUsername, rawContent, plainContent, 1, ts, null);
+
+        void embeddingQueue.enqueue({
+          id: sentId,
+          text: plainContent,
+          target: "message",
+          metadata: {
+            guild_id: guildId,
+            channel_id: targetChannelId,
+            user_id: botUserId,
+            created_at: ts,
+          },
+        }).catch((err: unknown) => {
+          scheduleLog.error("bot message embedding enqueue failed", {
+            messageId: sentId,
+            error: err instanceof Error ? err.message : String(err),
           });
-        }
-      })().catch((err: unknown) => {
-        log.error("failed to send scheduled message", {
-          scheduleId: schedule.id,
-          error: err instanceof Error ? err.message : String(err),
         });
+      };
+
+      // Build sender that routes to schedule's channel (no reply semantics)
+      const resolveTargetChannel = (chatId: string | undefined): TextChannel => {
+        if (chatId === undefined) return textChannel;
+        const resolved = guild.channels.cache.get(chatId);
+        if (resolved === undefined) {
+          throw new Error(`Invalid chat_id: channel "${chatId}" not found`);
+        }
+        if (!("send" in resolved)) {
+          throw new Error(`Invalid chat_id: channel "${chatId}" is not a text channel`);
+        }
+        return resolved as TextChannel;
+      };
+
+      const sender: MessageSender = async (text, _reply, chatId, voice, _signal) => {
+        const targetChannel = resolveTargetChannel(chatId);
+        const targetChannelId = targetChannel.id;
+
+        // Voice message path
+        if (voice !== undefined) {
+          const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
+          const sent = await targetChannel.send({ files: [attachment] });
+          storeBotMessage(sent.id, targetChannelId, "[Voice Message]", text);
+          if (targetChannel.isThread()) {
+            updateThreadActivity(db, targetChannelId, {
+              lastActivityAt: Date.now(),
+              lastMessageId: sent.id,
+            });
+            markBotParticipating(db, targetChannelId);
+          }
+          return { sentMessageId: sent.id };
+        }
+
+        // Text message path (always send, never reply)
+        const translated = translateOutbound(text, outboundResolvers);
+        const chunks = splitMessage(translated);
+        let firstId = "";
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i] as string;
+          const sent = await targetChannel.send(chunk);
+          if (i === 0) firstId = sent.id;
+          storeBotMessage(sent.id, targetChannelId, chunk, i === 0 ? text : chunk);
+        }
+        if (targetChannel.isThread()) {
+          updateThreadActivity(db, targetChannelId, {
+            lastActivityAt: Date.now(),
+            lastMessageId: firstId,
+          });
+          markBotParticipating(db, targetChannelId);
+        }
+        return { sentMessageId: firstId };
+      };
+
+      // Build simplified context for scheduled task
+      // No real latestUserMessage - use a synthetic one for the pipeline
+      const now = Date.now();
+      const syntheticLatestMessage: HistoryMessage = {
+        id: `scheduled-${schedule.id}-${now}`,
+        author: "scheduler",
+        authorId: "scheduler",
+        content: schedule.messageContent,
+        isBot: false,
+        timestamp: now,
+        replyToId: null,
+        imageIds: [],
+        captions: [],
+        hasEmbeds: false,
+        isSynthetic: true,
+        relatedThreadId: null,
+      };
+
+      // Simplified replyFallbackDeps (no Discord message fetching for scheduled tasks)
+      const replyFallbackDeps: ReplyFallbackDeps = {
+        db,
+        guildId,
+        channelId,
+        fetchDiscordMessage: () => Promise.resolve(null),
+        enqueueEmbedding: async (id, text, metadata) => {
+          await embeddingQueue.enqueue({ id, text, target: "message", metadata });
+        },
+        processImage: async () => {},
+      };
+
+      const isThread = textChannel.isThread();
+      const context = await buildContext(
+        guildId,
+        channelId,
+        guild,
+        guildConfig,
+        `[Scheduled Task] ${schedule.messageContent}`,
+        syntheticLatestMessage,
+        replyFallbackDeps,
+        isThread,
+      );
+
+      // Build agent tools (no typing indicator needed for scheduled tasks)
+      const extraTools = buildAgentTools(guildId, channelId, guildConfig, guild);
+
+      // Build synthetic incoming message
+      const incoming: IncomingMessage = {
+        content: schedule.messageContent,
+        authorId: "scheduler",
+        authorUsername: "scheduler",
+        botUserId,
+        mentionedUserIds: [],
+        translatedContent: schedule.messageContent,
+      };
+
+      // Build request log
+      const requestLog = new RequestLog(guildId, channelId);
+      requestLog.setAuthor("scheduler");
+
+      // Build TTS dependencies
+      const ttsEnabled = ttsClient !== undefined && guildConfig.tts?.enabled === true;
+      const generateSpeech = ttsEnabled && ttsClient !== undefined && guildConfig.tts !== undefined
+        ? async (text: string, voiceType: string): Promise<TtsResult> => {
+            const preset = voiceType === "whisper"
+              ? guildConfig.tts?.voices.whisper
+              : guildConfig.tts?.voices.normal;
+            if (preset === undefined) {
+              return { ok: false, error: `Voice type "${voiceType}" not configured` };
+            }
+            return ttsClient.generate({
+              text,
+              voiceId: preset.voiceId,
+              model: preset.model,
+              voiceSettings: {
+                stability: preset.stability,
+                similarityBoost: preset.similarityBoost,
+                speed: preset.speed,
+              },
+            });
+          }
+        : undefined;
+
+      // Build handler deps with forceTrigger
+      const deps: HandlerDeps = {
+        globalConfig,
+        guildConfig,
+        context,
+        sender,
+        extraTools,
+        log: scheduleLog,
+        requestLog,
+        ttsEnabled,
+        ttsConfig: guildConfig.tts,
+        generateSpeech,
+        forceTrigger: true,
+      };
+
+      // Run the agent
+      let result;
+      try {
+        result = await handleMessage(incoming, deps);
+        scheduleLog.info("scheduled task completed", { agentRan: result.agentRan });
+      } catch (err) {
+        requestLog.setError(err instanceof Error ? err.message : String(err));
+        throw err;
+      } finally {
+        if (result !== undefined) {
+          requestLog.setTrigger(result.triggerResult);
+          requestLog.setAgentRan(result.agentRan);
+        }
+        requestLog.emit(log);
+      }
+    })().catch((err: unknown) => {
+      log.error("scheduled task failed", {
+        scheduleId: schedule.id,
+        error: err instanceof Error ? err.message : String(err),
       });
-    }
+    });
   },
   log,
 });
@@ -330,6 +515,21 @@ function setupCommandHandlers(guildId: string): void {
       const messagesDeleted = (db.raw.prepare("DELETE FROM messages WHERE guild_id = ?").run(gId) as { changes: number }).changes;
 
       return Promise.resolve({ memoriesDeleted, messagesDeleted });
+    },
+    wipeRecent: async (_gId, chId, count) => {
+      const { messageIds, imagePaths } = deleteRecentMessages(db, chId, count);
+
+      // Qdrant cleanup
+      if (messageIds.length > 0) {
+        await deletePoints(qdrant, messageIds);
+      }
+
+      // Image file cleanup (best effort)
+      for (const p of imagePaths) {
+        try { unlinkSync(p); } catch { /* ignore missing */ }
+      }
+
+      return { messagesDeleted: messageIds.length, imagesDeleted: imagePaths.length };
     },
     adminUserIds: config.adminUserIds,
   }));
@@ -1192,6 +1392,49 @@ client.on("messageCreate", (message: Message) => void (async () => {
     if (message.guild !== null && message.guildId !== null && !message.author.bot) {
       requestLogStore.decrementActive();
     }
+  }
+})());
+
+// --- 22. messageDelete handler ---
+client.on("messageDelete", (message) => void (async () => {
+  try {
+    // Skip partials and DMs
+    if (message.partial || message.guild === null || message.guildId === null) return;
+
+    const messageId = message.id;
+    const guildId = message.guildId;
+
+    // Get images before deletion
+    const images = getImagesByMessageId(db, messageId);
+
+    // Delete images from DB
+    if (images.length > 0) {
+      db.raw
+        .prepare(`DELETE FROM images WHERE message_id = ?`)
+        .run(messageId);
+    }
+
+    // Delete message from DB
+    const result = db.raw
+      .prepare("DELETE FROM messages WHERE id = ? AND guild_id = ?")
+      .run(messageId, guildId) as { changes: number };
+
+    if (result.changes === 0) return; // Not in DB
+
+    // Delete Qdrant point
+    await deletePoint(qdrant, messageId);
+
+    // Delete image files (best effort)
+    for (const img of images) {
+      try { unlinkSync(img.path); } catch { /* ignore missing */ }
+    }
+
+    log.debug("message deleted from Discord", { messageId, guildId, images: images.length });
+  } catch (err) {
+    log.error("messageDelete handler error", {
+      messageId: message.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 })());
 

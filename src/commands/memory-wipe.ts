@@ -9,20 +9,35 @@ export interface WipeResult {
   messagesDeleted: number;
 }
 
+export interface WipeRecentResult {
+  messagesDeleted: number;
+  imagesDeleted: number;
+}
+
 export interface MemoryWipeDeps {
   /** Wipe all guild-scoped memories and messages. Returns counts. */
   wipeGuild: (guildId: string) => Promise<WipeResult>;
+  /** Wipe N most recent messages from a specific channel. */
+  wipeRecent: (guildId: string, channelId: string, count: number) => Promise<WipeRecentResult>;
   adminUserIds: string[];
 }
 
 export const memoryWipeCommandDefinition = new SlashCommandBuilder()
   .setName("memory-wipe")
   .setDescription("Clear all bot memory and message history for this guild (admin only)")
+  .addIntegerOption((opt) =>
+    opt
+      .setName("recent")
+      .setDescription("Delete only the last N messages from current channel (omit for full guild wipe)")
+      .setRequired(false)
+      .setMinValue(1)
+      .setMaxValue(1000)
+  )
   .addStringOption((opt) =>
     opt
       .setName("confirm")
-      .setDescription('Type "WIPE" to confirm')
-      .setRequired(true)
+      .setDescription('Type "WIPE" to confirm (required for full guild wipe)')
+      .setRequired(false)
   );
 
 export function createMemoryWipeHandler(deps: MemoryWipeDeps) {
@@ -43,6 +58,25 @@ export function createMemoryWipeHandler(deps: MemoryWipeDeps) {
       return;
     }
 
+    // Check for recent mode (channel-scoped, no confirmation required)
+    const recent = interaction.options.getInteger("recent");
+    if (recent !== null) {
+      try {
+        const result = await deps.wipeRecent(interaction.guildId, interaction.channelId, recent);
+        await interaction.reply({
+          content: `Deleted ${String(result.messagesDeleted)} messages and ${String(result.imagesDeleted)} images from this channel.`,
+          ephemeral: true,
+        });
+      } catch (_err) {
+        await interaction.reply({
+          content: "Recent wipe failed. Check logs for details.",
+          ephemeral: true,
+        });
+      }
+      return;
+    }
+
+    // Full guild wipe requires confirmation
     const confirm = interaction.options.getString("confirm");
     if (confirm !== "WIPE") {
       await interaction.reply({
