@@ -46,6 +46,8 @@ export interface HandlerDeps {
   ttsEnabled?: boolean;
   /** Function to generate speech from text (injected by caller). */
   generateSpeech?: (text: string, voiceType: string) => Promise<TtsResult>;
+  /** Skip trigger evaluation and always run the agent (for scheduled tasks). */
+  forceTrigger?: boolean;
 }
 
 export interface HandleResult {
@@ -95,16 +97,22 @@ export async function handleMessage(
   msg: IncomingMessage,
   deps: HandlerDeps
 ): Promise<HandleResult> {
-  const triggerInput: TriggerInput = {
-    content: msg.content,
-    authorId: msg.authorId,
-    botUserId: msg.botUserId,
-    mentionedUserIds: msg.mentionedUserIds,
-  };
+  let triggerResult: TriggerResult;
 
-  const triggerResult = shouldRespond(triggerInput, deps.guildConfig.triggers);
-  if (!triggerResult) {
-    return { triggered: false, triggerResult: null, agentRan: false };
+  if (deps.forceTrigger === true) {
+    triggerResult = { reason: "scheduled" };
+  } else {
+    const triggerInput: TriggerInput = {
+      content: msg.content,
+      authorId: msg.authorId,
+      botUserId: msg.botUserId,
+      mentionedUserIds: msg.mentionedUserIds,
+    };
+
+    triggerResult = shouldRespond(triggerInput, deps.guildConfig.triggers);
+    if (triggerResult === null) {
+      return { triggered: false, triggerResult: null, agentRan: false };
+    }
   }
 
   deps.onTriggered?.();

@@ -12,6 +12,7 @@ export type TriggerResult =
   | { reason: "mention" }
   | { reason: "keyword"; keyword: string }
   | { reason: "random" }
+  | { reason: "scheduled" }
   | null;
 
 /**
