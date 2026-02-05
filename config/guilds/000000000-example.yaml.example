@@ -59,6 +59,10 @@ imageCaptioningEnabled: false
 emotes:
   include: false  # Include available server emojis in LLM context
 
+# Agent tool-calling behavior (overrides global defaults)
+# forceToolCallFirstRun: true
+# disableParallelToolCallsFirstRun: true
+
 # Custom attachments directory (default: {dataDir}/attachments)
 # attachmentsDir: data/attachments
 

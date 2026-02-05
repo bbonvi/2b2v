@@ -490,6 +490,8 @@ describe("saveGuildConfig", () => {
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
+      forceToolCallFirstRun: false,
+      disableParallelToolCallsFirstRun: false,
     };
 
     saveGuildConfig(file, resolved);
@@ -523,6 +525,8 @@ describe("saveGuildConfig", () => {
       attachmentsDir: "data/attachments",
       instructions: "Custom guild instructions",
       emotes: { include: false },
+      forceToolCallFirstRun: false,
+      disableParallelToolCallsFirstRun: false,
     };
 
     saveGuildConfig(file, resolved);
@@ -845,6 +849,8 @@ describe("saveGuildConfig bashTool", () => {
         blocklist: [],
       },
       emotes: { include: false },
+      forceToolCallFirstRun: false,
+      disableParallelToolCallsFirstRun: false,
     };
 
     saveGuildConfig(file, resolved);
@@ -874,6 +880,8 @@ describe("saveGuildConfig bashTool", () => {
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
+      forceToolCallFirstRun: false,
+      disableParallelToolCallsFirstRun: false,
     };
 
     saveGuildConfig(file, resolved);
@@ -1086,6 +1094,8 @@ describe("saveGuildConfig emotes", () => {
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: true },
+      forceToolCallFirstRun: false,
+      disableParallelToolCallsFirstRun: false,
     };
 
     saveGuildConfig(file, resolved);
@@ -1122,6 +1132,8 @@ describe("saveGuildConfig triggerInstructions", () => {
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
+      forceToolCallFirstRun: false,
+      disableParallelToolCallsFirstRun: false,
     };
 
     saveGuildConfig(file, resolved);
@@ -1151,6 +1163,8 @@ describe("saveGuildConfig triggerInstructions", () => {
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
+      forceToolCallFirstRun: false,
+      disableParallelToolCallsFirstRun: false,
     };
 
     saveGuildConfig(file, resolved);

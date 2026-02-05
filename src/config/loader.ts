@@ -311,6 +311,8 @@ export function loadGlobalConfig(
     defaultEmotes: {
       include: yaml.emotes?.include ?? DEFAULT_EMOTES.include,
     },
+    defaultForceToolCallFirstRun: yaml.forceToolCallFirstRun ?? false,
+    defaultDisableParallelToolCallsFirstRun: yaml.disableParallelToolCallsFirstRun ?? false,
   };
 }
 
@@ -382,6 +384,8 @@ export function resolveGuildConfig(
     emotes: {
       include: partial.emotes?.include ?? global.defaultEmotes.include,
     },
+    forceToolCallFirstRun: partial.forceToolCallFirstRun ?? global.defaultForceToolCallFirstRun,
+    disableParallelToolCallsFirstRun: partial.disableParallelToolCallsFirstRun ?? global.defaultDisableParallelToolCallsFirstRun,
   };
 }
 

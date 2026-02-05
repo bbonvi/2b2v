@@ -32,6 +32,8 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     qdrantUrl: "http://localhost:6333",
     uiLang: "en",
     defaultEmotes: { include: false },
+    defaultForceToolCallFirstRun: false,
+    defaultDisableParallelToolCallsFirstRun: false,
     ...overrides,
   };
 }
@@ -53,6 +55,8 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     attachmentsDir: "data/attachments",
     instructions: "",
     emotes: { include: false },
+    forceToolCallFirstRun: false,
+    disableParallelToolCallsFirstRun: false,
     ...overrides,
   };
 }

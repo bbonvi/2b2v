@@ -58,6 +58,13 @@ imageCaptioningEnabled: false
 emotes:
   include: false  # Include available server emojis in LLM context (default: false)
 
+# Agent tool-calling behavior on first turn
+# Some models need "required" tool choice on first turn to ensure tool use.
+# Some models go haywire with parallel tool calls; disabling prevents that.
+# Both disabled by default.
+forceToolCallFirstRun: false              # Force toolChoice: "required" on first turn
+disableParallelToolCallsFirstRun: false   # Disable parallel tool calls on first turn
+
 # ElevenLabs text-to-speech configuration (requires ELEVENLABS_API_KEY env var)
 # When enabled, the bot can send voice messages as audio attachments
 tts:

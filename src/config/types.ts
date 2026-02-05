@@ -82,6 +82,10 @@ export interface GuildConfig {
   bashTool?: BashToolConfig;
   /** Emote/emoji context configuration. */
   emotes: EmotesConfig;
+  /** Force toolChoice: "required" on first agent turn. */
+  forceToolCallFirstRun: boolean;
+  /** Disable parallel tool calls on first agent turn. */
+  disableParallelToolCallsFirstRun: boolean;
 }
 
 /** Global configuration loaded from file + env. */
@@ -119,6 +123,10 @@ export interface GlobalConfig {
   defaultBashTool?: BashToolConfig;
   /** Default emotes configuration. */
   defaultEmotes: EmotesConfig;
+  /** Force toolChoice: "required" on first agent turn. Default false. */
+  defaultForceToolCallFirstRun: boolean;
+  /** Disable parallel tool calls on first agent turn. Default false. */
+  defaultDisableParallelToolCallsFirstRun: boolean;
 }
 
 /** Full resolved app config. */
@@ -152,6 +160,8 @@ export interface GuildConfigYaml {
   emotes?: {
     include?: boolean;
   };
+  forceToolCallFirstRun?: boolean;
+  disableParallelToolCallsFirstRun?: boolean;
 }
 
 /** Raw shape of the main config YAML file (config/config.yaml). All optional. */
@@ -198,4 +208,6 @@ export interface MainConfigYaml {
   emotes?: {
     include?: boolean;
   };
+  forceToolCallFirstRun?: boolean;
+  disableParallelToolCallsFirstRun?: boolean;
 }

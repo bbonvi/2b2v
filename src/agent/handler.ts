@@ -167,16 +167,16 @@ export async function handleMessage(
 
   const reqLog = deps.requestLog;
   let isFirstTurn = true;
+  const forceFirst = deps.guildConfig.forceToolCallFirstRun;
+  const disableParallel = deps.guildConfig.disableParallelToolCallsFirstRun;
   const wrappedStreamFn: typeof streamSimple = (model_, context, options) => {
-    // Force exactly one tool call on first turn to ensure the agent acts on user input
-    // parallelToolCalls: false prevents runaway duplicate calls from confused models
     const firstTurn = isFirstTurn;
     isFirstTurn = false;
     return streamSimple(model_, context, {
       ...options,
       ...streamOptions,
-      toolChoice: firstTurn ? "required" : undefined,
-      parallelToolCalls: firstTurn ? false : undefined,
+      toolChoice: (firstTurn && forceFirst) ? "required" : undefined,
+      parallelToolCalls: (firstTurn && disableParallel) ? false : undefined,
       onPayload: (payload: unknown) => {
         reqLog?.recordLLMRequest(payload);
       },

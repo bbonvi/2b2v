@@ -13,11 +13,11 @@ const GLOBAL: GlobalConfig = {
   defaultTriggerInstructions: {},
   defaultMemoryRetentionDays: 180,
   defaultImageMaxDimension: 768,
-    defaultMergeMessageGapSeconds: 120,
-    defaultImageReadMaxPerCall: 10,
-    defaultImageCaptioningEnabled: false,
-    defaultAttachmentsDir: "data/attachments",
-    defaultInstructions: "",
+  defaultMergeMessageGapSeconds: 120,
+  defaultImageReadMaxPerCall: 10,
+  defaultImageCaptioningEnabled: false,
+  defaultAttachmentsDir: "data/attachments",
+  defaultInstructions: "",
   personaPath: "config/persona.md",
   toolInstructionsPath: "config/tool_instructions.md",
   logLevel: "info",
@@ -26,6 +26,8 @@ const GLOBAL: GlobalConfig = {
   qdrantUrl: "http://localhost:6333",
   uiLang: "en",
   defaultEmotes: { include: false },
+  defaultForceToolCallFirstRun: false,
+  defaultDisableParallelToolCallsFirstRun: false,
 };
 
 const GUILD: GuildConfig = {
@@ -44,6 +46,8 @@ const GUILD: GuildConfig = {
   attachmentsDir: "data/attachments",
   instructions: "",
   emotes: { include: false },
+  forceToolCallFirstRun: false,
+  disableParallelToolCallsFirstRun: false,
 };
 
 describe("resolveModel", () => {
