@@ -140,7 +140,7 @@ describe("createSendMessageTool", () => {
 
       expect(result.content[0]).toEqual({
         type: "text",
-        text: "Message sent.\n\nWarning: unknown emotes (not available in this server): :whatever:",
+        text: "Message sent.\nWarning: unknown emotes (not available in this server): :whatever:",
       });
       expect(result.details.unresolvedEmotes).toEqual([":whatever:"]);
     });
@@ -153,7 +153,7 @@ describe("createSendMessageTool", () => {
 
       expect(result.content[0]).toEqual({
         type: "text",
-        text: "Message sent.\n\nWarning: unknown emotes (not available in this server): :foo:, :bar:",
+        text: "Message sent.\nWarning: unknown emotes (not available in this server): :foo:, :bar:",
       });
       expect(result.details.unresolvedEmotes).toEqual([":foo:", ":bar:"]);
     });

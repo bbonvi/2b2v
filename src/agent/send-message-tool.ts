@@ -119,7 +119,7 @@ export function createSendMessageTool(
         let resultText = "Message sent.";
         if (emoteWarnings.length > 0) {
           const emoteList = emoteWarnings.join(", ");
-          resultText = `Message sent.\n\nWarning: unknown emotes (not available in this server): ${emoteList}`;
+          resultText = `Message sent.\nWarning: unknown emotes (not available in this server): ${emoteList}`;
         }
 
         return {
