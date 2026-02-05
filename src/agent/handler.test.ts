@@ -1,8 +1,8 @@
 import { describe, test, expect } from "bun:test";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { handleMessage, patchToolLookup, type IncomingMessage, type HandlerDeps } from "./handler.ts";
-import type { AssembledContext } from "./context-assembly.ts";
+import { handleMessage, patchToolLookup, injectTriggerInstruction, type IncomingMessage, type HandlerDeps } from "./handler.ts";
+import type { AssembledContext, ContextSection } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { MessageSender } from "./send-message-tool.ts";
 import type { Logger } from "../logger.ts";
@@ -16,6 +16,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultTimezone: "UTC",
     defaultTrim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
     defaultTriggers: { mention: true, keywords: [], randomChance: 0 },
+    defaultTriggerInstructions: {},
     defaultMemoryRetentionDays: 180,
     defaultImageMaxDimension: 768,
     defaultMergeMessageGapSeconds: 120,
@@ -38,6 +39,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     guildId: "guild-1",
     slug: "test",
     triggers: { mention: true, keywords: [], randomChance: 0 },
+    triggerInstructions: {},
     timezone: "UTC",
     trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
     memoryRetentionDays: 180,
@@ -273,5 +275,48 @@ describe("patchToolLookup", () => {
     patchToolLookup(tools);
     const found = tools.find((t) => t.name === "nonexistent_tool");
     expect(found).toBeUndefined();
+  });
+});
+
+describe("injectTriggerInstruction", () => {
+  test("appends section when no Late Instruction exists", () => {
+    const sections: ContextSection[] = [
+      { label: "Persona", text: "You are a test bot.", cached: true },
+      { label: "Instructions", text: "## Instructions\nBe helpful.", cached: true },
+    ];
+    const result = injectTriggerInstruction(sections, "This is a random reply.");
+    expect(result.length).toBe(3);
+    expect(result[2]?.label).toBe("Trigger Instruction");
+    expect(result[2]?.text).toBe("## Trigger Context\nThis is a random reply.");
+    expect(result[2]?.cached).toBe(false);
+  });
+
+  test("inserts section before Late Instruction", () => {
+    const sections: ContextSection[] = [
+      { label: "Persona", text: "You are a test bot.", cached: true },
+      { label: "Instructions", text: "## Instructions\nBe helpful.", cached: true },
+      { label: "Late Instruction", text: "ALWAYS USE send_message.", cached: false },
+    ];
+    const result = injectTriggerInstruction(sections, "You were mentioned.");
+    expect(result.length).toBe(4);
+    expect(result[2]?.label).toBe("Trigger Instruction");
+    expect(result[2]?.text).toBe("## Trigger Context\nYou were mentioned.");
+    expect(result[3]?.label).toBe("Late Instruction");
+  });
+
+  test("preserves original sections order", () => {
+    const sections: ContextSection[] = [
+      { label: "Persona", text: "Persona text.", cached: true },
+      { label: "Chat History — Older", text: "Older history.", cached: true },
+      { label: "Chat History — Newer", text: "Newer history.", cached: false },
+      { label: "Late Instruction", text: "Late text.", cached: false },
+    ];
+    const result = injectTriggerInstruction(sections, "Scheduled task.");
+    expect(result.length).toBe(5);
+    expect(result[0]?.label).toBe("Persona");
+    expect(result[1]?.label).toBe("Chat History — Older");
+    expect(result[2]?.label).toBe("Chat History — Newer");
+    expect(result[3]?.label).toBe("Trigger Instruction");
+    expect(result[4]?.label).toBe("Late Instruction");
   });
 });

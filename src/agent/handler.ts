@@ -3,8 +3,9 @@ import type { Message, Model } from "@mariozechner/pi-ai";
 import { streamSimple, type ProviderStreamOptions } from "@mariozechner/pi-ai";
 import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
-import { contextToSystemPrompt, type AssembledContext } from "./context-assembly.ts";
+import { contextToSystemPrompt, type AssembledContext, type ContextSection } from "./context-assembly.ts";
 import { createSendMessageTool, type MessageSender, type SendMessageToolDeps } from "./send-message-tool.ts";
+import type { TriggerInstructions } from "../config/types.ts";
 import type { TtsConfig, TtsResult } from "../tts/types.ts";
 import { resolveGuildModel, buildStreamOptions } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
@@ -48,12 +49,35 @@ export interface HandlerDeps {
   generateSpeech?: (text: string, voiceType: string) => Promise<TtsResult>;
   /** Skip trigger evaluation and always run the agent (for scheduled tasks). */
   forceTrigger?: boolean;
+  /** Per-trigger-type instructions to inject into context. */
+  triggerInstructions?: TriggerInstructions;
 }
 
 export interface HandleResult {
   triggered: boolean;
   triggerResult: TriggerResult;
   agentRan: boolean;
+}
+
+/**
+ * Inject a trigger-specific instruction into context sections.
+ * Inserts before "Late Instruction" section if present, otherwise appends.
+ * @internal Exported for testing.
+ */
+export function injectTriggerInstruction(
+  sections: ContextSection[],
+  instruction: string
+): ContextSection[] {
+  const newSection: ContextSection = {
+    label: "Trigger Instruction",
+    text: `## Trigger Context\n${instruction}`,
+    cached: false,
+  };
+  const lateIdx = sections.findIndex((s) => s.label === "Late Instruction");
+  if (lateIdx === -1) {
+    return [...sections, newSection];
+  }
+  return [...sections.slice(0, lateIdx), newSection, ...sections.slice(lateIdx)];
 }
 
 /**
@@ -117,7 +141,17 @@ export async function handleMessage(
 
   deps.onTriggered?.();
 
-  const systemPrompt = contextToSystemPrompt(deps.context);
+  // Inject trigger-specific instruction if configured
+  const triggerInstruction = deps.triggerInstructions?.[triggerResult.reason];
+  let context = deps.context;
+  if (triggerInstruction !== undefined && triggerInstruction !== "") {
+    context = {
+      ...context,
+      sections: injectTriggerInstruction(context.sections, triggerInstruction),
+    };
+  }
+
+  const systemPrompt = contextToSystemPrompt(context);
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
   const streamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);
 

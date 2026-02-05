@@ -476,6 +476,7 @@ describe("saveGuildConfig", () => {
       guildId: "50",
       slug: "save",
       triggers: { mention: true, keywords: ["hey"], randomChance: 0.1 },
+      triggerInstructions: {},
       model: "custom/m",
       thinkingLevel: "high",
       timezone: "Asia/Tokyo",
@@ -508,6 +509,7 @@ describe("saveGuildConfig", () => {
       guildId: "51",
       slug: "instr",
       triggers: { mention: true, keywords: [], randomChance: 0 },
+      triggerInstructions: {},
       thinkingLevel: "medium",
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
@@ -821,6 +823,7 @@ describe("saveGuildConfig bashTool", () => {
       guildId: "60",
       slug: "bash",
       triggers: { mention: true, keywords: [], randomChance: 0 },
+      triggerInstructions: {},
       thinkingLevel: "medium",
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
@@ -855,6 +858,7 @@ describe("saveGuildConfig bashTool", () => {
       guildId: "61",
       slug: "no-bash",
       triggers: { mention: true, keywords: [], randomChance: 0 },
+      triggerInstructions: {},
       thinkingLevel: "medium",
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
@@ -872,5 +876,167 @@ describe("saveGuildConfig bashTool", () => {
 
     const reloaded = loadGuildConfigFile(file);
     expect(reloaded.bashTool).toBeUndefined();
+  });
+});
+
+describe("loadGlobalConfig triggerInstructions", () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  const BASE_ENV = { DISCORD_TOKEN: "tok_test", OPENROUTER_API_KEY: "or_test" };
+
+  test("defaultTriggerInstructions is empty object when not in YAML", () => {
+    const cfg = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "nonexistent.yaml"));
+    expect(cfg.defaultTriggerInstructions).toEqual({
+      mention: undefined,
+      keyword: undefined,
+      random: undefined,
+      scheduled: undefined,
+    });
+  });
+
+  test("parses triggerInstructions from YAML", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, `triggerInstructions:
+  mention: "You were mentioned."
+  keyword: "Keyword triggered."
+  random: "Random reply."
+  scheduled: "Scheduled task."
+`);
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultTriggerInstructions.mention).toBe("You were mentioned.");
+    expect(cfg.defaultTriggerInstructions.keyword).toBe("Keyword triggered.");
+    expect(cfg.defaultTriggerInstructions.random).toBe("Random reply.");
+    expect(cfg.defaultTriggerInstructions.scheduled).toBe("Scheduled task.");
+  });
+
+  test("parses partial triggerInstructions", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, `triggerInstructions:
+  random: "Only random set."
+`);
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultTriggerInstructions.mention).toBeUndefined();
+    expect(cfg.defaultTriggerInstructions.random).toBe("Only random set.");
+  });
+});
+
+describe("resolveGuildConfig triggerInstructions", () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  const BASE_ENV = { DISCORD_TOKEN: "t", OPENROUTER_API_KEY: "k" };
+
+  test("inherits triggerInstructions from global", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, `triggerInstructions:
+  mention: "Global mention."
+  random: "Global random."
+`);
+    const global = loadGlobalConfig(BASE_ENV, file);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "90",
+      slug: "inherit-trigger-instr",
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.triggerInstructions.mention).toBe("Global mention.");
+    expect(resolved.triggerInstructions.random).toBe("Global random.");
+    expect(resolved.triggerInstructions.keyword).toBeUndefined();
+  });
+
+  test("guild overrides single triggerInstruction key", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, `triggerInstructions:
+  mention: "Global mention."
+  random: "Global random."
+`);
+    const global = loadGlobalConfig(BASE_ENV, file);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "91",
+      slug: "override-trigger-instr",
+      triggerInstructions: {
+        random: "Guild random override.",
+      },
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.triggerInstructions.mention).toBe("Global mention.");
+    expect(resolved.triggerInstructions.random).toBe("Guild random override.");
+  });
+
+  test("guild can set triggerInstruction when global is empty", () => {
+    const global = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "none.yaml"));
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "92",
+      slug: "guild-only-trigger-instr",
+      triggerInstructions: {
+        scheduled: "Guild scheduled.",
+      },
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.triggerInstructions.scheduled).toBe("Guild scheduled.");
+    expect(resolved.triggerInstructions.mention).toBeUndefined();
+  });
+});
+
+describe("saveGuildConfig triggerInstructions", () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  test("persists triggerInstructions when set", () => {
+    const file = join(GUILDS_DIR, "70-trigger-instr.yaml");
+    writeFileSync(file, "");
+
+    const resolved: GuildConfig = {
+      guildId: "70",
+      slug: "trigger-instr",
+      triggers: { mention: true, keywords: [], randomChance: 0 },
+      triggerInstructions: {
+        random: "Be playful.",
+        mention: "Be helpful.",
+      },
+      timezone: "UTC",
+      trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
+      memoryRetentionDays: 180,
+      adminUserIds: [],
+      imageMaxDimension: 768,
+      mergeMessageGapSeconds: 120,
+      imageReadMaxPerCall: 10,
+      imageCaptioningEnabled: false,
+      attachmentsDir: "data/attachments",
+      instructions: "",
+    };
+
+    saveGuildConfig(file, resolved);
+
+    const reloaded = loadGuildConfigFile(file);
+    expect(reloaded.triggerInstructions?.random).toBe("Be playful.");
+    expect(reloaded.triggerInstructions?.mention).toBe("Be helpful.");
+  });
+
+  test("does not persist triggerInstructions when empty", () => {
+    const file = join(GUILDS_DIR, "71-no-trigger-instr.yaml");
+    writeFileSync(file, "");
+
+    const resolved: GuildConfig = {
+      guildId: "71",
+      slug: "no-trigger-instr",
+      triggers: { mention: true, keywords: [], randomChance: 0 },
+      triggerInstructions: {},
+      timezone: "UTC",
+      trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
+      memoryRetentionDays: 180,
+      adminUserIds: [],
+      imageMaxDimension: 768,
+      mergeMessageGapSeconds: 120,
+      imageReadMaxPerCall: 10,
+      imageCaptioningEnabled: false,
+      attachmentsDir: "data/attachments",
+      instructions: "",
+    };
+
+    saveGuildConfig(file, resolved);
+
+    const reloaded = loadGuildConfigFile(file);
+    expect(reloaded.triggerInstructions).toBeUndefined();
   });
 });

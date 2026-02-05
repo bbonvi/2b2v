@@ -8,6 +8,10 @@ triggers:
   keywords: [2b, yorha]   # Keywords that trigger a response
   randomChance: 0.02       # 0–1 probability of responding to any message
 
+# Trigger-specific instructions (overrides global defaults per-key).
+# triggerInstructions:
+#   random: "In this server, unprompted replies should be playful."
+
 # LLM model override (OpenRouter model ID). Omit to use global default.
 model: moonshotai/kimi-k2.5
 

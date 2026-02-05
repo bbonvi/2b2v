@@ -31,6 +31,14 @@ triggers:
   keywords: []           # Keywords that trigger a response
   randomChance: 0        # 0–1 probability of responding to any message
 
+# Trigger-specific instructions injected when bot responds to each trigger type.
+# Provides behavioral context for how the bot should behave in each scenario.
+# triggerInstructions:
+#   mention: "User directly mentioned you. Respond helpfully."
+#   keyword: "Triggered by keyword match. Keep response relevant."
+#   random: "You're replying unprompted. Make a brief remark without hijacking conversation."
+#   scheduled: "This is a scheduled task. Follow the task instructions closely."
+
 # Memory retention in days (0 = no expiry)
 memoryRetentionDays: 180
 

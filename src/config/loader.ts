@@ -7,6 +7,7 @@ import type {
   GuildConfigYaml,
   MainConfigYaml,
   TriggerConfig,
+  TriggerInstructions,
   TrimConfig,
   UiLang,
   VpnConfig,
@@ -278,6 +279,12 @@ export function loadGlobalConfig(
       keywords: yaml.triggers?.keywords ?? [...DEFAULT_TRIGGER.keywords],
       randomChance: yaml.triggers?.randomChance ?? DEFAULT_TRIGGER.randomChance,
     },
+    defaultTriggerInstructions: {
+      mention: yaml.triggerInstructions?.mention,
+      keyword: yaml.triggerInstructions?.keyword,
+      random: yaml.triggerInstructions?.random,
+      scheduled: yaml.triggerInstructions?.scheduled,
+    },
     defaultMemoryRetentionDays: yaml.memoryRetentionDays ?? 180,
     defaultImageMaxDimension: yaml.imageMaxDimension ?? 768,
     defaultMergeMessageGapSeconds: yaml.mergeMessageGapSeconds ?? 120,
@@ -336,6 +343,12 @@ export function resolveGuildConfig(
       keywords: partial.triggers?.keywords ?? [...global.defaultTriggers.keywords],
       randomChance: partial.triggers?.randomChance ?? global.defaultTriggers.randomChance,
     },
+    triggerInstructions: {
+      mention: partial.triggerInstructions?.mention ?? global.defaultTriggerInstructions.mention,
+      keyword: partial.triggerInstructions?.keyword ?? global.defaultTriggerInstructions.keyword,
+      random: partial.triggerInstructions?.random ?? global.defaultTriggerInstructions.random,
+      scheduled: partial.triggerInstructions?.scheduled ?? global.defaultTriggerInstructions.scheduled,
+    },
     model: partial.model,
     modelParams: { ...global.defaultModelParams, ...partial.modelParams },
     thinkingLevel: partial.thinkingLevel ?? global.defaultThinkingLevel,
@@ -389,11 +402,20 @@ export function loadGuildConfigs(
   return result;
 }
 
+/** Check if a TriggerInstructions object has any non-empty values. */
+function hasTriggerInstructions(ti: TriggerInstructions): boolean {
+  return (ti.mention !== undefined && ti.mention !== "") ||
+    (ti.keyword !== undefined && ti.keyword !== "") ||
+    (ti.random !== undefined && ti.random !== "") ||
+    (ti.scheduled !== undefined && ti.scheduled !== "");
+}
+
 /** Persist a resolved guild config back to its YAML file (source of truth). */
 export function saveGuildConfig(filePath: string, config: GuildConfig): void {
   // Write only the per-guild fields (not guildId/slug — those are in the filename)
   const yaml: GuildConfigYaml = {
     triggers: config.triggers,
+    triggerInstructions: hasTriggerInstructions(config.triggerInstructions) ? config.triggerInstructions : undefined,
     model: config.model,
     modelParams: config.modelParams,
     thinkingLevel: config.thinkingLevel,

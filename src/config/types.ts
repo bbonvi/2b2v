@@ -35,6 +35,14 @@ export interface TriggerConfig {
   randomChance: number; // 0–1
 }
 
+/** Per-trigger-type custom instructions injected into agent context. */
+export interface TriggerInstructions {
+  mention?: string;
+  keyword?: string;
+  random?: string;
+  scheduled?: string;
+}
+
 /** Context window trimming thresholds (message count). */
 export interface TrimConfig {
   trimTrigger: number;
@@ -49,6 +57,7 @@ export interface GuildConfig {
   guildId: string;
   slug: string;
   triggers: TriggerConfig;
+  triggerInstructions: TriggerInstructions;
   model?: string;
   modelParams?: Record<string, unknown>;
   thinkingLevel?: string;
@@ -78,6 +87,7 @@ export interface GlobalConfig {
   defaultTimezone: string;
   defaultTrim: TrimConfig;
   defaultTriggers: TriggerConfig;
+  defaultTriggerInstructions: TriggerInstructions;
   defaultMemoryRetentionDays: number;
   defaultImageMaxDimension: number;
   defaultMergeMessageGapSeconds: number;
@@ -109,6 +119,7 @@ export interface AppConfig {
 /** Raw shape of a guild YAML file (partial, all fields optional). */
 export interface GuildConfigYaml {
   triggers?: Partial<TriggerConfig>;
+  triggerInstructions?: Partial<TriggerInstructions>;
   model?: string;
   modelParams?: Record<string, unknown>;
   thinkingLevel?: string;
@@ -137,6 +148,7 @@ export interface MainConfigYaml {
   timezone?: string;
   trim?: Partial<TrimConfig>;
   triggers?: Partial<TriggerConfig>;
+  triggerInstructions?: Partial<TriggerInstructions>;
   memoryRetentionDays?: number;
   imageMaxDimension?: number;
   mergeMessageGapSeconds?: number;

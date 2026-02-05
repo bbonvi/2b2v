@@ -419,6 +419,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         ttsConfig: guildConfig.tts,
         generateSpeech,
         forceTrigger: true,
+        triggerInstructions: guildConfig.triggerInstructions,
       };
 
       // Run the agent
@@ -1348,6 +1349,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
       ttsEnabled,
       ttsConfig: guildConfig.tts,
       generateSpeech,
+      triggerInstructions: guildConfig.triggerInstructions,
     };
 
     // Run the handler
