@@ -11,6 +11,7 @@ services:
       MODEL_CACHE_DIR: /app/model-cache
       SSH_KEYS_LOCAL: /app/ssh-keys-local
       SSH_KEYS_SHARED: /app/ssh-keys-shared
+      LOG_DIR: /tmp
       LOG_LEVEL: debug
       UNSAFELY_BYPASS_DASHBOARD_AUTH: "true"
     volumes:
