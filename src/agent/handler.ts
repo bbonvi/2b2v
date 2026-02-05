@@ -5,6 +5,7 @@ import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
 import { contextToSystemPrompt, type AssembledContext, type ContextSection } from "./context-assembly.ts";
 import { createSendMessageTool, type MessageSender, type SendMessageToolDeps } from "./send-message-tool.ts";
+import { wrapToolsWithTiming } from "./tool-timing.ts";
 import type { TriggerInstructions } from "../config/types.ts";
 import type { TtsConfig, TtsResult } from "../tts/types.ts";
 import { resolveGuildModel, buildStreamOptions } from "../llm/client.ts";
@@ -164,6 +165,7 @@ export async function handleMessage(
   const sendTool = createSendMessageTool(sendToolDeps) as unknown as AgentTool;
   const tools: AgentTool[] = [sendTool, ...(deps.extraTools ?? [])];
   patchToolLookup(tools);
+  const timedTools = wrapToolsWithTiming(tools);
 
   const reqLog = deps.requestLog;
   let isFirstTurn = true;
@@ -188,7 +190,7 @@ export async function handleMessage(
       systemPrompt,
       model: model as unknown as Model<never>,
       thinkingLevel: (deps.guildConfig.thinkingLevel ?? "off") as ThinkingLevel,
-      tools,
+      tools: timedTools,
       messages: [],
     },
     convertToLlm: defaultConvertToLlm,
