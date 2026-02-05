@@ -58,8 +58,8 @@ export interface ContextAssemblyInput {
  * Assemble structured context from input sections.
  *
  * Section order per spec (parent channel):
- * 1. Persona (cached)
- * 2. Tool Instructions (cached)
+ * 1. Tool Instructions (cached)
+ * 2. Persona (cached)
  * 3. Instructions (cached) — if any
  * 4. Available Emojis (cached)
  * 5. Server Members (cached)
@@ -72,8 +72,8 @@ export interface ContextAssemblyInput {
  * 12. Late Instruction (uncached) — if any
  *
  * Section order per spec (thread channel):
- * 1. Persona (cached)
- * 2. Tool Instructions (cached)
+ * 1. Tool Instructions (cached)
+ * 2. Persona (cached)
  * 3. Instructions (cached) — if any
  * 4. Available Emojis (cached)
  * 5. Server Members (cached)
@@ -103,8 +103,8 @@ export function assembleContext(input: ContextAssemblyInput): AssembledContext {
     }
   };
 
-  add("Persona", input.persona, true);
   add("Tool Instructions", input.toolInstructions, true);
+  add("Persona", input.persona, true);
   addWithHeader("Instructions", "## Instructions", input.instructions, true);
   addWithHeader("Available Emojis", "## Available Emojis", input.emojis, true);
   addWithHeader("Server Members", "## Server Members", input.members, true);

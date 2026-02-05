@@ -31,8 +31,8 @@ describe("assembleContext", () => {
     expect(result.sections).toHaveLength(9);
     const labels = result.sections.map((s) => s.label);
     expect(labels).toEqual([
-      "Persona",
       "Tool Instructions",
+      "Persona",
       "Available Emojis",
       "Server Members",
       "Upcoming Schedules",
@@ -48,8 +48,8 @@ describe("assembleContext", () => {
     expect(result.sections).toHaveLength(10);
     const labels = result.sections.map((s) => s.label);
     expect(labels).toEqual([
-      "Persona",
       "Tool Instructions",
+      "Persona",
       "Instructions",
       "Available Emojis",
       "Server Members",
@@ -86,8 +86,8 @@ describe("assembleContext", () => {
     );
     const labels = result.sections.map((s) => s.label);
     expect(labels).toEqual([
-      "Persona",
       "Tool Instructions",
+      "Persona",
       "Chat History — Newer",
       "Current Context",
     ]);
@@ -99,8 +99,8 @@ describe("assembleContext", () => {
       .filter((s) => s.cached)
       .map((s) => s.label);
     expect(cachedLabels).toEqual([
-      "Persona",
       "Tool Instructions",
+      "Persona",
       "Instructions",
       "Available Emojis",
       "Server Members",
@@ -349,8 +349,8 @@ describe("contextToSystemPrompt", () => {
     }));
     const prompt = contextToSystemPrompt(ctx);
     expect(prompt).toBe(
-      "You are a test bot.\n\n" +
       "## How You Communicate\nUse send_message.\n\n" +
+      "You are a test bot.\n\n" +
       "Guild: g1 | Channel: c1\nDate/Time: 2026-01-01T00:00:00Z"
     );
   });

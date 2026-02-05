@@ -5,10 +5,9 @@ import { createMemory, listMemories, getMemory } from "./db/memory-repository.ts
 import { createSchedule, getSchedule, listSchedules } from "./db/schedule-repository.ts";
 import { createMemoryTools } from "./agent/memory-tools.ts";
 import { createScheduleTool } from "./agent/schedule-tool.ts";
-import { assembleSystemPrompt, type PromptContext, type ChatMessage } from "./agent/prompt.ts";
+import type { ChatMessage } from "./agent/prompt.ts";
 import { trimChatHistory } from "./agent/context-trimming.ts";
-import { shouldRespond, type TriggerInput } from "./agent/triggers.ts";
-import type { TriggerConfig, TrimConfig } from "./config/types.ts";
+import type { TrimConfig } from "./config/types.ts";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -302,64 +301,9 @@ describe("schedule tool → DB roundtrip", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Trigger → Prompt Assembly → Context Trimming Pipeline
+// 4. Trigger → Context Trimming Pipeline
 // ---------------------------------------------------------------------------
-describe("trigger → prompt assembly → trimming pipeline", () => {
-  test("mention trigger + prompt assembly includes all context sections", () => {
-    const input: TriggerInput = {
-      content: "Hey bot",
-      authorId: "user-1",
-      botUserId: "bot-1",
-      mentionedUserIds: ["bot-1"],
-    };
-    const triggers: TriggerConfig = { mention: true, keywords: [], randomChance: 0 };
-
-    const result = shouldRespond(input, triggers);
-    expect(result).toEqual({ reason: "mention" });
-
-    // Build full prompt context
-    const ctx: PromptContext = {
-      persona: "You are TestBot, a friendly assistant.",
-      emojiContext: ":wave: — greeting wave\n:fire: — excitement",
-      displayNameContext: "@alice — Alice W\n@bob — Bob X",
-      journalSummaries: ["User alice prefers short answers"],
-      upcomingSchedules: ["Daily standup in 2 hours"],
-      chatHistory: [
-        { author: "alice", content: "Hello!", isBot: false },
-        { author: "TestBot", content: "Hi Alice!", isBot: true },
-      ],
-      guildId: "g1",
-      channelId: "c1",
-      timestamp: "2025-01-01T00:00:00.000Z",
-    };
-
-    const prompt = assembleSystemPrompt(ctx);
-
-    // Verify all sections present in correct order
-    expect(prompt).toContain("You are TestBot");
-    expect(prompt).toContain("## Available Emojis");
-    expect(prompt).toContain(":wave: — greeting wave");
-    expect(prompt).toContain("## Server Members");
-    expect(prompt).toContain("@alice — Alice W");
-    expect(prompt).toContain("## Journal");
-    expect(prompt).toContain("User alice prefers short answers");
-    expect(prompt).toContain("## Upcoming Schedules");
-    expect(prompt).toContain("Daily standup in 2 hours");
-    expect(prompt).toContain("## Chat History");
-    expect(prompt).toContain("alice: Hello!");
-
-    // Verify section ordering (use "\n## X\n" pattern to match actual sections, not TOOL_INSTRUCTIONS references)
-    const emojiIdx = prompt.indexOf("\n## Available Emojis\n");
-    const membersIdx = prompt.indexOf("\n## Server Members\n");
-    const journalIdx = prompt.indexOf("\n## Journal\n");
-    const schedulesIdx = prompt.indexOf("\n## Upcoming Schedules\n");
-    const historyIdx = prompt.indexOf("\n## Chat History\n");
-    expect(emojiIdx).toBeLessThan(membersIdx);
-    expect(membersIdx).toBeLessThan(journalIdx);
-    expect(journalIdx).toBeLessThan(schedulesIdx);
-    expect(schedulesIdx).toBeLessThan(historyIdx);
-  });
-
+describe("trigger → trimming pipeline", () => {
   test("context trimming activates at trigger threshold and preserves newest", () => {
     const trim: TrimConfig = { trimTrigger: 10, trimTarget: 5, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 };
     const messages: ChatMessage[] = Array.from({ length: 12 }, (_, i) => ({
@@ -373,58 +317,6 @@ describe("trigger → prompt assembly → trimming pipeline", () => {
     // Should keep the newest 5 (indices 7-11)
     expect(trimmed[0]?.content).toBe("message-7");
     expect(trimmed[4]?.content).toBe("message-11");
-  });
-
-  test("trimmed history integrates into assembled prompt", () => {
-    const trim: TrimConfig = { trimTrigger: 5, trimTarget: 3, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 };
-    const fullHistory: ChatMessage[] = Array.from({ length: 6 }, (_, i) => ({
-      author: `user-${i}`,
-      content: `msg-${i}`,
-      isBot: false,
-    }));
-
-    const trimmed = trimChatHistory(fullHistory, trim);
-    expect(trimmed.length).toBe(3);
-
-    const prompt = assembleSystemPrompt({
-      persona: "Bot persona",
-      emojiContext: "",
-      displayNameContext: "",
-      journalSummaries: [],
-      upcomingSchedules: [],
-      chatHistory: trimmed,
-      guildId: "g1",
-      channelId: "c1",
-      timestamp: "2025-01-01T00:00:00.000Z",
-    });
-
-    // Only trimmed messages appear
-    expect(prompt).not.toContain("msg-0");
-    expect(prompt).not.toContain("msg-2");
-    expect(prompt).toContain("msg-3");
-    expect(prompt).toContain("msg-5");
-  });
-
-  test("empty optional sections are omitted from prompt", () => {
-    const prompt = assembleSystemPrompt({
-      persona: "Minimal bot",
-      emojiContext: "",
-      displayNameContext: "",
-      journalSummaries: [],
-      upcomingSchedules: [],
-      chatHistory: [],
-      guildId: "g1",
-      channelId: "c1",
-      timestamp: "2025-01-01T00:00:00.000Z",
-    });
-
-    expect(prompt).toStartWith("Minimal bot");
-    expect(prompt).toContain("send_message");
-    // Use "\n## X\n" pattern to check for actual sections (not TOOL_INSTRUCTIONS references)
-    expect(prompt).not.toContain("\n## Available Emojis\n");
-    expect(prompt).not.toContain("\n## Server Members\n");
-    expect(prompt).not.toContain("\n## Journal\n");
-    expect(prompt).not.toContain("\n## Chat History\n");
   });
 });
 
@@ -484,10 +376,10 @@ describe("message storage and retrieval", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7. Cross-Cutting: Translation → Trimming → Prompt → Sender Pipeline
+// 7. Cross-Cutting: Translation Pipeline
 // ---------------------------------------------------------------------------
-describe("full pipeline: translate → trim → assemble → send", () => {
-  test("end-to-end message processing pipeline", () => {
+describe("translation pipeline: inbound → outbound", () => {
+  test("end-to-end translation pipeline", () => {
     // 1. Simulate incoming Discord messages
     const rawMessages = [
       "Hey <@111>, what's up?",
@@ -502,37 +394,7 @@ describe("full pipeline: translate → trim → assemble → send", () => {
     expect(translated[1]).toBe("Not much @bob, just chillin in #general");
     expect(translated[2]).toBe("Cool, see you later!");
 
-    // 2. Build chat history from translated messages
-    const chatHistory: ChatMessage[] = translated.map((content, i) => ({
-      author: i === 0 ? "alice" : i === 1 ? "bob" : "alice",
-      content,
-      isBot: false,
-    }));
-
-    // 3. Trim (threshold not reached, so no trim)
-    const trimConfig: TrimConfig = { trimTrigger: 10, trimTarget: 5, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 };
-    const trimmed = trimChatHistory(chatHistory, trimConfig);
-    expect(trimmed.length).toBe(3);
-
-    // 4. Assemble system prompt
-    const prompt = assembleSystemPrompt({
-      persona: "You are TestBot.",
-      emojiContext: "",
-      displayNameContext: "@alice — Alice W\n@bob — Bob X",
-      journalSummaries: [],
-      upcomingSchedules: [],
-      chatHistory: trimmed,
-      guildId: "g1",
-      channelId: "c1",
-      timestamp: "2025-01-01T00:00:00.000Z",
-    });
-
-    expect(prompt).toContain("You are TestBot.");
-    expect(prompt).toContain("@alice — Alice W");
-    expect(prompt).toContain("alice: Hey @alice, what's up?");
-    expect(prompt).toContain("bob: Not much @bob, just chillin in #general");
-
-    // 5. Simulate outbound translation of an LLM response
+    // 2. Simulate outbound translation of an LLM response
     const llmResponse = "Hey @alice, I'll check #general for you!";
     const discordResponse = translateOutbound(llmResponse, makeOutboundResolvers());
     expect(discordResponse).toContain("<@111>");

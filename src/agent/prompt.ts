@@ -1,5 +1,3 @@
-import { readFileSync } from "fs";
-
 /** A message in the chat history for system prompt injection. */
 export interface ChatMessage {
   author: string;
@@ -7,37 +5,10 @@ export interface ChatMessage {
   isBot: boolean;
 }
 
-/** All data needed to assemble the system prompt. */
-export interface PromptContext {
-  persona: string;
-  journalSummaries: string[];
-  upcomingSchedules: string[];
-  chatHistory: ChatMessage[];
-  emojiContext: string;
-  displayNameContext: string;
-  guildId: string;
-  channelId: string;
-  timestamp: string;
-}
+export const TOOL_INSTRUCTIONS = `
+## Available Tools
+**You must extensively exercise these tools in order to efficiently fulfill your purposes.**
 
-/** Load persona markdown from disk. Throws if file is missing. */
-export function loadPersona(filePath: string): string {
-  return readFileSync(filePath, "utf-8").trim();
-}
-
-/** Format chat messages into a human-readable block for the system prompt. */
-export function formatChatHistory(messages: ChatMessage[]): string {
-  if (messages.length === 0) return "";
-  return messages.map((m) => `${m.author}: ${m.content}`).join("\n");
-}
-
-/**
- * Assemble the full system prompt from all context sections.
- *
- * Order: persona → emojis → members → journal → schedules → chat history.
- * Empty sections are omitted entirely.
- */
-export const TOOL_INSTRUCTIONS = `## Available Tools (always use some of them; and as much as you need)
 - \`start_typing\` — Trigger the typing indicator. Call immediately before each \`send_message\`.
 - \`send_message\` — Post a message to the chat. This is your ONLY way to communicate with users — your reasoning text is invisible to them. Always use it to make an actual response.
   - \`reply: true\` — creates a Discord reply (shows "replied to" link). Use on first response to the trigger message.
@@ -127,35 +98,4 @@ Always call \`send_message\` to respond — your reasoning text is invisible to 
 - ALWAYS use a tool!
 - ALWAYS \`send_message\` to the channel instead of inlining your responses.
 - ALWAYS \`start_typing\` before \`send_message\`.
-`;
-
-export function assembleSystemPrompt(ctx: PromptContext): string {
-  const sections: string[] = [ctx.persona, TOOL_INSTRUCTIONS];
-
-  if (ctx.emojiContext !== "") {
-    sections.push(`## Available Emojis\n${ctx.emojiContext}`);
-  }
-
-  if (ctx.displayNameContext !== "") {
-    sections.push(`## Server Members\n${ctx.displayNameContext}`);
-  }
-
-  if (ctx.journalSummaries.length > 0) {
-    const items = ctx.journalSummaries.map((s) => `- ${s}`).join("\n");
-    sections.push(`## Journal\n${items}`);
-  }
-
-  if (ctx.upcomingSchedules.length > 0) {
-    const items = ctx.upcomingSchedules.map((s) => `- ${s}`).join("\n");
-    sections.push(`## Upcoming Schedules\n${items}`);
-  }
-
-  sections.push(`## Current Context\nGuild: ${ctx.guildId} | Chat: ${ctx.channelId}\nDate/Time: ${ctx.timestamp}`);
-
-  const history = formatChatHistory(ctx.chatHistory);
-  if (history !== "") {
-    sections.push(`## Chat History\n${history}`);
-  }
-
-  return sections.join("\n\n");
-}
+`.trim();
