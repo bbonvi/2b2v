@@ -29,6 +29,15 @@ function getWrapped(tools: AgentTool[], index: number): AgentTool {
   return tool;
 }
 
+/** Extract elapsed time in ms from a tool result's timing note. */
+function extractElapsedMs(result: AgentToolResult<unknown>): number {
+  const note = result.content[1];
+  if (note?.type !== "text") throw new Error("No timing note");
+  const match = (note as { type: "text"; text: string }).text.match(/took (\d+)ms/);
+  if (match === null || match[1] === undefined) throw new Error("No ms match in timing note");
+  return parseInt(match[1], 10);
+}
+
 describe("formatTiming", () => {
   test("formats milliseconds for values < 1000", () => {
     expect(formatTiming(100)).toBe("100ms");
@@ -63,31 +72,63 @@ describe("wrapToolsWithTiming", () => {
     expect(note).toBeDefined();
     expect(note?.type).toBe("text");
     expect((note as { type: "text"; text: string }).text).toMatch(
-      /^\n\*Note for agent: This `fast_tool` took \d+ms to run\.\*$/
+      /^\n\*Note to agent: This `fast_tool` tool took \d+ms to run\.\*$/
     );
   });
 
-  test("elapsed time measured from previous tool end", async () => {
-    const tool1 = createMockTool("tool_1", 50);
-    const tool2 = createMockTool("tool_2", 50);
-    const wrapped = wrapToolsWithTiming([tool1, tool2]);
-    const w0 = wrapped[0];
-    const w1 = wrapped[1];
-    if (w0 === undefined || w1 === undefined) throw new Error("Missing tools");
+  test("measures time from batch start to tool completion", async () => {
+    const tool = createMockTool("slow_tool", 100);
+    const wrapped = getWrapped([tool], 0);
 
-    // First call — elapsed from wrapper creation
-    const result1 = await w0.execute("call-1", {}, undefined);
-    expect(result1.content).toHaveLength(2);
+    const result = await wrapped.execute("call-1", {}, undefined);
 
-    // Wait 150ms after first tool completes
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Should include ~100ms execution time
+    const elapsed = extractElapsedMs(result);
+    expect(elapsed).toBeGreaterThanOrEqual(100);
+    expect(elapsed).toBeLessThan(200); // reasonable upper bound
+  });
 
-    // Second call — elapsed from first tool end (should be >= 150ms)
-    const result2 = await w1.execute("call-2", {}, undefined);
-    expect(result2.content).toHaveLength(2);
-    expect((result2.content[1] as { type: "text"; text: string }).text).toMatch(
-      /^\n\*Note for agent: This `tool_2` took 1\d\dms to run\.\*$/
-    );
+  test("parallel tools measure from same reference point", async () => {
+    const toolA = createMockTool("tool_a", 200);
+    const toolB = createMockTool("tool_b", 50);
+    const wrapped = wrapToolsWithTiming([toolA, toolB]);
+    const wA = wrapped[0];
+    const wB = wrapped[1];
+    if (wA === undefined || wB === undefined) throw new Error("Missing tools");
+
+    // Execute in parallel
+    const [resultA, resultB] = await Promise.all([
+      wA.execute("call-a", {}, undefined),
+      wB.execute("call-b", {}, undefined),
+    ]);
+
+    const elapsedA = extractElapsedMs(resultA);
+    const elapsedB = extractElapsedMs(resultB);
+
+    // Both should be >= their execution time
+    expect(elapsedA).toBeGreaterThanOrEqual(200);
+    expect(elapsedB).toBeGreaterThanOrEqual(50);
+    // A should be longer than B (200ms vs 50ms)
+    expect(elapsedA).toBeGreaterThan(elapsedB);
+  });
+
+  test("sequential tools reset reference between batches", async () => {
+    const tool = createMockTool("tool", 50);
+    const wrapped = getWrapped([tool], 0);
+
+    // First call
+    await wrapped.execute("call-1", {}, undefined);
+
+    // Wait 100ms
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Second call — should NOT include the 100ms wait
+    const result = await wrapped.execute("call-2", {}, undefined);
+    const elapsed = extractElapsedMs(result);
+
+    // Should be ~50ms (tool execution), not ~150ms (wait + execution)
+    expect(elapsed).toBeGreaterThanOrEqual(50);
+    expect(elapsed).toBeLessThan(100);
   });
 
   test("preserves original tool properties", () => {
@@ -125,7 +166,7 @@ describe("wrapToolsWithTiming", () => {
     expect(caught).toBe(true);
   });
 
-  test("updates lastToolEndTime even on error", async () => {
+  test("resets reference after error in batch", async () => {
     const errorTool: AgentTool = {
       name: "error_tool",
       label: "Error Tool",
@@ -135,43 +176,41 @@ describe("wrapToolsWithTiming", () => {
         return Promise.reject(new Error("Tool failed"));
       },
     };
-    const normalTool = createMockTool("normal_tool");
+    const normalTool = createMockTool("normal_tool", 50);
     const wrapped = wrapToolsWithTiming([errorTool, normalTool]);
     const w0 = wrapped[0];
     const w1 = wrapped[1];
     if (w0 === undefined || w1 === undefined) throw new Error("Missing tools");
 
-    // First call throws
+    // First call throws — should still reset reference in finally
     try {
       await w0.execute("call-1", {}, undefined);
     } catch {
       // expected
     }
 
-    // Wait 150ms
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Wait 100ms
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
-    // Second call should measure from error tool's end time (~150ms)
+    // Second call — should measure ~50ms (its execution), not 150ms
     const result = await w1.execute("call-2", {}, undefined);
     expect(result.content).toHaveLength(2);
-    expect((result.content[1] as { type: "text"; text: string }).text).toMatch(
-      /^\n\*Note for agent: This `normal_tool` took 1\d\dms to run\.\*$/
-    );
+    const elapsed = extractElapsedMs(result);
+    expect(elapsed).toBeGreaterThanOrEqual(50);
+    expect(elapsed).toBeLessThan(100);
   });
 
   test("format switches from ms to seconds appropriately", async () => {
-    const tool = createMockTool("one_second_tool");
+    // Tool that takes just over 1 second to execute
+    const tool = createMockTool("one_second_tool", 1050);
     const wrapped = getWrapped([tool], 0);
-
-    // Wait just over 1 second before calling — tests second formatting
-    await new Promise((resolve) => setTimeout(resolve, 1050));
 
     const result = await wrapped.execute("call-1", {}, undefined);
 
     expect(result.content).toHaveLength(2);
     // Should be formatted as "1.Xs" (seconds with decimal)
     expect((result.content[1] as { type: "text"; text: string }).text).toMatch(
-      /^\n\*Note for agent: This `one_second_tool` took 1\.\ds to run\.\*$/
+      /^\n\*Note to agent: This `one_second_tool` tool took 1\.\ds to run\.\*$/
     );
   });
 });

@@ -17,13 +17,21 @@ export function formatTiming(ms: number): string {
 /**
  * Wrap tools to append timing notes to results.
  *
- * Timing measures elapsed time since the previous tool completed (or since
- * wrapper creation for the first call). This tells the agent how long the
- * user has been waiting, accounting for LLM thinking time between tool calls.
+ * Timing measures end-to-end time from batch start to tool completion.
+ * A "batch" is a group of tools executing concurrently — all tools in a batch
+ * measure from the same reference point (when the first tool started).
+ * When the last tool in a batch completes, the reference resets for the next batch.
+ *
+ * This correctly handles:
+ * - Sequential tools: each is its own batch, measures its execution time
+ * - Parallel tools: all measure from same start, no race conditions
+ * - LLM thinking time: included in the first tool's timing of each batch
  */
 export function wrapToolsWithTiming(tools: AgentTool[]): AgentTool[] {
-  // Shared mutable state: tracks when last tool execution finished
-  const state = { lastToolEndTime: Date.now() };
+  const state = {
+    referenceTime: 0, // Set when first tool of batch starts
+    activeTools: 0, // Tools currently executing
+  };
 
   return tools.map((tool) => ({
     ...tool,
@@ -32,19 +40,27 @@ export function wrapToolsWithTiming(tools: AgentTool[]): AgentTool[] {
       params: unknown,
       signal: AbortSignal | undefined
     ): Promise<AgentToolResult<unknown>> => {
-      const elapsed = Date.now() - state.lastToolEndTime;
+      // First tool of a new batch — set reference time
+      if (state.activeTools === 0) {
+        state.referenceTime = Date.now();
+      }
+      state.activeTools++;
 
       try {
         const result = await tool.execute(toolCallId, params, signal);
+        const elapsed = Date.now() - state.referenceTime;
 
-        const note = `\n*Note for agent: This \`${tool.name}\` took ${formatTiming(elapsed)} to run.*`;
+        const note = `\n*Note to agent: This \`${tool.name}\` tool took ${formatTiming(elapsed)} to run.*`;
         return {
           ...result,
           content: [...result.content, { type: "text", text: note }],
         };
       } finally {
-        // Always update end time, even on error
-        state.lastToolEndTime = Date.now();
+        state.activeTools--;
+        if (state.activeTools === 0) {
+          // Batch complete — set new reference for next batch
+          state.referenceTime = Date.now();
+        }
       }
     },
   }));
