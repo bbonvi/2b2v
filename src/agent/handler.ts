@@ -201,9 +201,9 @@ export async function handleMessage(
 
   let assistantResponseNotified = false;
   agent.subscribe((e) => {
-    if (e.type === "message_end") {
-      // Set timing reference when LLM response completes, before tools execute.
-      // This makes tool timing include LLM thinking time.
+    if (e.type === "turn_start") {
+      // Set timing reference when a new turn begins (before LLM call).
+      // Tool timing then measures: LLM thinking + tool execution.
       timingState.setReferenceTime();
     }
 
