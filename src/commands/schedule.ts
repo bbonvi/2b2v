@@ -100,7 +100,7 @@ export function formatScheduleRow(row: ScheduleRow): string {
       : `<t:${Math.floor((row.runAt ?? 0) / 1000)}:R>${isPast ? " **[past]**" : ""}`;
   const msg = truncateMessage(row.messageContent.replaceAll("\n", " "));
 
-  return `\`${row.id}\`${status} ${row.type} ${timing} — ${msg}`;
+  return `\`${row.id}\`${status} ${row.type}/${row.source} ${timing} — ${msg}`;
 }
 
 /**
