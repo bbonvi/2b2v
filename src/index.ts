@@ -526,6 +526,7 @@ function setupCommandHandlers(guildId: string): void {
     onScheduleCreated: (id) => scheduler.addSchedule(id),
     onScheduleRemoved: (id) => scheduler.removeSchedule(id),
     adminUserIds: config.adminUserIds,
+    getGuildTimezone: (gId) => getGuildConfig(gId).timezone,
   }));
 
   commandHandlers.set("memory-wipe", createMemoryWipeHandler({

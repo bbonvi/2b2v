@@ -50,6 +50,7 @@ function makeDeps(overrides?: Partial<ScheduleCommandDeps>): ScheduleCommandDeps
     onScheduleCreated: overrides?.onScheduleCreated ?? mock(() => {}),
     onScheduleRemoved: overrides?.onScheduleRemoved ?? mock(() => {}),
     adminUserIds: overrides?.adminUserIds ?? [],
+    getGuildTimezone: overrides?.getGuildTimezone ?? mock(() => "America/New_York"),
   };
 }
 
@@ -256,7 +257,7 @@ describe("createScheduleHandler", () => {
     expect(replyText(interaction).toLowerCase()).toContain("no schedules");
   });
 
-  test("add creates cron schedule", async () => {
+  test("add creates cron schedule with explicit timezone", async () => {
     const createFn = mock(() => "new-cron-id");
     const onCreated = mock(() => {});
     const deps = makeDeps({ createSchedule: createFn, onScheduleCreated: onCreated });
@@ -268,7 +269,7 @@ describe("createScheduleHandler", () => {
         cron: "0 9 * * *",
         channel: "ch-99",
         message: "Hello!",
-        timezone: "America/New_York",
+        timezone: "Europe/London",
       },
     });
     await handler(interaction as never);
@@ -279,19 +280,48 @@ describe("createScheduleHandler", () => {
       source: "admin",
       type: "cron",
       cronExpression: "0 9 * * *",
+      timezone: "Europe/London",
     });
     expect(onCreated).toHaveBeenCalledWith("new-cron-id");
+    // Response includes effective timezone
+    const text = replyText(interaction);
+    expect(text).toContain("Europe/London");
   });
 
-  test("add creates one-off schedule", async () => {
+  test("add cron defaults timezone to guild timezone", async () => {
+    const createFn = mock(() => "cron-guild-tz");
+    const deps = makeDeps({
+      createSchedule: createFn,
+      getGuildTimezone: mock(() => "Europe/Berlin"),
+    });
+    const handler = createScheduleHandler(deps);
+    const interaction = makeInteraction({
+      subcommand: "add",
+      options: {
+        type: "cron",
+        cron: "0 9 * * *",
+        channel: "ch-99",
+        message: "Guten Morgen!",
+      },
+    });
+    await handler(interaction as never);
+    const args = createFn.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(args[0]).toMatchObject({ timezone: "Europe/Berlin" });
+    expect(replyText(interaction)).toContain("Europe/Berlin");
+  });
+
+  test("add creates one-off schedule with local format", async () => {
     const createFn = mock(() => "new-oneoff-id");
-    const deps = makeDeps({ createSchedule: createFn });
+    const deps = makeDeps({
+      createSchedule: createFn,
+      getGuildTimezone: mock(() => "America/New_York"),
+    });
     const handler = createScheduleHandler(deps);
     const interaction = makeInteraction({
       subcommand: "add",
       options: {
         type: "one_off",
-        "run-at": "2025-06-15T10:00:00Z",
+        "run-at": "2026-06-15 10:00",
         channel: "ch-99",
         message: "Reminder!",
       },
@@ -299,8 +329,69 @@ describe("createScheduleHandler", () => {
     await handler(interaction as never);
     expect(createFn).toHaveBeenCalled();
     const args = createFn.mock.calls[0] as unknown as [Record<string, unknown>];
-    expect(args[0]).toMatchObject({ type: "one_off" });
+    expect(args[0]).toMatchObject({ type: "one_off", timezone: "America/New_York" });
     expect(typeof args[0].runAt).toBe("number");
+    // Response includes local time and timezone
+    const text = replyText(interaction);
+    expect(text).toContain("2026-06-15 10:00");
+    expect(text).toContain("America/New_York");
+  });
+
+  test("add one_off rejects ISO 8601 with Z suffix", async () => {
+    const deps = makeDeps();
+    const handler = createScheduleHandler(deps);
+    const interaction = makeInteraction({
+      subcommand: "add",
+      options: {
+        type: "one_off",
+        "run-at": "2026-06-15T10:00:00Z",
+        channel: "ch-1",
+        message: "bad",
+      },
+    });
+    await handler(interaction as never);
+    const text = replyText(interaction);
+    expect(text).toContain("YYYY-MM-DD HH:mm");
+  });
+
+  test("add one_off rejects ISO 8601 with offset", async () => {
+    const deps = makeDeps();
+    const handler = createScheduleHandler(deps);
+    const interaction = makeInteraction({
+      subcommand: "add",
+      options: {
+        type: "one_off",
+        "run-at": "2026-06-15T10:00:00+05:00",
+        channel: "ch-1",
+        message: "bad",
+      },
+    });
+    await handler(interaction as never);
+    const text = replyText(interaction);
+    expect(text).toContain("YYYY-MM-DD HH:mm");
+  });
+
+  test("add one_off ignores timezone option and uses guild timezone", async () => {
+    const createFn = mock(() => "oneoff-guild-tz");
+    const deps = makeDeps({
+      createSchedule: createFn,
+      getGuildTimezone: mock(() => "Asia/Tokyo"),
+    });
+    const handler = createScheduleHandler(deps);
+    const interaction = makeInteraction({
+      subcommand: "add",
+      options: {
+        type: "one_off",
+        "run-at": "2026-06-15 10:00",
+        channel: "ch-1",
+        message: "test",
+        timezone: "Europe/London", // should be ignored for one_off
+      },
+    });
+    await handler(interaction as never);
+    const args = createFn.mock.calls[0] as unknown as [Record<string, unknown>];
+    // timezone should be guild timezone, not the explicit option
+    expect(args[0]).toMatchObject({ timezone: "Asia/Tokyo" });
   });
 
   test("add rejects cron without expression", async () => {

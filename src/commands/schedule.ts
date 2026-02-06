@@ -9,6 +9,7 @@ import type {
   CreateScheduleInput,
   ListSchedulesFilter,
 } from "../db/schedule-repository.ts";
+import { parseLocalDateTimeToEpoch } from "../time/agent-time.ts";
 
 export interface ScheduleCommandDeps {
   listSchedules: (filter: ListSchedulesFilter) => ScheduleRow[];
@@ -19,6 +20,8 @@ export interface ScheduleCommandDeps {
   /** Notify engine that a schedule was removed so it can unregister the job. */
   onScheduleRemoved: (scheduleId: string) => void;
   adminUserIds: string[];
+  /** Resolve guild timezone from guild ID. */
+  getGuildTimezone: (guildId: string) => string;
 }
 
 export const scheduleCommandDefinition = new SlashCommandBuilder()
@@ -62,13 +65,13 @@ export const scheduleCommandDefinition = new SlashCommandBuilder()
       .addStringOption((opt) =>
         opt
           .setName("run-at")
-          .setDescription("ISO 8601 datetime (required for one_off type)")
+          .setDescription("Local datetime YYYY-MM-DD HH:mm (required for one_off type, uses guild timezone)")
           .setRequired(false)
       )
       .addStringOption((opt) =>
         opt
           .setName("timezone")
-          .setDescription("Timezone (defaults to guild timezone)")
+          .setDescription("Timezone for cron schedules (defaults to guild timezone)")
           .setRequired(false)
       )
   )
@@ -160,6 +163,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
       return;
     }
 
+    const guildTimezone = deps.getGuildTimezone(interaction.guildId);
     const subcommand = interaction.options.getSubcommand();
 
     if (subcommand === "list") {
@@ -187,7 +191,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
       const message = interaction.options.getString("message");
       const cronExpr = interaction.options.getString("cron");
       const runAtStr = interaction.options.getString("run-at");
-      const timezone = interaction.options.getString("timezone");
+      const timezoneOpt = interaction.options.getString("timezone");
 
       if (message === null || message === "") {
         await interaction.reply({
@@ -207,19 +211,22 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
           return;
         }
 
+        // Cron timezone: explicit override or guild timezone
+        const effectiveTimezone = timezoneOpt ?? guildTimezone;
+
         const id = deps.createSchedule({
           guildId: interaction.guildId,
           channelId: channelId ?? interaction.channelId,
           source: "admin",
           type: "cron",
           cronExpression: cronExpr,
-          timezone: timezone ?? "UTC",
+          timezone: effectiveTimezone,
           messageContent: message,
         });
 
         deps.onScheduleCreated(id);
         await interaction.reply({
-          content: `Schedule created: **${id}**\nCron: \`${cronExpr}\``,
+          content: `Schedule created: **${id}**\nCron: \`${cronExpr}\` (${effectiveTimezone})`,
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -229,16 +236,25 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
         if (runAtStr === null || runAtStr === "") {
           await interaction.reply({
             content:
-              "A run-at datetime is required for one_off schedules. Use the `run-at` option (ISO 8601).",
+              "A run-at datetime is required for one_off schedules. Use the `run-at` option (YYYY-MM-DD HH:mm).",
             flags: MessageFlags.Ephemeral,
           });
           return;
         }
 
-        const runAtMs = new Date(runAtStr).getTime();
-        if (Number.isNaN(runAtMs)) {
+        // One-off always uses guild timezone, ignore timezone option
+        const parsed = parseLocalDateTimeToEpoch(runAtStr, guildTimezone);
+        if (!parsed.ok) {
           await interaction.reply({
-            content: "Invalid datetime. Use ISO 8601 format (e.g. 2025-06-15T10:00:00Z).",
+            content: `${parsed.error} (${guildTimezone})`,
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        if (parsed.epochMs <= Date.now()) {
+          await interaction.reply({
+            content: `Time is in the past. Choose a future time. (${guildTimezone})`,
             flags: MessageFlags.Ephemeral,
           });
           return;
@@ -249,14 +265,14 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
           channelId: channelId ?? interaction.channelId,
           source: "admin",
           type: "one_off",
-          runAt: runAtMs,
-          timezone: timezone ?? "UTC",
+          runAt: parsed.epochMs,
+          timezone: guildTimezone,
           messageContent: message,
         });
 
         deps.onScheduleCreated(id);
         await interaction.reply({
-          content: `Schedule created: **${id}**\nRuns at: ${new Date(runAtMs).toISOString()}`,
+          content: `Schedule created: **${id}**\nRuns at: ${runAtStr} (${guildTimezone})`,
           flags: MessageFlags.Ephemeral,
         });
         return;
