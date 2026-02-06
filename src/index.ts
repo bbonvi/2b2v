@@ -1091,7 +1091,13 @@ async function processTriggeredMessage(message: Message): Promise<void> {
             return typeof content === "string"
               ? await targetMsg.reply(content)
               : await targetMsg.reply(content);
-          } catch { /* fall through */ }
+          } catch (err) {
+            log.warn("reply_to_message_id fetch failed, falling back to send", {
+              replyToMessageId,
+              channelId: targetChannel.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
         return typeof content === "string"
           ? await targetChannel.send(content)
