@@ -1,4 +1,5 @@
 import {
+  MessageFlags,
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
 } from "discord.js";
@@ -77,13 +78,13 @@ export function createStatusHandler(deps: StatusCommandDeps) {
     };
 
     if (!isAdmin(permCtx)) {
-      await interaction.reply({ content: "Admin access required.", ephemeral: true });
+      await interaction.reply({ content: "Admin access required.", flags: MessageFlags.Ephemeral });
       return;
     }
 
     const stats = await deps.getStats();
     const embed = buildStatusEmbed(stats);
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   };
 }
 

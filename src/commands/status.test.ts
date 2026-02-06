@@ -1,4 +1,5 @@
 import { describe, test, expect, mock } from "bun:test";
+import { MessageFlags } from "discord.js";
 import {
   formatUptime,
   buildStatusEmbed,
@@ -94,9 +95,9 @@ describe("createStatusHandler", () => {
     const interaction = makeInteraction({ userId: "999", permissionBits: 0n });
     await handler(interaction as never);
     expect(interaction.reply).toHaveBeenCalledTimes(1);
-    const call = replyArg(interaction) as { content: string; ephemeral: boolean };
+    const call = replyArg(interaction) as { content: string; flags: number };
     expect(call.content).toBe("Admin access required.");
-    expect(call.ephemeral).toBe(true);
+    expect(call.flags).toBe(MessageFlags.Ephemeral);
   });
 
   test("responds with embed for admin user (Discord permissions)", async () => {
@@ -104,8 +105,8 @@ describe("createStatusHandler", () => {
     const interaction = makeInteraction({ userId: "123", permissionBits: 8n });
     await handler(interaction as never);
     expect(interaction.reply).toHaveBeenCalledTimes(1);
-    const call = replyArg(interaction) as { embeds: unknown[]; ephemeral: boolean };
-    expect(call.ephemeral).toBe(true);
+    const call = replyArg(interaction) as { embeds: unknown[]; flags: number };
+    expect(call.flags).toBe(MessageFlags.Ephemeral);
     expect(call.embeds).toHaveLength(1);
   });
 
@@ -113,7 +114,7 @@ describe("createStatusHandler", () => {
     const handler = createStatusHandler(makeDeps({ adminUserIds: ["555"] }));
     const interaction = makeInteraction({ userId: "555", permissionBits: null });
     await handler(interaction as never);
-    const call = replyArg(interaction) as { embeds: unknown[]; ephemeral: boolean };
+    const call = replyArg(interaction) as { embeds: unknown[]; flags: number };
     expect(call.embeds).toHaveLength(1);
   });
 

@@ -1,4 +1,5 @@
 import {
+  MessageFlags,
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
 } from "discord.js";
@@ -146,7 +147,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
     if (!isAdmin(permCtx)) {
       await interaction.reply({
         content: "Admin access required.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -154,7 +155,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
     if (interaction.guildId === null) {
       await interaction.reply({
         content: "This command can only be used in a guild.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -167,15 +168,15 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
       if (schedules.length === 0) {
         await interaction.reply({
           content: "No schedules found for this guild.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
 
       const chunks = formatScheduleList(schedules);
-      await interaction.reply({ content: chunks[0], ephemeral: true });
+      await interaction.reply({ content: chunks[0], flags: MessageFlags.Ephemeral });
       for (let i = 1; i < chunks.length; i++) {
-        await interaction.followUp({ content: chunks[i], ephemeral: true });
+        await interaction.followUp({ content: chunks[i], flags: MessageFlags.Ephemeral });
       }
       return;
     }
@@ -191,7 +192,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
       if (message === null || message === "") {
         await interaction.reply({
           content: "A message is required.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -201,7 +202,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
           await interaction.reply({
             content:
               "A cron expression is required for cron schedules. Use the `cron` option.",
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -219,7 +220,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
         deps.onScheduleCreated(id);
         await interaction.reply({
           content: `Schedule created: **${id}**\nCron: \`${cronExpr}\``,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -229,7 +230,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
           await interaction.reply({
             content:
               "A run-at datetime is required for one_off schedules. Use the `run-at` option (ISO 8601).",
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -238,7 +239,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
         if (Number.isNaN(runAtMs)) {
           await interaction.reply({
             content: "Invalid datetime. Use ISO 8601 format (e.g. 2025-06-15T10:00:00Z).",
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -256,14 +257,14 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
         deps.onScheduleCreated(id);
         await interaction.reply({
           content: `Schedule created: **${id}**\nRuns at: ${new Date(runAtMs).toISOString()}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
 
       await interaction.reply({
         content: "Invalid type. Use `cron` or `one_off`.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -273,7 +274,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
       if (id === null || id === "") {
         await interaction.reply({
           content: "A schedule id is required.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -282,7 +283,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
       if (!deleted) {
         await interaction.reply({
           content: `Schedule not found: \`${id}\``,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -290,7 +291,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
       deps.onScheduleRemoved(id);
       await interaction.reply({
         content: `Schedule **${id}** removed.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   };

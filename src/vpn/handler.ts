@@ -1,7 +1,8 @@
-import type {
-  ChatInputCommandInteraction,
-  ButtonInteraction,
-  StringSelectMenuInteraction,
+import {
+  MessageFlags,
+  type ChatInputCommandInteraction,
+  type ButtonInteraction,
+  type StringSelectMenuInteraction,
 } from "discord.js";
 import type { Logger } from "../logger.ts";
 import type { VpnClient } from "./api-client.ts";
@@ -45,20 +46,20 @@ export async function handleVpnCommand(
 
   // Guild-only check
   if (guildId === null) {
-    await interaction.reply({ content: locale.notInGuild, ephemeral: true });
+    await interaction.reply({ content: locale.notInGuild, flags: MessageFlags.Ephemeral });
     return;
   }
 
   // Enabled check
   if (!enabled || client === null) {
-    await interaction.reply({ content: locale.vpnDisabled, ephemeral: true });
+    await interaction.reply({ content: locale.vpnDisabled, flags: MessageFlags.Ephemeral });
     return;
   }
 
   logVpnCommand(log, "invoke", userId, guildId);
 
   // Defer reply immediately — VPN API calls may be slow
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
     // Ensure user exists
@@ -103,20 +104,20 @@ export async function handleVpnComponent(
 
   // Enabled check
   if (!enabled || client === null) {
-    await interaction.reply({ content: locale.vpnDisabled, ephemeral: true });
+    await interaction.reply({ content: locale.vpnDisabled, flags: MessageFlags.Ephemeral });
     return true;
   }
 
   // Session lookup
   const session = sessionStore.get(sessionId);
   if (session === undefined) {
-    await interaction.reply({ content: locale.sessionExpired, ephemeral: true });
+    await interaction.reply({ content: locale.sessionExpired, flags: MessageFlags.Ephemeral });
     return true;
   }
 
   // User gating
   if (!sessionStore.isOwner(sessionId, userId)) {
-    await interaction.reply({ content: locale.userMismatch, ephemeral: true });
+    await interaction.reply({ content: locale.userMismatch, flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -282,7 +283,7 @@ export async function handleVpnComponent(
       await interaction.editReply(errorPanel).catch(() => {});
     } else {
       await interaction.update(errorPanel).catch(() =>
-        interaction.reply({ content: mapVpnError(err, locale), ephemeral: true }).catch(() => {}),
+        interaction.reply({ content: mapVpnError(err, locale), flags: MessageFlags.Ephemeral }).catch(() => {}),
       );
     }
   }

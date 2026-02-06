@@ -1,4 +1,5 @@
 import { describe, test, expect, mock } from "bun:test";
+import { MessageFlags } from "discord.js";
 import {
   createMemoryWipeHandler,
   memoryWipeCommandDefinition,
@@ -94,9 +95,9 @@ describe("createMemoryWipeHandler", () => {
     });
     await handler(interaction as never);
     expect(interaction.reply).toHaveBeenCalledTimes(1);
-    const call = replyArg(interaction) as { content: string; ephemeral: boolean };
+    const call = replyArg(interaction) as { content: string; flags: number };
     expect(call.content).toBe("Admin access required.");
-    expect(call.ephemeral).toBe(true);
+    expect(call.flags).toBe(MessageFlags.Ephemeral);
   });
 
   test("rejects when not in a guild", async () => {
@@ -108,9 +109,9 @@ describe("createMemoryWipeHandler", () => {
       confirmValue: "WIPE",
     });
     await handler(interaction as never);
-    const call = replyArg(interaction) as { content: string; ephemeral: boolean };
+    const call = replyArg(interaction) as { content: string; flags: number };
     expect(call.content).toBe("This command can only be used in a guild.");
-    expect(call.ephemeral).toBe(true);
+    expect(call.flags).toBe(MessageFlags.Ephemeral);
   });
 
   test("rejects wrong confirmation string", async () => {
@@ -123,9 +124,9 @@ describe("createMemoryWipeHandler", () => {
       confirmValue: "wrong",
     });
     await handler(interaction as never);
-    const call = replyArg(interaction) as { content: string; ephemeral: boolean };
+    const call = replyArg(interaction) as { content: string; flags: number };
     expect(call.content).toContain("WIPE");
-    expect(call.ephemeral).toBe(true);
+    expect(call.flags).toBe(MessageFlags.Ephemeral);
     expect(deps.wipeGuild).not.toHaveBeenCalled();
   });
 
@@ -141,10 +142,10 @@ describe("createMemoryWipeHandler", () => {
     await handler(interaction as never);
     expect(deps.wipeGuild).toHaveBeenCalledTimes(1);
     expect(deps.wipeGuild).toHaveBeenCalledWith("guild1");
-    const call = replyArg(interaction) as { content: string; ephemeral: boolean };
+    const call = replyArg(interaction) as { content: string; flags: number };
     expect(call.content).toContain("5 memories");
     expect(call.content).toContain("10 messages");
-    expect(call.ephemeral).toBe(true);
+    expect(call.flags).toBe(MessageFlags.Ephemeral);
   });
 
   test("works with fallback admin user", async () => {
@@ -174,9 +175,9 @@ describe("createMemoryWipeHandler", () => {
       confirmValue: "WIPE",
     });
     await handler(interaction as never);
-    const call = replyArg(interaction) as { content: string; ephemeral: boolean };
+    const call = replyArg(interaction) as { content: string; flags: number };
     expect(call.content).toContain("failed");
-    expect(call.ephemeral).toBe(true);
+    expect(call.flags).toBe(MessageFlags.Ephemeral);
   });
 
   test("recent mode deletes messages without confirmation", async () => {
@@ -194,10 +195,10 @@ describe("createMemoryWipeHandler", () => {
     expect(deps.wipeRecent).toHaveBeenCalledWith("guild1", "channel1", 5);
     expect(deps.wipeGuild).not.toHaveBeenCalled();
 
-    const call = replyArg(interaction) as { content: string; ephemeral: boolean };
+    const call = replyArg(interaction) as { content: string; flags: number };
     expect(call.content).toContain("3 messages");
     expect(call.content).toContain("1 images");
-    expect(call.ephemeral).toBe(true);
+    expect(call.flags).toBe(MessageFlags.Ephemeral);
   });
 
   test("recent mode rejects non-admin", async () => {
@@ -229,8 +230,8 @@ describe("createMemoryWipeHandler", () => {
     });
     await handler(interaction as never);
 
-    const call = replyArg(interaction) as { content: string; ephemeral: boolean };
+    const call = replyArg(interaction) as { content: string; flags: number };
     expect(call.content).toContain("Recent wipe failed");
-    expect(call.ephemeral).toBe(true);
+    expect(call.flags).toBe(MessageFlags.Ephemeral);
   });
 });

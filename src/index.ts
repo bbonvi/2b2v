@@ -58,7 +58,7 @@ import { getVpnLocale } from "./vpn/i18n";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch, unlinkSync } from "fs";
 import type { Database } from "./db/database";
-import { AttachmentBuilder, type ChatInputCommandInteraction, type Client, type Guild, type Message, type TextChannel } from "discord.js";
+import { AttachmentBuilder, MessageFlags, type ChatInputCommandInteraction, type Client, type Guild, type Message, type TextChannel } from "discord.js";
 
 const pkg = await Bun.file(new URL("../package.json", import.meta.url).pathname).json() as { version?: string };
 const version: string = pkg.version ?? "0.0.0";
@@ -601,7 +601,7 @@ client.on("interactionCreate", (interaction) => void (async () => {
         error: err instanceof Error ? err.message : String(err),
       });
       if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: "Произошла ошибка.", ephemeral: true }).catch(() => {});
+        await interaction.reply({ content: "Произошла ошибка.", flags: MessageFlags.Ephemeral }).catch(() => {});
       }
     }
     return;
@@ -624,7 +624,7 @@ client.on("interactionCreate", (interaction) => void (async () => {
         error: err instanceof Error ? err.message : String(err),
       });
       if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: "An error occurred.", ephemeral: true }).catch(() => {});
+        await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral }).catch(() => {});
       }
     }
   }
@@ -821,6 +821,7 @@ async function buildContext(
     const lateInstruction = `CRITICAL:
 - Always call \`start_typing\` before each \`send_message\`.
 - ALWAYS USE \`send_message\` TO MAKE AN ACTUAL RESPONSE to a user! OTHERWISE THE REPLY WILL BE LOST!
+- ONCE AGAIN, USER CANNOT SEE ANYTHING OTHER THAN MESSAGES SENT VIA \`send_message\` -- PLEASE USE THIS TOOL TO COMMUNICATE!!!!
 - Remember and consider all your "Available Tools".
 - Always recall user-related memories before making response.
 - If recallection of event is needed consider using literal search or fallback to semantic one. Try different queries.

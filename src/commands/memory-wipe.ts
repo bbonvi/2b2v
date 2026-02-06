@@ -1,4 +1,5 @@
 import {
+  MessageFlags,
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
 } from "discord.js";
@@ -49,12 +50,12 @@ export function createMemoryWipeHandler(deps: MemoryWipeDeps) {
     };
 
     if (!isAdmin(permCtx)) {
-      await interaction.reply({ content: "Admin access required.", ephemeral: true });
+      await interaction.reply({ content: "Admin access required.", flags: MessageFlags.Ephemeral });
       return;
     }
 
     if (interaction.guildId === null) {
-      await interaction.reply({ content: "This command can only be used in a guild.", ephemeral: true });
+      await interaction.reply({ content: "This command can only be used in a guild.", flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -65,12 +66,12 @@ export function createMemoryWipeHandler(deps: MemoryWipeDeps) {
         const result = await deps.wipeRecent(interaction.guildId, interaction.channelId, recent);
         await interaction.reply({
           content: `Deleted ${String(result.messagesDeleted)} messages and ${String(result.imagesDeleted)} images from this channel.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       } catch (_err) {
         await interaction.reply({
           content: "Recent wipe failed. Check logs for details.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
       return;
@@ -81,7 +82,7 @@ export function createMemoryWipeHandler(deps: MemoryWipeDeps) {
     if (confirm !== "WIPE") {
       await interaction.reply({
         content: 'Confirmation required. Pass `confirm: WIPE` to proceed.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -90,12 +91,12 @@ export function createMemoryWipeHandler(deps: MemoryWipeDeps) {
       const result = await deps.wipeGuild(interaction.guildId);
       await interaction.reply({
         content: `Guild data wiped: ${String(result.memoriesDeleted)} memories, ${String(result.messagesDeleted)} messages deleted.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } catch (_err) {
       await interaction.reply({
         content: "Memory wipe failed. Check logs for details.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   };
