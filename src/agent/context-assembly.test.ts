@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import {
   assembleContext,
   contextToSystemPrompt,
+  SECTION_DEFS,
   type ContextAssemblyInput,
 } from "./context-assembly.ts";
 
@@ -25,40 +26,75 @@ function makeInput(overrides: Partial<ContextAssemblyInput> = {}): ContextAssemb
   };
 }
 
+describe("SECTION_DEFS", () => {
+  test("all labels are unique", () => {
+    const labels = SECTION_DEFS.map((d) => d.label);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  test("system sections form a contiguous prefix", () => {
+    const roles = SECTION_DEFS.map((d) => d.role);
+    const lastSystemIdx = roles.lastIndexOf("system");
+    const firstDevIdx = roles.indexOf("developer");
+    expect(lastSystemIdx).toBeLessThan(firstDevIdx);
+  });
+
+  test("all system sections are cached", () => {
+    const systemDefs = SECTION_DEFS.filter((d) => d.role === "system");
+    expect(systemDefs.length).toBeGreaterThan(0);
+    for (const d of systemDefs) {
+      expect(d.cached).toBe(true);
+    }
+  });
+
+  test("within developer sections, cached precede uncached (contiguous groups)", () => {
+    const devDefs = SECTION_DEFS.filter((d) => d.role === "developer");
+    const cachedFlags = devDefs.map((d) => d.cached);
+    const lastCachedIdx = cachedFlags.lastIndexOf(true);
+    const firstUncachedIdx = cachedFlags.indexOf(false);
+    // All cached developer sections come before all uncached developer sections
+    if (lastCachedIdx !== -1 && firstUncachedIdx !== -1) {
+      expect(lastCachedIdx).toBeLessThan(firstUncachedIdx);
+    }
+  });
+
+  test("every field source references a valid string key of ContextAssemblyInput", () => {
+    // Build the set of string keys from a dummy input
+    const dummy = makeInput();
+    const stringKeys = new Set(
+      Object.entries(dummy)
+        .filter(([_k, v]) => typeof v === "string")
+        .map(([k]) => k)
+    );
+    for (const def of SECTION_DEFS) {
+      if (def.source.kind === "field") {
+        expect(stringKeys.has(def.source.inputKey)).toBe(true);
+      }
+    }
+  });
+
+  test("Thread Metadata is the only computed section", () => {
+    const computed = SECTION_DEFS.filter((d) => d.source.kind === "computed");
+    expect(computed).toHaveLength(1);
+    expect(computed[0]?.label).toBe("Thread Metadata");
+  });
+
+  test("Late Instruction is the last section", () => {
+    expect(SECTION_DEFS[SECTION_DEFS.length - 1]?.label).toBe("Late Instruction");
+  });
+});
+
 describe("assembleContext", () => {
-  test("produces all 9 sections in correct order when all inputs present (no instructions)", () => {
+  test("produces all 9 sections when all inputs present (no instructions)", () => {
     const result = assembleContext(makeInput());
     expect(result.sections).toHaveLength(9);
-    const labels = result.sections.map((s) => s.label);
-    expect(labels).toEqual([
-      "Tool Instructions",
-      "Persona",
-      "Available Emojis",
-      "Server Members",
-      "Upcoming Schedules",
-      "Chat History — Older",
-      "Journal Summaries",
-      "Chat History — Newer",
-      "Current Context",
-    ]);
   });
 
   test("produces 10 sections when instructions present", () => {
     const result = assembleContext(makeInput({ instructions: "Be concise and helpful." }));
     expect(result.sections).toHaveLength(10);
     const labels = result.sections.map((s) => s.label);
-    expect(labels).toEqual([
-      "Tool Instructions",
-      "Persona",
-      "Instructions",
-      "Available Emojis",
-      "Server Members",
-      "Upcoming Schedules",
-      "Chat History — Older",
-      "Journal Summaries",
-      "Chat History — Newer",
-      "Current Context",
-    ]);
+    expect(labels).toContain("Instructions");
   });
 
   test("instructions section is cached and has header", () => {
@@ -93,7 +129,7 @@ describe("assembleContext", () => {
     ]);
   });
 
-  test("marks stable sections as cached", () => {
+  test("cached/uncached grouping matches SECTION_DEFS", () => {
     const result = assembleContext(makeInput({ instructions: "test" }));
     const cachedLabels = result.sections
       .filter((s) => s.cached)
@@ -106,10 +142,6 @@ describe("assembleContext", () => {
       "Server Members",
       "Chat History — Older",
     ]);
-  });
-
-  test("marks newer history and current context as uncached", () => {
-    const result = assembleContext(makeInput());
     const uncachedLabels = result.sections
       .filter((s) => !s.cached)
       .map((s) => s.label);
@@ -156,22 +188,6 @@ describe("assembleContext", () => {
     expect(section?.cached).toBe(true);
   });
 
-  test("threads in chat section appears after schedules and before older history", () => {
-    const result = assembleContext(
-      makeInput({
-        upcomingSchedules: "- schedule",
-        threadsInChat: "- thread",
-        olderHistory: "## Chat History (Older)\nhello",
-      })
-    );
-    const labels = result.sections.map((s) => s.label);
-    const schedulesIdx = labels.indexOf("Upcoming Schedules");
-    const threadsIdx = labels.indexOf("Threads In This Chat");
-    const olderIdx = labels.indexOf("Chat History — Older");
-    expect(threadsIdx).toBeGreaterThan(schedulesIdx);
-    expect(threadsIdx).toBeLessThan(olderIdx);
-  });
-
   test("thread metadata section is cached and has correct format", () => {
     const result = assembleContext(
       makeInput({
@@ -193,27 +209,6 @@ describe("assembleContext", () => {
       "Starter Message: msg-789\n" +
       'Thread Name: "Help Discussion"'
     );
-  });
-
-  test("thread metadata section appears after schedules", () => {
-    const result = assembleContext(
-      makeInput({
-        upcomingSchedules: "- schedule",
-        threadMetadata: {
-          parentChatId: "p1",
-          threadId: "t1",
-          starterMessageId: "m1",
-          threadName: "Thread",
-        },
-        olderHistory: "## Chat History (Older)\nhello",
-      })
-    );
-    const labels = result.sections.map((s) => s.label);
-    const schedulesIdx = labels.indexOf("Upcoming Schedules");
-    const metaIdx = labels.indexOf("Thread Metadata");
-    const olderIdx = labels.indexOf("Chat History — Older");
-    expect(metaIdx).toBeGreaterThan(schedulesIdx);
-    expect(metaIdx).toBeLessThan(olderIdx);
   });
 
   test("thread metadata is omitted when undefined", () => {
@@ -263,17 +258,17 @@ describe("assembleContext", () => {
     );
     const labels = result.sections.map((s) => s.label);
 
-    // Verify order: Schedules < Thread Metadata < Parent Pre-Context < Older < Newer
-    const schedulesIdx = labels.indexOf("Upcoming Schedules");
+    // Thread Metadata < Parent Pre-Context < Older < Schedules < Newer
     const metaIdx = labels.indexOf("Thread Metadata");
     const preCtxIdx = labels.indexOf("Parent Pre-Context");
     const olderIdx = labels.indexOf("Chat History — Older");
+    const schedulesIdx = labels.indexOf("Upcoming Schedules");
     const newerIdx = labels.indexOf("Chat History — Newer");
 
-    expect(schedulesIdx).toBeLessThan(metaIdx);
     expect(metaIdx).toBeLessThan(preCtxIdx);
     expect(preCtxIdx).toBeLessThan(olderIdx);
-    expect(olderIdx).toBeLessThan(newerIdx);
+    expect(olderIdx).toBeLessThan(schedulesIdx);
+    expect(schedulesIdx).toBeLessThan(newerIdx);
   });
 
   test("persona and tool instructions pass through without extra wrapping", () => {

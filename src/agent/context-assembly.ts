@@ -1,9 +1,4 @@
-/**
- * Structured context assembly for multi-message LLM context.
- *
- * Produces an ordered array of system sections with per-section cache control,
- * plus a separate latest user message. Empty sections are omitted.
- */
+/** Structured context assembly for multi-message LLM context. */
 
 /** LLM message role for a context section. */
 export type SectionRole = "system" | "developer";
@@ -59,84 +54,72 @@ export interface ContextAssemblyInput {
   userMessage: string;
 }
 
-/**
- * Assemble structured context from input sections.
- *
- * Sections are split into three message groups for prefix caching:
- *
- * Group 1 — role=system, cached (stable identity):
- *   1. Tool Instructions
- *   2. Persona
- *   3. Instructions — if any
- *
- * Group 2 — role=developer, cached (guild context + older history):
- *   4. Available Emojis
- *   5. Server Members
- *   6. Threads In This Chat — if any (parent channels only)
- *   6t. Thread Metadata — thread context only
- *   7. Parent Pre-Context — thread context only
- *   8. Chat History — Older
- *
- * Group 3 — role=developer, uncached (volatile per-message):
- *   9. Upcoming Schedules — if any
- *   10. Journal Summaries — if any
- *   11. Chat History — Newer
- *   12. Current Context
- *   13. Late Instruction — if any
- *
- * Empty sections are omitted entirely.
- */
+/** Extract only required string-valued keys from T. */
+type StringFields<T> = { [K in keyof T]-?: T[K] extends string ? K : never }[keyof T];
+
+/** How to extract text from input. */
+export type SectionSource =
+  | { kind: "field"; inputKey: StringFields<ContextAssemblyInput>; header?: string }
+  | { kind: "computed"; compute: (input: ContextAssemblyInput) => string; header?: string };
+
+/** One entry in the section registry. */
+export interface SectionDef {
+  label: string;
+  role: SectionRole;
+  cached: boolean;
+  source: SectionSource;
+}
+
+function computeThreadMetadata(input: ContextAssemblyInput): string {
+  if (input.threadMetadata === undefined) return "";
+  const m = input.threadMetadata;
+  return [
+    `Parent Chat: ${m.parentChatId}`,
+    `Thread: ${m.threadId}`,
+    `Starter Message: ${m.starterMessageId}`,
+    `Thread Name: "${m.threadName}"`,
+  ].join("\n");
+}
+
+/** Declarative section registry. Array order = output order. */
+export const SECTION_DEFS: readonly SectionDef[] = [
+  // Group 1: system, cached (stable identity)
+  { label: "Tool Instructions",    role: "system",    cached: true,  source: { kind: "field", inputKey: "toolInstructions" } },
+  { label: "Persona",              role: "system",    cached: true,  source: { kind: "field", inputKey: "persona" } },
+  { label: "Instructions",         role: "system",    cached: true,  source: { kind: "field", inputKey: "instructions", header: "## Instructions" } },
+
+  // Group 2: developer, cached (guild context + older history)
+  { label: "Available Emojis",     role: "developer", cached: true,  source: { kind: "field", inputKey: "emojis", header: "## Available Emojis" } },
+  { label: "Server Members",       role: "developer", cached: true,  source: { kind: "field", inputKey: "members", header: "## Server Members" } },
+  { label: "Threads In This Chat", role: "developer", cached: true,  source: { kind: "field", inputKey: "threadsInChat", header: "## Threads In This Chat" } },
+  { label: "Thread Metadata",      role: "developer", cached: true,  source: { kind: "computed", compute: computeThreadMetadata, header: "## Thread Metadata" } },
+  { label: "Parent Pre-Context",   role: "developer", cached: true,  source: { kind: "field", inputKey: "parentPreContext" } },
+  { label: "Chat History — Older", role: "developer", cached: true,  source: { kind: "field", inputKey: "olderHistory" } },
+
+  // Group 3: developer, uncached (volatile per-message)
+  { label: "Upcoming Schedules",   role: "developer", cached: false, source: { kind: "field", inputKey: "upcomingSchedules", header: "## Upcoming Schedules" } },
+  { label: "Journal Summaries",    role: "developer", cached: false, source: { kind: "field", inputKey: "journalSummaries", header: "## Journal" } },
+  { label: "Chat History — Newer", role: "developer", cached: false, source: { kind: "field", inputKey: "newerHistory" } },
+  { label: "Current Context",      role: "developer", cached: false, source: { kind: "field", inputKey: "currentContext" } },
+  { label: "Late Instruction",     role: "developer", cached: false, source: { kind: "field", inputKey: "lateInstruction" } },
+];
+
+/** Assemble structured context from input sections. Empty sections are omitted. */
 export function assembleContext(input: ContextAssemblyInput): AssembledContext {
   const sections: ContextSection[] = [];
-
-  const add = (label: string, text: string, cached: boolean, role: SectionRole = "developer"): void => {
-    if (text !== "") {
-      sections.push({ label, text, cached, role });
-    }
-  };
-
-  const addWithHeader = (label: string, header: string, content: string, cached: boolean, role: SectionRole = "developer"): void => {
-    if (content !== "") {
-      sections.push({ label, text: `${header}\n${content}`, cached, role });
-    }
-  };
-
-  // Core instructions: role=system (stable identity the model should treat as ground truth)
-  add("Tool Instructions", input.toolInstructions, true, "system");
-  add("Persona", input.persona, true, "system");
-  addWithHeader("Instructions", "## Instructions", input.instructions, true, "system");
-
-  // Dynamic context: role=developer (ephemeral per-request data)
-  addWithHeader("Available Emojis", "## Available Emojis", input.emojis, true);
-  addWithHeader("Server Members", "## Server Members", input.members, true);
-  addWithHeader("Upcoming Schedules", "## Upcoming Schedules", input.upcomingSchedules, false);
-
-  // Parent channel: show threads in this chat
-  addWithHeader("Threads In This Chat", "## Threads In This Chat", input.threadsInChat, true);
-
-  // Thread channel: show thread metadata and parent pre-context
-  if (input.threadMetadata !== undefined) {
-    const meta = input.threadMetadata;
-    const metaContent = [
-      `Parent Chat: ${meta.parentChatId}`,
-      `Thread: ${meta.threadId}`,
-      `Starter Message: ${meta.starterMessageId}`,
-      `Thread Name: "${meta.threadName}"`,
-    ].join("\n");
-    addWithHeader("Thread Metadata", "## Thread Metadata", metaContent, true);
+  for (const def of SECTION_DEFS) {
+    const raw = def.source.kind === "field"
+      ? input[def.source.inputKey]
+      : def.source.compute(input);
+    if (raw === "") continue;
+    sections.push({
+      label: def.label,
+      text: def.source.header !== undefined ? `${def.source.header}\n${raw}` : raw,
+      cached: def.cached,
+      role: def.role,
+    });
   }
-  add("Parent Pre-Context", input.parentPreContext, true);
-
-  add("Chat History — Older", input.olderHistory, true);
-  addWithHeader("Journal Summaries", "## Journal", input.journalSummaries, false);
-  add("Chat History — Newer", input.newerHistory, false);
-  add("Current Context", input.currentContext, false);
-  add("Late Instruction", input.lateInstruction, false);
-
-  return {
-    sections,
-    userMessage: input.userMessage,
-  };
+  return { sections, userMessage: input.userMessage };
 }
 
 /**

@@ -58,7 +58,12 @@ Messages and memories enqueue into a batcher, get embedded by the local model, a
 
 ### Context Assembly
 
-Context is assembled into ordered sections (persona, instructions, emojis, members, journal, schedules, history, current context) and serialized for the agent.
+`SECTION_DEFS` in `src/agent/context-assembly.ts` is the single source of truth for section order, labels, roles, caching, and headers. Array position determines output order. Sections are grouped into three message blocks for prefix caching:
+- **Group 1** (system, cached): Tool Instructions, Persona, Instructions
+- **Group 2** (developer, cached): Emojis, Members, Threads, Thread Metadata, Parent Pre-Context, Older History
+- **Group 3** (developer, uncached): Schedules, Journal, Newer History, Current Context, Late Instruction
+
+Empty sections are omitted. `assembleContext()` iterates the registry; no imperative per-section logic.
 
 ### History Processing
 
