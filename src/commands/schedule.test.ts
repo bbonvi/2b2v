@@ -96,15 +96,28 @@ describe("formatScheduleRow", () => {
     expect(result).toContain("Good morning!");
   });
 
-  test("formats one-off schedule", () => {
+  test("formats future one-off schedule", () => {
+    const futureMs = Date.now() + 86_400_000;
     const row = makeScheduleRow({
       type: "one_off",
       cronExpression: null,
-      runAt: 1700000000000,
+      runAt: futureMs,
     });
     const result = formatScheduleRow(row);
     expect(result).toContain("one_off");
-    expect(result).toContain("<t:1700000000:R>");
+    expect(result).toContain("<t:");
+    expect(result).not.toContain("[past]");
+  });
+
+  test("marks past one-off schedule with [past]", () => {
+    const pastMs = Date.now() - 86_400_000;
+    const row = makeScheduleRow({
+      type: "one_off",
+      cronExpression: null,
+      runAt: pastMs,
+    });
+    const result = formatScheduleRow(row);
+    expect(result).toContain("[past]");
   });
 
   test("marks disabled schedules", () => {

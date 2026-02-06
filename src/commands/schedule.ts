@@ -93,10 +93,11 @@ function truncateMessage(text: string, limit: number = MESSAGE_PREVIEW_LIMIT): s
 
 export function formatScheduleRow(row: ScheduleRow): string {
   const status = row.enabled ? "" : " ⏸";
+  const isPast = row.type === "one_off" && (row.runAt ?? 0) < Date.now();
   const timing =
     row.type === "cron"
       ? `\`${row.cronExpression ?? "?"}\``
-      : `<t:${Math.floor((row.runAt ?? 0) / 1000)}:R>`;
+      : `<t:${Math.floor((row.runAt ?? 0) / 1000)}:R>${isPast ? " **[past]**" : ""}`;
   const msg = truncateMessage(row.messageContent.replaceAll("\n", " "));
 
   return `\`${row.id}\`${status} ${row.type} ${timing} — ${msg}`;
