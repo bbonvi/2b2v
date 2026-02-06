@@ -9,6 +9,7 @@ import type { TextContent } from "@mariozechner/pi-ai";
 function makeDeps(messages: ChatHistoryMessage[]): ChatHistoryToolDeps {
   return {
     guildId: "g1",
+    timezone: "UTC",
     fetchMessages: (_chatId, _limit) => Promise.resolve(messages),
   };
 }
@@ -41,6 +42,7 @@ describe("createChatHistoryTool", () => {
     let passedLimit: number | undefined;
     const deps: ChatHistoryToolDeps = {
       guildId: "g1",
+      timezone: "UTC",
       fetchMessages: (_chatId, limit) => {
         passedLimit = limit;
         return Promise.resolve(MESSAGES.slice(0, limit));
@@ -55,6 +57,7 @@ describe("createChatHistoryTool", () => {
     let passedLimit: number | undefined;
     const deps: ChatHistoryToolDeps = {
       guildId: "g1",
+      timezone: "UTC",
       fetchMessages: (_chatId, limit) => {
         passedLimit = limit;
         return Promise.resolve(MESSAGES);
@@ -76,6 +79,7 @@ describe("createChatHistoryTool", () => {
   test("degrades gracefully when fetchMessages throws", async () => {
     const deps: ChatHistoryToolDeps = {
       guildId: "g1",
+      timezone: "UTC",
       fetchMessages: () => { throw new Error("Missing Access"); },
     };
     const tool = createChatHistoryTool(deps);
@@ -84,11 +88,13 @@ describe("createChatHistoryTool", () => {
     expect(text).toContain("Unable to fetch");
   });
 
-  test("formats messages with timestamps", async () => {
+  test("formats messages with local wall-clock timestamps", async () => {
     const tool = createChatHistoryTool(makeDeps(MESSAGES));
     const result = await tool.execute("tc1", { chat_id: "c1" }, AbortSignal.timeout(5000));
     const text = (result.content[0] as TextContent).text;
-    expect(text).toContain("UTC");
+    // Local wall-clock format: [YYYY-MM-DD HH:mm], no "UTC" suffix
+    expect(text).toMatch(/\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]/);
+    expect(text).not.toContain("UTC");
     expect(text).toContain("alice: Hello world");
   });
 });

@@ -22,6 +22,7 @@ import { trimMessages } from "./agent/history-trimming";
 import { formatMessageLine, OLDER_LEGEND } from "./agent/history-formatting";
 import { insertDateStamps } from "./agent/history-dates";
 import { formatRelativeAgo, formatJournalTimestamp } from "./agent/history-dates";
+import { formatLocalWallClock, currentLocalContext } from "./time/agent-time";
 import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
 import type { MessageSender } from "./agent/send-message-tool";
@@ -731,7 +732,7 @@ async function buildContext(
     });
   const upcomingSchedules = upcoming.map((s) => {
     if (s.type === "cron") return `- [cron] ${s.cronExpression ?? "?"}: ${s.messageContent}`;
-    const runDate = s.runAt !== null ? new Date(s.runAt).toISOString() : "?";
+    const runDate = s.runAt !== null ? formatLocalWallClock(s.runAt, guildConfig.timezone) : "?";
     return `- [one-off at ${runDate}]: ${s.messageContent}`;
   }).join("\n");
 
@@ -763,8 +764,8 @@ async function buildContext(
     displayNameContext = buildDisplayNameContext(members, memoryCounts);
   }
 
-  // Current context metadata
-  const currentContext = `Guild: ${guildId} | Channel: ${channelId}\nDate/Time: ${new Date().toISOString()}`;
+  // Current context metadata — local wall-clock time, no ISO Z strings
+  const currentContext = `Guild: ${guildId} | Channel: ${channelId}\n${currentLocalContext(guildConfig.timezone)}`;
 
   // Thread list for parent channels (bot-participating threads only)
   // Only shown when NOT in a thread
@@ -888,6 +889,7 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
     db,
     qdrant,
     guildId,
+    timezone: guildConfig.timezone,
     embed: embeddingPipeline,
     resolveUsername,
     fetchMessage: async (chId, msgId) => {
@@ -944,6 +946,7 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
 
   const chatHistoryTool = createChatHistoryTool({
     guildId,
+    timezone: guildConfig.timezone,
     fetchMessages: (chatId, limit) => {
       // Validate channel is accessible in guild before querying DB
       const channel = guild.channels.cache.get(chatId);

@@ -4,6 +4,7 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 import type { Database } from "../db/database";
 import type { EmbeddingPipeline } from "../embeddings/pipeline";
 import { searchMessages, getMessageById, searchMessagesLiteral, type MessageSearchResult } from "../db/message-repository";
+import { formatLocalWallClock } from "../time/agent-time.ts";
 
 
 interface AttachmentInfo {
@@ -16,6 +17,7 @@ export interface SearchToolDeps {
   db: Database;
   qdrant: QdrantClient;
   guildId: string;
+  timezone: string;
   embed: EmbeddingPipeline;
   /** Resolve username to userId. Returns undefined if not found. */
   resolveUsername: (username: string) => string | undefined;
@@ -41,7 +43,7 @@ const SearchParams = Type.Object({
  * Embeds the query, runs Qdrant search + SQLite metadata lookup, returns formatted excerpts.
  */
 export function createSearchTool(deps: SearchToolDeps): AgentTool {
-  const { db, qdrant, guildId, embed, resolveUsername } = deps;
+  const { db, qdrant, guildId, timezone, embed, resolveUsername } = deps;
 
   return {
     name: "search_messages",
@@ -147,7 +149,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         await Promise.all(Array.from({ length: Math.min(CONCURRENCY, results.length) }, () => runBatch()));
       }
 
-      const lines = results.map((r) => formatResult(r, attachmentMap.get(r.id)));
+      const lines = results.map((r) => formatResult(r, timezone, attachmentMap.get(r.id)));
       return {
         content: [{ type: "text", text: lines.join("\n\n") }],
         details: { count: results.length },
@@ -156,8 +158,8 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
   };
 }
 
-function formatResult(r: MessageSearchResult, attachments?: AttachmentInfo[]): string {
-  const date = new Date(r.createdAt).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
+function formatResult(r: MessageSearchResult, timezone: string, attachments?: AttachmentInfo[]): string {
+  const date = formatLocalWallClock(r.createdAt, timezone);
   const replyTag = r.replyToId !== null ? ` (reply to ${r.replyToId})` : "";
   let line = `[${date}] ${r.authorUsername}${replyTag}: ${r.translatedContent}`;
   if (attachments !== undefined && attachments.length > 0) {

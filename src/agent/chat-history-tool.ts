@@ -1,5 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import { formatLocalWallClock } from "../time/agent-time.ts";
 
 export interface ChatHistoryMessage {
   id: string;
@@ -10,6 +11,7 @@ export interface ChatHistoryMessage {
 
 export interface ChatHistoryToolDeps {
   guildId: string;
+  timezone: string;
   fetchMessages: (chatId: string, limit: number) => Promise<ChatHistoryMessage[]>;
 }
 
@@ -21,7 +23,7 @@ const ChatHistoryParams = Type.Object({
 });
 
 export function createChatHistoryTool(deps: ChatHistoryToolDeps): AgentTool {
-  const { fetchMessages } = deps;
+  const { timezone, fetchMessages } = deps;
 
   return {
     name: "chat_history",
@@ -54,7 +56,7 @@ export function createChatHistoryTool(deps: ChatHistoryToolDeps): AgentTool {
         };
       }
 
-      const lines = messages.map((m) => formatMessage(m));
+      const lines = messages.map((m) => formatMessage(m, timezone));
       return {
         content: [{ type: "text", text: lines.join("\n") }],
         details: { count: messages.length },
@@ -63,7 +65,7 @@ export function createChatHistoryTool(deps: ChatHistoryToolDeps): AgentTool {
   };
 }
 
-function formatMessage(m: ChatHistoryMessage): string {
-  const date = new Date(m.createdAt).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
+function formatMessage(m: ChatHistoryMessage, timezone: string): string {
+  const date = formatLocalWallClock(m.createdAt, timezone);
   return `[${date}] ${m.authorUsername}: ${m.content}`;
 }

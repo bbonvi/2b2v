@@ -24,20 +24,20 @@ describe("formatDateStamp", () => {
     // 2026-02-02 14:05 UTC
     const ts = Date.UTC(2026, 1, 2, 14, 5, 0);
     const result = formatDateStamp(ts, "UTC");
-    expect(result).toBe("[DATE 2026-02-02 14:05 +00:00]");
+    expect(result).toBe("[DATE 2026-02-02 14:05]");
   });
 
   test("formats with timezone offset", () => {
     // 2026-02-02 14:05 UTC → 2026-02-02 23:05 in Asia/Tokyo (+09:00)
     const ts = Date.UTC(2026, 1, 2, 14, 5, 0);
     const result = formatDateStamp(ts, "Asia/Tokyo");
-    expect(result).toBe("[DATE 2026-02-02 23:05 +09:00]");
+    expect(result).toBe("[DATE 2026-02-02 23:05]");
   });
 
   test("falls back to UTC for invalid timezone", () => {
     const ts = Date.UTC(2026, 1, 2, 14, 5, 0);
     const result = formatDateStamp(ts, "Invalid/Zone");
-    expect(result).toBe("[DATE 2026-02-02 14:05 +00:00]");
+    expect(result).toBe("[DATE 2026-02-02 14:05]");
   });
 
   test("deterministic for identical inputs", () => {
@@ -47,11 +47,11 @@ describe("formatDateStamp", () => {
     expect(r1).toBe(r2);
   });
 
-  test("handles negative offset", () => {
+  test("handles negative offset timezone", () => {
     const ts = Date.UTC(2026, 1, 2, 14, 5, 0);
     const result = formatDateStamp(ts, "America/New_York");
-    // Feb in NYC is EST = -05:00
-    expect(result).toBe("[DATE 2026-02-02 09:05 -05:00]");
+    // Feb in NYC is EST = -05:00, but offset is no longer shown
+    expect(result).toBe("[DATE 2026-02-02 09:05]");
   });
 });
 

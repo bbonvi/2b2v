@@ -54,8 +54,9 @@ export function formatJournalTimestamp(updatedAt: number, nowMs?: number): strin
 }
 
 /**
- * Format a timestamp as a deterministic date stamp: `[DATE YYYY-MM-DD HH:mm Z]`
- * Uses the guild timezone with UTC fallback if invalid.
+ * Format a timestamp as a deterministic date stamp: `[DATE YYYY-MM-DD HH:mm]`
+ * Uses the guild timezone with UTC fallback if invalid. No offset suffix,
+ * timezone is communicated once via the Current Context block.
  */
 export function formatDateStamp(timestampMs: number, timezone: string): string {
   const tz = isValidTimezone(timezone) ? timezone : "UTC";
@@ -81,30 +82,7 @@ export function formatDateStamp(timestampMs: number, timezone: string): string {
   const hh = get("hour");
   const min = get("minute");
 
-  const offset = formatOffset(date, tz);
-
-  return `[DATE ${yyyy}-${mm}-${dd} ${hh}:${min} ${offset}]`;
-}
-
-/**
- * Compute the UTC offset string like "+09:00" or "-05:00" for a given date and timezone.
- */
-function formatOffset(date: Date, timezone: string): string {
-  // Use Intl to get the offset
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
-    timeZoneName: "longOffset",
-  });
-  const parts = formatter.formatToParts(date);
-  const tzPart = parts.find((p) => p.type === "timeZoneName")?.value ?? "GMT";
-  // tzPart is like "GMT+9:00" or "GMT-5:00" or "GMT"
-  if (tzPart === "GMT") return "+00:00";
-  const match = /GMT([+-])(\d{1,2}):?(\d{2})?/.exec(tzPart);
-  if (match === null) return "+00:00";
-  const sign = match[1] ?? "+";
-  const hours = (match[2] ?? "00").padStart(2, "0");
-  const minutes = (match[3] ?? "00").padStart(2, "0");
-  return `${sign}${hours}:${minutes}`;
+  return `[DATE ${yyyy}-${mm}-${dd} ${hh}:${min}]`;
 }
 
 /**
