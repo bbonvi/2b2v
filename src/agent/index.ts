@@ -5,9 +5,12 @@ export {
 export {
   assembleContext,
   contextToSystemPrompt,
+  contextToSplitPrompts,
+  type SectionRole,
   type ContextSection,
   type AssembledContext,
   type ContextAssemblyInput,
+  type SplitPrompts,
 } from "./context-assembly.ts";
 
 export {

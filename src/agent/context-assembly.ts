@@ -5,6 +5,9 @@
  * plus a separate latest user message. Empty sections are omitted.
  */
 
+/** LLM message role for a context section. */
+export type SectionRole = "system" | "developer";
+
 /** A single system section in the assembled context. */
 export interface ContextSection {
   /** Section label for debugging/logging (not sent to LLM). */
@@ -13,6 +16,8 @@ export interface ContextSection {
   text: string;
   /** Whether this section should be cached (cache_control). */
   cached: boolean;
+  /** LLM message role. "system" for core instructions, "developer" for dynamic context. */
+  role: SectionRole;
 }
 
 /** The full assembled context ready for LLM submission. */
@@ -57,61 +62,57 @@ export interface ContextAssemblyInput {
 /**
  * Assemble structured context from input sections.
  *
- * Section order per spec (parent channel):
- * 1. Tool Instructions (cached)
- * 2. Persona (cached)
- * 3. Instructions (cached) — if any
- * 4. Available Emojis (cached)
- * 5. Server Members (cached)
- * 6. Upcoming Schedules (cached) — if any
- * 7. Threads In This Chat (uncached) — if any (parent channels only)
- * 8. Chat History — Older (cached)
- * 9. Journal Summaries (uncached) — if any
- * 10. Chat History — Newer (uncached)
- * 11. Current Context (uncached)
- * 12. Late Instruction (uncached) — if any
+ * Sections are split into three message groups for prefix caching:
  *
- * Section order per spec (thread channel):
- * 1. Tool Instructions (cached)
- * 2. Persona (cached)
- * 3. Instructions (cached) — if any
- * 4. Available Emojis (cached)
- * 5. Server Members (cached)
- * 6. Upcoming Schedules (cached) — if any
- * 7. Thread Metadata (uncached) — thread context only
- * 8. Parent Pre-Context (cached) — thread context only
- * 9. Chat History — Older (cached)
- * 10. Journal Summaries (uncached) — if any
- * 11. Chat History — Newer (uncached)
- * 12. Current Context (uncached)
- * 13. Late Instruction (uncached) — if any
+ * Group 1 — role=system, cached (stable identity):
+ *   1. Tool Instructions
+ *   2. Persona
+ *   3. Instructions — if any
+ *
+ * Group 2 — role=developer, cached (guild context + older history):
+ *   4. Available Emojis
+ *   5. Server Members
+ *   6. Threads In This Chat — if any (parent channels only)
+ *   6t. Thread Metadata — thread context only
+ *   7. Parent Pre-Context — thread context only
+ *   8. Chat History — Older
+ *
+ * Group 3 — role=developer, uncached (volatile per-message):
+ *   9. Upcoming Schedules — if any
+ *   10. Journal Summaries — if any
+ *   11. Chat History — Newer
+ *   12. Current Context
+ *   13. Late Instruction — if any
  *
  * Empty sections are omitted entirely.
  */
 export function assembleContext(input: ContextAssemblyInput): AssembledContext {
   const sections: ContextSection[] = [];
 
-  const add = (label: string, text: string, cached: boolean): void => {
+  const add = (label: string, text: string, cached: boolean, role: SectionRole = "developer"): void => {
     if (text !== "") {
-      sections.push({ label, text, cached });
+      sections.push({ label, text, cached, role });
     }
   };
 
-  const addWithHeader = (label: string, header: string, content: string, cached: boolean): void => {
+  const addWithHeader = (label: string, header: string, content: string, cached: boolean, role: SectionRole = "developer"): void => {
     if (content !== "") {
-      sections.push({ label, text: `${header}\n${content}`, cached });
+      sections.push({ label, text: `${header}\n${content}`, cached, role });
     }
   };
 
-  add("Tool Instructions", input.toolInstructions, true);
-  add("Persona", input.persona, true);
-  addWithHeader("Instructions", "## Instructions", input.instructions, true);
+  // Core instructions: role=system (stable identity the model should treat as ground truth)
+  add("Tool Instructions", input.toolInstructions, true, "system");
+  add("Persona", input.persona, true, "system");
+  addWithHeader("Instructions", "## Instructions", input.instructions, true, "system");
+
+  // Dynamic context: role=developer (ephemeral per-request data)
   addWithHeader("Available Emojis", "## Available Emojis", input.emojis, true);
   addWithHeader("Server Members", "## Server Members", input.members, true);
-  addWithHeader("Upcoming Schedules", "## Upcoming Schedules", input.upcomingSchedules, true);
+  addWithHeader("Upcoming Schedules", "## Upcoming Schedules", input.upcomingSchedules, false);
 
   // Parent channel: show threads in this chat
-  addWithHeader("Threads In This Chat", "## Threads In This Chat", input.threadsInChat, false);
+  addWithHeader("Threads In This Chat", "## Threads In This Chat", input.threadsInChat, true);
 
   // Thread channel: show thread metadata and parent pre-context
   if (input.threadMetadata !== undefined) {
@@ -122,7 +123,7 @@ export function assembleContext(input: ContextAssemblyInput): AssembledContext {
       `Starter Message: ${meta.starterMessageId}`,
       `Thread Name: "${meta.threadName}"`,
     ].join("\n");
-    addWithHeader("Thread Metadata", "## Thread Metadata", metaContent, false);
+    addWithHeader("Thread Metadata", "## Thread Metadata", metaContent, true);
   }
   add("Parent Pre-Context", input.parentPreContext, true);
 
@@ -147,4 +148,46 @@ export function assembleContext(input: ContextAssemblyInput): AssembledContext {
  */
 export function contextToSystemPrompt(ctx: AssembledContext): string {
   return ctx.sections.map((s) => s.text).join("\n\n");
+}
+
+/**
+ * Three-way split for provider message construction.
+ *
+ * Sent as three separate messages to enable prefix caching:
+ *   [0] role=system  (cached) — stable identity, never changes
+ *   [1] role=developer (cached) — guild context + older history, changes rarely
+ *   [2] role=developer (uncached) — journal + recent history + volatile context
+ */
+export interface SplitPrompts {
+  /** Core instructions: tool instructions, persona, custom instructions. */
+  system: string;
+  /** Stable developer context: emojis, members, schedules, older history. */
+  cachedDeveloper: string;
+  /** Volatile developer context: journal, recent history, current context. */
+  developer: string;
+}
+
+/**
+ * Split assembled context into system / cached-developer / developer prompt strings.
+ * Sections are grouped by (role, cached), preserving original order within each group.
+ * Empty groups produce "".
+ */
+export function contextToSplitPrompts(ctx: AssembledContext): SplitPrompts {
+  const system: string[] = [];
+  const cachedDev: string[] = [];
+  const dev: string[] = [];
+  for (const s of ctx.sections) {
+    if (s.role === "system") {
+      system.push(s.text);
+    } else if (s.cached) {
+      cachedDev.push(s.text);
+    } else {
+      dev.push(s.text);
+    }
+  }
+  return {
+    system: system.join("\n\n"),
+    cachedDeveloper: cachedDev.join("\n\n"),
+    developer: dev.join("\n\n"),
+  };
 }

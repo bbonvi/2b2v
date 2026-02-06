@@ -104,7 +104,6 @@ describe("assembleContext", () => {
       "Instructions",
       "Available Emojis",
       "Server Members",
-      "Upcoming Schedules",
       "Chat History — Older",
     ]);
   });
@@ -115,6 +114,7 @@ describe("assembleContext", () => {
       .filter((s) => !s.cached)
       .map((s) => s.label);
     expect(uncachedLabels).toEqual([
+      "Upcoming Schedules",
       "Journal Summaries",
       "Chat History — Newer",
       "Current Context",
@@ -147,13 +147,13 @@ describe("assembleContext", () => {
     expect(section?.text).toBe("## Upcoming Schedules\n- [one-off at 2026-01-01] hello");
   });
 
-  test("wraps threads in chat with section header and is uncached", () => {
+  test("wraps threads in chat with section header and is cached", () => {
     const result = assembleContext(
       makeInput({ threadsInChat: '- "Help Thread" (thread_id: 123) — 5 msgs, 2h ago' })
     );
     const section = result.sections.find((s) => s.label === "Threads In This Chat");
     expect(section?.text).toBe('## Threads In This Chat\n- "Help Thread" (thread_id: 123) — 5 msgs, 2h ago');
-    expect(section?.cached).toBe(false);
+    expect(section?.cached).toBe(true);
   });
 
   test("threads in chat section appears after schedules and before older history", () => {
@@ -172,7 +172,7 @@ describe("assembleContext", () => {
     expect(threadsIdx).toBeLessThan(olderIdx);
   });
 
-  test("thread metadata section is uncached and has correct format", () => {
+  test("thread metadata section is cached and has correct format", () => {
     const result = assembleContext(
       makeInput({
         threadMetadata: {
@@ -185,7 +185,7 @@ describe("assembleContext", () => {
     );
     const section = result.sections.find((s) => s.label === "Thread Metadata");
     expect(section).toBeDefined();
-    expect(section?.cached).toBe(false);
+    expect(section?.cached).toBe(true);
     expect(section?.text).toBe(
       "## Thread Metadata\n" +
       "Parent Chat: parent-123\n" +

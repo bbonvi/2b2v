@@ -3,7 +3,7 @@ import type { Message, Model } from "@mariozechner/pi-ai";
 import { streamSimple, type ProviderStreamOptions } from "@mariozechner/pi-ai";
 import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
-import { contextToSystemPrompt, type AssembledContext, type ContextSection } from "./context-assembly.ts";
+import { contextToSplitPrompts, type AssembledContext, type ContextSection } from "./context-assembly.ts";
 import { createSendMessageTool, type MessageSender, type SendMessageToolDeps } from "./send-message-tool.ts";
 import { wrapToolsWithTiming } from "./tool-timing.ts";
 import type { TriggerInstructions } from "../config/types.ts";
@@ -73,6 +73,7 @@ export function injectTriggerInstruction(
     label: "Trigger Instruction",
     text: `## Trigger Context\n${instruction}`,
     cached: false,
+    role: "developer",
   };
   const lateIdx = sections.findIndex((s) => s.label === "Late Instruction");
   if (lateIdx === -1) {
@@ -152,7 +153,11 @@ export async function handleMessage(
     };
   }
 
-  const systemPrompt = contextToSystemPrompt(context);
+  const splitPrompts = contextToSplitPrompts(context);
+  // pi-ai only accepts a single systemPrompt string. We pass the volatile (uncached)
+  // developer portion; the system and cached-developer portions are injected via
+  // onPayload mutation (see below).
+  const systemPrompt = splitPrompts.developer;
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
   const streamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);
 
@@ -180,6 +185,27 @@ export async function handleMessage(
       toolChoice: (firstTurn && forceFirst) ? "required" : undefined,
       parallelToolCalls: (firstTurn && disableParallel) ? false : undefined,
       onPayload: (payload: unknown) => {
+        // pi-ai sends systemPrompt (the uncached developer portion) as a single
+        // "developer" message. We prepend the cached portions so the final order is:
+        //   [0] role=system    — tool instructions, persona, custom instructions (cached prefix)
+        //   [1] role=developer — emojis, members, schedules, older history (cached prefix)
+        //   [2] role=developer — journal, recent history, current context (uncached, from pi-ai)
+        //   [3..] user/assistant/tool messages
+        // This enables automatic prefix caching: messages [0] and [1] are stable
+        // across requests, so providers cache them as a shared prefix.
+        if (payload !== null && typeof payload === "object" && "messages" in payload) {
+          const p = payload as { messages: { role: string; content: string }[] };
+          const toInsert: { role: string; content: string }[] = [];
+          if (splitPrompts.system !== "") {
+            toInsert.push({ role: "system", content: splitPrompts.system });
+          }
+          if (splitPrompts.cachedDeveloper !== "") {
+            toInsert.push({ role: "developer", content: splitPrompts.cachedDeveloper });
+          }
+          if (toInsert.length > 0) {
+            p.messages.unshift(...toInsert);
+          }
+        }
         reqLog?.recordLLMRequest(payload);
       },
     } as ProviderStreamOptions);

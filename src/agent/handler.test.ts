@@ -66,7 +66,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
 function makeContext(overrides: Partial<AssembledContext> = {}): AssembledContext {
   return {
     sections: [
-      { label: "Persona", text: "You are a test bot.", cached: true },
+      { label: "Persona", text: "You are a test bot.", cached: true, role: "system" },
     ],
     userMessage: "hello bot",
     ...overrides,
@@ -289,8 +289,8 @@ describe("patchToolLookup", () => {
 describe("injectTriggerInstruction", () => {
   test("appends section when no Late Instruction exists", () => {
     const sections: ContextSection[] = [
-      { label: "Persona", text: "You are a test bot.", cached: true },
-      { label: "Instructions", text: "## Instructions\nBe helpful.", cached: true },
+      { label: "Persona", text: "You are a test bot.", cached: true, role: "system" },
+      { label: "Instructions", text: "## Instructions\nBe helpful.", cached: true, role: "system" },
     ];
     const result = injectTriggerInstruction(sections, "This is a random reply.");
     expect(result.length).toBe(3);
@@ -301,9 +301,9 @@ describe("injectTriggerInstruction", () => {
 
   test("inserts section before Late Instruction", () => {
     const sections: ContextSection[] = [
-      { label: "Persona", text: "You are a test bot.", cached: true },
-      { label: "Instructions", text: "## Instructions\nBe helpful.", cached: true },
-      { label: "Late Instruction", text: "ALWAYS USE send_message.", cached: false },
+      { label: "Persona", text: "You are a test bot.", cached: true, role: "system" },
+      { label: "Instructions", text: "## Instructions\nBe helpful.", cached: true, role: "system" },
+      { label: "Late Instruction", text: "ALWAYS USE send_message.", cached: false, role: "developer" },
     ];
     const result = injectTriggerInstruction(sections, "You were mentioned.");
     expect(result.length).toBe(4);
@@ -314,10 +314,10 @@ describe("injectTriggerInstruction", () => {
 
   test("preserves original sections order", () => {
     const sections: ContextSection[] = [
-      { label: "Persona", text: "Persona text.", cached: true },
-      { label: "Chat History — Older", text: "Older history.", cached: true },
-      { label: "Chat History — Newer", text: "Newer history.", cached: false },
-      { label: "Late Instruction", text: "Late text.", cached: false },
+      { label: "Persona", text: "Persona text.", cached: true, role: "system" },
+      { label: "Chat History — Older", text: "Older history.", cached: true, role: "developer" },
+      { label: "Chat History — Newer", text: "Newer history.", cached: false, role: "developer" },
+      { label: "Late Instruction", text: "Late text.", cached: false, role: "developer" },
     ];
     const result = injectTriggerInstruction(sections, "Scheduled task.");
     expect(result.length).toBe(5);
