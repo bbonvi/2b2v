@@ -24,7 +24,7 @@ const ScheduleMessageParams = Type.Object({
     [Type.Literal("in"), Type.Literal("at")],
     { default: "in", description: "\"in\" for relative delay, \"at\" for absolute local datetime." },
   ),
-  message: Type.String({ description: "Detailed instruction for your future self (not user-facing text). Be comprehensive, provide context." }),
+  instructions: Type.String({ description: "Detailed instruction for your future self (not user-facing text). Be comprehensive, provide context." }),
   amount: Type.Optional(Type.Number({ description: "How many units from now. Required when mode is \"in\"." })),
   unit: Type.Optional(Type.Union(
     [Type.Literal("seconds"), Type.Literal("minutes"), Type.Literal("hours")],
@@ -67,7 +67,7 @@ function handleRelativeMode(
 ): Promise<ScheduleResult> {
   const amount = params.amount as number | undefined;
   const unit = params.unit as string | undefined;
-  const message = params.message as string;
+  const instructions = params.instructions as string;
 
   if (amount === undefined || unit === undefined) {
     return Promise.resolve({
@@ -96,7 +96,7 @@ function handleRelativeMode(
     type: "one_off",
     runAt,
     timezone,
-    messageContent: message,
+    messageContent: instructions,
   });
 
   onScheduleCreated?.(id);
@@ -114,7 +114,7 @@ function handleAbsoluteMode(
   onScheduleCreated?: (id: string) => void,
 ): Promise<ScheduleResult> {
   const localDateTime = params.localDateTime as string | undefined;
-  const message = params.message as string;
+  const instructions = params.instructions as string;
 
   if (localDateTime === undefined) {
     return Promise.resolve({
@@ -145,7 +145,7 @@ function handleAbsoluteMode(
     type: "one_off",
     runAt: parsed.epochMs,
     timezone,
-    messageContent: message,
+    messageContent: instructions,
   });
 
   onScheduleCreated?.(id);

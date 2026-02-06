@@ -33,7 +33,7 @@ describe("createScheduleTool (schedule_message)", () => {
     const before = Date.now();
     const result = await tool.execute(
       "call-1",
-      { mode: "in", amount: 30, unit: "minutes", message: "Check back later" },
+      { mode: "in", amount: 30, unit: "minutes", instructions: "Check back later" },
       new AbortController().signal,
       () => {}
     );
@@ -63,7 +63,7 @@ describe("createScheduleTool (schedule_message)", () => {
   test("defaults to mode: in when mode is omitted", async () => {
     const result = await tool.execute(
       "c-default",
-      { amount: 10, unit: "minutes", message: "implicit in mode" },
+      { amount: 10, unit: "minutes", instructions: "implicit in mode" },
       new AbortController().signal,
       () => {}
     );
@@ -73,7 +73,7 @@ describe("createScheduleTool (schedule_message)", () => {
   });
 
   test("supports seconds unit", async () => {
-    await tool.execute("c2", { mode: "in", amount: 45, unit: "seconds", message: "ping" }, new AbortController().signal, () => {});
+    await tool.execute("c2", { mode: "in", amount: 45, unit: "seconds", instructions: "ping" }, new AbortController().signal, () => {});
     const s = listSchedules(db, { guildId: "guild-1" })[0];
     if (s === undefined) throw new Error("unreachable");
     expect(s.runAt).toBeGreaterThan(Date.now() + 40_000);
@@ -81,14 +81,14 @@ describe("createScheduleTool (schedule_message)", () => {
   });
 
   test("supports hours unit", async () => {
-    await tool.execute("c3", { mode: "in", amount: 2, unit: "hours", message: "reminder" }, new AbortController().signal, () => {});
+    await tool.execute("c3", { mode: "in", amount: 2, unit: "hours", instructions: "reminder" }, new AbortController().signal, () => {});
     const s = listSchedules(db, { guildId: "guild-1" })[0];
     if (s === undefined) throw new Error("unreachable");
     expect(s.runAt).toBeGreaterThan(Date.now() + 2 * 3600_000 - 1000);
   });
 
   test("calls onScheduleCreated callback with new schedule ID", async () => {
-    await tool.execute("c4", { mode: "in", amount: 10, unit: "minutes", message: "test" }, new AbortController().signal, () => {});
+    await tool.execute("c4", { mode: "in", amount: 10, unit: "minutes", instructions: "test" }, new AbortController().signal, () => {});
     expect(registeredIds).toHaveLength(1);
     const s = listSchedules(db, { guildId: "guild-1" })[0];
     if (s === undefined) throw new Error("unreachable");
@@ -96,25 +96,25 @@ describe("createScheduleTool (schedule_message)", () => {
   });
 
   test("rejects zero or negative amount", async () => {
-    const result = await tool.execute("c5", { mode: "in", amount: 0, unit: "minutes", message: "bad" }, new AbortController().signal, () => {});
+    const result = await tool.execute("c5", { mode: "in", amount: 0, unit: "minutes", instructions: "bad" }, new AbortController().signal, () => {});
     expect((result.content[0] as { text: string }).text).toContain("positive");
     expect(listSchedules(db, { guildId: "guild-1" })).toHaveLength(0);
   });
 
   test("rejects invalid unit", async () => {
-    const result = await tool.execute("c6", { mode: "in", amount: 5, unit: "days", message: "bad" }, new AbortController().signal, () => {});
+    const result = await tool.execute("c6", { mode: "in", amount: 5, unit: "days", instructions: "bad" }, new AbortController().signal, () => {});
     expect((result.content[0] as { text: string }).text).toContain("seconds, minutes, or hours");
     expect(listSchedules(db, { guildId: "guild-1" })).toHaveLength(0);
   });
 
   test("rejects mode: in with missing amount/unit", async () => {
-    const result = await tool.execute("c-missing", { mode: "in", message: "bad" }, new AbortController().signal, () => {});
+    const result = await tool.execute("c-missing", { mode: "in", instructions: "bad" }, new AbortController().signal, () => {});
     expect((result.content[0] as { text: string }).text).toContain("requires amount and unit");
     expect(listSchedules(db, { guildId: "guild-1" })).toHaveLength(0);
   });
 
   test("rejects mode: at with missing localDateTime", async () => {
-    const result = await tool.execute("c-missing-dt", { mode: "at", message: "bad" }, new AbortController().signal, () => {});
+    const result = await tool.execute("c-missing-dt", { mode: "at", instructions: "bad" }, new AbortController().signal, () => {});
     expect((result.content[0] as { text: string }).text).toContain("requires localDateTime");
     expect(listSchedules(db, { guildId: "guild-1" })).toHaveLength(0);
   });
@@ -125,7 +125,7 @@ describe("createScheduleTool (schedule_message)", () => {
     // 2026-06-15 10:00 in America/New_York = 2026-06-15 14:00 UTC (EDT)
     const result = await tool.execute(
       "c-at-1",
-      { mode: "at", localDateTime: "2026-06-15 10:00", message: "Absolute reminder" },
+      { mode: "at", localDateTime: "2026-06-15 10:00", instructions: "Absolute reminder" },
       new AbortController().signal,
       () => {}
     );
@@ -147,7 +147,7 @@ describe("createScheduleTool (schedule_message)", () => {
   test("mode: at rejects invalid format", async () => {
     const result = await tool.execute(
       "c-at-bad",
-      { mode: "at", localDateTime: "2026-06-15T10:00:00Z", message: "bad" },
+      { mode: "at", localDateTime: "2026-06-15T10:00:00Z", instructions: "bad" },
       new AbortController().signal,
       () => {}
     );
@@ -159,7 +159,7 @@ describe("createScheduleTool (schedule_message)", () => {
     // 2026-03-08 02:30 doesn't exist in America/New_York (spring forward)
     const result = await tool.execute(
       "c-at-dst",
-      { mode: "at", localDateTime: "2026-03-08 02:30", message: "bad" },
+      { mode: "at", localDateTime: "2026-03-08 02:30", instructions: "bad" },
       new AbortController().signal,
       () => {}
     );
@@ -172,7 +172,7 @@ describe("createScheduleTool (schedule_message)", () => {
     // 2026-11-01 01:30 is ambiguous in America/New_York (fall back)
     const result = await tool.execute(
       "c-at-ambig",
-      { mode: "at", localDateTime: "2026-11-01 01:30", message: "bad" },
+      { mode: "at", localDateTime: "2026-11-01 01:30", instructions: "bad" },
       new AbortController().signal,
       () => {}
     );
@@ -184,7 +184,7 @@ describe("createScheduleTool (schedule_message)", () => {
   test("mode: at rejects time in the past", async () => {
     const result = await tool.execute(
       "c-at-past",
-      { mode: "at", localDateTime: "2020-01-01 00:00", message: "bad" },
+      { mode: "at", localDateTime: "2020-01-01 00:00", instructions: "bad" },
       new AbortController().signal,
       () => {}
     );
@@ -196,7 +196,7 @@ describe("createScheduleTool (schedule_message)", () => {
   test("mode: at calls onScheduleCreated callback", async () => {
     await tool.execute(
       "c-at-cb",
-      { mode: "at", localDateTime: "2026-06-15 10:00", message: "future" },
+      { mode: "at", localDateTime: "2026-06-15 10:00", instructions: "future" },
       new AbortController().signal,
       () => {}
     );

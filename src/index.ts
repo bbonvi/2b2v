@@ -378,7 +378,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         channelId,
         guild,
         guildConfig,
-        `[Scheduled Task] ${schedule.messageContent}`,
+        `[Scheduled Task Instructions] ${schedule.messageContent}`,
         syntheticLatestMessage,
         replyFallbackDeps,
         isThread,

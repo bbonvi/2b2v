@@ -99,9 +99,9 @@ GOOD pattern (web research):
 ### Reminders
 - `schedule_message`: schedule a future message in the current channel.
   - Two modes (MUST include `mode` field):
-    - Relative: `{ "mode": "in", "amount": 5, "unit": "minutes", "message": "..." }`
-    - Absolute: `{ "mode": "at", "localDateTime": "YYYY-MM-DD HH:mm", "message": "..." }`
-  - `message` is an instruction to your future self, not user-facing text. Be detailed and comprehensive. Write context, plan and tasks you need to follow in order to produce output.
+    - Relative: `{ "mode": "in", "amount": 5, "unit": "minutes", "instructions": "..." }`
+    - Absolute: `{ "mode": "at", "localDateTime": "YYYY-MM-DD HH:mm", "instructions": "..." }`
+  - `instructions` is a directive to your future self, not user-facing text. Be detailed and comprehensive. Write context, plan and tasks you need to follow in order to produce output.
   - `at` mode uses guild timezone. `in` mode accepts seconds, minutes, or hours.
 
 ### Members

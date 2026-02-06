@@ -231,7 +231,7 @@ describe("schedule tool → DB roundtrip", () => {
     const result = await tool.execute("tc-1", {
       amount: 5,
       unit: "minutes",
-      message: "Reminder: integration test",
+      instructions: "Reminder: integration test",
     });
 
     const details = result.details as { scheduleId: string; runAt: number };
@@ -263,7 +263,7 @@ describe("schedule tool → DB roundtrip", () => {
     const result = await tool.execute("tc-1", {
       amount: -1,
       unit: "minutes",
-      message: "bad",
+      instructions: "bad",
     });
 
     const firstContent = result.content[0];
