@@ -18,5 +18,6 @@ export {
   scheduleCommandDefinition,
   createScheduleHandler,
   formatScheduleRow,
+  formatScheduleList,
   type ScheduleCommandDeps,
 } from "./schedule.ts";

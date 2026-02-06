@@ -83,14 +83,55 @@ export const scheduleCommandDefinition = new SlashCommandBuilder()
       )
   );
 
+const MESSAGE_PREVIEW_LIMIT = 80;
+const DISCORD_MESSAGE_LIMIT = 2000;
+
+function truncateMessage(text: string, limit: number = MESSAGE_PREVIEW_LIMIT): string {
+  if (text.length <= limit) return text;
+  return text.slice(0, limit - 1) + "…";
+}
+
 export function formatScheduleRow(row: ScheduleRow): string {
-  const status = row.enabled ? "" : " [disabled]";
+  const status = row.enabled ? "" : " ⏸";
   const timing =
     row.type === "cron"
       ? `\`${row.cronExpression ?? "?"}\``
-      : `<t:${Math.floor((row.runAt ?? 0) / 1000)}:F> (${new Date(row.runAt ?? 0).toISOString()})`;
+      : `<t:${Math.floor((row.runAt ?? 0) / 1000)}:R>`;
+  const msg = truncateMessage(row.messageContent.replaceAll("\n", " "));
 
-  return `**${row.id}**${status}\nType: ${row.type} | Source: ${row.source} | Timezone: ${row.timezone}\nTiming: ${timing}\nMessage: ${row.messageContent}`;
+  return `\`${row.id}\`${status} ${row.type} ${timing} — ${msg}`;
+}
+
+/**
+ * Format a list of schedules into Discord-safe chunks (<=2000 chars each).
+ * Sorts enabled before disabled, then newest first.
+ */
+export function formatScheduleList(schedules: ScheduleRow[]): string[] {
+  if (schedules.length === 0) return [];
+
+  const sorted = [...schedules].sort((a, b) => {
+    // enabled first
+    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+    // newest first
+    return b.createdAt - a.createdAt;
+  });
+
+  const lines = sorted.map(formatScheduleRow);
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const line of lines) {
+    const separator = current.length > 0 ? "\n" : "";
+    if (current.length + separator.length + line.length > DISCORD_MESSAGE_LIMIT) {
+      if (current.length > 0) chunks.push(current);
+      current = line;
+    } else {
+      current += separator + line;
+    }
+  }
+  if (current.length > 0) chunks.push(current);
+
+  return chunks;
 }
 
 export function createScheduleHandler(deps: ScheduleCommandDeps) {
@@ -130,11 +171,11 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
         return;
       }
 
-      const lines = schedules.map(formatScheduleRow);
-      await interaction.reply({
-        content: lines.join("\n\n"),
-        ephemeral: true,
-      });
+      const chunks = formatScheduleList(schedules);
+      await interaction.reply({ content: chunks[0], ephemeral: true });
+      for (let i = 1; i < chunks.length; i++) {
+        await interaction.followUp({ content: chunks[i], ephemeral: true });
+      }
       return;
     }
 

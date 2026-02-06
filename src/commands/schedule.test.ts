@@ -3,6 +3,7 @@ import {
   scheduleCommandDefinition,
   createScheduleHandler,
   formatScheduleRow,
+  formatScheduleList,
   type ScheduleCommandDeps,
 } from "./schedule.ts";
 import type { ScheduleRow } from "../db/schedule-repository.ts";
@@ -14,9 +15,10 @@ function makeInteraction(overrides: {
   guildId?: string | null;
   isAdmin?: boolean;
   options?: Record<string, string | number | null>;
-}): { reply: ReplyFn } {
+}): { reply: ReplyFn; followUp: ReplyFn } {
   const opts: Record<string, string | number | null> = overrides.options ?? {};
   const replyFn: ReplyFn = mock(() => Promise.resolve());
+  const followUpFn: ReplyFn = mock(() => Promise.resolve());
   return {
     guildId: "guildId" in overrides ? overrides.guildId : "guild-1",
     channelId: "default-ch",
@@ -36,7 +38,8 @@ function makeInteraction(overrides: {
       },
     },
     reply: replyFn,
-  } as unknown as { reply: ReplyFn };
+    followUp: followUpFn,
+  } as unknown as { reply: ReplyFn; followUp: ReplyFn };
 }
 
 function makeDeps(overrides?: Partial<ScheduleCommandDeps>): ScheduleCommandDeps {
@@ -101,13 +104,73 @@ describe("formatScheduleRow", () => {
     });
     const result = formatScheduleRow(row);
     expect(result).toContain("one_off");
-    expect(result).toContain("2023-");
+    expect(result).toContain("<t:1700000000:R>");
   });
 
   test("marks disabled schedules", () => {
     const row = makeScheduleRow({ enabled: false });
     const result = formatScheduleRow(row);
-    expect(result).toContain("disabled");
+    expect(result).toContain("⏸");
+  });
+
+  test("truncates long message content", () => {
+    const longMsg = "A".repeat(200);
+    const row = makeScheduleRow({ messageContent: longMsg });
+    const result = formatScheduleRow(row);
+    expect(result.length).toBeLessThan(300);
+    expect(result).toContain("…");
+  });
+});
+
+describe("formatScheduleList", () => {
+  test("each chunk fits within 2000 chars", () => {
+    const schedules = Array.from({ length: 30 }, (_, i) =>
+      makeScheduleRow({
+        id: `sched-${i}`,
+        messageContent: `Message content for schedule number ${i} with some padding text here`,
+      })
+    );
+    const chunks = formatScheduleList(schedules);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(2000);
+    }
+    // all schedule IDs should appear across chunks
+    for (let i = 0; i < 30; i++) {
+      const found = chunks.some((c) => c.includes(`sched-${i}`));
+      expect(found).toBe(true);
+    }
+  });
+
+  test("returns single chunk for small list", () => {
+    const schedules = [
+      makeScheduleRow({ id: "s1" }),
+      makeScheduleRow({ id: "s2" }),
+    ];
+    const chunks = formatScheduleList(schedules);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toContain("s1");
+    expect(chunks[0]).toContain("s2");
+  });
+
+  test("returns empty array for no schedules", () => {
+    expect(formatScheduleList([])).toEqual([]);
+  });
+
+  test("sorts: enabled before disabled, recent before old", () => {
+    const now = Date.now();
+    const schedules = [
+      makeScheduleRow({ id: "old-disabled", enabled: false, createdAt: now - 100000 }),
+      makeScheduleRow({ id: "new-enabled", enabled: true, createdAt: now }),
+      makeScheduleRow({ id: "old-enabled", enabled: true, createdAt: now - 50000 }),
+    ];
+    const chunks = formatScheduleList(schedules);
+    const text = chunks.join("\n");
+    const posNew = text.indexOf("new-enabled");
+    const posOldEnabled = text.indexOf("old-enabled");
+    const posOldDisabled = text.indexOf("old-disabled");
+    // enabled schedules appear before disabled
+    expect(posNew).toBeLessThan(posOldDisabled);
+    expect(posOldEnabled).toBeLessThan(posOldDisabled);
   });
 });
 
@@ -147,6 +210,29 @@ describe("createScheduleHandler", () => {
     expect(text).toContain("s1");
     expect(text).toContain("s2");
     expect(text).toContain("s3");
+  });
+
+  test("list uses followUp for large schedule lists", async () => {
+    const schedules = Array.from({ length: 30 }, (_, i) =>
+      makeScheduleRow({
+        id: `sched-${i}`,
+        messageContent: `Scheduled message content number ${i} with some extra padding text`,
+      })
+    );
+    const deps = makeDeps({ listSchedules: mock(() => schedules) });
+    const handler = createScheduleHandler(deps);
+    const interaction = makeInteraction({ subcommand: "list" });
+    await handler(interaction as never);
+    expect(interaction.reply).toHaveBeenCalled();
+    // first reply must be <=2000 chars
+    const firstReply = (interaction.reply.mock.calls[0] as unknown as [{ content: string }])[0];
+    expect(firstReply.content.length).toBeLessThanOrEqual(2000);
+    // followUp called for remaining chunks
+    expect(interaction.followUp.mock.calls.length).toBeGreaterThan(0);
+    for (const call of interaction.followUp.mock.calls) {
+      const arg = (call as unknown as [{ content: string }])[0];
+      expect(arg.content.length).toBeLessThanOrEqual(2000);
+    }
   });
 
   test("list shows empty message when no schedules", async () => {
