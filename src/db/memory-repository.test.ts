@@ -360,6 +360,33 @@ describe("listMemories", () => {
     const results = listMemories(db, { scope: "user", guildId: "g1", userId: "u1", limit: 3 });
     expect(results).toHaveLength(3);
   });
+
+  test("returns chronological order (oldest first)", () => {
+    // Insert with controlled timestamps via raw SQL to ensure ordering
+    const now = Date.now();
+    db.raw
+      .prepare(
+        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run("user", "g1", "u1", "Oldest", null, null, now - 3000, now - 3000, null);
+    db.raw
+      .prepare(
+        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run("user", "g1", "u1", "Middle", null, null, now - 2000, now - 2000, null);
+    db.raw
+      .prepare(
+        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run("user", "g1", "u1", "Newest", null, null, now - 1000, now - 1000, null);
+
+    const results = listMemories(db, { scope: "user", guildId: "g1", userId: "u1" });
+    expect(results).toHaveLength(3);
+    expect(results.map((r) => r.title)).toEqual(["Oldest", "Middle", "Newest"]);
+  });
 });
 
 describe("deleteExpiredMemories", () => {

@@ -137,6 +137,10 @@ export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRo
   }
 
   const rows = db.raw.prepare(sql).all(...params) as Record<string, unknown>[];
+
+  // Reverse to chronological order (oldest first)
+  rows.reverse();
+
   return rows.map(mapRow);
 }
 

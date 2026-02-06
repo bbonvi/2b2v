@@ -790,7 +790,7 @@ describe("insertSyntheticEvent", () => {
 });
 
 describe("getChatHistory", () => {
-  test("returns messages in reverse chronological order (newest first)", () => {
+  test("returns messages in chronological order (oldest first)", () => {
     const now = Date.now();
     insertMessage("older", { guildId: "g1", channelId: "c1", createdAt: now - 2000 });
     insertMessage("newer", { guildId: "g1", channelId: "c1", createdAt: now - 1000 });
@@ -798,9 +798,9 @@ describe("getChatHistory", () => {
 
     const results = getChatHistory(db, "g1", "c1", 10);
     expect(results.length).toBe(3);
-    expect(results[0]?.id).toBe("newest");
+    expect(results[0]?.id).toBe("older");
     expect(results[1]?.id).toBe("newer");
-    expect(results[2]?.id).toBe("older");
+    expect(results[2]?.id).toBe("newest");
   });
 
   test("filters by guild and channel", () => {
@@ -813,15 +813,16 @@ describe("getChatHistory", () => {
     expect(results[0]?.id).toBe("m1");
   });
 
-  test("respects limit", () => {
+  test("respects limit (most recent N, then chronological)", () => {
     insertMessage("m1", { guildId: "g1", channelId: "c1", createdAt: Date.now() - 3000 });
     insertMessage("m2", { guildId: "g1", channelId: "c1", createdAt: Date.now() - 2000 });
     insertMessage("m3", { guildId: "g1", channelId: "c1", createdAt: Date.now() - 1000 });
 
     const results = getChatHistory(db, "g1", "c1", 2);
     expect(results.length).toBe(2);
-    expect(results[0]?.id).toBe("m3");
-    expect(results[1]?.id).toBe("m2");
+    // Limit takes most recent 2, then reverses to chronological
+    expect(results[0]?.id).toBe("m2");
+    expect(results[1]?.id).toBe("m3");
   });
 
   test("includes synthetic events", () => {

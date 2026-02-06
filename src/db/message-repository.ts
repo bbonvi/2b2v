@@ -385,7 +385,7 @@ export interface ChatHistoryRow {
 
 /**
  * Fetch chat history for the chat_history tool.
- * Returns messages in reverse chronological order (newest first).
+ * Returns chronological order (oldest first).
  *
  * Note: Includes synthetic events (thread creation, etc.). This is up to debate —
  * synthetic events could be filtered out if they prove noisy for the LLM.
@@ -410,6 +410,9 @@ export function getChatHistory(
       translated_content: string;
       created_at: number;
     }>;
+
+  // Reverse to chronological order (oldest first)
+  rows.reverse();
 
   return rows.map((r) => ({
     id: r.id,
