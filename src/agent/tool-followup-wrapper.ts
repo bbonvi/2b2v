@@ -22,6 +22,8 @@ export interface FollowUpWrapperDeps {
   triggerMessageId: string;
   /** Max follow-ups to surface per check. */
   maxFollowUps: number;
+  /** Shared set of already-surfaced message IDs (e.g. from transformContext). */
+  sharedSurfacedIds?: Set<string>;
 }
 
 /**
@@ -79,7 +81,7 @@ export function wrapToolsWithFollowUp(
   tools: AgentTool[],
   deps: FollowUpWrapperDeps,
 ): { tools: AgentTool[]; state: FollowUpState } {
-  const surfacedIds = new Set<string>();
+  const surfacedIds = deps.sharedSurfacedIds ?? new Set<string>();
   const botSendIds = new Set<string>();
 
   const state: FollowUpState = {

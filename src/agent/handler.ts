@@ -181,11 +181,8 @@ export async function handleMessage(
 
   // Wrap with follow-up annotations if deps provided
   let finalTools: AgentTool[] = timedTools;
-  let _followUpState: FollowUpState | undefined;
   if (deps.followUpDeps !== undefined) {
-    const wrapped = wrapToolsWithFollowUp(timedTools, deps.followUpDeps);
-    finalTools = wrapped.tools;
-    _followUpState = wrapped.state;
+    finalTools = wrapToolsWithFollowUp(timedTools, deps.followUpDeps).tools;
   }
 
   const reqLog = deps.requestLog;

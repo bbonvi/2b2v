@@ -195,6 +195,26 @@ describe("wrapToolsWithFollowUp", () => {
     expect(result2.content).toHaveLength(2);
   });
 
+  test("respects pre-populated sharedSurfacedIds", async () => {
+    insertMessage("followup-1", "ch-1", "user-1", "alice", "already seen", 2000);
+    insertMessage("followup-2", "ch-1", "user-2", "bob", "new one", 3000);
+
+    const sharedSurfacedIds = new Set(["followup-1"]);
+    const tools = [makeTool("some_tool")];
+    const { tools: wrapped } = wrapToolsWithFollowUp(tools, {
+      db, ...BASE_DEPS, sharedSurfacedIds,
+    });
+
+    const result = await (wrapped[0] as AgentTool).execute("call-1", {}, undefined);
+
+    // Only followup-2 should be surfaced (followup-1 already in sharedSurfacedIds)
+    expect(result.content).toHaveLength(2);
+    const annotation = (result.content[1] as { text: string }).text;
+    expect(annotation).toContain("1 new message");
+    // followup-2 should now be in the shared set
+    expect(sharedSurfacedIds.has("followup-2")).toBe(true);
+  });
+
   test("messages from other channels are not surfaced", async () => {
     insertMessage("f-1", "ch-2", "user-1", "alice", "wrong channel", 2000);
 

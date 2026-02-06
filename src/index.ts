@@ -1296,6 +1296,7 @@ async function processTriggeredMessage(message: Message): Promise<void> {
     // Build follow-up deps for mid-loop context injection
     const botUserId = client.user?.id ?? "";
     const handlerStartTime = Date.now();
+    const sharedSurfacedIds = new Set<string>();
     const followUpDeps: FollowUpWrapperDeps | undefined = guildConfig.dispatcher.enabled
       ? {
           db,
@@ -1304,24 +1305,24 @@ async function processTriggeredMessage(message: Message): Promise<void> {
           botUserId,
           triggerMessageId: message.id,
           maxFollowUps: guildConfig.dispatcher.maxFollowUps,
+          sharedSurfacedIds,
         }
       : undefined;
 
     // Build transformContext for mid-loop follow-up injection
-    const surfacedViaTransform = new Set<string>();
     const transformContext = guildConfig.dispatcher.enabled
       // eslint-disable-next-line @typescript-eslint/require-await
       ? async (messages: AgentMessage[], _signal?: AbortSignal): Promise<AgentMessage[]> => {
-          const excludeIds = new Set([...surfacedViaTransform, message.id]);
+          const excludeIds = new Set([...sharedSurfacedIds, message.id]);
           const followUps = getFollowUpMessages(
             db, channelId, handlerStartTime, excludeIds, botUserId,
             guildConfig.dispatcher.maxFollowUps,
           );
           const userFollowUps = followUps.filter((f) => !f.isBot);
           if (userFollowUps.length === 0) return messages;
-          if (surfacedViaTransform.size >= guildConfig.trim.windowSize) return messages;
+          if (sharedSurfacedIds.size >= guildConfig.trim.windowSize) return messages;
 
-          for (const f of userFollowUps) surfacedViaTransform.add(f.id);
+          for (const f of userFollowUps) sharedSurfacedIds.add(f.id);
 
           const nowMs = Date.now();
           const lines = userFollowUps.map((m) => {
