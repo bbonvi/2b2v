@@ -5,6 +5,7 @@ import type { Database } from "../db/database";
 import type { EmbeddingPipeline } from "../embeddings/pipeline";
 import { searchMessages, getMessageById, searchMessagesLiteral, type MessageSearchResult } from "../db/message-repository";
 import { formatLocalWallClock } from "../time/agent-time.ts";
+import { normalizeUsername } from "./memory-tools.ts";
 
 
 interface AttachmentInfo {
@@ -64,10 +65,10 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
       const mode = p.mode ?? "semantic";
       const limit = Math.max(1, Math.min(p.limit ?? 10, 50));
 
-      // Resolve username to userId if provided
+      // Resolve username to userId if provided (normalize to strip leading @)
       let userId: string | undefined;
       if (p.username !== undefined) {
-        userId = resolveUsername(p.username);
+        userId = resolveUsername(normalizeUsername(p.username));
         if (userId === undefined) {
           return { content: [{ type: "text", text: `User '${p.username}' not found.` }], details: undefined };
         }

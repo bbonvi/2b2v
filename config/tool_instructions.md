@@ -108,8 +108,8 @@ GOOD pattern (web research):
 - `list_members`: list server members
 
 ### Memory
-- Journal: `save_journal_entry`, `recall_journal_entry`, `delete_journal_entry`
-- User memory: `save_user_memory`, `recall_user_memories`, `delete_user_memory`
+- Journal: `save_journal_entry`, `recall_journal_entry`, `delete_journal_entries`
+- User memory: `save_user_memory`, `recall_user_memories`, `delete_user_memories`
 Rules:
 - User memories are NOT auto-loaded. Recall when relevant.
 - Read before updating (recall first). Use `id` to update existing entries.

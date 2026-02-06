@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import { createDatabase, type Database } from "../db/database";
-import { createMemoryTools, type MemoryToolsDeps } from "./memory-tools";
+import { createMemoryTools, normalizeUsername, type MemoryToolsDeps } from "./memory-tools";
 import { getMemory, listMemories } from "../db/memory-repository";
 
 import type { AgentTool } from "@mariozechner/pi-agent-core";
@@ -41,6 +41,31 @@ function findTool(tools: AgentTool[], name: string): AgentTool {
   if (tool === undefined) throw new Error(`Tool ${name} not found`);
   return tool;
 }
+
+// ---------------------------------------------------------------------------
+// normalizeUsername helper
+// ---------------------------------------------------------------------------
+describe("normalizeUsername", () => {
+  test("strips leading @", () => {
+    expect(normalizeUsername("@foo")).toBe("foo");
+  });
+
+  test("passes through bare username unchanged", () => {
+    expect(normalizeUsername("foo")).toBe("foo");
+  });
+
+  test("trims whitespace and strips leading @", () => {
+    expect(normalizeUsername(" @foo ")).toBe("foo");
+  });
+
+  test("strips only one leading @", () => {
+    expect(normalizeUsername("@@foo")).toBe("@foo");
+  });
+
+  test("trims whitespace without @", () => {
+    expect(normalizeUsername("  bar  ")).toBe("bar");
+  });
+});
 
 // ---------------------------------------------------------------------------
 // save_journal_entry tool
@@ -209,13 +234,13 @@ describe("save_journal_entry tool", () => {
 });
 
 // ---------------------------------------------------------------------------
-// delete_journal_entry tool
+// delete_journal_entries tool
 // ---------------------------------------------------------------------------
-describe("delete_journal_entry tool", () => {
+describe("delete_journal_entries tool", () => {
   test("deletes an existing journal entry", async () => {
     const tools = createMemoryTools(makeDeps());
     const saveTool = findTool(tools, "save_journal_entry");
-    const deleteTool = findTool(tools, "delete_journal_entry");
+    const deleteTool = findTool(tools, "delete_journal_entries");
 
     const createResult = await saveTool.execute("tc-1", {
       title: "To delete",
@@ -223,7 +248,7 @@ describe("delete_journal_entry tool", () => {
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
-    const deleteResult = await deleteTool.execute("tc-2", { id }, new AbortController().signal);
+    const deleteResult = await deleteTool.execute("tc-2", { ids: [id] }, new AbortController().signal);
     const text = (deleteResult.content[0] as { text: string }).text;
     expect(text).toContain("Deleted");
     expect(getMemory(db, id)).toBeNull();
@@ -233,7 +258,7 @@ describe("delete_journal_entry tool", () => {
     const toolsG1 = createMemoryTools(makeDeps());
     const toolsG2 = createMemoryTools(makeDeps({ guildId: "g2" }));
     const saveG1 = findTool(toolsG1, "save_journal_entry");
-    const deleteG2 = findTool(toolsG2, "delete_journal_entry");
+    const deleteG2 = findTool(toolsG2, "delete_journal_entries");
 
     const createResult = await saveG1.execute("tc-1", {
       title: "G1 task",
@@ -241,7 +266,7 @@ describe("delete_journal_entry tool", () => {
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
-    const deleteResult = await deleteG2.execute("tc-2", { id }, new AbortController().signal);
+    const deleteResult = await deleteG2.execute("tc-2", { ids: [id] }, new AbortController().signal);
     const text = (deleteResult.content[0] as { text: string }).text;
     expect(text).toContain("not found");
 
@@ -252,30 +277,29 @@ describe("delete_journal_entry tool", () => {
   test("rejects deletion of user memory ID", async () => {
     const tools = createMemoryTools(makeDeps());
     const saveUserTool = findTool(tools, "save_user_memory");
-    const deleteJournalTool = findTool(tools, "delete_journal_entry");
+    const deleteJournalTool = findTool(tools, "delete_journal_entries");
 
     // Create a user memory
     const userResult = await saveUserTool.execute("tc-1", {
       username: "u1",
       title: "User fact",
     }, new AbortController().signal);
-    const userId = (userResult.details as { memoryId: number }).memoryId;
+    const memId = (userResult.details as { memoryId: number }).memoryId;
 
-    // Try to delete it via delete_journal_entry
-    const result = await deleteJournalTool.execute("tc-2", { id: userId }, new AbortController().signal);
+    // Try to delete it via delete_journal_entries
+    const result = await deleteJournalTool.execute("tc-2", { ids: [memId] }, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain("not a journal entry");
-    expect((result.details as { success: boolean }).success).toBe(false);
 
     // Verify still exists
-    expect(getMemory(db, userId)).not.toBeNull();
+    expect(getMemory(db, memId)).not.toBeNull();
   });
 
   test("reports when journal not found", async () => {
     const tools = createMemoryTools(makeDeps());
-    const deleteTool = findTool(tools, "delete_journal_entry");
+    const deleteTool = findTool(tools, "delete_journal_entries");
 
-    const result = await deleteTool.execute("tc-1", { id: 999999 }, new AbortController().signal);
+    const result = await deleteTool.execute("tc-1", { ids: [999999] }, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain("not found");
   });
@@ -286,7 +310,7 @@ describe("delete_journal_entry tool", () => {
       onMemoryDeleted: (id) => { deleted.push(id); },
     }));
     const saveTool = findTool(tools, "save_journal_entry");
-    const deleteTool = findTool(tools, "delete_journal_entry");
+    const deleteTool = findTool(tools, "delete_journal_entries");
 
     const createResult = await saveTool.execute("tc-1", {
       title: "To delete",
@@ -294,8 +318,76 @@ describe("delete_journal_entry tool", () => {
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
-    await deleteTool.execute("tc-2", { id }, new AbortController().signal);
+    await deleteTool.execute("tc-2", { ids: [id] }, new AbortController().signal);
     expect(deleted).toEqual([id]);
+  });
+
+  test("batch deletion of multiple journal entries", async () => {
+    const deleted: number[] = [];
+    const tools = createMemoryTools(makeDeps({
+      onMemoryDeleted: (id) => { deleted.push(id); },
+    }));
+    const saveTool = findTool(tools, "save_journal_entry");
+    const deleteTool = findTool(tools, "delete_journal_entries");
+
+    const ids: number[] = [];
+    for (const title of ["Entry A", "Entry B", "Entry C"]) {
+      const r = await saveTool.execute("tc", { title, content: "c" }, new AbortController().signal);
+      ids.push((r.details as { memoryId: number }).memoryId);
+    }
+
+    const result = await deleteTool.execute("tc-batch", { ids }, new AbortController().signal);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("Deleted 3 of 3 journal entries");
+    const details = result.details as { results: Array<{ id: number; deleted: boolean }> };
+    expect(details.results).toHaveLength(3);
+    expect(details.results.every((r) => r.deleted)).toBe(true);
+
+    // All removed from DB
+    for (const id of ids) {
+      expect(getMemory(db, id)).toBeNull();
+    }
+    // All onMemoryDeleted callbacks fired
+    expect(deleted.sort()).toEqual(ids.sort());
+  });
+
+  test("partial failure: mix of valid and nonexistent IDs", async () => {
+    const tools = createMemoryTools(makeDeps());
+    const saveTool = findTool(tools, "save_journal_entry");
+    const deleteTool = findTool(tools, "delete_journal_entries");
+
+    const r = await saveTool.execute("tc", { title: "Real", content: "c" }, new AbortController().signal);
+    const realId = (r.details as { memoryId: number }).memoryId;
+
+    const result = await deleteTool.execute("tc-partial", { ids: [realId, 999999] }, new AbortController().signal);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("Deleted 1 of 2");
+    expect(text).toContain("999999");
+    expect(text).toContain("not found");
+
+    expect(getMemory(db, realId)).toBeNull();
+  });
+
+  test("mixed scope rejection: user memory ID in journal batch", async () => {
+    const tools = createMemoryTools(makeDeps());
+    const saveJournal = findTool(tools, "save_journal_entry");
+    const saveUser = findTool(tools, "save_user_memory");
+    const deleteTool = findTool(tools, "delete_journal_entries");
+
+    const jr = await saveJournal.execute("tc", { title: "Journal", content: "c" }, new AbortController().signal);
+    const journalId = (jr.details as { memoryId: number }).memoryId;
+
+    const ur = await saveUser.execute("tc", { username: "u1", title: "User mem" }, new AbortController().signal);
+    const userId = (ur.details as { memoryId: number }).memoryId;
+
+    const result = await deleteTool.execute("tc-mixed", { ids: [journalId, userId] }, new AbortController().signal);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("Deleted 1 of 2");
+    expect(text).toContain("not a journal entry");
+
+    // Journal deleted, user memory still exists
+    expect(getMemory(db, journalId)).toBeNull();
+    expect(getMemory(db, userId)).not.toBeNull();
   });
 });
 
@@ -320,6 +412,23 @@ describe("save_user_memory tool", () => {
     const memories = listMemories(db, { scope: "user", guildId: "g1", userId: "uid-1" });
     expect(memories).toHaveLength(1);
     expect(memories[0]?.title).toBe("Prefers dark mode");
+  });
+
+  test("resolves @username with leading @ via normalizeUsername", async () => {
+    const tools = createMemoryTools(makeDeps());
+    const saveTool = findTool(tools, "save_user_memory");
+
+    const result = await saveTool.execute("tc-at", {
+      username: "@u1",
+      title: "At-prefixed save",
+    }, new AbortController().signal);
+
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("Saved");
+
+    const memories = listMemories(db, { scope: "user", guildId: "g1", userId: "uid-1" });
+    expect(memories).toHaveLength(1);
+    expect(memories[0]?.title).toBe("At-prefixed save");
   });
 
   test("updates existing user memory when id is provided", async () => {
@@ -436,13 +545,13 @@ describe("save_user_memory tool", () => {
 });
 
 // ---------------------------------------------------------------------------
-// delete_user_memory tool
+// delete_user_memories tool
 // ---------------------------------------------------------------------------
-describe("delete_user_memory tool", () => {
+describe("delete_user_memories tool", () => {
   test("deletes an existing user memory", async () => {
     const tools = createMemoryTools(makeDeps());
     const saveTool = findTool(tools, "save_user_memory");
-    const deleteTool = findTool(tools, "delete_user_memory");
+    const deleteTool = findTool(tools, "delete_user_memories");
 
     const createResult = await saveTool.execute("tc-1", {
       username: "u1",
@@ -450,7 +559,7 @@ describe("delete_user_memory tool", () => {
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
-    const deleteResult = await deleteTool.execute("tc-2", { id }, new AbortController().signal);
+    const deleteResult = await deleteTool.execute("tc-2", { ids: [id] }, new AbortController().signal);
     const text = (deleteResult.content[0] as { text: string }).text;
     expect(text).toContain("Deleted");
     expect(getMemory(db, id)).toBeNull();
@@ -460,7 +569,7 @@ describe("delete_user_memory tool", () => {
     const toolsG1 = createMemoryTools(makeDeps());
     const toolsG2 = createMemoryTools(makeDeps({ guildId: "g2" }));
     const saveG1 = findTool(toolsG1, "save_user_memory");
-    const deleteG2 = findTool(toolsG2, "delete_user_memory");
+    const deleteG2 = findTool(toolsG2, "delete_user_memories");
 
     const createResult = await saveG1.execute("tc-11", {
       username: "u1",
@@ -468,7 +577,7 @@ describe("delete_user_memory tool", () => {
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
-    const deleteResult = await deleteG2.execute("tc-12", { id }, new AbortController().signal);
+    const deleteResult = await deleteG2.execute("tc-12", { ids: [id] }, new AbortController().signal);
     const text = (deleteResult.content[0] as { text: string }).text;
     expect(text).toContain("not found");
 
@@ -479,7 +588,7 @@ describe("delete_user_memory tool", () => {
   test("rejects deletion of journal ID", async () => {
     const tools = createMemoryTools(makeDeps());
     const saveJournalTool = findTool(tools, "save_journal_entry");
-    const deleteUserTool = findTool(tools, "delete_user_memory");
+    const deleteUserTool = findTool(tools, "delete_user_memories");
 
     // Create a journal entry
     const journalResult = await saveJournalTool.execute("tc-1", {
@@ -488,11 +597,10 @@ describe("delete_user_memory tool", () => {
     }, new AbortController().signal);
     const journalId = (journalResult.details as { memoryId: number }).memoryId;
 
-    // Try to delete it via delete_user_memory
-    const result = await deleteUserTool.execute("tc-2", { id: journalId }, new AbortController().signal);
+    // Try to delete it via delete_user_memories
+    const result = await deleteUserTool.execute("tc-2", { ids: [journalId] }, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain("not a user memory");
-    expect((result.details as { success: boolean }).success).toBe(false);
 
     // Verify still exists
     expect(getMemory(db, journalId)).not.toBeNull();
@@ -500,9 +608,9 @@ describe("delete_user_memory tool", () => {
 
   test("reports when user memory not found", async () => {
     const tools = createMemoryTools(makeDeps());
-    const deleteTool = findTool(tools, "delete_user_memory");
+    const deleteTool = findTool(tools, "delete_user_memories");
 
-    const result = await deleteTool.execute("tc-15", { id: 999999 }, new AbortController().signal);
+    const result = await deleteTool.execute("tc-15", { ids: [999999] }, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain("not found");
   });
@@ -513,7 +621,7 @@ describe("delete_user_memory tool", () => {
       onMemoryDeleted: (id) => { deleted.push(id); },
     }));
     const saveTool = findTool(tools, "save_user_memory");
-    const deleteTool = findTool(tools, "delete_user_memory");
+    const deleteTool = findTool(tools, "delete_user_memories");
 
     const createResult = await saveTool.execute("tc-16", {
       username: "u1",
@@ -521,8 +629,74 @@ describe("delete_user_memory tool", () => {
     }, new AbortController().signal);
     const id = (createResult.details as { memoryId: number }).memoryId;
 
-    await deleteTool.execute("tc-17", { id }, new AbortController().signal);
+    await deleteTool.execute("tc-17", { ids: [id] }, new AbortController().signal);
     expect(deleted).toEqual([id]);
+  });
+
+  test("batch deletion of multiple user memories", async () => {
+    const deleted: number[] = [];
+    const tools = createMemoryTools(makeDeps({
+      onMemoryDeleted: (id) => { deleted.push(id); },
+    }));
+    const saveTool = findTool(tools, "save_user_memory");
+    const deleteTool = findTool(tools, "delete_user_memories");
+
+    const ids: number[] = [];
+    for (const title of ["Mem A", "Mem B", "Mem C"]) {
+      const r = await saveTool.execute("tc", { username: "u1", title }, new AbortController().signal);
+      ids.push((r.details as { memoryId: number }).memoryId);
+    }
+
+    const result = await deleteTool.execute("tc-batch", { ids }, new AbortController().signal);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("Deleted 3 of 3 user memories");
+    const details = result.details as { results: Array<{ id: number; deleted: boolean }> };
+    expect(details.results).toHaveLength(3);
+    expect(details.results.every((r) => r.deleted)).toBe(true);
+
+    for (const id of ids) {
+      expect(getMemory(db, id)).toBeNull();
+    }
+    expect(deleted.sort()).toEqual(ids.sort());
+  });
+
+  test("partial failure: mix of valid and nonexistent IDs", async () => {
+    const tools = createMemoryTools(makeDeps());
+    const saveTool = findTool(tools, "save_user_memory");
+    const deleteTool = findTool(tools, "delete_user_memories");
+
+    const r = await saveTool.execute("tc", { username: "u1", title: "Real" }, new AbortController().signal);
+    const realId = (r.details as { memoryId: number }).memoryId;
+
+    const result = await deleteTool.execute("tc-partial", { ids: [realId, 999999] }, new AbortController().signal);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("Deleted 1 of 2");
+    expect(text).toContain("999999");
+    expect(text).toContain("not found");
+
+    expect(getMemory(db, realId)).toBeNull();
+  });
+
+  test("mixed scope rejection: journal ID in user memory batch", async () => {
+    const tools = createMemoryTools(makeDeps());
+    const saveJournal = findTool(tools, "save_journal_entry");
+    const saveUser = findTool(tools, "save_user_memory");
+    const deleteTool = findTool(tools, "delete_user_memories");
+
+    const ur = await saveUser.execute("tc", { username: "u1", title: "User mem" }, new AbortController().signal);
+    const userId = (ur.details as { memoryId: number }).memoryId;
+
+    const jr = await saveJournal.execute("tc", { title: "Journal", content: "c" }, new AbortController().signal);
+    const journalId = (jr.details as { memoryId: number }).memoryId;
+
+    const result = await deleteTool.execute("tc-mixed", { ids: [userId, journalId] }, new AbortController().signal);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("Deleted 1 of 2");
+    expect(text).toContain("not a user memory");
+
+    // User memory deleted, journal still exists
+    expect(getMemory(db, userId)).toBeNull();
+    expect(getMemory(db, journalId)).not.toBeNull();
   });
 });
 
@@ -542,6 +716,18 @@ describe("recall_user_memories tool", () => {
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain("Fact A");
     expect(text).toContain("Fact B");
+  });
+
+  test("resolves @username with leading @ via normalizeUsername", async () => {
+    const tools = createMemoryTools(makeDeps());
+    const saveTool = findTool(tools, "save_user_memory");
+    const recallTool = findTool(tools, "recall_user_memories");
+
+    await saveTool.execute("tc-1", { username: "u1", title: "At-test fact" }, new AbortController().signal);
+
+    const result = await recallTool.execute("tc-2", { username: "@u1" }, new AbortController().signal);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("At-test fact");
   });
 
   test("lists all user memories when userId not provided", async () => {
@@ -688,8 +874,8 @@ describe("createMemoryTools factory", () => {
     const tools = createMemoryTools(makeDeps());
     expect(tools).toHaveLength(6);
     expect(tools.map(t => t.name).sort()).toEqual([
-      "delete_journal_entry",
-      "delete_user_memory",
+      "delete_journal_entries",
+      "delete_user_memories",
       "recall_journal_entry",
       "recall_user_memories",
       "save_journal_entry",

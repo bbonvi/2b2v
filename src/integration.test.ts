@@ -125,10 +125,10 @@ const mockUsers = new Map<string, string>([
 const mockResolveUsername = (username: string): string | undefined => mockUsers.get(username);
 
 describe("memory tools → DB roundtrip", () => {
-  test("save_user_memory creates entry, recall_user_memories retrieves, delete_user_memory removes", async () => {
+  test("save_user_memory creates entry, recall_user_memories retrieves, delete_user_memories removes", async () => {
     const tools = createMemoryTools({ db, guildId: GUILD_ID, botUserId: "bot-1", resolveUsername: mockResolveUsername });
     const saveTool = findTool(tools, "save_user_memory");
-    const deleteTool = findTool(tools, "delete_user_memory");
+    const deleteTool = findTool(tools, "delete_user_memories");
     const recallTool = findTool(tools, "recall_user_memories");
 
     // Create
@@ -152,8 +152,8 @@ describe("memory tools → DB roundtrip", () => {
     });
     expect((recallResult.details as { count: number } | undefined)?.count).toBe(1);
 
-    // Delete via tool
-    await deleteTool.execute("tc-3", { id: memoryId });
+    // Delete via tool (batch API)
+    await deleteTool.execute("tc-3", { ids: [memoryId] });
     expect(getMemory(db, memoryId)).toBeNull();
   });
 

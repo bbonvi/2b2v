@@ -36,8 +36,8 @@ interface SaveJournalEntryParams {
   sourceMessageId?: string;
 }
 
-interface DeleteJournalEntryParams {
-  id: number;
+interface DeleteJournalEntriesParams {
+  ids: number[];
 }
 
 interface RecallJournalEntryParams {
@@ -52,8 +52,11 @@ const SaveJournalEntrySchema = Type.Object({
   sourceMessageId: Type.Optional(Type.String({ description: "Discord message ID that triggered this journal entry." })),
 });
 
-const DeleteJournalEntrySchema = Type.Object({
-  id: Type.Integer({ description: "Journal entry ID to delete." }),
+const DeleteJournalEntriesSchema = Type.Object({
+  ids: Type.Array(Type.Integer({ description: "Journal entry ID to delete." }), {
+    minItems: 1,
+    description: "One or more journal entry IDs to delete.",
+  }),
 });
 
 const RecallJournalEntrySchema = Type.Object({
@@ -73,8 +76,8 @@ interface SaveUserMemoryParams {
   sourceMessageId?: string;
 }
 
-interface DeleteUserMemoryParams {
-  id: number;
+interface DeleteUserMemoriesParams {
+  ids: number[];
 }
 
 interface RecallUserMemoriesParams {
@@ -91,8 +94,11 @@ const SaveUserMemorySchema = Type.Object({
   sourceMessageId: Type.Optional(Type.String({ description: "Discord message ID that triggered this memory." })),
 });
 
-const DeleteUserMemorySchema = Type.Object({
-  id: Type.Integer({ description: "User memory ID to delete." }),
+const DeleteUserMemoriesSchema = Type.Object({
+  ids: Type.Array(Type.Integer({ description: "User memory ID to delete." }), {
+    minItems: 1,
+    description: "One or more user memory IDs to delete.",
+  }),
 });
 
 const RecallUserMemoriesSchema = Type.Object({
@@ -103,6 +109,12 @@ const RecallUserMemoriesSchema = Type.Object({
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Strip leading @ and trim whitespace from an LLM-provided username. */
+export function normalizeUsername(raw: string): string {
+  const trimmed = raw.trim();
+  return trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+}
 
 function embeddingText(title: string, content?: string | null): string {
   return content !== undefined && content !== null && content !== ""
@@ -117,8 +129,8 @@ function embeddingText(title: string, content?: string | null): string {
 
 /**
  * Create memory agent tools bound to a guild context.
- * Returns 6 tools: save_journal_entry, recall_journal_entry, delete_journal_entry,
- * save_user_memory, delete_user_memory, recall_user_memories.
+ * Returns 6 tools: save_journal_entry, recall_journal_entry, delete_journal_entries,
+ * save_user_memory, delete_user_memories, recall_user_memories.
  */
 export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
   const { db, guildId, botUserId, resolveUsername, onMemoryChanged, onMemoryDeleted } = deps;
@@ -227,35 +239,50 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
   };
 
   // -------------------------------------------------------------------------
-  // delete_journal_entry
+  // delete_journal_entries
   // -------------------------------------------------------------------------
-  const deleteJournalEntry: AgentTool = {
-    name: "delete_journal_entry",
-    label: "Delete Journal Entry",
-    description: "Delete a journal entry by its ID.",
-    parameters: DeleteJournalEntrySchema,
-    execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: number; success: boolean }>> => {
-      const p = params as DeleteJournalEntryParams;
-      const existing = getMemory(db, p.id);
-      if (existing === null || existing.guildId !== guildId) {
-        return Promise.resolve({
-          content: [{ type: "text", text: `Journal entry ${p.id} not found.` }],
-          details: { memoryId: p.id, success: false },
-        });
+  const deleteJournalEntries: AgentTool = {
+    name: "delete_journal_entries",
+    label: "Delete Journal Entries",
+    description: "Delete one or more journal entries by their IDs.",
+    parameters: DeleteJournalEntriesSchema,
+    execute: (_toolCallId, params): Promise<AgentToolResult<{ results: Array<{ id: number; deleted: boolean; error?: string }> }>> => {
+      const p = params as DeleteJournalEntriesParams;
+      const results: Array<{ id: number; deleted: boolean; error?: string }> = [];
+
+      for (const id of p.ids) {
+        const existing = getMemory(db, id);
+        if (existing === null || existing.guildId !== guildId) {
+          results.push({ id, deleted: false, error: "not found" });
+          continue;
+        }
+        if (existing.scope !== "journal") {
+          results.push({ id, deleted: false, error: "not a journal entry. Use delete_user_memories for user memories." });
+          continue;
+        }
+        const deleted = deleteMemory(db, id);
+        if (deleted) {
+          onMemoryDeleted?.(id);
+        }
+        results.push({ id, deleted });
       }
-      if (existing.scope !== "journal") {
-        return Promise.resolve({
-          content: [{ type: "text", text: `ID ${p.id} is not a journal entry. Use delete_user_memory for user memories.` }],
-          details: { memoryId: p.id, success: false },
-        });
+
+      const succeeded = results.filter((r) => r.deleted).length;
+      const failed = results.filter((r) => !r.deleted);
+      let text: string;
+      if (p.ids.length === 1 && results[0] !== undefined) {
+        const r = results[0];
+        text = r.deleted ? `Deleted journal entry ${r.id}.` : `Journal entry ${r.id}: ${r.error ?? "not found"}.`;
+      } else {
+        text = `Deleted ${succeeded} of ${p.ids.length} journal entries.`;
+        if (failed.length > 0) {
+          text += " Failed: " + failed.map((r) => `${r.id} (${r.error})`).join(", ") + ".";
+        }
       }
-      const deleted = deleteMemory(db, p.id);
-      if (deleted) {
-        onMemoryDeleted?.(p.id);
-      }
+
       return Promise.resolve({
-        content: [{ type: "text", text: deleted ? `Deleted journal entry ${p.id}.` : `Journal entry ${p.id} not found.` }],
-        details: { memoryId: p.id, success: deleted },
+        content: [{ type: "text", text }],
+        details: { results },
       });
     },
   };
@@ -272,8 +299,8 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: number; action: string; success: boolean }>> => {
       const p = params as SaveUserMemoryParams;
 
-      // Resolve username to userId
-      const userId = resolveUsername(p.username);
+      // Resolve username to userId (normalize to strip leading @)
+      const userId = resolveUsername(normalizeUsername(p.username));
       if (userId === undefined) {
         return Promise.resolve({
           content: [{ type: "text", text: `User '${p.username}' not found.` }],
@@ -336,35 +363,50 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
   };
 
   // -------------------------------------------------------------------------
-  // delete_user_memory
+  // delete_user_memories
   // -------------------------------------------------------------------------
-  const deleteUserMemory: AgentTool = {
-    name: "delete_user_memory",
-    label: "Delete User Memory",
-    description: "Delete a user memory by its ID.",
-    parameters: DeleteUserMemorySchema,
-    execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: number; success: boolean }>> => {
-      const p = params as DeleteUserMemoryParams;
-      const existing = getMemory(db, p.id);
-      if (existing === null || existing.guildId !== guildId) {
-        return Promise.resolve({
-          content: [{ type: "text", text: `User memory ${p.id} not found.` }],
-          details: { memoryId: p.id, success: false },
-        });
+  const deleteUserMemories: AgentTool = {
+    name: "delete_user_memories",
+    label: "Delete User Memories",
+    description: "Delete one or more user memories by their IDs.",
+    parameters: DeleteUserMemoriesSchema,
+    execute: (_toolCallId, params): Promise<AgentToolResult<{ results: Array<{ id: number; deleted: boolean; error?: string }> }>> => {
+      const p = params as DeleteUserMemoriesParams;
+      const results: Array<{ id: number; deleted: boolean; error?: string }> = [];
+
+      for (const id of p.ids) {
+        const existing = getMemory(db, id);
+        if (existing === null || existing.guildId !== guildId) {
+          results.push({ id, deleted: false, error: "not found" });
+          continue;
+        }
+        if (existing.scope !== "user") {
+          results.push({ id, deleted: false, error: "not a user memory. Use delete_journal_entries for journal entries." });
+          continue;
+        }
+        const deleted = deleteMemory(db, id);
+        if (deleted) {
+          onMemoryDeleted?.(id);
+        }
+        results.push({ id, deleted });
       }
-      if (existing.scope !== "user") {
-        return Promise.resolve({
-          content: [{ type: "text", text: `ID ${p.id} is not a user memory. Use delete_journal_entry for journal entries.` }],
-          details: { memoryId: p.id, success: false },
-        });
+
+      const succeeded = results.filter((r) => r.deleted).length;
+      const failed = results.filter((r) => !r.deleted);
+      let text: string;
+      if (p.ids.length === 1 && results[0] !== undefined) {
+        const r = results[0];
+        text = r.deleted ? `Deleted user memory ${r.id}.` : `User memory ${r.id}: ${r.error ?? "not found"}.`;
+      } else {
+        text = `Deleted ${succeeded} of ${p.ids.length} user memories.`;
+        if (failed.length > 0) {
+          text += " Failed: " + failed.map((r) => `${r.id} (${r.error})`).join(", ") + ".";
+        }
       }
-      const deleted = deleteMemory(db, p.id);
-      if (deleted) {
-        onMemoryDeleted?.(p.id);
-      }
+
       return Promise.resolve({
-        content: [{ type: "text", text: deleted ? `Deleted user memory ${p.id}.` : `User memory ${p.id} not found.` }],
-        details: { memoryId: p.id, success: deleted },
+        content: [{ type: "text", text }],
+        details: { results },
       });
     },
   };
@@ -381,10 +423,10 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     execute: (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as RecallUserMemoriesParams;
 
-      // Resolve username to userId if provided
+      // Resolve username to userId if provided (normalize to strip leading @)
       let userId: string | undefined;
       if (p.username !== undefined) {
-        userId = resolveUsername(p.username);
+        userId = resolveUsername(normalizeUsername(p.username));
         if (userId === undefined) {
           return Promise.resolve({
             content: [{ type: "text", text: `User '${p.username}' not found.` }],
@@ -407,7 +449,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
         return Promise.resolve({ content: [{ type: "text", text: msg }], details: undefined });
       }
 
-      const legend = "*[ID] ([Updated]) [Title]: [Content]; use `save_user_memory(id=N, ...)` to update, `delete_user_memory(id)` to remove*";
+      const legend = "*[ID] ([Updated]) [Title]: [Content]; use `save_user_memory(id=N, ...)` to update, `delete_user_memories(ids=[N])` to remove*";
       const lines = rows.map((r) => {
         const contentPart = r.content !== null && r.content !== "" ? `: ${r.content}` : "";
         return `- ${r.id} ${formatJournalTimestamp(r.updatedAt)} ${r.title}${contentPart}`;
@@ -419,5 +461,5 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     },
   };
 
-  return [saveJournalEntry, recallJournalEntry, deleteJournalEntry, saveUserMemory, deleteUserMemory, recallUserMemories];
+  return [saveJournalEntry, recallJournalEntry, deleteJournalEntries, saveUserMemory, deleteUserMemories, recallUserMemories];
 }
