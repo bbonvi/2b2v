@@ -31,7 +31,7 @@ export function getFollowUpMessages(
        ORDER BY created_at ASC
        LIMIT ?`
     )
-    .all(channelId, afterTimestamp, limit) as Array<{
+    .all(channelId, afterTimestamp, limit + excludeIds.size) as Array<{
       id: string;
       author_username: string;
       user_id: string;
@@ -44,6 +44,7 @@ export function getFollowUpMessages(
   const botMentionPattern = `<@${botUserId}>`;
   return rows
     .filter((r) => !excludeIds.has(r.id))
+    .slice(0, limit)
     .map((r) => ({
       id: r.id,
       authorUsername: r.author_username,

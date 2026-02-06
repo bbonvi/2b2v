@@ -112,6 +112,21 @@ describe("getFollowUpMessages", () => {
     expect((results[1] as (typeof results)[0]).isBot).toBe(false);
   });
 
+  test("over-fetches to compensate for excludeIds filtering", () => {
+    insertMessage("msg-1", "ch-1", "user-1", "alice", "one", 2000);
+    insertMessage("msg-2", "ch-1", "user-1", "alice", "two", 3000);
+    insertMessage("msg-3", "ch-1", "user-1", "alice", "three", 4000);
+    insertMessage("msg-4", "ch-1", "user-1", "alice", "four", 5000);
+    insertMessage("msg-5", "ch-1", "user-1", "alice", "five", 6000);
+
+    // limit=3, exclude first two: should return msg-3, msg-4, msg-5
+    const results = getFollowUpMessages(
+      db, "ch-1", 1000, new Set(["msg-1", "msg-2"]), "bot-1", 3,
+    );
+    expect(results).toHaveLength(3);
+    expect(results.map((r) => r.id)).toEqual(["msg-3", "msg-4", "msg-5"]);
+  });
+
   test("returns correct field mapping", () => {
     insertMessage("msg-1", "ch-1", "user-42", "alice", "test content", 5000);
 
