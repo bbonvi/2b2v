@@ -19,22 +19,19 @@ const UNIT_TO_MS: Record<string, number> = {
   hours: 3_600_000,
 };
 
-const ScheduleMessageParams = Type.Union([
-  Type.Object({
-    mode: Type.Literal("in"),
-    amount: Type.Number({ description: "How many units from now." }),
-    unit: Type.Union(
-      [Type.Literal("seconds"), Type.Literal("minutes"), Type.Literal("hours")],
-      { description: "Time unit: seconds, minutes, or hours." }
-    ),
-    message: Type.String({ description: "Detailed instruction that will be passed to scheduled message. Write it as an instruction to a future self, not an actual message. Make the instruction fully-featured and comprehensive, provide necessary context." }),
-  }),
-  Type.Object({
-    mode: Type.Literal("at"),
-    localDateTime: Type.String({ description: "Local date and time in YYYY-MM-DD HH:mm format (uses guild timezone)." }),
-    message: Type.String({ description: "Detailed instruction that will be passed to scheduled message. Write it as an instruction to a future self, not an actual message. Make the instruction fully-featured and comprehensive, provide necessary context." }),
-  }),
-]);
+const ScheduleMessageParams = Type.Object({
+  mode: Type.Union(
+    [Type.Literal("in"), Type.Literal("at")],
+    { default: "in", description: "\"in\" for relative delay, \"at\" for absolute local datetime." },
+  ),
+  message: Type.String({ description: "Detailed instruction for your future self (not user-facing text). Be comprehensive, provide context." }),
+  amount: Type.Optional(Type.Number({ description: "How many units from now. Required when mode is \"in\"." })),
+  unit: Type.Optional(Type.Union(
+    [Type.Literal("seconds"), Type.Literal("minutes"), Type.Literal("hours")],
+    { description: "Time unit. Required when mode is \"in\"." },
+  )),
+  localDateTime: Type.Optional(Type.String({ description: "Local date-time as YYYY-MM-DD HH:mm (guild timezone). Required when mode is \"at\"." })),
+});
 
 type ScheduleResult = AgentToolResult<{ scheduleId: string; runAt: number } | { error: boolean }>;
 
@@ -68,9 +65,16 @@ function handleRelativeMode(
   db: Database, guildId: string, channelId: string, timezone: string,
   onScheduleCreated?: (id: string) => void,
 ): Promise<ScheduleResult> {
-  const amount = params.amount as number;
-  const unit = params.unit as string;
+  const amount = params.amount as number | undefined;
+  const unit = params.unit as string | undefined;
   const message = params.message as string;
+
+  if (amount === undefined || unit === undefined) {
+    return Promise.resolve({
+      content: [{ type: "text", text: "mode \"in\" requires amount and unit." }],
+      details: { error: true },
+    });
+  }
 
   if (amount <= 0) {
     return Promise.resolve({ content: [{ type: "text", text: "Amount must be positive." }], details: { error: true } });
@@ -109,8 +113,15 @@ function handleAbsoluteMode(
   db: Database, guildId: string, channelId: string, timezone: string,
   onScheduleCreated?: (id: string) => void,
 ): Promise<ScheduleResult> {
-  const localDateTime = params.localDateTime as string;
+  const localDateTime = params.localDateTime as string | undefined;
   const message = params.message as string;
+
+  if (localDateTime === undefined) {
+    return Promise.resolve({
+      content: [{ type: "text", text: "mode \"at\" requires localDateTime in YYYY-MM-DD HH:mm format." }],
+      details: { error: true },
+    });
+  }
 
   const parsed = parseLocalDateTimeToEpoch(localDateTime, timezone);
   if (!parsed.ok) {

@@ -107,6 +107,18 @@ describe("createScheduleTool (schedule_message)", () => {
     expect(listSchedules(db, { guildId: "guild-1" })).toHaveLength(0);
   });
 
+  test("rejects mode: in with missing amount/unit", async () => {
+    const result = await tool.execute("c-missing", { mode: "in", message: "bad" }, new AbortController().signal, () => {});
+    expect((result.content[0] as { text: string }).text).toContain("requires amount and unit");
+    expect(listSchedules(db, { guildId: "guild-1" })).toHaveLength(0);
+  });
+
+  test("rejects mode: at with missing localDateTime", async () => {
+    const result = await tool.execute("c-missing-dt", { mode: "at", message: "bad" }, new AbortController().signal, () => {});
+    expect((result.content[0] as { text: string }).text).toContain("requires localDateTime");
+    expect(listSchedules(db, { guildId: "guild-1" })).toHaveLength(0);
+  });
+
   // --- mode: "at" (absolute local datetime) ---
 
   test("creates a one-off schedule from absolute local datetime (mode: at)", async () => {

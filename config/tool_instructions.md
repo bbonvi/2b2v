@@ -97,8 +97,12 @@ GOOD pattern (web research):
 - REQUIRED UX: send a progress `send_message` BEFORE starting web work (it can be slow)
 
 ### Reminders
-- `schedule_message`: schedule a later message
-  - Write as instructions to your future self, not user-facing text
+- `schedule_message`: schedule a future message in the current channel.
+  - Two modes (MUST include `mode` field):
+    - Relative: `{ "mode": "in", "amount": 5, "unit": "minutes", "message": "..." }`
+    - Absolute: `{ "mode": "at", "localDateTime": "YYYY-MM-DD HH:mm", "message": "..." }`
+  - `message` is an instruction to your future self, not user-facing text. Be detailed and comprehensive.
+  - `at` mode uses guild timezone. `in` mode accepts seconds, minutes, or hours.
 
 ### Members
 - `list_members`: list server members
