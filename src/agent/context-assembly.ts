@@ -144,9 +144,9 @@ export function contextToSystemPrompt(ctx: AssembledContext): string {
 export interface SplitPrompts {
   /** Core instructions: tool instructions, persona, custom instructions. */
   system: string;
-  /** Stable developer context: emojis, members, schedules, older history. */
+  /** Stable developer context: emojis, members, threads, older history. */
   cachedDeveloper: string;
-  /** Volatile developer context: journal, recent history, current context. */
+  /** Volatile developer context: schedules, journal, recent history, current context. */
   developer: string;
 }
 
