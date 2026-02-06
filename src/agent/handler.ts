@@ -7,7 +7,7 @@ import { contextToSplitPrompts, type AssembledContext, type ContextSection } fro
 import { createSendMessageTool, type MessageSender, type SendMessageToolDeps } from "./send-message-tool.ts";
 import { wrapToolsWithTiming } from "./tool-timing.ts";
 import { wrapToolsWithFollowUp } from "./tool-followup-wrapper.ts";
-import type { FollowUpState, FollowUpWrapperDeps } from "./tool-followup-wrapper.ts";
+import type { FollowUpWrapperDeps } from "./tool-followup-wrapper.ts";
 export type { FollowUpState, FollowUpWrapperDeps } from "./tool-followup-wrapper.ts";
 import type { TriggerInstructions } from "../config/types.ts";
 import type { TtsConfig, TtsResult } from "../tts/types.ts";
