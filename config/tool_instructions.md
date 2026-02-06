@@ -101,7 +101,7 @@ GOOD pattern (web research):
   - Two modes (MUST include `mode` field):
     - Relative: `{ "mode": "in", "amount": 5, "unit": "minutes", "message": "..." }`
     - Absolute: `{ "mode": "at", "localDateTime": "YYYY-MM-DD HH:mm", "message": "..." }`
-  - `message` is an instruction to your future self, not user-facing text. Be detailed and comprehensive.
+  - `message` is an instruction to your future self, not user-facing text. Be detailed and comprehensive. Write context, plan and tasks you need to follow in order to produce output.
   - `at` mode uses guild timezone. `in` mode accepts seconds, minutes, or hours.
 
 ### Members
