@@ -68,6 +68,13 @@ members:
 # forceToolCallFirstRun: true
 # disableParallelToolCallsFirstRun: true
 
+# Channel dispatcher (overrides global defaults)
+# dispatcher:
+#   enabled: true
+#   mentionDebounceMs: 500
+#   defaultDebounceMs: 2000
+#   maxFollowUps: 5
+
 # Custom attachments directory (default: {dataDir}/attachments)
 # attachmentsDir: data/attachments
 

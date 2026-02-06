@@ -40,6 +40,18 @@ export interface MembersConfig {
   include: boolean;
 }
 
+/** Channel dispatcher configuration. Controls debounce and follow-up awareness. */
+export interface DispatcherConfig {
+  /** Whether the channel dispatcher is enabled. Default true. */
+  enabled: boolean;
+  /** Debounce ms for mention triggers. Default 500. */
+  mentionDebounceMs: number;
+  /** Debounce ms for non-mention triggers (keyword, random). Default 2000. */
+  defaultDebounceMs: number;
+  /** Max follow-up messages to surface per tool check. Default 5. */
+  maxFollowUps: number;
+}
+
 /** Trigger configuration per guild. All independently toggleable. */
 export interface TriggerConfig {
   mention: boolean;
@@ -94,6 +106,8 @@ export interface GuildConfig {
   forceToolCallFirstRun: boolean;
   /** Disable parallel tool calls on first agent turn. */
   disableParallelToolCallsFirstRun: boolean;
+  /** Channel dispatcher configuration. */
+  dispatcher: DispatcherConfig;
 }
 
 /** Global configuration loaded from file + env. */
@@ -137,6 +151,8 @@ export interface GlobalConfig {
   defaultForceToolCallFirstRun: boolean;
   /** Disable parallel tool calls on first agent turn. Default false. */
   defaultDisableParallelToolCallsFirstRun: boolean;
+  /** Default dispatcher configuration. */
+  defaultDispatcher: DispatcherConfig;
 }
 
 /** Full resolved app config. */
@@ -175,6 +191,12 @@ export interface GuildConfigYaml {
   };
   forceToolCallFirstRun?: boolean;
   disableParallelToolCallsFirstRun?: boolean;
+  dispatcher?: {
+    enabled?: boolean;
+    mentionDebounceMs?: number;
+    defaultDebounceMs?: number;
+    maxFollowUps?: number;
+  };
 }
 
 /** Raw shape of the main config YAML file (config/config.yaml). All optional. */
@@ -226,4 +248,10 @@ export interface MainConfigYaml {
   };
   forceToolCallFirstRun?: boolean;
   disableParallelToolCallsFirstRun?: boolean;
+  dispatcher?: {
+    enabled?: boolean;
+    mentionDebounceMs?: number;
+    defaultDebounceMs?: number;
+    maxFollowUps?: number;
+  };
 }

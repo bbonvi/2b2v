@@ -25,6 +25,11 @@ const SendMessageParams = Type.Object({
       description: "Voice preset to use. 'whisper' only available if configured.",
     })
   ),
+  reply_to_message_id: Type.Optional(
+    Type.String({
+      description: "Reply to a specific message by ID. When provided, sends as a reply to that message (reply field is ignored). Use this to reply to follow-up messages.",
+    })
+  ),
 });
 
 export type SendMessageInput = Static<typeof SendMessageParams>;
@@ -55,7 +60,8 @@ export type MessageSender = (
   reply: boolean,
   chatId: string | undefined,
   voice?: VoiceAttachment,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  replyToMessageId?: string,
 ) => Promise<{ sentMessageId: string; warnings?: string[] }>;
 
 /** Dependencies for the send_message tool. */
@@ -86,10 +92,11 @@ export function createSendMessageTool(
       params,
       signal
     ): Promise<AgentToolResult<SendMessageDetails>> => {
-      const { text, reply, chat_id, is_voice_message, voice_type } = params;
+      const { text, reply, chat_id, is_voice_message, voice_type, reply_to_message_id } = params;
 
       // Reject cross-chat reply: cannot reply to trigger message when targeting a different chat
-      if (chat_id !== undefined && reply) {
+      // (reply_to_message_id takes precedence over reply boolean, so skip this check)
+      if (chat_id !== undefined && reply && reply_to_message_id === undefined) {
         return {
           content: [
             {
@@ -105,7 +112,8 @@ export function createSendMessageTool(
       if (is_voice_message !== true) {
         let result: { sentMessageId: string; warnings?: string[] };
         try {
-          result = await sender(text, reply, chat_id, undefined, signal);
+          const effectiveReply = reply_to_message_id !== undefined ? false : reply;
+          result = await sender(text, effectiveReply, chat_id, undefined, signal, reply_to_message_id);
         } catch (err) {
           const message = err instanceof Error ? err.message : "Unknown error";
           return {
@@ -175,7 +183,8 @@ export function createSendMessageTool(
 
       let result: { sentMessageId: string };
       try {
-        result = await sender(text, reply, chat_id, voiceAttachment, signal);
+        const effectiveReplyVoice = reply_to_message_id !== undefined ? false : reply;
+        result = await sender(text, effectiveReplyVoice, chat_id, voiceAttachment, signal, reply_to_message_id);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
         return {

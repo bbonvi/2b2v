@@ -63,6 +63,14 @@ emotes:
 members:
   include: true  # Include server members list in context (default: true)
 
+# Channel dispatcher — debounce and serialize per-channel message handling.
+# Prevents duplicate responses when multiple messages arrive during processing.
+dispatcher:
+  enabled: true             # Enable per-channel dispatch (default: true)
+  mentionDebounceMs: 500    # Debounce ms for mention triggers (default: 500)
+  defaultDebounceMs: 2000   # Debounce ms for non-mention triggers (default: 2000)
+  maxFollowUps: 5           # Max follow-up messages surfaced per tool check (default: 5)
+
 # Agent tool-calling behavior on first turn
 # Some models need "required" tool choice on first turn to ensure tool use.
 # Some models go haywire with parallel tool calls; disabling prevents that.

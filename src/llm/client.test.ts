@@ -29,6 +29,7 @@ const GLOBAL: GlobalConfig = {
   defaultMembers: { include: true },
   defaultForceToolCallFirstRun: false,
   defaultDisableParallelToolCallsFirstRun: false,
+  defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
 };
 
 const GUILD: GuildConfig = {
@@ -50,6 +51,7 @@ const GUILD: GuildConfig = {
   members: { include: true },
   forceToolCallFirstRun: false,
   disableParallelToolCallsFirstRun: false,
+  dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
 };
 
 describe("resolveModel", () => {

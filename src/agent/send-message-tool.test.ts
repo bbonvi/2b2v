@@ -464,4 +464,61 @@ describe("createSendMessageTool", () => {
       expect(speechCalls[0]?.voiceType).toBe("whisper");
     });
   });
+
+  describe("reply_to_message_id", () => {
+    test("passes reply_to_message_id to sender", async () => {
+      let receivedReplyTo: string | undefined;
+      const sender: MessageSender = (_text, _reply, _chatId, _voice, _signal, replyToMessageId) => {
+        receivedReplyTo = replyToMessageId;
+        return Promise.resolve({ sentMessageId: "msg-1" });
+      };
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+
+      await tool.execute("call-1", { text: "Hello", reply: false, reply_to_message_id: "target-123" });
+
+      expect(receivedReplyTo).toBe("target-123");
+    });
+
+    test("reply_to_message_id overrides reply boolean", async () => {
+      let receivedReply: boolean | undefined;
+      const sender: MessageSender = (_text, reply, _chatId, _voice, _signal, _replyTo) => {
+        receivedReply = reply;
+        return Promise.resolve({ sentMessageId: "msg-1" });
+      };
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+
+      await tool.execute("call-1", { text: "Hello", reply: true, reply_to_message_id: "target-123" });
+
+      // When reply_to_message_id is set, reply should be false (reply_to takes precedence)
+      expect(receivedReply).toBe(false);
+    });
+
+    test("allows reply_to_message_id with chat_id", async () => {
+      const { sender, calls } = createMockSender();
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+
+      const result = await tool.execute("call-1", {
+        text: "Hello",
+        reply: false,
+        chat_id: "thread-123",
+        reply_to_message_id: "target-456",
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(result.details.sentMessageId).toBe("msg-1");
+    });
+
+    test("reply_to_message_id not set defaults to undefined", async () => {
+      let receivedReplyTo: string | undefined = "should-be-undefined";
+      const sender: MessageSender = (_text, _reply, _chatId, _voice, _signal, replyToMessageId) => {
+        receivedReplyTo = replyToMessageId;
+        return Promise.resolve({ sentMessageId: "msg-1" });
+      };
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+
+      await tool.execute("call-1", { text: "Hello", reply: false });
+
+      expect(receivedReplyTo).toBeUndefined();
+    });
+  });
 });

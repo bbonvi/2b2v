@@ -34,14 +34,29 @@ Discord messageCreate event
   ├─ Store in SQLite messages table (raw + translated)
   ├─ Enqueue embeddings → batch embed → upsert to Qdrant
   │
-  └─ handleMessage(msg, deps)
-       ├─ shouldRespond(input, triggers) → mention|keyword|random|null
-       ├─ build context (persona, instructions, emojis, members, journal, schedules, history, current context)
-       ├─ resolve model (guild overrides global default)
-       └─ agent prompt with tools:
-          messaging + threading (`send_message`, `start_thread`), memory, search,
-          scheduling, member + chat history, web + URL fetch, image read/fetch
+  └─ channelDispatcher.enqueue(msg, isMention)
+       │
+       ├─ debounce (mention: 500ms, default: 2000ms)
+       ├─ serialize: one handler execution per channel at a time
+       │
+       └─ handleMessage(msgs, deps)
+            ├─ shouldRespond(input, triggers) → mention|keyword|random|null
+            ├─ build context (persona, instructions, emojis, members, journal, schedules, history, current context)
+            ├─ resolve model (guild overrides global default)
+            └─ agent prompt with tools:
+               messaging + threading (`send_message`, `start_thread`), memory, search,
+               scheduling, member + chat history, web + URL fetch, image read/fetch
 ```
+
+### Channel Dispatcher
+
+`src/discord/channel-dispatcher.ts` -- per-channel debounce and serialized handler execution. Created via `createChannelDispatcher({ config, handler })`.
+
+**Debounce:** When messages arrive, the dispatcher waits for a configurable quiet period before invoking the handler. Mention triggers use a shorter debounce (`mentionDebounceMs`, default 500ms) than keyword/random triggers (`defaultDebounceMs`, default 2000ms). If a mention arrives while a non-mention timer is running, the timer is shortened.
+
+**Serialization:** Only one handler execution runs per channel at a time. Messages that arrive during handler execution are queued and dispatched in a new debounce cycle after the current handler completes.
+
+**Lifecycle:** `enqueue(message, isMention)` is the only entry point from `messageCreate`. `dispose()` clears all timers and state.
 
 ### Message Search
 
@@ -68,6 +83,20 @@ Empty sections are omitted. `assembleContext()` iterates the registry; no impera
 ### History Processing
 
 Pipeline: fetch missing reply targets (Discord fallback), sort, merge consecutive author messages, slice older and newer windows, trim, resolve replies, insert sparse date stamps, then format lines.
+
+### Mid-Loop Follow-Up Awareness
+
+When the dispatcher is enabled, the agent gains awareness of new channel messages that arrive during its multi-turn processing loop. Two complementary mechanisms handle this.
+
+**Tool follow-up wrapper** (`src/agent/tool-followup-wrapper.ts`): Wraps all agent tools to append follow-up annotations to tool results. After each tool execution, queries SQLite for new messages (via `getFollowUpMessages`). For `send_message`, appends detailed annotations with author, message ID, relative timestamp, and content. For other tools, appends a lightweight count notification suggesting the agent use `chat_history` to review. Tracks surfaced message IDs to avoid re-surfacing. Applied in the tool pipeline after `wrapToolsWithTiming`:
+
+```
+tools -> patchToolLookup -> wrapToolsWithTiming -> wrapToolsWithFollowUp -> Agent
+```
+
+**`transformContext`**: Mid-loop context injection callback passed to the pi-agent-core `Agent`. Called before each LLM turn, it queries for follow-up messages and injects them as a `[CHANNEL UPDATE]` developer message into the conversation. Only surfaces user messages (not bot). Caps surfaced count at the trim window size to avoid context bloat. Works alongside the tool wrapper: `transformContext` handles inter-turn awareness, the tool wrapper handles intra-turn awareness.
+
+**`reply_to_message_id`**: Optional parameter on `send_message` that lets the agent reply to a specific message by Discord message ID. When set, the `reply` boolean is ignored and the message is sent as a reply to the target. Enables the agent to address specific follow-up messages rather than only the original trigger.
 
 ### Image Ingest
 
@@ -103,6 +132,15 @@ Three-tier config:
 
 Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields optional, missing values inherit from main defaults. See `config/guilds/000000000-example.yaml.example` for the full list.
 
+**Dispatcher config** (`DispatcherConfig`): Controls channel dispatcher behavior. Nested under `dispatcher` in guild config, `defaultDispatcher` in global config.
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `enabled` | boolean | `true` | Enable/disable per-channel debounce and serialization |
+| `mentionDebounceMs` | number | `500` | Debounce delay for mention triggers |
+| `defaultDebounceMs` | number | `2000` | Debounce delay for keyword/random triggers |
+| `maxFollowUps` | number | `5` | Max follow-up messages surfaced per tool check |
+
 **Instructions**: Custom text injected into LLM context (after tool instructions, before emojis). `instructionsPath` loads from a file; `instructions` provides inline text. `instructionsPath` takes priority. Guild-level overrides global default.
 
 ### Hot-Reload
@@ -126,6 +164,10 @@ Inbound Discord markup is translated to human-readable text, outbound content is
 ### Dual-Store (SQLite + Qdrant)
 
 SQLite is the source of truth for structured data and display content. Qdrant stores embeddings. Search joins Qdrant results back to SQLite, orphaned points are skipped.
+
+### Follow-Up Repository
+
+`src/db/followup-repository.ts` -- lightweight SQLite query for messages that arrived in a channel after a given timestamp. Filters out synthetic messages and a set of excluded IDs (bot's own sends, trigger message). Returns `FollowUpMessage[]` with content, author, mention status. Used by the tool follow-up wrapper and `transformContext` injection to detect new activity during agent processing.
 
 ### Time Contract
 

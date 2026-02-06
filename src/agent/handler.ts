@@ -6,6 +6,9 @@ import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers
 import { contextToSplitPrompts, type AssembledContext, type ContextSection } from "./context-assembly.ts";
 import { createSendMessageTool, type MessageSender, type SendMessageToolDeps } from "./send-message-tool.ts";
 import { wrapToolsWithTiming } from "./tool-timing.ts";
+import { wrapToolsWithFollowUp } from "./tool-followup-wrapper.ts";
+import type { FollowUpState, FollowUpWrapperDeps } from "./tool-followup-wrapper.ts";
+export type { FollowUpState, FollowUpWrapperDeps } from "./tool-followup-wrapper.ts";
 import type { TriggerInstructions } from "../config/types.ts";
 import type { TtsConfig, TtsResult } from "../tts/types.ts";
 import { resolveGuildModel, buildStreamOptions } from "../llm/client.ts";
@@ -52,6 +55,10 @@ export interface HandlerDeps {
   forceTrigger?: boolean;
   /** Per-trigger-type instructions to inject into context. */
   triggerInstructions?: TriggerInstructions;
+  /** Follow-up wrapper deps for mid-loop context injection. */
+  followUpDeps?: FollowUpWrapperDeps;
+  /** Optional transform applied to context before each LLM call (e.g., inject follow-ups). */
+  transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
 }
 
 export interface HandleResult {
@@ -172,6 +179,15 @@ export async function handleMessage(
   patchToolLookup(tools);
   const { tools: timedTools, state: timingState } = wrapToolsWithTiming(tools);
 
+  // Wrap with follow-up annotations if deps provided
+  let finalTools: AgentTool[] = timedTools;
+  let _followUpState: FollowUpState | undefined;
+  if (deps.followUpDeps !== undefined) {
+    const wrapped = wrapToolsWithFollowUp(timedTools, deps.followUpDeps);
+    finalTools = wrapped.tools;
+    _followUpState = wrapped.state;
+  }
+
   const reqLog = deps.requestLog;
   let isFirstTurn = true;
   const forceFirst = deps.guildConfig.forceToolCallFirstRun;
@@ -216,11 +232,12 @@ export async function handleMessage(
       systemPrompt,
       model: model as unknown as Model<never>,
       thinkingLevel: (deps.guildConfig.thinkingLevel ?? "off") as ThinkingLevel,
-      tools: timedTools,
+      tools: finalTools,
       messages: [],
     },
     convertToLlm: defaultConvertToLlm,
     streamFn: wrappedStreamFn,
+    transformContext: deps.transformContext,
   });
 
   agent.getApiKey = () => streamOptions.apiKey;

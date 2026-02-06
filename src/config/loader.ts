@@ -14,6 +14,7 @@ import type {
   BashToolConfig,
   EmotesConfig,
   MembersConfig,
+  DispatcherConfig,
 } from "./types.ts";
 import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 
@@ -145,6 +146,13 @@ const DEFAULT_EMOTES: EmotesConfig = {
 
 const DEFAULT_MEMBERS: MembersConfig = {
   include: true,
+};
+
+const DEFAULT_DISPATCHER: DispatcherConfig = {
+  enabled: true,
+  mentionDebounceMs: 500,
+  defaultDebounceMs: 2000,
+  maxFollowUps: 5,
 };
 
 const DEFAULT_BASH_TIMEOUT_MS = 5000;
@@ -321,6 +329,12 @@ export function loadGlobalConfig(
     },
     defaultForceToolCallFirstRun: yaml.forceToolCallFirstRun ?? false,
     defaultDisableParallelToolCallsFirstRun: yaml.disableParallelToolCallsFirstRun ?? false,
+    defaultDispatcher: {
+      enabled: yaml.dispatcher?.enabled ?? DEFAULT_DISPATCHER.enabled,
+      mentionDebounceMs: yaml.dispatcher?.mentionDebounceMs ?? DEFAULT_DISPATCHER.mentionDebounceMs,
+      defaultDebounceMs: yaml.dispatcher?.defaultDebounceMs ?? DEFAULT_DISPATCHER.defaultDebounceMs,
+      maxFollowUps: yaml.dispatcher?.maxFollowUps ?? DEFAULT_DISPATCHER.maxFollowUps,
+    },
   };
 }
 
@@ -397,6 +411,12 @@ export function resolveGuildConfig(
     },
     forceToolCallFirstRun: partial.forceToolCallFirstRun ?? global.defaultForceToolCallFirstRun,
     disableParallelToolCallsFirstRun: partial.disableParallelToolCallsFirstRun ?? global.defaultDisableParallelToolCallsFirstRun,
+    dispatcher: {
+      enabled: partial.dispatcher?.enabled ?? global.defaultDispatcher.enabled,
+      mentionDebounceMs: partial.dispatcher?.mentionDebounceMs ?? global.defaultDispatcher.mentionDebounceMs,
+      defaultDebounceMs: partial.dispatcher?.defaultDebounceMs ?? global.defaultDispatcher.defaultDebounceMs,
+      maxFollowUps: partial.dispatcher?.maxFollowUps ?? global.defaultDispatcher.maxFollowUps,
+    },
   };
 }
 
@@ -460,6 +480,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     bashTool: config.bashTool !== undefined ? { enabled: config.bashTool.enabled } : undefined,
     emotes: config.emotes,
     members: config.members,
+    dispatcher: config.dispatcher,
   };
 
   // Strip undefined keys before serializing

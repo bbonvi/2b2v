@@ -493,6 +493,7 @@ describe("saveGuildConfig", () => {
       members: { include: true },
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
     };
 
     saveGuildConfig(file, resolved);
@@ -529,6 +530,7 @@ describe("saveGuildConfig", () => {
       members: { include: true },
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
     };
 
     saveGuildConfig(file, resolved);
@@ -854,6 +856,7 @@ describe("saveGuildConfig bashTool", () => {
       members: { include: true },
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
     };
 
     saveGuildConfig(file, resolved);
@@ -886,6 +889,7 @@ describe("saveGuildConfig bashTool", () => {
       members: { include: true },
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
     };
 
     saveGuildConfig(file, resolved);
@@ -1101,6 +1105,7 @@ describe("saveGuildConfig emotes", () => {
       members: { include: true },
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
     };
 
     saveGuildConfig(file, resolved);
@@ -1140,6 +1145,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       members: { include: true },
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
     };
 
     saveGuildConfig(file, resolved);
@@ -1172,6 +1178,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       members: { include: true },
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
     };
 
     saveGuildConfig(file, resolved);

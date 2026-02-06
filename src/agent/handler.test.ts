@@ -35,6 +35,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultMembers: { include: true },
     defaultForceToolCallFirstRun: false,
     defaultDisableParallelToolCallsFirstRun: false,
+    defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
     ...overrides,
   };
 }
@@ -59,6 +60,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     members: { include: true },
     forceToolCallFirstRun: false,
     disableParallelToolCallsFirstRun: false,
+    dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
     ...overrides,
   };
 }

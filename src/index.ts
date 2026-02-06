@@ -13,7 +13,10 @@ import { translateInbound, translateOutbound, buildDisplayNameContext, type Inbo
 import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
-import { handleMessage, type IncomingMessage, type HandlerDeps } from "./agent/handler";
+import { handleMessage, type IncomingMessage, type HandlerDeps, type FollowUpWrapperDeps } from "./agent/handler";
+import { createChannelDispatcher, type ChannelDispatcher } from "./discord/channel-dispatcher";
+import { getFollowUpMessages } from "./db/followup-repository";
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
 import { getHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory, deleteRecentMessages } from "./db/message-repository";
@@ -829,6 +832,8 @@ async function buildContext(
 - If recallection of event is needed consider using literal search or fallback to semantic one. Try different queries.
 - \`send_message\` HAS to be called!
 - Consider proactively maintaining your journal and delete old unnecessary entries, or merge them.
+- If you see [CHANNEL UPDATE] or follow-up annotations in tool results, prioritize same-user messages. Do not repeat topics you already addressed.
+- Use reply_to_message_id to reply to specific follow-up messages.
 `;
 
   return assembleContext({
@@ -994,7 +999,405 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
   return tools;
 }
 
-// --- 21. messageCreate handler ---
+// --- 21. Channel dispatcher ---
+const dispatchers = new Map<string, ChannelDispatcher>();
+
+/** Get or create a channel dispatcher for a guild. */
+function getOrCreateDispatcher(guildId: string): ChannelDispatcher {
+  let dispatcher = dispatchers.get(guildId);
+  if (dispatcher !== undefined) return dispatcher;
+
+  const config = getGuildConfig(guildId);
+  dispatcher = createChannelDispatcher({
+    config: config.dispatcher,
+    handler: async (batch) => {
+      // The dispatcher fires with accumulated messages. Process the last one.
+      const last = batch[batch.length - 1];
+      if (last === undefined) return;
+      await processTriggeredMessage(last.message as Message);
+    },
+  });
+  dispatchers.set(guildId, dispatcher);
+  return dispatcher;
+}
+
+/** Process a triggered message through the full handler pipeline. */
+async function processTriggeredMessage(message: Message): Promise<void> {
+  if (message.guild === null || message.guildId === null) return;
+  const guild = message.guild;
+
+  const guildId = message.guildId;
+  const channelId = message.channelId;
+  requestLogStore.incrementActive();
+  const guildConfig = getGuildConfig(guildId);
+
+  try {
+    const inboundResolvers = buildInboundResolvers(guild);
+    const translatedContent = translateInbound(message.content, inboundResolvers);
+    const outboundResolvers = buildOutboundResolvers(guild);
+
+    function storeBotMessage(sentId: string, targetChannelId: string, rawContent: string, plainContent: string): void {
+      const ts = Date.now();
+      db.raw
+        .prepare(
+          `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(sentId, guildId, targetChannelId, client.user?.id ?? "", client.user?.username ?? "bot", rawContent, plainContent, 1, ts, null);
+
+      void embeddingQueue.enqueue({
+        id: sentId,
+        text: plainContent,
+        target: "message",
+        metadata: {
+          guild_id: guildId,
+          channel_id: targetChannelId,
+          user_id: client.user?.id ?? "",
+          created_at: ts,
+        },
+      }).catch((err: unknown) => {
+        log.error("bot message embedding enqueue failed", {
+          messageId: sentId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+
+    const currentChannelObj = message.channel as TextChannel;
+
+    function resolveTargetChannel(chatId: string | undefined): TextChannel {
+      if (chatId === undefined) return currentChannelObj;
+      const resolved = guild.channels.cache.get(chatId);
+      if (resolved === undefined) throw new Error(`Invalid chat_id: channel "${chatId}" not found`);
+      if (!("send" in resolved)) throw new Error(`Invalid chat_id: channel "${chatId}" is not a text channel`);
+      return resolved as TextChannel;
+    }
+
+    let lastTypingAt = 0;
+
+    const sender: MessageSender = async (text, reply, chatId, voice, _signal, replyToMessageId) => {
+      const targetChannel = resolveTargetChannel(chatId);
+      const targetChannelId = targetChannel.id;
+
+      const sinceTypingMs = Date.now() - lastTypingAt;
+      if (sinceTypingMs >= 0 && sinceTypingMs < 200) {
+        await new Promise((resolve) => setTimeout(resolve, 200 - sinceTypingMs));
+      }
+
+      const replyToSpecific = async (content: string | { files: AttachmentBuilder[] }): Promise<Message> => {
+        if (replyToMessageId !== undefined) {
+          try {
+            const targetMsg = await targetChannel.messages.fetch(replyToMessageId);
+            return typeof content === "string"
+              ? await targetMsg.reply(content)
+              : await targetMsg.reply(content);
+          } catch { /* fall through */ }
+        }
+        return typeof content === "string"
+          ? await targetChannel.send(content)
+          : await targetChannel.send(content);
+      };
+
+      if (voice !== undefined) {
+        const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
+        let sent: Message;
+        if (replyToMessageId !== undefined) {
+          sent = await replyToSpecific({ files: [attachment] });
+        } else if (reply) {
+          sent = await message.reply({ files: [attachment] });
+        } else {
+          sent = await targetChannel.send({ files: [attachment] });
+        }
+        storeBotMessage(sent.id, targetChannelId, "[Voice Message]", text);
+        if (targetChannel.isThread()) {
+          updateThreadActivity(db, targetChannelId, { lastActivityAt: Date.now(), lastMessageId: sent.id });
+          markBotParticipating(db, targetChannelId);
+        }
+        return { sentMessageId: sent.id };
+      }
+
+      const warnings: string[] = [];
+      const translated = translateOutbound(text, outboundResolvers, warnings);
+      const chunks = splitMessage(translated);
+      let firstId = "";
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i] as string;
+        let sent: Message;
+        if (replyToMessageId !== undefined && i === 0) {
+          sent = await replyToSpecific(chunk);
+        } else if (reply && i === 0) {
+          sent = await message.reply(chunk);
+        } else {
+          sent = await targetChannel.send(chunk);
+        }
+        if (i === 0) firstId = sent.id;
+        storeBotMessage(sent.id, targetChannelId, chunk, i === 0 ? text : chunk);
+      }
+      if (targetChannel.isThread()) {
+        updateThreadActivity(db, targetChannelId, { lastActivityAt: Date.now(), lastMessageId: firstId });
+        markBotParticipating(db, targetChannelId);
+      }
+      const emojiWarnings = warnings
+        .filter((w) => w.startsWith("Failed to resolve emoji:"))
+        .map((w) => w.replace("Failed to resolve emoji: ", ""));
+      return { sentMessageId: firstId, warnings: emojiWarnings.length > 0 ? emojiWarnings : undefined };
+    };
+
+    const ingestedImages = getImagesByMessageId(db, message.id);
+    const now = Date.now();
+    const latestUserMessage: HistoryMessage = {
+      id: message.id,
+      author: message.author.username,
+      authorId: message.author.id,
+      content: translatedContent,
+      isBot: false,
+      timestamp: now,
+      replyToId: message.reference?.messageId ?? null,
+      imageIds: ingestedImages.map((img) => img.id),
+      captions: ingestedImages.map((img) => img.caption).filter((c): c is string => c !== null),
+      hasEmbeds: message.embeds.length > 0,
+      isSynthetic: false,
+      relatedThreadId: null,
+    };
+
+    const replyFallbackDeps: ReplyFallbackDeps = {
+      db,
+      guildId,
+      channelId,
+      fetchDiscordMessage: async (chId, msgId) => {
+        const ch = guild.channels.cache.get(chId);
+        if (ch === undefined || !("messages" in ch)) return null;
+        try {
+          const fetched = await (ch as TextChannel).messages.fetch(msgId);
+          return {
+            id: fetched.id,
+            authorId: fetched.author.id,
+            authorUsername: fetched.author.username,
+            content: fetched.content,
+            timestamp: fetched.createdTimestamp,
+            isBot: fetched.author.bot,
+            replyToId: fetched.reference?.messageId ?? null,
+            attachments: [...fetched.attachments.values()].map((a) => ({
+              url: a.url,
+              contentType: a.contentType,
+            })),
+          };
+        } catch { return null; }
+      },
+      enqueueEmbedding: async (id, text, metadata) => {
+        await embeddingQueue.enqueue({ id, text, target: "message", metadata });
+      },
+      processImage: async (url, contentType, messageId) => {
+        const ingestDeps: ImageIngestDeps = {
+          db,
+          attachmentsDir: guildConfig.attachmentsDir,
+          maxDimension: guildConfig.imageMaxDimension,
+          fetchFn: fetch,
+        };
+        await processAndStoreImage(ingestDeps, { url, mimeType: contentType, messageId, guildId, channelId });
+      },
+    };
+
+    const isThread = message.channel.isThread();
+    const context = await buildContext(guildId, channelId, guild, guildConfig, translatedContent, latestUserMessage, replyFallbackDeps, isThread);
+
+    const sendTypingNow = (): void => {
+      lastTypingAt = Date.now();
+      void currentChannelObj.sendTyping().catch(() => {});
+    };
+
+    const startTypingTool = createStartTypingTool(sendTypingNow);
+    const startThreadTool = createStartThreadTool({
+      guildId,
+      createThread: async (name: string) => {
+        const thread = await message.startThread({ name });
+        return {
+          threadId: thread.id,
+          threadName: thread.name,
+          parentChatId: channelId,
+          starterMessageId: message.id,
+        };
+      },
+      persistThread: (input) => insertThread(db, input),
+      onSuccess: (payload) => {
+        try {
+          insertSyntheticEvent(db, {
+            id: crypto.randomUUID(),
+            guildId,
+            channelId: payload.parentChatId,
+            botUserId: client.user?.id ?? "",
+            botUsername: client.user?.username ?? "bot",
+            threadId: payload.threadId,
+            threadName: payload.threadName,
+          });
+        } catch (err) {
+          log.error("failed to insert synthetic event for thread", {
+            threadId: payload.threadId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      },
+    });
+    const extraTools = [...buildAgentTools(guildId, channelId, guildConfig, guild), startTypingTool, startThreadTool];
+
+    const TYPING_INTERVAL_MS = 8_000;
+    const TYPING_MAX_MS = 30_000;
+    let typingTimer: ReturnType<typeof setInterval> | null = null;
+    let typingTimeout: ReturnType<typeof setTimeout> | null = null;
+    const startTypingLoop = (): void => {
+      if (typingTimer !== null) return;
+      sendTypingNow();
+      typingTimer = setInterval(() => { sendTypingNow(); }, TYPING_INTERVAL_MS);
+      typingTimeout = setTimeout(() => { stopTypingLoop(); }, TYPING_MAX_MS);
+    };
+    const stopTypingLoop = (): void => {
+      if (typingTimer !== null) { clearInterval(typingTimer); typingTimer = null; }
+      if (typingTimeout !== null) { clearTimeout(typingTimeout); typingTimeout = null; }
+    };
+
+    const incoming: IncomingMessage = {
+      content: message.content,
+      authorId: message.author.id,
+      authorUsername: message.author.username,
+      botUserId: client.user?.id ?? "",
+      mentionedUserIds: [...message.mentions.users.keys()],
+      translatedContent,
+    };
+
+    const requestLog = new RequestLog(guildId, channelId);
+    requestLog.setAuthor(message.author.username);
+
+    const ttsEnabled = ttsClient !== undefined && guildConfig.tts?.enabled === true;
+    const generateSpeech = ttsEnabled && ttsClient !== undefined && guildConfig.tts !== undefined
+      ? async (text: string, voiceType: string): Promise<TtsResult> => {
+          const preset = voiceType === "whisper"
+            ? guildConfig.tts?.voices.whisper
+            : guildConfig.tts?.voices.normal;
+          if (preset === undefined) return { ok: false, error: `Voice type "${voiceType}" not configured` };
+          return ttsClient.generate({
+            text,
+            voiceId: preset.voiceId,
+            model: preset.model,
+            voiceSettings: {
+              stability: preset.stability,
+              similarityBoost: preset.similarityBoost,
+              speed: preset.speed,
+            },
+          });
+        }
+      : undefined;
+
+    // Build follow-up deps for mid-loop context injection
+    const botUserId = client.user?.id ?? "";
+    const handlerStartTime = Date.now();
+    const followUpDeps: FollowUpWrapperDeps | undefined = guildConfig.dispatcher.enabled
+      ? {
+          db,
+          channelId,
+          handlerStartTime,
+          botUserId,
+          triggerMessageId: message.id,
+          maxFollowUps: guildConfig.dispatcher.maxFollowUps,
+        }
+      : undefined;
+
+    // Build transformContext for mid-loop follow-up injection
+    const surfacedViaTransform = new Set<string>();
+    const transformContext = guildConfig.dispatcher.enabled
+      // eslint-disable-next-line @typescript-eslint/require-await
+      ? async (messages: AgentMessage[], _signal?: AbortSignal): Promise<AgentMessage[]> => {
+          const excludeIds = new Set([...surfacedViaTransform, message.id]);
+          const followUps = getFollowUpMessages(
+            db, channelId, handlerStartTime, excludeIds, botUserId,
+            guildConfig.dispatcher.maxFollowUps,
+          );
+          const userFollowUps = followUps.filter((f) => !f.isBot);
+          if (userFollowUps.length === 0) return messages;
+          if (surfacedViaTransform.size >= guildConfig.trim.windowSize) return messages;
+
+          for (const f of userFollowUps) surfacedViaTransform.add(f.id);
+
+          const nowMs = Date.now();
+          const lines = userFollowUps.map((m) => {
+            const ago = nowMs - m.createdAt;
+            const agoStr = ago < 1000 ? "just now" : ago < 60000 ? `${Math.round(ago / 1000)}s ago` : `${Math.round(ago / 60000)}m ago`;
+            return `\u2022 ${m.authorUsername} [MsgID: ${m.id}] (${agoStr}): "${m.content}"`;
+          });
+
+          const injection: AgentMessage = {
+            role: "user",
+            content: [
+              "[CHANNEL UPDATE \u2014 new messages arrived while you were responding]",
+              ...lines,
+              "",
+              "These appeared after you started processing. Prioritize same-user follow-ups. Do not repeat what you already said. Use reply_to_message_id to reply to specific messages.",
+            ].join("\n"),
+          } as AgentMessage;
+
+          return [...messages, injection];
+        }
+      : undefined;
+
+    const deps: HandlerDeps = {
+      globalConfig,
+      guildConfig,
+      context,
+      sender,
+      extraTools,
+      log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
+      onTriggered: (trigger) => { if (trigger.reason === "mention") startTypingLoop(); },
+      onAssistantResponseStart: stopTypingLoop,
+      onAgentEnd: stopTypingLoop,
+      requestLog,
+      ttsEnabled,
+      ttsConfig: guildConfig.tts,
+      generateSpeech,
+      triggerInstructions: guildConfig.triggerInstructions,
+      followUpDeps,
+      transformContext,
+    };
+
+    let result;
+    try {
+      result = await handleMessage(incoming, deps);
+    } catch (err) {
+      requestLog.setError(err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      stopTypingLoop();
+      if (result !== undefined) {
+        requestLog.setTrigger(result.triggerResult);
+        requestLog.setAgentRan(result.agentRan);
+      }
+      requestLog.emit(log);
+    }
+  } catch (err) {
+    log.error("messageCreate handler error", {
+      messageId: message.id,
+      guildId: message.guildId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    requestLogStore.push({
+      requestId: crypto.randomUUID(),
+      guildId: message.guildId,
+      channelId: message.channelId,
+      authorUsername: message.author.username,
+      trigger: null,
+      agentRan: false,
+      tools: [],
+      llmCalls: [],
+      totalDurationMs: 0,
+      error: err instanceof Error ? err.message : String(err),
+      timestamp: new Date().toISOString(),
+    });
+  } finally {
+    if (!message.author.bot) {
+      requestLogStore.decrementActive();
+    }
+  }
+}
+
+// --- 22. messageCreate handler ---
 client.on("messageCreate", (message: Message) => void (async () => {
   try {
     // Ignore bots (including self)
@@ -1005,7 +1408,6 @@ client.on("messageCreate", (message: Message) => void (async () => {
     const guild = message.guild;
     const guildId = message.guildId;
     const channelId = message.channelId;
-    requestLogStore.incrementActive();
     const guildConfig = getGuildConfig(guildId);
 
     // Build inbound resolvers and translate
@@ -1099,313 +1501,12 @@ client.on("messageCreate", (message: Message) => void (async () => {
 
     await Promise.allSettled(imageIngestPromises);
 
-    // Build outbound resolvers for the sender
-    const outboundResolvers = buildOutboundResolvers(guild);
-
-    function storeBotMessage(sentId: string, targetChannelId: string, rawContent: string, plainContent: string): void {
-      const ts = Date.now();
-      db.raw
-        .prepare(
-          `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(sentId, guildId, targetChannelId, client.user?.id ?? "", client.user?.username ?? "bot", rawContent, plainContent, 1, ts, null);
-
-      void embeddingQueue.enqueue({
-        id: sentId,
-        text: plainContent,
-        target: "message",
-        metadata: {
-          guild_id: guildId,
-          channel_id: targetChannelId,
-          user_id: client.user?.id ?? "",
-          created_at: ts,
-        },
-      }).catch((err: unknown) => {
-        log.error("bot message embedding enqueue failed", {
-          messageId: sentId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-    }
-
-    // Build message sender with chat_id routing
-    const currentChannelObj = message.channel as TextChannel;
-
-    /** Resolve target channel from chatId or fall back to current channel. */
-    function resolveTargetChannel(chatId: string | undefined): TextChannel {
-      if (chatId === undefined) {
-        return currentChannelObj;
-      }
-      const resolved = guild.channels.cache.get(chatId);
-      if (resolved === undefined) {
-        throw new Error(`Invalid chat_id: channel "${chatId}" not found`);
-      }
-      if (!("send" in resolved)) {
-        throw new Error(`Invalid chat_id: channel "${chatId}" is not a text channel`);
-      }
-      return resolved as TextChannel;
-    }
-
-    const sender: MessageSender = async (text, reply, chatId, voice, _signal) => {
-      const targetChannel = resolveTargetChannel(chatId);
-      const targetChannelId = targetChannel.id;
-
-      const sinceTypingMs = Date.now() - lastTypingAt;
-      if (sinceTypingMs >= 0 && sinceTypingMs < 200) {
-        await new Promise((resolve) => setTimeout(resolve, 200 - sinceTypingMs));
-      }
-
-      // Voice message path: send audio attachment
-      if (voice !== undefined) {
-        const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
-        const sent = reply
-          ? await message.reply({ files: [attachment] })
-          : await targetChannel.send({ files: [attachment] });
-        storeBotMessage(sent.id, targetChannelId, "[Voice Message]", text);
-        // Update thread activity and mark bot participating if sending to a thread
-        if (targetChannel.isThread()) {
-          updateThreadActivity(db, targetChannelId, {
-            lastActivityAt: Date.now(),
-            lastMessageId: sent.id,
-          });
-          markBotParticipating(db, targetChannelId);
-        }
-        return { sentMessageId: sent.id };
-      }
-
-      // Text message path
-      const warnings: string[] = [];
-      const translated = translateOutbound(text, outboundResolvers, warnings);
-      const chunks = splitMessage(translated);
-      let firstId = "";
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i] as string;
-        const sent = (reply && i === 0)
-          ? await message.reply(chunk)
-          : await targetChannel.send(chunk);
-        if (i === 0) firstId = sent.id;
-        storeBotMessage(sent.id, targetChannelId, chunk, i === 0 ? text : chunk);
-      }
-      // Update thread activity and mark bot participating if sending to a thread
-      if (targetChannel.isThread()) {
-        updateThreadActivity(db, targetChannelId, {
-          lastActivityAt: Date.now(),
-          lastMessageId: firstId,
-        });
-        markBotParticipating(db, targetChannelId);
-      }
-      // Filter to emoji warnings only (":name:" format)
-      const emojiWarnings = warnings
-        .filter((w) => w.startsWith("Failed to resolve emoji:"))
-        .map((w) => w.replace("Failed to resolve emoji: ", ""));
-      return { sentMessageId: firstId, warnings: emojiWarnings.length > 0 ? emojiWarnings : undefined };
-    };
-
-    // Build latest user message as HistoryMessage for pipeline
-    const ingestedImages = getImagesByMessageId(db, message.id);
-    const latestUserMessage: HistoryMessage = {
-      id: message.id,
-      author: message.author.username,
-      authorId: message.author.id,
-      content: translatedContent,
-      isBot: false,
-      timestamp: now,
-      replyToId: message.reference?.messageId ?? null,
-      imageIds: ingestedImages.map((img) => img.id),
-      captions: ingestedImages.map((img) => img.caption).filter((c): c is string => c !== null),
-      hasEmbeds: message.embeds.length > 0,
-      isSynthetic: false,
-      relatedThreadId: null,
-    };
-
-    // Build reply fallback deps for fetching missing reply targets
-    const replyFallbackDeps: ReplyFallbackDeps = {
-      db,
-      guildId,
-      channelId,
-      fetchDiscordMessage: async (chId, msgId) => {
-        const ch = guild.channels.cache.get(chId);
-        if (ch === undefined || !("messages" in ch)) return null;
-        try {
-          const fetched = await (ch as TextChannel).messages.fetch(msgId);
-          return {
-            id: fetched.id,
-            authorId: fetched.author.id,
-            authorUsername: fetched.author.username,
-            content: fetched.content,
-            timestamp: fetched.createdTimestamp,
-            isBot: fetched.author.bot,
-            replyToId: fetched.reference?.messageId ?? null,
-            attachments: [...fetched.attachments.values()].map((a) => ({
-              url: a.url,
-              contentType: a.contentType,
-            })),
-          };
-        } catch {
-          return null;
-        }
-      },
-      enqueueEmbedding: async (id, text, metadata) => {
-        await embeddingQueue.enqueue({
-          id,
-          text,
-          target: "message",
-          metadata,
-        });
-      },
-      processImage: async (url, contentType, messageId) => {
-        await processAndStoreImage(ingestDeps, {
-          url,
-          mimeType: contentType,
-          messageId,
-          guildId,
-          channelId,
-        });
-      },
-    };
-
-    // Build assembled context
-    const isThread = message.channel.isThread();
-    const context = await buildContext(guildId, channelId, guild, guildConfig, translatedContent, latestUserMessage, replyFallbackDeps, isThread);
-
-    let lastTypingAt = 0;
-    const sendTypingNow = (): void => {
-      lastTypingAt = Date.now();
-      void currentChannelObj.sendTyping().catch(() => {});
-    };
-
-    // Build agent tools (including start_typing and start_thread wired to the message)
-    const startTypingTool = createStartTypingTool(sendTypingNow);
-    const startThreadTool = createStartThreadTool({
-      guildId,
-      createThread: async (name: string) => {
-        const thread = await message.startThread({ name });
-        return {
-          threadId: thread.id,
-          threadName: thread.name,
-          parentChatId: channelId,
-          starterMessageId: message.id,
-        };
-      },
-      persistThread: (input) => insertThread(db, input),
-      onSuccess: (payload) => {
-        // Insert synthetic event in parent chat history
-        try {
-          insertSyntheticEvent(db, {
-            id: crypto.randomUUID(),
-            guildId,
-            channelId: payload.parentChatId,
-            botUserId: client.user?.id ?? "",
-            botUsername: client.user?.username ?? "bot",
-            threadId: payload.threadId,
-            threadName: payload.threadName,
-          });
-        } catch (err) {
-          // Thread created successfully — log but don't fail
-          log.error("failed to insert synthetic event for thread", {
-            threadId: payload.threadId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      },
-    });
-    const extraTools = [...buildAgentTools(guildId, channelId, guildConfig, guild), startTypingTool, startThreadTool];
-
-    const TYPING_INTERVAL_MS = 8_000;
-    const TYPING_MAX_MS = 30_000;
-    let typingTimer: ReturnType<typeof setInterval> | null = null;
-    let typingTimeout: ReturnType<typeof setTimeout> | null = null;
-    const startTypingLoop = (): void => {
-      if (typingTimer !== null) return;
-      sendTypingNow();
-      typingTimer = setInterval(() => {
-        sendTypingNow();
-      }, TYPING_INTERVAL_MS);
-      typingTimeout = setTimeout(() => {
-        stopTypingLoop();
-      }, TYPING_MAX_MS);
-    };
-    const stopTypingLoop = (): void => {
-      if (typingTimer !== null) {
-        clearInterval(typingTimer);
-        typingTimer = null;
-      }
-      if (typingTimeout !== null) {
-        clearTimeout(typingTimeout);
-        typingTimeout = null;
-      }
-    };
-
-    // Build incoming message
-    const incoming: IncomingMessage = {
-      content: message.content,
-      authorId: message.author.id,
-      authorUsername: message.author.username,
-      botUserId: client.user?.id ?? "",
-      mentionedUserIds: [...message.mentions.users.keys()],
-      translatedContent,
-    };
-
-    // Build request log accumulator
-    const requestLog = new RequestLog(guildId, channelId);
-    requestLog.setAuthor(message.author.username);
-
-    // Build TTS dependencies
-    const ttsEnabled = ttsClient !== undefined && guildConfig.tts?.enabled === true;
-    const generateSpeech = ttsEnabled && ttsClient !== undefined && guildConfig.tts !== undefined
-      ? async (text: string, voiceType: string): Promise<TtsResult> => {
-          const preset = voiceType === "whisper"
-            ? guildConfig.tts?.voices.whisper
-            : guildConfig.tts?.voices.normal;
-          if (preset === undefined) {
-            return { ok: false, error: `Voice type "${voiceType}" not configured` };
-          }
-          return ttsClient.generate({
-            text,
-            voiceId: preset.voiceId,
-            model: preset.model,
-            voiceSettings: {
-              stability: preset.stability,
-              similarityBoost: preset.similarityBoost,
-              speed: preset.speed,
-            },
-          });
-        }
-      : undefined;
-
-    // Build handler deps
-    const deps: HandlerDeps = {
-      globalConfig,
-      guildConfig,
-      context,
-      sender,
-      extraTools,
-      log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
-      onTriggered: (trigger) => { if (trigger.reason === "mention") startTypingLoop(); },
-      onAssistantResponseStart: stopTypingLoop,
-      onAgentEnd: stopTypingLoop,
-      requestLog,
-      ttsEnabled,
-      ttsConfig: guildConfig.tts,
-      generateSpeech,
-      triggerInstructions: guildConfig.triggerInstructions,
-    };
-
-    // Run the handler
-    let result;
-    try {
-      result = await handleMessage(incoming, deps);
-    } catch (err) {
-      requestLog.setError(err instanceof Error ? err.message : String(err));
-      throw err;
-    } finally {
-      stopTypingLoop();
-      if (result !== undefined) {
-        requestLog.setTrigger(result.triggerResult);
-        requestLog.setAgentRan(result.agentRan);
-      }
-      requestLog.emit(log);
+    // Dispatch to handler: use channel dispatcher if enabled, otherwise call directly
+    if (guildConfig.dispatcher.enabled) {
+      const isMention = message.mentions.has(client.user?.id ?? "");
+      getOrCreateDispatcher(guildId).enqueue(message, isMention);
+    } else {
+      await processTriggeredMessage(message);
     }
   } catch (err) {
     log.error("messageCreate handler error", {
@@ -1413,31 +1514,10 @@ client.on("messageCreate", (message: Message) => void (async () => {
       guildId: message.guildId,
       error: err instanceof Error ? err.message : String(err),
     });
-    // Push minimal error entry for hard failures that bypass RequestLog.emit
-    if (message.guildId !== null) {
-      requestLogStore.push({
-        requestId: crypto.randomUUID(),
-        guildId: message.guildId,
-        channelId: message.channelId,
-        authorUsername: message.author.username,
-        trigger: null,
-        agentRan: false,
-        tools: [],
-        llmCalls: [],
-        totalDurationMs: 0,
-        error: err instanceof Error ? err.message : String(err),
-        timestamp: new Date().toISOString(),
-      });
-    }
-  } finally {
-    // Decrement only if we incremented (i.e. passed the early returns)
-    if (message.guild !== null && message.guildId !== null && !message.author.bot) {
-      requestLogStore.decrementActive();
-    }
   }
 })());
 
-// --- 22. messageDelete handler ---
+// --- 23. messageDelete handler ---
 client.on("messageDelete", (message) => void (async () => {
   try {
     // Skip partials and DMs
@@ -1501,6 +1581,10 @@ function reloadConfigs(): void {
       guildConfigs.set(id, cfg);
     }
 
+    // Invalidate dispatchers so they pick up new config on next enqueue
+    for (const d of dispatchers.values()) d.dispose();
+    dispatchers.clear();
+
     log.info("config hot-reloaded", { model: globalConfig.defaultModel, guilds: guildConfigs.size });
   } catch (err) {
     log.error("config hot-reload failed, keeping previous config", {
@@ -1545,6 +1629,8 @@ async function shutdown(signal: string): Promise<void> {
 
   clearInterval(memoryCleanupTimer);
   clearInterval(vpnSessionCleanupTimer);
+  for (const d of dispatchers.values()) d.dispose();
+  dispatchers.clear();
   scheduler.stop();
   if (sshClient !== undefined) {
     sshClient.end();
