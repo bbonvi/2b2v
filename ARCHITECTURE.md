@@ -18,6 +18,7 @@ src/
 ├── llm/              OpenRouter client
 ├── qdrant/           Vector store adapter
 ├── scheduler/        Cron and one-off scheduling
+├── time/             Centralized agent-facing time utilities
 ├── tts/              Voice message integration
 └── dashboard/        Request log dashboard
 ```
@@ -120,6 +121,17 @@ Inbound Discord markup is translated to human-readable text, outbound content is
 ### Dual-Store (SQLite + Qdrant)
 
 SQLite is the source of truth for structured data and display content. Qdrant stores embeddings. Search joins Qdrant results back to SQLite, orphaned points are skipped.
+
+### Time Contract
+
+All agent-facing timestamps use local wall-clock time in the guild's configured timezone. No ISO `Z` strings appear in prompts, tool outputs, or context sections.
+
+- **Internal representation:** epoch milliseconds for determinism.
+- **Agent-visible format:** `YYYY-MM-DD HH:mm` (no offset, timezone communicated once in the Current Context block).
+- **Centralized module:** `src/time/agent-time.ts` provides `formatLocalWallClock()`, `currentLocalContext()`, and `parseLocalDateTimeToEpoch()`.
+- **DST safety:** Parsing uses Temporal polyfill with `disambiguation: 'reject'`. Nonexistent and ambiguous local times are rejected with actionable errors.
+- **One-off scheduling:** `schedule_message` tool supports `mode: "at"` with local datetime and `mode: "in"` with relative delay. `/schedule add one_off` accepts only `YYYY-MM-DD HH:mm` in guild timezone.
+- **Cron scheduling:** Timezone defaults to guild timezone, explicit override still allowed.
 
 ### Scheduler Engine
 

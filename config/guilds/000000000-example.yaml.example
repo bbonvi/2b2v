@@ -26,7 +26,8 @@ model: moonshotai/kimi-k2.5
 # Valid values: "minimal" | "low" | "medium" | "high" | "xhigh"
 # thinkingLevel: medium
 
-# Guild timezone (used for date stamps in history and scheduling)
+# Guild timezone — used for all agent-facing timestamps, scheduling, and date stamps.
+# One-off schedules always use this timezone. Cron schedules default to it unless overridden.
 timezone: UTC
 
 # Context window trimming thresholds
