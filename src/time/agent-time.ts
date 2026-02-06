@@ -83,7 +83,7 @@ export function parseLocalDateTimeToEpoch(localDateTime: string, timezone: strin
     // Convert to ZonedDateTime with disambiguation:'reject'.
     // Throws RangeError for nonexistent or ambiguous times.
     const zdt = pdt.toZonedDateTime(timezone, { disambiguation: "reject" });
-    return { ok: true, epochMs: Number(zdt.epochMilliseconds) };
+    return { ok: true, epochMs: zdt.epochMilliseconds };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
 
