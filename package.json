@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
+    "@js-temporal/polyfill": "^0.5.1",
     "@mariozechner/pi-agent-core": "^0.50.9",
     "@mariozechner/pi-ai": "^0.50.9",
     "@mozilla/readability": "^0.6.0",
