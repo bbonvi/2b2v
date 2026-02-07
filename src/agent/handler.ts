@@ -124,9 +124,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
 
-function isAnthropicModelPayload(payload: Record<string, unknown>): boolean {
+const CACHE_BREAKPOINT_MODEL_PREFIXES = ["anthropic/", "google/"] as const;
+
+function shouldAddCacheBreakpoints(payload: Record<string, unknown>): boolean {
   const model = payload.model;
-  return typeof model === "string" && model.startsWith("anthropic/");
+  if (typeof model !== "string") return false;
+  return CACHE_BREAKPOINT_MODEL_PREFIXES.some((prefix) => model.startsWith(prefix));
 }
 
 function stripCacheControlFromMessages(messages: unknown[]): void {
@@ -161,8 +164,8 @@ function prependSplitPromptsToPayload(payload: unknown, splitPrompts: SplitPromp
   const messages = payload.messages;
   if (!Array.isArray(messages)) return;
 
-  const useAnthropicCacheControl = isAnthropicModelPayload(payload);
-  if (useAnthropicCacheControl) {
+  const useCacheControlBreakpoints = shouldAddCacheBreakpoints(payload);
+  if (useCacheControlBreakpoints) {
     stripCacheControlFromMessages(messages);
   }
 
@@ -170,13 +173,13 @@ function prependSplitPromptsToPayload(payload: unknown, splitPrompts: SplitPromp
   if (splitPrompts.system !== "") {
     toInsert.push({
       role: "system",
-      content: makePromptContent(splitPrompts.system, useAnthropicCacheControl),
+      content: makePromptContent(splitPrompts.system, useCacheControlBreakpoints),
     });
   }
   if (splitPrompts.cachedDeveloper !== "") {
     toInsert.push({
       role: "developer",
-      content: makePromptContent(splitPrompts.cachedDeveloper, useAnthropicCacheControl),
+      content: makePromptContent(splitPrompts.cachedDeveloper, useCacheControlBreakpoints),
     });
   }
   if (toInsert.length > 0) {
