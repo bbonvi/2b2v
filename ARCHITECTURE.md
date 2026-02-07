@@ -155,6 +155,15 @@ Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields op
 
 **Instructions**: Custom text injected into LLM context (after tool instructions, before emojis). `instructionsPath` loads from a file; `instructions` provides inline text. `instructionsPath` takes priority. Guild-level overrides global default.
 
+### Configuration Change Checklist
+
+When adding or removing config fields:
+- Update both examples: `config/config.yaml.example` and `config/guilds/000000000-example.yaml.example`.
+- Update `src/config/types.ts` interfaces and YAML shapes.
+- Update parsing/resolution in `src/config/loader.ts`.
+- Add/adjust loader tests in `src/config/loader.test.ts`.
+- Update this architecture doc and README config snippets when behavior/defaults change.
+
 ### Hot-Reload
 
 `fs.watch("config", { recursive: true })` watches the entire `config/` directory. Changes are debounced and reload the main config, persona, and all guild configs. Malformed YAML or missing files keep the last known good config.
