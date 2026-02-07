@@ -47,6 +47,22 @@ describe("SECTION_DEFS", () => {
     }
   });
 
+  test("stable context sections are system role", () => {
+    const labels = SECTION_DEFS
+      .filter((d) => d.role === "system")
+      .map((d) => d.label);
+    expect(labels).toEqual([
+      "Tool Instructions",
+      "Persona",
+      "Instructions",
+      "Available Emojis",
+      "Server Members",
+      "Thread Metadata",
+      "Parent Pre-Context",
+      "Chat History — Older",
+    ]);
+  });
+
   test("within developer sections, cached precede uncached (contiguous groups)", () => {
     const devDefs = SECTION_DEFS.filter((d) => d.role === "developer");
     const cachedFlags = devDefs.map((d) => d.cached);

@@ -107,7 +107,6 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultInstructions).toBe("");
     expect((cfg as unknown as { defaultPromptCaching?: unknown }).defaultPromptCaching).toEqual({
       enabled: true,
-      profile: "conservative",
     });
     expect(cfg.logLevel).toBe("info");
   });
@@ -184,21 +183,19 @@ describe("loadGlobalConfig", () => {
 
   test("parses global promptCaching overrides", () => {
     const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "promptCaching:\n  enabled: false\n  profile: aggressive\n");
+    writeFileSync(file, "promptCaching:\n  enabled: false\n");
     const cfg = loadGlobalConfig(BASE_ENV, file);
     expect((cfg as unknown as { defaultPromptCaching?: unknown }).defaultPromptCaching).toEqual({
       enabled: false,
-      profile: "aggressive",
     });
   });
 
-  test("falls back to conservative profile for invalid global promptCaching profile", () => {
+  test("ignores extra global promptCaching fields", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, "promptCaching:\n  enabled: true\n  profile: invalid-profile\n");
     const cfg = loadGlobalConfig(BASE_ENV, file);
     expect((cfg as unknown as { defaultPromptCaching?: unknown }).defaultPromptCaching).toEqual({
       enabled: true,
-      profile: "conservative",
     });
   });
 });
@@ -432,7 +429,7 @@ describe("resolveGuildConfig", () => {
   test("inherits promptCaching from global", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
-    writeFileSync(cfgFile, "promptCaching:\n  enabled: false\n  profile: aggressive\n");
+    writeFileSync(cfgFile, "promptCaching:\n  enabled: false\n");
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {
       guildId: "110",
@@ -441,31 +438,29 @@ describe("resolveGuildConfig", () => {
     const resolved = resolveGuildConfig(global, partial);
     expect((resolved as unknown as { promptCaching?: unknown }).promptCaching).toEqual({
       enabled: false,
-      profile: "aggressive",
     });
   });
 
   test("guild promptCaching overrides global defaults", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
-    writeFileSync(cfgFile, "promptCaching:\n  enabled: true\n  profile: conservative\n");
+    writeFileSync(cfgFile, "promptCaching:\n  enabled: true\n");
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
     const partial = {
       guildId: "111",
       slug: "prompt-caching-override",
-      promptCaching: { enabled: false, profile: "aggressive" },
+      promptCaching: { enabled: false },
     } as GuildConfigYaml & { guildId: string; slug: string };
     const resolved = resolveGuildConfig(global, partial);
     expect((resolved as unknown as { promptCaching?: unknown }).promptCaching).toEqual({
       enabled: false,
-      profile: "aggressive",
     });
   });
 
-  test("invalid guild promptCaching profile falls back to global profile", () => {
+  test("ignores extra guild promptCaching fields", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
-    writeFileSync(cfgFile, "promptCaching:\n  enabled: true\n  profile: aggressive\n");
+    writeFileSync(cfgFile, "promptCaching:\n  enabled: true\n");
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
     const partial = {
       guildId: "112",
@@ -475,7 +470,6 @@ describe("resolveGuildConfig", () => {
     const resolved = resolveGuildConfig(global, partial);
     expect((resolved as unknown as { promptCaching?: unknown }).promptCaching).toEqual({
       enabled: true,
-      profile: "aggressive",
     });
   });
 });
@@ -568,7 +562,7 @@ describe("saveGuildConfig", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
-      promptCaching: { enabled: true, profile: "conservative" },
+      promptCaching: { enabled: true },
     };
 
     saveGuildConfig(file, resolved);
@@ -606,7 +600,7 @@ describe("saveGuildConfig", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
-      promptCaching: { enabled: true, profile: "conservative" },
+      promptCaching: { enabled: true },
     };
 
     saveGuildConfig(file, resolved);
@@ -640,7 +634,7 @@ describe("saveGuildConfig", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
-      promptCaching: { enabled: false, profile: "aggressive" },
+      promptCaching: { enabled: false },
     } as unknown as GuildConfig;
 
     saveGuildConfig(file, resolved);
@@ -648,7 +642,6 @@ describe("saveGuildConfig", () => {
     const reloaded = loadGuildConfigFile(file);
     expect((reloaded as unknown as { promptCaching?: unknown }).promptCaching).toEqual({
       enabled: false,
-      profile: "aggressive",
     });
   });
 });
@@ -970,7 +963,7 @@ describe("saveGuildConfig bashTool", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
-      promptCaching: { enabled: true, profile: "conservative" },
+      promptCaching: { enabled: true },
     };
 
     saveGuildConfig(file, resolved);
@@ -1004,7 +997,7 @@ describe("saveGuildConfig bashTool", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
-      promptCaching: { enabled: true, profile: "conservative" },
+      promptCaching: { enabled: true },
     };
 
     saveGuildConfig(file, resolved);
@@ -1221,7 +1214,7 @@ describe("saveGuildConfig emotes", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
-      promptCaching: { enabled: true, profile: "conservative" },
+      promptCaching: { enabled: true },
     };
 
     saveGuildConfig(file, resolved);
@@ -1262,7 +1255,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
-      promptCaching: { enabled: true, profile: "conservative" },
+      promptCaching: { enabled: true },
     };
 
     saveGuildConfig(file, resolved);
@@ -1296,7 +1289,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
-      promptCaching: { enabled: true, profile: "conservative" },
+      promptCaching: { enabled: true },
     };
 
     saveGuildConfig(file, resolved);

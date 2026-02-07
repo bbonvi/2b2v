@@ -36,7 +36,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultForceToolCallFirstRun: false,
     defaultDisableParallelToolCallsFirstRun: false,
     defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
-    defaultPromptCaching: { enabled: true, profile: "conservative" },
+    defaultPromptCaching: { enabled: true },
     ...overrides,
   };
 }
@@ -62,7 +62,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     forceToolCallFirstRun: false,
     disableParallelToolCallsFirstRun: false,
     dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
-    promptCaching: { enabled: true, profile: "conservative" },
+    promptCaching: { enabled: true },
     ...overrides,
   };
 }
@@ -258,7 +258,50 @@ describe("handleMessage", () => {
     expect(result.agentRan).toBe(true);
   });
 
-  test("conservative profile applies cache_control to tail stable sections for moonshot", async () => {
+  test("enabled prompt caching merges stable sections into one cached system message", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
+    let capturedPayload: unknown;
+    const requestLog = {
+      recordLLMRequest(payload: unknown) {
+        capturedPayload = structuredClone(payload);
+      },
+      recordToolStart() {},
+      recordToolEnd() {},
+      recordLLMCompletion() {},
+    };
+    const stableSections: ContextSection[] = [
+      { label: "S1", text: "stable-system-1", cached: true, role: "system" },
+      { label: "S2", text: "stable-system-2", cached: true, role: "system" },
+      { label: "S3", text: "stable-system-3", cached: true, role: "system" },
+      { label: "S4", text: "stable-system-4", cached: true, role: "system" },
+    ];
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig({ defaultModel: "moonshotai/kimi-k2.5" }),
+      guildConfig: makeGuildConfig({
+        model: "moonshotai/kimi-k2.5",
+        triggers: { mention: true, keywords: [], randomChance: 0 },
+        promptCaching: { enabled: true },
+      }),
+      context: makeContext({
+        sections: [...stableSections, { label: "Current Context", text: "volatile context", cached: false, role: "developer" }],
+        userMessage: "hello bot",
+      }),
+      sender,
+      requestLog: requestLog as unknown as HandlerDeps["requestLog"],
+    };
+
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+
+    const payload = capturedPayload as { messages?: PayloadMessage[] };
+    const messages = payload.messages ?? [];
+    expect(messages.length).toBeGreaterThanOrEqual(2);
+    expect(messages[0]?.role).toBe("system");
+    expect(messageText(messages[0] as PayloadMessage)).toBe(stableSections.map((s) => s.text).join("\n\n"));
+    expect(hasCacheControl(messages[0] as PayloadMessage)).toBe(true);
+    expect(messages.filter((m) => hasCacheControl(m)).length).toBe(1);
+  });
+
+  test("stable sections are merged per (role, cached) bucket", async () => {
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
     let capturedPayload: unknown;
     const requestLog = {
@@ -274,99 +317,13 @@ describe("handleMessage", () => {
       { label: "S2", text: "stable-system-2", cached: true, role: "system" },
       { label: "D1", text: "stable-dev-1", cached: true, role: "developer" },
       { label: "D2", text: "stable-dev-2", cached: true, role: "developer" },
-      { label: "D3", text: "stable-dev-3", cached: true, role: "developer" },
-      { label: "D4", text: "stable-dev-4", cached: true, role: "developer" },
-    ];
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig({ defaultModel: "moonshotai/kimi-k2.5" }),
-      guildConfig: makeGuildConfig({
-        model: "moonshotai/kimi-k2.5",
-        triggers: { mention: true, keywords: [], randomChance: 0 },
-        promptCaching: { enabled: true, profile: "conservative" },
-      }),
-      context: makeContext({
-        sections: [...stableSections, { label: "Current Context", text: "volatile context", cached: false, role: "developer" }],
-        userMessage: "hello bot",
-      }),
-      sender,
-      requestLog: requestLog as unknown as HandlerDeps["requestLog"],
-    };
-
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-
-    const payload = capturedPayload as { messages?: PayloadMessage[] };
-    const messages = payload.messages ?? [];
-    expect(messages.length).toBeGreaterThanOrEqual(stableSections.length + 1);
-
-    const prepended = messages.slice(0, stableSections.length);
-    expect(prepended.map((m) => m.role)).toEqual(["system", "system", "developer", "developer", "developer", "developer"]);
-    expect(prepended.map((m) => messageText(m))).toEqual(stableSections.map((s) => s.text));
-    expect(prepended.map((m) => hasCacheControl(m))).toEqual([false, false, true, true, true, true]);
-  });
-
-  test("google models avoid breakpoints on volatile cached developer history sections", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
-    let capturedPayload: unknown;
-    const requestLog = {
-      recordLLMRequest(payload: unknown) {
-        capturedPayload = structuredClone(payload);
-      },
-      recordToolStart() {},
-      recordToolEnd() {},
-      recordLLMCompletion() {},
-    };
-    const stableSections: ContextSection[] = [
-      { label: "S1", text: "stable-system-1", cached: true, role: "system" },
-      { label: "Chat History — Older", text: "stable-dev-older-history", cached: true, role: "developer" },
     ];
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig({ defaultModel: "google/gemini-3-flash-preview" }),
       guildConfig: makeGuildConfig({
-        model: "google/gemini-3-flash-preview",
-        triggers: { mention: true, keywords: [], randomChance: 0 },
-        promptCaching: { enabled: true, profile: "conservative" },
-      }),
-      context: makeContext({
-        sections: [...stableSections, { label: "Current Context", text: "volatile context", cached: false, role: "developer" }],
-        userMessage: "hello bot",
-      }),
-      sender,
-      requestLog: requestLog as unknown as HandlerDeps["requestLog"],
-    };
-
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-
-    const payload = capturedPayload as { messages?: PayloadMessage[] };
-    const messages = payload.messages ?? [];
-    const prepended = messages.slice(0, stableSections.length);
-    expect(prepended.map((m) => hasCacheControl(m))).toEqual([true, false]);
-  });
-
-  test("aggressive profile applies cache_control to all stable sections for non-anthropic models", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
-    let capturedPayload: unknown;
-    const requestLog = {
-      recordLLMRequest(payload: unknown) {
-        capturedPayload = structuredClone(payload);
-      },
-      recordToolStart() {},
-      recordToolEnd() {},
-      recordLLMCompletion() {},
-    };
-    const stableSections: ContextSection[] = [
-      { label: "S1", text: "stable-system-1", cached: true, role: "system" },
-      { label: "S2", text: "stable-system-2", cached: true, role: "system" },
-      { label: "D1", text: "stable-dev-1", cached: true, role: "developer" },
-      { label: "D2", text: "stable-dev-2", cached: true, role: "developer" },
-      { label: "D3", text: "stable-dev-3", cached: true, role: "developer" },
-      { label: "D4", text: "stable-dev-4", cached: true, role: "developer" },
-    ];
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig({ defaultModel: "moonshotai/kimi-k2.5" }),
-      guildConfig: makeGuildConfig({
         model: "moonshotai/kimi-k2.5",
         triggers: { mention: true, keywords: [], randomChance: 0 },
-        promptCaching: { enabled: true, profile: "aggressive" },
+        promptCaching: { enabled: true },
       }),
       context: makeContext({
         sections: [...stableSections, { label: "Current Context", text: "volatile context", cached: false, role: "developer" }],
@@ -380,50 +337,14 @@ describe("handleMessage", () => {
 
     const payload = capturedPayload as { messages?: PayloadMessage[] };
     const messages = payload.messages ?? [];
-    const prepended = messages.slice(0, stableSections.length);
-    expect(prepended.map((m) => hasCacheControl(m))).toEqual([true, true, true, true, true, true]);
-  });
-
-  test("aggressive profile is clamped to four breakpoints for anthropic models", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
-    let capturedPayload: unknown;
-    const requestLog = {
-      recordLLMRequest(payload: unknown) {
-        capturedPayload = structuredClone(payload);
-      },
-      recordToolStart() {},
-      recordToolEnd() {},
-      recordLLMCompletion() {},
-    };
-    const stableSections: ContextSection[] = [
-      { label: "S1", text: "stable-system-1", cached: true, role: "system" },
-      { label: "S2", text: "stable-system-2", cached: true, role: "system" },
-      { label: "D1", text: "stable-dev-1", cached: true, role: "developer" },
-      { label: "D2", text: "stable-dev-2", cached: true, role: "developer" },
-      { label: "D3", text: "stable-dev-3", cached: true, role: "developer" },
-      { label: "D4", text: "stable-dev-4", cached: true, role: "developer" },
-    ];
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig({ defaultModel: "anthropic/claude-sonnet-4" }),
-      guildConfig: makeGuildConfig({
-        model: "anthropic/claude-sonnet-4",
-        triggers: { mention: true, keywords: [], randomChance: 0 },
-        promptCaching: { enabled: true, profile: "aggressive" },
-      }),
-      context: makeContext({
-        sections: [...stableSections, { label: "Current Context", text: "volatile context", cached: false, role: "developer" }],
-        userMessage: "hello bot",
-      }),
-      sender,
-      requestLog: requestLog as unknown as HandlerDeps["requestLog"],
-    };
-
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-
-    const payload = capturedPayload as { messages?: PayloadMessage[] };
-    const messages = payload.messages ?? [];
-    const prepended = messages.slice(0, stableSections.length);
-    expect(prepended.map((m) => hasCacheControl(m))).toEqual([true, true, true, true, false, false]);
+    const prepended = messages.slice(0, 2);
+    expect(prepended.map((m) => m.role)).toEqual(["system", "developer"]);
+    expect(prepended.map((m) => messageText(m))).toEqual([
+      "stable-system-1\n\nstable-system-2",
+      "stable-dev-1\n\nstable-dev-2",
+    ]);
+    expect(prepended.map((m) => hasCacheControl(m))).toEqual([true, false]);
+    expect(messages.filter((m) => hasCacheControl(m)).length).toBe(1);
   });
 
   test("disabled prompt caching inserts stable sections without cache_control", async () => {
@@ -447,7 +368,7 @@ describe("handleMessage", () => {
       guildConfig: makeGuildConfig({
         model: "moonshotai/kimi-k2.5",
         triggers: { mention: true, keywords: [], randomChance: 0 },
-        promptCaching: { enabled: false, profile: "conservative" },
+        promptCaching: { enabled: false },
       }),
       context: makeContext({
         sections: [...stableSections, { label: "Current Context", text: "volatile context", cached: false, role: "developer" }],
@@ -461,8 +382,9 @@ describe("handleMessage", () => {
 
     const payload = capturedPayload as { messages?: PayloadMessage[] };
     const messages = payload.messages ?? [];
-    const prepended = messages.slice(0, stableSections.length);
-    expect(prepended.map((m) => hasCacheControl(m))).toEqual([false, false, false]);
+    expect(messages[0]?.role).toBe("system");
+    expect(hasCacheControl(messages[0] as PayloadMessage)).toBe(false);
+    expect(messages.filter((m) => hasCacheControl(m)).length).toBe(0);
 
     const userMessage = messages.find((m) => m.role === "user");
     expect(userMessage).toBeDefined();

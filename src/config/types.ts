@@ -52,13 +52,9 @@ export interface DispatcherConfig {
   maxFollowUps: number;
 }
 
-/** Prompt caching strategy profile for OpenRouter payload breakpoints. */
-export type PromptCachingProfile = "conservative" | "aggressive";
-
 /** Prompt caching controls. */
 export interface PromptCachingConfig {
   enabled: boolean;
-  profile: PromptCachingProfile;
 }
 
 /** Trigger configuration per guild. All independently toggleable. */
@@ -212,7 +208,6 @@ export interface GuildConfigYaml {
   };
   promptCaching?: {
     enabled?: boolean;
-    profile?: "conservative" | "aggressive";
   };
 }
 
@@ -273,6 +268,5 @@ export interface MainConfigYaml {
   };
   promptCaching?: {
     enabled?: boolean;
-    profile?: "conservative" | "aggressive";
   };
 }

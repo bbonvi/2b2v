@@ -78,12 +78,10 @@ Messages and memories enqueue into a batcher, get embedded by the local model, a
 Empty sections are omitted. `assembleContext()` iterates the registry; no imperative per-section logic.
 
 `handleMessage()` uses section-level prompt caching:
-- Every `cached: true` section is prepended as its own OpenAI-compatible message, preserving section order and role.
+- All `cached: true` sections are merged by `(role, cached)` bucket before payload injection.
+- With current `SECTION_DEFS`, stable sections are all `system`, producing one cached stable-prefix message.
 - Volatile developer context (`cached: false`) remains in `systemPrompt` as the regular developer message.
-- Cache breakpoints (`cache_control: { type: "ephemeral" }`) are applied by `guild.promptCaching` for all OpenRouter models.
-- Profile caps: `conservative` max 4 (applied to tail stable sections), `aggressive` unlimited soft cap.
-- Hard clamp: `anthropic/*` max 4.
-- `google/*` excludes `Chat History — Older` from breakpoint placement so Gemini's last-breakpoint behavior does not lock on highly volatile history.
+- Cache breakpoints (`cache_control: { type: "ephemeral" }`) are applied as a single marker on the first merged stable message when `guild.promptCaching.enabled` is true.
 - Existing `cache_control` markers on volatile conversation messages are stripped before stable breakpoints are inserted.
 
 ### History Processing
@@ -151,8 +149,7 @@ Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields op
 
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
-| `enabled` | boolean | `true` | Disable to send stable sections without cache breakpoints |
-| `profile` | `"conservative" \| "aggressive"` | `"conservative"` | `conservative` max 4 on tail stable sections, `aggressive` unlimited soft cap (Anthropic hard-clamped to 4; Google excludes `Chat History — Older` from breakpoints) |
+| `enabled` | boolean | `true` | Disable to send merged stable sections without cache breakpoints |
 
 **Instructions**: Custom text injected into LLM context (after tool instructions, before emojis). `instructionsPath` loads from a file; `instructions` provides inline text. `instructionsPath` takes priority. Guild-level overrides global default.
 

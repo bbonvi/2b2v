@@ -16,7 +16,6 @@ import type {
   MembersConfig,
   DispatcherConfig,
   PromptCachingConfig,
-  PromptCachingProfile,
 } from "./types.ts";
 import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 
@@ -159,27 +158,16 @@ const DEFAULT_DISPATCHER: DispatcherConfig = {
 
 const DEFAULT_PROMPT_CACHING: PromptCachingConfig = {
   enabled: true,
-  profile: "conservative",
 };
 
 const DEFAULT_BASH_TIMEOUT_MS = 5000;
 const DEFAULT_BASH_OUTPUT_LIMIT = 4000;
-
-function resolvePromptCachingProfile(
-  profile: unknown,
-  fallback: PromptCachingProfile
-): PromptCachingProfile {
-  if (profile === "aggressive") return "aggressive";
-  if (profile === "conservative") return "conservative";
-  return fallback;
-}
 
 function resolveGlobalPromptCaching(
   partial: MainConfigYaml["promptCaching"] | undefined
 ): PromptCachingConfig {
   return {
     enabled: partial?.enabled ?? DEFAULT_PROMPT_CACHING.enabled,
-    profile: resolvePromptCachingProfile(partial?.profile, DEFAULT_PROMPT_CACHING.profile),
   };
 }
 
@@ -189,7 +177,6 @@ function resolveGuildPromptCaching(
 ): PromptCachingConfig {
   return {
     enabled: partial?.enabled ?? global.enabled,
-    profile: resolvePromptCachingProfile(partial?.profile, global.profile),
   };
 }
 

@@ -79,7 +79,6 @@ trim:
   replyQuoteChars: 50
 promptCaching:
   enabled: true
-  profile: conservative
 mergeMessageGapSeconds: 120
 memoryRetentionDays: 180
 adminUserIds: []
@@ -89,11 +88,7 @@ imageReadMaxPerCall: 10
 
 All fields are optional — missing values fall back to global defaults.
 
-`promptCaching.profile` supports:
-- `conservative` (default): up to 4 stable-section cache breakpoints (applied to the latest stable sections)
-- `aggressive`: all stable sections (Anthropic models still hard-clamped to 4)
-
-For `google/*` models, `Chat History — Older` is excluded from breakpoint placement to avoid unstable cache keys.
+`promptCaching.enabled` controls whether the stable prefix is sent with a single cache breakpoint (`cache_control`).
 
 ### Persona
 

@@ -124,19 +124,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
 
-const CONSERVATIVE_PROMPT_CACHING_SOFT_CAP = 4;
-const ANTHROPIC_PROMPT_CACHING_HARD_CAP = 4;
-
-function resolvePromptCachingHardCap(model: string): number {
-  if (model.startsWith("anthropic/")) return ANTHROPIC_PROMPT_CACHING_HARD_CAP;
-  return Number.POSITIVE_INFINITY;
-}
-
-function resolvePromptCachingSoftCap(config: PromptCachingConfig): number {
-  if (config.profile === "conservative") return CONSERVATIVE_PROMPT_CACHING_SOFT_CAP;
-  return Number.POSITIVE_INFINITY;
-}
-
 function stripCacheControlFromMessages(messages: unknown[]): void {
   for (const message of messages) {
     if (!isRecord(message)) continue;
@@ -160,7 +147,6 @@ function makePromptContent(
 }
 
 interface StablePromptSection {
-  label: string;
   role: "system" | "developer";
   text: string;
 }
@@ -168,45 +154,31 @@ interface StablePromptSection {
 function getStablePromptSections(context: AssembledContext): StablePromptSection[] {
   return context.sections
     .filter((section) => section.cached)
-    .map((section) => ({ label: section.label, role: section.role, text: section.text }));
+    .map((section) => ({ role: section.role, text: section.text }));
 }
 
-function isGoogleModel(model: string): boolean {
-  return model.startsWith("google/");
+interface StablePromptGroup {
+  role: "system" | "developer";
+  text: string;
 }
 
-function shouldSkipBreakpointForGoogle(section: StablePromptSection): boolean {
-  return section.label === "Chat History — Older";
-}
-
-function selectBreakpointIndices(
-  stableSections: StablePromptSection[],
-  breakpointsToApply: number,
-  promptCaching: PromptCachingConfig,
-  model: string
-): Set<number> {
-  if (breakpointsToApply <= 0) return new Set<number>();
-
-  const eligibleIndices = stableSections
-    .map((section, idx) => ({ section, idx }))
-    .filter(({ section }) => !isGoogleModel(model) || !shouldSkipBreakpointForGoogle(section))
-    .map(({ idx }) => idx);
-
-  const selected = new Set<number>();
-  if (eligibleIndices.length === 0) return selected;
-
-  const limit = Math.min(breakpointsToApply, eligibleIndices.length);
-  const useTailBreakpoints = promptCaching.profile === "conservative";
-  const start = useTailBreakpoints ? eligibleIndices.length - limit : 0;
-  for (let i = start; i < start + limit; i += 1) {
-    selected.add(eligibleIndices[i] as number);
+function groupStableSections(stableSections: StablePromptSection[]): StablePromptGroup[] {
+  const groups = new Map<string, StablePromptGroup>();
+  for (const section of stableSections) {
+    const key = `${section.role}:cached`;
+    const existing = groups.get(key);
+    if (existing === undefined) {
+      groups.set(key, { role: section.role, text: section.text });
+      continue;
+    }
+    existing.text = `${existing.text}\n\n${section.text}`;
   }
-  return selected;
+  return [...groups.values()];
 }
 
 /**
- * Mutate OpenAI-compatible payload by prepending stable context sections.
- * Stable sections preserve original order and are inserted as individual messages.
+ * Mutate OpenAI-compatible payload by prepending grouped stable context sections.
+ * Stable sections are merged by (role, cached) buckets and keep original order within each bucket.
  */
 function prependStableSectionsToPayload(
   payload: unknown,
@@ -217,24 +189,12 @@ function prependStableSectionsToPayload(
   const messages = payload.messages;
   if (!Array.isArray(messages)) return;
 
-  const model = typeof payload.model === "string" ? payload.model : "";
-  let breakpointsToApply = 0;
-  if (promptCaching.enabled) {
-    const softCap = resolvePromptCachingSoftCap(promptCaching);
-    const hardCap = resolvePromptCachingHardCap(model);
-    breakpointsToApply = Math.min(stableSections.length, softCap, hardCap);
-    stripCacheControlFromMessages(messages);
-  }
+  if (promptCaching.enabled) stripCacheControlFromMessages(messages);
 
-  const breakpointIndices = selectBreakpointIndices(
-    stableSections,
-    breakpointsToApply,
-    promptCaching,
-    model
-  );
-  const toInsert = stableSections.map((section, idx) => ({
-    role: section.role,
-    content: makePromptContent(section.text, breakpointIndices.has(idx)),
+  const stableGroups = groupStableSections(stableSections);
+  const toInsert = stableGroups.map((group, idx) => ({
+    role: group.role,
+    content: makePromptContent(group.text, promptCaching.enabled && idx === 0),
   }));
   if (toInsert.length > 0) {
     messages.unshift(...toInsert);
@@ -284,7 +244,7 @@ export async function handleMessage(
   const stableSections = getStablePromptSections(context);
   const splitPrompts = contextToSplitPrompts(context);
   // pi-ai only accepts a single systemPrompt string. We pass the volatile (uncached)
-  // developer portion; stable sections are injected via onPayload mutation.
+  // developer portion; grouped stable sections are injected via onPayload mutation.
   const systemPrompt = splitPrompts.developer;
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
   const streamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);

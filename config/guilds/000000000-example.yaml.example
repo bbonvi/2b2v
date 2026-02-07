@@ -67,7 +67,6 @@ members:
 # Prompt caching override (inherits global when omitted)
 promptCaching:
   enabled: true
-  profile: conservative
 
 # Agent tool-calling behavior (overrides global defaults)
 # forceToolCallFirstRun: true

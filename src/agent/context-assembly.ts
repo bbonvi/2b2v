@@ -88,12 +88,12 @@ export const SECTION_DEFS: readonly SectionDef[] = [
   { label: "Persona",              role: "system",    cached: true,  source: { kind: "field", inputKey: "persona" } },
   { label: "Instructions",         role: "system",    cached: true,  source: { kind: "field", inputKey: "instructions", header: "## Instructions" } },
 
-  // Group 2: developer, cached (guild context + older history)
-  { label: "Available Emojis",     role: "developer", cached: true,  source: { kind: "field", inputKey: "emojis", header: "## Available Emojis" } },
-  { label: "Server Members",       role: "developer", cached: true,  source: { kind: "field", inputKey: "members", header: "## Server Members" } },
-  { label: "Thread Metadata",      role: "developer", cached: true,  source: { kind: "computed", compute: computeThreadMetadata, header: "## Thread Metadata" } },
-  { label: "Parent Pre-Context",   role: "developer", cached: true,  source: { kind: "field", inputKey: "parentPreContext" } },
-  { label: "Chat History — Older", role: "developer", cached: true,  source: { kind: "field", inputKey: "olderHistory" } },
+  // Group 2: system, cached (stable context + older history)
+  { label: "Available Emojis",     role: "system",    cached: true,  source: { kind: "field", inputKey: "emojis", header: "## Available Emojis" } },
+  { label: "Server Members",       role: "system",    cached: true,  source: { kind: "field", inputKey: "members", header: "## Server Members" } },
+  { label: "Thread Metadata",      role: "system",    cached: true,  source: { kind: "computed", compute: computeThreadMetadata, header: "## Thread Metadata" } },
+  { label: "Parent Pre-Context",   role: "system",    cached: true,  source: { kind: "field", inputKey: "parentPreContext" } },
+  { label: "Chat History — Older", role: "system",    cached: true,  source: { kind: "field", inputKey: "olderHistory" } },
 
   // Group 3: developer, uncached (volatile per-message)
   { label: "Threads In This Chat", role: "developer", cached: false, source: { kind: "field", inputKey: "threadsInChat", header: "## Threads In This Chat" } },
@@ -136,17 +136,14 @@ export function contextToSystemPrompt(ctx: AssembledContext): string {
 /**
  * Three-way split for provider message construction.
  *
- * Sent as three separate messages to enable prefix caching:
- *   [0] role=system  (cached) — stable identity, never changes
- *   [1] role=developer (cached) — stable guild/thread context + older history
- *   [2] role=developer (uncached) — volatile channel context + recent history
+ * Split assembled context into role/cached buckets.
  */
 export interface SplitPrompts {
-  /** Core instructions: tool instructions, persona, custom instructions. */
+  /** Cached system context. */
   system: string;
-  /** Stable developer context: emojis, members, thread metadata, older history. */
+  /** Cached developer context. Usually empty with current SECTION_DEFS. */
   cachedDeveloper: string;
-  /** Volatile developer context: threads list, schedules, journal, recent history, current context. */
+  /** Volatile developer context. */
   developer: string;
 }
 

@@ -30,7 +30,7 @@ const GLOBAL: GlobalConfig = {
   defaultForceToolCallFirstRun: false,
   defaultDisableParallelToolCallsFirstRun: false,
   defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
-  defaultPromptCaching: { enabled: true, profile: "conservative" },
+  defaultPromptCaching: { enabled: true },
 };
 
 const GUILD: GuildConfig = {
@@ -53,7 +53,7 @@ const GUILD: GuildConfig = {
   forceToolCallFirstRun: false,
   disableParallelToolCallsFirstRun: false,
   dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
-  promptCaching: { enabled: true, profile: "conservative" },
+  promptCaching: { enabled: true },
 };
 
 describe("resolveModel", () => {

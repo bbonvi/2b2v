@@ -71,12 +71,10 @@ dispatcher:
   defaultDebounceMs: 2000   # Debounce ms for non-mention triggers (default: 2000)
   maxFollowUps: 5           # Max follow-up messages surfaced per tool check (default: 5)
 
-# OpenRouter prompt caching controls.
-# conservative: up to 4 cache breakpoints (safe default)
-# aggressive: all stable sections (Anthropic still clamped to 4 by hard limit)
+# OpenRouter prompt caching control.
+# When enabled, the bot emits one cached stable-prefix message with one cache breakpoint.
 promptCaching:
   enabled: true
-  profile: conservative
 
 # Agent tool-calling behavior on first turn
 # Some models need "required" tool choice on first turn to ensure tool use.
