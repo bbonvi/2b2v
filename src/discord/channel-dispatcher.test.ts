@@ -12,8 +12,10 @@ function makeConfig(overrides: Partial<DispatcherConfig> = {}): DispatcherConfig
   };
 }
 
-function makeMessage(channelId: string): unknown {
-  return { channelId };
+let messageCounter = 0;
+function makeMessage(channelId: string, id?: string): unknown {
+  messageCounter += 1;
+  return { channelId, id: id ?? `m-${messageCounter}` };
 }
 
 function delay(ms: number): Promise<void> {
@@ -21,9 +23,58 @@ function delay(ms: number): Promise<void> {
 }
 
 describe("createChannelDispatcher", () => {
+  test("suppresses queued messages that were already surfaced during current run", async () => {
+    let callCount = 0;
+    const handler: DispatchHandler = async (msgs) => {
+      callCount++;
+      const currentId = (msgs[0] as PendingMessage).id;
+      if (callCount === 1) {
+        await delay(60);
+        return { coveredMessageIds: [currentId, "m-2"] };
+      }
+      return { coveredMessageIds: [currentId] };
+    };
+
+    const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 20 });
+    const dispatcher = createChannelDispatcher({ config, handler });
+
+    dispatcher.enqueue(makeMessage("ch-1", "m-1"), true);
+    await delay(30); // first handler starts
+
+    // Arrives while first handler is running, should be queued then suppressed.
+    dispatcher.enqueue(makeMessage("ch-1", "m-2"), true);
+
+    await delay(160);
+
+    expect(callCount).toBe(1);
+    dispatcher.dispose();
+  });
+
+  test("ignores late enqueue for message IDs already suppressed", async () => {
+    let callCount = 0;
+    const handler: DispatchHandler = (msgs) => {
+      callCount++;
+      const currentId = (msgs[0] as PendingMessage).id;
+      return Promise.resolve({ coveredMessageIds: [currentId, "m-late"] });
+    };
+
+    const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 20 });
+    const dispatcher = createChannelDispatcher({ config, handler });
+
+    dispatcher.enqueue(makeMessage("ch-1", "m-1"), true);
+    await delay(60);
+
+    // Simulates delayed enqueue (e.g., slower upstream work before dispatcher enqueue).
+    dispatcher.enqueue(makeMessage("ch-1", "m-late"), true);
+    await delay(60);
+
+    expect(callCount).toBe(1);
+    dispatcher.dispose();
+  });
+
   test("fires handler after debounce with accumulated messages", async () => {
     const batches: PendingMessage[][] = [];
-    const handler: DispatchHandler = (msgs) => { batches.push([...msgs]); return Promise.resolve(); };
+    const handler: DispatchHandler = (msgs) => { batches.push([...msgs]); return Promise.resolve(undefined); };
 
     const dispatcher = createChannelDispatcher({ config: makeConfig(), handler });
 
@@ -41,7 +92,7 @@ describe("createChannelDispatcher", () => {
 
   test("mention shortens debounce from default to mention timing", async () => {
     const batches: PendingMessage[][] = [];
-    const handler: DispatchHandler = (msgs) => { batches.push([...msgs]); return Promise.resolve(); };
+    const handler: DispatchHandler = (msgs) => { batches.push([...msgs]); return Promise.resolve(undefined); };
 
     const config = makeConfig({ mentionDebounceMs: 30, defaultDebounceMs: 200 });
     const dispatcher = createChannelDispatcher({ config, handler });
@@ -67,12 +118,13 @@ describe("createChannelDispatcher", () => {
     let maxConcurrent = 0;
     const batches: PendingMessage[][] = [];
 
-    const handler: DispatchHandler = async (msgs) => {
+    const handler: DispatchHandler = async (msgs): Promise<undefined> => {
       concurrentCount++;
       maxConcurrent = Math.max(maxConcurrent, concurrentCount);
       batches.push([...msgs]);
       await delay(80);
       concurrentCount--;
+      return undefined;
     };
 
     const config = makeConfig({ defaultDebounceMs: 20 });
@@ -104,7 +156,7 @@ describe("createChannelDispatcher", () => {
     const handler: DispatchHandler = (msgs) => {
       const channelId = ((msgs[0] as PendingMessage).message as { channelId: string }).channelId;
       batches.push({ channelId, count: msgs.length });
-      return Promise.resolve();
+      return Promise.resolve(undefined);
     };
 
     const config = makeConfig({ defaultDebounceMs: 30 });
@@ -127,9 +179,10 @@ describe("createChannelDispatcher", () => {
   test("queued messages form new batch after handler completes", async () => {
     const batches: PendingMessage[][] = [];
 
-    const handler: DispatchHandler = async (msgs) => {
+    const handler: DispatchHandler = async (msgs): Promise<undefined> => {
       batches.push([...msgs]);
       await delay(60);
+      return undefined;
     };
 
     const config = makeConfig({ defaultDebounceMs: 20 });
@@ -157,7 +210,7 @@ describe("createChannelDispatcher", () => {
 
   test("dispose clears all timers", async () => {
     const batches: PendingMessage[][] = [];
-    const handler: DispatchHandler = (msgs) => { batches.push([...msgs]); return Promise.resolve(); };
+    const handler: DispatchHandler = (msgs) => { batches.push([...msgs]); return Promise.resolve(undefined); };
 
     const dispatcher = createChannelDispatcher({ config: makeConfig(), handler });
 
@@ -174,7 +227,7 @@ describe("createChannelDispatcher", () => {
     const handler: DispatchHandler = (_msgs) => {
       callCount++;
       if (callCount === 1) return Promise.reject(new Error("handler failed"));
-      return Promise.resolve();
+      return Promise.resolve(undefined);
     };
 
     const config = makeConfig({ defaultDebounceMs: 20 });

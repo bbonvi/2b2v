@@ -6,6 +6,8 @@ import { getFollowUpMessages, type FollowUpMessage } from "../db/followup-reposi
 export interface FollowUpState {
   /** Message IDs already surfaced in tool results or transformContext. */
   surfacedIds: Set<string>;
+  /** Same-user follow-up IDs that should be suppressed from replay runs. */
+  coveredIds: Set<string>;
   /** Message IDs of bot sends in this handler run (excluded from queries). */
   botSendIds: Set<string>;
   /** Track a bot send ID (call when send_message completes). */
@@ -20,10 +22,14 @@ export interface FollowUpWrapperDeps {
   botUserId: string;
   /** The trigger message ID (excluded from follow-up queries). */
   triggerMessageId: string;
+  /** Triggering user ID for same-user follow-up scoping. */
+  triggerUserId: string;
   /** Max follow-ups to surface per check. */
   maxFollowUps: number;
   /** Shared set of already-surfaced message IDs (e.g. from transformContext). */
   sharedSurfacedIds?: Set<string>;
+  /** Shared set of same-user covered message IDs (for dispatcher suppression). */
+  sharedCoveredIds?: Set<string>;
 }
 
 /**
@@ -56,15 +62,53 @@ function formatDetailedAnnotation(messages: FollowUpMessage[], nowMs: number): s
 }
 
 /**
- * Build lightweight follow-up annotation for non-send_message tools.
+ * Build lightweight follow-up annotation.
  */
-function formatLightweightAnnotation(count: number): string {
-  const plural = count === 1 ? "" : "s";
-  return [
-    "---",
-    `[Channel: ${count} new message${plural} since you started. Use \`chat_history\` to review if relevant before responding.]`,
-    "---",
-  ].join("\n");
+function formatLightweightAnnotation(
+  triggerUserCount: number,
+  otherUserCount: number,
+): string {
+  const parts: string[] = [];
+  if (triggerUserCount > 0) {
+    const plural = triggerUserCount === 1 ? "" : "s";
+    parts.push(
+      `Trigger user: ${triggerUserCount} new follow-up message${plural}. Use \`chat_history\` and \`reply_to_message_id\` if relevant.`,
+    );
+  }
+  if (otherUserCount > 0) {
+    const plural = otherUserCount === 1 ? "" : "s";
+    parts.push(
+      `Other users: ${otherUserCount} new message${plural}. FYI only, these remain queued for separate handling.`,
+    );
+  }
+  if (parts.length === 0) return "";
+  return ["---", ...parts, "---"].join("\n");
+}
+
+/**
+ * Build send_message annotation with actionable same-user follow-ups and
+ * informational other-user activity.
+ */
+function formatSendMessageAnnotation(
+  sameUserFollowUps: FollowUpMessage[],
+  otherUserFollowUps: FollowUpMessage[],
+  nowMs: number,
+): string {
+  const blocks: string[] = [];
+  if (sameUserFollowUps.length > 0) {
+    blocks.push(formatDetailedAnnotation(sameUserFollowUps, nowMs));
+  }
+  if (otherUserFollowUps.length > 0) {
+    const plural = otherUserFollowUps.length === 1 ? "" : "s";
+    blocks.push([
+      "---",
+      "[OTHER USER ACTIVITY while you were responding]",
+      `${otherUserFollowUps.length} new message${plural} from other users.`,
+      "FYI only, these users are queued for separate handling.",
+      "---",
+    ].join("\n"));
+  }
+  return blocks.join("\n");
 }
 
 /**
@@ -82,10 +126,12 @@ export function wrapToolsWithFollowUp(
   deps: FollowUpWrapperDeps,
 ): { tools: AgentTool[]; state: FollowUpState } {
   const surfacedIds = deps.sharedSurfacedIds ?? new Set<string>();
+  const coveredIds = deps.sharedCoveredIds ?? new Set<string>();
   const botSendIds = new Set<string>();
 
   const state: FollowUpState = {
     surfacedIds,
+    coveredIds,
     botSendIds,
     registerBotSend(messageId: string) {
       botSendIds.add(messageId);
@@ -124,16 +170,31 @@ export function wrapToolsWithFollowUp(
         return result;
       }
 
-      // Mark as surfaced
-      for (const msg of followUps) {
+      const userFollowUps = followUps.filter((m) => !m.isBot);
+      if (userFollowUps.length === 0) {
+        return result;
+      }
+
+      const sameUserFollowUps = userFollowUps.filter((m) => m.userId === deps.triggerUserId);
+      const otherUserFollowUps = userFollowUps.filter((m) => m.userId !== deps.triggerUserId);
+
+      // Mark surfaced for de-duplication within this run.
+      for (const msg of userFollowUps) {
         surfacedIds.add(msg.id);
+      }
+      // Mark covered only for same-user actionable follow-ups.
+      for (const msg of sameUserFollowUps) {
+        coveredIds.add(msg.id);
       }
 
       // Build annotation based on tool type
       const nowMs = Date.now();
       const annotation = tool.name === "send_message"
-        ? formatDetailedAnnotation(followUps, nowMs)
-        : formatLightweightAnnotation(followUps.length);
+        ? formatSendMessageAnnotation(sameUserFollowUps, otherUserFollowUps, nowMs)
+        : formatLightweightAnnotation(sameUserFollowUps.length, otherUserFollowUps.length);
+      if (annotation === "") {
+        return result;
+      }
 
       return {
         ...result,

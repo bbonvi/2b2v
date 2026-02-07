@@ -69,6 +69,7 @@ const BASE_DEPS = {
   handlerStartTime: 1000,
   botUserId: "bot-1",
   triggerMessageId: "trigger-1",
+  triggerUserId: "user-1",
   maxFollowUps: 5,
 };
 
@@ -93,7 +94,7 @@ describe("wrapToolsWithFollowUp", () => {
 
     expect(result.content).toHaveLength(2);
     const annotation = (result.content[1] as { text: string }).text;
-    expect(annotation).toContain("[Channel: 1 new message since you started");
+    expect(annotation).toContain("Trigger user: 1 new follow-up message");
     expect(annotation).toContain("chat_history");
   });
 
@@ -175,7 +176,8 @@ describe("wrapToolsWithFollowUp", () => {
     const result = await (wrapped[0] as AgentTool).execute("call-1", {}, undefined);
 
     const annotation = (result.content[1] as { text: string }).text;
-    expect(annotation).toContain("3 new messages");
+    expect(annotation).toContain("Trigger user: 2 new follow-up messages");
+    expect(annotation).toContain("Other users: 1 new message");
   });
 
   test("new messages arriving between tool calls get surfaced", async () => {
@@ -210,9 +212,27 @@ describe("wrapToolsWithFollowUp", () => {
     // Only followup-2 should be surfaced (followup-1 already in sharedSurfacedIds)
     expect(result.content).toHaveLength(2);
     const annotation = (result.content[1] as { text: string }).text;
-    expect(annotation).toContain("1 new message");
+    expect(annotation).toContain("Other users: 1 new message");
     // followup-2 should now be in the shared set
     expect(sharedSurfacedIds.has("followup-2")).toBe(true);
+  });
+
+  test("only trigger-user follow-ups are marked as covered", async () => {
+    insertMessage("same-1", "ch-1", "user-1", "alice", "same user", 2000);
+    insertMessage("other-1", "ch-1", "user-2", "bob", "other user", 3000);
+
+    const tools = [makeTool("search")];
+    const sharedCoveredIds = new Set<string>();
+    const { tools: wrapped, state } = wrapToolsWithFollowUp(tools, {
+      db, ...BASE_DEPS, sharedCoveredIds,
+    });
+
+    await (wrapped[0] as AgentTool).execute("call-1", {}, undefined);
+
+    expect(state.coveredIds.has("same-1")).toBe(true);
+    expect(state.coveredIds.has("other-1")).toBe(false);
+    expect(sharedCoveredIds.has("same-1")).toBe(true);
+    expect(sharedCoveredIds.has("other-1")).toBe(false);
   });
 
   test("messages from other channels are not surfaced", async () => {

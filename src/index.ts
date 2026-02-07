@@ -14,7 +14,7 @@ import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { handleMessage, type IncomingMessage, type HandlerDeps, type FollowUpWrapperDeps } from "./agent/handler";
-import { createChannelDispatcher, type ChannelDispatcher } from "./discord/channel-dispatcher";
+import { createChannelDispatcher, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { getFollowUpMessages } from "./db/followup-repository";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
@@ -1010,11 +1010,11 @@ function getOrCreateDispatcher(guildId: string): ChannelDispatcher {
   const config = getGuildConfig(guildId);
   dispatcher = createChannelDispatcher({
     config: config.dispatcher,
-    handler: async (batch) => {
+    handler: async (batch): Promise<DispatchOutcome> => {
       // The dispatcher fires with accumulated messages. Process the last one.
       const last = batch[batch.length - 1];
-      if (last === undefined) return;
-      await processTriggeredMessage(last.message as Message);
+      if (last === undefined) return { coveredMessageIds: [] };
+      return processTriggeredMessage(last.message as Message);
     },
   });
   dispatchers.set(guildId, dispatcher);
@@ -1022,8 +1022,8 @@ function getOrCreateDispatcher(guildId: string): ChannelDispatcher {
 }
 
 /** Process a triggered message through the full handler pipeline. */
-async function processTriggeredMessage(message: Message): Promise<void> {
-  if (message.guild === null || message.guildId === null) return;
+async function processTriggeredMessage(message: Message): Promise<DispatchOutcome> {
+  if (message.guild === null || message.guildId === null) return { coveredMessageIds: [] };
   const guild = message.guild;
 
   const guildId = message.guildId;
@@ -1297,6 +1297,7 @@ async function processTriggeredMessage(message: Message): Promise<void> {
     const botUserId = client.user?.id ?? "";
     const handlerStartTime = Date.now();
     const sharedSurfacedIds = new Set<string>();
+    const sharedCoveredIds = new Set<string>();
     const followUpDeps: FollowUpWrapperDeps | undefined = guildConfig.dispatcher.enabled
       ? {
           db,
@@ -1304,8 +1305,10 @@ async function processTriggeredMessage(message: Message): Promise<void> {
           handlerStartTime,
           botUserId,
           triggerMessageId: message.id,
+          triggerUserId: message.author.id,
           maxFollowUps: guildConfig.dispatcher.maxFollowUps,
           sharedSurfacedIds,
+          sharedCoveredIds,
         }
       : undefined;
 
@@ -1323,21 +1326,39 @@ async function processTriggeredMessage(message: Message): Promise<void> {
           if (sharedSurfacedIds.size >= guildConfig.trim.windowSize) return messages;
 
           for (const f of userFollowUps) sharedSurfacedIds.add(f.id);
+          const sameUserFollowUps = userFollowUps.filter((f) => f.userId === message.author.id);
+          const otherUserFollowUps = userFollowUps.filter((f) => f.userId !== message.author.id);
+          for (const f of sameUserFollowUps) sharedCoveredIds.add(f.id);
+
+          if (sameUserFollowUps.length === 0 && otherUserFollowUps.length === 0) return messages;
 
           const nowMs = Date.now();
-          const lines = userFollowUps.map((m) => {
+          const formatLine = (m: (typeof userFollowUps)[number]): string => {
             const ago = nowMs - m.createdAt;
             const agoStr = ago < 1000 ? "just now" : ago < 60000 ? `${Math.round(ago / 1000)}s ago` : `${Math.round(ago / 60000)}m ago`;
             return `\u2022 ${m.authorUsername} [MsgID: ${m.id}] (${agoStr}): "${m.content}"`;
-          });
+          };
+
+          const sections: string[] = [];
+          if (sameUserFollowUps.length > 0) {
+            sections.push("[ACTIONABLE FOLLOW-UPS from triggering user]");
+            sections.push(...sameUserFollowUps.map(formatLine));
+            sections.push("Treat these as direct follow-ups to the current interaction.");
+            sections.push("");
+          }
+          if (otherUserFollowUps.length > 0) {
+            sections.push("[FYI ONLY: other-user channel activity]");
+            sections.push(...otherUserFollowUps.map(formatLine));
+            sections.push("These messages are queued for separate handling, do not treat them as direct follow-ups unless critical.");
+          }
 
           const injection: AgentMessage = {
             role: "user",
             content: [
               "[CHANNEL UPDATE \u2014 new messages arrived while you were responding]",
-              ...lines,
+              ...sections,
               "",
-              "These appeared after you started processing. Prioritize same-user follow-ups. Do not repeat what you already said. Use reply_to_message_id to reply to specific messages.",
+              "Use reply_to_message_id for specific replies. Avoid repeating prior output.",
             ].join("\n"),
           } as AgentMessage;
 
@@ -1378,6 +1399,9 @@ async function processTriggeredMessage(message: Message): Promise<void> {
       }
       requestLog.emit(log);
     }
+    return {
+      coveredMessageIds: [message.id, ...sharedCoveredIds],
+    };
   } catch (err) {
     log.error("messageCreate handler error", {
       messageId: message.id,
@@ -1397,6 +1421,7 @@ async function processTriggeredMessage(message: Message): Promise<void> {
       error: err instanceof Error ? err.message : String(err),
       timestamp: new Date().toISOString(),
     });
+    return { coveredMessageIds: [] };
   } finally {
     if (!message.author.bot) {
       requestLogStore.decrementActive();
