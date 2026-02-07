@@ -90,7 +90,7 @@ imageReadMaxPerCall: 10
 All fields are optional — missing values fall back to global defaults.
 
 `promptCaching.profile` supports:
-- `conservative` (default): up to 4 stable-section cache breakpoints
+- `conservative` (default): up to 4 stable-section cache breakpoints (applied to the latest stable sections)
 - `aggressive`: all stable sections (Anthropic models still hard-clamped to 4)
 
 ### Persona

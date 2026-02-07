@@ -192,9 +192,14 @@ function prependStableSectionsToPayload(
     stripCacheControlFromMessages(messages);
   }
 
+  const useTailBreakpoints = promptCaching.profile === "conservative";
+  const cacheControlStartIndex = stableSections.length - breakpointsToApply;
   const toInsert = stableSections.map((section, idx) => ({
     role: section.role,
-    content: makePromptContent(section.text, idx < breakpointsToApply),
+    content: makePromptContent(
+      section.text,
+      useTailBreakpoints ? idx >= cacheControlStartIndex : idx < breakpointsToApply
+    ),
   }));
   if (toInsert.length > 0) {
     messages.unshift(...toInsert);

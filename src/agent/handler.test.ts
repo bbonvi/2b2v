@@ -258,7 +258,7 @@ describe("handleMessage", () => {
     expect(result.agentRan).toBe(true);
   });
 
-  test("conservative profile applies cache_control to first four stable sections for moonshot", async () => {
+  test("conservative profile applies cache_control to tail stable sections for moonshot", async () => {
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
     let capturedPayload: unknown;
     const requestLog = {
@@ -301,7 +301,7 @@ describe("handleMessage", () => {
     const prepended = messages.slice(0, stableSections.length);
     expect(prepended.map((m) => m.role)).toEqual(["system", "system", "developer", "developer", "developer", "developer"]);
     expect(prepended.map((m) => messageText(m))).toEqual(stableSections.map((s) => s.text));
-    expect(prepended.map((m) => hasCacheControl(m))).toEqual([true, true, true, true, false, false]);
+    expect(prepended.map((m) => hasCacheControl(m))).toEqual([false, false, true, true, true, true]);
   });
 
   test("google models receive cache breakpoints when prompt caching is enabled", async () => {
