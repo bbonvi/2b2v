@@ -3,13 +3,13 @@ import type { Message, Model } from "@mariozechner/pi-ai";
 import { streamSimple, type ProviderStreamOptions } from "@mariozechner/pi-ai";
 import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
-import { contextToSplitPrompts, type AssembledContext, type ContextSection, type SplitPrompts } from "./context-assembly.ts";
+import { contextToSplitPrompts, type AssembledContext, type ContextSection } from "./context-assembly.ts";
 import { createSendMessageTool, type MessageSender, type SendMessageToolDeps } from "./send-message-tool.ts";
 import { wrapToolsWithTiming } from "./tool-timing.ts";
 import { wrapToolsWithFollowUp } from "./tool-followup-wrapper.ts";
 import type { FollowUpWrapperDeps } from "./tool-followup-wrapper.ts";
 export type { FollowUpState, FollowUpWrapperDeps } from "./tool-followup-wrapper.ts";
-import type { TriggerInstructions } from "../config/types.ts";
+import type { PromptCachingConfig, TriggerInstructions } from "../config/types.ts";
 import type { TtsConfig, TtsResult } from "../tts/types.ts";
 import { resolveGuildModel, buildStreamOptions } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
@@ -124,12 +124,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
 
-const CACHE_BREAKPOINT_MODEL_PREFIXES = ["anthropic/", "google/"] as const;
+const CONSERVATIVE_PROMPT_CACHING_SOFT_CAP = 4;
+const ANTHROPIC_PROMPT_CACHING_HARD_CAP = 4;
 
-function shouldAddCacheBreakpoints(payload: Record<string, unknown>): boolean {
-  const model = payload.model;
-  if (typeof model !== "string") return false;
-  return CACHE_BREAKPOINT_MODEL_PREFIXES.some((prefix) => model.startsWith(prefix));
+function resolvePromptCachingHardCap(model: string): number {
+  if (model.startsWith("anthropic/")) return ANTHROPIC_PROMPT_CACHING_HARD_CAP;
+  return Number.POSITIVE_INFINITY;
+}
+
+function resolvePromptCachingSoftCap(config: PromptCachingConfig): number {
+  if (config.profile === "conservative") return CONSERVATIVE_PROMPT_CACHING_SOFT_CAP;
+  return Number.POSITIVE_INFINITY;
 }
 
 function stripCacheControlFromMessages(messages: unknown[]): void {
@@ -154,34 +159,43 @@ function makePromptContent(
   return [{ type: "text", text, cache_control: { type: "ephemeral" } }];
 }
 
+interface StablePromptSection {
+  role: "system" | "developer";
+  text: string;
+}
+
+function getStablePromptSections(context: AssembledContext): StablePromptSection[] {
+  return context.sections
+    .filter((section) => section.cached)
+    .map((section) => ({ role: section.role, text: section.text }));
+}
+
 /**
- * Mutate OpenAI-compatible payload by prepending split prompt groups.
- * For Anthropic models on OpenRouter, attach cache breakpoints to stable prefix
- * groups and remove volatile cache breakpoints that would bust prefix caching.
+ * Mutate OpenAI-compatible payload by prepending stable context sections.
+ * Stable sections preserve original order and are inserted as individual messages.
  */
-function prependSplitPromptsToPayload(payload: unknown, splitPrompts: SplitPrompts): void {
+function prependStableSectionsToPayload(
+  payload: unknown,
+  stableSections: StablePromptSection[],
+  promptCaching: PromptCachingConfig
+): void {
   if (!isRecord(payload)) return;
   const messages = payload.messages;
   if (!Array.isArray(messages)) return;
 
-  const useCacheControlBreakpoints = shouldAddCacheBreakpoints(payload);
-  if (useCacheControlBreakpoints) {
+  let breakpointsToApply = 0;
+  if (promptCaching.enabled) {
+    const model = typeof payload.model === "string" ? payload.model : "";
+    const softCap = resolvePromptCachingSoftCap(promptCaching);
+    const hardCap = resolvePromptCachingHardCap(model);
+    breakpointsToApply = Math.min(stableSections.length, softCap, hardCap);
     stripCacheControlFromMessages(messages);
   }
 
-  const toInsert: Array<{ role: "system" | "developer"; content: unknown }> = [];
-  if (splitPrompts.system !== "") {
-    toInsert.push({
-      role: "system",
-      content: makePromptContent(splitPrompts.system, useCacheControlBreakpoints),
-    });
-  }
-  if (splitPrompts.cachedDeveloper !== "") {
-    toInsert.push({
-      role: "developer",
-      content: makePromptContent(splitPrompts.cachedDeveloper, useCacheControlBreakpoints),
-    });
-  }
+  const toInsert = stableSections.map((section, idx) => ({
+    role: section.role,
+    content: makePromptContent(section.text, idx < breakpointsToApply),
+  }));
   if (toInsert.length > 0) {
     messages.unshift(...toInsert);
   }
@@ -227,10 +241,10 @@ export async function handleMessage(
     };
   }
 
+  const stableSections = getStablePromptSections(context);
   const splitPrompts = contextToSplitPrompts(context);
   // pi-ai only accepts a single systemPrompt string. We pass the volatile (uncached)
-  // developer portion; the system and cached-developer portions are injected via
-  // onPayload mutation (see below).
+  // developer portion; stable sections are injected via onPayload mutation.
   const systemPrompt = splitPrompts.developer;
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
   const streamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);
@@ -265,15 +279,10 @@ export async function handleMessage(
       toolChoice: (firstTurn && forceFirst) ? "required" : undefined,
       parallelToolCalls: (firstTurn && disableParallel) ? false : undefined,
       onPayload: (payload: unknown) => {
-        // pi-ai sends systemPrompt (the uncached developer portion) as a single
-        // "developer" message. We prepend the cached portions so the final order is:
-        //   [0] role=system    — tool instructions, persona, custom instructions (cached prefix)
-        //   [1] role=developer — stable guild/thread context, older history (cached prefix)
-        //   [2] role=developer — volatile channel context, journal, recent history, current context
-        //   [3..] user/assistant/tool messages
-        // This enables automatic prefix caching: messages [0] and [1] are stable
-        // across requests, so providers cache them as a shared prefix.
-        prependSplitPromptsToPayload(payload, splitPrompts);
+        // pi-ai sends `systemPrompt` as a developer message.
+        // We prepend each stable context section so providers can cache prefix blocks
+        // at section granularity while keeping volatile conversation messages unchanged.
+        prependStableSectionsToPayload(payload, stableSections, deps.guildConfig.promptCaching);
         reqLog?.recordLLMRequest(payload);
       },
     } as ProviderStreamOptions);

@@ -105,6 +105,10 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultImageCaptioningEnabled).toBe(false);
     expect(cfg.defaultAttachmentsDir).toBe("data/attachments");
     expect(cfg.defaultInstructions).toBe("");
+    expect((cfg as unknown as { defaultPromptCaching?: unknown }).defaultPromptCaching).toEqual({
+      enabled: true,
+      profile: "conservative",
+    });
     expect(cfg.logLevel).toBe("info");
   });
 
@@ -176,6 +180,26 @@ describe("loadGlobalConfig", () => {
     expect(cfg.discordToken).toBe("tok_test");
     expect(cfg.openrouterApiKey).toBe("or_test");
     expect(cfg.braveApiKey).toBe("brave_test");
+  });
+
+  test("parses global promptCaching overrides", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "promptCaching:\n  enabled: false\n  profile: aggressive\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect((cfg as unknown as { defaultPromptCaching?: unknown }).defaultPromptCaching).toEqual({
+      enabled: false,
+      profile: "aggressive",
+    });
+  });
+
+  test("falls back to conservative profile for invalid global promptCaching profile", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "promptCaching:\n  enabled: true\n  profile: invalid-profile\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect((cfg as unknown as { defaultPromptCaching?: unknown }).defaultPromptCaching).toEqual({
+      enabled: true,
+      profile: "conservative",
+    });
   });
 });
 
@@ -404,6 +428,56 @@ describe("resolveGuildConfig", () => {
     expect(resolved.triggers.randomChance).toBe(0.03);
     expect(resolved.triggers.mention).toBe(true); // default
   });
+
+  test("inherits promptCaching from global", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "promptCaching:\n  enabled: false\n  profile: aggressive\n");
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "110",
+      slug: "prompt-caching-inherit",
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect((resolved as unknown as { promptCaching?: unknown }).promptCaching).toEqual({
+      enabled: false,
+      profile: "aggressive",
+    });
+  });
+
+  test("guild promptCaching overrides global defaults", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "promptCaching:\n  enabled: true\n  profile: conservative\n");
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const partial = {
+      guildId: "111",
+      slug: "prompt-caching-override",
+      promptCaching: { enabled: false, profile: "aggressive" },
+    } as GuildConfigYaml & { guildId: string; slug: string };
+    const resolved = resolveGuildConfig(global, partial);
+    expect((resolved as unknown as { promptCaching?: unknown }).promptCaching).toEqual({
+      enabled: false,
+      profile: "aggressive",
+    });
+  });
+
+  test("invalid guild promptCaching profile falls back to global profile", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "promptCaching:\n  enabled: true\n  profile: aggressive\n");
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const partial = {
+      guildId: "112",
+      slug: "prompt-caching-invalid",
+      promptCaching: { enabled: true, profile: "invalid-profile" },
+    } as unknown as GuildConfigYaml & { guildId: string; slug: string };
+    const resolved = resolveGuildConfig(global, partial);
+    expect((resolved as unknown as { promptCaching?: unknown }).promptCaching).toEqual({
+      enabled: true,
+      profile: "aggressive",
+    });
+  });
 });
 
 describe("loadGuildConfigs", () => {
@@ -494,6 +568,7 @@ describe("saveGuildConfig", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      promptCaching: { enabled: true, profile: "conservative" },
     };
 
     saveGuildConfig(file, resolved);
@@ -531,12 +606,50 @@ describe("saveGuildConfig", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      promptCaching: { enabled: true, profile: "conservative" },
     };
 
     saveGuildConfig(file, resolved);
 
     const reloaded = loadGuildConfigFile(file);
     expect(reloaded.instructions).toBe("Custom guild instructions");
+  });
+
+  test("persists promptCaching config", () => {
+    const file = join(GUILDS_DIR, "52-prompt-caching.yaml");
+    writeFileSync(file, "");
+
+    const resolved = {
+      guildId: "52",
+      slug: "prompt-caching",
+      triggers: { mention: true, keywords: [], randomChance: 0 },
+      triggerInstructions: {},
+      thinkingLevel: "medium",
+      timezone: "UTC",
+      trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
+      memoryRetentionDays: 180,
+      adminUserIds: [],
+      imageMaxDimension: 768,
+      mergeMessageGapSeconds: 120,
+      imageReadMaxPerCall: 10,
+      imageCaptioningEnabled: false,
+      attachmentsDir: "data/attachments",
+      instructions: "",
+      emotes: { include: false },
+      members: { include: true },
+      forceToolCallFirstRun: false,
+      disableParallelToolCallsFirstRun: false,
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      promptCaching: { enabled: false, profile: "aggressive" },
+    } as unknown as GuildConfig;
+
+    saveGuildConfig(file, resolved);
+
+    const reloaded = loadGuildConfigFile(file);
+    expect((reloaded as unknown as { promptCaching?: unknown }).promptCaching).toEqual({
+      enabled: false,
+      profile: "aggressive",
+    });
   });
 });
 
@@ -857,6 +970,7 @@ describe("saveGuildConfig bashTool", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      promptCaching: { enabled: true, profile: "conservative" },
     };
 
     saveGuildConfig(file, resolved);
@@ -890,6 +1004,7 @@ describe("saveGuildConfig bashTool", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      promptCaching: { enabled: true, profile: "conservative" },
     };
 
     saveGuildConfig(file, resolved);
@@ -1106,6 +1221,7 @@ describe("saveGuildConfig emotes", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      promptCaching: { enabled: true, profile: "conservative" },
     };
 
     saveGuildConfig(file, resolved);
@@ -1146,6 +1262,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      promptCaching: { enabled: true, profile: "conservative" },
     };
 
     saveGuildConfig(file, resolved);
@@ -1179,6 +1296,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       forceToolCallFirstRun: false,
       disableParallelToolCallsFirstRun: false,
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      promptCaching: { enabled: true, profile: "conservative" },
     };
 
     saveGuildConfig(file, resolved);

@@ -52,6 +52,15 @@ export interface DispatcherConfig {
   maxFollowUps: number;
 }
 
+/** Prompt caching strategy profile for OpenRouter payload breakpoints. */
+export type PromptCachingProfile = "conservative" | "aggressive";
+
+/** Prompt caching controls. */
+export interface PromptCachingConfig {
+  enabled: boolean;
+  profile: PromptCachingProfile;
+}
+
 /** Trigger configuration per guild. All independently toggleable. */
 export interface TriggerConfig {
   mention: boolean;
@@ -108,6 +117,8 @@ export interface GuildConfig {
   disableParallelToolCallsFirstRun: boolean;
   /** Channel dispatcher configuration. */
   dispatcher: DispatcherConfig;
+  /** Prompt caching controls for OpenRouter requests. */
+  promptCaching: PromptCachingConfig;
 }
 
 /** Global configuration loaded from file + env. */
@@ -153,6 +164,8 @@ export interface GlobalConfig {
   defaultDisableParallelToolCallsFirstRun: boolean;
   /** Default dispatcher configuration. */
   defaultDispatcher: DispatcherConfig;
+  /** Default prompt caching controls. */
+  defaultPromptCaching: PromptCachingConfig;
 }
 
 /** Full resolved app config. */
@@ -196,6 +209,10 @@ export interface GuildConfigYaml {
     mentionDebounceMs?: number;
     defaultDebounceMs?: number;
     maxFollowUps?: number;
+  };
+  promptCaching?: {
+    enabled?: boolean;
+    profile?: "conservative" | "aggressive";
   };
 }
 
@@ -253,5 +270,9 @@ export interface MainConfigYaml {
     mentionDebounceMs?: number;
     defaultDebounceMs?: number;
     maxFollowUps?: number;
+  };
+  promptCaching?: {
+    enabled?: boolean;
+    profile?: "conservative" | "aggressive";
   };
 }

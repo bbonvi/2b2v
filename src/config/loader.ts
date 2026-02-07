@@ -15,6 +15,8 @@ import type {
   EmotesConfig,
   MembersConfig,
   DispatcherConfig,
+  PromptCachingConfig,
+  PromptCachingProfile,
 } from "./types.ts";
 import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 
@@ -155,8 +157,41 @@ const DEFAULT_DISPATCHER: DispatcherConfig = {
   maxFollowUps: 5,
 };
 
+const DEFAULT_PROMPT_CACHING: PromptCachingConfig = {
+  enabled: true,
+  profile: "conservative",
+};
+
 const DEFAULT_BASH_TIMEOUT_MS = 5000;
 const DEFAULT_BASH_OUTPUT_LIMIT = 4000;
+
+function resolvePromptCachingProfile(
+  profile: unknown,
+  fallback: PromptCachingProfile
+): PromptCachingProfile {
+  if (profile === "aggressive") return "aggressive";
+  if (profile === "conservative") return "conservative";
+  return fallback;
+}
+
+function resolveGlobalPromptCaching(
+  partial: MainConfigYaml["promptCaching"] | undefined
+): PromptCachingConfig {
+  return {
+    enabled: partial?.enabled ?? DEFAULT_PROMPT_CACHING.enabled,
+    profile: resolvePromptCachingProfile(partial?.profile, DEFAULT_PROMPT_CACHING.profile),
+  };
+}
+
+function resolveGuildPromptCaching(
+  global: PromptCachingConfig,
+  partial: GuildConfigYaml["promptCaching"] | undefined
+): PromptCachingConfig {
+  return {
+    enabled: partial?.enabled ?? global.enabled,
+    profile: resolvePromptCachingProfile(partial?.profile, global.profile),
+  };
+}
 
 /**
  * Resolve bash tool config from YAML partial.
@@ -335,6 +370,7 @@ export function loadGlobalConfig(
       defaultDebounceMs: yaml.dispatcher?.defaultDebounceMs ?? DEFAULT_DISPATCHER.defaultDebounceMs,
       maxFollowUps: yaml.dispatcher?.maxFollowUps ?? DEFAULT_DISPATCHER.maxFollowUps,
     },
+    defaultPromptCaching: resolveGlobalPromptCaching(yaml.promptCaching),
   };
 }
 
@@ -417,6 +453,7 @@ export function resolveGuildConfig(
       defaultDebounceMs: partial.dispatcher?.defaultDebounceMs ?? global.defaultDispatcher.defaultDebounceMs,
       maxFollowUps: partial.dispatcher?.maxFollowUps ?? global.defaultDispatcher.maxFollowUps,
     },
+    promptCaching: resolveGuildPromptCaching(global.defaultPromptCaching, partial.promptCaching),
   };
 }
 
@@ -481,6 +518,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     emotes: config.emotes,
     members: config.members,
     dispatcher: config.dispatcher,
+    promptCaching: config.promptCaching,
   };
 
   // Strip undefined keys before serializing

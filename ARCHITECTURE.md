@@ -73,14 +73,17 @@ Messages and memories enqueue into a batcher, get embedded by the local model, a
 
 ### Context Assembly
 
-`SECTION_DEFS` in `src/agent/context-assembly.ts` is the single source of truth for section order, labels, roles, caching, and headers. Array position determines output order. Sections are grouped into three message blocks for prefix caching:
-- **Group 1** (system, cached): Tool Instructions, Persona, Instructions
-- **Group 2** (developer, cached): Emojis, Members, Thread Metadata, Parent Pre-Context, Older History
-- **Group 3** (developer, uncached): Threads, Schedules, Journal, Newer History, Current Context, Late Instruction
+`SECTION_DEFS` in `src/agent/context-assembly.ts` is the single source of truth for section order, labels, roles, caching, and headers. Array position determines output order.
 
 Empty sections are omitted. `assembleContext()` iterates the registry; no imperative per-section logic.
 
-For OpenRouter Anthropic and Google models, `handleMessage()` rewrites outbound OpenAI-compatible payloads so Group 1 and Group 2 are inserted as multipart text blocks with `cache_control: { type: "ephemeral" }`. Any cache markers on volatile conversation messages are stripped first. This places cache breakpoints only on stable prefix blocks.
+`handleMessage()` uses section-level prompt caching:
+- Every `cached: true` section is prepended as its own OpenAI-compatible message, preserving section order and role.
+- Volatile developer context (`cached: false`) remains in `systemPrompt` as the regular developer message.
+- Cache breakpoints (`cache_control: { type: "ephemeral" }`) are applied by `guild.promptCaching` for all OpenRouter models.
+- Profile caps: `conservative` max 4, `aggressive` unlimited soft cap.
+- Hard clamp: `anthropic/*` max 4.
+- Existing `cache_control` markers on volatile conversation messages are stripped before stable breakpoints are inserted.
 
 ### History Processing
 
@@ -142,6 +145,13 @@ Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields op
 | `mentionDebounceMs` | number | `500` | Debounce delay for mention triggers |
 | `defaultDebounceMs` | number | `2000` | Debounce delay for keyword/random triggers |
 | `maxFollowUps` | number | `5` | Max follow-up messages surfaced per tool check |
+
+**Prompt caching config** (`PromptCachingConfig`): Controls OpenRouter cache breakpoint injection. Nested under `promptCaching` in guild config, `defaultPromptCaching` in global config.
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `enabled` | boolean | `true` | Disable to send stable sections without cache breakpoints |
+| `profile` | `"conservative" \| "aggressive"` | `"conservative"` | `conservative` max 4, `aggressive` unlimited soft cap (Anthropic hard-clamped to 4) |
 
 **Instructions**: Custom text injected into LLM context (after tool instructions, before emojis). `instructionsPath` loads from a file; `instructions` provides inline text. `instructionsPath` takes priority. Guild-level overrides global default.
 

@@ -77,6 +77,9 @@ trim:
   windowSize: 20
   messageCharLimit: 200
   replyQuoteChars: 50
+promptCaching:
+  enabled: true
+  profile: conservative
 mergeMessageGapSeconds: 120
 memoryRetentionDays: 180
 adminUserIds: []
@@ -85,6 +88,10 @@ imageReadMaxPerCall: 10
 ```
 
 All fields are optional — missing values fall back to global defaults.
+
+`promptCaching.profile` supports:
+- `conservative` (default): up to 4 stable-section cache breakpoints
+- `aggressive`: all stable sections (Anthropic models still hard-clamped to 4)
 
 ### Persona
 
