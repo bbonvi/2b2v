@@ -179,13 +179,13 @@ describe("assembleContext", () => {
     expect(section?.text).toBe("## Upcoming Schedules\n- [one-off at 2026-01-01] hello");
   });
 
-  test("wraps threads in chat with section header and is cached", () => {
+  test("wraps threads in chat with section header and marks it uncached", () => {
     const result = assembleContext(
       makeInput({ threadsInChat: '- "Help Thread" (thread_id: 123) — 5 msgs, 2h ago' })
     );
     const section = result.sections.find((s) => s.label === "Threads In This Chat");
     expect(section?.text).toBe('## Threads In This Chat\n- "Help Thread" (thread_id: 123) — 5 msgs, 2h ago');
-    expect(section?.cached).toBe(true);
+    expect(section?.cached).toBe(false);
   });
 
   test("thread metadata section is cached and has correct format", () => {

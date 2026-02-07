@@ -201,8 +201,8 @@ export async function handleMessage(
         // pi-ai sends systemPrompt (the uncached developer portion) as a single
         // "developer" message. We prepend the cached portions so the final order is:
         //   [0] role=system    — tool instructions, persona, custom instructions (cached prefix)
-        //   [1] role=developer — emojis, members, schedules, older history (cached prefix)
-        //   [2] role=developer — journal, recent history, current context (uncached, from pi-ai)
+        //   [1] role=developer — stable guild/thread context, older history (cached prefix)
+        //   [2] role=developer — volatile channel context, journal, recent history, current context
         //   [3..] user/assistant/tool messages
         // This enables automatic prefix caching: messages [0] and [1] are stable
         // across requests, so providers cache them as a shared prefix.

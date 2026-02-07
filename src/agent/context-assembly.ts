@@ -91,12 +91,12 @@ export const SECTION_DEFS: readonly SectionDef[] = [
   // Group 2: developer, cached (guild context + older history)
   { label: "Available Emojis",     role: "developer", cached: true,  source: { kind: "field", inputKey: "emojis", header: "## Available Emojis" } },
   { label: "Server Members",       role: "developer", cached: true,  source: { kind: "field", inputKey: "members", header: "## Server Members" } },
-  { label: "Threads In This Chat", role: "developer", cached: true,  source: { kind: "field", inputKey: "threadsInChat", header: "## Threads In This Chat" } },
   { label: "Thread Metadata",      role: "developer", cached: true,  source: { kind: "computed", compute: computeThreadMetadata, header: "## Thread Metadata" } },
   { label: "Parent Pre-Context",   role: "developer", cached: true,  source: { kind: "field", inputKey: "parentPreContext" } },
   { label: "Chat History — Older", role: "developer", cached: true,  source: { kind: "field", inputKey: "olderHistory" } },
 
   // Group 3: developer, uncached (volatile per-message)
+  { label: "Threads In This Chat", role: "developer", cached: false, source: { kind: "field", inputKey: "threadsInChat", header: "## Threads In This Chat" } },
   { label: "Upcoming Schedules",   role: "developer", cached: false, source: { kind: "field", inputKey: "upcomingSchedules", header: "## Upcoming Schedules" } },
   { label: "Journal Summaries",    role: "developer", cached: false, source: { kind: "field", inputKey: "journalSummaries", header: "## Journal" } },
   { label: "Chat History — Newer", role: "developer", cached: false, source: { kind: "field", inputKey: "newerHistory" } },
@@ -138,15 +138,15 @@ export function contextToSystemPrompt(ctx: AssembledContext): string {
  *
  * Sent as three separate messages to enable prefix caching:
  *   [0] role=system  (cached) — stable identity, never changes
- *   [1] role=developer (cached) — guild context + older history, changes rarely
- *   [2] role=developer (uncached) — journal + recent history + volatile context
+ *   [1] role=developer (cached) — stable guild/thread context + older history
+ *   [2] role=developer (uncached) — volatile channel context + recent history
  */
 export interface SplitPrompts {
   /** Core instructions: tool instructions, persona, custom instructions. */
   system: string;
-  /** Stable developer context: emojis, members, threads, older history. */
+  /** Stable developer context: emojis, members, thread metadata, older history. */
   cachedDeveloper: string;
-  /** Volatile developer context: schedules, journal, recent history, current context. */
+  /** Volatile developer context: threads list, schedules, journal, recent history, current context. */
   developer: string;
 }
 
