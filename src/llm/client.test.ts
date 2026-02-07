@@ -27,10 +27,9 @@ const GLOBAL: GlobalConfig = {
   uiLang: "en",
   defaultEmotes: { include: false },
   defaultMembers: { include: true },
-  defaultForceToolCallFirstRun: false,
-  defaultDisableParallelToolCallsFirstRun: false,
   defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
   defaultPromptCaching: { enabled: true },
+  defaultActionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
 };
 
 const GUILD: GuildConfig = {
@@ -50,10 +49,9 @@ const GUILD: GuildConfig = {
   instructions: "",
   emotes: { include: false },
   members: { include: true },
-  forceToolCallFirstRun: false,
-  disableParallelToolCallsFirstRun: false,
   dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
   promptCaching: { enabled: true },
+  actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
 };
 
 describe("resolveModel", () => {

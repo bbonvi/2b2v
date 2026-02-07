@@ -1,11 +1,11 @@
-import { describe, test, expect } from "bun:test";
-import { Type } from "@sinclair/typebox";
+import { describe, test, expect, mock } from "bun:test";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { handleMessage, patchToolLookup, injectTriggerInstruction, type IncomingMessage, type HandlerDeps } from "./handler.ts";
+import type { AssistantMessage } from "@mariozechner/pi-ai";
+import { Type } from "@sinclair/typebox";
+import { handleMessage, injectTriggerInstruction, type IncomingMessage, type HandlerDeps, type LlmCompleteFn } from "./handler.ts";
 import type { AssembledContext, ContextSection } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { MessageSender } from "./send-message-tool.ts";
-import type { Logger } from "../logger.ts";
 
 function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
   return {
@@ -33,10 +33,9 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     uiLang: "en",
     defaultEmotes: { include: false },
     defaultMembers: { include: true },
-    defaultForceToolCallFirstRun: false,
-    defaultDisableParallelToolCallsFirstRun: false,
     defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
     defaultPromptCaching: { enabled: true },
+    defaultActionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
     ...overrides,
   };
 }
@@ -59,10 +58,9 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     instructions: "",
     emotes: { include: false },
     members: { include: true },
-    forceToolCallFirstRun: false,
-    disableParallelToolCallsFirstRun: false,
     dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
     promptCaching: { enabled: true },
+    actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
     ...overrides,
   };
 }
@@ -71,6 +69,7 @@ function makeContext(overrides: Partial<AssembledContext> = {}): AssembledContex
   return {
     sections: [
       { label: "Persona", text: "You are a test bot.", cached: true, role: "system" },
+      { label: "Current Context", text: "Guild: g1", cached: false, role: "developer" },
     ],
     userMessage: "hello bot",
     ...overrides,
@@ -89,28 +88,29 @@ function makeMessage(overrides: Partial<IncomingMessage> = {}): IncomingMessage 
   };
 }
 
-type PayloadMessage = { role?: unknown; content?: unknown };
-
-function messageText(message: PayloadMessage): string {
-  if (typeof message.content === "string") return message.content;
-  if (!Array.isArray(message.content)) return "";
-  const parts = message.content as unknown[];
-  const first = parts[0];
-  if (first === null || typeof first !== "object") return "";
-  const text = (first as { text?: unknown }).text;
-  return typeof text === "string" ? text : "";
-}
-
-function hasCacheControl(message: PayloadMessage): boolean {
-  if (!Array.isArray(message.content)) return false;
-  const parts = message.content as unknown[];
-  const first = parts[0];
-  if (first === null || typeof first !== "object") return false;
-  return (first as { cache_control?: unknown }).cache_control !== undefined;
+function assistantWithText(text: string): AssistantMessage {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text }],
+    api: "openai-completions",
+    provider: "openrouter",
+    model: "moonshotai/kimi-k2.5",
+    usage: {
+      input: 10,
+      output: 5,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 15,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop",
+    timestamp: Date.now(),
+  };
 }
 
 describe("handleMessage", () => {
   test("returns triggered=false when no trigger matches", async () => {
+    const llmComplete = mock(() => Promise.resolve(assistantWithText("{}")));
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
@@ -119,369 +119,209 @@ describe("handleMessage", () => {
       }),
       context: makeContext(),
       sender,
+      llmComplete: llmComplete as unknown as LlmCompleteFn,
     };
 
     const result = await handleMessage(makeMessage(), deps);
     expect(result.triggered).toBe(false);
-    expect(result.triggerResult).toBeNull();
     expect(result.agentRan).toBe(false);
+    expect(llmComplete).toHaveBeenCalledTimes(0);
   });
 
-  test("returns triggered=false when author is bot", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig(),
-      context: makeContext(),
-      sender,
+  test("executes send_message through structured tool_call", async () => {
+    const senderCalls: Array<{ text: string; reply: boolean }> = [];
+    const sender: MessageSender = (text, reply) => {
+      senderCalls.push({ text, reply });
+      return Promise.resolve({ sentMessageId: "m-1" });
     };
 
-    const result = await handleMessage(
-      makeMessage({ authorId: "bot-1", botUserId: "bot-1" }),
-      deps
-    );
-    expect(result.triggered).toBe(false);
+    const llmComplete: LlmCompleteFn = (_model, _context, _options) => {
+      const payload = {
+        status: "done",
+        actions: [
+          {
+            type: "tool_call",
+            tool_name: "send_message",
+            arguments: { text: "hello user", reply: true },
+          },
+          { type: "stop_response", reason: "complete" },
+        ],
+      };
+      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
+    };
+
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({ triggers: { mention: true, keywords: [], randomChance: 0 } }),
+      context: makeContext(),
+      sender,
+      llmComplete,
+    };
+
+    const result = await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+
+    expect(result.triggered).toBe(true);
+    expect(result.agentRan).toBe(true);
+    expect(senderCalls).toHaveLength(1);
+    expect(senderCalls[0]?.text).toBe("hello user");
+    expect(senderCalls[0]?.reply).toBe(true);
   });
 
-  test("returns triggered=true with mention trigger", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
+  test("retries when model emits plain text instead of JSON", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
+    let calls = 0;
+
+    const llmComplete: LlmCompleteFn = () => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve(assistantWithText("just thinking out loud"));
+      }
+      const payload = {
+        status: "done",
+        actions: [{ type: "ignore_user", reason: "no response needed" }],
+      };
+      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
+    };
+
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({ triggers: { mention: true, keywords: [], randomChance: 0 } }),
+      context: makeContext(),
+      sender,
+      llmComplete,
+    };
+
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+
+    expect(calls).toBe(2);
+  });
+
+  test("respects max tool call limit", async () => {
+    let sendCalls = 0;
+    const sender: MessageSender = () => {
+      sendCalls += 1;
+      return Promise.resolve({ sentMessageId: `m-${sendCalls}` });
+    };
+
+    const llmComplete: LlmCompleteFn = () => {
+      const payload = {
+        status: "continue",
+        actions: [
+          { type: "tool_call", tool_name: "send_message", arguments: { text: "one", reply: false } },
+          { type: "tool_call", tool_name: "send_message", arguments: { text: "two", reply: false } },
+        ],
+      };
+      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
+    };
+
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig({
         triggers: { mention: true, keywords: [], randomChance: 0 },
+        actionLoop: { maxToolCalls: 1, wallClockTimeoutMs: 45_000 },
       }),
       context: makeContext(),
       sender,
+      llmComplete,
     };
 
-    const result = await handleMessage(
-      makeMessage({ mentionedUserIds: ["bot-1"] }),
-      deps
-    );
-    expect(result.triggered).toBe(true);
-    expect(result.triggerResult).toEqual({ reason: "mention" });
-    expect(result.agentRan).toBe(true);
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+
+    expect(sendCalls).toBe(1);
   });
 
-  test("returns triggered=true with keyword trigger", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
+  test("prepends stable sections to payload and marks first with cache_control", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
+    let capturedPayload: unknown;
+
+    const llmComplete: LlmCompleteFn = (_model, _context, options) => {
+      const mutablePayload = {
+        messages: [{ role: "user", content: "hello" }],
+      };
+      options.onPayload?.(mutablePayload);
+      capturedPayload = mutablePayload;
+
+      const payload = {
+        status: "done",
+        actions: [{ type: "ignore_user", reason: "done" }],
+      };
+      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
+    };
+
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({
-        triggers: { mention: false, keywords: ["hello"], randomChance: 0 },
+      guildConfig: makeGuildConfig({ promptCaching: { enabled: true }, triggers: { mention: true, keywords: [], randomChance: 0 } }),
+      context: makeContext({
+        sections: [
+          { label: "S1", text: "stable-1", cached: true, role: "system" },
+          { label: "S2", text: "stable-2", cached: true, role: "system" },
+          { label: "V1", text: "volatile", cached: false, role: "developer" },
+        ],
       }),
-      context: makeContext(),
       sender,
+      llmComplete,
     };
 
-    const result = await handleMessage(
-      makeMessage({ content: "hello bot", translatedContent: "hello bot" }),
-      deps
-    );
-    expect(result.triggered).toBe(true);
-    expect(result.triggerResult).toEqual({ reason: "keyword", keyword: "hello" });
-    expect(result.agentRan).toBe(true);
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+
+    const payload = capturedPayload as { messages?: Array<{ role?: string; content?: unknown }> };
+    const first = payload.messages?.[0];
+    expect(first?.role).toBe("system");
+
+    const firstContent = first?.content as Array<{ text?: string; cache_control?: unknown }>;
+    expect(firstContent[0]?.text).toBe("stable-1\n\nstable-2");
+    expect(firstContent[0]?.cache_control).toEqual({ type: "ephemeral" });
   });
 
-  test("returns triggered=false when keyword does not match", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({
-        triggers: { mention: false, keywords: ["goodbye"], randomChance: 0 },
-      }),
-      context: makeContext(),
-      sender,
-    };
+  test("injectTriggerInstruction inserts before Late Instruction", () => {
+    const sections: ContextSection[] = [
+      { label: "Persona", text: "bot", cached: true, role: "system" },
+      { label: "Late Instruction", text: "late", cached: false, role: "developer" },
+    ];
 
-    const result = await handleMessage(
-      makeMessage({ content: "hello bot", translatedContent: "hello bot" }),
-      deps
-    );
-    expect(result.triggered).toBe(false);
-    expect(result.agentRan).toBe(false);
+    const result = injectTriggerInstruction(sections, "mention behavior");
+
+    expect(result[1]?.label).toBe("Trigger Instruction");
+    expect(result[1]?.text).toBe("## Trigger Context\nmention behavior");
+    expect(result[2]?.label).toBe("Late Instruction");
   });
 
-  test("passes extraTools to agent without error", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
-    const fakeTool = {
+  test("passes extra tools to loop and executes them", async () => {
+    let extraExecuted = false;
+    const fakeTool: AgentTool = {
       name: "fake_tool",
-      label: "Fake",
-      description: "A test tool",
-      parameters: Type.Object({}),
-      execute: () => Promise.resolve({
-        content: [{ type: "text" as const, text: "ok" }],
-        details: {},
-      }),
-    } as const;
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig(),
-      context: makeContext(),
-      sender,
-      extraTools: [fakeTool as unknown as AgentTool],
-    };
-
-    const result = await handleMessage(
-      makeMessage({ mentionedUserIds: ["bot-1"] }),
-      deps
-    );
-    expect(result.triggered).toBe(true);
-    expect(result.agentRan).toBe(true);
-  });
-
-  test("accepts logger with logTokenUsage", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
-    const logSpy = {
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      logTokenUsage: () => {},
-      child: () => logSpy,
-    };
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({
-        triggers: { mention: true, keywords: [], randomChance: 0 },
-      }),
-      context: makeContext(),
-      sender,
-      log: logSpy as unknown as Logger,
-    };
-
-    const result = await handleMessage(
-      makeMessage({ mentionedUserIds: ["bot-1"] }),
-      deps
-    );
-    expect(result.triggered).toBe(true);
-    expect(result.agentRan).toBe(true);
-  });
-
-  test("enabled prompt caching merges stable sections into one cached system message", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
-    let capturedPayload: unknown;
-    const requestLog = {
-      recordLLMRequest(payload: unknown) {
-        capturedPayload = structuredClone(payload);
+      label: "Fake Tool",
+      description: "used by tests",
+      parameters: Type.Object({ value: Type.String() }),
+      execute: () => {
+        extraExecuted = true;
+        return Promise.resolve({ content: [{ type: "text", text: "ok" }], details: {} });
       },
-      recordToolStart() {},
-      recordToolEnd() {},
-      recordLLMCompletion() {},
-    };
-    const stableSections: ContextSection[] = [
-      { label: "S1", text: "stable-system-1", cached: true, role: "system" },
-      { label: "S2", text: "stable-system-2", cached: true, role: "system" },
-      { label: "S3", text: "stable-system-3", cached: true, role: "system" },
-      { label: "S4", text: "stable-system-4", cached: true, role: "system" },
-    ];
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig({ defaultModel: "moonshotai/kimi-k2.5" }),
-      guildConfig: makeGuildConfig({
-        model: "moonshotai/kimi-k2.5",
-        triggers: { mention: true, keywords: [], randomChance: 0 },
-        promptCaching: { enabled: true },
-      }),
-      context: makeContext({
-        sections: [...stableSections, { label: "Current Context", text: "volatile context", cached: false, role: "developer" }],
-        userMessage: "hello bot",
-      }),
-      sender,
-      requestLog: requestLog as unknown as HandlerDeps["requestLog"],
-    };
-
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-
-    const payload = capturedPayload as { messages?: PayloadMessage[] };
-    const messages = payload.messages ?? [];
-    expect(messages.length).toBeGreaterThanOrEqual(2);
-    expect(messages[0]?.role).toBe("system");
-    expect(messageText(messages[0] as PayloadMessage)).toBe(stableSections.map((s) => s.text).join("\n\n"));
-    expect(hasCacheControl(messages[0] as PayloadMessage)).toBe(true);
-    expect(messages.filter((m) => hasCacheControl(m)).length).toBe(1);
-  });
-
-  test("stable sections are merged per (role, cached) bucket", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
-    let capturedPayload: unknown;
-    const requestLog = {
-      recordLLMRequest(payload: unknown) {
-        capturedPayload = structuredClone(payload);
-      },
-      recordToolStart() {},
-      recordToolEnd() {},
-      recordLLMCompletion() {},
-    };
-    const stableSections: ContextSection[] = [
-      { label: "S1", text: "stable-system-1", cached: true, role: "system" },
-      { label: "S2", text: "stable-system-2", cached: true, role: "system" },
-      { label: "D1", text: "stable-dev-1", cached: true, role: "developer" },
-      { label: "D2", text: "stable-dev-2", cached: true, role: "developer" },
-    ];
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig({ defaultModel: "google/gemini-3-flash-preview" }),
-      guildConfig: makeGuildConfig({
-        model: "moonshotai/kimi-k2.5",
-        triggers: { mention: true, keywords: [], randomChance: 0 },
-        promptCaching: { enabled: true },
-      }),
-      context: makeContext({
-        sections: [...stableSections, { label: "Current Context", text: "volatile context", cached: false, role: "developer" }],
-        userMessage: "hello bot",
-      }),
-      sender,
-      requestLog: requestLog as unknown as HandlerDeps["requestLog"],
-    };
-
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-
-    const payload = capturedPayload as { messages?: PayloadMessage[] };
-    const messages = payload.messages ?? [];
-    const prepended = messages.slice(0, 2);
-    expect(prepended.map((m) => m.role)).toEqual(["system", "developer"]);
-    expect(prepended.map((m) => messageText(m))).toEqual([
-      "stable-system-1\n\nstable-system-2",
-      "stable-dev-1\n\nstable-dev-2",
-    ]);
-    expect(prepended.map((m) => hasCacheControl(m))).toEqual([true, false]);
-    expect(messages.filter((m) => hasCacheControl(m)).length).toBe(1);
-  });
-
-  test("disabled prompt caching inserts stable sections without cache_control", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
-    let capturedPayload: unknown;
-    const requestLog = {
-      recordLLMRequest(payload: unknown) {
-        capturedPayload = structuredClone(payload);
-      },
-      recordToolStart() {},
-      recordToolEnd() {},
-      recordLLMCompletion() {},
-    };
-    const stableSections: ContextSection[] = [
-      { label: "S1", text: "stable-system-1", cached: true, role: "system" },
-      { label: "D1", text: "stable-dev-1", cached: true, role: "developer" },
-      { label: "D2", text: "stable-dev-2", cached: true, role: "developer" },
-    ];
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig({ defaultModel: "moonshotai/kimi-k2.5" }),
-      guildConfig: makeGuildConfig({
-        model: "moonshotai/kimi-k2.5",
-        triggers: { mention: true, keywords: [], randomChance: 0 },
-        promptCaching: { enabled: false },
-      }),
-      context: makeContext({
-        sections: [...stableSections, { label: "Current Context", text: "volatile context", cached: false, role: "developer" }],
-        userMessage: "hello bot",
-      }),
-      sender,
-      requestLog: requestLog as unknown as HandlerDeps["requestLog"],
-    };
-
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-
-    const payload = capturedPayload as { messages?: PayloadMessage[] };
-    const messages = payload.messages ?? [];
-    expect(messages[0]?.role).toBe("system");
-    expect(hasCacheControl(messages[0] as PayloadMessage)).toBe(false);
-    expect(messages.filter((m) => hasCacheControl(m)).length).toBe(0);
-
-    const userMessage = messages.find((m) => m.role === "user");
-    expect(userMessage).toBeDefined();
-    expect(hasCacheControl(userMessage as PayloadMessage)).toBe(false);
-  });
-});
-
-describe("patchToolLookup", () => {
-  function makeTool(name: string): AgentTool {
-    return {
-      name,
-      label: name,
-      description: "test",
-      parameters: Type.Object({}),
-      execute: () => Promise.resolve({ content: [{ type: "text" as const, text: "ok" }], details: {} }),
     } as unknown as AgentTool;
-  }
 
-  test("exact match still works", () => {
-    const tools = [makeTool("send_message"), makeTool("save_memory")];
-    patchToolLookup(tools);
-    const found = tools.find((t) => t.name === "send_message");
-    expect(found).toBeDefined();
-    expect(found?.name).toBe("send_message");
-  });
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
+    const llmComplete: LlmCompleteFn = () => {
+      const payload = {
+        status: "done",
+        actions: [
+          { type: "tool_call", tool_name: "fake_tool", arguments: { value: "x" } },
+          { type: "ignore_user", reason: "done" },
+        ],
+      };
+      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
+    };
 
-  test("finds tool when LLM adds leading space", () => {
-    const tools = [makeTool("send_message"), makeTool("save_memory")];
-    patchToolLookup(tools);
-    const found = tools.find((t) => t.name === " send_message");
-    expect(found).toBeDefined();
-    expect(found?.name).toBe("send_message");
-  });
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({ triggers: { mention: true, keywords: [], randomChance: 0 } }),
+      context: makeContext(),
+      sender,
+      llmComplete,
+      extraTools: [fakeTool],
+    };
 
-  test("finds tool when LLM adds trailing space", () => {
-    const tools = [makeTool("send_message")];
-    patchToolLookup(tools);
-    const found = tools.find((t) => t.name === "send_message ");
-    expect(found).toBeDefined();
-    expect(found?.name).toBe("send_message");
-  });
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
 
-  test("finds tool when LLM adds double leading space", () => {
-    const tools = [makeTool("send_message")];
-    patchToolLookup(tools);
-    const found = tools.find((t) => t.name === "  send_message");
-    expect(found).toBeDefined();
-    expect(found?.name).toBe("send_message");
-  });
-
-  test("returns undefined for genuinely unknown tool", () => {
-    const tools = [makeTool("send_message")];
-    patchToolLookup(tools);
-    const found = tools.find((t) => t.name === "nonexistent_tool");
-    expect(found).toBeUndefined();
-  });
-});
-
-describe("injectTriggerInstruction", () => {
-  test("appends section when no Late Instruction exists", () => {
-    const sections: ContextSection[] = [
-      { label: "Persona", text: "You are a test bot.", cached: true, role: "system" },
-      { label: "Instructions", text: "## Instructions\nBe helpful.", cached: true, role: "system" },
-    ];
-    const result = injectTriggerInstruction(sections, "This is a random reply.");
-    expect(result.length).toBe(3);
-    expect(result[2]?.label).toBe("Trigger Instruction");
-    expect(result[2]?.text).toBe("## Trigger Context\nThis is a random reply.");
-    expect(result[2]?.cached).toBe(false);
-  });
-
-  test("inserts section before Late Instruction", () => {
-    const sections: ContextSection[] = [
-      { label: "Persona", text: "You are a test bot.", cached: true, role: "system" },
-      { label: "Instructions", text: "## Instructions\nBe helpful.", cached: true, role: "system" },
-      { label: "Late Instruction", text: "ALWAYS USE send_message.", cached: false, role: "developer" },
-    ];
-    const result = injectTriggerInstruction(sections, "You were mentioned.");
-    expect(result.length).toBe(4);
-    expect(result[2]?.label).toBe("Trigger Instruction");
-    expect(result[2]?.text).toBe("## Trigger Context\nYou were mentioned.");
-    expect(result[3]?.label).toBe("Late Instruction");
-  });
-
-  test("preserves original sections order", () => {
-    const sections: ContextSection[] = [
-      { label: "Persona", text: "Persona text.", cached: true, role: "system" },
-      { label: "Chat History — Older", text: "Older history.", cached: true, role: "developer" },
-      { label: "Chat History — Newer", text: "Newer history.", cached: false, role: "developer" },
-      { label: "Late Instruction", text: "Late text.", cached: false, role: "developer" },
-    ];
-    const result = injectTriggerInstruction(sections, "Scheduled task.");
-    expect(result.length).toBe(5);
-    expect(result[0]?.label).toBe("Persona");
-    expect(result[1]?.label).toBe("Chat History — Older");
-    expect(result[2]?.label).toBe("Chat History — Newer");
-    expect(result[3]?.label).toBe("Trigger Instruction");
-    expect(result[4]?.label).toBe("Late Instruction");
+    expect(extraExecuted).toBe(true);
   });
 });

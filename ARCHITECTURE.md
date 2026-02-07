@@ -2,7 +2,7 @@
 
 Agentic Discord bot (~16,900 lines TypeScript, 111 files) that embodies a character persona while providing useful responses. Per-guild isolation, long-lived memory, semantic search, scheduling, and multi-tool agent capabilities.
 
-**Runtime:** Bun 1.3+ · **LLM:** OpenRouter (any model) · **Vectors:** Qdrant · **DB:** SQLite (WAL) · **Agent:** pi-agent-core
+**Runtime:** Bun 1.3+ · **LLM:** OpenRouter (any model) · **Vectors:** Qdrant · **DB:** SQLite (WAL) · **Agent:** custom structured-action loop (`src/agent/structured-actions.ts`)
 
 ## Module Map
 
@@ -43,9 +43,11 @@ Discord messageCreate event
             ├─ shouldRespond(input, triggers) → mention|keyword|random|null
             ├─ build context (persona, instructions, emojis, members, journal, schedules, history, current context)
             ├─ resolve model (guild overrides global default)
-            └─ agent prompt with tools:
-               messaging + threading (`send_message`, `start_thread`), memory, search,
-               scheduling, member + chat history, web + URL fetch, image read/fetch
+            └─ structured action loop:
+               OpenRouter `response_format` (json_schema) + prompt reinforcement
+               action batch = `tool_call` | `stop_response` | `ignore_user`
+               tools include messaging/threading, memory, search, schedules,
+               members/chat history, web/url fetch, image read/fetch
 ```
 
 ### Channel Dispatcher
@@ -84,6 +86,23 @@ Empty sections are omitted. `assembleContext()` iterates the registry; no impera
 - Cache breakpoints (`cache_control: { type: "ephemeral" }`) are applied as a single marker on the first merged stable message when `guild.promptCaching.enabled` is true.
 - Existing `cache_control` markers on volatile conversation messages are stripped before stable breakpoints are inserted.
 
+### Structured Action Loop
+
+`src/agent/structured-actions.ts` implements the control plane. The model does not use native tool-calling.
+
+- The model must return strict JSON action batches (`response_format: { type: "json_schema" }` on OpenRouter).
+- Batch shape:
+  - `status`: `"continue"` or `"done"`
+  - `actions`: ordered list of:
+    - `tool_call` (name + arguments)
+    - `stop_response` (terminal)
+    - `ignore_user` (terminal and silent)
+- Runtime executes actions sequentially and appends tool results back into context as internal messages.
+- Plain-text or invalid JSON outputs are treated as format violations, fed back with a corrective message, and retried.
+- Hard limits are enforced by config:
+  - `actionLoop.maxToolCalls`
+  - `actionLoop.wallClockTimeoutMs`
+
 ### History Processing
 
 Pipeline: fetch missing reply targets (Discord fallback), sort, merge consecutive author messages, slice older and newer windows, trim, resolve replies, insert sparse date stamps, then format lines.
@@ -95,10 +114,10 @@ When the dispatcher is enabled, the agent gains awareness of new channel message
 **Tool follow-up wrapper** (`src/agent/tool-followup-wrapper.ts`): Wraps all agent tools to append follow-up annotations to tool results. After each tool execution, queries SQLite for new messages (via `getFollowUpMessages`). For `send_message`, appends detailed annotations with author, message ID, relative timestamp, and content. For other tools, appends a lightweight count notification suggesting the agent use `chat_history` to review. Tracks surfaced message IDs to avoid re-surfacing. Applied in the tool pipeline after `wrapToolsWithTiming`:
 
 ```
-tools -> patchToolLookup -> wrapToolsWithTiming -> wrapToolsWithFollowUp -> Agent
+tools -> wrapToolsWithTiming -> wrapToolsWithFollowUp -> structured action loop
 ```
 
-**`transformContext`**: Mid-loop context injection callback passed to the pi-agent-core `Agent`. Called before each LLM turn, it queries for follow-up messages and injects them as a `[CHANNEL UPDATE]` developer message into the conversation. Only surfaces user messages (not bot). Caps surfaced count at the trim window size to avoid context bloat. Works alongside the tool wrapper: `transformContext` handles inter-turn awareness, the tool wrapper handles intra-turn awareness.
+**`transformContext`**: Mid-loop context injection callback passed into the structured action loop. Called before each LLM turn, it queries for follow-up messages and injects them as a `[CHANNEL UPDATE]` message into the conversation. Only surfaces user messages (not bot). Caps surfaced count at the trim window size to avoid context bloat. Works alongside the tool wrapper: `transformContext` handles inter-turn awareness, the tool wrapper handles intra-turn awareness.
 
 **`reply_to_message_id`**: Optional parameter on `send_message` that lets the agent reply to a specific message by Discord message ID. When set, the `reply` boolean is ignored and the message is sent as a reply to the target. Enables the agent to address specific follow-up messages rather than only the original trigger.
 
@@ -150,6 +169,13 @@ Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields op
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
 | `enabled` | boolean | `true` | Disable to send merged stable sections without cache breakpoints |
+
+**Action loop config** (`ActionLoopConfig`): Structured-output runtime limits. Nested under `actionLoop` in guild config, `defaultActionLoop` in global config.
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `maxToolCalls` | number | `8` | Max tool calls allowed in one response run |
+| `wallClockTimeoutMs` | number | `45000` | Hard timeout for a single response run |
 
 **Instructions**: Custom text injected into LLM context (after tool instructions, before emojis). `instructionsPath` loads from a file; `instructions` provides inline text. `instructionsPath` takes priority. Guild-level overrides global default.
 

@@ -16,6 +16,7 @@ import type {
   MembersConfig,
   DispatcherConfig,
   PromptCachingConfig,
+  ActionLoopConfig,
 } from "./types.ts";
 import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 
@@ -160,6 +161,11 @@ const DEFAULT_PROMPT_CACHING: PromptCachingConfig = {
   enabled: true,
 };
 
+const DEFAULT_ACTION_LOOP: ActionLoopConfig = {
+  maxToolCalls: 8,
+  wallClockTimeoutMs: 45_000,
+};
+
 const DEFAULT_BASH_TIMEOUT_MS = 5000;
 const DEFAULT_BASH_OUTPUT_LIMIT = 4000;
 
@@ -178,6 +184,38 @@ function resolveGuildPromptCaching(
   return {
     enabled: partial?.enabled ?? global.enabled,
   };
+}
+
+function resolveGlobalActionLoop(
+  partial: MainConfigYaml["actionLoop"] | undefined
+): ActionLoopConfig {
+  const resolved = {
+    maxToolCalls: partial?.maxToolCalls ?? DEFAULT_ACTION_LOOP.maxToolCalls,
+    wallClockTimeoutMs: partial?.wallClockTimeoutMs ?? DEFAULT_ACTION_LOOP.wallClockTimeoutMs,
+  };
+  validateActionLoopConfig(resolved, "actionLoop");
+  return resolved;
+}
+
+function resolveGuildActionLoop(
+  global: ActionLoopConfig,
+  partial: GuildConfigYaml["actionLoop"] | undefined
+): ActionLoopConfig {
+  const resolved = {
+    maxToolCalls: partial?.maxToolCalls ?? global.maxToolCalls,
+    wallClockTimeoutMs: partial?.wallClockTimeoutMs ?? global.wallClockTimeoutMs,
+  };
+  validateActionLoopConfig(resolved, "actionLoop");
+  return resolved;
+}
+
+function validateActionLoopConfig(config: ActionLoopConfig, keyPrefix: string): void {
+  if (!Number.isFinite(config.maxToolCalls) || config.maxToolCalls < 1) {
+    throw new Error(`${keyPrefix}.maxToolCalls must be >= 1`);
+  }
+  if (!Number.isFinite(config.wallClockTimeoutMs) || config.wallClockTimeoutMs < 1000) {
+    throw new Error(`${keyPrefix}.wallClockTimeoutMs must be >= 1000`);
+  }
 }
 
 /**
@@ -349,8 +387,6 @@ export function loadGlobalConfig(
     defaultMembers: {
       include: yaml.members?.include ?? DEFAULT_MEMBERS.include,
     },
-    defaultForceToolCallFirstRun: yaml.forceToolCallFirstRun ?? false,
-    defaultDisableParallelToolCallsFirstRun: yaml.disableParallelToolCallsFirstRun ?? false,
     defaultDispatcher: {
       enabled: yaml.dispatcher?.enabled ?? DEFAULT_DISPATCHER.enabled,
       mentionDebounceMs: yaml.dispatcher?.mentionDebounceMs ?? DEFAULT_DISPATCHER.mentionDebounceMs,
@@ -358,6 +394,7 @@ export function loadGlobalConfig(
       maxFollowUps: yaml.dispatcher?.maxFollowUps ?? DEFAULT_DISPATCHER.maxFollowUps,
     },
     defaultPromptCaching: resolveGlobalPromptCaching(yaml.promptCaching),
+    defaultActionLoop: resolveGlobalActionLoop(yaml.actionLoop),
   };
 }
 
@@ -432,8 +469,6 @@ export function resolveGuildConfig(
     members: {
       include: partial.members?.include ?? global.defaultMembers.include,
     },
-    forceToolCallFirstRun: partial.forceToolCallFirstRun ?? global.defaultForceToolCallFirstRun,
-    disableParallelToolCallsFirstRun: partial.disableParallelToolCallsFirstRun ?? global.defaultDisableParallelToolCallsFirstRun,
     dispatcher: {
       enabled: partial.dispatcher?.enabled ?? global.defaultDispatcher.enabled,
       mentionDebounceMs: partial.dispatcher?.mentionDebounceMs ?? global.defaultDispatcher.mentionDebounceMs,
@@ -441,6 +476,7 @@ export function resolveGuildConfig(
       maxFollowUps: partial.dispatcher?.maxFollowUps ?? global.defaultDispatcher.maxFollowUps,
     },
     promptCaching: resolveGuildPromptCaching(global.defaultPromptCaching, partial.promptCaching),
+    actionLoop: resolveGuildActionLoop(global.defaultActionLoop, partial.actionLoop),
   };
 }
 
@@ -506,6 +542,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     members: config.members,
     dispatcher: config.dispatcher,
     promptCaching: config.promptCaching,
+    actionLoop: config.actionLoop,
   };
 
   // Strip undefined keys before serializing

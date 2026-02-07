@@ -59,3 +59,16 @@ export { fetchMissingReplyTargets, type ReplyFallbackDeps, type FetchedDiscordMe
 export { createFetchUrlTool, type FetchUrlToolDeps } from "./fetch-url-tool.ts";
 
 export { createStartThreadTool, type StartThreadToolDeps, type StartThreadDetails } from "./start-thread-tool.ts";
+
+export {
+  buildActionResponseFormat,
+  buildStructuredActionProtocolPrompt,
+  parseStructuredActionBatch,
+  runStructuredActionLoop,
+  type StructuredActionBatch,
+  type StructuredAction,
+  type LoopMessage,
+  type LoopStopReason,
+  type RunStructuredActionLoopInput,
+  type RunStructuredActionLoopResult,
+} from "./structured-actions.ts";

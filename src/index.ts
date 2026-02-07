@@ -824,16 +824,16 @@ async function buildContext(
     }
   }
     const lateInstruction = `CRITICAL:
-- Always call \`start_typing\` before each \`send_message\`.
-- ALWAYS USE \`send_message\` TO MAKE AN ACTUAL RESPONSE to a user! OTHERWISE THE REPLY WILL BE LOST!
-- ONCE AGAIN, USER CANNOT SEE ANYTHING OTHER THAN MESSAGES SENT VIA \`send_message\` -- PLEASE USE THIS TOOL TO COMMUNICATE!!!!
-- Remember and consider all your "Available Tools".
-- Always recall user-related memories before making response.
-- If recallection of event is needed consider using literal search or fallback to semantic one. Try different queries.
-- \`send_message\` HAS to be called!
-- Consider proactively maintaining your journal and delete old unnecessary entries, or merge them.
-- If you see [CHANNEL UPDATE] or follow-up annotations in tool results, prioritize same-user messages. Do not repeat topics you already addressed.
-- Use reply_to_message_id to reply to specific follow-up messages.
+- Follow the structured action JSON protocol exactly (no plain-text output outside JSON).
+- User-visible output can only be sent through \`send_message\`.
+- If no response is appropriate, use \`ignore_user\`.
+- Use \`start_typing\` immediately before each \`send_message\`.
+- Consider all available tools before deciding.
+- Recall user-related memories when relevant.
+- For historical recall, try literal search first, then semantic fallback with alternate queries.
+- Proactively maintain journal quality (merge or delete stale entries).
+- If you see [CHANNEL UPDATE] or follow-up annotations in tool results, prioritize same-user follow-ups and avoid repetition.
+- Use \`reply_to_message_id\` for specific follow-up replies.
 `;
 
   return assembleContext({

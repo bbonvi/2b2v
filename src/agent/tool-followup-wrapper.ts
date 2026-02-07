@@ -119,7 +119,7 @@ function formatSendMessageAnnotation(
  * For other tools, appends a lightweight count notification.
  *
  * Applied AFTER wrapToolsWithTiming in the pipeline:
- * tools -> patchToolLookup -> wrapToolsWithTiming -> wrapToolsWithFollowUp -> Agent
+ * tools -> wrapToolsWithTiming -> wrapToolsWithFollowUp -> structured action loop
  */
 export function wrapToolsWithFollowUp(
   tools: AgentTool[],

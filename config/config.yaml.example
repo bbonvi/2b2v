@@ -76,12 +76,10 @@ dispatcher:
 promptCaching:
   enabled: true
 
-# Agent tool-calling behavior on first turn
-# Some models need "required" tool choice on first turn to ensure tool use.
-# Some models go haywire with parallel tool calls; disabling prevents that.
-# Both disabled by default.
-forceToolCallFirstRun: false              # Force toolChoice: "required" on first turn
-disableParallelToolCallsFirstRun: false   # Disable parallel tool calls on first turn
+# Structured action loop runtime limits
+actionLoop:
+  maxToolCalls: 8          # Max tool calls allowed in one response run
+  wallClockTimeoutMs: 45000  # Hard timeout per response run (milliseconds)
 
 # ElevenLabs text-to-speech configuration (requires ELEVENLABS_API_KEY env var)
 # When enabled, the bot can send voice messages as audio attachments

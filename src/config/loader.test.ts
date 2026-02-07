@@ -198,6 +198,30 @@ describe("loadGlobalConfig", () => {
       enabled: true,
     });
   });
+
+  test("uses actionLoop defaults when not configured", () => {
+    const cfg = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "nonexistent.yaml"));
+    expect(cfg.defaultActionLoop).toEqual({
+      maxToolCalls: 8,
+      wallClockTimeoutMs: 45_000,
+    });
+  });
+
+  test("parses global actionLoop overrides", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "actionLoop:\n  maxToolCalls: 12\n  wallClockTimeoutMs: 30000\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultActionLoop).toEqual({
+      maxToolCalls: 12,
+      wallClockTimeoutMs: 30_000,
+    });
+  });
+
+  test("rejects invalid global actionLoop values", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "actionLoop:\n  maxToolCalls: 0\n  wallClockTimeoutMs: 500\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow("actionLoop.maxToolCalls must be >= 1");
+  });
 });
 
 describe("loadGuildConfigFile", () => {
@@ -472,6 +496,52 @@ describe("resolveGuildConfig", () => {
       enabled: true,
     });
   });
+
+  test("inherits actionLoop from global defaults", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "actionLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n");
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "113",
+      slug: "action-loop-inherit",
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.actionLoop).toEqual({
+      maxToolCalls: 9,
+      wallClockTimeoutMs: 60_000,
+    });
+  });
+
+  test("guild actionLoop overrides global defaults", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "actionLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n");
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "114",
+      slug: "action-loop-override",
+      actionLoop: { maxToolCalls: 3, wallClockTimeoutMs: 15000 },
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.actionLoop).toEqual({
+      maxToolCalls: 3,
+      wallClockTimeoutMs: 15_000,
+    });
+  });
+
+  test("rejects invalid guild actionLoop overrides", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "actionLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n");
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "115",
+      slug: "action-loop-invalid",
+      actionLoop: { maxToolCalls: 0, wallClockTimeoutMs: 5000 },
+    };
+    expect(() => resolveGuildConfig(global, partial)).toThrow("actionLoop.maxToolCalls must be >= 1");
+  });
 });
 
 describe("loadGuildConfigs", () => {
@@ -559,8 +629,7 @@ describe("saveGuildConfig", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      forceToolCallFirstRun: false,
-      disableParallelToolCallsFirstRun: false,
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: true },
     };
@@ -597,8 +666,7 @@ describe("saveGuildConfig", () => {
       instructions: "Custom guild instructions",
       emotes: { include: false },
       members: { include: true },
-      forceToolCallFirstRun: false,
-      disableParallelToolCallsFirstRun: false,
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: true },
     };
@@ -631,8 +699,7 @@ describe("saveGuildConfig", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      forceToolCallFirstRun: false,
-      disableParallelToolCallsFirstRun: false,
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: false },
     } as unknown as GuildConfig;
@@ -960,8 +1027,7 @@ describe("saveGuildConfig bashTool", () => {
       },
       emotes: { include: false },
       members: { include: true },
-      forceToolCallFirstRun: false,
-      disableParallelToolCallsFirstRun: false,
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: true },
     };
@@ -994,8 +1060,7 @@ describe("saveGuildConfig bashTool", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      forceToolCallFirstRun: false,
-      disableParallelToolCallsFirstRun: false,
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: true },
     };
@@ -1211,8 +1276,7 @@ describe("saveGuildConfig emotes", () => {
       instructions: "",
       emotes: { include: true },
       members: { include: true },
-      forceToolCallFirstRun: false,
-      disableParallelToolCallsFirstRun: false,
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: true },
     };
@@ -1252,8 +1316,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      forceToolCallFirstRun: false,
-      disableParallelToolCallsFirstRun: false,
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: true },
     };
@@ -1286,8 +1349,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      forceToolCallFirstRun: false,
-      disableParallelToolCallsFirstRun: false,
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: true },
     };

@@ -57,6 +57,14 @@ export interface PromptCachingConfig {
   enabled: boolean;
 }
 
+/** Structured action loop runtime limits. */
+export interface ActionLoopConfig {
+  /** Max tool calls allowed in one agent run. */
+  maxToolCalls: number;
+  /** Absolute wall-clock timeout for one agent run. */
+  wallClockTimeoutMs: number;
+}
+
 /** Trigger configuration per guild. All independently toggleable. */
 export interface TriggerConfig {
   mention: boolean;
@@ -107,14 +115,12 @@ export interface GuildConfig {
   emotes: EmotesConfig;
   /** Server members list configuration. */
   members: MembersConfig;
-  /** Force toolChoice: "required" on first agent turn. */
-  forceToolCallFirstRun: boolean;
-  /** Disable parallel tool calls on first agent turn. */
-  disableParallelToolCallsFirstRun: boolean;
   /** Channel dispatcher configuration. */
   dispatcher: DispatcherConfig;
   /** Prompt caching controls for OpenRouter requests. */
   promptCaching: PromptCachingConfig;
+  /** Structured action loop runtime limits. */
+  actionLoop: ActionLoopConfig;
 }
 
 /** Global configuration loaded from file + env. */
@@ -154,14 +160,12 @@ export interface GlobalConfig {
   defaultEmotes: EmotesConfig;
   /** Default members configuration. */
   defaultMembers: MembersConfig;
-  /** Force toolChoice: "required" on first agent turn. Default false. */
-  defaultForceToolCallFirstRun: boolean;
-  /** Disable parallel tool calls on first agent turn. Default false. */
-  defaultDisableParallelToolCallsFirstRun: boolean;
   /** Default dispatcher configuration. */
   defaultDispatcher: DispatcherConfig;
   /** Default prompt caching controls. */
   defaultPromptCaching: PromptCachingConfig;
+  /** Default structured action loop runtime limits. */
+  defaultActionLoop: ActionLoopConfig;
 }
 
 /** Full resolved app config. */
@@ -198,8 +202,6 @@ export interface GuildConfigYaml {
   members?: {
     include?: boolean;
   };
-  forceToolCallFirstRun?: boolean;
-  disableParallelToolCallsFirstRun?: boolean;
   dispatcher?: {
     enabled?: boolean;
     mentionDebounceMs?: number;
@@ -208,6 +210,10 @@ export interface GuildConfigYaml {
   };
   promptCaching?: {
     enabled?: boolean;
+  };
+  actionLoop?: {
+    maxToolCalls?: number;
+    wallClockTimeoutMs?: number;
   };
 }
 
@@ -258,8 +264,6 @@ export interface MainConfigYaml {
   members?: {
     include?: boolean;
   };
-  forceToolCallFirstRun?: boolean;
-  disableParallelToolCallsFirstRun?: boolean;
   dispatcher?: {
     enabled?: boolean;
     mentionDebounceMs?: number;
@@ -268,5 +272,9 @@ export interface MainConfigYaml {
   };
   promptCaching?: {
     enabled?: boolean;
+  };
+  actionLoop?: {
+    maxToolCalls?: number;
+    wallClockTimeoutMs?: number;
   };
 }

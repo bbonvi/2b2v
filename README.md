@@ -79,6 +79,9 @@ trim:
   replyQuoteChars: 50
 promptCaching:
   enabled: true
+actionLoop:
+  maxToolCalls: 8
+  wallClockTimeoutMs: 45000
 mergeMessageGapSeconds: 120
 memoryRetentionDays: 180
 adminUserIds: []
@@ -89,6 +92,7 @@ imageReadMaxPerCall: 10
 All fields are optional — missing values fall back to global defaults.
 
 `promptCaching.enabled` controls whether the stable prefix is sent with a single cache breakpoint (`cache_control`).
+`actionLoop.maxToolCalls` and `actionLoop.wallClockTimeoutMs` bound each structured-output agent run.
 
 ### Persona
 

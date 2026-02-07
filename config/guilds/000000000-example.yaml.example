@@ -68,9 +68,10 @@ members:
 promptCaching:
   enabled: true
 
-# Agent tool-calling behavior (overrides global defaults)
-# forceToolCallFirstRun: true
-# disableParallelToolCallsFirstRun: true
+# Structured action loop limits (overrides global defaults)
+# actionLoop:
+#   maxToolCalls: 8
+#   wallClockTimeoutMs: 45000
 
 # Channel dispatcher (overrides global defaults)
 # dispatcher:

@@ -1,7 +1,10 @@
-import { Agent } from "@mariozechner/pi-agent-core";
-import type { Message, Model } from "@mariozechner/pi-ai";
-import { streamSimple, type ProviderStreamOptions } from "@mariozechner/pi-ai";
 import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
+import type {
+  AssistantMessage,
+  Message,
+  Model,
+  ProviderStreamOptions,
+} from "@mariozechner/pi-ai";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
 import { contextToSplitPrompts, type AssembledContext, type ContextSection } from "./context-assembly.ts";
 import { createSendMessageTool, type MessageSender, type SendMessageToolDeps } from "./send-message-tool.ts";
@@ -14,7 +17,12 @@ import type { TtsConfig, TtsResult } from "../tts/types.ts";
 import { resolveGuildModel, buildStreamOptions } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { Logger, RequestLog } from "../logger.ts";
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
+import {
+  buildStructuredActionProtocolPrompt,
+  runStructuredActionLoop,
+  type LoopMessage,
+} from "./structured-actions.ts";
+import { completeOpenRouterChat } from "../llm/openrouter-chat.ts";
 
 /** Minimal abstraction over a Discord message for the handler. */
 export interface IncomingMessage {
@@ -26,6 +34,12 @@ export interface IncomingMessage {
   /** Pre-translated (inbound) content for LLM consumption. */
   translatedContent: string;
 }
+
+export type LlmCompleteFn = (
+  model: Model<never>,
+  context: { systemPrompt?: string; messages: Message[] },
+  options: ProviderStreamOptions,
+) => Promise<AssistantMessage>;
 
 /** Dependencies injected into the handler. No direct discord.js coupling. */
 export interface HandlerDeps {
@@ -57,8 +71,10 @@ export interface HandlerDeps {
   triggerInstructions?: TriggerInstructions;
   /** Follow-up wrapper deps for mid-loop context injection. */
   followUpDeps?: FollowUpWrapperDeps;
-  /** Optional transform applied to context before each LLM call (e.g., inject follow-ups). */
+  /** Optional transform applied before each LLM call (e.g., inject follow-ups). */
   transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+  /** Optional injected completion function for tests. */
+  llmComplete?: LlmCompleteFn;
 }
 
 export interface HandleResult {
@@ -89,39 +105,13 @@ export function injectTriggerInstruction(
   return [...sections.slice(0, lateIdx), newSection, ...sections.slice(lateIdx)];
 }
 
-/**
- * Patch the tools array's `find` method to tolerate whitespace in LLM-returned
- * tool names. pi-agent-core does `tools.find(t => t.name === toolCall.name)` —
- * if the model returns `" send_message"` (leading space), the exact match fails.
- * This fallback probes common whitespace variants so the real tool is found.
- */
-export function patchToolLookup(tools: AgentTool[]): void {
-  const nativeFind = Array.prototype.find;
-  const WS = ["", " ", "  "];
-  Object.defineProperty(tools, "find", {
-    value(predicate: (value: AgentTool, index: number, array: AgentTool[]) => boolean) {
-      const exact = nativeFind.call(this, predicate) as AgentTool | undefined;
-      if (exact !== undefined) return exact;
-      for (const tool of this as AgentTool[]) {
-        for (const pre of WS) {
-          for (const suf of WS) {
-            if (pre === "" && suf === "") continue;
-            const probe = Object.create(tool, {
-              name: { value: `${pre}${tool.name}${suf}`, enumerable: true },
-            }) as AgentTool;
-            if (predicate(probe, 0, this as AgentTool[])) return tool;
-          }
-        }
-      }
-      return undefined;
-    },
-    writable: true,
-    configurable: true,
-  });
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  return value;
 }
 
 function stripCacheControlFromMessages(messages: unknown[]): void {
@@ -201,11 +191,85 @@ function prependStableSectionsToPayload(
   }
 }
 
+function messageContentToText(content: unknown): string | null {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return null;
+  const textParts: string[] = [];
+  for (const part of content) {
+    const rec = asRecord(part);
+    if (rec === null) continue;
+    if (rec.type === "text" && typeof rec.text === "string") {
+      textParts.push(rec.text);
+    }
+  }
+  if (textParts.length === 0) return null;
+  return textParts.join("\n");
+}
+
+function loopMessagesToAgentMessages(messages: LoopMessage[]): AgentMessage[] {
+  return messages.map((msg) => ({
+    role: msg.role,
+    content: msg.content,
+    timestamp: msg.timestamp,
+  } as AgentMessage));
+}
+
+function agentMessagesToLoopMessages(messages: AgentMessage[]): LoopMessage[] {
+  const converted: LoopMessage[] = [];
+  for (const message of messages) {
+    const rec = asRecord(message);
+    if (rec === null) continue;
+    const role = rec.role;
+    if (role !== "user" && role !== "assistant") continue;
+    const content = messageContentToText(rec.content);
+    if (content === null) continue;
+    const ts = typeof rec.timestamp === "number" ? rec.timestamp : Date.now();
+    converted.push({
+      role,
+      content,
+      timestamp: ts,
+    });
+  }
+  return converted;
+}
+
+function loopMessagesToLlmMessages(messages: LoopMessage[]): Message[] {
+  const converted = messages.map((msg) => ({
+    role: msg.role,
+    content: msg.content,
+    timestamp: msg.timestamp,
+  }));
+  return converted as unknown as Message[];
+}
+
+function extractAssistantText(message: AssistantMessage): string {
+  const text = message.content
+    .filter((part): part is { type: "text"; text: string } => part.type === "text")
+    .map((part) => part.text)
+    .join("\n")
+    .trim();
+
+  if (text !== "") return text;
+
+  const thinking = message.content
+    .filter((part): part is { type: "thinking"; thinking: string } => part.type === "thinking")
+    .map((part) => part.thinking)
+    .join("\n")
+    .trim();
+
+  return thinking;
+}
+
+function isStructuredOutputUnsupported(error: unknown): boolean {
+  const raw = error instanceof Error ? error.message : String(error);
+  const msg = raw.toLowerCase();
+  return msg.includes("response_format") || msg.includes("json_schema") || msg.includes("structured output");
+}
+
 /**
- * Core message handler. Evaluates triggers, builds agent, runs prompt.
+ * Core message handler. Evaluates triggers, builds action loop, runs prompt.
  *
  * Returns whether the bot was triggered and whether the agent ran.
- * The agent may choose not to use send_message (declining to respond).
  */
 export async function handleMessage(
   msg: IncomingMessage,
@@ -231,7 +295,6 @@ export async function handleMessage(
 
   deps.onTriggered?.(triggerResult);
 
-  // Inject trigger-specific instruction if configured
   const triggerInstruction = deps.triggerInstructions?.[triggerResult.reason];
   let context = deps.context;
   if (triggerInstruction !== undefined && triggerInstruction !== "") {
@@ -243,11 +306,8 @@ export async function handleMessage(
 
   const stableSections = getStablePromptSections(context);
   const splitPrompts = contextToSplitPrompts(context);
-  // pi-ai only accepts a single systemPrompt string. We pass the volatile (uncached)
-  // developer portion; grouped stable sections are injected via onPayload mutation.
-  const systemPrompt = splitPrompts.developer;
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
-  const streamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);
+  const baseStreamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);
 
   const sendToolDeps: SendMessageToolDeps = {
     sender: deps.sender,
@@ -257,123 +317,152 @@ export async function handleMessage(
   };
   const sendTool = createSendMessageTool(sendToolDeps) as unknown as AgentTool;
   const tools: AgentTool[] = [sendTool, ...(deps.extraTools ?? [])];
-  patchToolLookup(tools);
   const { tools: timedTools, state: timingState } = wrapToolsWithTiming(tools);
 
-  // Wrap with follow-up annotations if deps provided
   let finalTools: AgentTool[] = timedTools;
   if (deps.followUpDeps !== undefined) {
     finalTools = wrapToolsWithFollowUp(timedTools, deps.followUpDeps).tools;
   }
 
   const reqLog = deps.requestLog;
-  let isFirstTurn = true;
-  const forceFirst = deps.guildConfig.forceToolCallFirstRun;
-  const disableParallel = deps.guildConfig.disableParallelToolCallsFirstRun;
-  const wrappedStreamFn: typeof streamSimple = (model_, context, options) => {
-    const firstTurn = isFirstTurn;
-    isFirstTurn = false;
-    return streamSimple(model_, context, {
-      ...options,
-      ...streamOptions,
-      toolChoice: (firstTurn && forceFirst) ? "required" : undefined,
-      parallelToolCalls: (firstTurn && disableParallel) ? false : undefined,
-      onPayload: (payload: unknown) => {
-        // pi-ai sends `systemPrompt` as a developer message.
-        // We prepend each stable context section so providers can cache prefix blocks
-        // at section granularity while keeping volatile conversation messages unchanged.
-        prependStableSectionsToPayload(payload, stableSections, deps.guildConfig.promptCaching);
-        reqLog?.recordLLMRequest(payload);
-      },
-    } as ProviderStreamOptions);
-  };
+  const llmComplete = deps.llmComplete;
 
-  const agent = new Agent({
-    initialState: {
-      systemPrompt,
-      model: model as unknown as Model<never>,
-      thinkingLevel: (deps.guildConfig.thinkingLevel ?? "off") as ThinkingLevel,
-      tools: finalTools,
-      messages: [],
-    },
-    convertToLlm: defaultConvertToLlm,
-    streamFn: wrappedStreamFn,
-    transformContext: deps.transformContext,
-  });
-
-  agent.getApiKey = () => streamOptions.apiKey;
+  const actionProtocolPrompt = buildStructuredActionProtocolPrompt(finalTools);
+  const systemPrompt = [splitPrompts.developer, actionProtocolPrompt]
+    .filter((part) => part !== "")
+    .join("\n\n");
 
   let assistantResponseNotified = false;
-  agent.subscribe((e) => {
-    if (e.type === "turn_start") {
-      // Set timing reference when a new turn begins (before LLM call).
-      // Tool timing then measures: LLM thinking + tool execution.
-      timingState.setReferenceTime();
-    }
 
-    if (assistantResponseNotified) {
-      if (e.type === "agent_end") deps.onAgentEnd?.();
-      return;
-    }
+  try {
+    const userContent = deps.context.userMessage !== "" ? deps.context.userMessage : msg.translatedContent;
 
-    if (e.type === "message_start" && "role" in e.message && e.message.role === "assistant") {
-      assistantResponseNotified = true;
-      deps.onAssistantResponseStart?.();
-    }
-    if (e.type === "message_update" && "role" in e.message && e.message.role === "assistant") {
-      assistantResponseNotified = true;
-      deps.onAssistantResponseStart?.();
-    }
-    if (e.type === "agent_end") {
-      deps.onAgentEnd?.();
-    }
-  });
+    const loopResult = await runStructuredActionLoop({
+      initialMessages: [
+        {
+          role: "user",
+          content: userContent,
+          timestamp: Date.now(),
+        },
+      ],
+      tools: finalTools,
+      maxToolCalls: deps.guildConfig.actionLoop.maxToolCalls,
+      wallClockTimeoutMs: deps.guildConfig.actionLoop.wallClockTimeoutMs,
+      callModel: async (messages, responseFormat, signal) => {
+        timingState.setReferenceTime();
 
-  if (deps.log !== undefined) {
-    const agentLog = deps.log;
-    const reqLog = deps.requestLog;
-    agentLog.debug("agent tools", { tools: tools.map((t) => t.name) });
-    agent.subscribe((e) => {
-      switch (e.type) {
-        case "agent_start":
-          agentLog.debug("agent_start");
-          break;
-        case "agent_end":
-          agentLog.debug("agent_end", { messageCount: e.messages.length });
-          break;
-        case "tool_execution_start":
-          reqLog?.recordToolStart(e.toolCallId, e.toolName, e.args);
-          break;
-        case "tool_execution_end":
-          reqLog?.recordToolEnd(e.toolCallId, e.isError, e.result);
-          break;
-        case "message_end":
-          reqLog?.recordLLMCompletion(e.message as unknown as Record<string, unknown>);
-          break;
-        case "turn_start":
-        case "turn_end":
-        case "message_start":
-        case "message_update":
-        case "tool_execution_update":
-          break;
-      }
+        const transformedLoopMessages = deps.transformContext !== undefined
+          ? agentMessagesToLoopMessages(
+            await deps.transformContext(loopMessagesToAgentMessages(messages), signal),
+          )
+          : messages;
+
+        const llmMessages = loopMessagesToLlmMessages(transformedLoopMessages);
+
+        const makeOptions = (includeStructuredOutput: boolean): ProviderStreamOptions => ({
+          ...baseStreamOptions,
+          ...(includeStructuredOutput ? { response_format: responseFormat } : {}),
+          signal,
+          onPayload: (payload: unknown) => {
+            prependStableSectionsToPayload(payload, stableSections, deps.guildConfig.promptCaching);
+            reqLog?.recordLLMRequest(payload);
+          },
+        });
+
+        const completionViaInjected = async (includeStructuredOutput: boolean): Promise<{
+          text: string;
+          payload: Record<string, unknown>;
+        }> => {
+          const complete = llmComplete;
+          if (complete === undefined) {
+            const providerParams: Record<string, unknown> = { ...baseStreamOptions };
+            delete providerParams.apiKey;
+            delete providerParams.signal;
+            delete providerParams.onPayload;
+            const result = await completeOpenRouterChat({
+              apiKey: baseStreamOptions.apiKey,
+              model: model.id,
+              systemPrompt,
+              messages: transformedLoopMessages.map((message) => ({
+                role: message.role,
+                content: message.content,
+              })),
+              providerParams,
+              responseFormat: includeStructuredOutput ? responseFormat : undefined,
+              signal,
+              onPayload: (payload: unknown) => {
+                prependStableSectionsToPayload(payload, stableSections, deps.guildConfig.promptCaching);
+                reqLog?.recordLLMRequest(payload);
+              },
+            });
+            return {
+              text: result.text,
+              payload: result.messageForLogs,
+            };
+          }
+
+          const completion = await complete(
+            model as unknown as Model<never>,
+            { systemPrompt, messages: llmMessages },
+            makeOptions(includeStructuredOutput),
+          );
+          return {
+            text: extractAssistantText(completion),
+            payload: completion as unknown as Record<string, unknown>,
+          };
+        };
+
+        let completion: { text: string; payload: Record<string, unknown> };
+        try {
+          completion = await completionViaInjected(true);
+        } catch (error) {
+          if (!isStructuredOutputUnsupported(error)) {
+            throw error;
+          }
+          deps.log?.warn("structured output unsupported, retrying without response_format", {
+            model: model.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          completion = await completionViaInjected(false);
+        }
+
+        reqLog?.recordLLMCompletion(completion.payload);
+
+        if (!assistantResponseNotified) {
+          assistantResponseNotified = true;
+          deps.onAssistantResponseStart?.();
+        }
+
+        return {
+          rawText: completion.text,
+          responsePayload: completion.payload,
+        };
+      },
+      onToolCall: async (tool, toolCallId, args, signal) => {
+        reqLog?.recordToolStart(toolCallId, tool.name, args);
+        try {
+          const result = await tool.execute(toolCallId, args, signal);
+          reqLog?.recordToolEnd(toolCallId, false, result);
+          return result;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown tool execution error";
+          reqLog?.recordToolEnd(toolCallId, true, {
+            content: [{ type: "text", text: message }],
+          });
+          throw error;
+        }
+      },
+      signal: baseStreamOptions.signal as AbortSignal | undefined,
     });
+
+    deps.log?.debug("structured action loop completed", {
+      stopReason: loopResult.stopReason,
+      turns: loopResult.turns,
+      toolCalls: loopResult.toolCalls,
+    });
+  } finally {
+    deps.onAgentEnd?.();
   }
 
-  const userContent = deps.context.userMessage !== "" ? deps.context.userMessage : msg.translatedContent;
-  await agent.prompt(userContent);
-
   return { triggered: true, triggerResult, agentRan: true };
-}
-
-/**
- * Default message converter: passes through standard LLM message types.
- */
-function defaultConvertToLlm(messages: AgentMessage[]): Message[] {
-  return messages.filter(
-    (m): m is Message =>
-      typeof m === "object" &&
-      "role" in m &&
-      ["user", "assistant", "toolResult"].includes((m as { role: string }).role)
-  );
 }
