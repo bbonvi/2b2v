@@ -80,6 +80,8 @@ Messages and memories enqueue into a batcher, get embedded by the local model, a
 
 Empty sections are omitted. `assembleContext()` iterates the registry; no imperative per-section logic.
 
+For OpenRouter Anthropic models, `handleMessage()` rewrites outbound OpenAI-compatible payloads so Group 1 and Group 2 are inserted as multipart text blocks with `cache_control: { type: "ephemeral" }`. Any cache markers on volatile conversation messages are stripped first. This places cache breakpoints only on stable prefix blocks.
+
 ### History Processing
 
 Pipeline: fetch missing reply targets (Discord fallback), sort, merge consecutive author messages, slice older and newer windows, trim, resolve replies, insert sparse date stamps, then format lines.

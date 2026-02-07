@@ -235,6 +235,70 @@ describe("handleMessage", () => {
     expect(result.triggered).toBe(true);
     expect(result.agentRan).toBe(true);
   });
+
+  test("adds cache_control breakpoints to stable context messages for anthropic models", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
+    let capturedPayload: unknown;
+    const requestLog = {
+      recordLLMRequest(payload: unknown) {
+        capturedPayload = structuredClone(payload);
+      },
+      recordToolStart() {},
+      recordToolEnd() {},
+      recordLLMCompletion() {},
+    };
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig({ defaultModel: "anthropic/claude-sonnet-4" }),
+      guildConfig: makeGuildConfig({
+        model: "anthropic/claude-sonnet-4",
+        triggers: { mention: true, keywords: [], randomChance: 0 },
+      }),
+      context: makeContext({
+        sections: [
+          { label: "Tool Instructions", text: "Use send_message.", cached: true, role: "system" },
+          { label: "Persona", text: "You are a test bot.", cached: true, role: "system" },
+          { label: "Server Members", text: "## Server Members\n@alice — Alice", cached: true, role: "developer" },
+          { label: "Current Context", text: "volatile context", cached: false, role: "developer" },
+        ],
+        userMessage: "hello bot",
+      }),
+      sender,
+      requestLog: requestLog as unknown as HandlerDeps["requestLog"],
+    };
+
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+
+    expect(capturedPayload).toBeDefined();
+    expect(capturedPayload).not.toBeNull();
+    expect(typeof capturedPayload).toBe("object");
+    const payload = capturedPayload as { messages?: unknown[] };
+    const messages = payload.messages;
+    expect(Array.isArray(messages)).toBe(true);
+    expect(messages?.length).toBeGreaterThanOrEqual(3);
+
+    const systemMessage = messages?.[0] as { role?: string; content?: unknown };
+    const cachedDevMessage = messages?.[1] as { role?: string; content?: unknown };
+
+    expect(systemMessage.role).toBe("system");
+    expect(Array.isArray(systemMessage.content)).toBe(true);
+    expect((systemMessage.content as Array<{ cache_control?: unknown }>)[0]?.cache_control).toEqual({
+      type: "ephemeral",
+    });
+
+    expect(cachedDevMessage.role).toBe("developer");
+    expect(Array.isArray(cachedDevMessage.content)).toBe(true);
+    expect((cachedDevMessage.content as Array<{ cache_control?: unknown }>)[0]?.cache_control).toEqual({
+      type: "ephemeral",
+    });
+
+    const userMessage = messages?.find((m) => {
+      if (m === null || typeof m !== "object") return false;
+      return (m as { role?: unknown }).role === "user";
+    }) as { content?: unknown } | undefined;
+    expect(userMessage).toBeDefined();
+    expect(Array.isArray(userMessage?.content)).toBe(true);
+    expect((userMessage?.content as Array<{ cache_control?: unknown }>)[0]?.cache_control).toBeUndefined();
+  });
 });
 
 describe("patchToolLookup", () => {

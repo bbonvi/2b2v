@@ -3,7 +3,7 @@ import type { Message, Model } from "@mariozechner/pi-ai";
 import { streamSimple, type ProviderStreamOptions } from "@mariozechner/pi-ai";
 import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
-import { contextToSplitPrompts, type AssembledContext, type ContextSection } from "./context-assembly.ts";
+import { contextToSplitPrompts, type AssembledContext, type ContextSection, type SplitPrompts } from "./context-assembly.ts";
 import { createSendMessageTool, type MessageSender, type SendMessageToolDeps } from "./send-message-tool.ts";
 import { wrapToolsWithTiming } from "./tool-timing.ts";
 import { wrapToolsWithFollowUp } from "./tool-followup-wrapper.ts";
@@ -120,6 +120,70 @@ export function patchToolLookup(tools: AgentTool[]): void {
   });
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function isAnthropicModelPayload(payload: Record<string, unknown>): boolean {
+  const model = payload.model;
+  return typeof model === "string" && model.startsWith("anthropic/");
+}
+
+function stripCacheControlFromMessages(messages: unknown[]): void {
+  for (const message of messages) {
+    if (!isRecord(message)) continue;
+    const content = message.content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (!isRecord(part)) continue;
+      if ("cache_control" in part) {
+        delete part.cache_control;
+      }
+    }
+  }
+}
+
+function makePromptContent(
+  text: string,
+  withCacheControl: boolean
+): string | Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }> {
+  if (!withCacheControl) return text;
+  return [{ type: "text", text, cache_control: { type: "ephemeral" } }];
+}
+
+/**
+ * Mutate OpenAI-compatible payload by prepending split prompt groups.
+ * For Anthropic models on OpenRouter, attach cache breakpoints to stable prefix
+ * groups and remove volatile cache breakpoints that would bust prefix caching.
+ */
+function prependSplitPromptsToPayload(payload: unknown, splitPrompts: SplitPrompts): void {
+  if (!isRecord(payload)) return;
+  const messages = payload.messages;
+  if (!Array.isArray(messages)) return;
+
+  const useAnthropicCacheControl = isAnthropicModelPayload(payload);
+  if (useAnthropicCacheControl) {
+    stripCacheControlFromMessages(messages);
+  }
+
+  const toInsert: Array<{ role: "system" | "developer"; content: unknown }> = [];
+  if (splitPrompts.system !== "") {
+    toInsert.push({
+      role: "system",
+      content: makePromptContent(splitPrompts.system, useAnthropicCacheControl),
+    });
+  }
+  if (splitPrompts.cachedDeveloper !== "") {
+    toInsert.push({
+      role: "developer",
+      content: makePromptContent(splitPrompts.cachedDeveloper, useAnthropicCacheControl),
+    });
+  }
+  if (toInsert.length > 0) {
+    messages.unshift(...toInsert);
+  }
+}
+
 /**
  * Core message handler. Evaluates triggers, builds agent, runs prompt.
  *
@@ -206,19 +270,7 @@ export async function handleMessage(
         //   [3..] user/assistant/tool messages
         // This enables automatic prefix caching: messages [0] and [1] are stable
         // across requests, so providers cache them as a shared prefix.
-        if (payload !== null && typeof payload === "object" && "messages" in payload) {
-          const p = payload as { messages: { role: string; content: string }[] };
-          const toInsert: { role: string; content: string }[] = [];
-          if (splitPrompts.system !== "") {
-            toInsert.push({ role: "system", content: splitPrompts.system });
-          }
-          if (splitPrompts.cachedDeveloper !== "") {
-            toInsert.push({ role: "developer", content: splitPrompts.cachedDeveloper });
-          }
-          if (toInsert.length > 0) {
-            p.messages.unshift(...toInsert);
-          }
-        }
+        prependSplitPromptsToPayload(payload, splitPrompts);
         reqLog?.recordLLMRequest(payload);
       },
     } as ProviderStreamOptions);
