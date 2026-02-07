@@ -304,7 +304,7 @@ describe("handleMessage", () => {
     expect(prepended.map((m) => hasCacheControl(m))).toEqual([false, false, true, true, true, true]);
   });
 
-  test("google models receive cache breakpoints when prompt caching is enabled", async () => {
+  test("google models avoid breakpoints on volatile cached developer history sections", async () => {
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
     let capturedPayload: unknown;
     const requestLog = {
@@ -317,7 +317,7 @@ describe("handleMessage", () => {
     };
     const stableSections: ContextSection[] = [
       { label: "S1", text: "stable-system-1", cached: true, role: "system" },
-      { label: "D1", text: "stable-dev-1", cached: true, role: "developer" },
+      { label: "Chat History — Older", text: "stable-dev-older-history", cached: true, role: "developer" },
     ];
     const deps: HandlerDeps = {
       globalConfig: makeGlobalConfig({ defaultModel: "google/gemini-3-flash-preview" }),
@@ -339,7 +339,7 @@ describe("handleMessage", () => {
     const payload = capturedPayload as { messages?: PayloadMessage[] };
     const messages = payload.messages ?? [];
     const prepended = messages.slice(0, stableSections.length);
-    expect(prepended.map((m) => hasCacheControl(m))).toEqual([true, true]);
+    expect(prepended.map((m) => hasCacheControl(m))).toEqual([true, false]);
   });
 
   test("aggressive profile applies cache_control to all stable sections for non-anthropic models", async () => {

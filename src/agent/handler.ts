@@ -160,6 +160,7 @@ function makePromptContent(
 }
 
 interface StablePromptSection {
+  label: string;
   role: "system" | "developer";
   text: string;
 }
@@ -167,7 +168,40 @@ interface StablePromptSection {
 function getStablePromptSections(context: AssembledContext): StablePromptSection[] {
   return context.sections
     .filter((section) => section.cached)
-    .map((section) => ({ role: section.role, text: section.text }));
+    .map((section) => ({ label: section.label, role: section.role, text: section.text }));
+}
+
+function isGoogleModel(model: string): boolean {
+  return model.startsWith("google/");
+}
+
+function shouldSkipBreakpointForGoogle(section: StablePromptSection): boolean {
+  return section.label === "Chat History — Older";
+}
+
+function selectBreakpointIndices(
+  stableSections: StablePromptSection[],
+  breakpointsToApply: number,
+  promptCaching: PromptCachingConfig,
+  model: string
+): Set<number> {
+  if (breakpointsToApply <= 0) return new Set<number>();
+
+  const eligibleIndices = stableSections
+    .map((section, idx) => ({ section, idx }))
+    .filter(({ section }) => !isGoogleModel(model) || !shouldSkipBreakpointForGoogle(section))
+    .map(({ idx }) => idx);
+
+  const selected = new Set<number>();
+  if (eligibleIndices.length === 0) return selected;
+
+  const limit = Math.min(breakpointsToApply, eligibleIndices.length);
+  const useTailBreakpoints = promptCaching.profile === "conservative";
+  const start = useTailBreakpoints ? eligibleIndices.length - limit : 0;
+  for (let i = start; i < start + limit; i += 1) {
+    selected.add(eligibleIndices[i] as number);
+  }
+  return selected;
 }
 
 /**
@@ -183,23 +217,24 @@ function prependStableSectionsToPayload(
   const messages = payload.messages;
   if (!Array.isArray(messages)) return;
 
+  const model = typeof payload.model === "string" ? payload.model : "";
   let breakpointsToApply = 0;
   if (promptCaching.enabled) {
-    const model = typeof payload.model === "string" ? payload.model : "";
     const softCap = resolvePromptCachingSoftCap(promptCaching);
     const hardCap = resolvePromptCachingHardCap(model);
     breakpointsToApply = Math.min(stableSections.length, softCap, hardCap);
     stripCacheControlFromMessages(messages);
   }
 
-  const useTailBreakpoints = promptCaching.profile === "conservative";
-  const cacheControlStartIndex = stableSections.length - breakpointsToApply;
+  const breakpointIndices = selectBreakpointIndices(
+    stableSections,
+    breakpointsToApply,
+    promptCaching,
+    model
+  );
   const toInsert = stableSections.map((section, idx) => ({
     role: section.role,
-    content: makePromptContent(
-      section.text,
-      useTailBreakpoints ? idx >= cacheControlStartIndex : idx < breakpointsToApply
-    ),
+    content: makePromptContent(section.text, breakpointIndices.has(idx)),
   }));
   if (toInsert.length > 0) {
     messages.unshift(...toInsert);

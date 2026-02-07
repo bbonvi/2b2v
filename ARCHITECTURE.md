@@ -83,6 +83,7 @@ Empty sections are omitted. `assembleContext()` iterates the registry; no impera
 - Cache breakpoints (`cache_control: { type: "ephemeral" }`) are applied by `guild.promptCaching` for all OpenRouter models.
 - Profile caps: `conservative` max 4 (applied to tail stable sections), `aggressive` unlimited soft cap.
 - Hard clamp: `anthropic/*` max 4.
+- `google/*` excludes `Chat History — Older` from breakpoint placement so Gemini's last-breakpoint behavior does not lock on highly volatile history.
 - Existing `cache_control` markers on volatile conversation messages are stripped before stable breakpoints are inserted.
 
 ### History Processing
@@ -151,7 +152,7 @@ Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields op
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
 | `enabled` | boolean | `true` | Disable to send stable sections without cache breakpoints |
-| `profile` | `"conservative" \| "aggressive"` | `"conservative"` | `conservative` max 4 on tail stable sections, `aggressive` unlimited soft cap (Anthropic hard-clamped to 4) |
+| `profile` | `"conservative" \| "aggressive"` | `"conservative"` | `conservative` max 4 on tail stable sections, `aggressive` unlimited soft cap (Anthropic hard-clamped to 4; Google excludes `Chat History — Older` from breakpoints) |
 
 **Instructions**: Custom text injected into LLM context (after tool instructions, before emojis). `instructionsPath` loads from a file; `instructions` provides inline text. `instructionsPath` takes priority. Guild-level overrides global default.
 

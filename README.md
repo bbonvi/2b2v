@@ -93,6 +93,8 @@ All fields are optional — missing values fall back to global defaults.
 - `conservative` (default): up to 4 stable-section cache breakpoints (applied to the latest stable sections)
 - `aggressive`: all stable sections (Anthropic models still hard-clamped to 4)
 
+For `google/*` models, `Chat History — Older` is excluded from breakpoint placement to avoid unstable cache keys.
+
 ### Persona
 
 The persona is a freeform markdown file at `config/persona.md`. It defines the bot's character, tone, and behavioral rules. The real file is gitignored; `config/persona.md.example` is committed as a template.
