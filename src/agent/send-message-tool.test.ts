@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test";
+import { validateToolArguments, type ToolCall } from "@mariozechner/pi-ai";
 import {
   createSendMessageTool,
   type MessageSender,
@@ -466,6 +467,24 @@ describe("createSendMessageTool", () => {
   });
 
   describe("reply_to_message_id", () => {
+    test("schema accepts reply_to_message_id without reply", () => {
+      const { sender } = createMockSender();
+      const tool = createSendMessageTool({ sender, ttsEnabled: false });
+      const toolCall: ToolCall = {
+        type: "toolCall",
+        id: "call-1",
+        name: "send_message",
+        arguments: {
+          text: "Hello",
+          reply_to_message_id: "target-123",
+        },
+      };
+
+      expect(() => {
+        validateToolArguments(tool, toolCall);
+      }).not.toThrow();
+    });
+
     test("passes reply_to_message_id to sender", async () => {
       let receivedReplyTo: string | undefined;
       const sender: MessageSender = (_text, _reply, _chatId, _voice, _signal, replyToMessageId) => {

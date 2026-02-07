@@ -4,10 +4,12 @@ import type { TtsResult, TtsConfig } from "../tts/types.ts";
 
 const SendMessageParams = Type.Object({
   text: Type.String({ description: "Message text to send" }),
-  reply: Type.Boolean({
-    description: "When true, send as a reply to the trigger message. When false, send as a normal channel message.",
-    default: false,
-  }),
+  reply: Type.Optional(
+    Type.Boolean({
+      description: "When true, send as a reply to the trigger message. When false, send as a normal channel message.",
+      default: false,
+    })
+  ),
   chat_id: Type.Optional(
     Type.String({
       description:
@@ -93,10 +95,11 @@ export function createSendMessageTool(
       signal
     ): Promise<AgentToolResult<SendMessageDetails>> => {
       const { text, reply, chat_id, is_voice_message, voice_type, reply_to_message_id } = params;
+      const requestedReply = reply ?? false;
 
       // Reject cross-chat reply: cannot reply to trigger message when targeting a different chat
       // (reply_to_message_id takes precedence over reply boolean, so skip this check)
-      if (chat_id !== undefined && reply && reply_to_message_id === undefined) {
+      if (chat_id !== undefined && requestedReply && reply_to_message_id === undefined) {
         return {
           content: [
             {
@@ -112,7 +115,7 @@ export function createSendMessageTool(
       if (is_voice_message !== true) {
         let result: { sentMessageId: string; warnings?: string[] };
         try {
-          const effectiveReply = reply_to_message_id !== undefined ? false : reply;
+          const effectiveReply = reply_to_message_id !== undefined ? false : requestedReply;
           result = await sender(text, effectiveReply, chat_id, undefined, signal, reply_to_message_id);
         } catch (err) {
           const message = err instanceof Error ? err.message : "Unknown error";
@@ -183,7 +186,7 @@ export function createSendMessageTool(
 
       let result: { sentMessageId: string };
       try {
-        const effectiveReplyVoice = reply_to_message_id !== undefined ? false : reply;
+        const effectiveReplyVoice = reply_to_message_id !== undefined ? false : requestedReply;
         result = await sender(text, effectiveReplyVoice, chat_id, voiceAttachment, signal, reply_to_message_id);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
