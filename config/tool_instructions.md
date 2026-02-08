@@ -9,6 +9,18 @@
 - Use `status: "continue"` when you need another turn after tool results.
 - Use `status: "done"` when interaction is complete.
 - If no response is appropriate, use `ignore_user` (do not force a message).
+- For direct mentions or direct user questions, default to responding via `send_message`.
+- Only use `ignore_user` when silence is clearly better:
+  - spam/noise with no actionable request
+  - explicit request to ignore
+  - no-value continuation where replying would be disruptive
+- Never use `ignore_user` as a shortcut to avoid a user ping.
+
+Structured action examples:
+- Respond case:
+  - `{"status":"done","actions":[{"type":"tool_call","tool_name":"start_typing","arguments":{}},{"type":"tool_call","tool_name":"send_message","arguments":{"text":"...","reply":true}},{"type":"stop_response","reason":"answered"}]}`
+- Ignore case:
+  - `{"status":"done","actions":[{"type":"ignore_user","reason":"non-actionable spam"}]}`
 
 ## Visibility + Communication
 - Users see typing indicator and `send_message` output.

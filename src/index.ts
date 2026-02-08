@@ -826,7 +826,8 @@ async function buildContext(
     const lateInstruction = `CRITICAL:
 - Follow the structured action JSON protocol exactly (no plain-text output outside JSON).
 - User-visible output can only be sent through \`send_message\`.
-- If no response is appropriate, use \`ignore_user\`.
+- For direct mentions or direct user questions, default to responding via \`send_message\`.
+- Use \`ignore_user\` only when silence is clearly better (spam, no actionable request, or explicit request to ignore).
 - Use \`start_typing\` immediately before each \`send_message\`.
 - Consider all available tools before deciding.
 - Recall user-related memories when relevant.

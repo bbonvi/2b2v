@@ -3,6 +3,7 @@ import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import {
   buildActionResponseFormat,
+  buildStructuredActionProtocolPrompt,
   parseStructuredActionBatch,
   runStructuredActionLoop,
   type StructuredActionBatch,
@@ -39,6 +40,14 @@ describe("buildActionResponseFormat", () => {
     expect(asText).toContain("ignore_user");
     expect(asText).toContain("send_message");
     expect(asText).toContain("search_messages");
+  });
+});
+
+describe("buildStructuredActionProtocolPrompt", () => {
+  test("reinforces ignore policy for direct mentions and questions", () => {
+    const prompt = buildStructuredActionProtocolPrompt([makeTool("send_message"), makeTool("start_typing")]);
+    expect(prompt).toContain("For direct mentions or direct questions, default to responding via send_message.");
+    expect(prompt).toContain("Only use ignore_user when silence is clearly better");
   });
 });
 
