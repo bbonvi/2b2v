@@ -348,6 +348,7 @@ export async function handleMessage(
       tools: finalTools,
       maxToolCalls: deps.guildConfig.actionLoop.maxToolCalls,
       wallClockTimeoutMs: deps.guildConfig.actionLoop.wallClockTimeoutMs,
+      llmOutputTimeoutMs: deps.guildConfig.actionLoop.llmOutputTimeoutMs,
       callModel: async (messages, responseFormat, signal) => {
         timingState.setReferenceTime();
 

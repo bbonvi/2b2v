@@ -36,7 +36,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultMembers: { include: true },
     defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
     defaultPromptCaching: { enabled: true },
-    defaultActionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
+    defaultActionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
     ...overrides,
   };
 }
@@ -61,7 +61,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     members: { include: true },
     dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
     promptCaching: { enabled: true },
-    actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
+    actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
     ...overrides,
   };
 }
@@ -236,7 +236,7 @@ describe("handleMessage", () => {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig({
         triggers: { mention: true, keywords: [], randomChance: 0 },
-        actionLoop: { maxToolCalls: 1, wallClockTimeoutMs: 45_000 },
+        actionLoop: { maxToolCalls: 1, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       }),
       context: makeContext(),
       sender,

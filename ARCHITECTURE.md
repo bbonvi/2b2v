@@ -109,6 +109,7 @@ Empty sections are omitted. `assembleContext()` iterates the registry; no impera
 - Hard limits are enforced by config:
   - `actionLoop.maxToolCalls`
   - `actionLoop.wallClockTimeoutMs`
+  - `actionLoop.llmOutputTimeoutMs`
 
 ### History Processing
 
@@ -183,6 +184,7 @@ Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields op
 |-------|------|---------|-------|
 | `maxToolCalls` | number | `8` | Max tool calls allowed in one response run |
 | `wallClockTimeoutMs` | number | `45000` | Hard timeout for a single response run |
+| `llmOutputTimeoutMs` | number | `12000` | Timeout for one model turn before timeout feedback is injected and retried |
 
 **Instructions**: Custom text injected into LLM context (after tool instructions, before emojis). `instructionsPath` loads from a file; `instructions` provides inline text. `instructionsPath` takes priority. Guild-level overrides global default.
 

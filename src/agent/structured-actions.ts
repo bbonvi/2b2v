@@ -63,6 +63,7 @@ export interface RunStructuredActionLoopInput {
   tools: AgentTool[];
   maxToolCalls: number;
   wallClockTimeoutMs: number;
+  llmOutputTimeoutMs: number;
   callModel: (
     messages: LoopMessage[],
     responseFormat: Record<string, unknown>,
@@ -312,6 +313,77 @@ function buildPolicyErrorFeedback(error: string): string {
   ].join("\n");
 }
 
+class ModelOutputTimeoutError extends Error {
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number) {
+    super(`LLM output timed out after ${timeoutMs}ms`);
+    this.name = "ModelOutputTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+function buildModelTimeoutFeedback(timeoutMs: number): string {
+  return [
+    "[MODEL TIMEOUT]",
+    `LLM output timed out after ${timeoutMs}ms.`,
+    "Retry with strict JSON actions. If you can finish quickly, do so.",
+  ].join("\n");
+}
+
+function isModelOutputTimeoutError(error: unknown): error is ModelOutputTimeoutError {
+  return error instanceof ModelOutputTimeoutError;
+}
+
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+async function callModelWithTimeout(
+  input: RunStructuredActionLoopInput,
+  messages: LoopMessage[],
+  responseFormat: Record<string, unknown>,
+): Promise<ModelTurnOutput> {
+  const timeoutError = new ModelOutputTimeoutError(input.llmOutputTimeoutMs);
+  const turnController = new AbortController();
+
+  let onParentAbort: (() => void) | undefined;
+  if (input.signal !== undefined) {
+    if (input.signal.aborted) {
+      throw input.signal.reason ?? new Error("Aborted");
+    }
+    onParentAbort = () => {
+      turnController.abort(input.signal?.reason);
+    };
+    input.signal.addEventListener("abort", onParentAbort, { once: true });
+  }
+
+  const timeoutTimer = setTimeout(() => {
+    turnController.abort(timeoutError);
+  }, input.llmOutputTimeoutMs);
+
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    turnController.signal.addEventListener("abort", () => {
+      if (turnController.signal.reason instanceof ModelOutputTimeoutError) {
+        reject(turnController.signal.reason);
+        return;
+      }
+      const reason: unknown = turnController.signal.reason;
+      reject(reason instanceof Error ? reason : new Error("Model turn aborted"));
+    }, { once: true });
+  });
+
+  try {
+    const modelPromise = input.callModel(messages, responseFormat, turnController.signal);
+    return await Promise.race([modelPromise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutTimer);
+    if (input.signal !== undefined && onParentAbort !== undefined) {
+      input.signal.removeEventListener("abort", onParentAbort);
+    }
+  }
+}
+
 function isValidIgnoreUserReason(reason: string): boolean {
   const normalized = reason.trim().toLowerCase();
   if (normalized === "") return false;
@@ -360,7 +432,7 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
   });
 
   while (turns < maxTurns) {
-    if (input.signal?.aborted === true) {
+    if (isAborted(input.signal)) {
       return { stopReason: "aborted", toolCalls, turns, messages };
     }
 
@@ -370,7 +442,19 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
 
     turns += 1;
 
-    const turnOutput = await input.callModel(messages, responseFormat, input.signal);
+    let turnOutput: ModelTurnOutput;
+    try {
+      turnOutput = await callModelWithTimeout(input, messages, responseFormat);
+    } catch (error) {
+      if (isAborted(input.signal)) {
+        return { stopReason: "aborted", toolCalls, turns, messages };
+      }
+      if (isModelOutputTimeoutError(error)) {
+        messages.push(makeUserMessage(buildModelTimeoutFeedback(error.timeoutMs), now));
+        continue;
+      }
+      throw error;
+    }
     input.onModelTurn?.(turnOutput.responsePayload);
 
     messages.push(makeAssistantMessage(turnOutput.rawText, now));

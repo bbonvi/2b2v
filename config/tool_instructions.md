@@ -33,10 +33,9 @@ Structured action examples:
   - once research has started, do not end silently
 
 ## Typing Policy (Very Important)
-- If you are going to send a message, call `start_typing` immediately before `send_message`.
-- Typing indicator lasts about 10 seconds.
-- If work continues, refresh `start_typing` every 8 to 10 seconds.
-- After any `send_message`, if more work follows, call `start_typing` again.
+- If you are planning to send a reply, call `start_typing` before **every** `tool_call` until the final `send_message`.
+- This includes slow tools (`web_search`, `fetch_url`, `bash`, memory tools) and also includes `send_message`.
+- Do not rely on timed refresh cadence.
 - If you choose `ignore_user`, do not call `start_typing`.
 
 ## Progress-First Rule (Do Not Leave Users Hanging)
@@ -55,10 +54,12 @@ Recommended slow-work pattern:
 1) `start_typing`
 2) progress `send_message`
 3) `start_typing`
-4) slow tool work
+4) tool A
 5) `start_typing`
-6) final `send_message`
-7) `stop_response`
+6) tool B
+7) `start_typing`
+8) final `send_message`
+9) `stop_response`
 
 ## Research Workflow (External Facts)
 - Use this flow when facts are uncertain, current, or source-dependent.

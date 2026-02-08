@@ -63,6 +63,8 @@ export interface ActionLoopConfig {
   maxToolCalls: number;
   /** Absolute wall-clock timeout for one agent run. */
   wallClockTimeoutMs: number;
+  /** Timeout for a single model output turn before retry feedback. */
+  llmOutputTimeoutMs: number;
 }
 
 /** Trigger configuration per guild. All independently toggleable. */
@@ -214,6 +216,7 @@ export interface GuildConfigYaml {
   actionLoop?: {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;
+    llmOutputTimeoutMs?: number;
   };
 }
 
@@ -276,5 +279,6 @@ export interface MainConfigYaml {
   actionLoop?: {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;
+    llmOutputTimeoutMs?: number;
   };
 }

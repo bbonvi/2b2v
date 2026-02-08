@@ -164,6 +164,7 @@ const DEFAULT_PROMPT_CACHING: PromptCachingConfig = {
 const DEFAULT_ACTION_LOOP: ActionLoopConfig = {
   maxToolCalls: 8,
   wallClockTimeoutMs: 45_000,
+  llmOutputTimeoutMs: 12_000,
 };
 
 const DEFAULT_BASH_TIMEOUT_MS = 5000;
@@ -192,6 +193,7 @@ function resolveGlobalActionLoop(
   const resolved = {
     maxToolCalls: partial?.maxToolCalls ?? DEFAULT_ACTION_LOOP.maxToolCalls,
     wallClockTimeoutMs: partial?.wallClockTimeoutMs ?? DEFAULT_ACTION_LOOP.wallClockTimeoutMs,
+    llmOutputTimeoutMs: partial?.llmOutputTimeoutMs ?? DEFAULT_ACTION_LOOP.llmOutputTimeoutMs,
   };
   validateActionLoopConfig(resolved, "actionLoop");
   return resolved;
@@ -204,6 +206,7 @@ function resolveGuildActionLoop(
   const resolved = {
     maxToolCalls: partial?.maxToolCalls ?? global.maxToolCalls,
     wallClockTimeoutMs: partial?.wallClockTimeoutMs ?? global.wallClockTimeoutMs,
+    llmOutputTimeoutMs: partial?.llmOutputTimeoutMs ?? global.llmOutputTimeoutMs,
   };
   validateActionLoopConfig(resolved, "actionLoop");
   return resolved;
@@ -215,6 +218,9 @@ function validateActionLoopConfig(config: ActionLoopConfig, keyPrefix: string): 
   }
   if (!Number.isFinite(config.wallClockTimeoutMs) || config.wallClockTimeoutMs < 1000) {
     throw new Error(`${keyPrefix}.wallClockTimeoutMs must be >= 1000`);
+  }
+  if (!Number.isFinite(config.llmOutputTimeoutMs) || config.llmOutputTimeoutMs < 1000) {
+    throw new Error(`${keyPrefix}.llmOutputTimeoutMs must be >= 1000`);
   }
 }
 

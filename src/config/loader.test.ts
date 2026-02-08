@@ -204,16 +204,18 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultActionLoop).toEqual({
       maxToolCalls: 8,
       wallClockTimeoutMs: 45_000,
+      llmOutputTimeoutMs: 12_000,
     });
   });
 
   test("parses global actionLoop overrides", () => {
     const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "actionLoop:\n  maxToolCalls: 12\n  wallClockTimeoutMs: 30000\n");
+    writeFileSync(file, "actionLoop:\n  maxToolCalls: 12\n  wallClockTimeoutMs: 30000\n  llmOutputTimeoutMs: 9000\n");
     const cfg = loadGlobalConfig(BASE_ENV, file);
     expect(cfg.defaultActionLoop).toEqual({
       maxToolCalls: 12,
       wallClockTimeoutMs: 30_000,
+      llmOutputTimeoutMs: 9_000,
     });
   });
 
@@ -221,6 +223,12 @@ describe("loadGlobalConfig", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, "actionLoop:\n  maxToolCalls: 0\n  wallClockTimeoutMs: 500\n");
     expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow("actionLoop.maxToolCalls must be >= 1");
+  });
+
+  test("rejects invalid global llmOutputTimeoutMs", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "actionLoop:\n  maxToolCalls: 8\n  wallClockTimeoutMs: 30000\n  llmOutputTimeoutMs: 500\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow("actionLoop.llmOutputTimeoutMs must be >= 1000");
   });
 });
 
@@ -500,7 +508,7 @@ describe("resolveGuildConfig", () => {
   test("inherits actionLoop from global defaults", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
-    writeFileSync(cfgFile, "actionLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n");
+    writeFileSync(cfgFile, "actionLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n  llmOutputTimeoutMs: 8500\n");
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {
       guildId: "113",
@@ -510,23 +518,25 @@ describe("resolveGuildConfig", () => {
     expect(resolved.actionLoop).toEqual({
       maxToolCalls: 9,
       wallClockTimeoutMs: 60_000,
+      llmOutputTimeoutMs: 8_500,
     });
   });
 
   test("guild actionLoop overrides global defaults", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
-    writeFileSync(cfgFile, "actionLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n");
+    writeFileSync(cfgFile, "actionLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n  llmOutputTimeoutMs: 8500\n");
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {
       guildId: "114",
       slug: "action-loop-override",
-      actionLoop: { maxToolCalls: 3, wallClockTimeoutMs: 15000 },
+      actionLoop: { maxToolCalls: 3, wallClockTimeoutMs: 15000, llmOutputTimeoutMs: 4500 },
     };
     const resolved = resolveGuildConfig(global, partial);
     expect(resolved.actionLoop).toEqual({
       maxToolCalls: 3,
       wallClockTimeoutMs: 15_000,
+      llmOutputTimeoutMs: 4_500,
     });
   });
 
@@ -538,9 +548,22 @@ describe("resolveGuildConfig", () => {
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {
       guildId: "115",
       slug: "action-loop-invalid",
-      actionLoop: { maxToolCalls: 0, wallClockTimeoutMs: 5000 },
+      actionLoop: { maxToolCalls: 0, wallClockTimeoutMs: 5000, llmOutputTimeoutMs: 9000 },
     };
     expect(() => resolveGuildConfig(global, partial)).toThrow("actionLoop.maxToolCalls must be >= 1");
+  });
+
+  test("rejects invalid guild llmOutputTimeoutMs override", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "actionLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n  llmOutputTimeoutMs: 8500\n");
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "116",
+      slug: "action-loop-invalid-timeout",
+      actionLoop: { maxToolCalls: 3, wallClockTimeoutMs: 5000, llmOutputTimeoutMs: 500 },
+    };
+    expect(() => resolveGuildConfig(global, partial)).toThrow("actionLoop.llmOutputTimeoutMs must be >= 1000");
   });
 });
 
@@ -629,7 +652,7 @@ describe("saveGuildConfig", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: true },
     };
@@ -666,7 +689,7 @@ describe("saveGuildConfig", () => {
       instructions: "Custom guild instructions",
       emotes: { include: false },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: true },
     };
@@ -699,7 +722,7 @@ describe("saveGuildConfig", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: false },
     } as unknown as GuildConfig;
@@ -1027,7 +1050,7 @@ describe("saveGuildConfig bashTool", () => {
       },
       emotes: { include: false },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: true },
     };
@@ -1060,7 +1083,7 @@ describe("saveGuildConfig bashTool", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: true },
     };
@@ -1276,7 +1299,7 @@ describe("saveGuildConfig emotes", () => {
       instructions: "",
       emotes: { include: true },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: true },
     };
@@ -1316,7 +1339,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: true },
     };
@@ -1349,7 +1372,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000 },
+      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
       promptCaching: { enabled: true },
     };

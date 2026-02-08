@@ -82,6 +82,7 @@ promptCaching:
 actionLoop:
   maxToolCalls: 8
   wallClockTimeoutMs: 45000
+  llmOutputTimeoutMs: 12000
 mergeMessageGapSeconds: 120
 memoryRetentionDays: 180
 adminUserIds: []
@@ -93,6 +94,7 @@ All fields are optional — missing values fall back to global defaults.
 
 `promptCaching.enabled` controls whether the stable prefix is sent with a single cache breakpoint (`cache_control`).
 `actionLoop.maxToolCalls` and `actionLoop.wallClockTimeoutMs` bound each structured-output agent run.
+`actionLoop.llmOutputTimeoutMs` limits each individual LLM turn before injecting timeout feedback and retrying.
 
 ### Persona
 

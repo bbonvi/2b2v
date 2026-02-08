@@ -48,7 +48,7 @@ const LATE_ONLY_RULES: readonly PromptPolicyRule[] = [
   },
   {
     id: "start_typing_before_send_message",
-    text: "Use `start_typing` immediately before each `send_message`.",
+    text: "If you plan to send a reply, call `start_typing` before every `tool_call` until the final `send_message`.",
   },
   {
     id: "consider_all_tools_before_deciding",
@@ -104,7 +104,7 @@ const TOOL_RULES: readonly ToolScopedRule[] = [
   },
   {
     id: "tool_start_typing_refresh",
-    text: "Use start_typing before send_message, refresh every 8-10 seconds during long work.",
+    text: "If you are planning to reply, call start_typing before every tool_call (including before send_message).",
     requiredTools: ["start_typing"],
   },
   {

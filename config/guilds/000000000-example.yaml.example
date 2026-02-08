@@ -72,6 +72,7 @@ promptCaching:
 # actionLoop:
 #   maxToolCalls: 8
 #   wallClockTimeoutMs: 45000
+#   llmOutputTimeoutMs: 12000
 
 # Channel dispatcher (overrides global defaults)
 # dispatcher:

@@ -114,6 +114,8 @@ describe("buildStructuredActionProtocolPrompt", () => {
     expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_web_search_requires_fetch_url");
     expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_search_messages_retrieve_older_context");
     expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_chat_history_recent_context");
+    const typingRule = policy.toolRules.find((rule) => rule.id === "tool_start_typing_refresh");
+    expect(typingRule?.text).toContain("before every tool_call");
     expect(policy.researchWorkflowRules.map((rule) => rule.id)).toContain("research_workflow_title");
     expect(policy.researchWorkflowRules.map((rule) => rule.id)).toContain("research_workflow_breadcrumb_updates");
     expect(policy.researchWorkflowRules.map((rule) => rule.id)).toContain("research_workflow_parallel_fetch");
@@ -157,6 +159,7 @@ describe("runStructuredActionLoop", () => {
     const result = await runStructuredActionLoop({
       maxToolCalls: 3,
       wallClockTimeoutMs: 10_000,
+      llmOutputTimeoutMs: 2_000,
       tools: [makeTool("send_message")],
       callModel: () => {
         const next = calls.shift();
@@ -183,6 +186,7 @@ describe("runStructuredActionLoop", () => {
     const result = await runStructuredActionLoop({
       maxToolCalls: 3,
       wallClockTimeoutMs: 10_000,
+      llmOutputTimeoutMs: 2_000,
       tools: [makeTool("send_message")],
       callModel: () => {
         turn += 1;
@@ -229,6 +233,7 @@ describe("runStructuredActionLoop", () => {
     const result = await runStructuredActionLoop({
       maxToolCalls: 1,
       wallClockTimeoutMs: 10_000,
+      llmOutputTimeoutMs: 2_000,
       tools: [makeTool("send_message")],
       callModel: () => Promise.resolve({
         rawText: JSON.stringify(batch),
@@ -251,6 +256,7 @@ describe("runStructuredActionLoop", () => {
     const result = await runStructuredActionLoop({
       maxToolCalls: 3,
       wallClockTimeoutMs: 10_000,
+      llmOutputTimeoutMs: 2_000,
       tools: [makeTool("send_message")],
       callModel: () => {
         turn += 1;
@@ -291,6 +297,7 @@ describe("runStructuredActionLoop", () => {
     const result = await runStructuredActionLoop({
       maxToolCalls: 3,
       wallClockTimeoutMs: 10_000,
+      llmOutputTimeoutMs: 2_000,
       tools: [makeTool("send_message")],
       callModel: () => {
         turn += 1;
@@ -340,6 +347,7 @@ describe("runStructuredActionLoop", () => {
     const result = await runStructuredActionLoop({
       maxToolCalls: 3,
       wallClockTimeoutMs: 10_000,
+      llmOutputTimeoutMs: 2_000,
       tools: [makeTool("send_message")],
       callModel: () => {
         turn += 1;
@@ -380,5 +388,55 @@ describe("runStructuredActionLoop", () => {
       m.role === "user" && m.content.includes("ignore_user reason must indicate"),
     );
     expect(hasPolicyError).toBe(true);
+  });
+
+  test("retries after model output timeout and feeds timeout error back to loop", async () => {
+    let turn = 0;
+    let executed = 0;
+
+    const result = await runStructuredActionLoop({
+      maxToolCalls: 3,
+      wallClockTimeoutMs: 10_000,
+      llmOutputTimeoutMs: 2_000,
+      tools: [makeTool("send_message")],
+      callModel: (_messages, _responseFormat, signal) => {
+        turn += 1;
+        if (turn === 1) {
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              const reason: unknown = signal.reason;
+              reject(reason instanceof Error ? reason : new Error(String(reason)));
+            }, { once: true });
+          });
+        }
+        return Promise.resolve({
+          rawText: JSON.stringify({
+            status: "done",
+            actions: [
+              { type: "tool_call", tool_name: "send_message", arguments: { text: "after-timeout", reply: true } },
+              { type: "stop_response", reason: "done" },
+            ],
+          } satisfies StructuredActionBatch),
+        });
+      },
+      onToolCall: () => {
+        executed += 1;
+        return Promise.resolve({
+          content: [{ type: "text", text: "ok" }],
+          details: {},
+        });
+      },
+      initialMessages: [
+        { role: "user", content: "hello", timestamp: Date.now() },
+      ],
+    });
+
+    expect(result.stopReason).toBe("done");
+    expect(result.turns).toBe(2);
+    expect(executed).toBe(1);
+    const hasTimeoutFeedback = result.messages.some((m) =>
+      m.role === "user" && m.content.includes("[MODEL TIMEOUT]"),
+    );
+    expect(hasTimeoutFeedback).toBe(true);
   });
 });
