@@ -103,7 +103,7 @@ Empty sections are omitted. `assembleContext()` iterates the registry; no impera
   - `stop_response` / `status: done` are rejected until at least one successful `send_message` (unless `ignore_user` is chosen).
   - `send_message` actions must include explicit `reply: boolean`; missing `reply` triggers a policy error and retry.
   - `ignore_user` remains allowed but requires an explicit silence rationale (spam, non-actionable input, or explicit ignore request).
-- Prompt protocol reinforcement is tool-aware: `buildStructuredActionProtocolPrompt` adds an extra section for available tools (for example `web_search` + `fetch_url`, `search_messages`, `chat_history`, typing, memory tools) so behavior guidance matches the active toolset.
+- Prompt protocol reinforcement is tool-aware: `buildStructuredActionProtocolPrompt` adds an extra section for available tools (for example `web_search` + `fetch_url`, `search_messages`, `chat_history`, typing, memory tools) so behavior guidance matches the active toolset. When both web tools are available, it enforces `web_search` -> `fetch_url` before final factual output.
 - Hard limits are enforced by config:
   - `actionLoop.maxToolCalls`
   - `actionLoop.wallClockTimeoutMs`

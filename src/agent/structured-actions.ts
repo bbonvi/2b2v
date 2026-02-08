@@ -223,7 +223,7 @@ export function buildStructuredActionProtocolPrompt(tools: AgentTool[]): string 
     toolReinforcements.push("Use fetch_url to open and extract details from specific URLs.");
   }
   if (toolNames.has("web_search") && toolNames.has("fetch_url")) {
-    toolReinforcements.push("For web research, usually run web_search first, then fetch_url on selected results.");
+    toolReinforcements.push("If web_search is used, you must call fetch_url on at least one result before final factual answer.");
   }
   if (toolNames.has("search_messages")) {
     toolReinforcements.push("Use search_messages to retrieve older chat context.");

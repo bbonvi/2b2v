@@ -101,6 +101,7 @@ describe("buildStructuredActionProtocolPrompt", () => {
     expect(prompt).toContain("Tool-specific reinforcement for available tools:");
     expect(prompt).toContain("Use web_search to discover relevant sources for uncertain or current facts.");
     expect(prompt).toContain("Use fetch_url to open and extract details from specific URLs.");
+    expect(prompt).toContain("If web_search is used, you must call fetch_url on at least one result before final factual answer.");
     expect(prompt).toContain("Use search_messages to retrieve older chat context.");
     expect(prompt).toContain("Use chat_history to inspect recent in-channel context before replying.");
   });
