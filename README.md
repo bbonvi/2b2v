@@ -136,6 +136,17 @@ Each user can have up to 16 profiles. The UI is ephemeral and only the invoking 
 
 See `ARCHITECTURE.md` for system design, core flows, and component boundaries.
 
+## Verification
+
+Use this default verification flow after changes:
+
+```bash
+make check
+make test
+```
+
+`make test-unit` is optional for targeted non-Qdrant loops. Do not run it redundantly after a passing `make test` unless you need that separate signal.
+
 ## Known limitations
 
 - Semantic search time-range filtering is approximate
