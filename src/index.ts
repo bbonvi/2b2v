@@ -830,6 +830,8 @@ async function buildContext(
 - Use \`ignore_user\` only when silence is clearly better (spam, no actionable request, or explicit request to ignore).
 - Use \`start_typing\` immediately before each \`send_message\`.
 - Every \`send_message\` arguments object must include \`reply\` explicitly (\`true\` or \`false\`).
+- If the user asks for facts you are uncertain about, use \`web_search\` before answering.
+- If you start research/tool work, always finish with at least one \`send_message\` unless \`ignore_user\` is explicitly justified.
 - Consider all available tools before deciding.
 - Recall user-related memories when relevant.
 - For historical recall, try literal search first, then semantic fallback with alternate queries.

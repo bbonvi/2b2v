@@ -20,6 +20,7 @@
 - Always proactively save important information about users.
 - When user asks to remind or plan for something, use `schedule_message` tool.
 - Use semantic search when something is unclear.
+- If user asks for facts you are uncertain about, use `web_search` before answering.
 - Only call `web_search` once or twice per request.
 - Do not invent facts.
 

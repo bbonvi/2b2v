@@ -230,6 +230,8 @@ export function buildStructuredActionProtocolPrompt(tools: AgentTool[]): string 
     "If you intentionally decide not to respond to the user, include ignore_user action.",
     "Only send user-visible output via tool_call to send_message.",
     "Every send_message call must include reply as an explicit boolean (true or false).",
+    "If the user asks for facts you are uncertain about, use web_search before answering.",
+    "If you start research/tool work, you must end with at least one send_message unless ignore_user is explicitly justified.",
     "Do not use stop_response or status=done before at least one send_message action in this interaction.",
     "",
     "Available tools:",

@@ -84,6 +84,8 @@ describe("buildStructuredActionProtocolPrompt", () => {
     expect(prompt).toContain("Only use ignore_user when silence is clearly better");
     expect(prompt).toContain("Do not use stop_response or status=done before at least one send_message action");
     expect(prompt).toContain("Every send_message call must include reply as an explicit boolean");
+    expect(prompt).toContain("If you start research/tool work, you must end with at least one send_message");
+    expect(prompt).toContain("If the user asks for facts you are uncertain about, use web_search before answering");
   });
 });
 
