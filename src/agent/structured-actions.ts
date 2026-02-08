@@ -2,6 +2,7 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { validateToolArguments, type ToolCall } from "@mariozechner/pi-ai";
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
+import { resolvePromptPolicy } from "./prompt-policy.ts";
 
 const ToolCallActionSchema = Type.Object({
   type: Type.Literal("tool_call"),
@@ -214,68 +215,7 @@ export function buildStructuredActionProtocolPrompt(tools: AgentTool[]): string 
     .map((tool) => `- ${tool.name}: ${tool.description}`)
     .join("\n");
   const toolNames = new Set(tools.map((tool) => tool.name));
-  const toolReinforcements: string[] = [];
-  const researchWorkflow: string[] = [];
-
-  if (toolNames.has("web_search")) {
-    toolReinforcements.push("Use web_search to discover relevant sources for uncertain or current facts.");
-  }
-  if (toolNames.has("fetch_url")) {
-    toolReinforcements.push("Use fetch_url to open and extract details from specific URLs.");
-  }
-  if (toolNames.has("web_search") && toolNames.has("fetch_url")) {
-    toolReinforcements.push("If web_search is used, you must call fetch_url on at least one result before final factual answer.");
-    researchWorkflow.push("Research workflow for uncertain factual requests:");
-    researchWorkflow.push("- Leave breadcrumb progress updates via send_message while researching.");
-    researchWorkflow.push("- Start with web_search, then use fetch_url on selected results before final factual answer.");
-    researchWorkflow.push("- Run multiple independent fetch_url calls for selected sources (parallel when possible).");
-    if (toolNames.has("fetch_images")) {
-      researchWorkflow.push("- If images are relevant, use fetch_images on selected image URLs.");
-    }
-    researchWorkflow.push("- Consolidate findings across sources, summarize evidence, then do one more reasoning pass before final answer.");
-  }
-  if (toolNames.has("search_messages")) {
-    toolReinforcements.push("Use search_messages to retrieve older chat context.");
-  }
-  if (toolNames.has("chat_history")) {
-    toolReinforcements.push("Use chat_history to inspect recent in-channel context before replying.");
-  }
-  if (toolNames.has("start_typing")) {
-    toolReinforcements.push("Use start_typing before send_message, refresh every 8-10 seconds during long work.");
-  }
-  if (toolNames.has("read_chat_images")) {
-    toolReinforcements.push("Use read_chat_images with image_ids from chat history when inspecting stored images.");
-  }
-  if (toolNames.has("fetch_images")) {
-    toolReinforcements.push("Use fetch_images for external image URLs that are not already in chat history.");
-  }
-  if (toolNames.has("list_members")) {
-    toolReinforcements.push("Use list_members for member identity or online/offline context requests.");
-  }
-  if (toolNames.has("schedule_message")) {
-    toolReinforcements.push("Use schedule_message for reminders or delayed follow-ups with explicit timing details.");
-  }
-  if (toolNames.has("start_thread")) {
-    toolReinforcements.push("Use start_thread when the answer is long and would clutter the parent channel.");
-  }
-  if (toolNames.has("bash")) {
-    toolReinforcements.push("Before bash, send a short progress message and include a command preview.");
-  }
-  if (toolNames.has("recall_user_memories")) {
-    toolReinforcements.push("Use recall_user_memories before updating user memory to prevent duplicate entries.");
-  }
-  if (toolNames.has("save_user_memory")) {
-    toolReinforcements.push("Use save_user_memory for durable user facts, not transient chatter.");
-  }
-  if (toolNames.has("recall_journal_entry")) {
-    toolReinforcements.push("Use recall_journal_entry before creating new journal entries on related topics.");
-  }
-  if (toolNames.has("save_journal_entry")) {
-    toolReinforcements.push("Use save_journal_entry for durable multi-user context worth preserving.");
-  }
-  if (toolNames.has("delete_journal_entries") || toolNames.has("delete_user_memories")) {
-    toolReinforcements.push("Use delete memory tools only when the user clearly requests removal or correction.");
-  }
+  const promptPolicy = resolvePromptPolicy(toolNames);
 
   return [
     "## Structured Action Protocol (Highest Priority)",
@@ -287,23 +227,24 @@ export function buildStructuredActionProtocolPrompt(tools: AgentTool[]): string 
     '- {"type":"ignore_user","reason":"..."}',
     'Use `status: "continue"` when expecting another turn after tool results.',
     'Use `status: "done"` when finished for this interaction.',
-    "For direct mentions or direct questions, default to responding via send_message.",
-    "Only use ignore_user when silence is clearly better (spam, no actionable request, or explicit request to ignore).",
+    ...promptPolicy.sharedRules.map((rule) => rule.text),
     "Never use ignore_user as a shortcut to avoid replying to a user ping.",
     "If you intentionally decide not to respond to the user, include ignore_user action.",
     "Only send user-visible output via tool_call to send_message.",
-    "Every send_message call must include reply as an explicit boolean (true or false).",
-    "If the user asks for facts you are uncertain about, use web_search before answering.",
-    "If you start research/tool work, you must end with at least one send_message unless ignore_user is explicitly justified.",
     "Do not use stop_response or status=done before at least one send_message action in this interaction.",
-    ...(toolReinforcements.length > 0
+    ...(promptPolicy.toolRules.length > 0
       ? [
         "",
         "Tool-specific reinforcement for available tools:",
-        ...toolReinforcements.map((line) => `- ${line}`),
+        ...promptPolicy.toolRules.map((rule) => `- ${rule.text}`),
       ]
       : []),
-    ...(researchWorkflow.length > 0 ? ["", ...researchWorkflow] : []),
+    ...(promptPolicy.researchWorkflowRules.length > 0
+      ? [
+        "",
+        ...promptPolicy.researchWorkflowRules.map((rule, idx) => idx === 0 ? rule.text : `- ${rule.text}`),
+      ]
+      : []),
     "",
     "Available tools:",
     toolList,

@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { createSendMessageTool } from "./send-message-tool.ts";
+import { resolvePromptPolicy } from "./prompt-policy.ts";
 import {
   buildActionResponseFormat,
   buildStructuredActionProtocolPrompt,
@@ -78,18 +79,24 @@ describe("buildActionResponseFormat", () => {
 });
 
 describe("buildStructuredActionProtocolPrompt", () => {
-  test("reinforces ignore policy for direct mentions and questions", () => {
-    const prompt = buildStructuredActionProtocolPrompt([makeTool("send_message"), makeTool("start_typing")]);
-    expect(prompt).toContain("For direct mentions or direct questions, default to responding via send_message.");
-    expect(prompt).toContain("Only use ignore_user when silence is clearly better");
+  test("injects shared reinforcement rules from centralized policy", () => {
+    const tools = [makeTool("send_message"), makeTool("start_typing")];
+    const prompt = buildStructuredActionProtocolPrompt(tools);
+    const policy = resolvePromptPolicy(new Set(tools.map((tool) => tool.name)));
+
+    expect(policy.sharedRules.map((rule) => rule.id)).toContain("direct_mentions_default_send_message");
+    expect(policy.sharedRules.map((rule) => rule.id)).toContain("ignore_user_only_when_silence_is_better");
+    expect(policy.sharedRules.map((rule) => rule.id)).toContain("send_message_requires_reply_boolean");
+    expect(policy.sharedRules.map((rule) => rule.id)).toContain("research_requires_final_send_message");
+
+    for (const rule of policy.sharedRules) {
+      expect(prompt).toContain(rule.text);
+    }
     expect(prompt).toContain("Do not use stop_response or status=done before at least one send_message action");
-    expect(prompt).toContain("Every send_message call must include reply as an explicit boolean");
-    expect(prompt).toContain("If you start research/tool work, you must end with at least one send_message");
-    expect(prompt).toContain("If the user asks for facts you are uncertain about, use web_search before answering");
   });
 
-  test("includes tool-specific reinforcement for available tools", () => {
-    const prompt = buildStructuredActionProtocolPrompt([
+  test("includes selected tool and research workflow reinforcement from policy", () => {
+    const tools = [
       makeTool("send_message"),
       makeTool("start_typing"),
       makeTool("web_search"),
@@ -97,19 +104,28 @@ describe("buildStructuredActionProtocolPrompt", () => {
       makeTool("fetch_images"),
       makeTool("search_messages"),
       makeTool("chat_history"),
-    ]);
+    ];
+    const prompt = buildStructuredActionProtocolPrompt(tools);
+    const policy = resolvePromptPolicy(new Set(tools.map((tool) => tool.name)));
 
     expect(prompt).toContain("Tool-specific reinforcement for available tools:");
-    expect(prompt).toContain("Use web_search to discover relevant sources for uncertain or current facts.");
-    expect(prompt).toContain("Use fetch_url to open and extract details from specific URLs.");
-    expect(prompt).toContain("If web_search is used, you must call fetch_url on at least one result before final factual answer.");
-    expect(prompt).toContain("Use search_messages to retrieve older chat context.");
-    expect(prompt).toContain("Use chat_history to inspect recent in-channel context before replying.");
-    expect(prompt).toContain("Research workflow for uncertain factual requests:");
-    expect(prompt).toContain("Leave breadcrumb progress updates via send_message while researching.");
-    expect(prompt).toContain("Run multiple independent fetch_url calls for selected sources (parallel when possible).");
-    expect(prompt).toContain("If images are relevant, use fetch_images on selected image URLs.");
-    expect(prompt).toContain("Consolidate findings across sources, summarize evidence, then do one more reasoning pass before final answer.");
+    expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_web_search_discover_sources");
+    expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_fetch_url_extract_details");
+    expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_web_search_requires_fetch_url");
+    expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_search_messages_retrieve_older_context");
+    expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_chat_history_recent_context");
+    expect(policy.researchWorkflowRules.map((rule) => rule.id)).toContain("research_workflow_title");
+    expect(policy.researchWorkflowRules.map((rule) => rule.id)).toContain("research_workflow_breadcrumb_updates");
+    expect(policy.researchWorkflowRules.map((rule) => rule.id)).toContain("research_workflow_parallel_fetch");
+    expect(policy.researchWorkflowRules.map((rule) => rule.id)).toContain("research_workflow_optional_images");
+    expect(policy.researchWorkflowRules.map((rule) => rule.id)).toContain("research_workflow_consolidate_and_reason");
+
+    for (const rule of policy.toolRules) {
+      expect(prompt).toContain(rule.text);
+    }
+    for (const rule of policy.researchWorkflowRules) {
+      expect(prompt).toContain(rule.text);
+    }
   });
 });
 

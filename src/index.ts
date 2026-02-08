@@ -27,6 +27,7 @@ import { insertDateStamps } from "./agent/history-dates";
 import { formatRelativeAgo, formatJournalTimestamp } from "./agent/history-dates";
 import { formatLocalWallClock, currentLocalContext } from "./time/agent-time";
 import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
+import { buildLateInstructionPrompt } from "./agent/prompt-policy";
 
 import type { MessageSender } from "./agent/send-message-tool";
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
@@ -823,22 +824,7 @@ async function buildContext(
       }
     }
   }
-    const lateInstruction = `CRITICAL:
-- Follow the structured action JSON protocol exactly (no plain-text output outside JSON).
-- User-visible output can only be sent through \`send_message\`.
-- For direct mentions or direct user questions, default to responding via \`send_message\`.
-- Use \`ignore_user\` only when silence is clearly better (spam, no actionable request, or explicit request to ignore).
-- Use \`start_typing\` immediately before each \`send_message\`.
-- Every \`send_message\` arguments object must include \`reply\` explicitly (\`true\` or \`false\`).
-- If the user asks for facts you are uncertain about, use \`web_search\` before answering.
-- If you start research/tool work, always finish with at least one \`send_message\` unless \`ignore_user\` is explicitly justified.
-- Consider all available tools before deciding.
-- Recall user-related memories when relevant.
-- For historical recall, try literal search first, then semantic fallback with alternate queries.
-- Proactively maintain journal quality (merge or delete stale entries).
-- If you see [CHANNEL UPDATE] or follow-up annotations in tool results, prioritize same-user follow-ups and avoid repetition.
-- Use \`reply_to_message_id\` for specific follow-up replies.
-`;
+  const lateInstruction = buildLateInstructionPrompt();
 
   return assembleContext({
     persona,
