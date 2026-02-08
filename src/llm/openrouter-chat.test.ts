@@ -71,6 +71,38 @@ describe("completeOpenRouterChat", () => {
     fetchSpy.mockRestore();
   });
 
+  test("maps numeric usage.cost into total cost for logs", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      makeResponse({
+        model: "openai/gpt-4o-mini",
+        choices: [
+          {
+            message: { content: [{ type: "text", text: "{\"status\":\"done\"}" }] },
+            finish_reason: "stop",
+          },
+        ],
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          total_tokens: 15,
+          cost: 0.00123,
+        },
+      })
+    );
+
+    const result = await completeOpenRouterChat({
+      apiKey: "key",
+      model: "openai/gpt-4o-mini",
+      systemPrompt: "system",
+      messages: [{ role: "user", content: "hello" }],
+      baseUrl: "https://example.com",
+    });
+
+    expect((result.messageForLogs.usage as { cost?: { total?: number } }).cost?.total).toBe(0.00123);
+
+    fetchSpy.mockRestore();
+  });
+
   test("throws descriptive error on non-2xx responses", async () => {
     const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
       makeResponse({ error: { message: "bad request" } }, 400)

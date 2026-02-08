@@ -63,7 +63,13 @@ function buildUsage(rawUsage: Record<string, unknown> | null): Record<string, un
   const input = typeof rawUsage.prompt_tokens === "number" ? rawUsage.prompt_tokens : 0;
   const output = typeof rawUsage.completion_tokens === "number" ? rawUsage.completion_tokens : 0;
   const totalTokens = typeof rawUsage.total_tokens === "number" ? rawUsage.total_tokens : input + output;
-  const cost = asRecord(rawUsage.cost);
+  const rawCost = rawUsage.cost;
+  const cost = asRecord(rawCost);
+  const totalCost = typeof rawCost === "number"
+    ? rawCost
+    : typeof cost?.total === "number"
+      ? cost.total
+      : 0;
 
   return {
     input,
@@ -74,7 +80,7 @@ function buildUsage(rawUsage: Record<string, unknown> | null): Record<string, un
       output: typeof cost?.output === "number" ? cost.output : 0,
       cacheRead: typeof cost?.cache_read === "number" ? cost.cache_read : 0,
       cacheWrite: typeof cost?.cache_write === "number" ? cost.cache_write : 0,
-      total: typeof cost?.total === "number" ? cost.total : 0,
+      total: totalCost,
     },
   };
 }
