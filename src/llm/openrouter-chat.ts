@@ -174,6 +174,26 @@ function normalizeProviderParams(rawParams: Record<string, unknown>): Record<str
   return params;
 }
 
+function extractNestedProviderErrorMessage(rawRecord: Record<string, unknown> | null): string | null {
+  const errorRecord = asRecord(rawRecord?.error);
+  const metadataRecord = asRecord(errorRecord?.metadata);
+  if (metadataRecord === null) return null;
+
+  const rawMetadata = metadataRecord.raw;
+  if (typeof rawMetadata !== "string" || rawMetadata === "") return null;
+
+  try {
+    const parsed = asRecord(JSON.parse(rawMetadata) as unknown);
+    const nestedError = asRecord(parsed?.error);
+    if (typeof nestedError?.message === "string" && nestedError.message !== "") {
+      return nestedError.message;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export async function completeOpenRouterChat(request: OpenRouterChatRequest): Promise<OpenRouterChatResult> {
   const providerParams = normalizeProviderParams(request.providerParams ?? {});
   const payload: Record<string, unknown> = {
@@ -211,6 +231,10 @@ export async function completeOpenRouterChat(request: OpenRouterChatRequest): Pr
     const errorRecord = asRecord(rawRecord?.error);
     if (typeof errorRecord?.message === "string" && errorRecord.message !== "") {
       message = errorRecord.message;
+    }
+    const nestedProviderMessage = extractNestedProviderErrorMessage(rawRecord);
+    if (nestedProviderMessage !== null) {
+      message = `${message}: ${nestedProviderMessage}`;
     }
     throw new Error(message);
   }

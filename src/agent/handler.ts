@@ -289,7 +289,13 @@ function extractAssistantText(message: AssistantMessage): string {
 function isStructuredOutputUnsupported(error: unknown): boolean {
   const raw = error instanceof Error ? error.message : String(error);
   const msg = raw.toLowerCase();
-  return msg.includes("response_format") || msg.includes("json_schema") || msg.includes("structured output");
+  if (msg.includes("response_format") || msg.includes("json_schema") || msg.includes("structured output")) {
+    return true;
+  }
+  if (msg.includes("specified schema") || msg.includes("too many states")) {
+    return true;
+  }
+  return (msg.includes("provider returned error") || msg.includes("invalid_argument")) && msg.includes("schema");
 }
 
 /**

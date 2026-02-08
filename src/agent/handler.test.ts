@@ -1,4 +1,4 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, mock, spyOn } from "bun:test";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
@@ -112,7 +112,14 @@ function assistantWithText(text: string): AssistantMessage {
   };
 }
 
-function makeTestLogger(): { logger: Logger; debug: ReturnType<typeof mock> } {
+function makeFetchJsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function makeTestLogger(): { logger: Logger; debug: ReturnType<typeof mock>; warn: ReturnType<typeof mock> } {
   const debug = mock(() => {});
   const info = mock(() => {});
   const warn = mock(() => {});
@@ -126,7 +133,7 @@ function makeTestLogger(): { logger: Logger; debug: ReturnType<typeof mock> } {
     logTokenUsage,
     child: () => logger,
   } as Logger;
-  return { logger, debug };
+  return { logger, debug, warn };
 }
 
 describe("handleMessage", () => {
@@ -380,5 +387,65 @@ describe("handleMessage", () => {
     expect(llmOutputCalls).toHaveLength(2);
     expect(llmOutputCalls[0]?.[1]).toEqual({ content: JSON.stringify(firstPayload) });
     expect(llmOutputCalls[1]?.[1]).toEqual({ content: JSON.stringify(secondPayload) });
+  });
+
+  test("retries without response_format when provider reports schema state explosion", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
+    const fetchSpy = spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        makeFetchJsonResponse({
+          error: {
+            message: "Provider returned error",
+            metadata: {
+              raw: JSON.stringify({
+                error: {
+                  code: 400,
+                  message: "The specified schema produces a constraint that has too many states for serving.",
+                  status: "INVALID_ARGUMENT",
+                },
+              }),
+            },
+          },
+        }, 400)
+      )
+      .mockResolvedValueOnce(
+        makeFetchJsonResponse({
+          model: "google/gemini-3-flash-preview",
+          choices: [{
+            message: { content: "{\"status\":\"done\",\"actions\":[{\"type\":\"ignore_user\",\"reason\":\"no response needed\"}]}" },
+            finish_reason: "stop",
+          }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        })
+      );
+
+    const { logger, warn } = makeTestLogger();
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig({ defaultModel: "google/gemini-3-flash-preview" }),
+      guildConfig: makeGuildConfig({ model: "google/gemini-3-flash-preview", triggers: { mention: true, keywords: [], randomChance: 0 } }),
+      context: makeContext(),
+      sender,
+      log: logger,
+    };
+
+    const result = await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+
+    expect(result.triggered).toBe(true);
+    expect(result.agentRan).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    const firstBodyRaw = fetchSpy.mock.calls[0]?.[1]?.body;
+    const secondBodyRaw = fetchSpy.mock.calls[1]?.[1]?.body;
+    const firstBody = typeof firstBodyRaw === "string" ? JSON.parse(firstBodyRaw) as { response_format?: unknown } : {};
+    const secondBody = typeof secondBodyRaw === "string" ? JSON.parse(secondBodyRaw) as { response_format?: unknown } : {};
+
+    expect(firstBody.response_format).toBeDefined();
+    expect(secondBody.response_format).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      "structured output unsupported, retrying without response_format",
+      expect.objectContaining({ model: "google/gemini-3-flash-preview" }),
+    );
+
+    fetchSpy.mockRestore();
   });
 });

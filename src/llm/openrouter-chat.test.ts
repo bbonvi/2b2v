@@ -127,6 +127,46 @@ describe("completeOpenRouterChat", () => {
     fetchSpy.mockRestore();
   });
 
+  test("includes nested provider metadata error details on non-2xx responses", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      makeResponse({
+        error: {
+          message: "Provider returned error",
+          metadata: {
+            raw: JSON.stringify({
+              error: {
+                code: 400,
+                message: "The specified schema produces a constraint that has too many states for serving.",
+                status: "INVALID_ARGUMENT",
+              },
+            }),
+          },
+        },
+      }, 400)
+    );
+
+    try {
+      await completeOpenRouterChat({
+        apiKey: "key",
+        model: "google/gemini-3-flash-preview",
+        systemPrompt: "system",
+        messages: [{ role: "user", content: "hello" }],
+        baseUrl: "https://example.com",
+      }).then(
+        () => {
+          throw new Error("expected request to fail");
+        },
+        (error: unknown) => {
+          const msg = error instanceof Error ? error.message : String(error);
+          expect(msg).toContain("Provider returned error");
+          expect(msg).toContain("too many states");
+        },
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   test("normalizes legacy route options and strips unsupported route payload", async () => {
     const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
       makeResponse({
