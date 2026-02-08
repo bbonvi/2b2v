@@ -4,12 +4,9 @@ import type { TtsResult, TtsConfig } from "../tts/types.ts";
 
 const SendMessageParams = Type.Object({
   text: Type.String({ description: "Message text to send" }),
-  reply: Type.Optional(
-    Type.Boolean({
-      description: "When true, send as a reply to the trigger message. When false, send as a normal channel message.",
-      default: false,
-    })
-  ),
+  reply: Type.Boolean({
+    description: "When true, send as a reply to the trigger message. When false, send as a normal channel message.",
+  }),
   chat_id: Type.Optional(
     Type.String({
       description:
@@ -95,7 +92,7 @@ export function createSendMessageTool(
       signal
     ): Promise<AgentToolResult<SendMessageDetails>> => {
       const { text, reply, chat_id, is_voice_message, voice_type, reply_to_message_id } = params;
-      const requestedReply = reply ?? false;
+      const requestedReply = reply;
 
       // Reject cross-chat reply: cannot reply to trigger message when targeting a different chat
       // (reply_to_message_id takes precedence over reply boolean, so skip this check)

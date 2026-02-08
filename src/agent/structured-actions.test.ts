@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
+import { createSendMessageTool } from "./send-message-tool.ts";
 import {
   buildActionResponseFormat,
   buildStructuredActionProtocolPrompt,
@@ -40,6 +41,39 @@ describe("buildActionResponseFormat", () => {
     expect(asText).toContain("ignore_user");
     expect(asText).toContain("send_message");
     expect(asText).toContain("search_messages");
+  });
+
+  test("requires send_message.reply in structured output schema", () => {
+    const sendTool = createSendMessageTool({
+      sender: () => Promise.resolve({ sentMessageId: "m-1" }),
+      ttsEnabled: false,
+    }) as unknown as AgentTool;
+
+    const format = buildActionResponseFormat([sendTool]);
+    const schema = (format as {
+      json_schema?: {
+        schema?: {
+          properties?: {
+            actions?: {
+              items?: { anyOf?: unknown[] };
+            };
+          };
+        };
+      };
+    }).json_schema?.schema;
+
+    const variants = schema?.properties?.actions?.items?.anyOf ?? [];
+    const sendMessageVariant = variants.find((variant) => {
+      const rec = variant as {
+        properties?: { tool_name?: { const?: unknown } };
+      };
+      return rec.properties?.tool_name?.const === "send_message";
+    }) as {
+      properties?: { arguments?: { required?: unknown[] } };
+    } | undefined;
+
+    const requiredArgs = sendMessageVariant?.properties?.arguments?.required ?? [];
+    expect(requiredArgs).toContain("reply");
   });
 });
 
@@ -253,6 +287,55 @@ describe("runStructuredActionLoop", () => {
     expect(executed).toBe(1);
     const hasPolicyError = result.messages.some((m) =>
       m.role === "user" && m.content.includes("send_message requires explicit reply"),
+    );
+    expect(hasPolicyError).toBe(true);
+  });
+
+  test("rejects ignore_user without valid silence rationale and retries", async () => {
+    let turn = 0;
+    let executed = 0;
+
+    const result = await runStructuredActionLoop({
+      maxToolCalls: 3,
+      wallClockTimeoutMs: 10_000,
+      tools: [makeTool("send_message")],
+      callModel: () => {
+        turn += 1;
+        if (turn === 1) {
+          return Promise.resolve({
+            rawText: JSON.stringify({
+              status: "done",
+              actions: [{ type: "ignore_user", reason: "answered" }],
+            } satisfies StructuredActionBatch),
+          });
+        }
+        return Promise.resolve({
+          rawText: JSON.stringify({
+            status: "done",
+            actions: [
+              { type: "tool_call", tool_name: "send_message", arguments: { text: "hello", reply: true } },
+              { type: "stop_response", reason: "done" },
+            ],
+          } satisfies StructuredActionBatch),
+        });
+      },
+      onToolCall: () => {
+        executed += 1;
+        return Promise.resolve({
+          content: [{ type: "text", text: "ok" }],
+          details: {},
+        });
+      },
+      initialMessages: [
+        { role: "user", content: "hello", timestamp: Date.now() },
+      ],
+    });
+
+    expect(result.stopReason).toBe("done");
+    expect(result.turns).toBe(2);
+    expect(executed).toBe(1);
+    const hasPolicyError = result.messages.some((m) =>
+      m.role === "user" && m.content.includes("ignore_user reason must indicate"),
     );
     expect(hasPolicyError).toBe(true);
   });

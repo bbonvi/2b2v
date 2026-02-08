@@ -99,6 +99,10 @@ Empty sections are omitted. `assembleContext()` iterates the registry; no impera
     - `ignore_user` (terminal and silent)
 - Runtime executes actions sequentially and appends tool results back into context as internal messages.
 - Plain-text or invalid JSON outputs are treated as format violations, fed back with a corrective message, and retried.
+- Runtime policy guards:
+  - `stop_response` / `status: done` are rejected until at least one successful `send_message` (unless `ignore_user` is chosen).
+  - `send_message` actions must include explicit `reply: boolean`; missing `reply` triggers a policy error and retry.
+  - `ignore_user` remains allowed but requires an explicit silence rationale (spam, non-actionable input, or explicit ignore request).
 - Hard limits are enforced by config:
   - `actionLoop.maxToolCalls`
   - `actionLoop.wallClockTimeoutMs`

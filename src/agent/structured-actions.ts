@@ -298,6 +298,19 @@ function buildPolicyErrorFeedback(error: string): string {
   ].join("\n");
 }
 
+function isValidIgnoreUserReason(reason: string): boolean {
+  const normalized = reason.trim().toLowerCase();
+  if (normalized === "") return false;
+
+  const isSpamLike = /\b(spam|flood|abuse|harass|troll)\b/.test(normalized);
+  const isNonActionable = /\b(non[- ]?actionable|no actionable request|no response needed|no useful response|low[- ]value|no-value)\b/.test(normalized);
+  const hasIgnoreIntent = /\b(ignore|ignored|silence)\b/.test(normalized);
+  const hasExplicitMarker = /\b(explicit|explicitly|asked|request(?:ed)?|user asked)\b/.test(normalized);
+  const isExplicitIgnore = (hasIgnoreIntent && hasExplicitMarker) || /\b(ignore me|ignore this)\b/.test(normalized);
+
+  return isSpamLike || isNonActionable || isExplicitIgnore;
+}
+
 function buildToolCallId(turn: number, index: number): string {
   return `loop-${turn}-tool-${index}`;
 }
@@ -375,6 +388,10 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
       }
 
       if (action.type === "ignore_user") {
+        if (!isValidIgnoreUserReason(action.reason)) {
+          policyError = "ignore_user reason must indicate spam, non-actionable input, or explicit request to ignore.";
+          break;
+        }
         return { stopReason: "ignored", toolCalls, turns, messages };
       }
 

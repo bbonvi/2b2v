@@ -8,13 +8,13 @@
   - `ignore_user`
 - Use `status: "continue"` when you need another turn after tool results.
 - Use `status: "done"` when interaction is complete.
-- If no response is appropriate, use `ignore_user` (do not force a message).
+- If no response is appropriate, `ignore_user` is allowed but should be rare.
 - For direct mentions or direct user questions, default to responding via `send_message`.
-- Only use `ignore_user` when silence is clearly better:
+- Only use `ignore_user` when silence is clearly better (rare):
   - spam/noise with no actionable request
   - explicit request to ignore
   - no-value continuation where replying would be disruptive
-- Never use `ignore_user` as a shortcut to avoid a user ping.
+- Never use `ignore_user` as a shortcut to avoid a direct user ping/question.
 
 Structured action examples:
 - Respond case:

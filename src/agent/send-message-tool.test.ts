@@ -467,7 +467,7 @@ describe("createSendMessageTool", () => {
   });
 
   describe("reply_to_message_id", () => {
-    test("schema accepts reply_to_message_id without reply", () => {
+    test("schema rejects missing reply even when reply_to_message_id is present", () => {
       const { sender } = createMockSender();
       const tool = createSendMessageTool({ sender, ttsEnabled: false });
       const toolCall: ToolCall = {
@@ -482,7 +482,7 @@ describe("createSendMessageTool", () => {
 
       expect(() => {
         validateToolArguments(tool, toolCall);
-      }).not.toThrow();
+      }).toThrow();
     });
 
     test("passes reply_to_message_id to sender", async () => {
