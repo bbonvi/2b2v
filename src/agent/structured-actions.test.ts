@@ -87,6 +87,23 @@ describe("buildStructuredActionProtocolPrompt", () => {
     expect(prompt).toContain("If you start research/tool work, you must end with at least one send_message");
     expect(prompt).toContain("If the user asks for facts you are uncertain about, use web_search before answering");
   });
+
+  test("includes tool-specific reinforcement for available tools", () => {
+    const prompt = buildStructuredActionProtocolPrompt([
+      makeTool("send_message"),
+      makeTool("start_typing"),
+      makeTool("web_search"),
+      makeTool("fetch_url"),
+      makeTool("search_messages"),
+      makeTool("chat_history"),
+    ]);
+
+    expect(prompt).toContain("Tool-specific reinforcement for available tools:");
+    expect(prompt).toContain("Use web_search to discover relevant sources for uncertain or current facts.");
+    expect(prompt).toContain("Use fetch_url to open and extract details from specific URLs.");
+    expect(prompt).toContain("Use search_messages to retrieve older chat context.");
+    expect(prompt).toContain("Use chat_history to inspect recent in-channel context before replying.");
+  });
 });
 
 describe("parseStructuredActionBatch", () => {

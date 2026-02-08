@@ -213,6 +213,60 @@ export function buildStructuredActionProtocolPrompt(tools: AgentTool[]): string 
   const toolList = tools
     .map((tool) => `- ${tool.name}: ${tool.description}`)
     .join("\n");
+  const toolNames = new Set(tools.map((tool) => tool.name));
+  const toolReinforcements: string[] = [];
+
+  if (toolNames.has("web_search")) {
+    toolReinforcements.push("Use web_search to discover relevant sources for uncertain or current facts.");
+  }
+  if (toolNames.has("fetch_url")) {
+    toolReinforcements.push("Use fetch_url to open and extract details from specific URLs.");
+  }
+  if (toolNames.has("web_search") && toolNames.has("fetch_url")) {
+    toolReinforcements.push("For web research, usually run web_search first, then fetch_url on selected results.");
+  }
+  if (toolNames.has("search_messages")) {
+    toolReinforcements.push("Use search_messages to retrieve older chat context.");
+  }
+  if (toolNames.has("chat_history")) {
+    toolReinforcements.push("Use chat_history to inspect recent in-channel context before replying.");
+  }
+  if (toolNames.has("start_typing")) {
+    toolReinforcements.push("Use start_typing before send_message, refresh every 8-10 seconds during long work.");
+  }
+  if (toolNames.has("read_chat_images")) {
+    toolReinforcements.push("Use read_chat_images with image_ids from chat history when inspecting stored images.");
+  }
+  if (toolNames.has("fetch_images")) {
+    toolReinforcements.push("Use fetch_images for external image URLs that are not already in chat history.");
+  }
+  if (toolNames.has("list_members")) {
+    toolReinforcements.push("Use list_members for member identity or online/offline context requests.");
+  }
+  if (toolNames.has("schedule_message")) {
+    toolReinforcements.push("Use schedule_message for reminders or delayed follow-ups with explicit timing details.");
+  }
+  if (toolNames.has("start_thread")) {
+    toolReinforcements.push("Use start_thread when the answer is long and would clutter the parent channel.");
+  }
+  if (toolNames.has("bash")) {
+    toolReinforcements.push("Before bash, send a short progress message and include a command preview.");
+  }
+  if (toolNames.has("recall_user_memories")) {
+    toolReinforcements.push("Use recall_user_memories before updating user memory to prevent duplicate entries.");
+  }
+  if (toolNames.has("save_user_memory")) {
+    toolReinforcements.push("Use save_user_memory for durable user facts, not transient chatter.");
+  }
+  if (toolNames.has("recall_journal_entry")) {
+    toolReinforcements.push("Use recall_journal_entry before creating new journal entries on related topics.");
+  }
+  if (toolNames.has("save_journal_entry")) {
+    toolReinforcements.push("Use save_journal_entry for durable multi-user context worth preserving.");
+  }
+  if (toolNames.has("delete_journal_entries") || toolNames.has("delete_user_memories")) {
+    toolReinforcements.push("Use delete memory tools only when the user clearly requests removal or correction.");
+  }
 
   return [
     "## Structured Action Protocol (Highest Priority)",
@@ -233,6 +287,13 @@ export function buildStructuredActionProtocolPrompt(tools: AgentTool[]): string 
     "If the user asks for facts you are uncertain about, use web_search before answering.",
     "If you start research/tool work, you must end with at least one send_message unless ignore_user is explicitly justified.",
     "Do not use stop_response or status=done before at least one send_message action in this interaction.",
+    ...(toolReinforcements.length > 0
+      ? [
+        "",
+        "Tool-specific reinforcement for available tools:",
+        ...toolReinforcements.map((line) => `- ${line}`),
+      ]
+      : []),
     "",
     "Available tools:",
     toolList,
