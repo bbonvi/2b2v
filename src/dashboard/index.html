@@ -556,9 +556,9 @@
   const modalBody = document.getElementById('modal-body');
   const modalClose = document.getElementById('modal-close');
 
-  // Format payload for display: pretty-print content strings, truncate base64 images
+  // Format payload for display: pretty-print multiline strings, truncate base64 images
   function formatPayload(obj) {
-    return JSON.stringify(obj, function(key, value) {
+    var json = JSON.stringify(obj, function(key, value) {
       // Truncate base64 image data (covers "data" field and data-URI in "url")
       if (typeof value === 'string') {
         if (key === 'data' && value.length > 200) {
@@ -571,14 +571,74 @@
         }
       }
       return value;
-    }, 2)
-    // After JSON.stringify, unescape \n inside "content": "..." string values
-    // so they render as actual newlines in the <pre> block
-    .replace(/"content": "((?:[^"\\]|\\.)*)"/g, function(match, inner) {
-      if (inner.indexOf('\\n') === -1) return match;
-      var unescaped = inner.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
-      return '"content": "' + unescaped + '"';
-    });
+    }, 2);
+
+    // Unescape \n/\t/\r in JSON string *values* so long prompts stay readable.
+    var out = '';
+    for (var i = 0; i < json.length; i++) {
+      if (json[i] !== '"') {
+        out += json[i];
+        continue;
+      }
+
+      var j = i + 1;
+      var escaped = false;
+      var token = '';
+      while (j < json.length) {
+        var ch = json[j];
+        if (escaped) {
+          token += ch;
+          escaped = false;
+        } else if (ch === '\\') {
+          token += ch;
+          escaped = true;
+        } else if (ch === '"') {
+          break;
+        } else {
+          token += ch;
+        }
+        j += 1;
+      }
+
+      if (j >= json.length) {
+        out += json.slice(i);
+        break;
+      }
+
+      var k = j + 1;
+      while (k < json.length && /\s/.test(json[k])) k += 1;
+      var isKey = k < json.length && json[k] === ':';
+
+      if (isKey || token.indexOf('\\') === -1) {
+        out += '"' + token + '"';
+      } else {
+        var expanded = '';
+        for (var t = 0; t < token.length; t++) {
+          var cur = token[t];
+          var next = t + 1 < token.length ? token[t + 1] : '';
+          if (cur === '\\' && next === 'n') {
+            expanded += '\n';
+            t += 1;
+          } else if (cur === '\\' && next === 't') {
+            expanded += '\t';
+            t += 1;
+          } else if (cur === '\\' && next === 'r') {
+            expanded += '\r';
+            t += 1;
+          } else if (cur === '\\' && next !== '') {
+            expanded += cur + next;
+            t += 1;
+          } else {
+            expanded += cur;
+          }
+        }
+        out += '"' + expanded + '"';
+      }
+
+      i = j;
+    }
+
+    return out;
   }
 
   const modalTitle = document.querySelector('.modal-title');

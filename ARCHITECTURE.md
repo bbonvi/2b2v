@@ -201,6 +201,10 @@ When adding or removing config fields:
 
 ## Key Patterns
 
+### Dashboard Payload Rendering
+
+`src/dashboard/index.html` `formatPayload()` pretty-prints request/response payloads for the dashboard modal. It truncates large base64 fields and expands escaped newline/tab/carriage-return sequences in JSON string values (without modifying key names or literal escape sequences), so long prompt/context blobs remain readable in the `<pre>` view. Behavior is covered by `src/dashboard/index-format.test.ts`.
+
 ### Factory + Dependency Injection
 
 Agent tools, command handlers, and infrastructure components use factories with injected dependencies. This keeps core logic testable and avoids global state (except the embedding pipeline).
