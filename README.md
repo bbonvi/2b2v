@@ -59,6 +59,8 @@ Use the dev compose file for live reload, and the production compose file for lo
 
 Global defaults live in `config/config.yaml` (optional). See `config/config.yaml.example` for the full list of fields. Per-guild configs override these defaults.
 
+Stable persona/tool instruction sources are selected via `promptProfile` in `config/config.yaml`. The loader composes ordered `file`/`text` sources for both `persona` and `toolInstructions`. Legacy `personaPath` and `toolInstructionsPath` are still supported as fallback when `promptProfile` is omitted.
+
 ### Per-guild config
 
 Each guild has a YAML file at `config/guilds/<id>-<slug>.yaml`. The guild ID is parsed from the filename; the slug is cosmetic.
@@ -98,7 +100,7 @@ All fields are optional — missing values fall back to global defaults.
 
 ### Persona
 
-The persona is a freeform markdown file at `config/persona.md`. It defines the bot's character, tone, and behavioral rules. The real file is gitignored; `config/persona.md.example` is committed as a template.
+By default, `promptProfile.persona` points to `config/persona.md`. This markdown defines the bot's character, tone, and behavior rules. The real file is gitignored; `config/persona.md.example` is committed as a template.
 
 ## Slash commands
 

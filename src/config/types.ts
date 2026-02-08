@@ -67,6 +67,28 @@ export interface ActionLoopConfig {
   llmOutputTimeoutMs: number;
 }
 
+/** File-based source for prompt profile content. */
+export interface PromptFileSource {
+  kind: "file";
+  path: string;
+  optional: boolean;
+}
+
+/** Inline text source for prompt profile content. */
+export interface PromptInlineSource {
+  kind: "inline";
+  text: string;
+}
+
+/** Ordered prompt source chain for persona/tool instructions. */
+export type PromptSource = PromptFileSource | PromptInlineSource;
+
+/** Config-driven prompt profile for stable instruction sections. */
+export interface PromptProfileConfig {
+  persona: PromptSource[];
+  toolInstructions: PromptSource[];
+}
+
 /** Trigger configuration per guild. All independently toggleable. */
 export interface TriggerConfig {
   mention: boolean;
@@ -146,6 +168,7 @@ export interface GlobalConfig {
   defaultInstructions: string;
   personaPath: string;
   toolInstructionsPath: string;
+  promptProfile: PromptProfileConfig;
   logLevel: string;
   dataDir: string;
   modelCacheDir: string;
@@ -237,6 +260,18 @@ export interface MainConfigYaml {
   attachmentsDir?: string;
   personaPath?: string;
   toolInstructionsPath?: string;
+  promptProfile?: {
+    persona?: Array<{
+      file?: string;
+      text?: string;
+      optional?: boolean;
+    }>;
+    toolInstructions?: Array<{
+      file?: string;
+      text?: string;
+      optional?: boolean;
+    }>;
+  };
   instructions?: string;
   instructionsPath?: string;
   logLevel?: string;

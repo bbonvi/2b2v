@@ -60,6 +60,7 @@ import { createVpnClient, type VpnClient } from "./vpn/api-client";
 import { createSessionStore, type SessionStore } from "./vpn/session";
 import { handleVpnCommand, handleVpnComponent, type VpnHandlerDeps } from "./vpn/handler";
 import { getVpnLocale } from "./vpn/i18n";
+import { loadPromptProfile } from "./config/prompt-profile";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch, unlinkSync } from "fs";
 import type { Database } from "./db/database";
@@ -117,31 +118,8 @@ const guildsDir = join("config", "guilds");
 const guildConfigs = loadGuildConfigs(guildsDir, globalConfig);
 log.info("guild configs loaded", { count: guildConfigs.size });
 
-// --- 8. Load persona ---
-function loadPersonaFile(path: string): string {
-  try {
-    const content = readFileSync(path, "utf-8").trim();
-    log.info("persona loaded", { path, length: content.length });
-    return content;
-  } catch {
-    log.warn("persona file not found, using empty persona", { path });
-    return "";
-  }
-}
-let persona = loadPersonaFile(globalConfig.personaPath);
-
-// --- 8b. Load tool instructions ---
-function loadToolInstructionsFile(path: string): string {
-  try {
-    const content = readFileSync(path, "utf-8").trim();
-    log.info("tool instructions loaded", { path, length: content.length });
-    return content;
-  } catch {
-    log.warn("tool instructions file not found, using empty", { path });
-    return "";
-  }
-}
-let toolInstructions = loadToolInstructionsFile(globalConfig.toolInstructionsPath);
+// --- 8. Load prompt profile (persona + tool instructions) ---
+let { persona, toolInstructions } = loadPromptProfile(globalConfig.promptProfile, log);
 
 // --- 9. Emoji cache ---
 const emojiCache = new EmojiCache();
@@ -1593,8 +1571,7 @@ function reloadConfigs(): void {
     );
     validateTrimConfig(newGlobal.defaultTrim);
     globalConfig = newGlobal;
-    persona = loadPersonaFile(globalConfig.personaPath);
-    toolInstructions = loadToolInstructionsFile(globalConfig.toolInstructionsPath);
+    ({ persona, toolInstructions } = loadPromptProfile(globalConfig.promptProfile, log));
 
     // Reload guild configs — clear and rebuild
     const newGuilds = loadGuildConfigs(guildsDir, globalConfig);

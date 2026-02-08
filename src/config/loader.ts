@@ -17,6 +17,8 @@ import type {
   DispatcherConfig,
   PromptCachingConfig,
   ActionLoopConfig,
+  PromptProfileConfig,
+  PromptSource,
 } from "./types.ts";
 import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 
@@ -166,6 +168,65 @@ const DEFAULT_ACTION_LOOP: ActionLoopConfig = {
   wallClockTimeoutMs: 45_000,
   llmOutputTimeoutMs: 12_000,
 };
+
+type PromptSourceYaml =
+  NonNullable<NonNullable<MainConfigYaml["promptProfile"]>["persona"]>[number];
+
+function defaultPromptProfile(
+  personaPath: string,
+  toolInstructionsPath: string,
+): PromptProfileConfig {
+  return {
+    persona: [{ kind: "file", path: personaPath, optional: false }],
+    toolInstructions: [{ kind: "file", path: toolInstructionsPath, optional: false }],
+  };
+}
+
+function resolvePromptSource(
+  source: PromptSourceYaml,
+  section: "persona" | "toolInstructions",
+  index: number,
+): PromptSource {
+  const filePath = source.file;
+  const hasFile = typeof filePath === "string" && filePath !== "";
+  const hasText = typeof source.text === "string";
+  if (hasFile === hasText) {
+    throw new Error(`promptProfile.${section}[${index}] must define exactly one of "file" or "text"`);
+  }
+  if (hasFile) {
+    return {
+      kind: "file",
+      path: filePath,
+      optional: source.optional === true,
+    };
+  }
+  return {
+    kind: "inline",
+    text: source.text ?? "",
+  };
+}
+
+function resolvePromptSources(
+  sources: PromptSourceYaml[] | undefined,
+  fallback: PromptSource[],
+  section: "persona" | "toolInstructions",
+): PromptSource[] {
+  if (sources === undefined) return fallback;
+  return sources.map((source, idx) => resolvePromptSource(source, section, idx));
+}
+
+function resolvePromptProfile(
+  partial: MainConfigYaml["promptProfile"] | undefined,
+  personaPath: string,
+  toolInstructionsPath: string,
+): PromptProfileConfig {
+  const fallback = defaultPromptProfile(personaPath, toolInstructionsPath);
+  if (partial === undefined) return fallback;
+  return {
+    persona: resolvePromptSources(partial.persona, fallback.persona, "persona"),
+    toolInstructions: resolvePromptSources(partial.toolInstructions, fallback.toolInstructions, "toolInstructions"),
+  };
+}
 
 const DEFAULT_BASH_TIMEOUT_MS = 5000;
 const DEFAULT_BASH_OUTPUT_LIMIT = 4000;
@@ -340,6 +401,9 @@ export function loadGlobalConfig(
 
   const dataDir = yaml.dataDir ?? "data";
   const defaultAttachmentsDir = yaml.attachmentsDir ?? `${dataDir}/attachments`;
+  const personaPath = yaml.personaPath ?? "config/persona.md";
+  const toolInstructionsPath = yaml.toolInstructionsPath ?? "config/tool_instructions.md";
+  const promptProfile = resolvePromptProfile(yaml.promptProfile, personaPath, toolInstructionsPath);
 
   const defaultInstructions = resolveInstructions(yaml.instructions, yaml.instructionsPath);
 
@@ -376,8 +440,9 @@ export function loadGlobalConfig(
     defaultImageCaptioningEnabled: yaml.imageCaptioningEnabled ?? false,
     defaultAttachmentsDir,
     defaultInstructions,
-    personaPath: yaml.personaPath ?? "config/persona.md",
-    toolInstructionsPath: yaml.toolInstructionsPath ?? "config/tool_instructions.md",
+    personaPath,
+    toolInstructionsPath,
+    promptProfile,
     logLevel: yaml.logLevel ?? "info",
     dataDir,
     modelCacheDir: yaml.modelCacheDir ?? "model-cache",

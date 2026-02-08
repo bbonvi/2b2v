@@ -186,6 +186,21 @@ Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields op
 | `wallClockTimeoutMs` | number | `45000` | Hard timeout for a single response run |
 | `llmOutputTimeoutMs` | number | `12000` | Timeout for one model turn before timeout feedback is injected and retried |
 
+**Prompt profile config** (`PromptProfileConfig`): Config-driven source selection for stable instruction sections in context assembly.
+
+- Global-only, nested under `promptProfile` in `config/config.yaml`.
+- Sections:
+  - `persona`: ordered source list
+  - `toolInstructions`: ordered source list
+- Source forms:
+  - `file` (`path`) with optional `optional: true`
+  - `text` (inline snippet)
+- Loader behavior:
+  - Sources are resolved in order and concatenated with blank lines.
+  - Missing required files are skipped with warning logs.
+  - Missing optional files are skipped with info logs.
+- Backward compatibility: if `promptProfile` is omitted, loader derives one from legacy `personaPath` and `toolInstructionsPath`.
+
 **Instructions**: Custom text injected into LLM context (after tool instructions, before emojis). `instructionsPath` loads from a file; `instructions` provides inline text. `instructionsPath` takes priority. Guild-level overrides global default.
 
 ### Configuration Change Checklist
@@ -199,9 +214,13 @@ When adding or removing config fields:
 
 ### Hot-Reload
 
-`fs.watch("config", { recursive: true })` watches the entire `config/` directory. Changes are debounced and reload the main config, persona, and all guild configs. Malformed YAML or missing files keep the last known good config.
+`fs.watch("config", { recursive: true })` watches the entire `config/` directory. Changes are debounced and reload the main config, prompt profile content (persona + tool instructions), and all guild configs. Malformed YAML or missing files keep the last known good config.
 
 ## Key Patterns
+
+### Prompt Profile Loader
+
+`src/config/prompt-profile.ts` is the source of truth for loading file-based persona/tool instruction content. `src/index.ts` does not hardcode source files; it only consumes `globalConfig.promptProfile` resolved by `src/config/loader.ts`.
 
 ### Dashboard Payload Rendering
 

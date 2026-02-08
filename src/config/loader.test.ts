@@ -136,6 +136,60 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultInstructions).toBe("File-based instructions");
   });
 
+  test("derives default promptProfile from personaPath/toolInstructionsPath", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "personaPath: config/persona-alt.md\ntoolInstructionsPath: config/tools-alt.md\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect((cfg as unknown as { promptProfile?: unknown }).promptProfile).toEqual({
+      persona: [{ kind: "file", path: "config/persona-alt.md", optional: false }],
+      toolInstructions: [{ kind: "file", path: "config/tools-alt.md", optional: false }],
+    });
+  });
+
+  test("parses explicit promptProfile sources from YAML", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(
+      file,
+      [
+        "promptProfile:",
+        "  persona:",
+        "    - file: config/persona.md",
+        '    - text: "Persona addon"',
+        "  toolInstructions:",
+        "    - file: config/tool_instructions.md",
+        "    - file: config/ops.md",
+        "      optional: true",
+      ].join("\n"),
+    );
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect((cfg as unknown as { promptProfile?: unknown }).promptProfile).toEqual({
+      persona: [
+        { kind: "file", path: "config/persona.md", optional: false },
+        { kind: "inline", text: "Persona addon" },
+      ],
+      toolInstructions: [
+        { kind: "file", path: "config/tool_instructions.md", optional: false },
+        { kind: "file", path: "config/ops.md", optional: true },
+      ],
+    });
+  });
+
+  test("rejects invalid promptProfile sources", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(
+      file,
+      [
+        "promptProfile:",
+        "  persona:",
+        "    - file: config/persona.md",
+        '      text: "invalid"',
+      ].join("\n"),
+    );
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
+      'promptProfile.persona[0] must define exactly one of "file" or "text"',
+    );
+  });
+
   test("QDRANT_URL env overrides YAML qdrantUrl", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, "qdrantUrl: http://yaml-qdrant:6333\n");

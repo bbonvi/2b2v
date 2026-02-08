@@ -20,6 +20,10 @@ const GLOBAL: GlobalConfig = {
   defaultInstructions: "",
   personaPath: "config/persona.md",
   toolInstructionsPath: "config/tool_instructions.md",
+  promptProfile: {
+    persona: [{ kind: "file", path: "config/persona.md", optional: false }],
+    toolInstructions: [{ kind: "file", path: "config/tool_instructions.md", optional: false }],
+  },
   logLevel: "info",
   dataDir: "data",
   modelCacheDir: "model-cache",
