@@ -224,8 +224,9 @@ export function resolvePromptPolicy(
   };
 }
 
-export function buildLateInstructionPrompt(): string {
-  const resolved = resolvePromptPolicy(new Set<string>());
+export function buildLateInstructionPrompt(
+  resolved: Pick<ResolvedPromptPolicy, "sharedRules" | "lateOnlyRules"> = resolvePromptPolicy(new Set<string>()),
+): string {
   const lines = [...resolved.sharedRules, ...resolved.lateOnlyRules]
     .map((rule) => `- ${rule.text}`);
   return ["CRITICAL:", ...lines].join("\n");

@@ -2,7 +2,7 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { validateToolArguments, type ToolCall } from "@mariozechner/pi-ai";
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
-import { resolvePromptPolicy } from "./prompt-policy.ts";
+import { resolvePromptPolicy, type ResolvedPromptPolicy } from "./prompt-policy.ts";
 
 const ToolCallActionSchema = Type.Object({
   type: Type.Literal("tool_call"),
@@ -211,12 +211,13 @@ export function buildActionResponseFormat(tools: AgentTool[]): Record<string, un
   };
 }
 
-export function buildStructuredActionProtocolPrompt(tools: AgentTool[]): string {
+export function buildStructuredActionProtocolPrompt(
+  tools: AgentTool[],
+  promptPolicy: ResolvedPromptPolicy = resolvePromptPolicy(new Set(tools.map((tool) => tool.name))),
+): string {
   const toolList = tools
     .map((tool) => `- ${tool.name}: ${tool.description}`)
     .join("\n");
-  const toolNames = new Set(tools.map((tool) => tool.name));
-  const promptPolicy = resolvePromptPolicy(toolNames);
 
   return [
     "## Structured Action Protocol (Highest Priority)",

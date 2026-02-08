@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildLateInstructionPrompt,
   resolvePromptPolicy,
+  type ResolvedPromptPolicy,
 } from "./prompt-policy.ts";
 
 describe("resolvePromptPolicy", () => {
@@ -35,5 +36,20 @@ describe("buildLateInstructionPrompt", () => {
     expect(text).toContain("CRITICAL:");
     expect(text).toContain("For direct mentions or direct user questions, default to responding via `send_message`.");
     expect(text).toContain("Every `send_message` arguments object must include `reply` explicitly (`true` or `false`).");
+  });
+
+  test("renders only shared and late-only rules from injected policy", () => {
+    const injectedPolicy: ResolvedPromptPolicy = {
+      sharedRules: [{ id: "shared", text: "shared rule" }],
+      lateOnlyRules: [{ id: "late", text: "late-only rule" }],
+      toolRules: [{ id: "tool", text: "tool-only rule" }],
+      researchWorkflowRules: [{ id: "research", text: "research-only rule" }],
+    };
+    const text = buildLateInstructionPrompt(injectedPolicy);
+
+    expect(text).toContain("shared rule");
+    expect(text).toContain("late-only rule");
+    expect(text).not.toContain("tool-only rule");
+    expect(text).not.toContain("research-only rule");
   });
 });

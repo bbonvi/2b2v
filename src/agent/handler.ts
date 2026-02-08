@@ -22,6 +22,7 @@ import {
   runStructuredActionLoop,
   type LoopMessage,
 } from "./structured-actions.ts";
+import { buildLateInstructionPrompt, resolvePromptPolicy } from "./prompt-policy.ts";
 import { completeOpenRouterChat } from "../llm/openrouter-chat.ts";
 
 /** Minimal abstraction over a Discord message for the handler. */
@@ -103,6 +104,31 @@ export function injectTriggerInstruction(
     return [...sections, newSection];
   }
   return [...sections.slice(0, lateIdx), newSection, ...sections.slice(lateIdx)];
+}
+
+function injectResolvedLateInstruction(
+  context: AssembledContext,
+  lateInstruction: string,
+): AssembledContext {
+  const lateIdx = context.sections.findIndex((section) => section.label === "Late Instruction");
+  if (lateIdx !== -1) {
+    return {
+      ...context,
+      sections: context.sections.map((section, idx) => idx === lateIdx ? { ...section, text: lateInstruction } : section),
+    };
+  }
+  return {
+    ...context,
+    sections: [
+      ...context.sections,
+      {
+        label: "Late Instruction",
+        text: lateInstruction,
+        cached: false,
+        role: "developer",
+      },
+    ],
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -304,8 +330,6 @@ export async function handleMessage(
     };
   }
 
-  const stableSections = getStablePromptSections(context);
-  const splitPrompts = contextToSplitPrompts(context);
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
   const baseStreamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);
 
@@ -324,10 +348,16 @@ export async function handleMessage(
     finalTools = wrapToolsWithFollowUp(timedTools, deps.followUpDeps).tools;
   }
 
+  const promptPolicy = resolvePromptPolicy(new Set(finalTools.map((tool) => tool.name)));
+  const resolvedLateInstruction = buildLateInstructionPrompt(promptPolicy);
+  context = injectResolvedLateInstruction(context, resolvedLateInstruction);
+  const stableSections = getStablePromptSections(context);
+  const splitPrompts = contextToSplitPrompts(context);
+
   const reqLog = deps.requestLog;
   const llmComplete = deps.llmComplete;
 
-  const actionProtocolPrompt = buildStructuredActionProtocolPrompt(finalTools);
+  const actionProtocolPrompt = buildStructuredActionProtocolPrompt(finalTools, promptPolicy);
   const systemPrompt = [splitPrompts.developer, actionProtocolPrompt]
     .filter((part) => part !== "")
     .join("\n\n");

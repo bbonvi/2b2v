@@ -105,6 +105,7 @@ Empty sections are omitted. `assembleContext()` iterates the registry; no impera
   - `ignore_user` remains allowed but requires an explicit silence rationale (spam, non-actionable input, or explicit ignore request).
 - Prompt reinforcement is centralized in `src/agent/prompt-policy.ts` as typed rule IDs.
   Both `buildStructuredActionProtocolPrompt` and `buildLateInstructionPrompt` render from this shared policy source to prevent instruction drift.
+  `handleMessage` resolves policy once from active tool names, then passes that same resolved object into both prompt builders.
 - Prompt protocol reinforcement is tool-aware: `buildStructuredActionProtocolPrompt` adds an extra section for available tools (for example `web_search` + `fetch_url`, `search_messages`, `chat_history`, typing, memory tools) so behavior guidance matches the active toolset. When both web tools are available, it enforces `web_search` -> `fetch_url` before final factual output and injects a research workflow (breadcrumb progress updates, parallel source fetches, optional `fetch_images`, consolidation, extra reasoning pass).
 - Hard limits are enforced by config:
   - `actionLoop.maxToolCalls`

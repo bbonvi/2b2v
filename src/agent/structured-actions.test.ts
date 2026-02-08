@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { createSendMessageTool } from "./send-message-tool.ts";
-import { resolvePromptPolicy } from "./prompt-policy.ts";
+import { resolvePromptPolicy, type ResolvedPromptPolicy } from "./prompt-policy.ts";
 import {
   buildActionResponseFormat,
   buildStructuredActionProtocolPrompt,
@@ -128,6 +128,22 @@ describe("buildStructuredActionProtocolPrompt", () => {
     for (const rule of policy.researchWorkflowRules) {
       expect(prompt).toContain(rule.text);
     }
+  });
+
+  test("uses injected resolved policy and excludes late-only rules", () => {
+    const injectedPolicy: ResolvedPromptPolicy = {
+      sharedRules: [{ id: "shared", text: "shared injected rule" }],
+      lateOnlyRules: [{ id: "late-only", text: "late-only injected rule" }],
+      toolRules: [{ id: "tool", text: "tool injected rule" }],
+      researchWorkflowRules: [{ id: "research", text: "research injected rule" }],
+    };
+
+    const prompt = buildStructuredActionProtocolPrompt([makeTool("send_message")], injectedPolicy);
+
+    expect(prompt).toContain("shared injected rule");
+    expect(prompt).toContain("tool injected rule");
+    expect(prompt).toContain("research injected rule");
+    expect(prompt).not.toContain("late-only injected rule");
   });
 });
 
