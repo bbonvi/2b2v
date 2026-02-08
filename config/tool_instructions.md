@@ -74,6 +74,7 @@ Recommended slow-work pattern:
 ### Messaging / UX
 - `start_typing`: typing indicator.
 - `send_message`: only reliable user-visible output channel.
+- In every `send_message` call, include `reply` explicitly (`true` or `false`), never omit it.
 - `send_message.reply: true` only for the first response to trigger when appropriate.
 - `send_message.reply: false` for follow-ups.
 - `send_message.reply_to_message_id` is preferred for precise follow-up targeting.

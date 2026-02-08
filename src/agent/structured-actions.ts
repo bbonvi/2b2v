@@ -87,6 +87,8 @@ export interface RunStructuredActionLoopResult {
   messages: LoopMessage[];
 }
 
+const SEND_MESSAGE_TOOL_NAME = "send_message";
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value === null || typeof value !== "object") return null;
   return value as Record<string, unknown>;
@@ -227,6 +229,8 @@ export function buildStructuredActionProtocolPrompt(tools: AgentTool[]): string 
     "Never use ignore_user as a shortcut to avoid replying to a user ping.",
     "If you intentionally decide not to respond to the user, include ignore_user action.",
     "Only send user-visible output via tool_call to send_message.",
+    "Every send_message call must include reply as an explicit boolean (true or false).",
+    "Do not use stop_response or status=done before at least one send_message action in this interaction.",
     "",
     "Available tools:",
     toolList,
@@ -285,6 +289,15 @@ function buildToolErrorFeedback(toolName: string, error: string): string {
   ].join("\n");
 }
 
+function buildPolicyErrorFeedback(error: string): string {
+  return [
+    "[POLICY ERROR]",
+    error,
+    "If you intentionally choose silence, use ignore_user.",
+    "If you are responding, call send_message first, then finish with stop_response or status done.",
+  ].join("\n");
+}
+
 function buildToolCallId(turn: number, index: number): string {
   return `loop-${turn}-tool-${index}`;
 }
@@ -306,6 +319,7 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
   let turns = 0;
   let toolCalls = 0;
   let formatErrors = 0;
+  let hasUserVisibleMessage = false;
 
   const executeToolCall = input.onToolCall ?? (async (tool, toolCallId, args, signal) => {
     const toolCall: ToolCall = {
@@ -346,13 +360,18 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
 
     formatErrors = 0;
     const batch = parsed.value;
+    let policyError: string | null = null;
 
     let actionIndex = 0;
     for (const action of batch.actions) {
       actionIndex += 1;
 
       if (action.type === "stop_response") {
-        return { stopReason: "done", toolCalls, turns, messages };
+        if (hasUserVisibleMessage) {
+          return { stopReason: "done", toolCalls, turns, messages };
+        }
+        policyError = "stop_response is invalid before any send_message action.";
+        break;
       }
 
       if (action.type === "ignore_user") {
@@ -375,19 +394,39 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
         continue;
       }
 
+      if (tool.name === SEND_MESSAGE_TOOL_NAME && typeof argsRecord.reply !== "boolean") {
+        policyError = "send_message requires explicit reply boolean (true or false).";
+        break;
+      }
+
       const toolCallId = buildToolCallId(turns, actionIndex);
       toolCalls += 1;
 
       try {
         const result = await executeToolCall(tool, toolCallId, argsRecord, input.signal);
         messages.push(makeUserMessage(buildToolResultFeedback(tool.name, summarizeToolResult(result)), now));
+        if (tool.name === SEND_MESSAGE_TOOL_NAME) {
+          hasUserVisibleMessage = true;
+        }
       } catch (error) {
         const msg = error instanceof Error ? error.message : "Unknown tool execution error";
         messages.push(makeUserMessage(buildToolErrorFeedback(tool.name, msg), now));
       }
     }
 
+    if (policyError !== null) {
+      messages.push(makeUserMessage(buildPolicyErrorFeedback(policyError), now));
+      continue;
+    }
+
     if (batch.status === "done") {
+      if (!hasUserVisibleMessage) {
+        messages.push(makeUserMessage(
+          buildPolicyErrorFeedback("status=done is invalid before any send_message action."),
+          now,
+        ));
+        continue;
+      }
       return { stopReason: "done", toolCalls, turns, messages };
     }
   }

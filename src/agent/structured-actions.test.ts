@@ -48,6 +48,8 @@ describe("buildStructuredActionProtocolPrompt", () => {
     const prompt = buildStructuredActionProtocolPrompt([makeTool("send_message"), makeTool("start_typing")]);
     expect(prompt).toContain("For direct mentions or direct questions, default to responding via send_message.");
     expect(prompt).toContain("Only use ignore_user when silence is clearly better");
+    expect(prompt).toContain("Do not use stop_response or status=done before at least one send_message action");
+    expect(prompt).toContain("Every send_message call must include reply as an explicit boolean");
   });
 });
 
@@ -116,7 +118,7 @@ describe("runStructuredActionLoop", () => {
         const batch: StructuredActionBatch = {
           status: "done",
           actions: [
-            { type: "tool_call", tool_name: "send_message", arguments: { value: "hello" } },
+            { type: "tool_call", tool_name: "send_message", arguments: { text: "hello", reply: true } },
             { type: "stop_response", reason: "done" },
           ],
         };
@@ -143,8 +145,8 @@ describe("runStructuredActionLoop", () => {
     const batch: StructuredActionBatch = {
       status: "continue",
       actions: [
-        { type: "tool_call", tool_name: "send_message", arguments: { value: "1" } },
-        { type: "tool_call", tool_name: "send_message", arguments: { value: "2" } },
+        { type: "tool_call", tool_name: "send_message", arguments: { text: "1", reply: false } },
+        { type: "tool_call", tool_name: "send_message", arguments: { text: "2", reply: false } },
       ],
     };
 
@@ -166,5 +168,92 @@ describe("runStructuredActionLoop", () => {
 
     expect(result.stopReason).toBe("max_tool_calls");
     expect(result.toolCalls).toBe(1);
+  });
+
+  test("rejects silent stop_response without send_message and retries", async () => {
+    let turn = 0;
+    const result = await runStructuredActionLoop({
+      maxToolCalls: 3,
+      wallClockTimeoutMs: 10_000,
+      tools: [makeTool("send_message")],
+      callModel: () => {
+        turn += 1;
+        if (turn === 1) {
+          return Promise.resolve({
+            rawText: JSON.stringify({
+              status: "done",
+              actions: [{ type: "stop_response", reason: "direct question from user, will respond" }],
+            } satisfies StructuredActionBatch),
+          });
+        }
+        return Promise.resolve({
+          rawText: JSON.stringify({
+            status: "done",
+            actions: [{ type: "ignore_user", reason: "explicitly choosing silence" }],
+          } satisfies StructuredActionBatch),
+        });
+      },
+      onToolCall: () => Promise.resolve({
+        content: [{ type: "text", text: "ok" }],
+        details: {},
+      }),
+      initialMessages: [
+        { role: "user", content: "hello", timestamp: Date.now() },
+      ],
+    });
+
+    expect(result.stopReason).toBe("ignored");
+    expect(result.turns).toBe(2);
+    const hasPolicyError = result.messages.some((m) => m.role === "user" && m.content.includes("[POLICY ERROR]"));
+    expect(hasPolicyError).toBe(true);
+  });
+
+  test("rejects send_message without explicit reply and retries", async () => {
+    let turn = 0;
+    let executed = 0;
+
+    const result = await runStructuredActionLoop({
+      maxToolCalls: 3,
+      wallClockTimeoutMs: 10_000,
+      tools: [makeTool("send_message")],
+      callModel: () => {
+        turn += 1;
+        if (turn === 1) {
+          return Promise.resolve({
+            rawText: JSON.stringify({
+              status: "continue",
+              actions: [{ type: "tool_call", tool_name: "send_message", arguments: { text: "hello" } }],
+            } satisfies StructuredActionBatch),
+          });
+        }
+        return Promise.resolve({
+          rawText: JSON.stringify({
+            status: "done",
+            actions: [
+              { type: "tool_call", tool_name: "send_message", arguments: { text: "hello", reply: true } },
+              { type: "stop_response", reason: "done" },
+            ],
+          } satisfies StructuredActionBatch),
+        });
+      },
+      onToolCall: () => {
+        executed += 1;
+        return Promise.resolve({
+          content: [{ type: "text", text: "ok" }],
+          details: {},
+        });
+      },
+      initialMessages: [
+        { role: "user", content: "hello", timestamp: Date.now() },
+      ],
+    });
+
+    expect(result.stopReason).toBe("done");
+    expect(result.turns).toBe(2);
+    expect(executed).toBe(1);
+    const hasPolicyError = result.messages.some((m) =>
+      m.role === "user" && m.content.includes("send_message requires explicit reply"),
+    );
+    expect(hasPolicyError).toBe(true);
   });
 });
