@@ -100,8 +100,76 @@ function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
 }
 
+function normalizeProviderOptions(provider: Record<string, unknown>): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(provider)) {
+    switch (key) {
+      case "allowFallbacks":
+        normalized.allow_fallbacks = value;
+        break;
+      case "requireParameters":
+        normalized.require_parameters = value;
+        break;
+      case "dataCollection":
+        normalized.data_collection = value;
+        break;
+      case "maxPrice":
+        normalized.max_price = value;
+        break;
+      case "enforceDistillableText":
+        normalized.enforce_distillable_text = value;
+        break;
+      default:
+        normalized[key] = value;
+        break;
+    }
+  }
+  return normalized;
+}
+
+function normalizeProviderParams(rawParams: Record<string, unknown>): Record<string, unknown> {
+  const params: Record<string, unknown> = { ...rawParams };
+  const routeValue = params.route;
+  const route = asRecord(routeValue);
+
+  let provider = asRecord(params.provider);
+  if (provider !== null) {
+    provider = { ...provider };
+  }
+
+  // Legacy compatibility: old runtime forwarded `route` options directly.
+  // OpenRouter fetch API expects provider routing controls under `provider`.
+  if (route !== null) {
+    provider ??= {};
+
+    if (provider.sort === undefined && route.sort !== undefined) {
+      provider.sort = route.sort;
+    }
+
+    const hasAllowFallbacks = provider.allow_fallbacks !== undefined || provider.allowFallbacks !== undefined;
+    if (!hasAllowFallbacks && typeof route.fallback === "boolean") {
+      provider.allow_fallbacks = route.fallback;
+    }
+  }
+
+  if (routeValue !== undefined) {
+    delete params.route;
+  }
+
+  if (provider !== null) {
+    const normalizedProvider = normalizeProviderOptions(provider);
+    if (Object.keys(normalizedProvider).length > 0) {
+      params.provider = normalizedProvider;
+    } else {
+      delete params.provider;
+    }
+  }
+
+  return params;
+}
+
 export async function completeOpenRouterChat(request: OpenRouterChatRequest): Promise<OpenRouterChatResult> {
-  const providerParams = request.providerParams ?? {};
+  const providerParams = normalizeProviderParams(request.providerParams ?? {});
   const payload: Record<string, unknown> = {
     ...providerParams,
     model: request.model,

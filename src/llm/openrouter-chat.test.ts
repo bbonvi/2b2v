@@ -94,4 +94,43 @@ describe("completeOpenRouterChat", () => {
 
     fetchSpy.mockRestore();
   });
+
+  test("normalizes legacy route options and strips unsupported route payload", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      makeResponse({
+        model: "m",
+        choices: [{ message: { content: "{\"ok\":true}" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      })
+    );
+
+    await completeOpenRouterChat({
+      apiKey: "key",
+      model: "moonshotai/kimi-k2.5",
+      systemPrompt: "system",
+      messages: [{ role: "user", content: "hello" }],
+      providerParams: {
+        route: {
+          fallback: false,
+          sort: "throughput",
+          google: { safetySettings: [{ category: "x", threshold: "y" }] },
+        },
+      },
+      baseUrl: "https://example.com",
+    });
+
+    const init = fetchSpy.mock.calls[0]?.[1];
+    const bodyRaw = init?.body;
+    const bodyText = typeof bodyRaw === "string" ? bodyRaw : "";
+    const body = JSON.parse(bodyText) as {
+      route?: unknown;
+      provider?: { allow_fallbacks?: boolean; sort?: string };
+    };
+
+    expect(body.route).toBeUndefined();
+    expect(body.provider?.allow_fallbacks).toBe(false);
+    expect(body.provider?.sort).toBe("throughput");
+
+    fetchSpy.mockRestore();
+  });
 });
