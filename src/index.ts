@@ -118,7 +118,7 @@ const guildsDir = join("config", "guilds");
 const guildConfigs = loadGuildConfigs(guildsDir, globalConfig);
 log.info("guild configs loaded", { count: guildConfigs.size });
 
-// --- 8. Load prompt profile (persona + tool instructions) ---
+// --- 8. Load prompt profile (persona + tool instructions). Instructions load via global.defaultInstructions.
 let { persona, toolInstructions } = loadPromptProfile(globalConfig.promptProfile, log);
 
 // --- 9. Emoji cache ---

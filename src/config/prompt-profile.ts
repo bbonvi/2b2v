@@ -2,14 +2,17 @@ import { existsSync, readFileSync } from "fs";
 import type { Logger } from "../logger.ts";
 import type { PromptProfileConfig, PromptSource } from "./types.ts";
 
+export type PromptProfileSection = "persona" | "toolInstructions" | "instructions";
+
 export interface LoadedPromptProfile {
   persona: string;
   toolInstructions: string;
+  instructions: string;
 }
 
 function loadSourceText(
   source: PromptSource,
-  section: "persona" | "toolInstructions",
+  section: PromptProfileSection,
   index: number,
   log: Logger,
 ): string {
@@ -36,9 +39,9 @@ function loadSourceText(
   return text;
 }
 
-function loadSection(
+export function loadPromptSourceChain(
   sources: PromptSource[],
-  section: "persona" | "toolInstructions",
+  section: PromptProfileSection,
   log: Logger,
 ): string {
   const parts: string[] = [];
@@ -56,7 +59,8 @@ export function loadPromptProfile(
   log: Logger,
 ): LoadedPromptProfile {
   return {
-    persona: loadSection(profile.persona, "persona", log),
-    toolInstructions: loadSection(profile.toolInstructions, "toolInstructions", log),
+    persona: loadPromptSourceChain(profile.persona, "persona", log),
+    toolInstructions: loadPromptSourceChain(profile.toolInstructions, "toolInstructions", log),
+    instructions: loadPromptSourceChain(profile.instructions, "instructions", log),
   };
 }

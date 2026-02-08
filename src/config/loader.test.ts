@@ -120,29 +120,13 @@ describe("loadGlobalConfig", () => {
     expect(cfg.logLevel).toBe("debug");
   });
 
-  test("reads instructions from YAML inline", () => {
-    const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, 'instructions: "Be helpful"\n');
-    const cfg = loadGlobalConfig(BASE_ENV, file);
-    expect(cfg.defaultInstructions).toBe("Be helpful");
-  });
-
-  test("reads instructions from file path in YAML", () => {
-    const instrFile = join(TEST_DIR, "instr.md");
-    writeFileSync(instrFile, "File-based instructions\n");
-    const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, `instructionsPath: ${instrFile}\n`);
-    const cfg = loadGlobalConfig(BASE_ENV, file);
-    expect(cfg.defaultInstructions).toBe("File-based instructions");
-  });
-
-  test("derives default promptProfile from personaPath/toolInstructionsPath", () => {
-    const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "personaPath: config/persona-alt.md\ntoolInstructionsPath: config/tools-alt.md\n");
-    const cfg = loadGlobalConfig(BASE_ENV, file);
+  test("derives default promptProfile when promptProfile is omitted", () => {
+    const cfgPath = join(TEST_DIR, "nonexistent.yaml");
+    const cfg = loadGlobalConfig(BASE_ENV, cfgPath);
     expect((cfg as unknown as { promptProfile?: unknown }).promptProfile).toEqual({
-      persona: [{ kind: "file", path: "config/persona-alt.md", optional: false }],
-      toolInstructions: [{ kind: "file", path: "config/tools-alt.md", optional: false }],
+      persona: [{ kind: "file", path: join(TEST_DIR, "persona.md"), optional: false }],
+      toolInstructions: [{ kind: "file", path: join(TEST_DIR, "tool_instructions.md"), optional: false }],
+      instructions: [{ kind: "file", path: join(TEST_DIR, "instructions.md"), optional: false }],
     });
   });
 
@@ -159,6 +143,9 @@ describe("loadGlobalConfig", () => {
         "    - file: config/tool_instructions.md",
         "    - file: config/ops.md",
         "      optional: true",
+        "  instructions:",
+        "    - file: config/instructions.md",
+        '    - text: "Instruction addon"',
       ].join("\n"),
     );
     const cfg = loadGlobalConfig(BASE_ENV, file);
@@ -171,7 +158,34 @@ describe("loadGlobalConfig", () => {
         { kind: "file", path: "config/tool_instructions.md", optional: false },
         { kind: "file", path: "config/ops.md", optional: true },
       ],
+      instructions: [
+        { kind: "file", path: "config/instructions.md", optional: false },
+        { kind: "inline", text: "Instruction addon" },
+      ],
     });
+  });
+
+  test("loads defaultInstructions from promptProfile.instructions inline source", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "promptProfile:\n  instructions:\n    - text: Legacy global instructions\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultInstructions).toBe("Legacy global instructions");
+  });
+
+  test("loads defaultInstructions from promptProfile.instructions file source", () => {
+    const instrFile = join(TEST_DIR, "instr.md");
+    writeFileSync(instrFile, "File-based instructions\n");
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(
+      file,
+      [
+        "promptProfile:",
+        "  instructions:",
+        `    - file: ${instrFile}`,
+      ].join("\n"),
+    );
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultInstructions).toBe("File-based instructions");
   });
 
   test("rejects invalid promptProfile sources", () => {
@@ -413,7 +427,7 @@ describe("resolveGuildConfig", () => {
   test("falls back to global defaultInstructions when guild has none", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
-    writeFileSync(cfgFile, 'instructions: "Global default"\n');
+    writeFileSync(cfgFile, "promptProfile:\n  instructions:\n    - text: Global default\n");
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
     expect(global.defaultInstructions).toBe("Global default");
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {

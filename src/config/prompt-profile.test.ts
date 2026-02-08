@@ -33,8 +33,10 @@ describe("loadPromptProfile", () => {
   test("composes ordered file and inline persona/tool instruction sources", () => {
     const personaFile = join(TEST_DIR, "persona.md");
     const toolFile = join(TEST_DIR, "tool.md");
+    const instructionsFile = join(TEST_DIR, "instructions.md");
     writeFileSync(personaFile, "Primary persona");
     writeFileSync(toolFile, "Primary tool instructions");
+    writeFileSync(instructionsFile, "Primary instructions");
 
     const profile: PromptProfileConfig = {
       persona: [
@@ -45,11 +47,16 @@ describe("loadPromptProfile", () => {
         { kind: "inline", text: "Header" },
         { kind: "file", path: toolFile, optional: false },
       ],
+      instructions: [
+        { kind: "file", path: instructionsFile, optional: false },
+        { kind: "inline", text: "Instructions addendum" },
+      ],
     };
 
     const loaded = loadPromptProfile(profile, makeLogger());
     expect(loaded.persona).toBe("Primary persona\n\nPersona addendum");
     expect(loaded.toolInstructions).toBe("Header\n\nPrimary tool instructions");
+    expect(loaded.instructions).toBe("Primary instructions\n\nInstructions addendum");
   });
 
   test("skips missing optional file sources and keeps non-empty sources", () => {
@@ -62,10 +69,12 @@ describe("loadPromptProfile", () => {
         { kind: "inline", text: "Inline persona" },
       ],
       toolInstructions: [{ kind: "file", path: toolFile, optional: false }],
+      instructions: [],
     };
 
     const loaded = loadPromptProfile(profile, makeLogger());
     expect(loaded.persona).toBe("Inline persona");
     expect(loaded.toolInstructions).toBe("Tools");
+    expect(loaded.instructions).toBe("");
   });
 });

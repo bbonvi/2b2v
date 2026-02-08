@@ -192,6 +192,7 @@ Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields op
 - Sections:
   - `persona`: ordered source list
   - `toolInstructions`: ordered source list
+  - `instructions`: ordered source list
 - Source forms:
   - `file` (`path`) with optional `optional: true`
   - `text` (inline snippet)
@@ -199,9 +200,9 @@ Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields op
   - Sources are resolved in order and concatenated with blank lines.
   - Missing required files are skipped with warning logs.
   - Missing optional files are skipped with info logs.
-- Backward compatibility: if `promptProfile` is omitted, loader derives one from legacy `personaPath` and `toolInstructionsPath`.
-
-**Instructions**: Custom text injected into LLM context (after tool instructions, before emojis). `instructionsPath` loads from a file; `instructions` provides inline text. `instructionsPath` takes priority. Guild-level overrides global default.
+- Defaults (when `promptProfile` is omitted): `config/persona.md`, `config/tool_instructions.md`, `config/instructions.md`.
+- Global instructions now come only from `promptProfile.instructions` (breaking change, no global legacy fallback keys).
+- Guild-level instruction overrides are still provided by guild config `instructionsPath`/`instructions` (file path has priority).
 
 ### Configuration Change Checklist
 
@@ -214,13 +215,13 @@ When adding or removing config fields:
 
 ### Hot-Reload
 
-`fs.watch("config", { recursive: true })` watches the entire `config/` directory. Changes are debounced and reload the main config, prompt profile content (persona + tool instructions), and all guild configs. Malformed YAML or missing files keep the last known good config.
+`fs.watch("config", { recursive: true })` watches the entire `config/` directory. Changes are debounced and reload the main config, prompt profile content (persona + tool instructions + instructions), and all guild configs. Malformed YAML or missing files keep the last known good config.
 
 ## Key Patterns
 
 ### Prompt Profile Loader
 
-`src/config/prompt-profile.ts` is the source of truth for loading file-based persona/tool instruction content. `src/index.ts` does not hardcode source files; it only consumes `globalConfig.promptProfile` resolved by `src/config/loader.ts`.
+`src/config/prompt-profile.ts` is the source of truth for loading file-based persona/tool/instructions content. `src/index.ts` does not hardcode source files; it only consumes `globalConfig.promptProfile` resolved by `src/config/loader.ts`.
 
 ### Dashboard Payload Rendering
 

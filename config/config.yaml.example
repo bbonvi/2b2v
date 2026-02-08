@@ -111,16 +111,8 @@ promptProfile:
     - file: config/persona.md
   toolInstructions:
     - file: config/tool_instructions.md
-
-# Legacy fallback paths (used only when promptProfile is omitted)
-personaPath: config/persona.md
-toolInstructionsPath: config/tool_instructions.md
-
-# Custom instructions injected into the LLM context (after tool instructions).
-# Use instructionsPath to load from a file, or instructions for inline text.
-# instructionsPath takes priority over inline instructions.
-instructionsPath: config/instructions.md
-instructions: ""
+  instructions:
+    - file: config/instructions.md
 
 # Log level: debug | info | warn | error
 logLevel: info

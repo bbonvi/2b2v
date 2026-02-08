@@ -1,6 +1,6 @@
 import { parse, stringify } from "yaml";
 import { readFileSync, readdirSync, writeFileSync, existsSync } from "fs";
-import { join, basename } from "path";
+import { join, basename, dirname } from "path";
 import type {
   GlobalConfig,
   GuildConfig,
@@ -21,6 +21,8 @@ import type {
   PromptSource,
 } from "./types.ts";
 import type { TtsConfig, VoicePreset } from "../tts/types.ts";
+import type { Logger, TokenUsage } from "../logger.ts";
+import { loadPromptSourceChain } from "./prompt-profile.ts";
 
 const DEFAULT_TRIGGER: TriggerConfig = {
   mention: true,
@@ -172,19 +174,29 @@ const DEFAULT_ACTION_LOOP: ActionLoopConfig = {
 type PromptSourceYaml =
   NonNullable<NonNullable<MainConfigYaml["promptProfile"]>["persona"]>[number];
 
+const SILENT_PROMPT_LOGGER: Logger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  logTokenUsage: (_usage: TokenUsage) => {},
+  child: () => SILENT_PROMPT_LOGGER,
+};
+
 function defaultPromptProfile(
-  personaPath: string,
-  toolInstructionsPath: string,
+  configPath: string,
 ): PromptProfileConfig {
+  const configDir = dirname(configPath);
   return {
-    persona: [{ kind: "file", path: personaPath, optional: false }],
-    toolInstructions: [{ kind: "file", path: toolInstructionsPath, optional: false }],
+    persona: [{ kind: "file", path: join(configDir, "persona.md"), optional: false }],
+    toolInstructions: [{ kind: "file", path: join(configDir, "tool_instructions.md"), optional: false }],
+    instructions: [{ kind: "file", path: join(configDir, "instructions.md"), optional: false }],
   };
 }
 
 function resolvePromptSource(
   source: PromptSourceYaml,
-  section: "persona" | "toolInstructions",
+  section: "persona" | "toolInstructions" | "instructions",
   index: number,
 ): PromptSource {
   const filePath = source.file;
@@ -209,7 +221,7 @@ function resolvePromptSource(
 function resolvePromptSources(
   sources: PromptSourceYaml[] | undefined,
   fallback: PromptSource[],
-  section: "persona" | "toolInstructions",
+  section: "persona" | "toolInstructions" | "instructions",
 ): PromptSource[] {
   if (sources === undefined) return fallback;
   return sources.map((source, idx) => resolvePromptSource(source, section, idx));
@@ -217,14 +229,14 @@ function resolvePromptSources(
 
 function resolvePromptProfile(
   partial: MainConfigYaml["promptProfile"] | undefined,
-  personaPath: string,
-  toolInstructionsPath: string,
+  configPath: string,
 ): PromptProfileConfig {
-  const fallback = defaultPromptProfile(personaPath, toolInstructionsPath);
+  const fallback = defaultPromptProfile(configPath);
   if (partial === undefined) return fallback;
   return {
     persona: resolvePromptSources(partial.persona, fallback.persona, "persona"),
     toolInstructions: resolvePromptSources(partial.toolInstructions, fallback.toolInstructions, "toolInstructions"),
+    instructions: resolvePromptSources(partial.instructions, fallback.instructions, "instructions"),
   };
 }
 
@@ -401,11 +413,13 @@ export function loadGlobalConfig(
 
   const dataDir = yaml.dataDir ?? "data";
   const defaultAttachmentsDir = yaml.attachmentsDir ?? `${dataDir}/attachments`;
-  const personaPath = yaml.personaPath ?? "config/persona.md";
-  const toolInstructionsPath = yaml.toolInstructionsPath ?? "config/tool_instructions.md";
-  const promptProfile = resolvePromptProfile(yaml.promptProfile, personaPath, toolInstructionsPath);
+  const promptProfile = resolvePromptProfile(yaml.promptProfile, configPath);
 
-  const defaultInstructions = resolveInstructions(yaml.instructions, yaml.instructionsPath);
+  const defaultInstructions = loadPromptSourceChain(
+    promptProfile.instructions,
+    "instructions",
+    SILENT_PROMPT_LOGGER,
+  );
 
   return {
     discordToken,
@@ -440,8 +454,6 @@ export function loadGlobalConfig(
     defaultImageCaptioningEnabled: yaml.imageCaptioningEnabled ?? false,
     defaultAttachmentsDir,
     defaultInstructions,
-    personaPath,
-    toolInstructionsPath,
     promptProfile,
     logLevel: yaml.logLevel ?? "info",
     dataDir,
