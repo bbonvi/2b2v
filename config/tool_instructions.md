@@ -60,6 +60,19 @@ Recommended slow-work pattern:
 6) final `send_message`
 7) `stop_response`
 
+## Research Workflow (External Facts)
+- Use this flow when facts are uncertain, current, or source-dependent.
+- Leave breadcrumb updates so the user sees what is being researched right now.
+- Required flow:
+  1) progress breadcrumb (`send_message`)
+  2) `web_search` to discover candidate sources
+  3) multiple independent `fetch_url` calls for selected URLs (parallel when possible)
+  4) if visual evidence is needed, `fetch_images` on selected image URLs
+  5) consolidate and summarize evidence across sources
+  6) do one extra reasoning pass on the consolidated evidence
+  7) only then send final answer
+- If `web_search` was used, do not finalize without at least one `fetch_url` call.
+
 ## Parallel Tool Calls
 - Parallelize independent tool calls.
 - Do not parallelize dependent steps.

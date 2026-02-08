@@ -215,6 +215,7 @@ export function buildStructuredActionProtocolPrompt(tools: AgentTool[]): string 
     .join("\n");
   const toolNames = new Set(tools.map((tool) => tool.name));
   const toolReinforcements: string[] = [];
+  const researchWorkflow: string[] = [];
 
   if (toolNames.has("web_search")) {
     toolReinforcements.push("Use web_search to discover relevant sources for uncertain or current facts.");
@@ -224,6 +225,14 @@ export function buildStructuredActionProtocolPrompt(tools: AgentTool[]): string 
   }
   if (toolNames.has("web_search") && toolNames.has("fetch_url")) {
     toolReinforcements.push("If web_search is used, you must call fetch_url on at least one result before final factual answer.");
+    researchWorkflow.push("Research workflow for uncertain factual requests:");
+    researchWorkflow.push("- Leave breadcrumb progress updates via send_message while researching.");
+    researchWorkflow.push("- Start with web_search, then use fetch_url on selected results before final factual answer.");
+    researchWorkflow.push("- Run multiple independent fetch_url calls for selected sources (parallel when possible).");
+    if (toolNames.has("fetch_images")) {
+      researchWorkflow.push("- If images are relevant, use fetch_images on selected image URLs.");
+    }
+    researchWorkflow.push("- Consolidate findings across sources, summarize evidence, then do one more reasoning pass before final answer.");
   }
   if (toolNames.has("search_messages")) {
     toolReinforcements.push("Use search_messages to retrieve older chat context.");
@@ -294,6 +303,7 @@ export function buildStructuredActionProtocolPrompt(tools: AgentTool[]): string 
         ...toolReinforcements.map((line) => `- ${line}`),
       ]
       : []),
+    ...(researchWorkflow.length > 0 ? ["", ...researchWorkflow] : []),
     "",
     "Available tools:",
     toolList,

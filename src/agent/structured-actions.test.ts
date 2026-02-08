@@ -94,6 +94,7 @@ describe("buildStructuredActionProtocolPrompt", () => {
       makeTool("start_typing"),
       makeTool("web_search"),
       makeTool("fetch_url"),
+      makeTool("fetch_images"),
       makeTool("search_messages"),
       makeTool("chat_history"),
     ]);
@@ -104,6 +105,11 @@ describe("buildStructuredActionProtocolPrompt", () => {
     expect(prompt).toContain("If web_search is used, you must call fetch_url on at least one result before final factual answer.");
     expect(prompt).toContain("Use search_messages to retrieve older chat context.");
     expect(prompt).toContain("Use chat_history to inspect recent in-channel context before replying.");
+    expect(prompt).toContain("Research workflow for uncertain factual requests:");
+    expect(prompt).toContain("Leave breadcrumb progress updates via send_message while researching.");
+    expect(prompt).toContain("Run multiple independent fetch_url calls for selected sources (parallel when possible).");
+    expect(prompt).toContain("If images are relevant, use fetch_images on selected image URLs.");
+    expect(prompt).toContain("Consolidate findings across sources, summarize evidence, then do one more reasoning pass before final answer.");
   });
 });
 
