@@ -120,6 +120,22 @@ describe("loadGlobalConfig", () => {
     expect(cfg.logLevel).toBe("debug");
   });
 
+  test("rejects deprecated global instructionsPath/instructions keys", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "instructionsPath: config/instructions.md\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
+      'Deprecated config key "instructionsPath" is no longer supported. Use promptProfile instead.',
+    );
+  });
+
+  test("rejects deprecated global persona/toolInstructions path keys", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "personaPath: config/persona.md\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
+      'Deprecated config key "personaPath" is no longer supported. Use promptProfile instead.',
+    );
+  });
+
   test("derives default promptProfile when promptProfile is omitted", () => {
     const cfgPath = join(TEST_DIR, "nonexistent.yaml");
     const cfg = loadGlobalConfig(BASE_ENV, cfgPath);

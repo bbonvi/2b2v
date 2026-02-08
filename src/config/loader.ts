@@ -394,6 +394,16 @@ export function resolveInstructions(
   return instructions ?? "";
 }
 
+function assertNoDeprecatedGlobalPromptKeys(yaml: MainConfigYaml): void {
+  const raw = yaml as Record<string, unknown>;
+  const deprecatedKeys = ["personaPath", "toolInstructionsPath", "instructionsPath", "instructions"] as const;
+  for (const key of deprecatedKeys) {
+    if (raw[key] !== undefined) {
+      throw new Error(`Deprecated config key "${key}" is no longer supported. Use promptProfile instead.`);
+    }
+  }
+}
+
 /**
  * Build global config from main YAML config + env vars.
  * YAML provides non-secret defaults; env vars provide secrets and infrastructure overrides.
@@ -410,6 +420,7 @@ export function loadGlobalConfig(
   if (openrouterApiKey === undefined || openrouterApiKey === "") throw new Error("OPENROUTER_API_KEY is required");
 
   const yaml = loadMainConfig(configPath);
+  assertNoDeprecatedGlobalPromptKeys(yaml);
 
   const dataDir = yaml.dataDir ?? "data";
   const defaultAttachmentsDir = yaml.attachmentsDir ?? `${dataDir}/attachments`;
