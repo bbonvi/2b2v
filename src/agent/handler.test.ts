@@ -6,6 +6,7 @@ import { handleMessage, injectTriggerInstruction, type IncomingMessage, type Han
 import type { AssembledContext, ContextSection } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { MessageSender } from "./send-message-tool.ts";
+import type { Logger, TokenUsage } from "../logger.ts";
 
 function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
   return {
@@ -106,6 +107,23 @@ function assistantWithText(text: string): AssistantMessage {
     stopReason: "stop",
     timestamp: Date.now(),
   };
+}
+
+function makeTestLogger(): { logger: Logger; debug: ReturnType<typeof mock> } {
+  const debug = mock(() => {});
+  const info = mock(() => {});
+  const warn = mock(() => {});
+  const error = mock(() => {});
+  const logTokenUsage = mock((_usage: TokenUsage) => {});
+  const logger = {
+    debug,
+    info,
+    warn,
+    error,
+    logTokenUsage,
+    child: () => logger,
+  } as Logger;
+  return { logger, debug };
 }
 
 describe("handleMessage", () => {
@@ -323,5 +341,41 @@ describe("handleMessage", () => {
     await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
 
     expect(extraExecuted).toBe(true);
+  });
+
+  test("logs each llm output content in debug mode", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
+    const firstPayload = {
+      status: "continue",
+      actions: [{ type: "tool_call", tool_name: "send_message", arguments: { text: "hello", reply: false } }],
+    };
+    const secondPayload = {
+      status: "done",
+      actions: [{ type: "stop_response", reason: "done" }],
+    };
+    let call = 0;
+
+    const llmComplete: LlmCompleteFn = () => {
+      call += 1;
+      if (call === 1) return Promise.resolve(assistantWithText(JSON.stringify(firstPayload)));
+      return Promise.resolve(assistantWithText(JSON.stringify(secondPayload)));
+    };
+
+    const { logger, debug } = makeTestLogger();
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({ triggers: { mention: true, keywords: [], randomChance: 0 } }),
+      context: makeContext(),
+      sender,
+      llmComplete,
+      log: logger,
+    };
+
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+
+    const llmOutputCalls = debug.mock.calls.filter((args) => args[0] === "llm_output");
+    expect(llmOutputCalls).toHaveLength(2);
+    expect(llmOutputCalls[0]?.[1]).toEqual({ content: JSON.stringify(firstPayload) });
+    expect(llmOutputCalls[1]?.[1]).toEqual({ content: JSON.stringify(secondPayload) });
   });
 });

@@ -427,6 +427,7 @@ export async function handleMessage(
         }
 
         reqLog?.recordLLMCompletion(completion.payload);
+        deps.log?.debug("llm_output", { content: completion.text });
 
         if (!assistantResponseNotified) {
           assistantResponseNotified = true;
