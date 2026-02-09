@@ -145,18 +145,14 @@ export function parseStructuredActionBatch(rawText: string):
   return { ok: true, value: parsed };
 }
 
-function schemaForToolAction(toolNames: string[]): Record<string, unknown> {
-  const toolNameSchema: Record<string, unknown> = toolNames.length > 0
-    ? { type: "string", enum: toolNames }
-    : { type: "string", minLength: 1 };
-
+function schemaForToolAction(): Record<string, unknown> {
   return {
     type: "object",
     additionalProperties: false,
     required: ["type", "tool_name", "arguments"],
     properties: {
       type: { const: "tool_call" },
-      tool_name: toolNameSchema,
+      tool_name: { type: "string", minLength: 1 },
       // Keep arguments shallow for provider compatibility (Gemini rejects deeply nested json_schema).
       // Runtime still validates tool arguments before execution.
       arguments: {
@@ -191,9 +187,9 @@ function schemaForIgnoreAction(): Record<string, unknown> {
   };
 }
 
-export function buildActionResponseFormat(tools: AgentTool[]): Record<string, unknown> {
+export function buildActionResponseFormat(_tools: AgentTool[]): Record<string, unknown> {
   const actionVariants = [
-    schemaForToolAction(tools.map((tool) => tool.name)),
+    schemaForToolAction(),
     schemaForStopAction(),
     schemaForIgnoreAction(),
   ];

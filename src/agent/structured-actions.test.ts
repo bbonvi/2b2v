@@ -38,13 +38,12 @@ describe("buildActionResponseFormat", () => {
     const variants = actionsSchema?.anyOf ?? [];
 
     const asText = JSON.stringify(variants);
+    expect(asText).toContain("tool_call");
     expect(asText).toContain("stop_response");
     expect(asText).toContain("ignore_user");
-    expect(asText).toContain("send_message");
-    expect(asText).toContain("search_messages");
   });
 
-  test("keeps tool_call arguments shallow and validates tool_name via enum", () => {
+  test("keeps tool_call arguments shallow and allows tool_name as plain string", () => {
     const sendTool = createSendMessageTool({
       sender: () => Promise.resolve({ sentMessageId: "m-1" }),
       ttsEnabled: false,
@@ -61,7 +60,7 @@ describe("buildActionResponseFormat", () => {
                   required?: string[];
                   properties?: {
                     type?: { const?: string };
-                    tool_name?: { enum?: string[] };
+                    tool_name?: { enum?: string[]; type?: string; minLength?: number };
                     arguments?: { type?: string; additionalProperties?: boolean };
                   };
                 }>;
@@ -78,7 +77,7 @@ describe("buildActionResponseFormat", () => {
     expect(required.includes("type")).toBe(true);
     expect(required.includes("tool_name")).toBe(true);
     expect(required.includes("arguments")).toBe(true);
-    expect(toolCallVariant?.properties?.tool_name?.enum).toEqual(["send_message"]);
+    expect(toolCallVariant?.properties?.tool_name).toEqual({ type: "string", minLength: 1 });
     expect(toolCallVariant?.properties?.arguments).toEqual({
       type: "object",
       additionalProperties: true,
