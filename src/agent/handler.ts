@@ -21,6 +21,7 @@ import {
   buildStructuredActionProtocolPrompt,
   runStructuredActionLoop,
   type LoopMessage,
+  type StructuredLoopEvent,
 } from "./structured-actions.ts";
 import { buildLateInstructionPrompt, resolvePromptPolicy } from "./prompt-policy.ts";
 import { completeOpenRouterChat } from "../llm/openrouter-chat.ts";
@@ -307,6 +308,33 @@ function isStructuredOutputUnsupported(error: unknown): boolean {
   return (msg.includes("provider returned error") || msg.includes("invalid_argument")) && msg.includes("schema");
 }
 
+function serializeError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    const details: Record<string, unknown> = {
+      name: error.name,
+      message: error.message,
+    };
+    if (error.stack !== undefined) details.stack = error.stack;
+    const withCause = error as Error & { cause?: unknown };
+    if (withCause.cause !== undefined) {
+      if (withCause.cause instanceof Error) {
+        details.cause = serializeError(withCause.cause);
+      } else if (
+        typeof withCause.cause === "string"
+        || typeof withCause.cause === "number"
+        || typeof withCause.cause === "boolean"
+        || withCause.cause === null
+      ) {
+        details.cause = withCause.cause;
+      } else {
+        details.cause = "non-error cause";
+      }
+    }
+    return details;
+  }
+  return { message: String(error) };
+}
+
 /**
  * Core message handler. Evaluates triggers, builds action loop, runs prompt.
  *
@@ -381,9 +409,18 @@ export async function handleMessage(
     .join("\n\n");
 
   let assistantResponseNotified = false;
+  const loopStartedAt = Date.now();
+  let llmCallSeq = 0;
 
   try {
     const userContent = deps.context.userMessage !== "" ? deps.context.userMessage : msg.translatedContent;
+    deps.log?.debug("structured_loop_start", {
+      initialUserContentLength: userContent.length,
+      maxToolCalls: deps.guildConfig.actionLoop.maxToolCalls,
+      wallClockTimeoutMs: deps.guildConfig.actionLoop.wallClockTimeoutMs,
+      llmOutputTimeoutMs: deps.guildConfig.actionLoop.llmOutputTimeoutMs,
+      toolNames: finalTools.map((tool) => tool.name),
+    });
 
     const loopResult = await runStructuredActionLoop({
       initialMessages: [
@@ -398,6 +435,14 @@ export async function handleMessage(
       wallClockTimeoutMs: deps.guildConfig.actionLoop.wallClockTimeoutMs,
       llmOutputTimeoutMs: deps.guildConfig.actionLoop.llmOutputTimeoutMs,
       callModel: async (messages, responseFormat, signal) => {
+        const llmCallId = `llm-${++llmCallSeq}`;
+        const llmCallStartedAt = Date.now();
+        deps.log?.debug("llm_request_start", {
+          llmCallId,
+          model: model.id,
+          messageCount: messages.length,
+          responseFormatType: typeof responseFormat.type === "string" ? responseFormat.type : "unknown",
+        });
         timingState.setReferenceTime();
 
         const transformedLoopMessages = deps.transformContext !== undefined
@@ -415,6 +460,10 @@ export async function handleMessage(
           onPayload: (payload: unknown) => {
             prependStableSectionsToPayload(payload, stableSections, deps.guildConfig.promptCaching);
             reqLog?.recordLLMRequest(payload);
+            deps.log?.debug("llm_request_payload", {
+              llmCallId,
+              payload,
+            });
           },
         });
 
@@ -442,6 +491,10 @@ export async function handleMessage(
               onPayload: (payload: unknown) => {
                 prependStableSectionsToPayload(payload, stableSections, deps.guildConfig.promptCaching);
                 reqLog?.recordLLMRequest(payload);
+                deps.log?.debug("llm_request_payload", {
+                  llmCallId,
+                  payload,
+                });
               },
             });
             return {
@@ -465,6 +518,12 @@ export async function handleMessage(
         try {
           completion = await completionViaInjected(true);
         } catch (error) {
+          deps.log?.debug("llm_request_error", {
+            llmCallId,
+            model: model.id,
+            durationMs: Date.now() - llmCallStartedAt,
+            error: serializeError(error),
+          });
           if (!isStructuredOutputUnsupported(error)) {
             throw error;
           }
@@ -476,6 +535,16 @@ export async function handleMessage(
         }
 
         reqLog?.recordLLMCompletion(completion.payload);
+        deps.log?.debug("llm_response", {
+          llmCallId,
+          model: model.id,
+          durationMs: Date.now() - llmCallStartedAt,
+          outputLength: completion.text.length,
+        });
+        deps.log?.debug("llm_response_payload", {
+          llmCallId,
+          response: completion.payload,
+        });
         deps.log?.debug("llm_output", { content: completion.text });
 
         if (!assistantResponseNotified) {
@@ -503,12 +572,16 @@ export async function handleMessage(
         }
       },
       signal: baseStreamOptions.signal as AbortSignal | undefined,
+      onLoopEvent: (event: StructuredLoopEvent) => {
+        deps.log?.debug("structured_loop_event", event as unknown as Record<string, unknown>);
+      },
     });
 
     deps.log?.debug("structured action loop completed", {
       stopReason: loopResult.stopReason,
       turns: loopResult.turns,
       toolCalls: loopResult.toolCalls,
+      durationMs: Date.now() - loopStartedAt,
     });
 
     if (loopResult.stopReason === "timeout") {
@@ -520,6 +593,9 @@ export async function handleMessage(
       );
     }
   } finally {
+    deps.log?.debug("structured_loop_end", {
+      durationMs: Date.now() - loopStartedAt,
+    });
     deps.onAgentEnd?.();
   }
 

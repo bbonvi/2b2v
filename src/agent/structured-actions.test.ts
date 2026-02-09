@@ -8,6 +8,7 @@ import {
   buildStructuredActionProtocolPrompt,
   parseStructuredActionBatch,
   runStructuredActionLoop,
+  type StructuredLoopEvent,
   type StructuredActionBatch,
 } from "./structured-actions.ts";
 
@@ -516,5 +517,45 @@ describe("runStructuredActionLoop", () => {
 
     expect(result.stopReason).toBe("timeout");
     expect(result.timeoutCause).toBe("wall_clock_timeout");
+  });
+
+  test("emits loop telemetry events for model and tool lifecycle", async () => {
+    const events: StructuredLoopEvent[] = [];
+    const result = await runStructuredActionLoop({
+      maxToolCalls: 3,
+      wallClockTimeoutMs: 10_000,
+      llmOutputTimeoutMs: 2_000,
+      tools: [makeTool("send_message")],
+      callModel: () => Promise.resolve({
+        rawText: JSON.stringify({
+          status: "done",
+          actions: [
+            { type: "tool_call", tool_name: "send_message", arguments: { text: "hello", reply: true } },
+            { type: "stop_response", reason: "done" },
+          ],
+        } satisfies StructuredActionBatch),
+      }),
+      onToolCall: () => Promise.resolve({
+        content: [{ type: "text", text: "sent" }],
+        details: {},
+      }),
+      initialMessages: [
+        { role: "user", content: "hello", timestamp: Date.now() },
+      ],
+      onLoopEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    expect(result.stopReason).toBe("done");
+    const eventTypes = events.map((event) => event.type);
+    expect(eventTypes).toContain("loop_start");
+    expect(eventTypes).toContain("turn_start");
+    expect(eventTypes).toContain("model_call_start");
+    expect(eventTypes).toContain("model_call_end");
+    expect(eventTypes).toContain("batch_parsed");
+    expect(eventTypes).toContain("tool_call_start");
+    expect(eventTypes).toContain("tool_call_end");
+    expect(eventTypes).toContain("stop");
   });
 });

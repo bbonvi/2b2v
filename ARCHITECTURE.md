@@ -114,6 +114,10 @@ Empty sections are omitted. `assembleContext()` iterates the registry; no impera
   - `actionLoop.maxToolCalls`
   - `actionLoop.wallClockTimeoutMs`
   - `actionLoop.llmOutputTimeoutMs`
+- Runtime telemetry is emitted at `debug` level during execution:
+  - `structured_loop_start` / `structured_loop_event` / `structured_loop_end`
+  - `llm_request_start` / `llm_request_payload` / `llm_response` / `llm_response_payload` / `llm_request_error`
+- OpenRouter chat calls are non-streaming (`stream: false`), so user-visible output starts only after a full model turn completes and the loop reaches `send_message`.
 
 ### History Processing
 

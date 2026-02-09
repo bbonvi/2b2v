@@ -83,6 +83,7 @@ export interface RunStructuredActionLoopInput {
   maxTurns?: number;
   maxFormatErrors?: number;
   onModelTurn?: (payload: Record<string, unknown> | undefined) => void;
+  onLoopEvent?: (event: StructuredLoopEvent) => void;
 }
 
 export interface RunStructuredActionLoopResult {
@@ -92,6 +93,97 @@ export interface RunStructuredActionLoopResult {
   turns: number;
   messages: LoopMessage[];
 }
+
+type StructuredLoopEventBase = {
+  /** Milliseconds since loop start. */
+  atMs: number;
+};
+
+export type StructuredLoopEvent =
+  | (StructuredLoopEventBase & {
+    type: "loop_start";
+    maxTurns: number;
+    maxToolCalls: number;
+    wallClockTimeoutMs: number;
+    llmOutputTimeoutMs: number;
+    initialMessageCount: number;
+  })
+  | (StructuredLoopEventBase & {
+    type: "turn_start";
+    turn: number;
+    messageCount: number;
+  })
+  | (StructuredLoopEventBase & {
+    type: "model_call_start";
+    turn: number;
+    messageCount: number;
+  })
+  | (StructuredLoopEventBase & {
+    type: "model_call_end";
+    turn: number;
+    durationMs: number;
+    rawTextLength: number;
+  })
+  | (StructuredLoopEventBase & {
+    type: "model_call_error";
+    turn: number;
+    durationMs: number;
+    error: string;
+    isTimeout: boolean;
+  })
+  | (StructuredLoopEventBase & {
+    type: "format_error";
+    turn: number;
+    error: string;
+    consecutiveErrors: number;
+  })
+  | (StructuredLoopEventBase & {
+    type: "batch_parsed";
+    turn: number;
+    status: StructuredActionBatch["status"];
+    actionCount: number;
+  })
+  | (StructuredLoopEventBase & {
+    type: "policy_error";
+    turn: number;
+    error: string;
+  })
+  | (StructuredLoopEventBase & {
+    type: "tool_call_start";
+    turn: number;
+    actionIndex: number;
+    toolName: string;
+    toolCallId: string;
+  })
+  | (StructuredLoopEventBase & {
+    type: "tool_call_end";
+    turn: number;
+    actionIndex: number;
+    toolName: string;
+    toolCallId: string;
+    durationMs: number;
+    isError: boolean;
+  })
+  | (StructuredLoopEventBase & {
+    type: "stop";
+    reason: LoopStopReason;
+    turns: number;
+    toolCalls: number;
+    timeoutCause?: LoopTimeoutCause;
+  });
+
+type StructuredLoopEventInput =
+  | Omit<Extract<StructuredLoopEvent, { type: "loop_start" }>, "atMs">
+  | Omit<Extract<StructuredLoopEvent, { type: "turn_start" }>, "atMs">
+  | Omit<Extract<StructuredLoopEvent, { type: "model_call_start" }>, "atMs">
+  | Omit<Extract<StructuredLoopEvent, { type: "model_call_end" }>, "atMs">
+  | Omit<Extract<StructuredLoopEvent, { type: "model_call_error" }>, "atMs">
+  | Omit<Extract<StructuredLoopEvent, { type: "format_error" }>, "atMs">
+  | Omit<Extract<StructuredLoopEvent, { type: "batch_parsed" }>, "atMs">
+  | Omit<Extract<StructuredLoopEvent, { type: "policy_error" }>, "atMs">
+  | Omit<Extract<StructuredLoopEvent, { type: "tool_call_start" }>, "atMs">
+  | Omit<Extract<StructuredLoopEvent, { type: "tool_call_end" }>, "atMs">
+  | Omit<Extract<StructuredLoopEvent, { type: "stop" }>, "atMs">;
 
 const SEND_MESSAGE_TOOL_NAME = "send_message";
 
@@ -417,6 +509,12 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
   const maxFormatErrors = input.maxFormatErrors ?? 3;
   const maxModelTimeouts = Math.max(1, input.maxModelTimeouts ?? 1);
   const startedAt = now();
+  const emit = (event: StructuredLoopEventInput): void => {
+    input.onLoopEvent?.({
+      ...event,
+      atMs: Math.max(0, now() - startedAt),
+    });
+  };
   const responseFormat = buildActionResponseFormat(input.tools);
 
   const toolsByName = new Map<string, AgentTool>();
@@ -432,6 +530,15 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
   let modelTimeouts = 0;
   let hasUserVisibleMessage = false;
 
+  emit({
+    type: "loop_start",
+    maxTurns,
+    maxToolCalls: input.maxToolCalls,
+    wallClockTimeoutMs: input.wallClockTimeoutMs,
+    llmOutputTimeoutMs: input.llmOutputTimeoutMs,
+    initialMessageCount: messages.length,
+  });
+
   const executeToolCall = input.onToolCall ?? (async (tool, toolCallId, args, signal) => {
     const toolCall: ToolCall = {
       type: "toolCall",
@@ -445,25 +552,75 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
 
   while (turns < maxTurns) {
     if (isAborted(input.signal)) {
+      emit({
+        type: "stop",
+        reason: "aborted",
+        turns,
+        toolCalls,
+      });
       return { stopReason: "aborted", toolCalls, turns, messages };
     }
 
     if (now() - startedAt >= input.wallClockTimeoutMs) {
+      emit({
+        type: "stop",
+        reason: "timeout",
+        timeoutCause: "wall_clock_timeout",
+        turns,
+        toolCalls,
+      });
       return { stopReason: "timeout", timeoutCause: "wall_clock_timeout", toolCalls, turns, messages };
     }
 
     turns += 1;
+    emit({
+      type: "turn_start",
+      turn: turns,
+      messageCount: messages.length,
+    });
 
     let turnOutput: ModelTurnOutput;
+    const modelStartedAt = now();
+    emit({
+      type: "model_call_start",
+      turn: turns,
+      messageCount: messages.length,
+    });
     try {
       turnOutput = await callModelWithTimeout(input, messages, responseFormat);
+      emit({
+        type: "model_call_end",
+        turn: turns,
+        durationMs: Math.max(0, now() - modelStartedAt),
+        rawTextLength: turnOutput.rawText.length,
+      });
     } catch (error) {
+      emit({
+        type: "model_call_error",
+        turn: turns,
+        durationMs: Math.max(0, now() - modelStartedAt),
+        error: error instanceof Error ? error.message : String(error),
+        isTimeout: isModelOutputTimeoutError(error),
+      });
       if (isAborted(input.signal)) {
+        emit({
+          type: "stop",
+          reason: "aborted",
+          turns,
+          toolCalls,
+        });
         return { stopReason: "aborted", toolCalls, turns, messages };
       }
       if (isModelOutputTimeoutError(error)) {
         modelTimeouts += 1;
         if (modelTimeouts >= maxModelTimeouts) {
+          emit({
+            type: "stop",
+            reason: "timeout",
+            timeoutCause: "model_output_timeout",
+            turns,
+            toolCalls,
+          });
           return { stopReason: "timeout", timeoutCause: "model_output_timeout", toolCalls, turns, messages };
         }
         messages.push(makeUserMessage(buildModelTimeoutFeedback(error.timeoutMs), now));
@@ -479,8 +636,20 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
     const parsed = parseStructuredActionBatch(turnOutput.rawText);
     if (!parsed.ok) {
       formatErrors += 1;
+      emit({
+        type: "format_error",
+        turn: turns,
+        error: parsed.error,
+        consecutiveErrors: formatErrors,
+      });
       messages.push(makeUserMessage(buildFormatErrorFeedback(parsed.error), now));
       if (formatErrors >= maxFormatErrors) {
+        emit({
+          type: "stop",
+          reason: "invalid_format",
+          turns,
+          toolCalls,
+        });
         return { stopReason: "invalid_format", toolCalls, turns, messages };
       }
       continue;
@@ -488,6 +657,12 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
 
     formatErrors = 0;
     const batch = parsed.value;
+    emit({
+      type: "batch_parsed",
+      turn: turns,
+      status: batch.status,
+      actionCount: batch.actions.length,
+    });
     let policyError: string | null = null;
 
     let actionIndex = 0;
@@ -496,6 +671,12 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
 
       if (action.type === "stop_response") {
         if (hasUserVisibleMessage) {
+          emit({
+            type: "stop",
+            reason: "done",
+            turns,
+            toolCalls,
+          });
           return { stopReason: "done", toolCalls, turns, messages };
         }
         policyError = "stop_response is invalid before any send_message action.";
@@ -507,10 +688,22 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
           policyError = "ignore_user reason must indicate spam, non-actionable input, or explicit request to ignore.";
           break;
         }
+        emit({
+          type: "stop",
+          reason: "ignored",
+          turns,
+          toolCalls,
+        });
         return { stopReason: "ignored", toolCalls, turns, messages };
       }
 
       if (toolCalls >= input.maxToolCalls) {
+        emit({
+          type: "stop",
+          reason: "max_tool_calls",
+          turns,
+          toolCalls,
+        });
         return { stopReason: "max_tool_calls", toolCalls, turns, messages };
       }
 
@@ -533,20 +726,51 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
 
       const toolCallId = buildToolCallId(turns, actionIndex);
       toolCalls += 1;
+      const toolStartedAt = now();
+      emit({
+        type: "tool_call_start",
+        turn: turns,
+        actionIndex,
+        toolName: tool.name,
+        toolCallId,
+      });
 
       try {
         const result = await executeToolCall(tool, toolCallId, argsRecord, input.signal);
+        emit({
+          type: "tool_call_end",
+          turn: turns,
+          actionIndex,
+          toolName: tool.name,
+          toolCallId,
+          durationMs: Math.max(0, now() - toolStartedAt),
+          isError: false,
+        });
         messages.push(makeUserMessage(buildToolResultFeedback(tool.name, summarizeToolResult(result)), now));
         if (tool.name === SEND_MESSAGE_TOOL_NAME) {
           hasUserVisibleMessage = true;
         }
       } catch (error) {
+        emit({
+          type: "tool_call_end",
+          turn: turns,
+          actionIndex,
+          toolName: tool.name,
+          toolCallId,
+          durationMs: Math.max(0, now() - toolStartedAt),
+          isError: true,
+        });
         const msg = error instanceof Error ? error.message : "Unknown tool execution error";
         messages.push(makeUserMessage(buildToolErrorFeedback(tool.name, msg), now));
       }
     }
 
     if (policyError !== null) {
+      emit({
+        type: "policy_error",
+        turn: turns,
+        error: policyError,
+      });
       messages.push(makeUserMessage(buildPolicyErrorFeedback(policyError), now));
       continue;
     }
@@ -559,9 +783,21 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
         ));
         continue;
       }
+      emit({
+        type: "stop",
+        reason: "done",
+        turns,
+        toolCalls,
+      });
       return { stopReason: "done", toolCalls, turns, messages };
     }
   }
 
+  emit({
+    type: "stop",
+    reason: "max_turns",
+    turns,
+    toolCalls,
+  });
   return { stopReason: "max_turns", toolCalls, turns, messages };
 }

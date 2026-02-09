@@ -461,6 +461,38 @@ describe("handleMessage", () => {
     expect(llmOutputCalls[1]?.[1]).toEqual({ content: JSON.stringify(secondPayload) });
   });
 
+  test("emits loop and llm lifecycle debug telemetry", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
+    const llmComplete: LlmCompleteFn = (_model, _context, options) => {
+      options.onPayload?.({ messages: [{ role: "user", content: "hello" }] });
+      const payload = {
+        status: "done",
+        actions: [{ type: "ignore_user", reason: "no response needed" }],
+      };
+      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
+    };
+
+    const { logger, debug } = makeTestLogger();
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({ triggers: { mention: true, keywords: [], randomChance: 0 } }),
+      context: makeContext(),
+      sender,
+      llmComplete,
+      log: logger,
+    };
+
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+
+    expect(debug.mock.calls.some((args) => args[0] === "structured_loop_start")).toBe(true);
+    expect(debug.mock.calls.some((args) => args[0] === "structured_loop_event")).toBe(true);
+    expect(debug.mock.calls.some((args) => args[0] === "llm_request_start")).toBe(true);
+    expect(debug.mock.calls.some((args) => args[0] === "llm_request_payload")).toBe(true);
+    expect(debug.mock.calls.some((args) => args[0] === "llm_response")).toBe(true);
+    expect(debug.mock.calls.some((args) => args[0] === "llm_response_payload")).toBe(true);
+    expect(debug.mock.calls.some((args) => args[0] === "structured_loop_end")).toBe(true);
+  });
+
   test("retries without response_format when provider reports schema state explosion", async () => {
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
     const fetchSpy = spyOn(globalThis, "fetch")
