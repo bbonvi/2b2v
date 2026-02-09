@@ -95,7 +95,10 @@ describe("buildStructuredActionProtocolPrompt", () => {
     expect(policy.sharedRules.map((rule) => rule.id)).toContain("direct_mentions_default_send_message");
     expect(policy.sharedRules.map((rule) => rule.id)).toContain("ignore_user_only_when_silence_is_better");
     expect(policy.sharedRules.map((rule) => rule.id)).toContain("send_message_requires_reply_boolean");
+    expect(policy.sharedRules.map((rule) => rule.id)).toContain("start_typing_send_message_mutually_exclusive");
     expect(policy.sharedRules.map((rule) => rule.id)).toContain("research_requires_final_send_message");
+    const sequencingRule = policy.sharedRules.find((rule) => rule.id === "start_typing_send_message_mutually_exclusive");
+    expect(sequencingRule?.text).toContain("prior action batch");
 
     for (const rule of policy.sharedRules) {
       expect(prompt).toContain(rule.text);
@@ -123,7 +126,7 @@ describe("buildStructuredActionProtocolPrompt", () => {
     expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_search_messages_retrieve_older_context");
     expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_chat_history_recent_context");
     const typingRule = policy.toolRules.find((rule) => rule.id === "tool_start_typing_refresh");
-    expect(typingRule?.text).toContain("before every tool_call");
+    expect(typingRule?.text).toContain("send_message in a later batch");
     expect(policy.researchWorkflowRules.map((rule) => rule.id)).toContain("research_workflow_title");
     expect(policy.researchWorkflowRules.map((rule) => rule.id)).toContain("research_workflow_breadcrumb_updates");
     expect(policy.researchWorkflowRules.map((rule) => rule.id)).toContain("research_workflow_parallel_fetch");

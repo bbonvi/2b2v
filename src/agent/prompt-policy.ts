@@ -28,6 +28,10 @@ const SHARED_RULES: readonly PromptPolicyRule[] = [
     text: "Every `send_message` arguments object must include `reply` explicitly (`true` or `false`).",
   },
   {
+    id: "start_typing_send_message_mutually_exclusive",
+    text: "If you plan to reply, emit `start_typing` in a prior action batch, then send `send_message` in a later batch; never include both in the same batch.",
+  },
+  {
     id: "uncertain_facts_require_web_search",
     text: "If the user asks for facts you are uncertain about, use `web_search` before answering.",
   },
@@ -48,7 +52,7 @@ const LATE_ONLY_RULES: readonly PromptPolicyRule[] = [
   },
   {
     id: "start_typing_before_send_message",
-    text: "If you plan to send a reply, call `start_typing` before every `tool_call` until the final `send_message`.",
+    text: "Before any final `send_message`, call `start_typing` in a separate earlier action batch (`status: \"continue\"`). Never place both in one batch.",
   },
   {
     id: "consider_all_tools_before_deciding",
@@ -104,7 +108,7 @@ const TOOL_RULES: readonly ToolScopedRule[] = [
   },
   {
     id: "tool_start_typing_refresh",
-    text: "If you are planning to reply, call start_typing before every tool_call (including before send_message).",
+    text: "When preparing a reply, emit start_typing first and keep send_message in a later batch; if more non-message work follows, refresh start_typing before that work.",
     requiredTools: ["start_typing"],
   },
   {
