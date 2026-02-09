@@ -307,8 +307,6 @@ function isStructuredOutputUnsupported(error: unknown): boolean {
   return (msg.includes("provider returned error") || msg.includes("invalid_argument")) && msg.includes("schema");
 }
 
-const structuredOutputUnsupportedModels = new Set<string>();
-
 /**
  * Core message handler. Evaluates triggers, builds action loop, runs prompt.
  *
@@ -464,22 +462,17 @@ export async function handleMessage(
         };
 
         let completion: { text: string; payload: Record<string, unknown> };
-        if (structuredOutputUnsupportedModels.has(model.id)) {
-          completion = await completionViaInjected(false);
-        } else {
-          try {
-            completion = await completionViaInjected(true);
-          } catch (error) {
-            if (!isStructuredOutputUnsupported(error)) {
-              throw error;
-            }
-            structuredOutputUnsupportedModels.add(model.id);
-            deps.log?.warn("structured output unsupported, retrying without response_format", {
-              model: model.id,
-              error: error instanceof Error ? error.message : String(error),
-            });
-            completion = await completionViaInjected(false);
+        try {
+          completion = await completionViaInjected(true);
+        } catch (error) {
+          if (!isStructuredOutputUnsupported(error)) {
+            throw error;
           }
+          deps.log?.warn("structured output unsupported, retrying without response_format", {
+            model: model.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          completion = await completionViaInjected(false);
         }
 
         reqLog?.recordLLMCompletion(completion.payload);

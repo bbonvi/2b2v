@@ -486,7 +486,7 @@ describe("handleMessage", () => {
     fetchSpy.mockRestore();
   });
 
-  test("caches structured-output unsupported models and skips response_format on subsequent requests", async () => {
+  test("does not cache structured-output fallback across independent requests", async () => {
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
     const modelId = "google/gemini-3-flash-preview-cache-test";
     const fetchSpy = spyOn(globalThis, "fetch")
@@ -548,7 +548,7 @@ describe("handleMessage", () => {
 
     expect(firstBody.response_format).toBeDefined();
     expect(secondBody.response_format).toBeUndefined();
-    expect(thirdBody.response_format).toBeUndefined();
+    expect(thirdBody.response_format).toBeDefined();
 
     fetchSpy.mockRestore();
   });
