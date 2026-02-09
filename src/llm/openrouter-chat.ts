@@ -194,6 +194,28 @@ function extractNestedProviderErrorMessage(rawRecord: Record<string, unknown> | 
   return null;
 }
 
+function extractOpenRouterErrorMessage(
+  rawRecord: Record<string, unknown> | null,
+  fallbackMessage: string,
+): string {
+  const errorRecord = asRecord(rawRecord?.error);
+  let message = fallbackMessage;
+  if (typeof errorRecord?.message === "string" && errorRecord.message !== "") {
+    message = errorRecord.message;
+  }
+
+  const nestedProviderMessage = extractNestedProviderErrorMessage(rawRecord);
+  if (nestedProviderMessage !== null && !message.includes(nestedProviderMessage)) {
+    message = `${message}: ${nestedProviderMessage}`;
+  }
+  return message;
+}
+
+function appendRawResponse(message: string, rawRecord: Record<string, unknown> | null): string {
+  if (rawRecord === null) return message;
+  return `${message}; rawResponse=${JSON.stringify(rawRecord)}`;
+}
+
 export async function completeOpenRouterChat(request: OpenRouterChatRequest): Promise<OpenRouterChatResult> {
   const providerParams = normalizeProviderParams(request.providerParams ?? {});
   const payload: Record<string, unknown> = {
@@ -227,25 +249,30 @@ export async function completeOpenRouterChat(request: OpenRouterChatRequest): Pr
   const rawRecord = asRecord(raw);
 
   if (!response.ok) {
-    let message = `OpenRouter request failed: ${response.status}`;
-    const errorRecord = asRecord(rawRecord?.error);
-    if (typeof errorRecord?.message === "string" && errorRecord.message !== "") {
-      message = errorRecord.message;
-    }
-    const nestedProviderMessage = extractNestedProviderErrorMessage(rawRecord);
-    if (nestedProviderMessage !== null) {
-      message = `${message}: ${nestedProviderMessage}`;
-    }
-    throw new Error(message);
+    throw new Error(
+      appendRawResponse(
+        extractOpenRouterErrorMessage(rawRecord, `OpenRouter request failed: ${response.status}`),
+        rawRecord,
+      ),
+    );
   }
 
   if (rawRecord === null) {
     throw new Error("OpenRouter response was not JSON");
   }
 
+  if (asRecord(rawRecord.error) !== null) {
+    throw new Error(
+      appendRawResponse(
+        extractOpenRouterErrorMessage(rawRecord, "OpenRouter returned error payload"),
+        rawRecord,
+      ),
+    );
+  }
+
   const choices = rawRecord.choices;
   if (!Array.isArray(choices) || choices.length === 0) {
-    throw new Error("OpenRouter response missing choices");
+    throw new Error(appendRawResponse("OpenRouter response missing choices", rawRecord));
   }
 
   const firstChoice = asRecord(choices[0]);

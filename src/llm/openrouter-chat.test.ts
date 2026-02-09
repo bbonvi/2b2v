@@ -167,6 +167,78 @@ describe("completeOpenRouterChat", () => {
     }
   });
 
+  test("surfaces provider error details when OpenRouter returns 200 with error body", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      makeResponse({
+        error: {
+          message: "Provider timed out",
+          metadata: {
+            raw: JSON.stringify({
+              error: {
+                code: 504,
+                message: "Upstream model did not respond in time.",
+                status: "DEADLINE_EXCEEDED",
+              },
+            }),
+          },
+        },
+      }, 200)
+    );
+
+    try {
+      await completeOpenRouterChat({
+        apiKey: "key",
+        model: "google/gemini-3-flash-preview",
+        systemPrompt: "system",
+        messages: [{ role: "user", content: "hello" }],
+        baseUrl: "https://example.com",
+      }).then(
+        () => {
+          throw new Error("expected request to fail");
+        },
+        (error: unknown) => {
+          const msg = error instanceof Error ? error.message : String(error);
+          expect(msg).toContain("Provider timed out");
+          expect(msg).toContain("did not respond in time");
+        },
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  test("includes full raw response when choices are missing", async () => {
+    const rawPayload = {
+      id: "resp_123",
+      provider: "google",
+      detail: "unexpected provider payload",
+    };
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      makeResponse(rawPayload, 200)
+    );
+
+    try {
+      await completeOpenRouterChat({
+        apiKey: "key",
+        model: "google/gemini-3-flash-preview",
+        systemPrompt: "system",
+        messages: [{ role: "user", content: "hello" }],
+        baseUrl: "https://example.com",
+      }).then(
+        () => {
+          throw new Error("expected request to fail");
+        },
+        (error: unknown) => {
+          const msg = error instanceof Error ? error.message : String(error);
+          expect(msg).toContain("OpenRouter response missing choices");
+          expect(msg).toContain(JSON.stringify(rawPayload));
+        },
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   test("normalizes legacy route options and strips unsupported route payload", async () => {
     const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
       makeResponse({
