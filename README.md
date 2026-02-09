@@ -97,7 +97,7 @@ All fields are optional — missing values fall back to global defaults.
 
 `promptCaching.enabled` controls whether the stable prefix is sent with a single cache breakpoint (`cache_control`).
 `actionLoop.maxToolCalls` and `actionLoop.wallClockTimeoutMs` bound each structured-output agent run.
-`actionLoop.llmOutputTimeoutMs` limits each individual LLM turn before injecting timeout feedback and retrying.
+`actionLoop.llmOutputTimeoutMs` limits each individual LLM turn. On timeout, the run fails fast and the bot posts a short `[SYSTEM ERROR]` message in Discord.
 
 ### Persona
 

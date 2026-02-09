@@ -78,9 +78,9 @@ promptCaching:
 
 # Structured action loop runtime limits
 actionLoop:
-  maxToolCalls: 8          # Max tool calls allowed in one response run
-  wallClockTimeoutMs: 45000  # Hard timeout per response run (milliseconds)
-  llmOutputTimeoutMs: 12000  # Timeout for a single LLM turn before retry feedback (milliseconds)
+  maxToolCalls: 12           # Max tool calls allowed in one response run
+  wallClockTimeoutMs: 60000  # Hard timeout per response run (milliseconds)
+  llmOutputTimeoutMs: 30000  # Timeout for a single LLM turn (milliseconds); on timeout request fails fast
 
 # ElevenLabs text-to-speech configuration (requires ELEVENLABS_API_KEY env var)
 # When enabled, the bot can send voice messages as audio attachments

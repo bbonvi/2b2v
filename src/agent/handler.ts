@@ -241,12 +241,6 @@ function messageContentToText(content: unknown): string | null {
   return textParts.join("\n");
 }
 
-function hasModelTimeoutFeedback(messages: LoopMessage[]): boolean {
-  return messages.some((message) =>
-    message.role === "user" && message.content.includes("[MODEL TIMEOUT]"),
-  );
-}
-
 function loopMessagesToAgentMessages(messages: LoopMessage[]): AgentMessage[] {
   return messages.map((msg) => ({
     role: msg.role,
@@ -403,7 +397,6 @@ export async function handleMessage(
       maxToolCalls: deps.guildConfig.actionLoop.maxToolCalls,
       wallClockTimeoutMs: deps.guildConfig.actionLoop.wallClockTimeoutMs,
       llmOutputTimeoutMs: deps.guildConfig.actionLoop.llmOutputTimeoutMs,
-      maxModelTimeouts: 2,
       callModel: async (messages, responseFormat, signal) => {
         timingState.setReferenceTime();
 
@@ -414,7 +407,6 @@ export async function handleMessage(
           : messages;
 
         const llmMessages = loopMessagesToLlmMessages(transformedLoopMessages);
-        const retryAfterModelTimeout = hasModelTimeoutFeedback(transformedLoopMessages);
 
         const makeOptions = (includeStructuredOutput: boolean): ProviderStreamOptions => ({
           ...baseStreamOptions,
@@ -470,21 +462,17 @@ export async function handleMessage(
         };
 
         let completion: { text: string; payload: Record<string, unknown> };
-        if (retryAfterModelTimeout) {
-          completion = await completionViaInjected(false);
-        } else {
-          try {
-            completion = await completionViaInjected(true);
-          } catch (error) {
-            if (!isStructuredOutputUnsupported(error)) {
-              throw error;
-            }
-            deps.log?.warn("structured output unsupported, retrying without response_format", {
-              model: model.id,
-              error: error instanceof Error ? error.message : String(error),
-            });
-            completion = await completionViaInjected(false);
+        try {
+          completion = await completionViaInjected(true);
+        } catch (error) {
+          if (!isStructuredOutputUnsupported(error)) {
+            throw error;
           }
+          deps.log?.warn("structured output unsupported, retrying without response_format", {
+            model: model.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          completion = await completionViaInjected(false);
         }
 
         reqLog?.recordLLMCompletion(completion.payload);
@@ -524,8 +512,9 @@ export async function handleMessage(
     });
 
     if (loopResult.stopReason === "timeout") {
+      const timeoutCause = loopResult.timeoutCause ?? "unknown";
       throw new Error(
-        `Structured action loop timed out (turns=${loopResult.turns}, toolCalls=${loopResult.toolCalls}, `
+        `Structured action loop timed out (cause=${timeoutCause}, turns=${loopResult.turns}, toolCalls=${loopResult.toolCalls}, `
         + `wallClockTimeoutMs=${deps.guildConfig.actionLoop.wallClockTimeoutMs}, `
         + `llmOutputTimeoutMs=${deps.guildConfig.actionLoop.llmOutputTimeoutMs})`,
       );

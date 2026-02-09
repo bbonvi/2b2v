@@ -53,6 +53,8 @@ export type LoopStopReason =
   | "invalid_format"
   | "aborted";
 
+export type LoopTimeoutCause = "model_output_timeout" | "wall_clock_timeout";
+
 export interface ModelTurnOutput {
   rawText: string;
   responsePayload?: Record<string, unknown>;
@@ -85,6 +87,7 @@ export interface RunStructuredActionLoopInput {
 
 export interface RunStructuredActionLoopResult {
   stopReason: LoopStopReason;
+  timeoutCause?: LoopTimeoutCause;
   toolCalls: number;
   turns: number;
   messages: LoopMessage[];
@@ -446,7 +449,7 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
     }
 
     if (now() - startedAt >= input.wallClockTimeoutMs) {
-      return { stopReason: "timeout", toolCalls, turns, messages };
+      return { stopReason: "timeout", timeoutCause: "wall_clock_timeout", toolCalls, turns, messages };
     }
 
     turns += 1;
@@ -461,7 +464,7 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
       if (isModelOutputTimeoutError(error)) {
         modelTimeouts += 1;
         if (modelTimeouts >= maxModelTimeouts) {
-          return { stopReason: "timeout", toolCalls, turns, messages };
+          return { stopReason: "timeout", timeoutCause: "model_output_timeout", toolCalls, turns, messages };
         }
         messages.push(makeUserMessage(buildModelTimeoutFeedback(error.timeoutMs), now));
         continue;

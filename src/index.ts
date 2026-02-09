@@ -14,6 +14,7 @@ import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { handleMessage, type IncomingMessage, type HandlerDeps, type FollowUpWrapperDeps } from "./agent/handler";
+import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
 import { createChannelDispatcher, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { getFollowUpMessages } from "./db/followup-repository";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
@@ -1403,19 +1404,19 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
       guildId: message.guildId,
       error: err instanceof Error ? err.message : String(err),
     });
-    requestLogStore.push({
-      requestId: crypto.randomUUID(),
-      guildId: message.guildId,
-      channelId: message.channelId,
-      authorUsername: message.author.username,
-      trigger: null,
-      agentRan: false,
-      tools: [],
-      llmCalls: [],
-      totalDurationMs: 0,
-      error: err instanceof Error ? err.message : String(err),
-      timestamp: new Date().toISOString(),
-    });
+    const notice = buildPublicErrorNoticeForError(err, globalConfig.uiLang);
+    const channel = message.channel;
+    if ("send" in channel && typeof channel.send === "function") {
+      try {
+        await channel.send(notice);
+      } catch (sendErr) {
+        log.warn("failed to send system error notice", {
+          messageId: message.id,
+          guildId: message.guildId,
+          error: sendErr instanceof Error ? sendErr.message : String(sendErr),
+        });
+      }
+    }
     return { coveredMessageIds: [] };
   } finally {
     if (!message.author.bot) {

@@ -588,28 +588,19 @@ describe("handleMessage", () => {
     fetchSpy.mockRestore();
   });
 
-  test("retries once without response_format after model timeout", async () => {
+  test("fails fast on model timeout and reports timeout cause", async () => {
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
     let call = 0;
-    const responseFormats: unknown[] = [];
 
     const llmComplete: LlmCompleteFn = (_model, _context, options) => {
       call += 1;
-      responseFormats.push(options.response_format);
-      if (call === 1) {
-        return new Promise((_resolve, reject) => {
-          const signal = options.signal;
-          signal?.addEventListener("abort", () => {
-            const reason: unknown = signal.reason;
-            reject(reason instanceof Error ? reason : new Error(String(reason)));
-          }, { once: true });
-        });
-      }
-      const payload = {
-        status: "done",
-        actions: [{ type: "ignore_user", reason: "no response needed" }],
-      };
-      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
+      return new Promise((_resolve, reject) => {
+        const signal = options.signal;
+        signal?.addEventListener("abort", () => {
+          const reason: unknown = signal.reason;
+          reject(reason instanceof Error ? reason : new Error(String(reason)));
+        }, { once: true });
+      });
     };
 
     const deps: HandlerDeps = {
@@ -623,11 +614,16 @@ describe("handleMessage", () => {
       llmComplete,
     };
 
-    const result = await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-    expect(result.triggered).toBe(true);
-    expect(result.agentRan).toBe(true);
-    expect(call).toBe(2);
-    expect(responseFormats[0]).toBeDefined();
-    expect(responseFormats[1]).toBeUndefined();
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps).then(
+      () => {
+        throw new Error("expected timeout error");
+      },
+      (error: unknown) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        expect(msg).toContain("Structured action loop timed out");
+        expect(msg).toContain("cause=model_output_timeout");
+      },
+    );
+    expect(call).toBe(1);
   });
 });

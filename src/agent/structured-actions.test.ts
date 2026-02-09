@@ -482,10 +482,39 @@ describe("runStructuredActionLoop", () => {
     });
 
     expect(result.stopReason).toBe("timeout");
+    expect(result.timeoutCause).toBe("model_output_timeout");
     expect(result.turns).toBe(1);
     const hasTimeoutFeedback = result.messages.some((m) =>
       m.role === "user" && m.content.includes("[MODEL TIMEOUT]"),
     );
     expect(hasTimeoutFeedback).toBe(false);
+  });
+
+  test("reports wall clock timeout cause", async () => {
+    const result = await runStructuredActionLoop({
+      maxToolCalls: 3,
+      wallClockTimeoutMs: 1,
+      llmOutputTimeoutMs: 2_000,
+      tools: [makeTool("send_message")],
+      callModel: () => Promise.resolve({
+        rawText: JSON.stringify({
+          status: "done",
+          actions: [{ type: "ignore_user", reason: "spam" }],
+        } satisfies StructuredActionBatch),
+      }),
+      initialMessages: [
+        { role: "user", content: "hello", timestamp: Date.now() },
+      ],
+      now: (() => {
+        let t = 0;
+        return () => {
+          t += 5;
+          return t;
+        };
+      })(),
+    });
+
+    expect(result.stopReason).toBe("timeout");
+    expect(result.timeoutCause).toBe("wall_clock_timeout");
   });
 });

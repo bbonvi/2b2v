@@ -188,7 +188,7 @@ Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields op
 |-------|------|---------|-------|
 | `maxToolCalls` | number | `8` | Max tool calls allowed in one response run |
 | `wallClockTimeoutMs` | number | `45000` | Hard timeout for a single response run |
-| `llmOutputTimeoutMs` | number | `12000` | Timeout for one model turn before timeout feedback is injected and retried |
+| `llmOutputTimeoutMs` | number | `12000` | Timeout for one model turn; timeout is fail-fast and surfaced as a `[SYSTEM ERROR]` Discord message |
 
 **Prompt profile config** (`PromptProfileConfig`): Config-driven source selection for stable instruction sections in context assembly.
 
