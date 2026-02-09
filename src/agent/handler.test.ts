@@ -485,4 +485,71 @@ describe("handleMessage", () => {
 
     fetchSpy.mockRestore();
   });
+
+  test("caches structured-output unsupported models and skips response_format on subsequent requests", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
+    const modelId = "google/gemini-3-flash-preview-cache-test";
+    const fetchSpy = spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        makeFetchJsonResponse({
+          error: {
+            message: "Provider returned error",
+            metadata: {
+              raw: JSON.stringify({
+                error: {
+                  code: 400,
+                  message: "A schema in GenerationConfig in the request exceeds the maximum allowed nesting depth.",
+                  status: "INVALID_ARGUMENT",
+                },
+              }),
+            },
+          },
+        }, 400)
+      )
+      .mockResolvedValueOnce(
+        makeFetchJsonResponse({
+          model: modelId,
+          choices: [{
+            message: { content: "{\"status\":\"done\",\"actions\":[{\"type\":\"ignore_user\",\"reason\":\"no response needed\"}]}" },
+            finish_reason: "stop",
+          }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        })
+      )
+      .mockResolvedValueOnce(
+        makeFetchJsonResponse({
+          model: modelId,
+          choices: [{
+            message: { content: "{\"status\":\"done\",\"actions\":[{\"type\":\"ignore_user\",\"reason\":\"no response needed\"}]}" },
+            finish_reason: "stop",
+          }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        })
+      );
+
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig({ defaultModel: modelId }),
+      guildConfig: makeGuildConfig({ model: modelId, triggers: { mention: true, keywords: [], randomChance: 0 } }),
+      context: makeContext(),
+      sender,
+    };
+
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+
+    const firstBodyRaw = fetchSpy.mock.calls[0]?.[1]?.body;
+    const secondBodyRaw = fetchSpy.mock.calls[1]?.[1]?.body;
+    const thirdBodyRaw = fetchSpy.mock.calls[2]?.[1]?.body;
+    const firstBody = typeof firstBodyRaw === "string" ? JSON.parse(firstBodyRaw) as { response_format?: unknown } : {};
+    const secondBody = typeof secondBodyRaw === "string" ? JSON.parse(secondBodyRaw) as { response_format?: unknown } : {};
+    const thirdBody = typeof thirdBodyRaw === "string" ? JSON.parse(thirdBodyRaw) as { response_format?: unknown } : {};
+
+    expect(firstBody.response_format).toBeDefined();
+    expect(secondBody.response_format).toBeUndefined();
+    expect(thirdBody.response_format).toBeUndefined();
+
+    fetchSpy.mockRestore();
+  });
 });
