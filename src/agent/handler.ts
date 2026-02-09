@@ -308,6 +308,15 @@ function isStructuredOutputUnsupported(error: unknown): boolean {
   return (msg.includes("provider returned error") || msg.includes("invalid_argument")) && msg.includes("schema");
 }
 
+function isModelOutputTimeoutError(error: unknown): boolean {
+  return error instanceof Error && error.name === "ModelOutputTimeoutError";
+}
+
+function isSignalAbortedByModelTimeout(signal: AbortSignal | undefined): boolean {
+  if (signal?.aborted !== true) return false;
+  return isModelOutputTimeoutError(signal.reason);
+}
+
 function serializeError(error: unknown): Record<string, unknown> {
   if (error instanceof Error) {
     const details: Record<string, unknown> = {
@@ -518,12 +527,14 @@ export async function handleMessage(
         try {
           completion = await completionViaInjected(true);
         } catch (error) {
-          deps.log?.debug("llm_request_error", {
-            llmCallId,
-            model: model.id,
-            durationMs: Date.now() - llmCallStartedAt,
-            error: serializeError(error),
-          });
+          if (!isSignalAbortedByModelTimeout(signal)) {
+            deps.log?.debug("llm_request_error", {
+              llmCallId,
+              model: model.id,
+              durationMs: Date.now() - llmCallStartedAt,
+              error: serializeError(error),
+            });
+          }
           if (!isStructuredOutputUnsupported(error)) {
             throw error;
           }

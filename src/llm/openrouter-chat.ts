@@ -245,7 +245,16 @@ export async function completeOpenRouterChat(request: OpenRouterChatRequest): Pr
     signal: request.signal,
   });
 
-  const raw = await response.json().catch(() => null);
+  let raw: unknown;
+  try {
+    raw = await response.json();
+  } catch {
+    if (request.signal?.aborted === true) {
+      const reason: unknown = request.signal.reason;
+      throw reason instanceof Error ? reason : new Error("OpenRouter request aborted");
+    }
+    raw = null;
+  }
   const rawRecord = asRecord(raw);
 
   if (!response.ok) {

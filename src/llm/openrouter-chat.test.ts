@@ -239,6 +239,40 @@ describe("completeOpenRouterChat", () => {
     }
   });
 
+  test("propagates abort reason when response parsing fails after timeout abort", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("not-json", {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      })
+    );
+    const controller = new AbortController();
+    const timeoutError = new Error("LLM output timed out after 60000ms");
+    timeoutError.name = "ModelOutputTimeoutError";
+    controller.abort(timeoutError);
+
+    try {
+      await completeOpenRouterChat({
+        apiKey: "key",
+        model: "google/gemini-3-flash-preview",
+        systemPrompt: "system",
+        messages: [{ role: "user", content: "hello" }],
+        signal: controller.signal,
+        baseUrl: "https://example.com",
+      }).then(
+        () => {
+          throw new Error("expected request to fail");
+        },
+        (error: unknown) => {
+          const msg = error instanceof Error ? error.message : String(error);
+          expect(msg).toContain("LLM output timed out after 60000ms");
+        },
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   test("normalizes legacy route options and strips unsupported route payload", async () => {
     const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
       makeResponse({

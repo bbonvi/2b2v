@@ -330,6 +330,41 @@ describe("handleMessage", () => {
     );
   });
 
+  test("does not emit llm_request_error for model-output timeout aborts", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
+    const llmComplete: LlmCompleteFn = (_model, _context, options) =>
+      new Promise((_resolve, reject) => {
+        const signal = options.signal;
+        signal?.addEventListener("abort", () => {
+          const reason: unknown = signal.reason;
+          reject(reason instanceof Error ? reason : new Error(String(reason)));
+        }, { once: true });
+      });
+
+    const { logger, debug } = makeTestLogger();
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({
+        triggers: { mention: true, keywords: [], randomChance: 0 },
+        actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 2_000, llmOutputTimeoutMs: 20 },
+      }),
+      context: makeContext(),
+      sender,
+      llmComplete,
+      log: logger,
+    };
+
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps).then(
+      () => {
+        throw new Error("expected request to fail on timeout");
+      },
+      () => {},
+    );
+
+    const llmRequestErrorCalls = debug.mock.calls.filter((args) => args[0] === "llm_request_error");
+    expect(llmRequestErrorCalls).toHaveLength(0);
+  });
+
   test("prepends stable sections to payload and marks first with cache_control", async () => {
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
     let capturedPayload: unknown;
