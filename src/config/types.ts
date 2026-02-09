@@ -80,7 +80,7 @@ export interface PromptInlineSource {
   text: string;
 }
 
-/** Ordered prompt source chain for persona/tool/instructions sections. */
+/** Ordered prompt source chain for persona/tool/instructions/late-instructions sections. */
 export type PromptSource = PromptFileSource | PromptInlineSource;
 
 /** Config-driven prompt profile for stable instruction sections. */
@@ -88,6 +88,7 @@ export interface PromptProfileConfig {
   persona: PromptSource[];
   toolInstructions: PromptSource[];
   instructions: PromptSource[];
+  lateInstructions: PromptSource[];
 }
 
 /** Trigger configuration per guild. All independently toggleable. */
@@ -167,6 +168,7 @@ export interface GlobalConfig {
   defaultImageCaptioningEnabled: boolean;
   defaultAttachmentsDir: string;
   defaultInstructions: string;
+  defaultLateInstruction: string;
   promptProfile: PromptProfileConfig;
   logLevel: string;
   dataDir: string;
@@ -269,6 +271,11 @@ export interface MainConfigYaml {
       optional?: boolean;
     }>;
     instructions?: Array<{
+      file?: string;
+      text?: string;
+      optional?: boolean;
+    }>;
+    lateInstructions?: Array<{
       file?: string;
       text?: string;
       optional?: boolean;

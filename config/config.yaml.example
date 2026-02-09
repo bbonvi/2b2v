@@ -113,6 +113,9 @@ promptProfile:
     - file: config/tool_instructions.md
   instructions:
     - file: config/instructions.md
+  lateInstructions:
+    - file: config/late_instructions.md
+      optional: true
 
 # Log level: debug | info | warn | error
 logLevel: info

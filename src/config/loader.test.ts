@@ -143,6 +143,7 @@ describe("loadGlobalConfig", () => {
       persona: [{ kind: "file", path: join(TEST_DIR, "persona.md"), optional: false }],
       toolInstructions: [{ kind: "file", path: join(TEST_DIR, "tool_instructions.md"), optional: false }],
       instructions: [{ kind: "file", path: join(TEST_DIR, "instructions.md"), optional: false }],
+      lateInstructions: [{ kind: "file", path: join(TEST_DIR, "late_instructions.md"), optional: true }],
     });
   });
 
@@ -162,6 +163,9 @@ describe("loadGlobalConfig", () => {
         "  instructions:",
         "    - file: config/instructions.md",
         '    - text: "Instruction addon"',
+        "  lateInstructions:",
+        "    - file: config/late_instructions.md",
+        '    - text: "Late reinforcement"',
       ].join("\n"),
     );
     const cfg = loadGlobalConfig(BASE_ENV, file);
@@ -177,6 +181,10 @@ describe("loadGlobalConfig", () => {
       instructions: [
         { kind: "file", path: "config/instructions.md", optional: false },
         { kind: "inline", text: "Instruction addon" },
+      ],
+      lateInstructions: [
+        { kind: "file", path: "config/late_instructions.md", optional: false },
+        { kind: "inline", text: "Late reinforcement" },
       ],
     });
   });

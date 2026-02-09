@@ -191,12 +191,13 @@ function defaultPromptProfile(
     persona: [{ kind: "file", path: join(configDir, "persona.md"), optional: false }],
     toolInstructions: [{ kind: "file", path: join(configDir, "tool_instructions.md"), optional: false }],
     instructions: [{ kind: "file", path: join(configDir, "instructions.md"), optional: false }],
+    lateInstructions: [{ kind: "file", path: join(configDir, "late_instructions.md"), optional: true }],
   };
 }
 
 function resolvePromptSource(
   source: PromptSourceYaml,
-  section: "persona" | "toolInstructions" | "instructions",
+  section: "persona" | "toolInstructions" | "instructions" | "lateInstructions",
   index: number,
 ): PromptSource {
   const filePath = source.file;
@@ -221,7 +222,7 @@ function resolvePromptSource(
 function resolvePromptSources(
   sources: PromptSourceYaml[] | undefined,
   fallback: PromptSource[],
-  section: "persona" | "toolInstructions" | "instructions",
+  section: "persona" | "toolInstructions" | "instructions" | "lateInstructions",
 ): PromptSource[] {
   if (sources === undefined) return fallback;
   return sources.map((source, idx) => resolvePromptSource(source, section, idx));
@@ -237,6 +238,7 @@ function resolvePromptProfile(
     persona: resolvePromptSources(partial.persona, fallback.persona, "persona"),
     toolInstructions: resolvePromptSources(partial.toolInstructions, fallback.toolInstructions, "toolInstructions"),
     instructions: resolvePromptSources(partial.instructions, fallback.instructions, "instructions"),
+    lateInstructions: resolvePromptSources(partial.lateInstructions, fallback.lateInstructions, "lateInstructions"),
   };
 }
 
@@ -431,6 +433,11 @@ export function loadGlobalConfig(
     "instructions",
     SILENT_PROMPT_LOGGER,
   );
+  const defaultLateInstruction = loadPromptSourceChain(
+    promptProfile.lateInstructions,
+    "lateInstructions",
+    SILENT_PROMPT_LOGGER,
+  );
 
   return {
     discordToken,
@@ -465,6 +472,7 @@ export function loadGlobalConfig(
     defaultImageCaptioningEnabled: yaml.imageCaptioningEnabled ?? false,
     defaultAttachmentsDir,
     defaultInstructions,
+    defaultLateInstruction,
     promptProfile,
     logLevel: yaml.logLevel ?? "info",
     dataDir,

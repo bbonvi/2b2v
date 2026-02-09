@@ -131,6 +131,15 @@ function injectResolvedLateInstruction(
   };
 }
 
+function combineLateInstruction(
+  policyLateInstruction: string,
+  configuredLateInstruction: string,
+): string {
+  if (configuredLateInstruction === "") return policyLateInstruction;
+  if (policyLateInstruction === "") return configuredLateInstruction;
+  return `${policyLateInstruction}\n\n${configuredLateInstruction}`;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
@@ -355,7 +364,10 @@ export async function handleMessage(
   }
 
   const promptPolicy = resolvePromptPolicy(new Set(finalTools.map((tool) => tool.name)));
-  const resolvedLateInstruction = buildLateInstructionPrompt(promptPolicy);
+  const resolvedLateInstruction = combineLateInstruction(
+    buildLateInstructionPrompt(promptPolicy),
+    deps.globalConfig.defaultLateInstruction,
+  );
   context = injectResolvedLateInstruction(context, resolvedLateInstruction);
   const stableSections = getStablePromptSections(context);
   const splitPrompts = contextToSplitPrompts(context);

@@ -59,7 +59,7 @@ Use the dev compose file for live reload, and the production compose file for lo
 
 Global defaults live in `config/config.yaml` (optional). See `config/config.yaml.example` for the full list of fields. Per-guild configs override these defaults.
 
-Stable instruction sources are selected via `promptProfile` in `config/config.yaml`. The loader composes ordered `file`/`text` sources for `persona`, `toolInstructions`, and `instructions`.
+Stable instruction sources are selected via `promptProfile` in `config/config.yaml`. The loader composes ordered `file`/`text` sources for `persona`, `toolInstructions`, `instructions`, and `lateInstructions`.
 
 ### Per-guild config
 
@@ -100,7 +100,7 @@ All fields are optional — missing values fall back to global defaults.
 
 ### Persona
 
-By default, `promptProfile.persona` points to `config/persona.md`. `promptProfile.toolInstructions` points to `config/tool_instructions.md`, and `promptProfile.instructions` points to `config/instructions.md`. The real persona/instructions files are gitignored; corresponding `*.example` files are committed as templates.
+By default, `promptProfile.persona` points to `config/persona.md`. `promptProfile.toolInstructions` points to `config/tool_instructions.md`, `promptProfile.instructions` points to `config/instructions.md`, and `promptProfile.lateInstructions` optionally points to `config/late_instructions.md`. The real persona/instructions files are gitignored; corresponding `*.example` files are committed as templates.
 
 ## Slash commands
 

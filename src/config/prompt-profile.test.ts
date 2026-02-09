@@ -34,9 +34,11 @@ describe("loadPromptProfile", () => {
     const personaFile = join(TEST_DIR, "persona.md");
     const toolFile = join(TEST_DIR, "tool.md");
     const instructionsFile = join(TEST_DIR, "instructions.md");
+    const lateInstructionsFile = join(TEST_DIR, "late-instructions.md");
     writeFileSync(personaFile, "Primary persona");
     writeFileSync(toolFile, "Primary tool instructions");
     writeFileSync(instructionsFile, "Primary instructions");
+    writeFileSync(lateInstructionsFile, "Primary late instruction");
 
     const profile: PromptProfileConfig = {
       persona: [
@@ -51,12 +53,19 @@ describe("loadPromptProfile", () => {
         { kind: "file", path: instructionsFile, optional: false },
         { kind: "inline", text: "Instructions addendum" },
       ],
+      lateInstructions: [
+        { kind: "file", path: lateInstructionsFile, optional: false },
+        { kind: "inline", text: "Late addendum" },
+      ],
     };
 
     const loaded = loadPromptProfile(profile, makeLogger());
     expect(loaded.persona).toBe("Primary persona\n\nPersona addendum");
     expect(loaded.toolInstructions).toBe("Header\n\nPrimary tool instructions");
     expect(loaded.instructions).toBe("Primary instructions\n\nInstructions addendum");
+    expect(loaded.lateInstructions).toBe(
+      "Primary late instruction\n\nLate addendum",
+    );
   });
 
   test("skips missing optional file sources and keeps non-empty sources", () => {
@@ -70,6 +79,7 @@ describe("loadPromptProfile", () => {
       ],
       toolInstructions: [{ kind: "file", path: toolFile, optional: false }],
       instructions: [],
+      lateInstructions: [],
     };
 
     const loaded = loadPromptProfile(profile, makeLogger());

@@ -2,12 +2,13 @@ import { existsSync, readFileSync } from "fs";
 import type { Logger } from "../logger.ts";
 import type { PromptProfileConfig, PromptSource } from "./types.ts";
 
-export type PromptProfileSection = "persona" | "toolInstructions" | "instructions";
+export type PromptProfileSection = "persona" | "toolInstructions" | "instructions" | "lateInstructions";
 
 export interface LoadedPromptProfile {
   persona: string;
   toolInstructions: string;
   instructions: string;
+  lateInstructions: string;
 }
 
 function loadSourceText(
@@ -62,5 +63,6 @@ export function loadPromptProfile(
     persona: loadPromptSourceChain(profile.persona, "persona", log),
     toolInstructions: loadPromptSourceChain(profile.toolInstructions, "toolInstructions", log),
     instructions: loadPromptSourceChain(profile.instructions, "instructions", log),
+    lateInstructions: loadPromptSourceChain(profile.lateInstructions, "lateInstructions", log),
   };
 }

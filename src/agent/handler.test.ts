@@ -25,10 +25,12 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultImageCaptioningEnabled: false,
     defaultAttachmentsDir: "data/attachments",
     defaultInstructions: "",
+    defaultLateInstruction: "",
     promptProfile: {
       persona: [{ kind: "file", path: "config/persona.md", optional: false }],
       toolInstructions: [{ kind: "file", path: "config/tool_instructions.md", optional: false }],
       instructions: [],
+      lateInstructions: [],
     },
     logLevel: "info",
     dataDir: "./data",
@@ -137,6 +139,41 @@ function makeTestLogger(): { logger: Logger; debug: ReturnType<typeof mock>; war
 }
 
 describe("handleMessage", () => {
+  test("appends configured defaultLateInstruction after policy late rules", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
+    let capturedSystemPrompt = "";
+
+    const llmComplete: LlmCompleteFn = (_model, context) => {
+      capturedSystemPrompt = context.systemPrompt ?? "";
+      const payload = {
+        status: "done",
+        actions: [{ type: "ignore_user", reason: "done" }],
+      };
+      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
+    };
+
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig({ defaultLateInstruction: "CUSTOM LATE RULE: stay concise." }),
+      guildConfig: makeGuildConfig({ triggers: { mention: true, keywords: [], randomChance: 0 } }),
+      context: makeContext({
+        sections: [
+          { label: "Persona", text: "you are test bot", cached: true, role: "system" },
+          { label: "Chat History — Newer", text: "history", cached: false, role: "developer" },
+          { label: "Late Instruction", text: "stale late", cached: false, role: "developer" },
+        ],
+      }),
+      sender,
+      llmComplete,
+    };
+
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+
+    const customIdx = capturedSystemPrompt.indexOf("CUSTOM LATE RULE: stay concise.");
+    const policyIdx = capturedSystemPrompt.indexOf("CRITICAL:");
+    expect(policyIdx).toBeGreaterThanOrEqual(0);
+    expect(customIdx).toBeGreaterThan(policyIdx);
+  });
+
   test("returns triggered=false when no trigger matches", async () => {
     const llmComplete = mock(() => Promise.resolve(assistantWithText("{}")));
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });

@@ -27,7 +27,6 @@ import { insertDateStamps } from "./agent/history-dates";
 import { formatRelativeAgo, formatJournalTimestamp } from "./agent/history-dates";
 import { formatLocalWallClock, currentLocalContext } from "./time/agent-time";
 import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
-import { buildLateInstructionPrompt } from "./agent/prompt-policy";
 
 import type { MessageSender } from "./agent/send-message-tool";
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
@@ -118,8 +117,8 @@ const guildsDir = join("config", "guilds");
 const guildConfigs = loadGuildConfigs(guildsDir, globalConfig);
 log.info("guild configs loaded", { count: guildConfigs.size });
 
-// --- 8. Load prompt profile (persona + tool instructions). Instructions load via global.defaultInstructions.
-let { persona, toolInstructions } = loadPromptProfile(globalConfig.promptProfile, log);
+// --- 8. Load prompt profile (persona + tool + late instructions). Instructions load via global.defaultInstructions.
+let { persona, toolInstructions, lateInstructions } = loadPromptProfile(globalConfig.promptProfile, log);
 
 // --- 9. Emoji cache ---
 const emojiCache = new EmojiCache();
@@ -802,8 +801,6 @@ async function buildContext(
       }
     }
   }
-  const lateInstruction = buildLateInstructionPrompt();
-
   return assembleContext({
     persona,
     toolInstructions,
@@ -818,7 +815,7 @@ async function buildContext(
     olderHistory: olderText,
     newerHistory: newerText,
     currentContext,
-    lateInstruction,
+    lateInstruction: lateInstructions,
     userMessage,
   });
 }
@@ -1571,7 +1568,7 @@ function reloadConfigs(): void {
     );
     validateTrimConfig(newGlobal.defaultTrim);
     globalConfig = newGlobal;
-    ({ persona, toolInstructions } = loadPromptProfile(globalConfig.promptProfile, log));
+    ({ persona, toolInstructions, lateInstructions } = loadPromptProfile(globalConfig.promptProfile, log));
 
     // Reload guild configs — clear and rebuild
     const newGuilds = loadGuildConfigs(guildsDir, globalConfig);
