@@ -690,36 +690,26 @@ async function buildContext(
     replyFallbackDeps,
   );
 
-  // Journal summaries — sorted by updatedAt ascending, then ID
-  const botUserId = client.user?.id ?? "";
-  const journals = listMemories(db, { scope: "journal", guildId, userId: botUserId })
-    .filter((m) => m.title !== "")
+  // Unified journal summaries (global + user-scoped) — sorted by updatedAt ascending, then ID.
+  const journals = [
+    ...listMemories(db, { scope: "journal", guildId }),
+    ...listMemories(db, { scope: "user", guildId }),
+  ]
+    .filter((m) => m.content !== "")
     .sort((a, b) => {
       const ud = a.updatedAt - b.updatedAt;
       return ud !== 0 ? ud : a.id - b.id;
     });
-  // Format: legend line + entries (no brackets around ID, only updatedAt timestamp)
-  const journalLines = journals.map((m) => `- ${m.id} ${formatJournalTimestamp(m.updatedAt)} ${m.title}`);
-  const journalLegend = "*[ID] ([Last updated]) [Title]; each entry has `content`; use `recall_journal_entry(id)` for full object*";
+  const journalLines = journals.map((m) => {
+    const scopeLabel = m.scope === "journal"
+      ? "global"
+      : `@${guild.members.cache.get(m.userId ?? "")?.user.username ?? (m.userId ?? "unknown-user")}`;
+    return `- ${m.id} ${formatJournalTimestamp(m.updatedAt)} [${scopeLabel}] ${m.content}`;
+  });
+  const journalLegend =
+    "*[ID] ([Last updated]) [Scope] [Content]; [Scope] is `global` or `@username`; use `get_journal_entry(id)` for full content and optional `username` scope checks*";
   const journalSummaries = journals.length > 0
     ? [journalLegend, ...journalLines].join("\n")
-    : "";
-
-  const currentUserMemories = listMemories(db, {
-    scope: "user",
-    guildId,
-    userId: latestUserMessage.authorId,
-  })
-    .filter((m) => m.title !== "")
-    .sort((a, b) => {
-      const ud = a.updatedAt - b.updatedAt;
-      return ud !== 0 ? ud : a.id - b.id;
-    });
-  const currentUserMemoryLines = currentUserMemories.map((m) => `- ${m.id} ${formatJournalTimestamp(m.updatedAt)} ${m.title}`);
-  const currentUserMemoryLegend =
-    "*[ID] ([Last updated]) [Title]; each entry may have `content`; use `save_user_memory(id=N, ...)` to update, `delete_user_memories(ids=[N])` to remove, `recall_user_memories(username)` for other users*";
-  const currentUserMemorySummaries = currentUserMemories.length > 0
-    ? [currentUserMemoryLegend, ...currentUserMemoryLines].join("\n")
     : "";
 
   // Upcoming schedules — one-off by runAt then ID; cron by expression then ID; one-off first
@@ -831,7 +821,6 @@ async function buildContext(
     emojis: emojiContext,
     members: displayNameContext,
     journalSummaries,
-    currentUserMemories: currentUserMemorySummaries,
     upcomingSchedules,
     threadsInChat,
     threadMetadata,
@@ -850,7 +839,7 @@ function buildAgentTools(
   channelId: string,
   guildConfig: GuildConfig,
   guild: Guild,
-  currentUser: { id: string; username: string },
+  _currentUser: { id: string; username: string },
 ) {
   // Resolve username to userId using guild member cache
   const resolveUsername = (username: string): string | undefined => {
@@ -862,9 +851,8 @@ function buildAgentTools(
     db,
     guildId,
     botUserId: client.user?.id ?? "",
-    currentUserId: currentUser.id,
-    currentUsername: currentUser.username,
     resolveUsername,
+    resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
     onMemoryChanged: (memoryId, text) => {
       void embeddingQueue.enqueue({
         id: String(memoryId),

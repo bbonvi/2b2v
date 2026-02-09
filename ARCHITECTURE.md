@@ -79,9 +79,8 @@ Messages and memories enqueue into a batcher, get embedded by the local model, a
 
 Empty sections are omitted. `assembleContext()` iterates the registry; no imperative per-section logic.
 
-`buildContext()` injects two memory-oriented prompt sections:
-- `## Journal` from bot journal entries (`save_journal_entry`/`recall_journal_entry` flow).
-- `## Current User Memories` from `scope='user'` rows for the current inbound author, so per-user facts are available without calling `recall_user_memories` for that user.
+`buildContext()` injects one unified memory-oriented prompt section:
+- `## Journal` combines global journal entries and user-scoped entries. Global entries are unscoped, user-specific entries are labeled with `@username`. Full content lookup uses `get_journal_entry(id, username?)`.
 
 `handleMessage()` uses section-level prompt caching:
 - All `cached: true` sections are merged by `(role, cached)` bucket before payload injection.

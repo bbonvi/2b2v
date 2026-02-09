@@ -126,6 +126,26 @@ export function createDatabase(dbPath: string): Database {
   try { raw.run("UPDATE memories SET short_description = content WHERE short_description IS NULL OR short_description = ''"); } catch { /* column may not exist */ }
   try { raw.run("ALTER TABLE memories DROP COLUMN content"); } catch { /* already dropped */ }
 
+  // Migration: collapse short_description + long_description into single content field.
+  // Rule: if both existed -> "short: long"; if only one existed -> that value.
+  // Idempotency is guaranteed by nulling long_description after merge.
+  try {
+    raw.run(
+      `UPDATE memories
+       SET short_description = CASE
+         WHEN (short_description IS NULL OR TRIM(short_description) = '')
+              AND (long_description IS NULL OR TRIM(long_description) = '') THEN ''
+         WHEN short_description IS NULL OR TRIM(short_description) = '' THEN long_description
+         WHEN long_description IS NULL OR TRIM(long_description) = '' THEN short_description
+         ELSE short_description || ': ' || long_description
+       END,
+       long_description = NULL
+       WHERE long_description IS NOT NULL`
+    );
+  } catch {
+    /* long_description column may not exist */
+  }
+
   // Migration: memories id TEXT → INTEGER AUTOINCREMENT
   const memIdCol = (raw.prepare("PRAGMA table_info(memories)").all() as { name: string; type: string }[])
     .find((c) => c.name === "id");

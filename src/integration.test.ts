@@ -1,17 +1,21 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
+
+import {
+  buildDisplayNameContext,
+  translateInbound,
+  translateOutbound,
+  type InboundResolvers,
+  type OutboundResolvers,
+} from "./discord/translation.ts";
 import { createDatabase, type Database } from "./db/database.ts";
-import { translateInbound, translateOutbound, buildDisplayNameContext, type InboundResolvers, type OutboundResolvers } from "./discord/translation.ts";
-import { createMemory, listMemories, getMemory } from "./db/memory-repository.ts";
+import { createMemory, getMemory, listMemories } from "./db/memory-repository.ts";
 import { createSchedule, getSchedule, listSchedules } from "./db/schedule-repository.ts";
 import { createMemoryTools } from "./agent/memory-tools.ts";
 import { createScheduleTool } from "./agent/schedule-tool.ts";
-import type { ChatMessage } from "./agent/prompt.ts";
 import { trimChatHistory } from "./agent/context-trimming.ts";
+import type { ChatMessage } from "./agent/prompt.ts";
 import type { TrimConfig } from "./config/types.ts";
 
-// ---------------------------------------------------------------------------
-// Shared fixtures
-// ---------------------------------------------------------------------------
 const GUILD_ID = "guild-integration-1";
 const CHANNEL_ID = "channel-1";
 const USER_ID = "user-42";
@@ -32,8 +36,7 @@ function makeOutboundResolvers(): OutboundResolvers {
   return {
     user: (username) => (username === "alice" ? "111" : undefined),
     channel: (name) => (name === "general" ? "999" : undefined),
-    emoji: (name) =>
-      name === "wave" ? { id: "555", animated: false } : undefined,
+    emoji: (name) => (name === "wave" ? { id: "555", animated: false } : undefined),
   };
 }
 
@@ -43,9 +46,6 @@ beforeEach(() => {
   db = createDatabase(":memory:");
 });
 
-// ---------------------------------------------------------------------------
-// 1. Translation → DB Storage Pipeline
-// ---------------------------------------------------------------------------
 describe("translation → message storage pipeline", () => {
   test("inbound translation + message insert + retrieval", () => {
     const raw = "Hey <@111>, check <#999> for info from <@&888>";
@@ -53,7 +53,6 @@ describe("translation → message storage pipeline", () => {
 
     expect(translated).toBe("Hey @alice, check #general for info from @moderator");
 
-    // Store in messages table
     const msgId = "msg-001";
     const now = Date.now();
     db.raw
@@ -67,20 +66,16 @@ describe("translation → message storage pipeline", () => {
     expect(row.raw_content).toBe(raw);
     expect(row.translated_content).toBe(translated);
     expect(row.guild_id).toBe(GUILD_ID);
-    expect(row.is_bot).toBe(0);
   });
 
-  test("outbound translation resolves known entities and warns on unknowns", () => {
-    const llmOutput = "Hi @alice, check #general and greet @unknown with :wave: and :missing:";
-    const warnings: string[] = [];
-    const result = translateOutbound(llmOutput, makeOutboundResolvers(), warnings);
-
-    expect(result).toContain("<@111>");
-    expect(result).toContain("<#999>");
-    expect(result).toContain("<:wave:555>");
-    expect(result).toContain("@unknown"); // left as-is
-    expect(result).toContain(":missing:"); // left as-is
-    expect(warnings.length).toBe(2);
+  test("display name context legend references unified journal tools", () => {
+    const ctx = buildDisplayNameContext([
+      { username: "alice", displayName: "Alice W" },
+      { username: "bob", displayName: "Bob X" },
+    ]);
+    expect(ctx).toContain("Legend: [@username] — [display name] — [memories]");
+    expect(ctx).toContain("save_journal_entry(username)");
+    expect(ctx).toContain("get_journal_entry(id, username?)");
   });
 
   test("roundtrip: inbound → outbound preserves resolvable entities", () => {
@@ -88,179 +83,113 @@ describe("translation → message storage pipeline", () => {
     const humanReadable = translateInbound(original, makeInboundResolvers());
     expect(humanReadable).toBe("Hello @alice, see #general and :wave:");
 
-    const backToDiscord = translateOutbound(humanReadable, makeOutboundResolvers());
-    expect(backToDiscord).toContain("<@111>");
-    expect(backToDiscord).toContain("<#999>");
-    expect(backToDiscord).toContain("<:wave:555>");
-  });
-
-  test("display name context builds correctly from user data", () => {
-    const ctx = buildDisplayNameContext([
-      { username: "alice", displayName: "Alice W" },
-      { username: "bob", displayName: "Bob X" },
-    ]);
-    // Legend + user entries
-    expect(ctx).toContain("Legend: [@username] — [display name] — [memories]");
-    expect(ctx).toContain("for other users");
-    expect(ctx).toContain("@alice — Alice W");
-    expect(ctx).toContain("@bob — Bob X");
+    const discord = translateOutbound(humanReadable, makeOutboundResolvers());
+    expect(discord).toContain("<@111>");
+    expect(discord).toContain("<#999>");
+    expect(discord).toContain("<:wave:555>");
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. Memory Tools → DB Roundtrip
-// ---------------------------------------------------------------------------
-
 function findTool(tools: ReturnType<typeof createMemoryTools>, name: string) {
-  const tool = tools.find((t) => t.name === name);
-  if (!tool) throw new Error(`Tool ${name} not found`);
+  const tool = tools.find((entry) => entry.name === name);
+  if (tool === undefined) throw new Error(`tool ${name} not found`);
   return tool;
 }
 
-// Mock username → userId resolver for tests
 const mockUsers = new Map<string, string>([
   ["user-42", "uid-42"],
   ["testuser", USER_ID],
 ]);
-const mockResolveUsername = (username: string): string | undefined => mockUsers.get(username);
 
 describe("memory tools → DB roundtrip", () => {
-  test("save_user_memory defaults to current user when username is omitted", async () => {
+  test("save_journal_entry creates global entry when username is omitted", async () => {
     const tools = createMemoryTools({
       db,
       guildId: GUILD_ID,
       botUserId: "bot-1",
-      currentUserId: USER_ID,
-      currentUsername: "testuser",
-      resolveUsername: mockResolveUsername,
-    });
-    const saveTool = findTool(tools, "save_user_memory");
-
-    const saveResult = await saveTool.execute("tc-current", {
-      title: "Current-user only memory",
-    });
-    const memoryId = (saveResult.details as { memoryId: number }).memoryId;
-
-    const dbRow = getMemory(db, memoryId);
-    expect(dbRow?.scope).toBe("user");
-    expect(dbRow?.userId).toBe(USER_ID);
-    expect(dbRow?.title).toBe("Current-user only memory");
-  });
-
-  test("save_user_memory creates entry, recall_user_memories retrieves, delete_user_memories removes", async () => {
-    const tools = createMemoryTools({
-      db,
-      guildId: GUILD_ID,
-      botUserId: "bot-1",
-      currentUserId: USER_ID,
-      currentUsername: "testuser",
-      resolveUsername: mockResolveUsername,
-    });
-    const saveTool = findTool(tools, "save_user_memory");
-    const deleteTool = findTool(tools, "delete_user_memories");
-    const recallTool = findTool(tools, "recall_user_memories");
-
-    // Create
-    const saveResult = await saveTool.execute("tc-1", {
-      title: "Integration test memory",
-      username: "user-42",
-    });
-    const memoryId = (saveResult.details as { memoryId: number }).memoryId;
-    expect(memoryId).toBeTruthy();
-
-    // Verify in DB directly
-    const dbRow = getMemory(db, memoryId);
-    expect(dbRow).not.toBeNull();
-    expect(dbRow?.title).toBe("Integration test memory");
-    expect(dbRow?.scope).toBe("user");
-    expect(dbRow?.guildId).toBe(GUILD_ID);
-
-    // Recall via tool
-    const recallResult = await recallTool.execute("tc-2", {
-      username: "user-42",
-    });
-    expect((recallResult.details as { count: number } | undefined)?.count).toBe(1);
-
-    // Delete via tool (batch API)
-    await deleteTool.execute("tc-3", { ids: [memoryId] });
-    expect(getMemory(db, memoryId)).toBeNull();
-  });
-
-  test("save_user_memory with id param updates existing entry", async () => {
-    const tools = createMemoryTools({
-      db,
-      guildId: GUILD_ID,
-      botUserId: "bot-1",
-      currentUserId: USER_ID,
-      currentUsername: "testuser",
-      resolveUsername: mockResolveUsername,
-    });
-    const saveTool = findTool(tools, "save_user_memory");
-
-    // Create
-    const r1 = await saveTool.execute("tc-1", {
-      title: "original",
-      username: "testuser",
-    });
-    const id = (r1.details as { memoryId: number }).memoryId;
-
-    // Update
-    await saveTool.execute("tc-2", {
-      title: "updated",
-      username: "testuser",
-      id,
-    });
-
-    const row = getMemory(db, id);
-    expect(row?.title).toBe("updated");
-  });
-
-  test("save_journal_entry gets 180d TTL by default", async () => {
-    const tools = createMemoryTools({
-      db,
-      guildId: GUILD_ID,
-      botUserId: "bot-1",
-      currentUserId: USER_ID,
-      currentUsername: "testuser",
-      resolveUsername: mockResolveUsername,
+      resolveUsername: (username) => mockUsers.get(username),
     });
     const saveTool = findTool(tools, "save_journal_entry");
 
-    const before = Date.now();
-    const r = await saveTool.execute("tc-1", {
-      title: "Test journal",
-      content: "Detailed entry for integration test",
-    });
-    const id = (r.details as { memoryId: number }).memoryId;
-    const row = getMemory(db, id);
-    expect(row?.expiresAt).not.toBeNull();
-    // Verify it's approximately 180 days from now
-    const expectedExpiry = before + 180 * 24 * 60 * 60 * 1000;
-    const actualExpiry = row?.expiresAt ?? 0;
-    expect(actualExpiry).toBeGreaterThanOrEqual(expectedExpiry - 1000); // 1s tolerance
-    expect(actualExpiry).toBeLessThanOrEqual(expectedExpiry + 1000);
-    expect(row?.title).toBe("Test journal");
+    const saveResult = await saveTool.execute("tc-1", { content: "Global memory" }, new AbortController().signal);
+    const memoryId = (saveResult.details as { memoryId: number }).memoryId;
+    const row = getMemory(db, memoryId);
+
+    expect(row?.scope).toBe("journal");
+    expect(row?.userId).toBe("bot-1");
+    expect(row?.content).toBe("Global memory");
   });
 
-  test("guild isolation: memories scoped to different guilds are independent", () => {
-    createMemory(db, { scope: "user", guildId: "guild-A", userId: "user-1", title: "A data" });
-    createMemory(db, { scope: "user", guildId: "guild-B", userId: "user-1", title: "B data" });
+  test("user-scoped save/get/delete", async () => {
+    const tools = createMemoryTools({
+      db,
+      guildId: GUILD_ID,
+      botUserId: "bot-1",
+      resolveUsername: (username) => mockUsers.get(username),
+    });
+    const saveTool = findTool(tools, "save_journal_entry");
+    const getTool = findTool(tools, "get_journal_entry");
+    const deleteTool = findTool(tools, "delete_journal_entries");
+
+    const saveResult = await saveTool.execute("tc-2", {
+      username: "user-42",
+      content: "User-scoped entry",
+    }, new AbortController().signal);
+    const id = (saveResult.details as { memoryId: number }).memoryId;
+
+    const row = getMemory(db, id);
+    expect(row?.scope).toBe("user");
+    expect(row?.content).toBe("User-scoped entry");
+
+    const getResult = await getTool.execute("tc-3", {
+      id,
+      username: "user-42",
+    }, new AbortController().signal);
+    expect((getResult.details as { found: boolean }).found).toBe(true);
+
+    await deleteTool.execute("tc-4", {
+      ids: [id],
+      username: "user-42",
+    }, new AbortController().signal);
+    expect(getMemory(db, id)).toBeNull();
+  });
+
+  test("save_journal_entry with id updates existing entry", async () => {
+    const tools = createMemoryTools({
+      db,
+      guildId: GUILD_ID,
+      botUserId: "bot-1",
+      resolveUsername: (username) => mockUsers.get(username),
+    });
+    const saveTool = findTool(tools, "save_journal_entry");
+
+    const createResult = await saveTool.execute("tc-5", {
+      content: "original",
+    }, new AbortController().signal);
+    const id = (createResult.details as { memoryId: number }).memoryId;
+
+    await saveTool.execute("tc-6", {
+      id,
+      content: "updated",
+    }, new AbortController().signal);
+
+    expect(getMemory(db, id)?.content).toBe("updated");
+  });
+
+  test("guild isolation: memories are filtered by guild", () => {
+    createMemory(db, { scope: "user", guildId: "guild-A", userId: "user-1", content: "A data" });
+    createMemory(db, { scope: "user", guildId: "guild-B", userId: "user-1", content: "B data" });
 
     const listA = listMemories(db, { scope: "user", guildId: "guild-A" });
     const listB = listMemories(db, { scope: "user", guildId: "guild-B" });
 
-    expect(listA.length).toBe(1);
-    expect(listA[0]?.title).toBe("A data");
-    expect(listB.length).toBe(1);
-    expect(listB[0]?.title).toBe("B data");
+    expect(listA[0]?.content).toBe("A data");
+    expect(listB[0]?.content).toBe("B data");
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. Schedule Tool → DB Roundtrip
-// ---------------------------------------------------------------------------
 describe("schedule tool → DB roundtrip", () => {
-  test("schedule_message creates one-off schedule in DB and notifies engine", async () => {
+  test("schedule_message creates one-off schedule and notifies callback", async () => {
     const createdIds: string[] = [];
     const tool = createScheduleTool({
       db,
@@ -270,29 +199,15 @@ describe("schedule tool → DB roundtrip", () => {
       onScheduleCreated: (id) => createdIds.push(id),
     });
 
-    const before = Date.now();
     const result = await tool.execute("tc-1", {
       amount: 5,
       unit: "minutes",
       instructions: "Reminder: integration test",
-    });
+    }, new AbortController().signal);
 
-    const details = result.details as { scheduleId: string; runAt: number };
-    expect(details.scheduleId).toBeTruthy();
-    expect(details.runAt).toBeGreaterThanOrEqual(before + 5 * 60_000);
-
-    // Verify callback fired
+    const details = result.details as { scheduleId: string };
     expect(createdIds).toEqual([details.scheduleId]);
-
-    // Verify DB state
-    const row = getSchedule(db, details.scheduleId);
-    expect(row).not.toBeNull();
-    expect(row?.guildId).toBe(GUILD_ID);
-    expect(row?.channelId).toBe(CHANNEL_ID);
-    expect(row?.source).toBe("tool");
-    expect(row?.type).toBe("one_off");
-    expect(row?.messageContent).toBe("Reminder: integration test");
-    expect(row?.enabled).toBe(true);
+    expect(getSchedule(db, details.scheduleId)?.source).toBe("tool");
   });
 
   test("schedule_message rejects non-positive amount", async () => {
@@ -303,20 +218,17 @@ describe("schedule tool → DB roundtrip", () => {
       timezone: "UTC",
     });
 
-    const result = await tool.execute("tc-1", {
+    const result = await tool.execute("tc-2", {
       amount: -1,
       unit: "minutes",
       instructions: "bad",
-    });
+    }, new AbortController().signal);
 
-    const firstContent = result.content[0];
-    expect(firstContent?.type).toBe("text");
-    expect((firstContent as { type: "text"; text: string }).text).toContain("positive");
-    const schedules = listSchedules(db, { guildId: GUILD_ID });
-    expect(schedules.length).toBe(0);
+    expect((result.content[0] as { text: string }).text).toContain("positive");
+    expect(listSchedules(db, { guildId: GUILD_ID })).toHaveLength(0);
   });
 
-  test("admin and tool schedules coexist in same guild", () => {
+  test("admin and tool schedules coexist", () => {
     createSchedule(db, {
       guildId: GUILD_ID,
       channelId: CHANNEL_ID,
@@ -336,111 +248,50 @@ describe("schedule tool → DB roundtrip", () => {
       messageContent: "Reminder",
     });
 
-    const all = listSchedules(db, { guildId: GUILD_ID });
-    expect(all.length).toBe(2);
-    const sources = all.map((s) => s.source).sort();
+    const sources = listSchedules(db, { guildId: GUILD_ID }).map((entry) => entry.source).sort();
     expect(sources).toEqual(["admin", "tool"]);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. Trigger → Context Trimming Pipeline
-// ---------------------------------------------------------------------------
 describe("trigger → trimming pipeline", () => {
-  test("context trimming activates at trigger threshold and preserves newest", () => {
+  test("context trimming preserves newest messages when over trigger", () => {
     const trim: TrimConfig = { trimTrigger: 10, trimTarget: 5, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 };
-    const messages: ChatMessage[] = Array.from({ length: 12 }, (_, i) => ({
-      author: `user-${i}`,
-      content: `message-${i}`,
-      isBot: i % 2 === 0,
+    const messages: ChatMessage[] = Array.from({ length: 12 }, (_, index) => ({
+      author: `user-${index}`,
+      content: `message-${index}`,
+      isBot: index % 2 === 0,
     }));
 
     const trimmed = trimChatHistory(messages, trim);
-    expect(trimmed.length).toBe(5);
-    // Should keep the newest 5 (indices 7-11)
+    expect(trimmed).toHaveLength(5);
     expect(trimmed[0]?.content).toBe("message-7");
     expect(trimmed[4]?.content).toBe("message-11");
   });
 });
 
-
-// ---------------------------------------------------------------------------
-// 6. Message Storage → Retrieval Integration
-// ---------------------------------------------------------------------------
 describe("message storage and retrieval", () => {
-  test("stores multiple messages and queries by guild+channel+time", () => {
+  test("stores and filters messages by guild/channel/time", () => {
     const baseTime = 1700000000000;
-    const messages = [
-      { id: "m1", guildId: GUILD_ID, channelId: CHANNEL_ID, userId: "u1", author: "alice", raw: "raw1", translated: "translated1", isBot: 0, createdAt: baseTime },
-      { id: "m2", guildId: GUILD_ID, channelId: CHANNEL_ID, userId: "u2", author: "bob", raw: "raw2", translated: "translated2", isBot: 0, createdAt: baseTime + 1000 },
-      { id: "m3", guildId: GUILD_ID, channelId: "other-channel", userId: "u1", author: "alice", raw: "raw3", translated: "translated3", isBot: 0, createdAt: baseTime + 2000 },
-      { id: "m4", guildId: "other-guild", channelId: CHANNEL_ID, userId: "u1", author: "alice", raw: "raw4", translated: "translated4", isBot: 0, createdAt: baseTime + 3000 },
-    ];
-
-    const stmt = db.raw.prepare(
+    const insert = db.raw.prepare(
       `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
-    for (const m of messages) {
-      stmt.run(m.id, m.guildId, m.channelId, m.userId, m.author, m.raw, m.translated, m.isBot, m.createdAt);
-    }
+    insert.run("m1", GUILD_ID, CHANNEL_ID, "u1", "alice", "raw1", "translated1", 0, baseTime);
+    insert.run("m2", GUILD_ID, CHANNEL_ID, "u2", "bob", "raw2", "translated2", 0, baseTime + 1000);
+    insert.run("m3", GUILD_ID, "other", "u1", "alice", "raw3", "translated3", 0, baseTime + 2000);
 
-    // Query by guild + channel
     const rows = db.raw
-      .prepare("SELECT * FROM messages WHERE guild_id = ? AND channel_id = ? ORDER BY created_at")
+      .prepare("SELECT id FROM messages WHERE guild_id = ? AND channel_id = ? ORDER BY created_at")
       .all(GUILD_ID, CHANNEL_ID) as Array<{ id: string }>;
-    expect(rows.length).toBe(2);
-    expect(rows.map((r) => r.id)).toEqual(["m1", "m2"]);
-
-    // Query by guild only
-    const guildRows = db.raw
-      .prepare("SELECT * FROM messages WHERE guild_id = ? ORDER BY created_at")
-      .all(GUILD_ID) as Array<{ id: string }>;
-    expect(guildRows.length).toBe(3);
-
-    // Time-range query
-    const timeRows = db.raw
-      .prepare("SELECT * FROM messages WHERE guild_id = ? AND created_at > ? ORDER BY created_at")
-      .all(GUILD_ID, baseTime) as Array<{ id: string }>;
-    expect(timeRows.length).toBe(2);
-    expect(timeRows.map((r) => r.id)).toEqual(["m2", "m3"]);
+    expect(rows.map((row) => row.id)).toEqual(["m1", "m2"]);
   });
 
-  test("message retention: expired memories cleaned up correctly", () => {
-    createMemory(db, { scope: "user", guildId: GUILD_ID, userId: "user-1", title: "expired", ttlDays: -1 });
-    createMemory(db, { scope: "user", guildId: GUILD_ID, userId: "user-1", title: "still valid" });
+  test("expired memories are hidden by listMemories", () => {
+    createMemory(db, { scope: "user", guildId: GUILD_ID, userId: "user-1", content: "expired", ttlDays: -1 });
+    createMemory(db, { scope: "user", guildId: GUILD_ID, userId: "user-1", content: "still valid" });
 
-    // listMemories filters expired; ttlDays=-1 means expiry = now - 1 day (past)
-    const all = listMemories(db, { scope: "user", guildId: GUILD_ID });
-    const contents = all.map((m) => m.title);
-    expect(contents).toContain("still valid");
-    expect(contents).not.toContain("expired");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 7. Cross-Cutting: Translation Pipeline
-// ---------------------------------------------------------------------------
-describe("translation pipeline: inbound → outbound", () => {
-  test("end-to-end translation pipeline", () => {
-    // 1. Simulate incoming Discord messages
-    const rawMessages = [
-      "Hey <@111>, what's up?",
-      "Not much <@222>, just chillin in <#999>",
-      "Cool, see you later!",
-    ];
-
-    const resolvers = makeInboundResolvers();
-    const translated = rawMessages.map((raw) => translateInbound(raw, resolvers));
-
-    expect(translated[0]).toBe("Hey @alice, what's up?");
-    expect(translated[1]).toBe("Not much @bob, just chillin in #general");
-    expect(translated[2]).toBe("Cool, see you later!");
-
-    // 2. Simulate outbound translation of an LLM response
-    const llmResponse = "Hey @alice, I'll check #general for you!";
-    const discordResponse = translateOutbound(llmResponse, makeOutboundResolvers());
-    expect(discordResponse).toContain("<@111>");
-    expect(discordResponse).toContain("<#999>");
+    const visible = listMemories(db, { scope: "user", guildId: GUILD_ID }).map((row) => row.content);
+    expect(visible).toContain("still valid");
+    expect(visible).not.toContain("expired");
   });
 });

@@ -77,7 +77,7 @@ Recommended slow-work pattern:
 ## Parallel Tool Calls
 - Parallelize independent tool calls.
 - Do not parallelize dependent steps.
-- Example parallel: `recall_user_memories` + `chat_history` + `search_messages`.
+- Example parallel: `chat_history` + `search_messages` + `list_members`.
 - Example dependent: `web_search` -> pick URL -> `fetch_url`.
 
 ## Do Not Spam Tools
@@ -138,13 +138,10 @@ Recommended slow-work pattern:
 ### Memory
 - Journal tools:
   - `save_journal_entry`
-  - `recall_journal_entry`
+  - `get_journal_entry`
   - `delete_journal_entries`
-- User memory tools:
-  - `save_user_memory`
-  - `recall_user_memories`
-  - `delete_user_memories`
 - Rules:
+  - use `username` on journal tools when the memory should be scoped to a specific user
   - recall before updating existing entries
   - update existing entries when possible instead of creating duplicates
   - store durable high-signal facts, not transient chatter

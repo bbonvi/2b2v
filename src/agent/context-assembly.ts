@@ -39,7 +39,6 @@ export interface ContextAssemblyInput {
   emojis: string;
   members: string;
   journalSummaries: string;
-  currentUserMemories: string;
   upcomingSchedules: string;
   /** Threads in this chat (for parent channels only). */
   threadsInChat: string;
@@ -100,7 +99,6 @@ export const SECTION_DEFS: readonly SectionDef[] = [
   { label: "Threads In This Chat", role: "developer", cached: false, source: { kind: "field", inputKey: "threadsInChat", header: "## Threads In This Chat" } },
   { label: "Upcoming Schedules",   role: "developer", cached: false, source: { kind: "field", inputKey: "upcomingSchedules", header: "## Upcoming Schedules" } },
   { label: "Journal Summaries",    role: "developer", cached: false, source: { kind: "field", inputKey: "journalSummaries", header: "## Journal" } },
-  { label: "Current User Memories", role: "developer", cached: false, source: { kind: "field", inputKey: "currentUserMemories", header: "## Current User Memories" } },
   { label: "Chat History — Newer", role: "developer", cached: false, source: { kind: "field", inputKey: "newerHistory" } },
   { label: "Current Context",      role: "developer", cached: false, source: { kind: "field", inputKey: "currentContext" } },
   { label: "Late Instruction",     role: "developer", cached: false, source: { kind: "field", inputKey: "lateInstruction" } },

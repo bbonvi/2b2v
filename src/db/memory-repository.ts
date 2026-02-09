@@ -10,8 +10,7 @@ export interface MemoryRow {
   scope: MemoryScope;
   guildId: string | null;
   userId: string | null;
-  title: string;
-  content: string | null;
+  content: string;
   sourceMessageId: string | null;
   createdAt: number;
   updatedAt: number;
@@ -22,15 +21,13 @@ export interface CreateMemoryInput {
   scope: MemoryScope;
   guildId: string;
   userId: string;
-  title: string;
-  content?: string;
+  content: string;
   sourceMessageId?: string;
   /** Days until expiry. Default 180. Pass null to disable. */
   ttlDays?: number | null;
 }
 
 export interface UpdateMemoryInput {
-  title?: string;
   content?: string;
   /** Recompute expiry from now + ttlDays. Pass null to remove expiry. */
   ttlDays?: number | null;
@@ -63,8 +60,8 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
       input.scope,
       input.guildId,
       input.userId,
-      input.title,
-      input.content ?? null,
+      input.content,
+      null,
       input.sourceMessageId ?? null,
       now,
       now,
@@ -79,12 +76,8 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
   const sets: string[] = [];
   const params: (string | number | null)[] = [];
 
-  if (input.title !== undefined) {
-    sets.push("short_description = ?");
-    params.push(input.title);
-  }
   if (input.content !== undefined) {
-    sets.push("long_description = ?");
+    sets.push("short_description = ?");
     params.push(input.content);
   }
   if ("ttlDays" in input) {
@@ -176,8 +169,7 @@ function mapRow(row: Record<string, unknown>): MemoryRow {
     scope: row.scope as MemoryScope,
     guildId: row.guild_id as string | null,
     userId: row.user_id as string | null,
-    title: row.short_description as string,
-    content: row.long_description as string | null,
+    content: row.short_description as string,
     sourceMessageId: row.source_message_id as string | null,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,

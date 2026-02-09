@@ -138,34 +138,19 @@ const TOOL_RULES: readonly ToolScopedRule[] = [
     requiredTools: ["bash"],
   },
   {
-    id: "tool_recall_user_memories_for_other_users",
-    text: "Use recall_user_memories(username) when you need memories for users other than the current message author.",
-    requiredTools: ["recall_user_memories"],
-  },
-  {
-    id: "tool_save_user_memory_for_durable_facts",
-    text: "Use save_user_memory for durable facts about the current user in this conversation, not transient chatter.",
-    requiredTools: ["save_user_memory"],
-  },
-  {
-    id: "tool_recall_journal_before_save",
-    text: "Use recall_journal_entry before creating new journal entries on related topics.",
-    requiredTools: ["recall_journal_entry"],
+    id: "tool_get_journal_before_save",
+    text: "Use get_journal_entry before updating existing journal entries or when summary context may be insufficient.",
+    requiredTools: ["get_journal_entry"],
   },
   {
     id: "tool_save_journal_for_durable_context",
-    text: "Use save_journal_entry for durable multi-user context worth preserving.",
+    text: "Use save_journal_entry for durable context worth preserving; set username for user-scoped facts.",
     requiredTools: ["save_journal_entry"],
   },
   {
     id: "tool_delete_memory_only_on_clear_request",
     text: "Use delete memory tools only when the user clearly requests removal or correction.",
     requiredTools: ["delete_journal_entries"],
-  },
-  {
-    id: "tool_delete_user_memory_only_on_clear_request",
-    text: "Use delete memory tools only when the user clearly requests removal or correction.",
-    requiredTools: ["delete_user_memories"],
   },
 ];
 
