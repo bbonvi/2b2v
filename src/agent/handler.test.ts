@@ -587,4 +587,47 @@ describe("handleMessage", () => {
 
     fetchSpy.mockRestore();
   });
+
+  test("retries once without response_format after model timeout", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
+    let call = 0;
+    const responseFormats: unknown[] = [];
+
+    const llmComplete: LlmCompleteFn = (_model, _context, options) => {
+      call += 1;
+      responseFormats.push(options.response_format);
+      if (call === 1) {
+        return new Promise((_resolve, reject) => {
+          const signal = options.signal;
+          signal?.addEventListener("abort", () => {
+            const reason: unknown = signal.reason;
+            reject(reason instanceof Error ? reason : new Error(String(reason)));
+          }, { once: true });
+        });
+      }
+      const payload = {
+        status: "done",
+        actions: [{ type: "ignore_user", reason: "no response needed" }],
+      };
+      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
+    };
+
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({
+        triggers: { mention: true, keywords: [], randomChance: 0 },
+        actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 2_000, llmOutputTimeoutMs: 20 },
+      }),
+      context: makeContext(),
+      sender,
+      llmComplete,
+    };
+
+    const result = await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+    expect(result.triggered).toBe(true);
+    expect(result.agentRan).toBe(true);
+    expect(call).toBe(2);
+    expect(responseFormats[0]).toBeDefined();
+    expect(responseFormats[1]).toBeUndefined();
+  });
 });
