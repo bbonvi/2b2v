@@ -295,6 +295,41 @@ describe("handleMessage", () => {
     expect(sendCalls).toBe(1);
   });
 
+  test("throws explicit error when structured action loop times out", async () => {
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
+
+    const llmComplete: LlmCompleteFn = (_model, _context, options) =>
+      new Promise((_resolve, reject) => {
+        const signal = options.signal;
+        signal?.addEventListener("abort", () => {
+          const reason: unknown = signal.reason;
+          reject(reason instanceof Error ? reason : new Error(String(reason)));
+        }, { once: true });
+      });
+
+    const deps: HandlerDeps = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({
+        triggers: { mention: true, keywords: [], randomChance: 0 },
+        actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 2_000, llmOutputTimeoutMs: 20 },
+      }),
+      context: makeContext(),
+      sender,
+      llmComplete,
+    };
+
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps).then(
+      () => {
+        throw new Error("expected request to fail on timeout");
+      },
+      (error: unknown) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        expect(msg).toContain("Structured action loop timed out");
+        expect(msg).toContain("llmOutputTimeoutMs=20");
+      },
+    );
+  });
+
   test("prepends stable sections to payload and marks first with cache_control", async () => {
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
     let capturedPayload: unknown;

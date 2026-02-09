@@ -510,6 +510,14 @@ export async function handleMessage(
       turns: loopResult.turns,
       toolCalls: loopResult.toolCalls,
     });
+
+    if (loopResult.stopReason === "timeout") {
+      throw new Error(
+        `Structured action loop timed out (turns=${loopResult.turns}, toolCalls=${loopResult.toolCalls}, `
+        + `wallClockTimeoutMs=${deps.guildConfig.actionLoop.wallClockTimeoutMs}, `
+        + `llmOutputTimeoutMs=${deps.guildConfig.actionLoop.llmOutputTimeoutMs})`,
+      );
+    }
   } finally {
     deps.onAgentEnd?.();
   }

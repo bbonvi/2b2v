@@ -64,6 +64,7 @@ export interface RunStructuredActionLoopInput {
   maxToolCalls: number;
   wallClockTimeoutMs: number;
   llmOutputTimeoutMs: number;
+  maxModelTimeouts?: number;
   callModel: (
     messages: LoopMessage[],
     responseFormat: Record<string, unknown>,
@@ -144,15 +145,24 @@ export function parseStructuredActionBatch(rawText: string):
   return { ok: true, value: parsed };
 }
 
-function schemaForToolAction(tool: AgentTool): Record<string, unknown> {
+function schemaForToolAction(toolNames: string[]): Record<string, unknown> {
+  const toolNameSchema: Record<string, unknown> = toolNames.length > 0
+    ? { type: "string", enum: toolNames }
+    : { type: "string", minLength: 1 };
+
   return {
     type: "object",
     additionalProperties: false,
     required: ["type", "tool_name", "arguments"],
     properties: {
       type: { const: "tool_call" },
-      tool_name: { const: tool.name },
-      arguments: tool.parameters,
+      tool_name: toolNameSchema,
+      // Keep arguments shallow for provider compatibility (Gemini rejects deeply nested json_schema).
+      // Runtime still validates tool arguments before execution.
+      arguments: {
+        type: "object",
+        additionalProperties: true,
+      },
     },
   };
 }
@@ -183,7 +193,7 @@ function schemaForIgnoreAction(): Record<string, unknown> {
 
 export function buildActionResponseFormat(tools: AgentTool[]): Record<string, unknown> {
   const actionVariants = [
-    ...tools.map((tool) => schemaForToolAction(tool)),
+    schemaForToolAction(tools.map((tool) => tool.name)),
     schemaForStopAction(),
     schemaForIgnoreAction(),
   ];
@@ -406,6 +416,7 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
   const now = input.now ?? (() => Date.now());
   const maxTurns = input.maxTurns ?? 24;
   const maxFormatErrors = input.maxFormatErrors ?? 3;
+  const maxModelTimeouts = Math.max(1, input.maxModelTimeouts ?? 1);
   const startedAt = now();
   const responseFormat = buildActionResponseFormat(input.tools);
 
@@ -419,6 +430,7 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
   let turns = 0;
   let toolCalls = 0;
   let formatErrors = 0;
+  let modelTimeouts = 0;
   let hasUserVisibleMessage = false;
 
   const executeToolCall = input.onToolCall ?? (async (tool, toolCallId, args, signal) => {
@@ -451,11 +463,16 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
         return { stopReason: "aborted", toolCalls, turns, messages };
       }
       if (isModelOutputTimeoutError(error)) {
+        modelTimeouts += 1;
+        if (modelTimeouts >= maxModelTimeouts) {
+          return { stopReason: "timeout", toolCalls, turns, messages };
+        }
         messages.push(makeUserMessage(buildModelTimeoutFeedback(error.timeoutMs), now));
         continue;
       }
       throw error;
     }
+    modelTimeouts = 0;
     input.onModelTurn?.(turnOutput.responsePayload);
 
     messages.push(makeAssistantMessage(turnOutput.rawText, now));

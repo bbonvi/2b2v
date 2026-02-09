@@ -44,37 +44,45 @@ describe("buildActionResponseFormat", () => {
     expect(asText).toContain("search_messages");
   });
 
-  test("requires send_message.reply in structured output schema", () => {
+  test("keeps tool_call arguments shallow and validates tool_name via enum", () => {
     const sendTool = createSendMessageTool({
       sender: () => Promise.resolve({ sentMessageId: "m-1" }),
       ttsEnabled: false,
     }) as unknown as AgentTool;
 
     const format = buildActionResponseFormat([sendTool]);
-    const schema = (format as {
+    const actionsSchema = (format as {
       json_schema?: {
         schema?: {
           properties?: {
             actions?: {
-              items?: { anyOf?: unknown[] };
+              items?: {
+                anyOf?: Array<{
+                  required?: string[];
+                  properties?: {
+                    type?: { const?: string };
+                    tool_name?: { enum?: string[] };
+                    arguments?: { type?: string; additionalProperties?: boolean };
+                  };
+                }>;
+              };
             };
           };
         };
       };
-    }).json_schema?.schema;
+    }).json_schema?.schema?.properties?.actions;
 
-    const variants = schema?.properties?.actions?.items?.anyOf ?? [];
-    const sendMessageVariant = variants.find((variant) => {
-      const rec = variant as {
-        properties?: { tool_name?: { const?: unknown } };
-      };
-      return rec.properties?.tool_name?.const === "send_message";
-    }) as {
-      properties?: { arguments?: { required?: unknown[] } };
-    } | undefined;
-
-    const requiredArgs = sendMessageVariant?.properties?.arguments?.required ?? [];
-    expect(requiredArgs).toContain("reply");
+    const variants = actionsSchema?.items?.anyOf ?? [];
+    const toolCallVariant = variants.find((variant) => variant.properties?.type?.const === "tool_call");
+    const required = toolCallVariant?.required ?? [];
+    expect(required.includes("type")).toBe(true);
+    expect(required.includes("tool_name")).toBe(true);
+    expect(required.includes("arguments")).toBe(true);
+    expect(toolCallVariant?.properties?.tool_name?.enum).toEqual(["send_message"]);
+    expect(toolCallVariant?.properties?.arguments).toEqual({
+      type: "object",
+      additionalProperties: true,
+    });
   });
 });
 
@@ -406,7 +414,7 @@ describe("runStructuredActionLoop", () => {
     expect(hasPolicyError).toBe(true);
   });
 
-  test("retries after model output timeout and feeds timeout error back to loop", async () => {
+  test("retries after model output timeout and feeds timeout error back to loop when retries are enabled", async () => {
     let turn = 0;
     let executed = 0;
 
@@ -414,6 +422,7 @@ describe("runStructuredActionLoop", () => {
       maxToolCalls: 3,
       wallClockTimeoutMs: 10_000,
       llmOutputTimeoutMs: 2_000,
+      maxModelTimeouts: 2,
       tools: [makeTool("send_message")],
       callModel: (_messages, _responseFormat, signal) => {
         turn += 1;
@@ -454,5 +463,30 @@ describe("runStructuredActionLoop", () => {
       m.role === "user" && m.content.includes("[MODEL TIMEOUT]"),
     );
     expect(hasTimeoutFeedback).toBe(true);
+  });
+
+  test("stops on first model output timeout by default", async () => {
+    const result = await runStructuredActionLoop({
+      maxToolCalls: 3,
+      wallClockTimeoutMs: 10_000,
+      llmOutputTimeoutMs: 2_000,
+      tools: [makeTool("send_message")],
+      callModel: (_messages, _responseFormat, signal) => new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          const reason: unknown = signal.reason;
+          reject(reason instanceof Error ? reason : new Error(String(reason)));
+        }, { once: true });
+      }),
+      initialMessages: [
+        { role: "user", content: "hello", timestamp: Date.now() },
+      ],
+    });
+
+    expect(result.stopReason).toBe("timeout");
+    expect(result.turns).toBe(1);
+    const hasTimeoutFeedback = result.messages.some((m) =>
+      m.role === "user" && m.content.includes("[MODEL TIMEOUT]"),
+    );
+    expect(hasTimeoutFeedback).toBe(false);
   });
 });
