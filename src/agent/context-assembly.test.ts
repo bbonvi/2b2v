@@ -14,6 +14,7 @@ function makeInput(overrides: Partial<ContextAssemblyInput> = {}): ContextAssemb
     emojis: ":wave: — custom emoji",
     members: "@alice — Alice\n@bob — Bob",
     journalSummaries: "- User likes cats",
+    currentUserMemories: "- 12 (2h ago) Prefers concise answers",
     upcomingSchedules: "- [cron UTC] 0 9 * * *: Good morning",
     threadsInChat: "",
     parentPreContext: "",
@@ -101,14 +102,14 @@ describe("SECTION_DEFS", () => {
 });
 
 describe("assembleContext", () => {
-  test("produces all 9 sections when all inputs present (no instructions)", () => {
+  test("produces all 10 sections when all inputs present (no instructions)", () => {
     const result = assembleContext(makeInput());
-    expect(result.sections).toHaveLength(9);
+    expect(result.sections).toHaveLength(10);
   });
 
-  test("produces 10 sections when instructions present", () => {
+  test("produces 11 sections when instructions present", () => {
     const result = assembleContext(makeInput({ instructions: "Be concise and helpful." }));
-    expect(result.sections).toHaveLength(10);
+    expect(result.sections).toHaveLength(11);
     const labels = result.sections.map((s) => s.label);
     expect(labels).toContain("Instructions");
   });
@@ -132,6 +133,7 @@ describe("assembleContext", () => {
         emojis: "",
         members: "",
         journalSummaries: "",
+        currentUserMemories: "",
         upcomingSchedules: "",
         olderHistory: "",
       })
@@ -164,6 +166,7 @@ describe("assembleContext", () => {
     expect(uncachedLabels).toEqual([
       "Upcoming Schedules",
       "Journal Summaries",
+      "Current User Memories",
       "Chat History — Newer",
       "Current Context",
     ]);
@@ -185,6 +188,12 @@ describe("assembleContext", () => {
     const result = assembleContext(makeInput({ journalSummaries: "- Entry one" }));
     const section = result.sections.find((s) => s.label === "Journal Summaries");
     expect(section?.text).toBe("## Journal\n- Entry one");
+  });
+
+  test("wraps current user memories with section header", () => {
+    const result = assembleContext(makeInput({ currentUserMemories: "- 7 (now) Prefers tea" }));
+    const section = result.sections.find((s) => s.label === "Current User Memories");
+    expect(section?.text).toBe("## Current User Memories\n- 7 (now) Prefers tea");
   });
 
   test("wraps schedules with section header", () => {
@@ -318,6 +327,7 @@ describe("assembleContext", () => {
         emojis: "",
         members: "",
         journalSummaries: "",
+        currentUserMemories: "",
         upcomingSchedules: "",
         olderHistory: "",
         newerHistory: "",
@@ -338,6 +348,7 @@ describe("assembleContext", () => {
         emojis: "",
         members: "",
         journalSummaries: "",
+        currentUserMemories: "",
         upcomingSchedules: "",
         olderHistory: "",
         newerHistory: "",
@@ -354,6 +365,7 @@ describe("contextToSystemPrompt", () => {
       emojis: "",
       members: "",
       journalSummaries: "",
+      currentUserMemories: "",
       upcomingSchedules: "",
       olderHistory: "",
       newerHistory: "",
@@ -374,6 +386,7 @@ describe("contextToSystemPrompt", () => {
       emojis: "",
       members: "",
       journalSummaries: "",
+      currentUserMemories: "",
       upcomingSchedules: "",
       olderHistory: "",
       newerHistory: "",

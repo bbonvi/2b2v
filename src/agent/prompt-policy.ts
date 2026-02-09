@@ -138,13 +138,13 @@ const TOOL_RULES: readonly ToolScopedRule[] = [
     requiredTools: ["bash"],
   },
   {
-    id: "tool_recall_user_memories_before_save",
-    text: "Use recall_user_memories before updating user memory to prevent duplicate entries.",
+    id: "tool_recall_user_memories_for_other_users",
+    text: "Use recall_user_memories(username) when you need memories for users other than the current message author.",
     requiredTools: ["recall_user_memories"],
   },
   {
     id: "tool_save_user_memory_for_durable_facts",
-    text: "Use save_user_memory for durable user facts, not transient chatter.",
+    text: "Use save_user_memory for durable facts about the current user in this conversation, not transient chatter.",
     requiredTools: ["save_user_memory"],
   },
   {

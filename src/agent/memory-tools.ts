@@ -16,6 +16,10 @@ export interface MemoryToolsDeps {
   guildId: string;
   /** Bot's own user ID — auto-injected as userId for journal scope. */
   botUserId: string;
+  /** Current inbound user ID (message author) for current-user memory defaults. */
+  currentUserId: string;
+  /** Current inbound username for user-facing tool responses. */
+  currentUsername: string;
   /** Resolve username to userId. Returns undefined if not found. */
   resolveUsername: (username: string) => string | undefined;
   /** Called after a memory is created or updated, for embedding. */
@@ -68,7 +72,7 @@ const RecallJournalEntrySchema = Type.Object({
 // ---------------------------------------------------------------------------
 
 interface SaveUserMemoryParams {
-  username: string;
+  username?: string;
   title: string;
   id?: number;
   content?: string;
@@ -86,7 +90,9 @@ interface RecallUserMemoriesParams {
 }
 
 const SaveUserMemorySchema = Type.Object({
-  username: Type.String({ description: "Target username (required). Use the @username from chat history." }),
+  username: Type.Optional(Type.String({
+    description: "Target username (optional). Omit to store memory for the current user in this conversation.",
+  })),
   title: Type.String({ description: "Primary memory text." }),
   id: Type.Optional(Type.Integer({ description: "Existing memory ID to update. Omit to create new." })),
   content: Type.Optional(Type.String({ description: "Extended details (optional)." })),
@@ -133,7 +139,16 @@ function embeddingText(title: string, content?: string | null): string {
  * save_user_memory, delete_user_memories, recall_user_memories.
  */
 export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
-  const { db, guildId, botUserId, resolveUsername, onMemoryChanged, onMemoryDeleted } = deps;
+  const {
+    db,
+    guildId,
+    botUserId,
+    currentUserId,
+    currentUsername,
+    resolveUsername,
+    onMemoryChanged,
+    onMemoryDeleted,
+  } = deps;
 
   // -------------------------------------------------------------------------
   // save_journal_entry
@@ -294,16 +309,20 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     name: "save_user_memory",
     label: "Save User Memory",
     description:
-      "Create or update a memory about a user. User memories are NOT in context — use 'recall_user_memories' to retrieve them. Provide 'id' to update an existing entry.",
+      "Create or update a memory about the current user in this conversation. Optionally pass `username` to target a specific user. Provide `id` to update an existing entry.",
     parameters: SaveUserMemorySchema,
     execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: number; action: string; success: boolean }>> => {
       const p = params as SaveUserMemoryParams;
 
-      // Resolve username to userId (normalize to strip leading @)
-      const userId = resolveUsername(normalizeUsername(p.username));
-      if (userId === undefined) {
+      const targetUsername = p.username !== undefined
+        ? normalizeUsername(p.username)
+        : currentUsername;
+      const targetUserId = p.username !== undefined
+        ? resolveUsername(targetUsername)
+        : currentUserId;
+      if (targetUserId === undefined || targetUserId === "") {
         return Promise.resolve({
-          content: [{ type: "text", text: `User '${p.username}' not found.` }],
+          content: [{ type: "text", text: `User '${targetUsername}' not found.` }],
           details: { memoryId: -1, action: "create", success: false },
         });
       }
@@ -329,6 +348,12 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
             details: { memoryId: p.id, action: "update", success: false },
           });
         }
+        if (existing.userId !== targetUserId) {
+          return Promise.resolve({
+            content: [{ type: "text", text: `User memory ${p.id} belongs to a different user.` }],
+            details: { memoryId: p.id, action: "update", success: false },
+          });
+        }
         const updated = updateMemory(db, p.id, {
           title: p.title,
           content: p.content,
@@ -347,7 +372,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
       const id = createMemory(db, {
         scope: "user",
         guildId,
-        userId,
+        userId: targetUserId,
         title: p.title,
         content: p.content,
         sourceMessageId: p.sourceMessageId,
@@ -356,7 +381,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
       onMemoryChanged?.(id, embeddingText(p.title, p.content));
 
       return Promise.resolve({
-        content: [{ type: "text", text: `Saved new user memory ${id} for @${p.username}.` }],
+        content: [{ type: "text", text: `Saved new user memory ${id} for @${targetUsername}.` }],
         details: { memoryId: id, action: "create", success: true },
       });
     },
@@ -418,7 +443,7 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     name: "recall_user_memories",
     label: "Recall User Memories",
     description:
-      "Retrieve stored user memories. User memories are NOT in context by default — call this to discover them. Optionally filter by username.",
+      "Retrieve stored user memories for a specific user. Current-user memories are already in context in this turn.",
     parameters: RecallUserMemoriesSchema,
     execute: (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as RecallUserMemoriesParams;

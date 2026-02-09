@@ -31,6 +31,8 @@ function makeDeps(overrides: Partial<MemoryToolsDeps> = {}): MemoryToolsDeps {
     db,
     guildId: "g1",
     botUserId: "bot-1",
+    currentUserId: "uid-1",
+    currentUsername: "u1",
     resolveUsername: mockResolveUsername,
     ...overrides,
   };
@@ -395,6 +397,25 @@ describe("delete_journal_entries tool", () => {
 // save_user_memory tool
 // ---------------------------------------------------------------------------
 describe("save_user_memory tool", () => {
+  test("defaults to current user when username is omitted", async () => {
+    const tools = createMemoryTools(makeDeps({
+      currentUserId: "uid-alice",
+      currentUsername: "alice",
+    }));
+    const saveTool = findTool(tools, "save_user_memory");
+
+    const result = await saveTool.execute("tc-current", {
+      title: "Prefers concise answers",
+    }, new AbortController().signal);
+
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("@alice");
+
+    const memories = listMemories(db, { scope: "user", guildId: "g1", userId: "uid-alice" });
+    expect(memories).toHaveLength(1);
+    expect(memories[0]?.title).toBe("Prefers concise answers");
+  });
+
   test("creates a user memory via tool execution", async () => {
     const tools = createMemoryTools(makeDeps());
     const saveTool = findTool(tools, "save_user_memory");
@@ -452,6 +473,28 @@ describe("save_user_memory tool", () => {
     const mem = getMemory(db, id);
     expect(mem).not.toBeNull();
     expect(mem?.title).toBe("Updated");
+  });
+
+  test("rejects update when memory belongs to a different user", async () => {
+    const tools = createMemoryTools(makeDeps());
+    const saveTool = findTool(tools, "save_user_memory");
+
+    const createResult = await saveTool.execute("tc-diff-user-create", {
+      username: "u2",
+      title: "u2-only",
+    }, new AbortController().signal);
+    const id = (createResult.details as { memoryId: number }).memoryId;
+
+    const updateResult = await saveTool.execute("tc-diff-user-update", {
+      title: "attempted hijack",
+      id,
+    }, new AbortController().signal);
+    const text = (updateResult.content[0] as { text: string }).text;
+    expect(text).toContain("different user");
+    expect((updateResult.details as { success: boolean }).success).toBe(false);
+
+    const mem = getMemory(db, id);
+    expect(mem?.title).toBe("u2-only");
   });
 
   test("rejects update of user memory belonging to another guild", async () => {

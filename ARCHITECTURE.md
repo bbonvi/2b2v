@@ -41,7 +41,7 @@ Discord messageCreate event
        │
        └─ handleMessage(msgs, deps)
             ├─ shouldRespond(input, triggers) → mention|keyword|random|null
-            ├─ build context (persona, instructions, emojis, members, journal, schedules, history, current context)
+            ├─ build context (persona, instructions, emojis, members, journal, current-user memories, schedules, history, current context)
             ├─ resolve model (guild overrides global default)
             └─ structured action loop:
                OpenRouter `response_format` (json_schema) + prompt reinforcement
@@ -78,6 +78,10 @@ Messages and memories enqueue into a batcher, get embedded by the local model, a
 `SECTION_DEFS` in `src/agent/context-assembly.ts` is the single source of truth for section order, labels, roles, caching, and headers. Array position determines output order.
 
 Empty sections are omitted. `assembleContext()` iterates the registry; no imperative per-section logic.
+
+`buildContext()` injects two memory-oriented prompt sections:
+- `## Journal` from bot journal entries (`save_journal_entry`/`recall_journal_entry` flow).
+- `## Current User Memories` from `scope='user'` rows for the current inbound author, so per-user facts are available without calling `recall_user_memories` for that user.
 
 `handleMessage()` uses section-level prompt caching:
 - All `cached: true` sections are merged by `(role, cached)` bucket before payload injection.

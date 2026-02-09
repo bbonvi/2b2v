@@ -294,7 +294,7 @@ describe("buildDisplayNameContext", () => {
     ]);
     // Legend present
     expect(result).toContain("Legend: [@username] — [display name] — [memories]");
-    expect(result).toContain("recall_user_memories(username)");
+    expect(result).toContain("for other users");
     // User entries
     expect(result).toContain("@alice — Alice Wonder");
     expect(result).toContain("@bob — Bob Builder");

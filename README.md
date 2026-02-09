@@ -8,6 +8,7 @@ Personal agentic Discord bot that plays a character persona (default: 2B from Ni
 - Speaks in character while staying helpful and grounded
 - Splits responses into multiple short messages with natural delays
 - Remembers conversations and facts with scoped, searchable memory
+- Automatically includes current-user memory summaries in prompt context; uses `recall_user_memories(username)` for other users
 - Stores and recalls images shared in chats
 - Schedules messages (recurring, one-off, relative time)
 - Searches the web via Brave Search

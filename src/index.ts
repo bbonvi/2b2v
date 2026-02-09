@@ -366,7 +366,13 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
       );
 
       // Build agent tools (no typing indicator needed for scheduled tasks)
-      const extraTools = buildAgentTools(guildId, channelId, guildConfig, guild);
+      const extraTools = buildAgentTools(
+        guildId,
+        channelId,
+        guildConfig,
+        guild,
+        { id: "scheduler", username: "scheduler" },
+      );
 
       // Build synthetic incoming message
       const incoming: IncomingMessage = {
@@ -699,6 +705,23 @@ async function buildContext(
     ? [journalLegend, ...journalLines].join("\n")
     : "";
 
+  const currentUserMemories = listMemories(db, {
+    scope: "user",
+    guildId,
+    userId: latestUserMessage.authorId,
+  })
+    .filter((m) => m.title !== "")
+    .sort((a, b) => {
+      const ud = a.updatedAt - b.updatedAt;
+      return ud !== 0 ? ud : a.id - b.id;
+    });
+  const currentUserMemoryLines = currentUserMemories.map((m) => `- ${m.id} ${formatJournalTimestamp(m.updatedAt)} ${m.title}`);
+  const currentUserMemoryLegend =
+    "*[ID] ([Last updated]) [Title]; each entry may have `content`; use `save_user_memory(id=N, ...)` to update, `delete_user_memories(ids=[N])` to remove, `recall_user_memories(username)` for other users*";
+  const currentUserMemorySummaries = currentUserMemories.length > 0
+    ? [currentUserMemoryLegend, ...currentUserMemoryLines].join("\n")
+    : "";
+
   // Upcoming schedules — one-off by runAt then ID; cron by expression then ID; one-off first
   const upcoming = listUpcomingForContext(db, guildId)
     .sort((a, b) => {
@@ -808,6 +831,7 @@ async function buildContext(
     emojis: emojiContext,
     members: displayNameContext,
     journalSummaries,
+    currentUserMemories: currentUserMemorySummaries,
     upcomingSchedules,
     threadsInChat,
     threadMetadata,
@@ -821,7 +845,13 @@ async function buildContext(
 }
 
 // --- 20. Build agent tools for a message context ---
-function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildConfig, guild: Guild) {
+function buildAgentTools(
+  guildId: string,
+  channelId: string,
+  guildConfig: GuildConfig,
+  guild: Guild,
+  currentUser: { id: string; username: string },
+) {
   // Resolve username to userId using guild member cache
   const resolveUsername = (username: string): string | undefined => {
     const member = guild.members.cache.find((m) => m.user.username === username);
@@ -832,6 +862,8 @@ function buildAgentTools(guildId: string, channelId: string, guildConfig: GuildC
     db,
     guildId,
     botUserId: client.user?.id ?? "",
+    currentUserId: currentUser.id,
+    currentUsername: currentUser.username,
     resolveUsername,
     onMemoryChanged: (memoryId, text) => {
       void embeddingQueue.enqueue({
@@ -1209,7 +1241,17 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
         }
       },
     });
-    const extraTools = [...buildAgentTools(guildId, channelId, guildConfig, guild), startTypingTool, startThreadTool];
+    const extraTools = [
+      ...buildAgentTools(
+        guildId,
+        channelId,
+        guildConfig,
+        guild,
+        { id: message.author.id, username: message.author.username },
+      ),
+      startTypingTool,
+      startThreadTool,
+    ];
 
     const TYPING_INTERVAL_MS = 8_000;
     const TYPING_MAX_MS = 30_000;

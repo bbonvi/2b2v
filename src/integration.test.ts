@@ -101,7 +101,7 @@ describe("translation → message storage pipeline", () => {
     ]);
     // Legend + user entries
     expect(ctx).toContain("Legend: [@username] — [display name] — [memories]");
-    expect(ctx).toContain("recall_user_memories(username)");
+    expect(ctx).toContain("for other users");
     expect(ctx).toContain("@alice — Alice W");
     expect(ctx).toContain("@bob — Bob X");
   });
@@ -125,8 +125,37 @@ const mockUsers = new Map<string, string>([
 const mockResolveUsername = (username: string): string | undefined => mockUsers.get(username);
 
 describe("memory tools → DB roundtrip", () => {
+  test("save_user_memory defaults to current user when username is omitted", async () => {
+    const tools = createMemoryTools({
+      db,
+      guildId: GUILD_ID,
+      botUserId: "bot-1",
+      currentUserId: USER_ID,
+      currentUsername: "testuser",
+      resolveUsername: mockResolveUsername,
+    });
+    const saveTool = findTool(tools, "save_user_memory");
+
+    const saveResult = await saveTool.execute("tc-current", {
+      title: "Current-user only memory",
+    });
+    const memoryId = (saveResult.details as { memoryId: number }).memoryId;
+
+    const dbRow = getMemory(db, memoryId);
+    expect(dbRow?.scope).toBe("user");
+    expect(dbRow?.userId).toBe(USER_ID);
+    expect(dbRow?.title).toBe("Current-user only memory");
+  });
+
   test("save_user_memory creates entry, recall_user_memories retrieves, delete_user_memories removes", async () => {
-    const tools = createMemoryTools({ db, guildId: GUILD_ID, botUserId: "bot-1", resolveUsername: mockResolveUsername });
+    const tools = createMemoryTools({
+      db,
+      guildId: GUILD_ID,
+      botUserId: "bot-1",
+      currentUserId: USER_ID,
+      currentUsername: "testuser",
+      resolveUsername: mockResolveUsername,
+    });
     const saveTool = findTool(tools, "save_user_memory");
     const deleteTool = findTool(tools, "delete_user_memories");
     const recallTool = findTool(tools, "recall_user_memories");
@@ -158,7 +187,14 @@ describe("memory tools → DB roundtrip", () => {
   });
 
   test("save_user_memory with id param updates existing entry", async () => {
-    const tools = createMemoryTools({ db, guildId: GUILD_ID, botUserId: "bot-1", resolveUsername: mockResolveUsername });
+    const tools = createMemoryTools({
+      db,
+      guildId: GUILD_ID,
+      botUserId: "bot-1",
+      currentUserId: USER_ID,
+      currentUsername: "testuser",
+      resolveUsername: mockResolveUsername,
+    });
     const saveTool = findTool(tools, "save_user_memory");
 
     // Create
@@ -180,7 +216,14 @@ describe("memory tools → DB roundtrip", () => {
   });
 
   test("save_journal_entry gets 180d TTL by default", async () => {
-    const tools = createMemoryTools({ db, guildId: GUILD_ID, botUserId: "bot-1", resolveUsername: mockResolveUsername });
+    const tools = createMemoryTools({
+      db,
+      guildId: GUILD_ID,
+      botUserId: "bot-1",
+      currentUserId: USER_ID,
+      currentUsername: "testuser",
+      resolveUsername: mockResolveUsername,
+    });
     const saveTool = findTool(tools, "save_journal_entry");
 
     const before = Date.now();

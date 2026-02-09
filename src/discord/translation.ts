@@ -203,7 +203,7 @@ export function translateOutbound(
 }
 
 const MEMBER_LIST_LEGEND = `Legend: [@username] — [display name] — [memories]
-        Use \`recall_user_memories(username)\` to read a user's memories.`;
+        Current user's memories are in context; use \`recall_user_memories(username)\` for other users.`;
 
 /**
  * Build a display name context block for LLM consumption.
