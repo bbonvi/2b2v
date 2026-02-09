@@ -203,6 +203,41 @@ describe("runStructuredActionLoop", () => {
     expect(result.toolCalls).toBe(0);
   });
 
+  test("accepts ignore_user for sign-off phrasing without policy retry", async () => {
+    let turn = 0;
+    const result = await runStructuredActionLoop({
+      maxToolCalls: 3,
+      wallClockTimeoutMs: 10_000,
+      llmOutputTimeoutMs: 2_000,
+      tools: [makeTool("send_message")],
+      callModel: () => {
+        turn += 1;
+        return Promise.resolve({
+          rawText: JSON.stringify({
+            status: "done",
+            actions: [{
+              type: "ignore_user",
+              reason: "user signed off, wait for next actionable message",
+            }],
+          } satisfies StructuredActionBatch),
+        });
+      },
+      onToolCall: () => Promise.resolve({
+        content: [{ type: "text", text: "ok" }],
+        details: {},
+      }),
+      initialMessages: [
+        { role: "user", content: "hello", timestamp: Date.now() },
+      ],
+    });
+
+    expect(result.stopReason).toBe("ignored");
+    expect(result.turns).toBe(1);
+    const hasPolicyError = result.messages.some((m) => m.role === "user" && m.content.includes("[POLICY ERROR]"));
+    expect(hasPolicyError).toBe(false);
+    expect(turn).toBe(1);
+  });
+
   test("retries on invalid non-json output and then executes tool call", async () => {
     let turn = 0;
     let executed = 0;
@@ -360,56 +395,6 @@ describe("runStructuredActionLoop", () => {
     expect(executed).toBe(1);
     const hasPolicyError = result.messages.some((m) =>
       m.role === "user" && m.content.includes("send_message requires explicit reply"),
-    );
-    expect(hasPolicyError).toBe(true);
-  });
-
-  test("rejects ignore_user without valid silence rationale and retries", async () => {
-    let turn = 0;
-    let executed = 0;
-
-    const result = await runStructuredActionLoop({
-      maxToolCalls: 3,
-      wallClockTimeoutMs: 10_000,
-      llmOutputTimeoutMs: 2_000,
-      tools: [makeTool("send_message")],
-      callModel: () => {
-        turn += 1;
-        if (turn === 1) {
-          return Promise.resolve({
-            rawText: JSON.stringify({
-              status: "done",
-              actions: [{ type: "ignore_user", reason: "answered" }],
-            } satisfies StructuredActionBatch),
-          });
-        }
-        return Promise.resolve({
-          rawText: JSON.stringify({
-            status: "done",
-            actions: [
-              { type: "tool_call", tool_name: "send_message", arguments: { text: "hello", reply: true } },
-              { type: "stop_response", reason: "done" },
-            ],
-          } satisfies StructuredActionBatch),
-        });
-      },
-      onToolCall: () => {
-        executed += 1;
-        return Promise.resolve({
-          content: [{ type: "text", text: "ok" }],
-          details: {},
-        });
-      },
-      initialMessages: [
-        { role: "user", content: "hello", timestamp: Date.now() },
-      ],
-    });
-
-    expect(result.stopReason).toBe("done");
-    expect(result.turns).toBe(2);
-    expect(executed).toBe(1);
-    const hasPolicyError = result.messages.some((m) =>
-      m.role === "user" && m.content.includes("ignore_user reason must indicate"),
     );
     expect(hasPolicyError).toBe(true);
   });
