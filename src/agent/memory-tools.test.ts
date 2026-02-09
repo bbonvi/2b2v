@@ -56,7 +56,7 @@ describe("createMemoryTools factory", () => {
     const names = createMemoryTools(makeDeps()).map((tool) => tool.name).sort();
     expect(names).toEqual([
       "delete_journal_entries",
-      "get_journal_entry",
+      "get_journal_entries",
       "save_journal_entry",
     ]);
   });
@@ -138,40 +138,94 @@ describe("save_journal_entry", () => {
   });
 });
 
-describe("get_journal_entry", () => {
-  test("returns full content with scope labels", async () => {
+describe("get_journal_entries", () => {
+  test("returns global and user-scoped entries when username is omitted", async () => {
     const tools = createMemoryTools(makeDeps());
     const saveTool = findTool(tools, "save_journal_entry");
-    const getTool = findTool(tools, "get_journal_entry");
+    const getTool = findTool(tools, "get_journal_entries");
 
-    const createResult = await saveTool.execute("tc-1", {
+    const first = await saveTool.execute("tc-1", {
+      content: "Global context",
+    }, new AbortController().signal);
+    const second = await saveTool.execute("tc-2", {
       username: "alice",
       content: "Alice context",
     }, new AbortController().signal);
-    const id = (createResult.details as { memoryId: number }).memoryId;
+    const third = await saveTool.execute("tc-3", {
+      username: "bob",
+      content: "Bob context",
+    }, new AbortController().signal);
 
-    const result = await getTool.execute("tc-2", { id }, new AbortController().signal);
+    const firstId = (first.details as { memoryId: number }).memoryId;
+    const secondId = (second.details as { memoryId: number }).memoryId;
+    const thirdId = (third.details as { memoryId: number }).memoryId;
+
+    const result = await getTool.execute("tc-4", {}, new AbortController().signal);
     const text = (result.content[0] as { text: string }).text;
-    expect(text).toContain(`ID: ${id}`);
+    expect(text).toContain(`ID: ${firstId}`);
+    expect(text).toContain(`ID: ${secondId}`);
+    expect(text).toContain(`ID: ${thirdId}`);
+    expect(text).toContain("Scope: global");
     expect(text).toContain("Scope: @alice");
+    expect(text).toContain("Scope: @bob");
+    expect(text).toContain("Content: Global context");
     expect(text).toContain("Content: Alice context");
-    expect((result.details as { found: boolean }).found).toBe(true);
+    expect(text).toContain("Content: Bob context");
+    expect((result.details as { count: number }).count).toBe(3);
+    expect((result.details as { ids: number[] }).ids).toEqual([
+      firstId,
+      secondId,
+      thirdId,
+    ]);
   });
 
-  test("enforces username scope when provided", async () => {
+  test("returns only resolved user scope when username is provided", async () => {
     const tools = createMemoryTools(makeDeps());
     const saveTool = findTool(tools, "save_journal_entry");
-    const getTool = findTool(tools, "get_journal_entry");
+    const getTool = findTool(tools, "get_journal_entries");
 
-    const createResult = await saveTool.execute("tc-3", {
+    await saveTool.execute("tc-5", {
+      content: "Global entry",
+    }, new AbortController().signal);
+    await saveTool.execute("tc-6", {
       username: "alice",
       content: "Scoped content",
     }, new AbortController().signal);
-    const id = (createResult.details as { memoryId: number }).memoryId;
+    await saveTool.execute("tc-7", {
+      username: "bob",
+      content: "Other user content",
+    }, new AbortController().signal);
 
-    const mismatch = await getTool.execute("tc-4", { id, username: "bob" }, new AbortController().signal);
-    expect((mismatch.content[0] as { text: string }).text).toContain("different user");
-    expect((mismatch.details as { found: boolean }).found).toBe(false);
+    const result = await getTool.execute("tc-8", { username: "@alice" }, new AbortController().signal);
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(text).toContain("Scope: @alice");
+    expect(text).toContain("Content: Scoped content");
+    expect(text).not.toContain("Scope: global");
+    expect(text).not.toContain("Content: Other user content");
+    expect((result.details as { count: number }).count).toBe(1);
+    expect((result.details as { scope: string }).scope).toBe("@alice");
+  });
+
+  test("returns explicit error for unknown user", async () => {
+    const tools = createMemoryTools(makeDeps());
+    const getTool = findTool(tools, "get_journal_entries");
+
+    const result = await getTool.execute("tc-9", { username: "@missing" }, new AbortController().signal);
+    expect((result.content[0] as { text: string }).text).toContain("does not exist");
+    expect((result.details as { count: number }).count).toBe(0);
+  });
+
+  test("returns deterministic empty message when no entries are found", async () => {
+    const tools = createMemoryTools(makeDeps());
+    const getTool = findTool(tools, "get_journal_entries");
+
+    const result = await getTool.execute("tc-10", { username: "alice" }, new AbortController().signal);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toBe("No journal entries found for @alice.");
+    expect((result.details as { count: number }).count).toBe(0);
+    expect((result.details as { scope: string }).scope).toBe("@alice");
+    expect((result.details as { ids: number[] }).ids).toEqual([]);
   });
 });
 

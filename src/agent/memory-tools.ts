@@ -6,6 +6,7 @@ import {
   createMemory,
   deleteMemory,
   getMemory,
+  listMemories,
   type MemoryScope,
   type MemoryRow,
   updateMemory,
@@ -36,8 +37,7 @@ interface SaveJournalEntryParams {
   sourceMessageId?: string;
 }
 
-interface GetJournalEntryParams {
-  id: number;
+interface GetJournalEntriesParams {
   username?: string;
 }
 
@@ -59,9 +59,8 @@ const SaveJournalEntrySchema = Type.Object({
   sourceMessageId: Type.Optional(Type.String({ description: "Discord message ID that triggered this journal entry." })),
 });
 
-const GetJournalEntrySchema = Type.Object({
-  id: Type.Integer({ description: "Journal entry ID to retrieve." }),
-  username: Type.Optional(Type.String({ description: "Optional @username scope check for user-specific entries." })),
+const GetJournalEntriesSchema = Type.Object({
+  username: Type.Optional(Type.String({ description: "Optional @username scope to list user-specific entries only." })),
 });
 
 const DeleteJournalEntriesSchema = Type.Object({
@@ -132,7 +131,7 @@ function targetScopeLabel(
 
 /**
  * Create memory agent tools bound to a guild context.
- * Returns 3 tools: save_journal_entry, get_journal_entry, delete_journal_entries.
+ * Returns 3 tools: save_journal_entry, get_journal_entries, delete_journal_entries.
  */
 export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
   const {
@@ -232,13 +231,13 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     },
   };
 
-  const getJournalEntry: AgentTool = {
-    name: "get_journal_entry",
-    label: "Get Journal Entry",
-    description: "Retrieve a journal entry's full content by ID. Optional `username` enforces user-scoped match.",
-    parameters: GetJournalEntrySchema,
-    execute: (_toolCallId, params): Promise<AgentToolResult<{ memoryId: number; found: boolean }>> => {
-      const p = params as GetJournalEntryParams;
+  const getJournalEntries: AgentTool = {
+    name: "get_journal_entries",
+    label: "Get Journal Entries",
+    description: "List journal entries. Omit `username` for global+user entries, or set `username` for one user's scoped entries.",
+    parameters: GetJournalEntriesSchema,
+    execute: (_toolCallId, params): Promise<AgentToolResult<{ count: number; scope: string; ids: number[]; found: boolean }>> => {
+      const p = params as GetJournalEntriesParams;
       const scopedUser = p.username !== undefined
         ? resolveScopedUser(p.username, resolveUsername)
         : null;
@@ -246,44 +245,60 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
       if (p.username !== undefined && scopedUser === null) {
         return Promise.resolve({
           content: [{ type: "text", text: `User '${p.username}' does not exist.` }],
-          details: { memoryId: p.id, found: false },
+          details: {
+            count: 0,
+            scope: normalizeUsername(p.username),
+            ids: [],
+            found: false,
+          },
         });
       }
 
-      const existing = getMemory(db, p.id);
-      if (existing === null || existing.guildId !== guildId) {
+      const scope = scopedUser !== null ? `@${scopedUser.username}` : "all";
+      const rows = scopedUser !== null
+        ? listMemories(db, { scope: "user", guildId, userId: scopedUser.userId })
+        : [
+          ...listMemories(db, { scope: "journal", guildId }),
+          ...listMemories(db, { scope: "user", guildId }),
+        ];
+      const orderedRows = rows
+        .slice()
+        .sort((a, b) => {
+          const updatedDiff = a.updatedAt - b.updatedAt;
+          return updatedDiff !== 0 ? updatedDiff : a.id - b.id;
+        });
+
+      if (orderedRows.length === 0) {
         return Promise.resolve({
-          content: [{ type: "text", text: `Journal entry ${p.id} not found.` }],
-          details: { memoryId: p.id, found: false },
+          content: [{ type: "text", text: scopedUser !== null ? `No journal entries found for @${scopedUser.username}.` : "No journal entries found." }],
+          details: {
+            count: 0,
+            scope,
+            ids: [],
+            found: false,
+          },
         });
       }
 
-      if (scopedUser !== null) {
-        if (existing.scope !== "user") {
-          return Promise.resolve({
-            content: [{ type: "text", text: `Journal entry ${p.id} is global. Omit username to read it.` }],
-            details: { memoryId: p.id, found: false },
-          });
-        }
-        if (existing.userId !== scopedUser.userId) {
-          return Promise.resolve({
-            content: [{ type: "text", text: `Journal entry ${p.id} belongs to a different user.` }],
-            details: { memoryId: p.id, found: false },
-          });
-        }
-      }
+      const entryBlocks = orderedRows.map((row) => {
+        const label = scopeLabel(row, resolveUserId);
+        return [
+          `ID: ${row.id}`,
+          `Scope: ${label}`,
+          `Content: ${row.content}`,
+          `Created: ${formatRelativeAgo(row.createdAt)}`,
+          `Updated: ${formatRelativeAgo(row.updatedAt)}`,
+        ].join("\n");
+      });
 
-      const label = scopeLabel(existing, resolveUserId);
-      const lines = [
-        `ID: ${existing.id}`,
-        `Scope: ${label}`,
-        `Content: ${existing.content}`,
-        `Created: ${formatRelativeAgo(existing.createdAt)}`,
-        `Updated: ${formatRelativeAgo(existing.updatedAt)}`,
-      ];
       return Promise.resolve({
-        content: [{ type: "text", text: lines.join("\n") }],
-        details: { memoryId: p.id, found: true },
+        content: [{ type: "text", text: entryBlocks.join("\n\n") }],
+        details: {
+          count: orderedRows.length,
+          scope,
+          ids: orderedRows.map((row) => row.id),
+          found: true,
+        },
       });
     },
   };
@@ -356,5 +371,5 @@ export function createMemoryTools(deps: MemoryToolsDeps): AgentTool[] {
     },
   };
 
-  return [saveJournalEntry, getJournalEntry, deleteJournalEntries];
+  return [saveJournalEntry, getJournalEntries, deleteJournalEntries];
 }

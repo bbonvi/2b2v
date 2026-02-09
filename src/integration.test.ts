@@ -75,7 +75,7 @@ describe("translation → message storage pipeline", () => {
     ]);
     expect(ctx).toContain("Legend: [@username] — [display name] — [memories]");
     expect(ctx).toContain("save_journal_entry(username)");
-    expect(ctx).toContain("get_journal_entry(id, username?)");
+    expect(ctx).toContain("get_journal_entries(username?)");
   });
 
   test("roundtrip: inbound → outbound preserves resolvable entities", () => {
@@ -128,7 +128,7 @@ describe("memory tools → DB roundtrip", () => {
       resolveUsername: (username) => mockUsers.get(username),
     });
     const saveTool = findTool(tools, "save_journal_entry");
-    const getTool = findTool(tools, "get_journal_entry");
+    const getTool = findTool(tools, "get_journal_entries");
     const deleteTool = findTool(tools, "delete_journal_entries");
 
     const saveResult = await saveTool.execute("tc-2", {
@@ -142,10 +142,10 @@ describe("memory tools → DB roundtrip", () => {
     expect(row?.content).toBe("User-scoped entry");
 
     const getResult = await getTool.execute("tc-3", {
-      id,
       username: "user-42",
     }, new AbortController().signal);
-    expect((getResult.details as { found: boolean }).found).toBe(true);
+    expect((getResult.details as { count: number }).count).toBe(1);
+    expect((getResult.content[0] as { text: string }).text).toContain(`ID: ${id}`);
 
     await deleteTool.execute("tc-4", {
       ids: [id],

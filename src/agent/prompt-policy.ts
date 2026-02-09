@@ -139,8 +139,8 @@ const TOOL_RULES: readonly ToolScopedRule[] = [
   },
   {
     id: "tool_get_journal_before_save",
-    text: "Use get_journal_entry before updating existing journal entries or when summary context may be insufficient.",
-    requiredTools: ["get_journal_entry"],
+    text: "Use get_journal_entries before updating existing journal entries or when summary context may be insufficient.",
+    requiredTools: ["get_journal_entries"],
   },
   {
     id: "tool_save_journal_for_durable_context",

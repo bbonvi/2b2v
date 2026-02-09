@@ -707,7 +707,7 @@ async function buildContext(
     return `- ${m.id} ${formatJournalTimestamp(m.updatedAt)} [${scopeLabel}] ${m.content}`;
   });
   const journalLegend =
-    "*[ID] ([Last updated]) [Scope] [Content]; [Scope] is `global` or `@username`; use `get_journal_entry(id)` for full content and optional `username` scope checks*";
+    "*[ID] ([Last updated]) [Scope] [Content]; [Scope] is `global` or `@username`; use `get_journal_entries(username?)` to list scoped entries*";
   const journalSummaries = journals.length > 0
     ? [journalLegend, ...journalLines].join("\n")
     : "";
