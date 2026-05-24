@@ -33,6 +33,7 @@ export interface ThreadMetadata {
 
 /** Input for context assembly. All string fields may be empty to indicate omission. */
 export interface ContextAssemblyInput {
+  /** Persona prompt is intentionally not injected into orchestrator context. */
   persona: string;
   toolInstructions: string;
   instructions: string;
@@ -83,9 +84,8 @@ function computeThreadMetadata(input: ContextAssemblyInput): string {
 
 /** Declarative section registry. Array order = output order. */
 export const SECTION_DEFS: readonly SectionDef[] = [
-  // Group 1: system, cached (stable identity)
+  // Group 1: system, cached (stable orchestrator instructions)
   { label: "Tool Instructions",    role: "system",    cached: true,  source: { kind: "field", inputKey: "toolInstructions" } },
-  { label: "Persona",              role: "system",    cached: true,  source: { kind: "field", inputKey: "persona" } },
   { label: "Instructions",         role: "system",    cached: true,  source: { kind: "field", inputKey: "instructions", header: "## Instructions" } },
 
   // Group 2: system, cached (stable context + older history)

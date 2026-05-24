@@ -118,8 +118,8 @@ const guildsDir = join("config", "guilds");
 const guildConfigs = loadGuildConfigs(guildsDir, globalConfig);
 log.info("guild configs loaded", { count: guildConfigs.size });
 
-// --- 8. Load prompt profile (persona + tool + late instructions). Instructions load via global.defaultInstructions.
-let { persona, toolInstructions, lateInstructions } = loadPromptProfile(globalConfig.promptProfile, log);
+// --- 8. Load prompt profile. Persona is used only by persona_turn, not the outer orchestrator.
+let { persona, toolInstructions } = loadPromptProfile(globalConfig.promptProfile, log);
 
 // --- 9. Emoji cache ---
 const emojiCache = new EmojiCache();
@@ -417,6 +417,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         globalConfig,
         guildConfig,
         context,
+        personaPrompt: persona,
         sender,
         extraTools,
         log: scheduleLog,
@@ -829,7 +830,7 @@ async function buildContext(
     olderHistory: olderText,
     newerHistory: newerText,
     currentContext,
-    lateInstruction: lateInstructions,
+    lateInstruction: "",
     userMessage,
   });
 }
@@ -1366,6 +1367,7 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
       globalConfig,
       guildConfig,
       context,
+      personaPrompt: persona,
       sender,
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
@@ -1599,7 +1601,7 @@ function reloadConfigs(): void {
     );
     validateTrimConfig(newGlobal.defaultTrim);
     globalConfig = newGlobal;
-    ({ persona, toolInstructions, lateInstructions } = loadPromptProfile(globalConfig.promptProfile, log));
+    ({ persona, toolInstructions } = loadPromptProfile(globalConfig.promptProfile, log));
 
     // Reload guild configs — clear and rebuild
     const newGuilds = loadGuildConfigs(guildsDir, globalConfig);
@@ -1629,6 +1631,16 @@ if (existsSync("config")) {
   // Prevent watcher from keeping the process alive during shutdown
   watcher.unref();
   log.info("config hot-reload watcher started");
+}
+
+if (existsSync("prompts")) {
+  const watcher = watch("prompts", { recursive: true }, (_event, _filename) => {
+    if (reloadTimer !== null) clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(reloadConfigs, CONFIG_RELOAD_DEBOUNCE_MS);
+  });
+
+  watcher.unref();
+  log.info("prompt hot-reload watcher started");
 }
 
 // --- Health check summary ---

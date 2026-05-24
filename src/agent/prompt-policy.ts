@@ -16,28 +16,24 @@ export interface ResolvedPromptPolicy {
 
 const SHARED_RULES: readonly PromptPolicyRule[] = [
   {
-    id: "direct_mentions_default_send_message",
-    text: "For direct mentions or direct user questions, default to responding via `send_message`.",
+    id: "direct_mentions_default_persona_turn",
+    text: "For direct mentions or direct user questions, default to responding via `persona_turn`.",
   },
   {
     id: "ignore_user_only_when_silence_is_better",
     text: "Use `ignore_user` only when silence is clearly better (spam, no actionable request, or explicit request to ignore).",
   },
   {
-    id: "send_message_requires_reply_boolean",
-    text: "Every `send_message` arguments object must include `reply` explicitly (`true` or `false`).",
-  },
-  {
-    id: "start_typing_send_message_mutually_exclusive",
-    text: "If you plan to reply, emit `start_typing` in a prior action batch, then send `send_message` in a later batch; never include both in the same batch.",
+    id: "persona_turn_requires_reply_boolean",
+    text: "Every `persona_turn` action must include `reply` explicitly (`true` or `false`).",
   },
   {
     id: "uncertain_facts_require_web_search",
     text: "If the user asks for facts you are uncertain about, use `web_search` before answering.",
   },
   {
-    id: "research_requires_final_send_message",
-    text: "If you start research/tool work, always finish with at least one `send_message` unless `ignore_user` is explicitly justified.",
+    id: "research_requires_final_persona_turn",
+    text: "If you start research/tool work, always finish with at least one `persona_turn` unless `ignore_user` is explicitly justified.",
   },
 ];
 
@@ -47,12 +43,8 @@ const LATE_ONLY_RULES: readonly PromptPolicyRule[] = [
     text: "Follow the structured action JSON protocol exactly (no plain-text output outside JSON).",
   },
   {
-    id: "user_visible_output_via_send_message_only",
-    text: "User-visible output can only be sent through `send_message`.",
-  },
-  {
-    id: "start_typing_before_send_message",
-    text: "Before any final `send_message`, call `start_typing` in a separate earlier action batch (`status: \"continue\"`). Never place both in one batch.",
+    id: "user_visible_output_via_persona_turn_only",
+    text: "User-visible output can only be sent through `persona_turn`.",
   },
   {
     id: "consider_all_tools_before_deciding",
@@ -107,11 +99,6 @@ const TOOL_RULES: readonly ToolScopedRule[] = [
     requiredTools: ["chat_history"],
   },
   {
-    id: "tool_start_typing_refresh",
-    text: "When preparing a reply, emit start_typing first and keep send_message in a later batch; if more non-message work follows, refresh start_typing before that work.",
-    requiredTools: ["start_typing"],
-  },
-  {
     id: "tool_read_chat_images_for_stored_images",
     text: "Use read_chat_images with image_ids from chat history when inspecting stored images.",
     requiredTools: ["read_chat_images"],
@@ -138,7 +125,7 @@ const TOOL_RULES: readonly ToolScopedRule[] = [
   },
   {
     id: "tool_bash_progress_and_preview",
-    text: "Before bash, send a short progress message and include a command preview.",
+    text: "Before bash, use persona_turn for a short progress message and include a command preview.",
     requiredTools: ["bash"],
   },
   {
@@ -166,7 +153,7 @@ const RESEARCH_WORKFLOW_RULES: readonly ToolScopedRule[] = [
   },
   {
     id: "research_workflow_breadcrumb_updates",
-    text: "Leave breadcrumb progress updates via send_message while researching.",
+    text: "Leave breadcrumb progress updates via persona_turn while researching.",
     requiredTools: ["web_search", "fetch_url"],
   },
   {

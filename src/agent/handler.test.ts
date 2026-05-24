@@ -27,10 +27,10 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultInstructions: "",
     defaultLateInstruction: "",
     promptProfile: {
-      persona: [{ kind: "file", path: "config/persona.md", optional: false }],
-      toolInstructions: [{ kind: "file", path: "config/tool_instructions.md", optional: false }],
+      persona: [{ kind: "file", path: "prompts/persona.md", optional: false }],
+      toolInstructions: [{ kind: "file", path: "prompts/orchestrator.md", optional: false }],
       instructions: [],
-      lateInstructions: [],
+      lateInstructions: [{ kind: "file", path: "prompts/persona_response.md", optional: false }],
     },
     logLevel: "info",
     dataDir: "./data",
@@ -139,7 +139,7 @@ function makeTestLogger(): { logger: Logger; debug: ReturnType<typeof mock>; war
 }
 
 describe("handleMessage", () => {
-  test("appends configured defaultLateInstruction after policy late rules", async () => {
+  test("keeps persona instructions out of the outer orchestrator prompt", async () => {
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
     let capturedSystemPrompt = "";
 
@@ -168,10 +168,10 @@ describe("handleMessage", () => {
 
     await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
 
-    const customIdx = capturedSystemPrompt.indexOf("CUSTOM LATE RULE: stay concise.");
     const policyIdx = capturedSystemPrompt.indexOf("CRITICAL:");
     expect(policyIdx).toBeGreaterThanOrEqual(0);
-    expect(customIdx).toBeGreaterThan(policyIdx);
+    expect(capturedSystemPrompt).not.toContain("CUSTOM LATE RULE: stay concise.");
+    expect(capturedSystemPrompt).not.toContain("you are test bot");
   });
 
   test("returns triggered=false when no trigger matches", async () => {
@@ -193,21 +193,29 @@ describe("handleMessage", () => {
     expect(llmComplete).toHaveBeenCalledTimes(0);
   });
 
-  test("executes send_message through structured tool_call", async () => {
+  test("executes persona_turn through runtime persona speaker", async () => {
     const senderCalls: Array<{ text: string; reply: boolean }> = [];
     const sender: MessageSender = (text, reply) => {
       senderCalls.push({ text, reply });
       return Promise.resolve({ sentMessageId: "m-1" });
     };
 
-    const llmComplete: LlmCompleteFn = (_model, _context, _options) => {
+    let calls = 0;
+    let personaPrompt = "";
+    const llmComplete: LlmCompleteFn = (_model, context, _options) => {
+      calls += 1;
+      if (calls === 2) {
+        const firstMessage = context.messages[0] as { content?: unknown } | undefined;
+        personaPrompt = typeof firstMessage?.content === "string" ? firstMessage.content : "";
+        return Promise.resolve(assistantWithText("hello user"));
+      }
       const payload = {
         status: "done",
         actions: [
           {
-            type: "tool_call",
-            tool_name: "send_message",
-            arguments: { text: "hello user", reply: true },
+            type: "persona_turn",
+            kind: "final",
+            reply: true,
           },
           { type: "stop_response", reason: "complete" },
         ],
@@ -219,6 +227,7 @@ describe("handleMessage", () => {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig({ triggers: { mention: true, keywords: [], randomChance: 0 } }),
       context: makeContext(),
+      personaPrompt: "Persona",
       sender,
       llmComplete,
     };
@@ -227,6 +236,8 @@ describe("handleMessage", () => {
 
     expect(result.triggered).toBe(true);
     expect(result.agentRan).toBe(true);
+    expect(personaPrompt).toContain("## Current Orchestrator Transcript");
+    expect(personaPrompt).not.toContain("persona_turn");
     expect(senderCalls).toHaveLength(1);
     expect(senderCalls[0]?.text).toBe("hello user");
     expect(senderCalls[0]?.reply).toBe(true);
@@ -268,12 +279,15 @@ describe("handleMessage", () => {
       return Promise.resolve({ sentMessageId: `m-${sendCalls}` });
     };
 
+    let calls = 0;
     const llmComplete: LlmCompleteFn = () => {
+      calls += 1;
+      if (calls === 2) return Promise.resolve(assistantWithText("one"));
       const payload = {
         status: "continue",
         actions: [
-          { type: "tool_call", tool_name: "send_message", arguments: { text: "one", reply: false } },
-          { type: "tool_call", tool_name: "send_message", arguments: { text: "two", reply: false } },
+          { type: "persona_turn", kind: "progress", reply: false },
+          { type: "persona_turn", kind: "progress", reply: false },
         ],
       };
       return Promise.resolve(assistantWithText(JSON.stringify(payload)));
@@ -286,6 +300,7 @@ describe("handleMessage", () => {
         actionLoop: { maxToolCalls: 1, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       }),
       context: makeContext(),
+      personaPrompt: "Persona",
       sender,
       llmComplete,
     };
@@ -361,7 +376,7 @@ describe("handleMessage", () => {
       () => {},
     );
 
-    const llmRequestErrorCalls = debug.mock.calls.filter((args) => args[0] === "llm_request_error");
+    const llmRequestErrorCalls = debug.mock.calls.filter((args: unknown[]) => args[0] === "llm_request_error");
     expect(llmRequestErrorCalls).toHaveLength(0);
   });
 
@@ -464,7 +479,7 @@ describe("handleMessage", () => {
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
     const firstPayload = {
       status: "continue",
-      actions: [{ type: "tool_call", tool_name: "send_message", arguments: { text: "hello", reply: false } }],
+      actions: [{ type: "persona_turn", kind: "progress", reply: false }],
     };
     const secondPayload = {
       status: "done",
@@ -475,6 +490,7 @@ describe("handleMessage", () => {
     const llmComplete: LlmCompleteFn = () => {
       call += 1;
       if (call === 1) return Promise.resolve(assistantWithText(JSON.stringify(firstPayload)));
+      if (call === 2) return Promise.resolve(assistantWithText("hello"));
       return Promise.resolve(assistantWithText(JSON.stringify(secondPayload)));
     };
 
@@ -483,6 +499,7 @@ describe("handleMessage", () => {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig({ triggers: { mention: true, keywords: [], randomChance: 0 } }),
       context: makeContext(),
+      personaPrompt: "Persona",
       sender,
       llmComplete,
       log: logger,
@@ -490,7 +507,7 @@ describe("handleMessage", () => {
 
     await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
 
-    const llmOutputCalls = debug.mock.calls.filter((args) => args[0] === "llm_output");
+    const llmOutputCalls = debug.mock.calls.filter((args: unknown[]) => args[0] === "llm_output");
     expect(llmOutputCalls).toHaveLength(2);
     expect(llmOutputCalls[0]?.[1]).toEqual({ content: JSON.stringify(firstPayload) });
     expect(llmOutputCalls[1]?.[1]).toEqual({ content: JSON.stringify(secondPayload) });
@@ -519,13 +536,13 @@ describe("handleMessage", () => {
 
     await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
 
-    expect(debug.mock.calls.some((args) => args[0] === "structured_loop_start")).toBe(true);
-    expect(debug.mock.calls.some((args) => args[0] === "structured_loop_event")).toBe(true);
-    expect(debug.mock.calls.some((args) => args[0] === "llm_request_start")).toBe(true);
-    expect(debug.mock.calls.some((args) => args[0] === "llm_request_payload")).toBe(true);
-    expect(debug.mock.calls.some((args) => args[0] === "llm_response")).toBe(true);
-    expect(debug.mock.calls.some((args) => args[0] === "llm_response_payload")).toBe(true);
-    expect(debug.mock.calls.some((args) => args[0] === "structured_loop_end")).toBe(true);
+    expect(debug.mock.calls.some((args: unknown[]) => args[0] === "structured_loop_start")).toBe(true);
+    expect(debug.mock.calls.some((args: unknown[]) => args[0] === "structured_loop_event")).toBe(true);
+    expect(debug.mock.calls.some((args: unknown[]) => args[0] === "llm_request_start")).toBe(true);
+    expect(debug.mock.calls.some((args: unknown[]) => args[0] === "llm_request_payload")).toBe(true);
+    expect(debug.mock.calls.some((args: unknown[]) => args[0] === "llm_response")).toBe(true);
+    expect(debug.mock.calls.some((args: unknown[]) => args[0] === "llm_response_payload")).toBe(true);
+    expect(debug.mock.calls.some((args: unknown[]) => args[0] === "structured_loop_end")).toBe(true);
   });
 
   test("retries without response_format when provider reports schema state explosion", async () => {

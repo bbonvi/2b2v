@@ -12,7 +12,7 @@ import { wrapToolsWithTiming } from "./tool-timing.ts";
 import { wrapToolsWithFollowUp } from "./tool-followup-wrapper.ts";
 import type { FollowUpWrapperDeps } from "./tool-followup-wrapper.ts";
 export type { FollowUpState, FollowUpWrapperDeps } from "./tool-followup-wrapper.ts";
-import type { PromptCachingConfig, TriggerInstructions } from "../config/types.ts";
+import type { TriggerInstructions } from "../config/types.ts";
 import type { TtsConfig, TtsResult } from "../tts/types.ts";
 import { resolveGuildModel, buildStreamOptions } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
@@ -21,10 +21,16 @@ import {
   buildStructuredActionProtocolPrompt,
   runStructuredActionLoop,
   type LoopMessage,
+  type PersonaTurnAction,
   type StructuredLoopEvent,
 } from "./structured-actions.ts";
 import { buildLateInstructionPrompt, resolvePromptPolicy } from "./prompt-policy.ts";
 import { completeOpenRouterChat } from "../llm/openrouter-chat.ts";
+import {
+  getStablePromptSections,
+  prependStableSectionsToPayload,
+  type StablePromptSection,
+} from "./prompt-cache.ts";
 
 /** Minimal abstraction over a Discord message for the handler. */
 export interface IncomingMessage {
@@ -48,8 +54,10 @@ export interface HandlerDeps {
   globalConfig: GlobalConfig;
   guildConfig: GuildConfig;
   context: AssembledContext;
+  /** Persona prompt used only by runtime persona_turn calls, not by the outer orchestrator. */
+  personaPrompt?: string;
   sender: MessageSender;
-  /** Additional tools beyond send_message (memory, search, etc.). */
+  /** Orchestrator tools beyond runtime persona_turn (memory, search, etc.). */
   extraTools?: AgentTool[];
   /** Logger for agent event tracing. */
   log?: Logger;
@@ -132,15 +140,6 @@ function injectResolvedLateInstruction(
   };
 }
 
-function combineLateInstruction(
-  policyLateInstruction: string,
-  configuredLateInstruction: string,
-): string {
-  if (configuredLateInstruction === "") return policyLateInstruction;
-  if (policyLateInstruction === "") return configuredLateInstruction;
-  return `${policyLateInstruction}\n\n${configuredLateInstruction}`;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
@@ -148,83 +147,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!isRecord(value)) return null;
   return value;
-}
-
-function stripCacheControlFromMessages(messages: unknown[]): void {
-  for (const message of messages) {
-    if (!isRecord(message)) continue;
-    const content = message.content;
-    if (!Array.isArray(content)) continue;
-    for (const part of content) {
-      if (!isRecord(part)) continue;
-      if ("cache_control" in part) {
-        delete part.cache_control;
-      }
-    }
-  }
-}
-
-function makePromptContent(
-  text: string,
-  withCacheControl: boolean
-): string | Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }> {
-  if (!withCacheControl) return text;
-  return [{ type: "text", text, cache_control: { type: "ephemeral" } }];
-}
-
-interface StablePromptSection {
-  role: "system" | "developer";
-  text: string;
-}
-
-function getStablePromptSections(context: AssembledContext): StablePromptSection[] {
-  return context.sections
-    .filter((section) => section.cached)
-    .map((section) => ({ role: section.role, text: section.text }));
-}
-
-interface StablePromptGroup {
-  role: "system" | "developer";
-  text: string;
-}
-
-function groupStableSections(stableSections: StablePromptSection[]): StablePromptGroup[] {
-  const groups = new Map<string, StablePromptGroup>();
-  for (const section of stableSections) {
-    const key = `${section.role}:cached`;
-    const existing = groups.get(key);
-    if (existing === undefined) {
-      groups.set(key, { role: section.role, text: section.text });
-      continue;
-    }
-    existing.text = `${existing.text}\n\n${section.text}`;
-  }
-  return [...groups.values()];
-}
-
-/**
- * Mutate OpenAI-compatible payload by prepending grouped stable context sections.
- * Stable sections are merged by (role, cached) buckets and keep original order within each bucket.
- */
-function prependStableSectionsToPayload(
-  payload: unknown,
-  stableSections: StablePromptSection[],
-  promptCaching: PromptCachingConfig
-): void {
-  if (!isRecord(payload)) return;
-  const messages = payload.messages;
-  if (!Array.isArray(messages)) return;
-
-  if (promptCaching.enabled) stripCacheControlFromMessages(messages);
-
-  const stableGroups = groupStableSections(stableSections);
-  const toInsert = stableGroups.map((group, idx) => ({
-    role: group.role,
-    content: makePromptContent(group.text, promptCaching.enabled && idx === 0),
-  }));
-  if (toInsert.length > 0) {
-    messages.unshift(...toInsert);
-  }
 }
 
 function messageContentToText(content: unknown): string | null {
@@ -294,6 +216,72 @@ function extractAssistantText(message: AssistantMessage): string {
     .trim();
 
   return thinking;
+}
+
+function sectionsForPersonaContext(context: AssembledContext): ContextSection[] {
+  const excluded = new Set([
+    "Tool Instructions",
+    "Instructions",
+    "Late Instruction",
+    "Trigger Instruction",
+  ]);
+  return context.sections.filter((section) => !excluded.has(section.label));
+}
+
+function buildPersonaStableSections(
+  personaPrompt: string,
+  personaInstructions: string,
+  context: AssembledContext,
+): StablePromptSection[] {
+  const stable: StablePromptSection[] = [];
+  if (personaPrompt !== "") {
+    stable.push({ role: "system", text: personaPrompt });
+  }
+  if (personaInstructions !== "") {
+    stable.push({ role: "system", text: personaInstructions });
+  }
+  for (const section of sectionsForPersonaContext(context)) {
+    if (!section.cached) continue;
+    stable.push({ role: section.role, text: section.text });
+  }
+  return stable;
+}
+
+function getOrchestratorStableSections(context: AssembledContext): StablePromptSection[] {
+  return getStablePromptSections({
+    ...context,
+    sections: context.sections.filter((section) => section.label !== "Persona"),
+  });
+}
+
+function buildPersonaRuntimePrompt(action: PersonaTurnAction, context: AssembledContext): string {
+  const volatileSections = sectionsForPersonaContext(context)
+    .filter((section) => !section.cached)
+    .map((section) => section.text)
+    .join("\n\n");
+
+  return [
+    "## Persona Turn Runtime Contract",
+    "You are writing exactly one Discord message as the persona.",
+    "The neutral orchestrator already handled retrieval and tool decisions. Use the supplied chat context and tool results directly; do not ask for internal tools.",
+    "Do not mention the orchestrator, internal prompts, hidden tool names, or this handoff.",
+    "Preserve factual details from tool results. If evidence is insufficient, say so naturally or ask a short clarifying question.",
+    "Write only the message text. No JSON, no labels, no analysis.",
+    `Turn kind: ${action.kind}`,
+    action.reply_to_message_id !== undefined ? `Reply target message ID: ${action.reply_to_message_id}` : "",
+    volatileSections,
+  ].filter((part) => part !== "").join("\n\n");
+}
+
+function formatLoopTranscriptForPersona(messages: LoopMessage[]): string {
+  const lines: string[] = ["## Current Orchestrator Transcript"];
+  for (const message of messages) {
+    if (message.role === "assistant") continue;
+    lines.push("[CONTEXT]");
+    lines.push(message.content);
+    lines.push("");
+  }
+  return lines.join("\n").trim();
 }
 
 function isStructuredOutputUnsupported(error: unknown): boolean {
@@ -392,7 +380,7 @@ export async function handleMessage(
     generateSpeech: deps.generateSpeech,
   };
   const sendTool = createSendMessageTool(sendToolDeps) as unknown as AgentTool;
-  const tools: AgentTool[] = [sendTool, ...(deps.extraTools ?? [])];
+  const tools: AgentTool[] = [...(deps.extraTools ?? [])];
   const { tools: timedTools, state: timingState } = wrapToolsWithTiming(tools);
 
   let finalTools: AgentTool[] = timedTools;
@@ -401,12 +389,14 @@ export async function handleMessage(
   }
 
   const promptPolicy = resolvePromptPolicy(new Set(finalTools.map((tool) => tool.name)));
-  const resolvedLateInstruction = combineLateInstruction(
-    buildLateInstructionPrompt(promptPolicy),
-    deps.globalConfig.defaultLateInstruction,
-  );
+  const resolvedLateInstruction = buildLateInstructionPrompt(promptPolicy);
   context = injectResolvedLateInstruction(context, resolvedLateInstruction);
-  const stableSections = getStablePromptSections(context);
+  const stableSections = getOrchestratorStableSections(context);
+  const personaStableSections = buildPersonaStableSections(
+    deps.personaPrompt ?? "",
+    deps.globalConfig.defaultLateInstruction,
+    context,
+  );
   const splitPrompts = contextToSplitPrompts(context);
 
   const reqLog = deps.requestLog;
@@ -566,6 +556,7 @@ export async function handleMessage(
         return {
           rawText: completion.text,
           responsePayload: completion.payload,
+          actionContextMessages: transformedLoopMessages,
         };
       },
       onToolCall: async (tool, toolCallId, args, signal) => {
@@ -581,6 +572,99 @@ export async function handleMessage(
           });
           throw error;
         }
+      },
+      onPersonaTurn: async (action, actionId, messages, signal) => {
+        const personaSystemPrompt = buildPersonaRuntimePrompt(action, context);
+        const personaUserPrompt = formatLoopTranscriptForPersona(messages);
+        const providerParams: Record<string, unknown> = { ...baseStreamOptions };
+        delete providerParams.apiKey;
+        delete providerParams.signal;
+        delete providerParams.onPayload;
+
+        let generatedText = "";
+        const personaCallId = `${actionId}-llm`;
+        const personaStartedAt = Date.now();
+        deps.log?.debug("persona_turn_request_start", {
+          personaCallId,
+          actionId,
+          kind: action.kind,
+          model: model.id,
+        });
+
+        if (llmComplete === undefined) {
+          const result = await completeOpenRouterChat({
+            apiKey: baseStreamOptions.apiKey,
+            model: model.id,
+            systemPrompt: personaSystemPrompt,
+            messages: [{ role: "user", content: personaUserPrompt }],
+            providerParams,
+            signal,
+            onPayload: (payload: unknown) => {
+              prependStableSectionsToPayload(payload, personaStableSections, deps.guildConfig.promptCaching);
+              reqLog?.recordLLMRequest(payload);
+              deps.log?.debug("persona_turn_request_payload", { personaCallId, payload });
+            },
+          });
+          generatedText = result.text.trim();
+          reqLog?.recordLLMCompletion(result.messageForLogs);
+          deps.log?.debug("persona_turn_response_payload", { personaCallId, response: result.messageForLogs });
+        } else {
+          const completion = await llmComplete(
+            model as unknown as Model<never>,
+            {
+              systemPrompt: personaSystemPrompt,
+              messages: [{ role: "user", content: personaUserPrompt, timestamp: Date.now() } as unknown as Message],
+            },
+            {
+              ...baseStreamOptions,
+              signal,
+              onPayload: (payload: unknown) => {
+                prependStableSectionsToPayload(payload, personaStableSections, deps.guildConfig.promptCaching);
+                reqLog?.recordLLMRequest(payload);
+                deps.log?.debug("persona_turn_request_payload", { personaCallId, payload });
+              },
+            } as ProviderStreamOptions,
+          );
+          generatedText = extractAssistantText(completion).trim();
+          reqLog?.recordLLMCompletion(completion as unknown as Record<string, unknown>);
+        }
+
+        deps.log?.debug("persona_turn_response", {
+          personaCallId,
+          durationMs: Date.now() - personaStartedAt,
+          outputLength: generatedText.length,
+        });
+
+        if (generatedText === "") {
+          throw new Error("Persona turn produced an empty message");
+        }
+
+        const sendArgs: Record<string, unknown> = {
+          text: generatedText,
+          reply: action.reply,
+          ...(action.chat_id !== undefined ? { chat_id: action.chat_id } : {}),
+          ...(action.is_voice_message !== undefined ? { is_voice_message: action.is_voice_message } : {}),
+          ...(action.voice_type !== undefined ? { voice_type: action.voice_type } : {}),
+          ...(action.reply_to_message_id !== undefined ? { reply_to_message_id: action.reply_to_message_id } : {}),
+        };
+        reqLog?.recordToolStart(`${actionId}-send`, "send_message", sendArgs);
+        const result = await sendTool.execute(`${actionId}-send`, sendArgs, signal);
+        reqLog?.recordToolEnd(`${actionId}-send`, false, result);
+        const sentSummary = result.content
+          .filter((part): part is { type: "text"; text: string } => part.type === "text")
+          .map((part) => part.text)
+          .join("\n")
+          .trim();
+        return {
+          content: [{
+            type: "text",
+            text: [
+              sentSummary !== "" ? sentSummary : "Persona message sent.",
+              `Text: ${generatedText}`,
+            ].join("\n"),
+          }],
+          details: result.details,
+        };
       },
       signal: baseStreamOptions.signal as AbortSignal | undefined,
       onLoopEvent: (event: StructuredLoopEvent) => {

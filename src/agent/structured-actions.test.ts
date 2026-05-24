@@ -40,6 +40,8 @@ describe("buildActionResponseFormat", () => {
 
     const asText = JSON.stringify(variants);
     expect(asText).toContain("tool_call");
+    expect(asText).toContain("start_typing");
+    expect(asText).toContain("persona_turn");
     expect(asText).toContain("stop_response");
     expect(asText).toContain("ignore_user");
   });
@@ -92,18 +94,15 @@ describe("buildStructuredActionProtocolPrompt", () => {
     const prompt = buildStructuredActionProtocolPrompt(tools);
     const policy = resolvePromptPolicy(new Set(tools.map((tool) => tool.name)));
 
-    expect(policy.sharedRules.map((rule) => rule.id)).toContain("direct_mentions_default_send_message");
+    expect(policy.sharedRules.map((rule) => rule.id)).toContain("direct_mentions_default_persona_turn");
     expect(policy.sharedRules.map((rule) => rule.id)).toContain("ignore_user_only_when_silence_is_better");
-    expect(policy.sharedRules.map((rule) => rule.id)).toContain("send_message_requires_reply_boolean");
-    expect(policy.sharedRules.map((rule) => rule.id)).toContain("start_typing_send_message_mutually_exclusive");
-    expect(policy.sharedRules.map((rule) => rule.id)).toContain("research_requires_final_send_message");
-    const sequencingRule = policy.sharedRules.find((rule) => rule.id === "start_typing_send_message_mutually_exclusive");
-    expect(sequencingRule?.text).toContain("prior action batch");
+    expect(policy.sharedRules.map((rule) => rule.id)).toContain("persona_turn_requires_reply_boolean");
+    expect(policy.sharedRules.map((rule) => rule.id)).toContain("research_requires_final_persona_turn");
 
     for (const rule of policy.sharedRules) {
       expect(prompt).toContain(rule.text);
     }
-    expect(prompt).toContain("Do not use stop_response or status=done before at least one send_message action");
+    expect(prompt).toContain("Do not use stop_response or status=done before at least one persona_turn action");
   });
 
   test("includes selected tool and research workflow reinforcement from policy", () => {
@@ -125,8 +124,6 @@ describe("buildStructuredActionProtocolPrompt", () => {
     expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_web_search_requires_fetch_url");
     expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_search_messages_retrieve_older_context");
     expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_chat_history_recent_context");
-    const typingRule = policy.toolRules.find((rule) => rule.id === "tool_start_typing_refresh");
-    expect(typingRule?.text).toContain("send_message in a later batch");
     expect(policy.researchWorkflowRules.map((rule) => rule.id)).toContain("research_workflow_title");
     expect(policy.researchWorkflowRules.map((rule) => rule.id)).toContain("research_workflow_breadcrumb_updates");
     expect(policy.researchWorkflowRules.map((rule) => rule.id)).toContain("research_workflow_parallel_fetch");
@@ -166,6 +163,30 @@ describe("parseStructuredActionBatch", () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) throw new Error("expected parsed.ok=true");
     expect(parsed.value.status).toBe("done");
+  });
+
+  test("parses legacy shorthand start_typing action", () => {
+    const parsed = parseStructuredActionBatch(
+      '{"type":"start_typing"}'
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error("expected parsed.ok=true");
+    expect(parsed.value.status).toBe("continue");
+    expect(parsed.value.actions[0]?.type).toBe("start_typing");
+  });
+
+  test("accepts persona_turn content but leaves text generation to runtime persona", () => {
+    const parsed = parseStructuredActionBatch(
+      '{"status":"done","actions":[{"type":"persona_turn","kind":"final","reply":true,"content":"hello"}]}'
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error("expected parsed.ok=true");
+    expect(parsed.value.actions[0]).toEqual({
+      type: "persona_turn",
+      kind: "final",
+      reply: true,
+      content: "hello",
+    });
   });
 
   test("rejects plain text output", () => {
@@ -311,6 +332,90 @@ describe("runStructuredActionLoop", () => {
 
     expect(result.stopReason).toBe("max_tool_calls");
     expect(result.toolCalls).toBe(1);
+  });
+
+  test("executes shorthand start_typing action through the matching tool", async () => {
+    let executed = 0;
+    const startTypingTool = {
+      name: "start_typing",
+      label: "start_typing",
+      description: "Start typing",
+      parameters: Type.Object({}),
+      execute: (_id: string, args: Record<string, unknown>) => {
+        executed += 1;
+        expect(args).toEqual({});
+        return Promise.resolve({
+          content: [{ type: "text" as const, text: "typing" }],
+          details: {},
+        });
+      },
+    } as unknown as AgentTool;
+
+    const result = await runStructuredActionLoop({
+      maxToolCalls: 3,
+      wallClockTimeoutMs: 10_000,
+      llmOutputTimeoutMs: 2_000,
+      tools: [startTypingTool],
+      callModel: () => Promise.resolve({
+        rawText: JSON.stringify({
+          status: "done",
+          actions: [
+            { type: "start_typing" },
+            { type: "ignore_user", reason: "typing only compatibility path" },
+          ],
+        } satisfies StructuredActionBatch),
+      }),
+      initialMessages: [
+        { role: "user", content: "hello", timestamp: Date.now() },
+      ],
+    });
+
+    expect(result.stopReason).toBe("ignored");
+    expect(result.toolCalls).toBe(1);
+    expect(executed).toBe(1);
+    expect(result.messages.some((message) => message.content.includes("[TOOL RESULT] start_typing"))).toBe(true);
+  });
+
+  test("persona_turn receives transformed model context and prior same-batch tool results", async () => {
+    let personaMessages: string[] = [];
+    const result = await runStructuredActionLoop({
+      maxToolCalls: 3,
+      wallClockTimeoutMs: 10_000,
+      llmOutputTimeoutMs: 2_000,
+      tools: [makeTool("search_messages")],
+      callModel: (messages) => Promise.resolve({
+        rawText: JSON.stringify({
+          status: "done",
+          actions: [
+            { type: "tool_call", tool_name: "search_messages", arguments: { value: "x" } },
+            { type: "persona_turn", kind: "final", reply: true },
+            { type: "stop_response", reason: "done" },
+          ],
+        } satisfies StructuredActionBatch),
+        actionContextMessages: [
+          ...messages,
+          { role: "user", content: "[CHANNEL UPDATE] follow-up", timestamp: Date.now() },
+        ],
+      }),
+      onToolCall: () => Promise.resolve({
+        content: [{ type: "text", text: "search result" }],
+        details: {},
+      }),
+      onPersonaTurn: (_action, _actionId, messages) => {
+        personaMessages = messages.map((message) => message.content);
+        return Promise.resolve({
+          content: [{ type: "text", text: "sent" }],
+          details: {},
+        });
+      },
+      initialMessages: [
+        { role: "user", content: "hello", timestamp: Date.now() },
+      ],
+    });
+
+    expect(result.stopReason).toBe("done");
+    expect(personaMessages.some((content) => content.includes("[CHANNEL UPDATE] follow-up"))).toBe(true);
+    expect(personaMessages.some((content) => content.includes("search result"))).toBe(true);
   });
 
   test("rejects silent stop_response without send_message and retries", async () => {

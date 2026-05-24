@@ -19,6 +19,7 @@ FROM base AS prod
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY src/ ./src/
+COPY prompts/ ./prompts/
 
 # Embedding model cache and data directories created at runtime via volumes
 RUN mkdir -p /app/data /app/model-cache

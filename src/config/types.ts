@@ -80,10 +80,10 @@ export interface PromptInlineSource {
   text: string;
 }
 
-/** Ordered prompt source chain for persona/tool/instructions/late-instructions sections. */
+/** Ordered prompt source chain for persona/orchestrator/persona-response sections. */
 export type PromptSource = PromptFileSource | PromptInlineSource;
 
-/** Config-driven prompt profile for stable instruction sections. */
+/** Config-driven prompt profile. `lateInstructions` is the persona response prompt. */
 export interface PromptProfileConfig {
   persona: PromptSource[];
   toolInstructions: PromptSource[];

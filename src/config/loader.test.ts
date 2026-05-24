@@ -139,11 +139,12 @@ describe("loadGlobalConfig", () => {
   test("derives default promptProfile when promptProfile is omitted", () => {
     const cfgPath = join(TEST_DIR, "nonexistent.yaml");
     const cfg = loadGlobalConfig(BASE_ENV, cfgPath);
+    const promptDir = join(TEST_DIR, "..", "prompts");
     expect((cfg as unknown as { promptProfile?: unknown }).promptProfile).toEqual({
-      persona: [{ kind: "file", path: join(TEST_DIR, "persona.md"), optional: false }],
-      toolInstructions: [{ kind: "file", path: join(TEST_DIR, "tool_instructions.md"), optional: false }],
-      instructions: [{ kind: "file", path: join(TEST_DIR, "instructions.md"), optional: false }],
-      lateInstructions: [{ kind: "file", path: join(TEST_DIR, "late_instructions.md"), optional: true }],
+      persona: [{ kind: "file", path: join(promptDir, "persona.md"), optional: false }],
+      toolInstructions: [{ kind: "file", path: join(promptDir, "orchestrator.md"), optional: false }],
+      instructions: [],
+      lateInstructions: [{ kind: "file", path: join(promptDir, "persona_response.md"), optional: false }],
     });
   });
 

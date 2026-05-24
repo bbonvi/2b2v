@@ -186,12 +186,12 @@ const SILENT_PROMPT_LOGGER: Logger = {
 function defaultPromptProfile(
   configPath: string,
 ): PromptProfileConfig {
-  const configDir = dirname(configPath);
+  const promptDir = join(dirname(configPath), "..", "prompts");
   return {
-    persona: [{ kind: "file", path: join(configDir, "persona.md"), optional: false }],
-    toolInstructions: [{ kind: "file", path: join(configDir, "tool_instructions.md"), optional: false }],
-    instructions: [{ kind: "file", path: join(configDir, "instructions.md"), optional: false }],
-    lateInstructions: [{ kind: "file", path: join(configDir, "late_instructions.md"), optional: true }],
+    persona: [{ kind: "file", path: join(promptDir, "persona.md"), optional: false }],
+    toolInstructions: [{ kind: "file", path: join(promptDir, "orchestrator.md"), optional: false }],
+    instructions: [],
+    lateInstructions: [{ kind: "file", path: join(promptDir, "persona_response.md"), optional: false }],
   };
 }
 

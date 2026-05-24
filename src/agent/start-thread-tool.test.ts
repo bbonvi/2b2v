@@ -138,7 +138,7 @@ describe("createStartThreadTool", () => {
     const result = await tool.execute("tc1", { name: "Test" }, AbortSignal.timeout(5000));
 
     const text = (result.content[0] as TextContent).text;
-    expect(text).toContain('send_message(chat_id="thread-123")');
+    expect(text).toContain('persona_turn(chat_id="thread-123")');
     expect(text).toContain("parent_chat_id: channel-456");
   });
 

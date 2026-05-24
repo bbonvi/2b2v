@@ -9,7 +9,7 @@ import {
 function makeInput(overrides: Partial<ContextAssemblyInput> = {}): ContextAssemblyInput {
   return {
     persona: "You are a test bot.",
-    toolInstructions: "## How You Communicate\nUse send_message.",
+    toolInstructions: "## How You Communicate\nUse persona_turn.",
     instructions: "",
     emojis: ":wave: — custom emoji",
     members: "@alice — Alice\n@bob — Bob",
@@ -53,7 +53,6 @@ describe("SECTION_DEFS", () => {
       .map((d) => d.label);
     expect(labels).toEqual([
       "Tool Instructions",
-      "Persona",
       "Instructions",
       "Available Emojis",
       "Server Members",
@@ -101,14 +100,14 @@ describe("SECTION_DEFS", () => {
 });
 
 describe("assembleContext", () => {
-  test("produces all 9 sections when all inputs present (no instructions)", () => {
+  test("produces all 8 sections when all inputs present (no instructions)", () => {
     const result = assembleContext(makeInput());
-    expect(result.sections).toHaveLength(9);
+    expect(result.sections).toHaveLength(8);
   });
 
-  test("produces 10 sections when instructions present", () => {
+  test("produces 9 sections when instructions present", () => {
     const result = assembleContext(makeInput({ instructions: "Be concise and helpful." }));
-    expect(result.sections).toHaveLength(10);
+    expect(result.sections).toHaveLength(9);
     const labels = result.sections.map((s) => s.label);
     expect(labels).toContain("Instructions");
   });
@@ -139,7 +138,6 @@ describe("assembleContext", () => {
     const labels = result.sections.map((s) => s.label);
     expect(labels).toEqual([
       "Tool Instructions",
-      "Persona",
       "Chat History — Newer",
       "Current Context",
     ]);
@@ -152,7 +150,6 @@ describe("assembleContext", () => {
       .map((s) => s.label);
     expect(cachedLabels).toEqual([
       "Tool Instructions",
-      "Persona",
       "Instructions",
       "Available Emojis",
       "Server Members",
@@ -287,12 +284,11 @@ describe("assembleContext", () => {
     expect(schedulesIdx).toBeLessThan(newerIdx);
   });
 
-  test("persona and tool instructions pass through without extra wrapping", () => {
+  test("tool instructions pass through without extra wrapping", () => {
     const result = assembleContext(makeInput());
-    const persona = result.sections.find((s) => s.label === "Persona");
-    expect(persona?.text).toBe("You are a test bot.");
+    expect(result.sections.map((s) => s.label)).not.toContain("Persona");
     const tools = result.sections.find((s) => s.label === "Tool Instructions");
-    expect(tools?.text).toBe("## How You Communicate\nUse send_message.");
+    expect(tools?.text).toBe("## How You Communicate\nUse persona_turn.");
   });
 
   test("older and newer history pass through without extra wrapping", () => {
@@ -310,10 +306,10 @@ describe("assembleContext", () => {
     expect(a).toEqual(b);
   });
 
-  test("all sections omitted except persona when everything else empty", () => {
+  test("all sections omitted except tool instructions when everything else empty", () => {
     const result = assembleContext(
       makeInput({
-        toolInstructions: "",
+        toolInstructions: "Only orchestrate.",
         instructions: "",
         emojis: "",
         members: "",
@@ -326,10 +322,10 @@ describe("assembleContext", () => {
     );
     expect(result.sections).toHaveLength(1);
     expect(result.sections[0]).toBeDefined();
-    expect(result.sections[0]?.label).toBe("Persona");
+    expect(result.sections[0]?.label).toBe("Tool Instructions");
   });
 
-  test("empty persona is omitted too", () => {
+  test("empty orchestrator instructions are omitted too", () => {
     const result = assembleContext(
       makeInput({
         persona: "",
@@ -360,8 +356,7 @@ describe("contextToSystemPrompt", () => {
     }));
     const prompt = contextToSystemPrompt(ctx);
     expect(prompt).toBe(
-      "## How You Communicate\nUse send_message.\n\n" +
-      "You are a test bot.\n\n" +
+      "## How You Communicate\nUse persona_turn.\n\n" +
       "Guild: g1 | Channel: c1\nDate/Time: 2026-01-01T00:00:00Z"
     );
   });
@@ -385,8 +380,8 @@ describe("contextToSystemPrompt", () => {
   test("stable sections precede unstable sections in output", () => {
     const ctx = assembleContext(makeInput());
     const prompt = contextToSystemPrompt(ctx);
-    // Persona (stable) must appear before Current Context (unstable)
-    const personaIdx = prompt.indexOf("You are a test bot.");
+    // Tool instructions (stable) must appear before Current Context (unstable)
+    const personaIdx = prompt.indexOf("## How You Communicate");
     const contextIdx = prompt.indexOf("Guild: g1 | Channel: c1");
     expect(personaIdx).toBeLessThan(contextIdx);
   });
@@ -403,11 +398,11 @@ describe("contextToSystemPrompt", () => {
 
   test("late instruction appears after current context", () => {
     const ctx = assembleContext(makeInput({
-      lateInstruction: "Always call start_typing before send_message.",
+      lateInstruction: "Always call start_typing before persona_turn.",
     }));
     const prompt = contextToSystemPrompt(ctx);
     const contextIdx = prompt.indexOf("Guild: g1 | Channel: c1");
-    const lateIdx = prompt.indexOf("Always call start_typing before send_message.");
+    const lateIdx = prompt.indexOf("Always call start_typing before persona_turn.");
     expect(contextIdx).toBeGreaterThan(-1);
     expect(lateIdx).toBeGreaterThan(-1);
     expect(lateIdx).toBeGreaterThan(contextIdx);

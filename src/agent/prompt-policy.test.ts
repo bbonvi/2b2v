@@ -8,7 +8,6 @@ import {
 describe("resolvePromptPolicy", () => {
   test("returns shared and tool-specific rule ids from one source", () => {
     const policy = resolvePromptPolicy(new Set([
-      "send_message",
       "start_typing",
       "web_search",
       "fetch_url",
@@ -17,10 +16,10 @@ describe("resolvePromptPolicy", () => {
       "chat_history",
     ]));
 
-    expect(policy.sharedRules.map((rule) => rule.id)).toContain("direct_mentions_default_send_message");
+    expect(policy.sharedRules.map((rule) => rule.id)).toContain("direct_mentions_default_persona_turn");
     expect(policy.sharedRules.map((rule) => rule.id)).toContain("ignore_user_only_when_silence_is_better");
-    expect(policy.sharedRules.map((rule) => rule.id)).toContain("send_message_requires_reply_boolean");
-    expect(policy.sharedRules.map((rule) => rule.id)).toContain("research_requires_final_send_message");
+    expect(policy.sharedRules.map((rule) => rule.id)).toContain("persona_turn_requires_reply_boolean");
+    expect(policy.sharedRules.map((rule) => rule.id)).toContain("research_requires_final_persona_turn");
 
     expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_web_search_discover_sources");
     expect(policy.toolRules.map((rule) => rule.id)).toContain("tool_fetch_url_extract_details");
@@ -34,8 +33,8 @@ describe("buildLateInstructionPrompt", () => {
   test("renders CRITICAL bullet list from shared policy rules", () => {
     const text = buildLateInstructionPrompt();
     expect(text).toContain("CRITICAL:");
-    expect(text).toContain("For direct mentions or direct user questions, default to responding via `send_message`.");
-    expect(text).toContain("Every `send_message` arguments object must include `reply` explicitly (`true` or `false`).");
+    expect(text).toContain("For direct mentions or direct user questions, default to responding via `persona_turn`.");
+    expect(text).toContain("Every `persona_turn` action must include `reply` explicitly (`true` or `false`).");
   });
 
   test("renders only shared and late-only rules from injected policy", () => {

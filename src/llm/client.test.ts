@@ -20,10 +20,10 @@ const GLOBAL: GlobalConfig = {
     defaultInstructions: "",
     defaultLateInstruction: "",
     promptProfile: {
-      persona: [{ kind: "file", path: "config/persona.md", optional: false }],
-      toolInstructions: [{ kind: "file", path: "config/tool_instructions.md", optional: false }],
+      persona: [{ kind: "file", path: "prompts/persona.md", optional: false }],
+      toolInstructions: [{ kind: "file", path: "prompts/orchestrator.md", optional: false }],
       instructions: [],
-      lateInstructions: [],
+      lateInstructions: [{ kind: "file", path: "prompts/persona_response.md", optional: false }],
     },
   logLevel: "info",
   dataDir: "data",

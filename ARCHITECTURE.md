@@ -1,6 +1,6 @@
 # Architecture
 
-Agentic Discord bot (~16,900 lines TypeScript, 111 files) that embodies a character persona while providing useful responses. Per-guild isolation, long-lived memory, semantic search, scheduling, and multi-tool agent capabilities.
+Agentic Discord bot (~16,900 lines TypeScript, 111 files) with a neutral retrieval orchestrator and a separate runtime persona speaker. Per-guild isolation, long-lived memory, semantic search, scheduling, and multi-tool agent capabilities.
 
 **Runtime:** Bun 1.3+ · **LLM:** OpenRouter (any model) · **Vectors:** Qdrant · **DB:** SQLite (WAL) · **Agent:** custom structured-action loop (`src/agent/structured-actions.ts`)
 
@@ -41,7 +41,7 @@ Discord messageCreate event
        │
        └─ handleMessage(msgs, deps)
             ├─ shouldRespond(input, triggers) → mention|keyword|random|null
-            ├─ build context (persona, instructions, emojis, members, journal, current-user memories, schedules, history, current context)
+            ├─ build context (orchestrator instructions, emojis, members, journal, current-user memories, schedules, history, current context)
             ├─ resolve model (guild overrides global default)
             └─ structured action loop:
                OpenRouter `response_format` (json_schema) + prompt reinforcement
@@ -98,13 +98,15 @@ Empty sections are omitted. `assembleContext()` iterates the registry; no impera
   - `status`: `"continue"` or `"done"`
   - `actions`: ordered list of:
     - `tool_call` (name + arguments)
+    - `persona_turn` (runtime handoff for user-visible speech)
     - `stop_response` (terminal)
     - `ignore_user` (terminal and silent)
 - Runtime executes actions sequentially and appends tool results back into context as internal messages.
+- `persona_turn` is privileged runtime behavior, not an ordinary model-provided text tool. The outer orchestrator only chooses kind/routing; runtime builds a separate persona LLM request from the persona prompt, persona response prompt, canonical assembled context, and current loop transcript, then sends the generated text through the internal sender.
 - Plain-text or invalid JSON outputs are treated as format violations, fed back with a corrective message, and retried.
 - Runtime policy guards:
-  - `stop_response` / `status: done` are rejected until at least one successful `send_message` (unless `ignore_user` is chosen).
-  - `send_message` actions must include explicit `reply: boolean`; missing `reply` triggers a policy error and retry.
+  - `stop_response` / `status: done` are rejected until at least one successful `persona_turn` (unless `ignore_user` is chosen).
+  - `persona_turn` actions must include explicit `reply: boolean`; missing `reply` fails schema validation.
   - `ignore_user` remains allowed but requires an explicit silence rationale (spam, non-actionable input, or explicit ignore request).
 - Prompt reinforcement is centralized in `src/agent/prompt-policy.ts` as typed rule IDs.
   Both `buildStructuredActionProtocolPrompt` and `buildLateInstructionPrompt` render from this shared policy source to prevent instruction drift.
@@ -117,7 +119,7 @@ Empty sections are omitted. `assembleContext()` iterates the registry; no impera
 - Runtime telemetry is emitted at `debug` level during execution:
   - `structured_loop_start` / `structured_loop_event` / `structured_loop_end`
   - `llm_request_start` / `llm_request_payload` / `llm_response` / `llm_response_payload` / `llm_request_error`
-- OpenRouter chat calls are non-streaming (`stream: false`), so user-visible output starts only after a full model turn completes and the loop reaches `send_message`.
+- OpenRouter chat calls are non-streaming (`stream: false`), so user-visible output starts only after a full model turn completes and the loop reaches `persona_turn`.
 
 ### History Processing
 
@@ -127,7 +129,7 @@ Pipeline: fetch missing reply targets (Discord fallback), sort, merge consecutiv
 
 When the dispatcher is enabled, the agent gains awareness of new channel messages that arrive during its multi-turn processing loop. Two complementary mechanisms handle this.
 
-**Tool follow-up wrapper** (`src/agent/tool-followup-wrapper.ts`): Wraps all agent tools to append follow-up annotations to tool results. After each tool execution, queries SQLite for new messages (via `getFollowUpMessages`). For `send_message`, appends detailed annotations with author, message ID, relative timestamp, and content. For other tools, appends a lightweight count notification suggesting the agent use `chat_history` to review. Tracks surfaced message IDs to avoid re-surfacing. Applied in the tool pipeline after `wrapToolsWithTiming`:
+**Tool follow-up wrapper** (`src/agent/tool-followup-wrapper.ts`): Wraps orchestrator tools to append follow-up annotations to tool results. After each tool execution, queries SQLite for new messages (via `getFollowUpMessages`) and appends a lightweight count notification suggesting the agent use `chat_history` to review. Tracks surfaced message IDs to avoid re-surfacing. Applied in the tool pipeline after `wrapToolsWithTiming`:
 
 ```
 tools -> wrapToolsWithTiming -> wrapToolsWithFollowUp -> structured action loop
@@ -135,7 +137,7 @@ tools -> wrapToolsWithTiming -> wrapToolsWithFollowUp -> structured action loop
 
 **`transformContext`**: Mid-loop context injection callback passed into the structured action loop. Called before each LLM turn, it queries for follow-up messages and injects them as a `[CHANNEL UPDATE]` message into the conversation. Only surfaces user messages (not bot). Caps surfaced count at the trim window size to avoid context bloat. Works alongside the tool wrapper: `transformContext` handles inter-turn awareness, the tool wrapper handles intra-turn awareness.
 
-**`reply_to_message_id`**: Optional parameter on `send_message` that lets the agent reply to a specific message by Discord message ID. When set, the `reply` boolean is ignored and the message is sent as a reply to the target. Enables the agent to address specific follow-up messages rather than only the original trigger.
+**`reply_to_message_id`**: Optional parameter on `persona_turn` that lets the persona reply to a specific message by Discord message ID. When set, the `reply` boolean is ignored and the message is sent as a reply to the target. Enables the agent to address specific follow-up messages rather than only the original trigger.
 
 ### Image Ingest
 
@@ -198,10 +200,10 @@ Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields op
 
 - Global-only, nested under `promptProfile` in `config/config.yaml`.
 - Sections:
-  - `persona`: ordered source list
-  - `toolInstructions`: ordered source list
-  - `instructions`: ordered source list
-  - `lateInstructions`: ordered source list, injected at the end of context history as late reinforcement
+  - `persona`: ordered source list for runtime persona turns only
+  - `toolInstructions`: ordered source list for the neutral orchestrator
+  - `instructions`: optional extra orchestrator source list
+  - `lateInstructions`: ordered source list for persona response behavior
 - Source forms:
   - `file` (`path`) with optional `optional: true`
   - `text` (inline snippet)
@@ -209,7 +211,7 @@ Filename: `{guildId}-{slug}.yaml` (e.g., `123456-my-server.yaml`). All fields op
   - Sources are resolved in order and concatenated with blank lines.
   - Missing required files are skipped with warning logs.
   - Missing optional files are skipped with info logs.
-- Defaults (when `promptProfile` is omitted): `config/persona.md`, `config/tool_instructions.md`, `config/instructions.md`, optional `config/late_instructions.md`.
+- Defaults (when `promptProfile` is omitted): `prompts/persona.md`, `prompts/orchestrator.md`, no extra `instructions`, and `prompts/persona_response.md`.
 - Global instructions now come only from `promptProfile.instructions` (breaking change, no global legacy fallback keys).
 - Guild-level instruction overrides are still provided by guild config `instructionsPath`/`instructions` (file path has priority).
 
@@ -224,13 +226,13 @@ When adding or removing config fields:
 
 ### Hot-Reload
 
-`fs.watch("config", { recursive: true })` watches the entire `config/` directory. Changes are debounced and reload the main config, prompt profile content (persona + tool instructions + instructions + late instructions), and all guild configs. Malformed YAML or missing files keep the last known good config.
+`fs.watch` watches both `config/` and `prompts/`. Changes are debounced and reload the main config, prompt profile content (persona + orchestrator + optional instructions + persona response), and all guild configs. Malformed YAML or missing files keep the last known good config.
 
 ## Key Patterns
 
 ### Prompt Profile Loader
 
-`src/config/prompt-profile.ts` is the source of truth for loading file-based persona/tool/instructions/late-instructions content. `src/index.ts` does not hardcode source files; it only consumes `globalConfig.promptProfile` resolved by `src/config/loader.ts`.
+`src/config/prompt-profile.ts` is the source of truth for loading file-based persona, orchestrator, optional instruction, and persona-response content. `src/index.ts` does not hardcode source files; it only consumes `globalConfig.promptProfile` resolved by `src/config/loader.ts`.
 
 ### Dashboard Payload Rendering
 

@@ -10,6 +10,27 @@ const ToolCallActionSchema = Type.Object({
   arguments: Type.Record(Type.String(), Type.Unknown()),
 }, { additionalProperties: false });
 
+const StartTypingActionSchema = Type.Object({
+  type: Type.Literal("start_typing"),
+}, { additionalProperties: false });
+
+const PersonaTurnActionSchema = Type.Object({
+  type: Type.Literal("persona_turn"),
+  kind: Type.Union([
+    Type.Literal("progress"),
+    Type.Literal("final"),
+    Type.Literal("followup"),
+    Type.Literal("correction"),
+  ]),
+  reply: Type.Boolean(),
+  chat_id: Type.Optional(Type.String()),
+  is_voice_message: Type.Optional(Type.Boolean()),
+  voice_type: Type.Optional(Type.Union([Type.Literal("normal"), Type.Literal("whisper")])),
+  reply_to_message_id: Type.Optional(Type.String()),
+  // Accepted for provider tolerance, ignored by runtime. Persona writes the actual text.
+  content: Type.Optional(Type.String()),
+}, { additionalProperties: false });
+
 const StopResponseActionSchema = Type.Object({
   type: Type.Literal("stop_response"),
   reason: Type.String({ minLength: 1 }),
@@ -22,6 +43,8 @@ const IgnoreUserActionSchema = Type.Object({
 
 const StructuredActionSchema = Type.Union([
   ToolCallActionSchema,
+  StartTypingActionSchema,
+  PersonaTurnActionSchema,
   StopResponseActionSchema,
   IgnoreUserActionSchema,
 ]);
@@ -33,6 +56,8 @@ const StructuredActionBatchSchema = Type.Object({
 }, { additionalProperties: false });
 
 export type ToolCallAction = Static<typeof ToolCallActionSchema>;
+export type StartTypingAction = Static<typeof StartTypingActionSchema>;
+export type PersonaTurnAction = Static<typeof PersonaTurnActionSchema>;
 export type StopResponseAction = Static<typeof StopResponseActionSchema>;
 export type IgnoreUserAction = Static<typeof IgnoreUserActionSchema>;
 export type StructuredAction = Static<typeof StructuredActionSchema>;
@@ -58,6 +83,8 @@ export type LoopTimeoutCause = "model_output_timeout" | "wall_clock_timeout";
 export interface ModelTurnOutput {
   rawText: string;
   responsePayload?: Record<string, unknown>;
+  /** Actual message list sent to the model, after any runtime context injection. */
+  actionContextMessages?: LoopMessage[];
 }
 
 export interface RunStructuredActionLoopInput {
@@ -76,6 +103,12 @@ export interface RunStructuredActionLoopInput {
     tool: AgentTool,
     toolCallId: string,
     args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ) => Promise<AgentToolResult<unknown>>;
+  onPersonaTurn?: (
+    action: PersonaTurnAction,
+    actionId: string,
+    messages: LoopMessage[],
     signal?: AbortSignal,
   ) => Promise<AgentToolResult<unknown>>;
   now?: () => number;
@@ -201,6 +234,12 @@ function flattenErrors(value: unknown): string {
     .join("; ");
 }
 
+function statusForSingleAction(action: StructuredAction): StructuredActionBatch["status"] {
+  if (action.type === "ignore_user" || action.type === "stop_response") return "done";
+  if (action.type === "persona_turn" && action.kind === "final") return "done";
+  return "continue";
+}
+
 function extractJsonCandidate(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed.startsWith("```") && trimmed.endsWith("```")) {
@@ -231,6 +270,16 @@ export function parseStructuredActionBatch(rawText: string):
   }
 
   if (!Value.Check(StructuredActionBatchSchema, parsed)) {
+    if (Value.Check(StructuredActionSchema, parsed)) {
+      const action = parsed;
+      return {
+        ok: true,
+        value: {
+          status: statusForSingleAction(action),
+          actions: [action],
+        },
+      };
+    }
     return {
       ok: false,
       error: flattenErrors(parsed),
@@ -254,6 +303,35 @@ function schemaForToolAction(): Record<string, unknown> {
         type: "object",
         additionalProperties: true,
       },
+    },
+  };
+}
+
+function schemaForStartTypingAction(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type"],
+    properties: {
+      type: { const: "start_typing" },
+    },
+  };
+}
+
+function schemaForPersonaTurnAction(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "kind", "reply"],
+    properties: {
+      type: { const: "persona_turn" },
+      kind: { type: "string", enum: ["progress", "final", "followup", "correction"] },
+      reply: { type: "boolean" },
+      chat_id: { type: "string" },
+      is_voice_message: { type: "boolean" },
+      voice_type: { type: "string", enum: ["normal", "whisper"] },
+      reply_to_message_id: { type: "string" },
+      content: { type: "string" },
     },
   };
 }
@@ -285,6 +363,8 @@ function schemaForIgnoreAction(): Record<string, unknown> {
 export function buildActionResponseFormat(_tools: AgentTool[]): Record<string, unknown> {
   const actionVariants = [
     schemaForToolAction(),
+    schemaForStartTypingAction(),
+    schemaForPersonaTurnAction(),
     schemaForStopAction(),
     schemaForIgnoreAction(),
   ];
@@ -326,6 +406,8 @@ export function buildStructuredActionProtocolPrompt(
     "Never output plain text outside JSON.",
     "Valid actions:",
     '- {"type":"tool_call","tool_name":"<tool>","arguments":{...}}',
+    '- {"type":"start_typing"}',
+    '- {"type":"persona_turn","kind":"progress|final|followup|correction","reply":true|false}',
     '- {"type":"stop_response","reason":"..."}',
     '- {"type":"ignore_user","reason":"..."}',
     'Use `status: "continue"` when expecting another turn after tool results.',
@@ -333,8 +415,8 @@ export function buildStructuredActionProtocolPrompt(
     ...promptPolicy.sharedRules.map((rule) => rule.text),
     "Never use ignore_user as a shortcut to avoid replying to a user ping.",
     "If you intentionally decide not to respond to the user, include ignore_user action.",
-    "Only send user-visible output via tool_call to send_message.",
-    "Do not use stop_response or status=done before at least one send_message action in this interaction.",
+    "Only send user-visible output via persona_turn. Do not write user-facing prose in JSON notes or persona_turn.content.",
+    "Do not use stop_response or status=done before at least one persona_turn action in this interaction.",
     ...(promptPolicy.toolRules.length > 0
       ? [
         "",
@@ -411,7 +493,7 @@ function buildPolicyErrorFeedback(error: string): string {
     "[POLICY ERROR]",
     error,
     "If you intentionally choose silence, use ignore_user.",
-    "If you are responding, call send_message first, then finish with stop_response or status done.",
+    "If you are responding, use persona_turn first, then finish with stop_response or status done.",
   ].join("\n");
 }
 
@@ -618,7 +700,12 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
     modelTimeouts = 0;
     input.onModelTurn?.(turnOutput.responsePayload);
 
-    messages.push(makeAssistantMessage(turnOutput.rawText, now));
+    const assistantMessage = makeAssistantMessage(turnOutput.rawText, now);
+    messages.push(assistantMessage);
+    const actionContextMessages = [
+      ...(turnOutput.actionContextMessages ?? messages.slice(0, -1)),
+      assistantMessage,
+    ];
 
     const parsed = parseStructuredActionBatch(turnOutput.rawText);
     if (!parsed.ok) {
@@ -666,7 +753,7 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
           });
           return { stopReason: "done", toolCalls, turns, messages };
         }
-        policyError = "stop_response is invalid before any send_message action.";
+        policyError = "stop_response is invalid before any persona_turn action.";
         break;
       }
 
@@ -678,6 +765,127 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
           toolCalls,
         });
         return { stopReason: "ignored", toolCalls, turns, messages };
+      }
+
+      if (action.type === "persona_turn") {
+        if (input.onPersonaTurn === undefined) {
+          messages.push(makeUserMessage(buildToolErrorFeedback("persona_turn", "Persona turn handler is not configured"), now));
+          continue;
+        }
+        if (toolCalls >= input.maxToolCalls) {
+          emit({
+            type: "stop",
+            reason: "max_tool_calls",
+            turns,
+            toolCalls,
+          });
+          return { stopReason: "max_tool_calls", toolCalls, turns, messages };
+        }
+
+        const actionId = buildToolCallId(turns, actionIndex);
+        toolCalls += 1;
+        const toolStartedAt = now();
+        emit({
+          type: "tool_call_start",
+          turn: turns,
+          actionIndex,
+          toolName: "persona_turn",
+          toolCallId: actionId,
+        });
+
+        try {
+          const result = await input.onPersonaTurn(action, actionId, actionContextMessages, input.signal);
+          emit({
+            type: "tool_call_end",
+            turn: turns,
+            actionIndex,
+            toolName: "persona_turn",
+            toolCallId: actionId,
+            durationMs: Math.max(0, now() - toolStartedAt),
+            isError: false,
+          });
+          const feedback = makeUserMessage(buildToolResultFeedback("persona_turn", summarizeToolResult(result)), now);
+          messages.push(feedback);
+          actionContextMessages.push(feedback);
+          hasUserVisibleMessage = true;
+        } catch (error) {
+          emit({
+            type: "tool_call_end",
+            turn: turns,
+            actionIndex,
+            toolName: "persona_turn",
+            toolCallId: actionId,
+            durationMs: Math.max(0, now() - toolStartedAt),
+            isError: true,
+          });
+          const msg = error instanceof Error ? error.message : "Unknown persona turn error";
+          const feedback = makeUserMessage(buildToolErrorFeedback("persona_turn", msg), now);
+          messages.push(feedback);
+          actionContextMessages.push(feedback);
+        }
+        continue;
+      }
+
+      if (action.type === "start_typing") {
+        if (toolCalls >= input.maxToolCalls) {
+          emit({
+            type: "stop",
+            reason: "max_tool_calls",
+            turns,
+            toolCalls,
+          });
+          return { stopReason: "max_tool_calls", toolCalls, turns, messages };
+        }
+
+        const tool = toolsByName.get("start_typing");
+        if (tool === undefined) {
+          const feedback = makeUserMessage(buildToolErrorFeedback("start_typing", "Unknown tool"), now);
+          messages.push(feedback);
+          actionContextMessages.push(feedback);
+          continue;
+        }
+
+        const toolCallId = buildToolCallId(turns, actionIndex);
+        toolCalls += 1;
+        const toolStartedAt = now();
+        emit({
+          type: "tool_call_start",
+          turn: turns,
+          actionIndex,
+          toolName: tool.name,
+          toolCallId,
+        });
+
+        try {
+          const result = await executeToolCall(tool, toolCallId, {}, input.signal);
+          emit({
+            type: "tool_call_end",
+            turn: turns,
+            actionIndex,
+            toolName: tool.name,
+            toolCallId,
+            durationMs: Math.max(0, now() - toolStartedAt),
+            isError: false,
+          });
+          const feedback = makeUserMessage(buildToolResultFeedback(tool.name, summarizeToolResult(result)), now);
+          messages.push(feedback);
+          actionContextMessages.push(feedback);
+        } catch (error) {
+          emit({
+            type: "tool_call_end",
+            turn: turns,
+            actionIndex,
+            toolName: tool.name,
+            toolCallId,
+            durationMs: Math.max(0, now() - toolStartedAt),
+            isError: true,
+          });
+          const msg = error instanceof Error ? error.message : "Unknown tool execution error";
+          const feedback = makeUserMessage(buildToolErrorFeedback(tool.name, msg), now);
+          messages.push(feedback);
+          actionContextMessages.push(feedback);
+        }
+        continue;
       }
 
       if (toolCalls >= input.maxToolCalls) {
@@ -692,13 +900,17 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
 
       const tool = toolsByName.get(action.tool_name.trim());
       if (tool === undefined) {
-        messages.push(makeUserMessage(buildToolErrorFeedback(action.tool_name, "Unknown tool"), now));
+        const feedback = makeUserMessage(buildToolErrorFeedback(action.tool_name, "Unknown tool"), now);
+        messages.push(feedback);
+        actionContextMessages.push(feedback);
         continue;
       }
 
       const argsRecord = asRecord(action.arguments);
       if (argsRecord === null) {
-        messages.push(makeUserMessage(buildToolErrorFeedback(tool.name, "arguments must be an object"), now));
+        const feedback = makeUserMessage(buildToolErrorFeedback(tool.name, "arguments must be an object"), now);
+        messages.push(feedback);
+        actionContextMessages.push(feedback);
         continue;
       }
 
@@ -729,7 +941,9 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
           durationMs: Math.max(0, now() - toolStartedAt),
           isError: false,
         });
-        messages.push(makeUserMessage(buildToolResultFeedback(tool.name, summarizeToolResult(result)), now));
+        const feedback = makeUserMessage(buildToolResultFeedback(tool.name, summarizeToolResult(result)), now);
+        messages.push(feedback);
+        actionContextMessages.push(feedback);
         if (tool.name === SEND_MESSAGE_TOOL_NAME) {
           hasUserVisibleMessage = true;
         }
@@ -744,7 +958,9 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
           isError: true,
         });
         const msg = error instanceof Error ? error.message : "Unknown tool execution error";
-        messages.push(makeUserMessage(buildToolErrorFeedback(tool.name, msg), now));
+        const feedback = makeUserMessage(buildToolErrorFeedback(tool.name, msg), now);
+        messages.push(feedback);
+        actionContextMessages.push(feedback);
       }
     }
 
@@ -761,7 +977,7 @@ export async function runStructuredActionLoop(input: RunStructuredActionLoopInpu
     if (batch.status === "done") {
       if (!hasUserVisibleMessage) {
         messages.push(makeUserMessage(
-          buildPolicyErrorFeedback("status=done is invalid before any send_message action."),
+          buildPolicyErrorFeedback("status=done is invalid before any persona_turn action."),
           now,
         ));
         continue;

@@ -3,6 +3,7 @@ services:
     build:
       context: .
       target: prod
+    command: ["bun", "--watch", "src/index.ts"]
     env_file: .env
     environment:
       QDRANT_URL: http://qdrant:6333
@@ -11,14 +12,19 @@ services:
       SSH_KEYS_LOCAL: /app/ssh-keys-local
       SSH_KEYS_SHARED: /app/ssh-keys-shared
     volumes:
+      - ./src:/app/src:ro
       - bot-data:/app/data
       - model-cache:/app/model-cache
       - ./config:/app/config:ro
+      - ./prompts:/app/prompts:ro
       - ssh-keys-local:/app/ssh-keys-local
       - ssh-keys-shared:/app/ssh-keys-shared
     networks:
-      - default
-      - bash-net
+      default:
+      bash-net:
+      proxy:
+        aliases:
+          - 2b2v-bot
     depends_on:
       qdrant:
         condition: service_healthy
@@ -74,6 +80,8 @@ services:
 networks:
   bash-net:
     internal: true
+  proxy:
+    external: true
 
 volumes:
   bot-data:

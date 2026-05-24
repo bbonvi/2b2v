@@ -100,7 +100,7 @@ tts:
       similarityBoost: 0.4
       model: eleven_flash_v2_5
 
-# Composable prompt profile for stable instruction sections.
+# Composable prompt profile for committed prompt files.
 # Sources are resolved in order and concatenated with blank lines.
 # Each source supports:
 # - file: path to markdown/text file
@@ -108,14 +108,12 @@ tts:
 # - optional: true to skip missing file without warning
 promptProfile:
   persona:
-    - file: config/persona.md
+    - file: prompts/persona.md
   toolInstructions:
-    - file: config/tool_instructions.md
-  instructions:
-    - file: config/instructions.md
+    - file: prompts/orchestrator.md
+  instructions: []
   lateInstructions:
-    - file: config/late_instructions.md
-      optional: true
+    - file: prompts/persona_response.md
 
 # Log level: debug | info | warn | error
 logLevel: info

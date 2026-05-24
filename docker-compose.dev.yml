@@ -2,8 +2,8 @@ services:
   bot:
     build:
       context: .
-      target: base
-    command: ["bun", "--watch", "run", "src/index.ts"]
+      target: deps-dev
+    command: ["bun", "run", "dev"]
     env_file: .env
     environment:
       QDRANT_URL: http://qdrant:6333
@@ -16,10 +16,10 @@ services:
       UNSAFELY_BYPASS_DASHBOARD_AUTH: "true"
     volumes:
       - ./src:/app/src
+      - ./prompts:/app/prompts
       - ./config:/app/config
       - ./package.json:/app/package.json
       - ./tsconfig.json:/app/tsconfig.json
-      - ./node_modules:/app/node_modules
       - dev-data:/app/data
       - dev-model-cache:/app/model-cache
       - dev-ssh-keys-local:/app/ssh-keys-local
@@ -27,8 +27,11 @@ services:
     ports:
       - "31456:3000"
     networks:
-      - default
-      - bash-net
+      default:
+      bash-net:
+      proxy:
+        aliases:
+          - 2b2v-bot
     depends_on:
       qdrant:
         condition: service_healthy
@@ -81,6 +84,8 @@ services:
 networks:
   bash-net:
     internal: true
+  proxy:
+    external: true
 
 volumes:
   dev-data:
