@@ -38,9 +38,6 @@ trim:
   messageCharLimit: 200
   replyQuoteChars: 50
 
-# Memory retention in days
-memoryRetentionDays: 180
-
 # Discord user IDs with admin access to bot commands
 adminUserIds: []
 
@@ -68,8 +65,8 @@ members:
 promptCaching:
   enabled: true
 
-# Structured action loop limits (overrides global defaults)
-# actionLoop:
+# Native reply/tool loop limits (overrides global defaults)
+# replyLoop:
 #   maxToolCalls: 8
 #   wallClockTimeoutMs: 45000
 #   llmOutputTimeoutMs: 12000 # on timeout the request fails fast
@@ -79,7 +76,6 @@ promptCaching:
 #   enabled: true
 #   mentionDebounceMs: 500
 #   defaultDebounceMs: 2000
-#   maxFollowUps: 5
 
 # Custom attachments directory (default: {dataDir}/attachments)
 # attachmentsDir: data/attachments

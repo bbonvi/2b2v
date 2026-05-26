@@ -1,36 +1,34 @@
-import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
-import type {
-  AssistantMessage,
-  Message,
-  Model,
-  ProviderStreamOptions,
-} from "@mariozechner/pi-ai";
+import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import { validateToolArguments, type ToolCall } from "@mariozechner/pi-ai";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
 import { contextToSplitPrompts, type AssembledContext, type ContextSection } from "./context-assembly.ts";
 import { createSendMessageTool, type MessageSender, type SendMessageToolDeps } from "./send-message-tool.ts";
 import { wrapToolsWithTiming } from "./tool-timing.ts";
-import { wrapToolsWithFollowUp } from "./tool-followup-wrapper.ts";
-import type { FollowUpWrapperDeps } from "./tool-followup-wrapper.ts";
-export type { FollowUpState, FollowUpWrapperDeps } from "./tool-followup-wrapper.ts";
 import type { TriggerInstructions } from "../config/types.ts";
 import type { TtsConfig, TtsResult } from "../tts/types.ts";
 import { resolveGuildModel, buildStreamOptions } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { Logger, RequestLog } from "../logger.ts";
 import {
-  buildStructuredActionProtocolPrompt,
-  runStructuredActionLoop,
-  type LoopMessage,
-  type PersonaTurnAction,
-  type StructuredLoopEvent,
-} from "./structured-actions.ts";
-import { buildLateInstructionPrompt, resolvePromptPolicy } from "./prompt-policy.ts";
-import { completeOpenRouterChat } from "../llm/openrouter-chat.ts";
+  completeOpenRouterChat,
+  type OpenRouterChatRequest,
+  type OpenRouterChatResult,
+  type OpenRouterImageUrlPart,
+  type OpenRouterMessage,
+  type OpenRouterTextPart,
+  type OpenRouterToolCall,
+  type OpenRouterToolDefinition,
+} from "../llm/openrouter-chat.ts";
 import {
   getStablePromptSections,
   prependStableSectionsToPayload,
   type StablePromptSection,
 } from "./prompt-cache.ts";
+import {
+  parseResponseDirectives,
+  renderSegmentsForMemory,
+  type ResponseSegment,
+} from "./response-directives.ts";
 
 /** Minimal abstraction over a Discord message for the handler. */
 export interface IncomingMessage {
@@ -39,63 +37,53 @@ export interface IncomingMessage {
   authorUsername: string;
   botUserId: string;
   mentionedUserIds: string[];
-  /** Pre-translated (inbound) content for LLM consumption. */
   translatedContent: string;
+  messageId?: string;
 }
 
-export type LlmCompleteFn = (
-  model: Model<never>,
-  context: { systemPrompt?: string; messages: Message[] },
-  options: ProviderStreamOptions,
-) => Promise<AssistantMessage>;
+export type ChatCompleteFn = (request: OpenRouterChatRequest) => Promise<OpenRouterChatResult>;
+
+export interface MemoryExtractionRequest {
+  sourceMessageId?: string;
+  userMessage: string;
+  assistantReply: string;
+  recentContext: string;
+}
 
 /** Dependencies injected into the handler. No direct discord.js coupling. */
 export interface HandlerDeps {
   globalConfig: GlobalConfig;
   guildConfig: GuildConfig;
   context: AssembledContext;
-  /** Persona prompt used only by runtime persona_turn calls, not by the outer orchestrator. */
   personaPrompt?: string;
   sender: MessageSender;
-  /** Orchestrator tools beyond runtime persona_turn (memory, search, etc.). */
+  /** Native OpenRouter tools exposed to the model. */
   extraTools?: AgentTool[];
-  /** Logger for agent event tracing. */
   log?: Logger;
-  /** Called when a trigger matches, before the agent runs. Receives trigger result. */
   onTriggered?: (result: NonNullable<TriggerResult>) => void;
-  /** Called when the first assistant response starts streaming. */
-  onAssistantResponseStart?: () => void;
-  /** Called when the agent finishes, regardless of response. */
   onAgentEnd?: () => void;
-  /** Request-scoped log accumulator. */
   requestLog?: RequestLog;
-  /** TTS configuration for voice messages. */
   ttsConfig?: TtsConfig;
-  /** Whether TTS is enabled (requires API key + config). */
   ttsEnabled?: boolean;
-  /** Function to generate speech from text (injected by caller). */
   generateSpeech?: (text: string, voiceType: string) => Promise<TtsResult>;
-  /** Skip trigger evaluation and always run the agent (for scheduled tasks). */
   forceTrigger?: boolean;
-  /** Per-trigger-type instructions to inject into context. */
   triggerInstructions?: TriggerInstructions;
-  /** Follow-up wrapper deps for mid-loop context injection. */
-  followUpDeps?: FollowUpWrapperDeps;
-  /** Optional transform applied before each LLM call (e.g., inject follow-ups). */
-  transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
-  /** Optional injected completion function for tests. */
-  llmComplete?: LlmCompleteFn;
+  completeChat?: ChatCompleteFn;
+  afterReply?: (request: MemoryExtractionRequest) => Promise<void>;
 }
 
 export interface HandleResult {
   triggered: boolean;
   triggerResult: TriggerResult;
   agentRan: boolean;
+  responseText?: string;
 }
+
+type SendMessageRuntimeTool = ReturnType<typeof createSendMessageTool>;
 
 /**
  * Inject a trigger-specific instruction into context sections.
- * Inserts before "Late Instruction" section if present, otherwise appends.
+ * Inserts before the volatile response instruction section if present.
  * @internal Exported for testing.
  */
 export function injectTriggerInstruction(
@@ -108,234 +96,411 @@ export function injectTriggerInstruction(
     cached: false,
     role: "developer",
   };
-  const lateIdx = sections.findIndex((s) => s.label === "Late Instruction");
+  const lateIdx = sections.findIndex((s) => s.label === "Response Instruction");
   if (lateIdx === -1) {
     return [...sections, newSection];
   }
   return [...sections.slice(0, lateIdx), newSection, ...sections.slice(lateIdx)];
 }
 
-function injectResolvedLateInstruction(
-  context: AssembledContext,
-  lateInstruction: string,
-): AssembledContext {
-  const lateIdx = context.sections.findIndex((section) => section.label === "Late Instruction");
-  if (lateIdx !== -1) {
-    return {
-      ...context,
-      sections: context.sections.map((section, idx) => idx === lateIdx ? { ...section, text: lateInstruction } : section),
-    };
+class ModelOutputTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`LLM output timed out after ${timeoutMs}ms`);
+    this.name = "ModelOutputTimeoutError";
   }
-  return {
-    ...context,
-    sections: [
-      ...context.sections,
-      {
-        label: "Late Instruction",
-        text: lateInstruction,
-        cached: false,
-        role: "developer",
-      },
-    ],
-  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!isRecord(value)) return null;
-  return value;
-}
-
-function messageContentToText(content: unknown): string | null {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return null;
-  const textParts: string[] = [];
-  for (const part of content) {
-    const rec = asRecord(part);
-    if (rec === null) continue;
-    if (rec.type === "text" && typeof rec.text === "string") {
-      textParts.push(rec.text);
-    }
-  }
-  if (textParts.length === 0) return null;
-  return textParts.join("\n");
-}
-
-function loopMessagesToAgentMessages(messages: LoopMessage[]): AgentMessage[] {
-  return messages.map((msg) => ({
-    role: msg.role,
-    content: msg.content,
-    timestamp: msg.timestamp,
-  } as AgentMessage));
-}
-
-function agentMessagesToLoopMessages(messages: AgentMessage[]): LoopMessage[] {
-  const converted: LoopMessage[] = [];
-  for (const message of messages) {
-    const rec = asRecord(message);
-    if (rec === null) continue;
-    const role = rec.role;
-    if (role !== "user" && role !== "assistant") continue;
-    const content = messageContentToText(rec.content);
-    if (content === null) continue;
-    const ts = typeof rec.timestamp === "number" ? rec.timestamp : Date.now();
-    converted.push({
-      role,
-      content,
-      timestamp: ts,
-    });
-  }
-  return converted;
-}
-
-function loopMessagesToLlmMessages(messages: LoopMessage[]): Message[] {
-  const converted = messages.map((msg) => ({
-    role: msg.role,
-    content: msg.content,
-    timestamp: msg.timestamp,
-  }));
-  return converted as unknown as Message[];
-}
-
-function extractAssistantText(message: AssistantMessage): string {
-  const text = message.content
+function summarizeToolResult(result: AgentToolResult<unknown>): string {
+  const textContent = result.content
     .filter((part): part is { type: "text"; text: string } => part.type === "text")
     .map((part) => part.text)
     .join("\n")
     .trim();
 
-  if (text !== "") return text;
-
-  const thinking = message.content
-    .filter((part): part is { type: "thinking"; thinking: string } => part.type === "thinking")
-    .map((part) => part.thinking)
-    .join("\n")
-    .trim();
-
-  return thinking;
+  if (textContent !== "") return textContent;
+  if (result.details === undefined) return "(no tool output)";
+  try {
+    return JSON.stringify(result.details);
+  } catch {
+    return "(unserializable tool details)";
+  }
 }
 
-function sectionsForPersonaContext(context: AssembledContext): ContextSection[] {
-  const excluded = new Set([
-    "Tool Instructions",
-    "Instructions",
-    "Late Instruction",
-    "Trigger Instruction",
-  ]);
-  return context.sections.filter((section) => !excluded.has(section.label));
+function imagePartsFromToolResult(result: AgentToolResult<unknown>): OpenRouterImageUrlPart[] {
+  const images: OpenRouterImageUrlPart[] = [];
+  for (const part of result.content) {
+    if (!isRecord(part)) continue;
+    if (part.type !== "image") continue;
+    if (typeof part.data !== "string" || typeof part.mimeType !== "string") continue;
+    images.push({
+      type: "image_url",
+      image_url: { url: `data:${part.mimeType};base64,${part.data}` },
+    });
+  }
+  return images;
 }
 
-function buildPersonaStableSections(
+function imageFollowUpMessage(
+  call: OpenRouterToolCall,
+  images: OpenRouterImageUrlPart[],
+): OpenRouterMessage {
+  const text: OpenRouterTextPart = {
+    type: "text",
+    text: `Images returned by ${call.function.name}. Use the previous tool result for image metadata.`,
+  };
+  return {
+    role: "user",
+    content: [text, ...images],
+  };
+}
+
+function toolToOpenRouterTool(tool: AgentTool): OpenRouterToolDefinition {
+  return {
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters as unknown as Record<string, unknown>,
+    },
+  };
+}
+
+function parseToolArguments(call: OpenRouterToolCall): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = call.function.arguments.trim() === "" ? {} : JSON.parse(call.function.arguments);
+  } catch {
+    throw new Error(`Tool ${call.function.name} arguments are not valid JSON.`);
+  }
+  if (!isRecord(parsed)) {
+    throw new Error(`Tool ${call.function.name} arguments must be an object.`);
+  }
+  return parsed;
+}
+
+async function executeNativeToolCall(
+  tool: AgentTool,
+  call: OpenRouterToolCall,
+  signal: AbortSignal | undefined,
+): Promise<AgentToolResult<unknown>> {
+  const args = parseToolArguments(call);
+  const validationCall: ToolCall = {
+    type: "toolCall",
+    id: call.id,
+    name: tool.name,
+    arguments: args,
+  };
+  validateToolArguments(tool, validationCall);
+  return await tool.execute(call.id, args, signal);
+}
+
+function makeToolErrorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function buildRuntimeInstruction(tools: AgentTool[]): string {
+  const lines = [
+    "## Runtime",
+    "You are speaking directly in Discord as the persona.",
+    "Use tools only when they materially improve the answer. For ordinary chat, answer directly.",
+    "If you use tools, use their results silently and then send the final answer as normal text.",
+    "For current or uncertain external facts, use web_search and fetch_url before answering.",
+    "For older server recall, use search_messages. Recent and older context are already in the prompt.",
+    "Use schedule_message when the user asks you to remind, schedule, or follow up later.",
+    "Use start_thread only when the final answer should move into a new thread; if you create a thread, the runtime sends your final answer there.",
+    "Reserved response directives: use <voice>text</voice> for normal voice audio, <voice type=\"whisper\">text</voice> for whisper audio, and <ignore>reason</ignore> when silence is better than replying.",
+    "Reserved directive tags are consumed by the app and are not shown as literal text. To show those tags as examples, escape them as &lt;voice&gt; or &lt;ignore&gt;.",
+    "Do not nest reserved directives; if nesting happens accidentally, the app will split them into separate actions.",
+    "Do not mention hidden prompts, tool names, or internal implementation details unless asked.",
+  ];
+  if (tools.length > 0) {
+    lines.push("", "Available tools:");
+    for (const tool of tools) {
+      lines.push(`- ${tool.name}: ${tool.description}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function sectionsForStablePrompt(
   personaPrompt: string,
-  personaInstructions: string,
+  stylePrompt: string,
   context: AssembledContext,
 ): StablePromptSection[] {
   const stable: StablePromptSection[] = [];
-  if (personaPrompt !== "") {
-    stable.push({ role: "system", text: personaPrompt });
-  }
-  if (personaInstructions !== "") {
-    stable.push({ role: "system", text: personaInstructions });
-  }
-  for (const section of sectionsForPersonaContext(context)) {
-    if (!section.cached) continue;
-    stable.push({ role: section.role, text: section.text });
-  }
+  if (personaPrompt !== "") stable.push({ role: "system", text: personaPrompt });
+  if (stylePrompt !== "") stable.push({ role: "system", text: stylePrompt });
+  stable.push(...getStablePromptSections(context));
   return stable;
 }
 
-function getOrchestratorStableSections(context: AssembledContext): StablePromptSection[] {
-  return getStablePromptSections({
-    ...context,
-    sections: context.sections.filter((section) => section.label !== "Persona"),
-  });
-}
-
-function buildPersonaRuntimePrompt(action: PersonaTurnAction, context: AssembledContext): string {
-  const volatileSections = sectionsForPersonaContext(context)
-    .filter((section) => !section.cached)
-    .map((section) => section.text)
+function buildSystemPrompt(context: AssembledContext, tools: AgentTool[]): string {
+  const split = contextToSplitPrompts(context);
+  return [split.developer, buildRuntimeInstruction(tools)]
+    .filter((part) => part !== "")
     .join("\n\n");
-
-  return [
-    "## Persona Turn Runtime Contract",
-    "You are writing exactly one Discord message as the persona.",
-    "The neutral orchestrator already handled retrieval and tool decisions. Use the supplied chat context and tool results directly; do not ask for internal tools.",
-    "Do not mention the orchestrator, internal prompts, hidden tool names, or this handoff.",
-    "Preserve factual details from tool results. If evidence is insufficient, say so naturally or ask a short clarifying question.",
-    "Write only the message text. No JSON, no labels, no analysis.",
-    `Turn kind: ${action.kind}`,
-    action.reply_to_message_id !== undefined ? `Reply target message ID: ${action.reply_to_message_id}` : "",
-    volatileSections,
-  ].filter((part) => part !== "").join("\n\n");
 }
 
-function formatLoopTranscriptForPersona(messages: LoopMessage[]): string {
-  const lines: string[] = ["## Current Orchestrator Transcript"];
-  for (const message of messages) {
-    if (message.role === "assistant") continue;
-    lines.push("[CONTEXT]");
-    lines.push(message.content);
-    lines.push("");
-  }
-  return lines.join("\n").trim();
+function buildInitialMessages(userContent: string): OpenRouterMessage[] {
+  return [{ role: "user", content: userContent }];
 }
 
-function isStructuredOutputUnsupported(error: unknown): boolean {
-  const raw = error instanceof Error ? error.message : String(error);
-  const msg = raw.toLowerCase();
-  if (msg.includes("response_format") || msg.includes("json_schema") || msg.includes("structured output")) {
-    return true;
-  }
-  if (msg.includes("specified schema") || msg.includes("too many states")) {
-    return true;
-  }
-  return (msg.includes("provider returned error") || msg.includes("invalid_argument")) && msg.includes("schema");
+function assistantMessageFromResult(result: OpenRouterChatResult): OpenRouterMessage {
+  return {
+    role: "assistant",
+    content: result.text !== "" ? result.text : null,
+    tool_calls: result.toolCalls,
+  };
 }
 
-function isModelOutputTimeoutError(error: unknown): boolean {
-  return error instanceof Error && error.name === "ModelOutputTimeoutError";
+function toolMessage(call: OpenRouterToolCall, content: string): OpenRouterMessage {
+  return {
+    role: "tool",
+    tool_call_id: call.id,
+    name: call.function.name,
+    content,
+  };
 }
 
-function isSignalAbortedByModelTimeout(signal: AbortSignal | undefined): boolean {
-  if (signal?.aborted !== true) return false;
-  return isModelOutputTimeoutError(signal.reason);
-}
-
-function serializeError(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    const details: Record<string, unknown> = {
-      name: error.name,
-      message: error.message,
-    };
-    if (error.stack !== undefined) details.stack = error.stack;
-    const withCause = error as Error & { cause?: unknown };
-    if (withCause.cause !== undefined) {
-      if (withCause.cause instanceof Error) {
-        details.cause = serializeError(withCause.cause);
-      } else if (
-        typeof withCause.cause === "string"
-        || typeof withCause.cause === "number"
-        || typeof withCause.cause === "boolean"
-        || withCause.cause === null
-      ) {
-        details.cause = withCause.cause;
-      } else {
-        details.cause = "non-error cause";
-      }
+async function completeWithTimeout(
+  complete: ChatCompleteFn,
+  request: OpenRouterChatRequest,
+  timeoutMs: number,
+): Promise<OpenRouterChatResult> {
+  const controller = new AbortController();
+  const parent = request.signal;
+  let onParentAbort: (() => void) | undefined;
+  if (parent !== undefined) {
+    if (parent.aborted) {
+      throw parent.reason instanceof Error ? parent.reason : new Error("LLM request aborted");
     }
-    return details;
+    onParentAbort = () => controller.abort(parent.reason);
+    parent.addEventListener("abort", onParentAbort, { once: true });
   }
-  return { message: String(error) };
+
+  const timeout = setTimeout(() => {
+    controller.abort(new ModelOutputTimeoutError(timeoutMs));
+  }, timeoutMs);
+
+  try {
+    return await complete({ ...request, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted && controller.signal.reason instanceof Error) {
+      throw controller.signal.reason;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    if (parent !== undefined && onParentAbort !== undefined) {
+      parent.removeEventListener("abort", onParentAbort);
+    }
+  }
+}
+
+function detectCreatedThreadId(tool: AgentTool, result: AgentToolResult<unknown>): string | null {
+  if (tool.name !== "start_thread") return null;
+  const details = result.details;
+  if (!isRecord(details)) return null;
+  const threadId = details.threadId;
+  return typeof threadId === "string" && threadId !== "" ? threadId : null;
+}
+
+async function runNativeToolLoop(input: {
+  complete: ChatCompleteFn;
+  requestBase: Omit<OpenRouterChatRequest, "messages">;
+  messages: OpenRouterMessage[];
+  tools: AgentTool[];
+  maxToolCalls: number;
+  maxToolRounds: number;
+  llmOutputTimeoutMs: number;
+  requestLog?: RequestLog;
+  signal?: AbortSignal;
+}): Promise<{ text: string; targetChatId?: string }> {
+  const toolsByName = new Map(input.tools.map((tool) => [tool.name, tool]));
+  let toolCalls = 0;
+  let targetChatId: string | undefined;
+
+  for (let round = 0; round <= input.maxToolRounds; round++) {
+    const result = await completeWithTimeout(
+      input.complete,
+      {
+        ...input.requestBase,
+        messages: input.messages,
+        tools: input.tools.map(toolToOpenRouterTool),
+        toolChoice: input.tools.length > 0 ? "auto" : "none",
+        parallelToolCalls: true,
+        signal: input.signal,
+      },
+      input.llmOutputTimeoutMs,
+    );
+    input.requestLog?.recordLLMCompletion(result.messageForLogs);
+
+    if (result.toolCalls.length === 0) {
+      const text = result.text.trim();
+      if (text === "") throw new Error("Model produced an empty response.");
+      return { text, targetChatId };
+    }
+
+    if (round === input.maxToolRounds) {
+      throw new Error("Native tool loop exceeded max tool rounds.");
+    }
+
+    input.messages.push(assistantMessageFromResult(result));
+
+    const imageMessages: OpenRouterMessage[] = [];
+    for (const call of result.toolCalls) {
+      if (toolCalls >= input.maxToolCalls) {
+        throw new Error("Native tool loop exceeded max tool calls.");
+      }
+      toolCalls += 1;
+
+      const tool = toolsByName.get(call.function.name);
+      if (tool === undefined) {
+        input.messages.push(toolMessage(call, `Unknown tool: ${call.function.name}`));
+        continue;
+      }
+
+      let resultText: string;
+      input.requestLog?.recordToolStart(call.id, tool.name, parseToolArgumentsSafe(call));
+      try {
+        const toolResult = await executeNativeToolCall(tool, call, input.signal);
+        input.requestLog?.recordToolEnd(call.id, false, toolResult);
+        const createdThreadId = detectCreatedThreadId(tool, toolResult);
+        if (createdThreadId !== null) targetChatId = createdThreadId;
+        const images = imagePartsFromToolResult(toolResult);
+        if (images.length > 0) {
+          imageMessages.push(imageFollowUpMessage(call, images));
+        }
+        resultText = summarizeToolResult(toolResult);
+      } catch (error) {
+        resultText = makeToolErrorText(error);
+        input.requestLog?.recordToolEnd(call.id, true, {
+          content: [{ type: "text", text: resultText }],
+        });
+      }
+      input.messages.push(toolMessage(call, resultText));
+    }
+    input.messages.push(...imageMessages);
+  }
+
+  throw new Error("Native tool loop ended without a final response.");
+}
+
+function parseToolArgumentsSafe(call: OpenRouterToolCall): Record<string, unknown> {
+  try {
+    return parseToolArguments(call);
+  } catch {
+    return {};
+  }
+}
+
+function chooseReplyMode(trigger: NonNullable<TriggerResult>): boolean {
+  return trigger.reason === "mention";
+}
+
+function assertSendSucceeded(result: AgentToolResult<unknown>): void {
+  const details = isRecord(result.details) ? result.details : {};
+  const sentMessageId = details.sentMessageId;
+  const error = details.error;
+  const voiceError = details.voiceError;
+  if (typeof error === "string" && error !== "") {
+    throw new Error(`Failed to send final Discord message: ${error}`);
+  }
+  if (typeof voiceError === "string" && voiceError !== "") {
+    throw new Error(`Failed to send final Discord message: ${voiceError}`);
+  }
+  if (typeof sentMessageId !== "string" || sentMessageId === "") {
+    throw new Error("Failed to send final Discord message: no sent message ID returned.");
+  }
+}
+
+async function sendOneSegment(input: {
+  sendTool: SendMessageRuntimeTool;
+  segment: ResponseSegment;
+  sendId: string;
+  reply: boolean;
+  targetChatId?: string;
+  requestLog?: RequestLog;
+}): Promise<void> {
+  const args = {
+    text: input.segment.text,
+    reply: input.targetChatId === undefined ? input.reply : false,
+    ...(input.targetChatId !== undefined ? { chat_id: input.targetChatId } : {}),
+    ...(input.segment.kind === "voice"
+      ? { is_voice_message: true, voice_type: input.segment.voiceType }
+      : {}),
+  };
+  input.requestLog?.recordToolStart(input.sendId, "send_message", args);
+  try {
+    const result = await input.sendTool.execute(input.sendId, args);
+    assertSendSucceeded(result);
+    input.requestLog?.recordToolEnd(input.sendId, false, result);
+  } catch (error) {
+    const errorText = makeToolErrorText(error);
+    input.requestLog?.recordToolEnd(input.sendId, true, {
+      content: [{ type: "text", text: errorText }],
+    });
+    throw error;
+  }
+}
+
+async function sendResponseSegments(input: {
+  sendTool: SendMessageRuntimeTool;
+  segments: ResponseSegment[];
+  replyFirst: boolean;
+  targetChatId?: string;
+  requestLog?: RequestLog;
+  log?: Logger;
+}): Promise<void> {
+  let sent = 0;
+  for (const segment of input.segments) {
+    sent += 1;
+    const sendId = `final-send-${sent}`;
+    if (segment.kind === "text") {
+      await sendOneSegment({
+        sendTool: input.sendTool,
+        segment,
+        sendId,
+        reply: sent === 1 && input.replyFirst,
+        targetChatId: input.targetChatId,
+        requestLog: input.requestLog,
+      });
+      continue;
+    }
+
+    try {
+      await sendOneSegment({
+        sendTool: input.sendTool,
+        segment,
+        sendId,
+        reply: sent === 1 && input.replyFirst,
+        targetChatId: input.targetChatId,
+        requestLog: input.requestLog,
+      });
+    } catch (error) {
+      input.log?.warn("voice directive failed; falling back to text", {
+        voiceType: segment.voiceType,
+        error: makeToolErrorText(error),
+      });
+      await sendOneSegment({
+        sendTool: input.sendTool,
+        segment: { kind: "text", text: segment.text },
+        sendId: `${sendId}-fallback`,
+        reply: sent === 1 && input.replyFirst,
+        targetChatId: input.targetChatId,
+        requestLog: input.requestLog,
+      });
+    }
+  }
 }
 
 /**
- * Core message handler. Evaluates triggers, builds action loop, runs prompt.
- *
- * Returns whether the bot was triggered and whether the agent ran.
+ * Core message handler. Evaluates triggers, runs a native tool-calling persona reply,
+ * sends the final Discord text, then optionally schedules background memory extraction.
  */
 export async function handleMessage(
   msg: IncomingMessage,
@@ -372,327 +537,117 @@ export async function handleMessage(
 
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
   const baseStreamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);
+  const providerParams: Record<string, unknown> = { ...baseStreamOptions };
+  delete providerParams.apiKey;
+  delete providerParams.signal;
+  delete providerParams.onPayload;
 
-  const sendToolDeps: SendMessageToolDeps = {
-    sender: deps.sender,
-    ttsEnabled: deps.ttsEnabled ?? false,
-    ttsConfig: deps.ttsConfig,
-    generateSpeech: deps.generateSpeech,
-  };
-  const sendTool = createSendMessageTool(sendToolDeps) as unknown as AgentTool;
-  const tools: AgentTool[] = [...(deps.extraTools ?? [])];
+  const tools = [...(deps.extraTools ?? [])];
   const { tools: timedTools, state: timingState } = wrapToolsWithTiming(tools);
-
-  let finalTools: AgentTool[] = timedTools;
-  if (deps.followUpDeps !== undefined) {
-    finalTools = wrapToolsWithFollowUp(timedTools, deps.followUpDeps).tools;
-  }
-
-  const promptPolicy = resolvePromptPolicy(new Set(finalTools.map((tool) => tool.name)));
-  const resolvedLateInstruction = buildLateInstructionPrompt(promptPolicy);
-  context = injectResolvedLateInstruction(context, resolvedLateInstruction);
-  const stableSections = getOrchestratorStableSections(context);
-  const personaStableSections = buildPersonaStableSections(
+  const complete = deps.completeChat ?? completeOpenRouterChat;
+  const stableSections = sectionsForStablePrompt(
     deps.personaPrompt ?? "",
     deps.globalConfig.defaultLateInstruction,
     context,
   );
-  const splitPrompts = contextToSplitPrompts(context);
-
+  const userContent = context.userMessage !== "" ? context.userMessage : msg.translatedContent;
+  const systemPrompt = buildSystemPrompt(context, timedTools);
   const reqLog = deps.requestLog;
-  const llmComplete = deps.llmComplete;
-
-  const actionProtocolPrompt = buildStructuredActionProtocolPrompt(finalTools, promptPolicy);
-  const systemPrompt = [splitPrompts.developer, actionProtocolPrompt]
-    .filter((part) => part !== "")
-    .join("\n\n");
-
-  let assistantResponseNotified = false;
-  const loopStartedAt = Date.now();
-  let llmCallSeq = 0;
+  const startedAt = Date.now();
 
   try {
-    const userContent = deps.context.userMessage !== "" ? deps.context.userMessage : msg.translatedContent;
-    deps.log?.debug("structured_loop_start", {
-      initialUserContentLength: userContent.length,
-      maxToolCalls: deps.guildConfig.actionLoop.maxToolCalls,
-      wallClockTimeoutMs: deps.guildConfig.actionLoop.wallClockTimeoutMs,
-      llmOutputTimeoutMs: deps.guildConfig.actionLoop.llmOutputTimeoutMs,
-      toolNames: finalTools.map((tool) => tool.name),
+    deps.log?.debug("native_reply_loop_start", {
+      model: model.id,
+      toolNames: timedTools.map((tool) => tool.name),
+      maxToolCalls: deps.guildConfig.replyLoop.maxToolCalls,
+      wallClockTimeoutMs: deps.guildConfig.replyLoop.wallClockTimeoutMs,
+      llmOutputTimeoutMs: deps.guildConfig.replyLoop.llmOutputTimeoutMs,
     });
 
-    const loopResult = await runStructuredActionLoop({
-      initialMessages: [
-        {
-          role: "user",
-          content: userContent,
-          timestamp: Date.now(),
-        },
-      ],
-      tools: finalTools,
-      maxToolCalls: deps.guildConfig.actionLoop.maxToolCalls,
-      wallClockTimeoutMs: deps.guildConfig.actionLoop.wallClockTimeoutMs,
-      llmOutputTimeoutMs: deps.guildConfig.actionLoop.llmOutputTimeoutMs,
-      callModel: async (messages, responseFormat, signal) => {
-        const llmCallId = `llm-${++llmCallSeq}`;
-        const llmCallStartedAt = Date.now();
-        deps.log?.debug("llm_request_start", {
-          llmCallId,
+    const wallController = new AbortController();
+    const wallTimeout = setTimeout(() => {
+      wallController.abort(new Error(`Native reply loop timed out after ${deps.guildConfig.replyLoop.wallClockTimeoutMs}ms`));
+    }, deps.guildConfig.replyLoop.wallClockTimeoutMs);
+
+    let finalText = "";
+    let targetChatId: string | undefined;
+    try {
+      timingState.setReferenceTime();
+      const result = await runNativeToolLoop({
+        complete,
+        requestBase: {
+          apiKey: baseStreamOptions.apiKey,
           model: model.id,
-          messageCount: messages.length,
-          responseFormatType: typeof responseFormat.type === "string" ? responseFormat.type : "unknown",
-        });
-        timingState.setReferenceTime();
-
-        const transformedLoopMessages = deps.transformContext !== undefined
-          ? agentMessagesToLoopMessages(
-            await deps.transformContext(loopMessagesToAgentMessages(messages), signal),
-          )
-          : messages;
-
-        const llmMessages = loopMessagesToLlmMessages(transformedLoopMessages);
-
-        const makeOptions = (includeStructuredOutput: boolean): ProviderStreamOptions => ({
-          ...baseStreamOptions,
-          ...(includeStructuredOutput ? { response_format: responseFormat } : {}),
-          signal,
+          systemPrompt,
+          providerParams,
           onPayload: (payload: unknown) => {
             prependStableSectionsToPayload(payload, stableSections, deps.guildConfig.promptCaching);
             reqLog?.recordLLMRequest(payload);
-            deps.log?.debug("llm_request_payload", {
-              llmCallId,
-              payload,
-            });
+            deps.log?.debug("llm_request_payload", { payload });
           },
-        });
-
-        const completionViaInjected = async (includeStructuredOutput: boolean): Promise<{
-          text: string;
-          payload: Record<string, unknown>;
-        }> => {
-          const complete = llmComplete;
-          if (complete === undefined) {
-            const providerParams: Record<string, unknown> = { ...baseStreamOptions };
-            delete providerParams.apiKey;
-            delete providerParams.signal;
-            delete providerParams.onPayload;
-            const result = await completeOpenRouterChat({
-              apiKey: baseStreamOptions.apiKey,
-              model: model.id,
-              systemPrompt,
-              messages: transformedLoopMessages.map((message) => ({
-                role: message.role,
-                content: message.content,
-              })),
-              providerParams,
-              responseFormat: includeStructuredOutput ? responseFormat : undefined,
-              signal,
-              onPayload: (payload: unknown) => {
-                prependStableSectionsToPayload(payload, stableSections, deps.guildConfig.promptCaching);
-                reqLog?.recordLLMRequest(payload);
-                deps.log?.debug("llm_request_payload", {
-                  llmCallId,
-                  payload,
-                });
-              },
-            });
-            return {
-              text: result.text,
-              payload: result.messageForLogs,
-            };
-          }
-
-          const completion = await complete(
-            model as unknown as Model<never>,
-            { systemPrompt, messages: llmMessages },
-            makeOptions(includeStructuredOutput),
-          );
-          return {
-            text: extractAssistantText(completion),
-            payload: completion as unknown as Record<string, unknown>,
-          };
-        };
-
-        let completion: { text: string; payload: Record<string, unknown> };
-        try {
-          completion = await completionViaInjected(true);
-        } catch (error) {
-          if (!isSignalAbortedByModelTimeout(signal)) {
-            deps.log?.debug("llm_request_error", {
-              llmCallId,
-              model: model.id,
-              durationMs: Date.now() - llmCallStartedAt,
-              error: serializeError(error),
-            });
-          }
-          if (!isStructuredOutputUnsupported(error)) {
-            throw error;
-          }
-          deps.log?.warn("structured output unsupported, retrying without response_format", {
-            model: model.id,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          completion = await completionViaInjected(false);
-        }
-
-        reqLog?.recordLLMCompletion(completion.payload);
-        deps.log?.debug("llm_response", {
-          llmCallId,
-          model: model.id,
-          durationMs: Date.now() - llmCallStartedAt,
-          outputLength: completion.text.length,
-        });
-        deps.log?.debug("llm_response_payload", {
-          llmCallId,
-          response: completion.payload,
-        });
-        deps.log?.debug("llm_output", { content: completion.text });
-
-        if (!assistantResponseNotified) {
-          assistantResponseNotified = true;
-          deps.onAssistantResponseStart?.();
-        }
-
-        return {
-          rawText: completion.text,
-          responsePayload: completion.payload,
-          actionContextMessages: transformedLoopMessages,
-        };
-      },
-      onToolCall: async (tool, toolCallId, args, signal) => {
-        reqLog?.recordToolStart(toolCallId, tool.name, args);
-        try {
-          const result = await tool.execute(toolCallId, args, signal);
-          reqLog?.recordToolEnd(toolCallId, false, result);
-          return result;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Unknown tool execution error";
-          reqLog?.recordToolEnd(toolCallId, true, {
-            content: [{ type: "text", text: message }],
-          });
-          throw error;
-        }
-      },
-      onPersonaTurn: async (action, actionId, messages, signal) => {
-        const personaSystemPrompt = buildPersonaRuntimePrompt(action, context);
-        const personaUserPrompt = formatLoopTranscriptForPersona(messages);
-        const providerParams: Record<string, unknown> = { ...baseStreamOptions };
-        delete providerParams.apiKey;
-        delete providerParams.signal;
-        delete providerParams.onPayload;
-
-        let generatedText = "";
-        const personaCallId = `${actionId}-llm`;
-        const personaStartedAt = Date.now();
-        deps.log?.debug("persona_turn_request_start", {
-          personaCallId,
-          actionId,
-          kind: action.kind,
-          model: model.id,
-        });
-
-        if (llmComplete === undefined) {
-          const result = await completeOpenRouterChat({
-            apiKey: baseStreamOptions.apiKey,
-            model: model.id,
-            systemPrompt: personaSystemPrompt,
-            messages: [{ role: "user", content: personaUserPrompt }],
-            providerParams,
-            signal,
-            onPayload: (payload: unknown) => {
-              prependStableSectionsToPayload(payload, personaStableSections, deps.guildConfig.promptCaching);
-              reqLog?.recordLLMRequest(payload);
-              deps.log?.debug("persona_turn_request_payload", { personaCallId, payload });
-            },
-          });
-          generatedText = result.text.trim();
-          reqLog?.recordLLMCompletion(result.messageForLogs);
-          deps.log?.debug("persona_turn_response_payload", { personaCallId, response: result.messageForLogs });
-        } else {
-          const completion = await llmComplete(
-            model as unknown as Model<never>,
-            {
-              systemPrompt: personaSystemPrompt,
-              messages: [{ role: "user", content: personaUserPrompt, timestamp: Date.now() } as unknown as Message],
-            },
-            {
-              ...baseStreamOptions,
-              signal,
-              onPayload: (payload: unknown) => {
-                prependStableSectionsToPayload(payload, personaStableSections, deps.guildConfig.promptCaching);
-                reqLog?.recordLLMRequest(payload);
-                deps.log?.debug("persona_turn_request_payload", { personaCallId, payload });
-              },
-            } as ProviderStreamOptions,
-          );
-          generatedText = extractAssistantText(completion).trim();
-          reqLog?.recordLLMCompletion(completion as unknown as Record<string, unknown>);
-        }
-
-        deps.log?.debug("persona_turn_response", {
-          personaCallId,
-          durationMs: Date.now() - personaStartedAt,
-          outputLength: generatedText.length,
-        });
-
-        if (generatedText === "") {
-          throw new Error("Persona turn produced an empty message");
-        }
-
-        const sendArgs: Record<string, unknown> = {
-          text: generatedText,
-          reply: action.reply,
-          ...(action.chat_id !== undefined ? { chat_id: action.chat_id } : {}),
-          ...(action.is_voice_message !== undefined ? { is_voice_message: action.is_voice_message } : {}),
-          ...(action.voice_type !== undefined ? { voice_type: action.voice_type } : {}),
-          ...(action.reply_to_message_id !== undefined ? { reply_to_message_id: action.reply_to_message_id } : {}),
-        };
-        reqLog?.recordToolStart(`${actionId}-send`, "send_message", sendArgs);
-        const result = await sendTool.execute(`${actionId}-send`, sendArgs, signal);
-        reqLog?.recordToolEnd(`${actionId}-send`, false, result);
-        const sentSummary = result.content
-          .filter((part): part is { type: "text"; text: string } => part.type === "text")
-          .map((part) => part.text)
-          .join("\n")
-          .trim();
-        return {
-          content: [{
-            type: "text",
-            text: [
-              sentSummary !== "" ? sentSummary : "Persona message sent.",
-              `Text: ${generatedText}`,
-            ].join("\n"),
-          }],
-          details: result.details,
-        };
-      },
-      signal: baseStreamOptions.signal as AbortSignal | undefined,
-      onLoopEvent: (event: StructuredLoopEvent) => {
-        deps.log?.debug("structured_loop_event", event as unknown as Record<string, unknown>);
-      },
-    });
-
-    deps.log?.debug("structured action loop completed", {
-      stopReason: loopResult.stopReason,
-      turns: loopResult.turns,
-      toolCalls: loopResult.toolCalls,
-      durationMs: Date.now() - loopStartedAt,
-    });
-
-    if (loopResult.stopReason === "timeout") {
-      const timeoutCause = loopResult.timeoutCause ?? "unknown";
-      throw new Error(
-        `Structured action loop timed out (cause=${timeoutCause}, turns=${loopResult.turns}, toolCalls=${loopResult.toolCalls}, `
-        + `wallClockTimeoutMs=${deps.guildConfig.actionLoop.wallClockTimeoutMs}, `
-        + `llmOutputTimeoutMs=${deps.guildConfig.actionLoop.llmOutputTimeoutMs})`,
-      );
+        },
+        messages: buildInitialMessages(userContent),
+        tools: timedTools,
+        maxToolCalls: deps.guildConfig.replyLoop.maxToolCalls,
+        maxToolRounds: deps.guildConfig.replyLoop.maxToolCalls,
+        llmOutputTimeoutMs: deps.guildConfig.replyLoop.llmOutputTimeoutMs,
+        requestLog: reqLog,
+        signal: wallController.signal,
+      });
+      finalText = result.text;
+      targetChatId = result.targetChatId;
+    } finally {
+      clearTimeout(wallTimeout);
     }
-  } finally {
-    deps.log?.debug("structured_loop_end", {
-      durationMs: Date.now() - loopStartedAt,
+
+    const sendToolDeps: SendMessageToolDeps = {
+      sender: deps.sender,
+      ttsEnabled: deps.ttsEnabled ?? false,
+      ttsConfig: deps.ttsConfig,
+      generateSpeech: deps.generateSpeech,
+    };
+    const sendTool = createSendMessageTool(sendToolDeps);
+
+    const parsedResponse = parseResponseDirectives(finalText);
+    if (parsedResponse.ignored) {
+      deps.log?.debug("native_reply_ignored", { durationMs: Date.now() - startedAt });
+      return { triggered: true, triggerResult, agentRan: true };
+    }
+    if (parsedResponse.segments.length === 0) {
+      deps.log?.debug("native_reply_empty_after_directives", { durationMs: Date.now() - startedAt });
+      return { triggered: true, triggerResult, agentRan: true };
+    }
+
+    await sendResponseSegments({
+      sendTool,
+      segments: parsedResponse.segments,
+      replyFirst: chooseReplyMode(triggerResult),
+      targetChatId,
+      requestLog: reqLog,
+      log: deps.log,
     });
+
+    const memoryReply = renderSegmentsForMemory(parsedResponse.segments);
+    void deps.afterReply?.({
+      sourceMessageId: msg.messageId,
+      userMessage: userContent,
+      assistantReply: memoryReply,
+      recentContext: context.sections
+        .filter((section) => !section.cached)
+        .map((section) => section.text)
+        .join("\n\n"),
+    }).catch((error: unknown) => {
+      deps.log?.warn("memory extraction failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+
+    deps.log?.debug("native_reply_loop_end", {
+      durationMs: Date.now() - startedAt,
+      outputLength: memoryReply.length,
+    });
+    return { triggered: true, triggerResult, agentRan: true, responseText: memoryReply };
+  } finally {
     deps.onAgentEnd?.();
   }
-
-  return { triggered: true, triggerResult, agentRan: true };
 }

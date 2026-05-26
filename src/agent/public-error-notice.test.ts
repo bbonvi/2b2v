@@ -2,16 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { buildPublicErrorNoticeForError, classifyPublicErrorKind } from "./public-error-notice";
 
 describe("public-error-notice", () => {
-  test("classifies structured loop timeout as timeout kind", () => {
+  test("classifies reply loop timeout as timeout kind", () => {
     const kind = classifyPublicErrorKind(
-      new Error("Structured action loop timed out (cause=model_output_timeout, turns=1)"),
+      new Error("Native reply loop timed out after 45000ms"),
     );
     expect(kind).toBe("timeout");
   });
 
   test("builds short russian timeout notice", () => {
     const msg = buildPublicErrorNoticeForError(
-      new Error("Structured action loop timed out (cause=wall_clock_timeout)"),
+      new Error("Native reply loop timed out after 45000ms"),
       "ru",
     );
     expect(msg).toContain("[SYSTEM ERROR]");

@@ -43,67 +43,65 @@ describe("database initialization", () => {
 });
 
 describe("memories table", () => {
-  test("inserts and retrieves a user-scoped memory", () => {
+  test("inserts and retrieves a user memory", () => {
     const now = Date.now();
-    const expiresAt = now + 180 * 24 * 60 * 60 * 1000; // 6 months
     const result = db.raw
       .prepare(
-        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+        `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("user", "guild-1", "user-1", "Prefers dark mode", null, "msg-42", now, now, expiresAt);
+      .run("guild-1", "user-1", "preference", "Prefers dark mode", "msg-42", 0.9, now, now, null);
 
     const memId = Number(result.lastInsertRowid);
     const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get(memId) as Record<string, unknown>;
-    expect(row.scope).toBe("user");
     expect(row.guild_id).toBe("guild-1");
-    expect(row.user_id).toBe("user-1");
-    expect(row.short_description).toBe("Prefers dark mode");
+    expect(row.subject_user_id).toBe("user-1");
+    expect(row.kind).toBe("preference");
+    expect(row.content).toBe("Prefers dark mode");
     expect(row.source_message_id).toBe("msg-42");
-    expect(row.expires_at).toBe(expiresAt);
+    expect(row.confidence).toBe(0.9);
+    expect(row.deleted_at).toBeNull();
   });
 
-  test("inserts a journal entry with short and long descriptions", () => {
+  test("inserts a global note without a subject user", () => {
     const now = Date.now();
     const result = db.raw
       .prepare(
-        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+        `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("journal", "guild-1", "user-1", "Follow up on Alice's project", "Alice mentioned she's working on a Rust compiler. Check in next week.", null, now, now, null);
+      .run("guild-1", null, "global_note", "Movie night is every Friday", null, 0.8, now, now, null);
 
     const memId = Number(result.lastInsertRowid);
     const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get(memId) as Record<string, unknown>;
-    expect(row.scope).toBe("journal");
-    expect(row.short_description).toBe("Follow up on Alice's project");
-    expect(row.long_description).toContain("Rust compiler");
     expect(row.guild_id).toBe("guild-1");
-    expect(row.user_id).toBe("user-1");
-    expect(row.expires_at).toBeNull();
+    expect(row.subject_user_id).toBeNull();
+    expect(row.kind).toBe("global_note");
+    expect(row.content).toBe("Movie night is every Friday");
   });
 
-  test("rejects guild_bot scope due to CHECK constraint", () => {
+  test("rejects unknown memory kind due to CHECK constraint", () => {
     const now = Date.now();
     const insert = () =>
       db.raw
         .prepare(
-          `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run("gb-1", "guild_bot", "guild-1", null, "Movie night is every Friday", null, null, now, now, null);
+        .run("guild-1", null, "unknown", "Movie night is every Friday", null, 0.8, now, now, null);
 
     expect(insert).toThrow();
   });
 
-  test("rejects global_bot scope due to CHECK constraint", () => {
+  test("rejects empty memory content due to CHECK constraint", () => {
     const now = Date.now();
     const insert = () =>
       db.raw
         .prepare(
-          `INSERT INTO memories (id, scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run("glb-1", "global_bot", null, null, "Users generally prefer concise answers", null, null, now, now, null);
+        .run("guild-1", null, "global_note", "", null, 0.8, now, now, null);
 
     expect(insert).toThrow();
   });
@@ -111,25 +109,24 @@ describe("memories table", () => {
   test("autoincrement produces unique sequential IDs", () => {
     const now = Date.now();
     const insert = db.raw.prepare(
-      `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+      `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
-    const r1 = insert.run("user", "g1", "u1", "first", null, null, now, now, null);
-    const r2 = insert.run("user", "g1", "u1", "second", null, null, now, now, null);
-    const r3 = insert.run("user", "g1", "u1", "third", null, null, now, now, null);
+    const r1 = insert.run("g1", "u1", "fact", "first", null, 0.8, now, now, null);
+    const r2 = insert.run("g1", "u1", "fact", "second", null, 0.8, now, now, null);
+    const r3 = insert.run("g1", "u1", "fact", "third", null, 0.8, now, now, null);
 
     expect(Number(r1.lastInsertRowid)).toBe(1);
     expect(Number(r2.lastInsertRowid)).toBe(2);
     expect(Number(r3.lastInsertRowid)).toBe(3);
   });
 
-  test("scope_guild_user index supports efficient queries", () => {
-    // Verify index exists
+  test("guild_subject index supports efficient queries", () => {
     const idx = db.raw
-      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_memories_scope_guild_user'")
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_memories_guild_subject'")
       .get() as { name: string } | undefined;
-    expect(idx?.name).toBe("idx_memories_scope_guild_user");
+    expect(idx?.name).toBe("idx_memories_guild_subject");
   });
 });
 

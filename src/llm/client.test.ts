@@ -11,7 +11,6 @@ const GLOBAL: GlobalConfig = {
   defaultTrim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
   defaultTriggers: { mention: true, keywords: [], randomChance: 0 },
   defaultTriggerInstructions: {},
-  defaultMemoryRetentionDays: 180,
   defaultImageMaxDimension: 768,
   defaultMergeMessageGapSeconds: 120,
   defaultImageReadMaxPerCall: 10,
@@ -21,9 +20,9 @@ const GLOBAL: GlobalConfig = {
     defaultLateInstruction: "",
     promptProfile: {
       persona: [{ kind: "file", path: "prompts/persona.md", optional: false }],
-      toolInstructions: [{ kind: "file", path: "prompts/orchestrator.md", optional: false }],
+      toolInstructions: [],
       instructions: [],
-      lateInstructions: [{ kind: "file", path: "prompts/persona_response.md", optional: false }],
+      lateInstructions: [{ kind: "file", path: "prompts/style.md", optional: false }],
     },
   logLevel: "info",
   dataDir: "data",
@@ -32,9 +31,9 @@ const GLOBAL: GlobalConfig = {
   uiLang: "en",
   defaultEmotes: { include: false },
   defaultMembers: { include: true },
-  defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+  defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
   defaultPromptCaching: { enabled: true },
-  defaultActionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+  defaultReplyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
 };
 
 const GUILD: GuildConfig = {
@@ -44,7 +43,6 @@ const GUILD: GuildConfig = {
   triggerInstructions: {},
   timezone: "UTC",
   trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
-  memoryRetentionDays: 180,
   adminUserIds: [],
   imageMaxDimension: 768,
   mergeMessageGapSeconds: 120,
@@ -54,9 +52,9 @@ const GUILD: GuildConfig = {
   instructions: "",
   emotes: { include: false },
   members: { include: true },
-  dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+  dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
   promptCaching: { enabled: true },
-  actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+  replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
 };
 
 describe("resolveModel", () => {

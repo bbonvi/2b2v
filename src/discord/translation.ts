@@ -203,7 +203,7 @@ export function translateOutbound(
 }
 
 const MEMBER_LIST_LEGEND = `Legend: [@username] — [display name] — [memories]
-        Use \`save_journal_entry(username)\` for user-scoped memory, \`get_journal_entries(username?)\` to list scoped entries, and \`delete_journal_entries(ids, username?)\` when removal is needed.`;
+        Memories are injected automatically when relevant; no memory tool call is needed.`;
 
 /**
  * Build a display name context block for LLM consumption.

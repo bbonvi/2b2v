@@ -98,7 +98,6 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultTimezone).toBe("UTC");
     expect(cfg.defaultTrim).toEqual({ trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 });
     expect(cfg.defaultTriggers).toEqual({ mention: true, keywords: [], randomChance: 0 });
-    expect(cfg.defaultMemoryRetentionDays).toBe(180);
     expect(cfg.defaultImageMaxDimension).toBe(768);
     expect(cfg.defaultMergeMessageGapSeconds).toBe(120);
     expect(cfg.defaultImageReadMaxPerCall).toBe(10);
@@ -142,9 +141,9 @@ describe("loadGlobalConfig", () => {
     const promptDir = join(TEST_DIR, "..", "prompts");
     expect((cfg as unknown as { promptProfile?: unknown }).promptProfile).toEqual({
       persona: [{ kind: "file", path: join(promptDir, "persona.md"), optional: false }],
-      toolInstructions: [{ kind: "file", path: join(promptDir, "orchestrator.md"), optional: false }],
+      toolInstructions: [],
       instructions: [],
-      lateInstructions: [{ kind: "file", path: join(promptDir, "persona_response.md"), optional: false }],
+      lateInstructions: [{ kind: "file", path: join(promptDir, "style.md"), optional: false }],
     });
   });
 
@@ -292,36 +291,44 @@ describe("loadGlobalConfig", () => {
     });
   });
 
-  test("uses actionLoop defaults when not configured", () => {
+  test("uses replyLoop defaults when not configured", () => {
     const cfg = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "nonexistent.yaml"));
-    expect(cfg.defaultActionLoop).toEqual({
+    expect(cfg.defaultReplyLoop).toEqual({
       maxToolCalls: 8,
       wallClockTimeoutMs: 45_000,
       llmOutputTimeoutMs: 12_000,
     });
   });
 
-  test("parses global actionLoop overrides", () => {
+  test("parses global replyLoop overrides", () => {
     const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "actionLoop:\n  maxToolCalls: 12\n  wallClockTimeoutMs: 30000\n  llmOutputTimeoutMs: 9000\n");
+    writeFileSync(file, "replyLoop:\n  maxToolCalls: 12\n  wallClockTimeoutMs: 30000\n  llmOutputTimeoutMs: 9000\n");
     const cfg = loadGlobalConfig(BASE_ENV, file);
-    expect(cfg.defaultActionLoop).toEqual({
+    expect(cfg.defaultReplyLoop).toEqual({
       maxToolCalls: 12,
       wallClockTimeoutMs: 30_000,
       llmOutputTimeoutMs: 9_000,
     });
   });
 
-  test("rejects invalid global actionLoop values", () => {
+  test("rejects deprecated global actionLoop key", () => {
     const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "actionLoop:\n  maxToolCalls: 0\n  wallClockTimeoutMs: 500\n");
-    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow("actionLoop.maxToolCalls must be >= 1");
+    writeFileSync(file, "actionLoop:\n  maxToolCalls: 12\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
+      'Deprecated config key "global.actionLoop" is no longer supported. Use global.replyLoop instead.',
+    );
+  });
+
+  test("rejects invalid global replyLoop values", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "replyLoop:\n  maxToolCalls: 0\n  wallClockTimeoutMs: 500\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow("replyLoop.maxToolCalls must be >= 1");
   });
 
   test("rejects invalid global llmOutputTimeoutMs", () => {
     const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "actionLoop:\n  maxToolCalls: 8\n  wallClockTimeoutMs: 30000\n  llmOutputTimeoutMs: 500\n");
-    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow("actionLoop.llmOutputTimeoutMs must be >= 1000");
+    writeFileSync(file, "replyLoop:\n  maxToolCalls: 8\n  wallClockTimeoutMs: 30000\n  llmOutputTimeoutMs: 500\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow("replyLoop.llmOutputTimeoutMs must be >= 1000");
   });
 });
 
@@ -354,6 +361,14 @@ describe("loadGuildConfigFile", () => {
     expect(cfg.triggers?.mention).toBe(false);
     expect(cfg.triggers?.keywords).toEqual(["hello", "hi"]);
     expect(cfg.triggers?.randomChance).toBe(0.05);
+  });
+
+  test("rejects deprecated guild actionLoop key", () => {
+    const file = join(GUILDS_DIR, "111-action-loop.yaml");
+    writeFileSync(file, "actionLoop:\n  maxToolCalls: 12\n");
+    expect(() => loadGuildConfigFile(file)).toThrow(
+      'Deprecated config key "guild.actionLoop" is no longer supported. Use guild.replyLoop instead.',
+    );
   });
 
   test("parses adminUserIds", () => {
@@ -393,7 +408,6 @@ describe("resolveGuildConfig", () => {
     expect(resolved.thinkingLevel).toBeUndefined();
     expect(resolved.timezone).toBe("UTC");
     expect(resolved.trim).toEqual({ trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 });
-    expect(resolved.memoryRetentionDays).toBe(180);
     expect(resolved.mergeMessageGapSeconds).toBe(120);
     expect(resolved.imageReadMaxPerCall).toBe(10);
     expect(resolved.imageCaptioningEnabled).toBe(false);
@@ -598,65 +612,65 @@ describe("resolveGuildConfig", () => {
     });
   });
 
-  test("inherits actionLoop from global defaults", () => {
+  test("inherits replyLoop from global defaults", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
-    writeFileSync(cfgFile, "actionLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n  llmOutputTimeoutMs: 8500\n");
+    writeFileSync(cfgFile, "replyLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n  llmOutputTimeoutMs: 8500\n");
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {
       guildId: "113",
       slug: "action-loop-inherit",
     };
     const resolved = resolveGuildConfig(global, partial);
-    expect(resolved.actionLoop).toEqual({
+    expect(resolved.replyLoop).toEqual({
       maxToolCalls: 9,
       wallClockTimeoutMs: 60_000,
       llmOutputTimeoutMs: 8_500,
     });
   });
 
-  test("guild actionLoop overrides global defaults", () => {
+  test("guild replyLoop overrides global defaults", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
-    writeFileSync(cfgFile, "actionLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n  llmOutputTimeoutMs: 8500\n");
+    writeFileSync(cfgFile, "replyLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n  llmOutputTimeoutMs: 8500\n");
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {
       guildId: "114",
       slug: "action-loop-override",
-      actionLoop: { maxToolCalls: 3, wallClockTimeoutMs: 15000, llmOutputTimeoutMs: 4500 },
+      replyLoop: { maxToolCalls: 3, wallClockTimeoutMs: 15000, llmOutputTimeoutMs: 4500 },
     };
     const resolved = resolveGuildConfig(global, partial);
-    expect(resolved.actionLoop).toEqual({
+    expect(resolved.replyLoop).toEqual({
       maxToolCalls: 3,
       wallClockTimeoutMs: 15_000,
       llmOutputTimeoutMs: 4_500,
     });
   });
 
-  test("rejects invalid guild actionLoop overrides", () => {
+  test("rejects invalid guild replyLoop overrides", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
-    writeFileSync(cfgFile, "actionLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n");
+    writeFileSync(cfgFile, "replyLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n");
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {
       guildId: "115",
       slug: "action-loop-invalid",
-      actionLoop: { maxToolCalls: 0, wallClockTimeoutMs: 5000, llmOutputTimeoutMs: 9000 },
+      replyLoop: { maxToolCalls: 0, wallClockTimeoutMs: 5000, llmOutputTimeoutMs: 9000 },
     };
-    expect(() => resolveGuildConfig(global, partial)).toThrow("actionLoop.maxToolCalls must be >= 1");
+    expect(() => resolveGuildConfig(global, partial)).toThrow("replyLoop.maxToolCalls must be >= 1");
   });
 
   test("rejects invalid guild llmOutputTimeoutMs override", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
-    writeFileSync(cfgFile, "actionLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n  llmOutputTimeoutMs: 8500\n");
+    writeFileSync(cfgFile, "replyLoop:\n  maxToolCalls: 9\n  wallClockTimeoutMs: 60000\n  llmOutputTimeoutMs: 8500\n");
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {
       guildId: "116",
       slug: "action-loop-invalid-timeout",
-      actionLoop: { maxToolCalls: 3, wallClockTimeoutMs: 5000, llmOutputTimeoutMs: 500 },
+      replyLoop: { maxToolCalls: 3, wallClockTimeoutMs: 5000, llmOutputTimeoutMs: 500 },
     };
-    expect(() => resolveGuildConfig(global, partial)).toThrow("actionLoop.llmOutputTimeoutMs must be >= 1000");
+    expect(() => resolveGuildConfig(global, partial)).toThrow("replyLoop.llmOutputTimeoutMs must be >= 1000");
   });
 });
 
@@ -735,7 +749,6 @@ describe("saveGuildConfig", () => {
       thinkingLevel: "high",
       timezone: "Asia/Tokyo",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
-      memoryRetentionDays: 180,
       adminUserIds: [],
       imageMaxDimension: 768,
       mergeMessageGapSeconds: 120,
@@ -745,8 +758,8 @@ describe("saveGuildConfig", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
-      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: true },
     };
 
@@ -772,7 +785,6 @@ describe("saveGuildConfig", () => {
       thinkingLevel: "medium",
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
-      memoryRetentionDays: 180,
       adminUserIds: [],
       imageMaxDimension: 768,
       mergeMessageGapSeconds: 120,
@@ -782,8 +794,8 @@ describe("saveGuildConfig", () => {
       instructions: "Custom guild instructions",
       emotes: { include: false },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
-      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: true },
     };
 
@@ -805,7 +817,6 @@ describe("saveGuildConfig", () => {
       thinkingLevel: "medium",
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
-      memoryRetentionDays: 180,
       adminUserIds: [],
       imageMaxDimension: 768,
       mergeMessageGapSeconds: 120,
@@ -815,8 +826,8 @@ describe("saveGuildConfig", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
-      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: false },
     } as unknown as GuildConfig;
 
@@ -1126,7 +1137,6 @@ describe("saveGuildConfig bashTool", () => {
       thinkingLevel: "medium",
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
-      memoryRetentionDays: 180,
       adminUserIds: [],
       imageMaxDimension: 768,
       mergeMessageGapSeconds: 120,
@@ -1143,8 +1153,8 @@ describe("saveGuildConfig bashTool", () => {
       },
       emotes: { include: false },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
-      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: true },
     };
 
@@ -1166,7 +1176,6 @@ describe("saveGuildConfig bashTool", () => {
       thinkingLevel: "medium",
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
-      memoryRetentionDays: 180,
       adminUserIds: [],
       imageMaxDimension: 768,
       mergeMessageGapSeconds: 120,
@@ -1176,8 +1185,8 @@ describe("saveGuildConfig bashTool", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
-      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: true },
     };
 
@@ -1382,7 +1391,6 @@ describe("saveGuildConfig emotes", () => {
       triggerInstructions: {},
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
-      memoryRetentionDays: 180,
       adminUserIds: [],
       imageMaxDimension: 768,
       mergeMessageGapSeconds: 120,
@@ -1392,8 +1400,8 @@ describe("saveGuildConfig emotes", () => {
       instructions: "",
       emotes: { include: true },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
-      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: true },
     };
 
@@ -1422,7 +1430,6 @@ describe("saveGuildConfig triggerInstructions", () => {
       },
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
-      memoryRetentionDays: 180,
       adminUserIds: [],
       imageMaxDimension: 768,
       mergeMessageGapSeconds: 120,
@@ -1432,8 +1439,8 @@ describe("saveGuildConfig triggerInstructions", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
-      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: true },
     };
 
@@ -1455,7 +1462,6 @@ describe("saveGuildConfig triggerInstructions", () => {
       triggerInstructions: {},
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
-      memoryRetentionDays: 180,
       adminUserIds: [],
       imageMaxDimension: 768,
       mergeMessageGapSeconds: 120,
@@ -1465,8 +1471,8 @@ describe("saveGuildConfig triggerInstructions", () => {
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
-      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: true },
     };
 

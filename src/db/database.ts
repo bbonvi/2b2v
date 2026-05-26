@@ -8,23 +8,16 @@ export interface Database {
 const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS memories (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    scope             TEXT NOT NULL CHECK(scope IN ('user', 'journal')),
-    guild_id          TEXT,
-    user_id           TEXT,
-    short_description TEXT NOT NULL DEFAULT '',
-    long_description  TEXT,
+    guild_id          TEXT NOT NULL,
+    subject_user_id   TEXT,
+    kind              TEXT NOT NULL CHECK(kind IN ('global_note', 'user_note', 'preference', 'relationship', 'project', 'fact')),
+    content           TEXT NOT NULL CHECK(length(trim(content)) > 0),
     source_message_id TEXT,
+    confidence        REAL NOT NULL DEFAULT 0.7 CHECK(confidence >= 0 AND confidence <= 1),
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
-    expires_at        INTEGER
+    deleted_at        INTEGER
   );
-
-  CREATE INDEX IF NOT EXISTS idx_memories_scope_guild_user
-    ON memories(scope, guild_id, user_id);
-
-  CREATE INDEX IF NOT EXISTS idx_memories_expires
-    ON memories(expires_at)
-    WHERE expires_at IS NOT NULL;
 
   CREATE TABLE IF NOT EXISTS messages (
     id                  TEXT PRIMARY KEY,
@@ -122,60 +115,111 @@ export function createDatabase(dbPath: string): Database {
   try { raw.run("ALTER TABLE messages ADD COLUMN is_synthetic INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try { raw.run("ALTER TABLE messages ADD COLUMN related_thread_id TEXT"); } catch { /* already exists */ }
 
-  // Migration: remove content column from memories (replaced by short_description)
-  try { raw.run("UPDATE memories SET short_description = content WHERE short_description IS NULL OR short_description = ''"); } catch { /* column may not exist */ }
-  try { raw.run("ALTER TABLE memories DROP COLUMN content"); } catch { /* already dropped */ }
-
-  // Migration: collapse short_description + long_description into single content field.
-  // Rule: if both existed -> "short: long"; if only one existed -> that value.
-  // Idempotency is guaranteed by nulling long_description after merge.
-  try {
-    raw.run(
-      `UPDATE memories
-       SET short_description = CASE
-         WHEN (short_description IS NULL OR TRIM(short_description) = '')
-              AND (long_description IS NULL OR TRIM(long_description) = '') THEN ''
-         WHEN short_description IS NULL OR TRIM(short_description) = '' THEN long_description
-         WHEN long_description IS NULL OR TRIM(long_description) = '' THEN short_description
-         ELSE short_description || ': ' || long_description
-       END,
-       long_description = NULL
-       WHERE long_description IS NOT NULL`
-    );
-  } catch {
-    /* long_description column may not exist */
-  }
-
-  // Migration: memories id TEXT → INTEGER AUTOINCREMENT
-  const memIdCol = (raw.prepare("PRAGMA table_info(memories)").all() as { name: string; type: string }[])
-    .find((c) => c.name === "id");
-  if (memIdCol !== undefined && memIdCol.type === "TEXT") {
+  // Migration: legacy memory rows -> structured memories.
+  const memoryColumns = raw.prepare("PRAGMA table_info(memories)").all() as { name: string; type: string }[];
+  const hasStructuredMemorySchema = memoryColumns.some((c) => c.name === "subject_user_id")
+    && memoryColumns.some((c) => c.name === "content")
+    && memoryColumns.some((c) => c.name === "confidence")
+    && memoryColumns.some((c) => c.name === "deleted_at");
+  if (!hasStructuredMemorySchema) {
     raw.run("BEGIN TRANSACTION");
     try {
       raw.run(`CREATE TABLE memories_new (
         id                INTEGER PRIMARY KEY AUTOINCREMENT,
-        scope             TEXT NOT NULL CHECK(scope IN ('user', 'journal')),
-        guild_id          TEXT,
-        user_id           TEXT,
-        short_description TEXT NOT NULL DEFAULT '',
-        long_description  TEXT,
+        guild_id          TEXT NOT NULL,
+        subject_user_id   TEXT,
+        kind              TEXT NOT NULL CHECK(kind IN ('global_note', 'user_note', 'preference', 'relationship', 'project', 'fact')),
+        content           TEXT NOT NULL CHECK(length(trim(content)) > 0),
         source_message_id TEXT,
+        confidence        REAL NOT NULL DEFAULT 0.7 CHECK(confidence >= 0 AND confidence <= 1),
         created_at        INTEGER NOT NULL,
         updated_at        INTEGER NOT NULL,
-        expires_at        INTEGER
+        deleted_at        INTEGER
       )`);
-      raw.run(`INSERT INTO memories_new (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-        SELECT scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at FROM memories`);
+      raw.run(`INSERT INTO memories_new (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+        SELECT
+          COALESCE(guild_id, ''),
+          CASE WHEN scope = 'user' THEN user_id ELSE NULL END,
+          CASE WHEN scope = 'user' THEN 'user_note' ELSE 'global_note' END,
+          CASE
+            WHEN (short_description IS NULL OR TRIM(short_description) = '')
+                 AND (long_description IS NULL OR TRIM(long_description) = '') THEN ''
+            WHEN short_description IS NULL OR TRIM(short_description) = '' THEN long_description
+            WHEN long_description IS NULL OR TRIM(long_description) = '' THEN short_description
+            ELSE short_description || ': ' || long_description
+          END,
+          source_message_id,
+          0.7,
+          created_at,
+          updated_at,
+          CASE WHEN expires_at IS NOT NULL AND expires_at <= (strftime('%s','now') * 1000) THEN expires_at ELSE NULL END
+        FROM memories
+        WHERE COALESCE(TRIM(short_description), '') <> '' OR COALESCE(TRIM(long_description), '') <> ''`);
       raw.run("DROP TABLE memories");
       raw.run("ALTER TABLE memories_new RENAME TO memories");
-      raw.run("CREATE INDEX IF NOT EXISTS idx_memories_scope_guild_user ON memories(scope, guild_id, user_id)");
-      raw.run("CREATE INDEX IF NOT EXISTS idx_memories_expires ON memories(expires_at) WHERE expires_at IS NOT NULL");
+      raw.run("CREATE INDEX IF NOT EXISTS idx_memories_guild_subject ON memories(guild_id, subject_user_id)");
+      raw.run("CREATE INDEX IF NOT EXISTS idx_memories_guild_active ON memories(guild_id, deleted_at)");
       raw.run("COMMIT");
     } catch (e) {
       raw.run("ROLLBACK");
       throw e;
     }
   }
+
+  const memorySchema = raw
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='memories'")
+    .get() as { sql: string } | undefined;
+  const hasMemoryChecks = memorySchema?.sql.includes("CHECK(kind IN") === true
+    && memorySchema.sql.includes("CHECK(length(trim(content)) > 0)");
+  if (hasStructuredMemorySchema && !hasMemoryChecks) {
+    raw.run("BEGIN TRANSACTION");
+    try {
+      raw.run(`CREATE TABLE memories_new (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id          TEXT NOT NULL,
+        subject_user_id   TEXT,
+        kind              TEXT NOT NULL CHECK(kind IN ('global_note', 'user_note', 'preference', 'relationship', 'project', 'fact')),
+        content           TEXT NOT NULL CHECK(length(trim(content)) > 0),
+        source_message_id TEXT,
+        confidence        REAL NOT NULL DEFAULT 0.7 CHECK(confidence >= 0 AND confidence <= 1),
+        created_at        INTEGER NOT NULL,
+        updated_at        INTEGER NOT NULL,
+        deleted_at        INTEGER
+      )`);
+      raw.run(`INSERT INTO memories_new (id, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+        SELECT
+          id,
+          guild_id,
+          subject_user_id,
+          CASE
+            WHEN kind IN ('global_note', 'user_note', 'preference', 'relationship', 'project', 'fact') THEN kind
+            ELSE 'fact'
+          END,
+          TRIM(content),
+          source_message_id,
+          CASE
+            WHEN confidence < 0 THEN 0
+            WHEN confidence > 1 THEN 1
+            ELSE COALESCE(confidence, 0.7)
+          END,
+          created_at,
+          updated_at,
+          deleted_at
+        FROM memories
+        WHERE TRIM(content) <> ''`);
+      raw.run("DROP TABLE memories");
+      raw.run("ALTER TABLE memories_new RENAME TO memories");
+      raw.run("CREATE INDEX IF NOT EXISTS idx_memories_guild_subject ON memories(guild_id, subject_user_id)");
+      raw.run("CREATE INDEX IF NOT EXISTS idx_memories_guild_active ON memories(guild_id, deleted_at)");
+      raw.run("COMMIT");
+    } catch (e) {
+      raw.run("ROLLBACK");
+      throw e;
+    }
+  }
+
+  raw.run("CREATE INDEX IF NOT EXISTS idx_memories_guild_subject ON memories(guild_id, subject_user_id)");
+  raw.run("CREATE INDEX IF NOT EXISTS idx_memories_guild_active ON memories(guild_id, deleted_at)");
 
   return {
     raw,

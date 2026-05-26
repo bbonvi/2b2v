@@ -40,9 +40,6 @@ triggers:
 #   random: "You're replying unprompted. Make a brief remark without hijacking conversation."
 #   scheduled: "This is a scheduled task. Follow the task instructions closely."
 
-# Memory retention in days (0 = no expiry)
-memoryRetentionDays: 180
-
 # Max image dimension (larger images resized to fit)
 imageMaxDimension: 768
 
@@ -69,15 +66,14 @@ dispatcher:
   enabled: true             # Enable per-channel dispatch (default: true)
   mentionDebounceMs: 500    # Debounce ms for mention triggers (default: 500)
   defaultDebounceMs: 2000   # Debounce ms for non-mention triggers (default: 2000)
-  maxFollowUps: 5           # Max follow-up messages surfaced per tool check (default: 5)
 
 # OpenRouter prompt caching control.
 # When enabled, the bot emits one cached stable-prefix message with one cache breakpoint.
 promptCaching:
   enabled: true
 
-# Structured action loop runtime limits
-actionLoop:
+# Native reply/tool loop runtime limits
+replyLoop:
   maxToolCalls: 12           # Max tool calls allowed in one response run
   wallClockTimeoutMs: 60000  # Hard timeout per response run (milliseconds)
   llmOutputTimeoutMs: 30000  # Timeout for a single LLM turn (milliseconds); on timeout request fails fast
@@ -109,11 +105,10 @@ tts:
 promptProfile:
   persona:
     - file: prompts/persona.md
-  toolInstructions:
-    - file: prompts/orchestrator.md
+  toolInstructions: []
   instructions: []
   lateInstructions:
-    - file: prompts/persona_response.md
+    - file: prompts/style.md
 
 # Log level: debug | info | warn | error
 logLevel: info

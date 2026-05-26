@@ -10,7 +10,6 @@ import {
 import { createDatabase, type Database } from "./db/database.ts";
 import { createMemory, getMemory, listMemories } from "./db/memory-repository.ts";
 import { createSchedule, getSchedule, listSchedules } from "./db/schedule-repository.ts";
-import { createMemoryTools } from "./agent/memory-tools.ts";
 import { createScheduleTool } from "./agent/schedule-tool.ts";
 import { trimChatHistory } from "./agent/context-trimming.ts";
 import type { ChatMessage } from "./agent/prompt.ts";
@@ -68,14 +67,13 @@ describe("translation → message storage pipeline", () => {
     expect(row.guild_id).toBe(GUILD_ID);
   });
 
-  test("display name context legend references unified journal tools", () => {
+  test("display name context legend references automatic memory", () => {
     const ctx = buildDisplayNameContext([
       { username: "alice", displayName: "Alice W" },
       { username: "bob", displayName: "Bob X" },
     ]);
     expect(ctx).toContain("Legend: [@username] — [display name] — [memories]");
-    expect(ctx).toContain("save_journal_entry(username)");
-    expect(ctx).toContain("get_journal_entries(username?)");
+    expect(ctx).toContain("Memories are injected automatically");
   });
 
   test("roundtrip: inbound → outbound preserves resolvable entities", () => {
@@ -90,101 +88,31 @@ describe("translation → message storage pipeline", () => {
   });
 });
 
-function findTool(tools: ReturnType<typeof createMemoryTools>, name: string) {
-  const tool = tools.find((entry) => entry.name === name);
-  if (tool === undefined) throw new Error(`tool ${name} not found`);
-  return tool;
-}
-
-const mockUsers = new Map<string, string>([
-  ["user-42", "uid-42"],
-  ["testuser", USER_ID],
-]);
-
-describe("memory tools → DB roundtrip", () => {
-  test("save_journal_entry creates global entry when username is omitted", async () => {
-    const tools = createMemoryTools({
-      db,
-      guildId: GUILD_ID,
-      botUserId: "bot-1",
-      resolveUsername: (username) => mockUsers.get(username),
-    });
-    const saveTool = findTool(tools, "save_journal_entry");
-
-    const saveResult = await saveTool.execute("tc-1", { content: "Global memory" }, new AbortController().signal);
-    const memoryId = (saveResult.details as { memoryId: number }).memoryId;
-    const row = getMemory(db, memoryId);
-
-    expect(row?.scope).toBe("journal");
-    expect(row?.userId).toBe("bot-1");
-    expect(row?.content).toBe("Global memory");
-  });
-
-  test("user-scoped save/get/delete", async () => {
-    const tools = createMemoryTools({
-      db,
-      guildId: GUILD_ID,
-      botUserId: "bot-1",
-      resolveUsername: (username) => mockUsers.get(username),
-    });
-    const saveTool = findTool(tools, "save_journal_entry");
-    const getTool = findTool(tools, "get_journal_entries");
-    const deleteTool = findTool(tools, "delete_journal_entries");
-
-    const saveResult = await saveTool.execute("tc-2", {
-      username: "user-42",
-      content: "User-scoped entry",
-    }, new AbortController().signal);
-    const id = (saveResult.details as { memoryId: number }).memoryId;
-
-    const row = getMemory(db, id);
-    expect(row?.scope).toBe("user");
-    expect(row?.content).toBe("User-scoped entry");
-
-    const getResult = await getTool.execute("tc-3", {
-      username: "user-42",
-    }, new AbortController().signal);
-    expect((getResult.details as { count: number }).count).toBe(1);
-    expect((getResult.content[0] as { text: string }).text).toContain(`ID: ${id}`);
-
-    await deleteTool.execute("tc-4", {
-      ids: [id],
-      username: "user-42",
-    }, new AbortController().signal);
-    expect(getMemory(db, id)).toBeNull();
-  });
-
-  test("save_journal_entry with id updates existing entry", async () => {
-    const tools = createMemoryTools({
-      db,
-      guildId: GUILD_ID,
-      botUserId: "bot-1",
-      resolveUsername: (username) => mockUsers.get(username),
-    });
-    const saveTool = findTool(tools, "save_journal_entry");
-
-    const createResult = await saveTool.execute("tc-5", {
-      content: "original",
-    }, new AbortController().signal);
-    const id = (createResult.details as { memoryId: number }).memoryId;
-
-    await saveTool.execute("tc-6", {
-      id,
-      content: "updated",
-    }, new AbortController().signal);
-
-    expect(getMemory(db, id)?.content).toBe("updated");
-  });
-
+describe("memory repository → DB roundtrip", () => {
   test("guild isolation: memories are filtered by guild", () => {
-    createMemory(db, { scope: "user", guildId: "guild-A", userId: "user-1", content: "A data" });
-    createMemory(db, { scope: "user", guildId: "guild-B", userId: "user-1", content: "B data" });
+    createMemory(db, { kind: "user_note", guildId: "guild-A", subjectUserId: "user-1", content: "A data" });
+    createMemory(db, { kind: "user_note", guildId: "guild-B", subjectUserId: "user-1", content: "B data" });
 
-    const listA = listMemories(db, { scope: "user", guildId: "guild-A" });
-    const listB = listMemories(db, { scope: "user", guildId: "guild-B" });
+    const listA = listMemories(db, { guildId: "guild-A" });
+    const listB = listMemories(db, { guildId: "guild-B" });
 
     expect(listA[0]?.content).toBe("A data");
     expect(listB[0]?.content).toBe("B data");
+  });
+
+  test("subject-scoped memories are readable", () => {
+    const id = createMemory(db, {
+      kind: "preference",
+      guildId: GUILD_ID,
+      subjectUserId: USER_ID,
+      content: "prefers concise answers",
+      confidence: 0.9,
+    });
+
+    const row = getMemory(db, id);
+    expect(row?.kind).toBe("preference");
+    expect(row?.subjectUserId).toBe(USER_ID);
+    expect(row?.confidence).toBe(0.9);
   });
 });
 
@@ -286,12 +214,13 @@ describe("message storage and retrieval", () => {
     expect(rows.map((row) => row.id)).toEqual(["m1", "m2"]);
   });
 
-  test("expired memories are hidden by listMemories", () => {
-    createMemory(db, { scope: "user", guildId: GUILD_ID, userId: "user-1", content: "expired", ttlDays: -1 });
-    createMemory(db, { scope: "user", guildId: GUILD_ID, userId: "user-1", content: "still valid" });
+  test("soft-deleted memories are hidden by listMemories", () => {
+    const deleted = createMemory(db, { kind: "user_note", guildId: GUILD_ID, subjectUserId: "user-1", content: "deleted" });
+    createMemory(db, { kind: "user_note", guildId: GUILD_ID, subjectUserId: "user-1", content: "still valid" });
+    db.raw.prepare("UPDATE memories SET deleted_at = ? WHERE id = ?").run(Date.now(), deleted);
 
-    const visible = listMemories(db, { scope: "user", guildId: GUILD_ID }).map((row) => row.content);
+    const visible = listMemories(db, { guildId: GUILD_ID }).map((row) => row.content);
     expect(visible).toContain("still valid");
-    expect(visible).not.toContain("expired");
+    expect(visible).not.toContain("deleted");
   });
 });

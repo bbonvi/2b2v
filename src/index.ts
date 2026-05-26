@@ -5,7 +5,7 @@ import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, validateTrimCon
 import type { GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
 import { createQdrantClient, ensureCollection, healthCheck } from "./qdrant/client";
-import { deletePoint, deletePoints, toPointId } from "./qdrant/adapter";
+import { deletePoint, deletePoints } from "./qdrant/adapter";
 import { getEmbeddingPipeline, disposePipeline } from "./embeddings/pipeline";
 import { createEmbeddingQueue, type EmbeddingQueue } from "./embeddings/queue";
 import { createDiscordClient, loginDiscordClient } from "./discord/client";
@@ -13,11 +13,9 @@ import { translateInbound, translateOutbound, buildDisplayNameContext, type Inbo
 import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
-import { handleMessage, type IncomingMessage, type HandlerDeps, type FollowUpWrapperDeps } from "./agent/handler";
+import { handleMessage, type IncomingMessage, type HandlerDeps } from "./agent/handler";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
 import { createChannelDispatcher, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
-import { getFollowUpMessages } from "./db/followup-repository";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
 import { getHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory, deleteRecentMessages } from "./db/message-repository";
@@ -25,14 +23,14 @@ import { processHistory } from "./agent/history-pipeline";
 import { trimMessages } from "./agent/history-trimming";
 import { formatMessageLine, OLDER_LEGEND } from "./agent/history-formatting";
 import { insertDateStamps } from "./agent/history-dates";
-import { formatRelativeAgo, formatJournalTimestamp } from "./agent/history-dates";
+import { formatRelativeAgo } from "./agent/history-dates";
 import { formatLocalWallClock, currentLocalContext } from "./time/agent-time";
 import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
 import type { MessageSender } from "./agent/send-message-tool";
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
 import type { TtsResult } from "./tts/types";
-import { createMemoryTools } from "./agent/memory-tools";
+import { buildMemoryContext, extractAndApplyMemories } from "./agent/memory-service";
 import { createSearchTool } from "./agent/search-tool";
 import { createScheduleTool } from "./agent/schedule-tool";
 import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool";
@@ -41,15 +39,12 @@ import { createBraveSearchTool } from "./agent/brave-search-tool";
 import { createReadChatImagesTool } from "./agent/read-chat-images-tool";
 import { createFetchImagesTool } from "./agent/fetch-images-tool";
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
-import { createStartTypingTool } from "./agent/start-typing-tool";
 import { createStartThreadTool } from "./agent/start-thread-tool";
+import { getSshKeyPaths, ensureSshKeys } from "./ssh/client";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { insertThread, updateThreadActivity, markBotParticipating, listThreadsForContext, getThreadMetadata } from "./db/thread-repository";
 import { processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
-import { createBashTool } from "./agent/bash-tool";
-import { getSshKeyPaths, ensureSshKeys, createSshConnection, type SshKeyPaths } from "./ssh/client";
-import type { Client as SshClient } from "ssh2";
-import { listMemories, deleteExpiredMemories, countUserMemoriesByUser } from "./db/memory-repository";
+import { deleteExpiredMemories, countUserMemoriesByUser } from "./db/memory-repository";
 import { listUpcomingForContext, createSchedule, deleteSchedule, listSchedules } from "./db/schedule-repository";
 import { registerSlashCommands } from "./commands/registry";
 import { createStatusHandler, statusCommandDefinition } from "./commands/status";
@@ -61,6 +56,7 @@ import { createSessionStore, type SessionStore } from "./vpn/session";
 import { handleVpnCommand, handleVpnComponent, type VpnHandlerDeps } from "./vpn/handler";
 import { getVpnLocale } from "./vpn/i18n";
 import { loadPromptProfile } from "./config/prompt-profile";
+import { buildStreamOptions } from "./llm/client";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch, unlinkSync } from "fs";
 import type { Database } from "./db/database";
@@ -118,7 +114,7 @@ const guildsDir = join("config", "guilds");
 const guildConfigs = loadGuildConfigs(guildsDir, globalConfig);
 log.info("guild configs loaded", { count: guildConfigs.size });
 
-// --- 8. Load prompt profile. Persona is used only by persona_turn, not the outer orchestrator.
+// --- 8. Load prompt profile. Persona/style are stable prompt sections for the direct reply model.
 let { persona, toolInstructions } = loadPromptProfile(globalConfig.promptProfile, log);
 
 // --- 9. Emoji cache ---
@@ -150,51 +146,21 @@ const vpnSessionCleanupTimer = setInterval(() => {
   vpnSessionStore.cleanExpired();
 }, VPN_SESSION_CLEANUP_INTERVAL_MS);
 
-// --- 9d. SSH key setup for bash tool ---
-// SSH_KEYS_LOCAL: bot's private keys (never shared with bash-vm)
-// SSH_KEYS_SHARED: only authorized_keys (mounted read-only by bash-vm)
+// --- 9d. SSH key setup for the disabled-by-default bash implementation ---
+// The bash tool is no longer exposed to the chat model, but compose still starts
+// bash-vm when configured. Keep authorized_keys generation so that service can
+// boot for future operator-only use.
 const sshKeysLocal = process.env.SSH_KEYS_LOCAL;
 const sshKeysShared = process.env.SSH_KEYS_SHARED;
-let sshKeyPaths: SshKeyPaths | undefined;
-let sshClient: SshClient | undefined;
 
-// Create SSH keys when both paths are set (compose environment with bash-vm).
-// This ensures bash-vm can start (it waits for authorized_keys in shared dir).
-// The tool itself is only enabled when bashTool.enabled is true.
 if (sshKeysLocal !== undefined && sshKeysShared !== undefined) {
-  sshKeyPaths = getSshKeyPaths(sshKeysLocal, sshKeysShared);
+  const sshKeyPaths = getSshKeyPaths(sshKeysLocal, sshKeysShared);
   try {
     ensureSshKeys(sshKeyPaths);
     log.info("ssh keys ready", { local: sshKeysLocal, shared: sshKeysShared });
   } catch (err) {
     log.error("ssh key setup failed", { error: err instanceof Error ? err.message : String(err) });
-    sshKeyPaths = undefined;
   }
-}
-
-/** Get or create SSH client connection to bash-vm. */
-async function getSshClient(): Promise<SshClient> {
-  if (sshKeyPaths === undefined) {
-    throw new Error("SSH keys not configured");
-  }
-  if (globalConfig.defaultBashTool === undefined) {
-    throw new Error("Bash tool not configured");
-  }
-  if (sshClient !== undefined) {
-    return sshClient;
-  }
-  const cfg = globalConfig.defaultBashTool.ssh;
-  sshClient = await createSshConnection(
-    { host: cfg.host, port: cfg.port, username: cfg.user },
-    sshKeyPaths,
-  );
-  sshClient.on("close", () => {
-    sshClient = undefined;
-  });
-  sshClient.on("error", () => {
-    sshClient = undefined;
-  });
-  return sshClient;
 }
 
 // --- 10. Guild config resolver ---
@@ -372,7 +338,6 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         channelId,
         guildConfig,
         guild,
-        { id: "scheduler", username: "scheduler" },
       );
 
       // Build synthetic incoming message
@@ -380,9 +345,10 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         content: schedule.messageContent,
         authorId: "scheduler",
         authorUsername: "scheduler",
-        botUserId,
-        mentionedUserIds: [],
-        translatedContent: schedule.messageContent,
+      botUserId,
+      mentionedUserIds: [],
+      translatedContent: schedule.messageContent,
+      messageId: syntheticLatestMessage.id,
       };
 
       // Build request log
@@ -692,27 +658,12 @@ async function buildContext(
     replyFallbackDeps,
   );
 
-  // Unified journal summaries (global + user-scoped) — sorted by updatedAt ascending, then ID.
-  const journals = [
-    ...listMemories(db, { scope: "journal", guildId }),
-    ...listMemories(db, { scope: "user", guildId }),
-  ]
-    .filter((m) => m.content !== "")
-    .sort((a, b) => {
-      const ud = a.updatedAt - b.updatedAt;
-      return ud !== 0 ? ud : a.id - b.id;
-    });
-  const journalLines = journals.map((m) => {
-    const scopeLabel = m.scope === "journal"
-      ? "global"
-      : `@${guild.members.cache.get(m.userId ?? "")?.user.username ?? (m.userId ?? "unknown-user")}`;
-    return `- ${m.id} ${formatJournalTimestamp(m.updatedAt)} [${scopeLabel}] ${m.content}`;
+  const memories = buildMemoryContext({
+    db,
+    guildId,
+    currentUserId: latestUserMessage.authorId,
+    resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
   });
-  const journalLegend =
-    "*[ID] ([Last updated]) [Scope] [Content]; [Scope] is `global` or `@username`; use `get_journal_entries(username?)` to list scoped entries*";
-  const journalSummaries = journals.length > 0
-    ? [journalLegend, ...journalLines].join("\n")
-    : "";
 
   // Upcoming schedules — one-off by runAt then ID; cron by expression then ID; one-off first
   const upcoming = listUpcomingForContext(db, guildId)
@@ -817,12 +768,11 @@ async function buildContext(
     }
   }
   return assembleContext({
-    persona,
     toolInstructions,
     instructions: guildConfig.instructions,
     emojis: emojiContext,
     members: displayNameContext,
-    journalSummaries,
+    memories,
     upcomingSchedules,
     threadsInChat,
     threadMetadata,
@@ -830,7 +780,7 @@ async function buildContext(
     olderHistory: olderText,
     newerHistory: newerText,
     currentContext,
-    lateInstruction: "",
+    responseInstruction: "",
     userMessage,
   });
 }
@@ -841,42 +791,12 @@ function buildAgentTools(
   channelId: string,
   guildConfig: GuildConfig,
   guild: Guild,
-  _currentUser: { id: string; username: string },
 ) {
   // Resolve username to userId using guild member cache
   const resolveUsername = (username: string): string | undefined => {
     const member = guild.members.cache.find((m) => m.user.username === username);
     return member?.user.id;
   };
-
-  const memoryTools = createMemoryTools({
-    db,
-    guildId,
-    botUserId: client.user?.id ?? "",
-    resolveUsername,
-    resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
-    onMemoryChanged: (memoryId, text) => {
-      void embeddingQueue.enqueue({
-        id: String(memoryId),
-        text,
-        target: "memory",
-        metadata: { guild_id: guildId },
-      }).catch((err: unknown) => {
-        log.error("memory embedding enqueue failed", {
-          memoryId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-    },
-    onMemoryDeleted: (memoryId) => {
-      void deletePoint(qdrant, toPointId(String(memoryId))).catch((err: unknown) => {
-        log.error("memory qdrant delete failed", {
-          memoryId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-    },
-  });
 
   const searchTool = createSearchTool({
     db,
@@ -968,19 +888,11 @@ function buildAgentTools(
 
   const fetchUrlTool = createFetchUrlTool();
 
-  const tools = [...memoryTools, searchTool, scheduleTool, memberListTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool];
+  const tools = [searchTool, scheduleTool, memberListTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool];
 
   // Brave search if API key configured
   if (globalConfig.braveApiKey !== undefined && globalConfig.braveApiKey !== "") {
     tools.push(createBraveSearchTool({ apiKey: globalConfig.braveApiKey }));
-  }
-
-  // Bash tool if enabled (global + guild)
-  if (guildConfig.bashTool?.enabled === true && sshKeyPaths !== undefined) {
-    tools.push(createBashTool({
-      getClient: getSshClient,
-      config: guildConfig.bashTool,
-    }));
   }
 
   return tools;
@@ -1199,7 +1111,6 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
       void currentChannelObj.sendTyping().catch(() => {});
     };
 
-    const startTypingTool = createStartTypingTool(sendTypingNow);
     const startThreadTool = createStartThreadTool({
       guildId,
       createThread: async (name: string) => {
@@ -1237,9 +1148,7 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
         channelId,
         guildConfig,
         guild,
-        { id: message.author.id, username: message.author.username },
       ),
-      startTypingTool,
       startThreadTool,
     ];
 
@@ -1265,6 +1174,7 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
       botUserId: client.user?.id ?? "",
       mentionedUserIds: [...message.mentions.users.keys()],
       translatedContent,
+      messageId: message.id,
     };
 
     const requestLog = new RequestLog(guildId, channelId);
@@ -1290,79 +1200,6 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
         }
       : undefined;
 
-    // Build follow-up deps for mid-loop context injection
-    const botUserId = client.user?.id ?? "";
-    const handlerStartTime = Date.now();
-    const sharedSurfacedIds = new Set<string>();
-    const sharedCoveredIds = new Set<string>();
-    const followUpDeps: FollowUpWrapperDeps | undefined = guildConfig.dispatcher.enabled
-      ? {
-          db,
-          channelId,
-          handlerStartTime,
-          botUserId,
-          triggerMessageId: message.id,
-          triggerUserId: message.author.id,
-          maxFollowUps: guildConfig.dispatcher.maxFollowUps,
-          sharedSurfacedIds,
-          sharedCoveredIds,
-        }
-      : undefined;
-
-    // Build transformContext for mid-loop follow-up injection
-    const transformContext = guildConfig.dispatcher.enabled
-      // eslint-disable-next-line @typescript-eslint/require-await
-      ? async (messages: AgentMessage[], _signal?: AbortSignal): Promise<AgentMessage[]> => {
-          const excludeIds = new Set([...sharedSurfacedIds, message.id]);
-          const followUps = getFollowUpMessages(
-            db, channelId, handlerStartTime, excludeIds, botUserId,
-            guildConfig.dispatcher.maxFollowUps,
-          );
-          const userFollowUps = followUps.filter((f) => !f.isBot);
-          if (userFollowUps.length === 0) return messages;
-          if (sharedSurfacedIds.size >= guildConfig.trim.windowSize) return messages;
-
-          for (const f of userFollowUps) sharedSurfacedIds.add(f.id);
-          const sameUserFollowUps = userFollowUps.filter((f) => f.userId === message.author.id);
-          const otherUserFollowUps = userFollowUps.filter((f) => f.userId !== message.author.id);
-          for (const f of sameUserFollowUps) sharedCoveredIds.add(f.id);
-
-          if (sameUserFollowUps.length === 0 && otherUserFollowUps.length === 0) return messages;
-
-          const nowMs = Date.now();
-          const formatLine = (m: (typeof userFollowUps)[number]): string => {
-            const ago = nowMs - m.createdAt;
-            const agoStr = ago < 1000 ? "just now" : ago < 60000 ? `${Math.round(ago / 1000)}s ago` : `${Math.round(ago / 60000)}m ago`;
-            return `\u2022 ${m.authorUsername} [MsgID: ${m.id}] (${agoStr}): "${m.content}"`;
-          };
-
-          const sections: string[] = [];
-          if (sameUserFollowUps.length > 0) {
-            sections.push("[ACTIONABLE FOLLOW-UPS from triggering user]");
-            sections.push(...sameUserFollowUps.map(formatLine));
-            sections.push("Treat these as direct follow-ups to the current interaction.");
-            sections.push("");
-          }
-          if (otherUserFollowUps.length > 0) {
-            sections.push("[FYI ONLY: other-user channel activity]");
-            sections.push(...otherUserFollowUps.map(formatLine));
-            sections.push("These messages are queued for separate handling, do not treat them as direct follow-ups unless critical.");
-          }
-
-          const injection: AgentMessage = {
-            role: "user",
-            content: [
-              "[CHANNEL UPDATE \u2014 new messages arrived while you were responding]",
-              ...sections,
-              "",
-              "Use reply_to_message_id for specific replies. Avoid repeating prior output.",
-            ].join("\n"),
-          } as AgentMessage;
-
-          return [...messages, injection];
-        }
-      : undefined;
-
     const deps: HandlerDeps = {
       globalConfig,
       guildConfig,
@@ -1371,16 +1208,35 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
       sender,
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
-      onTriggered: (trigger) => { if (trigger.reason === "mention") startTypingLoop(); },
-      onAssistantResponseStart: stopTypingLoop,
+      onTriggered: () => { startTypingLoop(); },
       onAgentEnd: stopTypingLoop,
       requestLog,
       ttsEnabled,
       ttsConfig: guildConfig.tts,
       generateSpeech,
       triggerInstructions: guildConfig.triggerInstructions,
-      followUpDeps,
-      transformContext,
+      afterReply: async (memoryRequest) => {
+        const providerParams: Record<string, unknown> = { ...buildStreamOptions(globalConfig, guildConfig) };
+        delete providerParams.apiKey;
+        delete providerParams.signal;
+        delete providerParams.onPayload;
+        await extractAndApplyMemories({
+          db,
+          guildId,
+          currentUserId: message.author.id,
+          currentUsername: message.author.username,
+          sourceMessageId: memoryRequest.sourceMessageId ?? message.id,
+          userMessage: memoryRequest.userMessage,
+          assistantReply: memoryRequest.assistantReply,
+          recentContext: memoryRequest.recentContext,
+          apiKey: globalConfig.openrouterApiKey,
+          model: guildConfig.model ?? globalConfig.defaultModel,
+          providerParams,
+          promptCaching: guildConfig.promptCaching,
+          onPayload: (payload) => requestLog.recordLLMRequest(payload),
+          onCompletion: (payload) => requestLog.recordLLMCompletion(payload),
+        });
+      },
     };
 
     let result;
@@ -1398,7 +1254,7 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
       requestLog.emit(log);
     }
     return {
-      coveredMessageIds: [message.id, ...sharedCoveredIds],
+      coveredMessageIds: [message.id],
     };
   } catch (err) {
     log.error("messageCreate handler error", {
@@ -1671,9 +1527,6 @@ async function shutdown(signal: string): Promise<void> {
   for (const d of dispatchers.values()) d.dispose();
   dispatchers.clear();
   scheduler.stop();
-  if (sshClient !== undefined) {
-    sshClient.end();
-  }
   await client.destroy();
   await embeddingQueue.shutdown();
   await disposePipeline();

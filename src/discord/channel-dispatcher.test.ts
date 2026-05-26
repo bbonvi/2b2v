@@ -7,7 +7,6 @@ function makeConfig(overrides: Partial<DispatcherConfig> = {}): DispatcherConfig
     enabled: true,
     mentionDebounceMs: 50,
     defaultDebounceMs: 100,
-    maxFollowUps: 5,
     ...overrides,
   };
 }

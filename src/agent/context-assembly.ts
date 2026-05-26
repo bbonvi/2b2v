@@ -33,13 +33,11 @@ export interface ThreadMetadata {
 
 /** Input for context assembly. All string fields may be empty to indicate omission. */
 export interface ContextAssemblyInput {
-  /** Persona prompt is intentionally not injected into orchestrator context. */
-  persona: string;
   toolInstructions: string;
   instructions: string;
   emojis: string;
   members: string;
-  journalSummaries: string;
+  memories: string;
   upcomingSchedules: string;
   /** Threads in this chat (for parent channels only). */
   threadsInChat: string;
@@ -50,8 +48,8 @@ export interface ContextAssemblyInput {
   olderHistory: string;
   newerHistory: string;
   currentContext: string;
-  /** Optional high-priority instruction placed after all history/context sections. */
-  lateInstruction: string;
+  /** Optional volatile response instruction placed after all history/context sections. */
+  responseInstruction: string;
   userMessage: string;
 }
 
@@ -84,24 +82,24 @@ function computeThreadMetadata(input: ContextAssemblyInput): string {
 
 /** Declarative section registry. Array order = output order. */
 export const SECTION_DEFS: readonly SectionDef[] = [
-  // Group 1: system, cached (stable orchestrator instructions)
+  // Group 1: system, cached (stable tool/runtime instructions)
   { label: "Tool Instructions",    role: "system",    cached: true,  source: { kind: "field", inputKey: "toolInstructions" } },
   { label: "Instructions",         role: "system",    cached: true,  source: { kind: "field", inputKey: "instructions", header: "## Instructions" } },
 
   // Group 2: system, cached (stable context + older history)
   { label: "Available Emojis",     role: "system",    cached: true,  source: { kind: "field", inputKey: "emojis", header: "## Available Emojis" } },
-  { label: "Server Members",       role: "system",    cached: true,  source: { kind: "field", inputKey: "members", header: "## Server Members" } },
   { label: "Thread Metadata",      role: "system",    cached: true,  source: { kind: "computed", compute: computeThreadMetadata, header: "## Thread Metadata" } },
   { label: "Parent Pre-Context",   role: "system",    cached: true,  source: { kind: "field", inputKey: "parentPreContext" } },
   { label: "Chat History — Older", role: "system",    cached: true,  source: { kind: "field", inputKey: "olderHistory" } },
 
   // Group 3: developer, uncached (volatile per-message)
+  { label: "Server Members",       role: "developer", cached: false, source: { kind: "field", inputKey: "members", header: "## Server Members" } },
   { label: "Threads In This Chat", role: "developer", cached: false, source: { kind: "field", inputKey: "threadsInChat", header: "## Threads In This Chat" } },
   { label: "Upcoming Schedules",   role: "developer", cached: false, source: { kind: "field", inputKey: "upcomingSchedules", header: "## Upcoming Schedules" } },
-  { label: "Journal Summaries",    role: "developer", cached: false, source: { kind: "field", inputKey: "journalSummaries", header: "## Journal" } },
+  { label: "Memories",             role: "developer", cached: false, source: { kind: "field", inputKey: "memories", header: "## Memory" } },
   { label: "Chat History — Newer", role: "developer", cached: false, source: { kind: "field", inputKey: "newerHistory" } },
   { label: "Current Context",      role: "developer", cached: false, source: { kind: "field", inputKey: "currentContext" } },
-  { label: "Late Instruction",     role: "developer", cached: false, source: { kind: "field", inputKey: "lateInstruction" } },
+  { label: "Response Instruction", role: "developer", cached: false, source: { kind: "field", inputKey: "responseInstruction" } },
 ];
 
 /** Assemble structured context from input sections. Empty sections are omitted. */

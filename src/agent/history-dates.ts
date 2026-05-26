@@ -29,31 +29,6 @@ export function formatRelativeAgo(timestampMs: number, nowMs?: number): string {
 }
 
 /**
- * Format memory timestamps for context display.
- * Returns "(Created: Xago)" or "(Created: Xago; Updated: Yago)"
- */
-export function formatMemoryTimestamps(
-  createdAt: number,
-  updatedAt: number,
-  nowMs?: number,
-): string {
-  const created = formatRelativeAgo(createdAt, nowMs);
-  if (updatedAt === createdAt) {
-    return `(Created: ${created})`;
-  }
-  const updated = formatRelativeAgo(updatedAt, nowMs);
-  return `(Created: ${created}; Updated: ${updated})`;
-}
-
-/**
- * Format a single timestamp for journal context display.
- * Returns just "(Xago)" based on updatedAt.
- */
-export function formatJournalTimestamp(updatedAt: number, nowMs?: number): string {
-  return `(${formatRelativeAgo(updatedAt, nowMs)})`;
-}
-
-/**
  * Format a timestamp as a deterministic date stamp: `[DATE YYYY-MM-DD HH:mm]`
  * Uses the guild timezone with UTC fallback if invalid. No offset suffix,
  * timezone is communicated once via the Current Context block.

@@ -16,7 +16,7 @@ import type {
   MembersConfig,
   DispatcherConfig,
   PromptCachingConfig,
-  ActionLoopConfig,
+  ReplyLoopConfig,
   PromptProfileConfig,
   PromptSource,
 } from "./types.ts";
@@ -158,14 +158,13 @@ const DEFAULT_DISPATCHER: DispatcherConfig = {
   enabled: true,
   mentionDebounceMs: 500,
   defaultDebounceMs: 2000,
-  maxFollowUps: 5,
 };
 
 const DEFAULT_PROMPT_CACHING: PromptCachingConfig = {
   enabled: true,
 };
 
-const DEFAULT_ACTION_LOOP: ActionLoopConfig = {
+const DEFAULT_REPLY_LOOP: ReplyLoopConfig = {
   maxToolCalls: 8,
   wallClockTimeoutMs: 45_000,
   llmOutputTimeoutMs: 12_000,
@@ -189,9 +188,9 @@ function defaultPromptProfile(
   const promptDir = join(dirname(configPath), "..", "prompts");
   return {
     persona: [{ kind: "file", path: join(promptDir, "persona.md"), optional: false }],
-    toolInstructions: [{ kind: "file", path: join(promptDir, "orchestrator.md"), optional: false }],
+    toolInstructions: [],
     instructions: [],
-    lateInstructions: [{ kind: "file", path: join(promptDir, "persona_response.md"), optional: false }],
+    lateInstructions: [{ kind: "file", path: join(promptDir, "style.md"), optional: false }],
   };
 }
 
@@ -262,32 +261,32 @@ function resolveGuildPromptCaching(
   };
 }
 
-function resolveGlobalActionLoop(
-  partial: MainConfigYaml["actionLoop"] | undefined
-): ActionLoopConfig {
+function resolveGlobalReplyLoop(
+  partial: MainConfigYaml["replyLoop"] | undefined
+): ReplyLoopConfig {
   const resolved = {
-    maxToolCalls: partial?.maxToolCalls ?? DEFAULT_ACTION_LOOP.maxToolCalls,
-    wallClockTimeoutMs: partial?.wallClockTimeoutMs ?? DEFAULT_ACTION_LOOP.wallClockTimeoutMs,
-    llmOutputTimeoutMs: partial?.llmOutputTimeoutMs ?? DEFAULT_ACTION_LOOP.llmOutputTimeoutMs,
+    maxToolCalls: partial?.maxToolCalls ?? DEFAULT_REPLY_LOOP.maxToolCalls,
+    wallClockTimeoutMs: partial?.wallClockTimeoutMs ?? DEFAULT_REPLY_LOOP.wallClockTimeoutMs,
+    llmOutputTimeoutMs: partial?.llmOutputTimeoutMs ?? DEFAULT_REPLY_LOOP.llmOutputTimeoutMs,
   };
-  validateActionLoopConfig(resolved, "actionLoop");
+  validateReplyLoopConfig(resolved, "replyLoop");
   return resolved;
 }
 
-function resolveGuildActionLoop(
-  global: ActionLoopConfig,
-  partial: GuildConfigYaml["actionLoop"] | undefined
-): ActionLoopConfig {
+function resolveGuildReplyLoop(
+  global: ReplyLoopConfig,
+  partial: GuildConfigYaml["replyLoop"] | undefined
+): ReplyLoopConfig {
   const resolved = {
     maxToolCalls: partial?.maxToolCalls ?? global.maxToolCalls,
     wallClockTimeoutMs: partial?.wallClockTimeoutMs ?? global.wallClockTimeoutMs,
     llmOutputTimeoutMs: partial?.llmOutputTimeoutMs ?? global.llmOutputTimeoutMs,
   };
-  validateActionLoopConfig(resolved, "actionLoop");
+  validateReplyLoopConfig(resolved, "replyLoop");
   return resolved;
 }
 
-function validateActionLoopConfig(config: ActionLoopConfig, keyPrefix: string): void {
+function validateReplyLoopConfig(config: ReplyLoopConfig, keyPrefix: string): void {
   if (!Number.isFinite(config.maxToolCalls) || config.maxToolCalls < 1) {
     throw new Error(`${keyPrefix}.maxToolCalls must be >= 1`);
   }
@@ -406,6 +405,13 @@ function assertNoDeprecatedGlobalPromptKeys(yaml: MainConfigYaml): void {
   }
 }
 
+function assertNoDeprecatedReplyLoopKey(yaml: MainConfigYaml | GuildConfigYaml, scope: string): void {
+  const raw = yaml as Record<string, unknown>;
+  if (raw.actionLoop !== undefined) {
+    throw new Error(`Deprecated config key "${scope}.actionLoop" is no longer supported. Use ${scope}.replyLoop instead.`);
+  }
+}
+
 /**
  * Build global config from main YAML config + env vars.
  * YAML provides non-secret defaults; env vars provide secrets and infrastructure overrides.
@@ -423,6 +429,7 @@ export function loadGlobalConfig(
 
   const yaml = loadMainConfig(configPath);
   assertNoDeprecatedGlobalPromptKeys(yaml);
+  assertNoDeprecatedReplyLoopKey(yaml, "global");
 
   const dataDir = yaml.dataDir ?? "data";
   const defaultAttachmentsDir = yaml.attachmentsDir ?? `${dataDir}/attachments`;
@@ -465,7 +472,6 @@ export function loadGlobalConfig(
       random: yaml.triggerInstructions?.random,
       scheduled: yaml.triggerInstructions?.scheduled,
     },
-    defaultMemoryRetentionDays: yaml.memoryRetentionDays ?? 180,
     defaultImageMaxDimension: yaml.imageMaxDimension ?? 768,
     defaultMergeMessageGapSeconds: yaml.mergeMessageGapSeconds ?? 120,
     defaultImageReadMaxPerCall: yaml.imageReadMaxPerCall ?? 10,
@@ -493,10 +499,9 @@ export function loadGlobalConfig(
       enabled: yaml.dispatcher?.enabled ?? DEFAULT_DISPATCHER.enabled,
       mentionDebounceMs: yaml.dispatcher?.mentionDebounceMs ?? DEFAULT_DISPATCHER.mentionDebounceMs,
       defaultDebounceMs: yaml.dispatcher?.defaultDebounceMs ?? DEFAULT_DISPATCHER.defaultDebounceMs,
-      maxFollowUps: yaml.dispatcher?.maxFollowUps ?? DEFAULT_DISPATCHER.maxFollowUps,
     },
     defaultPromptCaching: resolveGlobalPromptCaching(yaml.promptCaching),
-    defaultActionLoop: resolveGlobalActionLoop(yaml.actionLoop),
+    defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
   };
 }
 
@@ -519,6 +524,7 @@ export function loadGuildConfigFile(
 ): GuildConfigYaml & { guildId: string; slug: string } {
   const raw = readFileSync(filePath, "utf-8");
   const parsed = (parse(raw) ?? {}) as GuildConfigYaml;
+  assertNoDeprecatedReplyLoopKey(parsed, "guild");
   const { guildId, slug } = parseGuildFilename(basename(filePath));
   return { guildId, slug, ...parsed };
 }
@@ -555,7 +561,6 @@ export function resolveGuildConfig(
       messageCharLimit: partial.trim?.messageCharLimit ?? global.defaultTrim.messageCharLimit,
       replyQuoteChars: partial.trim?.replyQuoteChars ?? global.defaultTrim.replyQuoteChars,
     },
-    memoryRetentionDays: partial.memoryRetentionDays ?? global.defaultMemoryRetentionDays,
     adminUserIds: partial.adminUserIds ?? [],
     imageMaxDimension: partial.imageMaxDimension ?? global.defaultImageMaxDimension,
     mergeMessageGapSeconds: partial.mergeMessageGapSeconds ?? global.defaultMergeMessageGapSeconds,
@@ -575,10 +580,9 @@ export function resolveGuildConfig(
       enabled: partial.dispatcher?.enabled ?? global.defaultDispatcher.enabled,
       mentionDebounceMs: partial.dispatcher?.mentionDebounceMs ?? global.defaultDispatcher.mentionDebounceMs,
       defaultDebounceMs: partial.dispatcher?.defaultDebounceMs ?? global.defaultDispatcher.defaultDebounceMs,
-      maxFollowUps: partial.dispatcher?.maxFollowUps ?? global.defaultDispatcher.maxFollowUps,
     },
     promptCaching: resolveGuildPromptCaching(global.defaultPromptCaching, partial.promptCaching),
-    actionLoop: resolveGuildActionLoop(global.defaultActionLoop, partial.actionLoop),
+    replyLoop: resolveGuildReplyLoop(global.defaultReplyLoop, partial.replyLoop),
   };
 }
 
@@ -630,7 +634,6 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     thinkingLevel: config.thinkingLevel,
     timezone: config.timezone,
     trim: config.trim,
-    memoryRetentionDays: config.memoryRetentionDays,
     adminUserIds: config.adminUserIds.length > 0 ? config.adminUserIds : undefined,
     imageMaxDimension: config.imageMaxDimension,
     mergeMessageGapSeconds: config.mergeMessageGapSeconds,
@@ -644,7 +647,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     members: config.members,
     dispatcher: config.dispatcher,
     promptCaching: config.promptCaching,
-    actionLoop: config.actionLoop,
+    replyLoop: config.replyLoop,
   };
 
   // Strip undefined keys before serializing

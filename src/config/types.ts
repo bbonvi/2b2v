@@ -40,7 +40,7 @@ export interface MembersConfig {
   include: boolean;
 }
 
-/** Channel dispatcher configuration. Controls debounce and follow-up awareness. */
+/** Channel dispatcher configuration. Controls debounce and per-channel serialization. */
 export interface DispatcherConfig {
   /** Whether the channel dispatcher is enabled. Default true. */
   enabled: boolean;
@@ -48,8 +48,6 @@ export interface DispatcherConfig {
   mentionDebounceMs: number;
   /** Debounce ms for non-mention triggers (keyword, random). Default 2000. */
   defaultDebounceMs: number;
-  /** Max follow-up messages to surface per tool check. Default 5. */
-  maxFollowUps: number;
 }
 
 /** Prompt caching controls. */
@@ -57,13 +55,13 @@ export interface PromptCachingConfig {
   enabled: boolean;
 }
 
-/** Structured action loop runtime limits. */
-export interface ActionLoopConfig {
+/** Native reply/tool loop runtime limits. */
+export interface ReplyLoopConfig {
   /** Max tool calls allowed in one agent run. */
   maxToolCalls: number;
   /** Absolute wall-clock timeout for one agent run. */
   wallClockTimeoutMs: number;
-  /** Timeout for a single model output turn before retry feedback. */
+  /** Timeout for a single model output turn. */
   llmOutputTimeoutMs: number;
 }
 
@@ -80,10 +78,10 @@ export interface PromptInlineSource {
   text: string;
 }
 
-/** Ordered prompt source chain for persona/orchestrator/persona-response sections. */
+/** Ordered prompt source chain for persona, optional tool guidance, and style sections. */
 export type PromptSource = PromptFileSource | PromptInlineSource;
 
-/** Config-driven prompt profile. `lateInstructions` is the persona response prompt. */
+/** Config-driven prompt profile. `lateInstructions` is the stable style prompt. */
 export interface PromptProfileConfig {
   persona: PromptSource[];
   toolInstructions: PromptSource[];
@@ -126,7 +124,6 @@ export interface GuildConfig {
   thinkingLevel?: string;
   timezone: string;
   trim: TrimConfig;
-  memoryRetentionDays: number;
   adminUserIds: string[];
   imageMaxDimension: number;
   mergeMessageGapSeconds: number;
@@ -145,8 +142,8 @@ export interface GuildConfig {
   dispatcher: DispatcherConfig;
   /** Prompt caching controls for OpenRouter requests. */
   promptCaching: PromptCachingConfig;
-  /** Structured action loop runtime limits. */
-  actionLoop: ActionLoopConfig;
+  /** Native reply/tool loop runtime limits. */
+  replyLoop: ReplyLoopConfig;
 }
 
 /** Global configuration loaded from file + env. */
@@ -161,7 +158,6 @@ export interface GlobalConfig {
   defaultTrim: TrimConfig;
   defaultTriggers: TriggerConfig;
   defaultTriggerInstructions: TriggerInstructions;
-  defaultMemoryRetentionDays: number;
   defaultImageMaxDimension: number;
   defaultMergeMessageGapSeconds: number;
   defaultImageReadMaxPerCall: number;
@@ -190,8 +186,8 @@ export interface GlobalConfig {
   defaultDispatcher: DispatcherConfig;
   /** Default prompt caching controls. */
   defaultPromptCaching: PromptCachingConfig;
-  /** Default structured action loop runtime limits. */
-  defaultActionLoop: ActionLoopConfig;
+  /** Default native reply/tool loop runtime limits. */
+  defaultReplyLoop: ReplyLoopConfig;
 }
 
 /** Full resolved app config. */
@@ -209,7 +205,6 @@ export interface GuildConfigYaml {
   thinkingLevel?: string;
   timezone?: string;
   trim?: Partial<TrimConfig>;
-  memoryRetentionDays?: number;
   adminUserIds?: string[];
   imageMaxDimension?: number;
   mergeMessageGapSeconds?: number;
@@ -232,12 +227,11 @@ export interface GuildConfigYaml {
     enabled?: boolean;
     mentionDebounceMs?: number;
     defaultDebounceMs?: number;
-    maxFollowUps?: number;
   };
   promptCaching?: {
     enabled?: boolean;
   };
-  actionLoop?: {
+  replyLoop?: {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;
     llmOutputTimeoutMs?: number;
@@ -253,7 +247,6 @@ export interface MainConfigYaml {
   trim?: Partial<TrimConfig>;
   triggers?: Partial<TriggerConfig>;
   triggerInstructions?: Partial<TriggerInstructions>;
-  memoryRetentionDays?: number;
   imageMaxDimension?: number;
   mergeMessageGapSeconds?: number;
   imageReadMaxPerCall?: number;
@@ -313,12 +306,11 @@ export interface MainConfigYaml {
     enabled?: boolean;
     mentionDebounceMs?: number;
     defaultDebounceMs?: number;
-    maxFollowUps?: number;
   };
   promptCaching?: {
     enabled?: boolean;
   };
-  actionLoop?: {
+  replyLoop?: {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;
     llmOutputTimeoutMs?: number;

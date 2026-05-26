@@ -68,7 +68,7 @@ export function createStartThreadTool(deps: StartThreadToolDeps): AgentTool {
     name: "start_thread",
     label: "Start Thread",
     description:
-      "Create a new thread attached to the trigger message. Use when you want to continue a conversation in a separate thread (e.g., for long discussions, private topics, or to avoid cluttering the main chat). Returns the thread_id for use with persona_turn(chat_id).",
+      "Create a new thread attached to the trigger message. Use when the final answer should continue in a separate thread (long discussions or to avoid cluttering the main chat). Runtime sends your final answer to the created thread.",
     parameters: StartThreadParams,
     execute: async (
       _toolCallId,
@@ -118,7 +118,7 @@ export function createStartThreadTool(deps: StartThreadToolDeps): AgentTool {
         content: [
           {
             type: "text",
-            text: `Thread created: "${result.threadName}" (thread_id: ${result.threadId}, parent_chat_id: ${result.parentChatId}). Use persona_turn(chat_id="${result.threadId}") to post in the thread.`,
+            text: `Thread created: "${result.threadName}" (thread_id: ${result.threadId}, parent_chat_id: ${result.parentChatId}). Runtime will send the final answer to this thread.`,
           },
         ],
         details: {

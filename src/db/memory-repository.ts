@@ -1,71 +1,74 @@
 import type { Database } from "./database";
 
-export type MemoryScope = "user" | "journal";
-
-const DEFAULT_TTL_DAYS = 180; // 6 months
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
+export type MemoryKind =
+  | "global_note"
+  | "user_note"
+  | "preference"
+  | "relationship"
+  | "project"
+  | "fact";
 
 export interface MemoryRow {
   id: number;
-  scope: MemoryScope;
-  guildId: string | null;
-  userId: string | null;
+  guildId: string;
+  subjectUserId: string | null;
+  kind: MemoryKind;
   content: string;
   sourceMessageId: string | null;
+  confidence: number;
   createdAt: number;
   updatedAt: number;
-  expiresAt: number | null;
+  deletedAt: number | null;
 }
 
 export interface CreateMemoryInput {
-  scope: MemoryScope;
   guildId: string;
-  userId: string;
+  subjectUserId?: string | null;
+  kind: MemoryKind;
   content: string;
-  sourceMessageId?: string;
-  /** Days until expiry. Default 180. Pass null to disable. */
-  ttlDays?: number | null;
+  sourceMessageId?: string | null;
+  confidence?: number;
 }
 
 export interface UpdateMemoryInput {
+  subjectUserId?: string | null;
+  kind?: MemoryKind;
   content?: string;
-  /** Recompute expiry from now + ttlDays. Pass null to remove expiry. */
-  ttlDays?: number | null;
+  sourceMessageId?: string | null;
+  confidence?: number;
+  deletedAt?: number | null;
 }
 
 export interface ListMemoriesFilter {
-  scope: MemoryScope;
   guildId: string;
-  userId?: string;
+  subjectUserId?: string | null;
+  includeGlobal?: boolean;
+  includeDeleted?: boolean;
   limit?: number;
 }
 
-function computeExpiry(_scope: MemoryScope, ttlDays?: number | null): number | null {
-  if (ttlDays === null) return null;
-  if (ttlDays !== undefined) return Date.now() + ttlDays * MS_PER_DAY;
-  return Date.now() + DEFAULT_TTL_DAYS * MS_PER_DAY;
+function clampConfidence(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) return 0.7;
+  return Math.max(0, Math.min(1, value));
 }
 
-/** Create a memory entry. Returns the generated ID. */
+/** Create a structured memory row and return its generated ID. */
 export function createMemory(db: Database, input: CreateMemoryInput): number {
   const now = Date.now();
-  const expiresAt = computeExpiry(input.scope, input.ttlDays);
-
   const result = db.raw
     .prepare(
-      `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`
     )
     .run(
-      input.scope,
       input.guildId,
-      input.userId,
+      input.subjectUserId ?? null,
+      input.kind,
       input.content,
-      null,
       input.sourceMessageId ?? null,
+      clampConfidence(input.confidence),
       now,
       now,
-      expiresAt
     );
 
   return Number(result.lastInsertRowid);
@@ -76,13 +79,29 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
   const sets: string[] = [];
   const params: (string | number | null)[] = [];
 
+  if ("subjectUserId" in input) {
+    sets.push("subject_user_id = ?");
+    params.push(input.subjectUserId ?? null);
+  }
+  if (input.kind !== undefined) {
+    sets.push("kind = ?");
+    params.push(input.kind);
+  }
   if (input.content !== undefined) {
-    sets.push("short_description = ?");
+    sets.push("content = ?");
     params.push(input.content);
   }
-  if ("ttlDays" in input) {
-    sets.push("expires_at = ?");
-    params.push(input.ttlDays === null ? null : Date.now() + (input.ttlDays ?? DEFAULT_TTL_DAYS) * MS_PER_DAY);
+  if ("sourceMessageId" in input) {
+    sets.push("source_message_id = ?");
+    params.push(input.sourceMessageId ?? null);
+  }
+  if (input.confidence !== undefined) {
+    sets.push("confidence = ?");
+    params.push(clampConfidence(input.confidence));
+  }
+  if ("deletedAt" in input) {
+    sets.push("deleted_at = ?");
+    params.push(input.deletedAt ?? null);
   }
 
   sets.push("updated_at = ?");
@@ -93,72 +112,70 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
   return result.changes > 0;
 }
 
-/** Delete a memory by ID. Returns true if the row existed. */
+/** Soft-delete a memory by ID. Returns true if the row existed. */
 export function deleteMemory(db: Database, id: number): boolean {
-  const result = db.raw.prepare("DELETE FROM memories WHERE id = ?").run(id);
-  return result.changes > 0;
+  return updateMemory(db, id, { deletedAt: Date.now() });
 }
 
-/** Get a single memory by ID. Returns null if not found. */
+/** Hard-delete all soft-deleted memories. Returns count removed. */
+export function deleteExpiredMemories(db: Database): number {
+  const result = db.raw
+    .prepare("DELETE FROM memories WHERE deleted_at IS NOT NULL")
+    .run();
+  return result.changes;
+}
+
+/** Get a single active memory by ID. Returns null if not found or deleted. */
 export function getMemory(db: Database, id: number): MemoryRow | null {
-  const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get(id) as Record<string, unknown> | null;
-  if (!row) return null;
+  const row = db.raw.prepare("SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL").get(id) as Record<string, unknown> | null;
+  if (row === null) return null;
   return mapRow(row);
 }
 
-/** List memories matching the filter. Excludes expired entries. */
+/** List active memories for a guild, optionally scoped to a subject user plus global rows. */
 export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRow[] {
-  const conditions = ["scope = ?"];
-  const params: (string | number | null)[] = [filter.scope];
+  const conditions = ["guild_id = ?"];
+  const params: (string | number | null)[] = [filter.guildId];
 
-  conditions.push("guild_id = ?");
-  params.push(filter.guildId);
-
-  if (filter.userId !== undefined) {
-    conditions.push("user_id = ?");
-    params.push(filter.userId);
+  if (filter.subjectUserId !== undefined) {
+    if (filter.includeGlobal === true) {
+      conditions.push("(subject_user_id = ? OR subject_user_id IS NULL)");
+      params.push(filter.subjectUserId);
+    } else if (filter.subjectUserId === null) {
+      conditions.push("subject_user_id IS NULL");
+    } else {
+      conditions.push("subject_user_id = ?");
+      params.push(filter.subjectUserId);
+    }
   }
 
-  // Exclude expired
-  conditions.push("(expires_at IS NULL OR expires_at > ?)");
-  params.push(Date.now());
+  if (filter.includeDeleted !== true) {
+    conditions.push("deleted_at IS NULL");
+  }
 
-  let sql = `SELECT * FROM memories WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC`;
+  let sql = `SELECT * FROM memories WHERE ${conditions.join(" AND ")} ORDER BY updated_at ASC, id ASC`;
   if (filter.limit !== undefined && filter.limit > 0) {
-    sql += ` LIMIT ?`;
+    sql += " LIMIT ?";
     params.push(filter.limit);
   }
 
   const rows = db.raw.prepare(sql).all(...params) as Record<string, unknown>[];
-
-  // Reverse to chronological order (oldest first)
-  rows.reverse();
-
   return rows.map(mapRow);
 }
 
-/** Delete all expired memories. Returns count deleted. */
-export function deleteExpiredMemories(db: Database): number {
-  const result = db.raw
-    .prepare("DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at <= ?")
-    .run(Date.now());
-  return result.changes;
-}
-
-/** Count user memories per userId in a guild. Returns Map<userId, count>. */
+/** Count active subject-user memories per userId in a guild. */
 export function countUserMemoriesByUser(db: Database, guildId: string): Map<string, number> {
   const rows = db.raw
     .prepare(
-      `SELECT user_id, COUNT(*) as count FROM memories
-       WHERE scope = 'user' AND guild_id = ?
-       AND (expires_at IS NULL OR expires_at > ?)
-       GROUP BY user_id`
+      `SELECT subject_user_id, COUNT(*) as count FROM memories
+       WHERE guild_id = ? AND subject_user_id IS NOT NULL AND deleted_at IS NULL
+       GROUP BY subject_user_id`
     )
-    .all(guildId, Date.now()) as Array<{ user_id: string; count: number }>;
+    .all(guildId) as Array<{ subject_user_id: string; count: number }>;
 
   const result = new Map<string, number>();
   for (const row of rows) {
-    result.set(row.user_id, row.count);
+    result.set(row.subject_user_id, row.count);
   }
   return result;
 }
@@ -166,13 +183,14 @@ export function countUserMemoriesByUser(db: Database, guildId: string): Map<stri
 function mapRow(row: Record<string, unknown>): MemoryRow {
   return {
     id: Number(row.id),
-    scope: row.scope as MemoryScope,
-    guildId: row.guild_id as string | null,
-    userId: row.user_id as string | null,
-    content: row.short_description as string,
+    guildId: row.guild_id as string,
+    subjectUserId: row.subject_user_id as string | null,
+    kind: row.kind as MemoryKind,
+    content: row.content as string,
     sourceMessageId: row.source_message_id as string | null,
+    confidence: Number(row.confidence),
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
-    expiresAt: row.expires_at as number | null,
+    deletedAt: row.deleted_at as number | null,
   };
 }

@@ -7,7 +7,7 @@ export {
   getMemory,
   listMemories,
   deleteExpiredMemories,
-  type MemoryScope,
+  type MemoryKind,
   type MemoryRow,
   type CreateMemoryInput,
   type UpdateMemoryInput,

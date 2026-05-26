@@ -36,9 +36,21 @@ export {
   type HandleResult,
 } from "./handler.ts";
 
+export {
+  parseResponseDirectives,
+  renderSegmentsForMemory,
+  type ResponseSegment,
+  type VoiceType,
+} from "./response-directives.ts";
+
 export { trimChatHistory } from "./context-trimming.ts";
 
-export { createMemoryTools, type MemoryToolsDeps } from "./memory-tools.ts";
+export {
+  buildMemoryContext,
+  extractAndApplyMemories,
+  type MemoryContextInput,
+  type MemoryExtractionInput,
+} from "./memory-service.ts";
 
 export { createSearchTool, type SearchToolDeps } from "./search-tool.ts";
 
@@ -59,16 +71,3 @@ export { fetchMissingReplyTargets, type ReplyFallbackDeps, type FetchedDiscordMe
 export { createFetchUrlTool, type FetchUrlToolDeps } from "./fetch-url-tool.ts";
 
 export { createStartThreadTool, type StartThreadToolDeps, type StartThreadDetails } from "./start-thread-tool.ts";
-
-export {
-  buildActionResponseFormat,
-  buildStructuredActionProtocolPrompt,
-  parseStructuredActionBatch,
-  runStructuredActionLoop,
-  type StructuredActionBatch,
-  type StructuredAction,
-  type LoopMessage,
-  type LoopStopReason,
-  type RunStructuredActionLoopInput,
-  type RunStructuredActionLoopResult,
-} from "./structured-actions.ts";

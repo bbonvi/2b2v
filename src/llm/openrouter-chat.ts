@@ -1,6 +1,39 @@
+export interface OpenRouterTextPart {
+  type: "text";
+  text: string;
+}
+
+export interface OpenRouterImageUrlPart {
+  type: "image_url";
+  image_url: { url: string };
+}
+
+export type OpenRouterMessageContent = string | Array<OpenRouterTextPart | OpenRouterImageUrlPart> | null;
+
 export interface OpenRouterMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
+  role: "system" | "user" | "assistant" | "tool";
+  content: OpenRouterMessageContent;
+  tool_call_id?: string;
+  name?: string;
+  tool_calls?: OpenRouterToolCall[];
+}
+
+export interface OpenRouterToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description?: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+export interface OpenRouterToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
 }
 
 export interface OpenRouterChatRequest {
@@ -10,6 +43,9 @@ export interface OpenRouterChatRequest {
   messages: OpenRouterMessage[];
   providerParams?: Record<string, unknown>;
   responseFormat?: Record<string, unknown>;
+  tools?: OpenRouterToolDefinition[];
+  toolChoice?: "auto" | "none";
+  parallelToolCalls?: boolean;
   signal?: AbortSignal;
   onPayload?: (payload: unknown) => void;
   baseUrl?: string;
@@ -17,6 +53,7 @@ export interface OpenRouterChatRequest {
 
 export interface OpenRouterChatResult {
   text: string;
+  toolCalls: OpenRouterToolCall[];
   messageForLogs: Record<string, unknown>;
   rawResponse: Record<string, unknown>;
 }
@@ -29,6 +66,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function normalizeMessageContent(content: unknown): string {
+  if (content === null || content === undefined) return "";
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
 
@@ -90,16 +128,41 @@ function normalizeAssistantPayload(
   modelId: string,
   text: string,
   finishReason: unknown,
+  toolCalls: OpenRouterToolCall[],
 ): Record<string, unknown> {
   return {
     role: "assistant",
     model: typeof raw.model === "string" ? raw.model : modelId,
     stopReason: mapStopReason(finishReason),
     content: text !== "" ? [{ type: "text", text }] : [],
+    ...(toolCalls.length > 0 ? { toolCalls } : {}),
     usage: buildUsage(asRecord(raw.usage)),
     timestamp: Date.now(),
     rawResponse: raw,
   };
+}
+
+function normalizeToolCalls(value: unknown): OpenRouterToolCall[] {
+  if (!Array.isArray(value)) return [];
+  const calls: OpenRouterToolCall[] = [];
+  for (const item of value) {
+    const rec = asRecord(item);
+    const fn = asRecord(rec?.function);
+    if (rec === null || fn === null) continue;
+    if (typeof rec.id !== "string" || rec.id === "") continue;
+    if (rec.type !== "function") continue;
+    if (typeof fn.name !== "string" || fn.name === "") continue;
+    const args = typeof fn.arguments === "string" ? fn.arguments : "{}";
+    calls.push({
+      id: rec.id,
+      type: "function",
+      function: {
+        name: fn.name,
+        arguments: args,
+      },
+    });
+  }
+  return calls;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -222,7 +285,7 @@ export async function completeOpenRouterChat(request: OpenRouterChatRequest): Pr
     ...providerParams,
     model: request.model,
     messages: [
-      { role: "system", content: request.systemPrompt },
+      ...(request.systemPrompt !== "" ? [{ role: "system", content: request.systemPrompt }] : []),
       ...request.messages,
     ],
     stream: false,
@@ -230,6 +293,11 @@ export async function completeOpenRouterChat(request: OpenRouterChatRequest): Pr
 
   if (request.responseFormat !== undefined) {
     payload.response_format = request.responseFormat;
+  }
+  if (request.tools !== undefined && request.tools.length > 0) {
+    payload.tools = request.tools;
+    payload.tool_choice = request.toolChoice ?? "auto";
+    payload.parallel_tool_calls = request.parallelToolCalls ?? true;
   }
 
   request.onPayload?.(payload);
@@ -288,11 +356,13 @@ export async function completeOpenRouterChat(request: OpenRouterChatRequest): Pr
   const firstMessage = asRecord(firstChoice?.message);
   const content = firstMessage?.content;
   const text = normalizeMessageContent(content);
+  const toolCalls = normalizeToolCalls(firstMessage?.tool_calls);
   const finishReason = firstChoice?.finish_reason;
 
   return {
     text,
-    messageForLogs: normalizeAssistantPayload(rawRecord, request.model, text, finishReason),
+    toolCalls,
+    messageForLogs: normalizeAssistantPayload(rawRecord, request.model, text, finishReason, toolCalls),
     rawResponse: rawRecord,
   };
 }

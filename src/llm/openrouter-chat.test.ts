@@ -36,6 +36,53 @@ describe("completeOpenRouterChat", () => {
     fetchSpy.mockRestore();
   });
 
+  test("includes native tools and parses returned tool calls", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      makeResponse({
+        model: "m",
+        choices: [{
+          message: {
+            content: null,
+            tool_calls: [{
+              id: "call-1",
+              type: "function",
+              function: { name: "lookup", arguments: "{\"query\":\"x\"}" },
+            }],
+          },
+          finish_reason: "tool_calls",
+        }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      })
+    );
+
+    const result = await completeOpenRouterChat({
+      apiKey: "key",
+      model: "moonshotai/kimi-k2.5",
+      systemPrompt: "system",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [{
+        type: "function",
+        function: {
+          name: "lookup",
+          description: "Lookup",
+          parameters: { type: "object", properties: { query: { type: "string" } } },
+        },
+      }],
+      baseUrl: "https://example.com",
+    });
+
+    const init = fetchSpy.mock.calls[0]?.[1];
+    const bodyRaw = init?.body;
+    const bodyText = typeof bodyRaw === "string" ? bodyRaw : "";
+    const body = JSON.parse(bodyText) as { tools?: unknown[]; tool_choice?: string };
+    expect(body.tools).toHaveLength(1);
+    expect(body.tool_choice).toBe("auto");
+    expect(result.text).toBe("");
+    expect(result.toolCalls[0]?.function.name).toBe("lookup");
+
+    fetchSpy.mockRestore();
+  });
+
   test("normalizes content and usage for logs", async () => {
     const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
       makeResponse({

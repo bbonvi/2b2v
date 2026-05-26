@@ -19,12 +19,11 @@ services:
       - ./prompts:/app/prompts:ro
       - ssh-keys-local:/app/ssh-keys-local
       - ssh-keys-shared:/app/ssh-keys-shared
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-31456}:3000"
     networks:
       default:
       bash-net:
-      proxy:
-        aliases:
-          - 2b2v-bot
     depends_on:
       qdrant:
         condition: service_healthy
@@ -80,8 +79,6 @@ services:
 networks:
   bash-net:
     internal: true
-  proxy:
-    external: true
 
 volumes:
   bot-data:

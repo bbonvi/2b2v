@@ -245,19 +245,18 @@ describe("no inline images in context", () => {
 
   test("assembled context contains no inline image data", () => {
     const ctx = assembleContext({
-      persona: "You are TestBot.",
       toolInstructions: "Use tools wisely.",
       instructions: "",
       emojis: ":wave: — greeting",
       members: "@alice — Alice",
-      journalSummaries: "",
+      memories: "",
       upcomingSchedules: "",
       threadsInChat: "",
       parentPreContext: "",
       olderHistory: "[@alice (ImageIDs: [1, 2])]: check these photos",
       newerHistory: "[@bob (ImageIDs: [3])]: nice pics",
       currentContext: "Channel: #general",
-      lateInstruction: "",
+      responseInstruction: "",
       userMessage: "[@carol (ImageIDs: [4])]: what about this one?",
     });
 
@@ -276,19 +275,18 @@ describe("no inline images in context", () => {
 
   test("context sections carry no image content blocks", () => {
     const ctx = assembleContext({
-      persona: "Bot",
       toolInstructions: "Tools",
       instructions: "",
       emojis: "",
       members: "",
-      journalSummaries: "",
+      memories: "",
       upcomingSchedules: "",
       threadsInChat: "",
       parentPreContext: "",
       olderHistory: "",
       newerHistory: "[@user (ImageIDs: [5])]: look at this",
       currentContext: "",
-      lateInstruction: "",
+      responseInstruction: "",
       userMessage: "test",
     });
 

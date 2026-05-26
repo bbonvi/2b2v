@@ -5,7 +5,6 @@ import type { Database } from "../db/database";
 import type { EmbeddingPipeline } from "../embeddings/pipeline";
 import { searchMessages, getMessageById, searchMessagesLiteral, type MessageSearchResult } from "../db/message-repository";
 import { formatLocalWallClock } from "../time/agent-time.ts";
-import { normalizeUsername } from "./memory-tools.ts";
 
 
 interface AttachmentInfo {
@@ -38,6 +37,12 @@ const SearchParams = Type.Object({
   beforeMs: Type.Optional(Type.Number({ description: "Only messages before this epoch ms timestamp." })),
   limit: Type.Optional(Type.Number({ description: "Max results to return. Default 10." })),
 });
+
+/** Strip one leading @ and trim whitespace from a username-like input. */
+export function normalizeUsername(raw: string): string {
+  const trimmed = raw.trim();
+  return trimmed.startsWith("@") ? trimmed.slice(1).trim() : trimmed;
+}
 
 /**
  * Create a semantic search agent tool bound to a guild context.

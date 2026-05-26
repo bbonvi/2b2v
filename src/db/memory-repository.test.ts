@@ -20,73 +20,55 @@ afterEach(() => {
   db.close();
 });
 
-const DEFAULT_TTL_MS = 180 * 24 * 60 * 60 * 1000;
-
 describe("createMemory", () => {
-  test("stores content-only memory rows", () => {
+  test("stores structured memory rows", () => {
     const id = createMemory(db, {
-      scope: "journal",
       guildId: "g1",
-      userId: "bot-1",
-      content: "Deploy window is Friday 17:00 UTC.",
-    });
-
-    const row = getMemory(db, id);
-    expect(row?.scope).toBe("journal");
-    expect(row?.guildId).toBe("g1");
-    expect(row?.userId).toBe("bot-1");
-    expect(row?.content).toBe("Deploy window is Friday 17:00 UTC.");
-  });
-
-  test("applies default ttl", () => {
-    const before = Date.now();
-    const id = createMemory(db, {
-      scope: "user",
-      guildId: "g1",
-      userId: "u1",
+      subjectUserId: "u1",
+      kind: "preference",
       content: "User likes concise answers.",
+      sourceMessageId: "m1",
+      confidence: 0.9,
     });
 
     const row = getMemory(db, id);
-    expect(row?.expiresAt).toBeGreaterThanOrEqual(before + DEFAULT_TTL_MS - 1000);
-    expect(row?.expiresAt).toBeLessThanOrEqual(Date.now() + DEFAULT_TTL_MS + 1000);
+    expect(row?.guildId).toBe("g1");
+    expect(row?.subjectUserId).toBe("u1");
+    expect(row?.kind).toBe("preference");
+    expect(row?.content).toBe("User likes concise answers.");
+    expect(row?.sourceMessageId).toBe("m1");
+    expect(row?.confidence).toBe(0.9);
   });
 
-  test("accepts custom ttl and null ttl", () => {
-    const customId = createMemory(db, {
-      scope: "user",
+  test("clamps confidence", () => {
+    const id = createMemory(db, {
       guildId: "g1",
-      userId: "u1",
-      content: "Temporary note",
-      ttlDays: 7,
-    });
-    const permanentId = createMemory(db, {
-      scope: "user",
-      guildId: "g1",
-      userId: "u1",
-      content: "Permanent note",
-      ttlDays: null,
+      kind: "global_note",
+      content: "Global",
+      confidence: 99,
     });
 
-    const custom = getMemory(db, customId);
-    const permanent = getMemory(db, permanentId);
-    expect(custom?.expiresAt).not.toBeNull();
-    expect(permanent?.expiresAt).toBeNull();
+    expect(getMemory(db, id)?.confidence).toBe(1);
   });
 });
 
 describe("updateMemory", () => {
-  test("updates content field", () => {
+  test("updates content and clears deletion marker", () => {
     const id = createMemory(db, {
-      scope: "journal",
       guildId: "g1",
-      userId: "bot-1",
+      subjectUserId: "u1",
+      kind: "user_note",
       content: "Old content",
     });
 
-    const updated = updateMemory(db, id, { content: "New content" });
-    expect(updated).toBe(true);
-    expect(getMemory(db, id)?.content).toBe("New content");
+    expect(updateMemory(db, id, {
+      kind: "fact",
+      content: "New content",
+      deletedAt: null,
+    })).toBe(true);
+    const row = getMemory(db, id);
+    expect(row?.kind).toBe("fact");
+    expect(row?.content).toBe("New content");
   });
 
   test("returns false when row does not exist", () => {
@@ -95,16 +77,16 @@ describe("updateMemory", () => {
 });
 
 describe("deleteMemory", () => {
-  test("deletes existing rows", () => {
+  test("soft-deletes existing rows", () => {
     const id = createMemory(db, {
-      scope: "journal",
       guildId: "g1",
-      userId: "bot-1",
+      kind: "global_note",
       content: "Remove me",
     });
 
     expect(deleteMemory(db, id)).toBe(true);
     expect(getMemory(db, id)).toBeNull();
+    expect(listMemories(db, { guildId: "g1", includeDeleted: true })).toHaveLength(1);
   });
 
   test("returns false for missing rows", () => {
@@ -113,97 +95,54 @@ describe("deleteMemory", () => {
 });
 
 describe("listMemories", () => {
-  test("filters by scope, guild, and optional user", () => {
-    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", content: "A" });
-    createMemory(db, { scope: "user", guildId: "g1", userId: "u1", content: "B" });
-    createMemory(db, { scope: "user", guildId: "g1", userId: "u2", content: "C" });
-    createMemory(db, { scope: "journal", guildId: "g1", userId: "bot", content: "D" });
+  test("filters by guild and optional subject with global rows", () => {
+    createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "preference", content: "A" });
+    createMemory(db, { guildId: "g1", subjectUserId: "u2", kind: "fact", content: "B" });
+    createMemory(db, { guildId: "g1", kind: "global_note", content: "C" });
+    createMemory(db, { guildId: "g2", kind: "global_note", content: "D" });
 
-    const userRows = listMemories(db, { scope: "user", guildId: "g1", userId: "u1" });
-    const journalRows = listMemories(db, { scope: "journal", guildId: "g1" });
+    const rows = listMemories(db, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      includeGlobal: true,
+    });
 
-    expect(userRows.map((row) => row.content).sort()).toEqual(["A", "B"]);
-    expect(journalRows.map((row) => row.content)).toEqual(["D"]);
+    expect(rows.map((row) => row.content)).toEqual(["A", "C"]);
   });
 
-  test("returns chronological order (oldest first)", () => {
+  test("returns chronological updated order and enforces limit", () => {
     const now = Date.now();
     db.raw
       .prepare(
-        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+        `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("user", "g1", "u1", "Oldest", null, null, now - 3000, now - 3000, null);
+      .run("g1", "u1", "user_note", "Oldest", null, 0.7, now - 3000, now - 3000, null);
     db.raw
       .prepare(
-        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+        `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("user", "g1", "u1", "Middle", null, null, now - 2000, now - 2000, null);
+      .run("g1", "u1", "user_note", "Middle", null, 0.7, now - 2000, now - 2000, null);
     db.raw
       .prepare(
-        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
+        `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("user", "g1", "u1", "Newest", null, null, now - 1000, now - 1000, null);
+      .run("g1", "u1", "user_note", "Newest", null, 0.7, now - 1000, now - 1000, null);
 
-    const rows = listMemories(db, { scope: "user", guildId: "g1", userId: "u1" });
-    expect(rows.map((row) => row.content)).toEqual(["Oldest", "Middle", "Newest"]);
-  });
-
-  test("excludes expired entries and enforces limit", () => {
-    const now = Date.now();
-    db.raw
-      .prepare(
-        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run("user", "g1", "u1", "Expired", null, null, now - 100000, now - 100000, now - 1000);
-
-    db.raw
-      .prepare(
-        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run("user", "g1", "u1", "One", null, null, now - 3000, now - 3000, now + 100000);
-    db.raw
-      .prepare(
-        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run("user", "g1", "u1", "Two", null, null, now - 2000, now - 2000, now + 100000);
-    db.raw
-      .prepare(
-        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run("user", "g1", "u1", "Three", null, null, now - 1000, now - 1000, now + 100000);
-
-    const rows = listMemories(db, { scope: "user", guildId: "g1", userId: "u1", limit: 2 });
-    expect(rows).toHaveLength(2);
-    expect(rows.map((row) => row.content)).toEqual(["Two", "Three"]);
+    const rows = listMemories(db, { guildId: "g1", subjectUserId: "u1", limit: 2 });
+    expect(rows.map((row) => row.content)).toEqual(["Oldest", "Middle"]);
   });
 });
 
 describe("deleteExpiredMemories", () => {
-  test("removes only expired rows", () => {
-    const now = Date.now();
-    const expired = db.raw
-      .prepare(
-        `INSERT INTO memories (scope, guild_id, user_id, short_description, long_description, source_message_id, created_at, updated_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run("user", "g1", "u1", "Expired", null, null, now, now, now - 1000);
-
-    createMemory(db, {
-      scope: "user",
-      guildId: "g1",
-      userId: "u1",
-      content: "Still valid",
-    });
+  test("hard-deletes soft-deleted rows only", () => {
+    const deleted = createMemory(db, { guildId: "g1", kind: "global_note", content: "gone" });
+    const active = createMemory(db, { guildId: "g1", kind: "global_note", content: "active" });
+    deleteMemory(db, deleted);
 
     expect(deleteExpiredMemories(db)).toBe(1);
-    expect(getMemory(db, Number(expired.lastInsertRowid))).toBeNull();
-    expect(listMemories(db, { scope: "user", guildId: "g1", userId: "u1" })).toHaveLength(1);
+    expect(listMemories(db, { guildId: "g1", includeDeleted: true }).map((row) => row.id)).toEqual([active]);
   });
 });

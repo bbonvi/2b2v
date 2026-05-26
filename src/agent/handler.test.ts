@@ -1,12 +1,11 @@
-import { describe, test, expect, mock, spyOn } from "bun:test";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage } from "@mariozechner/pi-ai";
+import { describe, expect, mock, test } from "bun:test";
 import { Type } from "@sinclair/typebox";
-import { handleMessage, injectTriggerInstruction, type IncomingMessage, type HandlerDeps, type LlmCompleteFn } from "./handler.ts";
+import type { AgentTool } from "@mariozechner/pi-agent-core";
+import { handleMessage, injectTriggerInstruction, type ChatCompleteFn, type HandlerDeps, type IncomingMessage } from "./handler.ts";
 import type { AssembledContext, ContextSection } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
-import type { MessageSender } from "./send-message-tool.ts";
-import type { Logger, TokenUsage } from "../logger.ts";
+import type { MessageSender, VoiceAttachment } from "./send-message-tool.ts";
+import type { TtsConfig, TtsResult } from "../tts/types.ts";
 
 function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
   return {
@@ -18,19 +17,18 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultTrim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
     defaultTriggers: { mention: true, keywords: [], randomChance: 0 },
     defaultTriggerInstructions: {},
-    defaultMemoryRetentionDays: 180,
     defaultImageMaxDimension: 768,
     defaultMergeMessageGapSeconds: 120,
     defaultImageReadMaxPerCall: 10,
     defaultImageCaptioningEnabled: false,
     defaultAttachmentsDir: "data/attachments",
     defaultInstructions: "",
-    defaultLateInstruction: "",
+    defaultLateInstruction: "Keep it short.",
     promptProfile: {
       persona: [{ kind: "file", path: "prompts/persona.md", optional: false }],
-      toolInstructions: [{ kind: "file", path: "prompts/orchestrator.md", optional: false }],
+      toolInstructions: [],
       instructions: [],
-      lateInstructions: [{ kind: "file", path: "prompts/persona_response.md", optional: false }],
+      lateInstructions: [{ kind: "file", path: "prompts/style.md", optional: false }],
     },
     logLevel: "info",
     dataDir: "./data",
@@ -39,9 +37,9 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     uiLang: "en",
     defaultEmotes: { include: false },
     defaultMembers: { include: true },
-    defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+    defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
     defaultPromptCaching: { enabled: true },
-    defaultActionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+    defaultReplyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
     ...overrides,
   };
 }
@@ -54,7 +52,6 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     triggerInstructions: {},
     timezone: "UTC",
     trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
-    memoryRetentionDays: 180,
     adminUserIds: [],
     imageMaxDimension: 768,
     mergeMessageGapSeconds: 120,
@@ -64,17 +61,26 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     instructions: "",
     emotes: { include: false },
     members: { include: true },
-    dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000, maxFollowUps: 5 },
+    dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
     promptCaching: { enabled: true },
-    actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+    replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
     ...overrides,
   };
 }
 
+const ttsConfig: TtsConfig = {
+  enabled: true,
+  voices: {
+    normal: { voiceId: "normal", speed: 1, stability: 0.5, similarityBoost: 0.75, model: "eleven_flash_v2_5" },
+    whisper: { voiceId: "whisper", speed: 1, stability: 0.5, similarityBoost: 0.75, model: "eleven_flash_v2_5" },
+  },
+};
+
 function makeContext(overrides: Partial<AssembledContext> = {}): AssembledContext {
   return {
     sections: [
-      { label: "Persona", text: "You are a test bot.", cached: true, role: "system" },
+      { label: "Server Members", text: "## Server Members\n@user", cached: false, role: "developer" },
+      { label: "Memories", text: "## Memory\n- 1 [@user] [preference] concise", cached: false, role: "developer" },
       { label: "Current Context", text: "Guild: g1", cached: false, role: "developer" },
     ],
     userMessage: "hello bot",
@@ -90,624 +96,340 @@ function makeMessage(overrides: Partial<IncomingMessage> = {}): IncomingMessage 
     botUserId: "bot-1",
     mentionedUserIds: [],
     translatedContent: "hello bot",
+    messageId: "msg-1",
     ...overrides,
   };
 }
 
-function assistantWithText(text: string): AssistantMessage {
-  return {
-    role: "assistant",
-    content: [{ type: "text", text }],
-    api: "openai-completions",
-    provider: "openrouter",
-    model: "moonshotai/kimi-k2.5",
-    usage: {
-      input: 10,
-      output: 5,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 15,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+function makeDeps(overrides: Partial<HandlerDeps> = {}): HandlerDeps {
+  const sender: MessageSender = () => Promise.resolve({ sentMessageId: "sent-1" });
+  const completeChat: ChatCompleteFn = () => Promise.resolve({
+    text: "hello user",
+    toolCalls: [],
+    rawResponse: {},
+    messageForLogs: {
+      role: "assistant",
+      model: "m",
+      stopReason: "stop",
+      content: [{ type: "text", text: "hello user" }],
+      usage: { input: 1, output: 1, totalTokens: 2, cost: { total: 0 } },
     },
-    stopReason: "stop",
-    timestamp: Date.now(),
+  });
+
+  return {
+    globalConfig: makeGlobalConfig(),
+    guildConfig: makeGuildConfig(),
+    context: makeContext(),
+    personaPrompt: "You are a test bot.",
+    sender,
+    completeChat,
+    ...overrides,
   };
 }
 
-function makeFetchJsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-function makeTestLogger(): { logger: Logger; debug: ReturnType<typeof mock>; warn: ReturnType<typeof mock> } {
-  const debug = mock(() => {});
-  const info = mock(() => {});
-  const warn = mock(() => {});
-  const error = mock(() => {});
-  const logTokenUsage = mock((_usage: TokenUsage) => {});
-  const logger = {
-    debug,
-    info,
-    warn,
-    error,
-    logTokenUsage,
-    child: () => logger,
-  } as Logger;
-  return { logger, debug, warn };
-}
-
 describe("handleMessage", () => {
-  test("keeps persona instructions out of the outer orchestrator prompt", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
-    let capturedSystemPrompt = "";
-
-    const llmComplete: LlmCompleteFn = (_model, context) => {
-      capturedSystemPrompt = context.systemPrompt ?? "";
-      const payload = {
-        status: "done",
-        actions: [{ type: "ignore_user", reason: "done" }],
-      };
-      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
-    };
-
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig({ defaultLateInstruction: "CUSTOM LATE RULE: stay concise." }),
-      guildConfig: makeGuildConfig({ triggers: { mention: true, keywords: [], randomChance: 0 } }),
-      context: makeContext({
-        sections: [
-          { label: "Persona", text: "you are test bot", cached: true, role: "system" },
-          { label: "Chat History — Newer", text: "history", cached: false, role: "developer" },
-          { label: "Late Instruction", text: "stale late", cached: false, role: "developer" },
-        ],
-      }),
-      sender,
-      llmComplete,
-    };
-
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-
-    const policyIdx = capturedSystemPrompt.indexOf("CRITICAL:");
-    expect(policyIdx).toBeGreaterThanOrEqual(0);
-    expect(capturedSystemPrompt).not.toContain("CUSTOM LATE RULE: stay concise.");
-    expect(capturedSystemPrompt).not.toContain("you are test bot");
-  });
-
   test("returns triggered=false when no trigger matches", async () => {
-    const llmComplete = mock(() => Promise.resolve(assistantWithText("{}")));
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({
-        triggers: { mention: false, keywords: [], randomChance: 0 },
-      }),
-      context: makeContext(),
-      sender,
-      llmComplete: llmComplete as unknown as LlmCompleteFn,
-    };
+    const completeChat = mock(() => Promise.resolve({
+      text: "unused",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: {},
+    }));
+    const result = await handleMessage(makeMessage(), makeDeps({
+      guildConfig: makeGuildConfig({ triggers: { mention: false, keywords: [], randomChance: 0 } }),
+      completeChat: completeChat as unknown as ChatCompleteFn,
+    }));
 
-    const result = await handleMessage(makeMessage(), deps);
     expect(result.triggered).toBe(false);
     expect(result.agentRan).toBe(false);
-    expect(llmComplete).toHaveBeenCalledTimes(0);
+    expect(completeChat).toHaveBeenCalledTimes(0);
   });
 
-  test("executes persona_turn through runtime persona speaker", async () => {
-    const senderCalls: Array<{ text: string; reply: boolean }> = [];
-    const sender: MessageSender = (text, reply) => {
-      senderCalls.push({ text, reply });
-      return Promise.resolve({ sentMessageId: "m-1" });
+  test("sends direct final model text", async () => {
+    const senderCalls: Array<{ text: string; reply: boolean; chatId?: string }> = [];
+    const sender: MessageSender = (text, reply, chatId) => {
+      senderCalls.push({ text, reply, chatId });
+      return Promise.resolve({ sentMessageId: "sent-1" });
     };
 
-    let calls = 0;
-    let personaPrompt = "";
-    const llmComplete: LlmCompleteFn = (_model, context, _options) => {
-      calls += 1;
-      if (calls === 2) {
-        const firstMessage = context.messages[0] as { content?: unknown } | undefined;
-        personaPrompt = typeof firstMessage?.content === "string" ? firstMessage.content : "";
-        return Promise.resolve(assistantWithText("hello user"));
-      }
-      const payload = {
-        status: "done",
-        actions: [
-          {
-            type: "persona_turn",
-            kind: "final",
-            reply: true,
-          },
-          { type: "stop_response", reason: "complete" },
-        ],
-      };
-      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ sender }),
+    );
+
+    expect(result.responseText).toBe("hello user");
+    expect(senderCalls).toEqual([{ text: "hello user", reply: true, chatId: undefined }]);
+  });
+
+  test("sends voice directive segments as TTS audio", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "Text first <voice type=\"whisper\">quiet line</voice> text after",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    });
+    const senderCalls: Array<{ text: string; reply: boolean; voice: boolean }> = [];
+    const sender: MessageSender = (text, reply, _chatId, voice) => {
+      senderCalls.push({ text, reply, voice: voice !== undefined });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+    const generateSpeech = (): Promise<TtsResult> =>
+      Promise.resolve({ ok: true, buffer: Buffer.from("audio"), contentType: "audio/mpeg" });
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, ttsEnabled: true, ttsConfig, generateSpeech }),
+    );
+
+    expect(senderCalls).toEqual([
+      { text: "Text first", reply: true, voice: false },
+      { text: "quiet line", reply: false, voice: true },
+      { text: "text after", reply: false, voice: false },
+    ]);
+    expect(result.responseText).toBe("Text first\n[voice whisper] quiet line\ntext after");
+  });
+
+  test("falls back to text when a voice directive cannot generate audio", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<voice>audio please</voice>",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    });
+    const senderCalls: Array<{ text: string; voice?: VoiceAttachment }> = [];
+    const sender: MessageSender = (text, _reply, _chatId, voice) => {
+      senderCalls.push({ text, voice });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
     };
 
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({ triggers: { mention: true, keywords: [], randomChance: 0 } }),
-      context: makeContext(),
-      personaPrompt: "Persona",
-      sender,
-      llmComplete,
-    };
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender }),
+    );
 
-    const result = await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+    expect(senderCalls).toEqual([{ text: "audio please", voice: undefined }]);
+  });
 
-    expect(result.triggered).toBe(true);
+  test("ignore directive produces no Discord send and no memory extraction", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<ignore>not worth answering</ignore>",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    });
+    const sender: MessageSender = mock(() => Promise.resolve({ sentMessageId: "sent-1" }));
+    const afterReply = mock(() => Promise.resolve());
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, afterReply }),
+    );
+
     expect(result.agentRan).toBe(true);
-    expect(personaPrompt).toContain("## Current Orchestrator Transcript");
-    expect(personaPrompt).not.toContain("persona_turn");
-    expect(senderCalls).toHaveLength(1);
-    expect(senderCalls[0]?.text).toBe("hello user");
-    expect(senderCalls[0]?.reply).toBe(true);
+    expect(result.responseText).toBeUndefined();
+    expect(sender).toHaveBeenCalledTimes(0);
+    expect(afterReply).toHaveBeenCalledTimes(0);
   });
 
-  test("retries when model emits plain text instead of JSON", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
-    let calls = 0;
+  test("throws and skips memory extraction when the final Discord send fails", async () => {
+    const afterReply = mock(() => Promise.resolve());
+    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
 
-    const llmComplete: LlmCompleteFn = () => {
+    let thrown: unknown;
+    try {
+      await handleMessage(
+        makeMessage({ mentionedUserIds: ["bot-1"] }),
+        makeDeps({ sender, afterReply }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("Failed to send final Discord message");
+    expect(afterReply).toHaveBeenCalledTimes(0);
+  });
+
+  test("executes native tool calls then sends final text", async () => {
+    const toolCalls: unknown[] = [];
+    const tool: AgentTool = {
+      name: "lookup",
+      label: "Lookup",
+      description: "Look something up",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: (_id, params) => {
+        toolCalls.push(params);
+        return Promise.resolve({ content: [{ type: "text", text: "tool says 42" }], details: {} });
+      },
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
       calls += 1;
       if (calls === 1) {
-        return Promise.resolve(assistantWithText("just thinking out loud"));
+        expect(request.tools?.[0]?.function.name).toBe("lookup");
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "lookup", arguments: "{\"query\":\"x\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
       }
-      const payload = {
-        status: "done",
-        actions: [{ type: "ignore_user", reason: "no response needed" }],
-      };
-      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
+      expect(
+        request.messages.some((m) =>
+          m.role === "tool" && typeof m.content === "string" && m.content.includes("tool says 42")),
+      ).toBe(true);
+      return Promise.resolve({
+        text: "answer is 42",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "answer is 42" }] },
+      });
     };
 
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({ triggers: { mention: true, keywords: [], randomChance: 0 } }),
-      context: makeContext(),
-      sender,
-      llmComplete,
-    };
+    const sender: MessageSender = mock(() => Promise.resolve({ sentMessageId: "sent-1" }));
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ extraTools: [tool], completeChat, sender }),
+    );
 
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-
-    expect(calls).toBe(2);
+    expect(result.responseText).toBe("answer is 42");
+    expect(toolCalls).toEqual([{ query: "x" }]);
+    expect(sender).toHaveBeenCalledTimes(1);
   });
 
-  test("respects max tool call limit", async () => {
-    let sendCalls = 0;
-    const sender: MessageSender = () => {
-      sendCalls += 1;
-      return Promise.resolve({ sentMessageId: `m-${sendCalls}` });
+  test("passes image tool results back to the model as multimodal context", async () => {
+    const tool: AgentTool = {
+      name: "read_chat_images",
+      label: "Read Images",
+      description: "Read images",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({
+        content: [
+          { type: "text", text: "{\"id\":1,\"width\":10,\"height\":10}" },
+          { type: "image", data: "abcd", mimeType: "image/jpeg" },
+        ],
+        details: {},
+      }),
     };
 
     let calls = 0;
-    const llmComplete: LlmCompleteFn = () => {
+    const completeChat: ChatCompleteFn = (request) => {
       calls += 1;
-      if (calls === 2) return Promise.resolve(assistantWithText("one"));
-      const payload = {
-        status: "continue",
-        actions: [
-          { type: "persona_turn", kind: "progress", reply: false },
-          { type: "persona_turn", kind: "progress", reply: false },
-        ],
-      };
-      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
-    };
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "read_chat_images", arguments: "{}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
 
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({
-        triggers: { mention: true, keywords: [], randomChance: 0 },
-        actionLoop: { maxToolCalls: 1, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
-      }),
-      context: makeContext(),
-      personaPrompt: "Persona",
-      sender,
-      llmComplete,
-    };
+      const multimodal = request.messages.find((m) => m.role === "user" && Array.isArray(m.content));
+      expect(multimodal).toBeDefined();
+      const parts = Array.isArray(multimodal?.content) ? multimodal.content : [];
+      expect(parts.some((part) =>
+        part.type === "image_url" && part.image_url.url === "data:image/jpeg;base64,abcd"
+      )).toBe(true);
 
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-
-    expect(sendCalls).toBe(1);
-  });
-
-  test("throws explicit error when structured action loop times out", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
-
-    const llmComplete: LlmCompleteFn = (_model, _context, options) =>
-      new Promise((_resolve, reject) => {
-        const signal = options.signal;
-        signal?.addEventListener("abort", () => {
-          const reason: unknown = signal.reason;
-          reject(reason instanceof Error ? reason : new Error(String(reason)));
-        }, { once: true });
+      return Promise.resolve({
+        text: "image answer",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "image answer" }] },
       });
-
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({
-        triggers: { mention: true, keywords: [], randomChance: 0 },
-        actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 2_000, llmOutputTimeoutMs: 20 },
-      }),
-      context: makeContext(),
-      sender,
-      llmComplete,
     };
 
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps).then(
-      () => {
-        throw new Error("expected request to fail on timeout");
-      },
-      (error: unknown) => {
-        const msg = error instanceof Error ? error.message : String(error);
-        expect(msg).toContain("Structured action loop timed out");
-        expect(msg).toContain("llmOutputTimeoutMs=20");
-      },
-    );
-  });
-
-  test("does not emit llm_request_error for model-output timeout aborts", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
-    const llmComplete: LlmCompleteFn = (_model, _context, options) =>
-      new Promise((_resolve, reject) => {
-        const signal = options.signal;
-        signal?.addEventListener("abort", () => {
-          const reason: unknown = signal.reason;
-          reject(reason instanceof Error ? reason : new Error(String(reason)));
-        }, { once: true });
-      });
-
-    const { logger, debug } = makeTestLogger();
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({
-        triggers: { mention: true, keywords: [], randomChance: 0 },
-        actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 2_000, llmOutputTimeoutMs: 20 },
-      }),
-      context: makeContext(),
-      sender,
-      llmComplete,
-      log: logger,
-    };
-
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps).then(
-      () => {
-        throw new Error("expected request to fail on timeout");
-      },
-      () => {},
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ extraTools: [tool], completeChat }),
     );
 
-    const llmRequestErrorCalls = debug.mock.calls.filter((args: unknown[]) => args[0] === "llm_request_error");
-    expect(llmRequestErrorCalls).toHaveLength(0);
+    expect(result.responseText).toBe("image answer");
   });
 
-  test("prepends stable sections to payload and marks first with cache_control", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
-    let capturedPayload: unknown;
-
-    const llmComplete: LlmCompleteFn = (_model, _context, options) => {
-      const mutablePayload = {
-        messages: [{ role: "user", content: "hello" }],
-      };
-      options.onPayload?.(mutablePayload);
-      capturedPayload = mutablePayload;
-
-      const payload = {
-        status: "done",
-        actions: [{ type: "ignore_user", reason: "done" }],
-      };
-      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
-    };
-
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({ promptCaching: { enabled: true }, triggers: { mention: true, keywords: [], randomChance: 0 } }),
-      context: makeContext({
-        sections: [
-          { label: "S1", text: "stable-1", cached: true, role: "system" },
-          { label: "S2", text: "stable-2", cached: true, role: "system" },
-          { label: "V1", text: "volatile", cached: false, role: "developer" },
-        ],
+  test("routes final answer to a created thread", async () => {
+    const threadTool: AgentTool = {
+      name: "start_thread",
+      label: "Start Thread",
+      description: "Create a thread",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({
+        content: [{ type: "text", text: "Thread created" }],
+        details: { threadId: "thread-1", threadName: "Thread", parentChatId: "channel-1" },
       }),
-      sender,
-      llmComplete,
+    };
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{ id: "call-1", type: "function", function: { name: "start_thread", arguments: "{}" } }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      return Promise.resolve({
+        text: "thread answer",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "thread answer" }] },
+      });
+    };
+    const senderCalls: Array<{ text: string; reply: boolean; chatId?: string }> = [];
+    const sender: MessageSender = (text, reply, chatId) => {
+      senderCalls.push({ text, reply, chatId });
+      return Promise.resolve({ sentMessageId: "sent-1" });
     };
 
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ extraTools: [threadTool], completeChat, sender }),
+    );
 
-    const payload = capturedPayload as { messages?: Array<{ role?: string; content?: unknown }> };
-    const first = payload.messages?.[0];
-    expect(first?.role).toBe("system");
-
-    const firstContent = first?.content as Array<{ text?: string; cache_control?: unknown }>;
-    expect(firstContent[0]?.text).toBe("stable-1\n\nstable-2");
-    expect(firstContent[0]?.cache_control).toEqual({ type: "ephemeral" });
+    expect(senderCalls).toEqual([{ text: "thread answer", reply: false, chatId: "thread-1" }]);
   });
 
-  test("injectTriggerInstruction inserts before Late Instruction", () => {
+  test("calls background memory extraction after send", async () => {
+    const afterReplyCalls: unknown[] = [];
+    const afterReply = (request: unknown): Promise<void> => {
+      afterReplyCalls.push(request);
+      return Promise.resolve();
+    };
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ afterReply }),
+    );
+
+    expect(afterReplyCalls).toHaveLength(1);
+    expect(afterReplyCalls[0]).toMatchObject({
+      sourceMessageId: "msg-1",
+      userMessage: "hello bot",
+      assistantReply: "hello user",
+    });
+  });
+
+  test("injectTriggerInstruction inserts before response instruction", () => {
     const sections: ContextSection[] = [
-      { label: "Persona", text: "bot", cached: true, role: "system" },
-      { label: "Late Instruction", text: "late", cached: false, role: "developer" },
+      { label: "Current Context", text: "ctx", cached: false, role: "developer" },
+      { label: "Response Instruction", text: "respond", cached: false, role: "developer" },
     ];
 
-    const result = injectTriggerInstruction(sections, "mention behavior");
+    const result = injectTriggerInstruction(sections, "Mentioned directly.");
 
-    expect(result[1]?.label).toBe("Trigger Instruction");
-    expect(result[1]?.text).toBe("## Trigger Context\nmention behavior");
-    expect(result[2]?.label).toBe("Late Instruction");
-  });
-
-  test("passes extra tools to loop and executes them", async () => {
-    let extraExecuted = false;
-    const fakeTool: AgentTool = {
-      name: "fake_tool",
-      label: "Fake Tool",
-      description: "used by tests",
-      parameters: Type.Object({ value: Type.String() }),
-      execute: () => {
-        extraExecuted = true;
-        return Promise.resolve({ content: [{ type: "text", text: "ok" }], details: {} });
-      },
-    } as unknown as AgentTool;
-
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
-    const llmComplete: LlmCompleteFn = () => {
-      const payload = {
-        status: "done",
-        actions: [
-          { type: "tool_call", tool_name: "fake_tool", arguments: { value: "x" } },
-          { type: "ignore_user", reason: "done" },
-        ],
-      };
-      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
-    };
-
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({ triggers: { mention: true, keywords: [], randomChance: 0 } }),
-      context: makeContext(),
-      sender,
-      llmComplete,
-      extraTools: [fakeTool],
-    };
-
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-
-    expect(extraExecuted).toBe(true);
-  });
-
-  test("logs each llm output content in debug mode", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
-    const firstPayload = {
-      status: "continue",
-      actions: [{ type: "persona_turn", kind: "progress", reply: false }],
-    };
-    const secondPayload = {
-      status: "done",
-      actions: [{ type: "stop_response", reason: "done" }],
-    };
-    let call = 0;
-
-    const llmComplete: LlmCompleteFn = () => {
-      call += 1;
-      if (call === 1) return Promise.resolve(assistantWithText(JSON.stringify(firstPayload)));
-      if (call === 2) return Promise.resolve(assistantWithText("hello"));
-      return Promise.resolve(assistantWithText(JSON.stringify(secondPayload)));
-    };
-
-    const { logger, debug } = makeTestLogger();
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({ triggers: { mention: true, keywords: [], randomChance: 0 } }),
-      context: makeContext(),
-      personaPrompt: "Persona",
-      sender,
-      llmComplete,
-      log: logger,
-    };
-
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-
-    const llmOutputCalls = debug.mock.calls.filter((args: unknown[]) => args[0] === "llm_output");
-    expect(llmOutputCalls).toHaveLength(2);
-    expect(llmOutputCalls[0]?.[1]).toEqual({ content: JSON.stringify(firstPayload) });
-    expect(llmOutputCalls[1]?.[1]).toEqual({ content: JSON.stringify(secondPayload) });
-  });
-
-  test("emits loop and llm lifecycle debug telemetry", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
-    const llmComplete: LlmCompleteFn = (_model, _context, options) => {
-      options.onPayload?.({ messages: [{ role: "user", content: "hello" }] });
-      const payload = {
-        status: "done",
-        actions: [{ type: "ignore_user", reason: "no response needed" }],
-      };
-      return Promise.resolve(assistantWithText(JSON.stringify(payload)));
-    };
-
-    const { logger, debug } = makeTestLogger();
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({ triggers: { mention: true, keywords: [], randomChance: 0 } }),
-      context: makeContext(),
-      sender,
-      llmComplete,
-      log: logger,
-    };
-
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-
-    expect(debug.mock.calls.some((args: unknown[]) => args[0] === "structured_loop_start")).toBe(true);
-    expect(debug.mock.calls.some((args: unknown[]) => args[0] === "structured_loop_event")).toBe(true);
-    expect(debug.mock.calls.some((args: unknown[]) => args[0] === "llm_request_start")).toBe(true);
-    expect(debug.mock.calls.some((args: unknown[]) => args[0] === "llm_request_payload")).toBe(true);
-    expect(debug.mock.calls.some((args: unknown[]) => args[0] === "llm_response")).toBe(true);
-    expect(debug.mock.calls.some((args: unknown[]) => args[0] === "llm_response_payload")).toBe(true);
-    expect(debug.mock.calls.some((args: unknown[]) => args[0] === "structured_loop_end")).toBe(true);
-  });
-
-  test("retries without response_format when provider reports schema state explosion", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
-    const fetchSpy = spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        makeFetchJsonResponse({
-          error: {
-            message: "Provider returned error",
-            metadata: {
-              raw: JSON.stringify({
-                error: {
-                  code: 400,
-                  message: "The specified schema produces a constraint that has too many states for serving.",
-                  status: "INVALID_ARGUMENT",
-                },
-              }),
-            },
-          },
-        }, 400)
-      )
-      .mockResolvedValueOnce(
-        makeFetchJsonResponse({
-          model: "google/gemini-3-flash-preview",
-          choices: [{
-            message: { content: "{\"status\":\"done\",\"actions\":[{\"type\":\"ignore_user\",\"reason\":\"no response needed\"}]}" },
-            finish_reason: "stop",
-          }],
-          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-        })
-      );
-
-    const { logger, warn } = makeTestLogger();
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig({ defaultModel: "google/gemini-3-flash-preview" }),
-      guildConfig: makeGuildConfig({ model: "google/gemini-3-flash-preview", triggers: { mention: true, keywords: [], randomChance: 0 } }),
-      context: makeContext(),
-      sender,
-      log: logger,
-    };
-
-    const result = await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-
-    expect(result.triggered).toBe(true);
-    expect(result.agentRan).toBe(true);
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-
-    const firstBodyRaw = fetchSpy.mock.calls[0]?.[1]?.body;
-    const secondBodyRaw = fetchSpy.mock.calls[1]?.[1]?.body;
-    const firstBody = typeof firstBodyRaw === "string" ? JSON.parse(firstBodyRaw) as { response_format?: unknown } : {};
-    const secondBody = typeof secondBodyRaw === "string" ? JSON.parse(secondBodyRaw) as { response_format?: unknown } : {};
-
-    expect(firstBody.response_format).toBeDefined();
-    expect(secondBody.response_format).toBeUndefined();
-    expect(warn).toHaveBeenCalledWith(
-      "structured output unsupported, retrying without response_format",
-      expect.objectContaining({ model: "google/gemini-3-flash-preview" }),
-    );
-
-    fetchSpy.mockRestore();
-  });
-
-  test("does not cache structured-output fallback across independent requests", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
-    const modelId = "google/gemini-3-flash-preview-cache-test";
-    const fetchSpy = spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        makeFetchJsonResponse({
-          error: {
-            message: "Provider returned error",
-            metadata: {
-              raw: JSON.stringify({
-                error: {
-                  code: 400,
-                  message: "A schema in GenerationConfig in the request exceeds the maximum allowed nesting depth.",
-                  status: "INVALID_ARGUMENT",
-                },
-              }),
-            },
-          },
-        }, 400)
-      )
-      .mockResolvedValueOnce(
-        makeFetchJsonResponse({
-          model: modelId,
-          choices: [{
-            message: { content: "{\"status\":\"done\",\"actions\":[{\"type\":\"ignore_user\",\"reason\":\"no response needed\"}]}" },
-            finish_reason: "stop",
-          }],
-          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-        })
-      )
-      .mockResolvedValueOnce(
-        makeFetchJsonResponse({
-          model: modelId,
-          choices: [{
-            message: { content: "{\"status\":\"done\",\"actions\":[{\"type\":\"ignore_user\",\"reason\":\"no response needed\"}]}" },
-            finish_reason: "stop",
-          }],
-          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-        })
-      );
-
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig({ defaultModel: modelId }),
-      guildConfig: makeGuildConfig({ model: modelId, triggers: { mention: true, keywords: [], randomChance: 0 } }),
-      context: makeContext(),
-      sender,
-    };
-
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
-
-    expect(fetchSpy).toHaveBeenCalledTimes(3);
-
-    const firstBodyRaw = fetchSpy.mock.calls[0]?.[1]?.body;
-    const secondBodyRaw = fetchSpy.mock.calls[1]?.[1]?.body;
-    const thirdBodyRaw = fetchSpy.mock.calls[2]?.[1]?.body;
-    const firstBody = typeof firstBodyRaw === "string" ? JSON.parse(firstBodyRaw) as { response_format?: unknown } : {};
-    const secondBody = typeof secondBodyRaw === "string" ? JSON.parse(secondBodyRaw) as { response_format?: unknown } : {};
-    const thirdBody = typeof thirdBodyRaw === "string" ? JSON.parse(thirdBodyRaw) as { response_format?: unknown } : {};
-
-    expect(firstBody.response_format).toBeDefined();
-    expect(secondBody.response_format).toBeUndefined();
-    expect(thirdBody.response_format).toBeDefined();
-
-    fetchSpy.mockRestore();
-  });
-
-  test("fails fast on model timeout and reports timeout cause", async () => {
-    const sender: MessageSender = () => Promise.resolve({ sentMessageId: "m-1" });
-    let call = 0;
-
-    const llmComplete: LlmCompleteFn = (_model, _context, options) => {
-      call += 1;
-      return new Promise((_resolve, reject) => {
-        const signal = options.signal;
-        signal?.addEventListener("abort", () => {
-          const reason: unknown = signal.reason;
-          reject(reason instanceof Error ? reason : new Error(String(reason)));
-        }, { once: true });
-      });
-    };
-
-    const deps: HandlerDeps = {
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({
-        triggers: { mention: true, keywords: [], randomChance: 0 },
-        actionLoop: { maxToolCalls: 8, wallClockTimeoutMs: 2_000, llmOutputTimeoutMs: 20 },
-      }),
-      context: makeContext(),
-      sender,
-      llmComplete,
-    };
-
-    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps).then(
-      () => {
-        throw new Error("expected timeout error");
-      },
-      (error: unknown) => {
-        const msg = error instanceof Error ? error.message : String(error);
-        expect(msg).toContain("Structured action loop timed out");
-        expect(msg).toContain("cause=model_output_timeout");
-      },
-    );
-    expect(call).toBe(1);
+    expect(result.map((section) => section.label)).toEqual([
+      "Current Context",
+      "Trigger Instruction",
+      "Response Instruction",
+    ]);
   });
 });
