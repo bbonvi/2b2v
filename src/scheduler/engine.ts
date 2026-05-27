@@ -17,6 +17,8 @@ export interface SchedulerEngineOptions {
   log?: SchedulerLogger;
   /** Not currently used; reserved for future polling. */
   pollIntervalMs?: number;
+  /** Test hook for exercising long one-off timers without waiting days. */
+  maxOneOffTimerDelayMs?: number;
 }
 
 /** Minimal logging interface to avoid hard dependency on logger module. */
@@ -29,6 +31,8 @@ interface ActiveJob {
   timer?: ReturnType<typeof setTimeout>;
   scheduleId: string;
 }
+
+const MAX_ONE_OFF_TIMER_DELAY_MS = 2_147_483_647;
 
 export interface SchedulerEngine {
   start(): void;
@@ -43,6 +47,10 @@ export function createSchedulerEngine(
   options: SchedulerEngineOptions
 ): SchedulerEngine {
   const { db, onFire, log } = options;
+  const maxOneOffTimerDelayMs = Math.min(
+    options.maxOneOffTimerDelayMs ?? MAX_ONE_OFF_TIMER_DELAY_MS,
+    MAX_ONE_OFF_TIMER_DELAY_MS,
+  );
   const jobs = new Map<string, ActiveJob>();
   let running = false;
 
@@ -93,17 +101,32 @@ export function createSchedulerEngine(
         });
       }
     } else if (schedule.type === "one_off" && schedule.runAt !== null) {
-      const delayMs = schedule.runAt - Date.now();
-      if (delayMs <= 0) {
-        // Past one-off — auto-disable
-        updateSchedule(db, schedule.id, { enabled: false });
-        return;
-      }
-      const timer = setTimeout(() => {
-        fire(schedule.id);
-      }, delayMs);
-      jobs.set(schedule.id, { timer, scheduleId: schedule.id });
+      scheduleOneOff(schedule, false);
     }
+  }
+
+  function scheduleOneOff(schedule: ScheduleRow, fireWhenDue: boolean): void {
+    if (schedule.runAt === null) return;
+
+    const delayMs = schedule.runAt - Date.now();
+    if (delayMs <= 0) {
+      if (fireWhenDue) {
+        fire(schedule.id);
+      } else {
+        // Past one-offs found during startup should not fire unexpectedly.
+        updateSchedule(db, schedule.id, { enabled: false });
+      }
+      return;
+    }
+
+    const timerDelayMs = Math.min(delayMs, maxOneOffTimerDelayMs);
+    const timer = setTimeout(() => {
+      jobs.delete(schedule.id);
+      const latest = getSchedule(db, schedule.id);
+      if (!latest || !latest.enabled || latest.type !== "one_off") return;
+      scheduleOneOff(latest, true);
+    }, timerDelayMs);
+    jobs.set(schedule.id, { timer, scheduleId: schedule.id });
   }
 
   function fire(scheduleId: string): void {

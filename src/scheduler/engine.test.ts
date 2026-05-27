@@ -24,13 +24,14 @@ describe("SchedulerEngine", () => {
     if (engine !== undefined) engine.stop();
   });
 
-  function makeEngine(opts?: { pollIntervalMs?: number }) {
+  function makeEngine(opts?: { pollIntervalMs?: number; maxOneOffTimerDelayMs?: number }) {
     engine = createSchedulerEngine({
       db,
       onFire: (event) => {
         fired.push(event);
       },
       pollIntervalMs: opts?.pollIntervalMs,
+      maxOneOffTimerDelayMs: opts?.maxOneOffTimerDelayMs,
     });
     return engine;
   }
@@ -105,6 +106,23 @@ describe("SchedulerEngine", () => {
     const row = getSchedule(db, id);
     expect(row).not.toBeUndefined();
     expect(row?.enabled).toBe(false);
+    e.stop();
+  });
+
+  test("re-arms long one-off schedules instead of firing at the first timer chunk", async () => {
+    const id = addOneOffSchedule(Date.now() + 180, "long reminder");
+    const e = makeEngine({ maxOneOffTimerDelayMs: 50 });
+    e.start();
+
+    await sleep(80);
+    expect(fired).toHaveLength(0);
+    expect(e.activeCount()).toBe(1);
+    expect(getSchedule(db, id)?.enabled).toBe(true);
+
+    await waitFor(() => fired.length > 0, 1000);
+    expect(fired).toHaveLength(1);
+    expect(fired[0]?.schedule.messageContent).toBe("long reminder");
+    expect(getSchedule(db, id)?.enabled).toBe(false);
     e.stop();
   });
 
@@ -231,4 +249,8 @@ function waitFor(fn: () => boolean, timeoutMs: number): Promise<void> {
     };
     check();
   });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
