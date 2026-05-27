@@ -33,6 +33,7 @@ describe("createFetchUrlTool", () => {
     const result = await tool.execute("test-id", { url: "https://example.com" });
     const details = result.details as FetchUrlDetails;
     expect(details.method).toBe("jina");
+    expect(getContentText(result)).toContain("Source: https://example.com/");
     expect(getContentText(result)).toContain("Test Page");
   });
 
@@ -174,6 +175,23 @@ describe("createFetchUrlTool", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(Error);
       expect((err as Error).message).toContain("HTTP 404");
+    }
+  });
+
+  test("times out with clear error", async () => {
+    const tool = createFetchUrlTool({
+      disableJina: true,
+      timeoutMs: 10,
+      fetchFn: () => new Promise<Response>(() => {}),
+    });
+
+    try {
+      await tool.execute("test-id", { url: "https://example.com" });
+      expect.unreachable("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain("fetch_url failed for https://example.com/");
+      expect((err as Error).message).toContain("fetch_url timed out after 10ms");
     }
   });
 

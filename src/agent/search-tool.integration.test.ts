@@ -149,6 +149,38 @@ describe("createSearchTool", () => {
     expect(text).toContain("bob");
     expect(result.details.count).toBe(1);
   });
+
+  test("returns semantic results in chronological reading order", async () => {
+    await insertWithEmbedding("newer", "shared search phrase newer", { createdAt: now + 2_000 });
+    await insertWithEmbedding("older", "shared search phrase older", { createdAt: now + 1_000 });
+
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const result = await tool.execute("tc1", { query: "shared search phrase", limit: 10 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+
+    const text = getResultText(result);
+    expect(text.indexOf("shared search phrase older")).toBeLessThan(text.indexOf("shared search phrase newer"));
+  });
+
+  test("filters out messages already present in prompt context without exhausting small limits", async () => {
+    await insertWithEmbedding("current", "needle context current", { createdAt: now + 2_000 });
+    await insertWithEmbedding("older", "needle context older", { createdAt: now + 1_000 });
+
+    const tool = createSearchTool({
+      db,
+      qdrant,
+      guildId: "g1",
+      timezone: "UTC",
+      embed: pipeline,
+      resolveUsername: mockResolveUsername,
+      excludedMessageIds: ["current"],
+    });
+    const result = await tool.execute("tc1", { query: "needle context", limit: 1 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+
+    const text = getResultText(result);
+    expect(text).toContain("needle context older");
+    expect(text).not.toContain("needle context current");
+    expect(result.details.count).toBe(1);
+  });
 });
 
 describe("reply-to display", () => {
@@ -257,6 +289,24 @@ describe("search mode: literal", () => {
     const result = await tool.execute("tc1", { query: "nonexistent", mode: "literal" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).toContain("No messages found");
+  });
+
+  test("literal mode filters out context messages", async () => {
+    insertMessage("current", "exact phrase current");
+    insertMessage("older", "exact phrase older");
+    const tool = createSearchTool({
+      db,
+      qdrant,
+      guildId: "g1",
+      timezone: "UTC",
+      embed: pipeline,
+      resolveUsername: mockResolveUsername,
+      excludedMessageIds: ["current"],
+    });
+    const result = await tool.execute("tc1", { query: "exact phrase", mode: "literal" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+    expect(text).toContain("exact phrase older");
+    expect(text).not.toContain("exact phrase current");
   });
 });
 

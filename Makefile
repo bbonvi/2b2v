@@ -1,6 +1,6 @@
 QDRANT_CONTAINER := qdrant-test
 QDRANT_IMAGE := qdrant/qdrant:latest
-QDRANT_URL := http://qdrant-test.orb.local:6333
+QDRANT_URL := http://localhost:6333
 
 .PHONY: test test-unit qdrant-up qdrant-down qdrant-ensure check lint
 

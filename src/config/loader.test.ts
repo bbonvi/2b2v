@@ -102,6 +102,11 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultMergeMessageGapSeconds).toBe(120);
     expect(cfg.defaultImageReadMaxPerCall).toBe(10);
     expect(cfg.defaultImageCaptioningEnabled).toBe(false);
+    expect(cfg.defaultImageReading).toEqual({
+      fallbackEnabled: false,
+      fallbackModel: "moonshotai/kimi-k2.5",
+      fallbackModelParams: {},
+    });
     expect(cfg.defaultAttachmentsDir).toBe("data/attachments");
     expect(cfg.defaultInstructions).toBe("");
     expect((cfg as unknown as { defaultPromptCaching?: unknown }).defaultPromptCaching).toEqual({
@@ -117,6 +122,40 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultModel).toBe("custom/model");
     expect(cfg.defaultTimezone).toBe("Asia/Tokyo");
     expect(cfg.logLevel).toBe("debug");
+  });
+
+  test("resolves ElevenLabs request parameters from TTS config", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, [
+      "tts:",
+      "  enabled: true",
+      "  voices:",
+      "    normal:",
+      "      voiceId: voice-123",
+      "      applyTextNormalization: on",
+      "      outputFormat: mp3_44100_128",
+      "      model: eleven_v3",
+    ].join("\n"));
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+
+    expect(cfg.defaultTts?.voices.normal.applyTextNormalization).toBe("on");
+    expect(cfg.defaultTts?.voices.normal.outputFormat).toBe("mp3_44100_128");
+  });
+
+  test("rejects invalid TTS text normalization mode", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, [
+      "tts:",
+      "  enabled: true",
+      "  voices:",
+      "    normal:",
+      "      voiceId: voice-123",
+      "      applyTextNormalization: always",
+    ].join("\n"));
+
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
+      'tts.voices.normal.applyTextNormalization must be "auto", "on", or "off"',
+    );
   });
 
   test("rejects deprecated global instructionsPath/instructions keys", () => {
@@ -294,7 +333,7 @@ describe("loadGlobalConfig", () => {
   test("uses replyLoop defaults when not configured", () => {
     const cfg = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "nonexistent.yaml"));
     expect(cfg.defaultReplyLoop).toEqual({
-      maxToolCalls: 8,
+      maxToolCalls: 16,
       wallClockTimeoutMs: 45_000,
       llmOutputTimeoutMs: 12_000,
     });
@@ -329,6 +368,51 @@ describe("loadGlobalConfig", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, "replyLoop:\n  maxToolCalls: 8\n  wallClockTimeoutMs: 30000\n  llmOutputTimeoutMs: 500\n");
     expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow("replyLoop.llmOutputTimeoutMs must be >= 1000");
+  });
+
+  test("parses global backgroundLlm overrides", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, [
+      "backgroundLlm:",
+      "  model: google/gemini-2.5-flash",
+      "  serviceTier: flex",
+      "  modelParams:",
+      "    temperature: 0.1",
+      "  promptCaching:",
+      "    enabled: false",
+    ].join("\n"));
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultBackgroundLlm).toEqual({
+      model: "google/gemini-2.5-flash",
+      modelParams: { temperature: 0.1 },
+      thinkingLevel: undefined,
+      serviceTier: "flex",
+      promptCaching: { enabled: false },
+    });
+  });
+
+  test("rejects invalid backgroundLlm service tier", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "backgroundLlm:\n  serviceTier: cheap\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow('backgroundLlm.serviceTier must be "flex" or "priority"');
+  });
+
+  test("parses global image reading fallback config", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, [
+      "imageReading:",
+      "  fallbackEnabled: true",
+      "  fallbackModel: moonshotai/kimi-k2.5",
+      "  fallbackModelParams:",
+      "    temperature: 0",
+    ].join("\n"));
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+
+    expect(cfg.defaultImageReading).toEqual({
+      fallbackEnabled: true,
+      fallbackModel: "moonshotai/kimi-k2.5",
+      fallbackModelParams: { temperature: 0 },
+    });
   });
 });
 
@@ -411,6 +495,11 @@ describe("resolveGuildConfig", () => {
     expect(resolved.mergeMessageGapSeconds).toBe(120);
     expect(resolved.imageReadMaxPerCall).toBe(10);
     expect(resolved.imageCaptioningEnabled).toBe(false);
+    expect(resolved.imageReading).toEqual({
+      fallbackEnabled: false,
+      fallbackModel: "moonshotai/kimi-k2.5",
+      fallbackModelParams: {},
+    });
     expect(resolved.attachmentsDir).toBe("data/attachments");
     expect(resolved.instructions).toBe("");
   });
@@ -424,6 +513,11 @@ describe("resolveGuildConfig", () => {
       mergeMessageGapSeconds: 60,
       imageReadMaxPerCall: 5,
       imageCaptioningEnabled: true,
+      imageReading: {
+        fallbackEnabled: true,
+        fallbackModel: "openai/gpt-4o-mini",
+        fallbackModelParams: { temperature: 0 },
+      },
       attachmentsDir: "/custom/attachments",
     };
     const resolved = resolveGuildConfig(global, partial);
@@ -433,6 +527,11 @@ describe("resolveGuildConfig", () => {
     expect(resolved.mergeMessageGapSeconds).toBe(60);
     expect(resolved.imageReadMaxPerCall).toBe(5);
     expect(resolved.imageCaptioningEnabled).toBe(true);
+    expect(resolved.imageReading).toEqual({
+      fallbackEnabled: true,
+      fallbackModel: "openai/gpt-4o-mini",
+      fallbackModelParams: { temperature: 0 },
+    });
     expect(resolved.attachmentsDir).toBe("/custom/attachments");
   });
 
@@ -612,6 +711,59 @@ describe("resolveGuildConfig", () => {
     });
   });
 
+  test("backgroundLlm inherits effective guild model configuration by default", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "model: global/model\nmodelParams:\n  temperature: 0.7\npromptCaching:\n  enabled: false\n");
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "112b",
+      slug: "background-default",
+      model: "guild/model",
+      modelParams: { topP: 0.9 },
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.backgroundLlm).toEqual({
+      model: "guild/model",
+      modelParams: { temperature: 0.7, topP: 0.9 },
+      thinkingLevel: undefined,
+      serviceTier: undefined,
+      promptCaching: { enabled: false },
+    });
+  });
+
+  test("backgroundLlm supports global and guild overrides", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, [
+      "model: global/model",
+      "backgroundLlm:",
+      "  model: global/bg",
+      "  serviceTier: flex",
+      "  modelParams:",
+      "    temperature: 0.2",
+    ].join("\n"));
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "112c",
+      slug: "background-override",
+      backgroundLlm: {
+        model: "guild/bg",
+        serviceTier: "priority",
+        modelParams: { topP: 0.5 },
+        promptCaching: { enabled: false },
+      },
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.backgroundLlm).toEqual({
+      model: "guild/bg",
+      modelParams: { temperature: 0.2, topP: 0.5 },
+      thinkingLevel: undefined,
+      serviceTier: "priority",
+      promptCaching: { enabled: false },
+    });
+  });
+
   test("inherits replyLoop from global defaults", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
@@ -754,13 +906,15 @@ describe("saveGuildConfig", () => {
       mergeMessageGapSeconds: 120,
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
+      imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      replyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: true },
+      backgroundLlm: { model: "custom/m", modelParams: {}, promptCaching: { enabled: true } },
     };
 
     saveGuildConfig(file, resolved);
@@ -790,13 +944,15 @@ describe("saveGuildConfig", () => {
       mergeMessageGapSeconds: 120,
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
+      imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
       attachmentsDir: "data/attachments",
       instructions: "Custom guild instructions",
       emotes: { include: false },
       members: { include: true },
-      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      replyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: true },
+      backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
     };
 
     saveGuildConfig(file, resolved);
@@ -822,11 +978,12 @@ describe("saveGuildConfig", () => {
       mergeMessageGapSeconds: 120,
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
+      imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      replyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: false },
     } as unknown as GuildConfig;
@@ -1142,6 +1299,7 @@ describe("saveGuildConfig bashTool", () => {
       mergeMessageGapSeconds: 120,
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
+      imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
       attachmentsDir: "data/attachments",
       instructions: "",
       bashTool: {
@@ -1153,9 +1311,10 @@ describe("saveGuildConfig bashTool", () => {
       },
       emotes: { include: false },
       members: { include: true },
-      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      replyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: true },
+      backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
     };
 
     saveGuildConfig(file, resolved);
@@ -1181,13 +1340,15 @@ describe("saveGuildConfig bashTool", () => {
       mergeMessageGapSeconds: 120,
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
+      imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      replyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: true },
+      backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
     };
 
     saveGuildConfig(file, resolved);
@@ -1396,13 +1557,15 @@ describe("saveGuildConfig emotes", () => {
       mergeMessageGapSeconds: 120,
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
+      imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: true },
       members: { include: true },
-      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      replyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: true },
+      backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
     };
 
     saveGuildConfig(file, resolved);
@@ -1435,13 +1598,15 @@ describe("saveGuildConfig triggerInstructions", () => {
       mergeMessageGapSeconds: 120,
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
+      imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      replyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: true },
+      backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
     };
 
     saveGuildConfig(file, resolved);
@@ -1467,13 +1632,15 @@ describe("saveGuildConfig triggerInstructions", () => {
       mergeMessageGapSeconds: 120,
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
+      imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
       members: { include: true },
-      replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+      replyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       promptCaching: { enabled: true },
+      backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
     };
 
     saveGuildConfig(file, resolved);

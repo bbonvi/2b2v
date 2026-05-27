@@ -16,11 +16,15 @@ import type {
   MembersConfig,
   DispatcherConfig,
   PromptCachingConfig,
+  BackgroundLlmConfig,
+  BackgroundLlmDefaults,
+  ImageReadingConfig,
   ReplyLoopConfig,
   PromptProfileConfig,
   PromptSource,
+  ServiceTier,
 } from "./types.ts";
-import type { TtsConfig, VoicePreset } from "../tts/types.ts";
+import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
 import type { Logger, TokenUsage } from "../logger.ts";
 import { loadPromptSourceChain } from "./prompt-profile.ts";
 
@@ -44,8 +48,18 @@ const DEFAULT_VOICE_PRESET: VoicePreset = {
   speed: 1.0,
   stability: 0.5,
   similarityBoost: 0.75,
-  model: "eleven_flash_v2_5",
+  style: 0,
+  useSpeakerBoost: false,
+  model: "eleven_v3",
 };
+
+function resolveTextNormalizationMode(
+  value: unknown,
+): TextNormalizationMode | undefined {
+  if (value === undefined) return undefined;
+  if (value === "auto" || value === "on" || value === "off") return value;
+  throw new Error('tts.voices.normal.applyTextNormalization must be "auto", "on", or "off"');
+}
 
 /**
  * Resolve a partial VoicePreset from YAML against defaults.
@@ -60,6 +74,15 @@ function resolveVoicePreset(partial: Partial<VoicePreset> | undefined): VoicePre
     speed: partial.speed ?? DEFAULT_VOICE_PRESET.speed,
     stability: partial.stability ?? DEFAULT_VOICE_PRESET.stability,
     similarityBoost: partial.similarityBoost ?? DEFAULT_VOICE_PRESET.similarityBoost,
+    style: partial.style ?? DEFAULT_VOICE_PRESET.style,
+    useSpeakerBoost: partial.useSpeakerBoost ?? DEFAULT_VOICE_PRESET.useSpeakerBoost,
+    ...(partial.seed !== undefined ? { seed: partial.seed } : {}),
+    ...(partial.applyTextNormalization !== undefined
+      ? { applyTextNormalization: resolveTextNormalizationMode(partial.applyTextNormalization) }
+      : {}),
+    ...(partial.outputFormat !== undefined && partial.outputFormat.trim() !== ""
+      ? { outputFormat: partial.outputFormat.trim() }
+      : {}),
     model: partial.model ?? DEFAULT_VOICE_PRESET.model,
   };
 }
@@ -77,13 +100,10 @@ function resolveTtsConfig(
   const normalVoice = resolveVoicePreset(partial.voices?.normal);
   if (normalVoice === undefined) return undefined;
 
-  const whisperVoice = resolveVoicePreset(partial.voices?.whisper);
-
   return {
     enabled: true,
     voices: {
       normal: normalVoice,
-      ...(whisperVoice !== undefined ? { whisper: whisperVoice } : {}),
     },
   };
 }
@@ -164,8 +184,14 @@ const DEFAULT_PROMPT_CACHING: PromptCachingConfig = {
   enabled: true,
 };
 
+const DEFAULT_IMAGE_READING: ImageReadingConfig = {
+  fallbackEnabled: false,
+  fallbackModel: "moonshotai/kimi-k2.5",
+  fallbackModelParams: {},
+};
+
 const DEFAULT_REPLY_LOOP: ReplyLoopConfig = {
-  maxToolCalls: 8,
+  maxToolCalls: 16,
   wallClockTimeoutMs: 45_000,
   llmOutputTimeoutMs: 12_000,
 };
@@ -252,12 +278,88 @@ function resolveGlobalPromptCaching(
   };
 }
 
+function resolveGlobalImageReading(
+  partial: MainConfigYaml["imageReading"] | undefined,
+): ImageReadingConfig {
+  return {
+    fallbackEnabled: partial?.fallbackEnabled ?? DEFAULT_IMAGE_READING.fallbackEnabled,
+    fallbackModel: partial?.fallbackModel ?? DEFAULT_IMAGE_READING.fallbackModel,
+    fallbackModelParams: partial?.fallbackModelParams ?? {},
+  };
+}
+
+function resolveGuildImageReading(
+  global: ImageReadingConfig,
+  partial: GuildConfigYaml["imageReading"] | undefined,
+): ImageReadingConfig {
+  return {
+    fallbackEnabled: partial?.fallbackEnabled ?? global.fallbackEnabled,
+    fallbackModel: partial?.fallbackModel ?? global.fallbackModel,
+    fallbackModelParams: {
+      ...global.fallbackModelParams,
+      ...partial?.fallbackModelParams,
+    },
+  };
+}
+
 function resolveGuildPromptCaching(
   global: PromptCachingConfig,
   partial: GuildConfigYaml["promptCaching"] | undefined
 ): PromptCachingConfig {
   return {
     enabled: partial?.enabled ?? global.enabled,
+  };
+}
+
+function parseServiceTier(value: unknown, keyPrefix: string): ServiceTier | undefined {
+  if (value === undefined) return undefined;
+  if (value === "flex" || value === "priority") return value;
+  throw new Error(`${keyPrefix}.serviceTier must be "flex" or "priority"`);
+}
+
+function resolveBackgroundPromptCaching(
+  fallback: PromptCachingConfig,
+  partial: { enabled?: boolean } | undefined,
+): PromptCachingConfig {
+  return { enabled: partial?.enabled ?? fallback.enabled };
+}
+
+function resolveGlobalBackgroundLlm(
+  partial: MainConfigYaml["backgroundLlm"] | undefined,
+): BackgroundLlmDefaults {
+  return {
+    model: partial?.model,
+    modelParams: partial?.modelParams ?? {},
+    thinkingLevel: partial?.thinkingLevel,
+    serviceTier: parseServiceTier(partial?.serviceTier, "backgroundLlm"),
+    promptCaching: partial?.promptCaching !== undefined
+      ? resolveBackgroundPromptCaching(DEFAULT_PROMPT_CACHING, partial.promptCaching)
+      : undefined,
+  };
+}
+
+function resolveGuildBackgroundLlm(
+  global: GlobalConfig,
+  partial: GuildConfigYaml & { guildId: string; slug: string },
+  mainPromptCaching: PromptCachingConfig,
+): BackgroundLlmConfig {
+  const globalBackground = global.defaultBackgroundLlm;
+  const guildBackground = partial.backgroundLlm;
+  const mainModelParams = { ...global.defaultModelParams, ...partial.modelParams };
+  const promptCachingFallback = globalBackground.promptCaching ?? mainPromptCaching;
+  return {
+    model: guildBackground?.model ?? globalBackground.model ?? partial.model ?? global.defaultModel,
+    modelParams: {
+      ...mainModelParams,
+      ...globalBackground.modelParams,
+      ...guildBackground?.modelParams,
+    },
+    thinkingLevel: guildBackground?.thinkingLevel
+      ?? globalBackground.thinkingLevel
+      ?? partial.thinkingLevel
+      ?? global.defaultThinkingLevel,
+    serviceTier: parseServiceTier(guildBackground?.serviceTier, "backgroundLlm") ?? globalBackground.serviceTier,
+    promptCaching: resolveBackgroundPromptCaching(promptCachingFallback, guildBackground?.promptCaching),
   };
 }
 
@@ -476,6 +578,7 @@ export function loadGlobalConfig(
     defaultMergeMessageGapSeconds: yaml.mergeMessageGapSeconds ?? 120,
     defaultImageReadMaxPerCall: yaml.imageReadMaxPerCall ?? 10,
     defaultImageCaptioningEnabled: yaml.imageCaptioningEnabled ?? false,
+    defaultImageReading: resolveGlobalImageReading(yaml.imageReading),
     defaultAttachmentsDir,
     defaultInstructions,
     defaultLateInstruction,
@@ -501,6 +604,7 @@ export function loadGlobalConfig(
       defaultDebounceMs: yaml.dispatcher?.defaultDebounceMs ?? DEFAULT_DISPATCHER.defaultDebounceMs,
     },
     defaultPromptCaching: resolveGlobalPromptCaching(yaml.promptCaching),
+    defaultBackgroundLlm: resolveGlobalBackgroundLlm(yaml.backgroundLlm),
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
   };
 }
@@ -535,6 +639,7 @@ export function resolveGuildConfig(
   partial: GuildConfigYaml & { guildId: string; slug: string }
 ): GuildConfig {
   const instructions = resolveInstructions(partial.instructions, partial.instructionsPath);
+  const promptCaching = resolveGuildPromptCaching(global.defaultPromptCaching, partial.promptCaching);
 
   return {
     guildId: partial.guildId,
@@ -566,6 +671,7 @@ export function resolveGuildConfig(
     mergeMessageGapSeconds: partial.mergeMessageGapSeconds ?? global.defaultMergeMessageGapSeconds,
     imageReadMaxPerCall: partial.imageReadMaxPerCall ?? global.defaultImageReadMaxPerCall,
     imageCaptioningEnabled: partial.imageCaptioningEnabled ?? global.defaultImageCaptioningEnabled,
+    imageReading: resolveGuildImageReading(global.defaultImageReading, partial.imageReading),
     attachmentsDir: partial.attachmentsDir ?? global.defaultAttachmentsDir,
     instructions: instructions !== "" ? instructions : global.defaultInstructions,
     tts: resolveTtsConfig(partial.tts) ?? global.defaultTts,
@@ -581,7 +687,8 @@ export function resolveGuildConfig(
       mentionDebounceMs: partial.dispatcher?.mentionDebounceMs ?? global.defaultDispatcher.mentionDebounceMs,
       defaultDebounceMs: partial.dispatcher?.defaultDebounceMs ?? global.defaultDispatcher.defaultDebounceMs,
     },
-    promptCaching: resolveGuildPromptCaching(global.defaultPromptCaching, partial.promptCaching),
+    promptCaching,
+    backgroundLlm: resolveGuildBackgroundLlm(global, partial, promptCaching),
     replyLoop: resolveGuildReplyLoop(global.defaultReplyLoop, partial.replyLoop),
   };
 }
@@ -639,6 +746,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     mergeMessageGapSeconds: config.mergeMessageGapSeconds,
     imageReadMaxPerCall: config.imageReadMaxPerCall,
     imageCaptioningEnabled: config.imageCaptioningEnabled,
+    imageReading: config.imageReading,
     attachmentsDir: config.attachmentsDir,
     instructions: config.instructions !== "" ? config.instructions : undefined,
     tts: config.tts,
@@ -647,6 +755,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     members: config.members,
     dispatcher: config.dispatcher,
     promptCaching: config.promptCaching,
+    backgroundLlm: config.backgroundLlm,
     replyLoop: config.replyLoop,
   };
 

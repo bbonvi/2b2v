@@ -45,7 +45,8 @@ export function createFetchUrlTool(deps: FetchUrlToolDeps = {}): AgentTool {
 
     async execute(
       _toolCallId: string,
-      params: unknown
+      params: unknown,
+      signal?: AbortSignal,
     ): Promise<AgentToolResult<{ url: string; title: string; contentLength: number; method: string }>> {
       const { url } = params as { url: string };
 
@@ -63,105 +64,173 @@ export function createFetchUrlTool(deps: FetchUrlToolDeps = {}): AgentTool {
         throw new Error(`Invalid URL: ${url}`);
       }
 
-      // Try Jina Reader first (unless disabled)
-      if (!disableJina) {
-        try {
-          const result = await fetchWithJina(parsedUrl.toString(), timeoutMs, maxContentLength, fetchFn);
-          return result;
-        } catch {
-          // Fall through to manual extraction
+      const request = createToolTimeout(signal, timeoutMs, `fetch_url timed out after ${timeoutMs}ms`);
+      try {
+        let jinaError: unknown;
+        // Try Jina Reader first (unless disabled)
+        if (!disableJina) {
+          try {
+            return await fetchWithJina(parsedUrl.toString(), maxContentLength, fetchFn, request.signal);
+          } catch (error) {
+            if (request.signal.aborted) throw error;
+            jinaError = error;
+          }
         }
-      }
 
-      // Fallback: Manual extraction
-      return fetchManual(parsedUrl.toString(), timeoutMs, maxContentLength, fetchFn, turndown);
+        // Fallback: Manual extraction
+        try {
+          return await fetchManual(parsedUrl.toString(), maxContentLength, fetchFn, turndown, request.signal);
+        } catch (manualError) {
+          if (jinaError !== undefined) {
+            throw new Error(`Jina reader failed: ${errorMessage(jinaError)}; manual fetch failed: ${errorMessage(manualError)}`);
+          }
+          throw manualError;
+        }
+      } catch (error) {
+        throw new Error(formatFetchUrlFailure(parsedUrl.toString(), error, timeoutMs));
+      } finally {
+        request.cleanup();
+      }
     },
   };
+}
+
+async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw abortReason(signal, "fetch_url aborted");
+  let onAbort: (() => void) | undefined;
+  const abortPromise = new Promise<never>((_resolve, reject) => {
+    onAbort = () => {
+      reject(abortReason(signal, "fetch_url aborted"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([promise, abortPromise]);
+  } finally {
+    if (onAbort !== undefined) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+}
+
+function abortReason(signal: AbortSignal, fallback: string): Error {
+  const reason: unknown = signal.reason;
+  if (reason instanceof Error) return reason;
+  if (typeof reason === "string" && reason !== "") return new Error(reason);
+  return new Error(fallback);
+}
+
+function createToolTimeout(parent: AbortSignal | undefined, timeoutMs: number, timeoutMessage: string): {
+  signal: AbortSignal;
+  cleanup: () => void;
+} {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new Error(timeoutMessage));
+  }, timeoutMs);
+  const onParentAbort = (): void => {
+    if (parent !== undefined) {
+      controller.abort(abortReason(parent, "fetch_url aborted"));
+      return;
+    }
+    controller.abort(new Error("fetch_url aborted"));
+  };
+
+  if (parent?.aborted === true) {
+    onParentAbort();
+  } else {
+    parent?.addEventListener("abort", onParentAbort, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeout);
+      parent?.removeEventListener("abort", onParentAbort);
+    },
+  };
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function formatFetchUrlFailure(url: string, error: unknown, timeoutMs: number): string {
+  if (error instanceof Error && error.message.startsWith("fetch_url failed")) return error.message;
+  if (error instanceof Error && error.name === "AbortError") {
+    return `fetch_url failed for ${url}: request timed out after ${timeoutMs}ms`;
+  }
+  return `fetch_url failed for ${url}: ${errorMessage(error)}`;
 }
 
 /** Fetch using Jina Reader API (r.jina.ai) */
 async function fetchWithJina(
   url: string,
-  timeoutMs: number,
   maxContentLength: number,
-  fetchFn: FetchLike
+  fetchFn: FetchLike,
+  signal: AbortSignal,
 ): Promise<AgentToolResult<{ url: string; title: string; contentLength: number; method: string }>> {
   const jinaUrl = `https://r.jina.ai/${url}`;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const response = await abortable(fetchFn(jinaUrl, {
+    signal,
+    headers: {
+      Accept: "text/markdown",
+    },
+  }), signal);
 
-  try {
-    const response = await fetchFn(jinaUrl, {
-      signal: controller.signal,
-      headers: {
-        Accept: "text/markdown",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Jina returned ${response.status}`);
-    }
-
-    let markdown = await response.text();
-
-    // Extract title from first heading if present
-    const titleMatch = markdown.match(/^#\s+(.+)$/m);
-    const title = titleMatch?.[1] ?? new URL(url).hostname;
-
-    // Truncate if needed
-    if (markdown.length > maxContentLength) {
-      markdown = markdown.slice(0, maxContentLength) + "\n\n[Content truncated...]";
-    }
-
-    return {
-      content: [{ type: "text", text: markdown }],
-      details: { url, title, contentLength: markdown.length, method: "jina" },
-    };
-  } finally {
-    clearTimeout(timeout);
+  if (!response.ok) {
+    throw new Error(`Jina returned HTTP ${response.status}: ${response.statusText}`);
   }
+
+  let markdown = await abortable(response.text(), signal);
+
+  // Extract title from first heading if present
+  const titleMatch = markdown.match(/^#\s+(.+)$/m);
+  const title = titleMatch?.[1] ?? new URL(url).hostname;
+
+  // Truncate if needed
+  if (markdown.length > maxContentLength) {
+    markdown = markdown.slice(0, maxContentLength) + "\n\n[Content truncated...]";
+  }
+
+  const text = markdown.startsWith("Source:")
+    ? markdown
+    : `Source: ${url}\n\n${markdown}`;
+
+  return {
+    content: [{ type: "text", text }],
+    details: { url, title, contentLength: markdown.length, method: "jina" },
+  };
 }
 
 /** Fallback: Manual fetch with Readability extraction */
 async function fetchManual(
   url: string,
-  timeoutMs: number,
   maxContentLength: number,
   fetchFn: FetchLike,
-  turndown: TurndownService
+  turndown: TurndownService,
+  signal: AbortSignal,
 ): Promise<AgentToolResult<{ url: string; title: string; contentLength: number; method: string }>> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const response = await abortable(fetchFn(url, {
+    signal,
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml",
+    },
+  }), signal);
 
-  let html: string;
-  try {
-    const response = await fetchFn(url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const contentType = response.headers.get("content-type") ?? "";
-    if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
-      throw new Error(`Unsupported content type: ${contentType}`);
-    }
-
-    html = await response.text();
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") {
-      throw new Error(`Request timed out after ${timeoutMs}ms`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timeout);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
   }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
+    throw new Error(`Unsupported content type: ${contentType}`);
+  }
+
+  const html = await abortable(response.text(), signal);
 
   // Parse and extract
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment

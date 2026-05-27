@@ -1,11 +1,10 @@
 import { describe, expect, mock, test } from "bun:test";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { handleMessage, injectTriggerInstruction, type ChatCompleteFn, type HandlerDeps, type IncomingMessage } from "./handler.ts";
+import { handleMessage, injectTriggerInstruction, type ChatCompleteFn, type HandlerDeps, type IncomingMessage, type MessageSender, type VoiceAttachment } from "./handler.ts";
 import type { AssembledContext, ContextSection } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
-import type { MessageSender, VoiceAttachment } from "./send-message-tool.ts";
-import type { TtsConfig, TtsResult } from "../tts/types.ts";
+import type { TtsResult } from "../tts/types.ts";
 
 function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
   return {
@@ -21,6 +20,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultMergeMessageGapSeconds: 120,
     defaultImageReadMaxPerCall: 10,
     defaultImageCaptioningEnabled: false,
+    defaultImageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
     defaultAttachmentsDir: "data/attachments",
     defaultInstructions: "",
     defaultLateInstruction: "Keep it short.",
@@ -39,7 +39,8 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultMembers: { include: true },
     defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
     defaultPromptCaching: { enabled: true },
-    defaultReplyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+    defaultBackgroundLlm: { modelParams: {} },
+    defaultReplyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
     ...overrides,
   };
 }
@@ -57,24 +58,22 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     mergeMessageGapSeconds: 120,
     imageReadMaxPerCall: 10,
     imageCaptioningEnabled: false,
+    imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
     attachmentsDir: "data/attachments",
     instructions: "",
     emotes: { include: false },
     members: { include: true },
     dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
     promptCaching: { enabled: true },
-    replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+    backgroundLlm: {
+      model: "moonshotai/kimi-k2.5",
+      modelParams: {},
+      promptCaching: { enabled: true },
+    },
+    replyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
     ...overrides,
   };
 }
-
-const ttsConfig: TtsConfig = {
-  enabled: true,
-  voices: {
-    normal: { voiceId: "normal", speed: 1, stability: 0.5, similarityBoost: 0.75, model: "eleven_flash_v2_5" },
-    whisper: { voiceId: "whisper", speed: 1, stability: 0.5, similarityBoost: 0.75, model: "eleven_flash_v2_5" },
-  },
-};
 
 function makeContext(overrides: Partial<AssembledContext> = {}): AssembledContext {
   return {
@@ -127,6 +126,38 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}): HandlerDeps {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function payloadText(payload: unknown): string {
+  if (!isRecord(payload) || !Array.isArray(payload.messages)) return "";
+  const chunks: string[] = [];
+  for (const message of payload.messages) {
+    if (!isRecord(message)) continue;
+    const content = message.content;
+    if (typeof content === "string") {
+      chunks.push(content);
+      continue;
+    }
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (!isRecord(part)) continue;
+      if (typeof part.text === "string") chunks.push(part.text);
+    }
+  }
+  return chunks.join("\n");
+}
+
+function contentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter(isRecord)
+    .map((part) => typeof part.text === "string" ? part.text : "")
+    .join("");
+}
+
 describe("handleMessage", () => {
   test("returns triggered=false when no trigger matches", async () => {
     const completeChat = mock(() => Promise.resolve({
@@ -161,16 +192,228 @@ describe("handleMessage", () => {
     expect(senderCalls).toEqual([{ text: "hello user", reply: true, chatId: undefined }]);
   });
 
+  test("instructs model to cite web and URL sources inline", async () => {
+    const completeChat: ChatCompleteFn = (request) => {
+      const payload = {
+        messages: [
+          ...(request.systemPrompt !== "" ? [{ role: "system", content: request.systemPrompt }] : []),
+          ...request.messages,
+        ],
+      };
+      request.onPayload?.(payload);
+      const text = payloadText(payload);
+      expect(text).toContain("cite every web-derived factual claim inline");
+      expect(text).toContain("ALWAYS cite every web-derived factual claim");
+      expect(text).toContain("Do not put sources only at the end");
+      expect(text).toContain("Use English search queries");
+      expect(text).toContain("web_search then fetch_url");
+      expect(text).toContain("include one short user-facing status line");
+      expect(text).toContain("To ping, write @username exactly");
+      expect(text).toContain("use list_members first");
+      expect(text).toContain("use search_messages when a user seems to reference something missing");
+      expect(text).toContain("when you do not understand what they mean");
+      expect(text).toContain("try a few different phrasings or filters");
+      expect(text.indexOf("Reserved response directives")).toBeGreaterThan(-1);
+      expect(text.indexOf("## Memory")).toBeGreaterThan(-1);
+      expect(text.indexOf("Reserved response directives")).toBeLessThan(text.indexOf("## Memory"));
+      return Promise.resolve({
+        text: "done",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat }),
+    );
+  });
+
+  test("keeps stable prompt before a stable cache anchor and volatile turn context", async () => {
+    const completeChat: ChatCompleteFn = (request) => {
+      const payload = {
+        messages: [
+          ...(request.systemPrompt !== "" ? [{ role: "system", content: request.systemPrompt }] : []),
+          ...request.messages,
+        ],
+      };
+      request.onPayload?.(payload);
+
+      const messages = payload.messages as Array<{ role?: string; content?: unknown }>;
+      expect(messages[0]?.role).toBe("system");
+      expect(contentText(messages[0]?.content)).toContain("You are a test bot.");
+      expect(contentText(messages[0]?.content)).toContain("Reserved response directives");
+      expect(messages[1]).toEqual({
+        role: "user",
+        content: "Stable context is loaded. Wait for the current Discord turn.",
+      });
+      expect(messages[2]).toEqual({ role: "assistant", content: "Ready." });
+      expect(messages[3]?.role).toBe("user");
+      expect(messages[3]?.content).toContain("## Current Discord Turn Context");
+      expect(messages[3]?.content).toContain("## Memory");
+      expect(messages[3]?.content).toContain("## Current User Message");
+      expect(messages[3]?.content).toContain("hello bot");
+
+      return Promise.resolve({
+        text: "done",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat }),
+    );
+  });
+
+  test("keeps older chat history in the stable prompt instead of volatile turn context", async () => {
+    const completeChat: ChatCompleteFn = (request) => {
+      const payload = { messages: [...request.messages] };
+      request.onPayload?.(payload);
+
+      const messages = payload.messages as Array<{ role?: string; content?: unknown }>;
+      const stableSystem = contentText(messages[0]?.content);
+      const currentTurn = contentText(messages[3]?.content);
+      expect(stableSystem).toContain("## Chat History — Older");
+      expect(stableSystem).toContain("[@old]: cached chunk");
+      expect(currentTurn).toContain("## Chat History\n[@new]: volatile recent");
+      expect(currentTurn).not.toContain("[@old]: cached chunk");
+
+      return Promise.resolve({
+        text: "done",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        context: makeContext({
+          sections: [
+            { label: "Chat History — Older", text: "## Chat History — Older\n[@old]: cached chunk", cached: true, role: "system" },
+            { label: "Chat History — Newer", text: "## Chat History\n[@new]: volatile recent", cached: false, role: "developer" },
+          ],
+        }),
+      }),
+    );
+  });
+
+  test("chains web search then fetch and sends one intermediate status", async () => {
+    const toolCalls: Array<{ name: string; params: unknown }> = [];
+    const webSearch: AgentTool = {
+      name: "web_search",
+      label: "Web Search",
+      description: "Search the web",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: (_id, params) => {
+        toolCalls.push({ name: "web_search", params });
+        return Promise.resolve({
+          content: [{ type: "text", text: "1. **Example**\n   https://example.com/post\n   Useful snippet" }],
+          details: {},
+        });
+      },
+    };
+    const fetchUrl: AgentTool = {
+      name: "fetch_url",
+      label: "Fetch URL",
+      description: "Fetch a URL",
+      parameters: Type.Object({ url: Type.String() }),
+      execute: (_id, params) => {
+        toolCalls.push({ name: "fetch_url", params });
+        return Promise.resolve({
+          content: [{ type: "text", text: "# Example\n\nSource: https://example.com/post\n\nFetched page body" }],
+          details: {},
+        });
+      },
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "I'll check, one sec.",
+          toolCalls: [{
+            id: "call-search",
+            type: "function",
+            function: { name: "web_search", arguments: "{\"query\":\"example\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      if (calls === 2) {
+        expect(request.messages.some((m) =>
+          m.role === "tool" && typeof m.content === "string" && m.content.includes("https://example.com/post"),
+        )).toBe(true);
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-fetch",
+            type: "function",
+            function: { name: "fetch_url", arguments: "{\"url\":\"https://example.com/post\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      expect(request.messages.some((m) =>
+        m.role === "tool" && typeof m.content === "string" && m.content.includes("Fetched page body"),
+      )).toBe(true);
+      return Promise.resolve({
+        text: "Fetched summary [source](https://example.com/post)",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    const senderCalls: Array<{ text: string; reply: boolean }> = [];
+    const sender: MessageSender = (text, reply) => {
+      senderCalls.push({ text, reply });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+    const onStillWorking = mock(() => {});
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [webSearch, fetchUrl],
+        completeChat,
+        sender,
+        onStillWorking,
+        guildConfig: makeGuildConfig({ replyLoop: { maxToolCalls: 2, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 } }),
+      }),
+    );
+
+    expect(result.responseText).toBe("Fetched summary [source](https://example.com/post)");
+    expect(toolCalls).toEqual([
+      { name: "web_search", params: { query: "example" } },
+      { name: "fetch_url", params: { url: "https://example.com/post" } },
+    ]);
+    expect(senderCalls).toEqual([
+      { text: "I'll check, one sec.", reply: true },
+      { text: "Fetched summary [source](https://example.com/post)", reply: false },
+    ]);
+    expect(onStillWorking).toHaveBeenCalledTimes(1);
+  });
+
   test("sends voice directive segments as TTS audio", async () => {
     const completeChat: ChatCompleteFn = () => Promise.resolve({
-      text: "Text first <voice type=\"whisper\">quiet line</voice> text after",
+      text: "Text first <voice>[whispers] quiet line</voice> text after",
       toolCalls: [],
       rawResponse: {},
       messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
     });
-    const senderCalls: Array<{ text: string; reply: boolean; voice: boolean }> = [];
+    const senderCalls: Array<{ text: string; reply: boolean; voice: boolean; historyText?: string }> = [];
     const sender: MessageSender = (text, reply, _chatId, voice) => {
-      senderCalls.push({ text, reply, voice: voice !== undefined });
+      senderCalls.push({ text, reply, voice: voice !== undefined, historyText: voice?.historyText });
       return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
     };
     const generateSpeech = (): Promise<TtsResult> =>
@@ -178,15 +421,50 @@ describe("handleMessage", () => {
 
     const result = await handleMessage(
       makeMessage({ mentionedUserIds: ["bot-1"] }),
-      makeDeps({ completeChat, sender, ttsEnabled: true, ttsConfig, generateSpeech }),
+      makeDeps({ completeChat, sender, ttsEnabled: true, generateSpeech }),
     );
 
     expect(senderCalls).toEqual([
-      { text: "Text first", reply: true, voice: false },
-      { text: "quiet line", reply: false, voice: true },
-      { text: "text after", reply: false, voice: false },
+      { text: "Text first", reply: true, voice: false, historyText: undefined },
+      { text: "[whispers] quiet line", reply: false, voice: true, historyText: '<voice>[whispers] quiet line</voice>' },
+      { text: "text after", reply: false, voice: false, historyText: undefined },
     ]);
-    expect(result.responseText).toBe("Text first\n[voice whisper] quiet line\ntext after");
+    expect(result.responseText).toBe('Text first\n<voice>[whispers] quiet line</voice>\ntext after');
+  });
+
+  test("stores sanitized voice XML in sender history and memory extraction", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<voice>[SLOW] Седьмая. [sings] Ладно. [heavy sigh, then amused resignation] Ещё.</voice>",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    });
+    const senderCalls: Array<{ text: string; historyText?: string }> = [];
+    const sender: MessageSender = (text, _reply, _chatId, voice) => {
+      senderCalls.push({ text, historyText: voice?.historyText });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+    const afterReplyCalls: unknown[] = [];
+    const afterReply = (request: unknown): Promise<void> => {
+      afterReplyCalls.push(request);
+      return Promise.resolve();
+    };
+    const generateSpeech = (): Promise<TtsResult> =>
+      Promise.resolve({ ok: true, buffer: Buffer.from("audio"), contentType: "audio/mpeg" });
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, ttsEnabled: true, generateSpeech, afterReply }),
+    );
+
+    expect(senderCalls).toEqual([{
+      text: "[SLOW] Седьмая. [sings] Ладно. [heavy sigh, then amused resignation] Ещё.",
+      historyText: "<voice>[SLOW] Седьмая. [sings] Ладно. [heavy sigh, then amused resignation] Ещё.</voice>",
+    }]);
+    expect(afterReplyCalls[0]).toMatchObject({
+      assistantReply: "<voice>[SLOW] Седьмая. [sings] Ладно. [heavy sigh, then amused resignation] Ещё.</voice>",
+    });
+    expect(result.responseText).toBe("<voice>[SLOW] Седьмая. [sings] Ладно. [heavy sigh, then amused resignation] Ещё.</voice>");
   });
 
   test("falls back to text when a voice directive cannot generate audio", async () => {
@@ -356,6 +634,295 @@ describe("handleMessage", () => {
     expect(result.responseText).toBe("image answer");
   });
 
+  test("returns a clear tool error instead of image parts for text-only models", async () => {
+    const tool: AgentTool = {
+      name: "read_chat_images",
+      label: "Read Images",
+      description: "Read images",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({
+        content: [
+          { type: "text", text: "{\"id\":1,\"width\":10,\"height\":10}" },
+          { type: "image", data: "abcd", mimeType: "image/jpeg" },
+        ],
+        details: {},
+      }),
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "read_chat_images", arguments: "{}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+
+      const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_chat_images");
+      expect(typeof toolMessage?.content).toBe("string");
+      expect(toolMessage?.content).toContain("current LLM endpoint cannot read image input");
+      expect(request.messages.some((m) =>
+        Array.isArray(m.content) && m.content.some((part) => part.type === "image_url")
+      )).toBe(false);
+
+      return Promise.resolve({
+        text: "cannot inspect image",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "cannot inspect image" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        completeChat,
+        guildConfig: makeGuildConfig({ model: "deepseek/deepseek-v4-pro:price" }),
+      }),
+    );
+
+    expect(result.responseText).toBe("cannot inspect image");
+  });
+
+  test("uses fallback image model when the selected model cannot read image input", async () => {
+    const tool: AgentTool = {
+      name: "read_chat_images",
+      label: "Read Images",
+      description: "Read images",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({
+        content: [
+          { type: "text", text: "{\"id\":1,\"width\":10,\"height\":10}" },
+          { type: "image", data: "abcd", mimeType: "image/jpeg" },
+        ],
+        details: {},
+      }),
+    };
+
+    let mainCalls = 0;
+    let imageCalls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      if (request.model === "moonshotai/kimi-k2.5") {
+        imageCalls += 1;
+        expect(request.systemPrompt).toContain("You describe images");
+        expect(request.systemPrompt).toContain("race/ethnicity/skin tone");
+        expect(request.systemPrompt).toContain("Use normal words like woman");
+        expect(request.systemPrompt).toContain("selfie");
+        expect(request.systemPrompt).toContain("movie/TV/anime/game frame");
+        expect(request.systemPrompt).toContain("actor");
+        expect(request.systemPrompt).toContain("vibe");
+        expect(request.messages.some((m) =>
+          Array.isArray(m.content) && m.content.some((part) => part.type === "image_url")
+        )).toBe(true);
+        return Promise.resolve({
+          text: "A very detailed image description.",
+          toolCalls: [],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "A very detailed image description." }] },
+        });
+      }
+
+      mainCalls += 1;
+      if (mainCalls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "read_chat_images", arguments: "{}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+
+      const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_chat_images");
+      expect(toolMessage?.content).toContain("Native image reading was unavailable");
+      expect(toolMessage?.content).toContain("fallback image model moonshotai/kimi-k2.5");
+      expect(toolMessage?.content).toContain("A very detailed image description.");
+      expect(request.messages.some((m) =>
+        Array.isArray(m.content) && m.content.some((part) => part.type === "image_url")
+      )).toBe(false);
+
+      return Promise.resolve({
+        text: "fallback answer",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "fallback answer" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        completeChat,
+        guildConfig: makeGuildConfig({
+          model: "deepseek/deepseek-v4-pro:price",
+          imageReading: {
+            fallbackEnabled: true,
+            fallbackModel: "moonshotai/kimi-k2.5",
+            fallbackModelParams: { temperature: 0 },
+          },
+        }),
+      }),
+    );
+
+    expect(result.responseText).toBe("fallback answer");
+    expect(mainCalls).toBe(2);
+    expect(imageCalls).toBe(1);
+  });
+
+  test("recovers when provider rejects image input after an image tool result", async () => {
+    const tool: AgentTool = {
+      name: "read_chat_images",
+      label: "Read Images",
+      description: "Read images",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({
+        content: [
+          { type: "text", text: "{\"id\":1,\"width\":10,\"height\":10}" },
+          { type: "image", data: "abcd", mimeType: "image/jpeg" },
+        ],
+        details: {},
+      }),
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "read_chat_images", arguments: "{}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      if (calls === 2) {
+        throw new Error("No endpoints found that support image input; rawResponse={\"error\":{\"message\":\"No endpoints found that support image input\",\"code\":404}}");
+      }
+
+      expect(request.messages.some((m) =>
+        Array.isArray(m.content) && m.content.some((part) => part.type === "image_url")
+      )).toBe(false);
+      const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_chat_images");
+      expect(toolMessage?.content).toContain("current LLM endpoint cannot read image input");
+      expect(request.messages.filter((m) => m.role === "user")).toHaveLength(1);
+
+      return Promise.resolve({
+        text: "cannot inspect image",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "cannot inspect image" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ extraTools: [tool], completeChat }),
+    );
+
+    expect(result.responseText).toBe("cannot inspect image");
+    expect(calls).toBe(3);
+  });
+
+  test("falls back to image description when provider rejects native image input", async () => {
+    const tool: AgentTool = {
+      name: "read_chat_images",
+      label: "Read Images",
+      description: "Read images",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({
+        content: [
+          { type: "text", text: "{\"id\":1,\"width\":10,\"height\":10}" },
+          { type: "image", data: "abcd", mimeType: "image/jpeg" },
+        ],
+        details: {},
+      }),
+    };
+
+    let mainCalls = 0;
+    let fallbackCalls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      if (request.systemPrompt.includes("You describe images")) {
+        fallbackCalls += 1;
+        expect(request.messages.some((m) =>
+          Array.isArray(m.content) && m.content.some((part) => part.type === "image_url")
+        )).toBe(true);
+        return Promise.resolve({
+          text: "Fallback saw a small square test image.",
+          toolCalls: [],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "Fallback saw a small square test image." }] },
+        });
+      }
+
+      mainCalls += 1;
+      if (mainCalls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "read_chat_images", arguments: "{}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      if (mainCalls === 2) {
+        throw new Error("No endpoints found that support image input; rawResponse={\"error\":{\"message\":\"No endpoints found that support image input\",\"code\":404}}");
+      }
+
+      expect(request.messages.some((m) =>
+        Array.isArray(m.content) && m.content.some((part) => part.type === "image_url")
+      )).toBe(false);
+      const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_chat_images");
+      expect(toolMessage?.content).toContain("Native image reading was unavailable");
+      expect(toolMessage?.content).toContain("Fallback saw a small square test image.");
+      expect(request.messages.filter((m) => m.role === "user")).toHaveLength(1);
+
+      return Promise.resolve({
+        text: "described image answer",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "described image answer" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        completeChat,
+        guildConfig: makeGuildConfig({
+          imageReading: {
+            fallbackEnabled: true,
+            fallbackModel: "moonshotai/kimi-k2.5",
+            fallbackModelParams: {},
+          },
+        }),
+      }),
+    );
+
+    expect(result.responseText).toBe("described image answer");
+    expect(mainCalls).toBe(3);
+    expect(fallbackCalls).toBe(1);
+  });
+
   test("routes final answer to a created thread", async () => {
     const threadTool: AgentTool = {
       name: "start_thread",
@@ -407,7 +974,18 @@ describe("handleMessage", () => {
     };
     await handleMessage(
       makeMessage({ mentionedUserIds: ["bot-1"] }),
-      makeDeps({ afterReply }),
+      makeDeps({
+        afterReply,
+        context: makeContext({
+          sections: [
+            { label: "Server Members", text: "## Server Members\n@user", cached: false, role: "developer" },
+            { label: "Memories", text: "## Memory\n- 1 [@user] [preference] concise", cached: false, role: "developer" },
+            { label: "Chat History — Older", text: "## Chat History — Older\n[@old]: cached", cached: true, role: "system" },
+            { label: "Chat History — Newer", text: "## Chat History\n[@bob]: relevant context", cached: false, role: "developer" },
+            { label: "Current Context", text: "Guild: g1", cached: false, role: "developer" },
+          ],
+        }),
+      }),
     );
 
     expect(afterReplyCalls).toHaveLength(1);
@@ -415,7 +993,10 @@ describe("handleMessage", () => {
       sourceMessageId: "msg-1",
       userMessage: "hello bot",
       assistantReply: "hello user",
+      recentContext: "## Chat History\n[@bob]: relevant context",
     });
+    expect(JSON.stringify(afterReplyCalls[0])).not.toContain("Server Members");
+    expect(JSON.stringify(afterReplyCalls[0])).not.toContain("cached");
   });
 
   test("injectTriggerInstruction inserts before response instruction", () => {

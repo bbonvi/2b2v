@@ -21,6 +21,8 @@ export interface SearchToolDeps {
   embed: EmbeddingPipeline;
   /** Resolve username to userId. Returns undefined if not found. */
   resolveUsername: (username: string) => string | undefined;
+  /** Message IDs already visible in prompt context; search should not repeat them. */
+  excludedMessageIds?: Iterable<string>;
   fetchMessage?: (channelId: string, messageId: string) => Promise<{ attachments: AttachmentInfo[] } | null>;
 }
 
@@ -55,7 +57,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
     name: "search_messages",
     label: "Search Messages",
     description:
-      "Search chat history. Modes: 'semantic' (default) — AI similarity search with natural language; 'literal' — case-insensitive keyword/phrase match; 'id' — direct message lookup by ID. Optionally filter by username, chat, or time range.",
+      "Search chat history when context is missing, a request refers to prior chat, or you feel lost. Modes: 'semantic' (default) — AI similarity search with natural language; 'literal' — case-insensitive keyword/phrase match; 'id' — direct message lookup by ID. Optionally filter by username, chat, or time range.",
     parameters: SearchParams,
     execute: async (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as {
@@ -69,6 +71,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
       };
       const mode = p.mode ?? "semantic";
       const limit = Math.max(1, Math.min(p.limit ?? 10, 50));
+      const excludedMessageIds = [...new Set(deps.excludedMessageIds ?? [])];
 
       // Resolve username to userId if provided (normalize to strip leading @)
       let userId: string | undefined;
@@ -86,6 +89,9 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         if (result === null) {
           return { content: [{ type: "text", text: "Message not found." }], details: undefined };
         }
+        if (excludedMessageIds.includes(result.id)) {
+          return { content: [{ type: "text", text: "Message is already present in the current prompt context." }], details: { count: 0 } };
+        }
         results = [result];
       } else if (mode === "literal") {
         try {
@@ -95,6 +101,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
             channelId: p.chat_id,
             after: p.afterMs,
             before: p.beforeMs,
+            excludeIds: excludedMessageIds,
             limit,
           });
         } catch {
@@ -121,6 +128,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
             channelId: p.chat_id,
             after: p.afterMs,
             before: p.beforeMs,
+            excludeIds: excludedMessageIds,
             limit,
           });
         } catch {
@@ -129,7 +137,10 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
       }
 
       if (results.length === 0) {
-        return { content: [{ type: "text", text: "No messages found matching your query." }], details: undefined };
+        const text = excludedMessageIds.length > 0
+          ? "No messages found outside the current prompt context matching your query."
+          : "No messages found matching your query.";
+        return { content: [{ type: "text", text }], details: { count: 0 } };
       }
 
       // Fetch attachments from Discord if callback provided

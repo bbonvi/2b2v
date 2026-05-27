@@ -9,12 +9,14 @@ export interface BraveSearchResult {
 
 export interface BraveSearchToolDeps {
   apiKey: string;
+  /** Request timeout in ms. Default: 15000. */
+  timeoutMs?: number;
   /** Injected for testability. Default implementation calls Brave Search API. */
-  fetchResults?: (query: string, count: number) => Promise<BraveSearchResult[]>;
+  fetchResults?: (query: string, count: number, signal?: AbortSignal) => Promise<BraveSearchResult[]>;
 }
 
 const WebSearchParams = Type.Object({
-  query: Type.String({ description: "The search query to execute." }),
+  query: Type.String({ description: "The search query to execute. Prefer English queries when the target information is not language-specific." }),
   count: Type.Optional(
     Type.Number({ description: "Number of results to return. Default: 5, max: 20." })
   ),
@@ -22,30 +24,37 @@ const WebSearchParams = Type.Object({
 
 export function createBraveSearchTool(deps: BraveSearchToolDeps): AgentTool {
   const { apiKey } = deps;
-  const fetchResults = deps.fetchResults ?? ((query: string, count: number) => fetchBraveResults(apiKey, query, count));
+  const timeoutMs = deps.timeoutMs ?? 15000;
+  const fetchResults = deps.fetchResults ?? ((query: string, count: number, signal?: AbortSignal) =>
+    fetchBraveResults(apiKey, query, count, signal));
 
   return {
     name: "web_search",
     label: "web_search",
     description:
-      "Search the web using Brave Search. Returns titles, URLs, and descriptions for each result.",
+      "Search the web using Brave Search. Prefer English queries when applicable. Returns titles, URLs, and descriptions for each result.",
     parameters: WebSearchParams,
 
     async execute(
       _toolCallId: string,
-      params: unknown
+      params: unknown,
+      signal?: AbortSignal,
     ): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {
       const { query, count: rawCount } = params as { query: string; count?: number };
       const count = Math.min(rawCount ?? 5, 20);
 
       let results: BraveSearchResult[];
+      const timeout = createToolTimeout(signal, timeoutMs, `web_search timed out after ${timeoutMs}ms`);
       try {
-        results = await fetchResults(query, count);
-      } catch {
+        results = await abortable(fetchResults(query, count, timeout.signal), timeout.signal);
+      } catch (error) {
+        const message = normalizeToolError(error, "web_search");
         return {
-          content: [{ type: "text", text: "Unable to perform web search. The Brave Search API may be unavailable or the API key may be invalid." }],
+          content: [{ type: "text", text: message }],
           details: { error: true },
         };
+      } finally {
+        timeout.cleanup();
       }
 
       if (results.length === 0) {
@@ -64,6 +73,67 @@ export function createBraveSearchTool(deps: BraveSearchToolDeps): AgentTool {
   };
 }
 
+async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw abortReason(signal, "web_search aborted");
+  let onAbort: (() => void) | undefined;
+  const abortPromise = new Promise<never>((_resolve, reject) => {
+    onAbort = () => {
+      reject(abortReason(signal, "web_search aborted"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([promise, abortPromise]);
+  } finally {
+    if (onAbort !== undefined) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+}
+
+function abortReason(signal: AbortSignal, fallback: string): Error {
+  const reason: unknown = signal.reason;
+  if (reason instanceof Error) return reason;
+  if (typeof reason === "string" && reason !== "") return new Error(reason);
+  return new Error(fallback);
+}
+
+function createToolTimeout(parent: AbortSignal | undefined, timeoutMs: number, timeoutMessage: string): {
+  signal: AbortSignal;
+  cleanup: () => void;
+} {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new Error(timeoutMessage));
+  }, timeoutMs);
+  const onParentAbort = (): void => {
+    if (parent !== undefined) {
+      controller.abort(abortReason(parent, "web_search aborted"));
+      return;
+    }
+    controller.abort(new Error("web_search aborted"));
+  };
+
+  if (parent?.aborted === true) {
+    onParentAbort();
+  } else {
+    parent?.addEventListener("abort", onParentAbort, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeout);
+      parent?.removeEventListener("abort", onParentAbort);
+    },
+  };
+}
+
+function normalizeToolError(error: unknown, toolName: string): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return `${toolName} failed: ${message}`;
+}
+
 interface BraveWebResult {
   title?: string;
   url?: string;
@@ -77,12 +147,18 @@ interface BraveSearchResponse {
 }
 
 /** Default implementation that calls the Brave Search Web API. */
-async function fetchBraveResults(apiKey: string, query: string, count: number): Promise<BraveSearchResult[]> {
+async function fetchBraveResults(
+  apiKey: string,
+  query: string,
+  count: number,
+  signal: AbortSignal | undefined,
+): Promise<BraveSearchResult[]> {
   const url = new URL("https://api.search.brave.com/res/v1/web/search");
   url.searchParams.set("q", query);
   url.searchParams.set("count", String(count));
 
   const res = await fetch(url.toString(), {
+    signal,
     headers: {
       Accept: "application/json",
       "Accept-Encoding": "gzip",

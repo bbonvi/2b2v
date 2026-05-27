@@ -55,6 +55,42 @@ export interface PromptCachingConfig {
   enabled: boolean;
 }
 
+/** OpenRouter service tier override for background LLM calls. */
+export type ServiceTier = "flex" | "priority";
+
+/** Dedicated background LLM configuration. */
+export interface BackgroundLlmConfig {
+  /** Effective model id for background LLM work. */
+  model: string;
+  /** Effective OpenRouter request parameters for background LLM work. */
+  modelParams: Record<string, unknown>;
+  /** Optional reasoning level marker retained for config symmetry. */
+  thinkingLevel?: string;
+  /** Optional OpenRouter service tier. Undefined means no service_tier is sent. */
+  serviceTier?: ServiceTier;
+  /** Prompt caching controls for background LLM work. */
+  promptCaching: PromptCachingConfig;
+}
+
+/** Global defaults for background LLM configuration. Missing fields inherit main model settings per guild. */
+export interface BackgroundLlmDefaults {
+  model?: string;
+  modelParams: Record<string, unknown>;
+  thinkingLevel?: string;
+  serviceTier?: ServiceTier;
+  promptCaching?: PromptCachingConfig;
+}
+
+/** Dedicated image-reading fallback configuration. */
+export interface ImageReadingConfig {
+  /** Whether to describe images with a separate vision model when the main model cannot read them. */
+  fallbackEnabled: boolean;
+  /** OpenRouter model id used for fallback image descriptions. */
+  fallbackModel: string;
+  /** OpenRouter request parameters for fallback image description calls. */
+  fallbackModelParams: Record<string, unknown>;
+}
+
 /** Native reply/tool loop runtime limits. */
 export interface ReplyLoopConfig {
   /** Max tool calls allowed in one agent run. */
@@ -129,6 +165,8 @@ export interface GuildConfig {
   mergeMessageGapSeconds: number;
   imageReadMaxPerCall: number;
   imageCaptioningEnabled: boolean;
+  /** Dedicated fallback for image tool results when the main model cannot read image input. */
+  imageReading: ImageReadingConfig;
   attachmentsDir: string;
   instructions: string;
   tts?: TtsConfig;
@@ -142,6 +180,8 @@ export interface GuildConfig {
   dispatcher: DispatcherConfig;
   /** Prompt caching controls for OpenRouter requests. */
   promptCaching: PromptCachingConfig;
+  /** Dedicated background LLM configuration. */
+  backgroundLlm: BackgroundLlmConfig;
   /** Native reply/tool loop runtime limits. */
   replyLoop: ReplyLoopConfig;
 }
@@ -162,6 +202,8 @@ export interface GlobalConfig {
   defaultMergeMessageGapSeconds: number;
   defaultImageReadMaxPerCall: number;
   defaultImageCaptioningEnabled: boolean;
+  /** Default fallback for image tool results when the main model cannot read image input. */
+  defaultImageReading: ImageReadingConfig;
   defaultAttachmentsDir: string;
   defaultInstructions: string;
   defaultLateInstruction: string;
@@ -186,6 +228,8 @@ export interface GlobalConfig {
   defaultDispatcher: DispatcherConfig;
   /** Default prompt caching controls. */
   defaultPromptCaching: PromptCachingConfig;
+  /** Default background LLM overrides. Missing fields inherit main model settings per guild. */
+  defaultBackgroundLlm: BackgroundLlmDefaults;
   /** Default native reply/tool loop runtime limits. */
   defaultReplyLoop: ReplyLoopConfig;
 }
@@ -210,10 +254,21 @@ export interface GuildConfigYaml {
   mergeMessageGapSeconds?: number;
   imageReadMaxPerCall?: number;
   imageCaptioningEnabled?: boolean;
+  imageReading?: {
+    fallbackEnabled?: boolean;
+    fallbackModel?: string;
+    fallbackModelParams?: Record<string, unknown>;
+  };
   attachmentsDir?: string;
   instructions?: string;
   instructionsPath?: string;
-  tts?: Partial<TtsConfig> & { voices?: { normal?: Partial<VoicePreset>; whisper?: Partial<VoicePreset> } };
+  tts?: Partial<TtsConfig> & {
+    voices?: {
+      normal?: Partial<VoicePreset>;
+      /** Obsolete; ignored by runtime and kept only while old YAML is migrated away. */
+      whisper?: Partial<VoicePreset>;
+    };
+  };
   bashTool?: {
     enabled?: boolean;
   };
@@ -230,6 +285,15 @@ export interface GuildConfigYaml {
   };
   promptCaching?: {
     enabled?: boolean;
+  };
+  backgroundLlm?: {
+    model?: string;
+    modelParams?: Record<string, unknown>;
+    thinkingLevel?: string;
+    serviceTier?: ServiceTier;
+    promptCaching?: {
+      enabled?: boolean;
+    };
   };
   replyLoop?: {
     maxToolCalls?: number;
@@ -251,6 +315,11 @@ export interface MainConfigYaml {
   mergeMessageGapSeconds?: number;
   imageReadMaxPerCall?: number;
   imageCaptioningEnabled?: boolean;
+  imageReading?: {
+    fallbackEnabled?: boolean;
+    fallbackModel?: string;
+    fallbackModelParams?: Record<string, unknown>;
+  };
   attachmentsDir?: string;
   promptProfile?: {
     persona?: Array<{
@@ -278,7 +347,13 @@ export interface MainConfigYaml {
   dataDir?: string;
   modelCacheDir?: string;
   qdrantUrl?: string;
-  tts?: Partial<TtsConfig> & { voices?: { normal?: Partial<VoicePreset>; whisper?: Partial<VoicePreset> } };
+  tts?: Partial<TtsConfig> & {
+    voices?: {
+      normal?: Partial<VoicePreset>;
+      /** Obsolete; ignored by runtime and kept only while old YAML is migrated away. */
+      whisper?: Partial<VoicePreset>;
+    };
+  };
   uiLang?: string;
   vpn?: {
     enabled?: boolean;
@@ -309,6 +384,15 @@ export interface MainConfigYaml {
   };
   promptCaching?: {
     enabled?: boolean;
+  };
+  backgroundLlm?: {
+    model?: string;
+    modelParams?: Record<string, unknown>;
+    thinkingLevel?: string;
+    serviceTier?: ServiceTier;
+    promptCaching?: {
+      enabled?: boolean;
+    };
   };
   replyLoop?: {
     maxToolCalls?: number;

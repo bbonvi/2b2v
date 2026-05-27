@@ -50,6 +50,13 @@ mergeMessageGapSeconds: 120
 # Max images per read_chat_images tool call
 imageReadMaxPerCall: 10
 
+# Fallback vision model for image tool results when the main model cannot read images
+# imageReading:
+#   fallbackEnabled: true
+#   fallbackModel: moonshotai/kimi-k2.5
+#   fallbackModelParams:
+#     temperature: 0
+
 # Enable automatic image captioning
 imageCaptioningEnabled: false
 
@@ -65,9 +72,18 @@ members:
 promptCaching:
   enabled: true
 
+# Background LLM override for memory extraction (inherits effective main model when omitted)
+# backgroundLlm:
+#   model: google/gemini-2.5-flash
+#   serviceTier: flex
+#   modelParams:
+#     temperature: 0.1
+#   promptCaching:
+#     enabled: true
+
 # Native reply/tool loop limits (overrides global defaults)
 # replyLoop:
-#   maxToolCalls: 8
+#   maxToolCalls: 16
 #   wallClockTimeoutMs: 45000
 #   llmOutputTimeoutMs: 12000 # on timeout the request fails fast
 
@@ -95,7 +111,13 @@ promptCaching:
 #       speed: 1.0
 #       stability: 0.7
 #       similarityBoost: 0.8
-#       model: eleven_flash_v2_5
+#       style: 0.0
+#       useSpeakerBoost: false
+#       # seed: 1
+#       applyTextNormalization: "on"
+#       outputFormat: mp3_44100_128
+#       model: eleven_v3
+#     # whisper is obsolete and ignored. Use Eleven v3 tags like [whispers] inside <voice>...</voice>.
 
 # Bash tool toggle (global-only settings; guild can only enable/disable)
 # Requires global bashTool.enabled: true and bash-vm service running.

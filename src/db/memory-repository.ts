@@ -153,7 +153,7 @@ export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRo
     conditions.push("deleted_at IS NULL");
   }
 
-  let sql = `SELECT * FROM memories WHERE ${conditions.join(" AND ")} ORDER BY updated_at ASC, id ASC`;
+  let sql = `SELECT * FROM memories WHERE ${conditions.join(" AND ")} ORDER BY updated_at DESC, id DESC`;
   if (filter.limit !== undefined && filter.limit > 0) {
     sql += " LIMIT ?";
     params.push(filter.limit);

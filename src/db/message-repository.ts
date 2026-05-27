@@ -2,6 +2,7 @@ import type { Database } from "./database";
 import type { QdrantClient } from "@qdrant/js-client-rest";
 import { searchPoints } from "../qdrant/adapter";
 import type { HistoryMessage } from "../agent/history-types";
+import type { TrimConfig } from "../config/types";
 
 export interface DeleteRecentResult {
   messageIds: string[];
@@ -16,6 +17,8 @@ export interface MessageSearchFilter {
   after?: number;
   /** Epoch ms — only messages before this timestamp. */
   before?: number;
+  /** Message IDs already present in the prompt context and therefore not useful to return. */
+  excludeIds?: readonly string[];
   limit: number;
 }
 
@@ -28,6 +31,65 @@ export interface MessageSearchResult {
   createdAt: number;
   replyToId: string | null;
   score: number;
+}
+
+interface HistoryRow {
+  id: string;
+  author_username: string;
+  user_id: string;
+  translated_content: string;
+  is_bot: number;
+  created_at: number;
+  reply_to_id: string | null;
+  is_synthetic: number;
+  related_thread_id: string | null;
+}
+
+function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] {
+  if (rows.length === 0) return [];
+
+  const messageIds = rows.map((r) => r.id);
+  const placeholders = messageIds.map(() => "?").join(",");
+  const imageRows = db.raw
+    .prepare(
+      `SELECT message_id, id, caption
+       FROM images
+       WHERE message_id IN (${placeholders})
+       ORDER BY id ASC`
+    )
+    .all(...messageIds) as Array<{
+      message_id: string;
+      id: number;
+      caption: string | null;
+    }>;
+
+  const imageMap = new Map<string, Array<{ id: number; caption: string | null }>>();
+  for (const img of imageRows) {
+    let arr = imageMap.get(img.message_id);
+    if (arr === undefined) {
+      arr = [];
+      imageMap.set(img.message_id, arr);
+    }
+    arr.push({ id: img.id, caption: img.caption });
+  }
+
+  return rows.map((r) => {
+    const images = imageMap.get(r.id) ?? [];
+    return {
+      id: r.id,
+      author: r.author_username,
+      authorId: r.user_id,
+      content: r.translated_content,
+      isBot: r.is_bot === 1,
+      timestamp: r.created_at,
+      replyToId: r.reply_to_id,
+      imageIds: images.map((i) => i.id),
+      captions: images.map((i) => i.caption ?? ""),
+      hasEmbeds: false,
+      isSynthetic: r.is_synthetic === 1,
+      relatedThreadId: r.related_thread_id,
+    };
+  });
 }
 
 /**
@@ -43,6 +105,10 @@ export async function searchMessages(
   queryVec: Float32Array,
   filter: MessageSearchFilter,
 ): Promise<MessageSearchResult[]> {
+  const excludeIds = new Set(filter.excludeIds ?? []);
+  const qdrantLimit = excludeIds.size > 0
+    ? Math.min(500, filter.limit + excludeIds.size)
+    : filter.limit;
   const qdrantResults = await searchPoints(
     qdrant,
     Array.from(queryVec),
@@ -53,13 +119,20 @@ export async function searchMessages(
       after: filter.after,
       before: filter.before,
     },
-    { type: "message", limit: filter.limit },
+    { type: "message", limit: qdrantLimit },
   );
 
   if (qdrantResults.length === 0) return [];
 
-  // Fetch message details from SQLite, excluding synthetic messages (defense-in-depth)
-  const ids = qdrantResults.map((r) => r.id);
+  // Fetch message details from SQLite, excluding synthetic messages (defense-in-depth).
+  // Overfetch before filtering so a small search limit does not become empty
+  // just because top hits are already visible in the prompt context.
+  const candidates = qdrantResults
+    .filter((r) => !excludeIds.has(r.id))
+    .slice(0, filter.limit);
+  if (candidates.length === 0) return [];
+
+  const ids = candidates.map((r) => r.id);
   const placeholders = ids.map(() => "?").join(",");
   const rows = db.raw
     .prepare(
@@ -78,10 +151,10 @@ export async function searchMessages(
     }>;
 
   const rowMap = new Map(rows.map((r) => [r.id, r]));
-  const scoreMap = new Map(qdrantResults.map((r) => [r.id, r.score]));
+  const scoreMap = new Map(candidates.map((r) => [r.id, r.score]));
 
   const results: MessageSearchResult[] = [];
-  for (const qr of qdrantResults) {
+  for (const qr of candidates) {
     const row = rowMap.get(qr.id);
     if (!row) continue; // orphaned Qdrant point — skip
     results.push({
@@ -96,7 +169,11 @@ export async function searchMessages(
     });
   }
 
-  return results;
+  return results.sort((a, b) => {
+    const timeDiff = a.createdAt - b.createdAt;
+    if (timeDiff !== 0) return timeDiff;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
 }
 
 /**
@@ -158,67 +235,56 @@ export function getHistoryMessages(
        ORDER BY created_at DESC
        LIMIT ?`
     )
-    .all(channelId, limit) as Array<{
-      id: string;
-      author_username: string;
-      user_id: string;
-      translated_content: string;
-      is_bot: number;
-      created_at: number;
-      reply_to_id: string | null;
-      is_synthetic: number;
-      related_thread_id: string | null;
-    }>;
+    .all(channelId, limit) as HistoryRow[];
 
   // Reverse to chronological order
   rows.reverse();
 
-  if (rows.length === 0) return [];
+  return hydrateHistoryRows(db, rows);
+}
 
-  // Batch fetch images for all messages
-  const messageIds = rows.map((r) => r.id);
-  const placeholders = messageIds.map(() => "?").join(",");
-  const imageRows = db.raw
+function chunkedHistoryTakeCount(totalMessages: number, trim: TrimConfig): number {
+  if (totalMessages < trim.trimTrigger) return totalMessages;
+  const overage = totalMessages - trim.trimTarget;
+  const dropCount = Math.floor(overage / trim.windowSize) * trim.windowSize;
+  return totalMessages - dropCount;
+}
+
+/**
+ * Fetch the channel history window for prompt context.
+ *
+ * Unlike getHistoryMessages(limit), this keeps the oldest included row stable
+ * while new messages arrive, and only advances the context window in
+ * windowSize chunks. That keeps the cached older-history prompt block from
+ * being invalidated on every user reply once a channel is past trimTrigger.
+ */
+export function getContextHistoryMessages(
+  db: Database,
+  channelId: string,
+  trim: TrimConfig,
+  excludeMessageId?: string,
+): HistoryMessage[] {
+  const excludeClause = excludeMessageId !== undefined ? " AND id != ?" : "";
+  const params = excludeMessageId !== undefined ? [channelId, excludeMessageId] : [channelId];
+  const countRow = db.raw
+    .prepare(`SELECT COUNT(*) AS count FROM messages WHERE channel_id = ?${excludeClause}`)
+    .get(...params) as { count: number } | null;
+  const totalMessages = countRow?.count ?? 0;
+  const takeCount = chunkedHistoryTakeCount(totalMessages, trim);
+  if (takeCount <= 0) return [];
+
+  const rows = db.raw
     .prepare(
-      `SELECT message_id, id, caption
-       FROM images
-       WHERE message_id IN (${placeholders})
-       ORDER BY id ASC`
+      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, related_thread_id
+       FROM messages
+       WHERE channel_id = ?${excludeClause}
+       ORDER BY created_at DESC
+       LIMIT ?`
     )
-    .all(...messageIds) as Array<{
-      message_id: string;
-      id: number;
-      caption: string | null;
-    }>;
+    .all(...params, takeCount) as HistoryRow[];
 
-  // Group images by message_id
-  const imageMap = new Map<string, Array<{ id: number; caption: string | null }>>();
-  for (const img of imageRows) {
-    let arr = imageMap.get(img.message_id);
-    if (arr === undefined) {
-      arr = [];
-      imageMap.set(img.message_id, arr);
-    }
-    arr.push({ id: img.id, caption: img.caption });
-  }
-
-  return rows.map((r) => {
-    const images = imageMap.get(r.id) ?? [];
-    return {
-      id: r.id,
-      author: r.author_username,
-      authorId: r.user_id,
-      content: r.translated_content,
-      isBot: r.is_bot === 1,
-      timestamp: r.created_at,
-      replyToId: r.reply_to_id,
-      imageIds: images.map((i) => i.id),
-      captions: images.map((i) => i.caption ?? ""),
-      hasEmbeds: false,
-      isSynthetic: r.is_synthetic === 1,
-      relatedThreadId: r.related_thread_id,
-    };
-  });
+  rows.reverse();
+  return hydrateHistoryRows(db, rows);
 }
 
 /**
@@ -262,6 +328,11 @@ export function searchMessagesLiteral(
   if (filter.before !== undefined) {
     conditions.push("created_at < ?");
     params.push(filter.before);
+  }
+  if (filter.excludeIds !== undefined && filter.excludeIds.length > 0) {
+    const placeholders = filter.excludeIds.map(() => "?").join(",");
+    conditions.push(`id NOT IN (${placeholders})`);
+    params.push(...filter.excludeIds);
   }
 
   const sql = `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id

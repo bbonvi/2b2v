@@ -1,8 +1,6 @@
-export type VoiceType = "normal" | "whisper";
-
 export type ResponseSegment =
   | { kind: "text"; text: string }
-  | { kind: "voice"; text: string; voiceType: VoiceType };
+  | { kind: "voice"; text: string };
 
 export interface ParsedResponseDirectives {
   ignored: boolean;
@@ -11,7 +9,7 @@ export interface ParsedResponseDirectives {
 
 type SegmentMode =
   | { kind: "text" }
-  | { kind: "voice"; voiceType: VoiceType };
+  | { kind: "voice" };
 
 interface ParseResult {
   ignored: boolean;
@@ -20,9 +18,9 @@ interface ParseResult {
   closed: boolean;
 }
 
-const RESERVED_TAG_RE = /<\s*\/?\s*(?:voice|ignore)\b/i;
+const RESERVED_TAG_RE = /<\s*\/?\s*(?:voice|ignore)(?=[\s/>])/i;
 const FENCE_RE = /```[ \t]*(?:[a-zA-Z0-9_-]+)?[ \t]*\n?([\s\S]*?)```/g;
-const TAG_RE = /<\s*(\/?)\s*(voice|ignore)\b([^>]*)>/gi;
+const TAG_RE = /<\s*(\/?)\s*(voice|ignore)(?=[\s/>])([^>]*)>/gi;
 
 function unwrapDirectiveFences(text: string): string {
   return text.replace(FENCE_RE, (match: string, inner: string) =>
@@ -30,37 +28,31 @@ function unwrapDirectiveFences(text: string): string {
   );
 }
 
-function parseVoiceType(attrs: string): VoiceType {
-  const match = /\btype\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'/>]+))/i.exec(attrs);
-  const raw = (match?.[1] ?? match?.[2] ?? match?.[3] ?? "").toLowerCase();
-  return raw === "whisper" ? "whisper" : "normal";
-}
-
 function pushSegment(
   segments: ResponseSegment[],
   mode: SegmentMode,
   rawText: string,
 ): void {
-  const text = rawText.trim();
+  const text = mode.kind === "voice"
+    ? sanitizeVoiceText(rawText)
+    : rawText.trim();
   if (text === "") return;
   const next: ResponseSegment = mode.kind === "text"
     ? { kind: "text", text }
-    : { kind: "voice", text, voiceType: mode.voiceType };
+    : { kind: "voice", text };
   const previous = segments[segments.length - 1];
   if (previous !== undefined && previous.kind === "text" && next.kind === "text") {
     previous.text = `${previous.text}\n${next.text}`;
     return;
   }
-  if (
-    previous !== undefined
-    && previous.kind === "voice"
-    && next.kind === "voice"
-    && previous.voiceType === next.voiceType
-  ) {
-    previous.text = `${previous.text}\n${next.text}`;
-    return;
-  }
   segments.push(next);
+}
+
+export function sanitizeVoiceText(text: string): string {
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.:;!?])/g, "$1")
+    .trim();
 }
 
 function parseRange(
@@ -107,7 +99,7 @@ function parseRange(
       continue;
     }
 
-    const nested = parseRange(text, tagEnd, { kind: "voice", voiceType: parseVoiceType(attrs) }, "voice");
+    const nested = parseRange(text, tagEnd, { kind: "voice" }, "voice");
     segments.push(...nested.segments);
     if (nested.ignored) {
       return { ignored: true, segments, index: text.length, closed: false };
@@ -129,10 +121,18 @@ export function parseResponseDirectives(response: string): ParsedResponseDirecti
   };
 }
 
+function escapeXmlText(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+export function renderSegmentForHistory(segment: ResponseSegment): string {
+  if (segment.kind === "text") return segment.text;
+  return `<voice>${escapeXmlText(segment.text)}</voice>`;
+}
+
 export function renderSegmentsForMemory(segments: ResponseSegment[]): string {
-  return segments.map((segment) => {
-    if (segment.kind === "text") return segment.text;
-    const label = segment.voiceType === "whisper" ? "voice whisper" : "voice";
-    return `[${label}] ${segment.text}`;
-  }).join("\n");
+  return segments.map(renderSegmentForHistory).join("\n");
 }

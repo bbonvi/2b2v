@@ -23,24 +23,18 @@ export {
 } from "./triggers.ts";
 
 export {
-  createSendMessageTool,
-  type SendMessageInput,
-  type SendMessageDetails,
-  type MessageSender,
-} from "./send-message-tool.ts";
-
-export {
   handleMessage,
   type IncomingMessage,
   type HandlerDeps,
   type HandleResult,
+  type MessageSender,
+  type VoiceAttachment,
 } from "./handler.ts";
 
 export {
   parseResponseDirectives,
   renderSegmentsForMemory,
   type ResponseSegment,
-  type VoiceType,
 } from "./response-directives.ts";
 
 export { trimChatHistory } from "./context-trimming.ts";

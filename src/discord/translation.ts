@@ -156,7 +156,9 @@ export interface OutboundResolvers {
 
 // Outbound patterns — match human-readable references in LLM output.
 // @username: must be at start of string or preceded by whitespace (avoid emails).
-const OUTBOUND_USER = /(?<=^|(?<=\s))@([\w.]+)/g;
+// Also accepts @<username> because models sometimes write placeholder-style pings.
+const USERNAME_PATTERN = "[A-Za-z0-9_](?:[A-Za-z0-9_.]{0,30}[A-Za-z0-9_])?";
+const OUTBOUND_USER = new RegExp(`(^|\\s)(?:@<(${USERNAME_PATTERN})>|@(${USERNAME_PATTERN}))`, "g");
 // #channel: channel names can have hyphens and underscores.
 const OUTBOUND_CHANNEL = /(?<=^|(?<=\s))#([\w-]+)/g;
 // :emoji: standard colon-wrapped name (not already Discord markup).
@@ -176,9 +178,11 @@ export function translateOutbound(
   let result = content;
 
   // User mentions: @username → <@id>
-  result = result.replace(OUTBOUND_USER, (match, username: string) => {
-    const id = resolvers.user(username);
-    if (id !== undefined) return `<@${id}>`;
+  result = result.replace(OUTBOUND_USER, (match, prefix: string, angleUsername: string | undefined, plainUsername: string | undefined) => {
+    const username = angleUsername ?? plainUsername;
+    if (username === undefined) return match;
+    const id = resolvers.user(username) ?? (username.toLowerCase() !== username ? resolvers.user(username.toLowerCase()) : undefined);
+    if (id !== undefined) return `${prefix}<@${id}>`;
     warnings?.push(`Failed to resolve user mention: @${username}`);
     return match;
   });
@@ -203,6 +207,7 @@ export function translateOutbound(
 }
 
 const MEMBER_LIST_LEGEND = `Legend: [@username] — [display name] — [memories]
+        Use @username only when you intentionally want to ping that user.
         Memories are injected automatically when relevant; no memory tool call is needed.`;
 
 /**

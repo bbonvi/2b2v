@@ -19,9 +19,9 @@ export function sortMessages(messages: HistoryMessage[]): HistoryMessage[] {
  * Given a chronological list of messages (already sorted, latest user message excluded):
  * - olderCount = trimTarget - windowSize
  * - N == 0 → both slices empty
- * - N <= trimTarget → newer = min(windowSize, N), older = N - newer
- * - trimTarget < N < trimTrigger → older = olderCount (stable), newer = N - olderCount (grows)
- * - N >= trimTrigger → drop oldest (N - trimTarget), then older = olderCount, newer = windowSize
+ * - Older history grows only in window-sized chunks, then caps at olderCount.
+ * - Recent history gets the in-progress chunk after the last complete cached chunk.
+ * - N >= trimTrigger → drop old messages in window-sized chunks before splitting.
  */
 export function sliceHistory(
   sorted: HistoryMessage[],
@@ -35,29 +35,22 @@ export function sliceHistory(
 
   const { trimTrigger, trimTarget, windowSize } = trim;
   const olderCount = trimTarget - windowSize;
+  const maxChunkedOlderSize = Math.floor(olderCount / windowSize) * windowSize;
+  const dropCount = (() => {
+    if (N < trimTrigger) return 0;
+    const overage = N - trimTarget;
+    return Math.floor(overage / windowSize) * windowSize;
+  })();
 
-  if (N <= trimTarget) {
-    const newerCount = Math.min(windowSize, N);
-    const olderSize = N - newerCount;
-    return {
-      older: sorted.slice(0, olderSize),
-      newer: sorted.slice(olderSize),
-    };
-  }
-
-  if (N < trimTrigger) {
-    // older stays stable at olderCount; newer grows
-    return {
-      older: sorted.slice(0, olderCount),
-      newer: sorted.slice(olderCount),
-    };
-  }
-
-  // N >= trimTrigger: drop oldest, then split
-  const dropCount = N - trimTarget;
   const trimmed = sorted.slice(dropCount);
+  const desiredOlderSize = Math.max(0, trimmed.length - 1);
+  const olderSize = Math.min(
+    maxChunkedOlderSize,
+    Math.floor(desiredOlderSize / windowSize) * windowSize,
+  );
+
   return {
-    older: trimmed.slice(0, olderCount),
-    newer: trimmed.slice(olderCount),
+    older: trimmed.slice(0, olderSize),
+    newer: trimmed.slice(olderSize),
   };
 }

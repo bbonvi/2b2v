@@ -54,7 +54,30 @@ export function buildStreamOptions(
   const params = guild.modelParams ?? {};
   return {
     apiKey: global.openrouterApiKey,
-    cacheRetention: "short",
     ...params,
+  };
+}
+
+/** Build OpenRouter options for background LLM calls. */
+export function buildBackgroundStreamOptions(
+  global: GlobalConfig,
+  guild: GuildConfig
+): Record<string, unknown> & { apiKey: string } {
+  const params = guild.backgroundLlm.modelParams;
+  return {
+    apiKey: global.openrouterApiKey,
+    ...params,
+    ...(guild.backgroundLlm.serviceTier !== undefined ? { service_tier: guild.backgroundLlm.serviceTier } : {}),
+  };
+}
+
+/** Build OpenRouter options for fallback image-description calls. */
+export function buildImageReadingStreamOptions(
+  global: GlobalConfig,
+  guild: GuildConfig,
+): Record<string, unknown> & { apiKey: string } {
+  return {
+    apiKey: global.openrouterApiKey,
+    ...guild.imageReading.fallbackModelParams,
   };
 }

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { resolveModel, buildStreamOptions } from "./client.ts";
+import { resolveModel, buildBackgroundStreamOptions, buildImageReadingStreamOptions, buildStreamOptions } from "./client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 
 const GLOBAL: GlobalConfig = {
@@ -14,16 +14,17 @@ const GLOBAL: GlobalConfig = {
   defaultImageMaxDimension: 768,
   defaultMergeMessageGapSeconds: 120,
   defaultImageReadMaxPerCall: 10,
-    defaultImageCaptioningEnabled: false,
-    defaultAttachmentsDir: "data/attachments",
-    defaultInstructions: "",
-    defaultLateInstruction: "",
-    promptProfile: {
-      persona: [{ kind: "file", path: "prompts/persona.md", optional: false }],
-      toolInstructions: [],
-      instructions: [],
-      lateInstructions: [{ kind: "file", path: "prompts/style.md", optional: false }],
-    },
+  defaultImageCaptioningEnabled: false,
+  defaultImageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
+  defaultAttachmentsDir: "data/attachments",
+  defaultInstructions: "",
+  defaultLateInstruction: "",
+  promptProfile: {
+    persona: [{ kind: "file", path: "prompts/persona.md", optional: false }],
+    toolInstructions: [],
+    instructions: [],
+    lateInstructions: [{ kind: "file", path: "prompts/style.md", optional: false }],
+  },
   logLevel: "info",
   dataDir: "data",
   modelCacheDir: "model-cache",
@@ -33,7 +34,8 @@ const GLOBAL: GlobalConfig = {
   defaultMembers: { include: true },
   defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
   defaultPromptCaching: { enabled: true },
-  defaultReplyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+  defaultBackgroundLlm: { modelParams: {} },
+  defaultReplyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
 };
 
 const GUILD: GuildConfig = {
@@ -48,13 +50,19 @@ const GUILD: GuildConfig = {
   mergeMessageGapSeconds: 120,
   imageReadMaxPerCall: 10,
   imageCaptioningEnabled: false,
+  imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
   attachmentsDir: "data/attachments",
   instructions: "",
   emotes: { include: false },
   members: { include: true },
   dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
   promptCaching: { enabled: true },
-  replyLoop: { maxToolCalls: 8, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+  backgroundLlm: {
+    model: "moonshotai/kimi-k2.5",
+    modelParams: {},
+    promptCaching: { enabled: true },
+  },
+  replyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
 };
 
 describe("resolveModel", () => {
@@ -85,6 +93,47 @@ describe("resolveModel", () => {
   });
 });
 
+describe("buildBackgroundStreamOptions", () => {
+  test("passes service_tier only when configured", () => {
+    const opts = buildBackgroundStreamOptions(GLOBAL, GUILD);
+    expect(opts.service_tier).toBeUndefined();
+
+    const flex = buildBackgroundStreamOptions(GLOBAL, {
+      ...GUILD,
+      backgroundLlm: { ...GUILD.backgroundLlm, serviceTier: "flex" },
+    });
+    expect(flex.service_tier).toBe("flex");
+  });
+
+  test("uses background model params", () => {
+    const opts = buildBackgroundStreamOptions(GLOBAL, {
+      ...GUILD,
+      backgroundLlm: {
+        ...GUILD.backgroundLlm,
+        modelParams: { temperature: 0.1 },
+      },
+    });
+    expect(opts.temperature).toBe(0.1);
+  });
+});
+
+describe("buildImageReadingStreamOptions", () => {
+  test("includes API key and image fallback model params", () => {
+    const opts = buildImageReadingStreamOptions(GLOBAL, {
+      ...GUILD,
+      imageReading: {
+        fallbackEnabled: true,
+        fallbackModel: "moonshotai/kimi-k2.5",
+        fallbackModelParams: { temperature: 0, topP: 0.2 },
+      },
+    });
+
+    expect(opts.apiKey).toBe("or_key_123");
+    expect(opts.temperature).toBe(0);
+    expect(opts.topP).toBe(0.2);
+  });
+});
+
 describe("buildStreamOptions", () => {
   test("includes API key from global config", () => {
     const opts = buildStreamOptions(GLOBAL, GUILD);
@@ -107,9 +156,9 @@ describe("buildStreamOptions", () => {
     expect(opts.temperature).toBeUndefined();
   });
 
-  test("includes cacheRetention for prompt caching", () => {
+  test("does not send non-OpenRouter cache retention params", () => {
     const opts = buildStreamOptions(GLOBAL, GUILD);
-    expect(opts.cacheRetention).toBe("short");
+    expect(opts.cacheRetention).toBeUndefined();
   });
 
   test("passes through toolChoice from modelParams", () => {

@@ -51,7 +51,7 @@ describe("sortMessages", () => {
 });
 
 describe("sliceHistory", () => {
-  // olderCount = 8 - 3 = 5
+  // olderCount = 8 - 3 = 5, max complete chunked older size = 3
 
   test("N == 0 → both slices empty", () => {
     const result = sliceHistory([], trim);
@@ -80,46 +80,44 @@ describe("sliceHistory", () => {
     expect(result.newer).toHaveLength(3);
   });
 
-  test("N == trimTarget → older = olderCount, newer = windowSize", () => {
-    // N=8, olderCount=5, newer=3
+  test("N == trimTarget → older uses complete chunks, newer keeps the in-progress chunk", () => {
+    // N=8, complete older chunk=3, newer=5 because olderCount=5 is not a complete chunk
     const msgs = Array.from({ length: 8 }, (_, i) => msg(String(i), i * 100));
     const result = sliceHistory(msgs, trim);
-    expect(result.older).toHaveLength(5);
-    expect(result.newer).toHaveLength(3);
+    expect(result.older).toHaveLength(3);
+    expect(result.newer).toHaveLength(5);
     expect(result.older[0]?.id).toBe("0");
-    expect(result.newer[0]?.id).toBe("5");
+    expect(result.newer[0]?.id).toBe("3");
   });
 
   test("trimTarget < N < trimTrigger → older stable, newer grows", () => {
-    // N=9, olderCount=5 (stable), newer=4 (grows)
+    // N=9, complete older chunk=3 (stable), newer=6 (grows)
     const msgs = Array.from({ length: 9 }, (_, i) => msg(String(i), i * 100));
     const result = sliceHistory(msgs, trim);
-    expect(result.older).toHaveLength(5);
-    expect(result.newer).toHaveLength(4);
-    // older is first 5
-    expect(result.older.map((m) => m.id)).toEqual(["0", "1", "2", "3", "4"]);
-    expect(result.newer.map((m) => m.id)).toEqual(["5", "6", "7", "8"]);
+    expect(result.older).toHaveLength(3);
+    expect(result.newer).toHaveLength(6);
+    expect(result.older.map((m) => m.id)).toEqual(["0", "1", "2"]);
+    expect(result.newer.map((m) => m.id)).toEqual(["3", "4", "5", "6", "7", "8"]);
   });
 
-  test("N == trimTrigger → drop oldest, split to trimTarget", () => {
-    // N=10, drop 2, remaining 8 → older=5, newer=3
+  test("N == trimTrigger → keeps older stable and lets newer grow", () => {
+    // N=10, overage=2 < windowSize, drop 0 → older=3, newer=7
     const msgs = Array.from({ length: 10 }, (_, i) => msg(String(i), i * 100));
     const result = sliceHistory(msgs, trim);
-    expect(result.older).toHaveLength(5);
-    expect(result.newer).toHaveLength(3);
-    // dropped 0,1 → older starts at 2
-    expect(result.older[0]?.id).toBe("2");
-    expect(result.newer[2]?.id).toBe("9");
+    expect(result.older).toHaveLength(3);
+    expect(result.newer).toHaveLength(7);
+    expect(result.older[0]?.id).toBe("0");
+    expect(result.newer[6]?.id).toBe("9");
   });
 
-  test("N > trimTrigger → drop oldest, split to trimTarget", () => {
-    // N=12, drop 4, remaining 8 → older=5, newer=3
+  test("N > trimTrigger → drops old messages only in window-sized chunks", () => {
+    // N=12, overage=4, windowSize=3, drop 3 → remaining 9 → older=3, newer=6
     const msgs = Array.from({ length: 12 }, (_, i) => msg(String(i), i * 100));
     const result = sliceHistory(msgs, trim);
-    expect(result.older).toHaveLength(5);
-    expect(result.newer).toHaveLength(3);
-    expect(result.older[0]?.id).toBe("4");
-    expect(result.newer[2]?.id).toBe("11");
+    expect(result.older).toHaveLength(3);
+    expect(result.newer).toHaveLength(6);
+    expect(result.older[0]?.id).toBe("3");
+    expect(result.newer[5]?.id).toBe("11");
   });
 
   test("newer is never empty when N > 0", () => {
@@ -131,12 +129,59 @@ describe("sliceHistory", () => {
   });
 
   test("older stays stable as N grows from trimTarget to trimTrigger-1", () => {
-    // As N grows from 8 to 9, older should remain the same 5 messages
+    // As N grows from 8 to 9, older should remain the same complete chunk.
     const msgs8 = Array.from({ length: 8 }, (_, i) => msg(String(i), i * 100));
     const msgs9 = Array.from({ length: 9 }, (_, i) => msg(String(i), i * 100));
     const r8 = sliceHistory(msgs8, trim);
     const r9 = sliceHistory(msgs9, trim);
     expect(r8.older.map((m) => m.id)).toEqual(r9.older.map((m) => m.id));
+  });
+
+  test("older does not grow one message at a time below trimTarget", () => {
+    const wideTrim: TrimConfig = {
+      trimTrigger: 400,
+      trimTarget: 300,
+      windowSize: 50,
+      messageCharLimit: 200,
+      replyQuoteChars: 50,
+    };
+
+    const r70 = sliceHistory(Array.from({ length: 70 }, (_, i) => msg(String(i), i * 100)), wideTrim);
+    const r72 = sliceHistory(Array.from({ length: 72 }, (_, i) => msg(String(i), i * 100)), wideTrim);
+    const r100 = sliceHistory(Array.from({ length: 100 }, (_, i) => msg(String(i), i * 100)), wideTrim);
+
+    expect(r70.older.map((m) => m.id)).toEqual(Array.from({ length: 50 }, (_, i) => String(i)));
+    expect(r72.older.map((m) => m.id)).toEqual(r70.older.map((m) => m.id));
+    expect(r100.older.map((m) => m.id)).toEqual(r70.older.map((m) => m.id));
+  });
+
+  test("older uses only complete chunks when olderCount is not divisible by windowSize", () => {
+    const unevenTrim: TrimConfig = {
+      trimTrigger: 200,
+      trimTarget: 150,
+      windowSize: 20,
+      messageCharLimit: 200,
+      replyQuoteChars: 50,
+    };
+
+    const r149 = sliceHistory(Array.from({ length: 149 }, (_, i) => msg(String(i), i * 100)), unevenTrim);
+    const r150 = sliceHistory(Array.from({ length: 150 }, (_, i) => msg(String(i), i * 100)), unevenTrim);
+
+    expect(r149.older).toHaveLength(120);
+    expect(r150.older).toHaveLength(120);
+    expect(r150.newer).toHaveLength(30);
+  });
+
+  test("older stays stable until a full newer-window chunk accumulates", () => {
+    const r8 = sliceHistory(Array.from({ length: 8 }, (_, i) => msg(String(i), i * 100)), trim);
+    const r9 = sliceHistory(Array.from({ length: 9 }, (_, i) => msg(String(i), i * 100)), trim);
+    const r10 = sliceHistory(Array.from({ length: 10 }, (_, i) => msg(String(i), i * 100)), trim);
+    const r11 = sliceHistory(Array.from({ length: 11 }, (_, i) => msg(String(i), i * 100)), trim);
+
+    expect(r8.older.map((m) => m.id)).toEqual(["0", "1", "2"]);
+    expect(r9.older.map((m) => m.id)).toEqual(r8.older.map((m) => m.id));
+    expect(r10.older.map((m) => m.id)).toEqual(r8.older.map((m) => m.id));
+    expect(r11.older.map((m) => m.id)).toEqual(["3", "4", "5"]);
   });
 
   test("total messages in both slices never exceeds input", () => {

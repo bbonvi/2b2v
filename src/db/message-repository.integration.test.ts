@@ -3,7 +3,7 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "./database";
 import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
-import { searchMessages, getMessageById, searchMessagesLiteral, getHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory } from "./message-repository";
+import { searchMessages, getMessageById, searchMessagesLiteral, getHistoryMessages, getContextHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory } from "./message-repository";
 import { createMockPipeline } from "../embeddings/test-utils";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
@@ -575,6 +575,58 @@ describe("getHistoryMessages", () => {
     for (const msg of results) {
       expect(msg.hasEmbeds).toBe(false);
     }
+  });
+});
+
+describe("getContextHistoryMessages", () => {
+  test("keeps oldest included message stable until a full window chunk accumulates", () => {
+    const trim = {
+      trimTrigger: 10,
+      trimTarget: 8,
+      windowSize: 3,
+      messageCharLimit: 200,
+      replyQuoteChars: 50,
+    };
+
+    for (let i = 0; i < 10; i += 1) {
+      insertMessage(`m${i}`, { channelId: "c1", createdAt: now + i });
+    }
+
+    const atTrigger = getContextHistoryMessages(db, "c1", trim);
+    expect(atTrigger.map((m) => m.id)).toEqual(["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9"]);
+
+    insertMessage("m10", { channelId: "c1", createdAt: now + 10 });
+    const beforeChunk = getContextHistoryMessages(db, "c1", trim);
+    expect(beforeChunk.map((m) => m.id)).toEqual(["m3", "m4", "m5", "m6", "m7", "m8", "m9", "m10"]);
+
+    insertMessage("m11", { channelId: "c1", createdAt: now + 11 });
+    const stillSameChunk = getContextHistoryMessages(db, "c1", trim);
+    expect(stillSameChunk.map((m) => m.id)).toEqual(["m3", "m4", "m5", "m6", "m7", "m8", "m9", "m10", "m11"]);
+
+    insertMessage("m12", { channelId: "c1", createdAt: now + 12 });
+    const nextChunk = getContextHistoryMessages(db, "c1", trim);
+    expect(nextChunk.map((m) => m.id)).toEqual(["m3", "m4", "m5", "m6", "m7", "m8", "m9", "m10", "m11", "m12"]);
+
+    insertMessage("m13", { channelId: "c1", createdAt: now + 13 });
+    const afterChunk = getContextHistoryMessages(db, "c1", trim);
+    expect(afterChunk.map((m) => m.id)).toEqual(["m6", "m7", "m8", "m9", "m10", "m11", "m12", "m13"]);
+  });
+
+  test("excludes latest message before calculating the chunked context window", () => {
+    const trim = {
+      trimTrigger: 10,
+      trimTarget: 8,
+      windowSize: 3,
+      messageCharLimit: 200,
+      replyQuoteChars: 50,
+    };
+
+    for (let i = 0; i < 11; i += 1) {
+      insertMessage(`m${i}`, { channelId: "c1", createdAt: now + i });
+    }
+
+    const withoutLatest = getContextHistoryMessages(db, "c1", trim, "m10");
+    expect(withoutLatest.map((m) => m.id)).toEqual(["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9"]);
   });
 });
 

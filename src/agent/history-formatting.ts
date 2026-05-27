@@ -5,6 +5,12 @@ export interface ReplyContext {
   targetAuthor: string;
   /** Short quote (already truncated to replyQuoteChars), or null if not applicable. */
   quote: string | null;
+  /**
+   * Discord message ID of the reply target.
+   *
+   * Kept for future direct-reply support, but intentionally omitted from
+   * prompt history while the model cannot target arbitrary message replies.
+   */
   replyMsgId: string;
   /** Whether the reply target is missing from both slices. */
   missingTarget: boolean;
@@ -27,7 +33,7 @@ export interface FormatInput {
  *
  * Synthetic events (e.g., thread creation) are formatted as-is without author prefix.
  *
- * Meta keys in order: Quote, ReplyMsgID, MissingTarget, ReplyImageIDs, ReplyCaptions, ImageIDs, Captions
+ * Meta keys in order: Quote, MissingTarget, ReplyImageIDs, ReplyCaptions, ImageIDs, Captions
  */
 export function formatMessageLine(input: FormatInput): string {
   const { message, reply, captioningEnabled } = input;
@@ -43,7 +49,6 @@ export function formatMessageLine(input: FormatInput): string {
     if (reply.quote !== null) {
       metaParts.push(`Quote: "${reply.quote}"`);
     }
-    metaParts.push(`ReplyMsgID: ${reply.replyMsgId}`);
     if (reply.missingTarget) {
       metaParts.push("MissingTarget: true");
     }
@@ -71,6 +76,6 @@ export function formatMessageLine(input: FormatInput): string {
 
 /** The legend block prepended to the older slice. */
 export const OLDER_LEGEND = [
-  "Legend: [@author to @target (Quote/ReplyMsgID/ReplyImageIDs/ReplyCaptions/ImageIDs/Captions)]: content",
+  "Legend: [@author to @target (Quote/ReplyImageIDs/ReplyCaptions/ImageIDs/Captions)]: content",
   "Legend: Dates use [DATE ...]. Merged messages use [msg-break]. Quotes are excerpts; use search_messages(id). Images use read_chat_images([id]).",
 ].join("\n");

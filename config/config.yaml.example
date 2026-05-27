@@ -49,6 +49,13 @@ mergeMessageGapSeconds: 120
 # Max images the LLM can read in a single read_chat_images call
 imageReadMaxPerCall: 10
 
+# Fallback vision model for image tool results when the main model cannot read images.
+imageReading:
+  fallbackEnabled: false
+  fallbackModel: moonshotai/kimi-k2.5
+  # fallbackModelParams:
+  #   temperature: 0
+
 # Enable automatic image captioning (requires captioning model)
 imageCaptioningEnabled: false
 
@@ -68,13 +75,24 @@ dispatcher:
   defaultDebounceMs: 2000   # Debounce ms for non-mention triggers (default: 2000)
 
 # OpenRouter prompt caching control.
-# When enabled, the bot emits one cached stable-prefix message with one cache breakpoint.
+# When enabled, explicit cache breakpoints are used for supported providers;
+# other providers fall back to OpenRouter/provider automatic caching.
 promptCaching:
   enabled: true
 
+# Background LLM defaults for memory extraction. Omitted fields inherit the main
+# effective model config. serviceTier is optional; omit it to send no service_tier.
+# backgroundLlm:
+#   model: google/gemini-2.5-flash
+#   serviceTier: flex  # "flex" | "priority"; only supported by some providers
+#   modelParams:
+#     temperature: 0.1
+#   promptCaching:
+#     enabled: true
+
 # Native reply/tool loop runtime limits
 replyLoop:
-  maxToolCalls: 12           # Max tool calls allowed in one response run
+  maxToolCalls: 16           # Max tool calls allowed in one response run
   wallClockTimeoutMs: 60000  # Hard timeout per response run (milliseconds)
   llmOutputTimeoutMs: 30000  # Timeout for a single LLM turn (milliseconds); on timeout request fails fast
 
@@ -88,13 +106,21 @@ tts:
       speed: 1.1
       stability: 0.80
       similarityBoost: 0.75
-      model: eleven_flash_v2_5
-    whisper:
-      voiceId: sH0WdfE5fsKuM2otdQZr  # Optional whisper voice ID
-      speed: 1.05
-      stability: 0.5
-      similarityBoost: 0.4
-      model: eleven_flash_v2_5
+      style: 0.0
+      useSpeakerBoost: false
+      # seed: 1  # Optional best-effort consistency hint
+      applyTextNormalization: "on"
+      outputFormat: mp3_44100_128
+      model: eleven_v3
+    # whisper is obsolete and ignored. Use Eleven v3 tags like [whispers] inside <voice>...</voice>.
+    # whisper:
+    #   voiceId: sH0WdfE5fsKuM2otdQZr
+    #   speed: 1.05
+    #   stability: 0.5
+    #   similarityBoost: 0.4
+    #   style: 0.0
+    #   useSpeakerBoost: false
+    #   model: eleven_v3
 
 # Composable prompt profile for committed prompt files.
 # Sources are resolved in order and concatenated with blank lines.

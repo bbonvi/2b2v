@@ -4,22 +4,28 @@ import { createElevenLabsClient, type GenerateSpeechParams, type FetchFn } from 
 const testParams: GenerateSpeechParams = {
   text: "Hello world",
   voiceId: "test-voice-id",
-  model: "eleven_flash_v2_5",
+  model: "eleven_v3",
+  seed: 1,
+  applyTextNormalization: "on",
+  outputFormat: "mp3_44100_128",
   voiceSettings: {
     stability: 0.8,
     similarityBoost: 0.75,
     speed: 1.1,
+    style: 0.1,
+    useSpeakerBoost: true,
   },
 };
 
 function createMockFetch(
-  response: { status: number; body?: ArrayBuffer | null; ok?: boolean }
+  response: { status: number; body?: ArrayBuffer | null; text?: string; ok?: boolean }
 ): FetchFn {
   return (_url, _options) =>
     Promise.resolve({
       ok: response.ok ?? (response.status >= 200 && response.status < 300),
       status: response.status,
       arrayBuffer: () => Promise.resolve(response.body ?? new ArrayBuffer(0)),
+      text: () => Promise.resolve(response.text ?? ""),
     } as Response);
 }
 
@@ -46,8 +52,11 @@ describe("createElevenLabsClient", () => {
 
       await client.generate(testParams);
 
-      expect(capturedUrl).toBe(
-        "https://api.elevenlabs.io/v1/text-to-speech/test-voice-id"
+      if (!(capturedUrl instanceof URL)) {
+        throw new Error("Expected ElevenLabs request URL");
+      }
+      expect(capturedUrl.toString()).toBe(
+        "https://api.elevenlabs.io/v1/text-to-speech/test-voice-id?output_format=mp3_44100_128"
       );
       expect(capturedOptions?.method).toBe("POST");
       expect(capturedOptions?.headers).toEqual({
@@ -59,11 +68,15 @@ describe("createElevenLabsClient", () => {
       const body = JSON.parse(capturedOptions?.body as string) as Record<string, unknown>;
       expect(body).toEqual({
         text: "Hello world",
-        model_id: "eleven_flash_v2_5",
+        model_id: "eleven_v3",
+        seed: 1,
+        apply_text_normalization: "on",
         voice_settings: {
           stability: 0.8,
           similarity_boost: 0.75,
           speed: 1.1,
+          style: 0.1,
+          use_speaker_boost: true,
         },
       });
     });
@@ -95,6 +108,30 @@ describe("createElevenLabsClient", () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.error).toBe("Invalid ElevenLabs API key");
+      }
+    });
+
+    test("returns detailed ElevenLabs error body when available", async () => {
+      const client = createElevenLabsClient({
+        apiKey: "limited-key",
+        fetchFn: createMockFetch({
+          status: 401,
+          text: JSON.stringify({
+            detail: {
+              status: "detected_unusual_activity",
+              message: "Free Tier usage disabled.",
+            },
+          }),
+        }),
+      });
+
+      const result = await client.generate(testParams);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toBe(
+          "ElevenLabs API error 401: detected_unusual_activity: Free Tier usage disabled."
+        );
       }
     });
 

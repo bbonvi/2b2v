@@ -107,6 +107,33 @@ describe("processHistory", () => {
     expect(result.newerText).toStartWith("## Chat History\n");
   });
 
+  test("older cached text remains stable while recent history grows inside a chunk", async () => {
+    const config = {
+      ...defaultConfig,
+      trim: { ...defaultConfig.trim, trimTrigger: 400, trimTarget: 300, windowSize: 50 },
+    };
+    const latest = msg({ id: "latest", content: "latest", timestamp: 1000 + 80 * 600_000 });
+    const baseMessages = Array.from({ length: 70 }, (_, i) => msg({
+      id: String(i + 1),
+      content: `msg-${i}`,
+      timestamp: 1000 + i * 600_000,
+    }));
+    const grownMessages = [
+      ...baseMessages,
+      msg({ id: "71", content: "extra-1", timestamp: 1000 + 70 * 600_000 }),
+      msg({ id: "72", content: "extra-2", timestamp: 1000 + 71 * 600_000 }),
+    ];
+
+    const before = await processHistory(baseMessages, latest, config, deps);
+    const after = await processHistory(grownMessages, latest, config, deps);
+
+    expect(before.olderText).toBe(after.olderText);
+    expect(before.olderText).toContain("msg-0");
+    expect(before.olderText).toContain("msg-49");
+    expect(before.olderText).not.toContain("msg-50");
+    expect(after.newerText).toContain("extra-2");
+  });
+
   test("formatted lines use [@author]: content grammar", async () => {
     const m1 = msg({ id: "1", author: "bob", content: "yo", timestamp: 1000 });
     const latest = msg({ id: "100", content: "sup", timestamp: 9000 });
@@ -174,13 +201,13 @@ describe("processHistory", () => {
 
     const result = await processHistory([m1, m2], latest, defaultConfig, deps);
 
-    expect(result.newerText).toContain("ReplyMsgID: 1");
     expect(result.newerText).toContain("to @bob");
+    expect(result.newerText).not.toContain("ReplyMsgID");
   });
 
   test("messages split correctly between older and newer with controlled config", async () => {
-    // windowSize=2, trimTarget=5 → olderCount=3
-    // 5 messages → older gets 3, newer gets 2
+    // windowSize=2, trimTarget=5 → olderCount=3, complete older chunk=2
+    // 5 messages → older gets 2, newer gets 3
     const config = {
       ...defaultConfig,
       trim: { ...defaultConfig.trim, trimTarget: 5, windowSize: 2, trimTrigger: 20 },
@@ -202,17 +229,17 @@ describe("processHistory", () => {
 
     const result = await processHistory(messages, latest, config, deps);
 
-    // Older should have first 3 messages
+    // Older should have first 2 messages
     expect(result.olderText).toContain("content-0");
     expect(result.olderText).toContain("content-1");
-    expect(result.olderText).toContain("content-2");
-    expect(result.olderText).not.toContain("content-3");
+    expect(result.olderText).not.toContain("content-2");
 
-    // Newer should have last 2 + latestUserMessage
+    // Newer should have last 3 + latestUserMessage
+    expect(result.newerText).toContain("content-2");
     expect(result.newerText).toContain("content-3");
     expect(result.newerText).toContain("content-4");
     expect(result.newerText).toContain("latest");
-    expect(result.newerText).not.toContain("content-2");
+    expect(result.newerText).not.toContain("content-1");
   });
 
   test("newer slice includes date stamps when temporal gaps exist", async () => {

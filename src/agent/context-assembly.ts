@@ -21,6 +21,8 @@ export interface AssembledContext {
   sections: ContextSection[];
   /** The formatted latest user message (role=user). */
   userMessage: string;
+  /** Message IDs already included in the prompt history/context. */
+  contextMessageIds?: string[];
 }
 
 /** Thread metadata for thread context assembly. */

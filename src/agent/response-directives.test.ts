@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseResponseDirectives, renderSegmentsForMemory } from "./response-directives.ts";
+import { parseResponseDirectives, renderSegmentsForMemory, sanitizeVoiceText } from "./response-directives.ts";
 
 describe("parseResponseDirectives", () => {
   test("returns plain text when no reserved directive exists", () => {
@@ -9,13 +9,34 @@ describe("parseResponseDirectives", () => {
     });
   });
 
-  test("parses voice and whisper directives", () => {
+  test("does not treat longer XML tag names as reserved directives", () => {
+    const xml = "<voice-note>keep as xml</voice-note> <ignore-me>also text</ignore-me>";
+    expect(parseResponseDirectives(xml)).toEqual({
+      ignored: false,
+      segments: [{ kind: "text", text: xml }],
+    });
+    expect(parseResponseDirectives("```xml\n<voice-note>keep fenced</voice-note>\n```").segments[0]?.text)
+      .toBe("```xml\n<voice-note>keep fenced</voice-note>\n```");
+  });
+
+  test("parses voice directives and ignores legacy voice attributes", () => {
     expect(parseResponseDirectives("Text <voice>hello</voice> <voice type=\"whisper\">quiet</voice>")).toEqual({
       ignored: false,
       segments: [
         { kind: "text", text: "Text" },
-        { kind: "voice", text: "hello", voiceType: "normal" },
-        { kind: "voice", text: "quiet", voiceType: "whisper" },
+        { kind: "voice", text: "hello" },
+        { kind: "voice", text: "quiet" },
+      ],
+    });
+  });
+
+  test("preserves voice tags before TTS and history", () => {
+    expect(parseResponseDirectives(
+      "<voice>[quiet exhale] Седьмая. [amused] Ладно. [heavy sigh, then amused resignation] Ещё.</voice>"
+    )).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "voice", text: "[quiet exhale] Седьмая. [amused] Ладно. [heavy sigh, then amused resignation] Ещё." },
       ],
     });
   });
@@ -24,9 +45,9 @@ describe("parseResponseDirectives", () => {
     expect(parseResponseDirectives("<voice>outer <voice type=\"whisper\">inner</voice> tail</voice>")).toEqual({
       ignored: false,
       segments: [
-        { kind: "voice", text: "outer", voiceType: "normal" },
-        { kind: "voice", text: "inner", voiceType: "whisper" },
-        { kind: "voice", text: "tail", voiceType: "normal" },
+        { kind: "voice", text: "outer" },
+        { kind: "voice", text: "inner" },
+        { kind: "voice", text: "tail" },
       ],
     });
   });
@@ -36,7 +57,7 @@ describe("parseResponseDirectives", () => {
       ignored: false,
       segments: [
         { kind: "text", text: "Okay:" },
-        { kind: "voice", text: "hello", voiceType: "normal" },
+        { kind: "voice", text: "hello" },
       ],
     });
   });
@@ -55,7 +76,7 @@ describe("parseResponseDirectives", () => {
 
   test("gracefully handles malformed reserved tags", () => {
     expect(parseResponseDirectives("<voice>hello").segments).toEqual([
-      { kind: "voice", text: "hello", voiceType: "normal" },
+      { kind: "voice", text: "hello" },
     ]);
     expect(parseResponseDirectives("</voice> hello").segments).toEqual([
       { kind: "text", text: "</voice>\nhello" },
@@ -63,12 +84,25 @@ describe("parseResponseDirectives", () => {
   });
 });
 
+describe("sanitizeVoiceText", () => {
+  test("preserves voice tags and normalizes whitespace", () => {
+    expect(sanitizeVoiceText("[ANGRY] hello [sings] there [hard pause] ok [heavy sigh, then amused resignation]"))
+      .toBe("[ANGRY] hello [sings] there [hard pause] ok [heavy sigh, then amused resignation]");
+  });
+});
+
 describe("renderSegmentsForMemory", () => {
-  test("labels voice segments for memory extraction", () => {
+  test("preserves voice directives as XML for history and memory context", () => {
     expect(renderSegmentsForMemory([
       { kind: "text", text: "text" },
-      { kind: "voice", text: "voice", voiceType: "normal" },
-      { kind: "voice", text: "quiet", voiceType: "whisper" },
-    ])).toBe("text\n[voice] voice\n[voice whisper] quiet");
+      { kind: "voice", text: "voice" },
+      { kind: "voice", text: "[whispers] quiet" },
+    ])).toBe('text\n<voice>voice</voice>\n<voice>[whispers] quiet</voice>');
+  });
+
+  test("escapes voice text when rendering XML for history", () => {
+    expect(renderSegmentsForMemory([
+      { kind: "voice", text: "2 < 3 & ok" },
+    ])).toBe("<voice>2 &lt; 3 &amp; ok</voice>");
   });
 });

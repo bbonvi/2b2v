@@ -1,6 +1,6 @@
 import { createLogger, RequestLog, type LogLevel } from "./logger";
 import { requestLogStore } from "./dashboard/store";
-import { startDashboard } from "./dashboard/server";
+import { parseDashboardPasswordlessCidrs, startDashboard } from "./dashboard/server";
 import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, validateTrimConfig, validateVpnConfig, validateBashToolConfig } from "./config/loader";
 import type { GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
@@ -13,12 +13,12 @@ import { translateInbound, translateOutbound, buildDisplayNameContext, type Inbo
 import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
-import { handleMessage, type IncomingMessage, type HandlerDeps } from "./agent/handler";
+import { handleMessage, type IncomingMessage, type HandlerDeps, type MessageSender } from "./agent/handler";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
 import { createChannelDispatcher, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
-import { getHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory, deleteRecentMessages } from "./db/message-repository";
+import { getContextHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory, deleteRecentMessages } from "./db/message-repository";
 import { processHistory } from "./agent/history-pipeline";
 import { trimMessages } from "./agent/history-trimming";
 import { formatMessageLine, OLDER_LEGEND } from "./agent/history-formatting";
@@ -27,7 +27,6 @@ import { formatRelativeAgo } from "./agent/history-dates";
 import { formatLocalWallClock, currentLocalContext } from "./time/agent-time";
 import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
-import type { MessageSender } from "./agent/send-message-tool";
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
 import type { TtsResult } from "./tts/types";
 import { buildMemoryContext, extractAndApplyMemories } from "./agent/memory-service";
@@ -56,7 +55,7 @@ import { createSessionStore, type SessionStore } from "./vpn/session";
 import { handleVpnCommand, handleVpnComponent, type VpnHandlerDeps } from "./vpn/handler";
 import { getVpnLocale } from "./vpn/i18n";
 import { loadPromptProfile } from "./config/prompt-profile";
-import { buildStreamOptions } from "./llm/client";
+import { buildBackgroundStreamOptions } from "./llm/client";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch, unlinkSync } from "fs";
 import type { Database } from "./db/database";
@@ -167,10 +166,9 @@ if (sshKeysLocal !== undefined && sshKeysShared !== undefined) {
 function getGuildConfig(guildId: string): GuildConfig {
   const existing = guildConfigs.get(guildId);
   if (existing !== undefined) return existing;
-  // Auto-create default config for unknown guilds
-  const resolved = resolveGuildConfig(globalConfig, { guildId, slug: "" });
-  guildConfigs.set(guildId, resolved);
-  return resolved;
+  // Resolve default-only guilds on demand so global hot-reload changes such as
+  // TTS settings cannot be hidden behind a stale cached default config.
+  return resolveGuildConfig(globalConfig, { guildId, slug: "" });
 }
 
 // --- 12. Init scheduler ---
@@ -254,7 +252,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         if (voice !== undefined) {
           const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
           const sent = await targetChannel.send({ files: [attachment] });
-          storeBotMessage(sent.id, targetChannelId, "[Voice Message]", text);
+          storeBotMessage(sent.id, targetChannelId, "[Voice Message]", voice.historyText ?? text);
           if (targetChannel.isThread()) {
             updateThreadActivity(db, targetChannelId, {
               lastActivityAt: Date.now(),
@@ -338,6 +336,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         channelId,
         guildConfig,
         guild,
+        context.contextMessageIds,
       );
 
       // Build synthetic incoming message
@@ -358,21 +357,24 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
       // Build TTS dependencies
       const ttsEnabled = ttsClient !== undefined && guildConfig.tts?.enabled === true;
       const generateSpeech = ttsEnabled && ttsClient !== undefined && guildConfig.tts !== undefined
-        ? async (text: string, voiceType: string): Promise<TtsResult> => {
-            const preset = voiceType === "whisper"
-              ? guildConfig.tts?.voices.whisper
-              : guildConfig.tts?.voices.normal;
+        ? async (text: string): Promise<TtsResult> => {
+            const preset = guildConfig.tts?.voices.normal;
             if (preset === undefined) {
-              return { ok: false, error: `Voice type "${voiceType}" not configured` };
+              return { ok: false, error: "Normal voice is not configured" };
             }
             return ttsClient.generate({
               text,
               voiceId: preset.voiceId,
               model: preset.model,
+              seed: preset.seed,
+              applyTextNormalization: preset.applyTextNormalization,
+              outputFormat: preset.outputFormat,
               voiceSettings: {
                 stability: preset.stability,
                 similarityBoost: preset.similarityBoost,
                 speed: preset.speed,
+                style: preset.style,
+                useSpeakerBoost: preset.useSpeakerBoost,
               },
             });
           }
@@ -389,7 +391,6 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         log: scheduleLog,
         requestLog,
         ttsEnabled,
-        ttsConfig: guildConfig.tts,
         generateSpeech,
         forceTrigger: true,
         triggerInstructions: guildConfig.triggerInstructions,
@@ -609,7 +610,8 @@ function buildInboundResolvers(guild: Guild): InboundResolvers {
 function buildOutboundResolvers(guild: Guild): OutboundResolvers {
   return {
     user: (username) => {
-      const member = guild.members.cache.find((m) => m.user.username === username);
+      const normalized = username.toLowerCase();
+      const member = guild.members.cache.find((m) => m.user.username.toLowerCase() === normalized);
       return member !== undefined ? member.id : undefined;
     },
     channel: (name) => {
@@ -643,8 +645,7 @@ async function buildContext(
   isThread: boolean,
 ): Promise<AssembledContext> {
   // Chat history via the full processing pipeline
-  const historyMessages = getHistoryMessages(db, channelId, guildConfig.trim.trimTrigger);
-  const historyWithoutLatest = historyMessages.filter((m) => m.id !== latestUserMessage.id);
+  const historyWithoutLatest = getContextHistoryMessages(db, channelId, guildConfig.trim, latestUserMessage.id);
   const { olderText, newerText } = await processHistory(
     historyWithoutLatest,
     latestUserMessage,
@@ -767,22 +768,30 @@ async function buildContext(
       }
     }
   }
-  return assembleContext({
-    toolInstructions,
-    instructions: guildConfig.instructions,
-    emojis: emojiContext,
-    members: displayNameContext,
-    memories,
-    upcomingSchedules,
-    threadsInChat,
-    threadMetadata,
-    parentPreContext,
-    olderHistory: olderText,
-    newerHistory: newerText,
-    currentContext,
-    responseInstruction: "",
-    userMessage,
-  });
+  const contextMessageIds = Array.from(new Set([
+    ...historyWithoutLatest.map((m) => m.id),
+    latestUserMessage.id,
+  ]));
+
+  return {
+    ...assembleContext({
+      toolInstructions,
+      instructions: guildConfig.instructions,
+      emojis: emojiContext,
+      members: displayNameContext,
+      memories,
+      upcomingSchedules,
+      threadsInChat,
+      threadMetadata,
+      parentPreContext,
+      olderHistory: olderText,
+      newerHistory: newerText,
+      currentContext,
+      responseInstruction: "",
+      userMessage,
+    }),
+    contextMessageIds,
+  };
 }
 
 // --- 20. Build agent tools for a message context ---
@@ -791,6 +800,7 @@ function buildAgentTools(
   channelId: string,
   guildConfig: GuildConfig,
   guild: Guild,
+  excludedMessageIds?: Iterable<string>,
 ) {
   // Resolve username to userId using guild member cache
   const resolveUsername = (username: string): string | undefined => {
@@ -805,6 +815,7 @@ function buildAgentTools(
     timezone: guildConfig.timezone,
     embed: embeddingPipeline,
     resolveUsername,
+    excludedMessageIds,
     fetchMessage: async (chId, msgId) => {
       const channel = guild.channels.cache.get(chId);
       if (channel === undefined || !("messages" in channel)) return null;
@@ -1013,7 +1024,7 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
         } else {
           sent = await targetChannel.send({ files: [attachment] });
         }
-        storeBotMessage(sent.id, targetChannelId, "[Voice Message]", text);
+        storeBotMessage(sent.id, targetChannelId, "[Voice Message]", voice.historyText ?? text);
         if (targetChannel.isThread()) {
           updateThreadActivity(db, targetChannelId, { lastActivityAt: Date.now(), lastMessageId: sent.id });
           markBotParticipating(db, targetChannelId);
@@ -1106,9 +1117,17 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
     const isThread = message.channel.isThread();
     const context = await buildContext(guildId, channelId, guild, guildConfig, translatedContent, latestUserMessage, replyFallbackDeps, isThread);
 
-    const sendTypingNow = (): void => {
+    const sendTypingNow = (chatId?: string): void => {
+      const targetChannel = (() => {
+        if (chatId === undefined) return currentChannelObj;
+        try {
+          return resolveTargetChannel(chatId);
+        } catch {
+          return currentChannelObj;
+        }
+      })();
       lastTypingAt = Date.now();
-      void currentChannelObj.sendTyping().catch(() => {});
+      void targetChannel.sendTyping().catch(() => {});
     };
 
     const startThreadTool = createStartThreadTool({
@@ -1148,23 +1167,20 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
         channelId,
         guildConfig,
         guild,
+        context.contextMessageIds,
       ),
       startThreadTool,
     ];
 
     const TYPING_INTERVAL_MS = 8_000;
-    const TYPING_MAX_MS = 30_000;
     let typingTimer: ReturnType<typeof setInterval> | null = null;
-    let typingTimeout: ReturnType<typeof setTimeout> | null = null;
     const startTypingLoop = (): void => {
       if (typingTimer !== null) return;
       sendTypingNow();
       typingTimer = setInterval(() => { sendTypingNow(); }, TYPING_INTERVAL_MS);
-      typingTimeout = setTimeout(() => { stopTypingLoop(); }, TYPING_MAX_MS);
     };
     const stopTypingLoop = (): void => {
       if (typingTimer !== null) { clearInterval(typingTimer); typingTimer = null; }
-      if (typingTimeout !== null) { clearTimeout(typingTimeout); typingTimeout = null; }
     };
 
     const incoming: IncomingMessage = {
@@ -1182,19 +1198,22 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
 
     const ttsEnabled = ttsClient !== undefined && guildConfig.tts?.enabled === true;
     const generateSpeech = ttsEnabled && ttsClient !== undefined && guildConfig.tts !== undefined
-      ? async (text: string, voiceType: string): Promise<TtsResult> => {
-          const preset = voiceType === "whisper"
-            ? guildConfig.tts?.voices.whisper
-            : guildConfig.tts?.voices.normal;
-          if (preset === undefined) return { ok: false, error: `Voice type "${voiceType}" not configured` };
+      ? async (text: string): Promise<TtsResult> => {
+          const preset = guildConfig.tts?.voices.normal;
+          if (preset === undefined) return { ok: false, error: "Normal voice is not configured" };
           return ttsClient.generate({
             text,
             voiceId: preset.voiceId,
             model: preset.model,
+            seed: preset.seed,
+            applyTextNormalization: preset.applyTextNormalization,
+            outputFormat: preset.outputFormat,
             voiceSettings: {
               stability: preset.stability,
               similarityBoost: preset.similarityBoost,
               speed: preset.speed,
+              style: preset.style,
+              useSpeakerBoost: preset.useSpeakerBoost,
             },
           });
         }
@@ -1209,33 +1228,46 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
       onTriggered: () => { startTypingLoop(); },
+      onStillWorking: (targetChatId) => { sendTypingNow(targetChatId); },
       onAgentEnd: stopTypingLoop,
       requestLog,
       ttsEnabled,
-      ttsConfig: guildConfig.tts,
       generateSpeech,
       triggerInstructions: guildConfig.triggerInstructions,
       afterReply: async (memoryRequest) => {
-        const providerParams: Record<string, unknown> = { ...buildStreamOptions(globalConfig, guildConfig) };
+        const memoryLog = new RequestLog(guildId, channelId);
+        memoryLog.setAuthor(message.author.username);
+        memoryLog.setTrigger({ type: "background_memory_extraction", sourceRequestId: requestLog.requestId });
+        memoryLog.setAgentRan(true);
+        requestLogStore.incrementActive();
+        const providerParams: Record<string, unknown> = { ...buildBackgroundStreamOptions(globalConfig, guildConfig) };
         delete providerParams.apiKey;
         delete providerParams.signal;
         delete providerParams.onPayload;
-        await extractAndApplyMemories({
-          db,
-          guildId,
-          currentUserId: message.author.id,
-          currentUsername: message.author.username,
-          sourceMessageId: memoryRequest.sourceMessageId ?? message.id,
-          userMessage: memoryRequest.userMessage,
-          assistantReply: memoryRequest.assistantReply,
-          recentContext: memoryRequest.recentContext,
-          apiKey: globalConfig.openrouterApiKey,
-          model: guildConfig.model ?? globalConfig.defaultModel,
-          providerParams,
-          promptCaching: guildConfig.promptCaching,
-          onPayload: (payload) => requestLog.recordLLMRequest(payload),
-          onCompletion: (payload) => requestLog.recordLLMCompletion(payload),
-        });
+        try {
+          await extractAndApplyMemories({
+            db,
+            guildId,
+            currentUserId: message.author.id,
+            currentUsername: message.author.username,
+            sourceMessageId: memoryRequest.sourceMessageId ?? message.id,
+            userMessage: memoryRequest.userMessage,
+            assistantReply: memoryRequest.assistantReply,
+            recentContext: memoryRequest.recentContext,
+            apiKey: globalConfig.openrouterApiKey,
+            model: guildConfig.backgroundLlm.model,
+            providerParams,
+            promptCaching: guildConfig.backgroundLlm.promptCaching,
+            onPayload: (payload) => memoryLog.recordLLMRequest(payload),
+            onCompletion: (payload) => memoryLog.recordLLMCompletion(payload),
+          });
+        } catch (err) {
+          memoryLog.setError(err instanceof Error ? err.message : String(err));
+          throw err;
+        } finally {
+          memoryLog.emit(log);
+          requestLogStore.decrementActive();
+        }
       },
     };
 
@@ -1509,11 +1541,19 @@ log.info("health check passed — all systems ready", {
 // --- Start dashboard ---
 const dashboardPassword = process.env.DASHBOARD_PASSWORD;
 const bypassDashboardAuth = process.env.UNSAFELY_BYPASS_DASHBOARD_AUTH === "true";
+const dashboardPasswordlessCidrs = parseDashboardPasswordlessCidrs(process.env.DASHBOARD_PASSWORDLESS_CIDRS);
+const dashboardTrustedProxyCidrs = parseDashboardPasswordlessCidrs(process.env.DASHBOARD_TRUSTED_PROXY_CIDRS);
 if (bypassDashboardAuth) {
   startDashboard({ port: 3000, password: "", bypassAuth: true, log });
   log.warn("dashboard started with auth bypass — do not use in production");
 } else if (dashboardPassword !== undefined && dashboardPassword !== "") {
-  startDashboard({ port: 3000, password: dashboardPassword, log });
+  startDashboard({
+    port: 3000,
+    password: dashboardPassword,
+    passwordlessCidrs: dashboardPasswordlessCidrs,
+    trustedProxyCidrs: dashboardTrustedProxyCidrs,
+    log,
+  });
 } else {
   log.info("dashboard disabled (DASHBOARD_PASSWORD not set)");
 }

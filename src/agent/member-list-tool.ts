@@ -28,7 +28,7 @@ export function createMemberListTool(deps: MemberListToolDeps): AgentTool {
     name: "list_members",
     label: "list_members",
     description:
-      "List server members. Optionally filter to only online members. Returns usernames, display names, online status and the number of memories associated..",
+      "List server members. Optionally filter to only online members. Returns exact @usernames for Discord pings, display names, online status and the number of memories associated.",
     parameters: ListMembersParams,
 
     async execute(_toolCallId: string, params: unknown): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {

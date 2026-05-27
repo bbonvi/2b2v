@@ -6,21 +6,14 @@ export interface StablePromptSection {
   text: string;
 }
 
-interface StablePromptGroup {
-  role: "system" | "developer";
+interface PromptTextPart {
+  type: "text";
   text: string;
+  cache_control?: { type: "ephemeral" };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
-}
-
-function makePromptContent(
-  text: string,
-  withCacheControl: boolean,
-): string | Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }> {
-  if (!withCacheControl) return text;
-  return [{ type: "text", text, cache_control: { type: "ephemeral" } }];
 }
 
 function stripCacheControlFromMessages(messages: unknown[]): void {
@@ -37,18 +30,58 @@ function stripCacheControlFromMessages(messages: unknown[]): void {
   }
 }
 
-function groupStableSections(stableSections: StablePromptSection[]): StablePromptGroup[] {
-  const groups = new Map<string, StablePromptGroup>();
+function stableSectionGroups(stableSections: StablePromptSection[]): StablePromptSection[][] {
+  const groups: StablePromptSection[][] = [];
   for (const section of stableSections) {
-    const key = `${section.role}:cached`;
-    const existing = groups.get(key);
-    if (existing === undefined) {
-      groups.set(key, { role: section.role, text: section.text });
+    const last = groups.at(-1);
+    if (last !== undefined && last[0]?.role === section.role) {
+      last.push(section);
       continue;
     }
-    existing.text = `${existing.text}\n\n${section.text}`;
+    groups.push([section]);
   }
-  return [...groups.values()];
+  return groups;
+}
+
+function buildMergedContent(
+  sections: StablePromptSection[],
+  explicitCache: boolean,
+): string | PromptTextPart[] {
+  const text = sections.map((section) => section.text).join("\n\n");
+  if (!explicitCache) {
+    return text;
+  }
+
+  return [{
+    type: "text",
+    text,
+    cache_control: { type: "ephemeral" },
+  }];
+}
+
+function buildStableMessages(
+  stableSections: StablePromptSection[],
+  explicitCache: boolean,
+): Array<Record<string, unknown>> {
+  const groups = stableSectionGroups(stableSections);
+  return groups.map((sections) => ({
+    role: sections[0]?.role ?? "system",
+    content: buildMergedContent(sections, explicitCache),
+  }));
+}
+
+function buildCacheAnchorMessages(promptCaching: PromptCachingConfig): Array<Record<string, unknown>> {
+  if (!promptCaching.enabled) return [];
+  return [
+    {
+      role: "user",
+      content: "Stable context is loaded. Wait for the current Discord turn.",
+    },
+    {
+      role: "assistant",
+      content: "Ready.",
+    },
+  ];
 }
 
 export function getStablePromptSections(context: AssembledContext): StablePromptSection[] {
@@ -59,24 +92,26 @@ export function getStablePromptSections(context: AssembledContext): StablePrompt
 
 /**
  * Mutate an OpenAI-compatible payload by prepending grouped stable context sections.
- * Stable sections are merged by (role, cached) buckets and keep original order within each bucket.
+ * Stable sections are merged by role, and volatile context must remain after
+ * the stable anchor so provider-side prefix caches keep a consistent start.
  */
 export function prependStableSectionsToPayload(
   payload: unknown,
   stableSections: StablePromptSection[],
   promptCaching: PromptCachingConfig,
+  _model?: string,
 ): void {
   if (!isRecord(payload)) return;
   const messages = payload.messages;
   if (!Array.isArray(messages)) return;
 
-  if (promptCaching.enabled) stripCacheControlFromMessages(messages);
+  stripCacheControlFromMessages(messages);
 
-  const stableGroups = groupStableSections(stableSections);
-  const toInsert = stableGroups.map((group, idx) => ({
-    role: group.role,
-    content: makePromptContent(group.text, promptCaching.enabled && idx === 0),
-  }));
+  const explicitCache = promptCaching.enabled;
+  const toInsert = [
+    ...buildStableMessages(stableSections, explicitCache),
+    ...buildCacheAnchorMessages(promptCaching),
+  ];
   if (toInsert.length > 0) {
     messages.unshift(...toInsert);
   }

@@ -107,10 +107,10 @@ describe("listMemories", () => {
       includeGlobal: true,
     });
 
-    expect(rows.map((row) => row.content)).toEqual(["A", "C"]);
+    expect(rows.map((row) => row.content).sort()).toEqual(["A", "C"]);
   });
 
-  test("returns chronological updated order and enforces limit", () => {
+  test("returns newest updated memories first and enforces limit", () => {
     const now = Date.now();
     db.raw
       .prepare(
@@ -132,7 +132,7 @@ describe("listMemories", () => {
       .run("g1", "u1", "user_note", "Newest", null, 0.7, now - 1000, now - 1000, null);
 
     const rows = listMemories(db, { guildId: "g1", subjectUserId: "u1", limit: 2 });
-    expect(rows.map((row) => row.content)).toEqual(["Oldest", "Middle"]);
+    expect(rows.map((row) => row.content)).toEqual(["Newest", "Middle"]);
   });
 });
 

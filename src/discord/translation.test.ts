@@ -257,6 +257,24 @@ describe("translateOutbound", () => {
     );
   });
 
+  test("resolves @username before sentence punctuation", () => {
+    expect(translateOutbound("Hi @alice.", outboundResolvers)).toBe(
+      "Hi <@111>."
+    );
+  });
+
+  test("resolves placeholder-style @<username>", () => {
+    expect(translateOutbound("Hi @<alice>", outboundResolvers)).toBe(
+      "Hi <@111>"
+    );
+  });
+
+  test("resolves username case-insensitively when resolver supports lowercase usernames", () => {
+    expect(translateOutbound("Hi @Alice", outboundResolvers)).toBe(
+      "Hi <@111>"
+    );
+  });
+
   test("does not resolve channel name with hyphen incorrectly", () => {
     expect(translateOutbound("See #off-topic", outboundResolvers)).toBe(
       "See <#444>"

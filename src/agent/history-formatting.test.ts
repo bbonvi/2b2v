@@ -67,7 +67,7 @@ describe("formatMessageLine", () => {
     };
     const input: FormatInput = { message: msg(), reply, captioningEnabled: false };
     expect(formatMessageLine(input)).toBe(
-      '[@alice to @bob (Quote: "earlier text"; ReplyMsgID: 123)]: hello'
+      '[@alice to @bob (Quote: "earlier text")]: hello'
     );
   });
 
@@ -81,7 +81,7 @@ describe("formatMessageLine", () => {
       replyCaptions: [],
     };
     const input: FormatInput = { message: msg(), reply, captioningEnabled: false };
-    expect(formatMessageLine(input)).toBe("[@alice to @bob (ReplyMsgID: 123)]: hello");
+    expect(formatMessageLine(input)).toBe("[@alice to @bob]: hello");
   });
 
   test("reply with missing target", () => {
@@ -95,7 +95,7 @@ describe("formatMessageLine", () => {
     };
     const input: FormatInput = { message: msg(), reply, captioningEnabled: false };
     expect(formatMessageLine(input)).toBe(
-      "[@alice to @eve (ReplyMsgID: 456; MissingTarget: true)]: hello"
+      "[@alice to @eve (MissingTarget: true)]: hello"
     );
   });
 
@@ -110,7 +110,7 @@ describe("formatMessageLine", () => {
     };
     const input: FormatInput = { message: msg(), reply, captioningEnabled: false };
     expect(formatMessageLine(input)).toBe(
-      '[@alice to @bob (Quote: "check this"; ReplyMsgID: 100; ReplyImageIDs: [5, 6])]: hello'
+      '[@alice to @bob (Quote: "check this"; ReplyImageIDs: [5, 6])]: hello'
     );
   });
 
@@ -125,7 +125,7 @@ describe("formatMessageLine", () => {
     };
     const input: FormatInput = { message: msg(), reply, captioningEnabled: true };
     expect(formatMessageLine(input)).toBe(
-      '[@alice to @bob (ReplyMsgID: 100; ReplyImageIDs: [5]; ReplyCaptions: ["a photo"])]: hello'
+      '[@alice to @bob (ReplyImageIDs: [5]; ReplyCaptions: ["a photo"])]: hello'
     );
   });
 
@@ -141,7 +141,7 @@ describe("formatMessageLine", () => {
     );
   });
 
-  test("full meta key ordering: Quote, ReplyMsgID, MissingTarget, ReplyImageIDs, ReplyCaptions, ImageIDs, Captions", () => {
+  test("full meta key ordering: Quote, MissingTarget, ReplyImageIDs, ReplyCaptions, ImageIDs, Captions", () => {
     const reply: ReplyContext = {
       targetAuthor: "bob",
       quote: "hi",
@@ -157,7 +157,7 @@ describe("formatMessageLine", () => {
     };
     const result = formatMessageLine(input);
     expect(result).toBe(
-      '[@alice to @bob (Quote: "hi"; ReplyMsgID: 99; MissingTarget: true; ReplyImageIDs: [1]; ReplyCaptions: ["cat"]; ImageIDs: [10]; Captions: ["dog"])]: hello'
+      '[@alice to @bob (Quote: "hi"; MissingTarget: true; ReplyImageIDs: [1]; ReplyCaptions: ["cat"]; ImageIDs: [10]; Captions: ["dog"])]: hello'
     );
   });
 });

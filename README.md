@@ -51,6 +51,9 @@ Use the dev compose file for live reload, and the production compose file for lo
 | `QDRANT_URL` | no | `http://localhost:6333` | Qdrant server URL |
 | `DATA_DIR` | no | `data` | Directory for SQLite database files |
 | `MODEL_CACHE_DIR` | no | `model-cache` | Directory for embedding model downloads |
+| `DASHBOARD_PASSWORD` | no | — | Dashboard password; dashboard is disabled when unset |
+| `DASHBOARD_PASSWORDLESS_CIDRS` | no | — | Comma/whitespace-separated IPv4 CIDRs that bypass dashboard login |
+| `DASHBOARD_TRUSTED_PROXY_CIDRS` | no | — | Proxy CIDRs whose forwarded client IP headers may be trusted |
 
 ## Configuration
 
@@ -80,29 +83,39 @@ trim:
   replyQuoteChars: 50
 promptCaching:
   enabled: true
+backgroundLlm:
+  model: google/gemini-2.5-flash
+  serviceTier: flex
+  modelParams:
+    temperature: 0.1
 replyLoop:
-  maxToolCalls: 8
+  maxToolCalls: 16
   wallClockTimeoutMs: 45000
   llmOutputTimeoutMs: 12000
 mergeMessageGapSeconds: 120
 adminUserIds: []
 imageMaxDimension: 768
 imageReadMaxPerCall: 10
+imageReading:
+  fallbackEnabled: true
+  fallbackModel: moonshotai/kimi-k2.5
 ```
 
 All fields are optional — missing values fall back to global defaults.
 
-`promptCaching.enabled` controls whether the stable prefix is sent with a single cache breakpoint (`cache_control`).
-`replyLoop.maxToolCalls` and `replyLoop.wallClockTimeoutMs` bound each native tool-calling reply run.
+`promptCaching.enabled` controls stable-prefix caching. Stable prompt sections are merged into the first system message, explicit `cache_control` breakpoints are added inside that stable block, then a tiny stable cache anchor is inserted before volatile turn context.
+`backgroundLlm` controls memory extraction; omitted fields inherit the main effective model config, and `serviceTier` is omitted unless explicitly set.
+`imageReading.fallbackEnabled` makes image tools ask `imageReading.fallbackModel` for a detailed description when the main model cannot read image input; the description is returned to the main model as tool text.
+`replyLoop.maxToolCalls` and `replyLoop.wallClockTimeoutMs` bound each native tool-calling reply run. The default is high enough for normal chained web work such as search, fetch, then answer.
 `replyLoop.llmOutputTimeoutMs` limits each individual LLM turn. On timeout, the run fails fast and the bot posts a short `[SYSTEM ERROR]` message in Discord.
 
 ### Persona
 
 By default, `promptProfile.persona` points to `prompts/persona.md` and `promptProfile.lateInstructions` points to `prompts/style.md`. The same model call speaks as the persona and uses native OpenRouter tool calls when it needs search, history, schedules, images, members, URLs, or threads.
 
-The runtime reserves two XML-like response directives: `<voice>text</voice>` / `<voice type="whisper">text</voice>` send generated audio, and `<ignore>reason</ignore>` sends nothing. Other XML remains normal text; literal examples of reserved tags should be escaped as `&lt;voice&gt;` or `&lt;ignore&gt;`.
+The runtime reserves two XML-like response directives: `<voice>text</voice>` sends generated audio, and `<ignore>reason</ignore>` sends nothing. Eleven v3 delivery tags such as `[slow]`, `[sings]`, `[whispers]`, or `[amused]` belong inside `<voice>...</voice>` and are passed through to TTS/history. Other XML remains normal text; literal examples of reserved tags should be escaped as `&lt;voice&gt;` or `&lt;ignore&gt;`.
 
-Directive edge cases are handled app-side: fenced blocks containing reserved tags are unwrapped, nested `<voice>` tags are split into separate sends, unknown voice types fall back to normal voice, unclosed `<voice>` runs to the end of the response, unmatched closing tags stay as text, empty directive bodies are skipped, and voice/TTS failures fall back to text. Any `<ignore>` directive suppresses the whole reply. General XML that does not use reserved tag names is not parsed.
+Directive edge cases are handled app-side: fenced blocks containing reserved tags are unwrapped, nested `<voice>` tags are split into separate sends, legacy voice attributes are ignored, unclosed `<voice>` runs to the end of the response, unmatched closing tags stay as text, empty directive bodies are skipped, and voice/TTS failures fall back to text. Sent voice messages are stored back into chat history as `<voice>` XML so later context still shows they were audio. Any `<ignore>` directive suppresses the whole reply. General XML that does not use reserved tag names is not parsed.
 
 ## Slash commands
 

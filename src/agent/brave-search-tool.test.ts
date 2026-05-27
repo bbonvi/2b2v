@@ -80,7 +80,19 @@ describe("createBraveSearchTool", () => {
     const tool = createBraveSearchTool(deps);
     const result = await tool.execute("tc1", { query: "test" }, AbortSignal.timeout(5000));
     const text = (result.content[0] as TextContent).text;
-    expect(text).toContain("Unable to perform");
+    expect(text).toContain("web_search failed: API rate limit");
+  });
+
+  test("times out with clear error when search hangs", async () => {
+    const deps: BraveSearchToolDeps = {
+      apiKey: "test-key",
+      timeoutMs: 10,
+      fetchResults: () => new Promise<BraveSearchResult[]>(() => {}),
+    };
+    const tool = createBraveSearchTool(deps);
+    const result = await tool.execute("tc-timeout", { query: "test" }, AbortSignal.timeout(5000));
+    const text = (result.content[0] as TextContent).text;
+    expect(text).toContain("web_search failed: web_search timed out after 10ms");
   });
 
   test("includes URL and description for each result", async () => {
