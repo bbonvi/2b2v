@@ -3,8 +3,7 @@ services:
     build:
       context: .
       target: prod
-    command: ["bun", "--watch", "src/index.ts"]
-    env_file: .env
+    env_file: .env.prod
     environment:
       QDRANT_URL: http://qdrant:6333
       DATA_DIR: /app/data
@@ -12,11 +11,10 @@ services:
       SSH_KEYS_LOCAL: /app/ssh-keys-local
       SSH_KEYS_SHARED: /app/ssh-keys-shared
     volumes:
-      - ./src:/app/src:ro
       - bot-data:/app/data
       - model-cache:/app/model-cache
-      - ./config:/app/config:ro
-      - ./prompts:/app/prompts:ro
+      - ${APP_CONFIG_DIR:-${HOME}/.local/share/2b2v/config}:/app/config:ro
+      - ${APP_PROMPTS_DIR:-${HOME}/.local/share/2b2v/prompts}:/app/prompts:ro
       - ssh-keys-local:/app/ssh-keys-local
       - ssh-keys-shared:/app/ssh-keys-shared
     ports:

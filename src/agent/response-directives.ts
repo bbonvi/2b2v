@@ -21,6 +21,13 @@ interface ParseResult {
 const RESERVED_TAG_RE = /<\s*\/?\s*(?:voice|ignore)(?=[\s/>])/i;
 const FENCE_RE = /```[ \t]*(?:[a-zA-Z0-9_-]+)?[ \t]*\n?([\s\S]*?)```/g;
 const TAG_RE = /<\s*(\/?)\s*(voice|ignore)(?=[\s/>])([^>]*)>/gi;
+const USERNAME_PATTERN = "[A-Za-z0-9_](?:[A-Za-z0-9_.]{0,30}[A-Za-z0-9_])?";
+const CHANNEL_PATTERN = "#[A-Za-z0-9_][\\w-]{0,99}";
+const URL_PATTERN = "https?:\\/\\/[^\\s<>()]+";
+const VOICE_EXTERNAL_TEXT_RE = new RegExp(
+  `(^|[\\s([{])(<@!?\\d+>|<#\\d+>|@(?!everyone\\b|here\\b)(?:<${USERNAME_PATTERN}>|${USERNAME_PATTERN})|${CHANNEL_PATTERN}|${URL_PATTERN})([,;:.!?]?)(?=$|[\\s)\\]}])`,
+  "gi",
+);
 
 function unwrapDirectiveFences(text: string): string {
   return text.replace(FENCE_RE, (match: string, inner: string) =>
@@ -28,24 +35,54 @@ function unwrapDirectiveFences(text: string): string {
   );
 }
 
+function pushTextSegment(segments: ResponseSegment[], rawText: string): void {
+  const text = rawText.trim();
+  if (text === "") return;
+  const previous = segments[segments.length - 1];
+  if (previous !== undefined && previous.kind === "text") {
+    previous.text = `${previous.text}\n${text}`;
+    return;
+  }
+  segments.push({ kind: "text", text });
+}
+
+function pushVoiceSegment(segments: ResponseSegment[], rawText: string): void {
+  const text = sanitizeVoiceText(rawText);
+  if (text === "") return;
+  segments.push({ kind: "voice", text });
+}
+
+/** Split Discord-only tokens out of voice text so pings/channels are sent as message content, not spoken. */
+function pushVoiceTextSegments(segments: ResponseSegment[], rawText: string): void {
+  let cursor = 0;
+  const tokenRe = new RegExp(VOICE_EXTERNAL_TEXT_RE.source, "gi");
+  for (;;) {
+    const match = tokenRe.exec(rawText);
+    if (match === null) break;
+
+    const prefix = match[1] ?? "";
+    const token = match[2];
+    if (token === undefined) continue;
+
+    const tokenStart = match.index + prefix.length;
+    const punctuation = match[3] ?? "";
+    pushVoiceSegment(segments, rawText.slice(cursor, tokenStart));
+    pushTextSegment(segments, token);
+    cursor = tokenStart + token.length + punctuation.length;
+  }
+  pushVoiceSegment(segments, rawText.slice(cursor));
+}
+
 function pushSegment(
   segments: ResponseSegment[],
   mode: SegmentMode,
   rawText: string,
 ): void {
-  const text = mode.kind === "voice"
-    ? sanitizeVoiceText(rawText)
-    : rawText.trim();
-  if (text === "") return;
-  const next: ResponseSegment = mode.kind === "text"
-    ? { kind: "text", text }
-    : { kind: "voice", text };
-  const previous = segments[segments.length - 1];
-  if (previous !== undefined && previous.kind === "text" && next.kind === "text") {
-    previous.text = `${previous.text}\n${next.text}`;
+  if (mode.kind === "voice") {
+    pushVoiceTextSegments(segments, rawText);
     return;
   }
-  segments.push(next);
+  pushTextSegment(segments, rawText);
 }
 
 export function sanitizeVoiceText(text: string): string {

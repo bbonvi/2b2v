@@ -5,6 +5,7 @@ node_modules/
 *.db-wal
 *.db-shm
 .env
+.env.prod
 config/**/*.md
 config/**/*.yaml
 dist/

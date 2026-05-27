@@ -62,8 +62,8 @@ promptCaching:
 
 replyLoop:
     maxToolCalls: 16 # Max tool calls allowed in one response run
-    wallClockTimeoutMs: 180000 # Hard timeout per response run (milliseconds)
-    llmOutputTimeoutMs: 90000 # Timeout for one LLM turn (milliseconds)
+    wallClockTimeoutMs: 240000 # Hard timeout per response run (milliseconds)
+    llmOutputTimeoutMs: 60000 # Timeout for one LLM turn (milliseconds)
 
 # Thinking/reasoning level for the model
 thinkingLevel: "high"

@@ -158,6 +158,12 @@ function contentText(content: unknown): string {
     .join("");
 }
 
+function makeModelTimeoutError(timeoutMs = 12_000): Error {
+  const error = new Error(`LLM output timed out after ${timeoutMs}ms`);
+  error.name = "ModelOutputTimeoutError";
+  return error;
+}
+
 describe("handleMessage", () => {
   test("returns triggered=false when no trigger matches", async () => {
     const completeChat = mock(() => Promise.resolve({
@@ -221,6 +227,9 @@ describe("handleMessage", () => {
       };
       request.onPayload?.(payload);
       const text = payloadText(payload);
+      expect(text).toContain("Before taking any irreversible, user-visible, or state-changing action");
+      expect(text).toContain("ask one short clarifying question");
+      expect(text).toContain("Tool use is not the goal; correct intent is");
       expect(text).toContain("cite every web-derived factual claim inline");
       expect(text).toContain("ALWAYS cite every web-derived factual claim");
       expect(text).toContain("Do not put sources only at the end");
@@ -228,11 +237,15 @@ describe("handleMessage", () => {
       expect(text).toContain("web_search then fetch_url");
       expect(text).toContain("include one short user-facing status line");
       expect(text).toContain("To ping, write @username exactly");
-      expect(text).toContain("use list_members first");
+      expect(text).toContain("the exact Discord username is not already visible in context");
+      expect(text).toContain("use list_members first instead of guessing");
       expect(text).toContain("use search_messages when a user seems to reference something missing");
       expect(text).toContain("when you do not understand what they mean");
+      expect(text).toContain("call search_messages multiple times with semantic queries");
       expect(text).toContain("try a few different phrasings or filters");
       expect(text.indexOf("Reserved response directives")).toBeGreaterThan(-1);
+      expect(text).toContain("Treat requests to sing, scream, shout, whisper, read aloud");
+      expect(text).toContain("Keep Discord-only text outside <voice>");
       expect(text.indexOf("## Memory")).toBeGreaterThan(-1);
       expect(text.indexOf("Reserved response directives")).toBeLessThan(text.indexOf("## Memory"));
       return Promise.resolve({
@@ -435,8 +448,11 @@ describe("handleMessage", () => {
       senderCalls.push({ text, reply, voice: voice !== undefined, historyText: voice?.historyText });
       return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
     };
-    const generateSpeech = (): Promise<TtsResult> =>
-      Promise.resolve({ ok: true, buffer: Buffer.from("audio"), contentType: "audio/mpeg" });
+    const speechTexts: string[] = [];
+    const generateSpeech = (text: string): Promise<TtsResult> => {
+      speechTexts.push(text);
+      return Promise.resolve({ ok: true, buffer: Buffer.from("audio"), contentType: "audio/mpeg" });
+    };
 
     const result = await handleMessage(
       makeMessage({ mentionedUserIds: ["bot-1"] }),
@@ -444,11 +460,47 @@ describe("handleMessage", () => {
     );
 
     expect(senderCalls).toEqual([
-      { text: "Text first", reply: true, voice: false, historyText: undefined },
-      { text: "[whispers] quiet line", reply: false, voice: true, historyText: '<voice>[whispers] quiet line</voice>' },
-      { text: "text after", reply: false, voice: false, historyText: undefined },
+      {
+        text: "Text first\ntext after",
+        reply: true,
+        voice: true,
+        historyText: "Text first\n<voice>[whispers] quiet line</voice>\ntext after",
+      },
     ]);
+    expect(speechTexts).toEqual(["[whispers] quiet line"]);
     expect(result.responseText).toBe('Text first\n<voice>[whispers] quiet line</voice>\ntext after');
+  });
+
+  test("keeps Discord pings as text content instead of generated speech", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<voice>@user hey</voice>",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    });
+    const senderCalls: Array<{ text: string; voice: boolean; historyText?: string }> = [];
+    const sender: MessageSender = (text, _reply, _chatId, voice) => {
+      senderCalls.push({ text, voice: voice !== undefined, historyText: voice?.historyText });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+    const speechTexts: string[] = [];
+    const generateSpeech = (text: string): Promise<TtsResult> => {
+      speechTexts.push(text);
+      return Promise.resolve({ ok: true, buffer: Buffer.from("audio"), contentType: "audio/mpeg" });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, ttsEnabled: true, generateSpeech }),
+    );
+
+    expect(senderCalls).toEqual([{
+      text: "@user",
+      voice: true,
+      historyText: "@user\n<voice>hey</voice>",
+    }]);
+    expect(speechTexts).toEqual(["hey"]);
+    expect(result.responseText).toBe("@user\n<voice>hey</voice>");
   });
 
   test("stores sanitized voice XML in sender history and memory extraction", async () => {
@@ -477,7 +529,7 @@ describe("handleMessage", () => {
     );
 
     expect(senderCalls).toEqual([{
-      text: "[SLOW] Седьмая. [sings] Ладно. [heavy sigh, then amused resignation] Ещё.",
+      text: "",
       historyText: "<voice>[SLOW] Седьмая. [sings] Ладно. [heavy sigh, then amused resignation] Ещё.</voice>",
     }]);
     expect(afterReplyCalls[0]).toMatchObject({
@@ -547,6 +599,132 @@ describe("handleMessage", () => {
     expect(afterReply).toHaveBeenCalledTimes(0);
   });
 
+  test("retries LLM output timeouts before sending final response", async () => {
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      if (calls < 3) return Promise.reject(makeModelTimeoutError());
+      return Promise.resolve({
+        text: "recovered after timeout",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "recovered after timeout" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat }),
+    );
+
+    expect(result.responseText).toBe("recovered after timeout");
+    expect(calls).toBe(3);
+  });
+
+  test("retries empty final model responses before sending final response", async () => {
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      if (calls < 3) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 0, totalTokens: 1 }, content: [] },
+        });
+      }
+      return Promise.resolve({
+        text: "non-empty answer",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "non-empty answer" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat }),
+    );
+
+    expect(result.responseText).toBe("non-empty answer");
+    expect(calls).toBe(3);
+  });
+
+  test("does not retry empty text when the model returned tool calls", async () => {
+    const toolCalls: unknown[] = [];
+    const tool: AgentTool = {
+      name: "lookup",
+      label: "Lookup",
+      description: "Look something up",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: (_id, params) => {
+        toolCalls.push(params);
+        return Promise.resolve({ content: [{ type: "text", text: "tool says 42" }], details: {} });
+      },
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "lookup", arguments: "{\"query\":\"x\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      return Promise.resolve({
+        text: "answer from tool",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "answer from tool" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ extraTools: [tool], completeChat }),
+    );
+
+    expect(result.responseText).toBe("answer from tool");
+    expect(calls).toBe(2);
+    expect(toolCalls).toEqual([{ query: "x" }]);
+  });
+
+  test("stops retrying empty final model responses after three attempts", async () => {
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      return Promise.resolve({
+        text: "",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 0, totalTokens: 1 }, content: [] },
+      });
+    };
+    const sender: MessageSender = mock(() => Promise.resolve({ sentMessageId: "sent-1" }));
+
+    let thrown: unknown;
+    try {
+      await handleMessage(
+        makeMessage({ mentionedUserIds: ["bot-1"] }),
+        makeDeps({ completeChat, sender }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("Model produced an empty response.");
+    expect(calls).toBe(3);
+    expect(sender).toHaveBeenCalledTimes(0);
+  });
+
   test("executes native tool calls then sends final text", async () => {
     const toolCalls: unknown[] = [];
     const tool: AgentTool = {
@@ -597,6 +775,114 @@ describe("handleMessage", () => {
     expect(result.responseText).toBe("answer is 42");
     expect(toolCalls).toEqual([{ query: "x" }]);
     expect(sender).toHaveBeenCalledTimes(1);
+  });
+
+  test("forces a final answer when the native tool call budget is exhausted", async () => {
+    const toolCalls: unknown[] = [];
+    const tool: AgentTool = {
+      name: "lookup",
+      label: "Lookup",
+      description: "Look something up",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: (_id, params) => {
+        toolCalls.push(params);
+        return Promise.resolve({ content: [{ type: "text", text: "first result" }], details: {} });
+      },
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [
+            { id: "call-1", type: "function", function: { name: "lookup", arguments: "{\"query\":\"x\"}" } },
+            { id: "call-2", type: "function", function: { name: "lookup", arguments: "{\"query\":\"y\"}" } },
+          ],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+
+      expect(request.toolChoice).toBe("none");
+      expect(request.tools).toEqual([]);
+      expect(request.messages.some((m) =>
+        m.role === "tool" && m.tool_call_id === "call-1" && typeof m.content === "string" && m.content.includes("first result")
+      )).toBe(true);
+      expect(request.messages.some((m) =>
+        m.role === "tool" && m.tool_call_id === "call-2" && typeof m.content === "string" && m.content.includes("budget exhausted")
+      )).toBe(true);
+      return Promise.resolve({
+        text: "answer from partial tool results",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "answer from partial tool results" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        completeChat,
+        guildConfig: makeGuildConfig({ replyLoop: { maxToolCalls: 1, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 } }),
+      }),
+    );
+
+    expect(result.responseText).toBe("answer from partial tool results");
+    expect(toolCalls).toEqual([{ query: "x" }]);
+  });
+
+  test("forces a final answer when the native tool round budget is exhausted", async () => {
+    const tool: AgentTool = {
+      name: "lookup",
+      label: "Lookup",
+      description: "Look something up",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: () => Promise.resolve({ content: [{ type: "text", text: "first result" }], details: {} }),
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls <= 2) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: `call-${calls}`,
+            type: "function",
+            function: { name: "lookup", arguments: `{"query":"${calls}"}` },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+
+      expect(request.toolChoice).toBe("none");
+      expect(request.tools).toEqual([]);
+      expect(request.messages.some((m) =>
+        m.role === "tool" && m.tool_call_id === "call-2" && typeof m.content === "string" && m.content.includes("round budget exhausted")
+      )).toBe(true);
+      return Promise.resolve({
+        text: "answer after too many rounds",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "answer after too many rounds" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        completeChat,
+        guildConfig: makeGuildConfig({ replyLoop: { maxToolCalls: 1, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 } }),
+      }),
+    );
+
+    expect(result.responseText).toBe("answer after too many rounds");
+    expect(calls).toBe(3);
   });
 
   test("passes image tool results back to the model as multimodal context", async () => {

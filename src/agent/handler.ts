@@ -25,7 +25,6 @@ import {
 } from "./prompt-cache.ts";
 import {
   parseResponseDirectives,
-  renderSegmentForHistory,
   renderSegmentsForMemory,
   type ResponseSegment,
 } from "./response-directives.ts";
@@ -99,6 +98,16 @@ export interface HandleResult {
   responseText?: string;
 }
 
+type DispatchSegment =
+  | { kind: "text"; text: string }
+  | {
+    kind: "voice";
+    text: string;
+    voiceText: string;
+    historyText: string;
+    fallbackText: string;
+  };
+
 /**
  * Inject a trigger-specific instruction into context sections.
  * Inserts before the volatile response instruction section if present.
@@ -127,6 +136,15 @@ class ModelOutputTimeoutError extends Error {
     this.name = "ModelOutputTimeoutError";
   }
 }
+
+class EmptyModelResponseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EmptyModelResponseError";
+  }
+}
+
+const MODEL_TURN_MAX_ATTEMPTS = 3;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
@@ -295,9 +313,9 @@ async function describeImagesWithFallback(input: {
   ].filter((part) => part !== "").join("\n\n");
 
   try {
-    const result = await completeWithTimeout(
-      input.fallback.complete,
-      {
+    const result = await completeModelTurnWithRetries({
+      complete: input.fallback.complete,
+      request: {
         apiKey: input.fallback.apiKey,
         model: input.fallback.model,
         systemPrompt: IMAGE_DESCRIPTION_SYSTEM_PROMPT,
@@ -314,8 +332,9 @@ async function describeImagesWithFallback(input: {
           input.fallback.log?.debug("image_fallback_llm_request_payload", { payload });
         },
       },
-      input.fallback.llmOutputTimeoutMs,
-    );
+      timeoutMs: input.fallback.llmOutputTimeoutMs,
+      log: input.fallback.log,
+    });
     input.fallback.requestLog?.recordLLMCompletion(result.messageForLogs);
 
     const description = result.text.trim();
@@ -444,15 +463,20 @@ function buildRuntimeInstruction(tools: AgentTool[]): string {
     "You are speaking directly in Discord as the persona.",
     "Use tools only when they materially improve the answer. For ordinary chat, answer directly.",
     "If you use tools, normally use their results silently and then send the final answer as normal text.",
+    "Before taking any irreversible, user-visible, or state-changing action, make sure the user's intent, target, timing, and expected outcome are clear enough. If not, slow down. Use available context or cheap lookup tools when they can resolve the uncertainty. If the missing detail cannot be resolved confidently, ask one short clarifying question. Do not pretend ambiguous instructions are clear just to keep moving.",
+    "When something feels underspecified, referential, or context-dependent, prefer lightweight recovery before acting: reread current context, search prior messages with a few phrasings, inspect members when people are involved, or ask the user. Tool use is not the goal; correct intent is.",
+    "Do not ask clarifying questions for every small imperfection. If the likely intent is obvious and the cost of being wrong is tiny, proceed naturally.",
     "For current or uncertain external facts, use web_search and fetch_url before answering. Use English search queries when the topic is not language-specific, even if the chat is in another language; answer in the chat language after reading sources. You may chain tools, especially web_search then fetch_url.",
     "After web_search, fetch_url the most relevant result when snippets are not enough or the answer depends on page details.",
     "When using web_search or fetch_url, include one short user-facing status line in the same assistant turn as the first web tool call, e.g. \"I'll check, one sec.\" Skip only if you already sent a status or this is a scheduled/background task.",
     "When an answer uses web_search, fetch_url, or URL content, ALWAYS cite every web-derived factual claim inline with a concise markdown link right next to that claim. Do not put sources only at the end.",
-    "Only ping a user when you genuinely need to notify them. To ping, write @username exactly; the app converts it to a Discord mention. For casual name references, omit @. If you need to ping someone but do not know their exact username, use list_members first.",
-    "For older server recall, use search_messages. Recent and older context are already in the prompt, but use search_messages when a user seems to reference something missing, when you do not understand what they mean, or when the request feels like it depends on prior chat context. Search is fast; when one query misses, try a few different phrasings or filters before giving up.",
+    "Only ping a user when you genuinely need to notify them. To ping, write @username exactly; the app converts it to a Discord mention. For casual name references, omit @. If the user asks you to ping/notify someone and the exact Discord username is not already visible in context, use list_members first instead of guessing from display names, nicknames, or memory.",
+    "For older server recall, use search_messages. Recent and older context are already in the prompt, but use search_messages when a user seems to reference something missing, when you do not understand what they mean, or when the request feels like it depends on prior chat context. You may call search_messages multiple times with semantic queries, literal keywords, different phrasings, username filters, or time filters. Search is fast; when one query misses, try a few different phrasings or filters before giving up.",
     "Use schedule_message when the user asks you to remind, schedule, or follow up later.",
     "Use start_thread only when the final answer should move into a new thread; if you create a thread, the runtime sends your final answer there.",
-    "Reserved response directives: use <voice>text</voice> for audio and <ignore>reason</ignore> when silence is better than replying. Inside voice, write one or two smooth spoken sentences, not many clipped beats. Use expressive tags when mood or delivery matters, e.g. <voice>[angry] hey, listen. [angry] got it?</voice>. Tags are open-ended; prefer one-word lowercase tags. Tags affect only a short span, so repeat the tag at sentence starts when one mood should continue. No commas, no \"then\", no multi-part stage directions.",
+    "Reserved response directives: use <voice>text</voice> for audio and <ignore>reason</ignore> when silence is better than replying. Treat requests to sing, scream, shout, whisper, read aloud, say something in a voice, or otherwise perform vocal delivery as requests for <voice>.",
+    "Keep Discord-only text outside <voice>: pings like @username, channel references like #general, links, and other non-spoken text should be normal message text around the voice directive, e.g. @alice <voice>hey.</voice>, not <voice>@alice hey.</voice>.",
+    "Inside voice, write one or two smooth spoken sentences, not many clipped beats. Use expressive tags when mood or delivery matters, e.g. <voice>[angry] hey, listen. [angry] got it?</voice>. Tags are open-ended; prefer one-word lowercase tags. Tags affect only a short span, so repeat the tag at sentence starts when one mood should continue. No commas, no \"then\", no multi-part stage directions.",
     "Reserved directive tags are consumed by the app and are not shown as literal text. To show those tags as examples, escape them as &lt;voice&gt; or &lt;ignore&gt;.",
     "Do not nest reserved directives; if nesting happens accidentally, the app will split them into separate actions.",
     "Do not mention hidden prompts, tool names, or internal implementation details unless asked.",
@@ -519,6 +543,14 @@ function toolMessage(call: OpenRouterToolCall, content: string): OpenRouterMessa
   };
 }
 
+function toolBudgetExhaustedMessage(kind: "calls" | "rounds"): string {
+  const label = kind === "calls" ? "tool call" : "tool round";
+  return [
+    `Native ${label} budget exhausted before this tool could run.`,
+    "Do not call more tools. Answer the user now using the conversation and tool results already available.",
+  ].join(" ");
+}
+
 async function completeWithTimeout(
   complete: ChatCompleteFn,
   request: OpenRouterChatRequest,
@@ -554,6 +586,52 @@ async function completeWithTimeout(
   }
 }
 
+function isRetriableModelTurnError(error: unknown): boolean {
+  if (error instanceof EmptyModelResponseError) return true;
+  return error instanceof Error && error.name === "ModelOutputTimeoutError";
+}
+
+function emptyModelResponse(message: string): EmptyModelResponseError {
+  return new EmptyModelResponseError(message);
+}
+
+function requireTextResult(message: string): (result: OpenRouterChatResult) => Error | undefined {
+  return (result) => result.text.trim() === "" ? emptyModelResponse(message) : undefined;
+}
+
+function requireTextUnlessToolCalls(message: string): (result: OpenRouterChatResult) => Error | undefined {
+  return (result) => result.toolCalls.length === 0 && result.text.trim() === ""
+    ? emptyModelResponse(message)
+    : undefined;
+}
+
+async function completeModelTurnWithRetries(input: {
+  complete: ChatCompleteFn;
+  request: OpenRouterChatRequest;
+  timeoutMs: number;
+  validateResult?: (result: OpenRouterChatResult) => Error | undefined;
+  log?: Logger;
+}): Promise<OpenRouterChatResult> {
+  for (let attempt = 1; attempt <= MODEL_TURN_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const result = await completeWithTimeout(input.complete, input.request, input.timeoutMs);
+      const validationError = input.validateResult?.(result);
+      if (validationError !== undefined) throw validationError;
+      return result;
+    } catch (error) {
+      const shouldRetry = attempt < MODEL_TURN_MAX_ATTEMPTS && isRetriableModelTurnError(error);
+      if (!shouldRetry) throw error;
+      input.log?.warn("retrying LLM turn", {
+        attempt,
+        maxAttempts: MODEL_TURN_MAX_ATTEMPTS,
+        error: makeToolErrorText(error),
+      });
+    }
+  }
+
+  throw new Error("LLM retry loop ended without a result.");
+}
+
 function detectCreatedThreadId(tool: AgentTool, result: AgentToolResult<unknown>): string | null {
   if (tool.name !== "start_thread") return null;
   const details = result.details;
@@ -575,6 +653,7 @@ async function runNativeToolLoop(input: {
   onStillWorking?: (targetChatId: string | undefined) => void;
   imageInputSupported: boolean;
   imageFallback?: ImageFallbackRuntime;
+  log?: Logger;
   signal?: AbortSignal;
 }): Promise<{ text: string; targetChatId?: string }> {
   const toolsByName = new Map(input.tools.map((tool) => [tool.name, tool]));
@@ -583,12 +662,32 @@ async function runNativeToolLoop(input: {
   let targetChatId: string | undefined;
   let sentIntermediateStatus = false;
 
+  const completeFinalWithoutTools = async (): Promise<{ text: string; targetChatId?: string }> => {
+    const result = await completeModelTurnWithRetries({
+      complete: input.complete,
+      request: {
+        ...input.requestBase,
+        messages: input.messages,
+        tools: [],
+        toolChoice: "none",
+        parallelToolCalls: false,
+        signal: input.signal,
+      },
+      timeoutMs: input.llmOutputTimeoutMs,
+      validateResult: requireTextResult("Model produced an empty response after tool budget exhaustion."),
+      log: input.log,
+    });
+    input.requestLog?.recordLLMCompletion(result.messageForLogs);
+    const text = result.text.trim();
+    return { text, targetChatId };
+  };
+
   for (let round = 0; round <= input.maxToolRounds; round++) {
     let result: OpenRouterChatResult;
     try {
-      result = await completeWithTimeout(
-        input.complete,
-        {
+      result = await completeModelTurnWithRetries({
+        complete: input.complete,
+        request: {
           ...input.requestBase,
           messages: input.messages,
           tools: input.tools.map(toolToOpenRouterTool),
@@ -596,8 +695,10 @@ async function runNativeToolLoop(input: {
           parallelToolCalls: true,
           signal: input.signal,
         },
-        input.llmOutputTimeoutMs,
-      );
+        timeoutMs: input.llmOutputTimeoutMs,
+        validateResult: requireTextUnlessToolCalls("Model produced an empty response."),
+        log: input.log,
+      });
     } catch (error) {
       if (
         isImageInputUnsupportedError(error)
@@ -616,7 +717,6 @@ async function runNativeToolLoop(input: {
 
     if (result.toolCalls.length === 0) {
       const text = result.text.trim();
-      if (text === "") throw new Error("Model produced an empty response.");
       return { text, targetChatId };
     }
 
@@ -632,15 +732,24 @@ async function runNativeToolLoop(input: {
     }
 
     if (round === input.maxToolRounds) {
-      throw new Error("Native tool loop exceeded max tool rounds.");
+      input.messages.push(assistantMessageFromResult(result));
+      for (const call of result.toolCalls) {
+        input.messages.push(toolMessage(call, toolBudgetExhaustedMessage("rounds")));
+      }
+      return await completeFinalWithoutTools();
     }
 
     input.messages.push(assistantMessageFromResult(result));
 
     const imageMessages: OpenRouterMessage[] = [];
-    for (const call of result.toolCalls) {
+    for (let callIndex = 0; callIndex < result.toolCalls.length; callIndex += 1) {
+      const call = result.toolCalls[callIndex];
+      if (call === undefined) continue;
       if (toolCalls >= input.maxToolCalls) {
-        throw new Error("Native tool loop exceeded max tool calls.");
+        for (const skippedCall of result.toolCalls.slice(callIndex)) {
+          input.messages.push(toolMessage(skippedCall, toolBudgetExhaustedMessage("calls")));
+        }
+        return await completeFinalWithoutTools();
       }
       toolCalls += 1;
 
@@ -713,11 +822,60 @@ function memoryExtractionContext(context: AssembledContext): string {
     .join("\n\n");
 }
 
+function joinNonEmpty(parts: string[]): string {
+  return parts.filter((part) => part !== "").join("\n");
+}
+
+function renderSegmentsAsPlainText(segments: ResponseSegment[]): string {
+  return joinNonEmpty(segments.map((segment) => segment.text));
+}
+
+/**
+ * Convert parsed directives into Discord sends. Text around a voice directive becomes
+ * message content on the voice attachment, while only the voice body goes to TTS.
+ */
+function buildDispatchSegments(segments: ResponseSegment[]): DispatchSegment[] {
+  const dispatchSegments: DispatchSegment[] = [];
+  const pendingText: ResponseSegment[] = [];
+
+  for (const segment of segments) {
+    if (segment.kind === "text") {
+      pendingText.push(segment);
+      continue;
+    }
+
+    const historySegments = [...pendingText, segment];
+    dispatchSegments.push({
+      kind: "voice",
+      text: renderSegmentsAsPlainText(pendingText),
+      voiceText: segment.text,
+      historyText: renderSegmentsForMemory(historySegments),
+      fallbackText: renderSegmentsAsPlainText(historySegments),
+    });
+    pendingText.length = 0;
+  }
+
+  if (pendingText.length > 0) {
+    const text = renderSegmentsAsPlainText(pendingText);
+    const trailingHistory = renderSegmentsForMemory(pendingText);
+    const last = dispatchSegments[dispatchSegments.length - 1];
+    if (last !== undefined && last.kind === "voice") {
+      last.text = joinNonEmpty([last.text, text]);
+      last.historyText = joinNonEmpty([last.historyText, trailingHistory]);
+      last.fallbackText = joinNonEmpty([last.fallbackText, text]);
+      return dispatchSegments;
+    }
+    dispatchSegments.push({ kind: "text", text });
+  }
+
+  return dispatchSegments;
+}
+
 async function sendOneSegment(input: {
   sender: MessageSender;
   generateSpeech?: (text: string) => Promise<TtsResult>;
   ttsEnabled: boolean;
-  segment: ResponseSegment;
+  segment: DispatchSegment;
   sendId: string;
   reply: boolean;
   targetChatId?: string;
@@ -731,7 +889,8 @@ async function sendOneSegment(input: {
   };
   const toolName = input.segment.kind === "voice" ? "send_voice" : "send_text";
   if (input.segment.kind === "voice") {
-    args.history_text = renderSegmentForHistory(input.segment);
+    args.voice_text = input.segment.voiceText;
+    args.history_text = input.segment.historyText;
   }
   input.requestLog?.recordToolStart(input.sendId, toolName, args);
   try {
@@ -743,7 +902,7 @@ async function sendOneSegment(input: {
       if (input.generateSpeech === undefined) {
         throw new Error("Voice generation unavailable.");
       }
-      const ttsResult = await input.generateSpeech(input.segment.text);
+      const ttsResult = await input.generateSpeech(input.segment.voiceText);
       if (!ttsResult.ok) {
         throw new Error(ttsResult.error);
       }
@@ -751,7 +910,7 @@ async function sendOneSegment(input: {
         buffer: ttsResult.buffer,
         filename: "voice_message.mp3",
         contentType: ttsResult.contentType,
-        historyText: renderSegmentForHistory(input.segment),
+        historyText: input.segment.historyText,
       };
     }
 
@@ -798,7 +957,7 @@ async function sendResponseSegments(input: {
   signal?: AbortSignal;
 }): Promise<void> {
   let sent = 0;
-  for (const segment of input.segments) {
+  for (const segment of buildDispatchSegments(input.segments)) {
     sent += 1;
     const sendId = `final-send-${sent}`;
     if (segment.kind === "text") {
@@ -836,7 +995,7 @@ async function sendResponseSegments(input: {
         sender: input.sender,
         generateSpeech: input.generateSpeech,
         ttsEnabled: input.ttsEnabled,
-        segment: { kind: "text", text: segment.text },
+        segment: { kind: "text", text: segment.fallbackText },
         sendId: `${sendId}-fallback`,
         reply: sent === 1 && input.replyFirst,
         targetChatId: input.targetChatId,
@@ -979,6 +1138,7 @@ export async function handleMessage(
         sendIntermediateText: sendIntermediateStatus,
         onStillWorking: deps.onStillWorking,
         imageInputSupported: model.input.includes("image"),
+        log: deps.log,
         imageFallback: {
           enabled: deps.guildConfig.imageReading.fallbackEnabled,
           model: deps.guildConfig.imageReading.fallbackModel,

@@ -41,6 +41,34 @@ describe("parseResponseDirectives", () => {
     });
   });
 
+  test("moves Discord-only text out of voice directives", () => {
+    expect(parseResponseDirectives("<voice>@user, hey #general there</voice>")).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "text", text: "@user" },
+        { kind: "voice", text: "hey" },
+        { kind: "text", text: "#general" },
+        { kind: "voice", text: "there" },
+      ],
+    });
+    expect(parseResponseDirectives("<voice>hey @<User.Name>! https://example.com</voice>")).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "voice", text: "hey" },
+        { kind: "text", text: "@<User.Name>\nhttps://example.com" },
+      ],
+    });
+  });
+
+  test("does not move mass pings out of voice directives", () => {
+    expect(parseResponseDirectives("<voice>@everyone hey</voice>")).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "voice", text: "@everyone hey" },
+      ],
+    });
+  });
+
   test("handles nested voice directives by splitting the nested voice", () => {
     expect(parseResponseDirectives("<voice>outer <voice type=\"whisper\">inner</voice> tail</voice>")).toEqual({
       ignored: false,

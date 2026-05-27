@@ -69,6 +69,23 @@ const startTime = Date.now();
 const logLevel = (process.env.LOG_LEVEL ?? "info") as LogLevel;
 const log = createLogger({ level: logLevel });
 
+type AttachmentSendPayload = { content?: string; files: AttachmentBuilder[] };
+
+function buildAttachmentPayload(content: string, attachment: AttachmentBuilder): AttachmentSendPayload {
+  return content === "" ? { files: [attachment] } : { content, files: [attachment] };
+}
+
+function voiceRawContent(content: string): string {
+  return content === "" ? "[Voice Message]" : `${content}\n[Voice Message]`;
+}
+
+function unresolvedEmojiWarnings(warnings: string[]): string[] | undefined {
+  const emojiWarnings = warnings
+    .filter((w) => w.startsWith("Failed to resolve emoji:"))
+    .map((w) => w.replace("Failed to resolve emoji: ", ""));
+  return emojiWarnings.length > 0 ? emojiWarnings : undefined;
+}
+
 log.info("bot starting", {
   version,
   runtime: `bun ${Bun.version}`,
@@ -252,8 +269,17 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         // Voice message path
         if (voice !== undefined) {
           const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
-          const sent = await targetChannel.send({ files: [attachment] });
-          storeBotMessage(sent.id, targetChannelId, "[Voice Message]", voice.historyText ?? text);
+          const warnings: string[] = [];
+          const translated = translateOutbound(text, outboundResolvers, warnings);
+          const chunks = splitMessage(translated);
+          const firstChunk = chunks[0] ?? "";
+          const sent = await targetChannel.send(buildAttachmentPayload(firstChunk, attachment));
+          storeBotMessage(sent.id, targetChannelId, voiceRawContent(firstChunk), voice.historyText ?? text);
+          for (let i = 1; i < chunks.length; i++) {
+            const chunk = chunks[i] as string;
+            const followup = await targetChannel.send(chunk);
+            storeBotMessage(followup.id, targetChannelId, chunk, chunk);
+          }
           if (targetChannel.isThread()) {
             updateThreadActivity(db, targetChannelId, {
               lastActivityAt: Date.now(),
@@ -261,7 +287,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
             });
             markBotParticipating(db, targetChannelId);
           }
-          return { sentMessageId: sent.id };
+          return { sentMessageId: sent.id, warnings: unresolvedEmojiWarnings(warnings) };
         }
 
         // Text message path (always send, never reply)
@@ -282,11 +308,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
           });
           markBotParticipating(db, targetChannelId);
         }
-        // Filter to emoji warnings only (":name:" format)
-        const emojiWarnings = warnings
-          .filter((w) => w.startsWith("Failed to resolve emoji:"))
-          .map((w) => w.replace("Failed to resolve emoji: ", ""));
-        return { sentMessageId: firstId, warnings: emojiWarnings.length > 0 ? emojiWarnings : undefined };
+        return { sentMessageId: firstId, warnings: unresolvedEmojiWarnings(warnings) };
       };
 
       // Build simplified context for scheduled task
@@ -1031,7 +1053,7 @@ async function processTriggeredMessage(
         await new Promise((resolve) => setTimeout(resolve, 200 - sinceTypingMs));
       }
 
-      const replyToSpecific = async (content: string | { files: AttachmentBuilder[] }): Promise<Message> => {
+      const replyToSpecific = async (content: string | AttachmentSendPayload): Promise<Message> => {
         if (replyToMessageId !== undefined) {
           try {
             const targetMsg = await targetChannel.messages.fetch(replyToMessageId);
@@ -1053,20 +1075,30 @@ async function processTriggeredMessage(
 
       if (voice !== undefined) {
         const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
+        const warnings: string[] = [];
+        const translated = translateOutbound(text, outboundResolvers, warnings);
+        const chunks = splitMessage(translated);
+        const firstChunk = chunks[0] ?? "";
+        const payload = buildAttachmentPayload(firstChunk, attachment);
         let sent: Message;
         if (replyToMessageId !== undefined) {
-          sent = await replyToSpecific({ files: [attachment] });
+          sent = await replyToSpecific(payload);
         } else if (reply) {
-          sent = await message.reply({ files: [attachment] });
+          sent = await message.reply(payload);
         } else {
-          sent = await targetChannel.send({ files: [attachment] });
+          sent = await targetChannel.send(payload);
         }
-        storeBotMessage(sent.id, targetChannelId, "[Voice Message]", voice.historyText ?? text);
+        storeBotMessage(sent.id, targetChannelId, voiceRawContent(firstChunk), voice.historyText ?? text);
+        for (let i = 1; i < chunks.length; i++) {
+          const chunk = chunks[i] as string;
+          const followup = await targetChannel.send(chunk);
+          storeBotMessage(followup.id, targetChannelId, chunk, chunk);
+        }
         if (targetChannel.isThread()) {
           updateThreadActivity(db, targetChannelId, { lastActivityAt: Date.now(), lastMessageId: sent.id });
           markBotParticipating(db, targetChannelId);
         }
-        return { sentMessageId: sent.id };
+        return { sentMessageId: sent.id, warnings: unresolvedEmojiWarnings(warnings) };
       }
 
       const warnings: string[] = [];
@@ -1090,10 +1122,7 @@ async function processTriggeredMessage(
         updateThreadActivity(db, targetChannelId, { lastActivityAt: Date.now(), lastMessageId: firstId });
         markBotParticipating(db, targetChannelId);
       }
-      const emojiWarnings = warnings
-        .filter((w) => w.startsWith("Failed to resolve emoji:"))
-        .map((w) => w.replace("Failed to resolve emoji: ", ""));
-      return { sentMessageId: firstId, warnings: emojiWarnings.length > 0 ? emojiWarnings : undefined };
+      return { sentMessageId: firstId, warnings: unresolvedEmojiWarnings(warnings) };
     };
 
     const ingestedImages = getImagesByMessageId(db, message.id);

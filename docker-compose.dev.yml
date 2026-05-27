@@ -25,7 +25,7 @@ services:
       - dev-ssh-keys-local:/app/ssh-keys-local
       - dev-ssh-keys-shared:/app/ssh-keys-shared
     ports:
-      - "127.0.0.1:${DASHBOARD_PORT:-31456}:3000"
+      - "127.0.0.1:${DASHBOARD_PORT:-31457}:3000"
     networks:
       default:
       bash-net:

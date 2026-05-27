@@ -57,11 +57,11 @@ Discord messageCreate
 - For slow web lookups, the model may emit one short user-facing status line before `web_search`/`fetch_url`; the runtime sends it and keeps typing while the tool loop continues.
 - Web lookup tools use 15s timeouts and return explicit failure text for the model, including timeout/API/HTTP/content extraction reasons.
 - `start_thread` is special only in routing: after the tool creates a thread, the final answer is sent in that thread.
-- The handler enforces `replyLoop.maxToolCalls`, `replyLoop.wallClockTimeoutMs`, and `replyLoop.llmOutputTimeoutMs`.
+- The handler enforces `replyLoop.maxToolCalls`, `replyLoop.wallClockTimeoutMs`, and `replyLoop.llmOutputTimeoutMs`. One LLM turn can retry timeouts and empty final responses up to three total attempts; the wall-clock timeout remains the hard cap for the whole run. Tool budget exhaustion is recoverable: pending tool calls receive synthetic tool results and the model gets one final no-tools turn to answer normally.
 - The runtime starts typing as soon as a trigger is accepted and stops typing when the handler exits. There is no typing tool.
 - The bash tool implementation remains in `src/agent/bash-tool.ts`, but it is not registered in the chat tool list.
-- Final text is parsed for reserved app directives in `src/agent/response-directives.ts`: `<voice>` becomes a TTS send, while `<ignore>` suppresses all Discord output for that run. Eleven v3 delivery tags stay inside the voice text and pass through to TTS/history, for example `<voice>[slow] hey</voice>` or `<voice>[sings] hey</voice>`.
-- Reserved directive parsing is deliberately narrow: ordinary XML passes through, fenced blocks are unwrapped only when they contain reserved tags, nested voice tags are split, legacy voice attributes are ignored, unclosed voice tags consume to EOF, unmatched closing tags stay as text, and TTS failures fall back to plain text.
+- Final text is parsed for reserved app directives in `src/agent/response-directives.ts`: `<voice>` becomes a TTS send, while `<ignore>` suppresses all Discord output for that run. Text outside a voice directive is sent as normal Discord content on the audio attachment, while only the voice body goes to TTS. Eleven v3 delivery tags stay inside the voice text and pass through to TTS/history, for example `<voice>[slow] hey</voice>` or `<voice>[sings] hey</voice>`.
+- Reserved directive parsing is deliberately narrow: ordinary XML passes through, fenced blocks are unwrapped only when they contain reserved tags, Discord mention tokens inside voice tags are moved to text segments, nested voice tags are split, legacy voice attributes are ignored, unclosed voice tags consume to EOF, unmatched closing tags stay as text, and TTS failures fall back to plain text.
 - Voice directive sends preserve their directive form in stored chat history (`<voice>...`) so later model context sees that the prior bot message was audio, not plain text.
 - Image tool results are forwarded as multimodal input when the selected model advertises image support. If the main model cannot read images, or OpenRouter rejects the image input anyway, `imageReading.fallbackEnabled` lets the handler call a dedicated vision model and return its detailed description as tool text.
 - Outbound text translation converts deliberate `@username` or `@<username>` pings into Discord `<@id>` mentions. The model is instructed to use this only when it wants to notify a user and to call `list_members` first when it does not know the exact username.
@@ -164,11 +164,13 @@ Important environment variables:
 | `OPENROUTER_API_KEY` | yes | OpenRouter API key |
 | `BRAVE_API_KEY` | no | Enables web search |
 | `QDRANT_URL` | no | Overrides YAML Qdrant URL |
+| `DASHBOARD_PORT` | no | Host dashboard port used by Compose |
 | `DASHBOARD_PASSWORD` | no | Dashboard auth |
 | `DASHBOARD_PASSWORDLESS_CIDRS` | no | Passwordless dashboard access for matching IPv4 CIDRs |
 | `DASHBOARD_TRUSTED_PROXY_CIDRS` | no | Proxy CIDRs whose forwarded client IP headers may be trusted |
 | `UNSAFELY_BYPASS_DASHBOARD_AUTH` | no | Dev-only dashboard bypass |
 | `ELEVENLABS_API_KEY` | no | Voice message generation |
+| `APP_CONFIG_DIR` / `APP_PROMPTS_DIR` | no | Production Compose host config/prompt directories; default to `~/.local/share/2b2v/{config,prompts}` |
 
 Key config groups:
 - `dispatcher`: channel debounce and serialization
@@ -204,4 +206,4 @@ Two Compose files:
 - `docker-compose.yml` for production builds and long-lived volumes
 - `docker-compose.dev.yml` for live reload with bind mounts and dev volumes
 
-The production bot waits on Qdrant health before startup.
+The default Compose project is intended for development. Production should be run with an explicit project name, for example `docker compose -p 2b2v-prod --env-file .env.prod -f docker-compose.yml up -d --build`, so production containers and volumes are independent. Production config and prompts are bind-mounted from `~/.local/share/2b2v/{config,prompts}` by default and remain watched by the app. The production bot waits on Qdrant health before startup and runs the built image without Bun watch.

@@ -96,8 +96,8 @@ promptCaching:
 # Native reply/tool loop runtime limits
 replyLoop:
   maxToolCalls: 16           # Max tool calls allowed in one response run
-  wallClockTimeoutMs: 60000  # Hard timeout per response run (milliseconds)
-  llmOutputTimeoutMs: 30000  # Timeout for a single LLM turn (milliseconds); on timeout request fails fast
+  wallClockTimeoutMs: 240000 # Hard timeout per response run (milliseconds)
+  llmOutputTimeoutMs: 60000  # Timeout for a single LLM turn (milliseconds); retried up to 3 total attempts
 
 # ElevenLabs text-to-speech configuration (requires ELEVENLABS_API_KEY env var)
 # When enabled, the bot can send voice messages as audio attachments
