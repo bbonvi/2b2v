@@ -1,4 +1,7 @@
-import type { DispatcherConfig } from "../config/types";
+import type { TriggerResult } from "../agent/triggers.ts";
+import type { DispatcherConfig, TriggerConfig } from "../config/types";
+
+export type DispatchTrigger = NonNullable<TriggerResult>;
 
 /** A pending message waiting to be dispatched. */
 export interface PendingMessage {
@@ -8,8 +11,15 @@ export interface PendingMessage {
   message: unknown;
   /** Date.now() when enqueue() fired. */
   receivedAt: number;
-  /** Whether the bot is mentioned in this message. */
-  isMention: boolean;
+  /** Discord author ID. */
+  authorId: string;
+  /** Trigger result for this individual message, if any. */
+  triggerResult: TriggerResult;
+}
+
+export interface SelectedDispatchTrigger {
+  result: DispatchTrigger;
+  message: PendingMessage;
 }
 
 export interface DispatchOutcome {
@@ -21,26 +31,53 @@ export interface DispatchOutcome {
 }
 
 /** Handler function that the dispatcher calls with accumulated messages. */
-export type DispatchHandler = (messages: PendingMessage[]) => Promise<DispatchOutcome | undefined>;
+export type DispatchHandler = (
+  messages: PendingMessage[],
+  trigger: SelectedDispatchTrigger | null,
+) => Promise<DispatchOutcome | undefined>;
+
+export interface EnqueueOptions {
+  authorId: string;
+  triggerResult: TriggerResult;
+}
 
 const MAX_SUPPRESSED_IDS = 1000;
 
 interface ChannelState {
   pending: PendingMessage[];
   debounceTimer: ReturnType<typeof setTimeout> | null;
-  /** Whether the current debounce was set for a mention (shorter delay). */
-  debounceIsMention: boolean;
   running: boolean;
   queued: PendingMessage[];
   suppressedIds: Set<string>;
   suppressedOrder: string[];
+  typingByUser: Map<string, number>;
 }
 
 export interface ChannelDispatcher {
   /** Enqueue a message for processing. Returns immediately. */
-  enqueue(message: unknown, isMention: boolean): void;
+  enqueue(message: unknown, options: EnqueueOptions): void;
+  /** Record a typing start event for a user in a channel. */
+  recordTyping(channelId: string, userId: string): void;
   /** Shut down all timers and pending state. */
   dispose(): void;
+}
+
+export function selectDispatchTrigger(messages: readonly PendingMessage[]): SelectedDispatchTrigger | null {
+  let selected: SelectedDispatchTrigger | null = null;
+  for (const message of messages) {
+    if (message.triggerResult === null) continue;
+    if (
+      selected === null ||
+      triggerPriority(message.triggerResult) > triggerPriority(selected.result) ||
+      (
+        triggerPriority(message.triggerResult) === triggerPriority(selected.result) &&
+        message.receivedAt >= selected.message.receivedAt
+      )
+    ) {
+      selected = { result: message.triggerResult, message };
+    }
+  }
+  return selected;
 }
 
 /**
@@ -50,9 +87,10 @@ export interface ChannelDispatcher {
  */
 export function createChannelDispatcher(opts: {
   config: DispatcherConfig;
+  triggers: TriggerConfig;
   handler: DispatchHandler;
 }): ChannelDispatcher {
-  const { config, handler } = opts;
+  const { config, triggers, handler } = opts;
   const channels = new Map<string, ChannelState>();
 
   function getChannelId(message: unknown): string {
@@ -71,19 +109,54 @@ export function createChannelDispatcher(opts: {
       state = {
         pending: [],
         debounceTimer: null,
-        debounceIsMention: false,
         running: false,
         queued: [],
         suppressedIds: new Set<string>(),
         suppressedOrder: [],
+        typingByUser: new Map<string, number>(),
       };
       channels.set(channelId, state);
     }
     return state;
   }
 
-  function getDebounceMs(isMention: boolean): number {
-    return isMention ? config.mentionDebounceMs : config.defaultDebounceMs;
+  function getDebounceMs(trigger: SelectedDispatchTrigger | null): number {
+    if (trigger?.result.reason === "mention") return Math.max(0, config.mentionDebounceMs);
+    if (trigger?.result.reason === "keyword") return Math.max(0, triggers.keywordDebounceMs);
+    return Math.max(0, config.defaultDebounceMs);
+  }
+
+  function latestMessageAtForUser(messages: readonly PendingMessage[], userId: string): number {
+    let latest = 0;
+    for (const message of messages) {
+      if (message.authorId === userId) latest = Math.max(latest, message.receivedAt);
+    }
+    return latest;
+  }
+
+  function getTypingWaitMs(
+    state: ChannelState,
+    messages: readonly PendingMessage[],
+    trigger: SelectedDispatchTrigger | null,
+  ): number {
+    if (trigger?.result.reason !== "keyword") return 0;
+    if (triggers.typingIdleMs <= 0 || triggers.typingMaxWaitMs <= 0) return 0;
+
+    const userId = trigger.message.authorId;
+    const lastTypingAt = state.typingByUser.get(userId);
+    if (lastTypingAt === undefined) return 0;
+
+    const latestMessageAt = latestMessageAtForUser(messages, userId);
+    if (lastTypingAt <= latestMessageAt) {
+      state.typingByUser.delete(userId);
+      return 0;
+    }
+
+    const now = Date.now();
+    const idleReadyAt = lastTypingAt + triggers.typingIdleMs;
+    const maxReadyAt = trigger.message.receivedAt + triggers.typingMaxWaitMs;
+    const waitUntil = Math.min(idleReadyAt, maxReadyAt);
+    return Math.max(0, waitUntil - now);
   }
 
   function rememberSuppressedId(state: ChannelState, id: string): void {
@@ -118,13 +191,20 @@ export function createChannelDispatcher(opts: {
       return;
     }
 
+    const trigger = selectDispatchTrigger(state.pending);
+    const typingWaitMs = getTypingWaitMs(state, state.pending, trigger);
+    if (typingWaitMs > 0) {
+      state.debounceTimer = setTimeout(() => fireDebounce(channelId), typingWaitMs);
+      return;
+    }
+
     // Start handler with current pending batch
     const batch = state.pending;
     state.pending = [];
     state.running = true;
 
     let coveredMessageIds: string[] = [];
-    void handler(batch)
+    void handler(batch, trigger)
       .then((result) => {
         coveredMessageIds = result?.coveredMessageIds ?? [];
       })
@@ -139,17 +219,16 @@ export function createChannelDispatcher(opts: {
           // Messages arrived during handler execution, start new debounce cycle
           state.pending = state.queued;
           state.queued = [];
-          const hasMention = state.pending.some((m) => m.isMention);
-          state.debounceIsMention = hasMention;
+          const nextTrigger = selectDispatchTrigger(state.pending);
           state.debounceTimer = setTimeout(
             () => fireDebounce(channelId),
-            getDebounceMs(hasMention),
+            getDebounceMs(nextTrigger),
           );
         }
       });
   }
 
-  function enqueue(message: unknown, isMention: boolean): void {
+  function enqueue(message: unknown, options: EnqueueOptions): void {
     const channelId = getChannelId(message);
     const state = getOrCreateState(channelId);
     const messageId = getMessageId(message);
@@ -161,32 +240,37 @@ export function createChannelDispatcher(opts: {
       id: messageId,
       message,
       receivedAt: Date.now(),
-      isMention,
+      authorId: options.authorId,
+      triggerResult: options.triggerResult,
     };
 
     state.pending.push(pending);
-
-    // If mention arrives and current timer is for non-mention, shorten debounce
-    if (isMention && !state.debounceIsMention && state.debounceTimer !== null) {
-      clearTimeout(state.debounceTimer);
-      state.debounceIsMention = true;
-      state.debounceTimer = setTimeout(
-        () => fireDebounce(channelId),
-        getDebounceMs(true),
-      );
-      return;
-    }
+    state.typingByUser.delete(options.authorId);
 
     // Reset debounce timer
     if (state.debounceTimer !== null) {
       clearTimeout(state.debounceTimer);
     }
 
-    state.debounceIsMention = isMention || state.debounceIsMention;
+    const trigger = selectDispatchTrigger(state.pending);
     state.debounceTimer = setTimeout(
       () => fireDebounce(channelId),
-      getDebounceMs(state.debounceIsMention),
+      getDebounceMs(trigger),
     );
+  }
+
+  function recordTyping(channelId: string, userId: string): void {
+    const state = channels.get(channelId);
+    if (state === undefined) return;
+    const messages = [...state.pending, ...state.queued];
+    const trigger = selectDispatchTrigger(messages);
+    if (trigger?.result.reason !== "keyword") return;
+    if (trigger.message.authorId !== userId) return;
+
+    const observedAt = Date.now();
+    const latestMessageAt = latestMessageAtForUser(messages, userId);
+    if (observedAt <= latestMessageAt) return;
+    state.typingByUser.set(userId, observedAt);
   }
 
   function dispose(): void {
@@ -199,5 +283,14 @@ export function createChannelDispatcher(opts: {
     channels.clear();
   }
 
-  return { enqueue, dispose };
+  return { enqueue, recordTyping, dispose };
+}
+
+function triggerPriority(trigger: DispatchTrigger): number {
+  switch (trigger.reason) {
+    case "scheduled": return 4;
+    case "mention": return 3;
+    case "keyword": return 2;
+    case "random": return 1;
+  }
 }

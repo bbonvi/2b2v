@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
-import { createChannelDispatcher, type PendingMessage, type DispatchHandler } from "./channel-dispatcher";
-import type { DispatcherConfig } from "../config/types";
+import { createChannelDispatcher, type PendingMessage, type DispatchHandler, type ChannelDispatcher } from "./channel-dispatcher";
+import type { TriggerResult } from "../agent/triggers.ts";
+import type { DispatcherConfig, TriggerConfig } from "../config/types";
 
 function makeConfig(overrides: Partial<DispatcherConfig> = {}): DispatcherConfig {
   return {
@@ -11,10 +12,31 @@ function makeConfig(overrides: Partial<DispatcherConfig> = {}): DispatcherConfig
   };
 }
 
+function makeTriggers(overrides: Partial<TriggerConfig> = {}): TriggerConfig {
+  return {
+    mention: true,
+    keywords: [],
+    randomChance: 0,
+    keywordDebounceMs: 80,
+    typingIdleMs: 50,
+    typingMaxWaitMs: 500,
+    ...overrides,
+  };
+}
+
 let messageCounter = 0;
 function makeMessage(channelId: string, id?: string): unknown {
   messageCounter += 1;
   return { channelId, id: id ?? `m-${messageCounter}` };
+}
+
+function enqueue(
+  dispatcher: ChannelDispatcher,
+  message: unknown,
+  triggerResult: TriggerResult = null,
+  authorId = "user-1",
+): void {
+  dispatcher.enqueue(message, { authorId, triggerResult });
 }
 
 function delay(ms: number): Promise<void> {
@@ -35,13 +57,13 @@ describe("createChannelDispatcher", () => {
     };
 
     const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 20 });
-    const dispatcher = createChannelDispatcher({ config, handler });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers(), handler });
 
-    dispatcher.enqueue(makeMessage("ch-1", "m-1"), true);
+    enqueue(dispatcher, makeMessage("ch-1", "m-1"), { reason: "mention" });
     await delay(30); // first handler starts
 
     // Arrives while first handler is running, should be queued then suppressed.
-    dispatcher.enqueue(makeMessage("ch-1", "m-2"), true);
+    enqueue(dispatcher, makeMessage("ch-1", "m-2"), { reason: "mention" });
 
     await delay(160);
 
@@ -58,13 +80,13 @@ describe("createChannelDispatcher", () => {
     };
 
     const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 20 });
-    const dispatcher = createChannelDispatcher({ config, handler });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers(), handler });
 
-    dispatcher.enqueue(makeMessage("ch-1", "m-1"), true);
+    enqueue(dispatcher, makeMessage("ch-1", "m-1"), { reason: "mention" });
     await delay(60);
 
     // Simulates delayed enqueue (e.g., slower upstream work before dispatcher enqueue).
-    dispatcher.enqueue(makeMessage("ch-1", "m-late"), true);
+    enqueue(dispatcher, makeMessage("ch-1", "m-late"), { reason: "mention" });
     await delay(60);
 
     expect(callCount).toBe(1);
@@ -75,10 +97,10 @@ describe("createChannelDispatcher", () => {
     const batches: PendingMessage[][] = [];
     const handler: DispatchHandler = (msgs) => { batches.push([...msgs]); return Promise.resolve(undefined); };
 
-    const dispatcher = createChannelDispatcher({ config: makeConfig(), handler });
+    const dispatcher = createChannelDispatcher({ config: makeConfig(), triggers: makeTriggers(), handler });
 
-    dispatcher.enqueue(makeMessage("ch-1"), false);
-    dispatcher.enqueue(makeMessage("ch-1"), false);
+    enqueue(dispatcher, makeMessage("ch-1"));
+    enqueue(dispatcher, makeMessage("ch-1"));
 
     // Wait for debounce to fire
     await delay(150);
@@ -94,20 +116,110 @@ describe("createChannelDispatcher", () => {
     const handler: DispatchHandler = (msgs) => { batches.push([...msgs]); return Promise.resolve(undefined); };
 
     const config = makeConfig({ mentionDebounceMs: 30, defaultDebounceMs: 200 });
-    const dispatcher = createChannelDispatcher({ config, handler });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers(), handler });
 
     // First message starts default debounce
-    dispatcher.enqueue(makeMessage("ch-1"), false);
+    enqueue(dispatcher, makeMessage("ch-1"));
 
     // Mention arrives shortly after, should shorten debounce
     await delay(10);
-    dispatcher.enqueue(makeMessage("ch-1"), true);
+    enqueue(dispatcher, makeMessage("ch-1"), { reason: "mention" });
 
     // After mention debounce but before default debounce
     await delay(50);
 
     expect(batches).toHaveLength(1);
     expect(batches[0]).toHaveLength(2);
+
+    dispatcher.dispose();
+  });
+
+  test("passes keyword trigger from earlier message when latest batch message is untriggered", async () => {
+    const calls: Array<{ ids: string[]; trigger: TriggerResult }> = [];
+    const handler: DispatchHandler = (msgs, trigger) => {
+      calls.push({ ids: msgs.map((m) => m.id), trigger: trigger?.result ?? null });
+      return Promise.resolve(undefined);
+    };
+
+    const config = makeConfig({ defaultDebounceMs: 200 });
+    const triggers = makeTriggers({ keywordDebounceMs: 20 });
+    const dispatcher = createChannelDispatcher({ config, triggers, handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-key"), { reason: "keyword", keyword: "туби" }, "user-1");
+    enqueue(dispatcher, makeMessage("ch-1", "m-followup"), null, "user-1");
+
+    await delay(70);
+
+    expect(calls).toEqual([
+      { ids: ["m-key", "m-followup"], trigger: { reason: "keyword", keyword: "туби" } },
+    ]);
+
+    dispatcher.dispose();
+  });
+
+  test("waits for keyword triggering user to stop typing", async () => {
+    let callCount = 0;
+    const handler: DispatchHandler = () => {
+      callCount++;
+      return Promise.resolve(undefined);
+    };
+
+    const config = makeConfig({ defaultDebounceMs: 200 });
+    const triggers = makeTriggers({ keywordDebounceMs: 20, typingIdleMs: 50, typingMaxWaitMs: 200 });
+    const dispatcher = createChannelDispatcher({ config, triggers, handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-key"), { reason: "keyword", keyword: "туби" }, "user-1");
+    await delay(5);
+    dispatcher.recordTyping("ch-1", "user-1");
+
+    await delay(35);
+    expect(callCount).toBe(0);
+
+    await delay(60);
+    expect(callCount).toBe(1);
+
+    dispatcher.dispose();
+  });
+
+  test("message from triggering user clears typing wait until typing starts again", async () => {
+    let callCount = 0;
+    const handler: DispatchHandler = () => {
+      callCount++;
+      return Promise.resolve(undefined);
+    };
+
+    const config = makeConfig({ defaultDebounceMs: 200 });
+    const triggers = makeTriggers({ keywordDebounceMs: 20, typingIdleMs: 80, typingMaxWaitMs: 300 });
+    const dispatcher = createChannelDispatcher({ config, triggers, handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-key"), { reason: "keyword", keyword: "туби" }, "user-1");
+    await delay(5);
+    dispatcher.recordTyping("ch-1", "user-1");
+    await delay(5);
+    enqueue(dispatcher, makeMessage("ch-1", "m-followup"), null, "user-1");
+
+    await delay(50);
+    expect(callCount).toBe(1);
+
+    dispatcher.dispose();
+  });
+
+  test("typing by other users does not delay keyword trigger", async () => {
+    let callCount = 0;
+    const handler: DispatchHandler = () => {
+      callCount++;
+      return Promise.resolve(undefined);
+    };
+
+    const config = makeConfig({ defaultDebounceMs: 200 });
+    const triggers = makeTriggers({ keywordDebounceMs: 20, typingIdleMs: 80, typingMaxWaitMs: 300 });
+    const dispatcher = createChannelDispatcher({ config, triggers, handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-key"), { reason: "keyword", keyword: "туби" }, "user-1");
+    dispatcher.recordTyping("ch-1", "user-2");
+
+    await delay(50);
+    expect(callCount).toBe(1);
 
     dispatcher.dispose();
   });
@@ -127,16 +239,16 @@ describe("createChannelDispatcher", () => {
     };
 
     const config = makeConfig({ defaultDebounceMs: 20 });
-    const dispatcher = createChannelDispatcher({ config, handler });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers(), handler });
 
     // First message
-    dispatcher.enqueue(makeMessage("ch-1"), false);
+    enqueue(dispatcher, makeMessage("ch-1"));
 
     // Wait for debounce to fire and handler to start
     await delay(40);
 
     // Second message arrives during handler execution
-    dispatcher.enqueue(makeMessage("ch-1"), false);
+    enqueue(dispatcher, makeMessage("ch-1"));
 
     // Wait for everything to complete
     await delay(200);
@@ -159,10 +271,10 @@ describe("createChannelDispatcher", () => {
     };
 
     const config = makeConfig({ defaultDebounceMs: 30 });
-    const dispatcher = createChannelDispatcher({ config, handler });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers(), handler });
 
-    dispatcher.enqueue(makeMessage("ch-1"), false);
-    dispatcher.enqueue(makeMessage("ch-2"), false);
+    enqueue(dispatcher, makeMessage("ch-1"));
+    enqueue(dispatcher, makeMessage("ch-2"));
 
     await delay(60);
 
@@ -185,17 +297,17 @@ describe("createChannelDispatcher", () => {
     };
 
     const config = makeConfig({ defaultDebounceMs: 20 });
-    const dispatcher = createChannelDispatcher({ config, handler });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers(), handler });
 
     // First message triggers handler
-    dispatcher.enqueue(makeMessage("ch-1"), false);
+    enqueue(dispatcher, makeMessage("ch-1"));
 
     // Wait for debounce, handler starts
     await delay(30);
 
     // These arrive during handler execution
-    dispatcher.enqueue(makeMessage("ch-1"), false);
-    dispatcher.enqueue(makeMessage("ch-1"), false);
+    enqueue(dispatcher, makeMessage("ch-1"));
+    enqueue(dispatcher, makeMessage("ch-1"));
 
     // Wait for first handler + debounce + second handler
     await delay(200);
@@ -211,9 +323,9 @@ describe("createChannelDispatcher", () => {
     const batches: PendingMessage[][] = [];
     const handler: DispatchHandler = (msgs) => { batches.push([...msgs]); return Promise.resolve(undefined); };
 
-    const dispatcher = createChannelDispatcher({ config: makeConfig(), handler });
+    const dispatcher = createChannelDispatcher({ config: makeConfig(), triggers: makeTriggers(), handler });
 
-    dispatcher.enqueue(makeMessage("ch-1"), false);
+    enqueue(dispatcher, makeMessage("ch-1"));
     dispatcher.dispose();
 
     await delay(150);
@@ -230,15 +342,15 @@ describe("createChannelDispatcher", () => {
     };
 
     const config = makeConfig({ defaultDebounceMs: 20 });
-    const dispatcher = createChannelDispatcher({ config, handler });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers(), handler });
 
     // First message - handler will throw
-    dispatcher.enqueue(makeMessage("ch-1"), false);
+    enqueue(dispatcher, makeMessage("ch-1"));
 
     await delay(40);
 
     // Second message - should still work
-    dispatcher.enqueue(makeMessage("ch-1"), false);
+    enqueue(dispatcher, makeMessage("ch-1"));
 
     await delay(60);
 

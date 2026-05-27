@@ -32,6 +32,9 @@ const DEFAULT_TRIGGER: TriggerConfig = {
   mention: true,
   keywords: [],
   randomChance: 0,
+  keywordDebounceMs: 2500,
+  typingIdleMs: 10000,
+  typingMaxWaitMs: 15000,
 };
 
 const DEFAULT_TRIM: TrimConfig = {
@@ -567,6 +570,9 @@ export function loadGlobalConfig(
       mention: yaml.triggers?.mention ?? DEFAULT_TRIGGER.mention,
       keywords: yaml.triggers?.keywords ?? [...DEFAULT_TRIGGER.keywords],
       randomChance: yaml.triggers?.randomChance ?? DEFAULT_TRIGGER.randomChance,
+      keywordDebounceMs: yaml.triggers?.keywordDebounceMs ?? DEFAULT_TRIGGER.keywordDebounceMs,
+      typingIdleMs: yaml.triggers?.typingIdleMs ?? DEFAULT_TRIGGER.typingIdleMs,
+      typingMaxWaitMs: yaml.triggers?.typingMaxWaitMs ?? DEFAULT_TRIGGER.typingMaxWaitMs,
     },
     defaultTriggerInstructions: {
       mention: yaml.triggerInstructions?.mention,
@@ -648,6 +654,9 @@ export function resolveGuildConfig(
       mention: partial.triggers?.mention ?? global.defaultTriggers.mention,
       keywords: partial.triggers?.keywords ?? [...global.defaultTriggers.keywords],
       randomChance: partial.triggers?.randomChance ?? global.defaultTriggers.randomChance,
+      keywordDebounceMs: partial.triggers?.keywordDebounceMs ?? global.defaultTriggers.keywordDebounceMs,
+      typingIdleMs: partial.triggers?.typingIdleMs ?? global.defaultTriggers.typingIdleMs,
+      typingMaxWaitMs: partial.triggers?.typingMaxWaitMs ?? global.defaultTriggers.typingMaxWaitMs,
     },
     triggerInstructions: {
       mention: partial.triggerInstructions?.mention ?? global.defaultTriggerInstructions.mention,

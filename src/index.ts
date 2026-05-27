@@ -14,8 +14,9 @@ import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { handleMessage, type IncomingMessage, type HandlerDeps, type MessageSender } from "./agent/handler";
+import { shouldRespond, type TriggerResult } from "./agent/triggers";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
-import { createChannelDispatcher, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
+import { createChannelDispatcher, type ChannelDispatcher, type DispatchOutcome, type PendingMessage, type SelectedDispatchTrigger } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
 import { getContextHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory, deleteRecentMessages } from "./db/message-repository";
@@ -59,7 +60,7 @@ import { buildBackgroundStreamOptions } from "./llm/client";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch, unlinkSync } from "fs";
 import type { Database } from "./db/database";
-import { AttachmentBuilder, MessageFlags, type ChatInputCommandInteraction, type Client, type Guild, type Message, type TextChannel } from "discord.js";
+import { AttachmentBuilder, MessageFlags, type ChatInputCommandInteraction, type Client, type Guild, type Message, type TextChannel, type Typing } from "discord.js";
 
 const pkg = await Bun.file(new URL("../package.json", import.meta.url).pathname).json() as { version?: string };
 const version: string = pkg.version ?? "0.0.0";
@@ -920,19 +921,55 @@ function getOrCreateDispatcher(guildId: string): ChannelDispatcher {
   const config = getGuildConfig(guildId);
   dispatcher = createChannelDispatcher({
     config: config.dispatcher,
-    handler: async (batch): Promise<DispatchOutcome> => {
-      // The dispatcher fires with accumulated messages. Process the last one.
-      const last = batch[batch.length - 1];
-      if (last === undefined) return { coveredMessageIds: [] };
-      return processTriggeredMessage(last.message as Message);
+    triggers: config.triggers,
+    handler: async (batch, trigger): Promise<DispatchOutcome> => {
+      if (trigger === null) return { coveredMessageIds: [] };
+      const selected = selectDispatchMessage(batch, trigger);
+      if (selected === undefined) return { coveredMessageIds: [] };
+      return processTriggeredMessage(selected.message as Message, trigger.result);
     },
   });
   dispatchers.set(guildId, dispatcher);
   return dispatcher;
 }
 
+function selectDispatchMessage(
+  batch: readonly PendingMessage[],
+  trigger: SelectedDispatchTrigger,
+): PendingMessage | undefined {
+  if (trigger.result.reason === "keyword") {
+    for (let i = batch.length - 1; i >= 0; i--) {
+      const message = batch[i];
+      if (message !== undefined && message.authorId === trigger.message.authorId) return message;
+    }
+  }
+  return batch[batch.length - 1];
+}
+
+function evaluateMessageTrigger(message: Message, guildConfig: GuildConfig): TriggerResult {
+  return shouldRespond(
+    {
+      content: message.content,
+      authorId: message.author.id,
+      botUserId: client.user?.id ?? "",
+      mentionedUserIds: [...message.mentions.users.keys()],
+    },
+    guildConfig.triggers,
+  );
+}
+
+function sendTypingForMessage(message: Message): void {
+  const channel = message.channel;
+  if ("sendTyping" in channel && typeof channel.sendTyping === "function") {
+    void channel.sendTyping().catch(() => {});
+  }
+}
+
 /** Process a triggered message through the full handler pipeline. */
-async function processTriggeredMessage(message: Message): Promise<DispatchOutcome> {
+async function processTriggeredMessage(
+  message: Message,
+  triggerOverride?: NonNullable<TriggerResult>,
+): Promise<DispatchOutcome> {
   if (message.guild === null || message.guildId === null) return { coveredMessageIds: [] };
   const guild = message.guild;
 
@@ -1233,6 +1270,7 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
       requestLog,
       ttsEnabled,
       generateSpeech,
+      triggerOverride,
       triggerInstructions: guildConfig.triggerInstructions,
       afterReply: async (memoryRequest) => {
         const memoryLog = new RequestLog(guildId, channelId);
@@ -1315,7 +1353,22 @@ async function processTriggeredMessage(message: Message): Promise<DispatchOutcom
   }
 }
 
-// --- 22. messageCreate handler ---
+// --- 22. typingStart handler ---
+client.on("typingStart", (typing: Typing) => {
+  if (!typing.inGuild()) return;
+  if (typing.user.bot) return;
+
+  const guildId = typing.guild.id;
+  const guildConfig = getGuildConfig(guildId);
+  if (!guildConfig.dispatcher.enabled) return;
+
+  getOrCreateDispatcher(guildId).recordTyping(
+    typing.channel.id,
+    typing.user.id,
+  );
+});
+
+// --- 23. messageCreate handler ---
 client.on("messageCreate", (message: Message) => void (async () => {
   try {
     // Ignore bots (including self)
@@ -1421,8 +1474,12 @@ client.on("messageCreate", (message: Message) => void (async () => {
 
     // Dispatch to handler: use channel dispatcher if enabled, otherwise call directly
     if (guildConfig.dispatcher.enabled) {
-      const isMention = message.mentions.has(client.user?.id ?? "");
-      getOrCreateDispatcher(guildId).enqueue(message, isMention);
+      const triggerResult = evaluateMessageTrigger(message, guildConfig);
+      if (triggerResult?.reason === "keyword") sendTypingForMessage(message);
+      getOrCreateDispatcher(guildId).enqueue(message, {
+        authorId: message.author.id,
+        triggerResult,
+      });
     } else {
       await processTriggeredMessage(message);
     }
@@ -1435,7 +1492,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
   }
 })());
 
-// --- 23. messageDelete handler ---
+// --- 24. messageDelete handler ---
 client.on("messageDelete", (message) => void (async () => {
   try {
     // Skip partials and DMs

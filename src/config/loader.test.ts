@@ -15,6 +15,18 @@ function teardown() {
   rmSync(TEST_DIR, { recursive: true, force: true });
 }
 
+function defaultTriggerConfig(overrides: Partial<GuildConfig["triggers"]> = {}): GuildConfig["triggers"] {
+  return {
+    mention: true,
+    keywords: [],
+    randomChance: 0,
+    keywordDebounceMs: 2500,
+    typingIdleMs: 10000,
+    typingMaxWaitMs: 15000,
+    ...overrides,
+  };
+}
+
 describe("loadMainConfig", () => {
   beforeEach(setup);
   afterEach(teardown);
@@ -43,11 +55,14 @@ describe("loadMainConfig", () => {
 
   test("parses triggers config", () => {
     const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "triggers:\n  mention: false\n  keywords: [hello]\n  randomChance: 0.1\n");
+    writeFileSync(file, "triggers:\n  mention: false\n  keywords: [hello]\n  randomChance: 0.1\n  keywordDebounceMs: 3000\n  typingIdleMs: 2000\n  typingMaxWaitMs: 12000\n");
     const cfg = loadMainConfig(file);
     expect(cfg.triggers?.mention).toBe(false);
     expect(cfg.triggers?.keywords).toEqual(["hello"]);
     expect(cfg.triggers?.randomChance).toBe(0.1);
+    expect(cfg.triggers?.keywordDebounceMs).toBe(3000);
+    expect(cfg.triggers?.typingIdleMs).toBe(2000);
+    expect(cfg.triggers?.typingMaxWaitMs).toBe(12000);
   });
 
   test("returns empty object for empty file", () => {
@@ -97,7 +112,7 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultThinkingLevel).toBeUndefined();
     expect(cfg.defaultTimezone).toBe("UTC");
     expect(cfg.defaultTrim).toEqual({ trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 });
-    expect(cfg.defaultTriggers).toEqual({ mention: true, keywords: [], randomChance: 0 });
+    expect(cfg.defaultTriggers).toEqual(defaultTriggerConfig());
     expect(cfg.defaultImageMaxDimension).toBe(768);
     expect(cfg.defaultMergeMessageGapSeconds).toBe(120);
     expect(cfg.defaultImageReadMaxPerCall).toBe(10);
@@ -652,7 +667,7 @@ describe("resolveGuildConfig", () => {
   test("inherits trigger defaults from global config YAML", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
-    writeFileSync(cfgFile, "triggers:\n  keywords: [hey, bot]\n  randomChance: 0.03\n");
+    writeFileSync(cfgFile, "triggers:\n  keywords: [hey, bot]\n  randomChance: 0.03\n  keywordDebounceMs: 3200\n  typingIdleMs: 2100\n  typingMaxWaitMs: 13000\n");
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {
       guildId: "60",
@@ -661,6 +676,9 @@ describe("resolveGuildConfig", () => {
     const resolved = resolveGuildConfig(global, partial);
     expect(resolved.triggers.keywords).toEqual(["hey", "bot"]);
     expect(resolved.triggers.randomChance).toBe(0.03);
+    expect(resolved.triggers.keywordDebounceMs).toBe(3200);
+    expect(resolved.triggers.typingIdleMs).toBe(2100);
+    expect(resolved.triggers.typingMaxWaitMs).toBe(13000);
     expect(resolved.triggers.mention).toBe(true); // default
   });
 
@@ -895,7 +913,7 @@ describe("saveGuildConfig", () => {
     const resolved: GuildConfig = {
       guildId: "50",
       slug: "save",
-      triggers: { mention: true, keywords: ["hey"], randomChance: 0.1 },
+      triggers: defaultTriggerConfig({ keywords: ["hey"], randomChance: 0.1 }),
       triggerInstructions: {},
       model: "custom/m",
       thinkingLevel: "high",
@@ -934,7 +952,7 @@ describe("saveGuildConfig", () => {
     const resolved: GuildConfig = {
       guildId: "51",
       slug: "instr",
-      triggers: { mention: true, keywords: [], randomChance: 0 },
+      triggers: defaultTriggerConfig(),
       triggerInstructions: {},
       thinkingLevel: "medium",
       timezone: "UTC",
@@ -968,7 +986,7 @@ describe("saveGuildConfig", () => {
     const resolved = {
       guildId: "52",
       slug: "prompt-caching",
-      triggers: { mention: true, keywords: [], randomChance: 0 },
+      triggers: defaultTriggerConfig(),
       triggerInstructions: {},
       thinkingLevel: "medium",
       timezone: "UTC",
@@ -1289,7 +1307,7 @@ describe("saveGuildConfig bashTool", () => {
     const resolved: GuildConfig = {
       guildId: "60",
       slug: "bash",
-      triggers: { mention: true, keywords: [], randomChance: 0 },
+      triggers: defaultTriggerConfig(),
       triggerInstructions: {},
       thinkingLevel: "medium",
       timezone: "UTC",
@@ -1330,7 +1348,7 @@ describe("saveGuildConfig bashTool", () => {
     const resolved: GuildConfig = {
       guildId: "61",
       slug: "no-bash",
-      triggers: { mention: true, keywords: [], randomChance: 0 },
+      triggers: defaultTriggerConfig(),
       triggerInstructions: {},
       thinkingLevel: "medium",
       timezone: "UTC",
@@ -1548,7 +1566,7 @@ describe("saveGuildConfig emotes", () => {
     const resolved: GuildConfig = {
       guildId: "80",
       slug: "emotes",
-      triggers: { mention: true, keywords: [], randomChance: 0 },
+      triggers: defaultTriggerConfig(),
       triggerInstructions: {},
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
@@ -1586,7 +1604,7 @@ describe("saveGuildConfig triggerInstructions", () => {
     const resolved: GuildConfig = {
       guildId: "70",
       slug: "trigger-instr",
-      triggers: { mention: true, keywords: [], randomChance: 0 },
+      triggers: defaultTriggerConfig(),
       triggerInstructions: {
         random: "Be playful.",
         mention: "Be helpful.",
@@ -1623,7 +1641,7 @@ describe("saveGuildConfig triggerInstructions", () => {
     const resolved: GuildConfig = {
       guildId: "71",
       slug: "no-trigger-instr",
-      triggers: { mention: true, keywords: [], randomChance: 0 },
+      triggers: defaultTriggerConfig(),
       triggerInstructions: {},
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },

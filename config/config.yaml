@@ -95,6 +95,9 @@ triggers:
         - "тубишка"
         - "туби"
     randomChance: 0.001 # 0–1 probability of responding to any message
+    keywordDebounceMs: 3000 # Wait this long after a keyword trigger before replying
+    typingIdleMs: 10000 # Treat typingStart from the triggering user as active for this long
+    typingMaxWaitMs: 40000 # Hard cap for typing-aware keyword waits
 
 # Emote/emoji settings
 emotes:

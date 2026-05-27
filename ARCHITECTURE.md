@@ -30,11 +30,12 @@ Discord messageCreate
   ├─ translateInbound(raw, resolvers)
   ├─ store message in SQLite
   ├─ enqueue message embedding for Qdrant
-  └─ channelDispatcher.enqueue(message, isMention)
+  └─ channelDispatcher.enqueue(message, triggerResult)
        ├─ debounce per channel
+       ├─ wait for keyword-triggering user typing to go idle
        ├─ serialize one handler run per channel
        └─ handleMessage(messages, deps)
-            ├─ shouldRespond(mention | keyword | random | forced schedule)
+            ├─ use dispatcher trigger or shouldRespond(mention | keyword | random | forced schedule)
             ├─ assemble prompt context
             ├─ start Discord typing immediately
             ├─ call OpenRouter with native tools
@@ -43,7 +44,7 @@ Discord messageCreate
             └─ run background memory extraction
 ```
 
-`src/discord/channel-dispatcher.ts` owns debounce and channel-level serialization. Mention triggers use a shorter debounce than keyword/random triggers. Messages that arrive while a handler is running wait for the next cycle; there is no mid-loop follow-up injection.
+`src/discord/channel-dispatcher.ts` owns debounce and channel-level serialization. Mention triggers use a shorter debounce, keyword triggers use `triggers.keywordDebounceMs`, and random/untriggered batches use the default dispatcher debounce. A `typingStart` from the keyword-triggering user is treated as active for `triggers.typingIdleMs`, capped by `triggers.typingMaxWaitMs`; Discord does not send a real typing-stop event. Messages that arrive while a handler is running wait for the next cycle; there is no mid-loop follow-up injection.
 
 ## Reply Runtime
 

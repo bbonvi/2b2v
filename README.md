@@ -72,6 +72,9 @@ triggers:
   mention: true
   keywords: [2b, yorha]
   randomChance: 0.02
+  keywordDebounceMs: 2500
+  typingIdleMs: 10000
+  typingMaxWaitMs: 15000
 model: moonshotai/kimi-k2.5
 thinkingLevel: medium
 timezone: UTC

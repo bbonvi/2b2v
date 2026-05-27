@@ -9,7 +9,7 @@ const GLOBAL: GlobalConfig = {
   defaultModelParams: {},
   defaultTimezone: "UTC",
   defaultTrim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
-  defaultTriggers: { mention: true, keywords: [], randomChance: 0 },
+  defaultTriggers: { mention: true, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingMaxWaitMs: 15000 },
   defaultTriggerInstructions: {},
   defaultImageMaxDimension: 768,
   defaultMergeMessageGapSeconds: 120,
@@ -41,7 +41,7 @@ const GLOBAL: GlobalConfig = {
 const GUILD: GuildConfig = {
   guildId: "1",
   slug: "test",
-  triggers: { mention: true, keywords: [], randomChance: 0 },
+  triggers: { mention: true, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingMaxWaitMs: 15000 },
   triggerInstructions: {},
   timezone: "UTC",
   trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },

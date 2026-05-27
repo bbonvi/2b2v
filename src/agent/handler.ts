@@ -86,6 +86,7 @@ export interface HandlerDeps {
   ttsEnabled?: boolean;
   generateSpeech?: (text: string) => Promise<TtsResult>;
   forceTrigger?: boolean;
+  triggerOverride?: NonNullable<TriggerResult>;
   triggerInstructions?: TriggerInstructions;
   completeChat?: ChatCompleteFn;
   afterReply?: (request: MemoryExtractionRequest) => Promise<void>;
@@ -856,7 +857,9 @@ export async function handleMessage(
 ): Promise<HandleResult> {
   let triggerResult: TriggerResult;
 
-  if (deps.forceTrigger === true) {
+  if (deps.triggerOverride !== undefined) {
+    triggerResult = deps.triggerOverride;
+  } else if (deps.forceTrigger === true) {
     triggerResult = { reason: "scheduled" };
   } else {
     const triggerInput: TriggerInput = {
