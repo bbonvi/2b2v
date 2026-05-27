@@ -166,7 +166,10 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         await Promise.all(Array.from({ length: Math.min(CONCURRENCY, results.length) }, () => runBatch()));
       }
 
-      const lines = results.map((r) => formatResult(r, timezone, attachmentMap.get(r.id)));
+      const lines = [
+        formatResultIntro(mode),
+        ...results.map((r) => formatResult(r, timezone, mode === "semantic", attachmentMap.get(r.id))),
+      ];
       return {
         content: [{ type: "text", text: lines.join("\n\n") }],
         details: { count: results.length },
@@ -175,10 +178,17 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
   };
 }
 
-function formatResult(r: MessageSearchResult, timezone: string, attachments?: AttachmentInfo[]): string {
+function formatResultIntro(mode: "semantic" | "literal" | "id"): string {
+  if (mode === "semantic") return "Semantic search results are ranked by similarity; higher scores mean closer matches.";
+  if (mode === "literal") return "Literal search results are exact text matches ordered oldest to newest.";
+  return "Direct message lookup result.";
+}
+
+function formatResult(r: MessageSearchResult, timezone: string, includeScore: boolean, attachments?: AttachmentInfo[]): string {
   const date = formatLocalWallClock(r.createdAt, timezone);
   const replyTag = r.replyToId !== null ? ` (reply to ${r.replyToId})` : "";
-  let line = `[${date}] ${r.authorUsername}${replyTag}: ${r.translatedContent}`;
+  const scoreTag = includeScore ? `[score ${r.score.toFixed(3)}] ` : "";
+  let line = `${scoreTag}[${date}] ${r.authorUsername}${replyTag}: ${r.translatedContent}`;
   if (attachments !== undefined && attachments.length > 0) {
     for (const a of attachments) {
       const sizeStr = formatFileSize(a.size);

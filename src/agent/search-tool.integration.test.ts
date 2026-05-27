@@ -150,15 +150,17 @@ describe("createSearchTool", () => {
     expect(result.details.count).toBe(1);
   });
 
-  test("returns semantic results in chronological reading order", async () => {
-    await insertWithEmbedding("newer", "shared search phrase newer", { createdAt: now + 2_000 });
-    await insertWithEmbedding("older", "shared search phrase older", { createdAt: now + 1_000 });
+  test("returns semantic results in rank order with scores", async () => {
+    await insertWithEmbedding("newer", "cats and dogs exact match", { createdAt: now + 2_000 });
+    await insertWithEmbedding("older", "quantum physics unrelated", { createdAt: now + 1_000 });
 
     const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "shared search phrase", limit: 10 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const result = await tool.execute("tc1", { query: "cats and dogs", limit: 10 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
 
     const text = getResultText(result);
-    expect(text.indexOf("shared search phrase older")).toBeLessThan(text.indexOf("shared search phrase newer"));
+    expect(text).toContain("Semantic search results are ranked by similarity");
+    expect(text).toContain("[score ");
+    expect(text.indexOf("cats and dogs exact match")).toBeLessThan(text.indexOf("quantum physics unrelated"));
   });
 
   test("filters out messages already present in prompt context without exhausting small limits", async () => {
@@ -270,6 +272,8 @@ describe("search mode: literal", () => {
     const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "quick brown", mode: "literal" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
+    expect(text).toContain("Literal search results are exact text matches ordered oldest to newest");
+    expect(text).not.toContain("[score ");
     expect(text).toContain("the quick brown fox");
     expect(result.details.count).toBe(1);
   });

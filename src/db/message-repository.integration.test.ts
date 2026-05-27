@@ -96,16 +96,18 @@ afterAll(async () => {
 
 describe("searchMessages", () => {
   test("returns results ordered by semantic similarity", async () => {
-    await insertWithEmbedding("m1", "cats and dogs playing together");
-    await insertWithEmbedding("m2", "quantum physics lecture notes");
-    await insertWithEmbedding("m3", "puppies and kittens having fun");
+    await insertWithEmbedding("m1", "cats and dogs playing together", { createdAt: now + hour });
+    await insertWithEmbedding("m2", "quantum physics lecture notes", { createdAt: now - hour });
+    await insertWithEmbedding("m3", "puppies and kittens having fun", { createdAt: now });
 
     const queryVec = await embedOne("cats and dogs");
     const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
 
     expect(results.length).toBe(3);
-    if (!results[0]) throw new Error("unreachable");
+    if (!results[0] || !results[1] || !results[2]) throw new Error("unreachable");
     expect(results[0].id).toBe("m1");
+    expect(results[0].score).toBeGreaterThanOrEqual(results[1].score);
+    expect(results[1].score).toBeGreaterThanOrEqual(results[2].score);
   });
 
   test("filters by guild", async () => {

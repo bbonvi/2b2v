@@ -169,11 +169,7 @@ export async function searchMessages(
     });
   }
 
-  return results.sort((a, b) => {
-    const timeDiff = a.createdAt - b.createdAt;
-    if (timeDiff !== 0) return timeDiff;
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-  });
+  return results;
 }
 
 /**
