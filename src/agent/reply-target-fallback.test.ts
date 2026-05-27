@@ -54,7 +54,7 @@ describe("fetchMissingReplyTargets", () => {
     expect(result).toEqual([]);
   });
 
-  test("returns empty when reply target exists in DB", async () => {
+  test("hydrates reply target when it exists in DB", async () => {
     // Pre-insert the target message into DB
     db.raw.prepare(
       `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
@@ -63,7 +63,10 @@ describe("fetchMissingReplyTargets", () => {
 
     const messages = [makeMsg({ id: "2", replyToId: "target-1" })];
     const result = await fetchMissingReplyTargets(baseDeps(), messages);
-    expect(result).toEqual([]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe("target-1");
+    expect(result[0]?.author).toBe("targetuser");
+    expect(result[0]?.content).toBe("translated");
   });
 
   test("fetches missing target from Discord and persists", async () => {
@@ -219,7 +222,7 @@ describe("fetchMissingReplyTargets", () => {
     expect(fetchCount).toBe(1);
   });
 
-  test("does not persist if message already inserted by concurrent fetch", async () => {
+  test("hydrates stored message instead of fetching when already inserted", async () => {
     // Pre-insert the target (simulating INSERT OR IGNORE race)
     db.raw.prepare(
       `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
@@ -236,11 +239,12 @@ describe("fetchMissingReplyTargets", () => {
     });
 
     const messages = [makeMsg({ id: "2", replyToId: "target-1" })];
-    // Should still return the message (using fetched data) even with INSERT OR IGNORE
     const result = await fetchMissingReplyTargets(deps, messages);
 
-    // The DB check happens first, so this should return empty (already in DB)
-    expect(result).toEqual([]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe("target-1");
+    expect(result[0]?.author).toBe("other");
+    expect(result[0]?.content).toBe("other content");
   });
 
   test("embedding enqueue failure does not prevent return", async () => {

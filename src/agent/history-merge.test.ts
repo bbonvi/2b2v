@@ -42,6 +42,7 @@ describe("mergeConsecutiveMessages", () => {
     expect(result).toHaveLength(1);
     expect(result[0]?.content).toBe("content-1 [msg-break] content-2");
     expect(result[0]?.id).toBe("1"); // retains first message's ID
+    expect(result[0]?.mergedMessageIds).toEqual(["1", "2"]);
   });
 
   test("merges three consecutive messages", () => {

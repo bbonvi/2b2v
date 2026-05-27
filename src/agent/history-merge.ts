@@ -29,10 +29,15 @@ function normalizeContent(content: string): string {
   return content.replace(/[\t\n\r]+/g, " ");
 }
 
+function messageIds(message: HistoryMessage): string[] {
+  return message.mergedMessageIds ?? [message.id];
+}
+
 /**
  * Merge consecutive plain messages by the same author within the time threshold.
  * Content is joined with ` [msg-break] ` separator. Original newlines collapsed to spaces.
- * The merged message retains the first message's ID and timestamp.
+ * The merged message retains the first message's ID and timestamp, and keeps
+ * every component message ID so Discord replies to later chunks still resolve.
  * Returns a new array; does not mutate input.
  */
 export function mergeConsecutiveMessages(
@@ -53,6 +58,7 @@ export function mergeConsecutiveMessages(
       current = {
         ...current,
         content: `${current.content} [msg-break] ${normalizeContent(next.content)}`,
+        mergedMessageIds: [...messageIds(current), ...messageIds(next)],
       };
     } else {
       result.push(current);

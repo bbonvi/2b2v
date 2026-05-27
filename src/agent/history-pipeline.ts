@@ -31,6 +31,9 @@ export async function processHistory(
   const normalizedContentMap = new Map<string, string>();
   for (const m of merged) {
     normalizedContentMap.set(m.id, m.content);
+    for (const id of m.mergedMessageIds ?? []) {
+      normalizedContentMap.set(id, m.content);
+    }
   }
   normalizedContentMap.set(latestUserMessage.id, latestUserMessage.content);
 

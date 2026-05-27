@@ -205,6 +205,18 @@ describe("processHistory", () => {
     expect(result.newerText).not.toContain("ReplyMsgID");
   });
 
+  test("latest user reply resolves when target is second message in merged bot row", async () => {
+    const m1 = msg({ id: "bot-1", author: "bot", authorId: "bot-id", isBot: true, content: "first bot chunk", timestamp: 1000 });
+    const m2 = msg({ id: "bot-2", author: "bot", authorId: "bot-id", isBot: true, content: "second bot chunk", timestamp: 2000 });
+    const latest = msg({ id: "user-1", author: "user", authorId: "user-id", content: "replying", timestamp: 3000, replyToId: "bot-2" });
+
+    const result = await processHistory([m1, m2], latest, defaultConfig, deps);
+
+    expect(result.newerText).toContain("[@bot]: first bot chunk [msg-break] second bot chunk");
+    expect(result.newerText).toContain("[@user to @bot]: replying");
+    expect(result.newerText).not.toContain("MissingTarget");
+  });
+
   test("messages split correctly between older and newer with controlled config", async () => {
     // windowSize=2, trimTarget=5 → olderCount=3, complete older chunk=2
     // 5 messages → older gets 2, newer gets 3

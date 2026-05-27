@@ -34,12 +34,87 @@ export interface ReplyFallbackDeps {
   processImage: (url: string, contentType: string, messageId: string) => Promise<void>;
 }
 
+function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMessage[] {
+  if (ids.length === 0) return [];
+
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = deps.db.raw
+    .prepare(
+      `SELECT id, user_id, author_username, translated_content, is_bot, created_at, reply_to_id, is_synthetic, related_thread_id
+       FROM messages
+       WHERE guild_id = ? AND id IN (${placeholders})`
+    )
+    .all(deps.guildId, ...ids) as Array<{
+      id: string;
+      user_id: string;
+      author_username: string;
+      translated_content: string;
+      is_bot: number;
+      created_at: number;
+      reply_to_id: string | null;
+      is_synthetic: number;
+      related_thread_id: string | null;
+    }>;
+
+  if (rows.length === 0) return [];
+
+  const messageIds = rows.map((row) => row.id);
+  const imagePlaceholders = messageIds.map(() => "?").join(",");
+  const imageRows = deps.db.raw
+    .prepare(
+      `SELECT message_id, id, caption
+       FROM images
+       WHERE message_id IN (${imagePlaceholders})
+       ORDER BY id ASC`
+    )
+    .all(...messageIds) as Array<{
+      message_id: string;
+      id: number;
+      caption: string | null;
+    }>;
+
+  const imageMap = new Map<string, Array<{ id: number; caption: string | null }>>();
+  for (const image of imageRows) {
+    const existing = imageMap.get(image.message_id);
+    if (existing !== undefined) {
+      existing.push({ id: image.id, caption: image.caption });
+    } else {
+      imageMap.set(image.message_id, [{ id: image.id, caption: image.caption }]);
+    }
+  }
+
+  const rowMap = new Map(rows.map((row) => [row.id, row]));
+  const messages: HistoryMessage[] = [];
+  for (const id of ids) {
+    const row = rowMap.get(id);
+    if (row === undefined) continue;
+    const images = imageMap.get(row.id) ?? [];
+    messages.push({
+      id: row.id,
+      author: row.author_username,
+      authorId: row.user_id,
+      content: row.translated_content,
+      isBot: row.is_bot === 1,
+      timestamp: row.created_at,
+      replyToId: row.reply_to_id,
+      imageIds: images.map((image) => image.id),
+      captions: images.map((image) => image.caption ?? ""),
+      hasEmbeds: false,
+      isSynthetic: row.is_synthetic === 1,
+      relatedThreadId: row.related_thread_id,
+    });
+  }
+
+  return messages;
+}
+
 /**
  * Fetch missing reply targets from Discord API and persist them.
  *
  * Given a list of history messages, identifies reply_to_ids that are:
  * 1. Not present in the message list itself
- * 2. Not present in the database
+ * 2. Hydrated from the database when already stored
+ * 3. Fetched from Discord when not yet stored
  *
  * For each missing target, fetches from Discord, persists to SQLite,
  * ingests image attachments, and enqueues for embedding.
@@ -52,7 +127,13 @@ export async function fetchMissingReplyTargets(
   messages: HistoryMessage[],
 ): Promise<HistoryMessage[]> {
   // Collect unique reply_to_ids not present in the message list
-  const knownIds = new Set(messages.map((m) => m.id));
+  const knownIds = new Set<string>();
+  for (const m of messages) {
+    knownIds.add(m.id);
+    for (const id of m.mergedMessageIds ?? []) {
+      knownIds.add(id);
+    }
+  }
   const missingIds = new Set<string>();
 
   for (const m of messages) {
@@ -63,22 +144,12 @@ export async function fetchMissingReplyTargets(
 
   if (missingIds.size === 0) return [];
 
-  // Check which are already in DB
-  const toFetch: string[] = [];
-  for (const id of missingIds) {
-    const row = deps.db.raw
-      .prepare("SELECT id FROM messages WHERE id = ? AND guild_id = ?")
-      .get(id, deps.guildId) as { id: string } | null;
-    if (row === null) {
-      toFetch.push(id);
-    }
-  }
-
-  if (toFetch.length === 0) return [];
+  const missingIdList = [...missingIds];
+  const fetched = loadStoredMessages(deps, missingIdList);
+  const foundInDb = new Set(fetched.map((m) => m.id));
+  const toFetch = missingIdList.filter((id) => !foundInDb.has(id));
 
   // Fetch from Discord (sequential to avoid rate limits)
-  const fetched: HistoryMessage[] = [];
-
   for (const msgId of toFetch) {
     let discordMsg: FetchedDiscordMessage | null;
     try {

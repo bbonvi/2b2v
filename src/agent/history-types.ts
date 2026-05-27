@@ -4,6 +4,8 @@ import type { TrimConfig } from "../config/types.ts";
 export interface HistoryMessage {
   /** Discord message snowflake ID. */
   id: string;
+  /** Discord message IDs represented by this formatted row after merge. */
+  mergedMessageIds?: string[];
   /** Message author display name (translated). */
   author: string;
   /** Author user ID. */

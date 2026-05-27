@@ -361,4 +361,29 @@ describe("resolveReplies", () => {
     expect(ctx.missingTarget).toBe(false);
     expect(ctx.replyMsgId).toBe("100");
   });
+
+  test("latest user reply resolves to merged previous message by component ID", () => {
+    const merged = msg({
+      id: "100",
+      mergedMessageIds: ["100", "101"],
+      author: "bot",
+      content: "first [msg-break] second",
+    });
+    const latest = msg({ id: "200", author: "user", replyToId: "101", content: "replying" });
+    const result = resolveReplies({
+      older: [],
+      newer: [merged],
+      latestUserMessage: latest,
+      replyQuoteChars: 80,
+      captioningEnabled: false,
+    });
+    expect(result.latestUser).toEqual<ReplyContext>({
+      targetAuthor: "bot",
+      quote: null,
+      replyMsgId: "101",
+      missingTarget: false,
+      replyImageIds: [],
+      replyCaptions: [],
+    });
+  });
 });

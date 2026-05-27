@@ -53,26 +53,36 @@ function buildLookup(
   extra?: HistoryMessage[],
 ): Map<string, HistoryMessage> {
   const map = new Map<string, HistoryMessage>();
+  const add = (message: HistoryMessage): void => {
+    map.set(message.id, message);
+    for (const id of message.mergedMessageIds ?? []) {
+      map.set(id, message);
+    }
+  };
   if (extra !== undefined) {
-    for (const m of extra) map.set(m.id, m);
+    for (const m of extra) add(m);
   }
-  for (const m of older) map.set(m.id, m);
-  for (const m of newer) map.set(m.id, m);
-  if (latestUserMessage !== null) map.set(latestUserMessage.id, latestUserMessage);
+  for (const m of older) add(m);
+  for (const m of newer) add(m);
+  if (latestUserMessage !== null) add(latestUserMessage);
   return map;
+}
+
+function messageHasId(message: HistoryMessage, id: string): boolean {
+  return message.id === id || (message.mergedMessageIds ?? []).includes(id);
 }
 
 /**
  * Build a ReplyContext for a message, given its slice context.
  *
  * @param isOlderSlice - true if the message is in the older slice (no quotes).
- * @param immediatelyPreviousId - ID of the message immediately before this one in the newer slice (or null).
+ * @param immediatelyPrevious - message immediately before this one in the newer slice (or null).
  */
 function buildReplyContext(
   message: HistoryMessage,
   lookup: Map<string, HistoryMessage>,
   isOlderSlice: boolean,
-  immediatelyPreviousId: string | null,
+  immediatelyPrevious: HistoryMessage | null,
   replyQuoteChars: number,
   captioningEnabled: boolean,
   normalizedContentMap: Map<string, string> | undefined,
@@ -96,9 +106,9 @@ function buildReplyContext(
   let quote: string | null = null;
 
   if (!isOlderSlice) {
-    const isImmediatePrevious = immediatelyPreviousId === message.replyToId;
+    const isImmediatePrevious = immediatelyPrevious !== null && messageHasId(immediatelyPrevious, message.replyToId);
     if (!isImmediatePrevious) {
-      const raw = normalizedContentMap?.get(target.id) ?? target.content;
+      const raw = normalizedContentMap?.get(message.replyToId) ?? normalizedContentMap?.get(target.id) ?? target.content;
       const normalized = normalizeForQuote(raw);
       quote = truncateQuote(normalized, replyQuoteChars);
     }
@@ -138,21 +148,19 @@ export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult
   for (let i = 0; i < newer.length; i++) {
     const m = newer[i];
     if (m === undefined) continue;
-    const prev = i > 0 ? newer[i - 1] : undefined;
-    const prevId = prev !== undefined ? prev.id : null;
-    const ctx = buildReplyContext(m, lookup, false, prevId, replyQuoteChars, captioningEnabled, normalizedContentMap);
+    const prev = i > 0 ? newer[i - 1] ?? null : null;
+    const ctx = buildReplyContext(m, lookup, false, prev, replyQuoteChars, captioningEnabled, normalizedContentMap);
     if (ctx !== null) newerMap.set(m.id, ctx);
   }
 
   let latestUser: ReplyContext | null = null;
   if (latestUserMessage !== null && latestUserMessage.replyToId !== null) {
-    const lastNewer = newer.length > 0 ? newer[newer.length - 1] : undefined;
-    const prevId = lastNewer !== undefined ? lastNewer.id : null;
+    const lastNewer = newer.length > 0 ? newer[newer.length - 1] ?? null : null;
     latestUser = buildReplyContext(
       latestUserMessage,
       lookup,
       false,
-      prevId,
+      lastNewer,
       replyQuoteChars,
       captioningEnabled,
       normalizedContentMap,
