@@ -468,6 +468,7 @@ function buildRuntimeInstruction(tools: AgentTool[]): string {
     "Do not ask clarifying questions for every small imperfection. If the likely intent is obvious and the cost of being wrong is tiny, proceed naturally.",
     "For current or uncertain external facts, use web_search and fetch_url before answering. Use English search queries when the topic is not language-specific, even if the chat is in another language; answer in the chat language after reading sources. You may chain tools, especially web_search then fetch_url.",
     "After web_search, fetch_url the most relevant result when snippets are not enough or the answer depends on page details.",
+    "When you need several independent read-only lookups, such as multiple URLs, searches, message searches, member/history reads, or image reads, call them together in one tool turn.",
     "When using web_search or fetch_url, include one short user-facing status line in the same assistant turn as the first web tool call, e.g. \"I'll check, one sec.\" Skip only if you already sent a status or this is a scheduled/background task.",
     "When an answer uses web_search, fetch_url, or URL content, ALWAYS cite every web-derived factual claim inline with a concise markdown link right next to that claim. Do not put sources only at the end.",
     "Only ping a user when you genuinely need to notify them. To ping, write @username exactly; the app converts it to a Discord mention. For casual name references, omit @. If the user asks you to ping/notify someone and the exact Discord username is not already visible in context, use list_members first instead of guessing from display names, nicknames, or memory.",
@@ -640,6 +641,89 @@ function detectCreatedThreadId(tool: AgentTool, result: AgentToolResult<unknown>
   return typeof threadId === "string" && threadId !== "" ? threadId : null;
 }
 
+const PARALLEL_SAFE_READ_ONLY_TOOLS = new Set([
+  "chat_history",
+  "fetch_images",
+  "fetch_url",
+  "list_members",
+  "read_chat_images",
+  "search_messages",
+  "web_search",
+]);
+
+/**
+ * Only repo-owned tools with read-only semantics are allowed to run together.
+ * Unknown/custom tools default to ordered execution because their side effects are not known here.
+ */
+function canRunToolInParallel(tool: AgentTool): boolean {
+  return PARALLEL_SAFE_READ_ONLY_TOOLS.has(tool.name);
+}
+
+interface ExecutedToolCall {
+  call: OpenRouterToolCall;
+  tool: AgentTool;
+  result?: AgentToolResult<unknown>;
+  errorText?: string;
+}
+
+async function executeToolCallForLoop(input: {
+  tool: AgentTool;
+  call: OpenRouterToolCall;
+  signal?: AbortSignal;
+  requestLog?: RequestLog;
+}): Promise<ExecutedToolCall> {
+  input.requestLog?.recordToolStart(input.call.id, input.tool.name, parseToolArgumentsSafe(input.call));
+  try {
+    const result = await executeNativeToolCall(input.tool, input.call, input.signal);
+    input.requestLog?.recordToolEnd(input.call.id, false, result);
+    return { call: input.call, tool: input.tool, result };
+  } catch (error) {
+    const errorText = makeToolErrorText(error);
+    input.requestLog?.recordToolEnd(input.call.id, true, {
+      content: [{ type: "text", text: errorText }],
+    });
+    return { call: input.call, tool: input.tool, errorText };
+  }
+}
+
+async function renderExecutedToolCall(input: {
+  execution: ExecutedToolCall;
+  imageInputSupported: boolean;
+  imageFallback?: ImageFallbackRuntime;
+  imageFollowUpSources: Map<OpenRouterMessage, ImageFollowUpSource>;
+  imageMessages: OpenRouterMessage[];
+}): Promise<{ resultText: string; createdThreadId: string | null }> {
+  if (input.execution.result === undefined) {
+    return {
+      resultText: input.execution.errorText ?? "Tool failed without an error message.",
+      createdThreadId: null,
+    };
+  }
+
+  const { call, tool, result } = input.execution;
+  const createdThreadId = detectCreatedThreadId(tool, result);
+  const images = imagePartsFromToolResult(result);
+  let resultText = summarizeToolResult(result);
+
+  if (images.length > 0 && input.imageInputSupported) {
+    const followUp = imageFollowUpMessage(call, images, resultText);
+    input.imageFollowUpSources.set(followUp.message, followUp.source);
+    input.imageMessages.push(followUp.message);
+  } else if (images.length > 0 && input.imageFallback?.enabled === true) {
+    resultText = await describeImagesWithFallback({
+      fallback: input.imageFallback,
+      images,
+      metadataText: resultText,
+      sourceName: tool.name,
+      reason: "the selected main model does not advertise image input support",
+    });
+  } else if (images.length > 0) {
+    resultText = appendImageUnsupportedToolText(resultText, images.length);
+  }
+
+  return { resultText, createdThreadId };
+}
+
 async function runNativeToolLoop(input: {
   complete: ChatCompleteFn;
   requestBase: Omit<OpenRouterChatRequest, "messages">;
@@ -742,55 +826,75 @@ async function runNativeToolLoop(input: {
     input.messages.push(assistantMessageFromResult(result));
 
     const imageMessages: OpenRouterMessage[] = [];
+    const pendingParallelCalls: Array<{ call: OpenRouterToolCall; tool: AgentTool }> = [];
+    const flushParallelCalls = async (): Promise<void> => {
+      if (pendingParallelCalls.length === 0) return;
+      const executions = await Promise.all(pendingParallelCalls.map(({ call, tool }) =>
+        executeToolCallForLoop({
+          tool,
+          call,
+          signal: input.signal,
+          requestLog: input.requestLog,
+        })
+      ));
+      pendingParallelCalls.length = 0;
+
+      for (const execution of executions) {
+        const rendered = await renderExecutedToolCall({
+          execution,
+          imageInputSupported: input.imageInputSupported,
+          imageFallback: input.imageFallback,
+          imageFollowUpSources,
+          imageMessages,
+        });
+        if (rendered.createdThreadId !== null) targetChatId = rendered.createdThreadId;
+        input.messages.push(toolMessage(execution.call, rendered.resultText));
+      }
+    };
+
     for (let callIndex = 0; callIndex < result.toolCalls.length; callIndex += 1) {
       const call = result.toolCalls[callIndex];
       if (call === undefined) continue;
       if (toolCalls >= input.maxToolCalls) {
+        await flushParallelCalls();
         for (const skippedCall of result.toolCalls.slice(callIndex)) {
           input.messages.push(toolMessage(skippedCall, toolBudgetExhaustedMessage("calls")));
         }
+        input.messages.push(...imageMessages);
         return await completeFinalWithoutTools();
       }
       toolCalls += 1;
 
       const tool = toolsByName.get(call.function.name);
       if (tool === undefined) {
+        await flushParallelCalls();
         input.messages.push(toolMessage(call, `Unknown tool: ${call.function.name}`));
         continue;
       }
 
-      let resultText: string;
-      input.requestLog?.recordToolStart(call.id, tool.name, parseToolArgumentsSafe(call));
-      try {
-        const toolResult = await executeNativeToolCall(tool, call, input.signal);
-        input.requestLog?.recordToolEnd(call.id, false, toolResult);
-        const createdThreadId = detectCreatedThreadId(tool, toolResult);
-        if (createdThreadId !== null) targetChatId = createdThreadId;
-        const images = imagePartsFromToolResult(toolResult);
-        resultText = summarizeToolResult(toolResult);
-        if (images.length > 0 && input.imageInputSupported) {
-          const followUp = imageFollowUpMessage(call, images, resultText);
-          imageFollowUpSources.set(followUp.message, followUp.source);
-          imageMessages.push(followUp.message);
-        } else if (images.length > 0 && input.imageFallback?.enabled === true) {
-          resultText = await describeImagesWithFallback({
-            fallback: input.imageFallback,
-            images,
-            metadataText: resultText,
-            sourceName: tool.name,
-            reason: "the selected main model does not advertise image input support",
-          });
-        } else if (images.length > 0) {
-          resultText = appendImageUnsupportedToolText(resultText, images.length);
-        }
-      } catch (error) {
-        resultText = makeToolErrorText(error);
-        input.requestLog?.recordToolEnd(call.id, true, {
-          content: [{ type: "text", text: resultText }],
-        });
+      if (canRunToolInParallel(tool)) {
+        pendingParallelCalls.push({ call, tool });
+        continue;
       }
-      input.messages.push(toolMessage(call, resultText));
+
+      await flushParallelCalls();
+      const execution = await executeToolCallForLoop({
+        tool,
+        call,
+        signal: input.signal,
+        requestLog: input.requestLog,
+      });
+      const rendered = await renderExecutedToolCall({
+        execution,
+        imageInputSupported: input.imageInputSupported,
+        imageFallback: input.imageFallback,
+        imageFollowUpSources,
+        imageMessages,
+      });
+      if (rendered.createdThreadId !== null) targetChatId = rendered.createdThreadId;
+      input.messages.push(toolMessage(call, rendered.resultText));
     }
+    await flushParallelCalls();
     input.messages.push(...imageMessages);
   }
 

@@ -777,6 +777,69 @@ describe("handleMessage", () => {
     expect(sender).toHaveBeenCalledTimes(1);
   });
 
+  test("runs safe read-only tool calls in parallel and preserves tool message order", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const starts: string[] = [];
+    const finishes: string[] = [];
+    const fetchUrl: AgentTool = {
+      name: "fetch_url",
+      label: "Fetch URL",
+      description: "Fetch a URL",
+      parameters: Type.Object({ url: Type.String() }),
+      execute: async (_id, params) => {
+        const { url } = params as { url: string };
+        starts.push(url);
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise<void>((resolve) => setTimeout(resolve, url.endsWith("/one") ? 30 : 10));
+        active -= 1;
+        finishes.push(url);
+        return {
+          content: [{ type: "text", text: `body for ${url}` }],
+          details: {},
+        };
+      },
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [
+            { id: "call-one", type: "function", function: { name: "fetch_url", arguments: "{\"url\":\"https://example.com/one\"}" } },
+            { id: "call-two", type: "function", function: { name: "fetch_url", arguments: "{\"url\":\"https://example.com/two\"}" } },
+          ],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+
+      const toolMessages = request.messages.filter((m) => m.role === "tool");
+      expect(toolMessages.map((m) => m.tool_call_id)).toEqual(["call-one", "call-two"]);
+      expect(toolMessages[0]?.content).toContain("body for https://example.com/one");
+      expect(toolMessages[1]?.content).toContain("body for https://example.com/two");
+      return Promise.resolve({
+        text: "parallel answer",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "parallel answer" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ extraTools: [fetchUrl], completeChat }),
+    );
+
+    expect(result.responseText).toBe("parallel answer");
+    expect(maxActive).toBe(2);
+    expect(starts).toEqual(["https://example.com/one", "https://example.com/two"]);
+    expect(finishes).toEqual(["https://example.com/two", "https://example.com/one"]);
+  });
+
   test("forces a final answer when the native tool call budget is exhausted", async () => {
     const toolCalls: unknown[] = [];
     const tool: AgentTool = {

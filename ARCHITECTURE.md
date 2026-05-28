@@ -54,6 +54,7 @@ Discord messageCreate
 - OpenRouter native `tools` are used for search, schedules, member lookup, chat history, images, URLs, and thread creation.
 - Ordinary chat should answer directly without tools.
 - Tool results are appended as `role: "tool"` messages, then the model produces final assistant text.
+- Consecutive repo-owned read-only tools (`search_messages`, `list_members`, `chat_history`, `read_chat_images`, `fetch_images`, `fetch_url`, `web_search`) run concurrently when requested in the same model turn. State-changing or unknown tools remain ordered execution barriers.
 - For slow web lookups, the model may emit one short user-facing status line before `web_search`/`fetch_url`; the runtime sends it and keeps typing while the tool loop continues.
 - Web lookup tools use 15s timeouts and return explicit failure text for the model, including timeout/API/HTTP/content extraction reasons.
 - `start_thread` is special only in routing: after the tool creates a thread, the final answer is sent in that thread.
@@ -118,7 +119,7 @@ The history pipeline fetches missing reply targets when possible, sorts messages
 Default chat tools are wired in `src/index.ts`:
 - `search_messages`
 - `schedule_message`
-- `member_list`
+- `list_members`
 - `chat_history`
 - `read_chat_images`
 - `fetch_images`

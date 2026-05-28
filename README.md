@@ -117,6 +117,7 @@ All fields are optional — missing values fall back to global defaults.
 `backgroundLlm` controls memory extraction; omitted fields inherit the main effective model config, and `serviceTier` is omitted unless explicitly set.
 `imageReading.fallbackEnabled` makes image tools ask `imageReading.fallbackModel` for a detailed description when the main model cannot read image input; the description is returned to the main model as tool text.
 `replyLoop.maxToolCalls` and `replyLoop.wallClockTimeoutMs` bound each native tool-calling reply run. The default is high enough for normal chained web work such as search, fetch, then answer. When the tool-call budget is exhausted, the model gets a final no-tools turn to answer from the context it already has.
+When the model requests multiple independent read-only tools in one turn, the handler runs allowlisted lookups concurrently, including multiple `fetch_url` calls.
 `replyLoop.llmOutputTimeoutMs` limits each individual LLM turn. LLM turn timeouts and empty final model responses are retried up to three total attempts before the bot posts a short `[SYSTEM ERROR]` message in Discord.
 
 ### Persona
