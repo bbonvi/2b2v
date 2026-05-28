@@ -9,6 +9,7 @@ import { deletePoint, deletePoints } from "./qdrant/adapter";
 import { getEmbeddingPipeline, disposePipeline } from "./embeddings/pipeline";
 import { createEmbeddingQueue, type EmbeddingQueue } from "./embeddings/queue";
 import { createDiscordClient, loginDiscordClient } from "./discord/client";
+import { sendWithUnknownMessageReferenceFallback } from "./discord/message-reference-retry";
 import { translateInbound, translateOutbound, buildDisplayNameContext, type InboundResolvers, type OutboundResolvers } from "./discord/translation";
 import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
@@ -212,24 +213,62 @@ function createDiscordMessageSender(input: {
 
     await waitAfterRecentTyping();
 
+    const sendToTargetChannel = async (content: string | AttachmentSendPayload): Promise<Message> => {
+      return typeof content === "string"
+        ? await targetChannel.send(content)
+        : await targetChannel.send(content);
+    };
+
+    const replyWithMessage = async (message: Message, content: string | AttachmentSendPayload): Promise<Message> => {
+      return typeof content === "string"
+        ? await message.reply(content)
+        : await message.reply(content);
+    };
+
     const replyToSpecific = async (content: string | AttachmentSendPayload): Promise<Message> => {
       if (replyToMessageId !== undefined) {
+        let targetMsg: Message;
         try {
-          const targetMsg = await targetChannel.messages.fetch(replyToMessageId);
-          return typeof content === "string"
-            ? await targetMsg.reply(content)
-            : await targetMsg.reply(content);
+          targetMsg = await targetChannel.messages.fetch(replyToMessageId);
         } catch (err) {
           input.logger.warn("reply_to_message_id fetch failed, falling back to send", {
             replyToMessageId,
             channelId: targetChannel.id,
             error: err instanceof Error ? err.message : String(err),
           });
+          return await sendToTargetChannel(content);
         }
+
+        return await sendWithUnknownMessageReferenceFallback(
+          () => replyWithMessage(targetMsg, content),
+          () => sendToTargetChannel(content),
+          (err) => {
+            input.logger.warn("reply_to_message_id target disappeared, falling back to send", {
+              replyToMessageId,
+              channelId: targetChannel.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          },
+        );
       }
-      return typeof content === "string"
-        ? await targetChannel.send(content)
-        : await targetChannel.send(content);
+      return await sendToTargetChannel(content);
+    };
+
+    const replyToSource = async (content: string | AttachmentSendPayload): Promise<Message> => {
+      const sourceMessage = input.replySourceMessage;
+      if (sourceMessage === undefined) return await sendToTargetChannel(content);
+
+      return await sendWithUnknownMessageReferenceFallback(
+        () => replyWithMessage(sourceMessage, content),
+        () => sendToTargetChannel(content),
+        (err) => {
+          input.logger.warn("reply source message disappeared, falling back to send", {
+            replySourceMessageId: sourceMessage.id,
+            channelId: targetChannel.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        },
+      );
     };
 
     if (voice !== undefined) {
@@ -242,15 +281,15 @@ function createDiscordMessageSender(input: {
       let sent: Message;
       if (replyToMessageId !== undefined) {
         sent = await replyToSpecific(payload);
-      } else if (reply && input.replySourceMessage !== undefined) {
-        sent = await input.replySourceMessage.reply(payload);
+      } else if (reply) {
+        sent = await replyToSource(payload);
       } else {
-        sent = await targetChannel.send(payload);
+        sent = await sendToTargetChannel(payload);
       }
       storeBotMessage(sent.id, targetChannelId, voiceRawContent(firstChunk), voice.historyText ?? text);
       for (let i = 1; i < chunks.length; i++) {
         const chunk = chunks[i] as string;
-        const followup = await targetChannel.send(chunk);
+        const followup = await sendToTargetChannel(chunk);
         storeBotMessage(followup.id, targetChannelId, chunk, chunk);
       }
       if (targetChannel.isThread()) {
@@ -269,10 +308,10 @@ function createDiscordMessageSender(input: {
       let sent: Message;
       if (replyToMessageId !== undefined && i === 0) {
         sent = await replyToSpecific(chunk);
-      } else if (reply && i === 0 && input.replySourceMessage !== undefined) {
-        sent = await input.replySourceMessage.reply(chunk);
+      } else if (reply && i === 0) {
+        sent = await replyToSource(chunk);
       } else {
-        sent = await targetChannel.send(chunk);
+        sent = await sendToTargetChannel(chunk);
       }
       if (i === 0) firstId = sent.id;
       storeBotMessage(sent.id, targetChannelId, chunk, i === 0 ? text : chunk);
