@@ -1,210 +1,55 @@
 # Architecture
 
-Personal Discord bot for small servers. The runtime is intentionally simple: one persona model call handles the reply, uses native OpenRouter tool calls when needed, and sends final text directly to Discord.
+This file records invariants that are easy to break and not obvious from file names. Prefer code and tests for ordinary module maps, option lists, and implementation inventory.
 
-**Runtime:** Bun 1.3+ · **LLM:** OpenRouter · **Vectors:** Qdrant · **DB:** SQLite (WAL) · **Agent:** native tool-calling reply loop (`src/agent/handler.ts`)
+## Reply Loop
 
-## Module Map
+`src/agent/handler.ts` is the reply control plane. The persona model speaks directly; there is no hidden orchestrator model and no custom JSON action protocol.
 
-```
-src/
-├── index.ts          Entry point, Discord wiring, tool wiring, background jobs
-├── agent/            Context assembly, reply handler, history pipeline, tools
-├── commands/         Slash command handlers
-├── config/           YAML config types + loader
-├── db/               SQLite repositories and schema
-├── discord/          Discord client helpers and markup translation
-├── embeddings/       Message embedding queue
-├── llm/              OpenRouter client
-├── qdrant/           Vector store adapter
-├── scheduler/        Cron and one-off scheduled messages
-├── time/             Guild-local time formatting/parsing
-├── tts/              Voice message integration
-└── dashboard/        Request log dashboard
-```
+Tool results are appended as `role: "tool"` messages, then the same model produces final text. Read-only tools may run concurrently only when they are in the same model turn and on the allowlist. State-changing or unknown tools remain ordered execution barriers.
 
-## Core Dataflow
+`start_thread` changes only final-answer routing: after the tool creates a thread, the assistant's final answer is sent there.
 
-```
-Discord messageCreate
-  ├─ translateInbound(raw, resolvers)
-  ├─ store message in SQLite
-  ├─ enqueue message embedding for Qdrant
-  └─ channelDispatcher.enqueue(message, triggerResult)
-       ├─ debounce per channel
-       ├─ wait for keyword-triggering user typing to go idle
-       ├─ serialize one handler run per channel
-       └─ handleMessage(messages, deps)
-            ├─ use dispatcher trigger or shouldRespond(mention | keyword | random | forced schedule)
-            ├─ assemble prompt context
-            ├─ start Discord typing immediately
-            ├─ call OpenRouter with native tools
-            ├─ execute requested tool calls
-            ├─ send final assistant text to Discord
-            └─ run background memory extraction
-```
+Tool-budget exhaustion is recoverable. Pending tool calls get synthetic results, then the model gets one final no-tools turn to answer from available context.
 
-`src/discord/channel-dispatcher.ts` owns debounce and channel-level serialization. Mention triggers use a shorter debounce, keyword triggers use `triggers.keywordDebounceMs`, and random/untriggered batches use the default dispatcher debounce. A `typingStart` from the keyword-triggering user is treated as active for `triggers.typingIdleMs`, capped by `triggers.typingMaxWaitMs`; Discord does not send a real typing-stop event. Messages that arrive while a handler is running wait for the next cycle; there is no mid-loop follow-up injection.
+Typing is runtime-owned. The model has no typing tool.
 
-## Reply Runtime
+## Prompt Cache
 
-`src/agent/handler.ts` is the single reply control plane.
+Prompt caching depends on stable content staying stable. The handler sends one merged stable prefix, adds cache breakpoints inside that block, then inserts a tiny stable user/assistant anchor before volatile turn context.
 
-- The model speaks directly as the persona. There is no orchestrator/persona split and no custom JSON action protocol.
-- OpenRouter native `tools` are used for search, schedules, member lookup, chat history, images, URLs, and thread creation.
-- Ordinary chat should answer directly without tools.
-- Tool results are appended as `role: "tool"` messages, then the model produces final assistant text.
-- Consecutive repo-owned read-only tools (`search_messages`, `list_members`, `chat_history`, `read_chat_images`, `fetch_images`, `fetch_url`, `web_search`) run concurrently when requested in the same model turn. State-changing or unknown tools remain ordered execution barriers.
-- For slow web lookups, the model may emit one short user-facing status line before `web_search`/`fetch_url`; the runtime sends it and keeps typing while the tool loop continues.
-- Web lookup tools use 15s timeouts and return explicit failure text for the model, including timeout/API/HTTP/content extraction reasons.
-- `start_thread` is special only in routing: after the tool creates a thread, the final answer is sent in that thread.
-- The handler enforces `replyLoop.maxToolCalls`, `replyLoop.wallClockTimeoutMs`, and `replyLoop.llmOutputTimeoutMs`. One LLM turn can retry timeouts and empty final responses up to three total attempts; the wall-clock timeout remains the hard cap for the whole run. Tool budget exhaustion is recoverable: pending tool calls receive synthetic tool results and the model gets one final no-tools turn to answer normally.
-- The runtime starts typing as soon as a trigger is accepted and stops typing when the handler exits. There is no typing tool.
-- The bash tool implementation remains in `src/agent/bash-tool.ts`, but it is not registered in the chat tool list.
-- Final text is parsed for reserved app directives in `src/agent/response-directives.ts`: `<voice>` becomes a TTS send, while `<ignore>` suppresses all Discord output for that run. Text outside a voice directive is sent as normal Discord content on the audio attachment, while only the voice body goes to TTS. Eleven v3 delivery tags stay inside the voice text and pass through to TTS/history, for example `<voice>[slow] hey</voice>` or `<voice>[sings] hey</voice>`.
-- Reserved directive parsing is deliberately narrow: ordinary XML passes through, fenced blocks are unwrapped only when they contain reserved tags, Discord mention tokens inside voice tags are moved to text segments, nested voice tags are split, legacy voice attributes are ignored, unclosed voice tags consume to EOF, unmatched closing tags stay as text, and TTS failures fall back to plain text.
-- Voice directive sends preserve their directive form in stored chat history (`<voice>...`) so later model context sees that the prior bot message was audio, not plain text.
-- Image tool results are forwarded as multimodal input when the selected model advertises image support. If the main model cannot read images, or OpenRouter rejects the image input anyway, `imageReading.fallbackEnabled` lets the handler call a dedicated vision model and return its detailed description as tool text.
-- Outbound text translation converts deliberate `@username` or `@<username>` pings into Discord `<@id>` mentions. The model is instructed to use this only when it wants to notify a user and to call `list_members` first when it does not know the exact username.
+Dynamic sections such as current time, current channel state, pending schedule summary, memories, recent history, current user messages, and trigger instructions must stay after the anchor.
 
-## Context Assembly
+Older chat history moves only in `trim.windowSize` chunks. Do not promote one message at a time from recent history to older cached history.
 
-`src/agent/context-assembly.ts` defines prompt section order, role, cache behavior, and headers. Empty sections are omitted. `src/agent/handler.ts` builds a merged stable prefix, then sends volatile turn context as the current user turn so providers do not merge changing context into the cached system prompt.
+`ReplyMsgID` is resolved internally for quote and image context, but is intentionally hidden from normal prompt history until direct replies are explicitly supported.
 
-Cached stable sections:
-- persona prompt (`prompts/persona.md`)
-- style prompt (`prompts/style.md`, through `promptProfile.lateInstructions`)
-- stable guild/server context such as emojis and tool-independent instructions
-- older trimmed chat history
+Merged history rows must preserve all component Discord message IDs. Reply resolution and prompt-visible search exclusions must treat aliases as present, not only the retained first ID.
 
-Uncached volatile sections:
-- current time/context
-- members
-- schedules
-- direct memories
-- recent history
-- current user messages
-- trigger-specific response instruction
+## History, Search, Memory
 
-Prompt caching keeps one merged stable block at the front of the OpenRouter message array. When `promptCaching.enabled` is true, explicit cache breakpoints are added inside the merged stable block and a tiny stable user/assistant anchor follows it so OpenRouter sticky routing sees a stable first non-system message. Dynamic memory, recent history, current context, and the current user message stay after the anchor so they can change without invalidating the cached system block.
+SQLite is the source of truth for readable state. Qdrant is only a semantic index; search results must join back to SQLite rows.
 
-History retrieval also preserves cache stability. `getContextHistoryMessages` excludes the latest user message before calculating the history window, `sliceHistory` promotes messages into the cached older block only in `trim.windowSize` chunks, and the old-history start advances only in `trim.windowSize` chunks once the channel is past `trim.trimTrigger`. This prevents the older cached block from sliding by one message on every reply.
+`search_messages` excludes messages already visible in prompt history. Semantic search overfetches before this filtering so small result limits do not go empty just because top hits are already in context.
 
-Reply target IDs are still resolved internally for quote/image context, but `ReplyMsgID` is intentionally not emitted into normal prompt history until the model has a supported way to send direct replies to arbitrary message IDs.
+Memory is direct SQLite data, not a chat-visible tool. The prompt gets global memories plus current-user memories; other users' stored context is signaled only indirectly, such as through member memory counts.
 
-## Memory
+## Schedules
 
-Memory is plain SQLite data, not a chat-visible tool.
+Agent schedule tools are current-guild and current-channel scoped, and list/delete only pending schedules. Prompt context exposes only a pending count summary; IDs and details require `list_scheduled_messages`.
 
-- `src/db/memory-repository.ts` stores structured rows: `guild_id`, optional `subject_user_id`, `kind`, `content`, `source_message_id`, `confidence`, timestamps, and soft-delete state.
-- `src/agent/memory-service.ts` injects active global memories plus current-user memories directly into the `## Memory` context block.
-- After a successful reply, a background extraction call updates memories. It uses `backgroundLlm` config, logs as its own dashboard request, sees existing memories plus the recent chat-history slice and latest user/bot exchange, and does not receive the larger older-history block.
-- Memory kinds are `global_note`, `user_note`, `preference`, `relationship`, `project`, and `fact`.
-- `/memory-wipe` clears guild memory and message history.
+Slash commands are the broader admin surface for guild schedule inspection and manual management.
 
-The member list includes per-user memory counts, so the model can tell when another user has stored context even though only current-user/global memories are injected by default.
+One-off timers longer than 2,147,483,647 ms must be chunked and re-armed because JavaScript timers cannot represent longer delays safely.
 
-## History And Search
+## Images And Voice
 
-The prompt carries two local history windows for cache efficiency:
-- an older trimmed window for broader context
-- a recent window for the latest conversation state
+Image tool results become multimodal model input only when `resolveModel(...).input` advertises image support. Text-only models receive tool text or, when enabled, a fallback vision-model description.
 
-`search_messages` remains available for older recall and for moments when the model is missing context or does not understand a reference. It supports semantic Qdrant search, literal SQLite search, and exact message ID lookup with filters for channel, user, and time. Search results exclude messages already visible in the current prompt history.
+Response directive parsing is deliberately narrow. `<voice>` sends audio, `<ignore>` suppresses output, and other XML remains normal text. Do not add broad XML parsing.
 
-The history pipeline fetches missing reply targets when possible, sorts messages, merges consecutive messages by author, trims content, resolves replies, inserts sparse date stamps, and formats the result for the prompt.
+ElevenLabs v3 bracket delivery tags inside `<voice>` are prompt policy, not code policy. Do not filter them in code.
 
-## Tools
+## Config Changes
 
-Default chat tools are wired in `src/index.ts`:
-- `search_messages`
-- `schedule_message`
-- `list_members`
-- `chat_history`
-- `read_chat_images`
-- `fetch_images`
-- `fetch_url`
-- `web_search` when `BRAVE_API_KEY` is configured
-- `start_thread` for normal message-triggered runs
-
-Scheduled runs use the same core tool set but are forced triggers. Users can create and manage scheduled messages themselves through the `schedule_message` tool; slash commands still exist for admin inspection and manual management.
-
-## Images
-
-Inbound image attachments are resized, stored on disk, indexed in SQLite, and linked to their source messages. `read_chat_images` lets the model inspect stored images by message/image context. `fetch_images` retrieves external image URLs ephemerally. When native image input is unavailable, image tools can fall back to a configured vision model and return a detailed description instead of raw image parts.
-
-## Storage
-
-SQLite tables:
-- `messages`: raw and translated Discord messages, reply targets, synthetic/thread metadata
-- `memories`: direct persistent memories
-- `schedules`: cron and one-off scheduled messages
-- `images`: stored image metadata
-- `threads`: Discord thread metadata
-
-Qdrant collection:
-- **Name:** `embeddings`
-- **Vectors:** 1024 dimensions, cosine distance
-- **Payload indexes:** `guild_id`, `channel_id`, `user_id`, `created_at`, `type`
-- **Active app use:** message embeddings for `search_messages`
-
-SQLite is the source of truth for display content. Qdrant stores vectors and payload metadata; search joins vector results back to SQLite rows.
-
-## Configuration
-
-Three-tier config:
-- `config/config.yaml` for global non-secret defaults
-- `config/guilds/{guildId}-{slug}.yaml` for guild overrides
-- environment variables for secrets and infrastructure
-
-Important environment variables:
-
-| Variable | Required | Notes |
-|----------|----------|-------|
-| `DISCORD_TOKEN` | yes | Discord bot token |
-| `OPENROUTER_API_KEY` | yes | OpenRouter API key |
-| `BRAVE_API_KEY` | no | Enables web search |
-| `QDRANT_URL` | no | Overrides YAML Qdrant URL |
-| `DASHBOARD_PORT` | no | Host dashboard port used by Compose |
-| `DASHBOARD_PASSWORD` | no | Dashboard auth |
-| `DASHBOARD_PASSWORDLESS_CIDRS` | no | Passwordless dashboard access for matching IPv4 CIDRs |
-| `DASHBOARD_TRUSTED_PROXY_CIDRS` | no | Proxy CIDRs whose forwarded client IP headers may be trusted |
-| `UNSAFELY_BYPASS_DASHBOARD_AUTH` | no | Dev-only dashboard bypass |
-| `ELEVENLABS_API_KEY` | no | Voice message generation |
-| `APP_CONFIG_DIR` / `APP_PROMPTS_DIR` | no | Production Compose host config/prompt directories; default to `~/.local/share/2b2v/{config,prompts}` |
-
-Key config groups:
-- `dispatcher`: channel debounce and serialization
-- `promptCaching`: stable prompt cache breakpoint control
-- `replyLoop`: native tool-calling reply limits
-- `promptProfile`: prompt source selection for persona, optional tool instructions, optional extra instructions, and style rules
-
-Default prompt sources:
-- `persona`: `prompts/persona.md`
-- `toolInstructions`: empty
-- `instructions`: empty
-- `lateInstructions`: `prompts/style.md`
-
-When adding or removing config fields, update:
-- `config/config.yaml.example`
-- `config/guilds/000000000-example.yaml.example`
-- `src/config/types.ts`
-- `src/config/loader.ts`
-- loader tests
-- README and this document
-
-## Key Contracts
-
-- Discord-specific APIs stay outside agent/tool logic behind injected callbacks.
-- Inbound Discord markup is translated to readable text; outbound content is translated back.
-- Agent-facing timestamps use guild-local wall-clock time: `YYYY-MM-DD HH:mm`, with timezone communicated in context.
-- One-off schedules support absolute local time or relative delay. Cron schedules use the guild timezone unless explicitly overridden.
-- Request/response payloads are recorded in the dashboard log with large image fields truncated for readability.
-
-## Docker
-
-Two Compose files:
-- `docker-compose.yml` for production builds and long-lived volumes
-- `docker-compose.dev.yml` for live reload with bind mounts and dev volumes
-
-The default Compose project is intended for development. Production should be run with an explicit project name, for example `docker compose -p 2b2v-prod --env-file .env.prod -f docker-compose.yml up -d --build`, so production containers and volumes are independent. Production config and prompts are bind-mounted from `~/.local/share/2b2v/{config,prompts}` by default and remain watched by the app. The production bot waits on Qdrant health before startup and runs the built image without Bun watch.
+When adding or removing config fields, update the example config files, config types, loader logic, loader tests, README reference text, and any invariant in this file affected by the change.
