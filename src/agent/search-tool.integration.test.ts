@@ -147,6 +147,8 @@ describe("createSearchTool", () => {
 
     const text = getResultText(result);
     expect(text).toContain("bob");
+    expect(text).toContain("[chat_id c5]");
+    expect(text).toContain("[id m1]");
     expect(result.details.count).toBe(1);
   });
 
@@ -288,6 +290,17 @@ describe("search mode: literal", () => {
     expect(result.details.count).toBe(1);
   });
 
+  test("omits repeated chat_id when search is scoped to a chat", async () => {
+    insertMessage("m1", "topic here", { channelId: "c1" });
+    insertMessage("m2", "topic here", { channelId: "c2" });
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const result = await tool.execute("tc1", { query: "topic", mode: "literal", chat_id: "c1" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+    expect(text).toContain("[id m1]");
+    expect(text).not.toContain("[chat_id");
+    expect(text).not.toContain("[id m2]");
+  });
+
   test("returns no-match message for literal mode", async () => {
     const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "nonexistent", mode: "literal" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
@@ -337,6 +350,48 @@ describe("search mode: id", () => {
     const result = await tool.execute("tc1", { query: "m1", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).toContain("not found");
+  });
+});
+
+describe("search mode: context", () => {
+  test("returns chronological context around a message id", async () => {
+    const anchorMs = Date.UTC(2026, 4, 28, 14, 12);
+    insertMessage("m1", "before context", { createdAt: anchorMs - 60_000 });
+    insertMessage("m2", "anchor context", { createdAt: anchorMs });
+    insertMessage("m3", "after context", { createdAt: anchorMs + 60_000 });
+
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const result = await tool.execute("tc1", { mode: "context", message_id: "m2", limit: 3 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+
+    expect(text).toContain("Surrounding chat context around message id m2 in chat c1");
+    expect(text.indexOf("[id m1]")).toBeLessThan(text.indexOf("[id m2]"));
+    expect(text.indexOf("[id m2]")).toBeLessThan(text.indexOf("[id m3]"));
+    expect(text).not.toContain("[chat_id");
+    expect(result.details.count).toBe(3);
+  });
+
+  test("returns chronological context around a timestamp", async () => {
+    const aroundMs = Date.UTC(2026, 4, 28, 14, 12);
+    insertMessage("m1", "before timestamp", { channelId: "c1", createdAt: aroundMs - 60_000 });
+    insertMessage("m2", "after timestamp", { channelId: "c1", createdAt: aroundMs + 60_000 });
+    insertMessage("m3", "wrong chat", { channelId: "c2", createdAt: aroundMs });
+
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const result = await tool.execute("tc1", { mode: "context", chat_id: "c1", around: "2026-05-28 14:12", limit: 2 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+
+    expect(text).toContain("Surrounding chat context around 2026-05-28 14:12 in chat c1");
+    expect(text).toContain("[id m1]");
+    expect(text).toContain("[id m2]");
+    expect(text).not.toContain("[id m3]");
+  });
+
+  test("requires chat_id for timestamp context", async () => {
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const result = await tool.execute("tc1", { mode: "context", around: "2026-05-28 14:12" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+    expect(text).toContain("chat_id is required");
   });
 });
 

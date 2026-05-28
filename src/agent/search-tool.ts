@@ -3,8 +3,15 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { QdrantClient } from "@qdrant/js-client-rest";
 import type { Database } from "../db/database";
 import type { EmbeddingPipeline } from "../embeddings/pipeline";
-import { searchMessages, getMessageById, searchMessagesLiteral, type MessageSearchResult } from "../db/message-repository";
-import { formatLocalWallClock } from "../time/agent-time.ts";
+import {
+  searchMessages,
+  getMessageById,
+  searchMessagesLiteral,
+  getMessagesAroundMessage,
+  getMessagesAroundTimestamp,
+  type MessageSearchResult,
+} from "../db/message-repository";
+import { formatLocalWallClock, parseLocalDateTimeToEpoch } from "../time/agent-time.ts";
 
 
 interface AttachmentInfo {
@@ -31,10 +38,13 @@ const SearchParams = Type.Object({
     Type.Literal("semantic"),
     Type.Literal("literal"),
     Type.Literal("id"),
-  ], { description: "Search mode. 'semantic' (default): AI similarity search. 'literal': exact keyword/phrase match (case-insensitive). 'id': direct message ID lookup." })),
-  query: Type.String({ description: "Search query, keyword/phrase, or message ID depending on mode." }),
+    Type.Literal("context"),
+  ], { description: "Search mode. 'semantic' (default): AI similarity search. 'literal': exact keyword/phrase match (case-insensitive). 'id': direct message ID lookup. 'context': chronological messages around a message_id or local timestamp." })),
+  query: Type.Optional(Type.String({ description: "Search query, keyword/phrase, or message ID depending on mode." })),
+  message_id: Type.Optional(Type.String({ description: "Anchor message ID for mode='context'." })),
   username: Type.Optional(Type.String({ description: "Filter results to a specific username." })),
-  chat_id: Type.Optional(Type.String({ description: "Filter results to a specific chat (channel, thread, or DM)." })),
+  chat_id: Type.Optional(Type.String({ description: "Filter results to a specific chat (channel, thread, or DM). Required for timestamp context." })),
+  around: Type.Optional(Type.String({ description: "Local wall-clock timestamp for mode='context', formatted YYYY-MM-DD HH:mm in the server timezone. Requires chat_id." })),
   afterMs: Type.Optional(Type.Number({ description: "Only messages after this epoch ms timestamp." })),
   beforeMs: Type.Optional(Type.Number({ description: "Only messages before this epoch ms timestamp." })),
   limit: Type.Optional(Type.Number({ description: "Max results to return. Default 10." })),
@@ -57,14 +67,16 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
     name: "search_messages",
     label: "Search Messages",
     description:
-      "Search chat history when context is missing, a request refers to prior chat, or you feel lost. Modes: 'semantic' (default) — AI similarity search with natural language; 'literal' — case-insensitive keyword/phrase match; 'id' — direct message lookup by ID. Optionally filter by username, chat, or time range.",
+      "Search chat history when context is missing, a request refers to prior chat, or you feel lost. Modes: 'semantic' (default) — AI similarity search with natural language; 'literal' — case-insensitive keyword/phrase match; 'id' — direct message lookup by ID; 'context' — chronological messages around a result id or local timestamp. Optionally filter by username, chat, or time range.",
     parameters: SearchParams,
     execute: async (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as {
-        mode?: "semantic" | "literal" | "id";
-        query: string;
+        mode?: "semantic" | "literal" | "id" | "context";
+        query?: string;
+        message_id?: string;
         username?: string;
         chat_id?: string;
+        around?: string;
         afterMs?: number;
         beforeMs?: number;
         limit?: number;
@@ -72,6 +84,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
       const mode = p.mode ?? "semantic";
       const limit = Math.max(1, Math.min(p.limit ?? 10, 50));
       const excludedMessageIds = [...new Set(deps.excludedMessageIds ?? [])];
+      let contextIntro: string | undefined;
 
       // Resolve username to userId if provided (normalize to strip leading @)
       let userId: string | undefined;
@@ -85,15 +98,58 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
       let results: MessageSearchResult[];
 
       if (mode === "id") {
+        if (p.query === undefined || p.query.trim() === "") {
+          return { content: [{ type: "text", text: "Message ID is required for id lookup." }], details: undefined };
+        }
         const result = getMessageById(db, p.query, guildId);
         if (result === null) {
           return { content: [{ type: "text", text: "Message not found." }], details: undefined };
+        }
+        if (p.chat_id !== undefined && result.channelId !== p.chat_id) {
+          return { content: [{ type: "text", text: "Message not found in that chat." }], details: undefined };
         }
         if (excludedMessageIds.includes(result.id)) {
           return { content: [{ type: "text", text: "Message is already present in the current prompt context." }], details: { count: 0 } };
         }
         results = [result];
+      } else if (mode === "context") {
+        const contextLimit = Math.max(1, Math.min(p.limit ?? 20, 50));
+        if (p.message_id !== undefined && p.message_id.trim() !== "") {
+          const contextResults = getMessagesAroundMessage(db, p.message_id, {
+            guildId,
+            channelId: p.chat_id,
+            limit: contextLimit,
+          });
+          if (contextResults === null) {
+            return { content: [{ type: "text", text: "Message not found." }], details: undefined };
+          }
+          results = contextResults;
+          const chatId = results[0]?.channelId ?? p.chat_id;
+          contextIntro = chatId !== undefined
+            ? `Surrounding chat context around message id ${p.message_id} in chat ${chatId}, ordered oldest to newest.`
+            : `Surrounding chat context around message id ${p.message_id}, ordered oldest to newest.`;
+        } else if (p.around !== undefined && p.around.trim() !== "") {
+          if (p.chat_id === undefined || p.chat_id.trim() === "") {
+            return { content: [{ type: "text", text: "chat_id is required for timestamp context." }], details: undefined };
+          }
+          const parsed = parseLocalDateTimeToEpoch(p.around, timezone);
+          if (!parsed.ok) {
+            return { content: [{ type: "text", text: `Invalid around timestamp: ${parsed.error}` }], details: undefined };
+          }
+          results = getMessagesAroundTimestamp(db, {
+            guildId,
+            channelId: p.chat_id,
+            around: parsed.epochMs,
+            limit: contextLimit,
+          });
+          contextIntro = `Surrounding chat context around ${p.around} in chat ${p.chat_id}, ordered oldest to newest.`;
+        } else {
+          return { content: [{ type: "text", text: "mode='context' requires message_id or around with chat_id." }], details: undefined };
+        }
       } else if (mode === "literal") {
+        if (p.query === undefined || p.query.trim() === "") {
+          return { content: [{ type: "text", text: "Query is required for literal search." }], details: undefined };
+        }
         try {
           results = searchMessagesLiteral(db, p.query, {
             guildId,
@@ -109,6 +165,9 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         }
       } else {
         // semantic mode
+        if (p.query === undefined || p.query.trim() === "") {
+          return { content: [{ type: "text", text: "Query is required for semantic search." }], details: undefined };
+        }
         let queryVec: Float32Array;
         try {
           const embedResult = await embed.embed([p.query]);
@@ -167,8 +226,12 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
       }
 
       const lines = [
-        formatResultIntro(mode),
-        ...results.map((r) => formatResult(r, timezone, mode === "semantic", attachmentMap.get(r.id))),
+        contextIntro ?? formatResultIntro(mode),
+        ...results.map((r) => formatResult(r, timezone, {
+          includeScore: mode === "semantic",
+          includeChatId: shouldIncludeChatId(mode, p.chat_id),
+          attachments: attachmentMap.get(r.id),
+        })),
       ];
       return {
         content: [{ type: "text", text: lines.join("\n\n") }],
@@ -178,19 +241,30 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
   };
 }
 
-function formatResultIntro(mode: "semantic" | "literal" | "id"): string {
+function formatResultIntro(mode: "semantic" | "literal" | "id" | "context"): string {
   if (mode === "semantic") return "Semantic search results are ranked by similarity; higher scores mean closer matches.";
   if (mode === "literal") return "Literal search results are exact text matches ordered oldest to newest.";
+  if (mode === "context") return "Surrounding chat context, ordered oldest to newest.";
   return "Direct message lookup result.";
 }
 
-function formatResult(r: MessageSearchResult, timezone: string, includeScore: boolean, attachments?: AttachmentInfo[]): string {
+function shouldIncludeChatId(mode: "semantic" | "literal" | "id" | "context", chatId: string | undefined): boolean {
+  if (mode === "context") return false;
+  return chatId === undefined;
+}
+
+function formatResult(
+  r: MessageSearchResult,
+  timezone: string,
+  options: { includeScore: boolean; includeChatId: boolean; attachments?: AttachmentInfo[] },
+): string {
   const date = formatLocalWallClock(r.createdAt, timezone);
   const replyTag = r.replyToId !== null ? ` (reply to ${r.replyToId})` : "";
-  const scoreTag = includeScore ? `[score ${r.score.toFixed(3)}] ` : "";
-  let line = `${scoreTag}[${date}] ${r.authorUsername}${replyTag}: ${r.translatedContent}`;
-  if (attachments !== undefined && attachments.length > 0) {
-    for (const a of attachments) {
+  const scoreTag = options.includeScore ? `[score ${r.score.toFixed(3)}] ` : "";
+  const chatTag = options.includeChatId ? ` [chat_id ${r.channelId}]` : "";
+  let line = `${scoreTag}[${date}]${chatTag} [id ${r.id}] ${r.authorUsername}${replyTag}: ${r.translatedContent}`;
+  if (options.attachments !== undefined && options.attachments.length > 0) {
+    for (const a of options.attachments) {
       const sizeStr = formatFileSize(a.size);
       const type = a.contentType ?? "unknown";
       line += `\n  📎 ${a.name} (${type}, ${sizeStr})`;

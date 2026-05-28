@@ -32,6 +32,8 @@ SQLite is the source of truth for readable state. Qdrant is only a semantic inde
 
 `search_messages` excludes messages already visible in prompt history. Semantic search overfetches before this filtering so small result limits do not go empty just because top hits are already in context.
 
+Search results expose message IDs as anchors. The same tool can fetch chronological context around a message ID, or around a local timestamp when a `chat_id` is provided.
+
 Memory is direct SQLite data, not a chat-visible tool. The prompt gets global memories plus current-user memories; other users' stored context is signaled only indirectly, such as through member memory counts.
 
 ## Schedules

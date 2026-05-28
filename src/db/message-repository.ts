@@ -33,6 +33,16 @@ export interface MessageSearchResult {
   score: number;
 }
 
+interface MessageSearchRow {
+  id: string;
+  channel_id: string;
+  user_id: string;
+  author_username: string;
+  translated_content: string;
+  created_at: number;
+  reply_to_id: string | null;
+}
+
 interface HistoryRow {
   id: string;
   author_username: string;
@@ -106,9 +116,10 @@ export async function searchMessages(
   filter: MessageSearchFilter,
 ): Promise<MessageSearchResult[]> {
   const excludeIds = new Set(filter.excludeIds ?? []);
-  const qdrantLimit = excludeIds.size > 0
-    ? Math.min(500, filter.limit + excludeIds.size)
-    : filter.limit;
+  const qdrantLimit = Math.min(
+    500,
+    Math.max(filter.limit * 10, filter.limit + excludeIds.size),
+  );
   const qdrantResults = await searchPoints(
     qdrant,
     Array.from(queryVec),
@@ -128,8 +139,7 @@ export async function searchMessages(
   // Overfetch before filtering so a small search limit does not become empty
   // just because top hits are already visible in the prompt context.
   const candidates = qdrantResults
-    .filter((r) => !excludeIds.has(r.id))
-    .slice(0, filter.limit);
+    .filter((r) => !excludeIds.has(r.id));
   if (candidates.length === 0) return [];
 
   const ids = candidates.map((r) => r.id);
@@ -138,7 +148,7 @@ export async function searchMessages(
     .prepare(
       `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
        FROM messages
-       WHERE id IN (${placeholders}) AND is_synthetic = 0`
+       WHERE id IN (${placeholders}) AND is_synthetic = 0 AND TRIM(translated_content) <> ''`
     )
     .all(...ids) as Array<{
       id: string;
@@ -167,9 +177,204 @@ export async function searchMessages(
       replyToId: row.reply_to_id,
       score: scoreMap.get(qr.id) ?? 0,
     });
+    if (results.length >= filter.limit) break;
   }
 
   return results;
+}
+
+function toMessageSearchResult(row: MessageSearchRow, score = 1.0): MessageSearchResult {
+  return {
+    id: row.id,
+    channelId: row.channel_id,
+    userId: row.user_id,
+    authorUsername: row.author_username,
+    translatedContent: row.translated_content,
+    createdAt: row.created_at,
+    replyToId: row.reply_to_id,
+    score,
+  };
+}
+
+function queryVisibleMessages(
+  db: Database,
+  sql: string,
+  params: Array<string | number>,
+): MessageSearchResult[] {
+  const rows = db.raw.prepare(sql).all(...params) as MessageSearchRow[];
+  return rows.map((row) => toMessageSearchResult(row));
+}
+
+function rebalanceContext<T>(
+  before: T[],
+  after: T[],
+  beforeTarget: number,
+  total: number,
+): { before: T[]; after: T[] } {
+  const beforeTakeInitial = Math.min(beforeTarget, before.length);
+  const afterTarget = total - beforeTakeInitial;
+  const afterTake = Math.min(afterTarget, after.length);
+  const beforeTake = Math.min(before.length, total - afterTake);
+
+  return {
+    before: before.slice(before.length - beforeTake),
+    after: after.slice(0, afterTake),
+  };
+}
+
+function contextBeforeMessage(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  createdAt: number,
+  messageId: string,
+  limit: number,
+): MessageSearchResult[] {
+  if (limit <= 0) return [];
+  const rows = queryVisibleMessages(
+    db,
+    `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
+     FROM messages
+     WHERE guild_id = ? AND channel_id = ?
+       AND is_synthetic = 0 AND TRIM(translated_content) <> ''
+       AND (created_at < ? OR (created_at = ? AND id < ?))
+     ORDER BY created_at DESC, id DESC
+     LIMIT ?`,
+    [guildId, channelId, createdAt, createdAt, messageId, limit],
+  );
+  rows.reverse();
+  return rows;
+}
+
+function contextAfterMessage(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  createdAt: number,
+  messageId: string,
+  limit: number,
+): MessageSearchResult[] {
+  if (limit <= 0) return [];
+  return queryVisibleMessages(
+    db,
+    `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
+     FROM messages
+     WHERE guild_id = ? AND channel_id = ?
+       AND is_synthetic = 0 AND TRIM(translated_content) <> ''
+       AND (created_at > ? OR (created_at = ? AND id > ?))
+     ORDER BY created_at ASC, id ASC
+     LIMIT ?`,
+    [guildId, channelId, createdAt, createdAt, messageId, limit],
+  );
+}
+
+function contextBeforeTimestamp(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  around: number,
+  limit: number,
+): MessageSearchResult[] {
+  if (limit <= 0) return [];
+  const rows = queryVisibleMessages(
+    db,
+    `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
+     FROM messages
+     WHERE guild_id = ? AND channel_id = ?
+       AND is_synthetic = 0 AND TRIM(translated_content) <> ''
+       AND created_at < ?
+     ORDER BY created_at DESC, id DESC
+     LIMIT ?`,
+    [guildId, channelId, around, limit],
+  );
+  rows.reverse();
+  return rows;
+}
+
+function contextAfterTimestamp(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  around: number,
+  limit: number,
+): MessageSearchResult[] {
+  if (limit <= 0) return [];
+  return queryVisibleMessages(
+    db,
+    `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
+     FROM messages
+     WHERE guild_id = ? AND channel_id = ?
+       AND is_synthetic = 0 AND TRIM(translated_content) <> ''
+       AND created_at >= ?
+     ORDER BY created_at ASC, id ASC
+     LIMIT ?`,
+    [guildId, channelId, around, limit],
+  );
+}
+
+/**
+ * Fetch chronological chat context around a specific message ID.
+ *
+ * The returned window includes the anchor message and is limited to visible,
+ * non-synthetic messages from the anchor's chat.
+ */
+export function getMessagesAroundMessage(
+  db: Database,
+  messageId: string,
+  filter: { guildId: string; channelId?: string; limit: number },
+): MessageSearchResult[] | null {
+  const limit = Math.max(1, filter.limit);
+  const channelClause = filter.channelId !== undefined ? " AND channel_id = ?" : "";
+  const params = filter.channelId !== undefined
+    ? [messageId, filter.guildId, filter.channelId]
+    : [messageId, filter.guildId];
+
+  const anchor = db.raw
+    .prepare(
+      `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
+       FROM messages
+       WHERE id = ? AND guild_id = ?${channelClause}
+         AND is_synthetic = 0 AND TRIM(translated_content) <> ''`
+    )
+    .get(...params) as MessageSearchRow | null;
+
+  if (anchor === null) return null;
+
+  const sideLimit = limit - 1;
+  const before = contextBeforeMessage(db, filter.guildId, anchor.channel_id, anchor.created_at, anchor.id, sideLimit);
+  const after = contextAfterMessage(db, filter.guildId, anchor.channel_id, anchor.created_at, anchor.id, sideLimit);
+  const { before: keptBefore, after: keptAfter } = rebalanceContext(
+    before,
+    after,
+    Math.floor(sideLimit / 2),
+    sideLimit,
+  );
+
+  return [...keptBefore, toMessageSearchResult(anchor), ...keptAfter];
+}
+
+/**
+ * Fetch chronological chat context around a local timestamp in a specific chat.
+ *
+ * Timestamp context has no exact anchor, so the limit is split across messages
+ * before and at/after the timestamp, with spare capacity rebalanced to the
+ * other side.
+ */
+export function getMessagesAroundTimestamp(
+  db: Database,
+  filter: { guildId: string; channelId: string; around: number; limit: number },
+): MessageSearchResult[] {
+  const limit = Math.max(1, filter.limit);
+  const before = contextBeforeTimestamp(db, filter.guildId, filter.channelId, filter.around, limit);
+  const after = contextAfterTimestamp(db, filter.guildId, filter.channelId, filter.around, limit);
+  const { before: keptBefore, after: keptAfter } = rebalanceContext(
+    before,
+    after,
+    Math.floor(limit / 2),
+    limit,
+  );
+
+  return [...keptBefore, ...keptAfter];
 }
 
 /**
@@ -199,16 +404,7 @@ export function getMessageById(
 
   if (row === null) return null;
 
-  return {
-    id: row.id,
-    channelId: row.channel_id,
-    userId: row.user_id,
-    authorUsername: row.author_username,
-    translatedContent: row.translated_content,
-    createdAt: row.created_at,
-    replyToId: row.reply_to_id,
-    score: 1.0,
-  };
+  return toMessageSearchResult(row);
 }
 
 /**
@@ -305,6 +501,7 @@ export function searchMessagesLiteral(
 
   // Exclude synthetic messages (thread creation events, etc.)
   conditions.push("is_synthetic = 0");
+  conditions.push("TRIM(translated_content) <> ''");
 
   conditions.push("translated_content LIKE ? ESCAPE '\\'");
   params.push(pattern);

@@ -3,7 +3,7 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "./database";
 import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
-import { searchMessages, getMessageById, searchMessagesLiteral, getHistoryMessages, getContextHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory } from "./message-repository";
+import { searchMessages, getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory } from "./message-repository";
 import { createMockPipeline } from "../embeddings/test-utils";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
@@ -282,6 +282,25 @@ describe("searchMessages", () => {
     expect(results.length).toBe(1);
     expect(results[0]?.id).toBe("real-msg");
   });
+
+  test("skips empty semantic hits and continues to real messages", async () => {
+    insertMessage("empty-hit", { guildId: "g1", translatedContent: "" });
+    const queryVec = await embedOne("important topic");
+    await upsertPoint(qdrant, "empty-hit", Array.from(queryVec), {
+      type: "message",
+      entity_id: "empty-hit",
+      guild_id: "g1",
+      channel_id: "c1",
+      user_id: "u1",
+      message_id: "empty-hit",
+      created_at: now,
+    });
+    await insertWithEmbedding("real-msg", "important topic discussion");
+
+    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
+
+    expect(results.map((r) => r.id)).toEqual(["real-msg"]);
+  });
 });
 
 describe("getMessageById", () => {
@@ -322,6 +341,68 @@ describe("getMessageById", () => {
     const result = getMessageById(db, "m1", "g1");
     if (result === null) throw new Error("unreachable");
     expect(result.replyToId).toBeNull();
+  });
+});
+
+describe("message context search", () => {
+  test("returns chronological context around a message id", () => {
+    insertMessage("m1", { translatedContent: "one", createdAt: now - 3_000 });
+    insertMessage("m2", { translatedContent: "two", createdAt: now - 2_000 });
+    insertMessage("m3", { translatedContent: "three", createdAt: now - 1_000 });
+    insertMessage("m4", { translatedContent: "four", createdAt: now });
+    insertMessage("m5", { translatedContent: "five", createdAt: now + 1_000 });
+
+    const results = getMessagesAroundMessage(db, "m3", { guildId: "g1", limit: 5 });
+
+    expect(results?.map((r) => r.id)).toEqual(["m1", "m2", "m3", "m4", "m5"]);
+  });
+
+  test("fills context from available side when one side is short", () => {
+    insertMessage("m1", { translatedContent: "one", createdAt: now });
+    insertMessage("m2", { translatedContent: "two", createdAt: now + 1_000 });
+    insertMessage("m3", { translatedContent: "three", createdAt: now + 2_000 });
+    insertMessage("m4", { translatedContent: "four", createdAt: now + 3_000 });
+
+    const results = getMessagesAroundMessage(db, "m1", { guildId: "g1", limit: 3 });
+
+    expect(results?.map((r) => r.id)).toEqual(["m1", "m2", "m3"]);
+  });
+
+  test("filters context by guild and channel", () => {
+    insertMessage("m1", { guildId: "g1", channelId: "c1", translatedContent: "one", createdAt: now });
+    insertMessage("m2", { guildId: "g1", channelId: "c2", translatedContent: "two", createdAt: now + 1_000 });
+
+    expect(getMessagesAroundMessage(db, "m1", { guildId: "g2", limit: 5 })).toBeNull();
+    expect(getMessagesAroundMessage(db, "m1", { guildId: "g1", channelId: "c2", limit: 5 })).toBeNull();
+  });
+
+  test("excludes synthetic and empty messages from message-id context", () => {
+    insertMessage("m1", { translatedContent: "one", createdAt: now - 2_000 });
+    insertMessage("empty", { translatedContent: "", createdAt: now - 1_000 });
+    insertMessage("m2", { translatedContent: "two", createdAt: now });
+    insertMessage("synthetic", { translatedContent: "event", createdAt: now + 1_000, isSynthetic: true });
+    insertMessage("m3", { translatedContent: "three", createdAt: now + 2_000 });
+
+    const results = getMessagesAroundMessage(db, "m2", { guildId: "g1", limit: 5 });
+
+    expect(results?.map((r) => r.id)).toEqual(["m1", "m2", "m3"]);
+  });
+
+  test("returns chronological context around a timestamp", () => {
+    insertMessage("m1", { channelId: "c1", translatedContent: "one", createdAt: now - 3_000 });
+    insertMessage("m2", { channelId: "c1", translatedContent: "two", createdAt: now - 2_000 });
+    insertMessage("m3", { channelId: "c1", translatedContent: "three", createdAt: now + 1_000 });
+    insertMessage("m4", { channelId: "c1", translatedContent: "four", createdAt: now + 2_000 });
+    insertMessage("other-channel", { channelId: "c2", translatedContent: "other", createdAt: now });
+
+    const results = getMessagesAroundTimestamp(db, {
+      guildId: "g1",
+      channelId: "c1",
+      around: now,
+      limit: 4,
+    });
+
+    expect(results.map((r) => r.id)).toEqual(["m1", "m2", "m3", "m4"]);
   });
 });
 
