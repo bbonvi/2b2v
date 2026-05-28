@@ -14,7 +14,7 @@ import { parseLocalDateTimeToEpoch } from "../time/agent-time.ts";
 export interface ScheduleCommandDeps {
   listSchedules: (filter: ListSchedulesFilter) => ScheduleRow[];
   createSchedule: (input: CreateScheduleInput) => string;
-  deleteSchedule: (id: string) => boolean;
+  deleteSchedule: (id: string, guildId: string) => boolean;
   /** Notify engine that a schedule was created so it can register the job. */
   onScheduleCreated: (scheduleId: string) => void;
   /** Notify engine that a schedule was removed so it can unregister the job. */
@@ -295,7 +295,7 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
         return;
       }
 
-      const deleted = deps.deleteSchedule(id);
+      const deleted = deps.deleteSchedule(id, interaction.guildId);
       if (!deleted) {
         await interaction.reply({
           content: `Schedule not found: \`${id}\``,

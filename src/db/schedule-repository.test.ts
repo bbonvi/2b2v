@@ -4,8 +4,11 @@ import {
   createSchedule,
   updateSchedule,
   deleteSchedule,
+  deleteScheduleForGuild,
+  deletePendingSchedule,
   getSchedule,
   listSchedules,
+  listPendingSchedules,
   listUpcomingForContext,
   type ScheduleSource,
   type ScheduleType,
@@ -243,6 +246,68 @@ describe("deleteSchedule", () => {
   test("returns false for nonexistent id", () => {
     expect(deleteSchedule(db, "nope")).toBe(false);
   });
+
+  test("deleteScheduleForGuild does not delete another guild schedule", () => {
+    const id = createSchedule(db, {
+      guildId: "g1",
+      channelId: "c1",
+      source: "admin",
+      type: "cron",
+      cronExpression: "0 9 * * *",
+      timezone: "UTC",
+      messageContent: "test",
+    });
+
+    expect(deleteScheduleForGuild(db, id, "g2")).toBe(false);
+    expect(getSchedule(db, id)).not.toBeNull();
+    expect(deleteScheduleForGuild(db, id, "g1")).toBe(true);
+    expect(getSchedule(db, id)).toBeNull();
+  });
+
+  test("deletePendingSchedule is scoped to guild and channel", () => {
+    const id = createSchedule(db, {
+      guildId: "g1",
+      channelId: "c1",
+      source: "tool",
+      type: "one_off",
+      runAt: Date.now() + 60_000,
+      timezone: "UTC",
+      messageContent: "test",
+    });
+
+    expect(deletePendingSchedule(db, id, { guildId: "g1", channelId: "c2" })).toBe(false);
+    expect(deletePendingSchedule(db, id, { guildId: "g2", channelId: "c1" })).toBe(false);
+    expect(getSchedule(db, id)).not.toBeNull();
+    expect(deletePendingSchedule(db, id, { guildId: "g1", channelId: "c1" })).toBe(true);
+    expect(getSchedule(db, id)).toBeNull();
+  });
+
+  test("deletePendingSchedule ignores disabled and past one-off schedules", () => {
+    const disabledId = createSchedule(db, {
+      guildId: "g1",
+      channelId: "c1",
+      source: "tool",
+      type: "cron",
+      cronExpression: "* * * * *",
+      timezone: "UTC",
+      messageContent: "disabled",
+      enabled: false,
+    });
+    const pastId = createSchedule(db, {
+      guildId: "g1",
+      channelId: "c1",
+      source: "tool",
+      type: "one_off",
+      runAt: Date.now() - 60_000,
+      timezone: "UTC",
+      messageContent: "past",
+    });
+
+    expect(deletePendingSchedule(db, disabledId, { guildId: "g1", channelId: "c1" })).toBe(false);
+    expect(deletePendingSchedule(db, pastId, { guildId: "g1", channelId: "c1" })).toBe(false);
+    expect(getSchedule(db, disabledId)).not.toBeNull();
+    expect(getSchedule(db, pastId)).not.toBeNull();
+  });
 });
 
 describe("listSchedules", () => {
@@ -325,6 +390,31 @@ describe("listSchedules", () => {
     expect(enabledOnly[0].messageContent).toBe("active");
   });
 
+  test("filters by channel", () => {
+    createSchedule(db, {
+      guildId: "g1",
+      channelId: "c1",
+      source: "admin",
+      type: "cron",
+      cronExpression: "0 9 * * *",
+      timezone: "UTC",
+      messageContent: "c1",
+    });
+    createSchedule(db, {
+      guildId: "g1",
+      channelId: "c2",
+      source: "admin",
+      type: "cron",
+      cronExpression: "0 9 * * *",
+      timezone: "UTC",
+      messageContent: "c2",
+    });
+
+    const channelOnly = listSchedules(db, { guildId: "g1", channelId: "c1" });
+    expect(channelOnly).toHaveLength(1);
+    expect(channelOnly[0]?.messageContent).toBe("c1");
+  });
+
   test("returns empty array for guild with no schedules", () => {
     expect(listSchedules(db, { guildId: "empty" })).toEqual([]);
   });
@@ -358,7 +448,7 @@ describe("listSchedules", () => {
 });
 
 describe("listUpcomingForContext", () => {
-  test("returns enabled schedules for a guild", () => {
+  test("returns pending schedules for a guild", () => {
     createSchedule(db, {
       guildId: "g1",
       channelId: "c1",
@@ -387,15 +477,94 @@ describe("listUpcomingForContext", () => {
       messageContent: "disabled",
       enabled: false,
     });
+    createSchedule(db, {
+      guildId: "g1",
+      channelId: "c1",
+      source: "bot",
+      type: "one_off",
+      runAt: Date.now() - 60_000,
+      timezone: "UTC",
+      messageContent: "past",
+    });
 
     const upcoming = listUpcomingForContext(db, "g1");
     expect(upcoming).toHaveLength(2);
-    // Should not include disabled
+    // Should not include disabled or past one-offs.
     expect(upcoming.every((s) => s.enabled)).toBe(true);
+    expect(upcoming.map((s) => s.messageContent)).not.toContain("past");
   });
 
   test("returns empty for guild with no schedules", () => {
     expect(listUpcomingForContext(db, "no-guild")).toEqual([]);
+  });
+
+  test("can scope pending context schedules to a channel", () => {
+    createSchedule(db, {
+      guildId: "g1",
+      channelId: "c1",
+      source: "tool",
+      type: "one_off",
+      runAt: Date.now() + 60_000,
+      timezone: "UTC",
+      messageContent: "c1",
+    });
+    createSchedule(db, {
+      guildId: "g1",
+      channelId: "c2",
+      source: "tool",
+      type: "one_off",
+      runAt: Date.now() + 60_000,
+      timezone: "UTC",
+      messageContent: "c2",
+    });
+
+    const upcoming = listUpcomingForContext(db, "g1", "c1");
+    expect(upcoming).toHaveLength(1);
+    expect(upcoming[0]?.messageContent).toBe("c1");
+  });
+});
+
+describe("listPendingSchedules", () => {
+  test("returns only enabled future one-offs and enabled cron schedules", () => {
+    createSchedule(db, {
+      guildId: "g1",
+      channelId: "c1",
+      source: "tool",
+      type: "one_off",
+      runAt: Date.now() + 60_000,
+      timezone: "UTC",
+      messageContent: "future",
+    });
+    createSchedule(db, {
+      guildId: "g1",
+      channelId: "c1",
+      source: "admin",
+      type: "cron",
+      cronExpression: "0 9 * * *",
+      timezone: "UTC",
+      messageContent: "cron",
+    });
+    createSchedule(db, {
+      guildId: "g1",
+      channelId: "c1",
+      source: "tool",
+      type: "one_off",
+      runAt: Date.now() - 60_000,
+      timezone: "UTC",
+      messageContent: "past",
+    });
+    createSchedule(db, {
+      guildId: "g2",
+      channelId: "c1",
+      source: "tool",
+      type: "one_off",
+      runAt: Date.now() + 60_000,
+      timezone: "UTC",
+      messageContent: "other guild",
+    });
+
+    const pending = listPendingSchedules(db, { guildId: "g1", channelId: "c1" });
+    expect(pending.map((s) => s.messageContent)).toEqual(["future", "cron"]);
   });
 });
 

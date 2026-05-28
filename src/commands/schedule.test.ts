@@ -437,7 +437,7 @@ describe("createScheduleHandler", () => {
       options: { id: "sched-1" },
     });
     await handler(interaction as never);
-    expect(deleteFn).toHaveBeenCalledWith("sched-1");
+    expect(deleteFn).toHaveBeenCalledWith("sched-1", "guild-1");
     expect(onRemoved).toHaveBeenCalledWith("sched-1");
     expect(replyText(interaction)).toContain("sched-1");
   });

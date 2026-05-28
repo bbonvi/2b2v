@@ -58,6 +58,9 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_schedules_guild_enabled
     ON schedules(guild_id, enabled);
 
+  CREATE INDEX IF NOT EXISTS idx_schedules_guild_channel_enabled
+    ON schedules(guild_id, channel_id, enabled);
+
   CREATE TABLE IF NOT EXISTS images (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id  TEXT NOT NULL,

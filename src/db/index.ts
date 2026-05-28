@@ -24,8 +24,11 @@ export {
   createSchedule,
   updateSchedule,
   deleteSchedule,
+  deleteScheduleForGuild,
+  deletePendingSchedule,
   getSchedule,
   listSchedules,
+  listPendingSchedules,
   listUpcomingForContext,
   type ScheduleSource,
   type ScheduleType,
@@ -33,4 +36,5 @@ export {
   type CreateScheduleInput,
   type UpdateScheduleInput,
   type ListSchedulesFilter,
+  type PendingSchedulesFilter,
 } from "./schedule-repository";

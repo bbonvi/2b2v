@@ -48,7 +48,13 @@ export {
 
 export { createSearchTool, type SearchToolDeps } from "./search-tool.ts";
 
-export { createScheduleTool, type ScheduleToolDeps } from "./schedule-tool.ts";
+export {
+  createScheduleTool,
+  createScheduleTools,
+  createListScheduledMessagesTool,
+  createDeleteScheduledMessageTool,
+  type ScheduleToolDeps,
+} from "./schedule-tool.ts";
 
 export { createMemberListTool, type MemberListToolDeps, type MemberInfo } from "./member-list-tool.ts";
 

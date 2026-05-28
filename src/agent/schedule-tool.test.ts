@@ -1,7 +1,13 @@
 import { test, expect, describe, beforeEach } from "bun:test";
 import { createDatabase, type Database } from "../db/database";
-import { listSchedules } from "../db/schedule-repository";
-import { createScheduleTool, type ScheduleToolDeps } from "./schedule-tool";
+import { createSchedule, getSchedule, listSchedules } from "../db/schedule-repository";
+import {
+  createDeleteScheduledMessageTool,
+  createListScheduledMessagesTool,
+  createScheduleTool,
+  createScheduleTools,
+  type ScheduleToolDeps,
+} from "./schedule-tool";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 
 describe("createScheduleTool (schedule_message)", () => {
@@ -25,6 +31,20 @@ describe("createScheduleTool (schedule_message)", () => {
 
   test("has correct label", () => {
     expect(tool.label).toBe("schedule_message");
+  });
+
+  test("createScheduleTools exposes create, list, and delete tools", () => {
+    const tools = createScheduleTools({
+      db,
+      guildId: "guild-1",
+      channelId: "ch-1",
+      timezone: "America/New_York",
+    });
+    expect(tools.map((t) => t.name)).toEqual([
+      "schedule_message",
+      "list_scheduled_messages",
+      "delete_scheduled_message",
+    ]);
   });
 
   // --- mode: "in" (relative) ---
@@ -201,5 +221,124 @@ describe("createScheduleTool (schedule_message)", () => {
       () => {}
     );
     expect(registeredIds).toHaveLength(1);
+  });
+});
+
+describe("schedule list/delete tools", () => {
+  let db: Database;
+  let deletedIds: string[];
+  let deps: ScheduleToolDeps;
+
+  beforeEach(() => {
+    db = createDatabase(":memory:");
+    deletedIds = [];
+    deps = {
+      db,
+      guildId: "guild-1",
+      channelId: "ch-1",
+      timezone: "UTC",
+      onScheduleDeleted: (id) => deletedIds.push(id),
+    };
+  });
+
+  test("list_scheduled_messages lists only pending schedules in the current channel and guild", async () => {
+    const currentId = createSchedule(db, {
+      guildId: "guild-1",
+      channelId: "ch-1",
+      source: "tool",
+      type: "one_off",
+      runAt: Date.now() + 60_000,
+      timezone: "UTC",
+      messageContent: "current channel reminder",
+    });
+    createSchedule(db, {
+      guildId: "guild-1",
+      channelId: "ch-2",
+      source: "tool",
+      type: "one_off",
+      runAt: Date.now() + 60_000,
+      timezone: "UTC",
+      messageContent: "other channel reminder",
+    });
+    createSchedule(db, {
+      guildId: "guild-2",
+      channelId: "ch-1",
+      source: "tool",
+      type: "one_off",
+      runAt: Date.now() + 60_000,
+      timezone: "UTC",
+      messageContent: "other guild reminder",
+    });
+    createSchedule(db, {
+      guildId: "guild-1",
+      channelId: "ch-1",
+      source: "tool",
+      type: "one_off",
+      runAt: Date.now() - 60_000,
+      timezone: "UTC",
+      messageContent: "past reminder",
+    });
+
+    const listTool = createListScheduledMessagesTool(deps);
+    const result = await listTool.execute("list-1", {}, new AbortController().signal, () => {});
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(text).toContain(currentId);
+    expect(text).toContain("current channel reminder");
+    expect(text).not.toContain("other channel reminder");
+    expect(text).not.toContain("other guild reminder");
+    expect(text).not.toContain("past reminder");
+  });
+
+  test("list_scheduled_messages does not show deleted schedules", async () => {
+    const id = createSchedule(db, {
+      guildId: "guild-1",
+      channelId: "ch-1",
+      source: "tool",
+      type: "one_off",
+      runAt: Date.now() + 60_000,
+      timezone: "UTC",
+      messageContent: "to delete",
+    });
+    const deleteTool = createDeleteScheduledMessageTool(deps);
+    await deleteTool.execute("delete-1", { scheduleId: id }, new AbortController().signal, () => {});
+
+    const listTool = createListScheduledMessagesTool(deps);
+    const result = await listTool.execute("list-1", {}, new AbortController().signal, () => {});
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(text).toContain("No pending");
+    expect(text).not.toContain(id);
+  });
+
+  test("delete_scheduled_message deletes only pending schedules in current channel and guild", async () => {
+    const id = createSchedule(db, {
+      guildId: "guild-1",
+      channelId: "ch-1",
+      source: "tool",
+      type: "one_off",
+      runAt: Date.now() + 60_000,
+      timezone: "UTC",
+      messageContent: "delete me",
+    });
+    const otherChannelId = createSchedule(db, {
+      guildId: "guild-1",
+      channelId: "ch-2",
+      source: "tool",
+      type: "one_off",
+      runAt: Date.now() + 60_000,
+      timezone: "UTC",
+      messageContent: "do not delete",
+    });
+
+    const deleteTool = createDeleteScheduledMessageTool(deps);
+    const miss = await deleteTool.execute("delete-miss", { scheduleId: otherChannelId }, new AbortController().signal, () => {});
+    expect((miss.content[0] as { text: string }).text).toContain("No pending");
+    expect(getSchedule(db, otherChannelId)).not.toBeNull();
+
+    const hit = await deleteTool.execute("delete-hit", { scheduleId: id }, new AbortController().signal, () => {});
+    expect((hit.content[0] as { text: string }).text).toContain("Deleted");
+    expect(getSchedule(db, id)).toBeNull();
+    expect(deletedIds).toEqual([id]);
   });
 });

@@ -1,4 +1,4 @@
-import { createLogger, RequestLog, type LogLevel } from "./logger";
+import { createLogger, RequestLog, type LogLevel, type Logger } from "./logger";
 import { requestLogStore } from "./dashboard/store";
 import { parseDashboardPasswordlessCidrs, startDashboard } from "./dashboard/server";
 import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, validateTrimConfig, validateVpnConfig, validateBashToolConfig } from "./config/loader";
@@ -25,14 +25,14 @@ import { trimMessages } from "./agent/history-trimming";
 import { formatMessageLine, OLDER_LEGEND } from "./agent/history-formatting";
 import { insertDateStamps } from "./agent/history-dates";
 import { formatRelativeAgo } from "./agent/history-dates";
-import { formatLocalWallClock, currentLocalContext } from "./time/agent-time";
+import { currentLocalContext } from "./time/agent-time";
 import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
 import type { TtsResult } from "./tts/types";
 import { buildMemoryContext, extractAndApplyMemories } from "./agent/memory-service";
 import { createSearchTool } from "./agent/search-tool";
-import { createScheduleTool } from "./agent/schedule-tool";
+import { createScheduleTools } from "./agent/schedule-tool";
 import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool";
 import { createChatHistoryTool } from "./agent/chat-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
@@ -45,7 +45,7 @@ import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { insertThread, updateThreadActivity, markBotParticipating, listThreadsForContext, getThreadMetadata } from "./db/thread-repository";
 import { processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
 import { deleteExpiredMemories, countUserMemoriesByUser } from "./db/memory-repository";
-import { listUpcomingForContext, createSchedule, deleteSchedule, listSchedules } from "./db/schedule-repository";
+import { listUpcomingForContext, createSchedule, deleteScheduleForGuild, listSchedules } from "./db/schedule-repository";
 import { registerSlashCommands } from "./commands/registry";
 import { createStatusHandler, statusCommandDefinition } from "./commands/status";
 import { createScheduleHandler, scheduleCommandDefinition } from "./commands/schedule";
@@ -70,6 +70,9 @@ const logLevel = (process.env.LOG_LEVEL ?? "info") as LogLevel;
 const log = createLogger({ level: logLevel });
 
 type AttachmentSendPayload = { content?: string; files: AttachmentBuilder[] };
+type ResolveTargetChannel = (chatId: string | undefined) => TextChannel;
+
+const TYPING_INTERVAL_MS = 8_000;
 
 function buildAttachmentPayload(content: string, attachment: AttachmentBuilder): AttachmentSendPayload {
   return content === "" ? { files: [attachment] } : { content, files: [attachment] };
@@ -84,6 +87,237 @@ function unresolvedEmojiWarnings(warnings: string[]): string[] | undefined {
     .filter((w) => w.startsWith("Failed to resolve emoji:"))
     .map((w) => w.replace("Failed to resolve emoji: ", ""));
   return emojiWarnings.length > 0 ? emojiWarnings : undefined;
+}
+
+function createBotMessageStore(input: {
+  guildId: string;
+  botUserId: string;
+  botUsername: string;
+  logger: Logger;
+}): (sentId: string, targetChannelId: string, rawContent: string, plainContent: string) => void {
+  return (sentId, targetChannelId, rawContent, plainContent) => {
+    const ts = Date.now();
+    db.raw
+      .prepare(
+        `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(sentId, input.guildId, targetChannelId, input.botUserId, input.botUsername, rawContent, plainContent, 1, ts, null);
+
+    void embeddingQueue.enqueue({
+      id: sentId,
+      text: plainContent,
+      target: "message",
+      metadata: {
+        guild_id: input.guildId,
+        channel_id: targetChannelId,
+        user_id: input.botUserId,
+        created_at: ts,
+      },
+    }).catch((err: unknown) => {
+      input.logger.error("bot message embedding enqueue failed", {
+        messageId: sentId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  };
+}
+
+function createTargetChannelResolver(guild: Guild, defaultChannel: TextChannel): ResolveTargetChannel {
+  return (chatId) => {
+    if (chatId === undefined) return defaultChannel;
+    const resolved = guild.channels.cache.get(chatId);
+    if (resolved === undefined) throw new Error(`Invalid chat_id: channel "${chatId}" not found`);
+    if (!("send" in resolved)) throw new Error(`Invalid chat_id: channel "${chatId}" is not a text channel`);
+    return resolved as TextChannel;
+  };
+}
+
+function createTypingController(input: {
+  defaultChannel: TextChannel;
+  resolveTargetChannel: ResolveTargetChannel;
+}): {
+  getLastTypingAt: () => number;
+  sendNow: (chatId?: string) => void;
+  startLoop: () => void;
+  stopLoop: () => void;
+} {
+  let lastTypingAt = 0;
+  let typingTimer: ReturnType<typeof setInterval> | null = null;
+
+  const sendNow = (chatId?: string): void => {
+    const targetChannel = (() => {
+      if (chatId === undefined) return input.defaultChannel;
+      try {
+        return input.resolveTargetChannel(chatId);
+      } catch {
+        return input.defaultChannel;
+      }
+    })();
+    lastTypingAt = Date.now();
+    void targetChannel.sendTyping().catch(() => {});
+  };
+
+  const startLoop = (): void => {
+    if (typingTimer !== null) return;
+    sendNow();
+    typingTimer = setInterval(() => { sendNow(); }, TYPING_INTERVAL_MS);
+  };
+
+  const stopLoop = (): void => {
+    if (typingTimer !== null) {
+      clearInterval(typingTimer);
+      typingTimer = null;
+    }
+  };
+
+  return {
+    getLastTypingAt: () => lastTypingAt,
+    sendNow,
+    startLoop,
+    stopLoop,
+  };
+}
+
+function createDiscordMessageSender(input: {
+  guildId: string;
+  guild: Guild;
+  defaultChannel: TextChannel;
+  outboundResolvers: OutboundResolvers;
+  botUserId: string;
+  botUsername: string;
+  logger: Logger;
+  replySourceMessage?: Message;
+  getLastTypingAt?: () => number;
+}): MessageSender {
+  const storeBotMessage = createBotMessageStore({
+    guildId: input.guildId,
+    botUserId: input.botUserId,
+    botUsername: input.botUsername,
+    logger: input.logger,
+  });
+  const resolveTargetChannel = createTargetChannelResolver(input.guild, input.defaultChannel);
+
+  async function waitAfterRecentTyping(): Promise<void> {
+    const lastTypingAt = input.getLastTypingAt?.() ?? 0;
+    const sinceTypingMs = Date.now() - lastTypingAt;
+    if (sinceTypingMs >= 0 && sinceTypingMs < 200) {
+      await new Promise((resolve) => setTimeout(resolve, 200 - sinceTypingMs));
+    }
+  }
+
+  return async (text, reply, chatId, voice, _signal, replyToMessageId) => {
+    const targetChannel = resolveTargetChannel(chatId);
+    const targetChannelId = targetChannel.id;
+
+    await waitAfterRecentTyping();
+
+    const replyToSpecific = async (content: string | AttachmentSendPayload): Promise<Message> => {
+      if (replyToMessageId !== undefined) {
+        try {
+          const targetMsg = await targetChannel.messages.fetch(replyToMessageId);
+          return typeof content === "string"
+            ? await targetMsg.reply(content)
+            : await targetMsg.reply(content);
+        } catch (err) {
+          input.logger.warn("reply_to_message_id fetch failed, falling back to send", {
+            replyToMessageId,
+            channelId: targetChannel.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      return typeof content === "string"
+        ? await targetChannel.send(content)
+        : await targetChannel.send(content);
+    };
+
+    if (voice !== undefined) {
+      const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
+      const warnings: string[] = [];
+      const translated = translateOutbound(text, input.outboundResolvers, warnings);
+      const chunks = splitMessage(translated);
+      const firstChunk = chunks[0] ?? "";
+      const payload = buildAttachmentPayload(firstChunk, attachment);
+      let sent: Message;
+      if (replyToMessageId !== undefined) {
+        sent = await replyToSpecific(payload);
+      } else if (reply && input.replySourceMessage !== undefined) {
+        sent = await input.replySourceMessage.reply(payload);
+      } else {
+        sent = await targetChannel.send(payload);
+      }
+      storeBotMessage(sent.id, targetChannelId, voiceRawContent(firstChunk), voice.historyText ?? text);
+      for (let i = 1; i < chunks.length; i++) {
+        const chunk = chunks[i] as string;
+        const followup = await targetChannel.send(chunk);
+        storeBotMessage(followup.id, targetChannelId, chunk, chunk);
+      }
+      if (targetChannel.isThread()) {
+        updateThreadActivity(db, targetChannelId, { lastActivityAt: Date.now(), lastMessageId: sent.id });
+        markBotParticipating(db, targetChannelId);
+      }
+      return { sentMessageId: sent.id, warnings: unresolvedEmojiWarnings(warnings) };
+    }
+
+    const warnings: string[] = [];
+    const translated = translateOutbound(text, input.outboundResolvers, warnings);
+    const chunks = splitMessage(translated);
+    let firstId = "";
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i] as string;
+      let sent: Message;
+      if (replyToMessageId !== undefined && i === 0) {
+        sent = await replyToSpecific(chunk);
+      } else if (reply && i === 0 && input.replySourceMessage !== undefined) {
+        sent = await input.replySourceMessage.reply(chunk);
+      } else {
+        sent = await targetChannel.send(chunk);
+      }
+      if (i === 0) firstId = sent.id;
+      storeBotMessage(sent.id, targetChannelId, chunk, i === 0 ? text : chunk);
+    }
+    if (targetChannel.isThread()) {
+      updateThreadActivity(db, targetChannelId, { lastActivityAt: Date.now(), lastMessageId: firstId });
+      markBotParticipating(db, targetChannelId);
+    }
+    return { sentMessageId: firstId, warnings: unresolvedEmojiWarnings(warnings) };
+  };
+}
+
+function createTtsGenerator(guildConfig: GuildConfig): {
+  ttsEnabled: boolean;
+  generateSpeech?: (text: string) => Promise<TtsResult>;
+} {
+  const ttsEnabled = ttsClient !== undefined && guildConfig.tts?.enabled === true;
+  if (!ttsEnabled || ttsClient === undefined || guildConfig.tts === undefined) {
+    return { ttsEnabled };
+  }
+  const client = ttsClient;
+  return {
+    ttsEnabled,
+    generateSpeech: async (text: string): Promise<TtsResult> => {
+      const preset = guildConfig.tts?.voices.normal;
+      if (preset === undefined) {
+        return { ok: false, error: "Normal voice is not configured" };
+      }
+      return client.generate({
+        text,
+        voiceId: preset.voiceId,
+        model: preset.model,
+        seed: preset.seed,
+        applyTextNormalization: preset.applyTextNormalization,
+        outputFormat: preset.outputFormat,
+        voiceSettings: {
+          stability: preset.stability,
+          similarityBoost: preset.similarityBoost,
+          speed: preset.speed,
+          style: preset.style,
+          useSpeakerBoost: preset.useSpeakerBoost,
+        },
+      });
+    },
+  };
 }
 
 log.info("bot starting", {
@@ -218,98 +452,22 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
       const botUserId = client.user?.id ?? "";
       const botUsername = client.user?.username ?? "bot";
 
-      // Build outbound resolvers for message translation
       const outboundResolvers = buildOutboundResolvers(guild);
-
-      // Helper to store bot messages (same as messageCreate handler)
-      const storeBotMessage = (sentId: string, targetChannelId: string, rawContent: string, plainContent: string): void => {
-        const ts = Date.now();
-        db.raw
-          .prepare(
-            `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-          )
-          .run(sentId, guildId, targetChannelId, botUserId, botUsername, rawContent, plainContent, 1, ts, null);
-
-        void embeddingQueue.enqueue({
-          id: sentId,
-          text: plainContent,
-          target: "message",
-          metadata: {
-            guild_id: guildId,
-            channel_id: targetChannelId,
-            user_id: botUserId,
-            created_at: ts,
-          },
-        }).catch((err: unknown) => {
-          scheduleLog.error("bot message embedding enqueue failed", {
-            messageId: sentId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
-      };
-
-      // Build sender that routes to schedule's channel (no reply semantics)
-      const resolveTargetChannel = (chatId: string | undefined): TextChannel => {
-        if (chatId === undefined) return textChannel;
-        const resolved = guild.channels.cache.get(chatId);
-        if (resolved === undefined) {
-          throw new Error(`Invalid chat_id: channel "${chatId}" not found`);
-        }
-        if (!("send" in resolved)) {
-          throw new Error(`Invalid chat_id: channel "${chatId}" is not a text channel`);
-        }
-        return resolved as TextChannel;
-      };
-
-      const sender: MessageSender = async (text, _reply, chatId, voice, _signal) => {
-        const targetChannel = resolveTargetChannel(chatId);
-        const targetChannelId = targetChannel.id;
-
-        // Voice message path
-        if (voice !== undefined) {
-          const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
-          const warnings: string[] = [];
-          const translated = translateOutbound(text, outboundResolvers, warnings);
-          const chunks = splitMessage(translated);
-          const firstChunk = chunks[0] ?? "";
-          const sent = await targetChannel.send(buildAttachmentPayload(firstChunk, attachment));
-          storeBotMessage(sent.id, targetChannelId, voiceRawContent(firstChunk), voice.historyText ?? text);
-          for (let i = 1; i < chunks.length; i++) {
-            const chunk = chunks[i] as string;
-            const followup = await targetChannel.send(chunk);
-            storeBotMessage(followup.id, targetChannelId, chunk, chunk);
-          }
-          if (targetChannel.isThread()) {
-            updateThreadActivity(db, targetChannelId, {
-              lastActivityAt: Date.now(),
-              lastMessageId: sent.id,
-            });
-            markBotParticipating(db, targetChannelId);
-          }
-          return { sentMessageId: sent.id, warnings: unresolvedEmojiWarnings(warnings) };
-        }
-
-        // Text message path (always send, never reply)
-        const warnings: string[] = [];
-        const translated = translateOutbound(text, outboundResolvers, warnings);
-        const chunks = splitMessage(translated);
-        let firstId = "";
-        for (let i = 0; i < chunks.length; i++) {
-          const chunk = chunks[i] as string;
-          const sent = await targetChannel.send(chunk);
-          if (i === 0) firstId = sent.id;
-          storeBotMessage(sent.id, targetChannelId, chunk, i === 0 ? text : chunk);
-        }
-        if (targetChannel.isThread()) {
-          updateThreadActivity(db, targetChannelId, {
-            lastActivityAt: Date.now(),
-            lastMessageId: firstId,
-          });
-          markBotParticipating(db, targetChannelId);
-        }
-        return { sentMessageId: firstId, warnings: unresolvedEmojiWarnings(warnings) };
-      };
+      const resolveTargetChannel = createTargetChannelResolver(guild, textChannel);
+      const typing = createTypingController({
+        defaultChannel: textChannel,
+        resolveTargetChannel,
+      });
+      const sender = createDiscordMessageSender({
+        guildId,
+        guild,
+        defaultChannel: textChannel,
+        outboundResolvers,
+        botUserId,
+        botUsername,
+        logger: scheduleLog,
+        getLastTypingAt: typing.getLastTypingAt,
+      });
 
       // Build simplified context for scheduled task
       // No real latestUserMessage - use a synthetic one for the pipeline
@@ -353,7 +511,6 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         isThread,
       );
 
-      // Build agent tools (no typing indicator needed for scheduled tasks)
       const extraTools = buildAgentTools(
         guildId,
         channelId,
@@ -367,41 +524,17 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         content: schedule.messageContent,
         authorId: "scheduler",
         authorUsername: "scheduler",
-      botUserId,
-      mentionedUserIds: [],
-      translatedContent: schedule.messageContent,
-      messageId: syntheticLatestMessage.id,
+        botUserId,
+        mentionedUserIds: [],
+        translatedContent: schedule.messageContent,
+        messageId: syntheticLatestMessage.id,
       };
 
       // Build request log
       const requestLog = new RequestLog(guildId, channelId);
       requestLog.setAuthor("scheduler");
 
-      // Build TTS dependencies
-      const ttsEnabled = ttsClient !== undefined && guildConfig.tts?.enabled === true;
-      const generateSpeech = ttsEnabled && ttsClient !== undefined && guildConfig.tts !== undefined
-        ? async (text: string): Promise<TtsResult> => {
-            const preset = guildConfig.tts?.voices.normal;
-            if (preset === undefined) {
-              return { ok: false, error: "Normal voice is not configured" };
-            }
-            return ttsClient.generate({
-              text,
-              voiceId: preset.voiceId,
-              model: preset.model,
-              seed: preset.seed,
-              applyTextNormalization: preset.applyTextNormalization,
-              outputFormat: preset.outputFormat,
-              voiceSettings: {
-                stability: preset.stability,
-                similarityBoost: preset.similarityBoost,
-                speed: preset.speed,
-                style: preset.style,
-                useSpeakerBoost: preset.useSpeakerBoost,
-              },
-            });
-          }
-        : undefined;
+      const { ttsEnabled, generateSpeech } = createTtsGenerator(guildConfig);
 
       // Build handler deps with forceTrigger
       const deps: HandlerDeps = {
@@ -415,6 +548,9 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         requestLog,
         ttsEnabled,
         generateSpeech,
+        onTriggered: () => { typing.startLoop(); },
+        onStillWorking: (targetChatId) => { typing.sendNow(targetChatId); },
+        onAgentEnd: typing.stopLoop,
         forceTrigger: true,
         triggerInstructions: guildConfig.triggerInstructions,
       };
@@ -428,6 +564,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         requestLog.setError(err instanceof Error ? err.message : String(err));
         throw err;
       } finally {
+        typing.stopLoop();
         if (result !== undefined) {
           requestLog.setTrigger(result.triggerResult);
           requestLog.setAgentRan(result.agentRan);
@@ -501,7 +638,7 @@ function setupCommandHandlers(guildId: string): void {
   commandHandlers.set("schedule", createScheduleHandler({
     listSchedules: (filter) => listSchedules(db, filter),
     createSchedule: (input) => createSchedule(db, input),
-    deleteSchedule: (id) => deleteSchedule(db, id),
+    deleteSchedule: (id, targetGuildId) => deleteScheduleForGuild(db, id, targetGuildId),
     onScheduleCreated: (id) => scheduler.addSchedule(id),
     onScheduleRemoved: (id) => scheduler.removeSchedule(id),
     adminUserIds: config.adminUserIds,
@@ -689,24 +826,10 @@ async function buildContext(
     resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
   });
 
-  // Upcoming schedules — one-off by runAt then ID; cron by expression then ID; one-off first
-  const upcoming = listUpcomingForContext(db, guildId)
-    .sort((a, b) => {
-      const typeOrder = (s: typeof a) => s.type === "cron" ? 1 : 0;
-      const td = typeOrder(a) - typeOrder(b);
-      if (td !== 0) return td;
-      if (a.type === "cron" && b.type === "cron") {
-        const ec = (a.cronExpression ?? "").localeCompare(b.cronExpression ?? "");
-        return ec !== 0 ? ec : a.id.localeCompare(b.id);
-      }
-      const rd = (a.runAt ?? 0) - (b.runAt ?? 0);
-      return rd !== 0 ? rd : a.id.localeCompare(b.id);
-    });
-  const upcomingSchedules = upcoming.map((s) => {
-    if (s.type === "cron") return `- [cron] ${s.cronExpression ?? "?"}: ${s.messageContent}`;
-    const runDate = s.runAt !== null ? formatLocalWallClock(s.runAt, guildConfig.timezone) : "?";
-    return `- [one-off at ${runDate}]: ${s.messageContent}`;
-  }).join("\n");
+  const pendingSchedules = listUpcomingForContext(db, guildId, channelId);
+  const oneOffCount = pendingSchedules.filter((s) => s.type === "one_off").length;
+  const cronCount = pendingSchedules.length - oneOffCount;
+  const upcomingSchedules = `Pending schedules in this channel: ${pendingSchedules.length} (${oneOffCount} one-off, ${cronCount} cron). Use list_scheduled_messages if you need schedule details or IDs.`;
 
   // Emoji cache refresh (always needed for outbound translation)
   refreshEmojiCache(guild);
@@ -857,12 +980,13 @@ function buildAgentTools(
     },
   });
 
-  const scheduleTool = createScheduleTool({
+  const scheduleTools = createScheduleTools({
     db,
     guildId,
     channelId,
     timezone: guildConfig.timezone,
     onScheduleCreated: (id) => scheduler.addSchedule(id),
+    onScheduleDeleted: (id) => scheduler.removeSchedule(id),
   });
 
   const memberListTool = createMemberListTool({
@@ -922,7 +1046,7 @@ function buildAgentTools(
 
   const fetchUrlTool = createFetchUrlTool();
 
-  const tools = [searchTool, scheduleTool, memberListTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool];
+  const tools = [searchTool, ...scheduleTools, memberListTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool];
 
   // Brave search if API key configured
   if (globalConfig.braveApiKey !== undefined && globalConfig.braveApiKey !== "") {
@@ -1004,126 +1128,23 @@ async function processTriggeredMessage(
     const inboundResolvers = buildInboundResolvers(guild);
     const translatedContent = translateInbound(message.content, inboundResolvers);
     const outboundResolvers = buildOutboundResolvers(guild);
-
-    function storeBotMessage(sentId: string, targetChannelId: string, rawContent: string, plainContent: string): void {
-      const ts = Date.now();
-      db.raw
-        .prepare(
-          `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(sentId, guildId, targetChannelId, client.user?.id ?? "", client.user?.username ?? "bot", rawContent, plainContent, 1, ts, null);
-
-      void embeddingQueue.enqueue({
-        id: sentId,
-        text: plainContent,
-        target: "message",
-        metadata: {
-          guild_id: guildId,
-          channel_id: targetChannelId,
-          user_id: client.user?.id ?? "",
-          created_at: ts,
-        },
-      }).catch((err: unknown) => {
-        log.error("bot message embedding enqueue failed", {
-          messageId: sentId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-    }
-
     const currentChannelObj = message.channel as TextChannel;
-
-    function resolveTargetChannel(chatId: string | undefined): TextChannel {
-      if (chatId === undefined) return currentChannelObj;
-      const resolved = guild.channels.cache.get(chatId);
-      if (resolved === undefined) throw new Error(`Invalid chat_id: channel "${chatId}" not found`);
-      if (!("send" in resolved)) throw new Error(`Invalid chat_id: channel "${chatId}" is not a text channel`);
-      return resolved as TextChannel;
-    }
-
-    let lastTypingAt = 0;
-
-    const sender: MessageSender = async (text, reply, chatId, voice, _signal, replyToMessageId) => {
-      const targetChannel = resolveTargetChannel(chatId);
-      const targetChannelId = targetChannel.id;
-
-      const sinceTypingMs = Date.now() - lastTypingAt;
-      if (sinceTypingMs >= 0 && sinceTypingMs < 200) {
-        await new Promise((resolve) => setTimeout(resolve, 200 - sinceTypingMs));
-      }
-
-      const replyToSpecific = async (content: string | AttachmentSendPayload): Promise<Message> => {
-        if (replyToMessageId !== undefined) {
-          try {
-            const targetMsg = await targetChannel.messages.fetch(replyToMessageId);
-            return typeof content === "string"
-              ? await targetMsg.reply(content)
-              : await targetMsg.reply(content);
-          } catch (err) {
-            log.warn("reply_to_message_id fetch failed, falling back to send", {
-              replyToMessageId,
-              channelId: targetChannel.id,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-        }
-        return typeof content === "string"
-          ? await targetChannel.send(content)
-          : await targetChannel.send(content);
-      };
-
-      if (voice !== undefined) {
-        const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
-        const warnings: string[] = [];
-        const translated = translateOutbound(text, outboundResolvers, warnings);
-        const chunks = splitMessage(translated);
-        const firstChunk = chunks[0] ?? "";
-        const payload = buildAttachmentPayload(firstChunk, attachment);
-        let sent: Message;
-        if (replyToMessageId !== undefined) {
-          sent = await replyToSpecific(payload);
-        } else if (reply) {
-          sent = await message.reply(payload);
-        } else {
-          sent = await targetChannel.send(payload);
-        }
-        storeBotMessage(sent.id, targetChannelId, voiceRawContent(firstChunk), voice.historyText ?? text);
-        for (let i = 1; i < chunks.length; i++) {
-          const chunk = chunks[i] as string;
-          const followup = await targetChannel.send(chunk);
-          storeBotMessage(followup.id, targetChannelId, chunk, chunk);
-        }
-        if (targetChannel.isThread()) {
-          updateThreadActivity(db, targetChannelId, { lastActivityAt: Date.now(), lastMessageId: sent.id });
-          markBotParticipating(db, targetChannelId);
-        }
-        return { sentMessageId: sent.id, warnings: unresolvedEmojiWarnings(warnings) };
-      }
-
-      const warnings: string[] = [];
-      const translated = translateOutbound(text, outboundResolvers, warnings);
-      const chunks = splitMessage(translated);
-      let firstId = "";
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i] as string;
-        let sent: Message;
-        if (replyToMessageId !== undefined && i === 0) {
-          sent = await replyToSpecific(chunk);
-        } else if (reply && i === 0) {
-          sent = await message.reply(chunk);
-        } else {
-          sent = await targetChannel.send(chunk);
-        }
-        if (i === 0) firstId = sent.id;
-        storeBotMessage(sent.id, targetChannelId, chunk, i === 0 ? text : chunk);
-      }
-      if (targetChannel.isThread()) {
-        updateThreadActivity(db, targetChannelId, { lastActivityAt: Date.now(), lastMessageId: firstId });
-        markBotParticipating(db, targetChannelId);
-      }
-      return { sentMessageId: firstId, warnings: unresolvedEmojiWarnings(warnings) };
-    };
+    const resolveTargetChannel = createTargetChannelResolver(guild, currentChannelObj);
+    const typing = createTypingController({
+      defaultChannel: currentChannelObj,
+      resolveTargetChannel,
+    });
+    const sender = createDiscordMessageSender({
+      guildId,
+      guild,
+      defaultChannel: currentChannelObj,
+      outboundResolvers,
+      botUserId: client.user?.id ?? "",
+      botUsername: client.user?.username ?? "bot",
+      logger: log,
+      replySourceMessage: message,
+      getLastTypingAt: typing.getLastTypingAt,
+    });
 
     const ingestedImages = getImagesByMessageId(db, message.id);
     const now = Date.now();
@@ -1183,19 +1204,6 @@ async function processTriggeredMessage(
     const isThread = message.channel.isThread();
     const context = await buildContext(guildId, channelId, guild, guildConfig, translatedContent, latestUserMessage, replyFallbackDeps, isThread);
 
-    const sendTypingNow = (chatId?: string): void => {
-      const targetChannel = (() => {
-        if (chatId === undefined) return currentChannelObj;
-        try {
-          return resolveTargetChannel(chatId);
-        } catch {
-          return currentChannelObj;
-        }
-      })();
-      lastTypingAt = Date.now();
-      void targetChannel.sendTyping().catch(() => {});
-    };
-
     const startThreadTool = createStartThreadTool({
       guildId,
       createThread: async (name: string) => {
@@ -1238,17 +1246,6 @@ async function processTriggeredMessage(
       startThreadTool,
     ];
 
-    const TYPING_INTERVAL_MS = 8_000;
-    let typingTimer: ReturnType<typeof setInterval> | null = null;
-    const startTypingLoop = (): void => {
-      if (typingTimer !== null) return;
-      sendTypingNow();
-      typingTimer = setInterval(() => { sendTypingNow(); }, TYPING_INTERVAL_MS);
-    };
-    const stopTypingLoop = (): void => {
-      if (typingTimer !== null) { clearInterval(typingTimer); typingTimer = null; }
-    };
-
     const incoming: IncomingMessage = {
       content: message.content,
       authorId: message.author.id,
@@ -1262,28 +1259,7 @@ async function processTriggeredMessage(
     const requestLog = new RequestLog(guildId, channelId);
     requestLog.setAuthor(message.author.username);
 
-    const ttsEnabled = ttsClient !== undefined && guildConfig.tts?.enabled === true;
-    const generateSpeech = ttsEnabled && ttsClient !== undefined && guildConfig.tts !== undefined
-      ? async (text: string): Promise<TtsResult> => {
-          const preset = guildConfig.tts?.voices.normal;
-          if (preset === undefined) return { ok: false, error: "Normal voice is not configured" };
-          return ttsClient.generate({
-            text,
-            voiceId: preset.voiceId,
-            model: preset.model,
-            seed: preset.seed,
-            applyTextNormalization: preset.applyTextNormalization,
-            outputFormat: preset.outputFormat,
-            voiceSettings: {
-              stability: preset.stability,
-              similarityBoost: preset.similarityBoost,
-              speed: preset.speed,
-              style: preset.style,
-              useSpeakerBoost: preset.useSpeakerBoost,
-            },
-          });
-        }
-      : undefined;
+    const { ttsEnabled, generateSpeech } = createTtsGenerator(guildConfig);
 
     const deps: HandlerDeps = {
       globalConfig,
@@ -1293,9 +1269,9 @@ async function processTriggeredMessage(
       sender,
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
-      onTriggered: () => { startTypingLoop(); },
-      onStillWorking: (targetChatId) => { sendTypingNow(targetChatId); },
-      onAgentEnd: stopTypingLoop,
+      onTriggered: () => { typing.startLoop(); },
+      onStillWorking: (targetChatId) => { typing.sendNow(targetChatId); },
+      onAgentEnd: typing.stopLoop,
       requestLog,
       ttsEnabled,
       generateSpeech,
@@ -1345,7 +1321,7 @@ async function processTriggeredMessage(
       requestLog.setError(err instanceof Error ? err.message : String(err));
       throw err;
     } finally {
-      stopTypingLoop();
+      typing.stopLoop();
       if (result !== undefined) {
         requestLog.setTrigger(result.triggerResult);
         requestLog.setAgentRan(result.agentRan);

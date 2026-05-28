@@ -1,7 +1,12 @@
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { Database } from "../db/database";
-import { createSchedule } from "../db/schedule-repository";
+import {
+  createSchedule,
+  deletePendingSchedule,
+  listPendingSchedules,
+  type ScheduleRow,
+} from "../db/schedule-repository";
 import { formatLocalWallClock, parseLocalDateTimeToEpoch } from "../time/agent-time.ts";
 
 export interface ScheduleToolDeps {
@@ -11,6 +16,8 @@ export interface ScheduleToolDeps {
   timezone: string;
   /** Called after schedule is created so the engine can register it at runtime. */
   onScheduleCreated?: (scheduleId: string) => void;
+  /** Called after schedule is deleted so the engine can unregister it at runtime. */
+  onScheduleDeleted?: (scheduleId: string) => void;
 }
 
 const UNIT_TO_MS: Record<string, number> = {
@@ -33,8 +40,26 @@ const ScheduleMessageParams = Type.Object({
   localDateTime: Type.Optional(Type.String({ description: "Local date-time as YYYY-MM-DD HH:mm (guild timezone). Required when mode is \"at\"." })),
 });
 
+const ListScheduledMessagesParams = Type.Object({
+  limit: Type.Optional(Type.Number({ description: "Maximum schedules to return. Default: 20, max: 50." })),
+});
+
+const DeleteScheduledMessageParams = Type.Object({
+  scheduleId: Type.String({ description: "ID of a pending scheduled message in the current channel." }),
+});
+
 type ScheduleResult = AgentToolResult<{ scheduleId: string; runAt: number } | { error: boolean }>;
 
+/** Create all schedule-related tools exposed to the chat agent. */
+export function createScheduleTools(deps: ScheduleToolDeps): AgentTool[] {
+  return [
+    createScheduleTool(deps),
+    createListScheduledMessagesTool(deps),
+    createDeleteScheduledMessageTool(deps),
+  ];
+}
+
+/** Create a one-off scheduled message in the current channel. */
 export function createScheduleTool(deps: ScheduleToolDeps): AgentTool {
   const { db, guildId, channelId, timezone, onScheduleCreated } = deps;
 
@@ -56,6 +81,88 @@ export function createScheduleTool(deps: ScheduleToolDeps): AgentTool {
         return handleAbsoluteMode(params, db, guildId, channelId, timezone, onScheduleCreated);
       }
       return handleRelativeMode(params, db, guildId, channelId, timezone, onScheduleCreated);
+    },
+  };
+}
+
+/** List pending scheduled messages for the current guild and channel. */
+export function createListScheduledMessagesTool(deps: ScheduleToolDeps): AgentTool {
+  const { db, guildId, channelId, timezone } = deps;
+
+  return {
+    name: "list_scheduled_messages",
+    label: "list_scheduled_messages",
+    description:
+      "List pending scheduled messages in the current channel only. Use this to inspect reminders/follow-ups before answering or before deleting one.",
+    parameters: ListScheduledMessagesParams,
+
+    execute(
+      _toolCallId: string,
+      rawParams: unknown
+    ): Promise<AgentToolResult<{ count: number; total: number }>> {
+      const params = rawParams as { limit?: number };
+      const limit = Math.max(1, Math.min(params.limit ?? 20, 50));
+      const schedules = listPendingSchedules(db, { guildId, channelId });
+      const visible = schedules.slice(0, limit);
+
+      if (visible.length === 0) {
+        return Promise.resolve({
+          content: [{ type: "text", text: "No pending scheduled messages in this channel." }],
+          details: { count: 0, total: 0 },
+        });
+      }
+
+      const suffix = schedules.length > visible.length
+        ? `\nShowing ${visible.length} of ${schedules.length}.`
+        : "";
+      return Promise.resolve({
+        content: [{
+          type: "text",
+          text: `Pending scheduled messages in this channel (${schedules.length}):\n${visible.map((s) => formatScheduleForTool(s, timezone)).join("\n")}${suffix}`,
+        }],
+        details: { count: visible.length, total: schedules.length },
+      });
+    },
+  };
+}
+
+/** Delete a pending scheduled message in the current guild and channel. */
+export function createDeleteScheduledMessageTool(deps: ScheduleToolDeps): AgentTool {
+  const { db, guildId, channelId, onScheduleDeleted } = deps;
+
+  return {
+    name: "delete_scheduled_message",
+    label: "delete_scheduled_message",
+    description:
+      "Delete a pending scheduled message by ID in the current channel only. Use list_scheduled_messages first if the exact ID is not already known.",
+    parameters: DeleteScheduledMessageParams,
+
+    execute(
+      _toolCallId: string,
+      rawParams: unknown
+    ): Promise<AgentToolResult<{ deleted: boolean; scheduleId?: string }>> {
+      const params = rawParams as { scheduleId?: string };
+      const scheduleId = params.scheduleId?.trim();
+      if (scheduleId === undefined || scheduleId === "") {
+        return Promise.resolve({
+          content: [{ type: "text", text: "scheduleId is required." }],
+          details: { deleted: false },
+        });
+      }
+
+      const deleted = deletePendingSchedule(db, scheduleId, { guildId, channelId });
+      if (!deleted) {
+        return Promise.resolve({
+          content: [{ type: "text", text: "No pending scheduled message with that ID exists in this channel." }],
+          details: { deleted: false, scheduleId },
+        });
+      }
+
+      onScheduleDeleted?.(scheduleId);
+      return Promise.resolve({
+        content: [{ type: "text", text: `Deleted pending scheduled message ${scheduleId}.` }],
+        details: { deleted: true, scheduleId },
+      });
     },
   };
 }
@@ -106,6 +213,20 @@ function handleRelativeMode(
     content: [{ type: "text", text: `Scheduled message in ${amount} ${unit} (fires at ${localTime}, ${timezone}).` }],
     details: { scheduleId: id, runAt },
   });
+}
+
+function formatScheduleForTool(schedule: ScheduleRow, timezone: string): string {
+  const content = truncate(schedule.messageContent.replaceAll("\n", " "), 240);
+  if (schedule.type === "cron") {
+    return `- ${schedule.id} [cron ${schedule.cronExpression ?? "?"}, ${schedule.timezone}]: ${content}`;
+  }
+  const runDate = schedule.runAt !== null ? formatLocalWallClock(schedule.runAt, timezone) : "?";
+  return `- ${schedule.id} [one-off at ${runDate}, ${timezone}]: ${content}`;
+}
+
+function truncate(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  return text.slice(0, limit - 3) + "...";
 }
 
 function handleAbsoluteMode(
