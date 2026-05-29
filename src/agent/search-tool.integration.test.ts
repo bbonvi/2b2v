@@ -29,6 +29,10 @@ const _hour = 60 * 60 * 1000;
 // Mock username → userId resolver (identity for tests)
 const mockResolveUsername = (username: string): string | undefined => username;
 
+function createTestSearchTool(deps: Omit<Parameters<typeof createSearchTool>[0], "currentChannelId"> & { currentChannelId?: string }) {
+  return createSearchTool({ currentChannelId: "c1", ...deps });
+}
+
 beforeAll(async () => {
   qdrant = createQdrantClient({ url: QDRANT_URL });
   try { await qdrant.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
@@ -86,7 +90,7 @@ afterAll(async () => {
 
 describe("createSearchTool", () => {
   test("returns search_messages AgentTool with correct metadata", () => {
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     expect(tool.name).toBe("search_messages");
     expect(tool.label).toBeDefined();
     expect(tool.description).toBeDefined();
@@ -97,7 +101,7 @@ describe("createSearchTool", () => {
     await insertWithEmbedding("m1", "cats and dogs playing");
     await insertWithEmbedding("m2", "quantum physics notes");
 
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "cats and dogs" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
 
     const text = getResultText(result);
@@ -111,7 +115,7 @@ describe("createSearchTool", () => {
     await insertWithEmbedding("m1", "secret guild one data", { guildId: "g1" });
     await insertWithEmbedding("m2", "secret guild two data", { guildId: "g2" });
 
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "secret data" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
 
     const text = getResultText(result);
@@ -123,7 +127,7 @@ describe("createSearchTool", () => {
     await insertWithEmbedding("m1", "food topic", { authorUsername: "u1", channelId: "c1" });
     await insertWithEmbedding("m2", "food topic again", { userId: "u2", channelId: "c1" });
 
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "food", username: "u1" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
 
     const text = getResultText(result);
@@ -132,7 +136,7 @@ describe("createSearchTool", () => {
   });
 
   test("returns informative message when no results found", async () => {
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "anything" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
 
     const text = getResultText(result);
@@ -140,23 +144,36 @@ describe("createSearchTool", () => {
   });
 
   test("includes metadata in results", async () => {
-    await insertWithEmbedding("m1", "test content", { authorUsername: "bob", channelId: "c5" });
+    await insertWithEmbedding("m1", "test content", { authorUsername: "bob", channelId: "c1" });
 
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "test content" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
 
     const text = getResultText(result);
     expect(text).toContain("bob");
-    expect(text).toContain("[chat_id c5]");
     expect(text).toContain("[id m1]");
+    expect(text).not.toContain("[chat_id");
     expect(result.details.count).toBe(1);
+  });
+
+  test("defaults searches to the current chat", async () => {
+    await insertWithEmbedding("m1", "same phrase current chat", { channelId: "c1" });
+    await insertWithEmbedding("m2", "same phrase other chat", { channelId: "c2" });
+
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const result = await tool.execute("tc1", { query: "same phrase" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+
+    const text = getResultText(result);
+    expect(text).toContain("same phrase current chat");
+    expect(text).not.toContain("same phrase other chat");
+    expect(text).not.toContain("[chat_id");
   });
 
   test("returns semantic results in rank order with scores", async () => {
     await insertWithEmbedding("newer", "cats and dogs exact match", { createdAt: now + 2_000 });
     await insertWithEmbedding("older", "quantum physics unrelated", { createdAt: now + 1_000 });
 
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "cats and dogs", limit: 10 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
 
     const text = getResultText(result);
@@ -169,7 +186,7 @@ describe("createSearchTool", () => {
     await insertWithEmbedding("current", "needle context current", { createdAt: now + 2_000 });
     await insertWithEmbedding("older", "needle context older", { createdAt: now + 1_000 });
 
-    const tool = createSearchTool({
+    const tool = createTestSearchTool({
       db,
       qdrant,
       guildId: "g1",
@@ -191,7 +208,7 @@ describe("reply-to display", () => {
   test("shows reply-to ID in formatted output", async () => {
     insertMessage("m-parent", "parent message");
     insertMessage("m-reply", "replying here", { replyToId: "m-parent" });
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "m-reply", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).toContain("(reply to m-parent)");
@@ -200,7 +217,7 @@ describe("reply-to display", () => {
 
   test("omits reply tag when not a reply", async () => {
     insertMessage("m-solo", "standalone message");
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "m-solo", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).not.toContain("reply to");
@@ -220,7 +237,7 @@ describe("createSearchTool attachment support", () => {
       });
     };
 
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
     const result = await tool.execute("tc1", { query: "diagram" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
 
@@ -239,7 +256,7 @@ describe("createSearchTool attachment support", () => {
       ],
     });
 
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
     const result = await tool.execute("tc1", { query: "diagram", include_attachments: true }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
 
@@ -253,7 +270,7 @@ describe("createSearchTool attachment support", () => {
 
     const fetchMessage = (): Promise<{ attachments: Array<{ name: string; contentType: string | null; size: number }> } | null> => Promise.reject(new Error("Discord API error"));
 
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
     const result = await tool.execute("tc1", { query: "some message", include_attachments: true }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
 
@@ -266,7 +283,7 @@ describe("createSearchTool attachment support", () => {
 
     const fetchMessage = (): Promise<{ attachments: Array<{ name: string; contentType: string | null; size: number }> } | null> => Promise.resolve(null);
 
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
     const result = await tool.execute("tc1", { query: "deleted msg", include_attachments: true }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
 
@@ -279,7 +296,7 @@ describe("createSearchTool attachment support", () => {
 
     const fetchMessage = (): Promise<{ attachments: Array<{ name: string; contentType: string | null; size: number }> } | null> => Promise.resolve({ attachments: [] });
 
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
     const result = await tool.execute("tc1", { query: "plain text", include_attachments: true }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
 
@@ -291,7 +308,7 @@ describe("createSearchTool attachment support", () => {
 describe("search mode: literal", () => {
   test("finds keyword match without Qdrant", async () => {
     insertMessage("m1", "the quick brown fox");
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "quick brown", mode: "literal" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).toContain("Literal search results are exact text matches ordered oldest to newest");
@@ -303,7 +320,7 @@ describe("search mode: literal", () => {
   test("respects filters in literal mode", async () => {
     insertMessage("m1", "topic here", { userId: "u1" });
     insertMessage("m2", "topic here", { userId: "u2" });
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "topic", mode: "literal", username: "u1" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).toContain("topic here");
@@ -313,7 +330,7 @@ describe("search mode: literal", () => {
   test("omits repeated chat_id when search is scoped to a chat", async () => {
     insertMessage("m1", "topic here", { channelId: "c1" });
     insertMessage("m2", "topic here", { channelId: "c2" });
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "topic", mode: "literal", chat_id: "c1" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).toContain("[id m1]");
@@ -322,7 +339,7 @@ describe("search mode: literal", () => {
   });
 
   test("returns no-match message for literal mode", async () => {
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "nonexistent", mode: "literal" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).toContain("No messages found");
@@ -331,7 +348,7 @@ describe("search mode: literal", () => {
   test("literal mode filters out context messages", async () => {
     insertMessage("current", "exact phrase current");
     insertMessage("older", "exact phrase older");
-    const tool = createSearchTool({
+    const tool = createTestSearchTool({
       db,
       qdrant,
       guildId: "g1",
@@ -350,7 +367,7 @@ describe("search mode: literal", () => {
 describe("search mode: id", () => {
   test("returns single message by ID", async () => {
     insertMessage("m1", "target content");
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "m1", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).toContain("target content");
@@ -358,7 +375,7 @@ describe("search mode: id", () => {
   });
 
   test("returns not found for missing ID", async () => {
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "missing", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).toContain("not found");
@@ -366,7 +383,7 @@ describe("search mode: id", () => {
 
   test("enforces guild isolation for ID lookup", async () => {
     insertMessage("m1", "secret content", { guildId: "g2" });
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "m1", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).toContain("not found");
@@ -380,7 +397,7 @@ describe("search mode: context", () => {
     insertMessage("m2", "anchor context", { createdAt: anchorMs });
     insertMessage("m3", "after context", { createdAt: anchorMs + 60_000 });
 
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { mode: "context", message_id: "m2", limit: 3 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
 
@@ -397,7 +414,7 @@ describe("search mode: context", () => {
     insertMessage("m2", "after timestamp", { channelId: "c1", createdAt: aroundMs + 60_000 });
     insertMessage("m3", "wrong chat", { channelId: "c2", createdAt: aroundMs });
 
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { mode: "context", chat_id: "c1", around: "2026-05-28 14:12", limit: 2 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
 
@@ -407,18 +424,24 @@ describe("search mode: context", () => {
     expect(text).not.toContain("[id m3]");
   });
 
-  test("requires chat_id for timestamp context", async () => {
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+  test("defaults timestamp context to current chat", async () => {
+    const aroundMs = Date.UTC(2026, 4, 28, 14, 12);
+    insertMessage("m1", "current chat timestamp", { channelId: "c1", createdAt: aroundMs });
+    insertMessage("m2", "other chat timestamp", { channelId: "c2", createdAt: aroundMs });
+
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { mode: "context", around: "2026-05-28 14:12" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
-    expect(text).toContain("chat_id is required");
+    expect(text).toContain("current chat timestamp");
+    expect(text).not.toContain("other chat timestamp");
+    expect(text).not.toContain("[chat_id");
   });
 });
 
 describe("search mode: default", () => {
   test("omitted mode defaults to semantic search", async () => {
     await insertWithEmbedding("m1", "cats playing with yarn");
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "cats playing" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).toContain("cats playing with yarn");
@@ -426,7 +449,7 @@ describe("search mode: default", () => {
 
   test("explicit semantic mode works same as default", async () => {
     await insertWithEmbedding("m1", "dogs running in park");
-    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "dogs running", mode: "semantic" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).toContain("dogs running in park");

@@ -1001,6 +1001,7 @@ function buildAgentTools(
     db,
     qdrant,
     guildId,
+    currentChannelId: channelId,
     timezone: guildConfig.timezone,
     embed: embeddingPipeline,
     resolveUsername,

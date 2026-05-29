@@ -25,6 +25,8 @@ export interface SearchToolDeps {
   db: Database;
   qdrant: QdrantClient;
   guildId: string;
+  /** Channel/thread/DM that initiated this agent turn; searches default here. */
+  currentChannelId: string;
   timezone: string;
   embed: EmbeddingPipeline;
   /** Resolve username to userId. Returns undefined if not found. */
@@ -41,11 +43,11 @@ const SearchParams = Type.Object({
     Type.Literal("id"),
     Type.Literal("context"),
   ], { description: "Search mode. 'semantic' (default): AI similarity search. 'literal': exact keyword/phrase match (case-insensitive). 'id': direct message ID lookup. 'context': chronological messages around a message_id or local timestamp." })),
-  query: Type.Optional(Type.String({ description: "Search query, keyword/phrase, or message ID depending on mode." })),
+  query: Type.Optional(Type.String({ description: "Semantic: short 2-5 word topic phrase; put names/times/channels in filters. Literal: exact string." })),
   message_id: Type.Optional(Type.String({ description: "Anchor message ID for mode='context'." })),
   username: Type.Optional(Type.String({ description: "Filter results to a specific username." })),
-  chat_id: Type.Optional(Type.String({ description: "Filter results to a specific chat (channel, thread, or DM). Required for timestamp context." })),
-  around: Type.Optional(Type.String({ description: "Local wall-clock timestamp for mode='context', formatted YYYY-MM-DD HH:mm in the server timezone. Requires chat_id." })),
+  chat_id: Type.Optional(Type.String({ description: "Search a specific chat (channel, thread, or DM). Defaults to the current chat." })),
+  around: Type.Optional(Type.String({ description: "Local wall-clock timestamp for mode='context', formatted YYYY-MM-DD HH:mm in the server timezone. Defaults to the current chat unless chat_id is provided." })),
   afterMs: Type.Optional(Type.Number({ description: "Only messages after this epoch ms timestamp." })),
   beforeMs: Type.Optional(Type.Number({ description: "Only messages before this epoch ms timestamp." })),
   is_bot: Type.Optional(Type.Boolean({ description: "Semantic search only: true for bot-authored results, false for human-authored results." })),
@@ -73,7 +75,7 @@ export function normalizeUsername(raw: string): string {
  * Embeds the query, runs Qdrant search + SQLite metadata lookup, returns formatted excerpts.
  */
 export function createSearchTool(deps: SearchToolDeps): AgentTool {
-  const { db, qdrant, guildId, timezone, embed, resolveUsername } = deps;
+  const { db, qdrant, guildId, currentChannelId, timezone, embed, resolveUsername } = deps;
 
   return {
     name: "search_messages",
@@ -99,6 +101,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
       };
       const mode = p.mode ?? "semantic";
       const limit = Math.max(1, Math.min(p.limit ?? 10, 50));
+      const scopedChatId = p.chat_id !== undefined && p.chat_id.trim() !== "" ? p.chat_id : currentChannelId;
       const excludedMessageIds = [...new Set(deps.excludedMessageIds ?? [])];
       let contextIntro: string | undefined;
 
@@ -121,7 +124,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         if (result === null) {
           return { content: [{ type: "text", text: "Message not found." }], details: undefined };
         }
-        if (p.chat_id !== undefined && result.channelId !== p.chat_id) {
+        if (result.channelId !== scopedChatId) {
           return { content: [{ type: "text", text: "Message not found in that chat." }], details: undefined };
         }
         if (excludedMessageIds.includes(result.id)) {
@@ -133,34 +136,28 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         if (p.message_id !== undefined && p.message_id.trim() !== "") {
           const contextResults = getMessagesAroundMessage(db, p.message_id, {
             guildId,
-            channelId: p.chat_id,
+            channelId: scopedChatId,
             limit: contextLimit,
           });
           if (contextResults === null) {
             return { content: [{ type: "text", text: "Message not found." }], details: undefined };
           }
           results = contextResults;
-          const chatId = results[0]?.channelId ?? p.chat_id;
-          contextIntro = chatId !== undefined
-            ? `Surrounding chat context around message id ${p.message_id} in chat ${chatId}, ordered oldest to newest.`
-            : `Surrounding chat context around message id ${p.message_id}, ordered oldest to newest.`;
+          contextIntro = `Surrounding chat context around message id ${p.message_id} in chat ${scopedChatId}, ordered oldest to newest.`;
         } else if (p.around !== undefined && p.around.trim() !== "") {
-          if (p.chat_id === undefined || p.chat_id.trim() === "") {
-            return { content: [{ type: "text", text: "chat_id is required for timestamp context." }], details: undefined };
-          }
           const parsed = parseLocalDateTimeToEpoch(p.around, timezone);
           if (!parsed.ok) {
             return { content: [{ type: "text", text: `Invalid around timestamp: ${parsed.error}` }], details: undefined };
           }
           results = getMessagesAroundTimestamp(db, {
             guildId,
-            channelId: p.chat_id,
+            channelId: scopedChatId,
             around: parsed.epochMs,
             limit: contextLimit,
           });
-          contextIntro = `Surrounding chat context around ${p.around} in chat ${p.chat_id}, ordered oldest to newest.`;
+          contextIntro = `Surrounding chat context around ${p.around} in chat ${scopedChatId}, ordered oldest to newest.`;
         } else {
-          return { content: [{ type: "text", text: "mode='context' requires message_id or around with chat_id." }], details: undefined };
+          return { content: [{ type: "text", text: "mode='context' requires message_id or around." }], details: undefined };
         }
       } else if (mode === "literal") {
         if (p.query === undefined || p.query.trim() === "") {
@@ -170,7 +167,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
           results = searchMessagesLiteral(db, p.query, {
             guildId,
             userId: userId,
-            channelId: p.chat_id,
+            channelId: scopedChatId,
             after: p.afterMs,
             before: p.beforeMs,
             excludeIds: excludedMessageIds,
@@ -204,7 +201,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
           results = await searchMessages(db, qdrant, queryVec, {
             guildId,
             userId: userId,
-            channelId: p.chat_id,
+            channelId: scopedChatId,
             after: p.afterMs,
             before: p.beforeMs,
             excludeIds: excludedMessageIds,
@@ -254,7 +251,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         contextIntro ?? formatResultIntro(mode),
         ...results.map((r) => formatResult(r, timezone, {
           includeScore: mode === "semantic",
-          includeChatId: shouldIncludeChatId(mode, p.chat_id),
+          includeChatId: false,
           attachments: attachmentMap.get(r.id),
         })),
       ];
@@ -271,11 +268,6 @@ function formatResultIntro(mode: "semantic" | "literal" | "id" | "context"): str
   if (mode === "literal") return "Literal search results are exact text matches ordered oldest to newest.";
   if (mode === "context") return "Surrounding chat context, ordered oldest to newest.";
   return "Direct message lookup result.";
-}
-
-function shouldIncludeChatId(mode: "semantic" | "literal" | "id" | "context", chatId: string | undefined): boolean {
-  if (mode === "context") return false;
-  return chatId === undefined;
 }
 
 function formatResult(

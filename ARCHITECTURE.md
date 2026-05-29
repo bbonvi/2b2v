@@ -42,7 +42,7 @@ Backfill and reindex jobs merge consecutive same-author messages into vector blo
 
 `search_messages` excludes messages already visible in prompt history. Semantic search overfetches before this filtering so small result limits do not go empty just because top hits are already in context.
 
-Search results expose message IDs as anchors. The same tool can fetch chronological context around a message ID, or around a local timestamp when a `chat_id` is provided.
+Search defaults to the current channel/thread/DM and omits repeated `chat_id` tags for scoped results. A provided `chat_id` scopes search to that specific chat. Results expose message IDs as anchors; the same tool can fetch chronological context around a message ID or around a local timestamp.
 
 `search_messages` is text-first. Discord attachment metadata is opt-in via `include_attachments` because uncached historical messages require per-message Discord API fetches.
 
