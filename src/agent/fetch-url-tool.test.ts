@@ -37,6 +37,34 @@ describe("createFetchUrlTool", () => {
     expect(getContentText(result)).toContain("Test Page");
   });
 
+  test("returns manual content when direct fetch beats Jina", async () => {
+    const calls: string[] = [];
+    const mockHtml = `
+      <html><head><title>Direct Win</title></head>
+      <body><article><p>Direct content.</p></article></body></html>
+    `;
+    const tool = createFetchUrlTool({
+      fetchFn: async (url) => {
+        const target = url.toString();
+        calls.push(target.includes("r.jina.ai") ? "jina" : "manual");
+        if (target.includes("r.jina.ai")) {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          return new Response("# Slow Jina\n\nSlow content.", {
+            headers: { "content-type": "text/markdown" },
+          });
+        }
+        return new Response(mockHtml, { headers: { "content-type": "text/html" } });
+      },
+    });
+
+    const result = await tool.execute("test-id", { url: "https://example.com" });
+    const details = result.details as FetchUrlDetails;
+    expect(calls).toContain("jina");
+    expect(calls).toContain("manual");
+    expect(details.method).toBe("manual");
+    expect(getContentText(result)).toContain("Direct content.");
+  });
+
   test("falls back to manual when Jina fails", async () => {
     const mockHtml = `
       <html><head><title>Fallback Test</title></head>
@@ -55,6 +83,48 @@ describe("createFetchUrlTool", () => {
     const result = await tool.execute("test-id", { url: "https://example.com" });
     const details = result.details as FetchUrlDetails;
     expect(details.method).toBe("manual");
+  });
+
+  test("rejects direct anti-bot challenge and waits for Jina content", async () => {
+    const challengeHtml = `
+      <html><head><title>Just a moment...</title></head>
+      <body><main>Checking your browser before accessing example.com.</main></body></html>
+    `;
+    const tool = createFetchUrlTool({
+      fetchFn: async (url) => {
+        if (url.toString().includes("r.jina.ai")) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return new Response("# Real Article\n\nUseful content.", {
+            headers: { "content-type": "text/markdown" },
+          });
+        }
+        return new Response(challengeHtml, { headers: { "content-type": "text/html" } });
+      },
+    });
+
+    const result = await tool.execute("test-id", { url: "https://example.com" });
+    const details = result.details as FetchUrlDetails;
+    expect(details.method).toBe("jina");
+    expect(getContentText(result)).toContain("Useful content.");
+  });
+
+  test("fails instead of returning direct anti-bot challenge content", async () => {
+    const challengeHtml = `
+      <html><head><title>Just a moment...</title></head>
+      <body><main>Checking your browser before accessing example.com.</main></body></html>
+    `;
+    const tool = createFetchUrlTool({
+      disableJina: true,
+      fetchFn: () => Promise.resolve(new Response(challengeHtml, { headers: { "content-type": "text/html" } })),
+    });
+
+    try {
+      await tool.execute("test-id", { url: "https://example.com" });
+      expect.unreachable("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain("anti-bot challenge");
+    }
   });
 
   test("rejects invalid URLs", async () => {

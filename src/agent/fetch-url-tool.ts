@@ -66,26 +66,20 @@ export function createFetchUrlTool(deps: FetchUrlToolDeps = {}): AgentTool {
 
       const request = createToolTimeout(signal, timeoutMs, `fetch_url timed out after ${timeoutMs}ms`);
       try {
-        let jinaError: unknown;
-        // Try Jina Reader first (unless disabled)
-        if (!disableJina) {
-          try {
-            return await fetchWithJina(parsedUrl.toString(), maxContentLength, fetchFn, request.signal);
-          } catch (error) {
-            if (request.signal.aborted) throw error;
-            jinaError = error;
-          }
+        if (disableJina) {
+          return await fetchManual(parsedUrl.toString(), maxContentLength, fetchFn, turndown, request.signal);
         }
 
-        // Fallback: Manual extraction
-        try {
-          return await fetchManual(parsedUrl.toString(), maxContentLength, fetchFn, turndown, request.signal);
-        } catch (manualError) {
-          if (jinaError !== undefined) {
-            throw new Error(`Jina reader failed: ${errorMessage(jinaError)}; manual fetch failed: ${errorMessage(manualError)}`);
-          }
-          throw manualError;
-        }
+        return await fetchFirstSuccessful([
+          {
+            name: "Jina reader",
+            run: (signal) => fetchWithJina(parsedUrl.toString(), maxContentLength, fetchFn, signal),
+          },
+          {
+            name: "manual fetch",
+            run: (signal) => fetchManual(parsedUrl.toString(), maxContentLength, fetchFn, turndown, signal),
+          },
+        ], request.signal);
       } catch (error) {
         throw new Error(formatFetchUrlFailure(parsedUrl.toString(), error, timeoutMs));
       } finally {
@@ -93,6 +87,74 @@ export function createFetchUrlTool(deps: FetchUrlToolDeps = {}): AgentTool {
       }
     },
   };
+}
+
+interface FetchAttempt {
+  name: string;
+  run: (signal: AbortSignal) => Promise<AgentToolResult<{ url: string; title: string; contentLength: number; method: string }>>;
+}
+
+async function fetchFirstSuccessful(
+  attempts: FetchAttempt[],
+  parent: AbortSignal,
+): Promise<AgentToolResult<{ url: string; title: string; contentLength: number; method: string }>> {
+  if (attempts.length === 0) throw new Error("No fetch strategies configured");
+  if (parent.aborted) throw abortReason(parent, "fetch_url aborted");
+
+  const controllers = attempts.map(() => new AbortController());
+  const onParentAbort = (): void => {
+    for (const controller of controllers) {
+      controller.abort(abortReason(parent, "fetch_url aborted"));
+    }
+  };
+  parent.addEventListener("abort", onParentAbort, { once: true });
+
+  const pending = new Set<number>(attempts.map((_attempt, index) => index));
+  const errors: Array<{ name: string; error: unknown }> = [];
+
+  try {
+    const wrapped = attempts.map((attempt, index) => {
+      const controller = controllers[index];
+      if (controller === undefined) {
+        return Promise.resolve({ index, result: undefined, error: new Error("Missing fetch controller") });
+      }
+      if (parent.aborted) {
+        controller.abort(abortReason(parent, "fetch_url aborted"));
+      }
+      return attempt.run(controller.signal)
+        .then((result) => ({ index, result, error: undefined }))
+        .catch((error: unknown) => ({ index, result: undefined, error }));
+    });
+
+    while (pending.size > 0) {
+      const result = await Promise.race([...pending].map((index) => {
+        const promise = wrapped[index];
+        if (promise === undefined) {
+          return Promise.resolve({ index, result: undefined, error: new Error("Missing fetch attempt") });
+        }
+        return promise;
+      }));
+      pending.delete(result.index);
+
+      if (result.result !== undefined) {
+        for (const index of pending) {
+          controllers[index]?.abort(new Error("fetch_url cancelled after another strategy succeeded"));
+        }
+        void Promise.allSettled(wrapped);
+        return result.result;
+      }
+
+      const attempt = attempts[result.index];
+      errors.push({
+        name: attempt?.name ?? `attempt ${result.index + 1}`,
+        error: result.error ?? new Error("Fetch strategy failed without an error"),
+      });
+    }
+  } finally {
+    parent.removeEventListener("abort", onParentAbort);
+  }
+
+  throw new Error(errors.map(({ name, error }) => `${name} failed: ${errorMessage(error)}`).join("; "));
 }
 
 async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -156,6 +218,32 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
+function assertNotBotChallenge(text: string, source: string): void {
+  const sample = text.slice(0, 120_000);
+  const compact = sample.replace(/\s+/g, " ").trim();
+  const signatures = [
+    /\bjust a moment\b/i,
+    /\bchecking (?:if )?your browser\b/i,
+    /\bverify you are human\b/i,
+    /\bcloudflare ray id\b/i,
+    /\bcf-browser-verification\b/i,
+    /\bcf-chl-/i,
+    /\bchallenge-platform\b/i,
+    /\bcdn-cgi\/challenge-platform\b/i,
+    /\bg-recaptcha\b/i,
+    /\bh-captcha\b/i,
+    /\bhcaptcha\b/i,
+    /\bpx-captcha\b/i,
+    /\bdatadome\b/i,
+    /\bddos-guard\b/i,
+    /\bperimeterx\b/i,
+    /\bakamai bot manager\b/i,
+  ];
+  if (signatures.some((signature) => signature.test(compact))) {
+    throw new Error(`${source} returned an anti-bot challenge instead of page content`);
+  }
+}
+
 function formatFetchUrlFailure(url: string, error: unknown, timeoutMs: number): string {
   if (error instanceof Error && error.message.startsWith("fetch_url failed")) return error.message;
   if (error instanceof Error && error.name === "AbortError") {
@@ -185,6 +273,7 @@ async function fetchWithJina(
   }
 
   let markdown = await abortable(response.text(), signal);
+  assertNotBotChallenge(markdown, "Jina reader");
 
   // Extract title from first heading if present
   const titleMatch = markdown.match(/^#\s+(.+)$/m);
@@ -231,6 +320,7 @@ async function fetchManual(
   }
 
   const html = await abortable(response.text(), signal);
+  assertNotBotChallenge(html, "Manual fetch");
 
   // Parse and extract
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -245,6 +335,7 @@ async function fetchManual(
   }
 
   let markdown = turndown.turndown(article.content ?? "");
+  assertNotBotChallenge(`${article.title ?? ""}\n${markdown}`, "Manual fetch");
 
   if (markdown.length > maxContentLength) {
     markdown = markdown.slice(0, maxContentLength) + "\n\n[Content truncated...]";
