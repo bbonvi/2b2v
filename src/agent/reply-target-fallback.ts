@@ -29,7 +29,15 @@ export interface ReplyFallbackDeps {
   /** Fetch a single message from Discord by channel+message ID. Returns null on failure/not found. */
   fetchDiscordMessage: (channelId: string, messageId: string) => Promise<FetchedDiscordMessage | null>;
   /** Enqueue a message for embedding (fire-and-forget semantics). */
-  enqueueEmbedding: (id: string, text: string, metadata: { guild_id: string; channel_id: string; user_id: string; created_at: number }) => Promise<void>;
+  enqueueEmbedding: (id: string, text: string, metadata: {
+    guild_id: string;
+    channel_id: string;
+    user_id: string;
+    created_at: number;
+    is_bot?: boolean;
+    source?: "live" | "backfill" | "reindex";
+    embedding_kind?: "single" | "merged";
+  }) => Promise<void>;
   /** Process and store an image attachment (fire-and-forget semantics). */
   processImage: (url: string, contentType: string, messageId: string) => Promise<void>;
 }
@@ -185,6 +193,9 @@ export async function fetchMissingReplyTargets(
       channel_id: deps.channelId,
       user_id: discordMsg.authorId,
       created_at: discordMsg.timestamp,
+      is_bot: discordMsg.isBot,
+      source: "live",
+      embedding_kind: "single",
     }).catch(() => {
       // Embedding failure is non-fatal
     });

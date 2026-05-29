@@ -14,6 +14,10 @@ Tool-budget exhaustion is recoverable. Pending tool calls get synthetic results,
 
 Typing is runtime-owned. The model has no typing tool.
 
+`fetch_url` races Jina Reader against `@steipete/summarize-core`; if summarize-core fails, that same branch falls back to the local Readability/Turndown extractor. Anti-bot challenge pages are failures, not returned content.
+
+`summarize_video` uses `@steipete/summarize-core` with a longer timeout for YouTube, direct media, and podcast transcript extraction. It returns extracted transcript/content as tool context; the reply model still writes the user-facing summary.
+
 ## Prompt Cache
 
 Prompt caching depends on stable content staying stable. The handler sends one merged stable prefix, adds cache breakpoints inside that block, then inserts a tiny stable user/assistant anchor before volatile turn context.
@@ -30,9 +34,15 @@ Merged history rows must preserve all component Discord message IDs. Reply resol
 
 SQLite is the source of truth for readable state. Qdrant is only a semantic index; search results must join back to SQLite rows.
 
+Message vectors use `normalizeMessageForEmbedding`: Discord markup and URLs are reduced to searchable placeholders, but ordinary short text such as "ok" or "lol" is preserved. Usernames, channel IDs, timestamps, bot/human state, vector source, and vector granularity belong in Qdrant payload fields, not embedded text.
+
+Backfill and reindex jobs merge consecutive same-author messages into vector blocks. Search resolves merged payload message IDs back to SQLite rows and returns one chronological excerpt.
+
 `search_messages` excludes messages already visible in prompt history. Semantic search overfetches before this filtering so small result limits do not go empty just because top hits are already in context.
 
 Search results expose message IDs as anchors. The same tool can fetch chronological context around a message ID, or around a local timestamp when a `chat_id` is provided.
+
+`search_messages` is text-first. Discord attachment metadata is opt-in via `include_attachments` because uncached historical messages require per-message Discord API fetches.
 
 Memory is direct SQLite data, not a chat-visible tool. The prompt gets global memories plus current-user memories; other users' stored context is signaled only indirectly, such as through member memory counts.
 
@@ -55,3 +65,9 @@ ElevenLabs v3 bracket delivery tags inside `<voice>` are prompt policy, not code
 ## Config Changes
 
 When adding or removing config fields, update the example config files, config types, loader logic, loader tests, README reference text, and any invariant in this file affected by the change.
+
+## Maintenance Scripts
+
+`scripts/import-legacy-channel-history.ts` streams older Discord channel messages into SQLite and Qdrant. It starts before the oldest stored message for that guild/channel and skips existing message IDs.
+
+`scripts/reindex-message-vectors.ts` is the repair path for garbage or stale message vectors. Dry-run counts source messages and merged blocks; `--apply` deletes matching message vectors and rebuilds them from SQLite with the current normalizer and payload schema.

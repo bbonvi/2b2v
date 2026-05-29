@@ -11,7 +11,15 @@ export interface PointPayload {
   channel_id?: string;
   user_id?: string;
   message_id?: string;
+  message_ids?: string[];
+  first_message_id?: string;
+  last_message_id?: string;
+  message_count?: number;
   created_at?: number;
+  last_created_at?: number;
+  is_bot?: boolean;
+  source?: "live" | "backfill" | "reindex" | "memory";
+  embedding_kind?: "single" | "merged";
 }
 
 /**
@@ -40,6 +48,9 @@ export interface SearchFilter {
   user_id?: string;
   after?: number;
   before?: number;
+  is_bot?: boolean;
+  source?: string;
+  embedding_kind?: "single" | "merged";
 }
 
 export interface SearchResult {
@@ -151,11 +162,20 @@ export async function searchPoints(
   if (filter.user_id !== undefined && filter.user_id !== "") {
     must.push({ key: "user_id", match: { value: filter.user_id } });
   }
-  if (filter.after !== undefined || filter.before !== undefined) {
-    const range: Record<string, number> = {};
-    if (filter.after !== undefined) range.gt = filter.after;
-    if (filter.before !== undefined) range.lt = filter.before;
-    must.push({ key: "created_at", range });
+  if (filter.is_bot !== undefined) {
+    must.push({ key: "is_bot", match: { value: filter.is_bot } });
+  }
+  if (filter.source !== undefined && filter.source !== "") {
+    must.push({ key: "source", match: { value: filter.source } });
+  }
+  if (filter.embedding_kind !== undefined) {
+    must.push({ key: "embedding_kind", match: { value: filter.embedding_kind } });
+  }
+  if (filter.after !== undefined) {
+    must.push({ key: "last_created_at", range: { gt: filter.after } });
+  }
+  if (filter.before !== undefined) {
+    must.push({ key: "created_at", range: { lt: filter.before } });
   }
 
   const results = await client.search(COLLECTION_NAME, {

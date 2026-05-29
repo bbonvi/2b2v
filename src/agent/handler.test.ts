@@ -217,6 +217,26 @@ describe("handleMessage", () => {
     expect(senderCalls).toEqual([{ text: "hello user", reply: true, chatId: undefined }]);
   });
 
+  test("sends keyword-triggered final text as a reply", async () => {
+    const senderCalls: Array<{ text: string; reply: boolean; chatId?: string }> = [];
+    const sender: MessageSender = (text, reply, chatId) => {
+      senderCalls.push({ text, reply, chatId });
+      return Promise.resolve({ sentMessageId: "sent-1" });
+    };
+
+    await handleMessage(
+      makeMessage({ content: "hello bot", translatedContent: "hello bot" }),
+      makeDeps({
+        guildConfig: makeGuildConfig({
+          triggers: { mention: false, keywords: ["bot"], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingMaxWaitMs: 15000 },
+        }),
+        sender,
+      }),
+    );
+
+    expect(senderCalls).toEqual([{ text: "hello user", reply: true, chatId: undefined }]);
+  });
+
   test("instructs model to cite web and URL sources inline", async () => {
     const completeChat: ChatCompleteFn = (request) => {
       const payload = {
@@ -946,6 +966,200 @@ describe("handleMessage", () => {
 
     expect(result.responseText).toBe("answer after too many rounds");
     expect(calls).toBe(3);
+  });
+
+  test("forces a final answer when agent time expires during an LLM turn", async () => {
+    const tool: AgentTool = {
+      name: "lookup",
+      label: "Lookup",
+      description: "Look something up",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: () => Promise.resolve({ content: [{ type: "text", text: "unused" }], details: {} }),
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls === 1) {
+        return new Promise((_, reject) => {
+          const signal = request.signal;
+          if (signal === undefined) {
+            reject(new Error("expected abort signal"));
+            return;
+          }
+          signal.addEventListener("abort", () => {
+            reject(signal.reason instanceof Error ? signal.reason : new Error("request aborted"));
+          }, { once: true });
+        });
+      }
+
+      expect(request.toolChoice).toBe("none");
+      expect(request.tools).toEqual([]);
+      expect(request.signal?.aborted).toBe(false);
+      expect(request.messages.some((m) =>
+        m.role === "system"
+        && typeof m.content === "string"
+        && m.content.includes("agent time budget exhausted")
+      )).toBe(true);
+      return Promise.resolve({
+        text: "answer from available context",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "answer from available context" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        completeChat,
+        guildConfig: makeGuildConfig({ replyLoop: { maxToolCalls: 2, wallClockTimeoutMs: 10, llmOutputTimeoutMs: 1_000 } }),
+      }),
+    );
+
+    expect(result.responseText).toBe("answer from available context");
+    expect(calls).toBe(2);
+  });
+
+  test("switches to agent-time finalization when time expires during tool-budget final answer", async () => {
+    const tool: AgentTool = {
+      name: "lookup",
+      label: "Lookup",
+      description: "Look something up",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: () => Promise.resolve({ content: [{ type: "text", text: "first result" }], details: {} }),
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [
+            { id: "call-1", type: "function", function: { name: "lookup", arguments: "{\"query\":\"x\"}" } },
+            { id: "call-2", type: "function", function: { name: "lookup", arguments: "{\"query\":\"y\"}" } },
+          ],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+
+      if (calls === 2) {
+        expect(request.toolChoice).toBe("none");
+        expect(request.signal).toBeDefined();
+        return new Promise((_, reject) => {
+          const signal = request.signal;
+          if (signal === undefined) {
+            reject(new Error("expected abort signal"));
+            return;
+          }
+          signal.addEventListener("abort", () => {
+            reject(signal.reason instanceof Error ? signal.reason : new Error("request aborted"));
+          }, { once: true });
+        });
+      }
+
+      expect(request.toolChoice).toBe("none");
+      expect(request.tools).toEqual([]);
+      expect(request.signal?.aborted).toBe(false);
+      expect(request.messages.some((m) =>
+        m.role === "tool"
+        && m.tool_call_id === "call-2"
+        && typeof m.content === "string"
+        && m.content.includes("tool call budget exhausted")
+      )).toBe(true);
+      expect(request.messages.some((m) =>
+        m.role === "system"
+        && typeof m.content === "string"
+        && m.content.includes("agent time budget exhausted")
+      )).toBe(true);
+      return Promise.resolve({
+        text: "answer after finalization timeout",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "answer after finalization timeout" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        completeChat,
+        guildConfig: makeGuildConfig({ replyLoop: { maxToolCalls: 1, wallClockTimeoutMs: 50, llmOutputTimeoutMs: 1_000 } }),
+      }),
+    );
+
+    expect(result.responseText).toBe("answer after finalization timeout");
+    expect(calls).toBe(3);
+  });
+
+  test("forces a final answer when agent time expires during tool execution", async () => {
+    const tool: AgentTool = {
+      name: "lookup",
+      label: "Lookup",
+      description: "Look something up",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: (_id, _params, signal) => new Promise((_, reject) => {
+        if (signal === undefined) {
+          reject(new Error("expected abort signal"));
+          return;
+        }
+        signal.addEventListener("abort", () => {
+          reject(signal.reason instanceof Error ? signal.reason : new Error("tool aborted"));
+        }, { once: true });
+      }),
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "lookup", arguments: "{\"query\":\"x\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+
+      expect(request.toolChoice).toBe("none");
+      expect(request.messages.some((m) =>
+        m.role === "tool"
+        && m.tool_call_id === "call-1"
+        && typeof m.content === "string"
+        && m.content.includes("agent time budget exhausted")
+      )).toBe(true);
+      expect(request.messages.some((m) =>
+        m.role === "system"
+        && typeof m.content === "string"
+        && m.content.includes("agent time budget exhausted")
+      )).toBe(true);
+      return Promise.resolve({
+        text: "answer after timed out tool",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "answer after timed out tool" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        completeChat,
+        guildConfig: makeGuildConfig({ replyLoop: { maxToolCalls: 2, wallClockTimeoutMs: 10, llmOutputTimeoutMs: 1_000 } }),
+      }),
+    );
+
+    expect(result.responseText).toBe("answer after timed out tool");
+    expect(calls).toBe(2);
   });
 
   test("passes image tool results back to the model as multimodal context", async () => {

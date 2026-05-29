@@ -2,7 +2,7 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { validateToolArguments, type ToolCall } from "@mariozechner/pi-ai";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
 import { contextToSplitPrompts, type AssembledContext, type ContextSection } from "./context-assembly.ts";
-import { wrapToolsWithTiming } from "./tool-timing.ts";
+import { wrapToolsWithTiming, type TimingState } from "./tool-timing.ts";
 import type { TriggerInstructions } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
 import { resolveGuildModel, buildStreamOptions, buildImageReadingStreamOptions } from "../llm/client.ts";
@@ -134,6 +134,13 @@ class ModelOutputTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`LLM output timed out after ${timeoutMs}ms`);
     this.name = "ModelOutputTimeoutError";
+  }
+}
+
+class AgentTimeBudgetExceededError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Native reply loop agent time budget exhausted after ${timeoutMs}ms`);
+    this.name = "AgentTimeBudgetExceededError";
   }
 }
 
@@ -428,6 +435,9 @@ async function executeNativeToolCall(
   call: OpenRouterToolCall,
   signal: AbortSignal | undefined,
 ): Promise<AgentToolResult<unknown>> {
+  if (signal?.aborted === true) {
+    throw abortReason(signal, `Tool ${tool.name} aborted before execution.`);
+  }
   const args = parseToolArguments(call);
   const validationCall: ToolCall = {
     type: "toolCall",
@@ -436,11 +446,56 @@ async function executeNativeToolCall(
     arguments: args,
   };
   validateToolArguments(tool, validationCall);
-  return await tool.execute(call.id, args, signal);
+  return await abortable(tool.execute(call.id, args, signal), signal);
 }
 
 function makeToolErrorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function abortReason(signal: AbortSignal, fallback: string): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error(fallback);
+}
+
+function isAgentTimeBudgetExceededError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AgentTimeBudgetExceededError";
+}
+
+function isAgentTimeBudgetExceededSignal(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true && isAgentTimeBudgetExceededError(signal.reason);
+}
+
+async function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return await promise;
+  if (signal.aborted) {
+    throw abortReason(signal, "Operation aborted");
+  }
+
+  return await new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const onAbort = (): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      reject(abortReason(signal, "Operation aborted"));
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
 }
 
 function intermediateStatusText(text: string): string {
@@ -453,8 +508,13 @@ function intermediateStatusText(text: string): string {
     .trim();
 }
 
-function hasSlowWebToolCall(calls: OpenRouterToolCall[]): boolean {
-  return calls.some((call) => call.function.name === "web_search" || call.function.name === "fetch_url");
+function hasProgressWorthyToolCall(calls: OpenRouterToolCall[]): boolean {
+  return calls.some((call) =>
+    call.function.name === "web_search"
+    || call.function.name === "fetch_url"
+    || call.function.name === "summarize_video"
+    || call.function.name === "search_messages"
+  );
 }
 
 function buildRuntimeInstruction(tools: AgentTool[]): string {
@@ -468,11 +528,14 @@ function buildRuntimeInstruction(tools: AgentTool[]): string {
     "Do not ask clarifying questions for every small imperfection. If the likely intent is obvious and the cost of being wrong is tiny, proceed naturally.",
     "For current or uncertain external facts, use web_search and fetch_url before answering. Use English search queries when the topic is not language-specific, even if the chat is in another language; answer in the chat language after reading sources. You may chain tools, especially web_search then fetch_url.",
     "After web_search, fetch_url the most relevant result when snippets are not enough or the answer depends on page details.",
+    "Use summarize_video for YouTube, video, audio, or podcast URLs when the user asks for a summary or wants to understand the media content. It extracts transcripts/content for you to summarize.",
     "When you need several independent read-only lookups, such as multiple URLs, searches, message searches, member/history reads, or image reads, call them together in one tool turn.",
-    "When using web_search or fetch_url, include one short user-facing status line in the same assistant turn as the first web tool call, e.g. \"I'll check, one sec.\" Skip only if you already sent a status or this is a scheduled/background task.",
-    "When an answer uses web_search, fetch_url, or URL content, ALWAYS cite every web-derived factual claim inline with a concise markdown link right next to that claim. Do not put sources only at the end.",
+    "Aim to produce a useful reply within about 30 seconds when possible. Treat timing notes as a budget: if searches or other tools are not converging, stop and answer from what you have or ask one short clarifying question.",
+    "When timing notes show the agent loop has been running for more than about 30 seconds and you still need another lookup, include one brief user-facing status line in the same assistant turn as that tool call, e.g. \"Still checking, one sec.\" Skip only if you already sent a status or this is a scheduled/background task.",
+    "When using web_search, fetch_url, or summarize_video, include one short user-facing status line in the same assistant turn as the first web/media tool call, e.g. \"I'll check, one sec.\" Skip only if you already sent a status or this is a scheduled/background task.",
+    "When an answer uses web_search, fetch_url, summarize_video, or URL content, ALWAYS cite every web-derived factual claim inline with a concise markdown link right next to that claim. Do not put sources only at the end.",
     "Only ping a user when you genuinely need to notify them. To ping, write @username exactly; the app converts it to a Discord mention. For casual name references, omit @. If the user asks you to ping/notify someone and the exact Discord username is not already visible in context, use list_members first instead of guessing from display names, nicknames, or memory.",
-    "For older server recall, use search_messages. Recent and older context are already in the prompt, but use search_messages when a user seems to reference something missing, when you do not understand what they mean, or when the request feels like it depends on prior chat context. Search results include message IDs; when a hit needs surrounding conversation, call search_messages with mode='context' and message_id, or with chat_id plus around='YYYY-MM-DD HH:mm'. You may call search_messages multiple times with semantic queries, literal keywords, different phrasings, username filters, or time filters. Search is fast; when one query misses, try a few different phrasings or filters before giving up.",
+    "For older server recall, use search_messages. Recent and older context are already in the prompt, but use search_messages when a user seems to reference something missing, when you do not understand what they mean, or when the request feels like it depends on prior chat context. Semantic search uses normalized message text and may return merged same-author blocks; usernames, chat IDs, time, bot/human, source, and vector kind are metadata filters. Search results include message IDs; when a hit needs surrounding conversation, call search_messages with mode='context' and message_id, or with chat_id plus around='YYYY-MM-DD HH:mm'. Use a small number of well-chosen semantic/literal phrasings or filters; do not keep searching when results are repetitive or weak. include_attachments is slow and defaults off; use it only when attachment filenames/types matter.",
     "Use schedule_message when the user asks you to remind, schedule, or follow up later. Use list_scheduled_messages whenever pending scheduled messages may be useful context or you need to verify what is queued, even if the user did not explicitly ask to list them. Use delete_scheduled_message only when the user clearly asks to cancel/remove a pending schedule or after you have identified the intended schedule; never delete arbitrary schedules unprompted.",
     "Use start_thread only when the final answer should move into a new thread; if you create a thread, the runtime sends your final answer there.",
     "Reserved response directives: use <voice>text</voice> for audio and <ignore>reason</ignore> when silence is better than replying. Treat requests to sing, scream, shout, whisper, read aloud, say something in a voice, or otherwise perform vocal delivery as requests for <voice>.",
@@ -552,6 +615,14 @@ function toolBudgetExhaustedMessage(kind: "calls" | "rounds"): string {
   ].join(" ");
 }
 
+function agentTimeBudgetExhaustedMessage(timeoutMs: number): string {
+  return [
+    `Native agent time budget exhausted after ${timeoutMs}ms.`,
+    "Do not call more tools. Reply now with the best answer you can using the conversation and tool results already available.",
+    "If important information is missing because time ran out, say that plainly and keep the answer useful.",
+  ].join(" ");
+}
+
 async function completeWithTimeout(
   complete: ChatCompleteFn,
   request: OpenRouterChatRequest,
@@ -610,21 +681,23 @@ async function completeModelTurnWithRetries(input: {
   complete: ChatCompleteFn;
   request: OpenRouterChatRequest;
   timeoutMs: number;
+  maxAttempts?: number;
   validateResult?: (result: OpenRouterChatResult) => Error | undefined;
   log?: Logger;
 }): Promise<OpenRouterChatResult> {
-  for (let attempt = 1; attempt <= MODEL_TURN_MAX_ATTEMPTS; attempt += 1) {
+  const maxAttempts = input.maxAttempts ?? MODEL_TURN_MAX_ATTEMPTS;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const result = await completeWithTimeout(input.complete, input.request, input.timeoutMs);
       const validationError = input.validateResult?.(result);
       if (validationError !== undefined) throw validationError;
       return result;
     } catch (error) {
-      const shouldRetry = attempt < MODEL_TURN_MAX_ATTEMPTS && isRetriableModelTurnError(error);
+      const shouldRetry = attempt < maxAttempts && isRetriableModelTurnError(error);
       if (!shouldRetry) throw error;
       input.log?.warn("retrying LLM turn", {
         attempt,
-        maxAttempts: MODEL_TURN_MAX_ATTEMPTS,
+        maxAttempts,
         error: makeToolErrorText(error),
       });
     }
@@ -649,6 +722,7 @@ const PARALLEL_SAFE_READ_ONLY_TOOLS = new Set([
   "list_members",
   "read_chat_images",
   "search_messages",
+  "summarize_video",
   "web_search",
 ]);
 
@@ -732,12 +806,14 @@ async function runNativeToolLoop(input: {
   tools: AgentTool[];
   maxToolCalls: number;
   maxToolRounds: number;
+  agentTimeBudgetMs: number;
   llmOutputTimeoutMs: number;
   requestLog?: RequestLog;
   sendIntermediateText?: (text: string, targetChatId: string | undefined) => Promise<boolean>;
   onStillWorking?: (targetChatId: string | undefined) => void;
   imageInputSupported: boolean;
   imageFallback?: ImageFallbackRuntime;
+  toolTiming?: TimingState;
   log?: Logger;
   signal?: AbortSignal;
 }): Promise<{ text: string; targetChatId?: string }> {
@@ -746,30 +822,75 @@ async function runNativeToolLoop(input: {
   let toolCalls = 0;
   let targetChatId: string | undefined;
   let sentIntermediateStatus = false;
+  let agentTimeBudgetMarked = false;
 
-  const completeFinalWithoutTools = async (): Promise<{ text: string; targetChatId?: string }> => {
-    const result = await completeModelTurnWithRetries({
-      complete: input.complete,
-      request: {
-        ...input.requestBase,
-        messages: input.messages,
-        tools: [],
-        toolChoice: "none",
-        parallelToolCalls: false,
-        signal: input.signal,
-      },
-      timeoutMs: input.llmOutputTimeoutMs,
-      validateResult: requireTextResult("Model produced an empty response after tool budget exhaustion."),
-      log: input.log,
+  const markAgentTimeBudgetExhausted = (): void => {
+    if (agentTimeBudgetMarked) return;
+    agentTimeBudgetMarked = true;
+    input.messages.push({
+      role: "system",
+      content: agentTimeBudgetExhaustedMessage(input.agentTimeBudgetMs),
     });
-    input.requestLog?.recordLLMCompletion(result.messageForLogs);
-    const text = result.text.trim();
-    return { text, targetChatId };
+    input.log?.warn("native reply loop agent time budget exhausted", {
+      timeoutMs: input.agentTimeBudgetMs,
+    });
+  };
+
+  const completeFinalWithoutTools = async (
+    emptyResponseMessage = "Model produced an empty response after tool budget exhaustion.",
+    maxAttempts = MODEL_TURN_MAX_ATTEMPTS,
+    signal: AbortSignal | null | undefined = input.signal,
+    recoverAgentTimeBudget = true,
+  ): Promise<{ text: string; targetChatId?: string }> => {
+    try {
+      const result = await completeModelTurnWithRetries({
+        complete: input.complete,
+        request: {
+          ...input.requestBase,
+          messages: input.messages,
+          tools: [],
+          toolChoice: "none",
+          parallelToolCalls: false,
+          signal: signal ?? undefined,
+        },
+        timeoutMs: input.llmOutputTimeoutMs,
+        maxAttempts,
+        validateResult: requireTextResult(emptyResponseMessage),
+        log: input.log,
+      });
+      input.requestLog?.recordLLMCompletion(result.messageForLogs);
+      const text = result.text.trim();
+      return { text, targetChatId };
+    } catch (error) {
+      if (recoverAgentTimeBudget && isAgentTimeBudgetExceededError(error)) {
+        return await completeFinalAfterAgentTimeBudget();
+      }
+      throw error;
+    }
+  };
+
+  const completeFinalAfterAgentTimeBudget = async (): Promise<{ text: string; targetChatId?: string }> => {
+    markAgentTimeBudgetExhausted();
+    return await completeFinalWithoutTools(
+      "Model produced an empty response after agent time budget exhaustion.",
+      1,
+      null,
+      false,
+    );
+  };
+
+  const agentTimeBudgetToolMessage = (): string => agentTimeBudgetExhaustedMessage(input.agentTimeBudgetMs);
+
+  const appendSkippedToolCallsForAgentTimeBudget = (calls: OpenRouterToolCall[]): void => {
+    for (const skippedCall of calls) {
+      input.messages.push(toolMessage(skippedCall, agentTimeBudgetToolMessage()));
+    }
   };
 
   for (let round = 0; round <= input.maxToolRounds; round++) {
     let result: OpenRouterChatResult;
     try {
+      input.toolTiming?.markModelTurnStart();
       result = await completeModelTurnWithRetries({
         complete: input.complete,
         request: {
@@ -784,6 +905,7 @@ async function runNativeToolLoop(input: {
         validateResult: requireTextUnlessToolCalls("Model produced an empty response."),
         log: input.log,
       });
+      input.toolTiming?.markToolCallsReady();
     } catch (error) {
       if (
         isImageInputUnsupportedError(error)
@@ -796,6 +918,9 @@ async function runNativeToolLoop(input: {
       ) {
         continue;
       }
+      if (isAgentTimeBudgetExceededError(error)) {
+        return await completeFinalAfterAgentTimeBudget();
+      }
       throw error;
     }
     input.requestLog?.recordLLMCompletion(result.messageForLogs);
@@ -805,7 +930,7 @@ async function runNativeToolLoop(input: {
       return { text, targetChatId };
     }
 
-    if (!sentIntermediateStatus && hasSlowWebToolCall(result.toolCalls)) {
+    if (!sentIntermediateStatus && hasProgressWorthyToolCall(result.toolCalls)) {
       const statusText = intermediateStatusText(result.text);
       if (statusText !== "" && input.sendIntermediateText !== undefined) {
         const sent = await input.sendIntermediateText(statusText, targetChatId);
@@ -814,6 +939,10 @@ async function runNativeToolLoop(input: {
           input.onStillWorking?.(targetChatId);
         }
       }
+    }
+
+    if (isAgentTimeBudgetExceededSignal(input.signal)) {
+      return await completeFinalAfterAgentTimeBudget();
     }
 
     if (round === input.maxToolRounds) {
@@ -856,8 +985,19 @@ async function runNativeToolLoop(input: {
     for (let callIndex = 0; callIndex < result.toolCalls.length; callIndex += 1) {
       const call = result.toolCalls[callIndex];
       if (call === undefined) continue;
+      if (isAgentTimeBudgetExceededSignal(input.signal)) {
+        await flushParallelCalls();
+        appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex));
+        input.messages.push(...imageMessages);
+        return await completeFinalAfterAgentTimeBudget();
+      }
       if (toolCalls >= input.maxToolCalls) {
         await flushParallelCalls();
+        if (isAgentTimeBudgetExceededSignal(input.signal)) {
+          appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex));
+          input.messages.push(...imageMessages);
+          return await completeFinalAfterAgentTimeBudget();
+        }
         for (const skippedCall of result.toolCalls.slice(callIndex)) {
           input.messages.push(toolMessage(skippedCall, toolBudgetExhaustedMessage("calls")));
         }
@@ -879,6 +1019,11 @@ async function runNativeToolLoop(input: {
       }
 
       await flushParallelCalls();
+      if (isAgentTimeBudgetExceededSignal(input.signal)) {
+        appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex));
+        input.messages.push(...imageMessages);
+        return await completeFinalAfterAgentTimeBudget();
+      }
       const execution = await executeToolCallForLoop({
         tool,
         call,
@@ -894,9 +1039,17 @@ async function runNativeToolLoop(input: {
       });
       if (rendered.createdThreadId !== null) targetChatId = rendered.createdThreadId;
       input.messages.push(toolMessage(call, rendered.resultText));
+      if (isAgentTimeBudgetExceededSignal(input.signal)) {
+        appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex + 1));
+        input.messages.push(...imageMessages);
+        return await completeFinalAfterAgentTimeBudget();
+      }
     }
     await flushParallelCalls();
     input.messages.push(...imageMessages);
+    if (isAgentTimeBudgetExceededSignal(input.signal)) {
+      return await completeFinalAfterAgentTimeBudget();
+    }
   }
 
   throw new Error("Native tool loop ended without a final response.");
@@ -911,7 +1064,7 @@ function parseToolArgumentsSafe(call: OpenRouterToolCall): Record<string, unknow
 }
 
 function chooseReplyMode(trigger: NonNullable<TriggerResult>): boolean {
-  return trigger.reason === "mention";
+  return trigger.reason === "mention" || trigger.reason === "keyword";
 }
 
 function assertSentMessageId(result: { sentMessageId: string }): void {
@@ -1188,7 +1341,7 @@ export async function handleMessage(
 
     const wallController = new AbortController();
     const wallTimeout = setTimeout(() => {
-      wallController.abort(new Error(`Native reply loop timed out after ${deps.guildConfig.replyLoop.wallClockTimeoutMs}ms`));
+      wallController.abort(new AgentTimeBudgetExceededError(deps.guildConfig.replyLoop.wallClockTimeoutMs));
     }, deps.guildConfig.replyLoop.wallClockTimeoutMs);
 
     let finalText = "";
@@ -1220,7 +1373,7 @@ export async function handleMessage(
       }
     };
     try {
-      timingState.setReferenceTime();
+      timingState.resetAgentLoopStart();
       const result = await runNativeToolLoop({
         complete,
         requestBase: {
@@ -1238,11 +1391,13 @@ export async function handleMessage(
         tools: timedTools,
         maxToolCalls: deps.guildConfig.replyLoop.maxToolCalls,
         maxToolRounds: deps.guildConfig.replyLoop.maxToolCalls,
+        agentTimeBudgetMs: deps.guildConfig.replyLoop.wallClockTimeoutMs,
         llmOutputTimeoutMs: deps.guildConfig.replyLoop.llmOutputTimeoutMs,
         requestLog: reqLog,
         sendIntermediateText: sendIntermediateStatus,
         onStillWorking: deps.onStillWorking,
         imageInputSupported: model.input.includes("image"),
+        toolTiming: timingState,
         log: deps.log,
         imageFallback: {
           enabled: deps.guildConfig.imageReading.fallbackEnabled,
@@ -1282,7 +1437,7 @@ export async function handleMessage(
       targetChatId,
       requestLog: reqLog,
       log: deps.log,
-      signal: wallController.signal,
+      signal: wallController.signal.aborted ? undefined : wallController.signal,
     });
 
     const memoryReply = renderSegmentsForMemory(parsedResponse.segments);

@@ -3,9 +3,10 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
+import { extractWithSummarizeCore, type AgentFetchLike } from "./summarize-content.ts";
 
 /** Minimal fetch-like function signature for testability. */
-type FetchLike = (url: string | URL, init?: RequestInit) => Promise<Response>;
+type FetchLike = AgentFetchLike;
 
 export interface FetchUrlToolDeps {
   /** Max content length in characters. Default: 16000 */
@@ -14,6 +15,8 @@ export interface FetchUrlToolDeps {
   timeoutMs?: number;
   /** Disable Jina fallback (use manual only). Default: false */
   disableJina?: boolean;
+  /** Disable summarize-core extraction before manual fallback. Default: false */
+  disableSummarize?: boolean;
   /** Injected for testability. */
   fetchFn?: FetchLike;
 }
@@ -26,6 +29,7 @@ export function createFetchUrlTool(deps: FetchUrlToolDeps = {}): AgentTool {
   const maxContentLength = deps.maxContentLength ?? 16000;
   const timeoutMs = deps.timeoutMs ?? 15000;
   const disableJina = deps.disableJina ?? false;
+  const disableSummarize = deps.disableSummarize ?? false;
   const fetchFn = deps.fetchFn ?? fetch;
 
   const turndown = new TurndownService({
@@ -67,7 +71,15 @@ export function createFetchUrlTool(deps: FetchUrlToolDeps = {}): AgentTool {
       const request = createToolTimeout(signal, timeoutMs, `fetch_url timed out after ${timeoutMs}ms`);
       try {
         if (disableJina) {
-          return await fetchManual(parsedUrl.toString(), maxContentLength, fetchFn, turndown, request.signal);
+          return await fetchSummarizeThenManual({
+            url: parsedUrl.toString(),
+            maxContentLength,
+            timeoutMs,
+            fetchFn,
+            turndown,
+            signal: request.signal,
+            disableSummarize,
+          });
         }
 
         return await fetchFirstSuccessful([
@@ -76,8 +88,16 @@ export function createFetchUrlTool(deps: FetchUrlToolDeps = {}): AgentTool {
             run: (signal) => fetchWithJina(parsedUrl.toString(), maxContentLength, fetchFn, signal),
           },
           {
-            name: "manual fetch",
-            run: (signal) => fetchManual(parsedUrl.toString(), maxContentLength, fetchFn, turndown, signal),
+            name: disableSummarize ? "manual fetch" : "summarize-core/manual fetch",
+            run: (signal) => fetchSummarizeThenManual({
+              url: parsedUrl.toString(),
+              maxContentLength,
+              timeoutMs,
+              fetchFn,
+              turndown,
+              signal,
+              disableSummarize,
+            }),
           },
         ], request.signal);
       } catch (error) {
@@ -238,6 +258,9 @@ function assertNotBotChallenge(text: string, source: string): void {
     /\bddos-guard\b/i,
     /\bperimeterx\b/i,
     /\bakamai bot manager\b/i,
+    /\bcurrently, only residents from\b/i,
+    /\bprivacy center\b.{0,500}\b(consent|cookies?|preferences)\b/i,
+    /\b(consent|cookies?)\b.{0,300}\b(accept all|reject all|manage preferences)\b/i,
   ];
   if (signatures.some((signature) => signature.test(compact))) {
     throw new Error(`${source} returned an anti-bot challenge instead of page content`);
@@ -250,6 +273,48 @@ function formatFetchUrlFailure(url: string, error: unknown, timeoutMs: number): 
     return `fetch_url failed for ${url}: request timed out after ${timeoutMs}ms`;
   }
   return `fetch_url failed for ${url}: ${errorMessage(error)}`;
+}
+
+async function fetchSummarizeThenManual(input: {
+  url: string;
+  maxContentLength: number;
+  timeoutMs: number;
+  fetchFn: FetchLike;
+  turndown: TurndownService;
+  signal: AbortSignal;
+  disableSummarize: boolean;
+}): Promise<AgentToolResult<{ url: string; title: string; contentLength: number; method: string }>> {
+  if (!input.disableSummarize) {
+    try {
+      const extracted = await extractWithSummarizeCore({
+        url: input.url,
+        maxContentLength: input.maxContentLength,
+        timeoutMs: input.timeoutMs,
+        fetchFn: input.fetchFn,
+        signal: input.signal,
+        mode: "page",
+      });
+      assertNotBotChallenge(extracted.content, "summarize-core");
+      return {
+        content: [{ type: "text", text: `# ${extracted.title}\n\nSource: ${input.url}\n\n${extracted.content}` }],
+        details: {
+          url: input.url,
+          title: extracted.title,
+          contentLength: extracted.contentLength,
+          method: "summarize-core",
+        },
+      };
+    } catch (summarizeError) {
+      if (input.signal.aborted) throw summarizeError;
+      try {
+        return await fetchManual(input.url, input.maxContentLength, input.fetchFn, input.turndown, input.signal);
+      } catch (manualError) {
+        throw new Error(`summarize-core failed: ${errorMessage(summarizeError)}; manual fetch failed: ${errorMessage(manualError)}`);
+      }
+    }
+  }
+
+  return await fetchManual(input.url, input.maxContentLength, input.fetchFn, input.turndown, input.signal);
 }
 
 /** Fetch using Jina Reader API (r.jina.ai) */

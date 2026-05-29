@@ -82,6 +82,7 @@ async function insertWithEmbedding(id: string, text: string, opts: Parameters<ty
     user_id: userId,
     message_id: id,
     created_at: createdAt,
+    last_created_at: createdAt,
   });
 }
 
@@ -300,6 +301,90 @@ describe("searchMessages", () => {
     const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
 
     expect(results.map((r) => r.id)).toEqual(["real-msg"]);
+  });
+
+  test("resolves merged vector payloads back to underlying messages", async () => {
+    insertMessage("m1", { translatedContent: "first half", createdAt: now - 1000 });
+    insertMessage("m2", { translatedContent: "second half", createdAt: now });
+    const vec = await embedOne("first half second half");
+    await upsertPoint(qdrant, "msgblock:m1:m2", Array.from(vec), {
+      type: "message",
+      entity_id: "msgblock:m1:m2",
+      guild_id: "g1",
+      channel_id: "c1",
+      user_id: "u1",
+      message_id: "m1",
+      message_ids: ["m1", "m2"],
+      first_message_id: "m1",
+      last_message_id: "m2",
+      message_count: 2,
+      created_at: now - 1000,
+      last_created_at: now,
+      embedding_kind: "merged",
+      source: "reindex",
+    });
+
+    const results = await searchMessages(db, qdrant, vec, { guildId: "g1", limit: 10 });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.id).toBe("m1");
+    expect(results[0]?.translatedContent).toBe("first half\nsecond half");
+    expect(results[0]?.matchedMessageIds).toEqual(["m1", "m2"]);
+    expect(results[0]?.messageCount).toBe(2);
+    expect(results[0]?.embeddingKind).toBe("merged");
+  });
+
+  test("does not hydrate rows outside the requested guild from stale vector payloads", async () => {
+    insertMessage("foreign", { guildId: "g2", translatedContent: "private foreign text" });
+    const vec = await embedOne("private foreign text");
+    await upsertPoint(qdrant, "stale-block", Array.from(vec), {
+      type: "message",
+      entity_id: "stale-block",
+      guild_id: "g1",
+      channel_id: "c1",
+      user_id: "u1",
+      message_id: "foreign",
+      message_ids: ["foreign"],
+      created_at: now,
+      last_created_at: now,
+    });
+
+    const results = await searchMessages(db, qdrant, vec, { guildId: "g1", limit: 10 });
+
+    expect(results).toEqual([]);
+  });
+
+  test("uses merged-block overlap for semantic time filters and hydrates only matching rows", async () => {
+    insertMessage("old", { translatedContent: "old part", createdAt: now - 10 * hour });
+    insertMessage("new", { translatedContent: "new part", createdAt: now - hour });
+    const vec = await embedOne("old part new part");
+    await upsertPoint(qdrant, "msgblock:old:new", Array.from(vec), {
+      type: "message",
+      entity_id: "msgblock:old:new",
+      guild_id: "g1",
+      channel_id: "c1",
+      user_id: "u1",
+      message_id: "old",
+      message_ids: ["old", "new"],
+      first_message_id: "old",
+      last_message_id: "new",
+      message_count: 2,
+      created_at: now - 10 * hour,
+      last_created_at: now - hour,
+      embedding_kind: "merged",
+      source: "reindex",
+    });
+
+    const results = await searchMessages(db, qdrant, vec, {
+      guildId: "g1",
+      after: now - 2 * hour,
+      limit: 10,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.id).toBe("new");
+    expect(results[0]?.translatedContent).toBe("new part");
+    expect(results[0]?.matchedMessageIds).toEqual(["new"]);
   });
 });
 

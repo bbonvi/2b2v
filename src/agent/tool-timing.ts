@@ -15,28 +15,51 @@ export function formatTiming(ms: number): string {
 }
 
 export interface TimingState {
-  /** Set externally when LLM turn ends, before tools execute. */
+  /** Reset total elapsed time for a new agentic loop. */
+  resetAgentLoopStart(): void;
+  /** Mark the start of an LLM turn that may produce tool calls. */
+  markModelTurnStart(): void;
+  /** Mark when the LLM has produced tool calls and tool execution is about to begin. */
+  markToolCallsReady(): void;
+  /** Backward-compatible alias for resetting the current tool batch baseline. */
   setReferenceTime(): void;
 }
 
 /**
  * Wrap tools to append timing notes to results.
  *
- * Timing measures end-to-end time from reference point to tool completion.
- * The reference point is set externally via `state.setReferenceTime()` — call it
- * when the LLM response completes (message_end event) to include thinking time.
+ * Timing distinguishes LLM tool-call generation, the actual tool execution,
+ * elapsed time for the current tool turn, and total elapsed agent-loop time.
  *
  * This correctly handles:
- * - Sequential tools: reference set before each tool batch
- * - Parallel tools: all measure from same reference point
- * - LLM thinking time: included when reference is set at message_end
+ * - Sequential tools: each gets its own execution duration
+ * - Parallel tools: all share the same tool-call generation duration
+ * - LLM generation time: measured from model-turn start to tool-call readiness
  */
 export function wrapToolsWithTiming(tools: AgentTool[]): { tools: AgentTool[]; state: TimingState } {
-  let referenceTime = Date.now();
+  let agentLoopStartedAt = Date.now();
+  let modelTurnStartedAt = agentLoopStartedAt;
+  let toolCallsReadyAt = agentLoopStartedAt;
 
   const state: TimingState = {
+    resetAgentLoopStart() {
+      const now = Date.now();
+      agentLoopStartedAt = now;
+      modelTurnStartedAt = now;
+      toolCallsReadyAt = now;
+    },
+    markModelTurnStart() {
+      const now = Date.now();
+      modelTurnStartedAt = now;
+      toolCallsReadyAt = now;
+    },
+    markToolCallsReady() {
+      toolCallsReadyAt = Date.now();
+    },
     setReferenceTime() {
-      referenceTime = Date.now();
+      const now = Date.now();
+      modelTurnStartedAt = now;
+      toolCallsReadyAt = now;
     },
   };
 
@@ -47,10 +70,21 @@ export function wrapToolsWithTiming(tools: AgentTool[]): { tools: AgentTool[]; s
       params: unknown,
       signal: AbortSignal | undefined
     ): Promise<AgentToolResult<unknown>> => {
+      const toolStartedAt = Date.now();
       const result = await tool.execute(toolCallId, params, signal);
-      const elapsed = Date.now() - referenceTime;
+      const completedAt = Date.now();
+      const toolCallGenerationMs = Math.max(0, toolCallsReadyAt - modelTurnStartedAt);
+      const toolExecutionMs = completedAt - toolStartedAt;
+      const toolTurnElapsedMs = completedAt - modelTurnStartedAt;
+      const agentLoopElapsedMs = completedAt - agentLoopStartedAt;
 
-      const note = `\n*Note to agent: This \`${tool.name}\` tool took ${formatTiming(elapsed)} to run.*`;
+      const note = [
+        `\n*Note to agent: Timing for \`${tool.name}\`:`,
+        `tool-call generation ${formatTiming(toolCallGenerationMs)},`,
+        `tool execution ${formatTiming(toolExecutionMs)},`,
+        `current tool turn ${formatTiming(toolTurnElapsedMs)},`,
+        `agent loop elapsed ${formatTiming(agentLoopElapsedMs)}.*`,
+      ].join(" ");
       return {
         ...result,
         content: [...result.content, { type: "text", text: note }],

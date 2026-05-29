@@ -12,6 +12,7 @@ import {
   type MessageSearchResult,
 } from "../db/message-repository";
 import { formatLocalWallClock, parseLocalDateTimeToEpoch } from "../time/agent-time.ts";
+import { normalizeMessageForEmbedding } from "../embeddings/message-text.ts";
 
 
 interface AttachmentInfo {
@@ -47,6 +48,17 @@ const SearchParams = Type.Object({
   around: Type.Optional(Type.String({ description: "Local wall-clock timestamp for mode='context', formatted YYYY-MM-DD HH:mm in the server timezone. Requires chat_id." })),
   afterMs: Type.Optional(Type.Number({ description: "Only messages after this epoch ms timestamp." })),
   beforeMs: Type.Optional(Type.Number({ description: "Only messages before this epoch ms timestamp." })),
+  is_bot: Type.Optional(Type.Boolean({ description: "Semantic search only: true for bot-authored results, false for human-authored results." })),
+  source: Type.Optional(Type.Union([
+    Type.Literal("live"),
+    Type.Literal("backfill"),
+    Type.Literal("reindex"),
+  ], { description: "Semantic search only: filter vector source. Usually omit unless debugging." })),
+  embedding_kind: Type.Optional(Type.Union([
+    Type.Literal("single"),
+    Type.Literal("merged"),
+  ], { description: "Semantic search only: 'merged' searches same-author message blocks; 'single' searches individual-message vectors. Usually omit." })),
+  include_attachments: Type.Optional(Type.Boolean({ description: "Fetch Discord attachment metadata for returned messages. Defaults to false because it can be slow for older uncached messages." })),
   limit: Type.Optional(Type.Number({ description: "Max results to return. Default 10." })),
 });
 
@@ -67,7 +79,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
     name: "search_messages",
     label: "Search Messages",
     description:
-      "Search chat history when context is missing, a request refers to prior chat, or you feel lost. Modes: 'semantic' (default) — AI similarity search with natural language; 'literal' — case-insensitive keyword/phrase match; 'id' — direct message lookup by ID; 'context' — chronological messages around a result id or local timestamp. Optionally filter by username, chat, or time range.",
+      "Search chat history when context is missing, a request refers to prior chat, or you feel lost. Modes: 'semantic' (default) — AI similarity over normalized message text, often merged into same-author blocks; 'literal' — exact keyword/phrase match; 'id' — direct lookup; 'context' — chronological messages around a result id or local timestamp. Prefer semantic for vague meaning, literal for exact words. Use username/chat/time/is_bot filters when they matter; source and embedding_kind are mostly for debugging. include_attachments defaults to false; enable it only when attachment filenames/types are needed.",
     parameters: SearchParams,
     execute: async (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as {
@@ -79,6 +91,10 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         around?: string;
         afterMs?: number;
         beforeMs?: number;
+        is_bot?: boolean;
+        source?: "live" | "backfill" | "reindex";
+        embedding_kind?: "single" | "merged";
+        include_attachments?: boolean;
         limit?: number;
       };
       const mode = p.mode ?? "semantic";
@@ -170,7 +186,11 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         }
         let queryVec: Float32Array;
         try {
-          const embedResult = await embed.embed([p.query]);
+          const normalizedQuery = normalizeMessageForEmbedding(p.query);
+          if (normalizedQuery === "") {
+            return { content: [{ type: "text", text: "Query has no searchable text after normalization." }], details: undefined };
+          }
+          const embedResult = await embed.embed([normalizedQuery]);
           const vec = embedResult[0];
           if (vec === undefined) {
             return { content: [{ type: "text", text: "Failed to generate embedding for query." }], details: undefined };
@@ -188,6 +208,9 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
             after: p.afterMs,
             before: p.beforeMs,
             excludeIds: excludedMessageIds,
+            isBot: p.is_bot,
+            source: p.source,
+            embeddingKind: p.embedding_kind,
             limit,
           });
         } catch {
@@ -202,9 +225,11 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         return { content: [{ type: "text", text }], details: { count: 0 } };
       }
 
-      // Fetch attachments from Discord if callback provided
+      // Fetch attachments from Discord only when explicitly requested. Older
+      // messages are usually uncached, so this path can cost one network call
+      // per result and dominate otherwise-fast SQLite/Qdrant searches.
       const attachmentMap = new Map<string, AttachmentInfo[]>();
-      if (deps.fetchMessage !== undefined) {
+      if (p.include_attachments === true && deps.fetchMessage !== undefined) {
         const fetchMsg = deps.fetchMessage;
         const CONCURRENCY = 5;
         const queue = [...results];
@@ -262,7 +287,13 @@ function formatResult(
   const replyTag = r.replyToId !== null ? ` (reply to ${r.replyToId})` : "";
   const scoreTag = options.includeScore ? `[score ${r.score.toFixed(3)}] ` : "";
   const chatTag = options.includeChatId ? ` [chat_id ${r.channelId}]` : "";
-  let line = `${scoreTag}[${date}]${chatTag} [id ${r.id}] ${r.authorUsername}${replyTag}: ${r.translatedContent}`;
+  const ids = r.matchedMessageIds !== undefined && r.matchedMessageIds.length > 1
+    ? ` [ids ${r.matchedMessageIds.join(",")}]`
+    : ` [id ${r.id}]`;
+  const vectorMeta = options.includeScore && (r.embeddingKind !== undefined || r.source !== undefined || (r.messageCount ?? 1) > 1)
+    ? ` [vector ${r.embeddingKind ?? "unknown"}, source ${r.source ?? "unknown"}, messages ${r.messageCount ?? 1}]`
+    : "";
+  let line = `${scoreTag}[${date}]${chatTag}${ids}${vectorMeta} ${r.authorUsername}${replyTag}: ${r.translatedContent}`;
   if (options.attachments !== undefined && options.attachments.length > 0) {
     for (const a of options.attachments) {
       const sizeStr = formatFileSize(a.size);

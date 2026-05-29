@@ -10,6 +10,7 @@ Personal Discord bot with a single persona reply loop, native tool calling, and 
 - Stores and recalls images shared in chats
 - Schedules messages (recurring, one-off, relative time)
 - Searches the web via Brave Search
+- Reads webpages and extracts YouTube/media transcripts for summaries
 - Can reference server members and channel history
 
 ## Requirements
@@ -17,6 +18,7 @@ Personal Discord bot with a single persona reply loop, native tool calling, and 
 - [Bun](https://bun.sh) 1.3+
 - [Docker](https://www.docker.com/) (for Qdrant)
 - API keys: [Discord](https://discord.com/developers/applications), [OpenRouter](https://openrouter.ai/), optional [Brave Search](https://brave.com/search/api/) and [ElevenLabs](https://elevenlabs.io/)
+- Optional for local non-Docker media extraction: `ffmpeg` and latest `yt-dlp`. The Docker image installs both.
 
 ## Quick start
 
@@ -44,7 +46,7 @@ Use the dev compose file for live reload. Use the production command with `-p 2b
 
 ## Environment variables
 
-Required: `DISCORD_TOKEN`, `OPENROUTER_API_KEY`. Optional feature keys: `BRAVE_API_KEY` for web search, `ELEVENLABS_API_KEY` for voice. See `.env.example` and `.env.prod.example` for infrastructure, dashboard, logging, and storage variables.
+Required: `DISCORD_TOKEN`, `OPENROUTER_API_KEY`. Optional feature keys: `BRAVE_API_KEY` for web search, `ELEVENLABS_API_KEY` for voice. Optional media transcription fallbacks can use `GROQ_API_KEY`, `ASSEMBLYAI_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `FAL_KEY`. See `.env.example` and `.env.prod.example` for infrastructure, dashboard, logging, and storage variables.
 
 ## Configuration
 
@@ -64,6 +66,25 @@ All fields are optional; missing values fall back to global defaults. `promptPro
 ### Persona
 
 `<voice>text</voice>` sends generated audio when ElevenLabs is configured. Text outside the voice directive is sent as normal Discord content on the audio attachment. `<ignore>reason</ignore>` sends nothing. Other XML is normal text.
+
+## History Search Maintenance
+
+Semantic message search stores normalized message text in Qdrant and keeps readable content in SQLite. Vector payloads include useful filters such as user, chat, time, bot/human author, source (`live`, `backfill`, `reindex`), and granularity (`single`, `merged`).
+
+Repair or rebuild message vectors from SQLite:
+
+```bash
+bun scripts/reindex-message-vectors.ts --guild <GUILD_ID> [--channel <CHANNEL_ID>]
+bun scripts/reindex-message-vectors.ts --guild <GUILD_ID> [--channel <CHANNEL_ID>] --apply
+```
+
+Production one-off example:
+
+```bash
+docker compose -p 2b2v-prod --env-file .env.prod -f docker-compose.yml run --rm --no-deps \
+  -v "$PWD/scripts:/app/scripts:ro" \
+  bot bun scripts/reindex-message-vectors.ts --guild <GUILD_ID> --channel <CHANNEL_ID> --apply
+```
 
 ## Slash commands
 

@@ -70,4 +70,6 @@ export { fetchMissingReplyTargets, type ReplyFallbackDeps, type FetchedDiscordMe
 
 export { createFetchUrlTool, type FetchUrlToolDeps } from "./fetch-url-tool.ts";
 
+export { createSummarizeVideoTool, type SummarizeVideoToolDeps } from "./summarize-video-tool.ts";
+
 export { createStartThreadTool, type StartThreadToolDeps, type StartThreadDetails } from "./start-thread-tool.ts";

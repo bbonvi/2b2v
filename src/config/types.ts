@@ -95,7 +95,7 @@ export interface ImageReadingConfig {
 export interface ReplyLoopConfig {
   /** Max tool calls allowed in one agent run. */
   maxToolCalls: number;
-  /** Absolute wall-clock timeout for one agent run. */
+  /** Wall-clock budget before tool gathering stops and a final no-tools reply is forced. */
   wallClockTimeoutMs: number;
   /** Timeout for a single model output turn. */
   llmOutputTimeoutMs: number;

@@ -1,6 +1,6 @@
 import type { Database } from "./database";
 import type { QdrantClient } from "@qdrant/js-client-rest";
-import { searchPoints } from "../qdrant/adapter";
+import { searchPoints, type SearchResult } from "../qdrant/adapter";
 import type { HistoryMessage } from "../agent/history-types";
 import type { TrimConfig } from "../config/types";
 
@@ -19,6 +19,12 @@ export interface MessageSearchFilter {
   before?: number;
   /** Message IDs already present in the prompt context and therefore not useful to return. */
   excludeIds?: readonly string[];
+  /** Filter bot-authored or human-authored vectors when semantic search can use payloads. */
+  isBot?: boolean;
+  /** Filter vector source such as live, backfill, or reindex. */
+  source?: string;
+  /** Filter vector granularity. Merged blocks usually improve semantic recall for chat. */
+  embeddingKind?: "single" | "merged";
   limit: number;
 }
 
@@ -31,6 +37,10 @@ export interface MessageSearchResult {
   createdAt: number;
   replyToId: string | null;
   score: number;
+  matchedMessageIds?: string[];
+  messageCount?: number;
+  embeddingKind?: string;
+  source?: string;
 }
 
 interface MessageSearchRow {
@@ -102,6 +112,13 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
   });
 }
 
+function messageIdsFromPayload(result: SearchResult): string[] {
+  const payload = result.payload;
+  if (Array.isArray(payload.message_ids)) return payload.message_ids.filter((id) => id !== "");
+  if (payload.message_id !== undefined && payload.message_id !== "") return [payload.message_id];
+  return [result.id];
+}
+
 /**
  * Semantic search over messages using Qdrant for vector search
  * and SQLite for message metadata retrieval.
@@ -129,6 +146,9 @@ export async function searchMessages(
       user_id: filter.userId,
       after: filter.after,
       before: filter.before,
+      is_bot: filter.isBot,
+      source: filter.source,
+      embedding_kind: filter.embeddingKind,
     },
     { type: "message", limit: qdrantLimit },
   );
@@ -139,18 +159,41 @@ export async function searchMessages(
   // Overfetch before filtering so a small search limit does not become empty
   // just because top hits are already visible in the prompt context.
   const candidates = qdrantResults
-    .filter((r) => !excludeIds.has(r.id));
+    .filter((r) => !messageIdsFromPayload(r).some((id) => excludeIds.has(id)));
   if (candidates.length === 0) return [];
 
-  const ids = candidates.map((r) => r.id);
+  const ids = [...new Set(candidates.flatMap(messageIdsFromPayload))];
   const placeholders = ids.map(() => "?").join(",");
+  const rowConditions = [
+    `id IN (${placeholders})`,
+    "guild_id = ?",
+    "is_synthetic = 0",
+    "TRIM(translated_content) <> ''",
+  ];
+  const rowParams: Array<string | number> = [...ids, filter.guildId];
+  if (filter.channelId !== undefined) {
+    rowConditions.push("channel_id = ?");
+    rowParams.push(filter.channelId);
+  }
+  if (filter.userId !== undefined) {
+    rowConditions.push("user_id = ?");
+    rowParams.push(filter.userId);
+  }
+  if (filter.after !== undefined) {
+    rowConditions.push("created_at > ?");
+    rowParams.push(filter.after);
+  }
+  if (filter.before !== undefined) {
+    rowConditions.push("created_at < ?");
+    rowParams.push(filter.before);
+  }
   const rows = db.raw
     .prepare(
       `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
        FROM messages
-       WHERE id IN (${placeholders}) AND is_synthetic = 0 AND TRIM(translated_content) <> ''`
+       WHERE ${rowConditions.join(" AND ")}`
     )
-    .all(...ids) as Array<{
+    .all(...rowParams) as Array<{
       id: string;
       channel_id: string;
       user_id: string;
@@ -161,21 +204,30 @@ export async function searchMessages(
     }>;
 
   const rowMap = new Map(rows.map((r) => [r.id, r]));
-  const scoreMap = new Map(candidates.map((r) => [r.id, r.score]));
 
   const results: MessageSearchResult[] = [];
   for (const qr of candidates) {
-    const row = rowMap.get(qr.id);
-    if (!row) continue; // orphaned Qdrant point — skip
+    const messageIds = messageIdsFromPayload(qr);
+    const matchedRows = messageIds
+      .map((id) => rowMap.get(id))
+      .filter((row): row is NonNullable<typeof row> => row !== undefined);
+    if (matchedRows.length === 0) continue; // orphaned Qdrant point — skip
+    const row = matchedRows[0];
+    if (row === undefined) continue;
+    const content = matchedRows.map((r) => r.translated_content).join("\n");
     results.push({
       id: row.id,
       channelId: row.channel_id,
       userId: row.user_id,
       authorUsername: row.author_username,
-      translatedContent: row.translated_content,
+      translatedContent: content,
       createdAt: row.created_at,
       replyToId: row.reply_to_id,
-      score: scoreMap.get(qr.id) ?? 0,
+      score: qr.score,
+      matchedMessageIds: matchedRows.map((r) => r.id),
+      messageCount: qr.payload.message_count ?? matchedRows.length,
+      embeddingKind: qr.payload.embedding_kind,
+      source: qr.payload.source,
     });
     if (results.length >= filter.limit) break;
   }

@@ -66,7 +66,21 @@ describe("enqueue and store", () => {
       id: "msg-meta",
       text: "metadata test",
       target: "message",
-      metadata: { guild_id: "g1", channel_id: "c1", user_id: "u1", created_at: now },
+      metadata: {
+        guild_id: "g1",
+        channel_id: "c1",
+        user_id: "u1",
+        created_at: now,
+        last_created_at: now + 1,
+        message_id: "m1",
+        message_ids: ["m1", "m2"],
+        first_message_id: "m1",
+        last_message_id: "m2",
+        message_count: 2,
+        is_bot: false,
+        source: "reindex",
+        embedding_kind: "merged",
+      },
     });
     await queue.flush();
 
@@ -83,6 +97,15 @@ describe("enqueue and store", () => {
       channel_id: "c1",
       user_id: "u1",
       created_at: now,
+      last_created_at: now + 1,
+      message_id: "m1",
+      message_ids: ["m1", "m2"],
+      first_message_id: "m1",
+      last_message_id: "m2",
+      message_count: 2,
+      is_bot: false,
+      source: "reindex",
+      embedding_kind: "merged",
     });
   });
 });

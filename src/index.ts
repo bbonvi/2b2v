@@ -40,6 +40,7 @@ import { createBraveSearchTool } from "./agent/brave-search-tool";
 import { createReadChatImagesTool } from "./agent/read-chat-images-tool";
 import { createFetchImagesTool } from "./agent/fetch-images-tool";
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
+import { createSummarizeVideoTool } from "./agent/summarize-video-tool";
 import { createStartThreadTool } from "./agent/start-thread-tool";
 import { getSshKeyPaths, ensureSshKeys } from "./ssh/client";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
@@ -114,6 +115,9 @@ function createBotMessageStore(input: {
         channel_id: targetChannelId,
         user_id: input.botUserId,
         created_at: ts,
+        is_bot: true,
+        source: "live",
+        embedding_kind: "single",
       },
     }).catch((err: unknown) => {
       input.logger.error("bot message embedding enqueue failed", {
@@ -1084,8 +1088,9 @@ function buildAgentTools(
   });
 
   const fetchUrlTool = createFetchUrlTool();
+  const summarizeVideoTool = createSummarizeVideoTool();
 
-  const tools = [searchTool, ...scheduleTools, memberListTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool];
+  const tools = [searchTool, ...scheduleTools, memberListTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool];
 
   // Brave search if API key configured
   if (globalConfig.braveApiKey !== undefined && globalConfig.braveApiKey !== "") {
@@ -1448,6 +1453,9 @@ client.on("messageCreate", (message: Message) => void (async () => {
         channel_id: channelId,
         user_id: message.author.id,
         created_at: now,
+        is_bot: false,
+        source: "live",
+        embedding_kind: "single",
       },
     }).catch((err: unknown) => {
       log.error("embedding enqueue failed", {

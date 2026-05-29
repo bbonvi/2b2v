@@ -37,7 +37,7 @@ describe("createFetchUrlTool", () => {
     expect(getContentText(result)).toContain("Test Page");
   });
 
-  test("returns manual content when direct fetch beats Jina", async () => {
+  test("returns summarize-core content when direct extraction beats Jina", async () => {
     const calls: string[] = [];
     const mockHtml = `
       <html><head><title>Direct Win</title></head>
@@ -61,11 +61,11 @@ describe("createFetchUrlTool", () => {
     const details = result.details as FetchUrlDetails;
     expect(calls).toContain("jina");
     expect(calls).toContain("manual");
-    expect(details.method).toBe("manual");
+    expect(details.method).toBe("summarize-core");
     expect(getContentText(result)).toContain("Direct content.");
   });
 
-  test("falls back to manual when Jina fails", async () => {
+  test("falls back to summarize-core when Jina fails", async () => {
     const mockHtml = `
       <html><head><title>Fallback Test</title></head>
       <body><article><p>Manual content.</p></article></body></html>
@@ -82,7 +82,30 @@ describe("createFetchUrlTool", () => {
 
     const result = await tool.execute("test-id", { url: "https://example.com" });
     const details = result.details as FetchUrlDetails;
+    expect(details.method).toBe("summarize-core");
+  });
+
+  test("falls back to manual when summarize-core fails", async () => {
+    const mockHtml = `
+      <html><head><title>Manual Fallback</title></head>
+      <body><article><p>Manual content after summarize failure.</p></article></body></html>
+    `;
+    let directCalls = 0;
+    const tool = createFetchUrlTool({
+      disableJina: true,
+      fetchFn: (url) => {
+        if (!url.toString().includes("r.jina.ai")) directCalls++;
+        if (directCalls === 1) {
+          return Promise.resolve(new Response('{"not":"html"}', { headers: { "content-type": "application/json" } }));
+        }
+        return Promise.resolve(new Response(mockHtml, { headers: { "content-type": "text/html" } }));
+      },
+    });
+
+    const result = await tool.execute("test-id", { url: "https://example.com" });
+    const details = result.details as FetchUrlDetails;
     expect(details.method).toBe("manual");
+    expect(getContentText(result)).toContain("Manual content after summarize failure.");
   });
 
   test("rejects direct anti-bot challenge and waits for Jina content", async () => {
@@ -168,6 +191,7 @@ describe("createFetchUrlTool", () => {
 
     const tool = createFetchUrlTool({
       disableJina: true,
+      disableSummarize: true,
       fetchFn: () => Promise.resolve(new Response(mockHtml, { headers: { "content-type": "text/html" } })),
     });
 

@@ -197,8 +197,8 @@ describe("searchPoints", () => {
     const hour = 60 * 60 * 1000;
     const vec = await embedOne("timed content");
 
-    await upsertPoint(client, "old", vecToArray(vec), { type: "message", entity_id: "old", guild_id: "g1", created_at: now - 10 * hour });
-    await upsertPoint(client, "recent", vecToArray(vec), { type: "message", entity_id: "recent", guild_id: "g1", created_at: now - 1 * hour });
+    await upsertPoint(client, "old", vecToArray(vec), { type: "message", entity_id: "old", guild_id: "g1", created_at: now - 10 * hour, last_created_at: now - 10 * hour });
+    await upsertPoint(client, "recent", vecToArray(vec), { type: "message", entity_id: "recent", guild_id: "g1", created_at: now - 1 * hour, last_created_at: now - 1 * hour });
 
     const results = await searchPoints(client, vecToArray(vec), { guild_id: "g1", after: now - 2 * hour }, { type: "message" });
     expect(results.length).toBe(1);

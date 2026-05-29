@@ -1,6 +1,7 @@
 import type { QdrantClient } from "@qdrant/js-client-rest";
 import type { EmbeddingPipeline } from "./pipeline";
 import { upsertPoints, type PointPayload } from "../qdrant/adapter";
+import { normalizeMessageForEmbedding } from "./message-text.ts";
 
 export type EmbeddingTarget = "memory" | "message";
 
@@ -9,6 +10,15 @@ export interface EmbedRequestMetadata {
   channel_id?: string;
   user_id?: string;
   created_at?: number;
+  last_created_at?: number;
+  message_id?: string;
+  message_ids?: string[];
+  first_message_id?: string;
+  last_message_id?: string;
+  message_count?: number;
+  is_bot?: boolean;
+  source?: "live" | "backfill" | "reindex" | "memory";
+  embedding_kind?: "single" | "merged";
 }
 
 export interface EmbedRequest {
@@ -58,18 +68,29 @@ export function createEmbeddingQueue(
 
   async function processBatch(batch: PendingItem[]): Promise<void> {
     try {
-      const texts = batch.map((item) => item.text);
+      const texts = batch.map((item) => item.target === "message" ? normalizeMessageForEmbedding(item.text) : item.text.trim());
       const embeddings = await pipeline.embed(texts);
 
       const points = batch.map((item, i) => {
+        const messageId = item.metadata?.message_id ?? (item.target === "message" ? item.id : undefined);
+        const messageIds = item.metadata?.message_ids ?? (messageId !== undefined ? [messageId] : undefined);
+        const messageCount = item.metadata?.message_count ?? messageIds?.length;
         const payload: PointPayload = {
           type: item.target,
           entity_id: item.id,
           guild_id: item.metadata?.guild_id,
           channel_id: item.metadata?.channel_id,
           user_id: item.metadata?.user_id,
-          message_id: item.target === "message" ? item.id : undefined,
+          message_id: messageId,
+          message_ids: messageIds,
+          first_message_id: item.metadata?.first_message_id ?? messageIds?.[0],
+          last_message_id: item.metadata?.last_message_id ?? messageIds?.[messageIds.length - 1],
+          message_count: messageCount,
           created_at: item.metadata?.created_at,
+          last_created_at: item.metadata?.last_created_at ?? item.metadata?.created_at,
+          is_bot: item.metadata?.is_bot,
+          source: item.metadata?.source,
+          embedding_kind: item.metadata?.embedding_kind ?? (messageCount !== undefined && messageCount > 1 ? "merged" : "single"),
         };
         return {
           id: item.id,
@@ -114,9 +135,11 @@ export function createEmbeddingQueue(
   return {
     enqueue(request: EmbedRequest): Promise<void> {
       if (closed) return Promise.reject(new Error("Queue is shut down"));
+      const normalizedText = request.target === "message" ? normalizeMessageForEmbedding(request.text) : request.text.trim();
+      if (normalizedText === "") return Promise.resolve();
 
       return new Promise<void>((resolve, reject) => {
-        queue.push({ ...request, resolve, reject });
+        queue.push({ ...request, text: normalizedText, resolve, reject });
 
         if (queue.length >= batchSize) {
           if (flushTimer !== null) {
