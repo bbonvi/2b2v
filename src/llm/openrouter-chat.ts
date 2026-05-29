@@ -42,6 +42,8 @@ export interface OpenRouterChatRequest {
   systemPrompt: string;
   messages: OpenRouterMessage[];
   providerParams?: Record<string, unknown>;
+  /** OpenRouter sticky routing key for keeping prompt caches warm across turns. */
+  sessionId?: string;
   responseFormat?: Record<string, unknown>;
   tools?: OpenRouterToolDefinition[];
   toolChoice?: "auto" | "none";
@@ -88,12 +90,22 @@ function mapStopReason(value: unknown): string {
   return value;
 }
 
-function buildUsage(rawUsage: Record<string, unknown> | null): Record<string, unknown> {
+function buildUsage(
+  rawUsage: Record<string, unknown> | null,
+  rawResponse?: Record<string, unknown>,
+): Record<string, unknown> {
+  const cacheDiscount = typeof rawUsage?.cache_discount === "number"
+    ? rawUsage.cache_discount
+    : typeof rawResponse?.cache_discount === "number"
+      ? rawResponse.cache_discount
+      : undefined;
+
   if (rawUsage === null) {
     return {
       input: 0,
       output: 0,
       totalTokens: 0,
+      ...(cacheDiscount !== undefined ? { cacheDiscount } : {}),
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     };
   }
@@ -101,6 +113,13 @@ function buildUsage(rawUsage: Record<string, unknown> | null): Record<string, un
   const input = typeof rawUsage.prompt_tokens === "number" ? rawUsage.prompt_tokens : 0;
   const output = typeof rawUsage.completion_tokens === "number" ? rawUsage.completion_tokens : 0;
   const totalTokens = typeof rawUsage.total_tokens === "number" ? rawUsage.total_tokens : input + output;
+  const promptTokenDetails = asRecord(rawUsage.prompt_tokens_details);
+  const cachedTokens = typeof promptTokenDetails?.cached_tokens === "number"
+    ? promptTokenDetails.cached_tokens
+    : undefined;
+  const cacheWriteTokens = typeof promptTokenDetails?.cache_write_tokens === "number"
+    ? promptTokenDetails.cache_write_tokens
+    : undefined;
   const rawCost = rawUsage.cost;
   const cost = asRecord(rawCost);
   const totalCost = typeof rawCost === "number"
@@ -113,6 +132,9 @@ function buildUsage(rawUsage: Record<string, unknown> | null): Record<string, un
     input,
     output,
     totalTokens,
+    ...(cachedTokens !== undefined ? { cachedTokens } : {}),
+    ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+    ...(cacheDiscount !== undefined ? { cacheDiscount } : {}),
     cost: {
       input: typeof cost?.input === "number" ? cost.input : 0,
       output: typeof cost?.output === "number" ? cost.output : 0,
@@ -136,7 +158,7 @@ function normalizeAssistantPayload(
     stopReason: mapStopReason(finishReason),
     content: text !== "" ? [{ type: "text", text }] : [],
     ...(toolCalls.length > 0 ? { toolCalls } : {}),
-    usage: buildUsage(asRecord(raw.usage)),
+    usage: buildUsage(asRecord(raw.usage), raw),
     timestamp: Date.now(),
     rawResponse: raw,
   };
@@ -293,6 +315,9 @@ export async function completeOpenRouterChat(request: OpenRouterChatRequest): Pr
 
   if (request.responseFormat !== undefined) {
     payload.response_format = request.responseFormat;
+  }
+  if (request.sessionId !== undefined && request.sessionId !== "") {
+    payload.session_id = request.sessionId;
   }
   if (request.tools !== undefined && request.tools.length > 0) {
     payload.tools = request.tools;

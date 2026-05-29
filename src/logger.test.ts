@@ -276,7 +276,15 @@ describe("RequestLog", () => {
         { type: "thinking", text: "long thinking content..." },
         { type: "text", text: "response" },
       ],
-      usage: { input: 2842, output: 407, totalTokens: 3249, cost: { total: 0.0026 } },
+      usage: {
+        input: 2842,
+        output: 407,
+        totalTokens: 3249,
+        cachedTokens: 2048,
+        cacheWriteTokens: 512,
+        cacheDiscount: 0.0011,
+        cost: { total: 0.0026 },
+      },
       stopReason: "stop",
     });
     rl.emit(logger);
@@ -288,6 +296,9 @@ describe("RequestLog", () => {
     expect(llm[0]?.promptTokens).toBe(2842);
     expect(llm[0]?.completionTokens).toBe(407);
     expect(llm[0]?.totalTokens).toBe(3249);
+    expect(llm[0]?.cachedTokens).toBe(2048);
+    expect(llm[0]?.cacheWriteTokens).toBe(512);
+    expect(llm[0]?.cacheDiscountUsd).toBe(0.0011);
     expect(llm[0]?.estimatedCostUsd).toBe(0.0026);
     expect(llm[0]?.stopReason).toBe("stop");
     expect(llm[0]?.contentTypes).toEqual(["thinking", "text"]);

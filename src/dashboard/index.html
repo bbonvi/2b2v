@@ -367,6 +367,20 @@
     return '$' + total.toFixed(4);
   }
 
+  function fmtCache(call) {
+    const hasTokens = call.cachedTokens != null || call.cacheWriteTokens != null;
+    const hasDiscount = call.cacheDiscountUsd != null;
+    if (!hasTokens && !hasDiscount) return '-';
+    const parts = [];
+    if (hasTokens) {
+      const read = call.cachedTokens != null ? call.cachedTokens : 0;
+      const write = call.cacheWriteTokens != null ? call.cacheWriteTokens : 0;
+      parts.push(read + ' / ' + write);
+    }
+    if (hasDiscount) parts.push('$' + call.cacheDiscountUsd.toFixed(4));
+    return parts.join(' | ');
+  }
+
   function fmtTrigger(t) {
     if (t == null) return 'none';
     if (typeof t === 'string') return t;
@@ -440,6 +454,7 @@
       llmRows += '<tr>'
         + '<td>' + esc(l.model) + '</td>'
         + '<td>' + l.promptTokens + ' / ' + l.completionTokens + '</td>'
+        + '<td>' + esc(fmtCache(l)) + '</td>'
         + '<td>' + (l.estimatedCostUsd != null ? '$' + l.estimatedCostUsd.toFixed(4) : '-') + '</td>'
         + '<td>' + esc(l.stopReason) + '</td>'
         + '<td>' + esc(l.contentTypes.join(', ')) + '</td>'
@@ -469,7 +484,7 @@
           + '<table class="detail-table"><tr><th>Tool</th><th>Args</th><th>Duration</th><th>Status</th><th>Result</th></tr>'
           + toolRows + '</table></div>' : '')
         + (e.llmCalls.length > 0 ? '<div class="detail-section"><div class="detail-label">LLM Calls</div>'
-          + '<table class="detail-table"><tr><th>Model</th><th>Tokens (in/out)</th><th>Cost</th><th>Stop</th><th>Content Types</th><th>Output</th><th>Request</th><th>Response</th></tr>'
+          + '<table class="detail-table"><tr><th>Model</th><th>Tokens (in/out)</th><th>Cache (read/write)</th><th>Cost</th><th>Stop</th><th>Content Types</th><th>Output</th><th>Request</th><th>Response</th></tr>'
           + llmRows + '</table></div>' : '')
       + '</div>'
     + '</div>';

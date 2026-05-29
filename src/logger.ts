@@ -93,6 +93,9 @@ export interface RequestLLMCall {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  cachedTokens?: number;
+  cacheWriteTokens?: number;
+  cacheDiscountUsd?: number;
   estimatedCostUsd?: number;
   stopReason: string;
   contentTypes: string[];
@@ -227,6 +230,9 @@ export class RequestLog {
       promptTokens: typeof usage.input === "number" ? usage.input : 0,
       completionTokens: typeof usage.output === "number" ? usage.output : 0,
       totalTokens: typeof usage.totalTokens === "number" ? usage.totalTokens : 0,
+      cachedTokens: typeof usage.cachedTokens === "number" ? usage.cachedTokens : undefined,
+      cacheWriteTokens: typeof usage.cacheWriteTokens === "number" ? usage.cacheWriteTokens : undefined,
+      cacheDiscountUsd: typeof usage.cacheDiscount === "number" ? usage.cacheDiscount : undefined,
       estimatedCostUsd: typeof cost?.total === "number" ? cost.total : undefined,
       stopReason: typeof message.stopReason === "string" ? message.stopReason : "unknown",
       contentTypes,

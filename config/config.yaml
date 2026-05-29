@@ -55,8 +55,8 @@ modelParams:
         }
 
 # OpenRouter prompt caching control.
-# Explicit-cache providers receive cache_control breakpoints; automatic-cache
-# providers like DeepSeek rely on stable prefix ordering without cache_control.
+# When enabled, stable prompt sections are marked with cache_control breakpoints.
+# OpenRouter/provider routing decides whether the selected provider uses them.
 promptCaching:
     enabled: true
 

@@ -5,6 +5,7 @@ import { handleMessage, injectTriggerInstruction, type ChatCompleteFn, type Hand
 import type { AssembledContext, ContextSection } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
+import { RequestLog } from "../logger.ts";
 
 function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
   return {
@@ -356,6 +357,54 @@ describe("handleMessage", () => {
         }),
       }),
     );
+  });
+
+  test("uses a stable OpenRouter session id across native tool turns", async () => {
+    const tool: AgentTool = {
+      name: "lookup",
+      label: "Lookup",
+      description: "Look something up",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: () => Promise.resolve({ content: [{ type: "text", text: "tool says 42" }], details: {} }),
+    };
+    const sessionIds: Array<string | undefined> = [];
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      sessionIds.push(request.sessionId);
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "lookup", arguments: "{\"query\":\"x\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      return Promise.resolve({
+        text: "answer is 42",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "answer is 42" }] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        completeChat,
+        requestLog: new RequestLog("guild-1", "channel-1"),
+      }),
+    );
+
+    expect(sessionIds).toEqual([
+      "2b2v:guild-1:channel-1:moonshotai/kimi-k2.5",
+      "2b2v:guild-1:channel-1:moonshotai/kimi-k2.5",
+    ]);
   });
 
   test("chains web search then fetch and sends one intermediate status", async () => {

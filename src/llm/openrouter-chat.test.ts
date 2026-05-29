@@ -36,6 +36,33 @@ describe("completeOpenRouterChat", () => {
     fetchSpy.mockRestore();
   });
 
+  test("includes session_id in outgoing payload", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      makeResponse({
+        model: "m",
+        choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      })
+    );
+
+    await completeOpenRouterChat({
+      apiKey: "key",
+      model: "moonshotai/kimi-k2.5",
+      systemPrompt: "system",
+      messages: [{ role: "user", content: "hello" }],
+      sessionId: "2b2v:g1:c1:moonshotai/kimi-k2.5",
+      baseUrl: "https://example.com",
+    });
+
+    const init = fetchSpy.mock.calls[0]?.[1];
+    const bodyRaw = init?.body;
+    const bodyText = typeof bodyRaw === "string" ? bodyRaw : "";
+    const body = JSON.parse(bodyText) as { session_id?: string };
+    expect(body.session_id).toBe("2b2v:g1:c1:moonshotai/kimi-k2.5");
+
+    fetchSpy.mockRestore();
+  });
+
   test("includes native tools and parses returned tool calls", async () => {
     const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
       makeResponse({
@@ -97,8 +124,10 @@ describe("completeOpenRouterChat", () => {
           prompt_tokens: 10,
           completion_tokens: 5,
           total_tokens: 15,
+          prompt_tokens_details: { cached_tokens: 8, cache_write_tokens: 2 },
           cost: { total: 0.001 },
         },
+        cache_discount: 0.0004,
       })
     );
 
@@ -112,8 +141,18 @@ describe("completeOpenRouterChat", () => {
 
     expect(result.text).toBe('{"status":"done"}');
     expect(result.messageForLogs.role).toBe("assistant");
-    expect((result.messageForLogs.usage as { input?: number }).input).toBe(10);
-    expect((result.messageForLogs.usage as { output?: number }).output).toBe(5);
+    const usage = result.messageForLogs.usage as {
+      input?: number;
+      output?: number;
+      cachedTokens?: number;
+      cacheWriteTokens?: number;
+      cacheDiscount?: number;
+    };
+    expect(usage.input).toBe(10);
+    expect(usage.output).toBe(5);
+    expect(usage.cachedTokens).toBe(8);
+    expect(usage.cacheWriteTokens).toBe(2);
+    expect(usage.cacheDiscount).toBe(0.0004);
 
     fetchSpy.mockRestore();
   });

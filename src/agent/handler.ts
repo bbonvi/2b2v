@@ -1,5 +1,6 @@
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { validateToolArguments, type ToolCall } from "@mariozechner/pi-ai";
+import { createHash } from "node:crypto";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
 import { contextToSplitPrompts, type AssembledContext, type ContextSection } from "./context-assembly.ts";
 import { wrapToolsWithTiming, type TimingState } from "./tool-timing.ts";
@@ -566,6 +567,14 @@ function sectionsForStablePrompt(
   stable.push(...getStablePromptSections(context));
   if (runtimeInstruction !== "") stable.push({ role: "system", text: runtimeInstruction });
   return stable;
+}
+
+/** Build a stable OpenRouter session id so provider routing can keep caches warm. */
+function buildPromptCacheSessionId(requestLog: RequestLog | undefined, modelId: string): string | undefined {
+  if (requestLog === undefined) return undefined;
+  const sessionId = `2b2v:${requestLog.guildId}:${requestLog.channelId}:${modelId}`;
+  if (sessionId.length <= 256) return sessionId;
+  return `2b2v:${createHash("sha256").update(sessionId).digest("hex")}`;
 }
 
 function buildVolatileTurnContext(context: AssembledContext): string {
@@ -1328,6 +1337,7 @@ export async function handleMessage(
   const userContent = context.userMessage !== "" ? context.userMessage : msg.translatedContent;
   const volatileTurnContext = buildVolatileTurnContext(context);
   const reqLog = deps.requestLog;
+  const sessionId = buildPromptCacheSessionId(reqLog, model.id);
   const startedAt = Date.now();
 
   try {
@@ -1381,6 +1391,7 @@ export async function handleMessage(
           model: model.id,
           systemPrompt: "",
           providerParams,
+          sessionId,
           onPayload: (payload: unknown) => {
             prependStableSectionsToPayload(payload, stableSections, deps.guildConfig.promptCaching, model.id);
             reqLog?.recordLLMRequest(payload);

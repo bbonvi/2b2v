@@ -78,8 +78,8 @@ dispatcher:
   defaultDebounceMs: 2000   # Debounce ms for non-mention triggers (default: 2000)
 
 # OpenRouter prompt caching control.
-# When enabled, explicit cache breakpoints are used for supported providers;
-# other providers fall back to OpenRouter/provider automatic caching.
+# When enabled, stable prompt sections are marked with cache_control breakpoints.
+# OpenRouter/provider routing decides whether the selected provider uses them.
 promptCaching:
   enabled: true
 

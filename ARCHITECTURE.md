@@ -22,6 +22,8 @@ Typing is runtime-owned. The model has no typing tool.
 
 Prompt caching depends on stable content staying stable. The handler sends one merged stable prefix, adds cache breakpoints inside that block, then inserts a tiny stable user/assistant anchor before volatile turn context.
 
+OpenRouter requests include a deterministic `session_id` scoped to guild, channel, and model so provider sticky routing can keep the same cache-warmed endpoint across tool turns and later reply loops. Request logs preserve `prompt_tokens_details.cached_tokens` and `cache_write_tokens` for verification.
+
 Dynamic sections such as current time, current channel state, pending schedule summary, memories, recent history, current user messages, and trigger instructions must stay after the anchor.
 
 Older chat history moves only in `trim.windowSize` chunks. Do not promote one message at a time from recent history to older cached history.
