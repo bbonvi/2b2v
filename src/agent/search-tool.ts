@@ -282,10 +282,7 @@ function formatResult(
   const ids = r.matchedMessageIds !== undefined && r.matchedMessageIds.length > 1
     ? ` [ids ${r.matchedMessageIds.join(",")}]`
     : ` [id ${r.id}]`;
-  const vectorMeta = options.includeScore && (r.embeddingKind !== undefined || r.source !== undefined || (r.messageCount ?? 1) > 1)
-    ? ` [vector ${r.embeddingKind ?? "unknown"}, source ${r.source ?? "unknown"}, messages ${r.messageCount ?? 1}]`
-    : "";
-  let line = `${scoreTag}[${date}]${chatTag}${ids}${vectorMeta} ${r.authorUsername}${replyTag}: ${r.translatedContent}`;
+  let line = `${scoreTag}[${date}]${chatTag}${ids} ${r.authorUsername}${replyTag}: ${r.translatedContent}`;
   if (options.attachments !== undefined && options.attachments.length > 0) {
     for (const a of options.attachments) {
       const sizeStr = formatFileSize(a.size);
