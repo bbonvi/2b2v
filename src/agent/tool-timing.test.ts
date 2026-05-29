@@ -33,13 +33,15 @@ function getTool(tools: AgentTool[], index: number): AgentTool {
   return tool;
 }
 
-/** Extract elapsed time in ms from a tool result's timing note. */
-function extractElapsedMs(result: AgentToolResult<unknown>): number {
+/** Extract a timing field from a tool result's timing note. */
+function extractTimingMs(result: AgentToolResult<unknown>, label: string): number {
   const note = result.content[1];
   if (note?.type !== "text") throw new Error("No timing note");
-  const match = (note as { type: "text"; text: string }).text.match(/took (\d+)ms/);
-  if (match === null || match[1] === undefined) throw new Error("No ms match in timing note");
-  return parseInt(match[1], 10);
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = (note as { type: "text"; text: string }).text.match(new RegExp(`${escapedLabel} (\\d+(?:\\.\\d+)?)(ms|s)`));
+  if (match === null || match[1] === undefined || match[2] === undefined) throw new Error(`No ${label} match in timing note`);
+  const value = Number(match[1]);
+  return match[2] === "s" ? value * 1000 : value;
 }
 
 describe("formatTiming", () => {
@@ -78,11 +80,11 @@ describe("wrapToolsWithTiming", () => {
     expect(note).toBeDefined();
     expect(note?.type).toBe("text");
     expect((note as { type: "text"; text: string }).text).toMatch(
-      /^\n\*Note to agent: This `fast_tool` tool took \d+ms to run\.\*$/
+      /^\n\*Note to agent: Timing for `fast_tool`: tool-call generation \d+ms, tool execution \d+ms, current tool turn \d+ms, agent loop elapsed \d+ms\.\*$/
     );
   });
 
-  test("measures time from reference point to tool completion", async () => {
+  test("measures actual tool execution time", async () => {
     const tool = createMockTool("slow_tool", 100);
     const { tools, state } = getWrapped([tool]);
     const wrapped = getTool(tools, 0);
@@ -91,7 +93,7 @@ describe("wrapToolsWithTiming", () => {
     const result = await wrapped.execute("call-1", {}, undefined);
 
     // Should include ~100ms execution time
-    const elapsed = extractElapsedMs(result);
+    const elapsed = extractTimingMs(result, "tool execution");
     expect(elapsed).toBeGreaterThanOrEqual(100);
     expect(elapsed).toBeLessThan(200); // reasonable upper bound
   });
@@ -110,8 +112,8 @@ describe("wrapToolsWithTiming", () => {
       wB.execute("call-b", {}, undefined),
     ]);
 
-    const elapsedA = extractElapsedMs(resultA);
-    const elapsedB = extractElapsedMs(resultB);
+    const elapsedA = extractTimingMs(resultA, "tool execution");
+    const elapsedB = extractTimingMs(resultB, "tool execution");
 
     // Both should be >= their execution time
     expect(elapsedA).toBeGreaterThanOrEqual(200);
@@ -120,43 +122,50 @@ describe("wrapToolsWithTiming", () => {
     expect(elapsedA).toBeGreaterThan(elapsedB);
   });
 
-  test("includes time between reference set and tool execution (LLM thinking)", async () => {
+  test("includes LLM tool-call generation time separately from tool execution", async () => {
     const tool = createMockTool("tool", 50);
     const { tools, state } = getWrapped([tool]);
     const wrapped = getTool(tools, 0);
 
-    // Simulate: reference set (LLM done), then 100ms "thinking" delay, then tool runs
-    state.setReferenceTime();
+    // Simulate: LLM starts, spends 100ms generating a tool call, then tool runs.
+    state.markModelTurnStart();
     await new Promise((r) => setTimeout(r, 100));
+    state.markToolCallsReady();
 
     const result = await wrapped.execute("call-1", {}, undefined);
-    const elapsed = extractElapsedMs(result);
+    const generation = extractTimingMs(result, "tool-call generation");
+    const execution = extractTimingMs(result, "tool execution");
+    const turnElapsed = extractTimingMs(result, "current tool turn");
 
-    // Should include both the 100ms wait AND ~50ms execution = ~150ms
-    expect(elapsed).toBeGreaterThanOrEqual(150);
-    expect(elapsed).toBeLessThan(250);
+    expect(generation).toBeGreaterThanOrEqual(100);
+    expect(generation).toBeLessThan(200);
+    expect(execution).toBeGreaterThanOrEqual(50);
+    expect(turnElapsed).toBeGreaterThanOrEqual(150);
+    expect(turnElapsed).toBeLessThan(300);
   });
 
-  test("setReferenceTime resets timing for new batch", async () => {
+  test("markModelTurnStart resets timing for new tool turn", async () => {
     const tool = createMockTool("tool", 50);
     const { tools, state } = getWrapped([tool]);
     const wrapped = getTool(tools, 0);
 
     // First batch
-    state.setReferenceTime();
+    state.markModelTurnStart();
+    state.markToolCallsReady();
     await wrapped.execute("call-1", {}, undefined);
 
     // Wait 100ms (simulating LLM response time)
     await new Promise((r) => setTimeout(r, 100));
 
-    // Second batch — setReferenceTime called, should NOT include the 100ms wait
-    state.setReferenceTime();
+    // Second batch — markModelTurnStart called, should NOT include prior idle wait.
+    state.markModelTurnStart();
+    state.markToolCallsReady();
     const result = await wrapped.execute("call-2", {}, undefined);
-    const elapsed = extractElapsedMs(result);
+    const elapsed = extractTimingMs(result, "current tool turn");
 
     // Should be ~50ms (tool execution), not ~150ms
     expect(elapsed).toBeGreaterThanOrEqual(50);
-    expect(elapsed).toBeLessThan(100);
+    expect(elapsed).toBeLessThan(120);
   });
 
   test("preserves original tool properties", () => {
@@ -208,7 +217,7 @@ describe("wrapToolsWithTiming", () => {
     expect(result.content).toHaveLength(2);
     // Should be formatted as "1.Xs" (seconds with decimal)
     expect((result.content[1] as { type: "text"; text: string }).text).toMatch(
-      /^\n\*Note to agent: This `one_second_tool` tool took 1\.\ds to run\.\*$/
+      /^\n\*Note to agent: Timing for `one_second_tool`: tool-call generation \d+ms, tool execution 1\.\ds, current tool turn 1\.\ds, agent loop elapsed 1\.\ds\.\*$/
     );
   });
 });

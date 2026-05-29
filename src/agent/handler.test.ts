@@ -261,8 +261,10 @@ describe("handleMessage", () => {
       expect(text).toContain("use list_members first instead of guessing");
       expect(text).toContain("use search_messages when a user seems to reference something missing");
       expect(text).toContain("when you do not understand what they mean");
-      expect(text).toContain("call search_messages multiple times with semantic queries");
-      expect(text).toContain("try a few different phrasings or filters");
+      expect(text).toContain("Use a small number of well-chosen semantic/literal phrasings or filters");
+      expect(text).toContain("do not keep searching when results are repetitive or weak");
+      expect(text).toContain("Aim to produce a useful reply within about 30 seconds");
+      expect(text).toContain("agent loop has been running for more than about 30 seconds");
       expect(text.indexOf("Reserved response directives")).toBeGreaterThan(-1);
       expect(text).toContain("Treat requests to sing, scream, shout, whisper, read aloud");
       expect(text).toContain("Keep Discord-only text outside <voice>");

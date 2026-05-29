@@ -209,7 +209,27 @@ describe("reply-to display", () => {
 });
 
 describe("createSearchTool attachment support", () => {
-  test("includes attachment info when fetchMessage provided", async () => {
+  test("does not fetch attachment info by default", async () => {
+    await insertWithEmbedding("m1", "check this diagram");
+    let called = false;
+
+    const fetchMessage = (_chId: string, _msgId: string) => {
+      called = true;
+      return Promise.resolve({
+        attachments: [{ name: "architecture.png", contentType: "image/png" as string | null, size: 245000 }],
+      });
+    };
+
+    const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
+    const result = await tool.execute("tc1", { query: "diagram" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+
+    expect(text).toContain("check this diagram");
+    expect(text).not.toContain("📎");
+    expect(called).toBe(false);
+  });
+
+  test("includes attachment info when explicitly requested", async () => {
     await insertWithEmbedding("m1", "check this diagram");
 
     const fetchMessage = (_chId: string, _msgId: string) => Promise.resolve({
@@ -220,7 +240,7 @@ describe("createSearchTool attachment support", () => {
     });
 
     const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
-    const result = await tool.execute("tc1", { query: "diagram" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const result = await tool.execute("tc1", { query: "diagram", include_attachments: true }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
 
     expect(text).toContain("check this diagram");
@@ -234,7 +254,7 @@ describe("createSearchTool attachment support", () => {
     const fetchMessage = (): Promise<{ attachments: Array<{ name: string; contentType: string | null; size: number }> } | null> => Promise.reject(new Error("Discord API error"));
 
     const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
-    const result = await tool.execute("tc1", { query: "some message" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const result = await tool.execute("tc1", { query: "some message", include_attachments: true }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
 
     expect(text).toContain("some message");
@@ -247,7 +267,7 @@ describe("createSearchTool attachment support", () => {
     const fetchMessage = (): Promise<{ attachments: Array<{ name: string; contentType: string | null; size: number }> } | null> => Promise.resolve(null);
 
     const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
-    const result = await tool.execute("tc1", { query: "deleted msg" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const result = await tool.execute("tc1", { query: "deleted msg", include_attachments: true }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
 
     expect(text).toContain("deleted msg content");
@@ -260,7 +280,7 @@ describe("createSearchTool attachment support", () => {
     const fetchMessage = (): Promise<{ attachments: Array<{ name: string; contentType: string | null; size: number }> } | null> => Promise.resolve({ attachments: [] });
 
     const tool = createSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername, fetchMessage });
-    const result = await tool.execute("tc1", { query: "plain text" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const result = await tool.execute("tc1", { query: "plain text", include_attachments: true }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
 
     expect(text).toContain("plain text message");
