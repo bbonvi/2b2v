@@ -17,7 +17,7 @@ Personal Discord bot with a single persona reply loop, native tool calling, and 
 
 - [Bun](https://bun.sh) 1.3+
 - [Docker](https://www.docker.com/) (for Qdrant)
-- API keys: [Discord](https://discord.com/developers/applications), [OpenRouter](https://openrouter.ai/), optional [Brave Search](https://brave.com/search/api/) and [ElevenLabs](https://elevenlabs.io/)
+- API keys: [Discord](https://discord.com/developers/applications), OpenRouter by default, optional ChatGPT/Codex subscription auth, [Brave Search](https://brave.com/search/api/), and [ElevenLabs](https://elevenlabs.io/)
 - Optional for local non-Docker media extraction: `ffmpeg` and latest `yt-dlp`. The Docker image installs both.
 
 ## Quick start
@@ -46,7 +46,7 @@ Use the dev compose file for live reload. Use the production command with `-p 2b
 
 ## Environment variables
 
-Required: `DISCORD_TOKEN`, `OPENROUTER_API_KEY`. Optional feature keys: `BRAVE_API_KEY` for web search, `ELEVENLABS_API_KEY` for voice. Optional media transcription fallbacks can use `GROQ_API_KEY`, `ASSEMBLYAI_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `FAL_KEY`. See `.env.example` and `.env.prod.example` for infrastructure, dashboard, logging, and storage variables.
+Required: `DISCORD_TOKEN` plus credentials for the configured LLM provider. The default provider is OpenRouter, which requires `OPENROUTER_API_KEY`; `llmProvider: openai-codex` uses ChatGPT subscription OAuth credentials from `CODEX_AUTH_PATH` or `data/codex-auth.json`. Run `bun run codex:login -- --auth data/codex-auth.json` locally, or `docker compose -f docker-compose.dev.yml exec bot bun run codex:login -- --auth data/codex-auth.json` for the dev container volume. Treat the Codex auth JSON as a secret. Optional feature keys: `BRAVE_API_KEY` for web search, `ELEVENLABS_API_KEY` for voice. Optional media transcription fallbacks can use `GROQ_API_KEY`, `ASSEMBLYAI_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `FAL_KEY`. See `.env.example` and `.env.prod.example` for infrastructure, dashboard, logging, and storage variables.
 
 ## Configuration
 
@@ -56,6 +56,7 @@ Global defaults live in optional `config/config.yaml`; copy `config/config.yaml.
 triggers:
   mention: true
   keywords: [2b]
+llmProvider: openrouter # or openai-codex
 model: moonshotai/kimi-k2.5
 timezone: UTC
 adminUserIds: []
@@ -111,7 +112,7 @@ make test
 - Semantic search time-range filtering is approximate
 - Embedding model download requires internet access on first startup
 - Designed for small personal servers (2–3 guilds, small member count) — not load-tested for large servers
-- No rate limiting on LLM calls beyond OpenRouter's own limits
+- No bot-side rate limiting on LLM calls beyond the selected provider's own limits
 - Requires Discord message content intent for full functionality
 
 ## License

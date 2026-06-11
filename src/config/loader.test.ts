@@ -119,6 +119,7 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultImageCaptioningEnabled).toBe(false);
     expect(cfg.defaultImageReading).toEqual({
       fallbackEnabled: false,
+      fallbackProvider: "openrouter",
       fallbackModel: "moonshotai/kimi-k2.5",
       fallbackModelParams: {},
     });
@@ -320,6 +321,25 @@ describe("loadGlobalConfig", () => {
     expect(() => loadGlobalConfig({ DISCORD_TOKEN: "x" }, join(TEST_DIR, "none.yaml"))).toThrow("OPENROUTER_API_KEY");
   });
 
+  test("does not require OpenRouter key when Codex is the only enabled LLM provider", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "llmProvider: openai-codex\nmodel: gpt-5.5\n");
+    const cfg = loadGlobalConfig({
+      DISCORD_TOKEN: "tok_test",
+      CODEX_AUTH_PATH: "/tmp/codex-auth.json",
+    }, file);
+    expect(cfg.defaultLlmProvider).toBe("openai-codex");
+    expect(cfg.defaultModel).toBe("gpt-5.5");
+    expect(cfg.openrouterApiKey).toBeUndefined();
+    expect(cfg.codexAuthPath).toBe("/tmp/codex-auth.json");
+  });
+
+  test("rejects invalid LLM provider", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "llmProvider: codex\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow('llmProvider must be "openrouter" or "openai-codex"');
+  });
+
   test("secrets come from env vars", () => {
     const cfg = loadGlobalConfig({ ...BASE_ENV, BRAVE_API_KEY: "brave_test" }, join(TEST_DIR, "none.yaml"));
     expect(cfg.discordToken).toBe("tok_test");
@@ -425,6 +445,7 @@ describe("loadGlobalConfig", () => {
 
     expect(cfg.defaultImageReading).toEqual({
       fallbackEnabled: true,
+      fallbackProvider: "openrouter",
       fallbackModel: "moonshotai/kimi-k2.5",
       fallbackModelParams: { temperature: 0 },
     });
@@ -512,6 +533,7 @@ describe("resolveGuildConfig", () => {
     expect(resolved.imageCaptioningEnabled).toBe(false);
     expect(resolved.imageReading).toEqual({
       fallbackEnabled: false,
+      fallbackProvider: "openrouter",
       fallbackModel: "moonshotai/kimi-k2.5",
       fallbackModelParams: {},
     });
@@ -544,6 +566,7 @@ describe("resolveGuildConfig", () => {
     expect(resolved.imageCaptioningEnabled).toBe(true);
     expect(resolved.imageReading).toEqual({
       fallbackEnabled: true,
+      fallbackProvider: "openrouter",
       fallbackModel: "openai/gpt-4o-mini",
       fallbackModelParams: { temperature: 0 },
     });
@@ -653,6 +676,36 @@ describe("resolveGuildConfig", () => {
     expect(resolved.thinkingLevel).toBe("low");
   });
 
+  test("rejects invalid global thinkingLevel", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "thinkingLevel: enormous\n");
+    expect(() => loadGlobalConfig(BASE_ENV, cfgFile)).toThrow(
+      'thinkingLevel must be "minimal", "low", "medium", "high", or "xhigh"',
+    );
+  });
+
+  test("rejects invalid guild thinkingLevel", () => {
+    const global = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "none.yaml"));
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "83",
+      slug: "bad-thinking",
+      thinkingLevel: "enormous" as never,
+    };
+    expect(() => resolveGuildConfig(global, partial)).toThrow(
+      'thinkingLevel must be "minimal", "low", "medium", "high", or "xhigh"',
+    );
+  });
+
+  test("rejects invalid background thinkingLevel", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "backgroundLlm:\n  thinkingLevel: enormous\n");
+    expect(() => loadGlobalConfig(BASE_ENV, cfgFile)).toThrow(
+      'backgroundLlm.thinkingLevel must be "minimal", "low", "medium", "high", or "xhigh"',
+    );
+  });
+
   test("thinkingLevel remains undefined when neither global nor guild specifies", () => {
     const global = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "none.yaml"));
     expect(global.defaultThinkingLevel).toBeUndefined();
@@ -742,6 +795,7 @@ describe("resolveGuildConfig", () => {
     };
     const resolved = resolveGuildConfig(global, partial);
     expect(resolved.backgroundLlm).toEqual({
+      provider: "openrouter",
       model: "guild/model",
       modelParams: { temperature: 0.7, topP: 0.9 },
       thinkingLevel: undefined,
@@ -774,6 +828,7 @@ describe("resolveGuildConfig", () => {
     };
     const resolved = resolveGuildConfig(global, partial);
     expect(resolved.backgroundLlm).toEqual({
+      provider: "openrouter",
       model: "guild/bg",
       modelParams: { temperature: 0.2, topP: 0.5 },
       thinkingLevel: undefined,
@@ -877,6 +932,16 @@ describe("loadGuildConfigs", () => {
     const guilds = loadGuildConfigs(GUILDS_DIR, global);
     expect(guilds.size).toBe(1);
     expect(guilds.has("3")).toBe(true);
+  });
+
+  test("rejects guild OpenRouter overrides without OpenRouter credentials", () => {
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "llmProvider: openai-codex\nmodel: gpt-5.5\n");
+    writeFileSync(join(GUILDS_DIR, "4-openrouter.yaml"), "llmProvider: openrouter\nmodel: moonshotai/kimi-k2.5\n");
+    const global = loadGlobalConfig({ DISCORD_TOKEN: "t", CODEX_AUTH_PATH: "/tmp/codex-auth.json" }, cfgFile);
+    expect(() => loadGuildConfigs(GUILDS_DIR, global)).toThrow(
+      "OPENROUTER_API_KEY is required by guild 4 OpenRouter LLM configuration",
+    );
   });
 });
 

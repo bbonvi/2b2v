@@ -55,18 +55,26 @@ export interface PromptCachingConfig {
   enabled: boolean;
 }
 
-/** OpenRouter service tier override for background LLM calls. */
+/** Supported hosted LLM backends. */
+export type LlmProvider = "openrouter" | "openai-codex";
+
+/** Reasoning effort requested from providers that expose thinking controls. */
+export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh";
+
+/** Service tier override for providers that support it. */
 export type ServiceTier = "flex" | "priority";
 
 /** Dedicated background LLM configuration. */
 export interface BackgroundLlmConfig {
+  /** Provider used for background LLM work. */
+  provider?: LlmProvider;
   /** Effective model id for background LLM work. */
   model: string;
-  /** Effective OpenRouter request parameters for background LLM work. */
+  /** Effective provider request parameters for background LLM work. */
   modelParams: Record<string, unknown>;
-  /** Optional reasoning level marker retained for config symmetry. */
-  thinkingLevel?: string;
-  /** Optional OpenRouter service tier. Undefined means no service_tier is sent. */
+  /** Optional reasoning effort requested for background LLM work. */
+  thinkingLevel?: ThinkingLevel;
+  /** Optional service tier. Undefined means no provider service tier is sent. */
   serviceTier?: ServiceTier;
   /** Prompt caching controls for background LLM work. */
   promptCaching: PromptCachingConfig;
@@ -74,9 +82,10 @@ export interface BackgroundLlmConfig {
 
 /** Global defaults for background LLM configuration. Missing fields inherit main model settings per guild. */
 export interface BackgroundLlmDefaults {
+  provider?: LlmProvider;
   model?: string;
   modelParams: Record<string, unknown>;
-  thinkingLevel?: string;
+  thinkingLevel?: ThinkingLevel;
   serviceTier?: ServiceTier;
   promptCaching?: PromptCachingConfig;
 }
@@ -85,9 +94,11 @@ export interface BackgroundLlmDefaults {
 export interface ImageReadingConfig {
   /** Whether to describe images with a separate vision model when the main model cannot read them. */
   fallbackEnabled: boolean;
-  /** OpenRouter model id used for fallback image descriptions. */
+  /** Provider used for fallback image descriptions. */
+  fallbackProvider?: LlmProvider;
+  /** Model id used for fallback image descriptions. */
   fallbackModel: string;
-  /** OpenRouter request parameters for fallback image description calls. */
+  /** Provider request parameters for fallback image description calls. */
   fallbackModelParams: Record<string, unknown>;
 }
 
@@ -161,9 +172,10 @@ export interface GuildConfig {
   slug: string;
   triggers: TriggerConfig;
   triggerInstructions: TriggerInstructions;
+  llmProvider?: LlmProvider;
   model?: string;
   modelParams?: Record<string, unknown>;
-  thinkingLevel?: string;
+  thinkingLevel?: ThinkingLevel;
   timezone: string;
   trim: TrimConfig;
   adminUserIds: string[];
@@ -184,7 +196,7 @@ export interface GuildConfig {
   members: MembersConfig;
   /** Channel dispatcher configuration. */
   dispatcher: DispatcherConfig;
-  /** Prompt caching controls for OpenRouter requests. */
+  /** Prompt caching controls for supported provider requests. */
   promptCaching: PromptCachingConfig;
   /** Dedicated background LLM configuration. */
   backgroundLlm: BackgroundLlmConfig;
@@ -195,11 +207,13 @@ export interface GuildConfig {
 /** Global configuration loaded from file + env. */
 export interface GlobalConfig {
   discordToken: string;
-  openrouterApiKey: string;
+  openrouterApiKey?: string;
+  codexAuthPath: string;
   braveApiKey?: string;
+  defaultLlmProvider: LlmProvider;
   defaultModel: string;
   defaultModelParams: Record<string, unknown>;
-  defaultThinkingLevel?: string;
+  defaultThinkingLevel?: ThinkingLevel;
   defaultTimezone: string;
   defaultTrim: TrimConfig;
   defaultTriggers: TriggerConfig;
@@ -250,9 +264,10 @@ export interface AppConfig {
 export interface GuildConfigYaml {
   triggers?: Partial<TriggerConfig>;
   triggerInstructions?: Partial<TriggerInstructions>;
+  llmProvider?: LlmProvider;
   model?: string;
   modelParams?: Record<string, unknown>;
-  thinkingLevel?: string;
+  thinkingLevel?: ThinkingLevel;
   timezone?: string;
   trim?: Partial<TrimConfig>;
   adminUserIds?: string[];
@@ -262,6 +277,7 @@ export interface GuildConfigYaml {
   imageCaptioningEnabled?: boolean;
   imageReading?: {
     fallbackEnabled?: boolean;
+    fallbackProvider?: LlmProvider;
     fallbackModel?: string;
     fallbackModelParams?: Record<string, unknown>;
   };
@@ -293,9 +309,10 @@ export interface GuildConfigYaml {
     enabled?: boolean;
   };
   backgroundLlm?: {
+    provider?: LlmProvider;
     model?: string;
     modelParams?: Record<string, unknown>;
-    thinkingLevel?: string;
+    thinkingLevel?: ThinkingLevel;
     serviceTier?: ServiceTier;
     promptCaching?: {
       enabled?: boolean;
@@ -310,9 +327,10 @@ export interface GuildConfigYaml {
 
 /** Raw shape of the main config YAML file (config/config.yaml). All optional. */
 export interface MainConfigYaml {
+  llmProvider?: LlmProvider;
   model?: string;
   modelParams?: Record<string, unknown>;
-  thinkingLevel?: string;
+  thinkingLevel?: ThinkingLevel;
   timezone?: string;
   trim?: Partial<TrimConfig>;
   triggers?: Partial<TriggerConfig>;
@@ -323,6 +341,7 @@ export interface MainConfigYaml {
   imageCaptioningEnabled?: boolean;
   imageReading?: {
     fallbackEnabled?: boolean;
+    fallbackProvider?: LlmProvider;
     fallbackModel?: string;
     fallbackModelParams?: Record<string, unknown>;
   };
@@ -392,9 +411,10 @@ export interface MainConfigYaml {
     enabled?: boolean;
   };
   backgroundLlm?: {
+    provider?: LlmProvider;
     model?: string;
     modelParams?: Record<string, unknown>;
-    thinkingLevel?: string;
+    thinkingLevel?: ThinkingLevel;
     serviceTier?: ServiceTier;
     promptCaching?: {
       enabled?: boolean;

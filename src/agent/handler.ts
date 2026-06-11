@@ -4,13 +4,13 @@ import { createHash } from "node:crypto";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
 import { contextToSplitPrompts, type AssembledContext, type ContextSection } from "./context-assembly.ts";
 import { wrapToolsWithTiming, type TimingState } from "./tool-timing.ts";
-import type { TriggerInstructions } from "../config/types.ts";
+import type { LlmProvider, TriggerInstructions } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
-import { resolveGuildModel, buildStreamOptions, buildImageReadingStreamOptions } from "../llm/client.ts";
+import { resolveGuildModel, buildStreamOptions, buildImageReadingStreamOptions, type ModelImageInputSupport } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { Logger, RequestLog } from "../logger.ts";
 import {
-  completeOpenRouterChat,
+  completeLlmChat,
   type OpenRouterChatRequest,
   type OpenRouterChatResult,
   type OpenRouterImageUrlPart,
@@ -90,6 +90,8 @@ export interface HandlerDeps {
   triggerInstructions?: TriggerInstructions;
   completeChat?: ChatCompleteFn;
   afterReply?: (request: MemoryExtractionRequest) => Promise<void>;
+  /** Live OpenRouter metadata result for the selected main model. Unknown means try native image input first. */
+  modelImageInputSupport?: ModelImageInputSupport;
 }
 
 export interface HandleResult {
@@ -191,6 +193,7 @@ function imagePartsFromToolResult(result: AgentToolResult<unknown>): OpenRouterI
 interface ImageFallbackRuntime {
   enabled: boolean;
   model: string;
+  provider: LlmProvider;
   apiKey: string;
   providerParams: Record<string, unknown>;
   complete: ChatCompleteFn;
@@ -324,6 +327,7 @@ async function describeImagesWithFallback(input: {
     const result = await completeModelTurnWithRetries({
       complete: input.fallback.complete,
       request: {
+        provider: input.fallback.provider,
         apiKey: input.fallback.apiKey,
         model: input.fallback.model,
         systemPrompt: IMAGE_DESCRIPTION_SYSTEM_PROMPT,
@@ -405,6 +409,15 @@ function isImageInputUnsupportedError(error: unknown): boolean {
 function appendImageUnsupportedToolText(text: string, imageCount: number): string {
   const notice = `Image reading failed: the current LLM endpoint cannot read image input, so ${imageCount === 1 ? "the image was" : "the images were"} not sent. Use available text metadata/captions or tell the user you cannot inspect images with this model.`;
   return text.trim() === "" ? notice : `${text.trim()}\n\n${notice}`;
+}
+
+function supportsNativeImageInput(
+  modelInput: readonly string[],
+  metadataSupport: ModelImageInputSupport | undefined,
+): boolean {
+  if (metadataSupport === "supported" || metadataSupport === "unknown") return true;
+  if (metadataSupport === "unsupported") return false;
+  return modelInput.includes("image");
 }
 
 function toolToOpenRouterTool(tool: AgentTool): OpenRouterToolDefinition {
@@ -1318,7 +1331,9 @@ export async function handleMessage(
   delete providerParams.apiKey;
   delete providerParams.signal;
   delete providerParams.onPayload;
-  const imageStreamOptions = buildImageReadingStreamOptions(deps.globalConfig, deps.guildConfig);
+  const imageStreamOptions = deps.guildConfig.imageReading.fallbackEnabled
+    ? buildImageReadingStreamOptions(deps.globalConfig, deps.guildConfig)
+    : { apiKey: "" };
   const imageProviderParams: Record<string, unknown> = { ...imageStreamOptions };
   delete imageProviderParams.apiKey;
   delete imageProviderParams.signal;
@@ -1326,7 +1341,7 @@ export async function handleMessage(
 
   const tools = [...(deps.extraTools ?? [])];
   const { tools: timedTools, state: timingState } = wrapToolsWithTiming(tools);
-  const complete = deps.completeChat ?? completeOpenRouterChat;
+  const complete = deps.completeChat ?? completeLlmChat;
   const runtimeInstruction = buildRuntimeInstruction(timedTools);
   const stableSections = sectionsForStablePrompt(
     deps.personaPrompt ?? "",
@@ -1337,12 +1352,13 @@ export async function handleMessage(
   const userContent = context.userMessage !== "" ? context.userMessage : msg.translatedContent;
   const volatileTurnContext = buildVolatileTurnContext(context);
   const reqLog = deps.requestLog;
-  const sessionId = buildPromptCacheSessionId(reqLog, model.id);
+  const sessionId = buildPromptCacheSessionId(reqLog, `${model.llmProvider}:${model.id}`);
   const startedAt = Date.now();
 
   try {
     deps.log?.debug("native_reply_loop_start", {
       model: model.id,
+      modelImageInputSupport: deps.modelImageInputSupport ?? "registry",
       toolNames: timedTools.map((tool) => tool.name),
       maxToolCalls: deps.guildConfig.replyLoop.maxToolCalls,
       wallClockTimeoutMs: deps.guildConfig.replyLoop.wallClockTimeoutMs,
@@ -1387,13 +1403,18 @@ export async function handleMessage(
       const result = await runNativeToolLoop({
         complete,
         requestBase: {
+          provider: model.llmProvider,
           apiKey: baseStreamOptions.apiKey,
           model: model.id,
-          systemPrompt: "",
+          systemPrompt: model.llmProvider === "openai-codex"
+            ? stableSections.map((section) => section.text).join("\n\n")
+            : "",
           providerParams,
           sessionId,
           onPayload: (payload: unknown) => {
-            prependStableSectionsToPayload(payload, stableSections, deps.guildConfig.promptCaching, model.id);
+            if (model.llmProvider === "openrouter") {
+              prependStableSectionsToPayload(payload, stableSections, deps.guildConfig.promptCaching, model.id);
+            }
             reqLog?.recordLLMRequest(payload);
             deps.log?.debug("llm_request_payload", { payload });
           },
@@ -1407,12 +1428,13 @@ export async function handleMessage(
         requestLog: reqLog,
         sendIntermediateText: sendIntermediateStatus,
         onStillWorking: deps.onStillWorking,
-        imageInputSupported: model.input.includes("image"),
+        imageInputSupported: supportsNativeImageInput(model.input, deps.modelImageInputSupport),
         toolTiming: timingState,
         log: deps.log,
         imageFallback: {
           enabled: deps.guildConfig.imageReading.fallbackEnabled,
           model: deps.guildConfig.imageReading.fallbackModel,
+          provider: deps.guildConfig.imageReading.fallbackProvider ?? "openrouter",
           apiKey: imageStreamOptions.apiKey,
           providerParams: imageProviderParams,
           complete,

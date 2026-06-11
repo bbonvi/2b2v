@@ -15,17 +15,20 @@ triggers:
 # triggerInstructions:
 #   random: "In this server, unprompted replies should be playful."
 
-# LLM model override (OpenRouter model ID). Omit to use global default.
+# LLM provider/model overrides. Omit to use global defaults.
+# llmProvider: openrouter # or openai-codex
+# OpenAI Codex example: gpt-5.5 (actual access depends on your ChatGPT account)
 model: moonshotai/kimi-k2.5
 
-# Additional model parameters passed to OpenRouter (merges with global defaults)
+# Additional model parameters passed to the selected provider (merges with global defaults)
 # modelParams:
 #   temperature: 0.8
 #   reasoning:
-#     effort: "high"  # Override global reasoning level for this guild
+#     effort: "high"  # OpenRouter-specific override
 
 # Thinking/reasoning level for the model (optional)
 # When omitted, inherits from global config (which may also be omitted, meaning no thinking).
+# Maps to Codex reasoningEffort or OpenRouter reasoning.effort unless modelParams overrides it.
 # Valid values: "minimal" | "low" | "medium" | "high" | "xhigh"
 # thinkingLevel: medium
 
@@ -56,6 +59,7 @@ imageReadMaxPerCall: 10
 # Fallback vision model for image tool results when the main model cannot read images
 # imageReading:
 #   fallbackEnabled: true
+#   fallbackProvider: openrouter # or openai-codex
 #   fallbackModel: moonshotai/kimi-k2.5
 #   fallbackModelParams:
 #     temperature: 0
@@ -77,8 +81,10 @@ promptCaching:
 
 # Background LLM override for memory extraction (inherits effective main model when omitted)
 # backgroundLlm:
+#   provider: openrouter # or openai-codex; omitted inherits the main provider
 #   model: google/gemini-2.5-flash
 #   serviceTier: flex
+#   thinkingLevel: low
 #   modelParams:
 #     temperature: 0.1
 #   promptCaching:

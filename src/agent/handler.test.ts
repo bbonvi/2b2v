@@ -11,6 +11,8 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
   return {
     discordToken: "test-token",
     openrouterApiKey: "test-key",
+    codexAuthPath: "data/codex-auth.json",
+    defaultLlmProvider: "openrouter",
     defaultModel: "moonshotai/kimi-k2.5",
     defaultModelParams: {},
     defaultTimezone: "UTC",
@@ -218,6 +220,39 @@ describe("handleMessage", () => {
     expect(senderCalls).toEqual([{ text: "hello user", reply: true, chatId: undefined }]);
   });
 
+  test("does not require OpenRouter image fallback options when Codex fallback is disabled", async () => {
+    const completeChat: ChatCompleteFn = (request) => {
+      expect(request.provider).toBe("openai-codex");
+      expect(request.apiKey).toBe("");
+      expect(request.providerParams?.codexAuthPath).toBe("data/codex-auth.json");
+      return Promise.resolve({
+        text: "codex reply",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        globalConfig: makeGlobalConfig({
+          openrouterApiKey: undefined,
+          defaultLlmProvider: "openai-codex",
+          defaultModel: "gpt-5.5",
+        }),
+        guildConfig: makeGuildConfig({
+          llmProvider: "openai-codex",
+          model: "gpt-5.5",
+          imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
+        }),
+        completeChat,
+      }),
+    );
+
+    expect(result.responseText).toBe("codex reply");
+  });
+
   test("sends keyword-triggered final text as a reply", async () => {
     const senderCalls: Array<{ text: string; reply: boolean; chatId?: string }> = [];
     const sender: MessageSender = (text, reply, chatId) => {
@@ -251,9 +286,7 @@ describe("handleMessage", () => {
       expect(text).toContain("Before taking any irreversible, user-visible, or state-changing action");
       expect(text).toContain("ask one short clarifying question");
       expect(text).toContain("Tool use is not the goal; correct intent is");
-      expect(text).toContain("cite every web-derived factual claim inline");
-      expect(text).toContain("ALWAYS cite every web-derived factual claim");
-      expect(text).toContain("Do not put sources only at the end");
+      expect(text).toContain("Cite factual claims from tools with concise inline markdown links near the claim");
       expect(text).toContain("Use English search queries");
       expect(text).toContain("web_search then fetch_url");
       expect(text).toContain("include one short user-facing status line");
@@ -402,8 +435,8 @@ describe("handleMessage", () => {
     );
 
     expect(sessionIds).toEqual([
-      "2b2v:guild-1:channel-1:moonshotai/kimi-k2.5",
-      "2b2v:guild-1:channel-1:moonshotai/kimi-k2.5",
+      "2b2v:guild-1:channel-1:openrouter:moonshotai/kimi-k2.5",
+      "2b2v:guild-1:channel-1:openrouter:moonshotai/kimi-k2.5",
     ]);
   });
 
@@ -1265,6 +1298,81 @@ describe("handleMessage", () => {
     );
 
     expect(result.responseText).toBe("image answer");
+  });
+
+  test("uses live OpenRouter metadata instead of static registry for image support", async () => {
+    const tool: AgentTool = {
+      name: "read_chat_images",
+      label: "Read Images",
+      description: "Read images",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({
+        content: [
+          { type: "text", text: "{\"id\":1,\"width\":10,\"height\":10}" },
+          { type: "image", data: "abcd", mimeType: "image/jpeg" },
+        ],
+        details: {},
+      }),
+    };
+
+    let mainCalls = 0;
+    let fallbackCalls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      if (request.model === "moonshotai/kimi-k2.5") {
+        fallbackCalls += 1;
+        return Promise.resolve({
+          text: "fallback should not run",
+          toolCalls: [],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "fallback should not run" }] },
+        });
+      }
+
+      mainCalls += 1;
+      if (mainCalls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "read_chat_images", arguments: "{}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+
+      expect(request.messages.some((m) =>
+        Array.isArray(m.content) && m.content.some((part) => part.type === "image_url")
+      )).toBe(true);
+      return Promise.resolve({
+        text: "native image answer",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "native image answer" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        completeChat,
+        modelImageInputSupport: "supported",
+        guildConfig: makeGuildConfig({
+          model: "new-vendor/vision-model-not-in-registry",
+          imageReading: {
+            fallbackEnabled: true,
+            fallbackModel: "moonshotai/kimi-k2.5",
+            fallbackModelParams: {},
+          },
+        }),
+      }),
+    );
+
+    expect(result.responseText).toBe("native image answer");
+    expect(mainCalls).toBe(2);
+    expect(fallbackCalls).toBe(0);
   });
 
   test("returns a clear tool error instead of image parts for text-only models", async () => {

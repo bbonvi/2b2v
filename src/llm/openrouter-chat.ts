@@ -1,3 +1,6 @@
+import type { LlmProvider } from "../config/types.ts";
+import { completeCodexChat } from "./codex-chat.ts";
+
 export interface OpenRouterTextPart {
   type: "text";
   text: string;
@@ -37,6 +40,7 @@ export interface OpenRouterToolCall {
 }
 
 export interface OpenRouterChatRequest {
+  provider?: LlmProvider;
   apiKey: string;
   model: string;
   systemPrompt: string;
@@ -390,4 +394,12 @@ export async function completeOpenRouterChat(request: OpenRouterChatRequest): Pr
     messageForLogs: normalizeAssistantPayload(rawRecord, request.model, text, finishReason, toolCalls),
     rawResponse: rawRecord,
   };
+}
+
+/** Dispatch a chat request to the configured backend adapter. */
+export async function completeLlmChat(request: OpenRouterChatRequest): Promise<OpenRouterChatResult> {
+  if (request.provider === "openai-codex") {
+    return await completeCodexChat(request);
+  }
+  return await completeOpenRouterChat(request);
 }
