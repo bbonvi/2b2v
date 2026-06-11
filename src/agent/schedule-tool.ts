@@ -31,7 +31,7 @@ const ScheduleMessageParams = Type.Object({
     [Type.Literal("in"), Type.Literal("at")],
     { default: "in", description: "\"in\" for relative delay, \"at\" for absolute local datetime." },
   ),
-  instructions: Type.String({ description: "Detailed instruction for your future self (not user-facing text). Be comprehensive, provide context." }),
+  instructions: Type.String({ description: "Detailed instruction for the future scheduled turn, not literal text to send. Include original user intent, who to notify, whether to ping, desired wording/tone, and any needed context." }),
   amount: Type.Optional(Type.Number({ description: "How many units from now. Required when mode is \"in\"." })),
   unit: Type.Optional(Type.Union(
     [Type.Literal("seconds"), Type.Literal("minutes"), Type.Literal("hours")],

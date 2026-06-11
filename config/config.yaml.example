@@ -102,7 +102,7 @@ promptCaching:
 
 # Native reply/tool loop runtime limits
 replyLoop:
-  maxToolCalls: 16           # Max tool calls allowed in one response run
+  maxToolCalls: 64           # Hard cap on tool calls in one response run
   wallClockTimeoutMs: 240000 # Stop tool gathering and force a final no-tools reply after this many milliseconds
   llmOutputTimeoutMs: 60000  # Timeout for a single LLM turn (milliseconds); retried up to 3 total attempts
 

@@ -199,7 +199,7 @@ const DEFAULT_IMAGE_READING: ImageReadingConfig = {
 };
 
 const DEFAULT_REPLY_LOOP: ReplyLoopConfig = {
-  maxToolCalls: 16,
+  maxToolCalls: 64,
   wallClockTimeoutMs: 45_000,
   llmOutputTimeoutMs: 12_000,
 };

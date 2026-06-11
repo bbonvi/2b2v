@@ -69,8 +69,8 @@ describe("extractAndApplyMemories", () => {
     expect(prompt).toContain("Recent chat context:\n## Chat History\n[@bob]: earlier context");
     expect(prompt).toContain("If the user asks to remember something, treat that as strong intent");
     expect(prompt).toContain("If the bot reply says it will remember something, do not save the promise itself");
-    expect(prompt).toContain("Use the bot's apparent persona and speaking style as a tie-breaker");
-    expect(prompt).toContain("Do not save trivia just because the persona might find it interesting.");
+    expect(prompt).toContain("Save rapport, teasing, tone, or help preferences only when the user clearly revealed a durable preference or relationship fact.");
+    expect(prompt).toContain("Do not save trivia just because it is interesting.");
     expect(prompt).toContain("do not limit yourself to the last message");
     expect(prompt).toContain("If the user says their name, preferred name, or corrects what they should be called");
   });

@@ -46,7 +46,7 @@ const GLOBAL: GlobalConfig = {
   defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
   defaultPromptCaching: { enabled: true },
   defaultBackgroundLlm: { modelParams: {} },
-  defaultReplyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+  defaultReplyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
 };
 
 const GUILD: GuildConfig = {
@@ -73,7 +73,7 @@ const GUILD: GuildConfig = {
     modelParams: {},
     promptCaching: { enabled: true },
   },
-  replyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+  replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
 };
 
 describe("resolveModel", () => {

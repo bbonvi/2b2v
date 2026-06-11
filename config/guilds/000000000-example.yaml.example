@@ -92,7 +92,7 @@ promptCaching:
 
 # Native reply/tool loop limits (overrides global defaults)
 # replyLoop:
-#   maxToolCalls: 16
+#   maxToolCalls: 64
 #   wallClockTimeoutMs: 240000
 #   llmOutputTimeoutMs: 60000 # retried up to 3 total attempts
 

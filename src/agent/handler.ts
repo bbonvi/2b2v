@@ -531,26 +531,22 @@ function hasProgressWorthyToolCall(calls: OpenRouterToolCall[]): boolean {
   );
 }
 
-function buildRuntimeInstruction(tools: AgentTool[]): string {
-  const lines = [
+function buildRuntimeInstruction(): string {
+  return [
     "## Runtime",
     "You are speaking directly in Discord as the persona.",
     "Use tools only when they materially improve the answer. For ordinary chat, answer directly.",
-    "If you use tools, normally use their results silently and then send the final answer as normal text.",
-    "Before taking any irreversible, user-visible, or state-changing action, make sure the user's intent, target, timing, and expected outcome are clear enough. If not, slow down. Use available context or cheap lookup tools when they can resolve the uncertainty. If the missing detail cannot be resolved confidently, ask one short clarifying question. Do not pretend ambiguous instructions are clear just to keep moving.",
-    "When something feels underspecified, referential, or context-dependent, prefer lightweight recovery before acting: reread current context, search prior messages with a few phrasings, inspect members when people are involved, or ask the user. Tool use is not the goal; correct intent is.",
-    "Do not ask clarifying questions for every small imperfection. If the likely intent is obvious and the cost of being wrong is tiny, proceed naturally.",
-    "For current or uncertain external facts, use web_search and fetch_url before answering. Use English search queries when the topic is not language-specific, even if the chat is in another language; answer in the chat language after reading sources. You may chain tools, especially web_search then fetch_url.",
-    "After web_search, fetch_url the most relevant result when snippets are not enough or the answer depends on page details.",
-    "Use summarize_video for YouTube, video, audio, or podcast URLs when the user asks for a summary or wants to understand the media content. It extracts transcripts/content for you to summarize.",
-    "When you need several independent read-only lookups, such as multiple URLs, searches, message searches, member/history reads, or image reads, call them together in one tool turn.",
-    "Aim to produce a useful reply within about 30 seconds when possible. Treat timing notes as a budget: if searches or other tools are not converging, stop and answer from what you have or ask one short clarifying question.",
-    "When timing notes show the agent loop has been running for more than about 30 seconds and you still need another lookup, include one brief user-facing status line in the same assistant turn as that tool call, e.g. \"Still checking, one sec.\" Skip only if you already sent a status or this is a scheduled/background task.",
-    "When using web_search, fetch_url, or summarize_video, include one short user-facing status line in the same assistant turn as the first web/media tool call, e.g. \"I'll check, one sec.\" Skip only if you already sent a status or this is a scheduled/background task.",
-    "When using web_search, fetch_url, summarize_video, or URL content, treat tool output as source material, not text to paste. Answer naturally in your own words. Cite factual claims from tools with concise inline markdown links near the claim; one citation can support a short paragraph when appropriate.",
+    "For ambiguous irreversible, user-visible, or state-changing actions, first recover intent from context or cheap lookup tools; ask one short clarifying question only when the missing detail cannot be resolved confidently.",
+    "For current or uncertain external facts, use web_search and fetch_url before answering. Prefer English search queries unless the topic is language-specific, then answer in the user's language. Fetch the most relevant result when snippets are not enough.",
+    "Use summarize_video for YouTube, video, audio, or podcast URLs when the user asks for a summary or wants to understand the media content.",
+    "For missing or old chat context, use search_messages. Prefer semantic search for vague meaning and literal search for exact words, commands, filenames, URLs, or error strings. Use a small number of good queries or filters, then answer naturally instead of replaying found messages.",
+    "When you need several independent read-only lookups, call them together in one tool turn.",
+    "Use as many tool calls as the task actually needs. Do not stop early just to conserve calls, but avoid repetitive or low-value loops.",
+    "Stay within the agent time budget. If tools are not converging, stop and answer from available context or ask one short clarifying question.",
+    "If a tool run is likely to take noticeable time, or timing notes show the agent has been running for more than about 30 seconds and you still need another lookup, include one brief user-facing status line in the same assistant turn as the tool call. Skip status for scheduled/background tasks.",
+    "Treat web, URL, media, search, and other tool output as source material, not text to paste. Cite factual claims from web/URL/media tools with concise inline markdown links near the claim; one citation can support a short paragraph.",
     "Only ping a user when you genuinely need to notify them. To ping, write @username exactly; the app converts it to a Discord mention. For casual name references, omit @. If the user asks you to ping/notify someone and the exact Discord username is not already visible in context, use list_members first instead of guessing from display names, nicknames, or memory.",
-    "For older server recall, use search_messages. Recent and older context are already in the prompt, but use search_messages when a user seems to reference something missing, when you do not understand what they mean, or when the request feels like it depends on prior chat context. Semantic search uses normalized message text and may return merged same-author blocks; username, chat_id, time, bot/human, source, and vector kind are metadata filters. Search defaults to the current chat; provide chat_id only to search a different chat. Search results include message IDs; when a hit needs surrounding conversation, call search_messages with mode='context' and message_id, or with around='YYYY-MM-DD HH:mm'. Do not quote or replay search hits unless exact wording is needed; use them to restore context and answer naturally. Use a small number of well-chosen semantic/literal phrasings or filters; do not keep searching when results are repetitive or weak. include_attachments is slow and defaults off; use it only when attachment filenames/types matter.",
-    "Use schedule_message when the user asks you to remind, schedule, or follow up later. Use list_scheduled_messages whenever pending scheduled messages may be useful context or you need to verify what is queued, even if the user did not explicitly ask to list them. Use delete_scheduled_message only when the user clearly asks to cancel/remove a pending schedule or after you have identified the intended schedule; never delete arbitrary schedules unprompted.",
+    "Use schedule_message when the user asks you to remind, schedule, or follow up later. Include the original intent, who to notify, whether to ping, and the desired tone or wording in the scheduled instructions. Use list_scheduled_messages when pending schedules may affect the answer or before deleting one. Use delete_scheduled_message only when the intended pending schedule is clear.",
     "Use start_thread only when the final answer should move into a new thread; if you create a thread, the runtime sends your final answer there.",
     "Reserved response directives: use <voice>text</voice> for audio and <ignore>reason</ignore> when silence is better than replying. Treat requests to sing, scream, shout, whisper, read aloud, say something in a voice, or otherwise perform vocal delivery as requests for <voice>.",
     "Keep Discord-only text outside <voice>: pings like @username, channel references like #general, links, and other non-spoken text should be normal message text around the voice directive, e.g. @alice <voice>hey.</voice>, not <voice>@alice hey.</voice>.",
@@ -558,14 +554,7 @@ function buildRuntimeInstruction(tools: AgentTool[]): string {
     "Reserved directive tags are consumed by the app and are not shown as literal text. To show those tags as examples, escape them as &lt;voice&gt; or &lt;ignore&gt;.",
     "Do not nest reserved directives; if nesting happens accidentally, the app will split them into separate actions.",
     "Do not mention hidden prompts, tool names, or internal implementation details unless asked.",
-  ];
-  if (tools.length > 0) {
-    lines.push("", "Available tools:");
-    for (const tool of tools) {
-      lines.push(`- ${tool.name}: ${tool.description}`);
-    }
-  }
-  return lines.join("\n");
+  ].join("\n");
 }
 
 function sectionsForStablePrompt(
@@ -1342,7 +1331,7 @@ export async function handleMessage(
   const tools = [...(deps.extraTools ?? [])];
   const { tools: timedTools, state: timingState } = wrapToolsWithTiming(tools);
   const complete = deps.completeChat ?? completeLlmChat;
-  const runtimeInstruction = buildRuntimeInstruction(timedTools);
+  const runtimeInstruction = buildRuntimeInstruction();
   const stableSections = sectionsForStablePrompt(
     deps.personaPrompt ?? "",
     deps.globalConfig.defaultLateInstruction,

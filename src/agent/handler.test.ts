@@ -43,7 +43,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
     defaultPromptCaching: { enabled: true },
     defaultBackgroundLlm: { modelParams: {} },
-    defaultReplyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+    defaultReplyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
     ...overrides,
   };
 }
@@ -73,7 +73,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
       modelParams: {},
       promptCaching: { enabled: true },
     },
-    replyLoop: { maxToolCalls: 16, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+    replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
     ...overrides,
   };
 }
@@ -283,22 +283,19 @@ describe("handleMessage", () => {
       };
       request.onPayload?.(payload);
       const text = payloadText(payload);
-      expect(text).toContain("Before taking any irreversible, user-visible, or state-changing action");
+      expect(text).toContain("For ambiguous irreversible, user-visible, or state-changing actions");
       expect(text).toContain("ask one short clarifying question");
-      expect(text).toContain("Tool use is not the goal; correct intent is");
-      expect(text).toContain("Cite factual claims from tools with concise inline markdown links near the claim");
-      expect(text).toContain("Use English search queries");
-      expect(text).toContain("web_search then fetch_url");
-      expect(text).toContain("include one short user-facing status line");
+      expect(text).toContain("Cite factual claims from web/URL/media tools with concise inline markdown links near the claim");
+      expect(text).toContain("Prefer English search queries");
+      expect(text).toContain("Fetch the most relevant result when snippets are not enough");
+      expect(text).toContain("include one brief user-facing status line");
       expect(text).toContain("To ping, write @username exactly");
       expect(text).toContain("the exact Discord username is not already visible in context");
       expect(text).toContain("use list_members first instead of guessing");
-      expect(text).toContain("use search_messages when a user seems to reference something missing");
-      expect(text).toContain("when you do not understand what they mean");
-      expect(text).toContain("Use a small number of well-chosen semantic/literal phrasings or filters");
-      expect(text).toContain("do not keep searching when results are repetitive or weak");
-      expect(text).toContain("Aim to produce a useful reply within about 30 seconds");
-      expect(text).toContain("agent loop has been running for more than about 30 seconds");
+      expect(text).toContain("For missing or old chat context, use search_messages");
+      expect(text).toContain("Use a small number of good queries or filters");
+      expect(text).toContain("Use as many tool calls as the task actually needs");
+      expect(text).toContain("agent has been running for more than about 30 seconds");
       expect(text.indexOf("Reserved response directives")).toBeGreaterThan(-1);
       expect(text).toContain("Treat requests to sing, scream, shout, whisper, read aloud");
       expect(text).toContain("Keep Discord-only text outside <voice>");

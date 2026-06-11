@@ -81,7 +81,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
     name: "search_messages",
     label: "Search Messages",
     description:
-      "Search chat history when context is missing, a request refers to prior chat, or you feel lost. Modes: 'semantic' (default) — AI similarity over normalized message text, often merged into same-author blocks; 'literal' — exact keyword/phrase match; 'id' — direct lookup; 'context' — chronological messages around a result id or local timestamp. Prefer semantic for vague meaning, literal for exact words. Use username/chat/time/is_bot filters when they matter; source and embedding_kind are mostly for debugging. include_attachments defaults to false; enable it only when attachment filenames/types are needed.",
+      "Search chat history when context is missing or a request refers to prior chat. Modes: 'semantic' (default) for vague meaning, 'literal' for exact words/errors/URLs/commands, 'id' for direct lookup, and 'context' for surrounding conversation around a result id or local timestamp. For semantic mode, use a short topic phrase and put names, chats, times, or bot/human constraints in filters. Search defaults to the current chat; set chat_id only for another chat. include_attachments is slow and should be enabled only when attachment filenames/types matter.",
     parameters: SearchParams,
     execute: async (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as {

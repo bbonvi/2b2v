@@ -104,7 +104,7 @@ export interface ImageReadingConfig {
 
 /** Native reply/tool loop runtime limits. */
 export interface ReplyLoopConfig {
-  /** Max tool calls allowed in one agent run. */
+  /** Hard cap on tool calls allowed in one agent run. */
   maxToolCalls: number;
   /** Wall-clock budget before tool gathering stops and a final no-tools reply is forced. */
   wallClockTimeoutMs: number;
