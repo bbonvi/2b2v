@@ -292,8 +292,10 @@ describe("handleMessage", () => {
       expect(text).toContain("To ping, write @username exactly");
       expect(text).toContain("the exact Discord username is not already visible in context");
       expect(text).toContain("use list_members first instead of guessing");
+      expect(text).toContain("If a request does not make sense");
+      expect(text).toContain("Try several targeted search_messages calls");
       expect(text).toContain("For missing or old chat context, use search_messages");
-      expect(text).toContain("Use a small number of good queries or filters");
+      expect(text).toContain("Search enough to reconstruct the likely context");
       expect(text).toContain("Use as many tool calls as the task actually needs");
       expect(text).toContain("agent has been running for more than about 30 seconds");
       expect(text.indexOf("Reserved response directives")).toBeGreaterThan(-1);
