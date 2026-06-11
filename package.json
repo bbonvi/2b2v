@@ -6,6 +6,7 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch src/index.ts",
+    "codex:login": "bun run scripts/codex-login.ts",
     "test": "bun test",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",

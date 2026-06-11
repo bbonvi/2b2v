@@ -10,8 +10,8 @@ import {
   type MemoryKind,
   type MemoryRow,
 } from "../db/memory-repository";
-import { completeOpenRouterChat, type OpenRouterChatRequest } from "../llm/openrouter-chat";
-import type { PromptCachingConfig } from "../config/types";
+import { completeLlmChat, type OpenRouterChatRequest } from "../llm/openrouter-chat";
+import type { LlmProvider, PromptCachingConfig } from "../config/types";
 import { prependStableSectionsToPayload, type StablePromptSection } from "./prompt-cache";
 
 export interface MemoryContextInput {
@@ -31,6 +31,7 @@ export interface MemoryExtractionInput {
   userMessage: string;
   assistantReply: string;
   recentContext: string;
+  provider?: LlmProvider;
   apiKey: string;
   model: string;
   providerParams?: Record<string, unknown>;
@@ -309,21 +310,24 @@ function duplicateMemory(
 
 /** Run background memory extraction and apply accepted updates. */
 export async function extractAndApplyMemories(input: MemoryExtractionInput): Promise<void> {
-  const complete = input.completeChat ?? completeOpenRouterChat;
+  const complete = input.completeChat ?? completeLlmChat;
   const stable: StablePromptSection[] = [{
     role: "system",
     text: "You are a memory extraction routine. Return only JSON matching the schema.",
   }];
   const result = await complete({
+    provider: input.provider,
     apiKey: input.apiKey,
     model: input.model,
-    systemPrompt: "",
+    systemPrompt: input.provider === "openai-codex" ? stable.map((section) => section.text).join("\n\n") : "",
     messages: [{ role: "user", content: buildExtractionPrompt(input) }],
     providerParams: input.providerParams,
     responseFormat: memoryExtractionResponseFormat(),
     signal: input.signal,
     onPayload: (payload) => {
-      prependStableSectionsToPayload(payload, stable, input.promptCaching, input.model);
+      if (input.provider !== "openai-codex") {
+        prependStableSectionsToPayload(payload, stable, input.promptCaching, input.model);
+      }
       input.onPayload?.(payload);
     },
   });

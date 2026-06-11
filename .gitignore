@@ -6,6 +6,7 @@ node_modules/
 *.db-shm
 .env
 .env.prod
+data/codex-auth.json
 config/**/*.md
 config/**/*.yaml
 dist/

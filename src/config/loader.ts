@@ -9,6 +9,7 @@ import type {
   TriggerConfig,
   TriggerInstructions,
   TrimConfig,
+  ThinkingLevel,
   UiLang,
   VpnConfig,
   BashToolConfig,
@@ -23,6 +24,7 @@ import type {
   PromptProfileConfig,
   PromptSource,
   ServiceTier,
+  LlmProvider,
 } from "./types.ts";
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
 import type { Logger, TokenUsage } from "../logger.ts";
@@ -187,8 +189,11 @@ const DEFAULT_PROMPT_CACHING: PromptCachingConfig = {
   enabled: true,
 };
 
+const DEFAULT_LLM_PROVIDER: LlmProvider = "openrouter";
+
 const DEFAULT_IMAGE_READING: ImageReadingConfig = {
   fallbackEnabled: false,
+  fallbackProvider: "openrouter",
   fallbackModel: "moonshotai/kimi-k2.5",
   fallbackModelParams: {},
 };
@@ -286,6 +291,8 @@ function resolveGlobalImageReading(
 ): ImageReadingConfig {
   return {
     fallbackEnabled: partial?.fallbackEnabled ?? DEFAULT_IMAGE_READING.fallbackEnabled,
+    fallbackProvider: parseLlmProvider(partial?.fallbackProvider, "imageReading.fallbackProvider")
+      ?? DEFAULT_IMAGE_READING.fallbackProvider,
     fallbackModel: partial?.fallbackModel ?? DEFAULT_IMAGE_READING.fallbackModel,
     fallbackModelParams: partial?.fallbackModelParams ?? {},
   };
@@ -297,6 +304,7 @@ function resolveGuildImageReading(
 ): ImageReadingConfig {
   return {
     fallbackEnabled: partial?.fallbackEnabled ?? global.fallbackEnabled,
+    fallbackProvider: parseLlmProvider(partial?.fallbackProvider, "imageReading.fallbackProvider") ?? global.fallbackProvider,
     fallbackModel: partial?.fallbackModel ?? global.fallbackModel,
     fallbackModelParams: {
       ...global.fallbackModelParams,
@@ -312,6 +320,26 @@ function resolveGuildPromptCaching(
   return {
     enabled: partial?.enabled ?? global.enabled,
   };
+}
+
+function parseLlmProvider(value: unknown, key: string): LlmProvider | undefined {
+  if (value === undefined) return undefined;
+  if (value === "openrouter" || value === "openai-codex") return value;
+  throw new Error(`${key} must be "openrouter" or "openai-codex"`);
+}
+
+function parseThinkingLevel(value: unknown, key: string): ThinkingLevel | undefined {
+  if (value === undefined) return undefined;
+  if (
+    value === "minimal"
+    || value === "low"
+    || value === "medium"
+    || value === "high"
+    || value === "xhigh"
+  ) {
+    return value;
+  }
+  throw new Error(`${key} must be "minimal", "low", "medium", "high", or "xhigh"`);
 }
 
 function parseServiceTier(value: unknown, keyPrefix: string): ServiceTier | undefined {
@@ -331,9 +359,10 @@ function resolveGlobalBackgroundLlm(
   partial: MainConfigYaml["backgroundLlm"] | undefined,
 ): BackgroundLlmDefaults {
   return {
+    provider: parseLlmProvider(partial?.provider, "backgroundLlm.provider"),
     model: partial?.model,
     modelParams: partial?.modelParams ?? {},
-    thinkingLevel: partial?.thinkingLevel,
+    thinkingLevel: parseThinkingLevel(partial?.thinkingLevel, "backgroundLlm.thinkingLevel"),
     serviceTier: parseServiceTier(partial?.serviceTier, "backgroundLlm"),
     promptCaching: partial?.promptCaching !== undefined
       ? resolveBackgroundPromptCaching(DEFAULT_PROMPT_CACHING, partial.promptCaching)
@@ -350,16 +379,20 @@ function resolveGuildBackgroundLlm(
   const guildBackground = partial.backgroundLlm;
   const mainModelParams = { ...global.defaultModelParams, ...partial.modelParams };
   const promptCachingFallback = globalBackground.promptCaching ?? mainPromptCaching;
+  const mainProvider = parseLlmProvider(partial.llmProvider, "llmProvider") ?? global.defaultLlmProvider;
   return {
+    provider: parseLlmProvider(guildBackground?.provider, "backgroundLlm.provider")
+      ?? globalBackground.provider
+      ?? mainProvider,
     model: guildBackground?.model ?? globalBackground.model ?? partial.model ?? global.defaultModel,
     modelParams: {
       ...mainModelParams,
       ...globalBackground.modelParams,
       ...guildBackground?.modelParams,
     },
-    thinkingLevel: guildBackground?.thinkingLevel
+    thinkingLevel: parseThinkingLevel(guildBackground?.thinkingLevel, "backgroundLlm.thinkingLevel")
       ?? globalBackground.thinkingLevel
-      ?? partial.thinkingLevel
+      ?? parseThinkingLevel(partial.thinkingLevel, "thinkingLevel")
       ?? global.defaultThinkingLevel,
     serviceTier: parseServiceTier(guildBackground?.serviceTier, "backgroundLlm") ?? globalBackground.serviceTier,
     promptCaching: resolveBackgroundPromptCaching(promptCachingFallback, guildBackground?.promptCaching),
@@ -529,14 +562,21 @@ export function loadGlobalConfig(
   const discordToken = env.DISCORD_TOKEN;
   if (discordToken === undefined || discordToken === "") throw new Error("DISCORD_TOKEN is required");
 
-  const openrouterApiKey = env.OPENROUTER_API_KEY;
-  if (openrouterApiKey === undefined || openrouterApiKey === "") throw new Error("OPENROUTER_API_KEY is required");
-
   const yaml = loadMainConfig(configPath);
   assertNoDeprecatedGlobalPromptKeys(yaml);
   assertNoDeprecatedReplyLoopKey(yaml, "global");
 
   const dataDir = yaml.dataDir ?? "data";
+  const defaultLlmProvider = parseLlmProvider(yaml.llmProvider, "llmProvider") ?? DEFAULT_LLM_PROVIDER;
+  const defaultImageReading = resolveGlobalImageReading(yaml.imageReading);
+  const openrouterApiKey = env.OPENROUTER_API_KEY;
+  const usesOpenRouter = defaultLlmProvider === "openrouter"
+    || yaml.backgroundLlm?.provider === "openrouter"
+    || (defaultImageReading.fallbackEnabled && defaultImageReading.fallbackProvider === "openrouter");
+  if (usesOpenRouter && (openrouterApiKey === undefined || openrouterApiKey === "")) {
+    throw new Error("OPENROUTER_API_KEY is required when any OpenRouter LLM backend is enabled");
+  }
+
   const defaultAttachmentsDir = yaml.attachmentsDir ?? `${dataDir}/attachments`;
   const promptProfile = resolvePromptProfile(yaml.promptProfile, configPath);
 
@@ -553,11 +593,13 @@ export function loadGlobalConfig(
 
   return {
     discordToken,
-    openrouterApiKey,
+    ...(openrouterApiKey !== undefined && openrouterApiKey !== "" ? { openrouterApiKey } : {}),
+    codexAuthPath: env.CODEX_AUTH_PATH ?? `${dataDir}/codex-auth.json`,
     braveApiKey: env.BRAVE_API_KEY,
+    defaultLlmProvider,
     defaultModel: yaml.model ?? "moonshotai/kimi-k2.5",
     defaultModelParams: yaml.modelParams ?? {},
-    defaultThinkingLevel: yaml.thinkingLevel,
+    defaultThinkingLevel: parseThinkingLevel(yaml.thinkingLevel, "thinkingLevel"),
     defaultTimezone: yaml.timezone ?? "UTC",
     defaultTrim: {
       trimTrigger: yaml.trim?.trimTrigger ?? DEFAULT_TRIM.trimTrigger,
@@ -584,7 +626,7 @@ export function loadGlobalConfig(
     defaultMergeMessageGapSeconds: yaml.mergeMessageGapSeconds ?? 120,
     defaultImageReadMaxPerCall: yaml.imageReadMaxPerCall ?? 10,
     defaultImageCaptioningEnabled: yaml.imageCaptioningEnabled ?? false,
-    defaultImageReading: resolveGlobalImageReading(yaml.imageReading),
+    defaultImageReading,
     defaultAttachmentsDir,
     defaultInstructions,
     defaultLateInstruction,
@@ -664,9 +706,10 @@ export function resolveGuildConfig(
       random: partial.triggerInstructions?.random ?? global.defaultTriggerInstructions.random,
       scheduled: partial.triggerInstructions?.scheduled ?? global.defaultTriggerInstructions.scheduled,
     },
+    llmProvider: parseLlmProvider(partial.llmProvider, "llmProvider") ?? global.defaultLlmProvider,
     model: partial.model,
     modelParams: { ...global.defaultModelParams, ...partial.modelParams },
-    thinkingLevel: partial.thinkingLevel ?? global.defaultThinkingLevel,
+    thinkingLevel: parseThinkingLevel(partial.thinkingLevel, "thinkingLevel") ?? global.defaultThinkingLevel,
     timezone: partial.timezone ?? global.defaultTimezone,
     trim: {
       trimTrigger: partial.trim?.trimTrigger ?? global.defaultTrim.trimTrigger,
@@ -715,6 +758,16 @@ export function validateTrimConfig(trim: TrimConfig): void {
   }
 }
 
+function validateGuildLlmCredentials(global: GlobalConfig, guild: GuildConfig): void {
+  const usesOpenRouter = guild.llmProvider === "openrouter"
+    || guild.backgroundLlm.provider === "openrouter"
+    || (guild.imageReading.fallbackEnabled && guild.imageReading.fallbackProvider === "openrouter");
+  if (!usesOpenRouter) return;
+  if (global.openrouterApiKey === undefined || global.openrouterApiKey === "") {
+    throw new Error(`OPENROUTER_API_KEY is required by guild ${guild.guildId} OpenRouter LLM configuration`);
+  }
+}
+
 /** Load all guild configs from a directory, resolved against global defaults. */
 export function loadGuildConfigs(
   guildsDir: string,
@@ -726,7 +779,9 @@ export function loadGuildConfigs(
   const files = readdirSync(guildsDir).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
   for (const file of files) {
     const partial = loadGuildConfigFile(join(guildsDir, file));
-    result.set(partial.guildId, resolveGuildConfig(global, partial));
+    const resolved = resolveGuildConfig(global, partial);
+    validateGuildLlmCredentials(global, resolved);
+    result.set(partial.guildId, resolved);
   }
   return result;
 }
@@ -745,6 +800,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
   const yaml: GuildConfigYaml = {
     triggers: config.triggers,
     triggerInstructions: hasTriggerInstructions(config.triggerInstructions) ? config.triggerInstructions : undefined,
+    llmProvider: config.llmProvider,
     model: config.model,
     modelParams: config.modelParams,
     thinkingLevel: config.thinkingLevel,

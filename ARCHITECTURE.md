@@ -20,9 +20,9 @@ Typing is runtime-owned. The model has no typing tool.
 
 ## Prompt Cache
 
-Prompt caching depends on stable content staying stable. The handler sends one merged stable prefix, adds cache breakpoints inside that block, then inserts a tiny stable user/assistant anchor before volatile turn context.
+Prompt caching depends on stable content staying stable. OpenRouter receives one merged stable prefix with cache breakpoints plus a tiny stable user/assistant anchor before volatile turn context. The Codex subscription backend receives the stable prefix as the pi-ai system prompt because the Codex Responses adapter owns payload construction.
 
-OpenRouter requests include a deterministic `session_id` scoped to guild, channel, and model so provider sticky routing can keep the same cache-warmed endpoint across tool turns and later reply loops. Request logs preserve `prompt_tokens_details.cached_tokens` and `cache_write_tokens` for verification.
+LLM requests include a deterministic `session_id` scoped to guild, channel, provider, and model so provider sticky routing can keep the same cache-warmed endpoint across tool turns and later reply loops. OpenRouter request logs preserve `prompt_tokens_details.cached_tokens` and `cache_write_tokens` for verification.
 
 Dynamic sections such as current time, current channel state, pending schedule summary, memories, recent history, current user messages, and trigger instructions must stay after the anchor.
 
@@ -58,7 +58,7 @@ One-off timers longer than 2,147,483,647 ms must be chunked and re-armed because
 
 ## Images And Voice
 
-Image tool results become multimodal model input only when `resolveModel(...).input` advertises image support. Text-only models receive tool text or, when enabled, a fallback vision-model description.
+Image tool results become multimodal model input according to provider metadata. OpenRouter support is refreshed from `/api/v1/models?output_modalities=all`; Codex support comes from the pi-ai model registry. If metadata says the selected main model lacks `image` input, text-only models receive tool text or, when enabled, a fallback vision-model description; if metadata is unavailable, the agent tries native image input first and only falls back after an endpoint rejection.
 
 Response directive parsing is deliberately narrow. `<voice>` sends audio, `<ignore>` suppresses output, and other XML remains normal text. Do not add broad XML parsing.
 

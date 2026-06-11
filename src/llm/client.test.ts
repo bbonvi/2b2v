@@ -1,10 +1,21 @@
 import { describe, test, expect } from "bun:test";
-import { resolveModel, buildBackgroundStreamOptions, buildImageReadingStreamOptions, buildStreamOptions } from "./client.ts";
+import {
+  resolveModel,
+  resolveGuildModel,
+  resolveGuildModelKey,
+  buildBackgroundStreamOptions,
+  buildImageReadingStreamOptions,
+  buildStreamOptions,
+  fetchOpenRouterModelMetadata,
+  imageInputSupportFromMetadata,
+} from "./client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 
 const GLOBAL: GlobalConfig = {
   discordToken: "t",
   openrouterApiKey: "or_key_123",
+  codexAuthPath: "data/codex-auth.json",
+  defaultLlmProvider: "openrouter",
   defaultModel: "moonshotai/kimi-k2.5",
   defaultModelParams: {},
   defaultTimezone: "UTC",
@@ -91,6 +102,65 @@ describe("resolveModel", () => {
     const model = resolveModel(GLOBAL.defaultModel);
     expect(model.id).toBe("moonshotai/kimi-k2.5");
   });
+
+  test("resolves OpenAI Codex subscription models", () => {
+    const model = resolveModel("gpt-5.5", "openai-codex");
+    expect(model.id).toBe("gpt-5.5");
+    expect(model.api).toBe("openai-codex-responses");
+    expect(model.provider).toBe("openai-codex");
+    expect(model.llmProvider).toBe("openai-codex");
+    expect(model.input).toContain("image");
+  });
+
+  test("uses provider-qualified guild model keys", () => {
+    const global = { ...GLOBAL, defaultLlmProvider: "openai-codex" as const, defaultModel: "gpt-5.5" };
+    const guild = { ...GUILD, llmProvider: "openai-codex" as const, model: "gpt-5.5" };
+    expect(resolveGuildModel(global, guild).llmProvider).toBe("openai-codex");
+    expect(resolveGuildModelKey(global, guild)).toBe("openai-codex:gpt-5.5");
+  });
+});
+
+describe("fetchOpenRouterModelMetadata", () => {
+  test("reads image input modalities from OpenRouter metadata", async () => {
+    const calls: string[] = [];
+    const metadata = await fetchOpenRouterModelMetadata({
+      modelId: "vendor/vision-model",
+      apiKey: "test-key",
+      fetchFn: (url, init) => {
+        calls.push(url.toString());
+        expect(init?.headers).toEqual({ Authorization: "Bearer test-key" });
+        return Promise.resolve(Response.json({
+          data: [{
+            id: "vendor/vision-model",
+            canonical_slug: "vendor/vision-model",
+            architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
+          }],
+        }));
+      },
+    });
+
+    expect(calls[0]).toContain("/models?output_modalities=all");
+    expect(metadata).toEqual({ id: "vendor/vision-model", inputModalities: ["text", "image"] });
+    expect(imageInputSupportFromMetadata(metadata)).toBe("supported");
+  });
+
+  test("returns null when OpenRouter does not list the model", async () => {
+    const metadata = await fetchOpenRouterModelMetadata({
+      modelId: "vendor/missing",
+      apiKey: "test-key",
+      fetchFn: () => Promise.resolve(Response.json({ data: [] })),
+    });
+
+    expect(metadata).toBeNull();
+    expect(imageInputSupportFromMetadata(metadata)).toBe("unknown");
+  });
+
+  test("classifies listed text-only models as unsupported", () => {
+    expect(imageInputSupportFromMetadata({
+      id: "vendor/text-model",
+      inputModalities: ["text"],
+    })).toBe("unsupported");
+  });
 });
 
 describe("buildBackgroundStreamOptions", () => {
@@ -115,6 +185,51 @@ describe("buildBackgroundStreamOptions", () => {
     });
     expect(opts.temperature).toBe(0.1);
   });
+
+  test("maps background thinkingLevel to provider reasoning params", () => {
+    const openrouter = buildBackgroundStreamOptions(GLOBAL, {
+      ...GUILD,
+      backgroundLlm: { ...GUILD.backgroundLlm, thinkingLevel: "medium" },
+    });
+    expect(openrouter.reasoning).toEqual({ effort: "medium" });
+
+    const codex = buildBackgroundStreamOptions(GLOBAL, {
+      ...GUILD,
+      backgroundLlm: {
+        ...GUILD.backgroundLlm,
+        provider: "openai-codex",
+        thinkingLevel: "xhigh",
+      },
+    });
+    expect(codex.reasoningEffort).toBe("xhigh");
+  });
+
+  test("does not override explicit background reasoning params", () => {
+    const opts = buildBackgroundStreamOptions(GLOBAL, {
+      ...GUILD,
+      backgroundLlm: {
+        ...GUILD.backgroundLlm,
+        modelParams: { reasoning: { effort: "high" } },
+        thinkingLevel: "low",
+      },
+    });
+    expect(opts.reasoning).toEqual({ effort: "high" });
+  });
+
+  test("uses Codex auth path and service tier spelling for Codex background calls", () => {
+    const opts = buildBackgroundStreamOptions(GLOBAL, {
+      ...GUILD,
+      backgroundLlm: {
+        ...GUILD.backgroundLlm,
+        provider: "openai-codex",
+        serviceTier: "priority",
+      },
+    });
+    expect(opts.apiKey).toBe("");
+    expect(opts.codexAuthPath).toBe("data/codex-auth.json");
+    expect(opts.serviceTier).toBe("priority");
+    expect(opts.service_tier).toBeUndefined();
+  });
 });
 
 describe("buildImageReadingStreamOptions", () => {
@@ -132,6 +247,21 @@ describe("buildImageReadingStreamOptions", () => {
     expect(opts.temperature).toBe(0);
     expect(opts.topP).toBe(0.2);
   });
+
+  test("uses Codex auth path for Codex image fallback", () => {
+    const opts = buildImageReadingStreamOptions(GLOBAL, {
+      ...GUILD,
+      imageReading: {
+        fallbackEnabled: true,
+        fallbackProvider: "openai-codex",
+        fallbackModel: "gpt-5.5",
+        fallbackModelParams: { temperature: 0 },
+      },
+    });
+    expect(opts.apiKey).toBe("");
+    expect(opts.codexAuthPath).toBe("data/codex-auth.json");
+    expect(opts.temperature).toBe(0);
+  });
 });
 
 describe("buildStreamOptions", () => {
@@ -148,6 +278,23 @@ describe("buildStreamOptions", () => {
     const opts = buildStreamOptions(GLOBAL, guildWithParams);
     expect(opts.temperature).toBe(0.7);
     expect(opts.topP).toBe(0.9);
+  });
+
+  test("maps thinkingLevel to OpenRouter reasoning effort", () => {
+    const opts = buildStreamOptions(GLOBAL, {
+      ...GUILD,
+      thinkingLevel: "medium",
+    });
+    expect(opts.reasoning).toEqual({ effort: "medium" });
+  });
+
+  test("does not override explicit OpenRouter reasoning params", () => {
+    const opts = buildStreamOptions(GLOBAL, {
+      ...GUILD,
+      modelParams: { reasoning: { effort: "high" } },
+      thinkingLevel: "low",
+    });
+    expect(opts.reasoning).toEqual({ effort: "high" });
   });
 
   test("works with no modelParams", () => {
@@ -168,5 +315,38 @@ describe("buildStreamOptions", () => {
     };
     const opts = buildStreamOptions(GLOBAL, guildWithToolChoice);
     expect(opts.toolChoice).toBe("required");
+  });
+
+  test("uses Codex auth path instead of OpenRouter API key for Codex main calls", () => {
+    const opts = buildStreamOptions(GLOBAL, {
+      ...GUILD,
+      llmProvider: "openai-codex",
+      model: "gpt-5.5",
+      modelParams: { reasoningEffort: "high" },
+    });
+    expect(opts.apiKey).toBe("");
+    expect(opts.codexAuthPath).toBe("data/codex-auth.json");
+    expect(opts.reasoningEffort).toBe("high");
+  });
+
+  test("maps thinkingLevel to Codex reasoning effort", () => {
+    const opts = buildStreamOptions(GLOBAL, {
+      ...GUILD,
+      llmProvider: "openai-codex",
+      model: "gpt-5.5",
+      thinkingLevel: "xhigh",
+    });
+    expect(opts.reasoningEffort).toBe("xhigh");
+  });
+
+  test("does not override explicit Codex reasoning effort", () => {
+    const opts = buildStreamOptions(GLOBAL, {
+      ...GUILD,
+      llmProvider: "openai-codex",
+      model: "gpt-5.5",
+      modelParams: { reasoningEffort: "high" },
+      thinkingLevel: "low",
+    });
+    expect(opts.reasoningEffort).toBe("high");
   });
 });

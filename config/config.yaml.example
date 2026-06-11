@@ -1,16 +1,21 @@
 # Main bot configuration — config/config.yaml
 # All fields are optional. Missing values use hardcoded defaults.
 
-# LLM model (OpenRouter model ID)
+# LLM backend. "openrouter" uses OPENROUTER_API_KEY; "openai-codex" uses CODEX_AUTH_PATH.
+llmProvider: openrouter
+
+# LLM model for the selected provider.
+# OpenAI Codex example: gpt-5.5 (actual access depends on your ChatGPT account)
 model: moonshotai/kimi-k2.5
 
-# Model parameters passed to OpenRouter (guild configs can override)
+# Model parameters passed to the selected provider (guild configs can override)
 # modelParams:
 #   reasoning:
-#     effort: "medium"  # "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+#     effort: "medium"  # OpenRouter-specific override
 
 # Thinking/reasoning level for the model (optional)
 # When omitted, no thinking/reasoning is requested from the model.
+# Maps to Codex reasoningEffort or OpenRouter reasoning.effort unless modelParams overrides it.
 # Valid values: "minimal" | "low" | "medium" | "high" | "xhigh"
 # thinkingLevel: medium
 
@@ -55,6 +60,7 @@ imageReadMaxPerCall: 10
 # Fallback vision model for image tool results when the main model cannot read images.
 imageReading:
   fallbackEnabled: false
+  # fallbackProvider: openrouter # or openai-codex
   fallbackModel: moonshotai/kimi-k2.5
   # fallbackModelParams:
   #   temperature: 0
@@ -77,17 +83,18 @@ dispatcher:
   mentionDebounceMs: 500    # Debounce ms for mention triggers (default: 500)
   defaultDebounceMs: 2000   # Debounce ms for non-mention triggers (default: 2000)
 
-# OpenRouter prompt caching control.
-# When enabled, stable prompt sections are marked with cache_control breakpoints.
-# OpenRouter/provider routing decides whether the selected provider uses them.
+# Prompt caching control.
+# OpenRouter uses cache_control breakpoints; Codex uses stable system prompt/session routing.
 promptCaching:
   enabled: true
 
 # Background LLM defaults for memory extraction. Omitted fields inherit the main
 # effective model config. serviceTier is optional; omit it to send no service_tier.
 # backgroundLlm:
+#   provider: openrouter # or openai-codex; omitted inherits the main provider
 #   model: google/gemini-2.5-flash
 #   serviceTier: flex  # "flex" | "priority"; only supported by some providers
+#   thinkingLevel: low
 #   modelParams:
 #     temperature: 0.1
 #   promptCaching:

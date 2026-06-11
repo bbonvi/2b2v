@@ -58,7 +58,7 @@ import { createSessionStore, type SessionStore } from "./vpn/session";
 import { handleVpnCommand, handleVpnComponent, type VpnHandlerDeps } from "./vpn/handler";
 import { getVpnLocale } from "./vpn/i18n";
 import { loadPromptProfile } from "./config/prompt-profile";
-import { buildBackgroundStreamOptions } from "./llm/client";
+import { buildBackgroundStreamOptions, fetchOpenRouterModelMetadata, imageInputSupportFromMetadata, resolveModel, resolveGuildModelKey, type ModelImageInputSupport } from "./llm/client";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch, unlinkSync } from "fs";
 import type { Database } from "./db/database";
@@ -407,6 +407,94 @@ const embeddingQueue: EmbeddingQueue = createEmbeddingQueue(embeddingPipeline, q
 const guildsDir = join("config", "guilds");
 const guildConfigs = loadGuildConfigs(guildsDir, globalConfig);
 log.info("guild configs loaded", { count: guildConfigs.size });
+
+const modelImageInputSupport = new Map<string, ModelImageInputSupport>();
+const MODEL_METADATA_TIMEOUT_MS = 10_000;
+
+function collectEffectiveModelIds(global: typeof globalConfig, guilds: ReadonlyMap<string, GuildConfig>): string[] {
+  const ids = new Set<string>();
+  for (const guildConfig of guilds.values()) {
+    ids.add(resolveGuildModelKey(global, guildConfig));
+  }
+  if (ids.size === 0) ids.add(`${global.defaultLlmProvider}:${global.defaultModel}`);
+  return [...ids].sort((a, b) => a.localeCompare(b));
+}
+
+async function refreshModelImageInputSupport(
+  global: typeof globalConfig,
+  guilds: ReadonlyMap<string, GuildConfig>,
+  reason: "startup" | "hot_reload",
+): Promise<void> {
+  const modelIds = collectEffectiveModelIds(global, guilds);
+  const next = new Map<string, ModelImageInputSupport>();
+
+  await Promise.all(modelIds.map(async (modelKey) => {
+    const splitAt = modelKey.indexOf(":");
+    const provider = splitAt === -1 ? "openrouter" : modelKey.slice(0, splitAt);
+    const modelId = splitAt === -1 ? modelKey : modelKey.slice(splitAt + 1);
+    if (provider === "openai-codex") {
+      const model = resolveModel(modelId, "openai-codex");
+      const support: ModelImageInputSupport = model.input.includes("image") ? "supported" : "unsupported";
+      next.set(modelKey, support);
+      log.info("codex model metadata loaded from registry", {
+        model: modelId,
+        reason,
+        imageInputSupport: support,
+        inputModalities: model.input,
+      });
+      return;
+    }
+    if (global.openrouterApiKey === undefined || global.openrouterApiKey === "") {
+      next.set(modelKey, "unknown");
+      log.error("openrouter model metadata fetch skipped", {
+        model: modelId,
+        reason,
+        error: "OPENROUTER_API_KEY is not configured",
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort(new Error(`OpenRouter model metadata request timed out after ${MODEL_METADATA_TIMEOUT_MS}ms`));
+    }, MODEL_METADATA_TIMEOUT_MS);
+    try {
+      const metadata = await fetchOpenRouterModelMetadata({
+        modelId,
+        apiKey: global.openrouterApiKey,
+        signal: controller.signal,
+      });
+      const support = imageInputSupportFromMetadata(metadata);
+      next.set(modelKey, support);
+      log.info("openrouter model metadata loaded", {
+        model: modelId,
+        reason,
+        imageInputSupport: support,
+        inputModalities: metadata?.inputModalities ?? [],
+      });
+    } catch (err) {
+      next.set(modelKey, "unknown");
+      log.error("openrouter model metadata fetch failed", {
+        model: modelId,
+        reason,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }));
+
+  modelImageInputSupport.clear();
+  for (const [modelId, support] of next) {
+    modelImageInputSupport.set(modelId, support);
+  }
+}
+
+function getModelImageInputSupport(guildConfig: GuildConfig): ModelImageInputSupport {
+  return modelImageInputSupport.get(resolveGuildModelKey(globalConfig, guildConfig)) ?? "unknown";
+}
+
+await refreshModelImageInputSupport(globalConfig, guildConfigs, "startup");
 
 // --- 8. Load prompt profile. Persona/style are stable prompt sections for the direct reply model.
 let { persona, toolInstructions } = loadPromptProfile(globalConfig.promptProfile, log);
@@ -1322,6 +1410,7 @@ async function processTriggeredMessage(
       generateSpeech,
       triggerOverride,
       triggerInstructions: guildConfig.triggerInstructions,
+      modelImageInputSupport: getModelImageInputSupport(guildConfig),
       afterReply: async (memoryRequest) => {
         const memoryLog = new RequestLog(guildId, channelId);
         memoryLog.setAuthor(message.author.username);
@@ -1329,6 +1418,7 @@ async function processTriggeredMessage(
         memoryLog.setAgentRan(true);
         requestLogStore.incrementActive();
         const providerParams: Record<string, unknown> = { ...buildBackgroundStreamOptions(globalConfig, guildConfig) };
+        const backgroundApiKey = providerParams.apiKey;
         delete providerParams.apiKey;
         delete providerParams.signal;
         delete providerParams.onPayload;
@@ -1342,7 +1432,8 @@ async function processTriggeredMessage(
             userMessage: memoryRequest.userMessage,
             assistantReply: memoryRequest.assistantReply,
             recentContext: memoryRequest.recentContext,
-            apiKey: globalConfig.openrouterApiKey,
+            provider: guildConfig.backgroundLlm.provider,
+            apiKey: typeof backgroundApiKey === "string" ? backgroundApiKey : "",
             model: guildConfig.backgroundLlm.model,
             providerParams,
             promptCaching: guildConfig.backgroundLlm.promptCaching,
@@ -1592,17 +1683,20 @@ client.on("messageDelete", (message) => void (async () => {
 const CONFIG_RELOAD_DEBOUNCE_MS = 500;
 let reloadTimer: ReturnType<typeof setTimeout> | null = null;
 
-function reloadConfigs(): void {
+async function reloadConfigs(): Promise<void> {
   try {
     const newGlobal = loadGlobalConfig(
       process.env as Record<string, string | undefined>,
     );
     validateTrimConfig(newGlobal.defaultTrim);
+
+    // Reload guild configs — clear and rebuild
+    const newGuilds = loadGuildConfigs(guildsDir, newGlobal);
+    await refreshModelImageInputSupport(newGlobal, newGuilds, "hot_reload");
+
     globalConfig = newGlobal;
     ({ persona, toolInstructions } = loadPromptProfile(globalConfig.promptProfile, log));
 
-    // Reload guild configs — clear and rebuild
-    const newGuilds = loadGuildConfigs(guildsDir, globalConfig);
     guildConfigs.clear();
     for (const [id, cfg] of newGuilds) {
       guildConfigs.set(id, cfg);
@@ -1623,7 +1717,7 @@ function reloadConfigs(): void {
 if (existsSync("config")) {
   const watcher = watch("config", { recursive: true }, (_event, _filename) => {
     if (reloadTimer !== null) clearTimeout(reloadTimer);
-    reloadTimer = setTimeout(reloadConfigs, CONFIG_RELOAD_DEBOUNCE_MS);
+    reloadTimer = setTimeout(() => void reloadConfigs(), CONFIG_RELOAD_DEBOUNCE_MS);
   });
 
   // Prevent watcher from keeping the process alive during shutdown
@@ -1634,7 +1728,7 @@ if (existsSync("config")) {
 if (existsSync("prompts")) {
   const watcher = watch("prompts", { recursive: true }, (_event, _filename) => {
     if (reloadTimer !== null) clearTimeout(reloadTimer);
-    reloadTimer = setTimeout(reloadConfigs, CONFIG_RELOAD_DEBOUNCE_MS);
+    reloadTimer = setTimeout(() => void reloadConfigs(), CONFIG_RELOAD_DEBOUNCE_MS);
   });
 
   watcher.unref();
