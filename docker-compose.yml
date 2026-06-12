@@ -13,8 +13,8 @@ services:
     volumes:
       - bot-data:/app/data
       - model-cache:/app/model-cache
-      - ${APP_CONFIG_DIR:-${HOME}/.local/share/2b2v/config}:/app/config:ro
-      - ${APP_PROMPTS_DIR:-${HOME}/.local/share/2b2v/prompts}:/app/prompts:ro
+      - ./config:/app/config:ro
+      - ./prompts:/app/prompts:ro
       - ssh-keys-local:/app/ssh-keys-local
       - ssh-keys-shared:/app/ssh-keys-shared
     ports:

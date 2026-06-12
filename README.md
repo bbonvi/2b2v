@@ -37,12 +37,10 @@ docker compose -f docker-compose.dev.yml up -d --build
 # 3b. Production (separate project, volumes, env, dashboard port)
 cp .env.prod.example .env.prod
 # Edit .env.prod with production secrets first.
-mkdir -p ~/.local/share/2b2v
-cp -a config prompts ~/.local/share/2b2v/
 docker compose -p 2b2v-prod --env-file .env.prod -f docker-compose.yml up -d --build
 ```
 
-Use the dev compose file for live reload. Use the production command with `-p 2b2v-prod` so prod containers and volumes are separate from the default dev project. Production config and prompts default to `~/.local/share/2b2v/{config,prompts}` and are watched by the app through bind mounts. Do not run dev and prod with the same Discord bot token unless you intentionally want both stacks connected as the same bot.
+Use the dev compose file for live reload. Use the production command with `-p 2b2v-prod` so prod containers and volumes are separate from the default dev project. Production bind-mounts `./config` and `./prompts` from this checkout read-only, matching development's single source of truth. Do not run dev and prod with the same Discord bot token unless you intentionally want both stacks connected as the same bot.
 
 ## Environment variables
 
