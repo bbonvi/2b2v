@@ -572,12 +572,12 @@ function sectionsForStablePrompt(
   return stable;
 }
 
-/** Build a stable OpenRouter session id so provider routing can keep caches warm. */
+/** Build a stable provider session id so provider routing can keep caches warm. */
 function buildPromptCacheSessionId(requestLog: RequestLog | undefined, modelId: string): string | undefined {
   if (requestLog === undefined) return undefined;
   const sessionId = `2b2v:${requestLog.guildId}:${requestLog.channelId}:${modelId}`;
-  if (sessionId.length <= 256) return sessionId;
-  return `2b2v:${createHash("sha256").update(sessionId).digest("hex")}`;
+  if (sessionId.length <= 64) return sessionId;
+  return `2b2v:${createHash("sha256").update(sessionId).digest("hex").slice(0, 58)}`;
 }
 
 function buildVolatileTurnContext(context: AssembledContext): string {

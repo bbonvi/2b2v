@@ -439,6 +439,35 @@ describe("handleMessage", () => {
     ]);
   });
 
+  test("hashes long provider session ids to fit OpenAI prompt cache key limits", async () => {
+    const sessionIds: Array<string | undefined> = [];
+    const completeChat: ChatCompleteFn = (request) => {
+      sessionIds.push(request.sessionId);
+      return Promise.resolve({
+        text: "ok",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "ok" }] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        globalConfig: makeGlobalConfig({ defaultLlmProvider: "openai-codex", defaultModel: "gpt-5.5" }),
+        guildConfig: makeGuildConfig({
+          llmProvider: "openai-codex",
+          model: "gpt-5.5",
+        }),
+        requestLog: new RequestLog("1075346959298199564", "1080016551471743046"),
+      }),
+    );
+
+    expect(sessionIds[0]?.startsWith("2b2v:")).toBe(true);
+    expect(sessionIds[0]?.length).toBeLessThanOrEqual(64);
+  });
+
   test("chains web search then fetch and sends one intermediate status", async () => {
     const toolCalls: Array<{ name: string; params: unknown }> = [];
     const webSearch: AgentTool = {
