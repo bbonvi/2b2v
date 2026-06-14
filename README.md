@@ -26,9 +26,12 @@ Personal Discord bot with a single persona reply loop, native tool calling, and 
 # 1. Copy and fill in secrets
 cp .env.example .env
 
-# 2. Create guild config from example
+# 2. Create local config and prompts from examples
+cp config/config.yaml.example config/config.yaml
 cp config/guilds/000000000-example.yaml.example config/guilds/<YOUR_GUILD_ID>-<slug>.yaml
-# Edit it to match your setup
+cp prompts/persona.md.example prompts/persona.md
+cp prompts/style.md.example prompts/style.md
+# Edit these files to match your setup and bot persona
 
 # 3a. Development (live reload, debug logging; uses .env)
 docker compose -f docker-compose.dev.yml up -d --build
@@ -48,7 +51,7 @@ Required: `DISCORD_TOKEN` plus credentials for the configured LLM provider. The 
 
 ## Configuration
 
-Global defaults live in optional `config/config.yaml`; copy `config/config.yaml.example` when needed. Each guild has `config/guilds/<id>-<slug>.yaml`; the guild ID is parsed from the filename, and the slug is cosmetic. Copy `config/guilds/000000000-example.yaml.example` for the full reference.
+Global defaults live in optional `config/config.yaml`; copy `config/config.yaml.example` and edit it locally. Each guild has `config/guilds/<id>-<slug>.yaml`; the guild ID is parsed from the filename, and the slug is cosmetic. Copy `config/guilds/000000000-example.yaml.example` for the full reference. Live `config/*.yaml` files are ignored by git except for committed `.example` files.
 
 ```yaml
 triggers:
@@ -60,7 +63,7 @@ timezone: UTC
 adminUserIds: []
 ```
 
-All fields are optional; missing values fall back to global defaults. `promptProfile` selects files from `prompts/`, with committed defaults in `prompts/persona.md` and `prompts/style.md`.
+All fields are optional; missing values fall back to global defaults. `promptProfile` selects files from `prompts/`. Live prompt files are local and ignored by git; copy `prompts/persona.md.example` to `prompts/persona.md` and `prompts/style.md.example` to `prompts/style.md`, then customize them for your bot.
 
 ### Persona
 

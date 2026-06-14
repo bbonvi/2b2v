@@ -9,6 +9,7 @@ node_modules/
 data/codex-auth.json
 config/**/*.md
 config/**/*.yaml
+prompts/*.md
 dist/
 *.tsbuildinfo
 model-cache/
