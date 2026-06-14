@@ -222,6 +222,57 @@ describe("createScheduleTool (schedule_message)", () => {
     );
     expect(registeredIds).toHaveLength(1);
   });
+
+  test("creates a recurring schedule from cron expression (mode: cron)", async () => {
+    const result = await tool.execute(
+      "c-cron-1",
+      { mode: "cron", cronExpression: "0 9 * * *", instructions: "Say good morning" },
+      new AbortController().signal,
+      () => {}
+    );
+
+    const schedules = listSchedules(db, { guildId: "guild-1" });
+    expect(schedules).toHaveLength(1);
+
+    const s = schedules[0];
+    if (s === undefined) throw new Error("unreachable");
+    expect(s.type).toBe("cron");
+    expect(s.source).toBe("tool");
+    expect(s.channelId).toBe("ch-1");
+    expect(s.timezone).toBe("America/New_York");
+    expect(s.cronExpression).toBe("0 9 * * *");
+    expect(s.runAt).toBeNull();
+    expect(s.messageContent).toBe("Say good morning");
+    expect(s.enabled).toBe(true);
+    expect(registeredIds).toEqual([s.id]);
+
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("recurring");
+    expect(text).toContain("0 9 * * *");
+    expect(text).toContain("America/New_York");
+  });
+
+  test("mode: cron rejects missing cronExpression", async () => {
+    const result = await tool.execute(
+      "c-cron-missing",
+      { mode: "cron", instructions: "bad" },
+      new AbortController().signal,
+      () => {}
+    );
+    expect((result.content[0] as { text: string }).text).toContain("cronExpression");
+    expect(listSchedules(db, { guildId: "guild-1" })).toHaveLength(0);
+  });
+
+  test("mode: cron rejects invalid cronExpression", async () => {
+    const result = await tool.execute(
+      "c-cron-invalid",
+      { mode: "cron", cronExpression: "not a cron", instructions: "bad" },
+      new AbortController().signal,
+      () => {}
+    );
+    expect((result.content[0] as { text: string }).text).toContain("Invalid cronExpression");
+    expect(listSchedules(db, { guildId: "guild-1" })).toHaveLength(0);
+  });
 });
 
 describe("schedule list/delete tools", () => {

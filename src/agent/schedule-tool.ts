@@ -1,5 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import { CronPattern } from "croner";
 import type { Database } from "../db/database";
 import {
   createSchedule,
@@ -28,8 +29,8 @@ const UNIT_TO_MS: Record<string, number> = {
 
 const ScheduleMessageParams = Type.Object({
   mode: Type.Union(
-    [Type.Literal("in"), Type.Literal("at")],
-    { default: "in", description: "\"in\" for relative delay, \"at\" for absolute local datetime." },
+    [Type.Literal("in"), Type.Literal("at"), Type.Literal("cron")],
+    { default: "in", description: "\"in\" for relative delay, \"at\" for absolute local datetime, \"cron\" for recurring schedules." },
   ),
   instructions: Type.String({ description: "Detailed instruction for the future scheduled turn, not literal text to send. Include original user intent, who to notify, whether to ping, desired wording/tone, and any needed context." }),
   amount: Type.Optional(Type.Number({ description: "How many units from now. Required when mode is \"in\"." })),
@@ -38,6 +39,7 @@ const ScheduleMessageParams = Type.Object({
     { description: "Time unit. Required when mode is \"in\"." },
   )),
   localDateTime: Type.Optional(Type.String({ description: "Local date-time as YYYY-MM-DD HH:mm (guild timezone). Required when mode is \"at\"." })),
+  cronExpression: Type.Optional(Type.String({ description: "Cron expression for recurring schedules. Required when mode is \"cron\". Uses the guild timezone." })),
 });
 
 const ListScheduledMessagesParams = Type.Object({
@@ -48,7 +50,11 @@ const DeleteScheduledMessageParams = Type.Object({
   scheduleId: Type.String({ description: "ID of a pending scheduled message in the current channel." }),
 });
 
-type ScheduleResult = AgentToolResult<{ scheduleId: string; runAt: number } | { error: boolean }>;
+type ScheduleResult = AgentToolResult<
+  | { scheduleId: string; runAt: number }
+  | { scheduleId: string; cronExpression: string; timezone: string }
+  | { error: boolean }
+>;
 
 /** Create all schedule-related tools exposed to the chat agent. */
 export function createScheduleTools(deps: ScheduleToolDeps): AgentTool[] {
@@ -59,7 +65,7 @@ export function createScheduleTools(deps: ScheduleToolDeps): AgentTool[] {
   ];
 }
 
-/** Create a one-off scheduled message in the current channel. */
+/** Create a one-off or recurring scheduled message in the current channel. */
 export function createScheduleTool(deps: ScheduleToolDeps): AgentTool {
   const { db, guildId, channelId, timezone, onScheduleCreated } = deps;
 
@@ -67,7 +73,7 @@ export function createScheduleTool(deps: ScheduleToolDeps): AgentTool {
     name: "schedule_message",
     label: "schedule_message",
     description:
-      "Schedule a message to be sent in the current channel. Two modes: 'in' for relative delay (e.g. in 30 minutes), 'at' for absolute local datetime (e.g. 2026-06-15 10:00). The 'at' mode uses the guild timezone.",
+      "Schedule a message to be sent in the current channel. Modes: 'in' for relative delay (e.g. in 30 minutes), 'at' for absolute local datetime (e.g. 2026-06-15 10:00), and 'cron' for recurring schedules. 'at' and 'cron' use the guild timezone. For recurring schedules, avoid useless or annoying repeats; if there are already several pending schedules, especially around 10+ recurring schedules, inspect list_scheduled_messages and use caution unless an admin explicitly asked for the schedule. Reasonable low-noise recurring chat rituals such as a daily good morning message are fine.",
     parameters: ScheduleMessageParams,
 
     execute(
@@ -79,6 +85,9 @@ export function createScheduleTool(deps: ScheduleToolDeps): AgentTool {
 
       if (mode === "at") {
         return handleAbsoluteMode(params, db, guildId, channelId, timezone, onScheduleCreated);
+      }
+      if (mode === "cron") {
+        return handleCronMode(params, db, guildId, channelId, timezone, onScheduleCreated);
       }
       return handleRelativeMode(params, db, guildId, channelId, timezone, onScheduleCreated);
     },
@@ -274,5 +283,48 @@ function handleAbsoluteMode(
   return Promise.resolve({
     content: [{ type: "text", text: `Scheduled for ${localDateTime} (${timezone}).` }],
     details: { scheduleId: id, runAt: parsed.epochMs },
+  });
+}
+
+function handleCronMode(
+  params: Record<string, unknown>,
+  db: Database, guildId: string, channelId: string, timezone: string,
+  onScheduleCreated?: (id: string) => void,
+): Promise<ScheduleResult> {
+  const cronExpression = (params.cronExpression as string | undefined)?.trim();
+  const instructions = params.instructions as string;
+
+  if (cronExpression === undefined || cronExpression === "") {
+    return Promise.resolve({
+      content: [{ type: "text", text: "mode \"cron\" requires cronExpression." }],
+      details: { error: true },
+    });
+  }
+
+  try {
+    new CronPattern(cronExpression, timezone);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return Promise.resolve({
+      content: [{ type: "text", text: `Invalid cronExpression: ${message}` }],
+      details: { error: true },
+    });
+  }
+
+  const id = createSchedule(db, {
+    guildId,
+    channelId,
+    source: "tool",
+    type: "cron",
+    cronExpression,
+    timezone,
+    messageContent: instructions,
+  });
+
+  onScheduleCreated?.(id);
+
+  return Promise.resolve({
+    content: [{ type: "text", text: `Scheduled recurring message with cron \`${cronExpression}\` (${timezone}).` }],
+    details: { scheduleId: id, cronExpression, timezone },
   });
 }
