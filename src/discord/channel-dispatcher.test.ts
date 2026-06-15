@@ -367,6 +367,35 @@ describe("createChannelDispatcher", () => {
     dispatcher.dispose();
   });
 
+  test("does not drop late pending messages when queued messages already exist", async () => {
+    const batches: PendingMessage[][] = [];
+
+    const handler: DispatchHandler = async (msgs): Promise<undefined> => {
+      batches.push([...msgs]);
+      if (batches.length === 1) await delay(100);
+      return undefined;
+    };
+
+    const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 20 });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers(), handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-1"), { reason: "mention" });
+    await delay(30);
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-queued"), { reason: "keyword", keyword: "bot" });
+    await delay(30);
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-late"), { reason: "mention" });
+    await delay(180);
+
+    expect(batches.map((batch) => batch.map((message) => message.id))).toEqual([
+      ["m-1"],
+      ["m-queued", "m-late"],
+    ]);
+
+    dispatcher.dispose();
+  });
+
   test("dispose clears all timers", async () => {
     const batches: PendingMessage[][] = [];
     const handler: DispatchHandler = (msgs) => { batches.push([...msgs]); return Promise.resolve(undefined); };

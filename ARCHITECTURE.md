@@ -16,6 +16,8 @@ Typing is runtime-owned. The model has no typing tool.
 
 Channel dispatch batches preserve the causal reply target. Mentions and random triggers process the actual triggering message; keyword triggers may process a same-author follow-up in the same debounce batch. Unrelated later chatter must not inherit another message's trigger reason.
 
+When a long-running handler finishes, queued messages and still-pending debounce messages must be merged into the next batch; promotion must not replace one bucket with the other.
+
 `fetch_url` races Jina Reader against `@steipete/summarize-core`; if summarize-core fails, that same branch falls back to the local Readability/Turndown extractor. Anti-bot challenge pages are failures, not returned content.
 
 `summarize_video` uses `@steipete/summarize-core` with a longer timeout for YouTube, direct media, and podcast transcript extraction. It returns extracted transcript/content as tool context; the reply model still writes the user-facing summary.

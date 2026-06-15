@@ -238,7 +238,11 @@ export function createChannelDispatcher(opts: {
 
         if (state.queued.length > 0) {
           // Messages arrived during handler execution, start new debounce cycle
-          state.pending = state.queued;
+          if (state.debounceTimer !== null) {
+            clearTimeout(state.debounceTimer);
+            state.debounceTimer = null;
+          }
+          state.pending = [...state.queued, ...state.pending];
           state.queued = [];
           const nextTrigger = selectDispatchTrigger(state.pending);
           state.debounceTimer = setTimeout(
