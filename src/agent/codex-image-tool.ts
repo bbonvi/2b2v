@@ -20,7 +20,7 @@ const MAX_DIAGNOSTIC_STRING_LENGTH = 2000;
 const CodexGenerateImageParams = Type.Object({
   prompt: Type.String({
     description:
-      "The final visual brief sent to Codex image generation. Preserve the user's exact visual request, relevant context, concrete subject/composition/style/lighting constraints, and avoid-list. Do not include chat/message tags, status text, tool names, or unrelated additions.",
+      "The final visual brief sent to Codex image generation. Preserve the user's visual request and concrete subject/composition/style/lighting constraints, but phrase it as a safe neutral image prompt. If retrying after a rejected/no-image attempt, rewrite the prompt instead of resending it exactly: remove or soften words that can be misread as sexual, violent, coercive, or logo/brand-mark-focused while keeping the intended subject and composition. Do not include chat/message tags, status text, tool names, or unrelated additions.",
   }),
   output_format: Type.Optional(Type.Union([
     Type.Literal("png"),
@@ -520,6 +520,22 @@ function codexFailureMessage(parsed: ParsedCodexResponse): string {
   return text !== "" ? `Codex did not return an image. Response text: ${text}` : "Codex did not return an image.";
 }
 
+const PROMPT_REWRITE_RETRY_GUIDANCE = [
+  "If this was the first failed image attempt for the user's request, call codex_generate_image one more time with a safer rewritten prompt.",
+  "Do not resend the exact same prompt.",
+  "Keep the intended subject, composition, medium, and mood, but replace risky wording with neutral visual descriptions and remove unnecessary sexual, violent, coercive, logo, watermark, or brand-mark phrasing.",
+  "If the rewritten retry also fails, stop retrying and explain briefly.",
+].join(" ");
+
+function shouldSuggestPromptRewriteRetry(message: string): boolean {
+  return /image|generation|filter|safety|reject|refus|failed|no image|did not return/i.test(message);
+}
+
+export function codexImageFailureMessageForAgent(message: string): string {
+  if (!shouldSuggestPromptRewriteRetry(message)) return message;
+  return `${message} ${PROMPT_REWRITE_RETRY_GUIDANCE}`;
+}
+
 async function requestImage(input: {
   prompt: string;
   token: string;
@@ -589,7 +605,8 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
     description: [
       "Generate an image with OpenAI Codex's built-in image_generation tool using the ChatGPT/Codex subscription backend. Does not require OPENAI_API_KEY.",
       "Use this only when the user asks for a raster image, photo, illustration, sprite, icon draft, banner, mockup, or similar bitmap output.",
-      "Before calling, turn the user's request into a concrete image prompt. Preserve explicit requirements, add useful visual specifics for vague requests, and avoid inventing unrelated subjects, brands, text, or narrative details.",
+      "Before calling, turn the user's request into a concrete, safe, neutral image prompt. Preserve explicit visual requirements, add useful visual specifics for vague requests, and avoid inventing unrelated subjects, brands, text, or narrative details.",
+      "If generation fails because Codex returns no image, rejects the prompt, or reports a safety/filter failure, you may retry once with a rewritten prompt that keeps the same visual intent but softens risky wording; do not resend the exact same prompt and do not retry more than once.",
       "The generated image will be attached to the final Discord reply automatically.",
     ].join(" "),
     parameters: CodexGenerateImageParams,
@@ -626,6 +643,9 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         fetchFn: deps.fetchFn ?? fetch,
         signal,
         logger: deps.logger,
+      }).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(codexImageFailureMessageForAgent(message));
       });
 
       if (parsed.image === undefined) {
@@ -641,7 +661,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
             responseHeaders: parsed.responseHeaders,
             diagnosticEvents: parsed.diagnosticEvents,
           });
-          throw new Error(codexFailureMessage(parsed));
+          throw new Error(codexImageFailureMessageForAgent(codexFailureMessage(parsed)));
         }
         deps.logger?.warn("codex image generation returned no image", {
           model: deps.model,
@@ -652,7 +672,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
           responseHeaders: parsed.responseHeaders,
           diagnosticEvents: parsed.diagnosticEvents,
         });
-        throw new Error(codexFailureMessage(parsed));
+        throw new Error(codexImageFailureMessageForAgent(codexFailureMessage(parsed)));
       }
 
       const attachmentId = randomUUID();

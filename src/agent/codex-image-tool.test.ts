@@ -3,6 +3,7 @@ import {
   buildCodexDirectImageRequestBody,
   buildCodexHeaders,
   buildCodexImageRequestBody,
+  codexImageFailureMessageForAgent,
   parseCodexDirectImageResponse,
   parseCodexImageSse,
 } from "./codex-image-tool.ts";
@@ -159,6 +160,24 @@ describe("buildCodexImageRequestBody", () => {
     expect(input[0]?.content[0]?.text).toBe("selfie of a futuristic android at a desk");
     expect(input[0]?.content[0]?.text).not.toContain("Discord");
     expect(input[0]?.content[0]?.text).not.toContain("style guidance");
+  });
+});
+
+describe("codexImageFailureMessageForAgent", () => {
+  test("adds one-off rewritten-prompt retry guidance for image failures", () => {
+    const message = codexImageFailureMessageForAgent(
+      "Codex image generation failed: {\"type\":\"image_generation_call\",\"status\":\"failed\"}",
+    );
+
+    expect(message).toContain("call codex_generate_image one more time");
+    expect(message).toContain("Do not resend the exact same prompt");
+    expect(message).toContain("If the rewritten retry also fails, stop retrying");
+  });
+
+  test("does not add image retry guidance to unrelated failures", () => {
+    expect(codexImageFailureMessageForAgent("OpenAI Codex OAuth credentials are missing.")).toBe(
+      "OpenAI Codex OAuth credentials are missing.",
+    );
   });
 });
 
