@@ -118,7 +118,7 @@ type DispatchSegment =
     delivery?: MessageDelivery;
   };
 
-const DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS = 900;
+const DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS = 1500;
 
 /**
  * Inject a trigger-specific instruction into context sections.
