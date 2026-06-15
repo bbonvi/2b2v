@@ -67,7 +67,7 @@ All fields are optional; missing values fall back to global defaults. `promptPro
 
 ### Persona
 
-`<voice>text</voice>` sends generated audio when ElevenLabs is configured. Text outside the voice directive is sent as normal Discord content on the audio attachment. `<ignore>reason</ignore>` sends nothing. Other XML is normal text.
+`<message>text</message>` separates an intentional multi-message reply; plain text remains a single message. Per-message delivery can use `reply="false"` for a normal channel send or `reply_to="<message id>"` to reply to a specific Discord message. `<voice>text</voice>` or `<audio>text</audio>` sends generated audio when ElevenLabs is configured. Text outside the voice/audio directive is sent as normal Discord content on the audio attachment. `<ignore>reason</ignore>` sends nothing. Other XML is normal text. `[msg-break]` is a history-only marker for merged separate messages, not an output directive.
 
 ## History Search Maintenance
 

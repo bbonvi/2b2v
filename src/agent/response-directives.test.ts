@@ -15,8 +15,8 @@ describe("parseResponseDirectives", () => {
       ignored: false,
       segments: [{ kind: "text", text: xml }],
     });
-    expect(parseResponseDirectives("```xml\n<voice-note>keep fenced</voice-note>\n```").segments[0]?.text)
-      .toBe("```xml\n<voice-note>keep fenced</voice-note>\n```");
+    expect(parseResponseDirectives("```xml\n<voice-note>keep fenced</voice-note>\n```").segments[0])
+      .toEqual({ kind: "text", text: "```xml\n<voice-note>keep fenced</voice-note>\n```" });
   });
 
   test("parses voice directives and ignores legacy voice attributes", () => {
@@ -26,6 +26,50 @@ describe("parseResponseDirectives", () => {
         { kind: "text", text: "Text" },
         { kind: "voice", text: "hello" },
         { kind: "voice", text: "quiet" },
+      ],
+    });
+  });
+
+  test("parses audio as a voice directive alias", () => {
+    expect(parseResponseDirectives("Text <audio>hello</audio>")).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "text", text: "Text" },
+        { kind: "voice", text: "hello" },
+      ],
+    });
+  });
+
+  test("parses message directives as send boundaries", () => {
+    expect(parseResponseDirectives("<message>first</message><message>second</message>")).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "text", text: "first" },
+        { kind: "messageBreak" },
+        { kind: "text", text: "second" },
+      ],
+    });
+  });
+
+  test("parses message delivery attributes", () => {
+    expect(parseResponseDirectives("<message reply=\"false\">first</message><message reply_to=\"12345\">second</message>")).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "messageBreak", delivery: { reply: false } },
+        { kind: "text", text: "first" },
+        { kind: "messageBreak", delivery: { replyTo: "12345" } },
+        { kind: "text", text: "second" },
+      ],
+    });
+  });
+
+  test("allows audio directives inside message directives", () => {
+    expect(parseResponseDirectives("<message>text</message><message><audio>spoken</audio></message>")).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "text", text: "text" },
+        { kind: "messageBreak" },
+        { kind: "voice", text: "spoken" },
       ],
     });
   });
@@ -91,8 +135,8 @@ describe("parseResponseDirectives", () => {
   });
 
   test("preserves non-reserved fenced XML", () => {
-    expect(parseResponseDirectives("```xml\n<root>ok</root>\n```").segments[0]?.text)
-      .toBe("```xml\n<root>ok</root>\n```");
+    expect(parseResponseDirectives("```xml\n<root>ok</root>\n```").segments[0])
+      .toEqual({ kind: "text", text: "```xml\n<root>ok</root>\n```" });
   });
 
   test("ignore directive suppresses all output", () => {
@@ -126,6 +170,21 @@ describe("renderSegmentsForMemory", () => {
       { kind: "voice", text: "voice" },
       { kind: "voice", text: "[whispers] quiet" },
     ])).toBe('text\n<voice>voice</voice>\n<voice>[whispers] quiet</voice>');
+  });
+
+  test("renders message boundaries as historical msg-break markers", () => {
+    expect(renderSegmentsForMemory([
+      { kind: "text", text: "first" },
+      { kind: "messageBreak" },
+      { kind: "text", text: "second" },
+    ])).toBe("first\n[msg-break]\nsecond");
+  });
+
+  test("does not render leading delivery metadata as a msg-break", () => {
+    expect(renderSegmentsForMemory([
+      { kind: "messageBreak", delivery: { reply: false } },
+      { kind: "text", text: "first" },
+    ])).toBe("first");
   });
 
   test("escapes voice text when rendering XML for history", () => {

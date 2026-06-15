@@ -27,6 +27,21 @@ describe("formatMessageLine", () => {
     expect(formatMessageLine(input)).toBe("[@alice]: hello");
   });
 
+  test("includes message id metadata when requested", () => {
+    const input: FormatInput = { message: msg({ id: "123" }), reply: null, captioningEnabled: false, includeMessageIds: true };
+    expect(formatMessageLine(input)).toBe("[@alice (MsgID: 123)]: hello");
+  });
+
+  test("includes merged message ids when requested", () => {
+    const input: FormatInput = {
+      message: msg({ id: "1", mergedMessageIds: ["1", "2"] }),
+      reply: null,
+      captioningEnabled: false,
+      includeMessageIds: true,
+    };
+    expect(formatMessageLine(input)).toBe("[@alice (MsgIDs: [1, 2])]: hello");
+  });
+
   test("message with images", () => {
     const input: FormatInput = {
       message: msg({ imageIds: [12, 13] }),

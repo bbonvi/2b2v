@@ -1,6 +1,12 @@
 export type ResponseSegment =
   | { kind: "text"; text: string }
-  | { kind: "voice"; text: string };
+  | { kind: "voice"; text: string }
+  | { kind: "messageBreak"; delivery?: MessageDelivery };
+
+export interface MessageDelivery {
+  reply?: boolean;
+  replyTo?: string;
+}
 
 export interface ParsedResponseDirectives {
   ignored: boolean;
@@ -18,9 +24,9 @@ interface ParseResult {
   closed: boolean;
 }
 
-const RESERVED_TAG_RE = /<\s*\/?\s*(?:voice|ignore)(?=[\s/>])/i;
+const RESERVED_TAG_RE = /<\s*\/?\s*(?:voice|audio|message|ignore)(?=[\s/>])/i;
 const FENCE_RE = /```[ \t]*(?:[a-zA-Z0-9_-]+)?[ \t]*\n?([\s\S]*?)```/g;
-const TAG_RE = /<\s*(\/?)\s*(voice|ignore)(?=[\s/>])([^>]*)>/gi;
+const TAG_RE = /<\s*(\/?)\s*(voice|audio|message|ignore)(?=[\s/>])([^>]*)>/gi;
 const USERNAME_PATTERN = "[A-Za-z0-9_](?:[A-Za-z0-9_.]{0,30}[A-Za-z0-9_])?";
 const CHANNEL_PATTERN = "#[A-Za-z0-9_][\\w-]{0,99}";
 const URL_PATTERN = "https?:\\/\\/[^\\s<>()]+";
@@ -50,6 +56,16 @@ function pushVoiceSegment(segments: ResponseSegment[], rawText: string): void {
   const text = sanitizeVoiceText(rawText);
   if (text === "") return;
   segments.push({ kind: "voice", text });
+}
+
+function pushMessageBreak(segments: ResponseSegment[], delivery?: MessageDelivery): void {
+  const previous = segments[segments.length - 1];
+  if (previous !== undefined && previous.kind === "messageBreak") {
+    if (delivery !== undefined) previous.delivery = delivery;
+    return;
+  }
+  if (previous === undefined && delivery === undefined) return;
+  segments.push({ kind: "messageBreak", ...(delivery !== undefined ? { delivery } : {}) });
 }
 
 /** Split Discord-only tokens out of voice text so pings/channels are sent as message content, not spoken. */
@@ -85,6 +101,34 @@ function pushSegment(
   pushTextSegment(segments, rawText);
 }
 
+function unescapeAttributeValue(value: string): string {
+  return value
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function parseMessageDelivery(attrs: string): MessageDelivery | undefined {
+  const delivery: MessageDelivery = {};
+  const attrRe = /\s(reply|reply_to)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/gi;
+  for (;;) {
+    const match = attrRe.exec(attrs);
+    if (match === null) break;
+    const rawName = match[1];
+    if (rawName === undefined) continue;
+    const value = unescapeAttributeValue(match[2] ?? match[3] ?? match[4] ?? "").trim();
+    if (rawName.toLowerCase() === "reply") {
+      if (value.toLowerCase() === "true") delivery.reply = true;
+      if (value.toLowerCase() === "false") delivery.reply = false;
+    } else if (value !== "") {
+      delivery.replyTo = value;
+    }
+  }
+  return delivery.reply !== undefined || delivery.replyTo !== undefined ? delivery : undefined;
+}
+
 export function sanitizeVoiceText(text: string): string {
   return text
     .replace(/\s+/g, " ")
@@ -96,7 +140,7 @@ function parseRange(
   text: string,
   start: number,
   mode: SegmentMode,
-  stopTag: "voice" | "ignore" | null,
+  stopTag: "voice" | "audio" | "message" | "ignore" | null,
 ): ParseResult {
   const segments: ResponseSegment[] = [];
   let cursor = start;
@@ -112,7 +156,7 @@ function parseRange(
     const isClosing = match[1] === "/";
     const rawTag = match[2];
     if (rawTag === undefined) continue;
-    const tag = rawTag.toLowerCase() as "voice" | "ignore";
+    const tag = rawTag.toLowerCase() as "voice" | "audio" | "message" | "ignore";
     const attrs = match[3] ?? "";
     const selfClosing = /\/\s*$/.test(attrs);
 
@@ -136,7 +180,20 @@ function parseRange(
       continue;
     }
 
-    const nested = parseRange(text, tagEnd, { kind: "voice" }, "voice");
+    if (tag === "message") {
+      pushMessageBreak(segments, parseMessageDelivery(attrs));
+      const nested = parseRange(text, tagEnd, { kind: "text" }, "message");
+      segments.push(...nested.segments);
+      if (nested.ignored) {
+        return { ignored: true, segments, index: text.length, closed: false };
+      }
+      pushMessageBreak(segments);
+      cursor = nested.index;
+      tagRe.lastIndex = cursor;
+      continue;
+    }
+
+    const nested = parseRange(text, tagEnd, { kind: "voice" }, tag);
     segments.push(...nested.segments);
     if (nested.ignored) {
       return { ignored: true, segments, index: text.length, closed: false };
@@ -154,8 +211,34 @@ export function parseResponseDirectives(response: string): ParsedResponseDirecti
   const parsed = parseRange(normalized, 0, { kind: "text" }, null);
   return {
     ignored: parsed.ignored,
-    segments: parsed.ignored ? [] : parsed.segments,
+    segments: parsed.ignored ? [] : normalizeMessageBreaks(parsed.segments),
   };
+}
+
+function normalizeMessageBreaks(segments: ResponseSegment[]): ResponseSegment[] {
+  const normalized: ResponseSegment[] = [];
+  for (const segment of segments) {
+    if (segment.kind === "messageBreak") {
+      const previous = normalized[normalized.length - 1];
+      if (previous === undefined) {
+        if (segment.delivery !== undefined) normalized.push(segment);
+        continue;
+      }
+      if (previous.kind === "messageBreak") {
+        if (segment.delivery !== undefined) previous.delivery = segment.delivery;
+        continue;
+      }
+      normalized.push(segment);
+      continue;
+    }
+    normalized.push(segment);
+  }
+
+  while (normalized[normalized.length - 1]?.kind === "messageBreak") {
+    normalized.pop();
+  }
+
+  return normalized;
 }
 
 function escapeXmlText(text: string): string {
@@ -167,9 +250,19 @@ function escapeXmlText(text: string): string {
 
 export function renderSegmentForHistory(segment: ResponseSegment): string {
   if (segment.kind === "text") return segment.text;
+  if (segment.kind === "messageBreak") return "[msg-break]";
   return `<voice>${escapeXmlText(segment.text)}</voice>`;
 }
 
 export function renderSegmentsForMemory(segments: ResponseSegment[]): string {
-  return segments.map(renderSegmentForHistory).join("\n");
+  const rendered: string[] = [];
+  for (const segment of segments) {
+    if (segment.kind === "messageBreak") {
+      if (rendered.length > 0) rendered.push(renderSegmentForHistory(segment));
+      continue;
+    }
+    rendered.push(renderSegmentForHistory(segment));
+  }
+  while (rendered[rendered.length - 1] === "[msg-break]") rendered.pop();
+  return rendered.join("\n");
 }

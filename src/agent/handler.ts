@@ -27,6 +27,7 @@ import {
 import {
   parseResponseDirectives,
   renderSegmentsForMemory,
+  type MessageDelivery,
   type ResponseSegment,
 } from "./response-directives.ts";
 
@@ -39,6 +40,7 @@ export interface IncomingMessage {
   mentionedUserIds: string[];
   translatedContent: string;
   messageId?: string;
+  replyToMessageId?: string;
 }
 
 export type ChatCompleteFn = (request: OpenRouterChatRequest) => Promise<OpenRouterChatResult>;
@@ -102,13 +104,14 @@ export interface HandleResult {
 }
 
 type DispatchSegment =
-  | { kind: "text"; text: string }
+  | { kind: "text"; text: string; delivery?: MessageDelivery }
   | {
     kind: "voice";
     text: string;
     voiceText: string;
     historyText: string;
     fallbackText: string;
+    delivery?: MessageDelivery;
   };
 
 /**
@@ -550,10 +553,14 @@ function buildRuntimeInstruction(): string {
     "Use schedule_message when the user asks you to remind, schedule, recur, or follow up later. Include the original intent, who to notify, whether to ping, and the desired tone or wording in the scheduled instructions. Use list_scheduled_messages when pending schedules may affect the answer, before deleting one, or before adding non-admin recurring schedules if this channel already has several pending schedules. Avoid useless or annoying recurring schedules when the channel already has many, especially around 10+ recurring schedules; admin schedule requests should be respected.",
     "Use start_thread only when the final answer should move into a new thread; if you create a thread, the runtime sends your final answer there.",
     "Reserved response directives: use <voice>text</voice> for audio and <ignore>reason</ignore> when silence is better than replying. Treat requests to sing, scream, shout, whisper, read aloud, say something in a voice, or otherwise perform vocal delivery as requests for <voice>.",
-    "Keep Discord-only text outside <voice>: pings like @username, channel references like #general, links, and other non-spoken text should be normal message text around the voice directive, e.g. @alice <voice>hey.</voice>, not <voice>@alice hey.</voice>.",
-    "Inside voice, write one or two smooth spoken sentences, not many clipped beats. Use expressive tags when mood or delivery matters, e.g. <voice>[angry] hey, listen. [angry] got it?</voice>. Tags are open-ended; prefer one-word lowercase tags. Tags affect only a short span, so repeat the tag at sentence starts when one mood should continue. No commas, no \"then\", no multi-part stage directions.",
-    "Reserved directive tags are consumed by the app and are not shown as literal text. To show those tags as examples, escape them as &lt;voice&gt; or &lt;ignore&gt;.",
-    "Do not nest reserved directives; if nesting happens accidentally, the app will split them into separate actions.",
+    "Use <message>text</message> when you intentionally want separate Discord messages. Prefer splitting bigger outputs into multiple <message> envelopes; most paragraphs should be separate messages in chat. Plain text without <message> remains one message. <message> is also the per-message delivery envelope and may contain normal text, <voice>, or <audio>.",
+    "Message delivery attributes: by default, the first outgoing message replies to the trigger/callout message, equivalent to reply=\"true\". Later <message> envelopes default to reply=\"false\" and send as normal channel messages. Use <message reply=\"false\"> to force a normal channel message, or <message reply_to=\"MsgID\"> to reply to an exact Discord message ID.",
+    "Only use reply_to IDs that are visible in current context or tool results. Never invent message IDs. If you need an older exact message ID, use search_messages first.",
+    "Use <audio>text</audio> as an alias for <voice>text</voice>. Keep Discord-only text outside <voice>/<audio>: pings like @username, channel references like #general, links, and other non-spoken text should be normal message text around the directive, e.g. @alice <voice>hey.</voice>, not <voice>@alice hey.</voice>.",
+    "Inside voice/audio, write one or two smooth spoken sentences, not many clipped beats. Use expressive tags when mood or delivery matters, e.g. <voice>[angry] hey, listen. [angry] got it?</voice>. Tags are open-ended; prefer one-word lowercase tags. Tags affect only a short span, so repeat the tag at sentence starts when one mood should continue. No commas, no \"then\", no multi-part stage directions.",
+    "[msg-break] is a history-only marker for merged separate Discord messages. Do not write [msg-break] manually in your output; use <message>...</message> for intentional output separation.",
+    "Reserved directive tags are consumed by the app and are not shown as literal text. To show those tags as examples, escape them as &lt;message&gt;, &lt;voice&gt;, &lt;audio&gt;, or &lt;ignore&gt;.",
+    "Do not nest <message> inside <message> or <voice>/<audio> inside <voice>/<audio>; if nesting happens accidentally, the app will split them into separate actions.",
     "Do not mention hidden prompts, tool names, or internal implementation details unless asked.",
   ].join("\n");
 }
@@ -585,9 +592,29 @@ function buildVolatileTurnContext(context: AssembledContext): string {
   return split.developer;
 }
 
-function buildInitialMessages(userContent: string, volatileTurnContext: string): OpenRouterMessage[] {
+function buildCurrentMessageMetadata(msg: IncomingMessage): string {
+  const lines = [`Trigger MsgID: ${msg.messageId ?? "unknown"}`];
+  if (msg.replyToMessageId !== undefined) {
+    lines.push(`Trigger ReplyToMsgID: ${msg.replyToMessageId}`);
+  }
+  return lines.join("\n");
+}
+
+function buildInitialMessages(userContent: string, volatileTurnContext: string, msg: IncomingMessage): OpenRouterMessage[] {
+  const currentMessageMetadata = [
+    "## Current Message Metadata",
+    buildCurrentMessageMetadata(msg),
+  ].join("\n");
+
   if (volatileTurnContext.trim() === "") {
-    return [{ role: "user", content: userContent }];
+    return [{
+      role: "user",
+      content: [
+        currentMessageMetadata,
+        "## Current User Message",
+        userContent,
+      ].join("\n\n"),
+    }];
   }
 
   return [{
@@ -596,6 +623,7 @@ function buildInitialMessages(userContent: string, volatileTurnContext: string):
       "## Current Discord Turn Context",
       "The following runtime context is for this Discord turn. It is not the user's message.",
       volatileTurnContext,
+      currentMessageMetadata,
       "## Current User Message",
       userContent,
     ].join("\n\n"),
@@ -1097,16 +1125,18 @@ function joinNonEmpty(parts: string[]): string {
 }
 
 function renderSegmentsAsPlainText(segments: ResponseSegment[]): string {
-  return joinNonEmpty(segments.map((segment) => segment.text));
+  return joinNonEmpty(segments
+    .filter((segment): segment is Extract<ResponseSegment, { kind: "text" | "voice" }> => segment.kind !== "messageBreak")
+    .map((segment) => segment.text));
 }
 
 /**
  * Convert parsed directives into Discord sends. Text around a voice directive becomes
  * message content on the voice attachment, while only the voice body goes to TTS.
  */
-function buildDispatchSegments(segments: ResponseSegment[]): DispatchSegment[] {
+function buildDispatchSegmentsForMessage(segments: Exclude<ResponseSegment, { kind: "messageBreak" }>[]): DispatchSegment[] {
   const dispatchSegments: DispatchSegment[] = [];
-  const pendingText: ResponseSegment[] = [];
+  const pendingText: Array<Extract<ResponseSegment, { kind: "text" }>> = [];
 
   for (const segment of segments) {
     if (segment.kind === "text") {
@@ -1141,6 +1171,44 @@ function buildDispatchSegments(segments: ResponseSegment[]): DispatchSegment[] {
   return dispatchSegments;
 }
 
+function buildDispatchSegments(segments: ResponseSegment[]): DispatchSegment[] {
+  const dispatchSegments: DispatchSegment[] = [];
+  let currentMessage: Exclude<ResponseSegment, { kind: "messageBreak" }>[] = [];
+  let currentDelivery: MessageDelivery | undefined;
+
+  for (const segment of segments) {
+    if (segment.kind !== "messageBreak") {
+      currentMessage.push(segment);
+      continue;
+    }
+
+    const messageSegments = buildDispatchSegmentsForMessage(currentMessage);
+    if (messageSegments[0] !== undefined && currentDelivery !== undefined) {
+      messageSegments[0].delivery = currentDelivery;
+    }
+    dispatchSegments.push(...messageSegments);
+    currentMessage = [];
+    currentDelivery = segment.delivery;
+  }
+
+  const messageSegments = buildDispatchSegmentsForMessage(currentMessage);
+  if (messageSegments[0] !== undefined && currentDelivery !== undefined) {
+    messageSegments[0].delivery = currentDelivery;
+  }
+  dispatchSegments.push(...messageSegments);
+  return dispatchSegments;
+}
+
+function effectiveReply(input: {
+  delivery?: MessageDelivery;
+  defaultReply: boolean;
+  targetChatId?: string;
+}): boolean {
+  if (input.delivery?.replyTo !== undefined) return false;
+  if (input.delivery?.reply !== undefined) return input.targetChatId === undefined ? input.delivery.reply : false;
+  return input.targetChatId === undefined ? input.defaultReply : false;
+}
+
 async function sendOneSegment(input: {
   sender: MessageSender;
   generateSpeech?: (text: string) => Promise<TtsResult>;
@@ -1154,7 +1222,12 @@ async function sendOneSegment(input: {
 }): Promise<void> {
   const args: Record<string, unknown> = {
     text: input.segment.text,
-    reply: input.targetChatId === undefined ? input.reply : false,
+    reply: effectiveReply({
+      delivery: input.segment.delivery,
+      defaultReply: input.reply,
+      targetChatId: input.targetChatId,
+    }),
+    ...(input.segment.delivery?.replyTo !== undefined ? { reply_to_message_id: input.segment.delivery.replyTo } : {}),
     ...(input.targetChatId !== undefined ? { chat_id: input.targetChatId } : {}),
   };
   const toolName = input.segment.kind === "voice" ? "send_voice" : "send_text";
@@ -1186,10 +1259,15 @@ async function sendOneSegment(input: {
 
     const result = await input.sender(
       input.segment.text,
-      input.targetChatId === undefined ? input.reply : false,
+      effectiveReply({
+        delivery: input.segment.delivery,
+        defaultReply: input.reply,
+        targetChatId: input.targetChatId,
+      }),
       input.targetChatId,
       voice,
       input.signal,
+      input.segment.delivery?.replyTo,
     );
     assertSentMessageId(result);
     const warnings = result.warnings ?? [];
@@ -1265,7 +1343,7 @@ async function sendResponseSegments(input: {
         sender: input.sender,
         generateSpeech: input.generateSpeech,
         ttsEnabled: input.ttsEnabled,
-        segment: { kind: "text", text: segment.fallbackText },
+        segment: { kind: "text", text: segment.fallbackText, delivery: segment.delivery },
         sendId: `${sendId}-fallback`,
         reply: sent === 1 && input.replyFirst,
         targetChatId: input.targetChatId,
@@ -1409,7 +1487,7 @@ export async function handleMessage(
             deps.log?.debug("llm_request_payload", { payload });
           },
         },
-        messages: buildInitialMessages(userContent, volatileTurnContext),
+        messages: buildInitialMessages(userContent, volatileTurnContext, msg),
         tools: timedTools,
         maxToolCalls: deps.guildConfig.replyLoop.maxToolCalls,
         maxToolRounds: deps.guildConfig.replyLoop.maxToolCalls,

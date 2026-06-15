@@ -300,7 +300,10 @@ describe("handleMessage", () => {
       expect(text).toContain("agent has been running for more than about 30 seconds");
       expect(text.indexOf("Reserved response directives")).toBeGreaterThan(-1);
       expect(text).toContain("Treat requests to sing, scream, shout, whisper, read aloud");
-      expect(text).toContain("Keep Discord-only text outside <voice>");
+      expect(text).toContain("most paragraphs should be separate messages");
+      expect(text).toContain("first outgoing message replies to the trigger/callout message");
+      expect(text).toContain("Later <message> envelopes default to reply=\"false\"");
+      expect(text).toContain("Keep Discord-only text outside <voice>/<audio>");
       expect(text.indexOf("## Memory")).toBeGreaterThan(-1);
       expect(text.indexOf("Reserved response directives")).toBeLessThan(text.indexOf("## Memory"));
       return Promise.resolve({
@@ -339,6 +342,9 @@ describe("handleMessage", () => {
       expect(messages[3]?.role).toBe("user");
       expect(messages[3]?.content).toContain("## Current Discord Turn Context");
       expect(messages[3]?.content).toContain("## Memory");
+      expect(messages[3]?.content).toContain("## Current Message Metadata");
+      expect(messages[3]?.content).toContain("Trigger MsgID: msg-1");
+      expect(messages[3]?.content).toContain("Trigger ReplyToMsgID: parent-msg");
       expect(messages[3]?.content).toContain("## Current User Message");
       expect(messages[3]?.content).toContain("hello bot");
 
@@ -351,7 +357,7 @@ describe("handleMessage", () => {
     };
 
     await handleMessage(
-      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeMessage({ mentionedUserIds: ["bot-1"], replyToMessageId: "parent-msg" }),
       makeDeps({ completeChat }),
     );
   });
@@ -568,6 +574,70 @@ describe("handleMessage", () => {
     expect(onStillWorking).toHaveBeenCalledTimes(1);
   });
 
+  test("sends message directive segments as separate Discord messages", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<message>first line</message><message>second line</message>",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    });
+    const senderCalls: Array<{ text: string; reply: boolean }> = [];
+    const sender: MessageSender = (text, reply) => {
+      senderCalls.push({ text, reply });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+    const afterReplyCalls: unknown[] = [];
+    const afterReply = (request: unknown): Promise<void> => {
+      afterReplyCalls.push(request);
+      return Promise.resolve();
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, afterReply }),
+    );
+
+    expect(senderCalls).toEqual([
+      { text: "first line", reply: true },
+      { text: "second line", reply: false },
+    ]);
+    expect(afterReplyCalls[0]).toMatchObject({
+      assistantReply: "first line\n[msg-break]\nsecond line",
+    });
+    expect(result.responseText).toBe("first line\n[msg-break]\nsecond line");
+  });
+
+  test("applies message delivery attributes per Discord message", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: [
+        "<message reply=\"false\">normal first</message>",
+        "<message reply=\"true\">reply second</message>",
+        "<message reply_to=\"older-123\">targeted third</message>",
+        "<message>normal fourth</message>",
+      ].join(""),
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    });
+    const senderCalls: Array<{ text: string; reply: boolean; replyToMessageId?: string }> = [];
+    const sender: MessageSender = (text, reply, _chatId, _voice, _signal, replyToMessageId) => {
+      senderCalls.push({ text, reply, replyToMessageId });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender }),
+    );
+
+    expect(senderCalls).toEqual([
+      { text: "normal first", reply: false, replyToMessageId: undefined },
+      { text: "reply second", reply: true, replyToMessageId: undefined },
+      { text: "targeted third", reply: false, replyToMessageId: "older-123" },
+      { text: "normal fourth", reply: false, replyToMessageId: undefined },
+    ]);
+  });
+
   test("sends voice directive segments as TTS audio", async () => {
     const completeChat: ChatCompleteFn = () => Promise.resolve({
       text: "Text first <voice>[whispers] quiet line</voice> text after",
@@ -601,6 +671,37 @@ describe("handleMessage", () => {
     ]);
     expect(speechTexts).toEqual(["[whispers] quiet line"]);
     expect(result.responseText).toBe('Text first\n<voice>[whispers] quiet line</voice>\ntext after');
+  });
+
+  test("sends audio directive inside message directive as one separate voice message", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<message>text first</message><message><audio>spoken second</audio></message>",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    });
+    const senderCalls: Array<{ text: string; reply: boolean; voice: boolean; historyText?: string }> = [];
+    const sender: MessageSender = (text, reply, _chatId, voice) => {
+      senderCalls.push({ text, reply, voice: voice !== undefined, historyText: voice?.historyText });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+    const speechTexts: string[] = [];
+    const generateSpeech = (text: string): Promise<TtsResult> => {
+      speechTexts.push(text);
+      return Promise.resolve({ ok: true, buffer: Buffer.from("audio"), contentType: "audio/mpeg" });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, ttsEnabled: true, generateSpeech }),
+    );
+
+    expect(senderCalls).toEqual([
+      { text: "text first", reply: true, voice: false, historyText: undefined },
+      { text: "", reply: false, voice: true, historyText: "<voice>spoken second</voice>" },
+    ]);
+    expect(speechTexts).toEqual(["spoken second"]);
+    expect(result.responseText).toBe("text first\n[msg-break]\n<voice>spoken second</voice>");
   });
 
   test("keeps Discord pings as text content instead of generated speech", async () => {

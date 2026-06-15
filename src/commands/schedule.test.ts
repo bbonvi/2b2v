@@ -382,7 +382,7 @@ describe("createScheduleHandler", () => {
       subcommand: "add",
       options: {
         type: "one_off",
-        "run-at": "2026-06-15 10:00",
+        "run-at": "2099-06-15 10:00",
         channel: "ch-1",
         message: "test",
         timezone: "Europe/London", // should be ignored for one_off

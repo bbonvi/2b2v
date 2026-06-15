@@ -105,6 +105,7 @@ export async function processHistory(
           message: m,
           reply,
           captioningEnabled: config.imageCaptioningEnabled,
+          includeMessageIds: true,
         }));
       }
     }

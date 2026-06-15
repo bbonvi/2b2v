@@ -659,6 +659,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         mentionedUserIds: [],
         translatedContent: schedule.messageContent,
         messageId: syntheticLatestMessage.id,
+        replyToMessageId: syntheticLatestMessage.replyToId ?? undefined,
       };
 
       // Build request log
@@ -1387,6 +1388,7 @@ async function processTriggeredMessage(
       mentionedUserIds: [...message.mentions.users.keys()],
       translatedContent,
       messageId: message.id,
+      replyToMessageId: message.reference?.messageId,
     };
 
     const requestLog = new RequestLog(guildId, channelId);

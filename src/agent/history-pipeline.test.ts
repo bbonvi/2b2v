@@ -63,7 +63,7 @@ describe("processHistory", () => {
 
     expect(result.olderText).toBe("");
     expect(result.newerText).toStartWith("## Chat History\n");
-    expect(result.newerText).toContain("[@alice]: hi");
+    expect(result.newerText).toContain("[@alice (MsgID: 100)]: hi");
   });
 
   test("single message goes to newer slice", async () => {
@@ -73,8 +73,8 @@ describe("processHistory", () => {
 
     expect(result.olderText).toBe("");
     expect(result.newerText).toStartWith("## Chat History\n");
-    expect(result.newerText).toContain("[@alice]: first");
-    expect(result.newerText).toContain("[@alice]: latest");
+    expect(result.newerText).toContain("[@alice (MsgID: 1)]: first");
+    expect(result.newerText).toContain("[@alice (MsgID: 100)]: latest");
   });
 
   test("enough messages produce older slice with OLDER_LEGEND and date stamps", async () => {
@@ -134,13 +134,13 @@ describe("processHistory", () => {
     expect(after.newerText).toContain("extra-2");
   });
 
-  test("formatted lines use [@author]: content grammar", async () => {
+  test("newer formatted lines include MsgID metadata", async () => {
     const m1 = msg({ id: "1", author: "bob", content: "yo", timestamp: 1000 });
     const latest = msg({ id: "100", content: "sup", timestamp: 9000 });
     const result = await processHistory([m1], latest, defaultConfig, deps);
 
-    expect(result.newerText).toContain("[@bob]: yo");
-    expect(result.newerText).toContain("[@alice]: sup");
+    expect(result.newerText).toContain("[@bob (MsgID: 1)]: yo");
+    expect(result.newerText).toContain("[@alice (MsgID: 100)]: sup");
   });
 
   test("merged messages contain [msg-break]", async () => {
@@ -212,8 +212,8 @@ describe("processHistory", () => {
 
     const result = await processHistory([m1, m2], latest, defaultConfig, deps);
 
-    expect(result.newerText).toContain("[@bot]: first bot chunk [msg-break] second bot chunk");
-    expect(result.newerText).toContain("[@user to @bot]: replying");
+    expect(result.newerText).toContain("[@bot (MsgIDs: [bot-1, bot-2])]: first bot chunk [msg-break] second bot chunk");
+    expect(result.newerText).toContain("[@user to @bot (MsgID: user-1)]: replying");
     expect(result.newerText).not.toContain("MissingTarget");
   });
 

@@ -25,6 +25,7 @@ export interface FormatInput {
   message: HistoryMessage;
   reply: ReplyContext | null;
   captioningEnabled: boolean;
+  includeMessageIds?: boolean;
 }
 
 /**
@@ -36,7 +37,7 @@ export interface FormatInput {
  * Meta keys in order: Quote, MissingTarget, ReplyImageIDs, ReplyCaptions, ImageIDs, Captions
  */
 export function formatMessageLine(input: FormatInput): string {
-  const { message, reply, captioningEnabled } = input;
+  const { message, reply, captioningEnabled, includeMessageIds } = input;
 
   // Synthetic events are pre-formatted, output content directly
   if (message.isSynthetic) {
@@ -44,6 +45,15 @@ export function formatMessageLine(input: FormatInput): string {
   }
 
   const metaParts: string[] = [];
+
+  if (includeMessageIds === true) {
+    const ids = message.mergedMessageIds ?? [message.id];
+    if (ids.length > 1) {
+      metaParts.push(`MsgIDs: [${ids.join(", ")}]`);
+    } else {
+      metaParts.push(`MsgID: ${ids[0] ?? message.id}`);
+    }
+  }
 
   if (reply !== null) {
     if (reply.quote !== null) {
@@ -76,6 +86,6 @@ export function formatMessageLine(input: FormatInput): string {
 
 /** The legend block prepended to the older slice. */
 export const OLDER_LEGEND = [
-  "Legend: [@author to @target (Quote/ReplyImageIDs/ReplyCaptions/ImageIDs/Captions)]: content",
-  "Legend: Dates use [DATE ...]. Merged messages use [msg-break]. Quotes are excerpts; use search_messages(id). Images use read_chat_images([id]).",
+  "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyCaptions/ImageIDs/Captions)]: content",
+  "Legend: Newer history exposes MsgID for reply_to. Dates use [DATE ...]. Merged messages use history-only [msg-break]. Quotes are excerpts; use search_messages(id). Images use read_chat_images([id]).",
 ].join("\n");
