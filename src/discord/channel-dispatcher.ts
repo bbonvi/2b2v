@@ -81,6 +81,27 @@ export function selectDispatchTrigger(messages: readonly PendingMessage[]): Sele
 }
 
 /**
+ * Choose the concrete message to process for a selected trigger.
+ * Keyword batches may include same-author follow-up text after the triggering
+ * message. Mention and random triggers stay pinned to the actual triggering
+ * message so Discord replies do not target unrelated non-triggering chatter.
+ */
+export function selectDispatchMessageForTrigger(
+  batch: readonly PendingMessage[],
+  trigger: SelectedDispatchTrigger,
+): PendingMessage | undefined {
+  if (trigger.result.reason === "keyword") {
+    for (let i = batch.length - 1; i >= 0; i--) {
+      const message = batch[i];
+      if (message !== undefined && message.authorId === trigger.message.authorId) return message;
+    }
+    return trigger.message;
+  }
+
+  return trigger.message;
+}
+
+/**
  * Create a channel dispatcher that debounces and serializes handler execution
  * per channel. Prevents duplicate responses when multiple messages arrive
  * during processing.

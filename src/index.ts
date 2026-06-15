@@ -17,7 +17,7 @@ import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine"
 import { handleMessage, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
 import { shouldRespond, type TriggerResult } from "./agent/triggers";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
-import { createChannelDispatcher, type ChannelDispatcher, type DispatchOutcome, type PendingMessage, type SelectedDispatchTrigger } from "./discord/channel-dispatcher";
+import { createChannelDispatcher, selectDispatchMessageForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
 import { getContextHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory, deleteRecentMessages } from "./db/message-repository";
@@ -1366,26 +1366,13 @@ function getOrCreateDispatcher(guildId: string): ChannelDispatcher {
     triggers: config.triggers,
     handler: async (batch, trigger): Promise<DispatchOutcome> => {
       if (trigger === null) return { coveredMessageIds: [] };
-      const selected = selectDispatchMessage(batch, trigger);
+      const selected = selectDispatchMessageForTrigger(batch, trigger);
       if (selected === undefined) return { coveredMessageIds: [] };
       return processTriggeredMessage(selected.message as Message, trigger.result);
     },
   });
   dispatchers.set(guildId, dispatcher);
   return dispatcher;
-}
-
-function selectDispatchMessage(
-  batch: readonly PendingMessage[],
-  trigger: SelectedDispatchTrigger,
-): PendingMessage | undefined {
-  if (trigger.result.reason === "keyword") {
-    for (let i = batch.length - 1; i >= 0; i--) {
-      const message = batch[i];
-      if (message !== undefined && message.authorId === trigger.message.authorId) return message;
-    }
-  }
-  return batch[batch.length - 1];
 }
 
 function evaluateMessageTrigger(message: Message, guildConfig: GuildConfig): TriggerResult {

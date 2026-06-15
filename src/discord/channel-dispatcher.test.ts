@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { createChannelDispatcher, type PendingMessage, type DispatchHandler, type ChannelDispatcher } from "./channel-dispatcher";
+import { createChannelDispatcher, selectDispatchMessageForTrigger, type PendingMessage, type DispatchHandler, type ChannelDispatcher } from "./channel-dispatcher";
 import type { TriggerResult } from "../agent/triggers.ts";
 import type { DispatcherConfig, TriggerConfig } from "../config/types";
 
@@ -30,6 +30,21 @@ function makeMessage(channelId: string, id?: string): unknown {
   return { channelId, id: id ?? `m-${messageCounter}` };
 }
 
+function makePending(
+  id: string,
+  authorId: string,
+  triggerResult: TriggerResult = null,
+  receivedAt = Date.now(),
+): PendingMessage {
+  return {
+    id,
+    message: makeMessage("ch-1", id),
+    receivedAt,
+    authorId,
+    triggerResult,
+  };
+}
+
 function enqueue(
   dispatcher: ChannelDispatcher,
   message: unknown,
@@ -44,6 +59,39 @@ function delay(ms: number): Promise<void> {
 }
 
 describe("createChannelDispatcher", () => {
+  test("selects the mentioned message instead of unrelated later batch chatter", () => {
+    const mentioned = makePending("m-mentioned", "user-1", { reason: "mention" }, 1000);
+    const unrelated = makePending("m-unrelated", "user-2", null, 1001);
+    const selected = selectDispatchMessageForTrigger(
+      [mentioned, unrelated],
+      { result: { reason: "mention" }, message: mentioned },
+    );
+
+    expect(selected?.id).toBe("m-mentioned");
+  });
+
+  test("keeps mention replies pinned to the mentioned message despite same-author follow-up", () => {
+    const mentioned = makePending("m-mentioned", "user-1", { reason: "mention" }, 1000);
+    const followup = makePending("m-followup", "user-1", null, 1001);
+    const selected = selectDispatchMessageForTrigger(
+      [mentioned, followup],
+      { result: { reason: "mention" }, message: mentioned },
+    );
+
+    expect(selected?.id).toBe("m-mentioned");
+  });
+
+  test("selects the randomly triggered message instead of latest batch message", () => {
+    const random = makePending("m-random", "user-1", { reason: "random" }, 1000);
+    const later = makePending("m-later", "user-2", null, 1001);
+    const selected = selectDispatchMessageForTrigger(
+      [random, later],
+      { result: { reason: "random" }, message: random },
+    );
+
+    expect(selected?.id).toBe("m-random");
+  });
+
   test("suppresses queued messages that were already surfaced during current run", async () => {
     let callCount = 0;
     const handler: DispatchHandler = async (msgs) => {
