@@ -58,6 +58,8 @@ export {
 
 export { createMemberListTool, type MemberListToolDeps, type MemberInfo } from "./member-list-tool.ts";
 
+export { createUserMemoryTool, type UserMemoryToolDeps } from "./user-memory-tool.ts";
+
 export { createChatHistoryTool, type ChatHistoryToolDeps, type ChatHistoryMessage } from "./chat-history-tool.ts";
 
 export { createBraveSearchTool, type BraveSearchToolDeps, type BraveSearchResult } from "./brave-search-tool.ts";

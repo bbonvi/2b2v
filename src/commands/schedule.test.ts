@@ -10,6 +10,8 @@ import type { ScheduleRow } from "../db/schedule-repository.ts";
 
 type ReplyFn = ReturnType<typeof mock>;
 
+const FUTURE_LOCAL_DATE_TIME = "2099-06-15 10:00";
+
 function makeInteraction(overrides: {
   subcommand: string;
   guildId?: string | null;
@@ -321,7 +323,7 @@ describe("createScheduleHandler", () => {
       subcommand: "add",
       options: {
         type: "one_off",
-        "run-at": "2026-06-15 10:00",
+        "run-at": FUTURE_LOCAL_DATE_TIME,
         channel: "ch-99",
         message: "Reminder!",
       },
@@ -333,7 +335,7 @@ describe("createScheduleHandler", () => {
     expect(typeof args[0].runAt).toBe("number");
     // Response includes local time and timezone
     const text = replyText(interaction);
-    expect(text).toContain("2026-06-15 10:00");
+    expect(text).toContain(FUTURE_LOCAL_DATE_TIME);
     expect(text).toContain("America/New_York");
   });
 

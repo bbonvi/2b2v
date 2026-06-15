@@ -35,6 +35,7 @@ import { buildMemoryContext, extractAndApplyMemories } from "./agent/memory-serv
 import { createSearchTool } from "./agent/search-tool";
 import { createScheduleTools } from "./agent/schedule-tool";
 import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool";
+import { createUserMemoryTool } from "./agent/user-memory-tool";
 import { createChatHistoryTool } from "./agent/chat-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
 import { createReadChatImagesTool } from "./agent/read-chat-images-tool";
@@ -1017,9 +1018,7 @@ function buildInboundResolvers(guild: Guild): InboundResolvers {
 function buildOutboundResolvers(guild: Guild): OutboundResolvers {
   return {
     user: (username) => {
-      const normalized = username.toLowerCase();
-      const member = guild.members.cache.find((m) => m.user.username.toLowerCase() === normalized);
-      return member !== undefined ? member.id : undefined;
+      return resolveGuildUsername(guild, username);
     },
     channel: (name) => {
       const ch = guild.channels.cache.find((c) => c.name === name);
@@ -1027,6 +1026,16 @@ function buildOutboundResolvers(guild: Guild): OutboundResolvers {
     },
     emoji: (name) => emojiCache.lookup(guild.id, name),
   };
+}
+
+/** Resolve a guild member username case-insensitively, accepting an optional leading @. */
+function resolveGuildUsername(guild: Guild, username: string): string | undefined {
+  const normalized = username.trim().startsWith("@")
+    ? username.trim().slice(1).trim().toLowerCase()
+    : username.trim().toLowerCase();
+  if (normalized === "") return undefined;
+  const member = guild.members.cache.find((m) => m.user.username.toLowerCase() === normalized);
+  return member?.id;
 }
 
 // --- 18. Refresh emoji cache for a guild ---
@@ -1196,11 +1205,7 @@ function buildAgentTools(
   excludedMessageIds?: Iterable<string>,
   onGeneratedImage?: (attachment: GeneratedImageAttachment) => void,
 ) {
-  // Resolve username to userId using guild member cache
-  const resolveUsername = (username: string): string | undefined => {
-    const member = guild.members.cache.find((m) => m.user.username === username);
-    return member?.user.id;
-  };
+  const resolveUsername = (username: string): string | undefined => resolveGuildUsername(guild, username);
 
   const searchTool = createSearchTool({
     db,
@@ -1264,6 +1269,21 @@ function buildAgentTools(
     getMemoryCounts: (gId) => countUserMemoriesByUser(db, gId),
   });
 
+  const userMemoryTool = createUserMemoryTool({
+    db,
+    guildId,
+    resolveUsername: async (username) => {
+      const cached = resolveUsername(username);
+      if (cached !== undefined) return cached;
+      try {
+        await guild.members.fetch();
+      } catch {
+        // Cache-only fallback below handles missing permissions.
+      }
+      return resolveUsername(username);
+    },
+  });
+
   const chatHistoryTool = createChatHistoryTool({
     guildId,
     timezone: guildConfig.timezone,
@@ -1322,7 +1342,7 @@ function buildAgentTools(
     onGeneratedImage: onGeneratedImage ?? (() => {}),
   });
 
-  const tools = [searchTool, ...scheduleTools, memberListTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, codexGenerateImageTool];
+  const tools = [searchTool, ...scheduleTools, memberListTool, userMemoryTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, codexGenerateImageTool];
 
   // Brave search if API key configured
   if (globalConfig.braveApiKey !== undefined && globalConfig.braveApiKey !== "") {
@@ -1496,6 +1516,11 @@ async function processTriggeredMessage(
         };
       },
       persistThread: (input) => insertThread(db, input),
+      onPersistError: (err) => {
+        log.error("failed to persist thread record", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      },
       onSuccess: (payload) => {
         try {
           insertSyntheticEvent(db, {

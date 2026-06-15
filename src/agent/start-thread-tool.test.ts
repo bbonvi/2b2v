@@ -1,4 +1,4 @@
-import { test, expect, describe } from "bun:test";
+import { test, expect, describe, mock } from "bun:test";
 import {
   createStartThreadTool,
   type StartThreadToolDeps,
@@ -117,10 +117,12 @@ describe("createStartThreadTool", () => {
   });
 
   test("returns success even if persist fails (thread exists in Discord)", async () => {
+    const onPersistError = mock(() => {});
     const deps = makeDeps({
       persistThread: () => {
         throw new Error("DB Error");
       },
+      onPersistError,
     });
     const tool = createStartThreadTool(deps);
     const result = await tool.execute("tc1", { name: "Test" }, AbortSignal.timeout(5000));
@@ -130,6 +132,7 @@ describe("createStartThreadTool", () => {
 
     const details = result.details as StartThreadDetails;
     expect(details.threadId).toBe("thread-123");
+    expect(onPersistError).toHaveBeenCalledTimes(1);
   });
 
   test("includes runtime routing hint and parent_chat_id in response", async () => {
@@ -174,6 +177,7 @@ describe("createStartThreadTool", () => {
 
   test("still calls onSuccess when persistThread fails (thread exists)", async () => {
     let successPayload: { threadId: string; threadName: string; parentChatId: string } | undefined;
+    const onPersistError = mock(() => {});
     const deps = makeDeps({
       persistThread: () => {
         throw new Error("DB Error");
@@ -181,6 +185,7 @@ describe("createStartThreadTool", () => {
       onSuccess: (payload) => {
         successPayload = payload;
       },
+      onPersistError,
     });
     const tool = createStartThreadTool(deps);
     await tool.execute("tc1", { name: "My Thread" }, AbortSignal.timeout(5000));
@@ -188,6 +193,7 @@ describe("createStartThreadTool", () => {
     // Even though persist failed, onSuccess should fire since thread exists in Discord
     expect(successPayload).toBeDefined();
     expect(successPayload?.threadId).toBe("thread-123");
+    expect(onPersistError).toHaveBeenCalledTimes(1);
   });
 
   test("works without onSuccess callback (backward compatible)", async () => {

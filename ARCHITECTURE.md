@@ -46,7 +46,7 @@ Search defaults to the current channel/thread/DM and omits repeated `chat_id` ta
 
 `search_messages` is text-first. Discord attachment metadata is opt-in via `include_attachments` because uncached historical messages require per-message Discord API fetches.
 
-Memory is direct SQLite data, not a chat-visible tool. The prompt gets global memories plus current-user memories; other users' stored context is signaled only indirectly, such as through member memory counts.
+Memory is direct SQLite data by default. The prompt gets global memories plus current-user memories. Other users' stored context is signaled through member memory counts, and the read-only `get_user_memory` tool can retrieve a guild member's user-scoped memories by username when the model needs more information about that person.
 
 ## Schedules
 

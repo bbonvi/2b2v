@@ -10,6 +10,9 @@ import {
 } from "./schedule-tool";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 
+const FUTURE_LOCAL_DATE_TIME = "2099-06-15 10:00";
+const FUTURE_LOCAL_EPOCH_MS = Date.UTC(2099, 5, 15, 14, 0, 0);
+
 describe("createScheduleTool (schedule_message)", () => {
   let db: Database;
   let tool: AgentTool;
@@ -142,10 +145,10 @@ describe("createScheduleTool (schedule_message)", () => {
   // --- mode: "at" (absolute local datetime) ---
 
   test("creates a one-off schedule from absolute local datetime (mode: at)", async () => {
-    // 2026-06-15 10:00 in America/New_York = 2026-06-15 14:00 UTC (EDT)
+    // 2099-06-15 10:00 in America/New_York = 2099-06-15 14:00 UTC (EDT)
     const result = await tool.execute(
       "c-at-1",
-      { mode: "at", localDateTime: "2026-06-15 10:00", instructions: "Absolute reminder" },
+      { mode: "at", localDateTime: FUTURE_LOCAL_DATE_TIME, instructions: "Absolute reminder" },
       new AbortController().signal,
       () => {}
     );
@@ -157,10 +160,10 @@ describe("createScheduleTool (schedule_message)", () => {
     if (s === undefined) throw new Error("unreachable");
     expect(s.type).toBe("one_off");
     expect(s.source).toBe("tool");
-    expect(s.runAt).toBe(Date.UTC(2026, 5, 15, 14, 0, 0)); // EDT = UTC-4
+    expect(s.runAt).toBe(FUTURE_LOCAL_EPOCH_MS); // EDT = UTC-4
 
     const text = (result.content[0] as { text: string }).text;
-    expect(text).toContain("2026-06-15 10:00");
+    expect(text).toContain(FUTURE_LOCAL_DATE_TIME);
     expect(text).toContain("America/New_York");
   });
 
@@ -216,7 +219,7 @@ describe("createScheduleTool (schedule_message)", () => {
   test("mode: at calls onScheduleCreated callback", async () => {
     await tool.execute(
       "c-at-cb",
-      { mode: "at", localDateTime: "2026-06-15 10:00", instructions: "future" },
+      { mode: "at", localDateTime: FUTURE_LOCAL_DATE_TIME, instructions: "future" },
       new AbortController().signal,
       () => {}
     );

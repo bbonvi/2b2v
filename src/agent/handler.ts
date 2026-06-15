@@ -805,6 +805,7 @@ const PARALLEL_SAFE_READ_ONLY_TOOLS = new Set([
   "chat_history",
   "fetch_images",
   "fetch_url",
+  "get_user_memory",
   "list_scheduled_messages",
   "list_members",
   "read_chat_images",
