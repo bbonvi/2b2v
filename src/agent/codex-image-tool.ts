@@ -22,6 +22,10 @@ const CodexGenerateImageParams = Type.Object({
     description:
       "The final visual brief sent to Codex image generation. Preserve the user's visual request and concrete subject/composition/style/lighting constraints, but phrase it as a safe neutral image prompt. If retrying after a rejected/no-image attempt, rewrite the prompt instead of resending it exactly: remove or soften words that can be misread as sexual, violent, coercive, or logo/brand-mark-focused while keeping the intended subject and composition. Do not include chat/message tags, status text, tool names, or unrelated additions.",
   }),
+  image_ids: Type.Optional(Type.Array(Type.Number(), {
+    description:
+      "Chat ImageIDs to pass as visual reference inputs. Include the user's attached image, replied-to image, or other specific context image when the request clearly depends on it.",
+  })),
   output_format: Type.Optional(Type.Union([
     Type.Literal("png"),
     Type.Literal("jpeg"),
@@ -42,6 +46,22 @@ export interface GeneratedImageAttachment {
   revisedPrompt?: string;
 }
 
+interface ReferenceImageRecord {
+  id: number;
+  mime: string;
+  width: number;
+  height: number;
+  path: string;
+}
+
+interface ReferenceImageInput {
+  id: number;
+  data: string;
+  mimeType: string;
+  width: number;
+  height: number;
+}
+
 export interface CodexGenerateImageToolDeps {
   codexAuthPath: string;
   model: string;
@@ -49,6 +69,9 @@ export interface CodexGenerateImageToolDeps {
   enableDirectImageFallback?: boolean;
   fetchFn?: typeof fetch;
   logger?: Logger;
+  imageReadMaxPerCall: number;
+  getImageById: (id: number) => ReferenceImageRecord | null;
+  readFile: (path: string) => Buffer | null;
   onGeneratedImage: (attachment: GeneratedImageAttachment) => void;
 }
 
@@ -166,8 +189,29 @@ export function buildCodexImageRequestBody(input: {
   prompt: string;
   model: string;
   outputFormat: OutputFormat;
+  referenceImages?: ReferenceImageInput[];
   sessionId?: string;
 }): Record<string, unknown> {
+  const referenceImages = input.referenceImages ?? [];
+  const referenceSummary = referenceImages.length > 0
+    ? [
+      input.prompt,
+      "",
+      "Reference images from chat are attached below:",
+      ...referenceImages.map((image, index) =>
+        `Reference ${index + 1}: Chat ImageID ${image.id}, ${image.width}x${image.height}, ${image.mimeType}.`
+      ),
+    ].join("\n")
+    : input.prompt;
+  const content: Record<string, unknown>[] = [
+    { type: "input_text", text: referenceSummary },
+    ...referenceImages.map((image) => ({
+      type: "input_image",
+      detail: "auto",
+      image_url: `data:${image.mimeType};base64,${image.data}`,
+    })),
+  ];
+
   return {
     model: input.model,
     store: false,
@@ -176,11 +220,12 @@ export function buildCodexImageRequestBody(input: {
     instructions: "You are an image generation assistant.",
     input: [{
       role: "user",
-      content: [{ type: "input_text", text: input.prompt }],
+      content,
     }],
     tools: [{
       type: "image_generation",
       model: BACKEND_IMAGE_MODEL,
+      action: referenceImages.length > 0 ? "auto" : "generate",
       output_format: input.outputFormat,
       moderation: "low",
       quality: "auto",
@@ -406,6 +451,7 @@ async function requestResponsesImage(input: {
   accountId: string;
   model: string;
   outputFormat: OutputFormat;
+  referenceImages: ReferenceImageInput[];
   sessionId?: string;
   fetchFn: typeof fetch;
   signal?: AbortSignal;
@@ -542,6 +588,7 @@ async function requestImage(input: {
   accountId: string;
   model: string;
   outputFormat: OutputFormat;
+  referenceImages: ReferenceImageInput[];
   sessionId?: string;
   enableDirectImageFallback?: boolean;
   fetchFn: typeof fetch;
@@ -566,7 +613,7 @@ async function requestImage(input: {
     diagnosticEvents: responsesParsed.diagnosticEvents,
   });
 
-  if (input.outputFormat !== "png" || input.enableDirectImageFallback !== true) {
+  if (input.referenceImages.length > 0 || input.outputFormat !== "png" || input.enableDirectImageFallback !== true) {
     return { ...responsesParsed, transport: "responses-tool" };
   }
 
@@ -597,6 +644,44 @@ function outputFormat(value: unknown): OutputFormat {
   return value === "jpeg" || value === "webp" || value === "png" ? value : DEFAULT_OUTPUT_FORMAT;
 }
 
+function parseImageIds(value: unknown): number[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error("image_ids must be an array of chat image IDs.");
+  const result: number[] = [];
+  const seen = new Set<number>();
+  for (const item of value) {
+    if (typeof item !== "number" || !Number.isInteger(item) || item <= 0) {
+      throw new Error("image_ids must contain positive integer chat image IDs.");
+    }
+    if (seen.has(item)) continue;
+    seen.add(item);
+    result.push(item);
+  }
+  return result;
+}
+
+function loadReferenceImages(deps: CodexGenerateImageToolDeps, imageIds: number[]): ReferenceImageInput[] {
+  if (imageIds.length > deps.imageReadMaxPerCall) {
+    throw new Error(`Too many reference image IDs requested (${imageIds.length}). Maximum is ${deps.imageReadMaxPerCall} per call.`);
+  }
+
+  const images: ReferenceImageInput[] = [];
+  for (const id of imageIds) {
+    const record = deps.getImageById(id);
+    if (record === null) throw new Error(`Reference image ${id} was not found.`);
+    const buffer = deps.readFile(record.path);
+    if (buffer === null) throw new Error(`Reference image ${id} could not be read from storage.`);
+    images.push({
+      id: record.id,
+      data: buffer.toString("base64"),
+      mimeType: record.mime,
+      width: record.width,
+      height: record.height,
+    });
+  }
+  return images;
+}
+
 /** Create a tool that generates images through Codex subscription image_generation. */
 export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): AgentTool {
   return {
@@ -605,6 +690,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
     description: [
       "Generate an image with OpenAI Codex's built-in image_generation tool using the ChatGPT/Codex subscription backend. Does not require OPENAI_API_KEY.",
       "Use this only when the user asks for a raster image, photo, illustration, sprite, icon draft, banner, mockup, or similar bitmap output.",
+      "When the visual request is based on a specific chat image, include its ImageID in image_ids. This includes images attached in the user's current post, images on the replied-to message, or images clearly referenced from recent context. Include several ImageIDs when the request asks to combine or compare multiple specific images; omit image_ids only when the image is generic background context or irrelevant.",
       "Before calling, turn the user's request into a concrete, safe, neutral image prompt. Preserve explicit visual requirements, add useful visual specifics for vague requests, and avoid inventing unrelated subjects, brands, text, or narrative details.",
       "If generation fails because Codex returns no image, rejects the prompt, or reports a safety/filter failure, you may retry once with a rewritten prompt that keeps the same visual intent but softens risky wording; do not resend the exact same prompt and do not retry more than once.",
       "The generated image will be attached to the final Discord reply automatically.",
@@ -620,16 +706,19 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
       model: string;
       backendImageModel: "gpt-image-2";
       outputFormat: OutputFormat;
+      referenceImageIds: number[];
       responseId?: string;
       imageGenerationId?: string;
       revisedPrompt?: string;
       transport: "responses-tool" | "direct-images";
       usage?: unknown;
     }>> {
-      const p = params as { prompt: string; output_format?: unknown };
+      const p = params as { prompt: string; output_format?: unknown; image_ids?: unknown };
       const prompt = p.prompt.trim();
       if (prompt === "") throw new Error("Image prompt must not be empty.");
       const output = outputFormat(p.output_format);
+      const imageIds = parseImageIds(p.image_ids);
+      const referenceImages = loadReferenceImages(deps, imageIds);
       const token = await getCodexApiKey(deps.codexAuthPath);
       const accountId = extractChatGptAccountId(token);
       const parsed = await requestImage({
@@ -638,6 +727,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         accountId,
         model: deps.model,
         outputFormat: output,
+        referenceImages,
         sessionId: deps.sessionId,
         enableDirectImageFallback: deps.enableDirectImageFallback,
         fetchFn: deps.fetchFn ?? fetch,
@@ -691,6 +781,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         `Generated image via openai-codex/${deps.model} using backend ${BACKEND_IMAGE_MODEL}.`,
         `Transport: ${parsed.transport}.`,
         `Attachment ID: ${attachmentId}.`,
+        referenceImages.length > 0 ? `Reference ImageIDs: [${referenceImages.map((image) => image.id).join(", ")}].` : "",
         `Status: ${parsed.image.status}.`,
         parsed.image.revisedPrompt !== undefined ? `Revised prompt: ${parsed.image.revisedPrompt}` : "",
         "The generated image is queued and will be attached to the final Discord reply.",
@@ -704,6 +795,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
           model: deps.model,
           backendImageModel: BACKEND_IMAGE_MODEL,
           outputFormat: output,
+          referenceImageIds: referenceImages.map((image) => image.id),
           responseId: parsed.responseId,
           imageGenerationId: parsed.image.id,
           revisedPrompt: parsed.image.revisedPrompt,

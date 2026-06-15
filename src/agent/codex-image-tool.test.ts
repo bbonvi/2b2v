@@ -147,6 +147,7 @@ describe("buildCodexImageRequestBody", () => {
     expect(body.tools).toEqual([{
       type: "image_generation",
       model: "gpt-image-2",
+      action: "generate",
       output_format: "png",
       moderation: "low",
       quality: "auto",
@@ -160,6 +161,48 @@ describe("buildCodexImageRequestBody", () => {
     expect(input[0]?.content[0]?.text).toBe("selfie of a futuristic android at a desk");
     expect(input[0]?.content[0]?.text).not.toContain("Discord");
     expect(input[0]?.content[0]?.text).not.toContain("style guidance");
+  });
+
+  test("includes chat reference images as Responses image inputs", () => {
+    const body = buildCodexImageRequestBody({
+      model: "gpt-5.5",
+      prompt: "turn this into a rainy noir poster",
+      outputFormat: "webp",
+      referenceImages: [{
+        id: 42,
+        data: "aW1hZ2UtZGF0YQ==",
+        mimeType: "image/jpeg",
+        width: 800,
+        height: 600,
+      }],
+    });
+
+    expect(body.tools).toEqual([{
+      type: "image_generation",
+      model: "gpt-image-2",
+      action: "auto",
+      output_format: "webp",
+      moderation: "low",
+      quality: "auto",
+      size: "auto",
+    }]);
+    const input = body.input as Array<{ content: Array<Record<string, unknown>> }>;
+    expect(input[0]?.content).toEqual([
+      {
+        type: "input_text",
+        text: [
+          "turn this into a rainy noir poster",
+          "",
+          "Reference images from chat are attached below:",
+          "Reference 1: Chat ImageID 42, 800x600, image/jpeg.",
+        ].join("\n"),
+      },
+      {
+        type: "input_image",
+        detail: "auto",
+        image_url: "data:image/jpeg;base64,aW1hZ2UtZGF0YQ==",
+      },
+    ]);
   });
 });
 

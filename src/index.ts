@@ -1278,7 +1278,10 @@ function buildAgentTools(
 
   const readChatImagesTool = createReadChatImagesTool({
     imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
-    getImageById: (id: number) => getImageById(db, id),
+    getImageById: (id: number) => {
+      const record = getImageById(db, id);
+      return record !== null && record.guildId === guildId ? record : null;
+    },
     readFile: (path: string) => {
       try {
         return Buffer.from(readFileSync(path));
@@ -1304,6 +1307,18 @@ function buildAgentTools(
     model: codexImageModel,
     sessionId: `2b2v-image:${guildId}:${channelId}:${codexImageModel}`,
     logger: log.child({ component: "codex-image", guildId, channelId }),
+    imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
+    getImageById: (id: number) => {
+      const record = getImageById(db, id);
+      return record !== null && record.guildId === guildId ? record : null;
+    },
+    readFile: (path: string) => {
+      try {
+        return Buffer.from(readFileSync(path));
+      } catch {
+        return null;
+      }
+    },
     onGeneratedImage: onGeneratedImage ?? (() => {}),
   });
 
