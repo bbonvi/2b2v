@@ -2,6 +2,8 @@ import { requestLogStore } from "./store";
 import type { Logger } from "../logger";
 import dashboard from "./index.html";
 
+const DASHBOARD_LOG_ENTRY_LIMIT = 100;
+
 interface DashboardOptions {
   port: number;
   password: string;
@@ -212,7 +214,7 @@ export function startDashboard(opts: DashboardOptions): void {
         if (guildId !== null && guildId !== "") filters.guildId = guildId;
         if (channelId !== null && channelId !== "") filters.channelId = channelId;
         if (authorUsername !== null && authorUsername !== "") filters.authorUsername = authorUsername;
-        return json(requestLogStore.query(filters));
+        return json(requestLogStore.query(filters, DASHBOARD_LOG_ENTRY_LIMIT));
       },
 
       "/api/filters": (req) => {

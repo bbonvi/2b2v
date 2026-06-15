@@ -15,6 +15,12 @@ export interface RequestLogEntry {
   timestamp: string;
 }
 
+export interface RequestLogFilters {
+  guildId?: string;
+  channelId?: string;
+  authorUsername?: string;
+}
+
 export class RequestLogStore {
   private readonly entries: RequestLogEntry[];
   private readonly maxEntries: number;
@@ -68,8 +74,9 @@ export class RequestLogStore {
     renameSync(tempPath, this.filePath);
   }
 
-  query(filters: { guildId?: string; channelId?: string; authorUsername?: string } = {}): RequestLogEntry[] {
+  query(filters: RequestLogFilters = {}, limit?: number): RequestLogEntry[] {
     const result: RequestLogEntry[] = [];
+    if (limit !== undefined && limit <= 0) return result;
     for (let i = 0; i < this.count; i++) {
       const idx = (this.head - 1 - i + this.maxEntries) % this.maxEntries;
       const entry = this.entries[idx] as RequestLogEntry;
@@ -77,6 +84,7 @@ export class RequestLogStore {
       if (filters.channelId !== undefined && entry.channelId !== filters.channelId) continue;
       if (filters.authorUsername !== undefined && entry.authorUsername !== filters.authorUsername) continue;
       result.push(entry);
+      if (limit !== undefined && result.length >= limit) break;
     }
     return result;
   }

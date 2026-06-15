@@ -81,6 +81,17 @@ describe("RequestLogStore", () => {
     expect(store.query({ guildId: "g1", channelId: "c1" })).toHaveLength(1);
   });
 
+  test("query limit caps returned entries after filtering", () => {
+    const store = new RequestLogStore();
+    store.push(makeEntry({ requestId: "r1", guildId: "g1" }));
+    store.push(makeEntry({ requestId: "r2", guildId: "g2" }));
+    store.push(makeEntry({ requestId: "r3", guildId: "g1" }));
+    store.push(makeEntry({ requestId: "r4", guildId: "g1" }));
+
+    expect(store.query({ guildId: "g1" }, 2).map((entry) => entry.requestId)).toEqual(["r4", "r3"]);
+    expect(store.query({}, 0)).toEqual([]);
+  });
+
   test("getFilterOptions returns unique values", () => {
     const store = new RequestLogStore();
     store.push(makeEntry({ guildId: "g1", channelId: "c1", authorUsername: "alice" }));
