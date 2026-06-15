@@ -8,6 +8,16 @@ function makeResponse(body: unknown, status = 200): Response {
   });
 }
 
+function makeSseResponse(events: unknown[]): Response {
+  const body = events
+    .map((event) => `data: ${typeof event === "string" ? event : JSON.stringify(event)}\n\n`)
+    .join("");
+  return new Response(body, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
 describe("completeOpenRouterChat", () => {
   test("includes response_format in outgoing payload", async () => {
     const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
@@ -59,6 +69,39 @@ describe("completeOpenRouterChat", () => {
     const bodyText = typeof bodyRaw === "string" ? bodyRaw : "";
     const body = JSON.parse(bodyText) as { session_id?: string };
     expect(body.session_id).toBe("2b2v:g1:c1:moonshotai/kimi-k2.5");
+
+    fetchSpy.mockRestore();
+  });
+
+  test("streams text deltas and returns accumulated result", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      makeSseResponse([
+        { model: "m", choices: [{ delta: { content: "hel" }, finish_reason: null }] },
+        { model: "m", choices: [{ delta: { content: "lo" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } },
+        "[DONE]",
+      ])
+    );
+    const deltas: string[] = [];
+
+    const result = await completeOpenRouterChat({
+      apiKey: "key",
+      model: "moonshotai/kimi-k2.5",
+      systemPrompt: "system",
+      messages: [{ role: "user", content: "hello" }],
+      onTextDelta: (delta) => {
+        deltas.push(delta);
+      },
+      baseUrl: "https://example.com",
+    });
+
+    const init = fetchSpy.mock.calls[0]?.[1];
+    const bodyRaw = init?.body;
+    const bodyText = typeof bodyRaw === "string" ? bodyRaw : "";
+    const body = JSON.parse(bodyText) as { stream?: boolean };
+    expect(body.stream).toBe(true);
+    expect(deltas).toEqual(["hel", "lo"]);
+    expect(result.text).toBe("hello");
+    expect(result.messageForLogs.role).toBe("assistant");
 
     fetchSpy.mockRestore();
   });

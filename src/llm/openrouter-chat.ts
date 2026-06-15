@@ -54,6 +54,7 @@ export interface OpenRouterChatRequest {
   parallelToolCalls?: boolean;
   signal?: AbortSignal;
   onPayload?: (payload: unknown) => void;
+  onTextDelta?: (delta: string) => void | Promise<void>;
   baseUrl?: string;
 }
 
@@ -191,6 +192,84 @@ function normalizeToolCalls(value: unknown): OpenRouterToolCall[] {
   return calls;
 }
 
+interface StreamingToolCallAccumulator {
+  id: string;
+  type: "function";
+  name: string;
+  arguments: string;
+}
+
+type StreamReadResult =
+  | { done: true; value?: undefined }
+  | { done: false; value: Uint8Array };
+
+function normalizeStreamingToolCalls(calls: StreamingToolCallAccumulator[]): OpenRouterToolCall[] {
+  return calls
+    .filter((call) => call.id !== "" && call.name !== "")
+    .map((call) => ({
+      id: call.id,
+      type: "function",
+      function: {
+        name: call.name,
+        arguments: call.arguments !== "" ? call.arguments : "{}",
+      },
+    }));
+}
+
+function applyStreamingToolCallDelta(
+  calls: StreamingToolCallAccumulator[],
+  rawDelta: unknown,
+): void {
+  if (!Array.isArray(rawDelta)) return;
+  for (const item of rawDelta) {
+    const rec = asRecord(item);
+    if (rec === null) continue;
+    const rawIndex = rec.index;
+    const index = typeof rawIndex === "number" && Number.isInteger(rawIndex)
+      ? rawIndex
+      : calls.length;
+    calls[index] ??= { id: "", type: "function", name: "", arguments: "" };
+    const target = calls[index];
+    if (typeof rec.id === "string" && rec.id !== "") target.id = rec.id;
+    if (rec.type === "function") target.type = "function";
+    const fn = asRecord(rec.function);
+    if (typeof fn?.name === "string" && fn.name !== "") target.name = fn.name;
+    if (typeof fn?.arguments === "string") target.arguments += fn.arguments;
+  }
+}
+
+async function* iterSseData(response: Response): AsyncGenerator<string> {
+  if (response.body === null) return;
+  const reader = response.body.getReader() as unknown as {
+    read: () => Promise<StreamReadResult>;
+  };
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const result = await reader.read();
+    if (result.done) break;
+    const value = result.value;
+    buffer += decoder.decode(value, { stream: true });
+    let separator = buffer.indexOf("\n\n");
+    while (separator !== -1) {
+      const eventText = buffer.slice(0, separator);
+      buffer = buffer.slice(separator + 2);
+      for (const line of eventText.split(/\r?\n/)) {
+        if (!line.startsWith("data:")) continue;
+        yield line.slice("data:".length).trimStart();
+      }
+      separator = buffer.indexOf("\n\n");
+    }
+  }
+  buffer += decoder.decode();
+  if (buffer.trim() !== "") {
+    for (const line of buffer.split(/\r?\n/)) {
+      if (!line.startsWith("data:")) continue;
+      yield line.slice("data:".length).trimStart();
+    }
+  }
+}
+
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
 }
@@ -314,8 +393,12 @@ export async function completeOpenRouterChat(request: OpenRouterChatRequest): Pr
       ...(request.systemPrompt !== "" ? [{ role: "system", content: request.systemPrompt }] : []),
       ...request.messages,
     ],
-    stream: false,
+    stream: request.onTextDelta !== undefined,
   };
+
+  if (request.onTextDelta !== undefined) {
+    payload.stream_options = { include_usage: true };
+  }
 
   if (request.responseFormat !== undefined) {
     payload.response_format = request.responseFormat;
@@ -341,6 +424,10 @@ export async function completeOpenRouterChat(request: OpenRouterChatRequest): Pr
     body: JSON.stringify(payload),
     signal: request.signal,
   });
+
+  if (request.onTextDelta !== undefined) {
+    return await completeOpenRouterStreamingChat(request, response);
+  }
 
   let raw: unknown;
   try {
@@ -393,6 +480,112 @@ export async function completeOpenRouterChat(request: OpenRouterChatRequest): Pr
     toolCalls,
     messageForLogs: normalizeAssistantPayload(rawRecord, request.model, text, finishReason, toolCalls),
     rawResponse: rawRecord,
+  };
+}
+
+async function completeOpenRouterStreamingChat(
+  request: OpenRouterChatRequest,
+  response: Response,
+): Promise<OpenRouterChatResult> {
+  if (!response.ok) {
+    let raw: unknown;
+    try {
+      raw = await response.json();
+    } catch {
+      raw = null;
+    }
+    const rawRecord = asRecord(raw);
+    throw new Error(
+      appendRawResponse(
+        extractOpenRouterErrorMessage(rawRecord, `OpenRouter request failed: ${response.status}`),
+        rawRecord,
+      ),
+    );
+  }
+
+  let text = "";
+  let model = request.model;
+  let finishReason: unknown = "stop";
+  let usage: Record<string, unknown> | null = null;
+  const toolCallAccumulators: StreamingToolCallAccumulator[] = [];
+  const chunks: Record<string, unknown>[] = [];
+
+  try {
+    for await (const data of iterSseData(response)) {
+      if (data === "[DONE]") break;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(data) as unknown;
+      } catch {
+        continue;
+      }
+      const rawRecord = asRecord(parsed);
+      if (rawRecord === null) continue;
+      chunks.push(rawRecord);
+
+      if (typeof rawRecord.model === "string") model = rawRecord.model;
+      const chunkUsage = asRecord(rawRecord.usage);
+      if (chunkUsage !== null) usage = chunkUsage;
+
+      if (asRecord(rawRecord.error) !== null) {
+        throw new Error(
+          appendRawResponse(
+            extractOpenRouterErrorMessage(rawRecord, "OpenRouter returned error payload"),
+            rawRecord,
+          ),
+        );
+      }
+
+      const choices = rawRecord.choices;
+      if (!Array.isArray(choices) || choices.length === 0) continue;
+      const firstChoice = asRecord(choices[0]);
+      if (firstChoice === null) continue;
+      if (firstChoice.finish_reason !== undefined && firstChoice.finish_reason !== null) {
+        finishReason = firstChoice.finish_reason;
+      }
+
+      const delta = asRecord(firstChoice.delta);
+      if (delta === null) continue;
+      const content = delta.content;
+      if (typeof content === "string" && content !== "") {
+        text += content;
+        await request.onTextDelta?.(content);
+      } else if (Array.isArray(content)) {
+        const normalized = normalizeMessageContent(content);
+        if (normalized !== "") {
+          text += normalized;
+          await request.onTextDelta?.(normalized);
+        }
+      }
+      applyStreamingToolCallDelta(toolCallAccumulators, delta.tool_calls);
+    }
+  } catch (error) {
+    if (request.signal?.aborted === true) {
+      const reason: unknown = request.signal.reason;
+      throw reason instanceof Error ? reason : new Error("OpenRouter request aborted");
+    }
+    throw error;
+  }
+
+  const toolCalls = normalizeStreamingToolCalls(toolCallAccumulators);
+  const rawResponse: Record<string, unknown> = {
+    model,
+    choices: [{
+      message: {
+        content: text,
+        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+      },
+      finish_reason: finishReason,
+    }],
+    ...(usage !== null ? { usage } : {}),
+    chunks,
+  };
+
+  return {
+    text,
+    toolCalls,
+    messageForLogs: normalizeAssistantPayload(rawResponse, request.model, text, finishReason, toolCalls),
+    rawResponse,
   };
 }
 

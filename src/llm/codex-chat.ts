@@ -1,4 +1,4 @@
-import { complete } from "@mariozechner/pi-ai";
+import { complete, stream } from "@mariozechner/pi-ai";
 import type {
   AssistantMessage,
   Context,
@@ -226,12 +226,38 @@ function providerParamsWithoutInternalFields(params: Record<string, unknown> | u
 export async function completeCodexChat(request: OpenRouterChatRequest): Promise<OpenRouterChatResult> {
   const model = resolveModel(request.model, "openai-codex");
   const apiKey = request.apiKey !== "" ? request.apiKey : await getCodexApiKey(codexAuthPath(request));
-  const response = await complete(model, buildCodexContext(request), {
+  const context = buildCodexContext(request);
+  const options = {
     apiKey,
     sessionId: request.sessionId,
     signal: request.signal,
     onPayload: request.onPayload,
     ...providerParamsWithoutInternalFields(request.providerParams),
+  };
+  if (request.onTextDelta !== undefined) {
+    const eventStream = stream(model, context, options);
+    for await (const event of eventStream) {
+      if (event.type === "text_delta") {
+        await request.onTextDelta(event.delta);
+      }
+    }
+    const response = await eventStream.result();
+    if (response.stopReason === "error" || response.stopReason === "aborted") {
+      throw new Error(response.errorMessage ?? `OpenAI Codex request failed: ${response.stopReason}`);
+    }
+
+    const text = resultText(response);
+    const toolCalls = resultToolCalls(response);
+    return {
+      text,
+      toolCalls,
+      messageForLogs: messageForLogs(response, text, toolCalls),
+      rawResponse: response as unknown as Record<string, unknown>,
+    };
+  }
+
+  const response = await complete(model, context, {
+    ...options,
   });
 
   if (response.stopReason === "error" || response.stopReason === "aborted") {

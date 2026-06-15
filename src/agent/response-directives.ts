@@ -6,6 +6,7 @@ export type ResponseSegment =
 export interface MessageDelivery {
   reply?: boolean;
   replyTo?: string;
+  keepTyping?: boolean;
 }
 
 export interface ParsedResponseDirectives {
@@ -112,7 +113,7 @@ function unescapeAttributeValue(value: string): string {
 
 function parseMessageDelivery(attrs: string): MessageDelivery | undefined {
   const delivery: MessageDelivery = {};
-  const attrRe = /\s(reply|reply_to)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/gi;
+  const attrRe = /\s(reply|reply_to|keep_typing)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/gi;
   for (;;) {
     const match = attrRe.exec(attrs);
     if (match === null) break;
@@ -122,11 +123,14 @@ function parseMessageDelivery(attrs: string): MessageDelivery | undefined {
     if (rawName.toLowerCase() === "reply") {
       if (value.toLowerCase() === "true") delivery.reply = true;
       if (value.toLowerCase() === "false") delivery.reply = false;
+    } else if (rawName.toLowerCase() === "keep_typing") {
+      if (value.toLowerCase() === "true") delivery.keepTyping = true;
+      if (value.toLowerCase() === "false") delivery.keepTyping = false;
     } else if (value !== "") {
       delivery.replyTo = value;
     }
   }
-  return delivery.reply !== undefined || delivery.replyTo !== undefined ? delivery : undefined;
+  return delivery.reply !== undefined || delivery.replyTo !== undefined || delivery.keepTyping !== undefined ? delivery : undefined;
 }
 
 export function sanitizeVoiceText(text: string): string {

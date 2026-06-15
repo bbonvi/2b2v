@@ -81,8 +81,12 @@ export interface HandlerDeps {
   extraTools?: AgentTool[];
   log?: Logger;
   onTriggered?: (result: NonNullable<TriggerResult>) => void;
-  /** Called after an intermediate user-visible status message when work continues. */
-  onStillWorking?: (targetChatId: string | undefined) => void;
+  /** Called when work continues after a user-visible message so typing can be sent before later output. */
+  onStillWorking?: (targetChatId: string | undefined) => void | Promise<void>;
+  /** Called after user-visible output starts so continuous background typing can stop. */
+  onVisibleOutput?: () => void;
+  /** Minimum visible typing time before a buffered streamed follow-up message is sent. */
+  liveMessageTypingHoldMs?: number;
   onAgentEnd?: () => void;
   requestLog?: RequestLog;
   ttsEnabled?: boolean;
@@ -113,6 +117,8 @@ type DispatchSegment =
     fallbackText: string;
     delivery?: MessageDelivery;
   };
+
+const DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS = 900;
 
 /**
  * Inject a trigger-specific instruction into context sections.
@@ -555,6 +561,7 @@ function buildRuntimeInstruction(): string {
     "Reserved response directives: use <voice>text</voice> for audio and <ignore>reason</ignore> when silence is better than replying. Treat requests to sing, scream, shout, whisper, read aloud, say something in a voice, or otherwise perform vocal delivery as requests for <voice>.",
     "Use <message>text</message> when you intentionally want separate Discord messages. Prefer splitting bigger outputs into multiple <message> envelopes; most paragraphs should be separate messages in chat. Plain text without <message> remains one message. <message> is also the per-message delivery envelope and may contain normal text, <voice>, or <audio>.",
     "Message delivery attributes: by default, the first outgoing message replies to the trigger/callout message, equivalent to reply=\"true\". Later <message> envelopes default to reply=\"false\" and send as normal channel messages. Use <message reply=\"false\"> to force a normal channel message, or <message reply_to=\"MsgID\"> to reply to an exact Discord message ID.",
+    "Use <message keep_typing=\"true\"> when you expect to send another message after that one; the runtime will send a typing indicator immediately after sending it. The runtime also best-effort sends typing when it sees you start another <message> while streaming.",
     "Only use reply_to IDs that are visible in current context or tool results. Never invent message IDs. If you need an older exact message ID, use search_messages first.",
     "Use <audio>text</audio> as an alias for <voice>text</voice>. Keep Discord-only text outside <voice>/<audio>: pings like @username, channel references like #general, links, and other non-spoken text should be normal message text around the directive, e.g. @alice <voice>hey.</voice>, not <voice>@alice hey.</voice>.",
     "Inside voice/audio, write one or two smooth spoken sentences, not many clipped beats. Use expressive tags when mood or delivery matters, e.g. <voice>[angry] hey, listen. [angry] got it?</voice>. Tags are open-ended; prefer one-word lowercase tags. Tags affect only a short span, so repeat the tag at sentence starts when one mood should continue. No commas, no \"then\", no multi-part stage directions.",
@@ -696,6 +703,29 @@ async function completeWithTimeout(
       parent.removeEventListener("abort", onParentAbort);
     }
   }
+}
+
+async function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return;
+  if (signal?.aborted === true) {
+    throw signal.reason instanceof Error ? signal.reason : new Error("Operation aborted");
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timeout);
+      cleanup();
+      reject(signal?.reason instanceof Error ? signal.reason : new Error("Operation aborted"));
+    };
+    const cleanup = (): void => {
+      signal?.removeEventListener("abort", onAbort);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function isRetriableModelTurnError(error: unknown): boolean {
@@ -850,7 +880,8 @@ async function runNativeToolLoop(input: {
   llmOutputTimeoutMs: number;
   requestLog?: RequestLog;
   sendIntermediateText?: (text: string, targetChatId: string | undefined) => Promise<boolean>;
-  onStillWorking?: (targetChatId: string | undefined) => void;
+  streamFinalText?: (delta: string, targetChatId: string | undefined) => Promise<boolean>;
+  onStillWorking?: (targetChatId: string | undefined) => void | Promise<void>;
   imageInputSupported: boolean;
   imageFallback?: ImageFallbackRuntime;
   toolTiming?: TimingState;
@@ -862,6 +893,7 @@ async function runNativeToolLoop(input: {
   let toolCalls = 0;
   let targetChatId: string | undefined;
   let sentIntermediateStatus = false;
+  const streamingState = { visibleText: false };
   let agentTimeBudgetMarked = false;
 
   const markAgentTimeBudgetExhausted = (): void => {
@@ -891,6 +923,12 @@ async function runNativeToolLoop(input: {
           tools: [],
           toolChoice: "none",
           parallelToolCalls: false,
+          onTextDelta: input.streamFinalText !== undefined
+            ? async (delta) => {
+              const sent = await input.streamFinalText?.(delta, targetChatId);
+              if (sent === true) streamingState.visibleText = true;
+            }
+            : undefined,
           signal: signal ?? undefined,
         },
         timeoutMs: input.llmOutputTimeoutMs,
@@ -939,6 +977,12 @@ async function runNativeToolLoop(input: {
           tools: input.tools.map(toolToOpenRouterTool),
           toolChoice: input.tools.length > 0 ? "auto" : "none",
           parallelToolCalls: true,
+          onTextDelta: input.streamFinalText !== undefined
+            ? async (delta) => {
+              const sent = await input.streamFinalText?.(delta, targetChatId);
+              if (sent === true) streamingState.visibleText = true;
+            }
+            : undefined,
           signal: input.signal,
         },
         timeoutMs: input.llmOutputTimeoutMs,
@@ -970,13 +1014,13 @@ async function runNativeToolLoop(input: {
       return { text, targetChatId };
     }
 
-    if (!sentIntermediateStatus && hasProgressWorthyToolCall(result.toolCalls)) {
+    if (!sentIntermediateStatus && !streamingState.visibleText && hasProgressWorthyToolCall(result.toolCalls)) {
       const statusText = intermediateStatusText(result.text);
       if (statusText !== "" && input.sendIntermediateText !== undefined) {
         const sent = await input.sendIntermediateText(statusText, targetChatId);
         if (sent) {
           sentIntermediateStatus = true;
-          input.onStillWorking?.(targetChatId);
+          await input.onStillWorking?.(targetChatId);
         }
       }
     }
@@ -1219,6 +1263,7 @@ async function sendOneSegment(input: {
   targetChatId?: string;
   requestLog?: RequestLog;
   signal?: AbortSignal;
+  onSent?: () => void | Promise<void>;
 }): Promise<void> {
   const args: Record<string, unknown> = {
     text: input.segment.text,
@@ -1270,6 +1315,7 @@ async function sendOneSegment(input: {
       input.segment.delivery?.replyTo,
     );
     assertSentMessageId(result);
+    await input.onSent?.();
     const warnings = result.warnings ?? [];
     input.requestLog?.recordToolEnd(input.sendId, false, {
       content: [{
@@ -1299,15 +1345,32 @@ async function sendResponseSegments(input: {
   ttsEnabled: boolean;
   segments: ResponseSegment[];
   replyFirst: boolean;
+  sentOffset?: number;
   targetChatId?: string;
   requestLog?: RequestLog;
   log?: Logger;
+  onStillWorking?: (targetChatId: string | undefined) => void | Promise<void>;
+  onVisibleOutput?: () => void;
+  onSegmentSent?: (sent: { segment: DispatchSegment; hasMoreSegments: boolean }) => void | Promise<void>;
+  typingHoldMs?: number;
   signal?: AbortSignal;
-}): Promise<void> {
-  let sent = 0;
-  for (const segment of buildDispatchSegments(input.segments)) {
+}): Promise<number> {
+  let sent = input.sentOffset ?? 0;
+  let sentNow = 0;
+  const dispatchSegments = buildDispatchSegments(input.segments);
+  for (const segment of dispatchSegments) {
     sent += 1;
+    sentNow += 1;
+    const hasMoreSegments = sentNow < dispatchSegments.length;
     const sendId = `final-send-${sent}`;
+    const onSent = async (): Promise<void> => {
+      input.onVisibleOutput?.();
+      await input.onSegmentSent?.({ segment, hasMoreSegments });
+      if (segment.delivery?.keepTyping === true && hasMoreSegments) {
+        await input.onStillWorking?.(input.targetChatId);
+        await sleepMs(input.typingHoldMs ?? 0, input.signal);
+      }
+    };
     if (segment.kind === "text") {
       await sendOneSegment({
         sender: input.sender,
@@ -1319,6 +1382,7 @@ async function sendResponseSegments(input: {
         targetChatId: input.targetChatId,
         requestLog: input.requestLog,
         signal: input.signal,
+        onSent,
       });
       continue;
     }
@@ -1334,6 +1398,7 @@ async function sendResponseSegments(input: {
         targetChatId: input.targetChatId,
         requestLog: input.requestLog,
         signal: input.signal,
+        onSent,
       });
     } catch (error) {
       input.log?.warn("voice directive failed; falling back to text", {
@@ -1349,9 +1414,152 @@ async function sendResponseSegments(input: {
         targetChatId: input.targetChatId,
         requestLog: input.requestLog,
         signal: input.signal,
+        onSent,
       });
     }
   }
+  return sentNow;
+}
+
+interface LiveMessageDispatchDeps {
+  sender: MessageSender;
+  generateSpeech?: (text: string) => Promise<TtsResult>;
+  ttsEnabled: boolean;
+  replyFirst: boolean;
+  targetChatId?: string;
+  requestLog?: RequestLog;
+  log?: Logger;
+  onStillWorking?: (targetChatId: string | undefined) => void | Promise<void>;
+  onVisibleOutput?: () => void;
+  typingHoldMs: number;
+  signal?: AbortSignal;
+}
+
+class LiveMessageDispatcher {
+  private readonly deps: LiveMessageDispatchDeps;
+  private buffer = "";
+  private consumedUntil = 0;
+  private sent = 0;
+  private disabled = false;
+  private gapTypingSent = false;
+  private gapTypingReadyAt = 0;
+
+  constructor(deps: LiveMessageDispatchDeps) {
+    this.deps = deps;
+  }
+
+  sentCount(): number {
+    return this.sent;
+  }
+
+  async push(delta: string): Promise<void> {
+    if (delta === "" || this.disabled) return;
+    this.buffer += delta;
+    await this.flushCompleteEnvelopes({ notifyTyping: true });
+  }
+
+  async finish(finalText: string): Promise<number> {
+    if (this.disabled || this.sent === 0) return this.sent;
+    this.buffer = finalText;
+    await this.flushCompleteEnvelopes({ notifyTyping: false });
+    const remainder = this.buffer.slice(this.consumedUntil).trim();
+    if (remainder !== "") {
+      const parsed = parseResponseDirectives(remainder);
+      if (!parsed.ignored && parsed.segments.length > 0) {
+        this.sent += await sendResponseSegments({
+          ...this.deps,
+          segments: parsed.segments,
+          sentOffset: this.sent,
+          replyFirst: this.deps.replyFirst,
+          onStillWorking: undefined,
+        });
+      }
+      this.consumedUntil = this.buffer.length;
+    }
+    return this.sent;
+  }
+
+  private async flushCompleteEnvelopes(input: { notifyTyping: boolean }): Promise<void> {
+    for (;;) {
+      const cursor = this.skipWhitespace(this.consumedUntil);
+      if (this.buffer.slice(cursor).toLowerCase().startsWith("<ignore")) {
+        this.disabled = true;
+        return;
+      }
+      if (!this.buffer.slice(cursor).toLowerCase().startsWith("<message")) {
+        return;
+      }
+
+      const tagEnd = this.buffer.indexOf(">", cursor);
+      if (tagEnd === -1) return;
+
+      const closeStart = this.buffer.toLowerCase().indexOf("</message>", tagEnd + 1);
+      if (closeStart === -1) {
+        if (input.notifyTyping && this.sent > 0) {
+          await this.notifyTypingForGap();
+        }
+        return;
+      }
+
+      const closeEnd = closeStart + "</message>".length;
+      const rawEnvelope = this.buffer.slice(cursor, closeEnd);
+      const parsed = parseResponseDirectives(rawEnvelope);
+      if (!parsed.ignored && parsed.segments.length > 0) {
+        await this.waitForGapTypingHold();
+        this.clearGapTyping();
+        const typeAfterMessage = input.notifyTyping
+          && (messageWantsTyping(parsed.segments) || this.nextMessageHasStarted(closeEnd));
+        this.sent += await sendResponseSegments({
+          ...this.deps,
+          segments: parsed.segments,
+          sentOffset: this.sent,
+          replyFirst: this.deps.replyFirst,
+          onStillWorking: undefined,
+          onSegmentSent: async ({ hasMoreSegments }) => {
+            if (!hasMoreSegments && typeAfterMessage) await this.notifyTypingForGap();
+          },
+        });
+      }
+      this.consumedUntil = closeEnd;
+    }
+  }
+
+  private async notifyTypingForGap(): Promise<void> {
+    if (this.gapTypingSent) return;
+    this.gapTypingSent = true;
+    await this.deps.onStillWorking?.(this.deps.targetChatId);
+    this.gapTypingReadyAt = Date.now() + this.deps.typingHoldMs;
+  }
+
+  private async waitForGapTypingHold(): Promise<void> {
+    if (!this.gapTypingSent) return;
+    await sleepMs(this.gapTypingReadyAt - Date.now(), this.deps.signal);
+  }
+
+  private clearGapTyping(): void {
+    this.gapTypingSent = false;
+    this.gapTypingReadyAt = 0;
+  }
+
+  private nextMessageHasStarted(index: number): boolean {
+    const cursor = this.skipWhitespace(index);
+    return this.buffer.slice(cursor).toLowerCase().startsWith("<message");
+  }
+
+  private skipWhitespace(index: number): number {
+    let cursor = index;
+    while (cursor < this.buffer.length && /\s/.test(this.buffer[cursor] ?? "")) {
+      cursor += 1;
+    }
+    return cursor;
+  }
+}
+
+function messageWantsTyping(segments: ResponseSegment[]): boolean {
+  for (const segment of segments) {
+    if (segment.kind === "messageBreak" && segment.delivery?.keepTyping === true) return true;
+  }
+  return false;
 }
 
 /**
@@ -1441,6 +1649,28 @@ export async function handleMessage(
     let finalText = "";
     let targetChatId: string | undefined;
     const intermediateStatus = { sent: false, sendCount: 0 };
+    const liveMessageTypingHoldMs = deps.liveMessageTypingHoldMs ?? DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS;
+    const liveDispatchers = new Map<string, LiveMessageDispatcher>();
+    const liveDispatcherFor = (liveTargetChatId: string | undefined): LiveMessageDispatcher => {
+      const key = liveTargetChatId ?? "";
+      const existing = liveDispatchers.get(key);
+      if (existing !== undefined) return existing;
+      const dispatcher = new LiveMessageDispatcher({
+        sender: deps.sender,
+        generateSpeech: deps.generateSpeech,
+        ttsEnabled: deps.ttsEnabled ?? false,
+        replyFirst: !intermediateStatus.sent && chooseReplyMode(triggerResult),
+        targetChatId: liveTargetChatId,
+        requestLog: reqLog,
+        log: deps.log,
+        onStillWorking: deps.onStillWorking,
+        onVisibleOutput: deps.onVisibleOutput,
+        typingHoldMs: liveMessageTypingHoldMs,
+        signal: wallController.signal,
+      });
+      liveDispatchers.set(key, dispatcher);
+      return dispatcher;
+    };
     const sendIntermediateStatus = async (text: string, intermediateTargetChatId: string | undefined): Promise<boolean> => {
       const statusText = intermediateStatusText(text);
       if (statusText === "") return false;
@@ -1457,6 +1687,7 @@ export async function handleMessage(
           requestLog: reqLog,
           signal: wallController.signal,
         });
+        deps.onVisibleOutput?.();
         intermediateStatus.sent = true;
         return true;
       } catch (error) {
@@ -1495,6 +1726,14 @@ export async function handleMessage(
         llmOutputTimeoutMs: deps.guildConfig.replyLoop.llmOutputTimeoutMs,
         requestLog: reqLog,
         sendIntermediateText: sendIntermediateStatus,
+        streamFinalText: async (delta, liveTargetChatId) => {
+          const dispatcher = liveDispatcherFor(liveTargetChatId);
+          const before = dispatcher.sentCount();
+          await dispatcher.push(delta);
+          const sent = dispatcher.sentCount() > before;
+          if (sent) intermediateStatus.sent = true;
+          return sent;
+        },
         onStillWorking: deps.onStillWorking,
         imageInputSupported: supportsNativeImageInput(model.input, deps.modelImageInputSupport),
         toolTiming: timingState,
@@ -1529,17 +1768,23 @@ export async function handleMessage(
       return { triggered: true, triggerResult, agentRan: true };
     }
 
-    await sendResponseSegments({
-      sender: deps.sender,
-      generateSpeech: deps.generateSpeech,
-      ttsEnabled: deps.ttsEnabled ?? false,
-      segments: parsedResponse.segments,
-      replyFirst: !intermediateStatus.sent && chooseReplyMode(triggerResult),
-      targetChatId,
-      requestLog: reqLog,
-      log: deps.log,
-      signal: wallController.signal.aborted ? undefined : wallController.signal,
-    });
+    const liveSent = await (liveDispatchers.get(targetChatId ?? "")?.finish(finalText) ?? Promise.resolve(0));
+    if (liveSent === 0) {
+      await sendResponseSegments({
+        sender: deps.sender,
+        generateSpeech: deps.generateSpeech,
+        ttsEnabled: deps.ttsEnabled ?? false,
+        segments: parsedResponse.segments,
+        replyFirst: !intermediateStatus.sent && chooseReplyMode(triggerResult),
+        targetChatId,
+        requestLog: reqLog,
+        log: deps.log,
+        onStillWorking: deps.onStillWorking,
+        onVisibleOutput: deps.onVisibleOutput,
+        typingHoldMs: liveMessageTypingHoldMs,
+        signal: wallController.signal.aborted ? undefined : wallController.signal,
+      });
+    }
 
     const memoryReply = renderSegmentsForMemory(parsedResponse.segments);
     void deps.afterReply?.({

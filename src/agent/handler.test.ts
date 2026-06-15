@@ -125,6 +125,7 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}): HandlerDeps {
     personaPrompt: "You are a test bot.",
     sender,
     completeChat,
+    liveMessageTypingHoldMs: 0,
     ...overrides,
   };
 }
@@ -303,6 +304,7 @@ describe("handleMessage", () => {
       expect(text).toContain("most paragraphs should be separate messages");
       expect(text).toContain("first outgoing message replies to the trigger/callout message");
       expect(text).toContain("Later <message> envelopes default to reply=\"false\"");
+      expect(text).toContain("keep_typing=\"true\"");
       expect(text).toContain("Keep Discord-only text outside <voice>/<audio>");
       expect(text.indexOf("## Memory")).toBeGreaterThan(-1);
       expect(text.indexOf("Reserved response directives")).toBeLessThan(text.indexOf("## Memory"));
@@ -636,6 +638,215 @@ describe("handleMessage", () => {
       { text: "targeted third", reply: false, replyToMessageId: "older-123" },
       { text: "normal fourth", reply: false, replyToMessageId: undefined },
     ]);
+  });
+
+  test("streams final message envelopes as they close", async () => {
+    const lookupTool: AgentTool = {
+      name: "search_messages",
+      label: "Search",
+      description: "Search",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: () => Promise.resolve({ content: [{ type: "text", text: "tool result" }], details: {} }),
+    };
+    const events: string[] = [];
+    let calls = 0;
+    const completeChat: ChatCompleteFn = async (request) => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          text: "",
+          toolCalls: [
+            {
+              id: "call-search",
+              type: "function",
+              function: { name: "search_messages", arguments: "{\"query\":\"x\"}" },
+            },
+            {
+              id: "call-search-skipped",
+              type: "function",
+              function: { name: "search_messages", arguments: "{\"query\":\"y\"}" },
+            },
+          ],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        };
+      }
+
+      expect(request.toolChoice).toBe("none");
+      await request.onTextDelta?.("<message keep_typing=\"true\">first</message><message>sec");
+      events.push("after-first-delta");
+      await request.onTextDelta?.("ond</message>");
+      return {
+        text: "<message keep_typing=\"true\">first</message><message>second</message>",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      };
+    };
+    const senderCalls: Array<{ text: string; reply: boolean }> = [];
+    const sender: MessageSender = (text, reply) => {
+      senderCalls.push({ text, reply });
+      events.push(`sent:${text}`);
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+    const onStillWorking = mock(() => {
+      events.push("typing");
+    });
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        sender,
+        extraTools: [lookupTool],
+        onStillWorking,
+        guildConfig: makeGuildConfig({ replyLoop: { maxToolCalls: 1, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 } }),
+      }),
+    );
+
+    expect(events.indexOf("sent:first")).toBeLessThan(events.indexOf("after-first-delta"));
+    expect(senderCalls).toEqual([
+      { text: "first", reply: true },
+      { text: "second", reply: false },
+    ]);
+    expect(onStillWorking).toHaveBeenCalled();
+    expect(result.responseText).toBe("first\n[msg-break]\nsecond");
+  });
+
+  test("streams ordinary first-turn answers even when tools are available", async () => {
+    const lookupTool: AgentTool = {
+      name: "search_messages",
+      label: "Search",
+      description: "Search",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: () => Promise.resolve({ content: [{ type: "text", text: "unused" }], details: {} }),
+    };
+    const events: string[] = [];
+    const completeChat: ChatCompleteFn = async (request) => {
+      expect(request.toolChoice).toBe("auto");
+      await request.onTextDelta?.("<message>first normal</message><message>second");
+      events.push("after-first-delta");
+      await request.onTextDelta?.(" normal</message>");
+      return {
+        text: "<message>first normal</message><message>second normal</message>",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      };
+    };
+    const senderCalls: Array<{ text: string; reply: boolean }> = [];
+    const sender: MessageSender = (text, reply) => {
+      senderCalls.push({ text, reply });
+      events.push(`sent:${text}`);
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, extraTools: [lookupTool] }),
+    );
+
+    expect(events.indexOf("sent:first normal")).toBeLessThan(events.indexOf("after-first-delta"));
+    expect(senderCalls).toEqual([
+      { text: "first normal", reply: true },
+      { text: "second normal", reply: false },
+    ]);
+    expect(result.responseText).toBe("first normal\n[msg-break]\nsecond normal");
+  });
+
+  test("waits for typing indicator before sending the next streamed message", async () => {
+    const events: string[] = [];
+    let releaseTyping: (() => void) | undefined;
+    const typingGate = new Promise<void>((resolve) => {
+      releaseTyping = resolve;
+    });
+    const completeChat: ChatCompleteFn = async (request) => {
+      const deltaPromise = request.onTextDelta?.("<message>first</message><message>sec") ?? Promise.resolve(false);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(events).toEqual(["sent:first", "typing-start"]);
+      releaseTyping?.();
+      await deltaPromise;
+      await request.onTextDelta?.("ond</message>");
+      return {
+        text: "<message>first</message><message>second</message>",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      };
+    };
+    const sender: MessageSender = (text) => {
+      events.push(`sent:${text}`);
+      return Promise.resolve({ sentMessageId: `sent-${events.length}` });
+    };
+    const onStillWorking = async (): Promise<void> => {
+      events.push("typing-start");
+      await typingGate;
+      events.push("typing-done");
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, onStillWorking }),
+    );
+
+    expect(events).toEqual(["sent:first", "typing-start", "typing-done", "sent:second"]);
+  });
+
+  test("emits typing between streamed messages that are already complete", async () => {
+    const completeChat: ChatCompleteFn = async (request) => {
+      await request.onTextDelta?.("<message keep_typing=\"true\">first</message><message>second</message>");
+      return {
+        text: "<message keep_typing=\"true\">first</message><message>second</message>",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      };
+    };
+    const events: string[] = [];
+    const sentAt: number[] = [];
+    const sender: MessageSender = (text) => {
+      sentAt.push(Date.now());
+      events.push(`sent:${text}`);
+      return Promise.resolve({ sentMessageId: `sent-${events.length}` });
+    };
+    const onStillWorking = mock(() => {
+      events.push("typing");
+    });
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, onStillWorking, liveMessageTypingHoldMs: 25 }),
+    );
+
+    expect(events).toEqual(["sent:first", "typing", "sent:second"]);
+    expect((sentAt[1] ?? 0) - (sentAt[0] ?? 0)).toBeGreaterThanOrEqual(15);
+    expect(onStillWorking).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not emit typing while flushing leftover streamed messages after completion", async () => {
+    const completeChat: ChatCompleteFn = async (request) => {
+      await request.onTextDelta?.("<message>first</message>");
+      return {
+        text: "<message>first</message><message>second</message>",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      };
+    };
+    const senderCalls: string[] = [];
+    const sender: MessageSender = (text) => {
+      senderCalls.push(text);
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+    const onStillWorking = mock(() => {});
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, onStillWorking }),
+    );
+
+    expect(senderCalls).toEqual(["first", "second"]);
+    expect(onStillWorking).toHaveBeenCalledTimes(0);
   });
 
   test("sends voice directive segments as TTS audio", async () => {

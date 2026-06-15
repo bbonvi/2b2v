@@ -143,14 +143,14 @@ function createTypingController(input: {
   resolveTargetChannel: ResolveTargetChannel;
 }): {
   getLastTypingAt: () => number;
-  sendNow: (chatId?: string) => void;
+  sendNow: (chatId?: string) => Promise<void>;
   startLoop: () => void;
   stopLoop: () => void;
 } {
   let lastTypingAt = 0;
   let typingTimer: ReturnType<typeof setInterval> | null = null;
 
-  const sendNow = (chatId?: string): void => {
+  const sendNow = async (chatId?: string): Promise<void> => {
     const targetChannel = (() => {
       if (chatId === undefined) return input.defaultChannel;
       try {
@@ -160,13 +160,13 @@ function createTypingController(input: {
       }
     })();
     lastTypingAt = Date.now();
-    void targetChannel.sendTyping().catch(() => {});
+    await targetChannel.sendTyping().catch(() => {});
   };
 
   const startLoop = (): void => {
     if (typingTimer !== null) return;
-    sendNow();
-    typingTimer = setInterval(() => { sendNow(); }, TYPING_INTERVAL_MS);
+    void sendNow().catch(() => {});
+    typingTimer = setInterval(() => { void sendNow().catch(() => {}); }, TYPING_INTERVAL_MS);
   };
 
   const stopLoop = (): void => {
@@ -681,7 +681,8 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         ttsEnabled,
         generateSpeech,
         onTriggered: () => { typing.startLoop(); },
-        onStillWorking: (targetChatId) => { typing.sendNow(targetChatId); },
+        onStillWorking: (targetChatId) => typing.sendNow(targetChatId),
+        onVisibleOutput: typing.stopLoop,
         onAgentEnd: typing.stopLoop,
         forceTrigger: true,
         triggerInstructions: guildConfig.triggerInstructions,
@@ -1405,7 +1406,8 @@ async function processTriggeredMessage(
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
       onTriggered: () => { typing.startLoop(); },
-      onStillWorking: (targetChatId) => { typing.sendNow(targetChatId); },
+      onStillWorking: (targetChatId) => typing.sendNow(targetChatId),
+      onVisibleOutput: typing.stopLoop,
       onAgentEnd: typing.stopLoop,
       requestLog,
       ttsEnabled,
@@ -1621,7 +1623,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
     // Dispatch to handler: use channel dispatcher if enabled, otherwise call directly
     if (guildConfig.dispatcher.enabled) {
       const triggerResult = evaluateMessageTrigger(message, guildConfig);
-      if (triggerResult?.reason === "keyword") sendTypingForMessage(message);
+      if (triggerResult?.reason === "keyword" || triggerResult?.reason === "mention") sendTypingForMessage(message);
       getOrCreateDispatcher(guildId).enqueue(message, {
         authorId: message.author.id,
         triggerResult,
