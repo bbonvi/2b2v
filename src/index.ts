@@ -14,7 +14,7 @@ import { translateInbound, translateOutbound, buildDisplayNameContext, type Inbo
 import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
-import { handleMessage, type IncomingMessage, type HandlerDeps, type MessageSender } from "./agent/handler";
+import { handleMessage, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
 import { shouldRespond, type TriggerResult } from "./agent/triggers";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
 import { createChannelDispatcher, type ChannelDispatcher, type DispatchOutcome, type PendingMessage, type SelectedDispatchTrigger } from "./discord/channel-dispatcher";
@@ -39,13 +39,14 @@ import { createChatHistoryTool } from "./agent/chat-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
 import { createReadChatImagesTool } from "./agent/read-chat-images-tool";
 import { createFetchImagesTool } from "./agent/fetch-images-tool";
+import { createCodexGenerateImageTool, type GeneratedImageAttachment } from "./agent/codex-image-tool";
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createSummarizeVideoTool } from "./agent/summarize-video-tool";
 import { createStartThreadTool } from "./agent/start-thread-tool";
 import { getSshKeyPaths, ensureSshKeys } from "./ssh/client";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { insertThread, updateThreadActivity, markBotParticipating, listThreadsForContext, getThreadMetadata } from "./db/thread-repository";
-import { processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
+import { processAndStoreImage, processAndStoreImageBuffer, type ImageIngestDeps } from "./db/image-ingest";
 import { deleteExpiredMemories, countUserMemoriesByUser } from "./db/memory-repository";
 import { listUpcomingForContext, createSchedule, deleteScheduleForGuild, listSchedules } from "./db/schedule-repository";
 import { registerSlashCommands } from "./commands/registry";
@@ -59,6 +60,7 @@ import { handleVpnCommand, handleVpnComponent, type VpnHandlerDeps } from "./vpn
 import { getVpnLocale } from "./vpn/i18n";
 import { loadPromptProfile } from "./config/prompt-profile";
 import { buildBackgroundStreamOptions, fetchOpenRouterModelMetadata, imageInputSupportFromMetadata, resolveModel, resolveGuildModelKey, type ModelImageInputSupport } from "./llm/client";
+import { createHash } from "node:crypto";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch, unlinkSync } from "fs";
 import type { Database } from "./db/database";
@@ -71,13 +73,29 @@ const startTime = Date.now();
 const logLevel = (process.env.LOG_LEVEL ?? "info") as LogLevel;
 const log = createLogger({ level: logLevel });
 
-type AttachmentSendPayload = { content?: string; files: AttachmentBuilder[] };
+type AttachmentSendPayload = {
+  content?: string;
+  files?: AttachmentBuilder[];
+  nonce?: string;
+  enforceNonce?: boolean;
+};
 type ResolveTargetChannel = (chatId: string | undefined) => TextChannel;
 
 const TYPING_INTERVAL_MS = 8_000;
+const DEFAULT_CODEX_IMAGE_ROUTER_MODEL = "gpt-5.2";
 
-function buildAttachmentPayload(content: string, attachment: AttachmentBuilder): AttachmentSendPayload {
-  return content === "" ? { files: [attachment] } : { content, files: [attachment] };
+/** Build a Discord create-message nonce short enough for the API from one logical send key. */
+function discordMessageNonce(dedupeKey: string | undefined, part: string): string | undefined {
+  if (dedupeKey === undefined || dedupeKey === "") return undefined;
+  return createHash("sha256").update(`${dedupeKey}:${part}`).digest("base64url").slice(0, 25);
+}
+
+function buildAttachmentPayload(content: string, attachments: AttachmentBuilder[], nonce?: string): AttachmentSendPayload {
+  return {
+    ...(content !== "" ? { content } : {}),
+    ...(attachments.length > 0 ? { files: attachments } : {}),
+    ...(nonce !== undefined ? { nonce, enforceNonce: true } : {}),
+  };
 }
 
 function voiceRawContent(content: string): string {
@@ -89,6 +107,34 @@ function unresolvedEmojiWarnings(warnings: string[]): string[] | undefined {
     .filter((w) => w.startsWith("Failed to resolve emoji:"))
     .map((w) => w.replace("Failed to resolve emoji: ", ""));
   return emojiWarnings.length > 0 ? emojiWarnings : undefined;
+}
+
+function createGeneratedImageRuntime(): {
+  onGeneratedImage: (attachment: GeneratedImageAttachment) => void;
+  consumeGeneratedAttachments: (ids: string[]) => OutboundAttachment[];
+} {
+  const images = new Map<string, GeneratedImageAttachment>();
+  return {
+    onGeneratedImage: (attachment) => {
+      images.set(attachment.id, attachment);
+    },
+    consumeGeneratedAttachments: (ids) => {
+      const attachments: OutboundAttachment[] = [];
+      for (const id of ids) {
+        const image = images.get(id);
+        if (image === undefined) continue;
+        images.delete(id);
+        attachments.push({
+          id: image.id,
+          buffer: image.buffer,
+          filename: image.filename,
+          contentType: image.contentType,
+          historyText: image.revisedPrompt ?? image.prompt,
+        });
+      }
+      return attachments;
+    },
+  };
 }
 
 function createBotMessageStore(input: {
@@ -144,11 +190,12 @@ function createTypingController(input: {
 }): {
   getLastTypingAt: () => number;
   sendNow: (chatId?: string) => Promise<void>;
-  startLoop: () => void;
+  startLoop: (chatId?: string) => void;
   stopLoop: () => void;
 } {
   let lastTypingAt = 0;
   let typingTimer: ReturnType<typeof setInterval> | null = null;
+  let typingChatId: string | undefined;
 
   const sendNow = async (chatId?: string): Promise<void> => {
     const targetChannel = (() => {
@@ -163,10 +210,11 @@ function createTypingController(input: {
     await targetChannel.sendTyping().catch(() => {});
   };
 
-  const startLoop = (): void => {
+  const startLoop = (chatId?: string): void => {
+    typingChatId = chatId;
+    void sendNow(typingChatId).catch(() => {});
     if (typingTimer !== null) return;
-    void sendNow().catch(() => {});
-    typingTimer = setInterval(() => { void sendNow().catch(() => {}); }, TYPING_INTERVAL_MS);
+    typingTimer = setInterval(() => { void sendNow(typingChatId).catch(() => {}); }, TYPING_INTERVAL_MS);
   };
 
   const stopLoop = (): void => {
@@ -194,6 +242,10 @@ function createDiscordMessageSender(input: {
   logger: Logger;
   replySourceMessage?: Message;
   getLastTypingAt?: () => number;
+  imageStore?: {
+    attachmentsDir: string;
+    maxDimension: number;
+  };
 }): MessageSender {
   const storeBotMessage = createBotMessageStore({
     guildId: input.guildId,
@@ -211,7 +263,44 @@ function createDiscordMessageSender(input: {
     }
   }
 
-  return async (text, reply, chatId, voice, _signal, replyToMessageId) => {
+  async function storeBotImageAttachments(
+    messageId: string,
+    targetChannelId: string,
+    attachments: OutboundAttachment[] | undefined,
+  ): Promise<void> {
+    if (attachments === undefined || attachments.length === 0 || input.imageStore === undefined) return;
+    const imageStore = input.imageStore;
+    const results = await Promise.allSettled(attachments.map((attachment) =>
+      processAndStoreImageBuffer({
+        db,
+        attachmentsDir: imageStore.attachmentsDir,
+        maxDimension: imageStore.maxDimension,
+      }, {
+        buffer: attachment.buffer,
+        mimeType: attachment.contentType,
+        messageId,
+        guildId: input.guildId,
+        channelId: targetChannelId,
+        caption: attachment.historyText,
+      })
+    ));
+    for (let i = 0; i < results.length; i += 1) {
+      const result = results[i];
+      if (result?.status !== "rejected") continue;
+      input.logger.warn("bot image attachment ingest failed", {
+        messageId,
+        filename: attachments[i]?.filename,
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      });
+    }
+  }
+
+  function attachmentBuilders(attachments: OutboundAttachment[] | undefined): AttachmentBuilder[] {
+    if (attachments === undefined || attachments.length === 0) return [];
+    return attachments.map((attachment) => new AttachmentBuilder(attachment.buffer, { name: attachment.filename }));
+  }
+
+  return async (text, reply, chatId, voice, _signal, replyToMessageId, attachments, dedupeKey) => {
     const targetChannel = resolveTargetChannel(chatId);
     const targetChannelId = targetChannel.id;
 
@@ -277,11 +366,16 @@ function createDiscordMessageSender(input: {
 
     if (voice !== undefined) {
       const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
+      const imageAttachments = attachmentBuilders(attachments);
       const warnings: string[] = [];
       const translated = translateOutbound(text, input.outboundResolvers, warnings);
       const chunks = splitMessage(translated);
       const firstChunk = chunks[0] ?? "";
-      const payload = buildAttachmentPayload(firstChunk, attachment);
+      const payload = buildAttachmentPayload(
+        firstChunk,
+        [attachment, ...imageAttachments],
+        discordMessageNonce(dedupeKey, "voice-0"),
+      );
       let sent: Message;
       if (replyToMessageId !== undefined) {
         sent = await replyToSpecific(payload);
@@ -291,9 +385,14 @@ function createDiscordMessageSender(input: {
         sent = await sendToTargetChannel(payload);
       }
       storeBotMessage(sent.id, targetChannelId, voiceRawContent(firstChunk), voice.historyText ?? text);
+      await storeBotImageAttachments(sent.id, targetChannelId, attachments);
       for (let i = 1; i < chunks.length; i++) {
         const chunk = chunks[i] as string;
-        const followup = await sendToTargetChannel(chunk);
+        const followup = await sendToTargetChannel(buildAttachmentPayload(
+          chunk,
+          [],
+          discordMessageNonce(dedupeKey, `voice-${i}`),
+        ));
         storeBotMessage(followup.id, targetChannelId, chunk, chunk);
       }
       if (targetChannel.isThread()) {
@@ -305,20 +404,28 @@ function createDiscordMessageSender(input: {
 
     const warnings: string[] = [];
     const translated = translateOutbound(text, input.outboundResolvers, warnings);
+    const imageAttachments = attachmentBuilders(attachments);
     const chunks = splitMessage(translated);
+    if (chunks.length === 0 && imageAttachments.length > 0) chunks.push("");
     let firstId = "";
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i] as string;
+      const payload = buildAttachmentPayload(
+        chunk,
+        i === 0 ? imageAttachments : [],
+        discordMessageNonce(dedupeKey, `text-${i}`),
+      );
       let sent: Message;
       if (replyToMessageId !== undefined && i === 0) {
-        sent = await replyToSpecific(chunk);
+        sent = await replyToSpecific(payload);
       } else if (reply && i === 0) {
-        sent = await replyToSource(chunk);
+        sent = await replyToSource(payload);
       } else {
-        sent = await sendToTargetChannel(chunk);
+        sent = await sendToTargetChannel(payload);
       }
       if (i === 0) firstId = sent.id;
       storeBotMessage(sent.id, targetChannelId, chunk, i === 0 ? text : chunk);
+      if (i === 0) await storeBotImageAttachments(sent.id, targetChannelId, attachments);
     }
     if (targetChannel.isThread()) {
       updateThreadActivity(db, targetChannelId, { lastActivityAt: Date.now(), lastMessageId: firstId });
@@ -598,6 +705,10 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         botUsername,
         logger: scheduleLog,
         getLastTypingAt: typing.getLastTypingAt,
+        imageStore: {
+          attachmentsDir: guildConfig.attachmentsDir,
+          maxDimension: guildConfig.imageMaxDimension,
+        },
       });
 
       // Build simplified context for scheduled task
@@ -642,12 +753,14 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         isThread,
       );
 
+      const generatedImages = createGeneratedImageRuntime();
       const extraTools = buildAgentTools(
         guildId,
         channelId,
         guildConfig,
         guild,
         context.contextMessageIds,
+        generatedImages.onGeneratedImage,
       );
 
       // Build synthetic incoming message
@@ -680,8 +793,9 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         requestLog,
         ttsEnabled,
         generateSpeech,
+        consumeGeneratedAttachments: generatedImages.consumeGeneratedAttachments,
         onTriggered: () => { typing.startLoop(); },
-        onStillWorking: (targetChatId) => typing.sendNow(targetChatId),
+        onStillWorking: (targetChatId) => { typing.startLoop(targetChatId); },
         onVisibleOutput: typing.stopLoop,
         onAgentEnd: typing.stopLoop,
         forceTrigger: true,
@@ -1080,6 +1194,7 @@ function buildAgentTools(
   guildConfig: GuildConfig,
   guild: Guild,
   excludedMessageIds?: Iterable<string>,
+  onGeneratedImage?: (attachment: GeneratedImageAttachment) => void,
 ) {
   // Resolve username to userId using guild member cache
   const resolveUsername = (username: string): string | undefined => {
@@ -1181,7 +1296,18 @@ function buildAgentTools(
   const fetchUrlTool = createFetchUrlTool();
   const summarizeVideoTool = createSummarizeVideoTool();
 
-  const tools = [searchTool, ...scheduleTools, memberListTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool];
+  const codexImageModel = guildConfig.llmProvider === "openai-codex"
+    ? guildConfig.model ?? globalConfig.defaultModel
+    : DEFAULT_CODEX_IMAGE_ROUTER_MODEL;
+  const codexGenerateImageTool = createCodexGenerateImageTool({
+    codexAuthPath: globalConfig.codexAuthPath,
+    model: codexImageModel,
+    sessionId: `2b2v-image:${guildId}:${channelId}:${codexImageModel}`,
+    logger: log.child({ component: "codex-image", guildId, channelId }),
+    onGeneratedImage: onGeneratedImage ?? (() => {}),
+  });
+
+  const tools = [searchTool, ...scheduleTools, memberListTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, codexGenerateImageTool];
 
   // Brave search if API key configured
   if (globalConfig.braveApiKey !== undefined && globalConfig.braveApiKey !== "") {
@@ -1279,6 +1405,10 @@ async function processTriggeredMessage(
       logger: log,
       replySourceMessage: message,
       getLastTypingAt: typing.getLastTypingAt,
+      imageStore: {
+        attachmentsDir: guildConfig.attachmentsDir,
+        maxDimension: guildConfig.imageMaxDimension,
+      },
     });
 
     const ingestedImages = getImagesByMessageId(db, message.id);
@@ -1370,6 +1500,7 @@ async function processTriggeredMessage(
         }
       },
     });
+    const generatedImages = createGeneratedImageRuntime();
     const extraTools = [
       ...buildAgentTools(
         guildId,
@@ -1377,6 +1508,7 @@ async function processTriggeredMessage(
         guildConfig,
         guild,
         context.contextMessageIds,
+        generatedImages.onGeneratedImage,
       ),
       startThreadTool,
     ];
@@ -1406,12 +1538,13 @@ async function processTriggeredMessage(
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
       onTriggered: () => { typing.startLoop(); },
-      onStillWorking: (targetChatId) => typing.sendNow(targetChatId),
+      onStillWorking: (targetChatId) => { typing.startLoop(targetChatId); },
       onVisibleOutput: typing.stopLoop,
       onAgentEnd: typing.stopLoop,
       requestLog,
       ttsEnabled,
       generateSpeech,
+      consumeGeneratedAttachments: generatedImages.consumeGeneratedAttachments,
       triggerOverride,
       triggerInstructions: guildConfig.triggerInstructions,
       modelImageInputSupport: getModelImageInputSupport(guildConfig),

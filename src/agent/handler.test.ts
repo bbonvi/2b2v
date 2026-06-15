@@ -849,6 +849,35 @@ describe("handleMessage", () => {
     expect(onStillWorking).toHaveBeenCalledTimes(0);
   });
 
+  test("does not slice final plain text with a streamed message envelope offset", async () => {
+    const finalText = "Не вышло и во второй раз. Похоже, генератор сегодня решил умереть стоя, очень драматично.";
+    const completeChat: ChatCompleteFn = async (request) => {
+      await request.onTextDelta?.("<message keep_typing=\"true\">be right back</message>");
+      return {
+        text: finalText,
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      };
+    };
+    const senderCalls: Array<{ text: string; reply: boolean }> = [];
+    const sender: MessageSender = (text, reply) => {
+      senderCalls.push({ text, reply });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender }),
+    );
+
+    expect(senderCalls).toEqual([
+      { text: "be right back", reply: true },
+      { text: finalText, reply: false },
+    ]);
+    expect(result.responseText).toBe(finalText);
+  });
+
   test("sends voice directive segments as TTS audio", async () => {
     const completeChat: ChatCompleteFn = () => Promise.resolve({
       text: "Text first <voice>[whispers] quiet line</voice> text after",
@@ -1219,6 +1248,74 @@ describe("handleMessage", () => {
     expect(result.responseText).toBe("answer is 42");
     expect(toolCalls).toEqual([{ query: "x" }]);
     expect(sender).toHaveBeenCalledTimes(1);
+  });
+
+  test("attaches generated image tool output to the final reply", async () => {
+    const tool: AgentTool = {
+      name: "codex_generate_image",
+      label: "Codex Image",
+      description: "Generate image",
+      parameters: Type.Object({ prompt: Type.String() }),
+      execute: () => Promise.resolve({
+        content: [{ type: "text", text: "Generated image queued." }],
+        details: { generatedAttachmentIds: ["img-1"] },
+      }),
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "codex_generate_image", arguments: "{\"prompt\":\"a blue house\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      return Promise.resolve({
+        text: "here",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "here" }] },
+      });
+    };
+
+    const sentAttachments: unknown[] = [];
+    const sender: MessageSender = (_text, _reply, _chatId, _voice, _signal, _replyToMessageId, attachments) => {
+      sentAttachments.push(attachments);
+      return Promise.resolve({ sentMessageId: "sent-1" });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        completeChat,
+        sender,
+        consumeGeneratedAttachments: (ids) => ids.map((id) => ({
+          id,
+          buffer: Buffer.from("fake"),
+          filename: `${id}.png`,
+          contentType: "image/png",
+          historyText: "a blue house",
+        })),
+      }),
+    );
+
+    expect(sentAttachments).toEqual([[
+      {
+        id: "img-1",
+        buffer: Buffer.from("fake"),
+        filename: "img-1.png",
+        contentType: "image/png",
+        historyText: "a blue house",
+      },
+    ]]);
   });
 
   test("runs safe read-only tool calls in parallel and preserves tool message order", async () => {

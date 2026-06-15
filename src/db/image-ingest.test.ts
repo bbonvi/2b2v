@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import { createDatabase, type Database } from "./database.ts";
-import { processAndStoreImage, processImageBuffer, type ImageIngestDeps } from "./image-ingest.ts";
+import { processAndStoreImage, processAndStoreImageBuffer, processImageBuffer, type ImageIngestDeps } from "./image-ingest.ts";
 import { getImagesByMessageId } from "./image-repository.ts";
 import { imagePath } from "./image-storage.ts";
 import { join } from "path";
@@ -250,5 +250,32 @@ describe("processAndStoreImage", () => {
 
     const all = getImagesByMessageId(db, "msg-1");
     expect(all).toHaveLength(2);
+  });
+
+  test("stores an already downloaded bot image buffer like an inbound image", async () => {
+    const testBuffer = await createTestImage(900, 600, "png");
+
+    const record = await processAndStoreImageBuffer({
+      db,
+      attachmentsDir,
+      maxDimension: 512,
+    }, {
+      buffer: testBuffer,
+      mimeType: "image/png",
+      messageId: "bot-msg-1",
+      guildId: "g1",
+      channelId: "c1",
+      caption: "generated prompt",
+    });
+
+    expect(record.mime).toBe("image/jpeg");
+    expect(record.caption).toBe("generated prompt");
+    expect(record.width).toBeLessThanOrEqual(512);
+    expect(existsSync(record.path)).toBe(true);
+
+    const fromDb = getImagesByMessageId(db, "bot-msg-1");
+    expect(fromDb).toHaveLength(1);
+    expect(fromDb[0]?.id).toBe(record.id);
+    expect(fromDb[0]?.caption).toBe("generated prompt");
   });
 });

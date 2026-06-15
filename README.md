@@ -8,6 +8,7 @@ Personal Discord bot with a single persona reply loop, native tool calling, and 
 - Splits responses into multiple short messages with natural delays
 - Remembers durable facts and preferences
 - Stores and recalls images shared in chats
+- Generates images through Codex subscription auth and stores bot images like chat images
 - Schedules messages (recurring, one-off, relative time)
 - Searches the web via Brave Search
 - Reads webpages and extracts YouTube/media transcripts for summaries
@@ -47,7 +48,7 @@ Use the dev compose file for live reload. Use the production command with `-p 2b
 
 ## Environment variables
 
-Required: `DISCORD_TOKEN` plus credentials for the configured LLM provider. The default provider is OpenRouter, which requires `OPENROUTER_API_KEY`; `llmProvider: openai-codex` uses ChatGPT subscription OAuth credentials from `CODEX_AUTH_PATH` or `data/codex-auth.json`. Run `bun run codex:login -- --auth data/codex-auth.json` locally, or `docker compose -f docker-compose.dev.yml exec bot bun run codex:login -- --auth data/codex-auth.json` for the dev container volume. Treat the Codex auth JSON as a secret. Optional feature keys: `BRAVE_API_KEY` for web search, `ELEVENLABS_API_KEY` for voice. Optional media transcription fallbacks can use `GROQ_API_KEY`, `ASSEMBLYAI_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `FAL_KEY`. See `.env.example` and `.env.prod.example` for infrastructure, dashboard, logging, and storage variables.
+Required: `DISCORD_TOKEN` plus credentials for the configured LLM provider. The default provider is OpenRouter, which requires `OPENROUTER_API_KEY`; `llmProvider: openai-codex` uses ChatGPT subscription OAuth credentials from `CODEX_AUTH_PATH` or `data/codex-auth.json`. Run `bun run codex:login -- --auth data/codex-auth.json` locally, or `docker compose -f docker-compose.dev.yml exec bot bun run codex:login -- --auth data/codex-auth.json` for the dev container volume. Treat the Codex auth JSON as a secret. The `codex_generate_image` tool also uses this Codex subscription auth, targets `gpt-image-2` through the Codex image backend, and does not require `OPENAI_API_KEY`. Optional feature keys: `BRAVE_API_KEY` for web search, `ELEVENLABS_API_KEY` for voice. Optional media transcription fallbacks can use `GROQ_API_KEY`, `ASSEMBLYAI_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `FAL_KEY`. See `.env.example` and `.env.prod.example` for infrastructure, dashboard, logging, and storage variables.
 
 ## Configuration
 

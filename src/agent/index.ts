@@ -66,6 +66,12 @@ export { createReadChatImagesTool, type ReadChatImagesToolDeps } from "./read-ch
 
 export { createFetchImagesTool, type FetchImagesToolDeps } from "./fetch-images-tool.ts";
 
+export {
+  createCodexGenerateImageTool,
+  type CodexGenerateImageToolDeps,
+  type GeneratedImageAttachment,
+} from "./codex-image-tool.ts";
+
 export { fetchMissingReplyTargets, type ReplyFallbackDeps, type FetchedDiscordMessage } from "./reply-target-fallback.ts";
 
 export { createFetchUrlTool, type FetchUrlToolDeps } from "./fetch-url-tool.ts";

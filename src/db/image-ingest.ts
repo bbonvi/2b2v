@@ -19,12 +19,27 @@ export interface ImageIngestDeps {
   fetchFn: (url: string) => Promise<{ ok: boolean; status?: number; arrayBuffer(): Promise<ArrayBuffer> }>;
 }
 
+export interface ImageStoreDeps {
+  db: Database;
+  attachmentsDir: string;
+  maxDimension: number;
+}
+
 export interface ImageIngestInput {
   url: string;
   mimeType: string;
   messageId: string;
   guildId: string;
   channelId: string;
+}
+
+export interface ImageBufferStoreInput {
+  buffer: Buffer;
+  mimeType: string;
+  messageId: string;
+  guildId: string;
+  channelId: string;
+  caption?: string;
 }
 
 /**
@@ -86,9 +101,21 @@ export async function processAndStoreImage(
   }
 
   const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
+  return processAndStoreImageBuffer(deps, {
+    buffer: Buffer.from(arrayBuffer),
+    mimeType: input.mimeType,
+    messageId: input.messageId,
+    guildId: input.guildId,
+    channelId: input.channelId,
+  });
+}
 
-  const processed = await processImageBuffer(buffer, input.mimeType, deps.maxDimension);
+/** Process and persist an already downloaded image buffer. */
+export async function processAndStoreImageBuffer(
+  deps: ImageStoreDeps,
+  input: ImageBufferStoreInput,
+): Promise<ImageRecord> {
+  const processed = await processImageBuffer(input.buffer, input.mimeType, deps.maxDimension);
 
   // Insert with a placeholder path to get the autoincrement ID
   const record = insertImage(deps.db, {
@@ -100,6 +127,7 @@ export async function processAndStoreImage(
     width: processed.width,
     height: processed.height,
     createdAt: Date.now(),
+    caption: input.caption,
   });
 
   // Compute deterministic path from the ID

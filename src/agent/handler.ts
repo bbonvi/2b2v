@@ -60,6 +60,15 @@ export interface VoiceAttachment {
   historyText?: string;
 }
 
+/** Binary attachment queued for an outgoing Discord message. */
+export interface OutboundAttachment {
+  id: string;
+  buffer: Buffer;
+  filename: string;
+  contentType: string;
+  historyText?: string;
+}
+
 /** Callback that performs the actual Discord send. */
 export type MessageSender = (
   text: string,
@@ -68,6 +77,8 @@ export type MessageSender = (
   voice?: VoiceAttachment,
   signal?: AbortSignal,
   replyToMessageId?: string,
+  attachments?: OutboundAttachment[],
+  dedupeKey?: string,
 ) => Promise<{ sentMessageId: string; warnings?: string[] }>;
 
 /** Dependencies injected into the handler. No direct discord.js coupling. */
@@ -98,6 +109,8 @@ export interface HandlerDeps {
   afterReply?: (request: MemoryExtractionRequest) => Promise<void>;
   /** Live OpenRouter metadata result for the selected main model. Unknown means try native image input first. */
   modelImageInputSupport?: ModelImageInputSupport;
+  /** Consume generated image attachments by opaque IDs returned from image tools. */
+  consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
 }
 
 export interface HandleResult {
@@ -534,6 +547,7 @@ function intermediateStatusText(text: string): string {
 function hasProgressWorthyToolCall(calls: OpenRouterToolCall[]): boolean {
   return calls.some((call) =>
     call.function.name === "web_search"
+    || call.function.name === "codex_generate_image"
     || call.function.name === "fetch_url"
     || call.function.name === "summarize_video"
     || call.function.name === "search_messages"
@@ -549,6 +563,7 @@ function buildRuntimeInstruction(): string {
     "If a request does not make sense, uses vague references, seems to depend on something said earlier, or you do not understand what the user wants, usually search chat history before asking. Try several targeted search_messages calls when useful: semantic topic phrases, literal exact words, likely usernames/channels/time filters, and context mode around promising hits.",
     "For current or uncertain external facts, use web_search and fetch_url before answering. Prefer English search queries unless the topic is language-specific, then answer in the user's language. Fetch the most relevant result when snippets are not enough.",
     "Use summarize_video for YouTube, video, audio, or podcast URLs when the user asks for a summary or wants to understand the media content.",
+    "Use codex_generate_image when the user asks you to create, generate, draw, render, or make a new raster image/photo/illustration/sprite/banner/mockup. Its prompt argument is the final visual brief sent to Codex image generation: preserve the user's exact visual request, relevant context, and concrete subject/composition/style/lighting/avoid constraints. Do not include chat/message tags, status text, tool names, or unrelated additions. The generated image is automatically attached to your final Discord reply.",
     "For missing or old chat context, use search_messages. Prefer semantic search for vague meaning and literal search for exact words, commands, filenames, URLs, or error strings. Search enough to reconstruct the likely context, then answer naturally instead of replaying found messages.",
     "When you need several independent read-only lookups, call them together in one tool turn.",
     "Use as many tool calls as the task actually needs. Do not stop early just to conserve calls, but avoid repetitive or low-value loops.",
@@ -561,7 +576,7 @@ function buildRuntimeInstruction(): string {
     "Reserved response directives: use <voice>text</voice> for audio and <ignore>reason</ignore> when silence is better than replying. Treat requests to sing, scream, shout, whisper, read aloud, say something in a voice, or otherwise perform vocal delivery as requests for <voice>.",
     "Use <message>text</message> when you intentionally want separate Discord messages. Prefer splitting bigger outputs into multiple <message> envelopes; most paragraphs should be separate messages in chat. Plain text without <message> remains one message. <message> is also the per-message delivery envelope and may contain normal text, <voice>, or <audio>.",
     "Message delivery attributes: by default, the first outgoing message replies to the trigger/callout message, equivalent to reply=\"true\". Later <message> envelopes default to reply=\"false\" and send as normal channel messages. Use <message reply=\"false\"> to force a normal channel message, or <message reply_to=\"MsgID\"> to reply to an exact Discord message ID.",
-    "Use <message keep_typing=\"true\"> when you expect to send another message after that one; the runtime will send a typing indicator immediately after sending it. The runtime also best-effort sends typing when it sees you start another <message> while streaming.",
+    "Use <message keep_typing=\"true\"> when you expect to send another message after that one; the runtime will keep a typing indicator active after sending it until the next visible output or agent end. The runtime also best-effort sends typing when it sees you start another <message> while streaming.",
     "Only use reply_to IDs that are visible in current context or tool results. Never invent message IDs. If you need an older exact message ID, use search_messages first.",
     "Use <audio>text</audio> as an alias for <voice>text</voice>. Keep Discord-only text outside <voice>/<audio>: pings like @username, channel references like #general, links, and other non-spoken text should be normal message text around the directive, e.g. @alice <voice>hey.</voice>, not <voice>@alice hey.</voice>.",
     "Inside voice/audio, write one or two smooth spoken sentences, not many clipped beats. Use expressive tags when mood or delivery matters, e.g. <voice>[angry] hey, listen. [angry] got it?</voice>. Tags are open-ended; prefer one-word lowercase tags. Tags affect only a short span, so repeat the tag at sentence starts when one mood should continue. No commas, no \"then\", no multi-part stage directions.",
@@ -811,6 +826,13 @@ interface ExecutedToolCall {
   errorText?: string;
 }
 
+function generatedAttachmentIdsFromToolResult(result: AgentToolResult<unknown>): string[] {
+  const details = isRecord(result.details) ? result.details : undefined;
+  const ids = details?.generatedAttachmentIds;
+  if (!Array.isArray(ids)) return [];
+  return ids.filter((id): id is string => typeof id === "string" && id !== "");
+}
+
 async function executeToolCallForLoop(input: {
   tool: AgentTool;
   call: OpenRouterToolCall;
@@ -837,6 +859,8 @@ async function renderExecutedToolCall(input: {
   imageFallback?: ImageFallbackRuntime;
   imageFollowUpSources: Map<OpenRouterMessage, ImageFollowUpSource>;
   imageMessages: OpenRouterMessage[];
+  consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
+  pendingAttachments: OutboundAttachment[];
 }): Promise<{ resultText: string; createdThreadId: string | null }> {
   if (input.execution.result === undefined) {
     return {
@@ -847,6 +871,10 @@ async function renderExecutedToolCall(input: {
 
   const { call, tool, result } = input.execution;
   const createdThreadId = detectCreatedThreadId(tool, result);
+  const generatedAttachmentIds = generatedAttachmentIdsFromToolResult(result);
+  if (generatedAttachmentIds.length > 0) {
+    input.pendingAttachments.push(...(input.consumeGeneratedAttachments?.(generatedAttachmentIds) ?? []));
+  }
   const images = imagePartsFromToolResult(result);
   let resultText = summarizeToolResult(result);
 
@@ -884,6 +912,8 @@ async function runNativeToolLoop(input: {
   onStillWorking?: (targetChatId: string | undefined) => void | Promise<void>;
   imageInputSupported: boolean;
   imageFallback?: ImageFallbackRuntime;
+  consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
+  pendingAttachments: OutboundAttachment[];
   toolTiming?: TimingState;
   log?: Logger;
   signal?: AbortSignal;
@@ -1060,6 +1090,8 @@ async function runNativeToolLoop(input: {
           imageFallback: input.imageFallback,
           imageFollowUpSources,
           imageMessages,
+          consumeGeneratedAttachments: input.consumeGeneratedAttachments,
+          pendingAttachments: input.pendingAttachments,
         });
         if (rendered.createdThreadId !== null) targetChatId = rendered.createdThreadId;
         input.messages.push(toolMessage(execution.call, rendered.resultText));
@@ -1120,6 +1152,8 @@ async function runNativeToolLoop(input: {
         imageFallback: input.imageFallback,
         imageFollowUpSources,
         imageMessages,
+        consumeGeneratedAttachments: input.consumeGeneratedAttachments,
+        pendingAttachments: input.pendingAttachments,
       });
       if (rendered.createdThreadId !== null) targetChatId = rendered.createdThreadId;
       input.messages.push(toolMessage(call, rendered.resultText));
@@ -1253,6 +1287,14 @@ function effectiveReply(input: {
   return input.targetChatId === undefined ? input.defaultReply : false;
 }
 
+/** Builds a stable key for one logical Discord send so transport retries can be idempotent. */
+function discordSendDedupeKey(input: { requestLog?: RequestLog; sendId: string }): string {
+  const requestScope = input.requestLog?.requestId ?? `${Date.now()}:${Math.random()}`;
+  return createHash("sha256")
+    .update(`${requestScope}:${input.sendId}`)
+    .digest("base64url");
+}
+
 async function sendOneSegment(input: {
   sender: MessageSender;
   generateSpeech?: (text: string) => Promise<TtsResult>;
@@ -1261,6 +1303,7 @@ async function sendOneSegment(input: {
   sendId: string;
   reply: boolean;
   targetChatId?: string;
+  attachments?: OutboundAttachment[];
   requestLog?: RequestLog;
   signal?: AbortSignal;
   onSent?: () => void | Promise<void>;
@@ -1274,6 +1317,9 @@ async function sendOneSegment(input: {
     }),
     ...(input.segment.delivery?.replyTo !== undefined ? { reply_to_message_id: input.segment.delivery.replyTo } : {}),
     ...(input.targetChatId !== undefined ? { chat_id: input.targetChatId } : {}),
+    ...(input.attachments !== undefined && input.attachments.length > 0
+      ? { attachments: input.attachments.map((attachment) => attachment.filename) }
+      : {}),
   };
   const toolName = input.segment.kind === "voice" ? "send_voice" : "send_text";
   if (input.segment.kind === "voice") {
@@ -1313,6 +1359,8 @@ async function sendOneSegment(input: {
       voice,
       input.signal,
       input.segment.delivery?.replyTo,
+      input.attachments,
+      discordSendDedupeKey({ requestLog: input.requestLog, sendId: input.sendId }),
     );
     assertSentMessageId(result);
     await input.onSent?.();
@@ -1327,6 +1375,9 @@ async function sendOneSegment(input: {
       details: {
         sentMessageId: result.sentMessageId,
         ...(voice !== undefined ? { voiceGenerated: true } : {}),
+        ...(input.attachments !== undefined && input.attachments.length > 0
+          ? { attachments: input.attachments.map((attachment) => attachment.filename) }
+          : {}),
         ...(warnings.length > 0 ? { unresolvedEmotes: warnings } : {}),
       },
     });
@@ -1354,6 +1405,7 @@ async function sendResponseSegments(input: {
   onSegmentSent?: (sent: { segment: DispatchSegment; hasMoreSegments: boolean }) => void | Promise<void>;
   typingHoldMs?: number;
   signal?: AbortSignal;
+  pendingAttachments?: OutboundAttachment[];
 }): Promise<number> {
   let sent = input.sentOffset ?? 0;
   let sentNow = 0;
@@ -1362,6 +1414,9 @@ async function sendResponseSegments(input: {
     sent += 1;
     sentNow += 1;
     const hasMoreSegments = sentNow < dispatchSegments.length;
+    const attachments = input.pendingAttachments !== undefined && input.pendingAttachments.length > 0
+      ? input.pendingAttachments.splice(0)
+      : undefined;
     const sendId = `final-send-${sent}`;
     const onSent = async (): Promise<void> => {
       input.onVisibleOutput?.();
@@ -1380,6 +1435,7 @@ async function sendResponseSegments(input: {
         sendId,
         reply: sent === 1 && input.replyFirst,
         targetChatId: input.targetChatId,
+        attachments,
         requestLog: input.requestLog,
         signal: input.signal,
         onSent,
@@ -1396,6 +1452,7 @@ async function sendResponseSegments(input: {
         sendId,
         reply: sent === 1 && input.replyFirst,
         targetChatId: input.targetChatId,
+        attachments,
         requestLog: input.requestLog,
         signal: input.signal,
         onSent,
@@ -1412,6 +1469,7 @@ async function sendResponseSegments(input: {
         sendId: `${sendId}-fallback`,
         reply: sent === 1 && input.replyFirst,
         targetChatId: input.targetChatId,
+        attachments,
         requestLog: input.requestLog,
         signal: input.signal,
         onSent,
@@ -1433,6 +1491,7 @@ interface LiveMessageDispatchDeps {
   onVisibleOutput?: () => void;
   typingHoldMs: number;
   signal?: AbortSignal;
+  pendingAttachments?: OutboundAttachment[];
 }
 
 class LiveMessageDispatcher {
@@ -1460,6 +1519,20 @@ class LiveMessageDispatcher {
 
   async finish(finalText: string): Promise<number> {
     if (this.disabled || this.sent === 0) return this.sent;
+    const consumedPrefix = this.buffer.slice(0, this.consumedUntil);
+    if (!finalText.startsWith(consumedPrefix)) {
+      const parsed = parseResponseDirectives(finalText);
+      if (!parsed.ignored && parsed.segments.length > 0) {
+        this.sent += await sendResponseSegments({
+          ...this.deps,
+          segments: parsed.segments,
+          sentOffset: this.sent,
+          replyFirst: this.deps.replyFirst,
+          onStillWorking: undefined,
+        });
+      }
+      return this.sent;
+    }
     this.buffer = finalText;
     await this.flushCompleteEnvelopes({ notifyTyping: false });
     const remainder = this.buffer.slice(this.consumedUntil).trim();
@@ -1648,6 +1721,7 @@ export async function handleMessage(
 
     let finalText = "";
     let targetChatId: string | undefined;
+    const pendingAttachments: OutboundAttachment[] = [];
     const intermediateStatus = { sent: false, sendCount: 0 };
     const liveMessageTypingHoldMs = deps.liveMessageTypingHoldMs ?? DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS;
     const liveDispatchers = new Map<string, LiveMessageDispatcher>();
@@ -1667,6 +1741,7 @@ export async function handleMessage(
         onVisibleOutput: deps.onVisibleOutput,
         typingHoldMs: liveMessageTypingHoldMs,
         signal: wallController.signal,
+        pendingAttachments,
       });
       liveDispatchers.set(key, dispatcher);
       return dispatcher;
@@ -1750,6 +1825,8 @@ export async function handleMessage(
           signal: wallController.signal,
           log: deps.log,
         },
+        consumeGeneratedAttachments: deps.consumeGeneratedAttachments,
+        pendingAttachments,
         signal: wallController.signal,
       });
       finalText = result.text;
@@ -1783,6 +1860,7 @@ export async function handleMessage(
         onVisibleOutput: deps.onVisibleOutput,
         typingHoldMs: liveMessageTypingHoldMs,
         signal: wallController.signal.aborted ? undefined : wallController.signal,
+        pendingAttachments,
       });
     }
 
