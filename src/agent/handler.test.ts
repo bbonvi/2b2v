@@ -1318,6 +1318,69 @@ describe("handleMessage", () => {
     ]]);
   });
 
+  test("does not resend a streamed explicit final message after generated image tool output", async () => {
+    const tool: AgentTool = {
+      name: "codex_generate_image",
+      label: "Codex Image",
+      description: "Generate image",
+      parameters: Type.Object({ prompt: Type.String() }),
+      execute: () => Promise.resolve({
+        content: [{ type: "text", text: "Generated image queued." }],
+        details: { generatedAttachmentIds: ["img-1"] },
+      }),
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = async (request) => {
+      calls += 1;
+      if (calls === 1) {
+        await request.onTextDelta?.("\n");
+        return {
+          text: "\n",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "codex_generate_image", arguments: "{\"prompt\":\"a blue house\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        };
+      }
+
+      await request.onTextDelta?.("<message>Вот.</message>");
+      return {
+        text: "<message>Вот.</message>",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "<message>Вот.</message>" }] },
+      };
+    };
+
+    const senderCalls: Array<{ text: string; attachmentIds: string[] }> = [];
+    const sender: MessageSender = (text, _reply, _chatId, _voice, _signal, _replyToMessageId, attachments) => {
+      senderCalls.push({ text, attachmentIds: attachments?.map((attachment) => attachment.id) ?? [] });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        completeChat,
+        sender,
+        consumeGeneratedAttachments: (ids) => ids.map((id) => ({
+          id,
+          buffer: Buffer.from("fake"),
+          filename: `${id}.png`,
+          contentType: "image/png",
+          historyText: "a blue house",
+        })),
+      }),
+    );
+
+    expect(senderCalls).toEqual([{ text: "Вот.", attachmentIds: ["img-1"] }]);
+  });
+
   test("runs safe read-only tool calls in parallel and preserves tool message order", async () => {
     let active = 0;
     let maxActive = 0;

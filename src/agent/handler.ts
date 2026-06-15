@@ -768,11 +768,13 @@ async function completeModelTurnWithRetries(input: {
   timeoutMs: number;
   maxAttempts?: number;
   validateResult?: (result: OpenRouterChatResult) => Error | undefined;
+  onAttemptStart?: () => void;
   log?: Logger;
 }): Promise<OpenRouterChatResult> {
   const maxAttempts = input.maxAttempts ?? MODEL_TURN_MAX_ATTEMPTS;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
+      input.onAttemptStart?.();
       const result = await completeWithTimeout(input.complete, input.request, input.timeoutMs);
       const validationError = input.validateResult?.(result);
       if (validationError !== undefined) throw validationError;
@@ -909,6 +911,7 @@ async function runNativeToolLoop(input: {
   requestLog?: RequestLog;
   sendIntermediateText?: (text: string, targetChatId: string | undefined) => Promise<boolean>;
   streamFinalText?: (delta: string, targetChatId: string | undefined) => Promise<boolean>;
+  onModelTurnStart?: (targetChatId: string | undefined) => void;
   onStillWorking?: (targetChatId: string | undefined) => void | Promise<void>;
   imageInputSupported: boolean;
   imageFallback?: ImageFallbackRuntime;
@@ -964,6 +967,7 @@ async function runNativeToolLoop(input: {
         timeoutMs: input.llmOutputTimeoutMs,
         maxAttempts,
         validateResult: requireTextResult(emptyResponseMessage),
+        onAttemptStart: () => input.onModelTurnStart?.(targetChatId),
         log: input.log,
       });
       input.requestLog?.recordLLMCompletion(result.messageForLogs);
@@ -1017,6 +1021,7 @@ async function runNativeToolLoop(input: {
         },
         timeoutMs: input.llmOutputTimeoutMs,
         validateResult: requireTextUnlessToolCalls("Model produced an empty response."),
+        onAttemptStart: () => input.onModelTurnStart?.(targetChatId),
         log: input.log,
       });
       input.toolTiming?.markToolCallsReady();
@@ -1511,6 +1516,17 @@ class LiveMessageDispatcher {
     return this.sent;
   }
 
+  /**
+   * Start a fresh provider stream while preserving how many Discord messages
+   * earlier model turns already emitted in this agent loop.
+   */
+  startModelTurn(): void {
+    this.buffer = "";
+    this.consumedUntil = 0;
+    this.disabled = false;
+    this.clearGapTyping();
+  }
+
   async push(delta: string): Promise<void> {
     if (delta === "" || this.disabled) return;
     this.buffer += delta;
@@ -1808,6 +1824,9 @@ export async function handleMessage(
           const sent = dispatcher.sentCount() > before;
           if (sent) intermediateStatus.sent = true;
           return sent;
+        },
+        onModelTurnStart: (liveTargetChatId) => {
+          liveDispatchers.get(liveTargetChatId ?? "")?.startModelTurn();
         },
         onStillWorking: deps.onStillWorking,
         imageInputSupported: supportsNativeImageInput(model.input, deps.modelImageInputSupport),
