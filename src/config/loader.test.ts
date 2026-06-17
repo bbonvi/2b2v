@@ -996,6 +996,7 @@ describe("saveGuildConfig", () => {
       members: { include: true },
       replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+      agentJobs: { imageTimeoutMs: 200_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       backgroundLlm: { model: "custom/m", modelParams: {}, promptCaching: { enabled: true } },
     };
@@ -1034,6 +1035,7 @@ describe("saveGuildConfig", () => {
       members: { include: true },
       replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+      agentJobs: { imageTimeoutMs: 200_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
     };
@@ -1068,6 +1070,7 @@ describe("saveGuildConfig", () => {
       members: { include: true },
       replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+      agentJobs: { imageTimeoutMs: 200_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: false },
     } as unknown as GuildConfig;
 
@@ -1396,6 +1399,7 @@ describe("saveGuildConfig bashTool", () => {
       members: { include: true },
       replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+      agentJobs: { imageTimeoutMs: 200_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
     };
@@ -1430,6 +1434,7 @@ describe("saveGuildConfig bashTool", () => {
       members: { include: true },
       replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+      agentJobs: { imageTimeoutMs: 200_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
     };
@@ -1647,6 +1652,7 @@ describe("saveGuildConfig emotes", () => {
       members: { include: true },
       replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+      agentJobs: { imageTimeoutMs: 200_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
     };
@@ -1688,6 +1694,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       members: { include: true },
       replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+      agentJobs: { imageTimeoutMs: 200_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
     };
@@ -1722,6 +1729,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       members: { include: true },
       replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+      agentJobs: { imageTimeoutMs: 200_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
     };

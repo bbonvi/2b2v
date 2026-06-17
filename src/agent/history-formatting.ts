@@ -76,6 +76,9 @@ export function formatMessageLine(input: FormatInput): string {
   if (captioningEnabled && message.captions.length > 0) {
     metaParts.push(`Captions: [${message.captions.map((c) => `"${c}"`).join(", ")}]`);
   }
+  if (message.jobAnnotations !== undefined && message.jobAnnotations.length > 0) {
+    metaParts.push(...message.jobAnnotations);
+  }
 
   const authorPart = `@${message.author}`;
   const targetPart = reply !== null ? ` to @${reply.targetAuthor}` : "";
@@ -86,6 +89,6 @@ export function formatMessageLine(input: FormatInput): string {
 
 /** The legend block prepended to the older slice. */
 export const OLDER_LEGEND = [
-  "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyCaptions/ImageIDs/Captions)]: content",
+  "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyCaptions/ImageIDs/Captions/ImageJob)]: content",
   "Legend: Newer history exposes MsgID for reply_to. Dates use [DATE ...]. Merged messages use history-only [msg-break]. Quotes are excerpts; use search_messages(id). Images use read_chat_images([id]).",
 ].join("\n");

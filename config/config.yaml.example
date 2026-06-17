@@ -83,6 +83,13 @@ dispatcher:
   mentionDebounceMs: 500    # Debounce ms for mention triggers (default: 500)
   defaultDebounceMs: 2000   # Debounce ms for non-mention triggers (default: 2000)
 
+# Async agent jobs — generic runtime, currently used for image generation.
+agentJobs:
+  imageTimeoutMs: 200000       # Cancel image jobs after this many ms (default: 200000)
+  imageCancelGraceMs: 60000    # Allow replacement cancellations only while this young (default: 60000)
+  terminalVisibleMs: 600000    # Keep failed/cancelled/timed-out/sent jobs in prompt context this long (default: 600000)
+  maxImageReplacements: 2      # Max replacement cancellations per original image request (default: 2)
+
 # Prompt caching control.
 # OpenRouter uses cache_control breakpoints; Codex uses stable system prompt/session routing.
 promptCaching:

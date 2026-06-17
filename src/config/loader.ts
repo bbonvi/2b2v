@@ -16,6 +16,7 @@ import type {
   EmotesConfig,
   MembersConfig,
   DispatcherConfig,
+  AgentJobsConfig,
   PromptCachingConfig,
   BackgroundLlmConfig,
   BackgroundLlmDefaults,
@@ -183,6 +184,13 @@ const DEFAULT_DISPATCHER: DispatcherConfig = {
   enabled: true,
   mentionDebounceMs: 500,
   defaultDebounceMs: 2000,
+};
+
+const DEFAULT_AGENT_JOBS: AgentJobsConfig = {
+  imageTimeoutMs: 200_000,
+  imageCancelGraceMs: 60_000,
+  terminalVisibleMs: 600_000,
+  maxImageReplacements: 2,
 };
 
 const DEFAULT_PROMPT_CACHING: PromptCachingConfig = {
@@ -436,6 +444,48 @@ function validateReplyLoopConfig(config: ReplyLoopConfig, keyPrefix: string): vo
   }
 }
 
+function resolveGlobalAgentJobs(
+  partial: MainConfigYaml["agentJobs"] | undefined,
+): AgentJobsConfig {
+  const resolved = {
+    imageTimeoutMs: partial?.imageTimeoutMs ?? DEFAULT_AGENT_JOBS.imageTimeoutMs,
+    imageCancelGraceMs: partial?.imageCancelGraceMs ?? DEFAULT_AGENT_JOBS.imageCancelGraceMs,
+    terminalVisibleMs: partial?.terminalVisibleMs ?? DEFAULT_AGENT_JOBS.terminalVisibleMs,
+    maxImageReplacements: partial?.maxImageReplacements ?? DEFAULT_AGENT_JOBS.maxImageReplacements,
+  };
+  validateAgentJobsConfig(resolved, "agentJobs");
+  return resolved;
+}
+
+function resolveGuildAgentJobs(
+  global: AgentJobsConfig,
+  partial: GuildConfigYaml["agentJobs"] | undefined,
+): AgentJobsConfig {
+  const resolved = {
+    imageTimeoutMs: partial?.imageTimeoutMs ?? global.imageTimeoutMs,
+    imageCancelGraceMs: partial?.imageCancelGraceMs ?? global.imageCancelGraceMs,
+    terminalVisibleMs: partial?.terminalVisibleMs ?? global.terminalVisibleMs,
+    maxImageReplacements: partial?.maxImageReplacements ?? global.maxImageReplacements,
+  };
+  validateAgentJobsConfig(resolved, "agentJobs");
+  return resolved;
+}
+
+function validateAgentJobsConfig(config: AgentJobsConfig, keyPrefix: string): void {
+  if (!Number.isFinite(config.imageTimeoutMs) || config.imageTimeoutMs < 10_000) {
+    throw new Error(`${keyPrefix}.imageTimeoutMs must be >= 10000`);
+  }
+  if (!Number.isFinite(config.imageCancelGraceMs) || config.imageCancelGraceMs < 0) {
+    throw new Error(`${keyPrefix}.imageCancelGraceMs must be >= 0`);
+  }
+  if (!Number.isFinite(config.terminalVisibleMs) || config.terminalVisibleMs < 0) {
+    throw new Error(`${keyPrefix}.terminalVisibleMs must be >= 0`);
+  }
+  if (!Number.isInteger(config.maxImageReplacements) || config.maxImageReplacements < 0) {
+    throw new Error(`${keyPrefix}.maxImageReplacements must be >= 0`);
+  }
+}
+
 /**
  * Resolve bash tool config from YAML partial.
  * Returns undefined if bash tool is not enabled.
@@ -651,6 +701,7 @@ export function loadGlobalConfig(
       mentionDebounceMs: yaml.dispatcher?.mentionDebounceMs ?? DEFAULT_DISPATCHER.mentionDebounceMs,
       defaultDebounceMs: yaml.dispatcher?.defaultDebounceMs ?? DEFAULT_DISPATCHER.defaultDebounceMs,
     },
+    defaultAgentJobs: resolveGlobalAgentJobs(yaml.agentJobs),
     defaultPromptCaching: resolveGlobalPromptCaching(yaml.promptCaching),
     defaultBackgroundLlm: resolveGlobalBackgroundLlm(yaml.backgroundLlm),
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
@@ -739,6 +790,7 @@ export function resolveGuildConfig(
       mentionDebounceMs: partial.dispatcher?.mentionDebounceMs ?? global.defaultDispatcher.mentionDebounceMs,
       defaultDebounceMs: partial.dispatcher?.defaultDebounceMs ?? global.defaultDispatcher.defaultDebounceMs,
     },
+    agentJobs: resolveGuildAgentJobs(global.defaultAgentJobs, partial.agentJobs),
     promptCaching,
     backgroundLlm: resolveGuildBackgroundLlm(global, partial, promptCaching),
     replyLoop: resolveGuildReplyLoop(global.defaultReplyLoop, partial.replyLoop),

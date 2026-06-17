@@ -41,6 +41,7 @@ import { createBraveSearchTool } from "./agent/brave-search-tool";
 import { createReadChatImagesTool } from "./agent/read-chat-images-tool";
 import { createFetchImagesTool } from "./agent/fetch-images-tool";
 import { createCodexGenerateImageTool, type GeneratedImageAttachment } from "./agent/codex-image-tool";
+import { AgentJobStore, createCancelAgentJobTool, isActiveJobStatus, type AgentJob, type ImageGenerationJobResult } from "./agent/job-runtime";
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createSummarizeVideoTool } from "./agent/summarize-video-tool";
 import { createStartThreadTool } from "./agent/start-thread-tool";
@@ -136,6 +137,323 @@ function createGeneratedImageRuntime(): {
       return attachments;
     },
   };
+}
+
+function shortQuote(text: string, maxLength = 120): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function formatJobAge(job: AgentJob, now: number): string {
+  const started = job.startedAt ?? job.createdAt;
+  const seconds = Math.max(0, Math.round((now - started) / 1000));
+  return `${seconds}s ago`;
+}
+
+function renderAgentJobsContext(jobs: AgentJob[], now = Date.now()): string {
+  if (jobs.length === 0) return "";
+  const lines = [
+    "## Active Image Jobs",
+    "Image generation is asynchronous. Active jobs keep typing while the worker runs. When ready, the runtime starts a normal 2b reply loop with the generated image attached to the current turn and sends that reply to the original message. Do not start a duplicate job for the same concrete request while a matching active job is visible here.",
+  ];
+  for (const job of jobs) {
+    const state = isActiveJobStatus(job.status) ? "active" : "recent terminal";
+    const replacement = job.replacesJobId !== undefined ? ` replaces ${job.replacesJobId}` : "";
+    const sent = job.sentMessageId !== undefined ? ` sent MsgID ${job.sentMessageId}` : "";
+    const error = job.error !== undefined ? ` error: ${shortQuote(job.error, 100)}` : "";
+    lines.push(
+      `- ${job.id} ${job.status} (${state}) for @${job.requesterUsername} from MsgID ${job.sourceMessageId}${replacement}; requested ${formatJobAge(job, now)}; quote: "${job.sourceQuote}"${sent}${error}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function annotateHistoryJobs(
+  messages: HistoryMessage[],
+  guildId: string,
+  channelId: string,
+): HistoryMessage[] {
+  return messages.map((message) => {
+    const annotations = agentJobs.annotationForMessage(message.id, guildId, channelId);
+    if (annotations.length === 0) return message;
+    return { ...message, jobAnnotations: [...(message.jobAnnotations ?? []), ...annotations] };
+  });
+}
+
+async function runImageGenerationJob(jobId: string): Promise<void> {
+  const job = agentJobs.get(jobId);
+  if (job === undefined) return;
+  const guildConfig = getGuildConfig(job.guildId);
+  const guild = client.guilds.cache.get(job.guildId);
+  if (guild === undefined) {
+    agentJobs.markFailed(job.id, "Guild is unavailable.");
+    return;
+  }
+  const channel = guild.channels.cache.get(job.channelId);
+  if (channel === undefined || !("send" in channel) || !("sendTyping" in channel)) {
+    agentJobs.markFailed(job.id, "Target channel is unavailable.");
+    return;
+  }
+  const textChannel = channel as TextChannel;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new Error(`Image job ${job.id} timed out after ${guildConfig.agentJobs.imageTimeoutMs}ms`));
+  }, guildConfig.agentJobs.imageTimeoutMs);
+  const typingTimer = setInterval(() => {
+    void textChannel.sendTyping().catch(() => {});
+  }, TYPING_INTERVAL_MS);
+  void textChannel.sendTyping().catch(() => {});
+  agentJobs.start(job.id, () => controller.abort(new Error(`Image job ${job.id} cancelled.`)));
+
+  const requestLog = new RequestLog(job.guildId, job.channelId);
+  requestLog.setAuthor(job.requesterUsername);
+  requestLog.setTrigger({ type: "async_image_generation", jobId: job.id, sourceMessageId: job.sourceMessageId });
+  requestLog.setAgentRan(true);
+  requestLogStore.incrementActive();
+
+  try {
+    const generated = createGeneratedImageRuntime();
+    const tool = createCodexGenerateImageTool({
+      codexAuthPath: globalConfig.codexAuthPath,
+      model: guildConfig.llmProvider === "openai-codex"
+        ? guildConfig.model ?? globalConfig.defaultModel
+        : DEFAULT_CODEX_IMAGE_ROUTER_MODEL,
+      sessionId: `2b2v-image-job:${job.guildId}:${job.channelId}:${job.id}`,
+      logger: log.child({ component: "async-image-job", guildId: job.guildId, channelId: job.channelId, jobId: job.id }),
+      imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
+      getImageById: (id: number) => {
+        const record = getImageById(db, id);
+        return record !== null && record.guildId === job.guildId ? record : null;
+      },
+      readFile: (path: string) => {
+        try {
+          return Buffer.from(readFileSync(path));
+        } catch {
+          return null;
+        }
+      },
+      onGeneratedImage: generated.onGeneratedImage,
+    });
+    const result = await tool.execute(job.id, {
+      prompt: job.input.prompt,
+      image_ids: job.input.imageIds,
+      output_format: job.input.outputFormat,
+    }, controller.signal);
+    const details = result.details as { generatedAttachmentIds?: string[]; revisedPrompt?: string } | undefined;
+    const attachmentIds = details?.generatedAttachmentIds ?? [];
+    const attachments = generated.consumeGeneratedAttachments(attachmentIds);
+    const attachment = attachments[0];
+    if (attachment === undefined) {
+      throw new Error("Image generation finished without an attachment.");
+    }
+
+    const latest = agentJobs.get(job.id);
+    if (latest === undefined || !isActiveJobStatus(latest.status)) return;
+    const outboundAttachment: OutboundAttachment = {
+      ...attachment,
+      historyText: [
+        `Async image job ${job.id}.`,
+        `Original request from @${job.requesterUsername}, MsgID ${job.sourceMessageId}: "${job.sourceQuote}"`,
+        `Generation prompt: ${job.input.prompt}`,
+        typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}` : "",
+      ].filter((part) => part !== "").join("\n"),
+    };
+
+    const outboundResolvers = buildOutboundResolvers(guild);
+    let sourceMessage: Message | undefined;
+    try {
+      sourceMessage = await textChannel.messages.fetch(job.sourceMessageId);
+    } catch {
+      sourceMessage = undefined;
+    }
+    const completionTyping = createTypingController({
+      defaultChannel: textChannel,
+      resolveTargetChannel: createTargetChannelResolver(guild, textChannel),
+    });
+    const sender = createDiscordMessageSender({
+      guildId: job.guildId,
+      guild,
+      defaultChannel: textChannel,
+      outboundResolvers,
+      botUserId: client.user?.id ?? "",
+      botUsername: client.user?.username ?? "bot",
+      logger: log,
+      ...(sourceMessage !== undefined ? { replySourceMessage: sourceMessage } : {}),
+      getLastTypingAt: completionTyping.getLastTypingAt,
+      imageStore: {
+        attachmentsDir: guildConfig.attachmentsDir,
+        maxDimension: guildConfig.imageMaxDimension,
+      },
+    });
+
+    const replyFallbackDeps: ReplyFallbackDeps = {
+      db,
+      guildId: job.guildId,
+      channelId: job.channelId,
+      fetchDiscordMessage: async (chId, msgId) => {
+        const ch = guild.channels.cache.get(chId);
+        if (ch === undefined || !("messages" in ch)) return null;
+        try {
+          const fetched = await (ch as TextChannel).messages.fetch(msgId);
+          return {
+            id: fetched.id,
+            authorId: fetched.author.id,
+            authorUsername: fetched.author.username,
+            content: fetched.content,
+            timestamp: fetched.createdTimestamp,
+            isBot: fetched.author.bot,
+            replyToId: fetched.reference?.messageId ?? null,
+            attachments: [...fetched.attachments.values()].map((a) => ({
+              url: a.url,
+              contentType: a.contentType,
+            })),
+          };
+        } catch { return null; }
+      },
+      enqueueEmbedding: async (id, text, metadata) => {
+        await embeddingQueue.enqueue({ id, text, target: "message", metadata });
+      },
+      processImage: async (url, contentType, messageId) => {
+        const ingestDeps: ImageIngestDeps = {
+          db,
+          attachmentsDir: guildConfig.attachmentsDir,
+          maxDimension: guildConfig.imageMaxDimension,
+          fetchFn: fetch,
+        };
+        await processAndStoreImage(ingestDeps, { url, mimeType: contentType, messageId, guildId: job.guildId, channelId: job.channelId });
+      },
+    };
+    const completionInstruction = [
+      `[Async Image Job Ready] Job ${job.id} generated an image for @${job.requesterUsername}.`,
+      `Original request MsgID ${job.sourceMessageId}: "${job.sourceQuote}"`,
+      `Generation prompt: ${job.input.prompt}`,
+      typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}` : "",
+      "The generated image is attached to this current turn as image input and is already queued as an outgoing attachment on your first visible Discord reply.",
+      `Use the normal persona, current chat history, and the visible image itself. Your first visible Discord response must explicitly target the original request: wrap it as <message reply="true" reply_to="${job.sourceMessageId}">your response text</message>. Do not use reply="false" for the first response.`,
+      "Do not call codex_generate_image, cancel_agent_job, or start another image job for this completion.",
+    ].filter((part) => part !== "").join("\n");
+    const syntheticLatestMessage: HistoryMessage = {
+      id: `async-image-ready-${job.id}`,
+      author: "async_image_generation",
+      authorId: "async_image_generation",
+      content: completionInstruction,
+      isBot: false,
+      timestamp: Date.now(),
+      replyToId: job.sourceMessageId,
+      imageIds: [],
+      captions: [],
+      hasEmbeds: false,
+      isSynthetic: true,
+      relatedThreadId: null,
+    };
+    const context = await buildContext(
+      job.guildId,
+      job.channelId,
+      guild,
+      guildConfig,
+      completionInstruction,
+      syntheticLatestMessage,
+      replyFallbackDeps,
+      textChannel.isThread(),
+    );
+    const extraTools = buildAgentTools(
+      job.guildId,
+      job.channelId,
+      guildConfig,
+      guild,
+      context.contextMessageIds,
+      undefined,
+      undefined,
+      { includeImageGenerationTools: false },
+    );
+    let sentMessageId: string | undefined;
+    const completionSender: MessageSender = async (...args) => {
+      const sent = await sender(...args);
+      sentMessageId ??= sent.sentMessageId;
+      return sent;
+    };
+    const { ttsEnabled, generateSpeech } = createTtsGenerator(guildConfig);
+    const completionIncoming: IncomingMessage = {
+      content: completionInstruction,
+      authorId: "async_image_generation",
+      authorUsername: "async_image_generation",
+      botUserId: client.user?.id ?? "",
+      mentionedUserIds: [],
+      translatedContent: completionInstruction,
+      messageId: syntheticLatestMessage.id,
+      replyToMessageId: job.sourceMessageId,
+      imageInputs: [{
+        buffer: outboundAttachment.buffer,
+        contentType: outboundAttachment.contentType,
+        metadataText: [
+          `Generated by async image job ${job.id}.`,
+          `Filename: ${outboundAttachment.filename}.`,
+          `Original request: "${job.sourceQuote}"`,
+        ].join(" "),
+      }],
+    };
+    const completionResult = await handleMessage(completionIncoming, {
+      globalConfig,
+      guildConfig,
+      context,
+      personaPrompt: persona,
+      sender: completionSender,
+      extraTools,
+      log: log.child({ component: "async-image-completion", guildId: job.guildId, channelId: job.channelId, jobId: job.id, requestId: requestLog.requestId }),
+      requestLog,
+      ttsEnabled,
+      generateSpeech,
+      initialPendingAttachments: [outboundAttachment],
+      forceTrigger: true,
+      triggerInstructions: guildConfig.triggerInstructions,
+      modelImageInputSupport: getModelImageInputSupport(guildConfig),
+      onTriggered: () => { completionTyping.startLoop(); },
+      onStillWorking: (targetChatId) => { completionTyping.startLoop(targetChatId); },
+      onVisibleOutput: completionTyping.stopLoop,
+      onAgentEnd: completionTyping.stopLoop,
+    });
+    if (!completionResult.agentRan || sentMessageId === undefined) {
+      throw new Error("Async image completion did not send a Discord message.");
+    }
+    agentJobs.markSent(job.id, sentMessageId, {
+      attachmentId: outboundAttachment.id,
+      filename: outboundAttachment.filename,
+      contentType: outboundAttachment.contentType,
+      ...(typeof details?.revisedPrompt === "string" ? { revisedPrompt: details.revisedPrompt } : {}),
+    } satisfies ImageGenerationJobResult);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (controller.signal.aborted && agentJobs.get(job.id)?.status === "cancelled") return;
+    const timedOut = controller.signal.aborted && message.includes("timed out");
+    if (timedOut) {
+      agentJobs.markTimedOut(job.id, message);
+    } else {
+      agentJobs.markFailed(job.id, message);
+    }
+    const latest = agentJobs.get(job.id);
+    if (latest?.status === "failed" || latest?.status === "timed_out") {
+      try {
+        const source = await textChannel.messages.fetch(job.sourceMessageId).catch(() => null);
+        const notice = `${job.id} ${latest.status === "timed_out" ? "timed out" : "failed"}: ${shortQuote(message, 160)}`;
+        if (source !== null) {
+          await source.reply(notice);
+        } else {
+          await textChannel.send(notice);
+        }
+      } catch (sendErr) {
+        log.warn("async image failure notice failed", {
+          jobId: job.id,
+          error: sendErr instanceof Error ? sendErr.message : String(sendErr),
+        });
+      }
+    }
+  } finally {
+    clearTimeout(timeout);
+    clearInterval(typingTimer);
+    requestLog.emit(log);
+    requestLogStore.decrementActive();
+  }
 }
 
 function createBotMessageStore(input: {
@@ -516,6 +834,12 @@ const guildsDir = join("config", "guilds");
 const guildConfigs = loadGuildConfigs(guildsDir, globalConfig);
 log.info("guild configs loaded", { count: guildConfigs.size });
 
+const agentJobs = new AgentJobStore(globalConfig.defaultAgentJobs);
+const agentJobCleanupTimer = setInterval(() => {
+  const removed = agentJobs.cleanup();
+  if (removed > 0) log.debug("agent jobs cleaned up", { removed });
+}, 60_000);
+
 const modelImageInputSupport = new Map<string, ModelImageInputSupport>();
 const MODEL_METADATA_TIMEOUT_MS = 10_000;
 
@@ -762,6 +1086,12 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         guild,
         context.contextMessageIds,
         generatedImages.onGeneratedImage,
+        {
+          requesterId: "scheduler",
+          requesterUsername: "scheduler",
+          sourceMessageId: syntheticLatestMessage.id,
+          sourceQuote: shortQuote(schedule.messageContent),
+        },
       );
 
       // Build synthetic incoming message
@@ -1061,10 +1391,22 @@ async function buildContext(
   isThread: boolean,
 ): Promise<AssembledContext> {
   // Chat history via the full processing pipeline
-  const historyWithoutLatest = getContextHistoryMessages(db, channelId, guildConfig.trim, latestUserMessage.id);
+  const visibleJobs = agentJobs.listVisible(guildId, channelId);
+  const historyWithoutLatest = annotateHistoryJobs(
+    getContextHistoryMessages(db, channelId, guildConfig.trim, latestUserMessage.id),
+    guildId,
+    channelId,
+  );
+  const annotatedLatestUserMessage = {
+    ...latestUserMessage,
+    jobAnnotations: [
+      ...(latestUserMessage.jobAnnotations ?? []),
+      ...agentJobs.annotationForMessage(latestUserMessage.id, guildId, channelId),
+    ],
+  };
   const { olderText, newerText } = await processHistory(
     historyWithoutLatest,
-    latestUserMessage,
+    annotatedLatestUserMessage,
     {
       trim: guildConfig.trim,
       mergeMessageGapSeconds: guildConfig.mergeMessageGapSeconds,
@@ -1172,11 +1514,10 @@ async function buildContext(
   }
   const contextMessageIds = Array.from(new Set([
     ...historyWithoutLatest.map((m) => m.id),
-    latestUserMessage.id,
+    annotatedLatestUserMessage.id,
   ]));
 
-  return {
-    ...assembleContext({
+  const assembled = assembleContext({
       toolInstructions,
       instructions: guildConfig.instructions,
       emojis: emojiContext,
@@ -1191,7 +1532,21 @@ async function buildContext(
       currentContext,
       responseInstruction: "",
       userMessage,
-    }),
+    });
+  const activeJobsText = renderAgentJobsContext(visibleJobs);
+  const activeJobsIndex = assembled.sections.findIndex((s) => s.label === "Chat History — Newer");
+  const activeJobsInsertAt = activeJobsIndex === -1 ? assembled.sections.length : activeJobsIndex;
+  const sections = activeJobsText === ""
+    ? assembled.sections
+    : [
+      ...assembled.sections.slice(0, activeJobsInsertAt),
+      { label: "Active Image Jobs", text: activeJobsText, cached: false, role: "developer" as const },
+      ...assembled.sections.slice(activeJobsInsertAt),
+    ];
+
+  return {
+    ...assembled,
+    sections,
     contextMessageIds,
   };
 }
@@ -1204,7 +1559,15 @@ function buildAgentTools(
   guild: Guild,
   excludedMessageIds?: Iterable<string>,
   onGeneratedImage?: (attachment: GeneratedImageAttachment) => void,
+  currentRequest?: {
+    requesterId: string;
+    requesterUsername: string;
+    sourceMessageId: string;
+    sourceQuote: string;
+  },
+  options: { includeImageGenerationTools?: boolean } = {},
 ) {
+  const includeImageGenerationTools = options.includeImageGenerationTools ?? true;
   const resolveUsername = (username: string): string | undefined => resolveGuildUsername(guild, username);
 
   const searchTool = createSearchTool({
@@ -1319,30 +1682,63 @@ function buildAgentTools(
   const fetchUrlTool = createFetchUrlTool();
   const summarizeVideoTool = createSummarizeVideoTool();
 
-  const codexImageModel = guildConfig.llmProvider === "openai-codex"
-    ? guildConfig.model ?? globalConfig.defaultModel
-    : DEFAULT_CODEX_IMAGE_ROUTER_MODEL;
-  const codexGenerateImageTool = createCodexGenerateImageTool({
-    codexAuthPath: globalConfig.codexAuthPath,
-    model: codexImageModel,
-    sessionId: `2b2v-image:${guildId}:${channelId}:${codexImageModel}`,
-    logger: log.child({ component: "codex-image", guildId, channelId }),
-    imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
-    getImageById: (id: number) => {
-      const record = getImageById(db, id);
-      return record !== null && record.guildId === guildId ? record : null;
-    },
-    readFile: (path: string) => {
-      try {
-        return Buffer.from(readFileSync(path));
-      } catch {
-        return null;
-      }
-    },
-    onGeneratedImage: onGeneratedImage ?? (() => {}),
-  });
+  const tools = [searchTool, ...scheduleTools, memberListTool, userMemoryTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool];
+  if (includeImageGenerationTools) {
+    const codexImageModel = guildConfig.llmProvider === "openai-codex"
+      ? guildConfig.model ?? globalConfig.defaultModel
+      : DEFAULT_CODEX_IMAGE_ROUTER_MODEL;
+    const codexGenerateImageTool = createCodexGenerateImageTool({
+      codexAuthPath: globalConfig.codexAuthPath,
+      model: codexImageModel,
+      sessionId: `2b2v-image:${guildId}:${channelId}:${codexImageModel}`,
+      logger: log.child({ component: "codex-image", guildId, channelId }),
+      imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
+      getImageById: (id: number) => {
+        const record = getImageById(db, id);
+        return record !== null && record.guildId === guildId ? record : null;
+      },
+      readFile: (path: string) => {
+        try {
+          return Buffer.from(readFileSync(path));
+        } catch {
+          return null;
+        }
+      },
+      onGeneratedImage: onGeneratedImage ?? (() => {}),
+      ...(currentRequest === undefined ? {} : { enqueueImageJob: (input) => {
+        const result = agentJobs.enqueueImageJob({
+          guildId,
+          channelId,
+          requesterId: currentRequest.requesterId,
+          requesterUsername: currentRequest.requesterUsername,
+          sourceMessageId: currentRequest.sourceMessageId,
+          sourceQuote: currentRequest.sourceQuote,
+          prompt: input.prompt,
+          promptHash: input.promptHash,
+          imageIds: input.imageIds,
+          outputFormat: input.outputFormat,
+          separateJob: input.separateJob,
+          allowsGroupCorrections: input.allowsGroupCorrections,
+          ...(input.replacesJobId !== undefined ? { replacesJobId: input.replacesJobId } : {}),
+        });
+        if (result.created) {
+          void runImageGenerationJob(result.job.id).catch((err: unknown) => {
+            log.error("async image job failed outside worker", {
+              jobId: result.job.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }
+        return result;
+      } }),
+    });
 
-  const tools = [searchTool, ...scheduleTools, memberListTool, userMemoryTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, codexGenerateImageTool];
+    const cancelJobTool = createCancelAgentJobTool({
+      store: agentJobs,
+      requesterId: currentRequest?.requesterId ?? "unknown",
+    });
+    tools.push(codexGenerateImageTool, cancelJobTool);
+  }
 
   // Brave search if API key configured
   if (globalConfig.braveApiKey !== undefined && globalConfig.braveApiKey !== "") {
@@ -1536,6 +1932,12 @@ async function processTriggeredMessage(
         guild,
         context.contextMessageIds,
         generatedImages.onGeneratedImage,
+        {
+          requesterId: message.author.id,
+          requesterUsername: message.author.username,
+          sourceMessageId: message.id,
+          sourceQuote: shortQuote(translatedContent),
+        },
       ),
       startThreadTool,
     ];
@@ -1932,6 +2334,7 @@ async function shutdown(signal: string): Promise<void> {
 
   clearInterval(memoryCleanupTimer);
   clearInterval(vpnSessionCleanupTimer);
+  clearInterval(agentJobCleanupTimer);
   for (const d of dispatchers.values()) d.dispose();
   dispatchers.clear();
   scheduler.stop();

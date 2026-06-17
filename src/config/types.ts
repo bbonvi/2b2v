@@ -50,6 +50,18 @@ export interface DispatcherConfig {
   defaultDebounceMs: number;
 }
 
+/** Async agent job configuration. Currently only image generation uses it. */
+export interface AgentJobsConfig {
+  /** Maximum runtime for one async image generation job. Default 200000. */
+  imageTimeoutMs: number;
+  /** Window where active image jobs can be cancelled/replaced for corrections. Default 60000. */
+  imageCancelGraceMs: number;
+  /** How long terminal jobs stay visible in prompt context. Default 600000. */
+  terminalVisibleMs: number;
+  /** Maximum replacement cancellations per original image request. Default 2. */
+  maxImageReplacements: number;
+}
+
 /** Prompt caching controls. */
 export interface PromptCachingConfig {
   enabled: boolean;
@@ -196,6 +208,8 @@ export interface GuildConfig {
   members: MembersConfig;
   /** Channel dispatcher configuration. */
   dispatcher: DispatcherConfig;
+  /** Async agent job configuration. */
+  agentJobs: AgentJobsConfig;
   /** Prompt caching controls for supported provider requests. */
   promptCaching: PromptCachingConfig;
   /** Dedicated background LLM configuration. */
@@ -246,6 +260,8 @@ export interface GlobalConfig {
   defaultMembers: MembersConfig;
   /** Default dispatcher configuration. */
   defaultDispatcher: DispatcherConfig;
+  /** Default async agent job configuration. */
+  defaultAgentJobs: AgentJobsConfig;
   /** Default prompt caching controls. */
   defaultPromptCaching: PromptCachingConfig;
   /** Default background LLM overrides. Missing fields inherit main model settings per guild. */
@@ -304,6 +320,12 @@ export interface GuildConfigYaml {
     enabled?: boolean;
     mentionDebounceMs?: number;
     defaultDebounceMs?: number;
+  };
+  agentJobs?: {
+    imageTimeoutMs?: number;
+    imageCancelGraceMs?: number;
+    terminalVisibleMs?: number;
+    maxImageReplacements?: number;
   };
   promptCaching?: {
     enabled?: boolean;
@@ -406,6 +428,12 @@ export interface MainConfigYaml {
     enabled?: boolean;
     mentionDebounceMs?: number;
     defaultDebounceMs?: number;
+  };
+  agentJobs?: {
+    imageTimeoutMs?: number;
+    imageCancelGraceMs?: number;
+    terminalVisibleMs?: number;
+    maxImageReplacements?: number;
   };
   promptCaching?: {
     enabled?: boolean;

@@ -44,6 +44,7 @@ const GLOBAL: GlobalConfig = {
   defaultEmotes: { include: false },
   defaultMembers: { include: true },
   defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+  defaultAgentJobs: { imageTimeoutMs: 200_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
   defaultPromptCaching: { enabled: true },
   defaultBackgroundLlm: { modelParams: {} },
   defaultReplyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
@@ -67,6 +68,7 @@ const GUILD: GuildConfig = {
   emotes: { include: false },
   members: { include: true },
   dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+  agentJobs: { imageTimeoutMs: 200_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
   promptCaching: { enabled: true },
   backgroundLlm: {
     model: "moonshotai/kimi-k2.5",

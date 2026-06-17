@@ -1,9 +1,10 @@
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { arch, platform, release } from "node:os";
 import { getCodexApiKey } from "../llm/codex-auth.ts";
 import type { Logger } from "../logger.ts";
+import type { EnqueueImageJobResult } from "./job-runtime.ts";
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_IMAGES_GENERATIONS_URL = "https://chatgpt.com/backend-api/codex/images/generations";
@@ -32,6 +33,18 @@ const CodexGenerateImageParams = Type.Object({
     Type.Literal("webp"),
   ], {
     description: "Output image format. Defaults to png.",
+  })),
+  separate_job: Type.Optional(Type.Boolean({
+    description:
+      "Set true only when the user explicitly asks for a separate new image/variant while another image job is active. Leave false for status checks, confusion, or duplicate requests.",
+  })),
+  allows_group_corrections: Type.Optional(Type.Boolean({
+    description:
+      "Set true only when the image request is explicitly about the whole chat/group/all visible users, so omitted participants can correct the still-young job.",
+  })),
+  replaces_job_id: Type.Optional(Type.String({
+    description:
+      "Set only after cancel_agent_job succeeds for a replacement. Use the cancelled job id being replaced.",
   })),
 });
 
@@ -73,7 +86,37 @@ export interface CodexGenerateImageToolDeps {
   getImageById: (id: number) => ReferenceImageRecord | null;
   readFile: (path: string) => Buffer | null;
   onGeneratedImage: (attachment: GeneratedImageAttachment) => void;
+  enqueueImageJob?: (input: {
+    prompt: string;
+    promptHash: string;
+    imageIds: number[];
+    outputFormat: OutputFormat;
+    separateJob: boolean;
+    allowsGroupCorrections: boolean;
+    replacesJobId?: string;
+  }) => EnqueueImageJobResult;
 }
+
+type CodexGenerateImageDetails =
+  | {
+    generatedAttachmentIds: string[];
+    provider: "openai-codex";
+    model: string;
+    backendImageModel: "gpt-image-2";
+    outputFormat: OutputFormat;
+    referenceImageIds: number[];
+    responseId?: string;
+    imageGenerationId?: string;
+    revisedPrompt?: string;
+    transport: "responses-tool" | "direct-images";
+    usage?: unknown;
+  }
+  | {
+    asyncJobId: string;
+    asyncJobStatus: string;
+    asyncJobCreated: boolean;
+    reason?: string;
+  };
 
 interface ParsedCodexResponse {
   image?: {
@@ -98,6 +141,15 @@ interface ParsedImageResult extends ParsedCodexResponse {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function promptHash(prompt: string, imageIds: readonly number[]): string {
+  return createHash("sha256")
+    .update(prompt.trim().toLowerCase().replace(/\s+/g, " "))
+    .update("|")
+    .update(imageIds.join(","))
+    .digest("hex")
+    .slice(0, 16);
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> {
@@ -688,36 +740,80 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
     name: "codex_generate_image",
     label: "Codex Image",
     description: [
-      "Generate an image with OpenAI Codex's built-in image_generation tool using the ChatGPT/Codex subscription backend. Does not require OPENAI_API_KEY.",
+      "Start image generation with OpenAI Codex's built-in image_generation tool using the ChatGPT/Codex subscription backend. Does not require OPENAI_API_KEY.",
+      "In Discord runtime this starts an async image job and returns immediately; the generated image will be posted later by the runtime.",
       "Use this only when the user asks for a raster image, photo, illustration, sprite, icon draft, banner, mockup, or similar bitmap output.",
       "When the visual request is based on a specific chat image, include its ImageID in image_ids. This includes images attached in the user's current post, images on the replied-to message, or images clearly referenced from recent context. Include several ImageIDs when the request asks to combine or compare multiple specific images; omit image_ids only when the image is generic background context or irrelevant.",
       "Before calling, turn the user's request into a concrete, safe, neutral image prompt. Preserve explicit visual requirements, add useful visual specifics for vague requests, and avoid inventing unrelated subjects, brands, text, or narrative details.",
-      "If generation fails because Codex returns no image, rejects the prompt, or reports a safety/filter failure, you may retry once with a rewritten prompt that keeps the same visual intent but softens risky wording; do not resend the exact same prompt and do not retry more than once.",
-      "The generated image will be attached to the final Discord reply automatically.",
+      "Do not call this when an active image job already covers the same concrete request; answer with that job's status instead.",
+      "If generation fails because Codex returns no image, rejects the prompt, or reports a safety/filter failure, the async worker will report failure. Do not retry unless the user asks to try again.",
+      "The generated image will be attached to a later Discord reply automatically.",
     ].join(" "),
     parameters: CodexGenerateImageParams,
     async execute(
       _toolCallId: string,
       params: unknown,
       signal?: AbortSignal,
-    ): Promise<AgentToolResult<{
-      generatedAttachmentIds: string[];
-      provider: "openai-codex";
-      model: string;
-      backendImageModel: "gpt-image-2";
-      outputFormat: OutputFormat;
-      referenceImageIds: number[];
-      responseId?: string;
-      imageGenerationId?: string;
-      revisedPrompt?: string;
-      transport: "responses-tool" | "direct-images";
-      usage?: unknown;
-    }>> {
-      const p = params as { prompt: string; output_format?: unknown; image_ids?: unknown };
+    ): Promise<AgentToolResult<CodexGenerateImageDetails>> {
+      const p = params as {
+        prompt: string;
+        output_format?: unknown;
+        image_ids?: unknown;
+        separate_job?: unknown;
+        allows_group_corrections?: unknown;
+        replaces_job_id?: unknown;
+      };
       const prompt = p.prompt.trim();
       if (prompt === "") throw new Error("Image prompt must not be empty.");
       const output = outputFormat(p.output_format);
       const imageIds = parseImageIds(p.image_ids);
+      if (deps.enqueueImageJob !== undefined) {
+        const replacesJobId = typeof p.replaces_job_id === "string" && p.replaces_job_id.trim() !== ""
+          ? p.replaces_job_id.trim()
+          : undefined;
+        const enqueueResult = deps.enqueueImageJob({
+          prompt,
+          promptHash: promptHash(prompt, imageIds),
+          imageIds,
+          outputFormat: output,
+          separateJob: p.separate_job === true,
+          allowsGroupCorrections: p.allows_group_corrections === true,
+          ...(replacesJobId !== undefined ? { replacesJobId } : {}),
+        });
+        if (!enqueueResult.created) {
+          return {
+            content: [{
+              type: "text",
+              text: [
+                `No new image job was started. Active related image job ${enqueueResult.job.id} is ${enqueueResult.job.status}.`,
+                "Do not call codex_generate_image again for the same request while this job is active.",
+                "Answer the user with this status unless they explicitly asked for a separate variant or a valid replacement.",
+              ].join(" "),
+            }],
+            details: {
+              asyncJobId: enqueueResult.job.id,
+              asyncJobStatus: enqueueResult.job.status,
+              asyncJobCreated: false,
+              reason: enqueueResult.reason,
+            },
+          };
+        }
+        return {
+          content: [{
+            type: "text",
+            text: [
+              `Started async image generation job ${enqueueResult.job.id}.`,
+              "The job will keep typing in the channel and reply to the original message with the image when ready.",
+              "Do not wait for the image in this reply loop and do not start another job for the same request.",
+            ].join(" "),
+          }],
+          details: {
+            asyncJobId: enqueueResult.job.id,
+            asyncJobStatus: enqueueResult.job.status,
+            asyncJobCreated: true,
+          },
+        };
+      }
       const referenceImages = loadReferenceImages(deps, imageIds);
       const token = await getCodexApiKey(deps.codexAuthPath);
       const accountId = extractChatGptAccountId(token);

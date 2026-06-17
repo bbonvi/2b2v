@@ -28,6 +28,8 @@ export interface HistoryMessage {
   isSynthetic: boolean;
   /** Thread ID this synthetic event references, or null. */
   relatedThreadId: string | null;
+  /** Runtime-only prompt annotations, e.g. async jobs triggered by this message. */
+  jobAnnotations?: string[];
 }
 
 /** Result of the slicing algorithm. */

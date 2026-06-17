@@ -41,6 +41,7 @@ export interface IncomingMessage {
   translatedContent: string;
   messageId?: string;
   replyToMessageId?: string;
+  imageInputs?: CurrentTurnImageInput[];
 }
 
 export type ChatCompleteFn = (request: OpenRouterChatRequest) => Promise<OpenRouterChatResult>;
@@ -67,6 +68,13 @@ export interface OutboundAttachment {
   filename: string;
   contentType: string;
   historyText?: string;
+}
+
+/** Image bytes attached to the current synthetic or live turn for native model vision. */
+export interface CurrentTurnImageInput {
+  buffer: Buffer;
+  contentType: string;
+  metadataText?: string;
 }
 
 /** Callback that performs the actual Discord send. */
@@ -111,6 +119,8 @@ export interface HandlerDeps {
   modelImageInputSupport?: ModelImageInputSupport;
   /** Consume generated image attachments by opaque IDs returned from image tools. */
   consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
+  /** Attachments already produced before this reply loop; sent with the first visible message. */
+  initialPendingAttachments?: OutboundAttachment[];
 }
 
 export interface HandleResult {
@@ -563,7 +573,13 @@ function buildRuntimeInstruction(): string {
     "If a request does not make sense, uses vague references, seems to depend on something said earlier, or you do not understand what the user wants, usually search chat history before asking. Try several targeted search_messages calls when useful: semantic topic phrases, literal exact words, likely usernames/channels/time filters, and context mode around promising hits.",
     "For current or uncertain external facts, use web_search and fetch_url before answering. Prefer English search queries unless the topic is language-specific, then answer in the user's language. Fetch the most relevant result when snippets are not enough.",
     "Use summarize_video for YouTube, video, audio, or podcast URLs when the user asks for a summary or wants to understand the media content.",
-    "Use codex_generate_image when the user asks you to create, generate, draw, render, or make a new raster image/photo/illustration/sprite/banner/mockup. Its prompt argument is the final visual brief sent to Codex image generation: preserve the user's visual request, relevant context, and concrete subject/composition/style/lighting/avoid constraints, but phrase it as a safe neutral image prompt. Do not include chat/message tags, status text, tool names, or unrelated additions. Exercise best judgment about image_ids: if the user attached an image in the current post, replied to an image, asks to use/edit/remix/continue a specific image, or context clearly implies a specific ImageID or ReplyImageID, pass that image ID; pass several IDs when the request depends on several specific images. Omit image_ids only when the image is irrelevant, merely generic context, or the request is clearly text-only. If the first image attempt fails because Codex returns no image, rejects the prompt, or reports a safety/filter failure, retry at most once with a rewritten safer prompt that keeps the same visual intent; do not resend the exact same prompt. The generated image is automatically attached to your final Discord reply.",
+    "Use codex_generate_image when the user asks you to create, generate, draw, render, or make a new raster image/photo/illustration/sprite/banner/mockup. Image generation is asynchronous in this runtime: codex_generate_image starts a visible image job and returns immediately; the runtime keeps typing while the worker runs. When the image is ready, the runtime starts a normal fresh 2b reply loop with the same persona, current chat history, and the generated image attached as current-turn image input and as a pending outgoing attachment. Do not wait for the image in the original reply loop.",
+    "If the current message is an internal [Async Image Job Ready] event, the image has already been generated and is attached to the current turn. Inspect it directly if the model supports images, then reply naturally to the original request with the image attached. The event includes a line like \"Original request MsgID 123...\" and also gives the exact required <message reply=\"true\" reply_to=\"123...\">...</message> envelope; use that concrete MsgID, not a placeholder. Do not call codex_generate_image, cancel_agent_job, or start another image job from an async completion turn.",
+    "For codex_generate_image, the prompt argument is the final visual brief sent to Codex image generation: preserve the user's visual request, relevant context, and concrete subject/composition/style/lighting/avoid constraints, but phrase it as a safe neutral image prompt. Do not include chat/message tags, status text, tool names, or unrelated additions. Exercise best judgment about image_ids: if the user attached an image in the current post, replied to an image, asks to use/edit/remix/continue a specific image, or context clearly implies a specific ImageID or ReplyImageID, pass that image ID; pass several IDs when the request depends on several specific images. Omit image_ids only when the image is irrelevant, merely generic context, or the request is clearly text-only.",
+    "Before calling codex_generate_image, inspect Active Image Jobs and recent message ImageJob annotations. If a visible active job already matches the same concrete request, do not call codex_generate_image again; answer with the job status/id. Do not start duplicate jobs just because a user asks where the image is, sounds confused, repeats the request, or pressures you to send it faster.",
+    "Set codex_generate_image separate_job=true only when the user explicitly asks for a separate new image or variant while another image job is active. Set allows_group_corrections=true only when the image request is explicitly about the whole chat/group/all visible users, so omitted participants can correct a still-young job.",
+    "Use cancel_agent_job only for active image jobs visible in context. For replacement corrections, cancel only when the new message clearly corrects or invalidates the active image request, the job is still inside the runtime grace window, and regenerating from a complete revised prompt is better than editing a degraded output. Common valid corrections: 'wait, make it blue instead', 'use this reference instead', or for a group/chat image, omitted participants saying 'where am I' or 'and me too'. Do not cancel for status checks, jokes, unrelated chat, or late minor preferences. After a successful replacement cancellation, call codex_generate_image exactly once with the complete revised prompt and replaces_job_id. If cancellation is rejected or the job is too old, do not keep trying; answer that the current image is already underway and offer a separate variant only if the user clearly wants one.",
+    "If an async image job failed, timed out, or was cancelled, do not try to cancel it. It remains visible briefly only for context. You may start a new job if the user still wants the image.",
     "For missing or old chat context, use search_messages. Prefer semantic search for vague meaning and literal search for exact words, commands, filenames, URLs, or error strings. Search enough to reconstruct the likely context, then answer naturally instead of replaying found messages.",
     "When you need several independent read-only lookups, call them together in one tool turn.",
     "Use as many tool calls as the task actually needs. Do not stop early just to conserve calls, but avoid repetitive or low-value loops.",
@@ -622,33 +638,57 @@ function buildCurrentMessageMetadata(msg: IncomingMessage): string {
   return lines.join("\n");
 }
 
+function imagePartsFromCurrentTurn(msg: IncomingMessage): OpenRouterImageUrlPart[] {
+  return (msg.imageInputs ?? []).map((image) => ({
+    type: "image_url",
+    image_url: { url: `data:${image.contentType};base64,${image.buffer.toString("base64")}` },
+  }));
+}
+
+function textPart(text: string): OpenRouterTextPart {
+  return { type: "text", text };
+}
+
 function buildInitialMessages(userContent: string, volatileTurnContext: string, msg: IncomingMessage): OpenRouterMessage[] {
   const currentMessageMetadata = [
     "## Current Message Metadata",
     buildCurrentMessageMetadata(msg),
   ].join("\n");
 
+  const imageMetadata = (msg.imageInputs ?? [])
+    .map((image, index) => image.metadataText !== undefined && image.metadataText !== ""
+      ? `Image ${index + 1}: ${image.metadataText}`
+      : `Image ${index + 1}: attached to this current turn.`
+    )
+    .join("\n");
+
   if (volatileTurnContext.trim() === "") {
-    return [{
-      role: "user",
-      content: [
+    const text = [
         currentMessageMetadata,
+        imageMetadata !== "" ? `## Current Turn Images\n${imageMetadata}` : "",
         "## Current User Message",
         userContent,
-      ].join("\n\n"),
+    ].filter((part) => part !== "").join("\n\n");
+    const images = imagePartsFromCurrentTurn(msg);
+    return [{
+      role: "user",
+      content: images.length > 0 ? [textPart(text), ...images] : text,
     }];
   }
 
-  return [{
-    role: "user",
-    content: [
+  const text = [
       "## Current Discord Turn Context",
       "The following runtime context is for this Discord turn. It is not the user's message.",
       volatileTurnContext,
       currentMessageMetadata,
+      imageMetadata !== "" ? `## Current Turn Images\n${imageMetadata}` : "",
       "## Current User Message",
       userContent,
-    ].join("\n\n"),
+  ].filter((part) => part !== "").join("\n\n");
+  const images = imagePartsFromCurrentTurn(msg);
+  return [{
+    role: "user",
+    content: images.length > 0 ? [textPart(text), ...images] : text,
   }];
 }
 
@@ -836,6 +876,11 @@ function generatedAttachmentIdsFromToolResult(result: AgentToolResult<unknown>):
   return ids.filter((id): id is string => typeof id === "string" && id !== "");
 }
 
+function asyncImageJobCreatedFromToolResult(result: AgentToolResult<unknown>): boolean {
+  const details = isRecord(result.details) ? result.details : undefined;
+  return details?.asyncJobCreated === true;
+}
+
 async function executeToolCallForLoop(input: {
   tool: AgentTool;
   call: OpenRouterToolCall;
@@ -864,16 +909,18 @@ async function renderExecutedToolCall(input: {
   imageMessages: OpenRouterMessage[];
   consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
   pendingAttachments: OutboundAttachment[];
-}): Promise<{ resultText: string; createdThreadId: string | null }> {
+}): Promise<{ resultText: string; createdThreadId: string | null; asyncImageJobCreated: boolean }> {
   if (input.execution.result === undefined) {
     return {
       resultText: input.execution.errorText ?? "Tool failed without an error message.",
       createdThreadId: null,
+      asyncImageJobCreated: false,
     };
   }
 
   const { call, tool, result } = input.execution;
   const createdThreadId = detectCreatedThreadId(tool, result);
+  const asyncImageJobCreated = tool.name === "codex_generate_image" && asyncImageJobCreatedFromToolResult(result);
   const generatedAttachmentIds = generatedAttachmentIdsFromToolResult(result);
   if (generatedAttachmentIds.length > 0) {
     input.pendingAttachments.push(...(input.consumeGeneratedAttachments?.(generatedAttachmentIds) ?? []));
@@ -897,7 +944,7 @@ async function renderExecutedToolCall(input: {
     resultText = appendImageUnsupportedToolText(resultText, images.length);
   }
 
-  return { resultText, createdThreadId };
+  return { resultText, createdThreadId, asyncImageJobCreated };
 }
 
 async function runNativeToolLoop(input: {
@@ -929,6 +976,7 @@ async function runNativeToolLoop(input: {
   let sentIntermediateStatus = false;
   const streamingState = { visibleText: false };
   let agentTimeBudgetMarked = false;
+  let asyncImageJobCreated = false;
 
   const markAgentTimeBudgetExhausted = (): void => {
     if (agentTimeBudgetMarked) return;
@@ -1100,6 +1148,7 @@ async function runNativeToolLoop(input: {
           pendingAttachments: input.pendingAttachments,
         });
         if (rendered.createdThreadId !== null) targetChatId = rendered.createdThreadId;
+        if (rendered.asyncImageJobCreated) asyncImageJobCreated = true;
         input.messages.push(toolMessage(execution.call, rendered.resultText));
       }
     };
@@ -1162,6 +1211,7 @@ async function runNativeToolLoop(input: {
         pendingAttachments: input.pendingAttachments,
       });
       if (rendered.createdThreadId !== null) targetChatId = rendered.createdThreadId;
+      if (rendered.asyncImageJobCreated) asyncImageJobCreated = true;
       input.messages.push(toolMessage(call, rendered.resultText));
       if (isAgentTimeBudgetExceededSignal(input.signal)) {
         appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex + 1));
@@ -1171,6 +1221,9 @@ async function runNativeToolLoop(input: {
     }
     await flushParallelCalls();
     input.messages.push(...imageMessages);
+    if (asyncImageJobCreated) {
+      return { text: "", targetChatId };
+    }
     if (isAgentTimeBudgetExceededSignal(input.signal)) {
       return await completeFinalAfterAgentTimeBudget();
     }
@@ -1738,7 +1791,7 @@ export async function handleMessage(
 
     let finalText = "";
     let targetChatId: string | undefined;
-    const pendingAttachments: OutboundAttachment[] = [];
+    const pendingAttachments: OutboundAttachment[] = [...(deps.initialPendingAttachments ?? [])];
     const intermediateStatus = { sent: false, sendCount: 0 };
     const liveMessageTypingHoldMs = deps.liveMessageTypingHoldMs ?? DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS;
     const liveDispatchers = new Map<string, LiveMessageDispatcher>();
