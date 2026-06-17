@@ -224,7 +224,7 @@ export function startDashboard(opts: DashboardOptions): void {
       "/api/logs/:requestId": (req) => {
         const denied = requireAuth(req);
         if (denied !== null) return denied;
-        const entry = requestLogStore.getByRequestId(req.params.requestId);
+        const entry = requestLogStore.getSanitizedByRequestId(req.params.requestId);
         if (entry === null) return json({ error: "Log entry not found" }, 404);
         return json(entry);
       },

@@ -36,6 +36,10 @@ export interface RequestLogFilters {
   authorUsername?: string;
 }
 
+const BASE64_PLACEHOLDER_MIN_LENGTH = 1_024;
+const BASE64_SAMPLE_LENGTH = 4_096;
+const BASE64_FIELD_NAMES = new Set(["base64", "b64json", "data", "image", "imageurl"]);
+
 export class RequestLogStore {
   private readonly entries: RequestLogEntry[];
   private readonly maxEntries: number;
@@ -119,6 +123,12 @@ export class RequestLogStore {
     return null;
   }
 
+  /** Finds one entry for dashboard detail responses with oversized base64 image data replaced. */
+  getSanitizedByRequestId(requestId: string): RequestLogEntry | null {
+    const entry = this.getByRequestId(requestId);
+    return entry === null ? null : sanitizeDashboardLogEntry(entry);
+  }
+
   getFilterOptions(): { guildIds: string[]; channelIds: string[]; usernames: string[] } {
     const guildIds = new Set<string>();
     const channelIds = new Set<string>();
@@ -148,6 +158,80 @@ export class RequestLogStore {
   getActiveCount(): number {
     return this.activeRequests;
   }
+}
+
+function sanitizeDashboardLogEntry(entry: RequestLogEntry): RequestLogEntry {
+  return {
+    ...entry,
+    trigger: sanitizeDashboardValue(entry.trigger),
+    tools: entry.tools.map((tool) => ({
+      ...tool,
+      args: sanitizeDashboardRecord(tool.args),
+      result: tool.result !== undefined ? sanitizeDashboardString(tool.result, "result") : undefined,
+    })),
+    llmCalls: entry.llmCalls.map((call) => ({
+      ...call,
+      contentTypes: [...call.contentTypes],
+      outputText: call.outputText !== undefined ? sanitizeDashboardString(call.outputText, "outputText") : undefined,
+      requestPayload: sanitizeDashboardValue(call.requestPayload, "requestPayload"),
+      responsePayload: sanitizeDashboardValue(call.responsePayload, "responsePayload"),
+    })),
+  };
+}
+
+function sanitizeDashboardRecord(value: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    result[key] = sanitizeDashboardValue(item, key);
+  }
+  return result;
+}
+
+function sanitizeDashboardValue(value: unknown, key = ""): unknown {
+  if (typeof value === "string") return sanitizeDashboardString(value, key);
+  if (Array.isArray(value)) return value.map((item) => sanitizeDashboardValue(item, key));
+  if (value !== null && typeof value === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [childKey, item] of Object.entries(value)) {
+      result[childKey] = sanitizeDashboardValue(item, childKey);
+    }
+    return result;
+  }
+  return value;
+}
+
+function sanitizeDashboardString(value: string, key: string): string {
+  const dataUri = dataUriBase64PayloadOffset(value);
+  if (dataUri !== null) {
+    return `${value.slice(0, dataUri)}[${formatApproxKb(value.length - dataUri)} base64 truncated]`;
+  }
+
+  if (isLikelyBase64ImageField(key, value)) {
+    return `[${formatApproxKb(value.length)} base64 truncated]`;
+  }
+
+  return value;
+}
+
+function dataUriBase64PayloadOffset(value: string): number | null {
+  if (!value.startsWith("data:")) return null;
+  const comma = value.indexOf(",");
+  if (comma === -1 || comma > 256) return null;
+  const header = value.slice(5, comma).toLowerCase();
+  if (!header.split(";").includes("base64")) return null;
+  return comma + 1;
+}
+
+function isLikelyBase64ImageField(key: string, value: string): boolean {
+  if (value.length < BASE64_PLACEHOLDER_MIN_LENGTH) return false;
+  const normalizedKey = key.toLowerCase().replaceAll("_", "").replaceAll("-", "");
+  if (!BASE64_FIELD_NAMES.has(normalizedKey)) return false;
+  const sample = value.slice(0, BASE64_SAMPLE_LENGTH);
+  return /^[A-Za-z0-9+/=_-]+$/.test(sample);
+}
+
+function formatApproxKb(length: number): string {
+  return `${Math.max(1, Math.round(length / 1024))}KB`;
 }
 
 function toSummary(entry: RequestLogEntry): RequestLogSummary {

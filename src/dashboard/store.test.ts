@@ -147,6 +147,48 @@ describe("RequestLogStore", () => {
     expect(store.getByRequestId("missing")).toBeNull();
   });
 
+  test("getSanitizedByRequestId trims base64 image data without mutating stored entry", () => {
+    const store = new RequestLogStore();
+    const dataUri = `data:image/png;base64,${"A".repeat(5_000)}`;
+    const rawBase64 = "B".repeat(5_000);
+    store.push(makeEntry({
+      requestId: "r1",
+      tools: [{
+        tool: "read_image",
+        args: { data: rawBase64 },
+      }],
+      llmCalls: [{
+        model: "model",
+        promptTokens: 10,
+        completionTokens: 5,
+        totalTokens: 15,
+        stopReason: "stop",
+        contentTypes: ["text", "image"],
+        requestPayload: {
+          content: [{ type: "input_image", image_url: dataUri }],
+        },
+        responsePayload: {
+          b64_json: rawBase64,
+        },
+      }],
+    }));
+
+    const sanitized = store.getSanitizedByRequestId("r1");
+    if (sanitized === null) throw new Error("expected sanitized entry");
+    const raw = store.getByRequestId("r1");
+    if (raw === null) throw new Error("expected raw entry");
+
+    const sanitizedText = JSON.stringify(sanitized);
+    expect(sanitizedText).toContain("data:image/png;base64,[5KB base64 truncated]");
+    expect(sanitizedText).toContain("[5KB base64 truncated]");
+    expect(sanitizedText).not.toContain("A".repeat(1_024));
+    expect(sanitizedText).not.toContain("B".repeat(1_024));
+
+    const rawText = JSON.stringify(raw);
+    expect(rawText).toContain(dataUri);
+    expect(rawText).toContain(rawBase64);
+  });
+
   test("getFilterOptions returns unique values", () => {
     const store = new RequestLogStore();
     store.push(makeEntry({ guildId: "g1", channelId: "c1", authorUsername: "alice" }));
