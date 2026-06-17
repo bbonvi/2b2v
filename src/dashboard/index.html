@@ -495,14 +495,20 @@
   // Last-seen data fingerprint to skip redundant DOM writes
   let lastLogHash = '';
 
-  async function fetchLogs() {
+  function currentLogParams() {
     const params = new URLSearchParams();
     if (fGuild.value) params.set('guildId', fGuild.value);
     if (fChannel.value) params.set('channelId', fChannel.value);
     if (fUser.value) params.set('authorUsername', fUser.value);
-    const r = await fetch('/api/logs?' + params.toString());
+    return params;
+  }
+
+  async function fetchLogs() {
+    const requestQuery = currentLogParams().toString();
+    const r = await fetch('/api/logs?' + requestQuery);
     if (r.status === 401) { location.href = '/login'; return; }
     const data = await r.json();
+    if (currentLogParams().toString() !== requestQuery) return;
 
     // Cheap fingerprint: count + newest requestId. Skip re-render if unchanged.
     const hash = data.length + ':' + (data.length > 0 ? data[0].requestId : '');
@@ -531,23 +537,38 @@
     fGuild.value = gv; fChannel.value = cv; fUser.value = uv;
   }
 
+  let logRefreshRunning = false;
+  let logRefreshQueued = false;
+
+  async function refreshLogs() {
+    if (logRefreshRunning) {
+      logRefreshQueued = true;
+      return;
+    }
+
+    logRefreshRunning = true;
+    try {
+      do {
+        logRefreshQueued = false;
+        await fetchLogs();
+      } while (logRefreshQueued && !document.hidden);
+    } finally {
+      logRefreshRunning = false;
+    }
+  }
+
   async function refresh() {
-    await Promise.all([fetchLogs(), fetchFilters()]);
+    await Promise.all([refreshLogs(), fetchFilters()]);
   }
 
   btnRefresh.addEventListener('click', () => { lastLogHash = ''; refresh(); });
-  fGuild.addEventListener('change', () => { lastLogHash = ''; fetchLogs(); });
-  fChannel.addEventListener('change', () => { lastLogHash = ''; fetchLogs(); });
-  fUser.addEventListener('change', () => { lastLogHash = ''; fetchLogs(); });
+  fGuild.addEventListener('change', () => { lastLogHash = ''; refreshLogs(); });
+  fChannel.addEventListener('change', () => { lastLogHash = ''; refreshLogs(); });
+  fUser.addEventListener('change', () => { lastLogHash = ''; refreshLogs(); });
 
-  // Unified polling: status + logs every 1s
-  let pollTimer = null;
-  async function poll() {
+  async function refreshStatus() {
     try {
-      const [statusRes] = await Promise.all([
-        fetch('/api/status'),
-        fetchLogs(),
-      ]);
+      const statusRes = await fetch('/api/status');
       if (statusRes.ok) {
         const d = await statusRes.json();
         if (d.activeRequests > 0) {
@@ -559,8 +580,40 @@
       }
     } catch {}
   }
-  function startPolling() { poll(); pollTimer = setInterval(poll, 1000); }
-  function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+  let statusPollTimer = null;
+  let logPollTimer = null;
+  let logPollingActive = false;
+
+  async function pollLogs() {
+    if (!logPollingActive) return;
+    try {
+      await refreshLogs();
+    } catch {}
+    if (!logPollingActive) return;
+    logPollTimer = setTimeout(() => { logPollTimer = null; pollLogs(); }, 1000);
+  }
+
+  function startPolling() {
+    refreshStatus();
+    if (statusPollTimer === null) statusPollTimer = setInterval(refreshStatus, 1000);
+    if (!logPollingActive) {
+      logPollingActive = true;
+      pollLogs();
+    }
+  }
+
+  function stopPolling() {
+    if (statusPollTimer !== null) {
+      clearInterval(statusPollTimer);
+      statusPollTimer = null;
+    }
+    if (logPollTimer !== null) {
+      clearTimeout(logPollTimer);
+      logPollTimer = null;
+    }
+    logPollingActive = false;
+  }
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) stopPolling(); else { lastLogHash = ''; startPolling(); }
