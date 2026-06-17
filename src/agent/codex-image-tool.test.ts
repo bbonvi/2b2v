@@ -3,6 +3,7 @@ import {
   buildCodexDirectImageRequestBody,
   buildCodexHeaders,
   buildCodexImageRequestBody,
+  buildCodexResponsesImageHeaders,
   codexImageFailureMessageForAgent,
   parseCodexDirectImageResponse,
   parseCodexImageSse,
@@ -142,7 +143,7 @@ describe("buildCodexImageRequestBody", () => {
     });
 
     expect(body.model).toBe("gpt-5.5");
-    expect(body.prompt_cache_key).toBe("session-1");
+    expect(body.prompt_cache_key).toBeUndefined();
     expect(body.include).toBeUndefined();
     expect(body.tools).toEqual([{
       type: "image_generation",
@@ -161,6 +162,17 @@ describe("buildCodexImageRequestBody", () => {
     expect(input[0]?.content[0]?.text).toBe("selfie of a futuristic android at a desk");
     expect(input[0]?.content[0]?.text).not.toContain("Discord");
     expect(input[0]?.content[0]?.text).not.toContain("style guidance");
+  });
+
+  test("omits prompt cache keys from Codex image requests", () => {
+    const body = buildCodexImageRequestBody({
+      model: "gpt-5.5",
+      prompt: "a cat",
+      outputFormat: "png",
+      sessionId: "2b2v-image-job:1234567890123456789:1234567890123456789:img-abcdef",
+    });
+
+    expect(body.prompt_cache_key).toBeUndefined();
   });
 
   test("includes chat reference images as Responses image inputs", () => {
@@ -207,17 +219,13 @@ describe("buildCodexImageRequestBody", () => {
 });
 
 describe("codexImageFailureMessageForAgent", () => {
-  test("adds one-off rewritten-prompt retry guidance for image failures", () => {
-    const message = codexImageFailureMessageForAgent(
-      "Codex image generation failed: {\"type\":\"image_generation_call\",\"status\":\"failed\"}",
-    );
+  test("does not add retry guidance to image failures", () => {
+    const message = "Codex image generation failed: {\"type\":\"image_generation_call\",\"status\":\"failed\"}";
 
-    expect(message).toContain("call codex_generate_image one more time");
-    expect(message).toContain("Do not resend the exact same prompt");
-    expect(message).toContain("If the rewritten retry also fails, stop retrying");
+    expect(codexImageFailureMessageForAgent(message)).toBe(message);
   });
 
-  test("does not add image retry guidance to unrelated failures", () => {
+  test("leaves unrelated failures unchanged", () => {
     expect(codexImageFailureMessageForAgent("OpenAI Codex OAuth credentials are missing.")).toBe(
       "OpenAI Codex OAuth credentials are missing.",
     );
@@ -292,5 +300,15 @@ describe("buildCodexHeaders", () => {
 
     expect(headers.accept).toBe("application/json");
     expect(headers.session_id).toBeUndefined();
+  });
+
+  test("responses image route never sends session affinity headers", () => {
+    const headers = buildCodexResponsesImageHeaders({
+      token: "token",
+      accountId: "account-1",
+    });
+
+    expect(headers.session_id).toBeUndefined();
+    expect(headers.accept).toBe("text/event-stream");
   });
 });

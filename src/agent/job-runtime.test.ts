@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { AgentJobStore } from "./job-runtime.ts";
 
 const config = {
-  imageTimeoutMs: 200_000,
+  imageTimeoutMs: 300_000,
   imageCancelGraceMs: 60_000,
   terminalVisibleMs: 600_000,
   maxImageReplacements: 2,

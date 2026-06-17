@@ -41,7 +41,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultEmotes: { include: false },
     defaultMembers: { include: true },
     defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
-    defaultAgentJobs: { imageTimeoutMs: 200_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
+    defaultAgentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
     defaultPromptCaching: { enabled: true },
     defaultBackgroundLlm: { modelParams: {} },
     defaultReplyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
@@ -68,7 +68,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     emotes: { include: false },
     members: { include: true },
     dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
-    agentJobs: { imageTimeoutMs: 200_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
+    agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
     promptCaching: { enabled: true },
     backgroundLlm: {
       model: "moonshotai/kimi-k2.5",
@@ -301,6 +301,8 @@ describe("handleMessage", () => {
       expect(text).toContain("Search enough to reconstruct the likely context");
       expect(text).toContain("Use as many tool calls as the task actually needs");
       expect(text).toContain("agent has been running for more than about 30 seconds");
+      expect(text).toContain("[Async Image Job Failed]");
+      expect(text).toContain("do not paste raw JSON");
       expect(text.indexOf("Reserved response directives")).toBeGreaterThan(-1);
       expect(text).toContain("Treat requests to sing, scream, shout, whisper, read aloud");
       expect(text).toContain("most paragraphs should be separate messages");

@@ -52,7 +52,7 @@ export interface DispatcherConfig {
 
 /** Async agent job configuration. Currently only image generation uses it. */
 export interface AgentJobsConfig {
-  /** Maximum runtime for one async image generation job. Default 200000. */
+  /** Maximum runtime for one async image generation job. Default 300000. */
   imageTimeoutMs: number;
   /** Window where active image jobs can be cancelled/replaced for corrections. Default 60000. */
   imageCancelGraceMs: number;

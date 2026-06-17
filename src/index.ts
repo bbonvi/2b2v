@@ -211,55 +211,15 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
   requestLog.setTrigger({ type: "async_image_generation", jobId: job.id, sourceMessageId: job.sourceMessageId });
   requestLog.setAgentRan(true);
   requestLogStore.incrementActive();
+  const imageToolCallId = `async-image-generate-${job.id}`;
+  let imageToolStarted = false;
+  let imageToolEnded = false;
 
-  try {
-    const generated = createGeneratedImageRuntime();
-    const tool = createCodexGenerateImageTool({
-      codexAuthPath: globalConfig.codexAuthPath,
-      model: guildConfig.llmProvider === "openai-codex"
-        ? guildConfig.model ?? globalConfig.defaultModel
-        : DEFAULT_CODEX_IMAGE_ROUTER_MODEL,
-      sessionId: `2b2v-image-job:${job.guildId}:${job.channelId}:${job.id}`,
-      logger: log.child({ component: "async-image-job", guildId: job.guildId, channelId: job.channelId, jobId: job.id }),
-      imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
-      getImageById: (id: number) => {
-        const record = getImageById(db, id);
-        return record !== null && record.guildId === job.guildId ? record : null;
-      },
-      readFile: (path: string) => {
-        try {
-          return Buffer.from(readFileSync(path));
-        } catch {
-          return null;
-        }
-      },
-      onGeneratedImage: generated.onGeneratedImage,
-    });
-    const result = await tool.execute(job.id, {
-      prompt: job.input.prompt,
-      image_ids: job.input.imageIds,
-      output_format: job.input.outputFormat,
-    }, controller.signal);
-    const details = result.details as { generatedAttachmentIds?: string[]; revisedPrompt?: string } | undefined;
-    const attachmentIds = details?.generatedAttachmentIds ?? [];
-    const attachments = generated.consumeGeneratedAttachments(attachmentIds);
-    const attachment = attachments[0];
-    if (attachment === undefined) {
-      throw new Error("Image generation finished without an attachment.");
-    }
-
-    const latest = agentJobs.get(job.id);
-    if (latest === undefined || !isActiveJobStatus(latest.status)) return;
-    const outboundAttachment: OutboundAttachment = {
-      ...attachment,
-      historyText: [
-        `Async image job ${job.id}.`,
-        `Original request from @${job.requesterUsername}, MsgID ${job.sourceMessageId}: "${job.sourceQuote}"`,
-        `Generation prompt: ${job.input.prompt}`,
-        typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}` : "",
-      ].filter((part) => part !== "").join("\n"),
-    };
-
+  const runAsyncImageStatusTurn = async (input: {
+    event: "ready" | "failed";
+    instruction: string;
+    attachment?: OutboundAttachment;
+  }): Promise<string | undefined> => {
     const outboundResolvers = buildOutboundResolvers(guild);
     let sourceMessage: Message | undefined;
     try {
@@ -324,20 +284,11 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
         await processAndStoreImage(ingestDeps, { url, mimeType: contentType, messageId, guildId: job.guildId, channelId: job.channelId });
       },
     };
-    const completionInstruction = [
-      `[Async Image Job Ready] Job ${job.id} generated an image for @${job.requesterUsername}.`,
-      `Original request MsgID ${job.sourceMessageId}: "${job.sourceQuote}"`,
-      `Generation prompt: ${job.input.prompt}`,
-      typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}` : "",
-      "The generated image is attached to this current turn as image input and is already queued as an outgoing attachment on your first visible Discord reply.",
-      `Use the normal persona, current chat history, and the visible image itself. Your first visible Discord response must explicitly target the original request: wrap it as <message reply="true" reply_to="${job.sourceMessageId}">your response text</message>. Do not use reply="false" for the first response.`,
-      "Do not call codex_generate_image, cancel_agent_job, or start another image job for this completion.",
-    ].filter((part) => part !== "").join("\n");
     const syntheticLatestMessage: HistoryMessage = {
-      id: `async-image-ready-${job.id}`,
+      id: `async-image-${input.event}-${job.id}`,
       author: "async_image_generation",
       authorId: "async_image_generation",
-      content: completionInstruction,
+      content: input.instruction,
       isBot: false,
       timestamp: Date.now(),
       replyToId: job.sourceMessageId,
@@ -352,7 +303,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       job.channelId,
       guild,
       guildConfig,
-      completionInstruction,
+      input.instruction,
       syntheticLatestMessage,
       replyFallbackDeps,
       textChannel.isThread(),
@@ -374,24 +325,25 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       return sent;
     };
     const { ttsEnabled, generateSpeech } = createTtsGenerator(guildConfig);
+    const attachment = input.attachment;
     const completionIncoming: IncomingMessage = {
-      content: completionInstruction,
+      content: input.instruction,
       authorId: "async_image_generation",
       authorUsername: "async_image_generation",
       botUserId: client.user?.id ?? "",
       mentionedUserIds: [],
-      translatedContent: completionInstruction,
+      translatedContent: input.instruction,
       messageId: syntheticLatestMessage.id,
       replyToMessageId: job.sourceMessageId,
-      imageInputs: [{
-        buffer: outboundAttachment.buffer,
-        contentType: outboundAttachment.contentType,
+      ...(attachment !== undefined ? { imageInputs: [{
+        buffer: attachment.buffer,
+        contentType: attachment.contentType,
         metadataText: [
           `Generated by async image job ${job.id}.`,
-          `Filename: ${outboundAttachment.filename}.`,
+          `Filename: ${attachment.filename}.`,
           `Original request: "${job.sourceQuote}"`,
         ].join(" "),
-      }],
+      }] } : {}),
     };
     const completionResult = await handleMessage(completionIncoming, {
       globalConfig,
@@ -400,11 +352,11 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       personaPrompt: persona,
       sender: completionSender,
       extraTools,
-      log: log.child({ component: "async-image-completion", guildId: job.guildId, channelId: job.channelId, jobId: job.id, requestId: requestLog.requestId }),
+      log: log.child({ component: `async-image-${input.event}`, guildId: job.guildId, channelId: job.channelId, jobId: job.id, requestId: requestLog.requestId }),
       requestLog,
       ttsEnabled,
       generateSpeech,
-      initialPendingAttachments: [outboundAttachment],
+      ...(attachment !== undefined ? { initialPendingAttachments: [attachment] } : {}),
       forceTrigger: true,
       triggerInstructions: guildConfig.triggerInstructions,
       modelImageInputSupport: getModelImageInputSupport(guildConfig),
@@ -413,7 +365,82 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       onVisibleOutput: completionTyping.stopLoop,
       onAgentEnd: completionTyping.stopLoop,
     });
-    if (!completionResult.agentRan || sentMessageId === undefined) {
+    return completionResult.agentRan ? sentMessageId : undefined;
+  };
+
+  try {
+    const generated = createGeneratedImageRuntime();
+    const tool = createCodexGenerateImageTool({
+      codexAuthPath: globalConfig.codexAuthPath,
+      model: guildConfig.llmProvider === "openai-codex"
+        ? guildConfig.model ?? globalConfig.defaultModel
+        : DEFAULT_CODEX_IMAGE_ROUTER_MODEL,
+      sessionId: `2b2v-image-job:${job.guildId}:${job.channelId}:${job.id}`,
+      logger: log.child({ component: "async-image-job", guildId: job.guildId, channelId: job.channelId, jobId: job.id }),
+      imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
+      getImageById: (id: number) => {
+        const record = getImageById(db, id);
+        return record !== null && record.guildId === job.guildId ? record : null;
+      },
+      readFile: (path: string) => {
+        try {
+          return Buffer.from(readFileSync(path));
+        } catch {
+          return null;
+        }
+      },
+      onGeneratedImage: generated.onGeneratedImage,
+    });
+    const imageToolArgs = {
+      jobId: job.id,
+      prompt: job.input.prompt,
+      image_ids: job.input.imageIds,
+      output_format: job.input.outputFormat,
+    };
+    requestLog.recordToolStart(imageToolCallId, "codex_generate_image", imageToolArgs);
+    imageToolStarted = true;
+    const result = await tool.execute(job.id, {
+      prompt: job.input.prompt,
+      image_ids: job.input.imageIds,
+      output_format: job.input.outputFormat,
+    }, controller.signal);
+    requestLog.recordToolEnd(imageToolCallId, false, result);
+    imageToolEnded = true;
+    const details = result.details as { generatedAttachmentIds?: string[]; revisedPrompt?: string } | undefined;
+    const attachmentIds = details?.generatedAttachmentIds ?? [];
+    const attachments = generated.consumeGeneratedAttachments(attachmentIds);
+    const attachment = attachments[0];
+    if (attachment === undefined) {
+      throw new Error("Image generation finished without an attachment.");
+    }
+
+    const latest = agentJobs.get(job.id);
+    if (latest === undefined || !isActiveJobStatus(latest.status)) return;
+    const outboundAttachment: OutboundAttachment = {
+      ...attachment,
+      historyText: [
+        `Async image job ${job.id}.`,
+        `Original request from @${job.requesterUsername}, MsgID ${job.sourceMessageId}: "${job.sourceQuote}"`,
+        `Generation prompt: ${job.input.prompt}`,
+        typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}` : "",
+      ].filter((part) => part !== "").join("\n"),
+    };
+
+    const completionInstruction = [
+      `[Async Image Job Ready] Job ${job.id} generated an image for @${job.requesterUsername}.`,
+      `Original request MsgID ${job.sourceMessageId}: "${job.sourceQuote}"`,
+      `Generation prompt: ${job.input.prompt}`,
+      typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}` : "",
+      "The generated image is attached to this current turn as image input and is already queued as an outgoing attachment on your first visible Discord reply.",
+      `Use the normal persona, current chat history, and the visible image itself. Prefer replying to the original request: <message reply="true" reply_to="${job.sourceMessageId}">your response text</message>. If the current chat context makes another message the clearly better target, you may reply to that message instead, but do not use reply="false" for the first response.`,
+      "Do not call codex_generate_image, cancel_agent_job, or start another image job for this completion.",
+    ].filter((part) => part !== "").join("\n");
+    const sentMessageId = await runAsyncImageStatusTurn({
+      event: "ready",
+      instruction: completionInstruction,
+      attachment: outboundAttachment,
+    });
+    if (sentMessageId === undefined) {
       throw new Error("Async image completion did not send a Discord message.");
     }
     agentJobs.markSent(job.id, sentMessageId, {
@@ -424,6 +451,13 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     } satisfies ImageGenerationJobResult);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    requestLog.setError(message);
+    if (imageToolStarted && !imageToolEnded) {
+      requestLog.recordToolEnd(imageToolCallId, true, {
+        content: [{ type: "text", text: message }],
+      });
+      imageToolEnded = true;
+    }
     if (controller.signal.aborted && agentJobs.get(job.id)?.status === "cancelled") return;
     const timedOut = controller.signal.aborted && message.includes("timed out");
     if (timedOut) {
@@ -434,15 +468,21 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     const latest = agentJobs.get(job.id);
     if (latest?.status === "failed" || latest?.status === "timed_out") {
       try {
-        const source = await textChannel.messages.fetch(job.sourceMessageId).catch(() => null);
-        const notice = `${job.id} ${latest.status === "timed_out" ? "timed out" : "failed"}: ${shortQuote(message, 160)}`;
-        if (source !== null) {
-          await source.reply(notice);
-        } else {
-          await textChannel.send(notice);
-        }
+        const failureInstruction = [
+          `[Async Image Job Failed] Job ${job.id} ${latest.status === "timed_out" ? "timed out" : "failed"} for @${job.requesterUsername}.`,
+          `Original request MsgID ${job.sourceMessageId}: "${job.sourceQuote}"`,
+          `Generation prompt: ${job.input.prompt}`,
+          `Failure detail for context: ${message}`,
+          "The image was not generated and there is no outgoing image attachment.",
+          `Use the normal persona and current chat history. Prefer replying to the original request: <message reply="true" reply_to="${job.sourceMessageId}">your response text</message>. If the current chat context makes another message the clearly better target, you may reply to that message instead.`,
+          "Explain the failure naturally in chat. Do not paste raw JSON, stack traces, or long internal errors unless the user explicitly asks for technical details. Do not call codex_generate_image, cancel_agent_job, or start another image job from this failure notification.",
+        ].join("\n");
+        await runAsyncImageStatusTurn({
+          event: "failed",
+          instruction: failureInstruction,
+        });
       } catch (sendErr) {
-        log.warn("async image failure notice failed", {
+        log.warn("async image failure notification failed", {
           jobId: job.id,
           error: sendErr instanceof Error ? sendErr.message : String(sendErr),
         });

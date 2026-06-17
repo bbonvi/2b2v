@@ -268,7 +268,6 @@ export function buildCodexImageRequestBody(input: {
     model: input.model,
     store: false,
     stream: true,
-    ...(input.sessionId !== undefined ? { prompt_cache_key: input.sessionId } : {}),
     instructions: "You are an image generation assistant.",
     input: [{
       role: "user",
@@ -465,6 +464,16 @@ export function buildCodexHeaders(input: {
   };
 }
 
+export function buildCodexResponsesImageHeaders(input: {
+  token: string;
+  accountId: string;
+}): Record<string, string> {
+  return buildCodexHeaders({
+    token: input.token,
+    accountId: input.accountId,
+  });
+}
+
 function isRetryableStatus(status: number, errorText: string): boolean {
   if ([429, 500, 502, 503, 504].includes(status)) return true;
   return /rate.?limit|overloaded|service.?unavailable|upstream.?connect|connection.?refused/i.test(errorText);
@@ -509,7 +518,10 @@ async function requestResponsesImage(input: {
   signal?: AbortSignal;
 }): Promise<ParsedCodexResponse> {
   const body = JSON.stringify(buildCodexImageRequestBody(input));
-  const headers = buildCodexHeaders(input);
+  const headers = buildCodexResponsesImageHeaders({
+    token: input.token,
+    accountId: input.accountId,
+  });
 
   for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt += 1) {
     if (input.signal?.aborted === true) throw new Error("Image generation was aborted.");
@@ -618,20 +630,8 @@ function codexFailureMessage(parsed: ParsedCodexResponse): string {
   return text !== "" ? `Codex did not return an image. Response text: ${text}` : "Codex did not return an image.";
 }
 
-const PROMPT_REWRITE_RETRY_GUIDANCE = [
-  "If this was the first failed image attempt for the user's request, call codex_generate_image one more time with a safer rewritten prompt.",
-  "Do not resend the exact same prompt.",
-  "Keep the intended subject, composition, medium, and mood, but replace risky wording with neutral visual descriptions and remove unnecessary sexual, violent, coercive, logo, watermark, or brand-mark phrasing.",
-  "If the rewritten retry also fails, stop retrying and explain briefly.",
-].join(" ");
-
-function shouldSuggestPromptRewriteRetry(message: string): boolean {
-  return /image|generation|filter|safety|reject|refus|failed|no image|did not return/i.test(message);
-}
-
 export function codexImageFailureMessageForAgent(message: string): string {
-  if (!shouldSuggestPromptRewriteRetry(message)) return message;
-  return `${message} ${PROMPT_REWRITE_RETRY_GUIDANCE}`;
+  return message;
 }
 
 async function requestImage(input: {

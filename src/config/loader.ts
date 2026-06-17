@@ -187,7 +187,7 @@ const DEFAULT_DISPATCHER: DispatcherConfig = {
 };
 
 const DEFAULT_AGENT_JOBS: AgentJobsConfig = {
-  imageTimeoutMs: 200_000,
+  imageTimeoutMs: 300_000,
   imageCancelGraceMs: 60_000,
   terminalVisibleMs: 600_000,
   maxImageReplacements: 2,
