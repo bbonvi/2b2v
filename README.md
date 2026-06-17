@@ -19,7 +19,7 @@ Personal Discord bot with a single persona reply loop, native tool calling, and 
 - [Bun](https://bun.sh) 1.3+
 - [Docker](https://www.docker.com/) (for Qdrant)
 - API keys: [Discord](https://discord.com/developers/applications), OpenRouter by default, optional ChatGPT/Codex subscription auth, [Brave Search](https://brave.com/search/api/), and [ElevenLabs](https://elevenlabs.io/)
-- Optional for local non-Docker media extraction: `ffmpeg` and latest `yt-dlp`. The Docker image installs both.
+- Optional for local non-Docker media extraction: latest `yt-dlp`, plus `ffmpeg` only for media fallback transcription, chunking, or slide extraction. The Docker image installs standalone `yt-dlp`.
 
 ## Quick start
 
@@ -45,6 +45,8 @@ docker compose -p 2b2v-prod --env-file .env.prod -f docker-compose.yml up -d --b
 ```
 
 Use the dev compose file for live reload. Use the production command with `-p 2b2v-prod` so prod containers and volumes are separate from the default dev project. Production bind-mounts `./config` and `./prompts` from this checkout read-only, matching development's single source of truth. Do not run dev and prod with the same Discord bot token unless you intentionally want both stacks connected as the same bot.
+
+The Docker image caches `yt-dlp` between builds. Refresh it explicitly with `docker compose -p 2b2v-prod --env-file .env.prod -f docker-compose.yml build --build-arg YT_DLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux?cache-bust=$(date -Iseconds)" bot`.
 
 ## Environment variables
 
