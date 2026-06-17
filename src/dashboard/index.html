@@ -242,6 +242,12 @@
     padding: .35rem .5rem;
     font-size: .7rem;
   }
+  .detail-state {
+    color: var(--text-dim);
+    font-size: .7rem;
+    padding: .35rem 0;
+  }
+  .detail-state.error { color: var(--red) }
 
   .empty-state {
     text-align: center;
@@ -406,26 +412,31 @@
 
   // Track which entries are expanded by requestId
   const expandedIds = new Set();
+  const detailCache = new Map();
+  const detailErrors = new Map();
+  const detailRequests = new Map();
 
   function toggleExpand(requestId) {
-    if (expandedIds.has(requestId)) expandedIds.delete(requestId);
-    else expandedIds.add(requestId);
-    // Toggle DOM directly for instant feedback (no re-render wait)
+    if (expandedIds.has(requestId)) {
+      expandedIds.delete(requestId);
+    } else {
+      expandedIds.add(requestId);
+    }
+
     const el = document.querySelector('[data-rid="' + requestId + '"]');
-    if (el) el.classList.toggle('expanded');
+    if (!el) return;
+    const expanded = expandedIds.has(requestId);
+    el.classList.toggle('expanded', expanded);
+    if (expanded) {
+      renderDetailState(requestId);
+      loadEntryDetail(requestId);
+    }
   }
 
   // Store payloads by key for modal lookup (avoids inline JSON escaping issues)
   const payloadStore = new Map();
 
-  function renderEntry(e) {
-    const cost = fmtCost(e.llmCalls);
-    const hasErr = e.error != null;
-    const cls = ['entry'];
-    if (hasErr) cls.push('has-error');
-    if (!e.agentRan) cls.push('no-agent');
-    if (expandedIds.has(e.requestId)) cls.push('expanded');
-
+  function renderEntryDetail(e) {
     let toolRows = '';
     for (const t of e.tools) {
       toolRows += '<tr' + (t.isError ? ' class="tool-error"' : '') + '>'
@@ -464,6 +475,57 @@
         + '</tr>';
     }
 
+    return (e.error != null ? '<div class="detail-section"><div class="detail-label">Error</div><div class="error-text">' + esc(e.error) + '</div></div>' : '')
+      + (e.tools.length > 0 ? '<div class="detail-section"><div class="detail-label">Tool Calls</div>'
+        + '<table class="detail-table"><tr><th>Tool</th><th>Args</th><th>Duration</th><th>Status</th><th>Result</th></tr>'
+        + toolRows + '</table></div>' : '')
+      + (e.llmCalls.length > 0 ? '<div class="detail-section"><div class="detail-label">LLM Calls</div>'
+        + '<table class="detail-table"><tr><th>Model</th><th>Tokens (in/out)</th><th>Cache (read/write)</th><th>Cost</th><th>Stop</th><th>Content Types</th><th>Output</th><th>Request</th><th>Response</th></tr>'
+        + llmRows + '</table></div>' : '')
+      + (e.error == null && e.tools.length === 0 && e.llmCalls.length === 0 ? '<div class="detail-state">No tool or LLM detail for this entry.</div>' : '');
+  }
+
+  function detailStateHtml(requestId) {
+    const cached = detailCache.get(requestId);
+    if (cached != null) return renderEntryDetail(cached);
+    const error = detailErrors.get(requestId);
+    if (error != null) return '<div class="detail-state error">' + esc(error) + '</div>';
+    return '<div class="detail-state">Loading entry details...</div>';
+  }
+
+  function renderDetailState(requestId) {
+    const detail = document.querySelector('[data-detail-rid="' + requestId + '"]');
+    if (detail != null) detail.innerHTML = detailStateHtml(requestId);
+  }
+
+  async function loadEntryDetail(requestId) {
+    if (detailCache.has(requestId) || detailRequests.has(requestId)) return;
+    detailErrors.delete(requestId);
+    const request = (async function() {
+      const r = await fetch('/api/logs/' + encodeURIComponent(requestId));
+      if (r.status === 401) { location.href = '/login'; return; }
+      if (!r.ok) throw new Error('Unable to load entry details (' + r.status + ')');
+      detailCache.set(requestId, await r.json());
+    })();
+    detailRequests.set(requestId, request);
+    try {
+      await request;
+    } catch (err) {
+      detailErrors.set(requestId, err instanceof Error ? err.message : 'Unable to load entry details');
+    } finally {
+      detailRequests.delete(requestId);
+      if (expandedIds.has(requestId)) renderDetailState(requestId);
+    }
+  }
+
+  function renderEntry(e) {
+    const cost = e.estimatedCostUsd != null ? '$' + e.estimatedCostUsd.toFixed(4) : null;
+    const hasErr = e.hasError === true;
+    const cls = ['entry'];
+    if (hasErr) cls.push('has-error');
+    if (!e.agentRan) cls.push('no-agent');
+    if (expandedIds.has(e.requestId)) cls.push('expanded');
+
     const rid = esc(e.requestId);
     return '<div class="' + cls.join(' ') + '" data-rid="' + rid + '">'
       + '<div class="entry-header" onclick="window.__toggleExpand(\'' + rid + '\')">'
@@ -473,20 +535,12 @@
         + (hasErr ? '<span class="entry-error-badge">error</span>' : '')
         + '<div class="entry-stats">'
           + '<span>' + fmtDuration(e.totalDurationMs) + '</span>'
-          + '<span>T:<span class="stat-val">' + e.tools.length + '</span></span>'
-          + '<span>L:<span class="stat-val">' + e.llmCalls.length + '</span></span>'
+          + '<span>T:<span class="stat-val">' + e.toolCount + '</span></span>'
+          + '<span>L:<span class="stat-val">' + e.llmCallCount + '</span></span>'
           + (cost ? '<span class="entry-cost">' + cost + '</span>' : '')
         + '</div>'
       + '</div>'
-      + '<div class="entry-detail">'
-        + (hasErr ? '<div class="detail-section"><div class="detail-label">Error</div><div class="error-text">' + esc(e.error) + '</div></div>' : '')
-        + (e.tools.length > 0 ? '<div class="detail-section"><div class="detail-label">Tool Calls</div>'
-          + '<table class="detail-table"><tr><th>Tool</th><th>Args</th><th>Duration</th><th>Status</th><th>Result</th></tr>'
-          + toolRows + '</table></div>' : '')
-        + (e.llmCalls.length > 0 ? '<div class="detail-section"><div class="detail-label">LLM Calls</div>'
-          + '<table class="detail-table"><tr><th>Model</th><th>Tokens (in/out)</th><th>Cache (read/write)</th><th>Cost</th><th>Stop</th><th>Content Types</th><th>Output</th><th>Request</th><th>Response</th></tr>'
-          + llmRows + '</table></div>' : '')
-      + '</div>'
+      + '<div class="entry-detail" data-detail-rid="' + rid + '">' + (expandedIds.has(e.requestId) ? detailStateHtml(e.requestId) : '') + '</div>'
     + '</div>';
   }
   // Expose toggle for inline onclick

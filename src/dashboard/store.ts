@@ -15,6 +15,21 @@ export interface RequestLogEntry {
   timestamp: string;
 }
 
+export interface RequestLogSummary {
+  requestId: string;
+  guildId: string;
+  channelId: string;
+  authorUsername: string;
+  trigger: unknown;
+  agentRan: boolean;
+  toolCount: number;
+  llmCallCount: number;
+  estimatedCostUsd: number | null;
+  totalDurationMs: number;
+  hasError: boolean;
+  timestamp: string;
+}
+
 export interface RequestLogFilters {
   guildId?: string;
   channelId?: string;
@@ -89,6 +104,21 @@ export class RequestLogStore {
     return result;
   }
 
+  /** Returns compact rows for the dashboard list without large tool or LLM payloads. */
+  querySummaries(filters: RequestLogFilters = {}, limit?: number): RequestLogSummary[] {
+    return this.query(filters, limit).map((entry) => toSummary(entry));
+  }
+
+  /** Finds one full dashboard log entry by request ID for on-demand expansion. */
+  getByRequestId(requestId: string): RequestLogEntry | null {
+    for (let i = 0; i < this.count; i++) {
+      const idx = (this.head - 1 - i + this.maxEntries) % this.maxEntries;
+      const entry = this.entries[idx] as RequestLogEntry;
+      if (entry.requestId === requestId) return entry;
+    }
+    return null;
+  }
+
   getFilterOptions(): { guildIds: string[]; channelIds: string[]; usernames: string[] } {
     const guildIds = new Set<string>();
     const channelIds = new Set<string>();
@@ -118,6 +148,27 @@ export class RequestLogStore {
   getActiveCount(): number {
     return this.activeRequests;
   }
+}
+
+function toSummary(entry: RequestLogEntry): RequestLogSummary {
+  let estimatedCostUsd = 0;
+  for (const call of entry.llmCalls) {
+    if (call.estimatedCostUsd !== undefined) estimatedCostUsd += call.estimatedCostUsd;
+  }
+  return {
+    requestId: entry.requestId,
+    guildId: entry.guildId,
+    channelId: entry.channelId,
+    authorUsername: entry.authorUsername,
+    trigger: entry.trigger,
+    agentRan: entry.agentRan,
+    toolCount: entry.tools.length,
+    llmCallCount: entry.llmCalls.length,
+    estimatedCostUsd: estimatedCostUsd > 0 ? estimatedCostUsd : null,
+    totalDurationMs: entry.totalDurationMs,
+    hasError: entry.error !== undefined,
+    timestamp: entry.timestamp,
+  };
 }
 
 const logDir = process.env.LOG_DIR;

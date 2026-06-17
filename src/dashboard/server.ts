@@ -157,6 +157,18 @@ function json(data: unknown, status = 200, headers: Record<string, string> = {})
   });
 }
 
+function requestLogFilters(req: Request): { guildId?: string; channelId?: string; authorUsername?: string } {
+  const url = new URL(req.url);
+  const filters: { guildId?: string; channelId?: string; authorUsername?: string } = {};
+  const guildId = url.searchParams.get("guildId");
+  const channelId = url.searchParams.get("channelId");
+  const authorUsername = url.searchParams.get("authorUsername");
+  if (guildId !== null && guildId !== "") filters.guildId = guildId;
+  if (channelId !== null && channelId !== "") filters.channelId = channelId;
+  if (authorUsername !== null && authorUsername !== "") filters.authorUsername = authorUsername;
+  return filters;
+}
+
 export function startDashboard(opts: DashboardOptions): void {
   const { port, password, bypassAuth = false, passwordlessCidrs = [], trustedProxyCidrs = [], log } = opts;
 
@@ -206,15 +218,15 @@ export function startDashboard(opts: DashboardOptions): void {
       "/api/logs": (req) => {
         const denied = requireAuth(req);
         if (denied !== null) return denied;
-        const url = new URL(req.url);
-        const filters: { guildId?: string; channelId?: string; authorUsername?: string } = {};
-        const guildId = url.searchParams.get("guildId");
-        const channelId = url.searchParams.get("channelId");
-        const authorUsername = url.searchParams.get("authorUsername");
-        if (guildId !== null && guildId !== "") filters.guildId = guildId;
-        if (channelId !== null && channelId !== "") filters.channelId = channelId;
-        if (authorUsername !== null && authorUsername !== "") filters.authorUsername = authorUsername;
-        return json(requestLogStore.query(filters, DASHBOARD_LOG_ENTRY_LIMIT));
+        return json(requestLogStore.querySummaries(requestLogFilters(req), DASHBOARD_LOG_ENTRY_LIMIT));
+      },
+
+      "/api/logs/:requestId": (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        const entry = requestLogStore.getByRequestId(req.params.requestId);
+        if (entry === null) return json({ error: "Log entry not found" }, 404);
+        return json(entry);
       },
 
       "/api/filters": (req) => {

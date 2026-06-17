@@ -92,6 +92,61 @@ describe("RequestLogStore", () => {
     expect(store.query({}, 0)).toEqual([]);
   });
 
+  test("querySummaries omits heavyweight detail payloads", () => {
+    const store = new RequestLogStore();
+    store.push(makeEntry({
+      requestId: "r1",
+      timestamp: "2026-06-17T00:00:00.000Z",
+      error: "boom",
+      tools: [{
+        tool: "huge_tool",
+        args: { input: "x" },
+        result: "x".repeat(10_000),
+      }],
+      llmCalls: [{
+        model: "model",
+        promptTokens: 10,
+        completionTokens: 5,
+        totalTokens: 15,
+        estimatedCostUsd: 0.25,
+        stopReason: "stop",
+        contentTypes: ["text"],
+        outputText: "x".repeat(10_000),
+        requestPayload: { large: "x".repeat(10_000) },
+        responsePayload: { large: "x".repeat(10_000) },
+      }],
+    }));
+
+    const summaries = store.querySummaries();
+    expect(summaries).toEqual([{
+      requestId: "r1",
+      guildId: "g1",
+      channelId: "c1",
+      authorUsername: "alice",
+      trigger: { type: "mention" },
+      agentRan: true,
+      toolCount: 1,
+      llmCallCount: 1,
+      estimatedCostUsd: 0.25,
+      totalDurationMs: 100,
+      hasError: true,
+      timestamp: "2026-06-17T00:00:00.000Z",
+    }]);
+    const first = summaries[0];
+    if (first === undefined) throw new Error("expected summary");
+    expect("tools" in first).toBe(false);
+    expect("llmCalls" in first).toBe(false);
+  });
+
+  test("getByRequestId returns a single full entry", () => {
+    const store = new RequestLogStore();
+    store.push(makeEntry({ requestId: "r1" }));
+    store.push(makeEntry({ requestId: "r2", tools: [{ tool: "search", args: {}, result: "full result" }] }));
+
+    expect(store.getByRequestId("r2")?.tools[0]?.result).toBe("full result");
+    expect(store.getByRequestId("missing")).toBeNull();
+  });
+
   test("getFilterOptions returns unique values", () => {
     const store = new RequestLogStore();
     store.push(makeEntry({ guildId: "g1", channelId: "c1", authorUsername: "alice" }));
