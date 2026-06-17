@@ -100,8 +100,14 @@ export interface RequestLLMCall {
   stopReason: string;
   contentTypes: string[];
   outputText?: string;
+  isError?: boolean;
+  error?: string;
   requestPayload?: unknown;
   responsePayload?: unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
 }
 
 /** Recursively truncate string values in an object to `maxLen` characters. */
@@ -203,6 +209,28 @@ export class RequestLog {
 
   recordLLMRequest(payload: unknown): void {
     this.pendingPayload = payload;
+  }
+
+  recordLLMError(error: unknown): void {
+    const payload = this.pendingPayload;
+    const payloadRecord = isRecord(payload) ? payload : null;
+    const model = typeof payloadRecord?.model === "string" && payloadRecord.model !== ""
+      ? payloadRecord.model
+      : "unknown";
+    const message = error instanceof Error ? error.message : String(error);
+    this.llmCalls.push({
+      model,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      stopReason: "error",
+      contentTypes: [],
+      outputText: message,
+      isError: true,
+      error: message,
+      requestPayload: payload ?? undefined,
+    });
+    this.pendingPayload = null;
   }
 
   recordLLMCompletion(message: Record<string, unknown>): void {

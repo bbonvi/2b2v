@@ -85,7 +85,7 @@ dispatcher:
 
 # Async agent jobs — generic runtime, currently used for image generation.
 agentJobs:
-  imageTimeoutMs: 200000       # Cancel image jobs after this many ms (default: 200000)
+  imageTimeoutMs: 300000       # Cancel image jobs after this many ms (default: 300000)
   imageCancelGraceMs: 60000    # Allow replacement cancellations only while this young (default: 60000)
   terminalVisibleMs: 600000    # Keep failed/cancelled/timed-out/sent jobs in prompt context this long (default: 600000)
   maxImageReplacements: 2      # Max replacement cancellations per original image request (default: 2)

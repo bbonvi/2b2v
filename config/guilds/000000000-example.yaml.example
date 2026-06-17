@@ -104,7 +104,7 @@ promptCaching:
 
 # Async agent job overrides (currently image generation)
 # agentJobs:
-#   imageTimeoutMs: 200000
+#   imageTimeoutMs: 300000
 #   imageCancelGraceMs: 60000
 #   terminalVisibleMs: 600000
 #   maxImageReplacements: 2

@@ -377,6 +377,7 @@ async function describeImagesWithFallback(input: {
         },
       },
       timeoutMs: input.fallback.llmOutputTimeoutMs,
+      requestLog: input.fallback.requestLog,
       log: input.fallback.log,
     });
     input.fallback.requestLog?.recordLLMCompletion(result.messageForLogs);
@@ -497,6 +498,38 @@ async function executeNativeToolCall(
 
 function makeToolErrorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function modelProviderName(request: OpenRouterChatRequest): string {
+  return request.provider === "openai-codex" ? "OpenAI Codex" : "OpenRouter";
+}
+
+function isProviderTransientErrorMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized === "not found"
+    || normalized.includes("not found")
+    || normalized.includes("bad gateway")
+    || normalized.includes("cloudflare")
+    || normalized.includes("service unavailable")
+    || normalized.includes("gateway timeout")
+    || normalized.includes("rate limit")
+    || normalized.includes("overloaded")
+    || normalized.includes("temporarily unavailable")
+    || /\b(408|409|425|429|500|502|503|504)\b/.test(normalized);
+}
+
+function normalizeModelTurnError(error: unknown, request: OpenRouterChatRequest): Error {
+  const message = makeToolErrorText(error);
+  if (error instanceof EmptyModelResponseError || error instanceof ModelOutputTimeoutError) return error;
+  if (isAgentTimeBudgetExceededError(error)) return error instanceof Error ? error : new Error(message);
+  const provider = modelProviderName(request);
+  if (message.startsWith(`${provider} request failed:`) || message.startsWith("LLM provider request failed:")) {
+    return error instanceof Error ? error : new Error(message);
+  }
+  if (isProviderTransientErrorMessage(message)) {
+    return new Error(`${provider} request failed: ${message}`);
+  }
+  return error instanceof Error ? error : new Error(message);
 }
 
 function abortReason(signal: AbortSignal, fallback: string): Error {
@@ -786,7 +819,8 @@ async function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
 
 function isRetriableModelTurnError(error: unknown): boolean {
   if (error instanceof EmptyModelResponseError) return true;
-  return error instanceof Error && error.name === "ModelOutputTimeoutError";
+  if (error instanceof Error && error.name === "ModelOutputTimeoutError") return true;
+  return isProviderTransientErrorMessage(makeToolErrorText(error));
 }
 
 function emptyModelResponse(message: string): EmptyModelResponseError {
@@ -810,6 +844,7 @@ async function completeModelTurnWithRetries(input: {
   maxAttempts?: number;
   validateResult?: (result: OpenRouterChatResult) => Error | undefined;
   onAttemptStart?: () => void;
+  requestLog?: RequestLog;
   log?: Logger;
 }): Promise<OpenRouterChatResult> {
   const maxAttempts = input.maxAttempts ?? MODEL_TURN_MAX_ATTEMPTS;
@@ -821,12 +856,18 @@ async function completeModelTurnWithRetries(input: {
       if (validationError !== undefined) throw validationError;
       return result;
     } catch (error) {
-      const shouldRetry = attempt < maxAttempts && isRetriableModelTurnError(error);
-      if (!shouldRetry) throw error;
+      const normalizedError = normalizeModelTurnError(error, input.request);
+      const shouldRetry = attempt < maxAttempts && isRetriableModelTurnError(normalizedError);
+      if (!shouldRetry) {
+        if (!isAgentTimeBudgetExceededError(normalizedError)) {
+          input.requestLog?.recordLLMError(normalizedError);
+        }
+        throw normalizedError;
+      }
       input.log?.warn("retrying LLM turn", {
         attempt,
         maxAttempts,
-        error: makeToolErrorText(error),
+        error: makeToolErrorText(normalizedError),
       });
     }
   }
@@ -1018,6 +1059,7 @@ async function runNativeToolLoop(input: {
         maxAttempts,
         validateResult: requireTextResult(emptyResponseMessage),
         onAttemptStart: () => input.onModelTurnStart?.(targetChatId),
+        requestLog: input.requestLog,
         log: input.log,
       });
       input.requestLog?.recordLLMCompletion(result.messageForLogs);
@@ -1072,6 +1114,7 @@ async function runNativeToolLoop(input: {
         timeoutMs: input.llmOutputTimeoutMs,
         validateResult: requireTextUnlessToolCalls("Model produced an empty response."),
         onAttemptStart: () => input.onModelTurnStart?.(targetChatId),
+        requestLog: input.requestLog,
         log: input.log,
       });
       input.toolTiming?.markToolCallsReady();

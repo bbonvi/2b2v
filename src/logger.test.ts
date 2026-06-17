@@ -364,6 +364,21 @@ describe("RequestLog", () => {
     expect(entry.llmCalls[0]?.requestPayload).toEqual(payload);
   });
 
+  test("recordLLMError preserves pending payload for dashboard detail", () => {
+    const rl = new RequestLog("g1", "c1");
+    const payload = { model: "test-model", messages: [{ role: "user", content: "hi" }] };
+    rl.recordLLMRequest(payload);
+    rl.recordLLMError(new Error("OpenAI Codex request failed: Not Found"));
+
+    const entry = rl.toEntry();
+    expect(entry.llmCalls).toHaveLength(1);
+    expect(entry.llmCalls[0]?.model).toBe("test-model");
+    expect(entry.llmCalls[0]?.isError).toBe(true);
+    expect(entry.llmCalls[0]?.stopReason).toBe("error");
+    expect(entry.llmCalls[0]?.error).toBe("OpenAI Codex request failed: Not Found");
+    expect(entry.llmCalls[0]?.requestPayload).toEqual(payload);
+  });
+
   test("requestPayload resets after consumption", () => {
     const rl = new RequestLog("g1", "c1");
     rl.recordLLMRequest({ msg: "first" });

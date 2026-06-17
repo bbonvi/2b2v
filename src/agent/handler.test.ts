@@ -1098,6 +1098,53 @@ describe("handleMessage", () => {
     expect(calls).toBe(3);
   });
 
+  test("retries transient provider Not Found errors before sending final response", async () => {
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      if (calls < 3) return Promise.reject(new Error("Not Found"));
+      return Promise.resolve({
+        text: "recovered after provider error",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "recovered after provider error" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat }),
+    );
+
+    expect(result.responseText).toBe("recovered after provider error");
+    expect(calls).toBe(3);
+  });
+
+  test("records normalized provider errors with pending LLM request payload", async () => {
+    const requestLog = new RequestLog("guild-1", "channel-1");
+    const completeChat: ChatCompleteFn = (request) => {
+      request.onPayload?.({ model: request.model, route: "test-route" });
+      return Promise.reject(new Error("Not Found"));
+    };
+
+    let thrown: unknown;
+    try {
+      await handleMessage(
+        makeMessage({ mentionedUserIds: ["bot-1"] }),
+        makeDeps({ completeChat, requestLog }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe("OpenRouter request failed: Not Found");
+    expect(requestLog.toEntry().llmCalls).toHaveLength(1);
+    expect(requestLog.toEntry().llmCalls[0]?.isError).toBe(true);
+    expect(requestLog.toEntry().llmCalls[0]?.error).toBe("OpenRouter request failed: Not Found");
+    expect(requestLog.toEntry().llmCalls[0]?.requestPayload).toEqual({ model: "moonshotai/kimi-k2.5", route: "test-route" });
+  });
+
   test("retries empty final model responses before sending final response", async () => {
     let calls = 0;
     const completeChat: ChatCompleteFn = () => {
