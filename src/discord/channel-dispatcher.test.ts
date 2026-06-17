@@ -205,6 +205,54 @@ describe("createChannelDispatcher", () => {
     dispatcher.dispose();
   });
 
+  test("runs multiple triggering messages from one debounce batch in order", async () => {
+    const calls: Array<{ ids: string[]; trigger: TriggerResult }> = [];
+    const handler: DispatchHandler = (msgs, trigger) => {
+      calls.push({ ids: msgs.map((m) => m.id), trigger: trigger?.result ?? null });
+      return Promise.resolve({ coveredMessageIds: [msgs[0]?.id ?? ""] });
+    };
+
+    const config = makeConfig({ mentionDebounceMs: 20 });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers(), handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-first"), { reason: "mention" }, "user-1");
+    enqueue(dispatcher, makeMessage("ch-1", "m-second"), { reason: "mention" }, "user-2");
+
+    await delay(90);
+
+    expect(calls).toEqual([
+      { ids: ["m-first"], trigger: { reason: "mention" } },
+      { ids: ["m-second"], trigger: { reason: "mention" } },
+    ]);
+
+    dispatcher.dispose();
+  });
+
+  test("keeps keyword follow-up together without swallowing a later trigger", async () => {
+    const calls: Array<{ ids: string[]; trigger: TriggerResult }> = [];
+    const handler: DispatchHandler = (msgs, trigger) => {
+      calls.push({ ids: msgs.map((m) => m.id), trigger: trigger?.result ?? null });
+      return Promise.resolve({ coveredMessageIds: [msgs[0]?.id ?? ""] });
+    };
+
+    const config = makeConfig({ mentionDebounceMs: 20 });
+    const triggers = makeTriggers({ keywordDebounceMs: 20 });
+    const dispatcher = createChannelDispatcher({ config, triggers, handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-key"), { reason: "keyword", keyword: "bot" }, "user-1");
+    enqueue(dispatcher, makeMessage("ch-1", "m-followup"), null, "user-1");
+    enqueue(dispatcher, makeMessage("ch-1", "m-mention"), { reason: "mention" }, "user-2");
+
+    await delay(100);
+
+    expect(calls).toEqual([
+      { ids: ["m-key", "m-followup"], trigger: { reason: "keyword", keyword: "bot" } },
+      { ids: ["m-mention"], trigger: { reason: "mention" } },
+    ]);
+
+    dispatcher.dispose();
+  });
+
   test("waits for keyword triggering user to stop typing", async () => {
     let callCount = 0;
     const handler: DispatchHandler = () => {
@@ -390,7 +438,8 @@ describe("createChannelDispatcher", () => {
 
     expect(batches.map((batch) => batch.map((message) => message.id))).toEqual([
       ["m-1"],
-      ["m-queued", "m-late"],
+      ["m-queued"],
+      ["m-late"],
     ]);
 
     dispatcher.dispose();

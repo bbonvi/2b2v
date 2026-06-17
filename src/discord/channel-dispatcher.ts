@@ -80,6 +80,15 @@ export function selectDispatchTrigger(messages: readonly PendingMessage[]): Sele
   return selected;
 }
 
+function selectNextDispatchTrigger(messages: readonly PendingMessage[]): SelectedDispatchTrigger | null {
+  for (const message of messages) {
+    if (message.triggerResult !== null) {
+      return { result: message.triggerResult, message };
+    }
+  }
+  return null;
+}
+
 /**
  * Choose the concrete message to process for a selected trigger.
  * Keyword batches may include same-author follow-up text after the triggering
@@ -99,6 +108,38 @@ export function selectDispatchMessageForTrigger(
   }
 
   return trigger.message;
+}
+
+function takeNextDispatchBatch(state: ChannelState): {
+  batch: PendingMessage[];
+  trigger: SelectedDispatchTrigger | null;
+} {
+  const trigger = selectNextDispatchTrigger(state.pending);
+  if (trigger === null) {
+    const batch = state.pending;
+    state.pending = [];
+    return { batch, trigger };
+  }
+
+  const triggerIndex = state.pending.findIndex((message) => message.id === trigger.message.id);
+  if (triggerIndex === -1) {
+    const batch = state.pending;
+    state.pending = [];
+    return { batch, trigger };
+  }
+
+  let endIndex = triggerIndex;
+  if (trigger.result.reason === "keyword") {
+    for (let i = triggerIndex + 1; i < state.pending.length; i += 1) {
+      const message = state.pending[i];
+      if (message === undefined || message.triggerResult !== null) break;
+      if (message.authorId === trigger.message.authorId) endIndex = i;
+    }
+  }
+
+  const batch = state.pending.slice(0, endIndex + 1);
+  state.pending = state.pending.slice(endIndex + 1);
+  return { batch, trigger };
 }
 
 /**
@@ -199,6 +240,15 @@ export function createChannelDispatcher(opts: {
     state.queued = state.queued.filter((m) => !state.suppressedIds.has(m.id));
   }
 
+  function ensurePendingDebounce(channelId: string, state: ChannelState): void {
+    if (state.pending.length === 0 || state.debounceTimer !== null) return;
+    const trigger = selectDispatchTrigger(state.pending);
+    state.debounceTimer = setTimeout(
+      () => fireDebounce(channelId),
+      getDebounceMs(trigger),
+    );
+  }
+
   function fireDebounce(channelId: string): void {
     const state = channels.get(channelId);
     if (state === undefined) return;
@@ -212,7 +262,7 @@ export function createChannelDispatcher(opts: {
       return;
     }
 
-    const trigger = selectDispatchTrigger(state.pending);
+    const trigger = selectNextDispatchTrigger(state.pending);
     const typingWaitMs = getTypingWaitMs(state, state.pending, trigger);
     if (typingWaitMs > 0) {
       state.debounceTimer = setTimeout(() => fireDebounce(channelId), typingWaitMs);
@@ -220,12 +270,12 @@ export function createChannelDispatcher(opts: {
     }
 
     // Start handler with current pending batch
-    const batch = state.pending;
-    state.pending = [];
+    const { batch, trigger: dispatchTrigger } = takeNextDispatchBatch(state);
+    if (batch.length === 0) return;
     state.running = true;
 
     let coveredMessageIds: string[] = [];
-    void handler(batch, trigger)
+    void handler(batch, dispatchTrigger)
       .then((result) => {
         coveredMessageIds = result?.coveredMessageIds ?? [];
       })
@@ -244,12 +294,8 @@ export function createChannelDispatcher(opts: {
           }
           state.pending = [...state.queued, ...state.pending];
           state.queued = [];
-          const nextTrigger = selectDispatchTrigger(state.pending);
-          state.debounceTimer = setTimeout(
-            () => fireDebounce(channelId),
-            getDebounceMs(nextTrigger),
-          );
         }
+        ensurePendingDebounce(channelId, state);
       });
   }
 
@@ -287,8 +333,8 @@ export function createChannelDispatcher(opts: {
   function recordTyping(channelId: string, userId: string): void {
     const state = channels.get(channelId);
     if (state === undefined) return;
-    const messages = [...state.pending, ...state.queued];
-    const trigger = selectDispatchTrigger(messages);
+    const messages = [...state.queued, ...state.pending];
+    const trigger = selectNextDispatchTrigger(messages);
     if (trigger?.result.reason !== "keyword") return;
     if (trigger.message.authorId !== userId) return;
 
