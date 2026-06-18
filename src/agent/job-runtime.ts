@@ -207,9 +207,15 @@ export class AgentJobStore {
     const job = this.jobs.get(id);
     if (job === undefined) return { ok: false, message: `No job ${id} exists.` };
     if (!this.isActive(job)) return { ok: false, message: `Job ${id} is ${job.status} and cannot be cancelled.` };
-    if (job.requesterId !== input.requesterId && !job.input.allowsGroupCorrections) {
-      return { ok: false, message: `Job ${id} belongs to @${job.requesterUsername}; only that requester can cancel it.` };
-    }
+    /*
+     * Temporarily disabled: requester/group-correction authorization is too coarse
+     * for replacement corrections and can block legitimate follow-up fixes. Rely on
+     * the model's cancel_agent_job selection until cancellation policy is redesigned.
+     *
+     * if (job.requesterId !== input.requesterId && !job.input.allowsGroupCorrections) {
+     *   return { ok: false, message: `Job ${id} belongs to @${job.requesterUsername}; only that requester can cancel it.` };
+     * }
+     */
     const now = input.now ?? Date.now();
     const ageMs = now - (job.startedAt ?? job.createdAt);
     if (input.mode === "replacement" && ageMs > this.config.imageCancelGraceMs) {

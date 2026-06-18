@@ -80,6 +80,22 @@ describe("AgentJobStore", () => {
     expect(store.get(first.job.id)?.status).toBe("cancelled");
   });
 
+  test("allows cancellation by another participant while requester guard is disabled", () => {
+    const store = new AgentJobStore(config);
+    const first = enqueue(store, { now: 1_000 });
+    store.start(first.job.id, undefined, 1_000);
+
+    const cancelled = store.cancel(first.job.id, {
+      requesterId: "u2",
+      reason: "fix it",
+      mode: "replacement",
+      now: 10_000,
+    });
+
+    expect(cancelled.ok).toBe(true);
+    expect(store.get(first.job.id)?.status).toBe("cancelled");
+  });
+
   test("keeps terminal jobs visible only for the configured ttl", () => {
     const store = new AgentJobStore(config);
     const first = enqueue(store, { now: 1_000 });
