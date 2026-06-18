@@ -2030,6 +2030,16 @@ async function processTriggeredMessage(
           guildId,
           currentUserId: message.author.id,
           sourceMessageId: memoryRequest.sourceMessageId ?? message.id,
+          resolveUsername: async (username) => {
+            const cached = resolveGuildUsername(guild, username);
+            if (cached !== undefined) return cached;
+            try {
+              await guild.members.fetch();
+            } catch {
+              // Cache-only fallback below handles missing permissions.
+            }
+            return resolveGuildUsername(guild, username);
+          },
         });
         try {
           await runSilentMemoryAgentPass({

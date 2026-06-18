@@ -17,7 +17,7 @@ afterEach(() => {
 describe("buildMemoryContext", () => {
   test("includes global and current-user memories only", () => {
     createMemory(db, { guildId: "g1", kind: "global_note", content: "Global note" });
-    createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "preference", content: "Likes concise answers" });
+    createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "preference", content: "Likes concise answers", confidence: 0.8 });
     createMemory(db, { guildId: "g1", subjectUserId: "u2", kind: "fact", content: "Other user fact" });
 
     const context = buildMemoryContext({
@@ -27,8 +27,9 @@ describe("buildMemoryContext", () => {
       resolveUserId: (id) => id === "u1" ? "alice" : undefined,
     });
 
-    expect(context).toContain("[global] [global_note] Global note");
-    expect(context).toContain("[@alice] [preference] Likes concise answers");
+    expect(context).toContain("The number after scope is confidence");
+    expect(context).toContain("[global] [0.7] [global_note] Global note");
+    expect(context).toContain("[@alice] [0.8] [preference] Likes concise answers");
     expect(context).not.toContain("Other user fact");
   });
 });
@@ -287,7 +288,7 @@ describe("extractAndApplyMemories", () => {
     expect(getMemory(db, existing)?.content).toBe("Keep this memory.");
   });
 
-  test("ignores update and delete actions outside the current guild/user scope", async () => {
+  test("ignores update actions outside the current guild while allowing same-guild user targets", async () => {
     const otherGuild = createMemory(db, {
       guildId: "g2",
       subjectUserId: "u1",
@@ -333,7 +334,7 @@ describe("extractAndApplyMemories", () => {
     });
 
     expect(getMemory(db, otherGuild)?.content).toBe("foreign guild");
-    expect(getMemory(db, otherUser)?.content).toBe("other user fact");
+    expect(getMemory(db, otherUser)).toBeNull();
   });
 
   test("preserves existing memory scope when updating by id", async () => {
@@ -414,5 +415,31 @@ describe("createRecordMemoryTool", () => {
     const memories = listMemories(db, { guildId: "g1", subjectUserId: "u1" });
     expect(memories).toHaveLength(1);
     expect(memories[0]?.content).toBe("Prefers concise answers.");
+  });
+
+  test("records memories for another user by username", async () => {
+    const tool = createRecordMemoryTool({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      sourceMessageId: "m1",
+      resolveUsername: (username) => Promise.resolve(username === "bob" ? "u2" : undefined),
+    });
+
+    await tool.execute("call-1", {
+      actions: [{
+        action: "upsert",
+        subject: "user",
+        username: "@bob",
+        kind: "fact",
+        content: "Bob is working on the dashboard.",
+        confidence: 0.6,
+      }],
+    });
+
+    const memories = listMemories(db, { guildId: "g1", subjectUserId: "u2" });
+    expect(memories).toHaveLength(1);
+    expect(memories[0]?.content).toBe("Bob is working on the dashboard.");
+    expect(memories[0]?.confidence).toBe(0.6);
   });
 });

@@ -48,6 +48,8 @@ export interface RecordMemoryToolDeps {
   guildId: string;
   currentUserId: string;
   sourceMessageId: string;
+  /** Resolve a Discord username, with or without @, to a guild-scoped user ID. */
+  resolveUsername?: (username: string) => Promise<string | undefined>;
 }
 
 type RecordMemoryToolResult = AgentToolResult<{ applied: number; requested: number } | { error: true }>;
@@ -57,7 +59,10 @@ interface MemoryMutationInput {
   guildId: string;
   currentUserId: string;
   sourceMessageId: string;
+  resolveUsername?: (username: string) => Promise<string | undefined>;
 }
+
+type MemorySubject = "global" | "current_user" | "user";
 
 const MemoryActionSchema = Type.Union([
   Type.Object({
@@ -66,7 +71,13 @@ const MemoryActionSchema = Type.Union([
   Type.Object({
     action: Type.Literal("upsert"),
     id: Type.Optional(Type.Integer({ minimum: 1 })),
-    subject: Type.Union([Type.Literal("global"), Type.Literal("current_user")]),
+    subject: Type.Union([Type.Literal("global"), Type.Literal("current_user"), Type.Literal("user")], {
+      description: "global for shared context, current_user for the triggering user, user for another Discord user.",
+    }),
+    username: Type.Optional(Type.String({
+      minLength: 1,
+      description: "Required when subject=user. Leading @ is optional.",
+    })),
     kind: Type.Union([
       Type.Literal("global_note"),
       Type.Literal("user_note"),
@@ -94,7 +105,8 @@ type MemoryExtraction = {
     | {
       action: "upsert";
       id?: number;
-      subject: "global" | "current_user";
+      subject: MemorySubject;
+      username?: string;
       kind: MemoryKind;
       content: string;
       confidence?: number;
@@ -115,6 +127,10 @@ function scopeLabel(row: MemoryRow, resolveUserId?: (userId: string) => string |
   return username !== undefined && username !== "" ? `@${username}` : `user:${row.subjectUserId}`;
 }
 
+function formatConfidence(confidence: number): string {
+  return confidence.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
 /** Build the uncached memory block injected into the conversation prompt. */
 export function buildMemoryContext(input: MemoryContextInput): string {
   const rows = listMemories(input.db, {
@@ -128,16 +144,25 @@ export function buildMemoryContext(input: MemoryContextInput): string {
 
   const lines = rows.map((row) => {
     const label = scopeLabel(row, input.resolveUserId);
-    return `- ${row.id} [${label}] [${row.kind}] ${row.content}`;
+    return `- ${row.id} [${label}] [${formatConfidence(row.confidence)}] [${row.kind}] ${row.content}`;
   });
   return [
-    "Use these durable memories as background context. Current chat instructions override memory.",
+    "Use these durable memories as background context. Current chat instructions override memory. The number after scope is confidence (0-1); weigh lower confidence accordingly.",
     ...lines,
   ].join("\n");
 }
 
-function normalizeSubject(value: unknown): "global" | "current_user" {
-  return value === "global" || value === "server" ? "global" : "current_user";
+function normalizeUsername(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const username = value.trim().replace(/^@+/, "").trim();
+  return username !== "" ? username : undefined;
+}
+
+function normalizeSubject(value: unknown): MemorySubject {
+  if (value === "global" || value === "server") return "global";
+  if (value === "user" || value === "other_user" || value === "username") return "user";
+  if (typeof value === "string" && value.trim().startsWith("@")) return "user";
+  return "current_user";
 }
 
 function normalizeKind(value: unknown): MemoryKind {
@@ -167,6 +192,9 @@ function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][
       action: "upsert",
       ...(id !== undefined ? { id } : {}),
       subject: normalizeSubject(value.subject),
+      ...(normalizeUsername(value.username ?? value.subject) !== undefined
+        ? { username: normalizeUsername(value.username ?? value.subject) }
+        : {}),
       kind: normalizeKind(value.kind),
       content,
       ...(confidence !== undefined ? { confidence } : {}),
@@ -232,7 +260,8 @@ function memoryExtractionResponseFormat(): Record<string, unknown> {
                   properties: {
                     action: { const: "upsert" },
                     id: { type: "integer", minimum: 1 },
-                    subject: { type: "string", enum: ["global", "current_user"] },
+                    subject: { type: "string", enum: ["global", "current_user", "user"] },
+                    username: { type: "string", minLength: 1 },
                     kind: { type: "string", enum: ["global_note", "user_note", "preference", "relationship", "project", "fact"] },
                     content: { type: "string", minLength: 1 },
                     confidence: { type: "number", minimum: 0, maximum: 1 },
@@ -302,7 +331,6 @@ function editableMemory(input: MemoryMutationInput, id: number): MemoryRow | nul
   const existing = getMemory(input.db, id);
   if (existing === null) return null;
   if (existing.guildId !== input.guildId) return null;
-  if (existing.subjectUserId !== null && existing.subjectUserId !== input.currentUserId) return null;
   return existing;
 }
 
@@ -315,8 +343,6 @@ function duplicateMemory(
   const normalized = content.trim().toLowerCase();
   const rows = listMemories(input.db, {
     guildId: input.guildId,
-    subjectUserId: input.currentUserId,
-    includeGlobal: true,
   });
   return rows.find((row) =>
     row.subjectUserId === subjectUserId
@@ -325,7 +351,21 @@ function duplicateMemory(
   ) ?? null;
 }
 
-function applyMemoryActions(input: MemoryMutationInput, extraction: MemoryExtraction): number {
+async function actionSubjectUserId(
+  input: MemoryMutationInput,
+  action: Extract<MemoryExtraction["actions"][number], { action: "upsert" }>,
+  existing: MemoryRow | null,
+): Promise<string | null | undefined> {
+  if (existing !== null) return existing.subjectUserId;
+  if (action.subject === "global") return null;
+  if (action.subject === "current_user") return input.currentUserId;
+
+  const username = normalizeUsername(action.username);
+  if (username === undefined || input.resolveUsername === undefined) return undefined;
+  return await input.resolveUsername(username);
+}
+
+async function applyMemoryActions(input: MemoryMutationInput, extraction: MemoryExtraction): Promise<number> {
   let applied = 0;
   for (const action of extraction.actions) {
     if (action.action === "none") continue;
@@ -339,11 +379,8 @@ function applyMemoryActions(input: MemoryMutationInput, extraction: MemoryExtrac
     const existing = action.id !== undefined ? editableMemory(input, action.id) : null;
     if (action.id !== undefined && existing === null) continue;
 
-    const subjectUserId = existing !== null
-      ? existing.subjectUserId
-      : action.subject === "current_user"
-        ? input.currentUserId
-        : null;
+    const subjectUserId = await actionSubjectUserId(input, action, existing);
+    if (subjectUserId === undefined) continue;
     const payload = {
       subjectUserId,
       kind: action.kind,
@@ -381,27 +418,29 @@ export function createRecordMemoryTool(deps: RecordMemoryToolDeps): AgentTool {
       "Record durable memory updates after a Discord turn has already completed.",
       "Use only for stable facts, preferences, names/pronouns/language corrections, relationships, recurring project context, or explicit corrections that can affect future replies or bot decisions.",
       "Do not record jokes, transient moods, filler, ordinary one-off requests, or facts that cannot plausibly matter later.",
+      "Call this tool at most once per pass; put all memory changes in the single actions array.",
       "Prefer updating an existing memory id over creating duplicates. Delete only when the current exchange clearly makes an existing listed memory obsolete or false.",
-      "Use subject=current_user for facts about the triggering user; use subject=global for shared server/project context or explicitly named aggregate context.",
+      "Use subject=current_user for the triggering user, subject=user with username for another Discord user, and subject=global for shared server/project context or explicitly named aggregate context.",
+      "When recording a claim about another user that they did not directly confirm, use lower confidence.",
       "When saving personal knowledge as global, include the person's name or the group scope in the content so future turns are not ambiguous.",
     ].join(" "),
     parameters: MemoryExtractionSchema,
 
-    execute(_toolCallId: string, params: unknown): Promise<RecordMemoryToolResult> {
+    async execute(_toolCallId: string, params: unknown): Promise<RecordMemoryToolResult> {
       const normalized = normalizeExtractionShape(params);
       if (!Value.Check(MemoryExtractionSchema, normalized)) {
-        return Promise.resolve({
+        return {
           content: [{ type: "text", text: "Memory update rejected: arguments did not match the schema." }],
           details: { error: true },
-        });
+        };
       }
 
       const extraction = normalized as MemoryExtraction;
-      const applied = applyMemoryActions(deps, extraction);
-      return Promise.resolve({
+      const applied = await applyMemoryActions(deps, extraction);
+      return {
         content: [{ type: "text", text: `Memory update complete. Applied ${applied} of ${extraction.actions.length} requested action(s).` }],
         details: { applied, requested: extraction.actions.length },
-      });
+      };
     },
   };
 }
@@ -434,5 +473,5 @@ export async function extractAndApplyMemories(input: MemoryExtractionInput): Pro
   const extracted = parseExtraction(result.text);
   if (extracted === null) return;
 
-  applyMemoryActions(input, extracted);
+  await applyMemoryActions(input, extracted);
 }

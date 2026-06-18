@@ -1031,8 +1031,10 @@ async function runNativeToolLoop(input: {
   signal?: AbortSignal;
   allowEmptyFinalResponse?: boolean;
   stopOnAgentTimeBudget?: boolean;
+  terminateAfterSuccessfulToolNames?: readonly string[];
 }): Promise<{ text: string; targetChatId?: string }> {
   const toolsByName = new Map(input.tools.map((tool) => [tool.name, tool]));
+  const terminateAfterSuccessfulToolNames = new Set(input.terminateAfterSuccessfulToolNames ?? []);
   const imageFollowUpSources = new Map<OpenRouterMessage, ImageFollowUpSource>();
   let toolCalls = 0;
   let targetChatId: string | undefined;
@@ -1285,6 +1287,9 @@ async function runNativeToolLoop(input: {
       if (rendered.createdThreadId !== null) targetChatId = rendered.createdThreadId;
       if (rendered.asyncImageJobCreated) asyncImageJobCreated = true;
       input.messages.push(toolMessage(call, rendered.resultText));
+      if (execution.result !== undefined && terminateAfterSuccessfulToolNames.has(tool.name)) {
+        return { text: "", targetChatId };
+      }
       if (isAgentTimeBudgetExceededSignal(input.signal)) {
         appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex + 1));
         input.messages.push(...imageMessages);
@@ -1783,6 +1788,7 @@ function buildMemoryPassRuntimeInstruction(): string {
     "The visible Discord reply loop has already ended. Do not write user-facing prose.",
     "Consider whether this completed turn reveals durable memory that should affect future conversations or bot decisions.",
     "Focus on what the human user newly revealed, requested to remember, or corrected in the current exchange. Recent chat context is only supporting evidence.",
+    "Memory can be about the triggering user, another Discord user by username, or shared/global context; use lower confidence for claims about another user unless that user directly confirmed them.",
     "Do not persist facts that come only from system/developer context, persona, tool instructions, existing memory text, member lists, schedules, or bot implementation details.",
     "Do not save jokes, transient moods, ordinary chat, pleasantries, reactions, filler, or one-off requests.",
     "When in doubt, do not save it.",
@@ -1878,7 +1884,7 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
       },
       messages,
       tools: timedTools,
-      maxToolCalls: Math.min(input.guildConfig.replyLoop.maxToolCalls, 3),
+      maxToolCalls: 1,
       maxToolRounds: Math.min(input.guildConfig.replyLoop.maxToolCalls, 3),
       agentTimeBudgetMs: input.guildConfig.replyLoop.wallClockTimeoutMs,
       llmOutputTimeoutMs: input.guildConfig.replyLoop.llmOutputTimeoutMs,
@@ -1890,6 +1896,7 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
       signal: wallController.signal,
       allowEmptyFinalResponse: true,
       stopOnAgentTimeBudget: true,
+      terminateAfterSuccessfulToolNames: ["record_memory"],
     });
   } finally {
     clearTimeout(wallTimeout);

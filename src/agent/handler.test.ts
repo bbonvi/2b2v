@@ -2371,7 +2371,7 @@ describe("handleMessage", () => {
     expect(senderCalls).toEqual([{ text: "thread answer", reply: false, chatId: "thread-1" }]);
   });
 
-  test("silent memory pass runs the native loop with only supplied memory tools", async () => {
+  test("silent memory pass terminates after one successful memory tool call", async () => {
     const toolCalls: unknown[] = [];
     const recordMemoryTool: AgentTool = {
       name: "record_memory",
@@ -2394,19 +2394,11 @@ describe("handleMessage", () => {
       exposedTools.push(request.tools?.map((tool) => tool.function.name) ?? []);
       systemPrompts.push(request.systemPrompt);
       expect(request.signal).toBeInstanceOf(AbortSignal);
-      if (calls === 1) {
-        return Promise.resolve({
-          text: "",
-          toolCalls: [{ id: "call-1", type: "function", function: { name: "record_memory", arguments: "{\"actions\":[{\"action\":\"none\"}]}" } }],
-          rawResponse: {},
-          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
-        });
-      }
       return Promise.resolve({
         text: "",
-        toolCalls: [],
+        toolCalls: [{ id: "call-1", type: "function", function: { name: "record_memory", arguments: "{\"actions\":[{\"action\":\"none\"}]}" } }],
         rawResponse: {},
-        messageForLogs: { role: "assistant", usage: { input: 1, output: 0, totalTokens: 1 }, content: [] },
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
       });
     };
 
@@ -2431,7 +2423,8 @@ describe("handleMessage", () => {
     });
 
     expect(toolCalls).toEqual([{ actions: [{ action: "none" }] }]);
-    expect(exposedTools).toEqual([["record_memory"], ["record_memory"]]);
+    expect(calls).toBe(1);
+    expect(exposedTools).toEqual([["record_memory"]]);
     expect(systemPrompts[0]).toContain("Focus on what the human user newly revealed");
     expect(systemPrompts[0]).toContain("Do not persist facts that come only from system/developer context");
   });
