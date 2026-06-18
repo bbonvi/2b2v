@@ -54,7 +54,7 @@ Required: `DISCORD_TOKEN` plus credentials for the configured LLM provider. The 
 
 ## Configuration
 
-Global defaults live in optional `config/config.yaml`; copy `config/config.yaml.example` and edit it locally. Each guild has `config/guilds/<id>-<slug>.yaml`; the guild ID is parsed from the filename, and the slug is cosmetic. Copy `config/guilds/000000000-example.yaml.example` for the full reference. Live `config/*.yaml` files are ignored by git except for committed `.example` files.
+Global defaults live in optional `config/config.yaml`; copy `config/config.yaml.example` and edit it locally. Each guild has `config/guilds/<id>-<slug>.yaml`; the guild ID is parsed from the filename, and the slug is cosmetic. Copy `config/guilds/000000000-example.yaml.example` for the full reference. Live `config/*.yaml` files are ignored by git except for committed `.example` files. Codex image generation quality is controlled by `imageGeneration.quality`, which defaults to `auto` and accepts `auto`, `low`, `medium`, or `high`.
 
 ```yaml
 triggers:

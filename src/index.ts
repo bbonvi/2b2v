@@ -378,6 +378,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       sessionId: `2b2v-image-job:${job.guildId}:${job.channelId}:${job.id}`,
       logger: log.child({ component: "async-image-job", guildId: job.guildId, channelId: job.channelId, jobId: job.id }),
       imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
+      imageGenerationQuality: guildConfig.imageGeneration.quality,
       getImageById: (id: number) => {
         const record = getImageById(db, id);
         return record !== null && record.guildId === job.guildId ? record : null;
@@ -1733,6 +1734,7 @@ function buildAgentTools(
       sessionId: `2b2v-image:${guildId}:${channelId}:${codexImageModel}`,
       logger: log.child({ component: "codex-image", guildId, channelId }),
       imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
+      imageGenerationQuality: guildConfig.imageGeneration.quality,
       getImageById: (id: number) => {
         const record = getImageById(db, id);
         return record !== null && record.guildId === guildId ? record : null;

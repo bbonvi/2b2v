@@ -56,6 +56,10 @@ mergeMessageGapSeconds: 120
 # Max images per read_chat_images tool call
 imageReadMaxPerCall: 10
 
+# Codex image generation request settings
+# imageGeneration:
+#   quality: auto # "auto" | "low" | "medium" | "high"
+
 # Fallback vision model for image tool results when the main model cannot read images
 # imageReading:
 #   fallbackEnabled: true

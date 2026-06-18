@@ -21,6 +21,8 @@ import type {
   BackgroundLlmConfig,
   BackgroundLlmDefaults,
   ImageReadingConfig,
+  ImageGenerationConfig,
+  ImageGenerationQuality,
   ReplyLoopConfig,
   PromptProfileConfig,
   PromptSource,
@@ -206,6 +208,10 @@ const DEFAULT_IMAGE_READING: ImageReadingConfig = {
   fallbackModelParams: {},
 };
 
+const DEFAULT_IMAGE_GENERATION: ImageGenerationConfig = {
+  quality: "auto",
+};
+
 const DEFAULT_REPLY_LOOP: ReplyLoopConfig = {
   maxToolCalls: 64,
   wallClockTimeoutMs: 45_000,
@@ -318,6 +324,30 @@ function resolveGuildImageReading(
       ...global.fallbackModelParams,
       ...partial?.fallbackModelParams,
     },
+  };
+}
+
+function parseImageGenerationQuality(value: unknown, key: string): ImageGenerationQuality | undefined {
+  if (value === undefined) return undefined;
+  if (value === "auto" || value === "low" || value === "medium" || value === "high") return value;
+  throw new Error(`${key} must be "auto", "low", "medium", or "high"`);
+}
+
+function resolveGlobalImageGeneration(
+  partial: MainConfigYaml["imageGeneration"] | undefined,
+): ImageGenerationConfig {
+  return {
+    quality: parseImageGenerationQuality(partial?.quality, "imageGeneration.quality")
+      ?? DEFAULT_IMAGE_GENERATION.quality,
+  };
+}
+
+function resolveGuildImageGeneration(
+  global: ImageGenerationConfig,
+  partial: GuildConfigYaml["imageGeneration"] | undefined,
+): ImageGenerationConfig {
+  return {
+    quality: parseImageGenerationQuality(partial?.quality, "imageGeneration.quality") ?? global.quality,
   };
 }
 
@@ -619,6 +649,7 @@ export function loadGlobalConfig(
   const dataDir = yaml.dataDir ?? "data";
   const defaultLlmProvider = parseLlmProvider(yaml.llmProvider, "llmProvider") ?? DEFAULT_LLM_PROVIDER;
   const defaultImageReading = resolveGlobalImageReading(yaml.imageReading);
+  const defaultImageGeneration = resolveGlobalImageGeneration(yaml.imageGeneration);
   const openrouterApiKey = env.OPENROUTER_API_KEY;
   const usesOpenRouter = defaultLlmProvider === "openrouter"
     || yaml.backgroundLlm?.provider === "openrouter"
@@ -677,6 +708,7 @@ export function loadGlobalConfig(
     defaultImageReadMaxPerCall: yaml.imageReadMaxPerCall ?? 10,
     defaultImageCaptioningEnabled: yaml.imageCaptioningEnabled ?? false,
     defaultImageReading,
+    defaultImageGeneration,
     defaultAttachmentsDir,
     defaultInstructions,
     defaultLateInstruction,
@@ -775,6 +807,7 @@ export function resolveGuildConfig(
     imageReadMaxPerCall: partial.imageReadMaxPerCall ?? global.defaultImageReadMaxPerCall,
     imageCaptioningEnabled: partial.imageCaptioningEnabled ?? global.defaultImageCaptioningEnabled,
     imageReading: resolveGuildImageReading(global.defaultImageReading, partial.imageReading),
+    imageGeneration: resolveGuildImageGeneration(global.defaultImageGeneration, partial.imageGeneration),
     attachmentsDir: partial.attachmentsDir ?? global.defaultAttachmentsDir,
     instructions: instructions !== "" ? instructions : global.defaultInstructions,
     tts: resolveTtsConfig(partial.tts) ?? global.defaultTts,
@@ -864,6 +897,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     imageReadMaxPerCall: config.imageReadMaxPerCall,
     imageCaptioningEnabled: config.imageCaptioningEnabled,
     imageReading: config.imageReading,
+    imageGeneration: config.imageGeneration,
     attachmentsDir: config.attachmentsDir,
     instructions: config.instructions !== "" ? config.instructions : undefined,
     tts: config.tts,

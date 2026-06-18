@@ -114,6 +114,15 @@ export interface ImageReadingConfig {
   fallbackModelParams: Record<string, unknown>;
 }
 
+/** Quality sent to Codex image generation. */
+export type ImageGenerationQuality = "auto" | "low" | "medium" | "high";
+
+/** Dedicated image-generation request configuration. */
+export interface ImageGenerationConfig {
+  /** Quality passed to the backend image_generation tool. Default auto. */
+  quality: ImageGenerationQuality;
+}
+
 /** Native reply/tool loop runtime limits. */
 export interface ReplyLoopConfig {
   /** Hard cap on tool calls allowed in one agent run. */
@@ -197,6 +206,8 @@ export interface GuildConfig {
   imageCaptioningEnabled: boolean;
   /** Dedicated fallback for image tool results when the main model cannot read image input. */
   imageReading: ImageReadingConfig;
+  /** Dedicated image-generation request settings. */
+  imageGeneration: ImageGenerationConfig;
   attachmentsDir: string;
   instructions: string;
   tts?: TtsConfig;
@@ -238,6 +249,8 @@ export interface GlobalConfig {
   defaultImageCaptioningEnabled: boolean;
   /** Default fallback for image tool results when the main model cannot read image input. */
   defaultImageReading: ImageReadingConfig;
+  /** Default image-generation request settings. */
+  defaultImageGeneration: ImageGenerationConfig;
   defaultAttachmentsDir: string;
   defaultInstructions: string;
   defaultLateInstruction: string;
@@ -296,6 +309,9 @@ export interface GuildConfigYaml {
     fallbackProvider?: LlmProvider;
     fallbackModel?: string;
     fallbackModelParams?: Record<string, unknown>;
+  };
+  imageGeneration?: {
+    quality?: ImageGenerationQuality;
   };
   attachmentsDir?: string;
   instructions?: string;
@@ -366,6 +382,9 @@ export interface MainConfigYaml {
     fallbackProvider?: LlmProvider;
     fallbackModel?: string;
     fallbackModelParams?: Record<string, unknown>;
+  };
+  imageGeneration?: {
+    quality?: ImageGenerationQuality;
   };
   attachmentsDir?: string;
   promptProfile?: {

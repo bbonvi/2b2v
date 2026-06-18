@@ -175,6 +175,25 @@ describe("buildCodexImageRequestBody", () => {
     expect(body.prompt_cache_key).toBeUndefined();
   });
 
+  test("uses configured image generation quality", () => {
+    const body = buildCodexImageRequestBody({
+      model: "gpt-5.5",
+      prompt: "a cat",
+      outputFormat: "png",
+      imageGenerationQuality: "high",
+    });
+
+    expect(body.tools).toEqual([{
+      type: "image_generation",
+      model: "gpt-image-2",
+      action: "generate",
+      output_format: "png",
+      moderation: "low",
+      quality: "high",
+      size: "auto",
+    }]);
+  });
+
   test("includes chat reference images as Responses image inputs", () => {
     const body = buildCodexImageRequestBody({
       model: "gpt-5.5",
@@ -236,11 +255,12 @@ describe("buildCodexDirectImageRequestBody", () => {
   test("builds the Codex direct image proxy request", () => {
     expect(buildCodexDirectImageRequestBody({
       prompt: "a polished icon",
+      imageGenerationQuality: "high",
     })).toEqual({
       prompt: "a polished icon",
       model: "gpt-image-2",
       n: 1,
-      quality: "auto",
+      quality: "high",
       size: "auto",
     });
   });

@@ -123,6 +123,7 @@ describe("loadGlobalConfig", () => {
       fallbackModel: "moonshotai/kimi-k2.5",
       fallbackModelParams: {},
     });
+    expect(cfg.defaultImageGeneration).toEqual({ quality: "auto" });
     expect(cfg.defaultAttachmentsDir).toBe("data/attachments");
     expect(cfg.defaultInstructions).toBe("");
     expect((cfg as unknown as { defaultPromptCaching?: unknown }).defaultPromptCaching).toEqual({
@@ -450,6 +451,29 @@ describe("loadGlobalConfig", () => {
       fallbackModelParams: { temperature: 0 },
     });
   });
+
+  test("parses global image generation config", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, [
+      "imageGeneration:",
+      "  quality: high",
+    ].join("\n"));
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+
+    expect(cfg.defaultImageGeneration).toEqual({ quality: "high" });
+  });
+
+  test("rejects invalid image generation quality", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, [
+      "imageGeneration:",
+      "  quality: ultra",
+    ].join("\n"));
+
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
+      'imageGeneration.quality must be "auto", "low", "medium", or "high"',
+    );
+  });
 });
 
 describe("loadGuildConfigFile", () => {
@@ -537,6 +561,7 @@ describe("resolveGuildConfig", () => {
       fallbackModel: "moonshotai/kimi-k2.5",
       fallbackModelParams: {},
     });
+    expect(resolved.imageGeneration).toEqual({ quality: "auto" });
     expect(resolved.attachmentsDir).toBe("data/attachments");
     expect(resolved.instructions).toBe("");
   });
@@ -555,6 +580,9 @@ describe("resolveGuildConfig", () => {
         fallbackModel: "openai/gpt-4o-mini",
         fallbackModelParams: { temperature: 0 },
       },
+      imageGeneration: {
+        quality: "high",
+      },
       attachmentsDir: "/custom/attachments",
     };
     const resolved = resolveGuildConfig(global, partial);
@@ -570,6 +598,7 @@ describe("resolveGuildConfig", () => {
       fallbackModel: "openai/gpt-4o-mini",
       fallbackModelParams: { temperature: 0 },
     });
+    expect(resolved.imageGeneration).toEqual({ quality: "high" });
     expect(resolved.attachmentsDir).toBe("/custom/attachments");
   });
 
@@ -990,6 +1019,7 @@ describe("saveGuildConfig", () => {
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
       imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
+      imageGeneration: { quality: "auto" },
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
@@ -1029,6 +1059,7 @@ describe("saveGuildConfig", () => {
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
       imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
+      imageGeneration: { quality: "auto" },
       attachmentsDir: "data/attachments",
       instructions: "Custom guild instructions",
       emotes: { include: false },
@@ -1064,6 +1095,7 @@ describe("saveGuildConfig", () => {
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
       imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
+      imageGeneration: { quality: "auto" },
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
@@ -1386,6 +1418,7 @@ describe("saveGuildConfig bashTool", () => {
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
       imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
+      imageGeneration: { quality: "auto" },
       attachmentsDir: "data/attachments",
       instructions: "",
       bashTool: {
@@ -1428,6 +1461,7 @@ describe("saveGuildConfig bashTool", () => {
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
       imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
+      imageGeneration: { quality: "auto" },
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
@@ -1646,6 +1680,7 @@ describe("saveGuildConfig emotes", () => {
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
       imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
+      imageGeneration: { quality: "auto" },
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: true },
@@ -1688,6 +1723,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
       imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
+      imageGeneration: { quality: "auto" },
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
@@ -1723,6 +1759,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
       imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
+      imageGeneration: { quality: "auto" },
       attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },

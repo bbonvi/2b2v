@@ -5,6 +5,7 @@ import { arch, platform, release } from "node:os";
 import { getCodexApiKey } from "../llm/codex-auth.ts";
 import type { Logger } from "../logger.ts";
 import type { EnqueueImageJobResult } from "./job-runtime.ts";
+import type { ImageGenerationQuality } from "../config/types.ts";
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_IMAGES_GENERATIONS_URL = "https://chatgpt.com/backend-api/codex/images/generations";
@@ -13,6 +14,7 @@ const OPENAI_BETA_HEADER = "responses=experimental";
 const DEFAULT_OUTPUT_FORMAT = "png";
 const BACKEND_IMAGE_MODEL = "gpt-image-2";
 const DEFAULT_IMAGE_SIZE = "auto";
+const DEFAULT_IMAGE_QUALITY: ImageGenerationQuality = "auto";
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
 const MAX_DIAGNOSTIC_EVENTS = 80;
@@ -83,6 +85,7 @@ export interface CodexGenerateImageToolDeps {
   fetchFn?: typeof fetch;
   logger?: Logger;
   imageReadMaxPerCall: number;
+  imageGenerationQuality: ImageGenerationQuality;
   getImageById: (id: number) => ReferenceImageRecord | null;
   readFile: (path: string) => Buffer | null;
   onGeneratedImage: (attachment: GeneratedImageAttachment) => void;
@@ -241,10 +244,12 @@ export function buildCodexImageRequestBody(input: {
   prompt: string;
   model: string;
   outputFormat: OutputFormat;
+  imageGenerationQuality?: ImageGenerationQuality;
   referenceImages?: ReferenceImageInput[];
   sessionId?: string;
 }): Record<string, unknown> {
   const referenceImages = input.referenceImages ?? [];
+  const quality = input.imageGenerationQuality ?? DEFAULT_IMAGE_QUALITY;
   const referenceSummary = referenceImages.length > 0
     ? [
       input.prompt,
@@ -279,7 +284,7 @@ export function buildCodexImageRequestBody(input: {
       action: referenceImages.length > 0 ? "auto" : "generate",
       output_format: input.outputFormat,
       moderation: "low",
-      quality: "auto",
+      quality,
       size: DEFAULT_IMAGE_SIZE,
     }],
     tool_choice: { type: "image_generation" },
@@ -290,12 +295,13 @@ export function buildCodexImageRequestBody(input: {
 
 export function buildCodexDirectImageRequestBody(input: {
   prompt: string;
+  imageGenerationQuality?: ImageGenerationQuality;
 }): Record<string, unknown> {
   return {
     prompt: input.prompt,
     model: BACKEND_IMAGE_MODEL,
     n: 1,
-    quality: "auto",
+    quality: input.imageGenerationQuality ?? DEFAULT_IMAGE_QUALITY,
     size: DEFAULT_IMAGE_SIZE,
   };
 }
@@ -512,6 +518,7 @@ async function requestResponsesImage(input: {
   accountId: string;
   model: string;
   outputFormat: OutputFormat;
+  imageGenerationQuality: ImageGenerationQuality;
   referenceImages: ReferenceImageInput[];
   sessionId?: string;
   fetchFn: typeof fetch;
@@ -573,6 +580,7 @@ export function parseCodexDirectImageResponse(value: unknown): ParsedCodexRespon
 
 async function requestDirectImage(input: {
   prompt: string;
+  imageGenerationQuality: ImageGenerationQuality;
   token: string;
   accountId: string;
   fetchFn: typeof fetch;
@@ -640,6 +648,7 @@ async function requestImage(input: {
   accountId: string;
   model: string;
   outputFormat: OutputFormat;
+  imageGenerationQuality: ImageGenerationQuality;
   referenceImages: ReferenceImageInput[];
   sessionId?: string;
   enableDirectImageFallback?: boolean;
@@ -823,6 +832,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         accountId,
         model: deps.model,
         outputFormat: output,
+        imageGenerationQuality: deps.imageGenerationQuality,
         referenceImages,
         sessionId: deps.sessionId,
         enableDirectImageFallback: deps.enableDirectImageFallback,
