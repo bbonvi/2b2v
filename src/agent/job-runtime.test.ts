@@ -27,15 +27,15 @@ function enqueue(store: AgentJobStore, overrides: Partial<Parameters<AgentJobSto
 }
 
 describe("AgentJobStore", () => {
-  test("dedupes active image jobs for the same request", () => {
+  test("allows duplicate active image jobs while hard dedupe is disabled", () => {
     const store = new AgentJobStore(config);
     const first = enqueue(store);
     const second = enqueue(store);
 
     expect(first.created).toBe(true);
-    expect(second.created).toBe(false);
-    expect(second.reason).toBe("already_running");
-    expect(second.job.id).toBe(first.job.id);
+    expect(second.created).toBe(true);
+    expect(second.reason).toBe("created");
+    expect(second.job.id).not.toBe(first.job.id);
   });
 
   test("allows explicit separate image jobs", () => {

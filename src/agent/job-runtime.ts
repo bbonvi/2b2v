@@ -96,12 +96,19 @@ export class AgentJobStore {
       return { job: replacement, created: false, reason: "replacement_limit" };
     }
 
-    if (!input.separateJob && input.replacesJobId === undefined) {
-      const existing = this.findMatchingActiveImageJob(input);
-      if (existing !== undefined) {
-        return { job: existing, created: false, reason: "already_running" };
-      }
-    }
+    /*
+     * Temporarily disabled: this hard dedupe guard has been producing false positives
+     * by blocking legitimate new image requests while an unrelated image job is active.
+     * Keep duplicate prevention in prompt/runtime context until a safer request matcher
+     * exists.
+     *
+     * if (!input.separateJob && input.replacesJobId === undefined) {
+     *   const existing = this.findMatchingActiveImageJob(input);
+     *   if (existing !== undefined) {
+     *     return { job: existing, created: false, reason: "already_running" };
+     *   }
+     * }
+     */
 
     const id = this.createShortId("img");
     const replacementRootJobId = replacement?.replacementRootJobId ?? replacement?.id;
@@ -241,15 +248,20 @@ export class AgentJobStore {
     return ACTIVE_STATUSES.has(job.status);
   }
 
-  private findMatchingActiveImageJob(input: EnqueueImageJobInput): AgentJob | undefined {
-    return this.listActive(input.guildId, input.channelId)
-      .find((job) =>
-        job.sourceMessageId === input.sourceMessageId
-        || job.input.promptHash === input.promptHash
-        || job.requesterId === input.requesterId
-        || job.input.allowsGroupCorrections
-      );
-  }
+  /*
+   * Hard image-job dedupe is disabled above. This matcher is intentionally retained
+   * as commented reference for the old behavior while we observe prompt-only handling.
+   *
+   * private findMatchingActiveImageJob(input: EnqueueImageJobInput): AgentJob | undefined {
+   *   return this.listActive(input.guildId, input.channelId)
+   *     .find((job) =>
+   *       job.sourceMessageId === input.sourceMessageId
+   *       || job.input.promptHash === input.promptHash
+   *       || job.requesterId === input.requesterId
+   *       || job.input.allowsGroupCorrections
+   *     );
+   * }
+   */
 
   private createShortId(prefix: "img"): string {
     for (let i = 0; i < 10; i += 1) {
