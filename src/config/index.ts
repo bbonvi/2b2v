@@ -5,7 +5,6 @@ export type {
   TriggerConfig,
   TrimConfig,
   AppConfig,
-  BashToolConfig,
 } from "./types.ts";
 
 export {
@@ -14,5 +13,4 @@ export {
   loadGuildConfigs,
   resolveGuildConfig,
   saveGuildConfig,
-  validateBashToolConfig,
 } from "./loader.ts";

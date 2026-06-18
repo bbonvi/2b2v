@@ -138,8 +138,3 @@ promptCaching:
 #       outputFormat: mp3_44100_128
 #       model: eleven_v3
 #     # whisper is obsolete and ignored. Use Eleven v3 tags like [whispers] inside <voice>...</voice>.
-
-# Bash tool toggle (global-only settings; guild can only enable/disable)
-# Requires global bashTool.enabled: true and bash-vm service running.
-# bashTool:
-#   enabled: true

@@ -1,7 +1,7 @@
 import { createLogger, RequestLog, type LogLevel, type Logger } from "./logger";
 import { requestLogStore } from "./dashboard/store";
 import { parseDashboardPasswordlessCidrs, startDashboard } from "./dashboard/server";
-import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, validateTrimConfig, validateVpnConfig, validateBashToolConfig } from "./config/loader";
+import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, validateTrimConfig, validateVpnConfig } from "./config/loader";
 import type { GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
 import { createQdrantClient, ensureCollection, healthCheck } from "./qdrant/client";
@@ -45,7 +45,6 @@ import { AgentJobStore, createCancelAgentJobTool, isActiveJobStatus, type AgentJ
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createSummarizeVideoTool } from "./agent/summarize-video-tool";
 import { createStartThreadTool } from "./agent/start-thread-tool";
-import { getSshKeyPaths, ensureSshKeys } from "./ssh/client";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { insertThread, updateThreadActivity, markBotParticipating, listThreadsForContext, getThreadMetadata } from "./db/thread-repository";
 import { processAndStoreImage, processAndStoreImageBuffer, type ImageIngestDeps } from "./db/image-ingest";
@@ -840,7 +839,6 @@ log.info("bot starting", {
 let globalConfig = loadGlobalConfig();
 validateTrimConfig(globalConfig.defaultTrim);
 validateVpnConfig(globalConfig.vpn);
-validateBashToolConfig(globalConfig.defaultBashTool);
 log.info("config loaded", { model: globalConfig.defaultModel, qdrant: globalConfig.qdrantUrl });
 
 const startupMessageQueue: Message[] = [];
@@ -1009,23 +1007,6 @@ const VPN_SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const vpnSessionCleanupTimer = setInterval(() => {
   vpnSessionStore.cleanExpired();
 }, VPN_SESSION_CLEANUP_INTERVAL_MS);
-
-// --- 9d. SSH key setup for the disabled-by-default bash implementation ---
-// The bash tool is no longer exposed to the chat model, but compose still starts
-// bash-vm when configured. Keep authorized_keys generation so that service can
-// boot for future operator-only use.
-const sshKeysLocal = process.env.SSH_KEYS_LOCAL;
-const sshKeysShared = process.env.SSH_KEYS_SHARED;
-
-if (sshKeysLocal !== undefined && sshKeysShared !== undefined) {
-  const sshKeyPaths = getSshKeyPaths(sshKeysLocal, sshKeysShared);
-  try {
-    ensureSshKeys(sshKeyPaths);
-    log.info("ssh keys ready", { local: sshKeysLocal, shared: sshKeysShared });
-  } catch (err) {
-    log.error("ssh key setup failed", { error: err instanceof Error ? err.message : String(err) });
-  }
-}
 
 // --- 10. Guild config resolver ---
 function getGuildConfig(guildId: string): GuildConfig {

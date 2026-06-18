@@ -12,7 +12,6 @@ import type {
   ThinkingLevel,
   UiLang,
   VpnConfig,
-  BashToolConfig,
   EmotesConfig,
   MembersConfig,
   DispatcherConfig,
@@ -140,40 +139,6 @@ export function validateVpnConfig(vpn: VpnConfig | undefined): void {
   if (vpn.vpnPeer === "") throw new Error("vpn.vpnPeer required when vpn.enabled");
 }
 
-/**
- * Default blocklist patterns for the bash tool.
- * Blocks: shutdown/reboot, network/firewall admin, iptables, container escape attempts,
- * fork bombs, and resource exhaustion patterns.
- */
-const DEFAULT_BASH_BLOCKLIST: string[] = [
-  // System shutdown/reboot
-  "\\b(shutdown|reboot|poweroff|halt|init\\s+[06])\\b",
-  // Network/firewall administration
-  "\\b(iptables|ip6tables|nft|nftables|ufw|firewall-cmd|firewalld)\\b",
-  // Network interface and socket tools
-  "\\b(ifconfig|ip\\s+(link|addr|route)|route\\s+(add|del)|ss|netstat)\\b",
-  // System control
-  "\\b(sysctl|systemctl|service)\\b",
-  // Container/VM escape attempts
-  "\\b(docker|podman|kubectl|nsenter|chroot)\\b",
-  // Kernel module manipulation
-  "\\b(modprobe|insmod|rmmod|lsmod)\\b",
-  // Disk/mount operations
-  "\\b(mount|umount|mkfs|fdisk|parted)\\b",
-  // SSH daemon attacks
-  "\\b(killall\\s+sshd|pkill\\s+sshd)\\b",
-  // Fork bombs and recursive process spawning
-  ":\\(\\)\\s*\\{.*\\|.*&.*\\}",  // Classic fork bomb :(){ :|:& };:
-  "\\|\\s*:\\s*&",                // Piping to : with background
-  "\\bwhile\\b.*\\bdone\\s*&",    // Backgrounded while loops
-];
-
-const DEFAULT_BASH_SSH = {
-  host: "bash-vm",
-  port: 22,
-  user: "user",
-};
-
 const DEFAULT_EMOTES: EmotesConfig = {
   include: false,
 };
@@ -288,9 +253,6 @@ function resolvePromptProfile(
     lateInstructions: resolvePromptSources(partial.lateInstructions, fallback.lateInstructions, "lateInstructions"),
   };
 }
-
-const DEFAULT_BASH_TIMEOUT_MS = 5000;
-const DEFAULT_BASH_OUTPUT_LIMIT = 4000;
 
 function resolveGlobalPromptCaching(
   partial: MainConfigYaml["promptCaching"] | undefined
@@ -517,66 +479,6 @@ function validateAgentJobsConfig(config: AgentJobsConfig, keyPrefix: string): vo
 }
 
 /**
- * Resolve bash tool config from YAML partial.
- * Returns undefined if bash tool is not enabled.
- */
-function resolveBashToolConfig(
-  partial: MainConfigYaml["bashTool"] | undefined
-): BashToolConfig | undefined {
-  if (partial?.enabled !== true) return undefined;
-  return {
-    enabled: true,
-    ssh: {
-      host: partial.ssh?.host ?? DEFAULT_BASH_SSH.host,
-      port: partial.ssh?.port ?? DEFAULT_BASH_SSH.port,
-      user: partial.ssh?.user ?? DEFAULT_BASH_SSH.user,
-    },
-    timeoutMs: partial.timeoutMs ?? DEFAULT_BASH_TIMEOUT_MS,
-    outputLimit: partial.outputLimit ?? DEFAULT_BASH_OUTPUT_LIMIT,
-    blocklist: partial.blocklist ?? [...DEFAULT_BASH_BLOCKLIST],
-  };
-}
-
-/**
- * Validate bash tool config. Throws if enabled but missing required fields.
- */
-export function validateBashToolConfig(bashTool: BashToolConfig | undefined): void {
-  if (bashTool === undefined || !bashTool.enabled) return;
-  if (bashTool.ssh.host === "") throw new Error("bashTool.ssh.host required when bashTool.enabled");
-  if (bashTool.ssh.port <= 0 || bashTool.ssh.port > 65535) {
-    throw new Error("bashTool.ssh.port must be 1-65535");
-  }
-  if (bashTool.ssh.user === "") throw new Error("bashTool.ssh.user required when bashTool.enabled");
-  if (bashTool.timeoutMs <= 0) throw new Error("bashTool.timeoutMs must be positive");
-  if (bashTool.outputLimit <= 0) throw new Error("bashTool.outputLimit must be positive");
-  // Validate blocklist patterns are valid regex
-  for (const pattern of bashTool.blocklist) {
-    try {
-      new RegExp(pattern, "i");
-    } catch {
-      throw new Error(`bashTool.blocklist contains invalid regex: ${pattern}`);
-    }
-  }
-}
-
-/**
- * Resolve guild-level bash tool config.
- * Guild can only toggle enabled; all other settings come from global.
- * Returns undefined if global is disabled or guild disables it.
- */
-function resolveGuildBashToolConfig(
-  global: BashToolConfig | undefined,
-  guildPartial: GuildConfigYaml["bashTool"] | undefined
-): BashToolConfig | undefined {
-  // If global is disabled, guild cannot enable
-  if (global === undefined || !global.enabled) return undefined;
-  // Guild can explicitly disable
-  if (guildPartial?.enabled === false) return undefined;
-  // Otherwise inherit global config (guild enabled by default when global is enabled)
-  return global;
-}
-
-/**
  * Load and parse the main config YAML file.
  * Returns an empty object if the file does not exist.
  * Throws on malformed YAML.
@@ -721,7 +623,6 @@ export function loadGlobalConfig(
     defaultTts: resolveTtsConfig(yaml.tts),
     uiLang: (yaml.uiLang === "ru" ? "ru" : "en") as UiLang,
     vpn: resolveVpnConfig(yaml.vpn),
-    defaultBashTool: resolveBashToolConfig(yaml.bashTool),
     defaultEmotes: {
       include: yaml.emotes?.include ?? DEFAULT_EMOTES.include,
     },
@@ -811,7 +712,6 @@ export function resolveGuildConfig(
     attachmentsDir: partial.attachmentsDir ?? global.defaultAttachmentsDir,
     instructions: instructions !== "" ? instructions : global.defaultInstructions,
     tts: resolveTtsConfig(partial.tts) ?? global.defaultTts,
-    bashTool: resolveGuildBashToolConfig(global.defaultBashTool, partial.bashTool),
     emotes: {
       include: partial.emotes?.include ?? global.defaultEmotes.include,
     },
@@ -901,7 +801,6 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     attachmentsDir: config.attachmentsDir,
     instructions: config.instructions !== "" ? config.instructions : undefined,
     tts: config.tts,
-    bashTool: config.bashTool !== undefined ? { enabled: config.bashTool.enabled } : undefined,
     emotes: config.emotes,
     members: config.members,
     dispatcher: config.dispatcher,

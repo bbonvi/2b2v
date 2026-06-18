@@ -3,24 +3,6 @@ import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 /** UI language for VPN panel. */
 export type UiLang = "en" | "ru";
 
-/** Bash tool configuration. Controls remote shell execution via SSH. */
-export interface BashToolConfig {
-  /** Whether the bash tool is enabled. Both global and guild must be true for tool to be available. */
-  enabled: boolean;
-  /** SSH connection settings for the bash-vm service. */
-  ssh: {
-    host: string;
-    port: number;
-    user: string;
-  };
-  /** Command execution timeout in milliseconds. Default 5000. */
-  timeoutMs: number;
-  /** Max output characters after redaction. Default 4000. */
-  outputLimit: number;
-  /** Regex patterns for blocked commands. Commands matching any pattern are rejected. */
-  blocklist: string[];
-}
-
 /** VPN configuration (WireGuard profile management). */
 export interface VpnConfig {
   enabled: boolean;
@@ -211,8 +193,6 @@ export interface GuildConfig {
   attachmentsDir: string;
   instructions: string;
   tts?: TtsConfig;
-  /** Bash tool configuration. Undefined when disabled for this guild. */
-  bashTool?: BashToolConfig;
   /** Emote/emoji context configuration. */
   emotes: EmotesConfig;
   /** Server members list configuration. */
@@ -265,8 +245,6 @@ export interface GlobalConfig {
   uiLang: UiLang;
   /** VPN configuration. Undefined when disabled. */
   vpn?: VpnConfig;
-  /** Default bash tool configuration. Undefined when disabled globally. */
-  defaultBashTool?: BashToolConfig;
   /** Default emotes configuration. */
   defaultEmotes: EmotesConfig;
   /** Default members configuration. */
@@ -322,9 +300,6 @@ export interface GuildConfigYaml {
       /** Obsolete; ignored by runtime and kept only while old YAML is migrated away. */
       whisper?: Partial<VoicePreset>;
     };
-  };
-  bashTool?: {
-    enabled?: boolean;
   };
   emotes?: {
     include?: boolean;
@@ -425,17 +400,6 @@ export interface MainConfigYaml {
     enabled?: boolean;
     apiUrl?: string;
     vpnPeer?: string;
-  };
-  bashTool?: {
-    enabled?: boolean;
-    ssh?: {
-      host?: string;
-      port?: number;
-      user?: string;
-    };
-    timeoutMs?: number;
-    outputLimit?: number;
-    blocklist?: string[];
   };
   emotes?: {
     include?: boolean;

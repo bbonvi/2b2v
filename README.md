@@ -35,13 +35,13 @@ cp prompts/style.md.example prompts/style.md
 # Edit these files to match your setup and bot persona
 
 # 3a. Development (live reload, debug logging; uses .env)
-docker compose -f docker-compose.dev.yml up -d --build
+docker compose -f docker-compose.dev.yml up -d --build --remove-orphans
 # After the first build, src/, prompts/, and config/ edits restart the app via Bun watch.
 
 # 3b. Production (separate project, volumes, env, dashboard port)
 cp .env.prod.example .env.prod
 # Edit .env.prod with production secrets first.
-docker compose -p 2b2v-prod --env-file .env.prod -f docker-compose.yml up -d --build
+docker compose -p 2b2v-prod --env-file .env.prod -f docker-compose.yml up -d --build --remove-orphans
 ```
 
 Use the dev compose file for live reload. Use the production command with `-p 2b2v-prod` so prod containers and volumes are separate from the default dev project. Production bind-mounts `./config` and `./prompts` from this checkout read-only, matching development's single source of truth. Do not run dev and prod with the same Discord bot token unless you intentionally want both stacks connected as the same bot.

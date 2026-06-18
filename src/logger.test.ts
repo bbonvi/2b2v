@@ -481,7 +481,7 @@ describe("RequestLog", () => {
 
     // Generate a result longer than 500 chars (console truncation threshold)
     const longResult = "x".repeat(1000);
-    rl.recordToolStart("tc1", "bash", { command: "echo test" });
+    rl.recordToolStart("tc1", "sample_tool", { input: "test" });
     rl.recordToolEnd("tc1", false, {
       content: [{ type: "text", text: longResult }],
     });
