@@ -41,9 +41,11 @@ export { trimChatHistory } from "./context-trimming.ts";
 
 export {
   buildMemoryContext,
+  createRecordMemoryTool,
   extractAndApplyMemories,
   type MemoryContextInput,
   type MemoryExtractionInput,
+  type RecordMemoryToolDeps,
 } from "./memory-service.ts";
 
 export { createSearchTool, type SearchToolDeps } from "./search-tool.ts";

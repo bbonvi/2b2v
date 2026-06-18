@@ -14,7 +14,7 @@ import { translateInbound, translateOutbound, buildDisplayNameContext, type Inbo
 import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
-import { handleMessage, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
+import { handleMessage, runSilentMemoryAgentPass, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
 import { shouldRespond, type TriggerResult } from "./agent/triggers";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
@@ -31,7 +31,7 @@ import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
 import type { TtsResult } from "./tts/types";
-import { buildMemoryContext, extractAndApplyMemories } from "./agent/memory-service";
+import { buildMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
 import { createSearchTool } from "./agent/search-tool";
 import { createScheduleTools } from "./agent/schedule-tool";
 import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool";
@@ -61,7 +61,7 @@ import { createSessionStore, type SessionStore } from "./vpn/session";
 import { handleVpnCommand, handleVpnComponent, type VpnHandlerDeps } from "./vpn/handler";
 import { getVpnLocale } from "./vpn/i18n";
 import { loadPromptProfile } from "./config/prompt-profile";
-import { buildBackgroundStreamOptions, fetchOpenRouterModelMetadata, imageInputSupportFromMetadata, resolveModel, resolveGuildModelKey, type ModelImageInputSupport } from "./llm/client";
+import { fetchOpenRouterModelMetadata, imageInputSupportFromMetadata, resolveModel, resolveGuildModelKey, type ModelImageInputSupport } from "./llm/client";
 import { createHash } from "node:crypto";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch, unlinkSync } from "fs";
@@ -2025,28 +2025,25 @@ async function processTriggeredMessage(
         memoryLog.setTrigger({ type: "background_memory_extraction", sourceRequestId: requestLog.requestId });
         memoryLog.setAgentRan(true);
         requestLogStore.incrementActive();
-        const providerParams: Record<string, unknown> = { ...buildBackgroundStreamOptions(globalConfig, guildConfig) };
-        const backgroundApiKey = providerParams.apiKey;
-        delete providerParams.apiKey;
-        delete providerParams.signal;
-        delete providerParams.onPayload;
+        const recordMemoryTool = createRecordMemoryTool({
+          db,
+          guildId,
+          currentUserId: message.author.id,
+          sourceMessageId: memoryRequest.sourceMessageId ?? message.id,
+        });
         try {
-          await extractAndApplyMemories({
-            db,
-            guildId,
-            currentUserId: message.author.id,
-            currentUsername: message.author.username,
-            sourceMessageId: memoryRequest.sourceMessageId ?? message.id,
-            userMessage: memoryRequest.userMessage,
+          await runSilentMemoryAgentPass({
+            globalConfig,
+            guildConfig,
+            context: memoryRequest.context,
+            personaPrompt: persona,
+            incomingMessage: memoryRequest.incomingMessage,
+            userContent: memoryRequest.userMessage,
             assistantReply: memoryRequest.assistantReply,
-            recentContext: memoryRequest.recentContext,
-            provider: guildConfig.backgroundLlm.provider,
-            apiKey: typeof backgroundApiKey === "string" ? backgroundApiKey : "",
-            model: guildConfig.backgroundLlm.model,
-            providerParams,
-            promptCaching: guildConfig.backgroundLlm.promptCaching,
-            onPayload: (payload) => memoryLog.recordLLMRequest(payload),
-            onCompletion: (payload) => memoryLog.recordLLMCompletion(payload),
+            visibleReplySent: memoryRequest.visibleReplySent,
+            tools: [recordMemoryTool],
+            requestLog: memoryLog,
+            log: log.child({ guildId, channelId, requestId: memoryLog.requestId }),
           });
         } catch (err) {
           memoryLog.setError(err instanceof Error ? err.message : String(err));

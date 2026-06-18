@@ -6,7 +6,7 @@ import { contextToSplitPrompts, type AssembledContext, type ContextSection } fro
 import { wrapToolsWithTiming, type TimingState } from "./tool-timing.ts";
 import type { LlmProvider, TriggerInstructions } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
-import { resolveGuildModel, buildStreamOptions, buildImageReadingStreamOptions, type ModelImageInputSupport } from "../llm/client.ts";
+import { resolveGuildModel, buildStreamOptions, buildBackgroundStreamOptions, buildImageReadingStreamOptions, type ModelImageInputSupport } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { Logger, RequestLog } from "../logger.ts";
 import {
@@ -51,6 +51,25 @@ export interface MemoryExtractionRequest {
   userMessage: string;
   assistantReply: string;
   recentContext: string;
+  context: AssembledContext;
+  incomingMessage: IncomingMessage;
+  visibleReplySent: boolean;
+}
+
+export interface SilentMemoryAgentInput {
+  globalConfig: GlobalConfig;
+  guildConfig: GuildConfig;
+  context: AssembledContext;
+  personaPrompt?: string;
+  incomingMessage: IncomingMessage;
+  userContent: string;
+  assistantReply: string;
+  visibleReplySent: boolean;
+  tools: AgentTool[];
+  log?: Logger;
+  requestLog?: RequestLog;
+  completeChat?: ChatCompleteFn;
+  signal?: AbortSignal;
 }
 
 /** Attachment data for a generated voice message. */
@@ -1010,6 +1029,8 @@ async function runNativeToolLoop(input: {
   toolTiming?: TimingState;
   log?: Logger;
   signal?: AbortSignal;
+  allowEmptyFinalResponse?: boolean;
+  stopOnAgentTimeBudget?: boolean;
 }): Promise<{ text: string; targetChatId?: string }> {
   const toolsByName = new Map(input.tools.map((tool) => [tool.name, tool]));
   const imageFollowUpSources = new Map<OpenRouterMessage, ImageFollowUpSource>();
@@ -1057,7 +1078,7 @@ async function runNativeToolLoop(input: {
         },
         timeoutMs: input.llmOutputTimeoutMs,
         maxAttempts,
-        validateResult: requireTextResult(emptyResponseMessage),
+        validateResult: input.allowEmptyFinalResponse === true ? undefined : requireTextResult(emptyResponseMessage),
         onAttemptStart: () => input.onModelTurnStart?.(targetChatId),
         requestLog: input.requestLog,
         log: input.log,
@@ -1067,7 +1088,7 @@ async function runNativeToolLoop(input: {
       return { text, targetChatId };
     } catch (error) {
       if (recoverAgentTimeBudget && isAgentTimeBudgetExceededError(error)) {
-        return await completeFinalAfterAgentTimeBudget();
+        return await finishAfterAgentTimeBudget();
       }
       throw error;
     }
@@ -1081,6 +1102,13 @@ async function runNativeToolLoop(input: {
       null,
       false,
     );
+  };
+
+  const finishAfterAgentTimeBudget = async (): Promise<{ text: string; targetChatId?: string }> => {
+    if (input.stopOnAgentTimeBudget === true) {
+      return { text: "", targetChatId };
+    }
+    return await completeFinalAfterAgentTimeBudget();
   };
 
   const agentTimeBudgetToolMessage = (): string => agentTimeBudgetExhaustedMessage(input.agentTimeBudgetMs);
@@ -1112,7 +1140,7 @@ async function runNativeToolLoop(input: {
           signal: input.signal,
         },
         timeoutMs: input.llmOutputTimeoutMs,
-        validateResult: requireTextUnlessToolCalls("Model produced an empty response."),
+        validateResult: input.allowEmptyFinalResponse === true ? undefined : requireTextUnlessToolCalls("Model produced an empty response."),
         onAttemptStart: () => input.onModelTurnStart?.(targetChatId),
         requestLog: input.requestLog,
         log: input.log,
@@ -1131,7 +1159,7 @@ async function runNativeToolLoop(input: {
         continue;
       }
       if (isAgentTimeBudgetExceededError(error)) {
-        return await completeFinalAfterAgentTimeBudget();
+        return await finishAfterAgentTimeBudget();
       }
       throw error;
     }
@@ -1154,7 +1182,7 @@ async function runNativeToolLoop(input: {
     }
 
     if (isAgentTimeBudgetExceededSignal(input.signal)) {
-      return await completeFinalAfterAgentTimeBudget();
+      return await finishAfterAgentTimeBudget();
     }
 
     if (round === input.maxToolRounds) {
@@ -1204,14 +1232,14 @@ async function runNativeToolLoop(input: {
         await flushParallelCalls();
         appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex));
         input.messages.push(...imageMessages);
-        return await completeFinalAfterAgentTimeBudget();
+        return await finishAfterAgentTimeBudget();
       }
       if (toolCalls >= input.maxToolCalls) {
         await flushParallelCalls();
         if (isAgentTimeBudgetExceededSignal(input.signal)) {
           appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex));
           input.messages.push(...imageMessages);
-          return await completeFinalAfterAgentTimeBudget();
+          return await finishAfterAgentTimeBudget();
         }
         for (const skippedCall of result.toolCalls.slice(callIndex)) {
           input.messages.push(toolMessage(skippedCall, toolBudgetExhaustedMessage("calls")));
@@ -1237,7 +1265,7 @@ async function runNativeToolLoop(input: {
       if (isAgentTimeBudgetExceededSignal(input.signal)) {
         appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex));
         input.messages.push(...imageMessages);
-        return await completeFinalAfterAgentTimeBudget();
+        return await finishAfterAgentTimeBudget();
       }
       const execution = await executeToolCallForLoop({
         tool,
@@ -1260,7 +1288,7 @@ async function runNativeToolLoop(input: {
       if (isAgentTimeBudgetExceededSignal(input.signal)) {
         appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex + 1));
         input.messages.push(...imageMessages);
-        return await completeFinalAfterAgentTimeBudget();
+        return await finishAfterAgentTimeBudget();
       }
     }
     await flushParallelCalls();
@@ -1269,7 +1297,7 @@ async function runNativeToolLoop(input: {
       return { text: "", targetChatId };
     }
     if (isAgentTimeBudgetExceededSignal(input.signal)) {
-      return await completeFinalAfterAgentTimeBudget();
+      return await finishAfterAgentTimeBudget();
     }
   }
 
@@ -1749,6 +1777,128 @@ function messageWantsTyping(segments: ResponseSegment[]): boolean {
   return false;
 }
 
+function buildMemoryPassRuntimeInstruction(): string {
+  return [
+    "## Silent Memory Pass",
+    "The visible Discord reply loop has already ended. Do not write user-facing prose.",
+    "Consider whether this completed turn reveals durable memory that should affect future conversations or bot decisions.",
+    "Focus on what the human user newly revealed, requested to remember, or corrected in the current exchange. Recent chat context is only supporting evidence.",
+    "Do not persist facts that come only from system/developer context, persona, tool instructions, existing memory text, member lists, schedules, or bot implementation details.",
+    "Do not save jokes, transient moods, ordinary chat, pleasantries, reactions, filler, or one-off requests.",
+    "When in doubt, do not save it.",
+    "If memory should change, call record_memory. If no memory should change, produce no tool call and no visible text.",
+    "Use only the available memory tool. Do not mention this maintenance pass.",
+  ].join("\n");
+}
+
+function backgroundProvider(input: SilentMemoryAgentInput): LlmProvider {
+  return input.guildConfig.backgroundLlm.provider
+    ?? input.guildConfig.llmProvider
+    ?? input.globalConfig.defaultLlmProvider;
+}
+
+function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
+  return [
+    "## Post-Reply Memory Consideration",
+    input.visibleReplySent
+      ? `Visible bot reply already sent:\n${input.assistantReply !== "" ? input.assistantReply : "(empty)"}`
+      : "No visible bot reply was sent for this turn.",
+    "",
+    "Decide silently whether durable memory should be updated. Call record_memory only if an update is useful.",
+  ].join("\n");
+}
+
+/** Run the post-reply memory maintenance loop with only memory tools and no Discord output hooks. */
+export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): Promise<void> {
+  if (input.tools.length === 0) return;
+
+  const wallController = new AbortController();
+  const parent = input.signal;
+  let onParentAbort: (() => void) | undefined;
+  if (parent !== undefined) {
+    if (parent.aborted) {
+      throw parent.reason instanceof Error ? parent.reason : new Error("Silent memory pass aborted");
+    }
+    onParentAbort = () => wallController.abort(parent.reason);
+    parent.addEventListener("abort", onParentAbort, { once: true });
+  }
+  const wallTimeout = setTimeout(() => {
+    wallController.abort(new AgentTimeBudgetExceededError(input.guildConfig.replyLoop.wallClockTimeoutMs));
+  }, input.guildConfig.replyLoop.wallClockTimeoutMs);
+
+  const complete = input.completeChat ?? completeLlmChat;
+  const provider = backgroundProvider(input);
+  const streamOptions = buildBackgroundStreamOptions(input.globalConfig, input.guildConfig);
+  const providerParams: Record<string, unknown> = { ...streamOptions };
+  delete providerParams.apiKey;
+  delete providerParams.signal;
+  delete providerParams.onPayload;
+
+  const stableSections = sectionsForStablePrompt(
+    input.personaPrompt ?? "",
+    input.globalConfig.defaultLateInstruction,
+    input.context,
+    buildMemoryPassRuntimeInstruction(),
+  );
+  const sessionId = buildPromptCacheSessionId(input.requestLog, `${provider}:${input.guildConfig.backgroundLlm.model}`);
+  const currentMessageWithoutImages: IncomingMessage = { ...input.incomingMessage, imageInputs: undefined };
+  const messages = buildInitialMessages(
+    input.userContent,
+    buildVolatileTurnContext(input.context),
+    currentMessageWithoutImages,
+  );
+  messages.push({ role: "user", content: memoryPassControlMessage(input) });
+
+  const { tools: timedTools, state: timingState } = wrapToolsWithTiming(input.tools);
+  timingState.resetAgentLoopStart();
+  try {
+    await runNativeToolLoop({
+      complete,
+      requestBase: {
+        provider,
+        apiKey: streamOptions.apiKey,
+        model: input.guildConfig.backgroundLlm.model,
+        systemPrompt: provider === "openai-codex"
+          ? stableSections.map((section) => section.text).join("\n\n")
+          : "",
+        providerParams,
+        sessionId,
+        onPayload: (payload: unknown) => {
+          if (provider === "openrouter") {
+            prependStableSectionsToPayload(
+              payload,
+              stableSections,
+              input.guildConfig.backgroundLlm.promptCaching,
+              input.guildConfig.backgroundLlm.model,
+            );
+          }
+          input.requestLog?.recordLLMRequest(payload);
+          input.log?.debug("memory_llm_request_payload", { payload });
+        },
+      },
+      messages,
+      tools: timedTools,
+      maxToolCalls: Math.min(input.guildConfig.replyLoop.maxToolCalls, 3),
+      maxToolRounds: Math.min(input.guildConfig.replyLoop.maxToolCalls, 3),
+      agentTimeBudgetMs: input.guildConfig.replyLoop.wallClockTimeoutMs,
+      llmOutputTimeoutMs: input.guildConfig.replyLoop.llmOutputTimeoutMs,
+      requestLog: input.requestLog,
+      imageInputSupported: false,
+      pendingAttachments: [],
+      toolTiming: timingState,
+      log: input.log,
+      signal: wallController.signal,
+      allowEmptyFinalResponse: true,
+      stopOnAgentTimeBudget: true,
+    });
+  } finally {
+    clearTimeout(wallTimeout);
+    if (parent !== undefined && onParentAbort !== undefined) {
+      parent.removeEventListener("abort", onParentAbort);
+    }
+  }
+}
+
 /**
  * Core message handler. Evaluates triggers, runs a native tool-calling persona reply,
  * sends the final Discord text, then optionally schedules background memory extraction.
@@ -1817,6 +1967,21 @@ export async function handleMessage(
   const reqLog = deps.requestLog;
   const sessionId = buildPromptCacheSessionId(reqLog, `${model.llmProvider}:${model.id}`);
   const startedAt = Date.now();
+  const scheduleMemoryPass = (assistantReply: string, visibleReplySent: boolean): void => {
+    void deps.afterReply?.({
+      sourceMessageId: msg.messageId,
+      userMessage: userContent,
+      assistantReply,
+      recentContext: memoryExtractionContext(context),
+      context,
+      incomingMessage: msg,
+      visibleReplySent,
+    }).catch((error: unknown) => {
+      deps.log?.warn("memory extraction failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  };
 
   try {
     deps.log?.debug("native_reply_loop_start", {
@@ -1954,10 +2119,12 @@ export async function handleMessage(
 
     const parsedResponse = parseResponseDirectives(finalText);
     if (parsedResponse.ignored) {
+      scheduleMemoryPass("", false);
       deps.log?.debug("native_reply_ignored", { durationMs: Date.now() - startedAt });
       return { triggered: true, triggerResult, agentRan: true };
     }
     if (parsedResponse.segments.length === 0) {
+      scheduleMemoryPass("", false);
       deps.log?.debug("native_reply_empty_after_directives", { durationMs: Date.now() - startedAt });
       return { triggered: true, triggerResult, agentRan: true };
     }
@@ -1982,16 +2149,7 @@ export async function handleMessage(
     }
 
     const memoryReply = renderSegmentsForMemory(parsedResponse.segments);
-    void deps.afterReply?.({
-      sourceMessageId: msg.messageId,
-      userMessage: userContent,
-      assistantReply: memoryReply,
-      recentContext: memoryExtractionContext(context),
-    }).catch((error: unknown) => {
-      deps.log?.warn("memory extraction failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
+    scheduleMemoryPass(memoryReply, true);
 
     deps.log?.debug("native_reply_loop_end", {
       durationMs: Date.now() - startedAt,

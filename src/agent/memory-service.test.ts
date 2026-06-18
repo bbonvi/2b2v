@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "../db/database";
 import { createMemory, getMemory, listMemories } from "../db/memory-repository";
 import type { OpenRouterChatRequest } from "../llm/openrouter-chat";
-import { buildMemoryContext, extractAndApplyMemories } from "./memory-service";
+import { buildMemoryContext, createRecordMemoryTool, extractAndApplyMemories } from "./memory-service";
 
 let db: Database;
 
@@ -390,5 +390,29 @@ describe("extractAndApplyMemories", () => {
     expect(getMemory(db, userMemory)?.content).toBe("updated user memory");
     expect(getMemory(db, globalMemory)?.subjectUserId).toBeNull();
     expect(getMemory(db, globalMemory)?.content).toBe("updated global memory");
+  });
+});
+
+describe("createRecordMemoryTool", () => {
+  test("applies memory updates through a real tool", async () => {
+    const tool = createRecordMemoryTool({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      sourceMessageId: "m1",
+    });
+
+    await tool.execute("call-1", {
+      actions: [{
+        action: "upsert",
+        subject: "current_user",
+        kind: "preference",
+        content: "Prefers concise answers.",
+      }],
+    });
+
+    const memories = listMemories(db, { guildId: "g1", subjectUserId: "u1" });
+    expect(memories).toHaveLength(1);
+    expect(memories[0]?.content).toBe("Prefers concise answers.");
   });
 });

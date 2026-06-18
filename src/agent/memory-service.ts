@@ -1,5 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
+import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { Database } from "../db/database";
 import {
   createMemory,
@@ -40,6 +41,22 @@ export interface MemoryExtractionInput {
   onPayload?: (payload: unknown) => void;
   onCompletion?: (message: Record<string, unknown>) => void;
   completeChat?: (request: OpenRouterChatRequest) => Promise<{ text: string; messageForLogs: Record<string, unknown> }>;
+}
+
+export interface RecordMemoryToolDeps {
+  db: Database;
+  guildId: string;
+  currentUserId: string;
+  sourceMessageId: string;
+}
+
+type RecordMemoryToolResult = AgentToolResult<{ applied: number; requested: number } | { error: true }>;
+
+interface MemoryMutationInput {
+  db: Database;
+  guildId: string;
+  currentUserId: string;
+  sourceMessageId: string;
 }
 
 const MemoryActionSchema = Type.Union([
@@ -281,7 +298,7 @@ function buildExtractionPrompt(input: MemoryExtractionInput): string {
   ].join("\n");
 }
 
-function editableMemory(input: MemoryExtractionInput, id: number): MemoryRow | null {
+function editableMemory(input: MemoryMutationInput, id: number): MemoryRow | null {
   const existing = getMemory(input.db, id);
   if (existing === null) return null;
   if (existing.guildId !== input.guildId) return null;
@@ -290,7 +307,7 @@ function editableMemory(input: MemoryExtractionInput, id: number): MemoryRow | n
 }
 
 function duplicateMemory(
-  input: MemoryExtractionInput,
+  input: MemoryMutationInput,
   subjectUserId: string | null,
   kind: MemoryKind,
   content: string,
@@ -306,6 +323,87 @@ function duplicateMemory(
     && row.kind === kind
     && row.content.trim().toLowerCase() === normalized
   ) ?? null;
+}
+
+function applyMemoryActions(input: MemoryMutationInput, extraction: MemoryExtraction): number {
+  let applied = 0;
+  for (const action of extraction.actions) {
+    if (action.action === "none") continue;
+    if (action.action === "delete") {
+      if (editableMemory(input, action.id) === null) continue;
+      deleteMemory(input.db, action.id);
+      applied += 1;
+      continue;
+    }
+
+    const existing = action.id !== undefined ? editableMemory(input, action.id) : null;
+    if (action.id !== undefined && existing === null) continue;
+
+    const subjectUserId = existing !== null
+      ? existing.subjectUserId
+      : action.subject === "current_user"
+        ? input.currentUserId
+        : null;
+    const payload = {
+      subjectUserId,
+      kind: action.kind,
+      content: action.content.trim(),
+      sourceMessageId: input.sourceMessageId,
+      confidence: action.confidence,
+    };
+    if (payload.content === "") continue;
+
+    if (action.id !== undefined) {
+      updateMemory(input.db, action.id, payload);
+      applied += 1;
+      continue;
+    }
+
+    if (duplicateMemory(input, subjectUserId, action.kind, payload.content) !== null) {
+      continue;
+    }
+
+    createMemory(input.db, {
+      guildId: input.guildId,
+      ...payload,
+    });
+    applied += 1;
+  }
+  return applied;
+}
+
+/** Create the state-changing tool used by the silent post-reply memory pass. */
+export function createRecordMemoryTool(deps: RecordMemoryToolDeps): AgentTool {
+  return {
+    name: "record_memory",
+    label: "record_memory",
+    description: [
+      "Record durable memory updates after a Discord turn has already completed.",
+      "Use only for stable facts, preferences, names/pronouns/language corrections, relationships, recurring project context, or explicit corrections that can affect future replies or bot decisions.",
+      "Do not record jokes, transient moods, filler, ordinary one-off requests, or facts that cannot plausibly matter later.",
+      "Prefer updating an existing memory id over creating duplicates. Delete only when the current exchange clearly makes an existing listed memory obsolete or false.",
+      "Use subject=current_user for facts about the triggering user; use subject=global for shared server/project context or explicitly named aggregate context.",
+      "When saving personal knowledge as global, include the person's name or the group scope in the content so future turns are not ambiguous.",
+    ].join(" "),
+    parameters: MemoryExtractionSchema,
+
+    execute(_toolCallId: string, params: unknown): Promise<RecordMemoryToolResult> {
+      const normalized = normalizeExtractionShape(params);
+      if (!Value.Check(MemoryExtractionSchema, normalized)) {
+        return Promise.resolve({
+          content: [{ type: "text", text: "Memory update rejected: arguments did not match the schema." }],
+          details: { error: true },
+        });
+      }
+
+      const extraction = normalized as MemoryExtraction;
+      const applied = applyMemoryActions(deps, extraction);
+      return Promise.resolve({
+        content: [{ type: "text", text: `Memory update complete. Applied ${applied} of ${extraction.actions.length} requested action(s).` }],
+        details: { applied, requested: extraction.actions.length },
+      });
+    },
+  };
 }
 
 /** Run background memory extraction and apply accepted updates. */
@@ -336,43 +434,5 @@ export async function extractAndApplyMemories(input: MemoryExtractionInput): Pro
   const extracted = parseExtraction(result.text);
   if (extracted === null) return;
 
-  for (const action of extracted.actions) {
-    if (action.action === "none") continue;
-    if (action.action === "delete") {
-      if (editableMemory(input, action.id) === null) continue;
-      deleteMemory(input.db, action.id);
-      continue;
-    }
-
-    const existing = action.id !== undefined ? editableMemory(input, action.id) : null;
-    if (action.id !== undefined && existing === null) continue;
-
-    const subjectUserId = existing !== null
-      ? existing.subjectUserId
-      : action.subject === "current_user"
-        ? input.currentUserId
-        : null;
-    const payload = {
-      subjectUserId,
-      kind: action.kind,
-      content: action.content.trim(),
-      sourceMessageId: input.sourceMessageId,
-      confidence: action.confidence,
-    };
-    if (payload.content === "") continue;
-
-    if (action.id !== undefined) {
-      updateMemory(input.db, action.id, payload);
-      continue;
-    }
-
-    if (duplicateMemory(input, subjectUserId, action.kind, payload.content) !== null) {
-      continue;
-    }
-
-    createMemory(input.db, {
-      guildId: input.guildId,
-      ...payload,
-    });
-  }
+  applyMemoryActions(input, extracted);
 }

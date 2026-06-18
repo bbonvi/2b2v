@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { handleMessage, injectTriggerInstruction, type ChatCompleteFn, type HandlerDeps, type IncomingMessage, type MessageSender, type VoiceAttachment } from "./handler.ts";
+import { handleMessage, injectTriggerInstruction, runSilentMemoryAgentPass, type ChatCompleteFn, type HandlerDeps, type IncomingMessage, type MessageSender, type VoiceAttachment } from "./handler.ts";
 import type { AssembledContext, ContextSection } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
@@ -1039,7 +1039,7 @@ describe("handleMessage", () => {
     expect(senderCalls).toEqual([{ text: "audio please", voice: undefined }]);
   });
 
-  test("ignore directive produces no Discord send and no memory extraction", async () => {
+  test("ignore directive produces no Discord send but still schedules silent memory pass", async () => {
     const completeChat: ChatCompleteFn = () => Promise.resolve({
       text: "<ignore>not worth answering</ignore>",
       toolCalls: [],
@@ -1047,7 +1047,11 @@ describe("handleMessage", () => {
       messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
     });
     const sender: MessageSender = mock(() => Promise.resolve({ sentMessageId: "sent-1" }));
-    const afterReply = mock(() => Promise.resolve());
+    const afterReplyCalls: unknown[] = [];
+    const afterReply = mock((request: unknown) => {
+      afterReplyCalls.push(request);
+      return Promise.resolve();
+    });
 
     const result = await handleMessage(
       makeMessage({ mentionedUserIds: ["bot-1"] }),
@@ -1057,7 +1061,11 @@ describe("handleMessage", () => {
     expect(result.agentRan).toBe(true);
     expect(result.responseText).toBeUndefined();
     expect(sender).toHaveBeenCalledTimes(0);
-    expect(afterReply).toHaveBeenCalledTimes(0);
+    expect(afterReply).toHaveBeenCalledTimes(1);
+    expect(afterReplyCalls[0]).toMatchObject({
+      assistantReply: "",
+      visibleReplySent: false,
+    });
   });
 
   test("throws and skips memory extraction when the final Discord send fails", async () => {
@@ -2363,6 +2371,110 @@ describe("handleMessage", () => {
     expect(senderCalls).toEqual([{ text: "thread answer", reply: false, chatId: "thread-1" }]);
   });
 
+  test("silent memory pass runs the native loop with only supplied memory tools", async () => {
+    const toolCalls: unknown[] = [];
+    const recordMemoryTool: AgentTool = {
+      name: "record_memory",
+      label: "record_memory",
+      description: "Record memory",
+      parameters: Type.Object({ actions: Type.Array(Type.Object({ action: Type.Literal("none") })) }),
+      execute: (_id, params) => {
+        toolCalls.push(params);
+        return Promise.resolve({
+          content: [{ type: "text", text: "Memory update complete." }],
+          details: { applied: 0, requested: 1 },
+        });
+      },
+    };
+    let calls = 0;
+    const exposedTools: string[][] = [];
+    const systemPrompts: string[] = [];
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      exposedTools.push(request.tools?.map((tool) => tool.function.name) ?? []);
+      systemPrompts.push(request.systemPrompt);
+      expect(request.signal).toBeInstanceOf(AbortSignal);
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{ id: "call-1", type: "function", function: { name: "record_memory", arguments: "{\"actions\":[{\"action\":\"none\"}]}" } }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      return Promise.resolve({
+        text: "",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 0, totalTokens: 1 }, content: [] },
+      });
+    };
+
+    await runSilentMemoryAgentPass({
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({
+        backgroundLlm: {
+          provider: "openai-codex",
+          model: "gpt-5",
+          modelParams: {},
+          promptCaching: { enabled: true },
+        },
+      }),
+      context: makeContext(),
+      personaPrompt: "You are a test bot.",
+      incomingMessage: makeMessage(),
+      userContent: "remember I like concise answers",
+      assistantReply: "got it",
+      visibleReplySent: true,
+      tools: [recordMemoryTool],
+      completeChat,
+    });
+
+    expect(toolCalls).toEqual([{ actions: [{ action: "none" }] }]);
+    expect(exposedTools).toEqual([["record_memory"], ["record_memory"]]);
+    expect(systemPrompts[0]).toContain("Focus on what the human user newly revealed");
+    expect(systemPrompts[0]).toContain("Do not persist facts that come only from system/developer context");
+  });
+
+  test("silent memory pass stops on wall-clock timeout without recovery completion", async () => {
+    const recordMemoryTool: AgentTool = {
+      name: "record_memory",
+      label: "record_memory",
+      description: "Record memory",
+      parameters: Type.Object({ actions: Type.Array(Type.Object({ action: Type.Literal("none") })) }),
+      execute: () => Promise.resolve({
+        content: [{ type: "text", text: "Memory update complete." }],
+        details: { applied: 0, requested: 1 },
+      }),
+    };
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      return new Promise((_resolve, reject) => {
+        request.signal?.addEventListener("abort", () => {
+          reject(request.signal?.reason instanceof Error ? request.signal.reason : new Error("aborted"));
+        }, { once: true });
+      });
+    };
+
+    await runSilentMemoryAgentPass({
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({
+        replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 1, llmOutputTimeoutMs: 10_000 },
+      }),
+      context: makeContext(),
+      personaPrompt: "You are a test bot.",
+      incomingMessage: makeMessage(),
+      userContent: "remember I like concise answers",
+      assistantReply: "got it",
+      visibleReplySent: true,
+      tools: [recordMemoryTool],
+      completeChat,
+    });
+
+    expect(calls).toBe(1);
+  });
+
   test("calls background memory extraction after send", async () => {
     const afterReplyCalls: unknown[] = [];
     const afterReply = (request: unknown): Promise<void> => {
@@ -2391,9 +2503,11 @@ describe("handleMessage", () => {
       userMessage: "hello bot",
       assistantReply: "hello user",
       recentContext: "## Chat History\n[@bob]: relevant context",
+      visibleReplySent: true,
     });
-    expect(JSON.stringify(afterReplyCalls[0])).not.toContain("Server Members");
-    expect(JSON.stringify(afterReplyCalls[0])).not.toContain("cached");
+    const memoryRequest = afterReplyCalls[0] as { recentContext: string };
+    expect(memoryRequest.recentContext).not.toContain("Server Members");
+    expect(memoryRequest.recentContext).not.toContain("cached");
   });
 
   test("injectTriggerInstruction inserts before response instruction", () => {

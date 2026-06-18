@@ -52,6 +52,8 @@ Search defaults to the current channel/thread/DM and omits repeated `chat_id` ta
 
 Memory is direct SQLite data by default. The prompt gets global memories plus current-user memories. Other users' stored context is signaled through member memory counts, and the read-only `get_user_memory` tool can retrieve a guild member's user-scoped memories by username when the model needs more information about that person.
 
+Memory writes happen after the visible reply loop has ended. The runtime starts a silent second native agent loop with the same assembled context style and only the `record_memory` tool available; it sends no Discord output and does not keep typing active.
+
 ## Schedules
 
 Agent schedule tools are current-guild and current-channel scoped, and list/delete only pending schedules. Prompt context exposes only a pending count summary; IDs and details require `list_scheduled_messages`.
