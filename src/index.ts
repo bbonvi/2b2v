@@ -475,7 +475,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
           `Failure detail for context: ${message}`,
           "The image was not generated and there is no outgoing image attachment.",
           `Use the normal persona and current chat history. Prefer replying to the original request: <message reply="true" reply_to="${job.sourceMessageId}">your response text</message>. If the current chat context makes another message the clearly better target, you may reply to that message instead.`,
-          "Explain the failure naturally in chat. Do not paste raw JSON, stack traces, or long internal errors unless the user explicitly asks for technical details. Do not call codex_generate_image, cancel_agent_job, or start another image job from this failure notification.",
+          "Explain the failure naturally in chat. Do not paste raw JSON, stack traces, or long internal errors unless the user explicitly asks for technical details.",
         ].join("\n");
         await runAsyncImageStatusTurn({
           event: "failed",
