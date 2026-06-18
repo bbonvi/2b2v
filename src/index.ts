@@ -843,6 +843,15 @@ validateVpnConfig(globalConfig.vpn);
 validateBashToolConfig(globalConfig.defaultBashTool);
 log.info("config loaded", { model: globalConfig.defaultModel, qdrant: globalConfig.qdrantUrl });
 
+const startupMessageQueue: Message[] = [];
+let startupMessageProcessingReady = false;
+let startupMessageQueueDraining = false;
+
+const client: Client = createDiscordClient(globalConfig, log);
+client.on("messageCreate", handleMessageCreateEvent);
+const discordLoginPromise = loginDiscordClient(client, globalConfig.discordToken);
+void discordLoginPromise.catch(() => {});
+
 // --- 2. Ensure data directory exists ---
 if (!existsSync(globalConfig.dataDir)) {
   mkdirSync(globalConfig.dataDir, { recursive: true });
@@ -1211,9 +1220,8 @@ const memoryCleanupTimer = setInterval(() => {
   }
 }, MEMORY_CLEANUP_INTERVAL_MS);
 
-// --- 13. Create and login Discord client ---
-const client: Client = createDiscordClient(globalConfig, log);
-await loginDiscordClient(client, globalConfig.discordToken);
+// --- 13. Wait for Discord client login ---
+await discordLoginPromise;
 
 // --- 14. Register slash commands ---
 const botUser = client.user;
@@ -2124,8 +2132,33 @@ client.on("typingStart", (typing: Typing) => {
   );
 });
 
+/** Queue Discord messages that arrive before startup dependencies are ready. */
+function handleMessageCreateEvent(message: Message): void {
+  if (!startupMessageProcessingReady || startupMessageQueueDraining) {
+    startupMessageQueue.push(message);
+    return;
+  }
+
+  void processDiscordMessageCreate(message);
+}
+
+function drainStartupMessageQueue(): void {
+  if (startupMessageQueueDraining) return;
+  startupMessageQueueDraining = true;
+  const queued = startupMessageQueue.length;
+  if (queued > 0) log.info("draining startup Discord message queue", { queued });
+  try {
+    while (startupMessageQueue.length > 0) {
+      const message = startupMessageQueue.shift();
+      if (message !== undefined) void processDiscordMessageCreate(message);
+    }
+  } finally {
+    startupMessageQueueDraining = false;
+  }
+}
+
 // --- 23. messageCreate handler ---
-client.on("messageCreate", (message: Message) => void (async () => {
+async function processDiscordMessageCreate(message: Message): Promise<void> {
   try {
     // Ignore bots (including self)
     if (message.author.bot) return;
@@ -2249,7 +2282,7 @@ client.on("messageCreate", (message: Message) => void (async () => {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-})());
+}
 
 // --- 24. messageDelete handler ---
 client.on("messageDelete", (message) => void (async () => {
@@ -2356,6 +2389,8 @@ log.info("health check passed — all systems ready", {
   guilds: guildConfigs.size,
   schedulerJobs: scheduler.activeCount(),
 });
+startupMessageProcessingReady = true;
+drainStartupMessageQueue();
 
 // --- Start dashboard ---
 const dashboardPassword = process.env.DASHBOARD_PASSWORD;
