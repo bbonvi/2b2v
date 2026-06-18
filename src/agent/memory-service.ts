@@ -418,6 +418,7 @@ export function createRecordMemoryTool(deps: RecordMemoryToolDeps): AgentTool {
       "Record durable memory updates after a Discord turn has already completed.",
       "Use only for stable facts, preferences, names/pronouns/language corrections, relationships, recurring project context, or explicit corrections that can affect future replies or bot decisions.",
       "Do not record jokes, transient moods, filler, ordinary one-off requests, or facts that cannot plausibly matter later.",
+      "Keep each memory concise and structured as one short durable fact or preference.",
       "Call this tool at most once per pass; put all memory changes in the single actions array.",
       "Prefer updating an existing memory id over creating duplicates. Delete only when the current exchange clearly makes an existing listed memory obsolete or false.",
       "Use subject=current_user for the triggering user, subject=user with username for another Discord user, and subject=global for shared server/project context or explicitly named aggregate context.",
