@@ -41,7 +41,6 @@ export interface IncomingMessage {
   authorDisplayName?: string;
   authorGlobalName?: string;
   authorIsBot?: boolean;
-  authorIsGuildMember?: boolean;
   botUserId: string;
   mentionedUserIds: string[];
   translatedContent: string;
@@ -705,9 +704,6 @@ function buildCurrentMessageMetadata(msg: IncomingMessage): string {
   }
   if (msg.authorGlobalName !== undefined && msg.authorGlobalName !== "" && msg.authorGlobalName !== msg.authorUsername && msg.authorGlobalName !== msg.authorDisplayName) {
     lines.push(`Trigger GlobalName: ${msg.authorGlobalName}`);
-  }
-  if (msg.authorIsGuildMember !== undefined) {
-    lines.push(`Trigger AuthorIsGuildMember: ${msg.authorIsGuildMember ? "true" : "false"}`);
   }
   if (msg.authorIsBot !== undefined) {
     lines.push(`Trigger AuthorIsBot: ${msg.authorIsBot ? "true" : "false"}`);

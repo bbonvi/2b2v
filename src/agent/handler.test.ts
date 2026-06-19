@@ -357,7 +357,6 @@ describe("handleMessage", () => {
       expect(messages[3]?.content).toContain("Trigger AuthorID: user-1");
       expect(messages[3]?.content).toContain("Trigger DisplayName: Test Nick");
       expect(messages[3]?.content).toContain("Trigger GlobalName: Test Global");
-      expect(messages[3]?.content).toContain("Trigger AuthorIsGuildMember: true");
       expect(messages[3]?.content).toContain("Trigger AuthorIsBot: false");
       expect(messages[3]?.content).toContain("Trigger ReplyToMsgID: parent-msg");
       expect(messages[3]?.content).toContain("## Current User Message");
@@ -377,7 +376,6 @@ describe("handleMessage", () => {
         replyToMessageId: "parent-msg",
         authorDisplayName: "Test Nick",
         authorGlobalName: "Test Global",
-        authorIsGuildMember: true,
         authorIsBot: false,
       }),
       makeDeps({ completeChat }),

@@ -2026,7 +2026,6 @@ async function processTriggeredMessage(
       authorDisplayName: authorDisplayName(message),
       authorGlobalName: message.author.globalName ?? message.author.displayName,
       authorIsBot: message.author.bot,
-      authorIsGuildMember: message.member !== null,
       botUserId: client.user?.id ?? "",
       mentionedUserIds: [...message.mentions.users.keys()],
       translatedContent,
