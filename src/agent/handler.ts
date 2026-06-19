@@ -31,6 +31,7 @@ import {
   type ResponseSegment,
 } from "./response-directives.ts";
 import { currentLocalContext } from "../time/agent-time.ts";
+import { buildMemoryPolicyInstructions } from "./memory-service.ts";
 
 /** Minimal abstraction over a Discord message for the handler. */
 export interface IncomingMessage {
@@ -1788,24 +1789,7 @@ function buildMemoryPassRuntimeInstruction(): string {
     "## Silent Memory Pass",
     "The visible Discord reply loop has already ended. Do not write user-facing prose.",
     "Consider whether this completed turn reveals durable memory that should affect future conversations or bot decisions.",
-    "Focus on what the human user newly revealed, requested to remember, or corrected in the current exchange. Recent chat context is only supporting evidence.",
-    "Record explicit and strongly implied durable facts, preferences, relationships, routines, constraints, identity details, projects, and recurring behaviors when they could matter later; the user does not need to ask you to remember.",
-    "The triggering user is only the source of this memory pass, not the only valid memory subject. Inspect the current exchange and recent chat context for durable, future-useful memories about any clearly identifiable user or shared context; use subject=user with username for another user when appropriate.",
-    "Be proactive but selective: record context-derived or implied memories only when they are likely to affect future replies, reveal a stable pattern, or clarify relationships, preferences, constraints, projects, or routines.",
-    "For subtle, uncertain, or pattern-based memories, use lower confidence and tentative standalone phrasing; if the clue is likely to become stale, use a conservative expiresAt. Keep the memory content short and avoid verbose meta-commentary.",
-    "Use lower confidence for indirect, inferred, or pattern-based memories.",
-    "Write each memory as a standalone factual note that remains clear without hidden chat context, prior assumptions, or what the bot previously believed.",
-    "Memory can be about the triggering user, another Discord user by username, or shared/global context; use lower confidence for claims about another user unless that user directly confirmed them.",
-    "Prefer the narrowest correct scope: current_user for triggering-user preferences/facts, user for another named user, and global only for shared server/project facts or explicit bot-wide rules.",
-    "Do not turn one user's preference into a global memory unless explicitly asked to apply it globally or to everyone.",
-    "Maintain the memory set instead of only appending. Before creating a memory, consider updating, compressing, or deleting an existing row.",
-    "If a new memory overlaps an existing memory, update that id with a shorter merged version instead of creating another row.",
-    "Actively delete stale or superseded memories when the current exchange clearly replaces them.",
-    "Keep memories compact: normally one sentence; dense merged memories should still stay short unless the user explicitly asked to preserve detailed instructions.",
-    "Do not persist facts that come only from system/developer context, persona, tool instructions, existing memory text, member lists, schedules, or bot implementation details.",
-    "Do not save jokes, transient moods, ordinary chat, pleasantries, reactions, filler, one-off requests, or preferences that only apply to the current request unless the user asks to remember them, clearly states a general future preference, or the surrounding pattern strongly implies a recurring durable preference or rapport detail.",
-    "Use expiresAt only for clearly temporary memories such as current-event context, short-lived projects, temporary availability, deadlines, or explicitly time-limited preferences; use future Unix epoch milliseconds from the current time in the control message, never past timestamps or seconds; do not set expiry for stable names, pronouns, preferences, relationships, durable facts, or long-lived context.",
-    "When in doubt, do not save it.",
+    ...buildMemoryPolicyInstructions(),
     "If memory should change, call record_memory. If no memory should change, produce no tool call and no visible text.",
     "Use only the available memory tool. Do not mention this maintenance pass.",
   ].join("\n");
