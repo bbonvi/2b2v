@@ -156,6 +156,16 @@ function shortQuote(text: string, maxLength = 120): string {
   return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
+function formatJobErrorForContext(error: string): string {
+  const responseTextMarker = "Response text:";
+  const responseTextIndex = error.indexOf(responseTextMarker);
+  if (responseTextIndex >= 0) {
+    const responseText = error.slice(responseTextIndex + responseTextMarker.length).trim();
+    if (responseText !== "") return ` error response: "${shortQuote(responseText, 400)}"`;
+  }
+  return ` error: ${shortQuote(error, 200)}`;
+}
+
 function formatJobAge(job: AgentJob, now: number): string {
   const started = job.startedAt ?? job.createdAt;
   const seconds = Math.max(0, Math.round((now - started) / 1000));
@@ -172,7 +182,7 @@ function renderAgentJobsContext(jobs: AgentJob[], now = Date.now()): string {
     const state = isActiveJobStatus(job.status) ? "active" : "recent terminal";
     const replacement = job.replacesJobId !== undefined ? ` replaces ${job.replacesJobId}` : "";
     const sent = job.sentMessageId !== undefined ? ` sent MsgID ${job.sentMessageId}` : "";
-    const error = job.error !== undefined ? ` error: ${shortQuote(job.error, 100)}` : "";
+    const error = job.error !== undefined ? formatJobErrorForContext(job.error) : "";
     const highRes = job.input.is4k ? " 4K" : "";
     lines.push(
       `- ${job.id} ${job.status}${highRes} (${state}) for @${job.requesterUsername} from MsgID ${job.sourceMessageId}${replacement}; requested ${formatJobAge(job, now)}; quote: "${job.sourceQuote}"${sent}${error}`,
