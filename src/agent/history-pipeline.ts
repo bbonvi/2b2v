@@ -8,6 +8,13 @@ import { formatMessageLine, NEWER_LEGEND, OLDER_LEGEND } from "./history-formatt
 import { resolveReplies } from "./history-replies.ts";
 import { fetchMissingReplyTargets } from "./reply-target-fallback.ts";
 
+export interface ProcessedHistory {
+  olderText: string;
+  newerText: string;
+  /** Human user IDs visible in the rendered chat history, newest visible activity first. */
+  visibleUserIds: string[];
+}
+
 /**
  * Run the full history processing pipeline:
  * sort → merge → slice → trim → fallback fetch → resolve replies → date stamps → format.
@@ -20,7 +27,7 @@ export async function processHistory(
   latestUserMessage: HistoryMessage,
   config: HistoryProcessingConfig & { replyQuoteChars: number },
   replyFallbackDeps: ReplyFallbackDeps,
-): Promise<{ olderText: string; newerText: string }> {
+): Promise<ProcessedHistory> {
   // 1. Sort deterministically
   const sorted = sortMessages(applyDisplayNames(messages, config.displayNamesByUserId));
   const latestWithDisplayName = applyDisplayName(latestUserMessage, config.displayNamesByUserId);
@@ -114,7 +121,21 @@ export async function processHistory(
     newerText = `## Chat History\n${lines.join("\n")}`;
   }
 
-  return { olderText, newerText };
+  return {
+    olderText,
+    newerText,
+    visibleUserIds: collectVisibleUserIds([...olderTrimmed, ...newerMessages]),
+  };
+}
+
+function collectVisibleUserIds(messages: HistoryMessage[]): string[] {
+  const recency = new Map<string, true>();
+  for (const message of messages) {
+    if (message.isBot) continue;
+    recency.delete(message.authorId);
+    recency.set(message.authorId, true);
+  }
+  return [...recency.keys()].reverse();
 }
 
 function applyDisplayNames(

@@ -2432,6 +2432,7 @@ describe("handleMessage", () => {
       userContent: "remember I like concise answers",
       assistantReply: "got it",
       visibleReplySent: true,
+      visibleUserMemoryContext: "## Existing Memories For Other Visible Users\n- 2 [@other] [0.7] [fact] Other fact.",
       tools: [recordMemoryTool],
       completeChat,
     });
@@ -2444,6 +2445,9 @@ describe("handleMessage", () => {
     expect(systemPrompts[0]).toContain("Before creating a new memory");
     expect(systemPrompts[0]).toContain("expiresIn");
     expect(systemPrompts[0]).not.toContain("expiresAt");
+    expect(systemPrompts[0]).not.toContain("Other fact.");
+    expect(controlMessages[0]).toStartWith("## Existing Memories For Other Visible Users");
+    expect(controlMessages[0]).toContain("Other fact.\n\n## Post-Reply Memory Consideration");
     expect(controlMessages[0]).toContain("Current time for expiresIn decisions:");
     expect(controlMessages[0]).toContain("Timezone: UTC");
   });

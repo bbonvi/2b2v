@@ -31,7 +31,7 @@ import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
 import type { TtsResult } from "./tts/types";
-import { buildMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
+import { buildMemoryContext, buildVisibleUserMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
 import { createSearchTool } from "./agent/search-tool";
 import { createScheduleTools } from "./agent/schedule-tool";
 import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool";
@@ -1475,7 +1475,7 @@ async function buildContext(
       ...agentJobs.annotationForMessage(latestUserMessage.id, guildId, channelId),
     ],
   };
-  const { olderText, newerText } = await processHistory(
+  const { olderText, newerText, visibleUserIds } = await processHistory(
     historyWithoutLatest,
     annotatedLatestUserMessage,
     {
@@ -1605,6 +1605,7 @@ async function buildContext(
       responseInstruction: "",
       userMessage,
     });
+  assembled.visibleUserIds = visibleUserIds;
   const activeJobsText = renderAgentJobsContext(visibleJobs);
   const activeJobsIndex = assembled.sections.findIndex((s) => s.label === "Chat History — Newer");
   const activeJobsInsertAt = activeJobsIndex === -1 ? assembled.sections.length : activeJobsIndex;
@@ -2079,6 +2080,13 @@ async function processTriggeredMessage(
             return resolveGuildUsername(guild, username);
           },
         });
+        const visibleUserMemoryContext = buildVisibleUserMemoryContext({
+          db,
+          guildId,
+          currentUserId: message.author.id,
+          visibleUserIds: memoryRequest.context.visibleUserIds ?? [],
+          resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
+        });
         try {
           await runSilentMemoryAgentPass({
             globalConfig,
@@ -2089,6 +2097,7 @@ async function processTriggeredMessage(
             userContent: memoryRequest.userMessage,
             assistantReply: memoryRequest.assistantReply,
             visibleReplySent: memoryRequest.visibleReplySent,
+            visibleUserMemoryContext,
             tools: [recordMemoryTool],
             requestLog: memoryLog,
             log: log.child({ guildId, channelId, requestId: memoryLog.requestId }),

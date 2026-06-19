@@ -23,6 +23,8 @@ export interface AssembledContext {
   userMessage: string;
   /** Message IDs already included in the prompt history/context. */
   contextMessageIds?: string[];
+  /** Human user IDs visible in the rendered chat history, newest visible activity first. */
+  visibleUserIds?: string[];
 }
 
 /** Thread metadata for thread context assembly. */

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "../db/database";
 import { createMemory, getMemory, listMemories } from "../db/memory-repository";
 import type { OpenRouterChatRequest } from "../llm/openrouter-chat";
-import { buildMemoryContext, createRecordMemoryTool, extractAndApplyMemories } from "./memory-service";
+import { buildMemoryContext, buildVisibleUserMemoryContext, createRecordMemoryTool, extractAndApplyMemories } from "./memory-service";
 
 let db: Database;
 
@@ -50,6 +50,44 @@ describe("buildMemoryContext", () => {
 
     expect(context).toContain("[project] [expires in 3 days] Alice is temporarily focused on launch prep.");
     expect(context).not.toContain("expiresAt");
+  });
+});
+
+describe("buildVisibleUserMemoryContext", () => {
+  test("hydrates newest visible users and newest memories within caps", () => {
+    const newest = createMemory(db, { guildId: "g1", subjectUserId: "u-new", kind: "fact", content: "Newest visible-user memory." });
+    const middle = createMemory(db, { guildId: "g1", subjectUserId: "u-new", kind: "fact", content: "Middle visible-user memory." });
+    const oldest = createMemory(db, { guildId: "g1", subjectUserId: "u-new", kind: "fact", content: "Oldest visible-user memory." });
+    const midUser = createMemory(db, { guildId: "g1", subjectUserId: "u-mid", kind: "project", content: "Mid user memory." });
+    createMemory(db, { guildId: "g1", subjectUserId: "u-old", kind: "fact", content: "Old visible-user memory." });
+    createMemory(db, { guildId: "g1", subjectUserId: "u-current", kind: "preference", content: "Current user memory." });
+    createMemory(db, { guildId: "g1", kind: "global_note", content: "Global memory." });
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(300, newest);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, middle);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, oldest);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(250, midUser);
+
+    const context = buildVisibleUserMemoryContext({
+      db,
+      guildId: "g1",
+      currentUserId: "u-current",
+      visibleUserIds: ["u-new", "u-mid", "u-old", "u-current"],
+      resolveUserId: (id) => ({ "u-new": "new", "u-mid": "mid", "u-old": "old" })[id],
+      maxUsers: 2,
+      maxMemoriesPerUser: 2,
+      maxRows: 3,
+    });
+
+    expect(context).toContain("## Existing Memories For Other Visible Users");
+    expect(context).toContain("### @new");
+    expect(context).toContain("Newest visible-user memory.");
+    expect(context).toContain("Middle visible-user memory.");
+    expect(context).not.toContain("Oldest visible-user memory.");
+    expect(context).toContain("### @mid");
+    expect(context).toContain("Mid user memory.");
+    expect(context).not.toContain("### @old");
+    expect(context).not.toContain("Current user memory.");
+    expect(context).not.toContain("Global memory.");
   });
 });
 

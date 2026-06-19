@@ -283,6 +283,24 @@ describe("processHistory", () => {
     expect(result.newerText).not.toContain("content-1");
   });
 
+  test("returns visible human users newest first across older and newer history", async () => {
+    const config = {
+      ...defaultConfig,
+      trim: { ...defaultConfig.trim, trimTarget: 5, windowSize: 2, trimTrigger: 20 },
+    };
+    const messages = [
+      msg({ id: "1", author: "old", authorId: "uid-old", content: "old", timestamp: 1000 }),
+      msg({ id: "2", author: "middle", authorId: "uid-middle", content: "middle", timestamp: 2000 }),
+      msg({ id: "3", author: "bot", authorId: "bot-id", isBot: true, content: "bot", timestamp: 3000 }),
+      msg({ id: "4", author: "old", authorId: "uid-old", content: "old again", timestamp: 4000 }),
+    ];
+    const latest = msg({ id: "100", author: "latest", authorId: "uid-latest", content: "latest", timestamp: 5000 });
+
+    const result = await processHistory(messages, latest, config, deps);
+
+    expect(result.visibleUserIds).toEqual(["uid-latest", "uid-old", "uid-middle"]);
+  });
+
   test("newer slice includes date stamps when temporal gaps exist", async () => {
     // Two messages 10 minutes apart in newer slice should get separate date stamps
     const m1 = msg({ id: "1", content: "first", timestamp: 1000 });

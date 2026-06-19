@@ -70,6 +70,7 @@ export interface SilentMemoryAgentInput {
   userContent: string;
   assistantReply: string;
   visibleReplySent: boolean;
+  visibleUserMemoryContext?: string;
   tools: AgentTool[];
   log?: Logger;
   requestLog?: RequestLog;
@@ -1825,6 +1826,9 @@ function backgroundProvider(input: SilentMemoryAgentInput): LlmProvider {
 function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
   const now = Date.now();
   return [
+    ...(input.visibleUserMemoryContext !== undefined && input.visibleUserMemoryContext.trim() !== ""
+      ? [input.visibleUserMemoryContext.trim(), ""]
+      : []),
     "## Post-Reply Memory Consideration",
     "Current time for expiresIn decisions:",
     currentLocalContext(input.guildConfig.timezone, now),

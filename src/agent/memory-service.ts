@@ -24,6 +24,18 @@ export interface MemoryContextInput {
   limit?: number;
 }
 
+export interface VisibleUserMemoryContextInput {
+  db: Database;
+  guildId: string;
+  currentUserId: string;
+  /** User IDs visible in rendered chat history, newest visible activity first. */
+  visibleUserIds: readonly string[];
+  resolveUserId?: (userId: string) => string | undefined;
+  maxUsers?: number;
+  maxMemoriesPerUser?: number;
+  maxRows?: number;
+}
+
 export interface MemoryExtractionInput {
   db: Database;
   guildId: string;
@@ -233,6 +245,50 @@ export function buildMemoryContext(input: MemoryContextInput): string {
     "Use these durable memories as background context. Current chat instructions override memory. The number after scope is confidence (0-1); weigh lower confidence accordingly.",
     ...lines,
   ].join("\n");
+}
+
+/** Build memory-pass-only dedupe context for other users visible in chat history. */
+export function buildVisibleUserMemoryContext(input: VisibleUserMemoryContextInput): string {
+  const maxUsers = input.maxUsers ?? 10;
+  const maxMemoriesPerUser = input.maxMemoriesPerUser ?? 10;
+  const maxRows = input.maxRows ?? 100;
+  const seen = new Set<string>([input.currentUserId]);
+  const groups: Array<{ userId: string; rows: MemoryRow[] }> = [];
+  let rowCount = 0;
+
+  for (const userId of input.visibleUserIds) {
+    if (groups.length >= maxUsers || rowCount >= maxRows) break;
+    if (seen.has(userId)) continue;
+    seen.add(userId);
+
+    const remainingRows = maxRows - rowCount;
+    const rows = listMemories(input.db, {
+      guildId: input.guildId,
+      subjectUserId: userId,
+      limit: Math.min(maxMemoriesPerUser, remainingRows),
+    });
+    if (rows.length === 0) continue;
+
+    groups.push({ userId, rows });
+    rowCount += rows.length;
+  }
+
+  if (groups.length === 0) return "";
+
+  const lines = [
+    "## Existing Memories For Other Visible Users",
+    "These memories are shown only so this memory pass can update existing rows or avoid duplicates for other users visible in the rendered chat history. Do not copy them into new memories unless the current exchange adds new information.",
+  ];
+  for (const group of groups) {
+    const username = input.resolveUserId?.(group.userId);
+    const label = username !== undefined && username !== "" ? `@${username}` : `user:${group.userId}`;
+    lines.push(`### ${label}`);
+    for (const row of group.rows) {
+      const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
+      lines.push(`- ${row.id} [${formatConfidence(row.confidence)}] [${row.kind}]${expiry} ${row.content}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 function normalizeUsername(value: unknown): string | undefined {
