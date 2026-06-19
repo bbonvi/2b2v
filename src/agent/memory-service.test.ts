@@ -84,10 +84,10 @@ describe("extractAndApplyMemories", () => {
     expect(prompt).toContain("strongly implied durable facts");
     expect(prompt).toContain("standalone factual note");
     expect(prompt).toContain("narrowest correct scope");
-    expect(prompt).toContain("expiresAt");
-    expect(prompt).toContain("Current time for expiresAt calculations:");
+    expect(prompt).toContain("expiresIn");
+    expect(prompt).not.toContain("expiresAt");
+    expect(prompt).toContain("Current time for expiresIn decisions:");
     expect(prompt).toContain("Timezone: America/New_York");
-    expect(prompt).toContain("Current Unix epoch milliseconds:");
     expect(prompt).toContain("Recent chat context:\n## Chat History\n[@bob]: earlier context");
   });
 
@@ -274,8 +274,8 @@ describe("extractAndApplyMemories", () => {
     expect(listMemories(db, { guildId: "g1" }).some((row) => row.kind === "project")).toBe(true);
   });
 
-  test("applies expiresAt from extractor output", async () => {
-    const expiresAt = Date.now() + 2 * 60 * 60 * 1000;
+  test("applies relative expiresIn from extractor output", async () => {
+    const before = Date.now();
     await extractAndApplyMemories({
       db,
       guildId: "g1",
@@ -295,14 +295,47 @@ describe("extractAndApplyMemories", () => {
             subject: "current_user",
             kind: "fact",
             content: "Alice is at the conference today.",
-            expiresAt,
+            expiresIn: { amount: 2, unit: "hours" },
           }],
         }),
         messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
       }),
     });
 
-    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })[0]?.expiresAt).toBe(expiresAt);
+    const expiresAt = listMemories(db, { guildId: "g1", subjectUserId: "u1" })[0]?.expiresAt;
+    const after = Date.now();
+    expect(expiresAt).toBeGreaterThanOrEqual(before + 2 * 60 * 60 * 1000);
+    expect(expiresAt).toBeLessThanOrEqual(after + 2 * 60 * 60 * 1000);
+  });
+
+  test("ignores extractor output that tries to use raw expiresAt", async () => {
+    await extractAndApplyMemories({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      currentUsername: "alice",
+      sourceMessageId: "m1",
+      userMessage: "remember I'm at the conference until tonight",
+      assistantReply: "got it",
+      recentContext: "",
+      apiKey: "key",
+      model: "model",
+      promptCaching: { enabled: false },
+      completeChat: () => Promise.resolve({
+        text: JSON.stringify({
+          actions: [{
+            action: "upsert",
+            subject: "current_user",
+            kind: "fact",
+            content: "Alice is at the conference today.",
+            expiresAt: Date.now() + 2 * 60 * 60 * 1000,
+          }],
+        }),
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      }),
+    });
+
+    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
   });
 
   test("ignores impossible delete ids from sloppy providers", async () => {
@@ -442,6 +475,7 @@ describe("extractAndApplyMemories", () => {
 
 describe("createRecordMemoryTool", () => {
   test("applies memory updates through a real tool", async () => {
+    const before = Date.now();
     const tool = createRecordMemoryTool({
       db,
       guildId: "g1",
@@ -449,18 +483,25 @@ describe("createRecordMemoryTool", () => {
       sourceMessageId: "m1",
     });
 
+    expect(tool.description).toContain("expiresIn");
+    expect(tool.description).not.toContain("expiresAt");
+
     await tool.execute("call-1", {
       actions: [{
         action: "upsert",
         subject: "current_user",
         kind: "preference",
         content: "Prefers concise answers.",
+        expiresIn: { amount: 90, unit: "minutes" },
       }],
     });
 
     const memories = listMemories(db, { guildId: "g1", subjectUserId: "u1" });
+    const after = Date.now();
     expect(memories).toHaveLength(1);
     expect(memories[0]?.content).toBe("Prefers concise answers.");
+    expect(memories[0]?.expiresAt).toBeGreaterThanOrEqual(before + 90 * 60 * 1000);
+    expect(memories[0]?.expiresAt).toBeLessThanOrEqual(after + 90 * 60 * 1000);
   });
 
   test("clears and prolongs memory expiry through a real tool", async () => {
@@ -478,7 +519,7 @@ describe("createRecordMemoryTool", () => {
       content: "Temporary dashboard focus.",
       expiresAt: Date.now() + 60_000,
     });
-    const later = Date.now() + 3 * 60 * 60 * 1000;
+    const before = Date.now();
     const tool = createRecordMemoryTool({
       db,
       guildId: "g1",
@@ -494,7 +535,7 @@ describe("createRecordMemoryTool", () => {
           subject: "current_user",
           kind: "project",
           content: "Launch focus is now a durable project preference.",
-          expiresAt: null,
+          expiresIn: null,
         },
         {
           action: "upsert",
@@ -502,16 +543,19 @@ describe("createRecordMemoryTool", () => {
           subject: "current_user",
           kind: "project",
           content: "Temporary dashboard focus lasts through tonight.",
-          expiresAt: later,
+          expiresIn: { amount: 3, unit: "hours" },
         },
       ],
     });
 
+    const prolongedExpiresAt = getMemory(db, prolonged)?.expiresAt;
+    const after = Date.now();
     expect(getMemory(db, temporary)?.expiresAt).toBeNull();
-    expect(getMemory(db, prolonged)?.expiresAt).toBe(later);
+    expect(prolongedExpiresAt).toBeGreaterThanOrEqual(before + 3 * 60 * 60 * 1000);
+    expect(prolongedExpiresAt).toBeLessThanOrEqual(after + 3 * 60 * 60 * 1000);
   });
 
-  test("skips upserts with non-future expiresAt through a real tool", async () => {
+  test("skips upserts with non-positive expiresIn through a real tool", async () => {
     const tool = createRecordMemoryTool({
       db,
       guildId: "g1",
@@ -525,7 +569,28 @@ describe("createRecordMemoryTool", () => {
         subject: "current_user",
         kind: "fact",
         content: "This already expired.",
-        expiresAt: Date.now() - 1,
+        expiresIn: { amount: 0, unit: "hours" },
+      }],
+    });
+
+    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
+  });
+
+  test("skips upserts with raw expiresAt through a real tool", async () => {
+    const tool = createRecordMemoryTool({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      sourceMessageId: "m1",
+    });
+
+    await tool.execute("call-1", {
+      actions: [{
+        action: "upsert",
+        subject: "current_user",
+        kind: "fact",
+        content: "This attempts timestamp expiry.",
+        expiresAt: Date.now() + 60_000,
       }],
     });
 

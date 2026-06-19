@@ -2431,10 +2431,10 @@ describe("handleMessage", () => {
     expect(systemPrompts[0]).toContain("Silent Memory Pass");
     expect(systemPrompts[0]).toContain("strongly implied durable facts");
     expect(systemPrompts[0]).toContain("Before creating a new memory");
-    expect(systemPrompts[0]).toContain("expiresAt");
-    expect(controlMessages[0]).toContain("Current time for expiresAt calculations:");
+    expect(systemPrompts[0]).toContain("expiresIn");
+    expect(systemPrompts[0]).not.toContain("expiresAt");
+    expect(controlMessages[0]).toContain("Current time for expiresIn decisions:");
     expect(controlMessages[0]).toContain("Timezone: UTC");
-    expect(controlMessages[0]).toContain("Current Unix epoch milliseconds:");
   });
 
   test("silent memory pass stops on wall-clock timeout without recovery completion", async () => {

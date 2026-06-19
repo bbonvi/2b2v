@@ -65,6 +65,26 @@ interface MemoryMutationInput {
 }
 
 type MemorySubject = "global" | "current_user" | "user";
+type ExpiresInUnit = "minutes" | "hours" | "days" | "weeks" | "months";
+
+interface ExpiresIn {
+  amount: number;
+  unit: ExpiresInUnit;
+}
+
+const ExpiresInSchema = Type.Object({
+  amount: Type.Number({
+    exclusiveMinimum: 0,
+    description: "Positive relative duration amount.",
+  }),
+  unit: Type.Union([
+    Type.Literal("minutes"),
+    Type.Literal("hours"),
+    Type.Literal("days"),
+    Type.Literal("weeks"),
+    Type.Literal("months"),
+  ]),
+}, { additionalProperties: false });
 
 const MemoryActionSchema = Type.Union([
   Type.Object({
@@ -90,8 +110,8 @@ const MemoryActionSchema = Type.Union([
     ]),
     content: Type.String({ minLength: 1 }),
     confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
-    expiresAt: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()], {
-      description: "Unix epoch milliseconds when this clearly temporary memory should expire; null clears an existing expiry.",
+    expiresIn: Type.Optional(Type.Union([ExpiresInSchema, Type.Null()], {
+      description: "Relative duration for clearly temporary memories; null clears an existing expiry.",
     })),
   }, { additionalProperties: false }),
   Type.Object({
@@ -115,7 +135,7 @@ type MemoryExtraction = {
       kind: MemoryKind;
       content: string;
       confidence?: number;
-      expiresAt?: number | null;
+      expiresIn?: ExpiresIn | null;
     }
     | { action: "delete"; id: number }
   >;
@@ -154,10 +174,7 @@ function formatExpiry(expiresAt: number, now = Date.now()): string {
 
 function memoryClockContext(timezone: string | undefined, now = Date.now()): string {
   const tz = timezone ?? "UTC";
-  return [
-    currentLocalContext(tz, now),
-    `Current Unix epoch milliseconds: ${now}`,
-  ].join("\n");
+  return currentLocalContext(tz, now);
 }
 
 /** Shared policy for memory-writing prompts and the record_memory tool. */
@@ -170,7 +187,7 @@ export function buildMemoryPolicyInstructions(): string[] {
     "The triggering user is only the source of this memory pass, not the only valid memory subject. Inspect the current exchange and recent chat context for durable, future-useful memories about any clearly identifiable user or shared context; use subject=user with username for another user when appropriate.",
     "Be proactive but selective: record context-derived or implied memories only when they are likely to affect future replies, reveal a stable pattern, or clarify relationships, preferences, constraints, projects, or routines.",
     "Memory changes should be occasional, not routine. Prefer action=none when the signal is weak, incidental, or unlikely to matter in future conversations.",
-    "For subtle, uncertain, or pattern-based memories, use lower confidence and tentative standalone phrasing; if the clue is likely to become stale, use a conservative expiresAt. Keep the memory content short and avoid verbose meta-commentary.",
+    "For subtle, uncertain, or pattern-based memories, use lower confidence and tentative standalone phrasing; if the clue is likely to become stale, use a conservative expiresIn. Keep the memory content short and avoid verbose meta-commentary.",
     "Use lower confidence for indirect, inferred, or pattern-based memories.",
     "Write each memory as a standalone factual note that remains clear without hidden chat context, prior assumptions, or what the bot previously believed.",
     "Do not save jokes, transient moods, ordinary chat, pleasantries, reactions, filler, or one-off requests.",
@@ -183,9 +200,9 @@ export function buildMemoryPolicyInstructions(): string[] {
     "Only delete a memory when an existing memory is listed below and the new chat clearly makes that specific memory obsolete, false, or superseded. Never invent memory ids.",
     "Prefer the narrowest correct scope: subject=current_user for triggering-user preferences/facts, subject=user with username for another named user, and subject=global only for shared server/project facts or explicit bot-wide rules.",
     "Do not turn one user's preference into a global memory unless explicitly asked to apply it globally or to everyone.",
-    "Set expiresAt only for clearly temporary memories, such as current-event context, short-lived projects, temporary availability, deadlines, or explicitly time-limited preferences. Use future Unix epoch milliseconds based on the current time provided in context; never use past timestamps or seconds.",
-    "Do not overuse expiresAt. Do not set expiry for names, pronouns, stable preferences, relationships, durable facts, or things likely to live a long time; permanent is fine because stale memories can be removed later.",
-    "When a temporary memory is reinforced into a permanent memory, set expiresAt=null on that existing id. When temporary context is extended, update expiresAt to the new later time.",
+    "Set expiresIn only for clearly temporary memories, such as current-event context, short-lived projects, temporary availability, deadlines, or explicitly time-limited preferences. Use a structured relative duration like {amount: 3, unit: \"days\"}; do not calculate timestamps.",
+    "Do not overuse expiresIn. Do not set expiry for names, pronouns, stable preferences, relationships, durable facts, or things likely to live a long time; permanent is fine because stale memories can be removed later.",
+    "When a temporary memory is reinforced into a permanent memory, set expiresIn=null on that existing id. When temporary context is extended, update expiresIn to the full new relative duration from now.",
     "Do not persist facts that come only from system/developer context, persona, tool instructions, existing memory text, member lists, schedules, or bot implementation details.",
     "Focus on what the human user newly revealed or corrected in the chat exchange. Recent chat context is supporting evidence, not the only source.",
     "If the user asks to remember something, treat that as strong intent to preserve the underlying fact/preference if it can matter later.",
@@ -237,6 +254,35 @@ function normalizeKind(value: unknown): MemoryKind {
     : "fact";
 }
 
+function normalizeExpiresIn(value: unknown): ExpiresIn | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (!isRecord(value)) return undefined;
+
+  const { amount, unit } = value;
+  if (
+    typeof amount !== "number"
+    || !Number.isFinite(amount)
+    || amount <= 0
+    || (unit !== "minutes" && unit !== "hours" && unit !== "days" && unit !== "weeks" && unit !== "months")
+  ) {
+    return undefined;
+  }
+  return { amount, unit };
+}
+
+function expiresInToExpiresAt(expiresIn: ExpiresIn, now = Date.now()): number {
+  const minuteMs = 60 * 1000;
+  const unitMs: Record<ExpiresInUnit, number> = {
+    minutes: minuteMs,
+    hours: 60 * minuteMs,
+    days: 24 * 60 * minuteMs,
+    weeks: 7 * 24 * 60 * minuteMs,
+    months: 30 * 24 * 60 * minuteMs,
+  };
+  return Math.round(now + expiresIn.amount * unitMs[expiresIn.unit]);
+}
+
 function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][number] | null {
   if (!isRecord(value)) return null;
   const rawAction = value.action;
@@ -254,11 +300,9 @@ function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][
     const confidence = typeof value.confidence === "number" && Number.isFinite(value.confidence)
       ? Math.max(0, Math.min(1, value.confidence))
       : undefined;
-    const expiresAt = typeof value.expiresAt === "number" && Number.isInteger(value.expiresAt) && value.expiresAt >= 0
-      ? value.expiresAt
-      : value.expiresAt === null
-        ? null
-        : undefined;
+    if ("expiresAt" in value) return null;
+    const expiresIn = normalizeExpiresIn(value.expiresIn);
+    if ("expiresIn" in value && expiresIn === undefined) return null;
     return {
       action: "upsert",
       ...(id !== undefined ? { id } : {}),
@@ -269,7 +313,7 @@ function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][
       kind: normalizeKind(value.kind),
       content,
       ...(confidence !== undefined ? { confidence } : {}),
-      ...(expiresAt !== undefined ? { expiresAt } : {}),
+      ...(expiresIn !== undefined ? { expiresIn } : {}),
     };
   }
 
@@ -337,7 +381,20 @@ function memoryExtractionResponseFormat(): Record<string, unknown> {
                     kind: { type: "string", enum: ["global_note", "user_note", "preference", "relationship", "project", "fact"] },
                     content: { type: "string", minLength: 1 },
                     confidence: { type: "number", minimum: 0, maximum: 1 },
-                    expiresAt: { anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }] },
+                    expiresIn: {
+                      anyOf: [
+                        {
+                          type: "object",
+                          additionalProperties: false,
+                          required: ["amount", "unit"],
+                          properties: {
+                            amount: { type: "number", exclusiveMinimum: 0 },
+                            unit: { type: "string", enum: ["minutes", "hours", "days", "weeks", "months"] },
+                          },
+                        },
+                        { type: "null" },
+                      ],
+                    },
                   },
                 },
                 {
@@ -372,7 +429,7 @@ function buildExtractionPrompt(input: MemoryExtractionInput): string {
     "Existing memories:",
     current !== "" ? current : "(none)",
     "",
-    "Current time for expiresAt calculations:",
+    "Current time for expiresIn decisions:",
     memoryClockContext(input.timezone),
     "",
     ...(input.recentContext.trim() !== ""
@@ -442,14 +499,18 @@ async function applyMemoryActions(input: MemoryMutationInput, extraction: Memory
 
     const subjectUserId = await actionSubjectUserId(input, action, existing);
     if (subjectUserId === undefined) continue;
-    if (typeof action.expiresAt === "number" && action.expiresAt <= Date.now()) continue;
+    const expiresAt = action.expiresIn === undefined
+      ? undefined
+      : action.expiresIn === null
+        ? null
+        : expiresInToExpiresAt(action.expiresIn);
     const payload = {
       subjectUserId,
       kind: action.kind,
       content: action.content.trim(),
       sourceMessageId: input.sourceMessageId,
       confidence: action.confidence,
-      ...(action.expiresAt !== undefined ? { expiresAt: action.expiresAt } : {}),
+      ...(expiresAt !== undefined ? { expiresAt } : {}),
     };
     if (payload.content === "") continue;
 

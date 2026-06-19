@@ -1810,9 +1810,8 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
   const now = Date.now();
   return [
     "## Post-Reply Memory Consideration",
-    "Current time for expiresAt calculations:",
+    "Current time for expiresIn decisions:",
     currentLocalContext(input.guildConfig.timezone, now),
-    `Current Unix epoch milliseconds: ${now}`,
     "",
     input.visibleReplySent
       ? `Visible bot reply already sent:\n${input.assistantReply !== "" ? input.assistantReply : "(empty)"}`
