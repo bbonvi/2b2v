@@ -14,6 +14,7 @@ import {
 import { completeLlmChat, type OpenRouterChatRequest } from "../llm/openrouter-chat";
 import type { LlmProvider, PromptCachingConfig } from "../config/types";
 import { prependStableSectionsToPayload, type StablePromptSection } from "./prompt-cache";
+import { currentLocalContext } from "../time/agent-time";
 
 export interface MemoryContextInput {
   db: Database;
@@ -32,6 +33,7 @@ export interface MemoryExtractionInput {
   userMessage: string;
   assistantReply: string;
   recentContext: string;
+  timezone?: string;
   provider?: LlmProvider;
   apiKey: string;
   model: string;
@@ -88,6 +90,9 @@ const MemoryActionSchema = Type.Union([
     ]),
     content: Type.String({ minLength: 1 }),
     confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+    expiresAt: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()], {
+      description: "Unix epoch milliseconds when this clearly temporary memory should expire; null clears an existing expiry.",
+    })),
   }, { additionalProperties: false }),
   Type.Object({
     action: Type.Literal("delete"),
@@ -110,6 +115,7 @@ type MemoryExtraction = {
       kind: MemoryKind;
       content: string;
       confidence?: number;
+      expiresAt?: number | null;
     }
     | { action: "delete"; id: number }
   >;
@@ -131,6 +137,29 @@ function formatConfidence(confidence: number): string {
   return confidence.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+function formatExpiry(expiresAt: number, now = Date.now()): string {
+  const remainingMs = expiresAt - now;
+  const minuteMs = 60 * 1000;
+  const hourMs = 60 * minuteMs;
+  const dayMs = 24 * hourMs;
+  if (remainingMs <= minuteMs) return "expires in <1 minute";
+
+  const units = remainingMs >= dayMs
+    ? { value: Math.ceil(remainingMs / dayMs), label: "day" }
+    : remainingMs >= hourMs
+      ? { value: Math.ceil(remainingMs / hourMs), label: "hour" }
+      : { value: Math.ceil(remainingMs / minuteMs), label: "minute" };
+  return `expires in ${units.value} ${units.label}${units.value === 1 ? "" : "s"}`;
+}
+
+function memoryClockContext(timezone: string | undefined, now = Date.now()): string {
+  const tz = timezone ?? "UTC";
+  return [
+    currentLocalContext(tz, now),
+    `Current Unix epoch milliseconds: ${now}`,
+  ].join("\n");
+}
+
 /** Build the uncached memory block injected into the conversation prompt. */
 export function buildMemoryContext(input: MemoryContextInput): string {
   const rows = listMemories(input.db, {
@@ -144,7 +173,8 @@ export function buildMemoryContext(input: MemoryContextInput): string {
 
   const lines = rows.map((row) => {
     const label = scopeLabel(row, input.resolveUserId);
-    return `- ${row.id} [${label}] [${formatConfidence(row.confidence)}] [${row.kind}] ${row.content}`;
+    const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
+    return `- ${row.id} [${label}] [${formatConfidence(row.confidence)}] [${row.kind}]${expiry} ${row.content}`;
   });
   return [
     "Use these durable memories as background context. Current chat instructions override memory. The number after scope is confidence (0-1); weigh lower confidence accordingly.",
@@ -188,6 +218,11 @@ function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][
     const confidence = typeof value.confidence === "number" && Number.isFinite(value.confidence)
       ? Math.max(0, Math.min(1, value.confidence))
       : undefined;
+    const expiresAt = typeof value.expiresAt === "number" && Number.isInteger(value.expiresAt) && value.expiresAt >= 0
+      ? value.expiresAt
+      : value.expiresAt === null
+        ? null
+        : undefined;
     return {
       action: "upsert",
       ...(id !== undefined ? { id } : {}),
@@ -198,6 +233,7 @@ function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][
       kind: normalizeKind(value.kind),
       content,
       ...(confidence !== undefined ? { confidence } : {}),
+      ...(expiresAt !== undefined ? { expiresAt } : {}),
     };
   }
 
@@ -265,6 +301,7 @@ function memoryExtractionResponseFormat(): Record<string, unknown> {
                     kind: { type: "string", enum: ["global_note", "user_note", "preference", "relationship", "project", "fact"] },
                     content: { type: "string", minLength: 1 },
                     confidence: { type: "number", minimum: 0, maximum: 1 },
+                    expiresAt: { anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }] },
                   },
                 },
                 {
@@ -296,12 +333,27 @@ function buildExtractionPrompt(input: MemoryExtractionInput): string {
     "Preserve a memory only if it is likely to be useful in a future conversation or future bot decision.",
     "If the fact cannot change how the bot should reply or act later, return action=none.",
     "Save stable user preferences, preferred or real names, explicit name/pronoun/language corrections, long-term facts, recurring project context, relationships, and explicit corrections.",
+    "Record explicit and strongly implied durable facts, preferences, relationships, routines, constraints, identity details, projects, and recurring behaviors when they could matter later; the user does not need to ask you to remember.",
+    "The triggering user is only the source of this memory pass, not the only valid memory subject. Inspect the current exchange and recent chat context for durable, future-useful memories about any clearly identifiable user or shared context; use subject=user with username for another user when appropriate.",
+    "Be proactive but selective: record context-derived or implied memories only when they are likely to affect future replies, reveal a stable pattern, or clarify relationships, preferences, constraints, projects, or routines.",
+    "For subtle, uncertain, or pattern-based memories, use lower confidence and tentative standalone phrasing; if the clue is likely to become stale, use a conservative expiresAt. Keep the memory content short and avoid verbose meta-commentary.",
+    "Use lower confidence for indirect, inferred, or pattern-based memories.",
+    "Write each memory as a standalone factual note that remains clear without hidden chat context, prior assumptions, or what the bot previously believed.",
     "Do not save jokes, transient moods, ordinary chat, pleasantries, reactions, filler, or one-off requests.",
     "When in doubt, do not save it.",
-    "Prefer updating an existing memory id over creating duplicates.",
-    "Only delete a memory when an existing memory is listed below and the new chat clearly makes that specific memory obsolete or false.",
+    "Do not record preferences that only apply to the current request unless the user asks to remember them, the wording clearly describes a general future preference, or the surrounding pattern strongly implies a recurring durable preference or rapport detail.",
+    "Before creating a new memory, check whether an existing memory should be updated, compressed, or deleted instead.",
+    "Do not store the same underlying memory in multiple scopes. If a new memory overlaps an existing one, update that existing id with a shorter merged version instead of creating another row.",
+    "Prefer updating an existing memory id over creating duplicates. Actively delete stale or superseded existing memories when the current exchange clearly replaces them.",
+    "Keep memories compact. Normal memory should be one sentence; dense memories may replace several near-duplicate rows, but should still stay short, around <=350 chars unless the user explicitly asked to preserve detailed instructions.",
+    "Only delete a memory when an existing memory is listed below and the new chat clearly makes that specific memory obsolete, false, or superseded.",
     "If Existing memories is (none), deletion is impossible; return none or upsert only. Never invent memory ids.",
-    "Use subject=current_user for facts about the triggering user; use subject=global for shared server/project context.",
+    "Prefer the narrowest correct scope: subject=current_user for triggering-user preferences/facts, subject=user with username for another named user, and subject=global only for shared server/project facts or explicit bot-wide rules.",
+    "Do not turn one user's preference into a global memory unless explicitly asked to apply it globally or to everyone.",
+    "Set expiresAt only for clearly temporary memories, such as current-event context, short-lived projects, temporary availability, deadlines, or explicitly time-limited preferences. Use future Unix epoch milliseconds based on the current time below.",
+    "Never set expiresAt to a past time or to seconds; if you cannot determine a future millisecond expiry, leave expiresAt unset.",
+    "Do not overuse expiresAt. Do not set expiry for names, pronouns, stable preferences, relationships, durable facts, or things likely to live a long time; permanent is fine because stale memories can be removed later.",
+    "When a temporary memory is reinforced into a permanent memory, set expiresAt=null on that existing id. When temporary context is extended, update expiresAt to the new later time.",
     "Do not persist facts that come only from system/developer context, persona, tool instructions, or bot implementation details.",
     "Focus on what the human user newly revealed or corrected in the chat exchange.",
     "If the user asks to remember something, treat that as strong intent to preserve the underlying fact/preference if it can matter later.",
@@ -313,6 +365,9 @@ function buildExtractionPrompt(input: MemoryExtractionInput): string {
     "",
     "Existing memories:",
     current !== "" ? current : "(none)",
+    "",
+    "Current time for expiresAt calculations:",
+    memoryClockContext(input.timezone),
     "",
     ...(input.recentContext.trim() !== ""
       ? [
@@ -381,12 +436,14 @@ async function applyMemoryActions(input: MemoryMutationInput, extraction: Memory
 
     const subjectUserId = await actionSubjectUserId(input, action, existing);
     if (subjectUserId === undefined) continue;
+    if (typeof action.expiresAt === "number" && action.expiresAt <= Date.now()) continue;
     const payload = {
       subjectUserId,
       kind: action.kind,
       content: action.content.trim(),
       sourceMessageId: input.sourceMessageId,
       confidence: action.confidence,
+      ...(action.expiresAt !== undefined ? { expiresAt: action.expiresAt } : {}),
     };
     if (payload.content === "") continue;
 
@@ -417,11 +474,22 @@ export function createRecordMemoryTool(deps: RecordMemoryToolDeps): AgentTool {
     description: [
       "Record durable memory updates after a Discord turn has already completed.",
       "Use only for stable facts, preferences, names/pronouns/language corrections, relationships, recurring project context, or explicit corrections that can affect future replies or bot decisions.",
+      "Record explicit and strongly implied durable facts, preferences, relationships, routines, constraints, identity details, projects, and recurring behaviors when they could matter later; the user does not need to ask you to remember.",
+      "The triggering user is only the source of this memory pass, not the only valid memory subject. Inspect the current exchange and recent chat context for durable, future-useful memories about any clearly identifiable user or shared context; use subject=user with username for another user when appropriate.",
+      "Be proactive but selective: record context-derived or implied memories only when they are likely to affect future replies, reveal a stable pattern, or clarify relationships, preferences, constraints, projects, or routines.",
+      "For subtle, uncertain, or pattern-based memories, use lower confidence and tentative standalone phrasing; if the clue is likely to become stale, use a conservative expiresAt. Keep the memory content short and avoid verbose meta-commentary.",
+      "Use lower confidence for indirect, inferred, or pattern-based memories.",
+      "Write each memory as a standalone factual note that remains clear without hidden chat context, prior assumptions, or what the bot previously believed.",
       "Do not record jokes, transient moods, filler, ordinary one-off requests, or facts that cannot plausibly matter later.",
-      "Keep each memory concise and structured as one short durable fact or preference; prefer useful generalized knowledge over unnecessary specifics.",
+      "Do not record preferences that only apply to the current request unless the user asks to remember them, the wording clearly describes a general future preference, or the surrounding pattern strongly implies a recurring durable preference or rapport detail.",
+      "Keep each memory concise and structured as one short durable fact or preference. Normal memory should be one sentence; dense memories may replace several near-duplicate rows, but should still stay short, around <=350 chars unless explicitly asked to preserve detailed instructions.",
       "Call this tool at most once per pass; put all memory changes in the single actions array.",
-      "Prefer updating an existing memory id over creating duplicates. Delete only when the current exchange clearly makes an existing listed memory obsolete or false.",
-      "Use subject=current_user for the triggering user, subject=user with username for another Discord user, and subject=global for shared server/project context or explicitly named aggregate context.",
+      "Before creating a new memory, check whether an existing memory should be updated, compressed, or deleted instead. If a new memory overlaps an existing one, update that id with a shorter merged version instead of creating another row.",
+      "Actively delete stale or superseded existing memories when the current exchange clearly replaces them.",
+      "Do not store the same underlying memory in multiple scopes.",
+      "Prefer the narrowest correct scope: subject=current_user for triggering-user preferences/facts, subject=user with username for another Discord user, and subject=global only for shared server/project facts or explicit bot-wide rules. Do not turn one user's preference into a global memory unless explicitly asked to apply it globally/everyone.",
+      "Set expiresAt only for clearly temporary memories, such as current-event context, short-lived projects, temporary availability, deadlines, or explicitly time-limited preferences. Use future Unix epoch milliseconds based on the current time provided in context; never use past timestamps or seconds. Do not set expiry for names, pronouns, stable preferences, relationships, durable facts, or things likely to live a long time.",
+      "Set expiresAt=null on an existing id to clear expiry when a temporary memory becomes permanent; set a later expiresAt to prolong temporary context.",
       "When recording a claim about another user that they did not directly confirm, use lower confidence.",
       "When saving personal knowledge as global, include the person's name or the group scope in the content so future turns are not ambiguous.",
     ].join(" "),

@@ -16,6 +16,7 @@ const SCHEMA_SQL = `
     confidence        REAL NOT NULL DEFAULT 0.7 CHECK(confidence >= 0 AND confidence <= 1),
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
+    expires_at        INTEGER,
     deleted_at        INTEGER
   );
 
@@ -118,6 +119,9 @@ export function createDatabase(dbPath: string): Database {
   try { raw.run("ALTER TABLE messages ADD COLUMN is_synthetic INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try { raw.run("ALTER TABLE messages ADD COLUMN related_thread_id TEXT"); } catch { /* already exists */ }
 
+  // Idempotent migration: add optional expiry to memories before shape migrations can copy it.
+  try { raw.run("ALTER TABLE memories ADD COLUMN expires_at INTEGER"); } catch { /* already exists */ }
+
   // Migration: legacy memory rows -> structured memories.
   const memoryColumns = raw.prepare("PRAGMA table_info(memories)").all() as { name: string; type: string }[];
   const hasStructuredMemorySchema = memoryColumns.some((c) => c.name === "subject_user_id")
@@ -137,9 +141,10 @@ export function createDatabase(dbPath: string): Database {
         confidence        REAL NOT NULL DEFAULT 0.7 CHECK(confidence >= 0 AND confidence <= 1),
         created_at        INTEGER NOT NULL,
         updated_at        INTEGER NOT NULL,
+        expires_at        INTEGER,
         deleted_at        INTEGER
       )`);
-      raw.run(`INSERT INTO memories_new (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+      raw.run(`INSERT INTO memories_new (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
         SELECT
           COALESCE(guild_id, ''),
           CASE WHEN scope = 'user' THEN user_id ELSE NULL END,
@@ -155,6 +160,7 @@ export function createDatabase(dbPath: string): Database {
           0.7,
           created_at,
           updated_at,
+          CASE WHEN expires_at IS NOT NULL AND expires_at > (strftime('%s','now') * 1000) THEN expires_at ELSE NULL END,
           CASE WHEN expires_at IS NOT NULL AND expires_at <= (strftime('%s','now') * 1000) THEN expires_at ELSE NULL END
         FROM memories
         WHERE COALESCE(TRIM(short_description), '') <> '' OR COALESCE(TRIM(long_description), '') <> ''`);
@@ -187,9 +193,10 @@ export function createDatabase(dbPath: string): Database {
         confidence        REAL NOT NULL DEFAULT 0.7 CHECK(confidence >= 0 AND confidence <= 1),
         created_at        INTEGER NOT NULL,
         updated_at        INTEGER NOT NULL,
+        expires_at        INTEGER,
         deleted_at        INTEGER
       )`);
-      raw.run(`INSERT INTO memories_new (id, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+      raw.run(`INSERT INTO memories_new (id, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
         SELECT
           id,
           guild_id,
@@ -207,6 +214,7 @@ export function createDatabase(dbPath: string): Database {
           END,
           created_at,
           updated_at,
+          expires_at,
           deleted_at
         FROM memories
         WHERE TRIM(content) <> ''`);

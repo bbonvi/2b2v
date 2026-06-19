@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "./database";
 import {
   createMemory,
+  countUserMemoriesByUser,
   deleteExpiredMemories,
   deleteMemory,
   getMemory,
@@ -38,6 +39,7 @@ describe("createMemory", () => {
     expect(row?.content).toBe("User likes concise answers.");
     expect(row?.sourceMessageId).toBe("m1");
     expect(row?.confidence).toBe(0.9);
+    expect(row?.expiresAt).toBeNull();
   });
 
   test("clamps confidence", () => {
@@ -69,6 +71,21 @@ describe("updateMemory", () => {
     const row = getMemory(db, id);
     expect(row?.kind).toBe("fact");
     expect(row?.content).toBe("New content");
+  });
+
+  test("updates and clears expiry", () => {
+    const expiresAt = Date.now() + 60_000;
+    const id = createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      kind: "user_note",
+      content: "Temporary content",
+      expiresAt,
+    });
+
+    expect(getMemory(db, id)?.expiresAt).toBe(expiresAt);
+    expect(updateMemory(db, id, { expiresAt: null })).toBe(true);
+    expect(getMemory(db, id)?.expiresAt).toBeNull();
   });
 
   test("returns false when row does not exist", () => {
@@ -134,15 +151,43 @@ describe("listMemories", () => {
     const rows = listMemories(db, { guildId: "g1", subjectUserId: "u1", limit: 2 });
     expect(rows.map((row) => row.content)).toEqual(["Newest", "Middle"]);
   });
+
+  test("excludes expired memories from active reads and counts", () => {
+    const expired = createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      kind: "fact",
+      content: "Expired",
+      expiresAt: Date.now() - 1,
+    });
+    const active = createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      kind: "fact",
+      content: "Active",
+      expiresAt: Date.now() + 60_000,
+    });
+
+    expect(getMemory(db, expired)).toBeNull();
+    expect(getMemory(db, active)?.content).toBe("Active");
+    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" }).map((row) => row.content)).toEqual(["Active"]);
+    expect(countUserMemoriesByUser(db, "g1").get("u1")).toBe(1);
+  });
 });
 
 describe("deleteExpiredMemories", () => {
-  test("hard-deletes soft-deleted rows only", () => {
+  test("hard-deletes soft-deleted and expired rows", () => {
     const deleted = createMemory(db, { guildId: "g1", kind: "global_note", content: "gone" });
     const active = createMemory(db, { guildId: "g1", kind: "global_note", content: "active" });
+    createMemory(db, {
+      guildId: "g1",
+      kind: "global_note",
+      content: "expired",
+      expiresAt: Date.now() - 1,
+    });
     deleteMemory(db, deleted);
 
-    expect(deleteExpiredMemories(db)).toBe(1);
+    expect(deleteExpiredMemories(db)).toBe(2);
     expect(listMemories(db, { guildId: "g1", includeDeleted: true }).map((row) => row.id)).toEqual([active]);
   });
 });

@@ -32,6 +32,25 @@ describe("buildMemoryContext", () => {
     expect(context).toContain("[@alice] [0.8] [preference] Likes concise answers");
     expect(context).not.toContain("Other user fact");
   });
+
+  test("renders future expiry relatively", () => {
+    createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      kind: "project",
+      content: "Alice is temporarily focused on launch prep.",
+      expiresAt: Date.now() + (3 * 24 * 60 * 60 * 1000),
+    });
+
+    const context = buildMemoryContext({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+    });
+
+    expect(context).toContain("[project] [expires in 3 days] Alice is temporarily focused on launch prep.");
+    expect(context).not.toContain("expiresAt");
+  });
 });
 
 describe("extractAndApplyMemories", () => {
@@ -47,6 +66,7 @@ describe("extractAndApplyMemories", () => {
       userMessage: "lol that was funny",
       assistantReply: "yeah",
       recentContext: "## Chat History\n[@bob]: earlier context",
+      timezone: "America/New_York",
       apiKey: "key",
       model: "model",
       promptCaching: { enabled: false },
@@ -60,20 +80,15 @@ describe("extractAndApplyMemories", () => {
       },
     });
 
-    expect(prompt).toContain("Preserve a memory only if it is likely to be useful in a future conversation or future bot decision.");
-    expect(prompt).toContain("If the fact cannot change how the bot should reply or act later, return action=none.");
-    expect(prompt).toContain("When in doubt, do not save it.");
-    expect(prompt).toContain("Save stable user preferences, preferred or real names, explicit name/pronoun/language corrections");
-    expect(prompt).toContain("Only delete a memory when an existing memory is listed below");
-    expect(prompt).toContain("If Existing memories is (none), deletion is impossible");
-    expect(prompt).toContain("Do not persist facts that come only from system/developer context, persona, tool instructions, or bot implementation details.");
+    expect(prompt).toContain("future conversation or future bot decision");
+    expect(prompt).toContain("strongly implied durable facts");
+    expect(prompt).toContain("standalone factual note");
+    expect(prompt).toContain("narrowest correct scope");
+    expect(prompt).toContain("expiresAt");
+    expect(prompt).toContain("Current time for expiresAt calculations:");
+    expect(prompt).toContain("Timezone: America/New_York");
+    expect(prompt).toContain("Current Unix epoch milliseconds:");
     expect(prompt).toContain("Recent chat context:\n## Chat History\n[@bob]: earlier context");
-    expect(prompt).toContain("If the user asks to remember something, treat that as strong intent");
-    expect(prompt).toContain("If the bot reply says it will remember something, do not save the promise itself");
-    expect(prompt).toContain("Save rapport, teasing, tone, or help preferences only when the user clearly revealed a durable preference or relationship fact.");
-    expect(prompt).toContain("Do not save trivia just because it is interesting.");
-    expect(prompt).toContain("do not limit yourself to the last message");
-    expect(prompt).toContain("If the user says their name, preferred name, or corrects what they should be called");
   });
 
   test("omits recent chat context when none is provided", async () => {
@@ -259,6 +274,37 @@ describe("extractAndApplyMemories", () => {
     expect(listMemories(db, { guildId: "g1" }).some((row) => row.kind === "project")).toBe(true);
   });
 
+  test("applies expiresAt from extractor output", async () => {
+    const expiresAt = Date.now() + 2 * 60 * 60 * 1000;
+    await extractAndApplyMemories({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      currentUsername: "alice",
+      sourceMessageId: "m1",
+      userMessage: "remember I'm at the conference until tonight",
+      assistantReply: "got it",
+      recentContext: "",
+      apiKey: "key",
+      model: "model",
+      promptCaching: { enabled: false },
+      completeChat: () => Promise.resolve({
+        text: JSON.stringify({
+          actions: [{
+            action: "upsert",
+            subject: "current_user",
+            kind: "fact",
+            content: "Alice is at the conference today.",
+            expiresAt,
+          }],
+        }),
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      }),
+    });
+
+    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })[0]?.expiresAt).toBe(expiresAt);
+  });
+
   test("ignores impossible delete ids from sloppy providers", async () => {
     const existing = createMemory(db, {
       guildId: "g1",
@@ -415,6 +461,75 @@ describe("createRecordMemoryTool", () => {
     const memories = listMemories(db, { guildId: "g1", subjectUserId: "u1" });
     expect(memories).toHaveLength(1);
     expect(memories[0]?.content).toBe("Prefers concise answers.");
+  });
+
+  test("clears and prolongs memory expiry through a real tool", async () => {
+    const temporary = createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      kind: "project",
+      content: "Temporary launch focus.",
+      expiresAt: Date.now() + 60_000,
+    });
+    const prolonged = createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      kind: "project",
+      content: "Temporary dashboard focus.",
+      expiresAt: Date.now() + 60_000,
+    });
+    const later = Date.now() + 3 * 60 * 60 * 1000;
+    const tool = createRecordMemoryTool({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      sourceMessageId: "m1",
+    });
+
+    await tool.execute("call-1", {
+      actions: [
+        {
+          action: "upsert",
+          id: temporary,
+          subject: "current_user",
+          kind: "project",
+          content: "Launch focus is now a durable project preference.",
+          expiresAt: null,
+        },
+        {
+          action: "upsert",
+          id: prolonged,
+          subject: "current_user",
+          kind: "project",
+          content: "Temporary dashboard focus lasts through tonight.",
+          expiresAt: later,
+        },
+      ],
+    });
+
+    expect(getMemory(db, temporary)?.expiresAt).toBeNull();
+    expect(getMemory(db, prolonged)?.expiresAt).toBe(later);
+  });
+
+  test("skips upserts with non-future expiresAt through a real tool", async () => {
+    const tool = createRecordMemoryTool({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      sourceMessageId: "m1",
+    });
+
+    await tool.execute("call-1", {
+      actions: [{
+        action: "upsert",
+        subject: "current_user",
+        kind: "fact",
+        content: "This already expired.",
+        expiresAt: Date.now() - 1,
+      }],
+    });
+
+    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
   });
 
   test("records memories for another user by username", async () => {

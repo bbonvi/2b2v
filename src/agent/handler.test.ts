@@ -2389,10 +2389,13 @@ describe("handleMessage", () => {
     let calls = 0;
     const exposedTools: string[][] = [];
     const systemPrompts: string[] = [];
+    const controlMessages: string[] = [];
     const completeChat: ChatCompleteFn = (request) => {
       calls += 1;
       exposedTools.push(request.tools?.map((tool) => tool.function.name) ?? []);
       systemPrompts.push(request.systemPrompt);
+      const lastMessage = request.messages[request.messages.length - 1];
+      controlMessages.push(typeof lastMessage?.content === "string" ? lastMessage.content : "");
       expect(request.signal).toBeInstanceOf(AbortSignal);
       return Promise.resolve({
         text: "",
@@ -2425,8 +2428,13 @@ describe("handleMessage", () => {
     expect(toolCalls).toEqual([{ actions: [{ action: "none" }] }]);
     expect(calls).toBe(1);
     expect(exposedTools).toEqual([["record_memory"]]);
-    expect(systemPrompts[0]).toContain("Focus on what the human user newly revealed");
-    expect(systemPrompts[0]).toContain("Do not persist facts that come only from system/developer context");
+    expect(systemPrompts[0]).toContain("Silent Memory Pass");
+    expect(systemPrompts[0]).toContain("strongly implied durable facts");
+    expect(systemPrompts[0]).toContain("Maintain the memory set");
+    expect(systemPrompts[0]).toContain("expiresAt");
+    expect(controlMessages[0]).toContain("Current time for expiresAt calculations:");
+    expect(controlMessages[0]).toContain("Timezone: UTC");
+    expect(controlMessages[0]).toContain("Current Unix epoch milliseconds:");
   });
 
   test("silent memory pass stops on wall-clock timeout without recovery completion", async () => {
