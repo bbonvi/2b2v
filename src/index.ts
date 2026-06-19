@@ -21,6 +21,13 @@ import { createChannelDispatcher, selectDispatchMessageForTrigger, type ChannelD
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
 import { getContextHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory, deleteRecentMessages } from "./db/message-repository";
+import {
+  countMessagesSinceMemoryExtraction,
+  getMemoryExtractionCheckpoint,
+  getMessagesSinceMemoryExtraction,
+  markMemoryExtractionCheckpoint,
+  markMemoryExtractionCheckpointAtMessage,
+} from "./db/memory-extraction-repository";
 import { processHistory } from "./agent/history-pipeline";
 import { trimMessages } from "./agent/history-trimming";
 import { formatMessageLine, OLDER_LEGEND } from "./agent/history-formatting";
@@ -1194,6 +1201,65 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         onAgentEnd: typing.stopLoop,
         forceTrigger: true,
         triggerInstructions: guildConfig.triggerInstructions,
+        afterReply: async (memoryRequest) => {
+          if (!guildConfig.memoryExtraction.postReply) return;
+          const memoryLog = new RequestLog(guildId, channelId);
+          memoryLog.setAuthor("scheduler");
+          memoryLog.setTrigger({ type: "background_memory_extraction", sourceRequestId: requestLog.requestId, source: "scheduled" });
+          memoryLog.setAgentRan(true);
+          requestLogStore.incrementActive();
+          const recordMemoryTool = createRecordMemoryTool({
+            db,
+            guildId,
+            currentUserId: "scheduler",
+            sourceMessageId: memoryRequest.sourceMessageId ?? syntheticLatestMessage.id,
+            resolveUsername: async (username) => {
+              const cached = resolveGuildUsername(guild, username);
+              if (cached !== undefined) return cached;
+              try {
+                await guild.members.fetch();
+              } catch {
+                // Cache-only fallback below handles missing permissions.
+              }
+              return resolveGuildUsername(guild, username);
+            },
+          });
+          const visibleUserMemoryContext = buildVisibleUserMemoryContext({
+            db,
+            guildId,
+            currentUserId: "scheduler",
+            visibleUserIds: memoryRequest.context.visibleUserIds ?? [],
+            resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
+          });
+          try {
+            await runSilentMemoryAgentPass({
+              globalConfig,
+              guildConfig,
+              context: memoryRequest.context,
+              personaPrompt: persona,
+              incomingMessage: memoryRequest.incomingMessage,
+              userContent: memoryRequest.userMessage,
+              assistantReply: memoryRequest.assistantReply,
+              visibleReplySent: memoryRequest.visibleReplySent,
+              visibleUserMemoryContext,
+              tools: [recordMemoryTool],
+              requestLog: memoryLog,
+              log: scheduleLog.child({ guildId, channelId, requestId: memoryLog.requestId }),
+            });
+            markMemoryExtractionCheckpointFromContext({
+              guildId,
+              channelId,
+              contextMessageIds: memoryRequest.context.contextMessageIds,
+              fallbackMessageId: memoryRequest.sourceMessageId,
+            });
+          } catch (err) {
+            memoryLog.setError(err instanceof Error ? err.message : String(err));
+            throw err;
+          } finally {
+            memoryLog.emit(log);
+            requestLogStore.decrementActive();
+          }
+        },
       };
 
       // Run the agent
@@ -1622,6 +1688,201 @@ async function buildContext(
     sections,
     contextMessageIds,
   };
+}
+
+const ambientMemoryPasses = new Set<string>();
+
+function collectHumanUserIds(messages: HistoryMessage[]): string[] {
+  const recency = new Map<string, true>();
+  for (const message of messages) {
+    if (message.isBot) continue;
+    recency.delete(message.authorId);
+    recency.set(message.authorId, true);
+  }
+  return [...recency.keys()].reverse();
+}
+
+function formatAmbientMemoryHistory(messages: HistoryMessage[], timezone: string, captioningEnabled: boolean): string {
+  const dateEntries = insertDateStamps(messages, timezone);
+  const lines: string[] = [OLDER_LEGEND];
+  for (const entry of dateEntries) {
+    if (entry.type === "date") {
+      lines.push(entry.text);
+      continue;
+    }
+    const item = messages[entry.index];
+    if (item === undefined) continue;
+    lines.push(formatMessageLine({
+      message: item,
+      reply: null,
+      captioningEnabled,
+      includeMessageIds: true,
+      includeDisplayNames: true,
+    }));
+  }
+  return `## Ambient Chat History\n${lines.join("\n")}`;
+}
+
+async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: GuildConfig): Promise<void> {
+  if (!guildConfig.memoryExtraction.ambient.enabled) return;
+  if (message.guild === null || message.guildId === null) return;
+  if (client.user === null) return;
+
+  const guildId = message.guildId;
+  const channelId = message.channelId;
+  const key = `${guildId}:${channelId}`;
+  if (ambientMemoryPasses.has(key)) return;
+
+  const checkpoint = getMemoryExtractionCheckpoint(db, guildId, channelId);
+  const now = Date.now();
+  const minIntervalMs = guildConfig.memoryExtraction.ambient.minIntervalSeconds * 1000;
+  if (checkpoint !== null && now - checkpoint.lastRunAt < minIntervalMs) return;
+
+  const pendingCount = countMessagesSinceMemoryExtraction(db, {
+    guildId,
+    channelId,
+    checkpoint,
+  });
+  if (pendingCount < guildConfig.memoryExtraction.ambient.everyMessages) return;
+
+  const batch = getMessagesSinceMemoryExtraction(db, {
+    guildId,
+    channelId,
+    checkpoint,
+    limit: guildConfig.memoryExtraction.ambient.maxBatchMessages,
+  });
+  const lastMessage = batch[batch.length - 1];
+  if (lastMessage === undefined) return;
+
+  ambientMemoryPasses.add(key);
+  try {
+    const guild = message.guild;
+    const memoryLog = new RequestLog(guildId, channelId);
+    memoryLog.setAuthor("ambient");
+    memoryLog.setTrigger({ type: "background_memory_extraction", mode: "ambient" });
+    memoryLog.setAgentRan(true);
+    requestLogStore.incrementActive();
+
+    const visibleUserIds = collectHumanUserIds(batch);
+    const visibleUserMemoryContext = buildVisibleUserMemoryContext({
+      db,
+      guildId,
+      currentUserId: lastMessage.authorId,
+      visibleUserIds,
+      resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
+    });
+    const currentUserMemories = buildMemoryContext({
+      db,
+      guildId,
+      currentUserId: lastMessage.authorId,
+      resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
+    });
+    const context: AssembledContext = {
+      sections: [
+        ...(currentUserMemories !== ""
+          ? [{ label: "Memories", role: "developer" as const, cached: false, text: `## Memory\n${currentUserMemories}` }]
+          : []),
+        {
+          label: "Chat History — Newer",
+          role: "developer",
+          cached: false,
+          text: formatAmbientMemoryHistory(batch, guildConfig.timezone, guildConfig.imageCaptioningEnabled),
+        },
+      ],
+      userMessage: "",
+      contextMessageIds: batch.map((item) => item.id),
+      visibleUserIds,
+    };
+    const recordMemoryTool = createRecordMemoryTool({
+      db,
+      guildId,
+      currentUserId: lastMessage.authorId,
+      sourceMessageId: lastMessage.id,
+      resolveUsername: async (username) => {
+        const cached = resolveGuildUsername(guild, username);
+        if (cached !== undefined) return cached;
+        try {
+          await guild.members.fetch();
+        } catch {
+          // Cache-only fallback below handles missing permissions.
+        }
+        return resolveGuildUsername(guild, username);
+      },
+    });
+    const incoming: IncomingMessage = {
+      content: "",
+      authorId: lastMessage.authorId,
+      authorUsername: lastMessage.author,
+      authorDisplayName: guild.members.cache.get(lastMessage.authorId)?.displayName,
+      authorIsBot: false,
+      botUserId: client.user.id,
+      mentionedUserIds: [],
+      translatedContent: "",
+      messageId: lastMessage.id,
+    };
+
+    try {
+      await runSilentMemoryAgentPass({
+        globalConfig,
+        guildConfig,
+        context,
+        personaPrompt: persona,
+        incomingMessage: incoming,
+        userContent: "",
+        assistantReply: "",
+        visibleReplySent: false,
+        passKind: "ambient",
+        visibleUserMemoryContext,
+        tools: [recordMemoryTool],
+        requestLog: memoryLog,
+        log: log.child({ guildId, channelId, requestId: memoryLog.requestId }),
+      });
+      markMemoryExtractionCheckpoint(db, {
+        guildId,
+        channelId,
+        lastMessageId: lastMessage.id,
+        lastMessageCreatedAt: lastMessage.timestamp,
+      });
+    } catch (err) {
+      memoryLog.setError(err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      memoryLog.emit(log);
+      requestLogStore.decrementActive();
+    }
+  } catch (err) {
+    log.warn("ambient memory extraction failed", {
+      guildId,
+      channelId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  } finally {
+    ambientMemoryPasses.delete(key);
+  }
+}
+
+function markMemoryExtractionCheckpointFromContext(input: {
+  guildId: string;
+  channelId: string;
+  contextMessageIds: readonly string[] | undefined;
+  fallbackMessageId?: string;
+}): boolean {
+  const ids = [
+    ...(input.contextMessageIds ?? []),
+    ...(input.fallbackMessageId !== undefined ? [input.fallbackMessageId] : []),
+  ];
+  for (let i = ids.length - 1; i >= 0; i -= 1) {
+    const id = ids[i];
+    if (id === undefined) continue;
+    if (markMemoryExtractionCheckpointAtMessage(db, {
+      guildId: input.guildId,
+      channelId: input.channelId,
+      messageId: id,
+    })) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // --- 20. Build agent tools for a message context ---
@@ -2059,6 +2320,7 @@ async function processTriggeredMessage(
       triggerInstructions: guildConfig.triggerInstructions,
       modelImageInputSupport: getModelImageInputSupport(guildConfig),
       afterReply: async (memoryRequest) => {
+        if (!guildConfig.memoryExtraction.postReply) return;
         const memoryLog = new RequestLog(guildId, channelId);
         memoryLog.setAuthor(message.author.username);
         memoryLog.setTrigger({ type: "background_memory_extraction", sourceRequestId: requestLog.requestId });
@@ -2102,6 +2364,18 @@ async function processTriggeredMessage(
             requestLog: memoryLog,
             log: log.child({ guildId, channelId, requestId: memoryLog.requestId }),
           });
+          const checkpointMarked = markMemoryExtractionCheckpointAtMessage(db, {
+            guildId,
+            channelId,
+            messageId: memoryRequest.sourceMessageId ?? message.id,
+          });
+          if (!checkpointMarked) {
+            markMemoryExtractionCheckpointFromContext({
+              guildId,
+              channelId,
+              contextMessageIds: memoryRequest.context.contextMessageIds,
+            });
+          }
         } catch (err) {
           memoryLog.setError(err instanceof Error ? err.message : String(err));
           throw err;
@@ -2303,16 +2577,24 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
 
     await Promise.allSettled(imageIngestPromises);
 
+    const triggerResult = evaluateMessageTrigger(message, guildConfig);
+
     // Dispatch to handler: use channel dispatcher if enabled, otherwise call directly
     if (guildConfig.dispatcher.enabled) {
-      const triggerResult = evaluateMessageTrigger(message, guildConfig);
       if (triggerResult?.reason === "keyword" || triggerResult?.reason === "mention") sendTypingForMessage(message);
       getOrCreateDispatcher(guildId).enqueue(message, {
         authorId: message.author.id,
         triggerResult,
       });
+      if (triggerResult === null) {
+        void maybeRunAmbientMemoryExtraction(message, guildConfig);
+      }
     } else {
-      await processTriggeredMessage(message);
+      if (triggerResult === null) {
+        void maybeRunAmbientMemoryExtraction(message, guildConfig);
+      } else {
+        await processTriggeredMessage(message, triggerResult);
+      }
     }
   } catch (err) {
     log.error("messageCreate handler error", {

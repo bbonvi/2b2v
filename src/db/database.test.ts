@@ -45,6 +45,13 @@ describe("database initialization", () => {
     expect(info?.name).toBe("messages");
   });
 
+  test("creates memory extraction checkpoints table", () => {
+    const info = db.raw
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_extraction_checkpoints'")
+      .get() as { name: string } | undefined;
+    expect(info?.name).toBe("memory_extraction_checkpoints");
+  });
+
 });
 
 describe("memories table", () => {

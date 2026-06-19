@@ -23,6 +23,7 @@ import type {
   ImageGenerationConfig,
   ImageGenerationQuality,
   ReplyLoopConfig,
+  MemoryExtractionConfig,
   PromptProfileConfig,
   PromptSource,
   ServiceTier,
@@ -47,6 +48,16 @@ const DEFAULT_TRIM: TrimConfig = {
   windowSize: 20,
   messageCharLimit: 200,
   replyQuoteChars: 50,
+};
+
+const DEFAULT_MEMORY_EXTRACTION: MemoryExtractionConfig = {
+  postReply: true,
+  ambient: {
+    enabled: false,
+    everyMessages: 300,
+    maxBatchMessages: 300,
+    minIntervalSeconds: 600,
+  },
 };
 
 /** Default voice preset values for TTS. */
@@ -436,6 +447,51 @@ function validateReplyLoopConfig(config: ReplyLoopConfig, keyPrefix: string): vo
   }
 }
 
+function resolveGlobalMemoryExtraction(
+  partial: MainConfigYaml["memoryExtraction"] | undefined,
+): MemoryExtractionConfig {
+  const resolved = {
+    postReply: partial?.postReply ?? DEFAULT_MEMORY_EXTRACTION.postReply,
+    ambient: {
+      enabled: partial?.ambient?.enabled ?? DEFAULT_MEMORY_EXTRACTION.ambient.enabled,
+      everyMessages: partial?.ambient?.everyMessages ?? DEFAULT_MEMORY_EXTRACTION.ambient.everyMessages,
+      maxBatchMessages: partial?.ambient?.maxBatchMessages ?? DEFAULT_MEMORY_EXTRACTION.ambient.maxBatchMessages,
+      minIntervalSeconds: partial?.ambient?.minIntervalSeconds ?? DEFAULT_MEMORY_EXTRACTION.ambient.minIntervalSeconds,
+    },
+  };
+  validateMemoryExtractionConfig(resolved, "memoryExtraction");
+  return resolved;
+}
+
+function resolveGuildMemoryExtraction(
+  global: MemoryExtractionConfig,
+  partial: GuildConfigYaml["memoryExtraction"] | undefined,
+): MemoryExtractionConfig {
+  const resolved = {
+    postReply: partial?.postReply ?? global.postReply,
+    ambient: {
+      enabled: partial?.ambient?.enabled ?? global.ambient.enabled,
+      everyMessages: partial?.ambient?.everyMessages ?? global.ambient.everyMessages,
+      maxBatchMessages: partial?.ambient?.maxBatchMessages ?? global.ambient.maxBatchMessages,
+      minIntervalSeconds: partial?.ambient?.minIntervalSeconds ?? global.ambient.minIntervalSeconds,
+    },
+  };
+  validateMemoryExtractionConfig(resolved, "memoryExtraction");
+  return resolved;
+}
+
+function validateMemoryExtractionConfig(config: MemoryExtractionConfig, keyPrefix: string): void {
+  if (!Number.isInteger(config.ambient.everyMessages) || config.ambient.everyMessages < 1) {
+    throw new Error(`${keyPrefix}.ambient.everyMessages must be >= 1`);
+  }
+  if (!Number.isInteger(config.ambient.maxBatchMessages) || config.ambient.maxBatchMessages < 1) {
+    throw new Error(`${keyPrefix}.ambient.maxBatchMessages must be >= 1`);
+  }
+  if (!Number.isFinite(config.ambient.minIntervalSeconds) || config.ambient.minIntervalSeconds < 0) {
+    throw new Error(`${keyPrefix}.ambient.minIntervalSeconds must be >= 0`);
+  }
+}
+
 function resolveGlobalAgentJobs(
   partial: MainConfigYaml["agentJobs"] | undefined,
 ): AgentJobsConfig {
@@ -638,6 +694,7 @@ export function loadGlobalConfig(
     defaultPromptCaching: resolveGlobalPromptCaching(yaml.promptCaching),
     defaultBackgroundLlm: resolveGlobalBackgroundLlm(yaml.backgroundLlm),
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
+    defaultMemoryExtraction: resolveGlobalMemoryExtraction(yaml.memoryExtraction),
   };
 }
 
@@ -727,6 +784,7 @@ export function resolveGuildConfig(
     promptCaching,
     backgroundLlm: resolveGuildBackgroundLlm(global, partial, promptCaching),
     replyLoop: resolveGuildReplyLoop(global.defaultReplyLoop, partial.replyLoop),
+    memoryExtraction: resolveGuildMemoryExtraction(global.defaultMemoryExtraction, partial.memoryExtraction),
   };
 }
 
@@ -807,6 +865,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     promptCaching: config.promptCaching,
     backgroundLlm: config.backgroundLlm,
     replyLoop: config.replyLoop,
+    memoryExtraction: config.memoryExtraction,
   };
 
   // Strip undefined keys before serializing

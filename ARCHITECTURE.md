@@ -54,7 +54,9 @@ Search defaults to the current channel/thread/DM and omits repeated `chat_id` ta
 
 Memory is direct SQLite data by default. The prompt gets active global memories plus active current-user memories, with temporary expiries rendered relatively. Other users' stored context is signaled through member memory counts, and the read-only `get_user_memory` tool can retrieve a guild member's active user-scoped memories by username when the model needs more information about that person.
 
-Memory writes happen after the visible reply loop has ended. The runtime starts a silent second native agent loop with the same assembled context style and only the `record_memory` tool available; it sends no Discord output and does not keep typing active. For duplicate avoidance, that memory pass also receives a volatile, bounded appendix of active memories for other human users visible in rendered chat history: newest visible users first, up to 10 users, 10 memories per user, and 100 rows total.
+Memory writes can happen after the visible reply loop has ended. The runtime starts a silent second native agent loop with the same assembled context style and only the `record_memory` tool available; it sends no Discord output and does not keep typing active. For duplicate avoidance, that memory pass also receives a volatile, bounded appendix of active memories for other human users visible in rendered chat history: newest visible users first, up to 10 users, 10 memories per user, and 100 rows total.
+
+Ambient memory extraction is separate from reply triggering. When enabled, non-triggered human chatter is reviewed after `memoryExtraction.ambient.everyMessages` messages since the last successful memory pass in that channel, subject to `minIntervalSeconds` and `maxBatchMessages`. Successful post-reply memory passes reset the same channel checkpoint, so active bot conversations back off ambient extraction instead of double-paying for the same recent window.
 
 ## Schedules
 

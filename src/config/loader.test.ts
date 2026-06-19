@@ -386,6 +386,35 @@ describe("loadGlobalConfig", () => {
     });
   });
 
+  test("parses global memoryExtraction overrides", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, [
+      "memoryExtraction:",
+      "  postReply: false",
+      "  ambient:",
+      "    enabled: true",
+      "    everyMessages: 120",
+      "    maxBatchMessages: 80",
+      "    minIntervalSeconds: 30",
+    ].join("\n"));
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultMemoryExtraction).toEqual({
+      postReply: false,
+      ambient: {
+        enabled: true,
+        everyMessages: 120,
+        maxBatchMessages: 80,
+        minIntervalSeconds: 30,
+      },
+    });
+  });
+
+  test("rejects invalid global memoryExtraction values", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "memoryExtraction:\n  ambient:\n    everyMessages: 0\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow("memoryExtraction.ambient.everyMessages must be >= 1");
+  });
+
   test("rejects deprecated global actionLoop key", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, "actionLoop:\n  maxToolCalls: 12\n");
@@ -901,6 +930,39 @@ describe("resolveGuildConfig", () => {
     });
   });
 
+  test("guild memoryExtraction overrides global defaults", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, [
+      "memoryExtraction:",
+      "  postReply: true",
+      "  ambient:",
+      "    enabled: false",
+      "    everyMessages: 300",
+      "    maxBatchMessages: 250",
+      "    minIntervalSeconds: 600",
+    ].join("\n"));
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "117",
+      slug: "memory-extraction-override",
+      memoryExtraction: {
+        postReply: false,
+        ambient: { enabled: true, everyMessages: 40, minIntervalSeconds: 5 },
+      },
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.memoryExtraction).toEqual({
+      postReply: false,
+      ambient: {
+        enabled: true,
+        everyMessages: 40,
+        maxBatchMessages: 250,
+        minIntervalSeconds: 5,
+      },
+    });
+  });
+
   test("rejects invalid guild replyLoop overrides", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
@@ -1029,6 +1091,7 @@ describe("saveGuildConfig", () => {
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       backgroundLlm: { model: "custom/m", modelParams: {}, promptCaching: { enabled: true } },
+      memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };
 
     saveGuildConfig(file, resolved);
@@ -1069,6 +1132,7 @@ describe("saveGuildConfig", () => {
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
+      memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };
 
     saveGuildConfig(file, resolved);
@@ -1399,6 +1463,7 @@ describe("saveGuildConfig emotes", () => {
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
+      memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };
 
     saveGuildConfig(file, resolved);
@@ -1442,6 +1507,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
+      memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };
 
     saveGuildConfig(file, resolved);
@@ -1478,6 +1544,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
+      memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };
 
     saveGuildConfig(file, resolved);

@@ -70,6 +70,7 @@ export interface SilentMemoryAgentInput {
   userContent: string;
   assistantReply: string;
   visibleReplySent: boolean;
+  passKind?: "post_reply" | "ambient";
   visibleUserMemoryContext?: string;
   tools: AgentTool[];
   log?: Logger;
@@ -1806,15 +1807,28 @@ function messageWantsTyping(segments: ResponseSegment[]): boolean {
   return false;
 }
 
-function buildMemoryPassRuntimeInstruction(): string {
-  return [
+function buildMemoryPassRuntimeInstruction(passKind: "post_reply" | "ambient" = "post_reply"): string {
+  const base = [
     "## Silent Memory Pass",
-    "The visible Discord reply loop has already ended. Do not write user-facing prose.",
-    "Consider whether this completed turn reveals durable memory that should affect future conversations or bot decisions.",
+    passKind === "ambient"
+      ? "This is an automatic ambient memory pass over ordinary channel chatter. No visible Discord reply loop ran for this pass."
+      : "The visible Discord reply loop has already ended. Do not write user-facing prose.",
+    passKind === "ambient"
+      ? "Consider whether the reviewed chat batch reveals durable memory that should affect future conversations or bot decisions."
+      : "Consider whether this completed turn reveals durable memory that should affect future conversations or bot decisions.",
     ...buildMemoryPolicyInstructions(),
+  ];
+  if (passKind === "ambient") {
+    base.push(
+      "Be stricter than a post-reply pass because nobody asked the bot to remember this chatter.",
+      "Do not use subject=current_user in ambient passes. For user-scoped memories, use subject=user with the person's username; use subject=global only for shared server or project context.",
+    );
+  }
+  base.push(
     "If memory should change, call record_memory. If no memory should change, produce no tool call and no visible text.",
     "Use only the available memory tool. Do not mention this maintenance pass.",
-  ].join("\n");
+  );
+  return base.join("\n");
 }
 
 function backgroundProvider(input: SilentMemoryAgentInput): LlmProvider {
@@ -1825,17 +1839,20 @@ function backgroundProvider(input: SilentMemoryAgentInput): LlmProvider {
 
 function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
   const now = Date.now();
+  const passKind = input.passKind ?? "post_reply";
   return [
     ...(input.visibleUserMemoryContext !== undefined && input.visibleUserMemoryContext.trim() !== ""
       ? [input.visibleUserMemoryContext.trim(), ""]
       : []),
-    "## Post-Reply Memory Consideration",
+    passKind === "ambient" ? "## Ambient Memory Consideration" : "## Post-Reply Memory Consideration",
     "Current time for expiresIn decisions:",
     currentLocalContext(input.guildConfig.timezone, now),
     "",
-    input.visibleReplySent
-      ? `Visible bot reply already sent:\n${input.assistantReply !== "" ? input.assistantReply : "(empty)"}`
-      : "No visible bot reply was sent for this turn.",
+    passKind === "ambient"
+      ? "Review the ambient chat history in context. This pass is periodic maintenance, not a user request."
+      : input.visibleReplySent
+        ? `Visible bot reply already sent:\n${input.assistantReply !== "" ? input.assistantReply : "(empty)"}`
+        : "No visible bot reply was sent for this turn.",
     "",
     "Decide silently whether durable memory should be updated. Call record_memory only if an update is useful.",
   ].join("\n");
@@ -1871,7 +1888,7 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
     input.personaPrompt ?? "",
     input.globalConfig.defaultLateInstruction,
     input.context,
-    buildMemoryPassRuntimeInstruction(),
+    buildMemoryPassRuntimeInstruction(input.passKind ?? "post_reply"),
   );
   const sessionId = buildPromptCacheSessionId(input.requestLog, `${provider}:${input.guildConfig.backgroundLlm.model}`);
   const currentMessageWithoutImages: IncomingMessage = { ...input.incomingMessage, imageInputs: undefined };

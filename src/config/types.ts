@@ -169,6 +169,22 @@ export interface TrimConfig {
   replyQuoteChars: number;
 }
 
+/** Automatic background memory extraction controls. */
+export interface MemoryExtractionConfig {
+  /** Run the existing silent memory pass after visible replies. */
+  postReply: boolean;
+  /** Ambient extraction for non-triggered channel chatter. */
+  ambient: {
+    enabled: boolean;
+    /** Human messages since the last successful memory pass before ambient extraction runs. */
+    everyMessages: number;
+    /** Maximum chronological messages reviewed in one ambient pass. */
+    maxBatchMessages: number;
+    /** Minimum seconds between ambient passes for the same channel. */
+    minIntervalSeconds: number;
+  };
+}
+
 /** Per-guild configuration. Source of truth is the YAML file. */
 export interface GuildConfig {
   guildId: string;
@@ -208,6 +224,8 @@ export interface GuildConfig {
   backgroundLlm: BackgroundLlmConfig;
   /** Native reply/tool loop runtime limits. */
   replyLoop: ReplyLoopConfig;
+  /** Background memory extraction behavior. */
+  memoryExtraction: MemoryExtractionConfig;
 }
 
 /** Global configuration loaded from file + env. */
@@ -260,6 +278,8 @@ export interface GlobalConfig {
   defaultBackgroundLlm: BackgroundLlmDefaults;
   /** Default native reply/tool loop runtime limits. */
   defaultReplyLoop: ReplyLoopConfig;
+  /** Default background memory extraction behavior. */
+  defaultMemoryExtraction: MemoryExtractionConfig;
 }
 
 /** Full resolved app config. */
@@ -336,6 +356,15 @@ export interface GuildConfigYaml {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;
     llmOutputTimeoutMs?: number;
+  };
+  memoryExtraction?: {
+    postReply?: boolean;
+    ambient?: {
+      enabled?: boolean;
+      everyMessages?: number;
+      maxBatchMessages?: number;
+      minIntervalSeconds?: number;
+    };
   };
 }
 
@@ -436,5 +465,14 @@ export interface MainConfigYaml {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;
     llmOutputTimeoutMs?: number;
+  };
+  memoryExtraction?: {
+    postReply?: boolean;
+    ambient?: {
+      enabled?: boolean;
+      everyMessages?: number;
+      maxBatchMessages?: number;
+      minIntervalSeconds?: number;
+    };
   };
 }

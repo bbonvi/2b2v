@@ -44,6 +44,15 @@ trim:
   messageCharLimit: 200
   replyQuoteChars: 50
 
+# Optional per-guild memory extraction override
+# memoryExtraction:
+#   postReply: true
+#   ambient:
+#     enabled: false
+#     everyMessages: 300
+#     maxBatchMessages: 300
+#     minIntervalSeconds: 600
+
 # Discord user IDs with admin access to bot commands
 adminUserIds: []
 

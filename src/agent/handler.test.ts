@@ -46,6 +46,10 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultPromptCaching: { enabled: true },
     defaultBackgroundLlm: { modelParams: {} },
     defaultReplyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+    defaultMemoryExtraction: {
+      postReply: true,
+      ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
+    },
     ...overrides,
   };
 }
@@ -78,6 +82,10 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
       promptCaching: { enabled: true },
     },
     replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+    memoryExtraction: {
+      postReply: true,
+      ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
+    },
     ...overrides,
   };
 }

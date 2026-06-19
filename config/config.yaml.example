@@ -31,6 +31,15 @@ trim:
   messageCharLimit: 200  # Max chars per message before truncation
   replyQuoteChars: 50    # Max chars for reply quote excerpts
 
+# Background memory extraction
+memoryExtraction:
+  postReply: true         # Run a silent memory pass after visible bot replies
+  ambient:
+    enabled: false        # Also review non-triggered chatter periodically
+    everyMessages: 300    # Human messages since the last successful memory pass
+    maxBatchMessages: 300 # Max chronological messages reviewed per ambient pass
+    minIntervalSeconds: 600 # Minimum seconds between ambient passes per channel
+
 # Default trigger settings (guilds can override)
 triggers:
   mention: true          # Respond when @mentioned

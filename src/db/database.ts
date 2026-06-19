@@ -41,6 +41,15 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_messages_user_guild
     ON messages(user_id, guild_id);
 
+  CREATE TABLE IF NOT EXISTS memory_extraction_checkpoints (
+    guild_id                 TEXT NOT NULL,
+    channel_id               TEXT NOT NULL,
+    last_message_id          TEXT,
+    last_message_created_at  INTEGER NOT NULL DEFAULT 0,
+    last_run_at              INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, channel_id)
+  );
+
   CREATE TABLE IF NOT EXISTS schedules (
     id                TEXT PRIMARY KEY,
     guild_id          TEXT NOT NULL,
