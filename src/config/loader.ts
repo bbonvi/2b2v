@@ -605,7 +605,7 @@ export function loadGlobalConfig(
       random: yaml.triggerInstructions?.random,
       scheduled: yaml.triggerInstructions?.scheduled,
     },
-    defaultImageMaxDimension: yaml.imageMaxDimension ?? 768,
+    defaultImageMaxDimension: yaml.imageMaxDimension ?? 4096,
     defaultMergeMessageGapSeconds: yaml.mergeMessageGapSeconds ?? 120,
     defaultImageReadMaxPerCall: yaml.imageReadMaxPerCall ?? 10,
     defaultImageCaptioningEnabled: yaml.imageCaptioningEnabled ?? false,

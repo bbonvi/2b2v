@@ -182,6 +182,7 @@ export interface GuildConfig {
   timezone: string;
   trim: TrimConfig;
   adminUserIds: string[];
+  /** Longest edge for canonical stored user images. */
   imageMaxDimension: number;
   mergeMessageGapSeconds: number;
   imageReadMaxPerCall: number;

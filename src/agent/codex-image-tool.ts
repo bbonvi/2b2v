@@ -6,6 +6,7 @@ import { getCodexApiKey } from "../llm/codex-auth.ts";
 import type { Logger } from "../logger.ts";
 import type { EnqueueImageJobResult } from "./job-runtime.ts";
 import type { ImageGenerationQuality } from "../config/types.ts";
+import { imageExtensionForMime, imageMimeFromBuffer } from "../db/image-ingest.ts";
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_IMAGES_GENERATIONS_URL = "https://chatgpt.com/backend-api/codex/images/generations";
@@ -183,10 +184,6 @@ function extractChatGptAccountId(token: string): string {
 
 function mimeForFormat(outputFormat: OutputFormat): string {
   return outputFormat === "jpeg" ? "image/jpeg" : `image/${outputFormat}`;
-}
-
-function extensionForFormat(outputFormat: OutputFormat): string {
-  return outputFormat === "jpeg" ? "jpg" : outputFormat;
 }
 
 function redactDiagnosticValue(value: unknown, depth = 0): unknown {
@@ -871,14 +868,15 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         throw new Error(codexImageFailureMessageForAgent(codexFailureMessage(parsed)));
       }
 
-      const attachmentId = randomUUID();
-      const filename = `codex-image-${attachmentId}.${extensionForFormat(output)}`;
       const buffer = Buffer.from(parsed.image.result, "base64");
+      const actualMime = imageMimeFromBuffer(buffer, mimeForFormat(output));
+      const attachmentId = randomUUID();
+      const filename = `codex-image-${attachmentId}.${imageExtensionForMime(actualMime)}`;
       deps.onGeneratedImage({
         id: attachmentId,
         buffer,
         filename,
-        contentType: mimeForFormat(output),
+        contentType: actualMime,
         prompt,
         revisedPrompt: parsed.image.revisedPrompt,
       });

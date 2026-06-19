@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
-import { processImageBuffer } from "../db/image-ingest.ts";
+import { prepareImageBufferForContext } from "../db/image-ingest.ts";
 
 /** Minimal fetch-like function signature for testability. */
 type FetchLike = (url: string | URL, init?: RequestInit) => Promise<Response>;
@@ -153,7 +153,7 @@ async function fetchSingleImage(
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const processed = await processImageBuffer(buffer, contentType, maxDimension);
+    const processed = await prepareImageBufferForContext(buffer, contentType, maxDimension);
 
     return {
       success: true,

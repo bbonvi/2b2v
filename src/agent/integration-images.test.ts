@@ -71,6 +71,12 @@ describe("read_chat_images tool with real DB", () => {
         return rec !== null ? { id: rec.id, mime: rec.mime, width: rec.width, height: rec.height, path: rec.path } : null;
       },
       readFile: (path: string) => fakeFiles.get(path) ?? null,
+      prepareImageForContext: (buffer: Buffer) => Promise.resolve({
+        data: buffer,
+        mime: "image/jpeg",
+        width: 256,
+        height: 192,
+      }),
     };
 
     const tool = createReadChatImagesTool(deps);
@@ -83,7 +89,7 @@ describe("read_chat_images tool with real DB", () => {
     // First image metadata (img2)
     const meta1 = JSON.parse((result.content[0] as { type: "text"; text: string }).text) as Record<string, unknown>;
     expect(meta1.id).toBe(img2.id);
-    expect(meta1.width).toBe(320);
+    expect(meta1.width).toBe(256);
 
     // First image data (img2)
     const img2Data = result.content[1] as { type: "image"; data: string; mimeType: string };
@@ -93,7 +99,7 @@ describe("read_chat_images tool with real DB", () => {
     // Second image metadata (img1)
     const meta2 = JSON.parse((result.content[2] as { type: "text"; text: string }).text) as Record<string, unknown>;
     expect(meta2.id).toBe(img1.id);
-    expect(meta2.width).toBe(640);
+    expect(meta2.width).toBe(256);
 
     // Second image data (img1)
     const img1Data = result.content[3] as { type: "image"; data: string; mimeType: string };
@@ -109,6 +115,12 @@ describe("read_chat_images tool with real DB", () => {
         return rec !== null ? { id: rec.id, mime: rec.mime, width: rec.width, height: rec.height, path: rec.path } : null;
       },
       readFile: () => null,
+      prepareImageForContext: (buffer: Buffer) => Promise.resolve({
+        data: buffer,
+        mime: "image/jpeg",
+        width: 256,
+        height: 192,
+      }),
     };
 
     const tool = createReadChatImagesTool(deps);

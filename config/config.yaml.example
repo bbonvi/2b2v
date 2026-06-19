@@ -48,8 +48,8 @@ triggers:
 #   random: "You're replying unprompted. Make a brief remark without hijacking conversation."
 #   scheduled: "This is a scheduled task. Follow the task instructions closely."
 
-# Max image dimension (larger images resized to fit)
-imageMaxDimension: 768
+# Max canonical stored image dimension (larger user images resized to fit)
+imageMaxDimension: 4096
 
 # Max seconds between messages to merge consecutive same-author messages
 mergeMessageGapSeconds: 120

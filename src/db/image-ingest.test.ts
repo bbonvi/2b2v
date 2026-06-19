@@ -1,6 +1,12 @@
 import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import { createDatabase, type Database } from "./database.ts";
-import { processAndStoreImage, processAndStoreImageBuffer, processImageBuffer, type ImageIngestDeps } from "./image-ingest.ts";
+import {
+  prepareImageBufferForContext,
+  processAndStoreImage,
+  processImageBuffer,
+  storeImageBufferUnmodified,
+  type ImageIngestDeps,
+} from "./image-ingest.ts";
 import { getImagesByMessageId } from "./image-repository.ts";
 import { imagePath } from "./image-storage.ts";
 import { join } from "path";
@@ -45,35 +51,35 @@ async function createTestGif(width: number, height: number): Promise<Buffer> {
 }
 
 describe("processImageBuffer", () => {
-  test("converts PNG to JPEG q=85 and resizes", async () => {
+  test("converts PNG to WebP q=90 and resizes", async () => {
     const input = await createTestImage(1200, 800);
     const result = await processImageBuffer(input, "image/png", 600);
 
-    expect(result.mime).toBe("image/jpeg");
+    expect(result.mime).toBe("image/webp");
     const meta = await sharp(result.data).metadata();
-    expect(meta.format).toBe("jpeg");
+    expect(meta.format).toBe("webp");
     // Longest side should be <= 600
     expect(Math.max(meta.width, meta.height)).toBeLessThanOrEqual(600);
     expect(meta.width).toBe(600);
   });
 
-  test("converts WebP to JPEG", async () => {
+  test("keeps WebP storage format", async () => {
     const input = await createTestImage(400, 300, "webp");
     const result = await processImageBuffer(input, "image/webp", 800);
 
-    expect(result.mime).toBe("image/jpeg");
+    expect(result.mime).toBe("image/webp");
     const meta = await sharp(result.data).metadata();
-    expect(meta.format).toBe("jpeg");
+    expect(meta.format).toBe("webp");
     // Under max dimension — no resize
     expect(meta.width).toBe(400);
     expect(meta.height).toBe(300);
   });
 
-  test("converts JPEG input to JPEG q=85 (recompresses)", async () => {
+  test("converts JPEG input to WebP", async () => {
     const input = await createTestImage(300, 200, "jpeg");
     const result = await processImageBuffer(input, "image/jpeg", 800);
 
-    expect(result.mime).toBe("image/jpeg");
+    expect(result.mime).toBe("image/webp");
     expect(result.width).toBe(300);
     expect(result.height).toBe(200);
   });
@@ -94,15 +100,26 @@ describe("processImageBuffer", () => {
     expect(result.height).toBe(80);
   });
 
-  test("converts GIF to JPEG", async () => {
+  test("converts GIF to static WebP", async () => {
     const input = await createTestGif(100, 100);
     const result = await processImageBuffer(input, "image/gif", 800);
 
-    expect(result.mime).toBe("image/jpeg");
+    expect(result.mime).toBe("image/webp");
     expect(result.width).toBe(100);
     expect(result.height).toBe(100);
 
-    // Verify output is JPEG format
+    const meta = await sharp(result.data).metadata();
+    expect(meta.format).toBe("webp");
+  });
+});
+
+describe("prepareImageBufferForContext", () => {
+  test("creates ephemeral JPEG context copy", async () => {
+    const input = await createTestImage(1200, 800, "png");
+    const result = await prepareImageBufferForContext(input, "image/png", 600);
+
+    expect(result.mime).toBe("image/jpeg");
+    expect(result.width).toBe(600);
     const meta = await sharp(result.data).metadata();
     expect(meta.format).toBe("jpeg");
   });
@@ -145,17 +162,17 @@ describe("processAndStoreImage", () => {
 
     // DB record created
     expect(record.id).toBeGreaterThan(0);
-    expect(record.mime).toBe("image/jpeg");
+    expect(record.mime).toBe("image/webp");
     expect(record.width).toBeLessThanOrEqual(500);
 
     // File written to disk at deterministic path
-    const expectedPath = imagePath(attachmentsDir, "g1", "c1", record.id);
+    const expectedPath = imagePath(attachmentsDir, "g1", "c1", record.id, "webp");
     expect(record.path).toBe(expectedPath);
     expect(existsSync(expectedPath)).toBe(true);
 
-    // File is valid JPEG
+    // File is valid WebP
     const diskMeta = await sharp(readFileSync(expectedPath)).metadata();
-    expect(diskMeta.format).toBe("jpeg");
+    expect(diskMeta.format).toBe("webp");
 
     // DB query returns the record
     const fromDb = getImagesByMessageId(db, "msg-1");
@@ -252,13 +269,12 @@ describe("processAndStoreImage", () => {
     expect(all).toHaveLength(2);
   });
 
-  test("stores an already downloaded bot image buffer like an inbound image", async () => {
+  test("stores an already generated bot image buffer without recompression", async () => {
     const testBuffer = await createTestImage(900, 600, "png");
 
-    const record = await processAndStoreImageBuffer({
+    const record = await storeImageBufferUnmodified({
       db,
       attachmentsDir,
-      maxDimension: 512,
     }, {
       buffer: testBuffer,
       mimeType: "image/png",
@@ -268,14 +284,36 @@ describe("processAndStoreImage", () => {
       caption: "generated prompt",
     });
 
-    expect(record.mime).toBe("image/jpeg");
+    expect(record.mime).toBe("image/png");
     expect(record.caption).toBe("generated prompt");
-    expect(record.width).toBeLessThanOrEqual(512);
+    expect(record.width).toBe(900);
+    expect(record.height).toBe(600);
     expect(existsSync(record.path)).toBe(true);
+    expect(record.path.endsWith(".png")).toBe(true);
+    expect(readFileSync(record.path).equals(testBuffer)).toBe(true);
 
     const fromDb = getImagesByMessageId(db, "bot-msg-1");
     expect(fromDb).toHaveLength(1);
     expect(fromDb[0]?.id).toBe(record.id);
     expect(fromDb[0]?.caption).toBe("generated prompt");
+  });
+
+  test("stores generated image with MIME and extension from actual bytes", async () => {
+    const testBuffer = await createTestImage(120, 80, "png");
+
+    const record = await storeImageBufferUnmodified({
+      db,
+      attachmentsDir,
+    }, {
+      buffer: testBuffer,
+      mimeType: "image/webp",
+      messageId: "bot-msg-2",
+      guildId: "g1",
+      channelId: "c1",
+    });
+
+    expect(record.mime).toBe("image/png");
+    expect(record.path.endsWith(".png")).toBe(true);
+    expect(readFileSync(record.path).equals(testBuffer)).toBe(true);
   });
 });

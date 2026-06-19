@@ -21,6 +21,12 @@ function makeDeps(overrides?: Partial<ReadChatImagesToolDeps>): ReadChatImagesTo
     imageReadMaxPerCall: 10,
     getImageById: (id: number) => fakeImages.get(id) ?? null,
     readFile: (path: string) => fakeFiles.get(path) ?? null,
+    prepareImageForContext: (buffer: Buffer) => Promise.resolve({
+      data: Buffer.from(`prepared-${buffer.toString()}`),
+      mime: "image/jpeg",
+      width: 256,
+      height: 192,
+    }),
     ...overrides,
   };
 }
@@ -44,15 +50,17 @@ describe("createReadChatImagesTool", () => {
     // First image: id=2
     const meta0 = result.content[0] as { type: "text"; text: string };
     expect(meta0.type).toBe("text");
-    const parsed0 = JSON.parse(meta0.text) as { id: number; width: number; height: number };
+    const parsed0 = JSON.parse(meta0.text) as { id: number; width: number; height: number; source_width: number; source_height: number };
     expect(parsed0.id).toBe(2);
-    expect(parsed0.width).toBe(400);
-    expect(parsed0.height).toBe(300);
+    expect(parsed0.width).toBe(256);
+    expect(parsed0.height).toBe(192);
+    expect(parsed0.source_width).toBe(400);
+    expect(parsed0.source_height).toBe(300);
 
     const img0 = result.content[1] as { type: "image"; data: string; mimeType: string };
     expect(img0.type).toBe("image");
     expect(img0.mimeType).toBe("image/jpeg");
-    expect(img0.data).toBe(Buffer.from("fake-image-2").toString("base64"));
+    expect(img0.data).toBe(Buffer.from("prepared-fake-image-2").toString("base64"));
 
     // Second image: id=1
     const meta1 = result.content[2] as { type: "text"; text: string };
@@ -61,7 +69,7 @@ describe("createReadChatImagesTool", () => {
 
     const img1 = result.content[3] as { type: "image"; data: string; mimeType: string };
     expect(img1.type).toBe("image");
-    expect(img1.data).toBe(Buffer.from("fake-image-1").toString("base64"));
+    expect(img1.data).toBe(Buffer.from("prepared-fake-image-1").toString("base64"));
   });
 
   test("returns text-only not_found for missing IDs", async () => {
@@ -93,7 +101,7 @@ describe("createReadChatImagesTool", () => {
     const deps = makeDeps({ imageReadMaxPerCall: 2 });
     tool = createReadChatImagesTool(deps);
 
-    expect(() => tool.execute("call-4", { image_ids: [1, 2, 5] })).toThrow("Maximum is 2");
+    return expect(Promise.resolve(tool.execute("call-4", { image_ids: [1, 2, 5] }))).rejects.toThrow("Maximum is 2");
   });
 
   test("returns empty content for empty input", async () => {

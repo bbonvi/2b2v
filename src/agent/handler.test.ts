@@ -59,7 +59,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     timezone: "UTC",
     trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
     adminUserIds: [],
-    imageMaxDimension: 768,
+    imageMaxDimension: 4096,
     mergeMessageGapSeconds: 120,
     imageReadMaxPerCall: 10,
     imageCaptioningEnabled: false,

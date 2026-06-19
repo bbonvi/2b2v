@@ -66,7 +66,7 @@ timezone: UTC
 adminUserIds: []
 ```
 
-All fields are optional; missing values fall back to global defaults. `promptProfile` selects files from `prompts/`. Live prompt files are local and ignored by git; copy `prompts/persona.md.example` to `prompts/persona.md` and `prompts/style.md.example` to `prompts/style.md`, then customize them for your bot.
+All fields are optional; missing values fall back to global defaults. `imageMaxDimension` controls canonical user-image storage only: uploads are stored as WebP q90 and clamped to that longest edge, while LLM context reads use temporary compressed copies. Generated bot PNGs are stored as generated. `promptProfile` selects files from `prompts/`. Live prompt files are local and ignored by git; copy `prompts/persona.md.example` to `prompts/persona.md` and `prompts/style.md.example` to `prompts/style.md`, then customize them for your bot.
 
 ### Persona
 

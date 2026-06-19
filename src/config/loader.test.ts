@@ -113,7 +113,7 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultTimezone).toBe("UTC");
     expect(cfg.defaultTrim).toEqual({ trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 });
     expect(cfg.defaultTriggers).toEqual(defaultTriggerConfig());
-    expect(cfg.defaultImageMaxDimension).toBe(768);
+    expect(cfg.defaultImageMaxDimension).toBe(4096);
     expect(cfg.defaultMergeMessageGapSeconds).toBe(120);
     expect(cfg.defaultImageReadMaxPerCall).toBe(10);
     expect(cfg.defaultImageCaptioningEnabled).toBe(false);
@@ -1014,7 +1014,7 @@ describe("saveGuildConfig", () => {
       timezone: "Asia/Tokyo",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
       adminUserIds: [],
-      imageMaxDimension: 768,
+      imageMaxDimension: 4096,
       mergeMessageGapSeconds: 120,
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
@@ -1054,7 +1054,7 @@ describe("saveGuildConfig", () => {
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
       adminUserIds: [],
-      imageMaxDimension: 768,
+      imageMaxDimension: 4096,
       mergeMessageGapSeconds: 120,
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
@@ -1090,7 +1090,7 @@ describe("saveGuildConfig", () => {
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
       adminUserIds: [],
-      imageMaxDimension: 768,
+      imageMaxDimension: 4096,
       mergeMessageGapSeconds: 120,
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
@@ -1384,7 +1384,7 @@ describe("saveGuildConfig emotes", () => {
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
       adminUserIds: [],
-      imageMaxDimension: 768,
+      imageMaxDimension: 4096,
       mergeMessageGapSeconds: 120,
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
@@ -1427,7 +1427,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
       adminUserIds: [],
-      imageMaxDimension: 768,
+      imageMaxDimension: 4096,
       mergeMessageGapSeconds: 120,
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,
@@ -1463,7 +1463,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
       adminUserIds: [],
-      imageMaxDimension: 768,
+      imageMaxDimension: 4096,
       mergeMessageGapSeconds: 120,
       imageReadMaxPerCall: 10,
       imageCaptioningEnabled: false,

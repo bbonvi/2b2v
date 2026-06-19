@@ -47,8 +47,8 @@ trim:
 # Discord user IDs with admin access to bot commands
 adminUserIds: []
 
-# Max image dimension (images resized to fit)
-imageMaxDimension: 768
+# Max canonical stored image dimension (larger user images resized to fit)
+imageMaxDimension: 4096
 
 # Max seconds between messages for same-author merge
 mergeMessageGapSeconds: 120

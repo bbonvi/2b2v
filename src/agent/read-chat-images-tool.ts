@@ -12,6 +12,7 @@ export interface ReadChatImagesToolDeps {
   imageReadMaxPerCall: number;
   getImageById: (id: number) => { id: number; mime: string; width: number; height: number; path: string } | null;
   readFile: (path: string) => Buffer | null;
+  prepareImageForContext: (buffer: Buffer, mimeType: string) => Promise<{ data: Buffer; mime: string; width: number; height: number }>;
 }
 
 export function createReadChatImagesTool(deps: ReadChatImagesToolDeps): AgentTool {
@@ -21,7 +22,7 @@ export function createReadChatImagesTool(deps: ReadChatImagesToolDeps): AgentToo
     description:
       "Retrieve stored images by their IDs from chat history. Returns image data with metadata. Use this to view images referenced by image_ids in chat history.",
     parameters: ReadChatImagesParams,
-    execute: (
+    execute: async (
       _toolCallId,
       params,
     ): Promise<AgentToolResult<{ count: number } | undefined>> => {
@@ -51,15 +52,39 @@ export function createReadChatImagesTool(deps: ReadChatImagesToolDeps): AgentToo
           continue;
         }
 
-        content.push({ type: "text", text: JSON.stringify({ id: record.id, width: record.width, height: record.height }) });
-        content.push({ type: "image", data: buf.toString("base64"), mimeType: record.mime });
+        let prepared: { data: Buffer; mime: string; width: number; height: number };
+        try {
+          prepared = await deps.prepareImageForContext(buf, record.mime);
+        } catch (error) {
+          content.push({
+            type: "text",
+            text: JSON.stringify({
+              id,
+              error: "prepare_failed",
+              message: error instanceof Error ? error.message : String(error),
+            }),
+          });
+          count++;
+          continue;
+        }
+        content.push({
+          type: "text",
+          text: JSON.stringify({
+            id: record.id,
+            width: prepared.width,
+            height: prepared.height,
+            source_width: record.width,
+            source_height: record.height,
+          }),
+        });
+        content.push({ type: "image", data: prepared.data.toString("base64"), mimeType: prepared.mime });
         count++;
       }
 
-      return Promise.resolve({
+      return {
         content,
         details: { count },
-      });
+      };
     },
   };
 }
