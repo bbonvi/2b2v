@@ -353,6 +353,12 @@ describe("handleMessage", () => {
       expect(messages[3]?.content).toContain("## Memory");
       expect(messages[3]?.content).toContain("## Current Message Metadata");
       expect(messages[3]?.content).toContain("Trigger MsgID: msg-1");
+      expect(messages[3]?.content).toContain("Trigger Author: @testuser");
+      expect(messages[3]?.content).toContain("Trigger AuthorID: user-1");
+      expect(messages[3]?.content).toContain("Trigger DisplayName: Test Nick");
+      expect(messages[3]?.content).toContain("Trigger GlobalName: Test Global");
+      expect(messages[3]?.content).toContain("Trigger AuthorIsGuildMember: true");
+      expect(messages[3]?.content).toContain("Trigger AuthorIsBot: false");
       expect(messages[3]?.content).toContain("Trigger ReplyToMsgID: parent-msg");
       expect(messages[3]?.content).toContain("## Current User Message");
       expect(messages[3]?.content).toContain("hello bot");
@@ -366,7 +372,14 @@ describe("handleMessage", () => {
     };
 
     await handleMessage(
-      makeMessage({ mentionedUserIds: ["bot-1"], replyToMessageId: "parent-msg" }),
+      makeMessage({
+        mentionedUserIds: ["bot-1"],
+        replyToMessageId: "parent-msg",
+        authorDisplayName: "Test Nick",
+        authorGlobalName: "Test Global",
+        authorIsGuildMember: true,
+        authorIsBot: false,
+      }),
       makeDeps({ completeChat }),
     );
   });

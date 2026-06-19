@@ -3,6 +3,8 @@ import type { HistoryMessage } from "./history-types.ts";
 /** Reply context resolved for formatting. */
 export interface ReplyContext {
   targetAuthor: string;
+  /** Current Discord display name/nickname for the reply target, if available. */
+  targetDisplayName?: string;
   /** Short quote (already truncated to replyQuoteChars), or null if not applicable. */
   quote: string | null;
   /**
@@ -26,6 +28,7 @@ export interface FormatInput {
   reply: ReplyContext | null;
   captioningEnabled: boolean;
   includeMessageIds?: boolean;
+  includeDisplayNames?: boolean;
 }
 
 /**
@@ -37,7 +40,7 @@ export interface FormatInput {
  * Meta keys in order: Quote, MissingTarget, ReplyImageIDs, ReplyCaptions, ImageIDs, Captions
  */
 export function formatMessageLine(input: FormatInput): string {
-  const { message, reply, captioningEnabled, includeMessageIds } = input;
+  const { message, reply, captioningEnabled, includeMessageIds, includeDisplayNames } = input;
 
   // Synthetic events are pre-formatted, output content directly
   if (message.isSynthetic) {
@@ -80,12 +83,31 @@ export function formatMessageLine(input: FormatInput): string {
     metaParts.push(...message.jobAnnotations);
   }
 
-  const authorPart = `@${message.author}`;
-  const targetPart = reply !== null ? ` to @${reply.targetAuthor}` : "";
+  const authorPart = `@${message.author}${formatDisplayNameSuffix(message.author, message.authorDisplayName, includeDisplayNames)}`;
+  const targetPart = reply !== null
+    ? ` to @${reply.targetAuthor}${formatDisplayNameSuffix(reply.targetAuthor, reply.targetDisplayName, includeDisplayNames)}`
+    : "";
   const metaPart = metaParts.length > 0 ? ` (${metaParts.join("; ")})` : "";
 
   return `[${authorPart}${targetPart}${metaPart}]: ${message.content}`;
 }
+
+function formatDisplayNameSuffix(
+  username: string,
+  displayName: string | undefined,
+  includeDisplayNames: boolean | undefined,
+): string {
+  if (includeDisplayNames !== true || displayName === undefined) return "";
+  const normalized = displayName.replace(/[\t\n\r]+/g, " ").trim();
+  if (normalized === "" || normalized === username) return "";
+  return ` (${normalized})`;
+}
+
+/** The legend block prepended to the newer slice. */
+export const NEWER_LEGEND = [
+  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyCaptions/ImageIDs/Captions/ImageJob)]: content",
+  "Legend: Parenthesized names are current Discord display names, not stable identity. Users change them often and they may contain jokes, moods, or temporary labels; use @username for exact pings.",
+].join("\n");
 
 /** The legend block prepended to the older slice. */
 export const OLDER_LEGEND = [

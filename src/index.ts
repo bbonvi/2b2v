@@ -264,6 +264,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
             id: fetched.id,
             authorId: fetched.author.id,
             authorUsername: fetched.author.username,
+            authorDisplayName: authorDisplayName(fetched),
             content: fetched.content,
             timestamp: fetched.createdTimestamp,
             isBot: fetched.author.bot,
@@ -1419,6 +1420,14 @@ function buildOutboundResolvers(guild: Guild): OutboundResolvers {
   };
 }
 
+function buildCurrentDisplayNameMap(guild: Guild): ReadonlyMap<string, string> {
+  return new Map([...guild.members.cache.values()].map((member) => [member.id, member.displayName]));
+}
+
+function authorDisplayName(message: Message): string | undefined {
+  return message.member?.displayName ?? message.author.globalName ?? message.author.displayName;
+}
+
 /** Resolve a guild member username case-insensitively, accepting an optional leading @. */
 function resolveGuildUsername(guild: Guild, username: string): string | undefined {
   const normalized = username.trim().startsWith("@")
@@ -1453,6 +1462,7 @@ async function buildContext(
 ): Promise<AssembledContext> {
   // Chat history via the full processing pipeline
   const visibleJobs = agentJobs.listVisible(guildId, channelId);
+  const displayNamesByUserId = buildCurrentDisplayNameMap(guild);
   const historyWithoutLatest = annotateHistoryJobs(
     getContextHistoryMessages(db, channelId, guildConfig.trim, latestUserMessage.id),
     guildId,
@@ -1474,6 +1484,7 @@ async function buildContext(
       timezone: guildConfig.timezone,
       imageCaptioningEnabled: guildConfig.imageCaptioningEnabled,
       replyQuoteChars: guildConfig.trim.replyQuoteChars,
+      displayNamesByUserId,
     },
     replyFallbackDeps,
   );
@@ -1898,6 +1909,7 @@ async function processTriggeredMessage(
     const latestUserMessage: HistoryMessage = {
       id: message.id,
       author: message.author.username,
+      authorDisplayName: authorDisplayName(message),
       authorId: message.author.id,
       content: translatedContent,
       isBot: false,
@@ -1923,6 +1935,7 @@ async function processTriggeredMessage(
             id: fetched.id,
             authorId: fetched.author.id,
             authorUsername: fetched.author.username,
+            authorDisplayName: authorDisplayName(fetched),
             content: fetched.content,
             timestamp: fetched.createdTimestamp,
             isBot: fetched.author.bot,
@@ -2010,6 +2023,10 @@ async function processTriggeredMessage(
       content: message.content,
       authorId: message.author.id,
       authorUsername: message.author.username,
+      authorDisplayName: authorDisplayName(message),
+      authorGlobalName: message.author.globalName ?? message.author.displayName,
+      authorIsBot: message.author.bot,
+      authorIsGuildMember: message.member !== null,
       botUserId: client.user?.id ?? "",
       mentionedUserIds: [...message.mentions.users.keys()],
       translatedContent,

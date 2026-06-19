@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { formatMessageLine, OLDER_LEGEND } from "./history-formatting.ts";
+import { formatMessageLine, NEWER_LEGEND, OLDER_LEGEND } from "./history-formatting.ts";
 import type { HistoryMessage } from "./history-types.ts";
 import type { FormatInput, ReplyContext } from "./history-formatting.ts";
 
@@ -29,6 +29,28 @@ describe("formatMessageLine", () => {
 
   test("includes message id metadata when requested", () => {
     const input: FormatInput = { message: msg({ id: "123" }), reply: null, captioningEnabled: false, includeMessageIds: true };
+    expect(formatMessageLine(input)).toBe("[@alice (MsgID: 123)]: hello");
+  });
+
+  test("includes author display name before metadata when requested", () => {
+    const input: FormatInput = {
+      message: msg({ id: "123", authorDisplayName: "Alice W" }),
+      reply: null,
+      captioningEnabled: false,
+      includeMessageIds: true,
+      includeDisplayNames: true,
+    };
+    expect(formatMessageLine(input)).toBe("[@alice (Alice W) (MsgID: 123)]: hello");
+  });
+
+  test("omits display name when it equals username", () => {
+    const input: FormatInput = {
+      message: msg({ id: "123", authorDisplayName: "alice" }),
+      reply: null,
+      captioningEnabled: false,
+      includeMessageIds: true,
+      includeDisplayNames: true,
+    };
     expect(formatMessageLine(input)).toBe("[@alice (MsgID: 123)]: hello");
   });
 
@@ -74,15 +96,16 @@ describe("formatMessageLine", () => {
   test("reply with quote", () => {
     const reply: ReplyContext = {
       targetAuthor: "bob",
+      targetDisplayName: "Bob X",
       quote: "earlier text",
       replyMsgId: "123",
       missingTarget: false,
       replyImageIds: [],
       replyCaptions: [],
     };
-    const input: FormatInput = { message: msg(), reply, captioningEnabled: false };
+    const input: FormatInput = { message: msg({ authorDisplayName: "Alice W" }), reply, captioningEnabled: false, includeDisplayNames: true };
     expect(formatMessageLine(input)).toBe(
-      '[@alice to @bob (Quote: "earlier text")]: hello'
+      '[@alice (Alice W) to @bob (Bob X) (Quote: "earlier text")]: hello'
     );
   });
 
@@ -222,5 +245,14 @@ describe("OLDER_LEGEND", () => {
     expect(OLDER_LEGEND).toContain("[msg-break]");
     expect(OLDER_LEGEND).toContain("search_messages(id)");
     expect(OLDER_LEGEND).toContain("read_chat_images([id])");
+  });
+});
+
+describe("NEWER_LEGEND", () => {
+  test("explains volatile display names", () => {
+    expect(NEWER_LEGEND).toContain("display name");
+    expect(NEWER_LEGEND).toContain("not stable identity");
+    expect(NEWER_LEGEND).toContain("jokes");
+    expect(NEWER_LEGEND).toContain("@username for exact pings");
   });
 });

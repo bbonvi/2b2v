@@ -38,6 +38,10 @@ export interface IncomingMessage {
   content: string;
   authorId: string;
   authorUsername: string;
+  authorDisplayName?: string;
+  authorGlobalName?: string;
+  authorIsBot?: boolean;
+  authorIsGuildMember?: boolean;
   botUserId: string;
   mentionedUserIds: string[];
   translatedContent: string;
@@ -691,7 +695,23 @@ function buildVolatileTurnContext(context: AssembledContext): string {
 }
 
 function buildCurrentMessageMetadata(msg: IncomingMessage): string {
-  const lines = [`Trigger MsgID: ${msg.messageId ?? "unknown"}`];
+  const lines = [
+    `Trigger MsgID: ${msg.messageId ?? "unknown"}`,
+    `Trigger Author: @${msg.authorUsername}`,
+    `Trigger AuthorID: ${msg.authorId}`,
+  ];
+  if (msg.authorDisplayName !== undefined && msg.authorDisplayName !== "" && msg.authorDisplayName !== msg.authorUsername) {
+    lines.push(`Trigger DisplayName: ${msg.authorDisplayName}`);
+  }
+  if (msg.authorGlobalName !== undefined && msg.authorGlobalName !== "" && msg.authorGlobalName !== msg.authorUsername && msg.authorGlobalName !== msg.authorDisplayName) {
+    lines.push(`Trigger GlobalName: ${msg.authorGlobalName}`);
+  }
+  if (msg.authorIsGuildMember !== undefined) {
+    lines.push(`Trigger AuthorIsGuildMember: ${msg.authorIsGuildMember ? "true" : "false"}`);
+  }
+  if (msg.authorIsBot !== undefined) {
+    lines.push(`Trigger AuthorIsBot: ${msg.authorIsBot ? "true" : "false"}`);
+  }
   if (msg.replyToMessageId !== undefined) {
     lines.push(`Trigger ReplyToMsgID: ${msg.replyToMessageId}`);
   }

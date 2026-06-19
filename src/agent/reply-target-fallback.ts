@@ -6,6 +6,7 @@ export interface FetchedDiscordMessage {
   id: string;
   authorId: string;
   authorUsername: string;
+  authorDisplayName?: string;
   content: string;
   /** Unix epoch ms. */
   timestamp: number;
@@ -226,6 +227,7 @@ export async function fetchMissingReplyTargets(
     fetched.push({
       id: discordMsg.id,
       author: discordMsg.authorUsername,
+      authorDisplayName: discordMsg.authorDisplayName,
       authorId: discordMsg.authorId,
       content: discordMsg.content,
       isBot: discordMsg.isBot,

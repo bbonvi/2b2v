@@ -6,8 +6,10 @@ export interface HistoryMessage {
   id: string;
   /** Discord message IDs represented by this formatted row after merge. */
   mergedMessageIds?: string[];
-  /** Message author display name (translated). */
+  /** Stable Discord username used for exact pings. */
   author: string;
+  /** Current Discord display name/nickname. Volatile and may differ from username. */
+  authorDisplayName?: string;
   /** Author user ID. */
   authorId: string;
   /** Translated message content. */
@@ -44,6 +46,8 @@ export interface HistoryProcessingConfig {
   mergeMessageGapSeconds: number;
   timezone: string;
   imageCaptioningEnabled: boolean;
+  /** Current Discord display names keyed by user ID. Used only for volatile recent history. */
+  displayNamesByUserId?: ReadonlyMap<string, string>;
 }
 
 /** A formatted line in the output, either a message line or a date stamp. */

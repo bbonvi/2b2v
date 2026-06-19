@@ -4,7 +4,7 @@ import { sortMessages, sliceHistory } from "./history-slicing.ts";
 import { mergeConsecutiveMessages } from "./history-merge.ts";
 import { trimMessages } from "./history-trimming.ts";
 import { insertDateStamps } from "./history-dates.ts";
-import { formatMessageLine, OLDER_LEGEND } from "./history-formatting.ts";
+import { formatMessageLine, NEWER_LEGEND, OLDER_LEGEND } from "./history-formatting.ts";
 import { resolveReplies } from "./history-replies.ts";
 import { fetchMissingReplyTargets } from "./reply-target-fallback.ts";
 
@@ -22,7 +22,8 @@ export async function processHistory(
   replyFallbackDeps: ReplyFallbackDeps,
 ): Promise<{ olderText: string; newerText: string }> {
   // 1. Sort deterministically
-  const sorted = sortMessages(messages);
+  const sorted = sortMessages(applyDisplayNames(messages, config.displayNamesByUserId));
+  const latestWithDisplayName = applyDisplayName(latestUserMessage, config.displayNamesByUserId);
 
   // 2. Merge consecutive plain messages by same author
   const merged = mergeConsecutiveMessages(sorted, config.mergeMessageGapSeconds);
@@ -35,7 +36,7 @@ export async function processHistory(
       normalizedContentMap.set(id, m.content);
     }
   }
-  normalizedContentMap.set(latestUserMessage.id, latestUserMessage.content);
+  normalizedContentMap.set(latestWithDisplayName.id, latestWithDisplayName.content);
 
   // 4. Slice into older/newer
   const { older, newer } = sliceHistory(merged, config.trim);
@@ -45,8 +46,8 @@ export async function processHistory(
   const newerTrimmed = newer;
 
   // 6. Fetch missing reply targets from Discord
-  const allForFallback = [...olderTrimmed, ...newerTrimmed, latestUserMessage];
-  const fetched = await fetchMissingReplyTargets(replyFallbackDeps, allForFallback);
+  const allForFallback = [...olderTrimmed, ...newerTrimmed, latestWithDisplayName];
+  const fetched = applyDisplayNames(await fetchMissingReplyTargets(replyFallbackDeps, allForFallback), config.displayNamesByUserId);
 
   // 7. Add fetched messages to normalized content map
   for (const m of fetched) {
@@ -57,7 +58,7 @@ export async function processHistory(
   const replyResult = resolveReplies({
     older: olderTrimmed,
     newer: newerTrimmed,
-    latestUserMessage,
+    latestUserMessage: latestWithDisplayName,
     replyQuoteChars: config.replyQuoteChars,
     captioningEnabled: config.imageCaptioningEnabled,
     normalizedContentMap,
@@ -87,10 +88,10 @@ export async function processHistory(
 
   // 10. Format newer slice with date stamps
   let newerText = "";
-  const newerMessages = [...newerTrimmed, latestUserMessage];
+  const newerMessages = [...newerTrimmed, latestWithDisplayName];
   if (newerMessages.length > 0) {
     const newerDateEntries = insertDateStamps(newerMessages, config.timezone);
-    const lines: string[] = [];
+    const lines: string[] = [NEWER_LEGEND];
     for (const entry of newerDateEntries) {
       if (entry.type === "date") {
         lines.push(entry.text);
@@ -106,6 +107,7 @@ export async function processHistory(
           reply,
           captioningEnabled: config.imageCaptioningEnabled,
           includeMessageIds: true,
+          includeDisplayNames: true,
         }));
       }
     }
@@ -113,4 +115,21 @@ export async function processHistory(
   }
 
   return { olderText, newerText };
+}
+
+function applyDisplayNames(
+  messages: HistoryMessage[],
+  displayNamesByUserId: ReadonlyMap<string, string> | undefined,
+): HistoryMessage[] {
+  if (displayNamesByUserId === undefined) return messages;
+  return messages.map((message) => applyDisplayName(message, displayNamesByUserId));
+}
+
+function applyDisplayName(
+  message: HistoryMessage,
+  displayNamesByUserId: ReadonlyMap<string, string> | undefined,
+): HistoryMessage {
+  if (displayNamesByUserId === undefined || message.authorDisplayName !== undefined) return message;
+  const displayName = displayNamesByUserId.get(message.authorId);
+  return displayName !== undefined ? { ...message, authorDisplayName: displayName } : message;
 }

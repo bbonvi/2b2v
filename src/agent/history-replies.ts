@@ -116,6 +116,7 @@ function buildReplyContext(
 
   return {
     targetAuthor: target.author,
+    ...(target.authorDisplayName !== undefined ? { targetDisplayName: target.authorDisplayName } : {}),
     quote,
     replyMsgId: message.replyToId,
     missingTarget: false,

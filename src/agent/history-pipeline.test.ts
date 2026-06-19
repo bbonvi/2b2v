@@ -77,6 +77,35 @@ describe("processHistory", () => {
     expect(result.newerText).toContain("[@alice (MsgID: 100)]: latest");
   });
 
+  test("newer slice includes current display names for authors and reply targets", async () => {
+    const m1 = msg({ id: "1", author: "alice", authorId: "uid-alice", content: "first", timestamp: 1000 });
+    const latest = msg({
+      id: "100",
+      author: "bob",
+      authorId: "uid-bob",
+      content: "reply",
+      timestamp: 9000,
+      replyToId: "1",
+    });
+    const result = await processHistory(
+      [m1],
+      latest,
+      {
+        ...defaultConfig,
+        displayNamesByUserId: new Map([
+          ["uid-alice", "Alice W"],
+          ["uid-bob", "Bob X"],
+        ]),
+      },
+      deps,
+    );
+
+    expect(result.olderText).toBe("");
+    expect(result.newerText).toContain("Parenthesized names are current Discord display names");
+    expect(result.newerText).toContain("[@alice (Alice W) (MsgID: 1)]: first");
+    expect(result.newerText).toContain("[@bob (Bob X) to @alice (Alice W) (MsgID: 100)]: reply");
+  });
+
   test("enough messages produce older slice with OLDER_LEGEND and date stamps", async () => {
     // With windowSize=30, trimTarget=100: olderCount=70
     // Need >30 messages so some go to older slice
