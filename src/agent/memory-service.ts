@@ -231,18 +231,18 @@ export function buildMemoryContext(input: MemoryContextInput): string {
     guildId: input.guildId,
     subjectUserId: input.currentUserId,
     includeGlobal: true,
-    limit: input.limit ?? 40,
+    limit: input.limit ?? 50,
   }).filter((row) => row.content.trim() !== "");
 
   if (rows.length === 0) return "";
 
-  const lines = rows.map((row) => {
+  const lines = [...rows].reverse().map((row) => {
     const label = scopeLabel(row, input.resolveUserId);
     const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
     return `- ${row.id} [${label}] [${formatConfidence(row.confidence)}] [${row.kind}]${expiry} ${row.content}`;
   });
   return [
-    "Use these durable memories as background context. Current chat instructions override memory. The number after scope is confidence (0-1); weigh lower confidence accordingly.",
+    "Use these durable memories as background context. Current chat instructions override memory. The number after scope is confidence (0-1); weigh lower confidence accordingly. This block is capped at 50 visible memories; additional memories may exist but are not shown. Within this visible block, the most recently updated and usually most relevant memories are closer to the bottom.",
     ...lines,
   ].join("\n");
 }
@@ -277,13 +277,13 @@ export function buildVisibleUserMemoryContext(input: VisibleUserMemoryContextInp
 
   const lines = [
     "## Existing Memories For Other Visible Users",
-    "These memories are shown only so this memory pass can update existing rows or avoid duplicates for other users visible in the rendered chat history. Do not copy them into new memories unless the current exchange adds new information.",
+    "These memories are shown only so this memory pass can update existing rows or avoid duplicates for other users visible in the rendered chat history. Do not copy them into new memories unless the current exchange adds new information. Fresher memories and users with more recent visible activity are lower in this section.",
   ];
-  for (const group of groups) {
+  for (const group of [...groups].reverse()) {
     const username = input.resolveUserId?.(group.userId);
     const label = username !== undefined && username !== "" ? `@${username}` : `user:${group.userId}`;
     lines.push(`### ${label}`);
-    for (const row of group.rows) {
+    for (const row of [...group.rows].reverse()) {
       const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
       lines.push(`- ${row.id} [${formatConfidence(row.confidence)}] [${row.kind}]${expiry} ${row.content}`);
     }
