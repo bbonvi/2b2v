@@ -2,6 +2,7 @@ import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { createHash, randomUUID } from "node:crypto";
 import { arch, platform, release } from "node:os";
+import sharp from "sharp";
 import { getCodexApiKey } from "../llm/codex-auth.ts";
 import type { Logger } from "../logger.ts";
 import type { EnqueueImageJobResult } from "./job-runtime.ts";
@@ -10,11 +11,16 @@ import { imageExtensionForMime, imageMimeFromBuffer } from "../db/image-ingest.t
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_IMAGES_GENERATIONS_URL = "https://chatgpt.com/backend-api/codex/images/generations";
+const CODEX_IMAGES_EDITS_URL = "https://chatgpt.com/backend-api/codex/images/edits";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 const OPENAI_BETA_HEADER = "responses=experimental";
-const DEFAULT_OUTPUT_FORMAT = "png";
+const DEFAULT_OUTPUT_FORMAT = "webp";
 const BACKEND_IMAGE_MODEL = "gpt-image-2";
 const DEFAULT_IMAGE_SIZE = "auto";
+const FOUR_K_IMAGE_QUALITY: ImageGenerationQuality = "high";
+const MAX_GPT_IMAGE_EDGE = 3840;
+const MAX_GPT_IMAGE_PIXELS = 8_294_400;
+const GPT_IMAGE_SIZE_MULTIPLE = 16;
 const DEFAULT_IMAGE_QUALITY: ImageGenerationQuality = "auto";
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
@@ -35,7 +41,11 @@ const CodexGenerateImageParams = Type.Object({
     Type.Literal("jpeg"),
     Type.Literal("webp"),
   ], {
-    description: "Output image format. Defaults to png.",
+    description: "Output image format. Defaults to webp.",
+  })),
+  "4k": Type.Optional(Type.Boolean({
+    description:
+      "Set true only when the user explicitly asks for 4K, UHD, highest/maximum resolution, print-resolution, or a final high-resolution render. Leave false for ordinary high quality, detailed, HD, or good images.",
   })),
   separate_job: Type.Optional(Type.Boolean({
     description:
@@ -52,6 +62,7 @@ const CodexGenerateImageParams = Type.Object({
 });
 
 type OutputFormat = "png" | "jpeg" | "webp";
+type ImageTransport = "responses-tool" | "direct-images" | "direct-edits";
 
 export interface GeneratedImageAttachment {
   id: string;
@@ -60,6 +71,10 @@ export interface GeneratedImageAttachment {
   contentType: string;
   prompt: string;
   revisedPrompt?: string;
+  requestedSize?: string;
+  actualSize?: string;
+  transport?: ImageTransport;
+  is4k?: boolean;
 }
 
 interface ReferenceImageRecord {
@@ -70,7 +85,7 @@ interface ReferenceImageRecord {
   path: string;
 }
 
-interface ReferenceImageInput {
+export interface ReferenceImageInput {
   id: number;
   data: string;
   mimeType: string;
@@ -95,6 +110,7 @@ export interface CodexGenerateImageToolDeps {
     promptHash: string;
     imageIds: number[];
     outputFormat: OutputFormat;
+    is4k: boolean;
     separateJob: boolean;
     allowsGroupCorrections: boolean;
     replacesJobId?: string;
@@ -108,17 +124,21 @@ type CodexGenerateImageDetails =
     model: string;
     backendImageModel: "gpt-image-2";
     outputFormat: OutputFormat;
+    is4k: boolean;
     referenceImageIds: number[];
     responseId?: string;
     imageGenerationId?: string;
     revisedPrompt?: string;
-    transport: "responses-tool" | "direct-images";
+    transport: ImageTransport;
+    requestedSize?: string;
+    actualSize?: string;
     usage?: unknown;
   }
   | {
     asyncJobId: string;
     asyncJobStatus: string;
     asyncJobCreated: boolean;
+    is4k: boolean;
     reason?: string;
   };
 
@@ -140,18 +160,22 @@ interface ParsedCodexResponse {
 }
 
 interface ParsedImageResult extends ParsedCodexResponse {
-  transport: "responses-tool" | "direct-images";
+  transport: ImageTransport;
+  requestedSize?: string;
+  actualSize?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function promptHash(prompt: string, imageIds: readonly number[]): string {
+function promptHash(prompt: string, imageIds: readonly number[], is4k: boolean): string {
   return createHash("sha256")
-    .update(prompt.trim().toLowerCase().replace(/\s+/g, " "))
+    .update(normalizePrompt(prompt))
     .update("|")
     .update(imageIds.join(","))
+    .update("|")
+    .update(is4k ? "4k" : "standard")
     .digest("hex")
     .slice(0, 16);
 }
@@ -184,6 +208,124 @@ function extractChatGptAccountId(token: string): string {
 
 function mimeForFormat(outputFormat: OutputFormat): string {
   return outputFormat === "jpeg" ? "image/jpeg" : `image/${outputFormat}`;
+}
+
+export interface ImageSize {
+  width: number;
+  height: number;
+}
+
+function normalizePrompt(prompt: string): string {
+  return prompt.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function containsAny(text: string, patterns: readonly RegExp[]): boolean {
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+export function infer4kAspectRatio(prompt: string): ImageSize {
+  const text = normalizePrompt(prompt);
+  const wantsWide = containsAny(text, [
+    /\bwide\b/,
+    /\blandscape\b/,
+    /\bcinematic\b/,
+    /\bbanner\b/,
+    /\bwallpaper\b/,
+    /\bwidescreen\b/,
+    /\b16[:\s-]?9\b/,
+  ]);
+  if (wantsWide) return { width: 16, height: 9 };
+  if (containsAny(text, [
+    /\bvertical\b/,
+    /\bportrait\b/,
+    /\bselfie\b/,
+    /\bphone\b/,
+    /\bmobile\b/,
+    /\b9[:\s-]?16\b/,
+  ])) return { width: 9, height: 16 };
+  if (containsAny(text, [
+    /\bavatar\b/,
+    /\bprofile\b/,
+    /\bicon\b/,
+    /\bsquare\b/,
+    /\b1[:\s-]?1\b/,
+  ])) return { width: 1, height: 1 };
+  if (containsAny(text, [/\bposter\b/, /\bkey art\b/, /\bkeyart\b/])) return { width: 3, height: 2 };
+  return { width: 1, height: 1 };
+}
+
+function gcd(a: number, b: number): number {
+  let x = Math.abs(a);
+  let y = Math.abs(b);
+  while (y !== 0) {
+    const next = x % y;
+    x = y;
+    y = next;
+  }
+  return x;
+}
+
+function reducedAspect(width: number, height: number): ImageSize {
+  const divisor = gcd(width, height);
+  return { width: width / divisor, height: height / divisor };
+}
+
+export function calculate4kImageSize(aspect: ImageSize): ImageSize {
+  if (!Number.isFinite(aspect.width) || !Number.isFinite(aspect.height) || aspect.width <= 0 || aspect.height <= 0) {
+    throw new Error("4K image aspect ratio must be positive.");
+  }
+  const reduced = reducedAspect(Math.round(aspect.width), Math.round(aspect.height));
+  const ratio = Math.max(reduced.width, reduced.height) / Math.min(reduced.width, reduced.height);
+  if (ratio > 3) throw new Error("4K image aspect ratio must be 3:1 or narrower.");
+  if (reduced.width === 3 && reduced.height === 2) {
+    const size = { width: 3520, height: 2336 };
+    validate4kImageSize(size);
+    return size;
+  }
+  if (reduced.width === 2 && reduced.height === 3) {
+    const size = { width: 2336, height: 3520 };
+    validate4kImageSize(size);
+    return size;
+  }
+
+  const maxScaleByEdge = Math.floor(MAX_GPT_IMAGE_EDGE / Math.max(reduced.width, reduced.height));
+  const maxScaleByPixels = Math.floor(Math.sqrt(MAX_GPT_IMAGE_PIXELS / (reduced.width * reduced.height)));
+  let scale = Math.min(maxScaleByEdge, maxScaleByPixels);
+  scale -= scale % GPT_IMAGE_SIZE_MULTIPLE;
+  if (scale <= 0) throw new Error("4K image size could not satisfy backend constraints.");
+  const size = {
+    width: reduced.width * scale,
+    height: reduced.height * scale,
+  };
+  validate4kImageSize(size);
+  return size;
+}
+
+export function validate4kImageSize(size: ImageSize): void {
+  if (size.width % GPT_IMAGE_SIZE_MULTIPLE !== 0 || size.height % GPT_IMAGE_SIZE_MULTIPLE !== 0) {
+    throw new Error("4K image size edges must be multiples of 16.");
+  }
+  if (Math.max(size.width, size.height) > MAX_GPT_IMAGE_EDGE) {
+    throw new Error("4K image size exceeds backend max edge.");
+  }
+  const ratio = Math.max(size.width, size.height) / Math.min(size.width, size.height);
+  if (ratio > 3) throw new Error("4K image size exceeds backend aspect ratio limit.");
+  if (size.width * size.height > MAX_GPT_IMAGE_PIXELS) {
+    throw new Error("4K image size exceeds backend pixel limit.");
+  }
+}
+
+function formatImageSize(size: ImageSize): string {
+  return `${size.width}x${size.height}`;
+}
+
+async function imageSizeFromBuffer(buffer: Buffer): Promise<string | undefined> {
+  try {
+    const meta = await sharp(buffer).metadata();
+    return `${meta.width}x${meta.height}`;
+  } catch {
+    return undefined;
+  }
 }
 
 function redactDiagnosticValue(value: unknown, depth = 0): unknown {
@@ -292,14 +434,39 @@ export function buildCodexImageRequestBody(input: {
 
 export function buildCodexDirectImageRequestBody(input: {
   prompt: string;
+  model?: string;
   imageGenerationQuality?: ImageGenerationQuality;
+  size?: string;
+  outputFormat?: OutputFormat;
 }): Record<string, unknown> {
   return {
     prompt: input.prompt,
-    model: BACKEND_IMAGE_MODEL,
+    model: input.model ?? BACKEND_IMAGE_MODEL,
     n: 1,
     quality: input.imageGenerationQuality ?? DEFAULT_IMAGE_QUALITY,
-    size: DEFAULT_IMAGE_SIZE,
+    size: input.size ?? DEFAULT_IMAGE_SIZE,
+    output_format: input.outputFormat ?? DEFAULT_OUTPUT_FORMAT,
+  };
+}
+
+export function buildCodexDirectImageEditRequestBody(input: {
+  prompt: string;
+  referenceImages: ReferenceImageInput[];
+  model?: string;
+  imageGenerationQuality?: ImageGenerationQuality;
+  size?: string;
+  outputFormat?: OutputFormat;
+}): Record<string, unknown> {
+  return {
+    prompt: input.prompt,
+    model: input.model ?? BACKEND_IMAGE_MODEL,
+    n: 1,
+    quality: input.imageGenerationQuality ?? DEFAULT_IMAGE_QUALITY,
+    size: input.size ?? DEFAULT_IMAGE_SIZE,
+    output_format: input.outputFormat ?? DEFAULT_OUTPUT_FORMAT,
+    images: input.referenceImages.map((image) => ({
+      image_url: `data:${image.mimeType};base64,${image.data}`,
+    })),
   };
 }
 
@@ -578,6 +745,8 @@ export function parseCodexDirectImageResponse(value: unknown): ParsedCodexRespon
 async function requestDirectImage(input: {
   prompt: string;
   imageGenerationQuality: ImageGenerationQuality;
+  size?: string;
+  outputFormat: OutputFormat;
   token: string;
   accountId: string;
   fetchFn: typeof fetch;
@@ -617,6 +786,51 @@ async function requestDirectImage(input: {
   throw new Error("Codex direct image generation request failed after all retries.");
 }
 
+async function requestDirectImageEdit(input: {
+  prompt: string;
+  imageGenerationQuality: ImageGenerationQuality;
+  size?: string;
+  outputFormat: OutputFormat;
+  referenceImages: ReferenceImageInput[];
+  token: string;
+  accountId: string;
+  fetchFn: typeof fetch;
+  signal?: AbortSignal;
+}): Promise<ParsedCodexResponse> {
+  const body = JSON.stringify(buildCodexDirectImageEditRequestBody(input));
+  const headers = buildCodexHeaders({
+    token: input.token,
+    accountId: input.accountId,
+    accept: "application/json",
+  });
+
+  for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt += 1) {
+    if (input.signal?.aborted === true) throw new Error("Image generation was aborted.");
+
+    const response = await input.fetchFn(CODEX_IMAGES_EDITS_URL, {
+      method: "POST",
+      headers,
+      body,
+      signal: input.signal,
+    });
+
+    if (response.ok) {
+      const parsed = parseCodexDirectImageResponse(await response.json());
+      parsed.responseHeaders = diagnosticHeaders(response);
+      return parsed;
+    }
+
+    const errorText = await response.text();
+    if (attempt <= MAX_RETRIES && isRetryableStatus(response.status, errorText)) {
+      await sleepMs(backoffMs(attempt), input.signal);
+      continue;
+    }
+    throw new Error(`Codex direct image edit request failed (${response.status}): ${errorText}`);
+  }
+
+  throw new Error("Codex direct image edit request failed after all retries.");
+}
+
 function applyPartialImageFallback(parsed: ParsedCodexResponse): void {
   if (parsed.image !== undefined || parsed.lastPartialImage === undefined) return;
   parsed.image = {
@@ -646,6 +860,7 @@ async function requestImage(input: {
   model: string;
   outputFormat: OutputFormat;
   imageGenerationQuality: ImageGenerationQuality;
+  is4k: boolean;
   referenceImages: ReferenceImageInput[];
   sessionId?: string;
   enableDirectImageFallback?: boolean;
@@ -653,6 +868,35 @@ async function requestImage(input: {
   signal?: AbortSignal;
   logger?: Logger;
 }): Promise<ParsedImageResult> {
+  if (input.is4k) {
+    const aspect = input.referenceImages[0] !== undefined
+      ? { width: input.referenceImages[0].width, height: input.referenceImages[0].height }
+      : infer4kAspectRatio(input.prompt);
+    const size = formatImageSize(calculate4kImageSize(aspect));
+    input.logger?.info("requesting Codex 4K image route", {
+      model: input.model,
+      backendImageModel: BACKEND_IMAGE_MODEL,
+      outputFormat: input.outputFormat,
+      is4k: true,
+      transport: input.referenceImages.length > 0 ? "direct-edits" : "direct-images",
+      requestedSize: size,
+      referenceImageIds: input.referenceImages.map((image) => image.id),
+    });
+    const directInput = {
+      ...input,
+      imageGenerationQuality: FOUR_K_IMAGE_QUALITY,
+      size,
+    };
+    const parsed = input.referenceImages.length > 0
+      ? await requestDirectImageEdit(directInput)
+      : await requestDirectImage(directInput);
+    return {
+      ...parsed,
+      transport: input.referenceImages.length > 0 ? "direct-edits" : "direct-images",
+      requestedSize: size,
+    };
+  }
+
   const responsesParsed = await requestResponsesImage(input);
   applyPartialImageFallback(responsesParsed);
   if (responsesParsed.image !== undefined) {
@@ -663,6 +907,7 @@ async function requestImage(input: {
     model: input.model,
     backendImageModel: BACKEND_IMAGE_MODEL,
     outputFormat: input.outputFormat,
+    is4k: input.is4k,
     responseId: responsesParsed.responseId,
     failure: responsesParsed.failure,
     failureEvent: responsesParsed.failureEvent,
@@ -671,7 +916,7 @@ async function requestImage(input: {
     diagnosticEvents: responsesParsed.diagnosticEvents,
   });
 
-  if (input.referenceImages.length > 0 || input.outputFormat !== "png" || input.enableDirectImageFallback !== true) {
+  if (input.referenceImages.length > 0 || input.enableDirectImageFallback !== true) {
     return { ...responsesParsed, transport: "responses-tool" };
   }
 
@@ -679,6 +924,7 @@ async function requestImage(input: {
     model: input.model,
     backendImageModel: BACKEND_IMAGE_MODEL,
     outputFormat: input.outputFormat,
+    is4k: input.is4k,
     responseId: responsesParsed.responseId,
   });
 
@@ -691,6 +937,7 @@ async function requestImage(input: {
       model: input.model,
       backendImageModel: BACKEND_IMAGE_MODEL,
       outputFormat: input.outputFormat,
+      is4k: input.is4k,
       responsesFailure: codexFailureMessage(responsesParsed),
       directFailure,
     });
@@ -764,6 +1011,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
       const p = params as {
         prompt: string;
         output_format?: unknown;
+        "4k"?: unknown;
         image_ids?: unknown;
         separate_job?: unknown;
         allows_group_corrections?: unknown;
@@ -772,6 +1020,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
       const prompt = p.prompt.trim();
       if (prompt === "") throw new Error("Image prompt must not be empty.");
       const output = outputFormat(p.output_format);
+      const is4k = p["4k"] === true;
       const imageIds = parseImageIds(p.image_ids);
       if (deps.enqueueImageJob !== undefined) {
         const replacesJobId = typeof p.replaces_job_id === "string" && p.replaces_job_id.trim() !== ""
@@ -779,9 +1028,10 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
           : undefined;
         const enqueueResult = deps.enqueueImageJob({
           prompt,
-          promptHash: promptHash(prompt, imageIds),
+          promptHash: promptHash(prompt, imageIds, is4k),
           imageIds,
           outputFormat: output,
+          is4k,
           separateJob: p.separate_job === true,
           allowsGroupCorrections: p.allows_group_corrections === true,
           ...(replacesJobId !== undefined ? { replacesJobId } : {}),
@@ -800,6 +1050,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
               asyncJobId: enqueueResult.job.id,
               asyncJobStatus: enqueueResult.job.status,
               asyncJobCreated: false,
+              is4k,
               reason: enqueueResult.reason,
             },
           };
@@ -817,6 +1068,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
             asyncJobId: enqueueResult.job.id,
             asyncJobStatus: enqueueResult.job.status,
             asyncJobCreated: true,
+            is4k,
           },
         };
       }
@@ -829,6 +1081,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         accountId,
         model: deps.model,
         outputFormat: output,
+        is4k,
         imageGenerationQuality: deps.imageGenerationQuality,
         referenceImages,
         sessionId: deps.sessionId,
@@ -870,6 +1123,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
 
       const buffer = Buffer.from(parsed.image.result, "base64");
       const actualMime = imageMimeFromBuffer(buffer, mimeForFormat(output));
+      const actualSize = await imageSizeFromBuffer(buffer);
       const attachmentId = randomUUID();
       const filename = `codex-image-${attachmentId}.${imageExtensionForMime(actualMime)}`;
       deps.onGeneratedImage({
@@ -879,11 +1133,18 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         contentType: actualMime,
         prompt,
         revisedPrompt: parsed.image.revisedPrompt,
+        requestedSize: parsed.requestedSize,
+        actualSize,
+        transport: parsed.transport,
+        is4k,
       });
 
       const summary = [
         `Generated image via openai-codex/${deps.model} using backend ${BACKEND_IMAGE_MODEL}.`,
         `Transport: ${parsed.transport}.`,
+        `4K: ${is4k ? "yes" : "no"}.`,
+        parsed.requestedSize !== undefined ? `Requested size: ${parsed.requestedSize}.` : "",
+        actualSize !== undefined ? `Actual size: ${actualSize}.` : "",
         `Attachment ID: ${attachmentId}.`,
         referenceImages.length > 0 ? `Reference ImageIDs: [${referenceImages.map((image) => image.id).join(", ")}].` : "",
         `Status: ${parsed.image.status}.`,
@@ -904,6 +1165,9 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
           imageGenerationId: parsed.image.id,
           revisedPrompt: parsed.image.revisedPrompt,
           transport: parsed.transport,
+          is4k,
+          requestedSize: parsed.requestedSize,
+          actualSize,
           usage: parsed.usage,
         },
       };

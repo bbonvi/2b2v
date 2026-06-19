@@ -20,6 +20,7 @@ function enqueue(store: AgentJobStore, overrides: Partial<Parameters<AgentJobSto
     promptHash: "hash-1",
     imageIds: [],
     outputFormat: "png",
+    is4k: false,
     separateJob: false,
     allowsGroupCorrections: false,
     ...overrides,

@@ -11,6 +11,7 @@ export interface ImageGenerationJobInput {
   promptHash: string;
   imageIds: number[];
   outputFormat: "png" | "jpeg" | "webp";
+  is4k: boolean;
   separateJob: boolean;
   allowsGroupCorrections: boolean;
   replacesJobId?: string;
@@ -21,6 +22,10 @@ export interface ImageGenerationJobResult {
   filename?: string;
   contentType?: string;
   revisedPrompt?: string;
+  requestedSize?: string;
+  actualSize?: string;
+  transport?: string;
+  is4k?: boolean;
 }
 
 export interface AgentJob {
@@ -65,6 +70,7 @@ export interface EnqueueImageJobInput {
   promptHash: string;
   imageIds: number[];
   outputFormat: "png" | "jpeg" | "webp";
+  is4k: boolean;
   separateJob: boolean;
   allowsGroupCorrections: boolean;
   replacesJobId?: string;
@@ -128,6 +134,7 @@ export class AgentJobStore {
         promptHash: input.promptHash,
         imageIds: input.imageIds,
         outputFormat: input.outputFormat,
+        is4k: input.is4k,
         separateJob: input.separateJob,
         allowsGroupCorrections: input.allowsGroupCorrections,
         ...(input.replacesJobId !== undefined ? { replacesJobId: input.replacesJobId } : {}),
@@ -247,7 +254,7 @@ export class AgentJobStore {
   annotationForMessage(messageId: string, guildId: string, channelId: string, now = Date.now()): string[] {
     const jobs = this.listVisible(guildId, channelId, now)
       .filter((job) => job.sourceMessageId === messageId);
-    return jobs.map((job) => `ImageJob: ${job.id} ${job.status}`);
+    return jobs.map((job) => `ImageJob: ${job.id} ${job.status}${job.input.is4k ? " 4K" : ""}`);
   }
 
   private isActive(job: AgentJob): boolean {

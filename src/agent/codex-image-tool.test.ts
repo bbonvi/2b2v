@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildCodexDirectImageEditRequestBody,
   buildCodexDirectImageRequestBody,
   buildCodexHeaders,
   buildCodexImageRequestBody,
   buildCodexResponsesImageHeaders,
+  calculate4kImageSize,
   codexImageFailureMessageForAgent,
+  createCodexGenerateImageTool,
+  infer4kAspectRatio,
   parseCodexDirectImageResponse,
   parseCodexImageSse,
 } from "./codex-image-tool.ts";
@@ -256,13 +260,142 @@ describe("buildCodexDirectImageRequestBody", () => {
     expect(buildCodexDirectImageRequestBody({
       prompt: "a polished icon",
       imageGenerationQuality: "high",
+      size: "2880x2880",
+      outputFormat: "webp",
     })).toEqual({
       prompt: "a polished icon",
       model: "gpt-image-2",
       n: 1,
       quality: "high",
-      size: "auto",
+      size: "2880x2880",
+      output_format: "webp",
     });
+  });
+});
+
+describe("buildCodexDirectImageEditRequestBody", () => {
+  test("builds the JSON edit request with data URL reference images", () => {
+    expect(buildCodexDirectImageEditRequestBody({
+      prompt: "make this a print-resolution poster",
+      imageGenerationQuality: "high",
+      size: "3520x2336",
+      outputFormat: "webp",
+      referenceImages: [{
+        id: 7,
+        data: "aW1hZ2U=",
+        mimeType: "image/webp",
+        width: 1200,
+        height: 800,
+      }],
+    })).toEqual({
+      prompt: "make this a print-resolution poster",
+      model: "gpt-image-2",
+      n: 1,
+      quality: "high",
+      size: "3520x2336",
+      output_format: "webp",
+      images: [{ image_url: "data:image/webp;base64,aW1hZ2U=" }],
+    });
+  });
+});
+
+describe("4K image sizing", () => {
+  test("infers conservative prompt aspects", () => {
+    expect(infer4kAspectRatio("cinematic wallpaper of neon streets")).toEqual({ width: 16, height: 9 });
+    expect(infer4kAspectRatio("vertical phone portrait selfie")).toEqual({ width: 9, height: 16 });
+    expect(infer4kAspectRatio("profile avatar icon")).toEqual({ width: 1, height: 1 });
+    expect(infer4kAspectRatio("fantasy poster key art")).toEqual({ width: 3, height: 2 });
+    expect(infer4kAspectRatio("a cozy cabin")).toEqual({ width: 1, height: 1 });
+  });
+
+  test("calculates valid maximum 4K-ish sizes", () => {
+    expect(calculate4kImageSize({ width: 16, height: 9 })).toEqual({ width: 3840, height: 2160 });
+    expect(calculate4kImageSize({ width: 9, height: 16 })).toEqual({ width: 2160, height: 3840 });
+    expect(calculate4kImageSize({ width: 1, height: 1 })).toEqual({ width: 2880, height: 2880 });
+    expect(calculate4kImageSize({ width: 3, height: 2 })).toEqual({ width: 3520, height: 2336 });
+  });
+});
+
+describe("createCodexGenerateImageTool", () => {
+  test("defaults async image jobs to WebP and non-4K", async () => {
+    let observed: { outputFormat: string; is4k: boolean } | undefined;
+    const tool = createCodexGenerateImageTool({
+      codexAuthPath: "unused",
+      model: "gpt-5.5",
+      imageReadMaxPerCall: 2,
+      imageGenerationQuality: "auto",
+      getImageById: () => null,
+      readFile: () => null,
+      onGeneratedImage: () => {},
+      enqueueImageJob: (input) => {
+        observed = { outputFormat: input.outputFormat, is4k: input.is4k };
+        return {
+          created: true,
+          reason: "created",
+          job: {
+            id: "img-1",
+            kind: "image_generation",
+            guildId: "g1",
+            channelId: "c1",
+            requesterId: "u1",
+            requesterUsername: "alice",
+            sourceMessageId: "m1",
+            sourceQuote: "make an image",
+            status: "queued",
+            createdAt: 1,
+            input,
+            replacementCount: 0,
+          },
+        };
+      },
+    });
+
+    const result = await tool.execute("call-1", { prompt: "a blue house" });
+
+    expect(result.details).toMatchObject({
+      asyncJobId: "img-1",
+      asyncJobCreated: true,
+      is4k: false,
+    });
+    expect(observed).toEqual({ outputFormat: "webp", is4k: false });
+  });
+
+  test("propagates explicit 4K async job requests", async () => {
+    let observed: { outputFormat: string; is4k: boolean } | undefined;
+    const tool = createCodexGenerateImageTool({
+      codexAuthPath: "unused",
+      model: "gpt-5.5",
+      imageReadMaxPerCall: 2,
+      imageGenerationQuality: "auto",
+      getImageById: () => null,
+      readFile: () => null,
+      onGeneratedImage: () => {},
+      enqueueImageJob: (input) => {
+        observed = { outputFormat: input.outputFormat, is4k: input.is4k };
+        return {
+          created: true,
+          reason: "created",
+          job: {
+            id: "img-1",
+            kind: "image_generation",
+            guildId: "g1",
+            channelId: "c1",
+            requesterId: "u1",
+            requesterUsername: "alice",
+            sourceMessageId: "m1",
+            sourceQuote: "make an image",
+            status: "queued",
+            createdAt: 1,
+            input,
+            replacementCount: 0,
+          },
+        };
+      },
+    });
+
+    await tool.execute("call-1", { prompt: "a blue house", "4k": true });
+
+    expect(observed).toEqual({ outputFormat: "webp", is4k: true });
   });
 });
 
