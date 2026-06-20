@@ -72,6 +72,13 @@ export { createBraveSearchTool, type BraveSearchToolDeps, type BraveSearchResult
 
 export { createReadChatImagesTool, type ReadChatImagesToolDeps } from "./read-chat-images-tool.ts";
 
+export {
+  createReadUserAvatarTool,
+  type AvatarSize,
+  type ReadUserAvatarToolDeps,
+  type ResolvedUserAvatar,
+} from "./read-user-avatar-tool.ts";
+
 export { createFetchImagesTool, type FetchImagesToolDeps } from "./fetch-images-tool.ts";
 
 export {

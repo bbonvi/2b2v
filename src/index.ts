@@ -49,6 +49,7 @@ import { createUserMemoryTool } from "./agent/user-memory-tool";
 import { createChatHistoryTool } from "./agent/chat-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
 import { createReadChatImagesTool } from "./agent/read-chat-images-tool";
+import { createReadUserAvatarTool, type AvatarSize } from "./agent/read-user-avatar-tool";
 import { createFetchImagesTool } from "./agent/fetch-images-tool";
 import { createCodexGenerateImageTool, type GeneratedImageAttachment } from "./agent/codex-image-tool";
 import { AgentJobStore, createCancelAgentJobTool, isActiveJobStatus, type AgentJob, type ImageGenerationJobResult } from "./agent/job-runtime";
@@ -77,7 +78,7 @@ import { createHash } from "node:crypto";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch, unlinkSync } from "fs";
 import type { Database } from "./db/database";
-import { AttachmentBuilder, ChannelType, MessageFlags, PermissionFlagsBits, type ChatInputCommandInteraction, type Client, type Guild, type GuildBasedChannel, type GuildTextBasedChannel, type Message, type MessageReaction, type PartialMessage, type PartialMessageReaction, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
+import { AttachmentBuilder, ChannelType, MessageFlags, PermissionFlagsBits, type ChatInputCommandInteraction, type Client, type Guild, type GuildBasedChannel, type GuildMember, type GuildTextBasedChannel, type Message, type MessageReaction, type PartialMessage, type PartialMessageReaction, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
 
 const pkg = await Bun.file(new URL("../package.json", import.meta.url).pathname).json() as { version?: string };
 const CONTEXT_IMAGE_MAX_DIMENSION = 1024;
@@ -1728,6 +1729,35 @@ function resolveGuildUsername(guild: Guild, username: string): string | undefine
   return member?.id;
 }
 
+/** Resolve a guild member by raw mention, user ID, username, or @username. */
+async function resolveGuildMemberReference(guild: Guild, reference: string): Promise<GuildMember | undefined> {
+  const trimmed = reference.trim();
+  if (trimmed === "") return undefined;
+
+  const mentionId = /^<@!?(\d+)>$/.exec(trimmed)?.[1];
+  const directUserId = /^\d{17,20}$/.test(trimmed) ? trimmed : undefined;
+  const userId = mentionId ?? directUserId;
+  if (userId !== undefined) {
+    const cached = guild.members.cache.get(userId);
+    if (cached !== undefined) return cached;
+    try {
+      return await guild.members.fetch(userId);
+    } catch {
+      return undefined;
+    }
+  }
+
+  const cachedUsername = resolveGuildUsername(guild, trimmed);
+  if (cachedUsername !== undefined) return guild.members.cache.get(cachedUsername);
+  try {
+    await guild.members.fetch();
+  } catch {
+    // Cache-only fallback below handles missing permissions.
+  }
+  const fetchedUsername = resolveGuildUsername(guild, trimmed);
+  return fetchedUsername !== undefined ? guild.members.cache.get(fetchedUsername) : undefined;
+}
+
 // --- 18. Refresh emoji cache for a guild ---
 function mapGuildEmojis(guild: Guild): EmojiEntry[] {
   return guild.emojis.cache.map((e) => ({
@@ -2349,6 +2379,23 @@ function buildAgentTools(
       prepareImageBufferForContext(buffer, mimeType, CONTEXT_IMAGE_MAX_DIMENSION),
   });
 
+  const readUserAvatarTool = createReadUserAvatarTool({
+    resolveUserAvatar: async (reference: string, size: AvatarSize) => {
+      const member = await resolveGuildMemberReference(guild, reference);
+      if (member === undefined) return null;
+      return {
+        userId: member.id,
+        username: member.user.username,
+        displayName: member.displayName,
+        avatarUrl: member.displayAvatarURL({ extension: "png", forceStatic: true, size }),
+        requestedSize: size,
+      };
+    },
+    fetchFn: async (url) => await fetch(url),
+    prepareImageForContext: (buffer, mimeType) =>
+      prepareImageBufferForContext(buffer, mimeType, CONTEXT_IMAGE_MAX_DIMENSION),
+  });
+
   const fetchImagesTool = createFetchImagesTool({
     maxImagesPerCall: 5,
     maxDimension: CONTEXT_IMAGE_MAX_DIMENSION,
@@ -2393,7 +2440,7 @@ function buildAgentTools(
     },
   });
 
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, userMemoryTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, userMemoryTool, chatHistoryTool, readChatImagesTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (includeImageGenerationTools) {
     const codexImageModel = guildConfig.llmProvider === "openai-codex"
       ? guildConfig.model ?? globalConfig.defaultModel
