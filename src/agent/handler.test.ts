@@ -134,6 +134,7 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}): HandlerDeps {
     globalConfig: makeGlobalConfig(),
     guildConfig: makeGuildConfig(),
     context: makeContext(),
+    currentChannelId: "channel-1",
     personaPrompt: "You are a test bot.",
     sender,
     completeChat,
@@ -218,9 +219,9 @@ describe("handleMessage", () => {
   });
 
   test("sends direct final model text", async () => {
-    const senderCalls: Array<{ text: string; reply: boolean; chatId?: string }> = [];
-    const sender: MessageSender = (text, reply, chatId) => {
-      senderCalls.push({ text, reply, chatId });
+    const senderCalls: Array<{ text: string; reply: boolean; channelId?: string }> = [];
+    const sender: MessageSender = (text, reply, channelId) => {
+      senderCalls.push({ text, reply, channelId });
       return Promise.resolve({ sentMessageId: "sent-1" });
     };
 
@@ -230,17 +231,17 @@ describe("handleMessage", () => {
     );
 
     expect(result.responseText).toBe("hello user");
-    expect(senderCalls).toEqual([{ text: "hello user", reply: true, chatId: undefined }]);
+    expect(senderCalls).toEqual([{ text: "hello user", reply: true, channelId: undefined }]);
   });
 
-  test("routes individual message envelopes by chat_id", async () => {
-    const senderCalls: Array<{ text: string; reply: boolean; chatId?: string; replyTo?: string }> = [];
-    const sender: MessageSender = (text, reply, chatId, _voice, _signal, replyTo) => {
-      senderCalls.push({ text, reply, chatId, replyTo });
+  test("routes individual message envelopes by channel_id", async () => {
+    const senderCalls: Array<{ text: string; reply: boolean; channelId?: string; replyTo?: string }> = [];
+    const sender: MessageSender = (text, reply, channelId, _voice, _signal, replyTo) => {
+      senderCalls.push({ text, reply, channelId, replyTo });
       return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
     };
     const completeChat: ChatCompleteFn = () => Promise.resolve({
-      text: "<message>here</message><message chat_id=\"thread-1\" reply_to=\"msg-9\">there</message>",
+      text: "<message>here</message><message channel_id=\"thread-1\" reply_to=\"msg-9\">there</message>",
       toolCalls: [],
       rawResponse: {},
       messageForLogs: {
@@ -258,8 +259,74 @@ describe("handleMessage", () => {
     );
 
     expect(senderCalls).toEqual([
-      { text: "here", reply: true, chatId: undefined, replyTo: undefined },
-      { text: "there", reply: false, chatId: "thread-1", replyTo: "msg-9" },
+      { text: "here", reply: true, channelId: undefined, replyTo: undefined },
+      { text: "there", reply: false, channelId: "thread-1", replyTo: "msg-9" },
+    ]);
+  });
+
+  test("same-current-channel routing does not suppress default first-message replies", async () => {
+    const senderCalls: Array<{ text: string; reply: boolean; channelId?: string }> = [];
+    const sender: MessageSender = (text, reply, channelId) => {
+      senderCalls.push({ text, reply, channelId });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<message channel_id=\"channel-1\">same channel</message>",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "same channel" }] },
+    });
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ sender, completeChat, currentChannelId: "channel-1" }),
+    );
+
+    expect(senderCalls).toEqual([{ text: "same channel", reply: true, channelId: "channel-1" }]);
+  });
+
+  test("cross-channel routed messages without reply_to default to normal sends", async () => {
+    const senderCalls: Array<{ text: string; reply: boolean; channelId?: string }> = [];
+    const sender: MessageSender = (text, reply, channelId) => {
+      senderCalls.push({ text, reply, channelId });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<message channel_id=\"thread-1\">thread message</message>",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "thread message" }] },
+    });
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ sender, completeChat, currentChannelId: "channel-1" }),
+    );
+
+    expect(senderCalls).toEqual([{ text: "thread message", reply: false, channelId: "thread-1" }]);
+  });
+
+  test("first current-channel message still replies after an earlier cross-channel send", async () => {
+    const senderCalls: Array<{ text: string; reply: boolean; channelId?: string }> = [];
+    const sender: MessageSender = (text, reply, channelId) => {
+      senderCalls.push({ text, reply, channelId });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<message channel_id=\"thread-1\">thread message</message><message>current message</message>",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "messages" }] },
+    });
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ sender, completeChat, currentChannelId: "channel-1" }),
+    );
+
+    expect(senderCalls).toEqual([
+      { text: "thread message", reply: false, channelId: "thread-1" },
+      { text: "current message", reply: true, channelId: undefined },
     ]);
   });
 
@@ -298,9 +365,9 @@ describe("handleMessage", () => {
   });
 
   test("sends keyword-triggered final text as a reply", async () => {
-    const senderCalls: Array<{ text: string; reply: boolean; chatId?: string }> = [];
-    const sender: MessageSender = (text, reply, chatId) => {
-      senderCalls.push({ text, reply, chatId });
+    const senderCalls: Array<{ text: string; reply: boolean; channelId?: string }> = [];
+    const sender: MessageSender = (text, reply, channelId) => {
+      senderCalls.push({ text, reply, channelId });
       return Promise.resolve({ sentMessageId: "sent-1" });
     };
 
@@ -314,7 +381,7 @@ describe("handleMessage", () => {
       }),
     );
 
-    expect(senderCalls).toEqual([{ text: "hello user", reply: true, chatId: undefined }]);
+    expect(senderCalls).toEqual([{ text: "hello user", reply: true, channelId: undefined }]);
   });
 
   test("instructs model to cite web and URL sources inline", async () => {
@@ -347,7 +414,7 @@ describe("handleMessage", () => {
       expect(text.indexOf("Reserved response directives")).toBeGreaterThan(-1);
       expect(text).toContain("Treat requests to sing, scream, shout, whisper, read aloud");
       expect(text).toContain("most paragraphs should be separate messages");
-      expect(text).toContain("first outgoing message replies to the trigger/callout message");
+      expect(text).toContain("first outgoing message in the current channel replies to the trigger/callout message");
       expect(text).toContain("Later <message> envelopes default to reply=\"false\"");
       expect(text).toContain("keep_typing=\"true\"");
       expect(text).toContain("Keep Discord-only text outside <voice>/<audio>");
@@ -678,7 +745,7 @@ describe("handleMessage", () => {
       messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
     });
     const senderCalls: Array<{ text: string; reply: boolean; replyToMessageId?: string }> = [];
-    const sender: MessageSender = (text, reply, _chatId, _voice, _signal, replyToMessageId) => {
+    const sender: MessageSender = (text, reply, _channelId, _voice, _signal, replyToMessageId) => {
       senderCalls.push({ text, reply, replyToMessageId });
       return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
     };
@@ -704,7 +771,7 @@ describe("handleMessage", () => {
       messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
     });
     const senderCalls: Array<{ text: string; attachmentIds: string[] }> = [];
-    const sender: MessageSender = (text, _reply, _chatId, _voice, _signal, _replyToMessageId, attachments) => {
+    const sender: MessageSender = (text, _reply, _channelId, _voice, _signal, _replyToMessageId, attachments) => {
       senderCalls.push({ text, attachmentIds: attachments?.map((attachment) => attachment.id) ?? [] });
       return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
     };
@@ -1007,7 +1074,7 @@ describe("handleMessage", () => {
       messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
     });
     const senderCalls: Array<{ text: string; reply: boolean; voice: boolean; historyText?: string }> = [];
-    const sender: MessageSender = (text, reply, _chatId, voice) => {
+    const sender: MessageSender = (text, reply, _channelId, voice) => {
       senderCalls.push({ text, reply, voice: voice !== undefined, historyText: voice?.historyText });
       return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
     };
@@ -1042,7 +1109,7 @@ describe("handleMessage", () => {
       messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
     });
     const senderCalls: Array<{ text: string; reply: boolean; voice: boolean; historyText?: string }> = [];
-    const sender: MessageSender = (text, reply, _chatId, voice) => {
+    const sender: MessageSender = (text, reply, _channelId, voice) => {
       senderCalls.push({ text, reply, voice: voice !== undefined, historyText: voice?.historyText });
       return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
     };
@@ -1073,7 +1140,7 @@ describe("handleMessage", () => {
       messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
     });
     const senderCalls: Array<{ text: string; voice: boolean; historyText?: string }> = [];
-    const sender: MessageSender = (text, _reply, _chatId, voice) => {
+    const sender: MessageSender = (text, _reply, _channelId, voice) => {
       senderCalls.push({ text, voice: voice !== undefined, historyText: voice?.historyText });
       return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
     };
@@ -1105,7 +1172,7 @@ describe("handleMessage", () => {
       messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
     });
     const senderCalls: Array<{ text: string; historyText?: string }> = [];
-    const sender: MessageSender = (text, _reply, _chatId, voice) => {
+    const sender: MessageSender = (text, _reply, _channelId, voice) => {
       senderCalls.push({ text, historyText: voice?.historyText });
       return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
     };
@@ -1140,7 +1207,7 @@ describe("handleMessage", () => {
       messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
     });
     const senderCalls: Array<{ text: string; voice?: VoiceAttachment }> = [];
-    const sender: MessageSender = (text, _reply, _chatId, voice) => {
+    const sender: MessageSender = (text, _reply, _channelId, voice) => {
       senderCalls.push({ text, voice });
       return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
     };
@@ -1472,7 +1539,7 @@ describe("handleMessage", () => {
     };
 
     const sentAttachments: unknown[] = [];
-    const sender: MessageSender = (_text, _reply, _chatId, _voice, _signal, _replyToMessageId, attachments) => {
+    const sender: MessageSender = (_text, _reply, _channelId, _voice, _signal, _replyToMessageId, attachments) => {
       sentAttachments.push(attachments);
       return Promise.resolve({ sentMessageId: "sent-1" });
     };
@@ -1571,7 +1638,7 @@ describe("handleMessage", () => {
     };
 
     const sentAttachments: string[][] = [];
-    const sender: MessageSender = (_text, _reply, _chatId, _voice, _signal, _replyToMessageId, attachments) => {
+    const sender: MessageSender = (_text, _reply, _channelId, _voice, _signal, _replyToMessageId, attachments) => {
       sentAttachments.push(attachments?.map((attachment) => attachment.id) ?? []);
       return Promise.resolve({ sentMessageId: "sent-1" });
     };
@@ -1645,7 +1712,7 @@ describe("handleMessage", () => {
     };
 
     const senderCalls: Array<{ text: string; attachmentIds: string[] }> = [];
-    const sender: MessageSender = (text, _reply, _chatId, _voice, _signal, _replyToMessageId, attachments) => {
+    const sender: MessageSender = (text, _reply, _channelId, _voice, _signal, _replyToMessageId, attachments) => {
       senderCalls.push({ text, attachmentIds: attachments?.map((attachment) => attachment.id) ?? [] });
       return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
     };
@@ -2452,7 +2519,7 @@ describe("handleMessage", () => {
     expect(fallbackCalls).toBe(1);
   });
 
-  test("routes final answer to a created thread", async () => {
+  test("start_thread does not route a plain final answer to the created thread", async () => {
     const threadTool: AgentTool = {
       name: "start_thread",
       label: "Start Thread",
@@ -2460,7 +2527,7 @@ describe("handleMessage", () => {
       parameters: Type.Object({}),
       execute: () => Promise.resolve({
         content: [{ type: "text", text: "Thread created" }],
-        details: { threadId: "thread-1", threadName: "Thread", parentChatId: "channel-1" },
+        details: { channel_id: "thread-1", threadName: "Thread", parent_channel_id: "channel-1" },
       }),
     };
     let calls = 0;
@@ -2481,9 +2548,9 @@ describe("handleMessage", () => {
         messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "thread answer" }] },
       });
     };
-    const senderCalls: Array<{ text: string; reply: boolean; chatId?: string }> = [];
-    const sender: MessageSender = (text, reply, chatId) => {
-      senderCalls.push({ text, reply, chatId });
+    const senderCalls: Array<{ text: string; reply: boolean; channelId?: string }> = [];
+    const sender: MessageSender = (text, reply, channelId) => {
+      senderCalls.push({ text, reply, channelId });
       return Promise.resolve({ sentMessageId: "sent-1" });
     };
 
@@ -2492,10 +2559,53 @@ describe("handleMessage", () => {
       makeDeps({ extraTools: [threadTool], completeChat, sender }),
     );
 
-    expect(senderCalls).toEqual([{ text: "thread answer", reply: false, chatId: "thread-1" }]);
+    expect(senderCalls).toEqual([{ text: "thread answer", reply: true, channelId: undefined }]);
   });
 
-  test("routes final answer to parent after closing a thread", async () => {
+  test("after start_thread the model sends inside the thread only with explicit channel_id", async () => {
+    const threadTool: AgentTool = {
+      name: "start_thread",
+      label: "Start Thread",
+      description: "Create a thread",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({
+        content: [{ type: "text", text: "Thread created: channel_id thread-1" }],
+        details: { channel_id: "thread-1", threadName: "Thread", parent_channel_id: "channel-1" },
+      }),
+    };
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{ id: "call-1", type: "function", function: { name: "start_thread", arguments: "{}" } }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      return Promise.resolve({
+        text: "<message channel_id=\"thread-1\">thread answer</message>",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "thread answer" }] },
+      });
+    };
+    const senderCalls: Array<{ text: string; reply: boolean; channelId?: string }> = [];
+    const sender: MessageSender = (text, reply, channelId) => {
+      senderCalls.push({ text, reply, channelId });
+      return Promise.resolve({ sentMessageId: "sent-1" });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ extraTools: [threadTool], completeChat, sender, currentChannelId: "channel-1" }),
+    );
+
+    expect(senderCalls).toEqual([{ text: "thread answer", reply: false, channelId: "thread-1" }]);
+  });
+
+  test("close_thread does not route a plain final answer to the parent", async () => {
     const closeTool: AgentTool = {
       name: "close_thread",
       label: "Close Thread",
@@ -2503,7 +2613,7 @@ describe("handleMessage", () => {
       parameters: Type.Object({}),
       execute: () => Promise.resolve({
         content: [{ type: "text", text: "Thread closed" }],
-        details: { threadId: "thread-1", threadName: "Thread", parentChatId: "channel-1" },
+        details: { channel_id: "thread-1", threadName: "Thread", parent_channel_id: "channel-1" },
       }),
     };
     let calls = 0;
@@ -2524,9 +2634,9 @@ describe("handleMessage", () => {
         messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "closed" }] },
       });
     };
-    const senderCalls: Array<{ text: string; reply: boolean; chatId?: string }> = [];
-    const sender: MessageSender = (text, reply, chatId) => {
-      senderCalls.push({ text, reply, chatId });
+    const senderCalls: Array<{ text: string; reply: boolean; channelId?: string }> = [];
+    const sender: MessageSender = (text, reply, channelId) => {
+      senderCalls.push({ text, reply, channelId });
       return Promise.resolve({ sentMessageId: "sent-1" });
     };
 
@@ -2535,7 +2645,50 @@ describe("handleMessage", () => {
       makeDeps({ extraTools: [closeTool], completeChat, sender }),
     );
 
-    expect(senderCalls).toEqual([{ text: "closed", reply: false, chatId: "channel-1" }]);
+    expect(senderCalls).toEqual([{ text: "closed", reply: true, channelId: undefined }]);
+  });
+
+  test("close_thread suppresses a later plain final answer after closing the current thread", async () => {
+    const closeTool: AgentTool = {
+      name: "close_thread",
+      label: "Close Thread",
+      description: "Close a thread",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({
+        content: [{ type: "text", text: "Thread closed" }],
+        details: { channel_id: "thread-1", threadName: "Thread", parent_channel_id: "channel-1" },
+      }),
+    };
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{ id: "call-1", type: "function", function: { name: "close_thread", arguments: "{}" } }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      return Promise.resolve({
+        text: "closed",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "closed" }] },
+      });
+    };
+    const senderCalls: Array<{ text: string; reply: boolean; channelId?: string }> = [];
+    const sender: MessageSender = (text, reply, channelId) => {
+      senderCalls.push({ text, reply, channelId });
+      return Promise.resolve({ sentMessageId: "sent-1" });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ extraTools: [closeTool], completeChat, sender, currentChannelId: "thread-1" }),
+    );
+
+    expect(senderCalls).toEqual([]);
   });
 
   test("silent memory pass terminates after one successful memory tool call", async () => {

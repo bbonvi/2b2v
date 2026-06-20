@@ -267,17 +267,17 @@ describe("formatMessageLine", () => {
 describe("synthetic event formatting", () => {
   test("synthetic event outputs content directly without author prefix", () => {
     const syntheticMsg = msg({
-      content: "Event: Thread created — Support Thread (thread_id: 123456)",
+      content: "Event: Thread created — Support Thread (channel_id: 123456)",
       isSynthetic: true,
       relatedThreadId: "123456",
     });
     const input: FormatInput = { message: syntheticMsg, reply: null, captioningEnabled: false };
-    expect(formatMessageLine(input)).toBe("Event: Thread created — Support Thread (thread_id: 123456)");
+    expect(formatMessageLine(input)).toBe("Event: Thread created — Support Thread (channel_id: 123456)");
   });
 
   test("synthetic event ignores reply context", () => {
     const syntheticMsg = msg({
-      content: "Event: Thread created — Help (thread_id: 789)",
+      content: "Event: Thread created — Help (channel_id: 789)",
       isSynthetic: true,
       relatedThreadId: "789",
       replyToId: "some-msg", // Should be ignored
@@ -292,7 +292,7 @@ describe("synthetic event formatting", () => {
     };
     const input: FormatInput = { message: syntheticMsg, reply, captioningEnabled: false };
     // Output is raw content, not formatted with reply metadata
-    expect(formatMessageLine(input)).toBe("Event: Thread created — Help (thread_id: 789)");
+    expect(formatMessageLine(input)).toBe("Event: Thread created — Help (channel_id: 789)");
   });
 });
 

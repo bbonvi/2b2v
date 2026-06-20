@@ -8,8 +8,8 @@ const StartThreadParams = Type.Object({
 });
 
 const CloseThreadParams = Type.Object({
-  thread_id: Type.Optional(
-    Type.String({ description: "Thread id to close. Omit when closing the current thread from inside it." })
+  channel_id: Type.Optional(
+    Type.String({ description: "Bot-created thread channel ID to archive. Omit only when closing the current channel and the current channel is a thread." })
   ),
 });
 
@@ -18,16 +18,16 @@ export type CloseThreadInput = Static<typeof CloseThreadParams>;
 
 /** Details returned from the start_thread tool execution. */
 export interface StartThreadDetails {
-  threadId: string;
+  channel_id: string;
   threadName: string;
-  parentChatId: string;
+  parent_channel_id: string;
 }
 
 /** Details returned from the close_thread tool execution. */
 export interface CloseThreadDetails {
-  threadId: string;
+  channel_id: string;
   threadName: string;
-  parentChatId: string;
+  parent_channel_id: string;
 }
 
 /**
@@ -37,7 +37,7 @@ export interface CloseThreadDetails {
 export type ThreadCreator = (name: string) => Promise<{
   threadId: string;
   threadName: string;
-  parentChatId: string;
+  parentChannelId: string;
   starterMessageId: string;
 }>;
 
@@ -47,7 +47,7 @@ export type ThreadCreator = (name: string) => Promise<{
 export type ThreadPersister = (input: {
   threadId: string;
   guildId: string;
-  parentChatId: string;
+  parentChannelId: string;
   starterMessageId: string;
   threadName: string;
 }) => void;
@@ -59,7 +59,7 @@ export type ThreadPersister = (input: {
 export type ThreadSuccessCallback = (payload: {
   threadId: string;
   threadName: string;
-  parentChatId: string;
+  parentChannelId: string;
 }) => void;
 
 /** Metadata lookup used by close_thread to enforce bot-created ownership. */
@@ -67,7 +67,7 @@ export type ThreadMetadataLookup = (threadId: string) => {
   threadId: string;
   guildId: string;
   threadName: string;
-  parentChatId: string;
+  parentChannelId: string;
   createdByBot: boolean;
 } | null;
 
@@ -75,7 +75,7 @@ export type ThreadMetadataLookup = (threadId: string) => {
 export type ThreadCloser = (threadId: string) => Promise<{
   threadId: string;
   threadName: string;
-  parentChatId: string;
+  parentChannelId: string;
 }>;
 
 /** Callback that persists local archived state after Discord closes a thread. */
@@ -116,7 +116,7 @@ export function createStartThreadTool(deps: StartThreadToolDeps): AgentTool {
     name: "start_thread",
     label: "Start Thread",
     description:
-      "Create a new thread attached to the trigger message. Use when the final answer should continue in a separate thread (long discussions or to avoid cluttering the main chat). Runtime sends your final answer to the created thread.",
+      "Create a new thread attached to the trigger message. Use when the user asked for a thread or approved moving a focused discussion out of the current channel. Creating a thread does not route later messages; send inside it with <message channel_id=\"RETURNED_CHANNEL_ID\">...</message>.",
     parameters: StartThreadParams,
     execute: async (
       _toolCallId,
@@ -141,7 +141,7 @@ export function createStartThreadTool(deps: StartThreadToolDeps): AgentTool {
         persistThread({
           threadId: result.threadId,
           guildId,
-          parentChatId: result.parentChatId,
+          parentChannelId: result.parentChannelId,
           starterMessageId: result.starterMessageId,
           threadName: result.threadName,
         });
@@ -157,7 +157,7 @@ export function createStartThreadTool(deps: StartThreadToolDeps): AgentTool {
         onSuccess({
           threadId: result.threadId,
           threadName: result.threadName,
-          parentChatId: result.parentChatId,
+          parentChannelId: result.parentChannelId,
         });
       }
 
@@ -165,13 +165,13 @@ export function createStartThreadTool(deps: StartThreadToolDeps): AgentTool {
         content: [
           {
             type: "text",
-            text: `Thread created: "${result.threadName}" (thread_id: ${result.threadId}, parent_chat_id: ${result.parentChatId}). Runtime will send the final answer to this thread.`,
+            text: `Thread created: "${result.threadName}" (channel_id: ${result.threadId}, parent_channel_id: ${result.parentChannelId}). To send inside this thread, use <message channel_id="${result.threadId}">...</message>.`,
           },
         ],
         details: {
-          threadId: result.threadId,
+          channel_id: result.threadId,
           threadName: result.threadName,
-          parentChatId: result.parentChatId,
+          parent_channel_id: result.parentChannelId,
         },
       };
     },
@@ -187,16 +187,16 @@ export function createCloseThreadTool(deps: CloseThreadToolDeps): AgentTool {
     name: "close_thread",
     label: "Close Thread",
     description:
-      "Archive a bot-created Discord thread. Omit thread_id from inside the thread; from a parent channel provide a visible thread_id. Use only after checking context/history enough to avoid closing a side thread for an unrelated bystander.",
+      "Archive a bot-created Discord thread by its channel_id. Omit channel_id only when closing the current channel and the current channel is a thread. Use only after checking context/history enough to avoid closing a side thread for an unrelated bystander.",
     parameters: CloseThreadParams,
     execute: async (
       _toolCallId,
       params
     ): Promise<AgentToolResult<CloseThreadDetails | { error: string }>> => {
       const p = params as CloseThreadInput;
-      const trimmedThreadId = p.thread_id?.trim();
-      const threadId = trimmedThreadId !== undefined && trimmedThreadId !== ""
-        ? trimmedThreadId
+      const trimmedChannelId = p.channel_id?.trim();
+      const threadId = trimmedChannelId !== undefined && trimmedChannelId !== ""
+        ? trimmedChannelId
         : deps.currentChannelId;
       const metadata = deps.lookupThread(threadId);
       if (metadata === null) {
@@ -224,7 +224,7 @@ export function createCloseThreadTool(deps: CloseThreadToolDeps): AgentTool {
             details: { error: "not_current_thread" },
           };
         }
-      } else if (metadata.parentChatId !== deps.currentChannelId) {
+      } else if (metadata.parentChannelId !== deps.currentChannelId) {
         return {
           content: [{ type: "text", text: `Cannot close thread ${threadId}: it is not attached to the current parent channel.` }],
           details: { error: "not_visible_in_parent" },
@@ -246,12 +246,12 @@ export function createCloseThreadTool(deps: CloseThreadToolDeps): AgentTool {
       return {
         content: [{
           type: "text",
-          text: `Thread closed: "${result.threadName}" (thread_id: ${result.threadId}, parent_chat_id: ${result.parentChatId}).`,
+          text: `Thread closed: "${result.threadName}" (channel_id: ${result.threadId}, parent_channel_id: ${result.parentChannelId}).`,
         }],
         details: {
-          threadId: result.threadId,
+          channel_id: result.threadId,
           threadName: result.threadName,
-          parentChatId: result.parentChatId,
+          parent_channel_id: result.parentChannelId,
         },
       };
     },

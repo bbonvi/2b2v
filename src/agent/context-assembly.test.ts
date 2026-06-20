@@ -192,10 +192,10 @@ describe("assembleContext", () => {
 
   test("wraps threads in chat with section header and marks it uncached", () => {
     const result = assembleContext(
-      makeInput({ threadsInChat: '- "Help Thread" (thread_id: 123) — 5 msgs, 2h ago' })
+      makeInput({ threadsInChat: '- "Help Thread" (channel_id: 123) — 5 msgs, 2h ago' })
     );
-    const section = result.sections.find((s) => s.label === "Threads In This Chat");
-    expect(section?.text).toBe('## Threads In This Chat\n- "Help Thread" (thread_id: 123) — 5 msgs, 2h ago');
+    const section = result.sections.find((s) => s.label === "Threads In This Channel");
+    expect(section?.text).toBe('## Threads In This Channel\n- "Help Thread" (channel_id: 123) — 5 msgs, 2h ago');
     expect(section?.cached).toBe(false);
   });
 
@@ -203,7 +203,7 @@ describe("assembleContext", () => {
     const result = assembleContext(
       makeInput({
         threadMetadata: {
-          parentChatId: "parent-123",
+          parentChannelId: "parent-123",
           threadId: "thread-456",
           starterMessageId: "msg-789",
           threadName: "Help Discussion",
@@ -215,8 +215,8 @@ describe("assembleContext", () => {
     expect(section?.cached).toBe(true);
     expect(section?.text).toBe(
       "## Thread Metadata\n" +
-      "Parent Chat: parent-123\n" +
-      "Thread: thread-456\n" +
+      "Parent Channel: parent-123\n" +
+      "Thread Channel: thread-456\n" +
       "Starter Message: msg-789\n" +
       'Thread Name: "Help Discussion"'
     );
@@ -257,7 +257,7 @@ describe("assembleContext", () => {
       makeInput({
         upcomingSchedules: "- schedule",
         threadMetadata: {
-          parentChatId: "p1",
+          parentChannelId: "p1",
           threadId: "t1",
           starterMessageId: "m1",
           threadName: "Thread",

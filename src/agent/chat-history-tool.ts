@@ -12,11 +12,11 @@ export interface ChatHistoryMessage {
 export interface ChatHistoryToolDeps {
   guildId: string;
   timezone: string;
-  fetchMessages: (chatId: string, limit: number) => Promise<ChatHistoryMessage[]>;
+  fetchMessages: (channelId: string, limit: number) => Promise<ChatHistoryMessage[]>;
 }
 
 const ChatHistoryParams = Type.Object({
-  chat_id: Type.String({ description: "The guild channel or thread ID to fetch history from. DMs are not supported." }),
+  channel_id: Type.String({ description: "The guild channel or thread ID to fetch history from. DMs are not supported." }),
   limit: Type.Optional(
     Type.Number({ description: "Maximum number of messages to retrieve. Default: 50, max: 100." })
   ),
@@ -36,22 +36,22 @@ export function createChatHistoryTool(deps: ChatHistoryToolDeps): AgentTool {
       _toolCallId: string,
       params: unknown
     ): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {
-      const { chat_id, limit: rawLimit } = params as { chat_id: string; limit?: number };
+      const { channel_id, limit: rawLimit } = params as { channel_id: string; limit?: number };
       const limit = Math.min(rawLimit ?? 50, 100);
 
       let messages: ChatHistoryMessage[];
       try {
-        messages = await fetchMessages(chat_id, limit);
+        messages = await fetchMessages(channel_id, limit);
       } catch {
         return {
-          content: [{ type: "text", text: "Unable to fetch chat history. The bot may lack permission to read this chat." }],
+          content: [{ type: "text", text: "Unable to fetch channel history. The bot may lack permission to read this channel." }],
           details: { error: true },
         };
       }
 
       if (messages.length === 0) {
         return {
-          content: [{ type: "text", text: "No messages found in this chat." }],
+          content: [{ type: "text", text: "No messages found in this channel." }],
           details: { count: 0 },
         };
       }

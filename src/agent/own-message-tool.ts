@@ -4,12 +4,12 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 const EditOwnMessageParams = Type.Object({
   message_id: Type.String({ description: "Discord message ID to edit. The message must have been authored by this bot." }),
   content: Type.String({ description: "Replacement message content. Only this bot's own messages can be edited." }),
-  chat_id: Type.Optional(Type.String({ description: "Guild channel or thread containing the bot-authored message. Defaults to the current chat. DMs are not supported." })),
+  channel_id: Type.Optional(Type.String({ description: "Guild channel or thread containing the bot-authored message. Defaults to the current channel. DMs are not supported." })),
 });
 
 const DeleteOwnMessageParams = Type.Object({
   message_id: Type.String({ description: "Discord message ID to delete. The message must have been authored by this bot." }),
-  chat_id: Type.Optional(Type.String({ description: "Guild channel or thread containing the bot-authored message. Defaults to the current chat. DMs are not supported." })),
+  channel_id: Type.Optional(Type.String({ description: "Guild channel or thread containing the bot-authored message. Defaults to the current channel. DMs are not supported." })),
 });
 
 export type EditOwnMessageInput = Static<typeof EditOwnMessageParams>;
@@ -44,15 +44,15 @@ export interface OwnMessageEditStateInput extends OwnMessageStateInput {
 export interface OwnMessageToolsDeps {
   currentChannelId: string;
   botUserId: string;
-  fetchMessage: (chatId: string, messageId: string) => Promise<OwnMessageLookup | null>;
-  editMessage: (chatId: string, messageId: string, content: string) => Promise<{ rawContent: string }>;
-  deleteMessage: (chatId: string, messageId: string) => Promise<void>;
+  fetchMessage: (channelId: string, messageId: string) => Promise<OwnMessageLookup | null>;
+  editMessage: (channelId: string, messageId: string, content: string) => Promise<{ rawContent: string }>;
+  deleteMessage: (channelId: string, messageId: string) => Promise<void>;
   afterEdit: (input: OwnMessageEditStateInput) => Promise<void>;
   afterDelete: (input: OwnMessageStateInput) => Promise<void>;
 }
 
 interface AuthorizedOwnMessage {
-  chatId: string;
+  channelId: string;
   message: OwnMessageLookup & { guildId: string };
 }
 
@@ -68,22 +68,22 @@ function firstText(result: "edit" | "delete", messageId: string): string {
  */
 export async function authorizeOwnMessageOperation(
   deps: Pick<OwnMessageToolsDeps, "currentChannelId" | "botUserId" | "fetchMessage">,
-  input: { messageId: string; chatId?: string },
+  input: { messageId: string; channelId?: string },
 ): Promise<{ ok: true; value: AuthorizedOwnMessage } | { ok: false; error: string; message: string }> {
   const messageId = input.messageId.trim();
   if (messageId === "") {
     return { ok: false, error: "missing_message_id", message: "message_id is required." };
   }
 
-  const chatId = input.chatId?.trim() !== "" && input.chatId !== undefined
-    ? input.chatId.trim()
+  const channelId = input.channelId?.trim() !== "" && input.channelId !== undefined
+    ? input.channelId.trim()
     : deps.currentChannelId;
-  const message = await deps.fetchMessage(chatId, messageId);
+  const message = await deps.fetchMessage(channelId, messageId);
   if (message === null) {
     return {
       ok: false,
       error: "message_not_found",
-      message: `Cannot access message ${messageId} in chat ${chatId}. Use a guild text channel/thread ID; DMs are not supported.`,
+      message: `Cannot access message ${messageId} in channel ${channelId}. Use a guild text channel/thread ID; DMs are not supported.`,
     };
   }
   if (message.guildId === null) {
@@ -100,15 +100,15 @@ export async function authorizeOwnMessageOperation(
       message: `Cannot modify message ${messageId}: it was not authored by this bot.`,
     };
   }
-  if (message.channelId !== chatId) {
+  if (message.channelId !== channelId) {
     return {
       ok: false,
-      error: "wrong_chat",
-      message: `Cannot modify message ${messageId}: it is not in chat ${chatId}.`,
+      error: "wrong_channel",
+      message: `Cannot modify message ${messageId}: it is not in channel ${channelId}.`,
     };
   }
 
-  return { ok: true, value: { chatId, message: { ...message, guildId: message.guildId } } };
+  return { ok: true, value: { channelId, message: { ...message, guildId: message.guildId } } };
 }
 
 /** Create tools that let the bot edit or delete only its own Discord messages. */
@@ -118,12 +118,12 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
       name: "edit_own_message",
       label: "Edit Own Message",
       description:
-        "Edit a Discord message authored by this bot only. This tool can never edit user messages. Defaults chat_id to the current guild channel/thread; DMs and inaccessible chats are rejected.",
+        "Edit a Discord message authored by this bot only. This tool can never edit user messages. Defaults channel_id to the current guild channel/thread; DMs and inaccessible channels are rejected.",
       parameters: EditOwnMessageParams,
       execute: async (
         _toolCallId,
         params,
-      ): Promise<AgentToolResult<{ messageId: string; chatId: string } | { error: string }>> => {
+      ): Promise<AgentToolResult<{ messageId: string; channel_id: string } | { error: string }>> => {
         const p = params as EditOwnMessageInput;
         const content = p.content.trim();
         if (content === "") {
@@ -135,7 +135,7 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
 
         const auth = await authorizeOwnMessageOperation(deps, {
           messageId: p.message_id,
-          chatId: p.chat_id,
+          channelId: p.channel_id,
         });
         if (!auth.ok) {
           return {
@@ -146,7 +146,7 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
 
         let edited: { rawContent: string };
         try {
-          edited = await deps.editMessage(auth.value.chatId, auth.value.message.id, content);
+          edited = await deps.editMessage(auth.value.channelId, auth.value.message.id, content);
         } catch (err) {
           const message = err instanceof Error ? err.message : "Unknown error";
           return {
@@ -169,7 +169,7 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
 
         return {
           content: [{ type: "text", text: firstText("edit", auth.value.message.id) }],
-          details: { messageId: auth.value.message.id, chatId: auth.value.chatId },
+          details: { messageId: auth.value.message.id, channel_id: auth.value.channelId },
         };
       },
     },
@@ -177,16 +177,16 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
       name: "delete_own_message",
       label: "Delete Own Message",
       description:
-        "Delete a Discord message authored by this bot only. This tool can never delete user messages. Defaults chat_id to the current guild channel/thread; DMs and inaccessible chats are rejected.",
+        "Delete a Discord message authored by this bot only. This tool can never delete user messages. Defaults channel_id to the current guild channel/thread; DMs and inaccessible channels are rejected.",
       parameters: DeleteOwnMessageParams,
       execute: async (
         _toolCallId,
         params,
-      ): Promise<AgentToolResult<{ messageId: string; chatId: string } | { error: string }>> => {
+      ): Promise<AgentToolResult<{ messageId: string; channel_id: string } | { error: string }>> => {
         const p = params as DeleteOwnMessageInput;
         const auth = await authorizeOwnMessageOperation(deps, {
           messageId: p.message_id,
-          chatId: p.chat_id,
+          channelId: p.channel_id,
         });
         if (!auth.ok) {
           return {
@@ -196,7 +196,7 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
         }
 
         try {
-          await deps.deleteMessage(auth.value.chatId, auth.value.message.id);
+          await deps.deleteMessage(auth.value.channelId, auth.value.message.id);
         } catch (err) {
           const message = err instanceof Error ? err.message : "Unknown error";
           return {
@@ -213,7 +213,7 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
 
         return {
           content: [{ type: "text", text: firstText("delete", auth.value.message.id) }],
-          details: { messageId: auth.value.message.id, chatId: auth.value.chatId },
+          details: { messageId: auth.value.message.id, channel_id: auth.value.channelId },
         };
       },
     },

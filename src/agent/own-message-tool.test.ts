@@ -35,12 +35,12 @@ function makeDeps(overrides: Partial<OwnMessageToolsDeps> = {}): OwnMessageTools
   return {
     currentChannelId: "c1",
     botUserId: "bot-1",
-    fetchMessage: (_chatId, messageId) => Promise.resolve(messageId === botMessage.id ? botMessage : null),
-    editMessage: (_chatId, _messageId, content) => {
+    fetchMessage: (_channelId, messageId) => Promise.resolve(messageId === botMessage.id ? botMessage : null),
+    editMessage: (_channelId, _messageId, content) => {
       edited.push(content);
       return Promise.resolve({ rawContent: content });
     },
-    deleteMessage: (_chatId, messageId) => {
+    deleteMessage: (_channelId, messageId) => {
       deleted.push(messageId);
       return Promise.resolve();
     },
@@ -67,7 +67,7 @@ describe("authorizeOwnMessageOperation", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("unreachable");
-    expect(result.value.chatId).toBe("c1");
+    expect(result.value.channelId).toBe("c1");
     expect(result.value.message.id).toBe("m-bot");
   });
 

@@ -97,7 +97,7 @@ type AttachmentSendPayload = {
   enforceNonce?: boolean;
 };
 type SendableGuildChannel = GuildTextBasedChannel & { sendTyping: () => Promise<void> };
-type ResolveTargetChannel = (chatId: string | undefined) => Promise<SendableGuildChannel>;
+type ResolveTargetChannel = (channelId: string | undefined) => Promise<SendableGuildChannel>;
 
 const TYPING_INTERVAL_MS = 8_000;
 const DEFAULT_CODEX_IMAGE_ROUTER_MODEL = "gpt-5.2";
@@ -194,7 +194,7 @@ function renderAgentJobsContext(jobs: AgentJob[], now = Date.now()): string {
     const error = job.error !== undefined ? formatJobErrorForContext(job.error) : "";
     const highRes = job.input.is4k ? " 4K" : "";
     const delivery = job.deliveryGuildId !== job.guildId || job.deliveryChannelId !== job.channelId
-      ? ` delivery chat ${job.deliveryChannelId}`
+      ? ` delivery channel ${job.deliveryChannelId}`
       : "";
     lines.push(
       `- ${job.id} ${job.status}${highRes} (${state}) for @${job.requesterUsername} from MsgID ${job.sourceMessageId}${delivery}${replacement}; requested ${formatJobAge(job, now)}; quote: "${job.sourceQuote}"${sent}${error}`,
@@ -413,6 +413,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       globalConfig,
       guildConfig: deliveryGuildConfig,
       context,
+      currentChannelId: job.deliveryChannelId,
       personaPrompt: persona,
       sender: completionSender,
       extraTools,
@@ -429,14 +430,14 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       triggerInstructions: deliveryGuildConfig.triggerInstructions,
       modelImageInputSupport: getModelImageInputSupport(deliveryGuildConfig),
       onTriggered: () => { completionTyping.startLoop(); },
-      onStillWorking: (targetChatId) => { completionTyping.startLoop(targetChatId); },
+      onStillWorking: (destinationChannelId) => { completionTyping.startLoop(destinationChannelId); },
       onVisibleOutput: completionTyping.stopLoop,
       onAgentEnd: completionTyping.stopLoop,
-      onIgnoredReply: ({ targetChatId, historyText }) => {
+      onIgnoredReply: ({ channelId: destinationChannelId, historyText }) => {
         persistIgnoredBotReply({
           guildId: job.deliveryGuildId,
           channelId: job.deliveryChannelId,
-          targetChatId,
+          destinationChannelId,
           botUserId: client.user?.id ?? "",
           botUsername: client.user?.username ?? "bot",
           sourceMessageId: syntheticLatestMessage.id,
@@ -529,7 +530,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       `Generation prompt: ${job.input.prompt}`,
       typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}` : "",
       "The generated image is attached to this current turn as image input and is already queued as an outgoing attachment on your first visible Discord reply.",
-      `Use the normal persona, current chat history, and the visible image itself. Prefer replying to the original request: <message reply="true" reply_to="${job.sourceMessageId}">your response text</message>. If the current chat context makes another message the clearly better target, you may reply to that message instead, but do not use reply="false" for the first response.`,
+      `Use the normal persona, current channel history, and the visible image itself. Prefer replying to the original request: <message reply="true" reply_to="${job.sourceMessageId}">your response text</message>. If the current channel context makes another message the clearly better target, you may reply to that message instead, but do not use reply="false" for the first response.`,
       "Do not call codex_generate_image, cancel_agent_job, or start another image job for this completion.",
     ].filter((part) => part !== "").join("\n");
     const sentMessageId = await runAsyncImageStatusTurn({
@@ -575,9 +576,9 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
           `Generation prompt: ${job.input.prompt}`,
           `Failure detail for context: ${message}`,
           "The image was not generated and there is no outgoing image attachment.",
-          `Use the normal persona and current chat history. Prefer replying to the original request: <message reply="true" reply_to="${job.sourceMessageId}">your response text</message>. If the current chat context makes another message the clearly better target, you may reply to that message instead.`,
-          "You may retry with codex_generate_image from this failure turn, but prefer not to unless the user asked for a retry or you are certain a revised prompt will work this time. If you retry, first tell the user the image failed and that you are trying again, then call codex_generate_image. Do not retry the same request more than 3 times unless the current chat or user explicitly overrides that limit.",
-          "Explain the failure naturally in chat. Do not paste raw JSON, stack traces, or long internal errors unless the user explicitly asks for technical details.",
+          `Use the normal persona and current channel history. Prefer replying to the original request: <message reply="true" reply_to="${job.sourceMessageId}">your response text</message>. If the current channel context makes another message the clearly better target, you may reply to that message instead.`,
+          "You may retry with codex_generate_image from this failure turn, but prefer not to unless the user asked for a retry or you are certain a revised prompt will work this time. If you retry, first tell the user the image failed and that you are trying again, then call codex_generate_image. Do not retry the same request more than 3 times unless the current channel or user explicitly overrides that limit.",
+          "Explain the failure naturally in the channel. Do not paste raw JSON, stack traces, or long internal errors unless the user explicitly asks for technical details.",
         ].join("\n");
         await runAsyncImageStatusTurn({
           event: "failed",
@@ -637,7 +638,7 @@ function createBotMessageStore(input: {
 function persistIgnoredBotReply(input: {
   guildId: string;
   channelId: string;
-  targetChatId?: string;
+  destinationChannelId?: string;
   botUserId: string;
   botUsername: string;
   sourceMessageId: string;
@@ -646,7 +647,7 @@ function persistIgnoredBotReply(input: {
   insertPromptOnlyBotMessage(db, {
     id: `prompt-only:ignore:${input.sourceMessageId}`,
     guildId: input.guildId,
-    channelId: input.targetChatId ?? input.channelId,
+    channelId: input.destinationChannelId ?? input.channelId,
     botUserId: input.botUserId,
     botUsername: input.botUsername,
     content: input.historyText,
@@ -711,21 +712,21 @@ function botChannelPermissions(channel: GuildBasedChannel | ThreadChannel): {
   return { canView, canSend };
 }
 
-async function fetchAccessibleGuildChannel(chatId: string): Promise<SendableGuildChannel | null> {
-  const cached = client.channels.cache.get(chatId);
-  const resolved = cached ?? await client.channels.fetch(chatId).catch(() => null);
+async function fetchAccessibleGuildChannel(channelId: string): Promise<SendableGuildChannel | null> {
+  const cached = client.channels.cache.get(channelId);
+  const resolved = cached ?? await client.channels.fetch(channelId).catch(() => null);
   return isSendableGuildChannel(resolved) ? resolved : null;
 }
 
 function createTargetChannelResolver(discordClient: Client, defaultChannel: SendableGuildChannel): ResolveTargetChannel {
-  return async (chatId) => {
-    if (chatId === undefined) return defaultChannel;
-    const cached = discordClient.channels.cache.get(chatId);
-    const resolved = cached ?? await discordClient.channels.fetch(chatId).catch(() => null);
-    if (resolved === null) throw new Error(`Invalid chat_id: channel "${chatId}" not found`);
+  return async (channelId) => {
+    if (channelId === undefined) return defaultChannel;
+    const cached = discordClient.channels.cache.get(channelId);
+    const resolved = cached ?? await discordClient.channels.fetch(channelId).catch(() => null);
+    if (resolved === null) throw new Error(`Invalid channel_id: channel "${channelId}" not found`);
     // PM/DM sends are intentionally disabled for now; guild channel/thread delivery may expand later.
     if (!isSendableGuildChannel(resolved)) {
-      throw new Error(`Invalid chat_id: channel "${chatId}" is not a supported guild text channel or thread`);
+      throw new Error(`Invalid channel_id: channel "${channelId}" is not a supported guild text channel or thread`);
     }
     return resolved;
   };
@@ -736,19 +737,19 @@ function createTypingController(input: {
   resolveTargetChannel: ResolveTargetChannel;
 }): {
   getLastTypingAt: () => number;
-  sendNow: (chatId?: string) => Promise<void>;
-  startLoop: (chatId?: string) => void;
+  sendNow: (channelId?: string) => Promise<void>;
+  startLoop: (channelId?: string) => void;
   stopLoop: () => void;
 } {
   let lastTypingAt = 0;
   let typingTimer: ReturnType<typeof setInterval> | null = null;
-  let typingChatId: string | undefined;
+  let typingChannelId: string | undefined;
 
-  const sendNow = async (chatId?: string): Promise<void> => {
+  const sendNow = async (channelId?: string): Promise<void> => {
     let targetChannel = input.defaultChannel;
-    if (chatId !== undefined) {
+    if (channelId !== undefined) {
       try {
-        targetChannel = await input.resolveTargetChannel(chatId);
+        targetChannel = await input.resolveTargetChannel(channelId);
       } catch {
         targetChannel = input.defaultChannel;
       }
@@ -757,11 +758,11 @@ function createTypingController(input: {
     await targetChannel.sendTyping().catch(() => {});
   };
 
-  const startLoop = (chatId?: string): void => {
-    typingChatId = chatId;
-    void sendNow(typingChatId).catch(() => {});
+  const startLoop = (channelId?: string): void => {
+    typingChannelId = channelId;
+    void sendNow(typingChannelId).catch(() => {});
     if (typingTimer !== null) return;
-    typingTimer = setInterval(() => { void sendNow(typingChatId).catch(() => {}); }, TYPING_INTERVAL_MS);
+    typingTimer = setInterval(() => { void sendNow(typingChannelId).catch(() => {}); }, TYPING_INTERVAL_MS);
   };
 
   const stopLoop = (): void => {
@@ -839,8 +840,8 @@ function createDiscordMessageSender(input: {
     return attachments.map((attachment) => new AttachmentBuilder(attachment.buffer, { name: attachment.filename }));
   }
 
-  return async (text, reply, chatId, voice, _signal, replyToMessageId, attachments, dedupeKey) => {
-    const targetChannel = await input.resolveTargetChannel(chatId);
+  return async (text, reply, channelId, voice, _signal, replyToMessageId, attachments, dedupeKey) => {
+    const targetChannel = await input.resolveTargetChannel(channelId);
     const targetGuildId = targetChannel.guildId;
     const targetChannelId = targetChannel.id;
     const outboundResolvers = buildOutboundResolvers(targetChannel.guild);
@@ -891,6 +892,7 @@ function createDiscordMessageSender(input: {
     const replyToSource = async (content: string | AttachmentSendPayload): Promise<Message> => {
       const sourceMessage = input.replySourceMessage;
       if (sourceMessage === undefined) return await sendToTargetChannel(content);
+      if (sourceMessage.channelId !== targetChannel.id) return await sendToTargetChannel(content);
 
       return await sendWithUnknownMessageReferenceFallback(
         () => replyWithMessage(sourceMessage, content),
@@ -1456,6 +1458,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         globalConfig,
         guildConfig,
         context,
+        currentChannelId: channelId,
         personaPrompt: persona,
         sender,
         extraTools,
@@ -1469,14 +1472,14 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
           logger: scheduleLog.child({ component: "stored-image-attachments", guildId, channelId }),
         }),
         onTriggered: () => { typing.startLoop(); },
-        onStillWorking: (targetChatId) => { typing.startLoop(targetChatId); },
+        onStillWorking: (destinationChannelId) => { typing.startLoop(destinationChannelId); },
         onVisibleOutput: typing.stopLoop,
         onAgentEnd: typing.stopLoop,
-        onIgnoredReply: ({ targetChatId, historyText }) => {
+        onIgnoredReply: ({ channelId: destinationChannelId, historyText }) => {
           persistIgnoredBotReply({
             guildId,
             channelId,
-            targetChatId,
+            destinationChannelId,
             botUserId,
             botUsername,
             sourceMessageId: syntheticLatestMessage.id,
@@ -1965,7 +1968,7 @@ async function buildContext(
         const status = t.archivedAt !== null ? "closed" : "open";
         const handoff = t.createdByBot ? "handoff" : "recent";
         const last = t.lastMessageId !== null ? `, last MsgID ${t.lastMessageId}` : "";
-        return `- "${t.threadName}" (thread_id: ${t.threadId}, starter_msg_id: ${t.starterMessageId}) — ${status} ${handoff}, ${t.messageCount} msgs, last active ${formatRelativeAgo(t.lastActivityAt)}${last}`;
+        return `- "${t.threadName}" (channel_id: ${t.threadId}, starter_msg_id: ${t.starterMessageId}) — ${status} ${handoff}, ${t.messageCount} msgs, last active ${formatRelativeAgo(t.lastActivityAt)}${last}`;
       })
       .join("\n");
   }
@@ -1977,7 +1980,7 @@ async function buildContext(
     const meta = getThreadMetadata(db, channelId);
     if (meta !== null) {
       threadMetadata = {
-        parentChatId: meta.parentChatId,
+        parentChannelId: meta.parentChatId,
         threadId: channelId,
         starterMessageId: meta.starterMessageId,
         threadName: meta.threadName,
@@ -2265,7 +2268,6 @@ function buildAgentTools(
   },
   options: {
     includeImageGenerationTools?: boolean;
-    getDeliveryChatId?: () => string | undefined;
     currentRequest?: {
       requesterId: string;
       requesterUsername: string;
@@ -2494,8 +2496,8 @@ function buildAgentTools(
   const chatHistoryTool = createChatHistoryTool({
     guildId,
     timezone: guildConfig.timezone,
-    fetchMessages: async (chatId, limit) => {
-      const channel = await fetchAccessibleGuildChannel(chatId);
+    fetchMessages: async (historyChannelId, limit) => {
+      const channel = await fetchAccessibleGuildChannel(historyChannelId);
       if (channel === null || channel.guildId !== guildId || !("messages" in channel)) return [];
       return getChatHistory(db, guildId, channel.id, limit);
     },
@@ -2504,8 +2506,8 @@ function buildAgentTools(
   const ownMessageTools = createOwnMessageTools({
     currentChannelId: channelId,
     botUserId: client.user?.id ?? "",
-    fetchMessage: async (chatId, messageId) => {
-      const channel = await fetchAccessibleGuildChannel(chatId);
+    fetchMessage: async (messageChannelId, messageId) => {
+      const channel = await fetchAccessibleGuildChannel(messageChannelId);
       if (channel === null || !("messages" in channel)) return null;
       try {
         const msg = await (channel as TextChannel | ThreadChannel).messages.fetch(messageId);
@@ -2523,9 +2525,9 @@ function buildAgentTools(
         return null;
       }
     },
-    editMessage: async (chatId, messageId, content) => {
-      const channel = await fetchAccessibleGuildChannel(chatId);
-      if (channel === null || !("messages" in channel)) throw new Error("Target chat is inaccessible.");
+    editMessage: async (messageChannelId, messageId, content) => {
+      const channel = await fetchAccessibleGuildChannel(messageChannelId);
+      if (channel === null || !("messages" in channel)) throw new Error("Target channel is inaccessible.");
       const warnings: string[] = [];
       const translated = translateOutbound(content, buildOutboundResolvers(channel.guild), warnings);
       const chunks = splitMessage(translated);
@@ -2536,9 +2538,9 @@ function buildAgentTools(
       const edited = await msg.edit(chunks[0] ?? "");
       return { rawContent: edited.content };
     },
-    deleteMessage: async (chatId, messageId) => {
-      const channel = await fetchAccessibleGuildChannel(chatId);
-      if (channel === null || !("messages" in channel)) throw new Error("Target chat is inaccessible.");
+    deleteMessage: async (messageChannelId, messageId) => {
+      const channel = await fetchAccessibleGuildChannel(messageChannelId);
+      if (channel === null || !("messages" in channel)) throw new Error("Target channel is inaccessible.");
       const msg = await (channel as TextChannel | ThreadChannel).messages.fetch(messageId);
       await msg.delete();
     },
@@ -2593,9 +2595,9 @@ function buildAgentTools(
   const reactToMessageTool = createReactToMessageTool({
     currentChannelId: channelId,
     reactToMessage: async (input) => {
-      const targetChannel = await fetchAccessibleGuildChannel(input.chatId);
+      const targetChannel = await fetchAccessibleGuildChannel(input.channelId);
       if (targetChannel === null || !("messages" in targetChannel)) {
-        throw new Error(`Chat ${input.chatId} is not an accessible guild text channel or thread.`);
+        throw new Error(`Channel ${input.channelId} is not an accessible guild text channel or thread.`);
       }
 
       refreshEmojiCache(targetChannel.guild);
@@ -2609,7 +2611,7 @@ function buildAgentTools(
       try {
         targetMessage = await targetChannel.messages.fetch(input.messageId);
       } catch {
-        throw new Error(`Message ${input.messageId} was not found or is not accessible in chat ${input.chatId}.`);
+        throw new Error(`Message ${input.messageId} was not found or is not accessible in channel ${input.channelId}.`);
       }
 
       try {
@@ -2621,7 +2623,7 @@ function buildAgentTools(
 
       return {
         messageId: targetMessage.id,
-        chatId: targetChannel.id,
+        channelId: targetChannel.id,
         emoji,
       };
     },
@@ -2652,15 +2654,15 @@ function buildAgentTools(
       },
       onGeneratedImage: onGeneratedImage ?? (() => {}),
       ...(effectiveCurrentRequest === undefined ? {} : { enqueueImageJob: (input) => {
-        const deliveryChatId = options.getDeliveryChatId?.() ?? channelId;
-        const deliveryGuildId = client.channels.cache.get(deliveryChatId) !== undefined && isSendableGuildChannel(client.channels.cache.get(deliveryChatId))
-          ? (client.channels.cache.get(deliveryChatId) as SendableGuildChannel).guildId
+        const deliveryChannelId = channelId;
+        const deliveryGuildId = client.channels.cache.get(deliveryChannelId) !== undefined && isSendableGuildChannel(client.channels.cache.get(deliveryChannelId))
+          ? (client.channels.cache.get(deliveryChannelId) as SendableGuildChannel).guildId
           : guildId;
         const result = agentJobs.enqueueImageJob({
           guildId,
           channelId,
           deliveryGuildId,
-          deliveryChannelId: deliveryChatId,
+          deliveryChannelId,
           requesterId: effectiveCurrentRequest.requesterId,
           requesterUsername: effectiveCurrentRequest.requesterUsername,
           sourceMessageId: effectiveCurrentRequest.sourceMessageId,
@@ -2852,7 +2854,6 @@ async function processTriggeredMessage(
     const isThread = message.channel.isThread();
     const context = await buildContext(guildId, channelId, guild, guildConfig, translatedContent, latestUserMessage, replyFallbackDeps, isThread);
 
-    let routedChatId: string | undefined;
     const startThreadTool = createStartThreadTool({
       guildId,
       createThread: async (name: string) => {
@@ -2860,23 +2861,29 @@ async function processTriggeredMessage(
         return {
           threadId: thread.id,
           threadName: thread.name,
-          parentChatId: channelId,
+          parentChannelId: channelId,
           starterMessageId: message.id,
         };
       },
-      persistThread: (input) => upsertThread(db, { ...input, createdByBot: true }),
+      persistThread: (input) => upsertThread(db, {
+        threadId: input.threadId,
+        guildId: input.guildId,
+        parentChatId: input.parentChannelId,
+        starterMessageId: input.starterMessageId,
+        threadName: input.threadName,
+        createdByBot: true,
+      }),
       onPersistError: (err) => {
         log.error("failed to persist thread record", {
           error: err instanceof Error ? err.message : String(err),
         });
       },
       onSuccess: (payload) => {
-        routedChatId = payload.threadId;
         try {
           insertSyntheticEvent(db, {
             id: crypto.randomUUID(),
             guildId,
-            channelId: payload.parentChatId,
+            channelId: payload.parentChannelId,
             botUserId: client.user?.id ?? "",
             botUsername: client.user?.username ?? "bot",
             threadId: payload.threadId,
@@ -2901,18 +2908,18 @@ async function processTriggeredMessage(
           threadId: row.threadId,
           guildId: row.guildId,
           threadName: row.threadName,
-          parentChatId: row.parentChatId,
+          parentChannelId: row.parentChatId,
           createdByBot: row.createdByBot,
         };
       },
       closeThread: async (threadId) => {
         const resolved = await createTargetChannelResolver(client, currentChannelObj)(threadId);
-        if (!resolved.isThread()) throw new Error("Target chat is not a thread.");
+        if (!resolved.isThread()) throw new Error("Target channel is not a thread.");
         await (resolved as ThreadChannel).setArchived(true, "closed by close_thread tool");
         return {
           threadId: resolved.id,
           threadName: resolved.name,
-          parentChatId: resolved.parentId ?? channelId,
+          parentChannelId: resolved.parentId ?? channelId,
         };
       },
       persistArchived: (threadId) => {
@@ -2934,7 +2941,7 @@ async function processTriggeredMessage(
           sourceMessageId: message.id,
           sourceQuote: shortQuote(translatedContent),
         },
-        { getDeliveryChatId: () => routedChatId },
+        {},
       ),
       startThreadTool,
       closeThreadTool,
@@ -2963,12 +2970,13 @@ async function processTriggeredMessage(
       globalConfig,
       guildConfig,
       context,
+      currentChannelId: channelId,
       personaPrompt: persona,
       sender,
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
       onTriggered: () => { typing.startLoop(); },
-      onStillWorking: (targetChatId) => { typing.startLoop(targetChatId); },
+      onStillWorking: (destinationChannelId) => { typing.startLoop(destinationChannelId); },
       onVisibleOutput: typing.stopLoop,
       onAgentEnd: typing.stopLoop,
       requestLog,
@@ -2982,11 +2990,11 @@ async function processTriggeredMessage(
       triggerOverride,
       triggerInstructions: guildConfig.triggerInstructions,
       modelImageInputSupport: getModelImageInputSupport(guildConfig),
-      onIgnoredReply: ({ targetChatId, historyText }) => {
+      onIgnoredReply: ({ channelId: destinationChannelId, historyText }) => {
         persistIgnoredBotReply({
           guildId,
           channelId,
-          targetChatId,
+          destinationChannelId,
           botUserId: client.user?.id ?? "",
           botUsername: client.user?.username ?? "bot",
           sourceMessageId: message.id,

@@ -63,7 +63,7 @@ export interface MemoryExtractionRequest {
 
 export interface IgnoredReplyRequest {
   sourceMessageId?: string;
-  targetChatId?: string;
+  channelId?: string;
   historyText: string;
   rawResponse: string;
 }
@@ -118,7 +118,7 @@ export interface CurrentTurnImageInput {
 export type MessageSender = (
   text: string,
   reply: boolean,
-  chatId: string | undefined,
+  channelId: string | undefined,
   voice?: VoiceAttachment,
   signal?: AbortSignal,
   replyToMessageId?: string,
@@ -134,6 +134,8 @@ export interface HandlerDeps {
   globalConfig: GlobalConfig;
   guildConfig: GuildConfig;
   context: AssembledContext;
+  /** Discord channel/thread that initiated this reply loop. */
+  currentChannelId?: string;
   personaPrompt?: string;
   sender: MessageSender;
   /** Native OpenRouter tools exposed to the model. */
@@ -141,7 +143,7 @@ export interface HandlerDeps {
   log?: Logger;
   onTriggered?: (result: NonNullable<TriggerResult>) => void;
   /** Called when work continues after a user-visible message so typing can be sent before later output. */
-  onStillWorking?: (targetChatId: string | undefined) => void | Promise<void>;
+  onStillWorking?: (channelId: string | undefined) => void | Promise<void>;
   /** Called after user-visible output starts so continuous background typing can stop. */
   onVisibleOutput?: () => void;
   /** Minimum visible typing time before a buffered streamed follow-up message is sent. */
@@ -650,10 +652,10 @@ function buildRuntimeInstruction(): string {
     "If a request does not make sense, uses vague references, seems to depend on something said earlier, or you do not understand what the user wants, usually search chat history before asking. Try several targeted search_messages calls when useful: semantic topic phrases, literal exact words, likely usernames/channels/time filters, and context mode around promising hits.",
     "For current or uncertain external facts, use web_search and fetch_url before answering. Prefer English search queries unless the topic is language-specific, then answer in the user's language. Fetch the most relevant result when snippets are not enough.",
     "Use summarize_video for YouTube, video, audio, or podcast URLs when the user asks for a summary or wants to understand the media content.",
-    "Use codex_generate_image when the user asks you to create, generate, draw, render, or make a new raster image/photo/illustration/sprite/banner/mockup. Image generation is asynchronous in this runtime: codex_generate_image starts a visible image job and returns immediately; the runtime keeps typing while the worker runs. When the image is ready, the runtime starts a normal fresh 2b reply loop with the same persona, current chat history, and the generated image attached as current-turn image input and as a pending outgoing attachment. Do not wait for the image in the original reply loop.",
+    "Use codex_generate_image when the user asks you to create, generate, draw, render, or make a new raster image/photo/illustration/sprite/banner/mockup. Image generation is asynchronous in this runtime: codex_generate_image starts a visible image job and returns immediately; the runtime keeps typing while the worker runs. When the image is ready, the runtime starts a normal fresh 2b reply loop with the same persona, current channel history, and the generated image attached as current-turn image input and as a pending outgoing attachment. Do not wait for the image in the original reply loop.",
     "Use react_to_message for small acknowledgements on visible/retrievable guild messages when no text reply is useful. This is especially appropriate after codex_generate_image starts an async image job: react with something like 👍 to the request, then use <ignore> if there is nothing else to say.",
-    "If the current message is an internal [Async Image Job Ready] event, the image has already been generated and is attached to the current turn. Inspect it directly if the model supports images, then reply naturally with the image attached. Prefer replying to the original request; the event includes a line like \"Original request MsgID 123...\" and a suggested <message reply=\"true\" reply_to=\"123...\">...</message> envelope. Use that concrete MsgID unless the current chat context makes another message the clearly better reply target. Do not call codex_generate_image, cancel_agent_job, or start another image job from an async completion turn.",
-    "If the current message is an internal [Async Image Job Failed] event, the image was not generated. Reply naturally in character. Prefer replying to the original request using the concrete MsgID from the suggested <message reply=\"true\" reply_to=\"123...\">...</message> envelope, but you may reply to another message if the current chat context makes that clearly better. You may mention that the image failed or timed out, but do not paste raw JSON, stack traces, or long internal errors unless the user explicitly asks for technical details. You may call codex_generate_image again from this failure turn, but prefer not to unless the user asked for a retry or you are 100% sure a revised prompt will work this time. If you retry, prefer to send a short visible note first saying the image failed and you are trying again, then call codex_generate_image with a changed prompt. Do not retry the same request more than 3 times unless the current chat or user explicitly overrides that limit.",
+    "If the current message is an internal [Async Image Job Ready] event, the image has already been generated and is attached to the current turn. Inspect it directly if the model supports images, then reply naturally with the image attached. Prefer replying to the original request; the event includes a line like \"Original request MsgID 123...\" and a suggested <message reply=\"true\" reply_to=\"123...\">...</message> envelope. Use that concrete MsgID unless the current channel context makes another message the clearly better reply target. Do not call codex_generate_image, cancel_agent_job, or start another image job from an async completion turn.",
+    "If the current message is an internal [Async Image Job Failed] event, the image was not generated. Reply naturally in character. Prefer replying to the original request using the concrete MsgID from the suggested <message reply=\"true\" reply_to=\"123...\">...</message> envelope, but you may reply to another message if the current channel context makes that clearly better. You may mention that the image failed or timed out, but do not paste raw JSON, stack traces, or long internal errors unless the user explicitly asks for technical details. You may call codex_generate_image again from this failure turn, but prefer not to unless the user asked for a retry or you are 100% sure a revised prompt will work this time. If you retry, prefer to send a short visible note first saying the image failed and you are trying again, then call codex_generate_image with a changed prompt. Do not retry the same request more than 3 times unless the current channel or user explicitly overrides that limit.",
     "For codex_generate_image, the prompt argument is the final visual brief sent to Codex image generation: preserve the user's visual request, relevant context, and concrete subject/composition/style/lighting/avoid constraints, but phrase it as a safe neutral image prompt. Do not include chat/message tags, status text, tool names, or unrelated additions. Exercise best judgment about image_ids: if the user attached an image in the current post, replied to an image, asks to use/edit/remix/continue a specific image, or context clearly implies a specific ImageID or ReplyImageID, pass that image ID; pass several IDs when the request depends on several specific images. Omit image_ids only when the image is irrelevant, merely generic context, or the request is clearly text-only.",
     "For codex_generate_image, set 4k=true only when the user explicitly asks for 4K, UHD, highest/maximum resolution, print-resolution, or a final high-resolution render. Do not set it merely for ordinary high quality, detailed, HD, or good images. 4K requests can take roughly twice as long as normal image jobs.",
     "Before calling codex_generate_image, inspect Active Image Jobs and recent message ImageJob annotations. If a visible active job already matches the same concrete request, do not call codex_generate_image again; answer with the job status/id. Do not start duplicate jobs just because a user asks where the image is, sounds confused, repeats the request, or pressures you to send it faster.",
@@ -670,14 +672,15 @@ function buildRuntimeInstruction(): string {
     "Only ping a user when you genuinely need to notify them. To ping, write @username exactly; the app converts it to a Discord mention. For casual name references, omit @. If the user asks you to ping/notify someone and the exact Discord username is not already visible in context, use list_chat_users first instead of guessing from display names, nicknames, or memory.",
     "Use schedule_message when the user asks you to remind, schedule, recur, or follow up later. Include the original intent, who to notify, whether to ping, and the desired tone or wording in the scheduled instructions. Use list_scheduled_messages when pending schedules may affect the answer, before deleting one, or before adding non-admin recurring schedules if this channel already has several pending schedules. Avoid useless or annoying recurring schedules when the channel already has many, especially around 10+ recurring schedules; admin schedule requests should be respected.",
     "Use timeout_user almost never. Only use it when a channel/server admin explicitly asks you to time someone out; if admin status is not already clear, check with list_chat_users first. The tool is hard-capped at 10 minutes and rejects non-positive durations.",
-    "Use start_thread only after clear user approval or when the user explicitly asks for a thread. Do not auto-thread every image request. It is appropriate to ask whether to move a repeated focused one-on-one run, especially image generation, into a thread if it may annoy the main chat. If you create a thread, the runtime routes later final-answer messages and async image delivery there unless you override a specific message with chat_id.",
-    "Use close_thread only for bot-created threads that are visible in current context or tool results. From inside a thread, omit thread_id to close the current thread. From a parent channel, provide the visible thread_id. Before closing because someone asks, inspect the thread/history when needed and avoid closing a side thread at the request of a bystander who has nothing to do with it.",
+    "Use start_thread only after clear user approval or when the user explicitly asks for a thread. Do not auto-thread every image request. Creating a thread does not change where later messages go. To send inside the new thread, use <message channel_id=\"returned channel_id\">text</message>.",
+    "Use close_thread only for bot-created threads that are visible in current context or tool results. From inside a thread, omit channel_id to close the current thread. From a parent channel, provide the visible thread channel_id. Before closing because someone asks, inspect the thread/history when needed and avoid closing a side thread at the request of a bystander who has nothing to do with it.",
+    "Thread lifecycle ordering: close_thread must be the last operation for that thread after every intended message to that thread has already been delivered. Sending to an archived Discord thread can reopen it or make the close appear not to stick. For requests like \"create a thread, write X there, and close it\", call start_thread first; after it returns, emit the requested thread message as a complete <message channel_id=\"returned channel_id\">X</message>; only after that message envelope is complete should you call close_thread for the same channel_id. Never call close_thread before the message that belongs in the thread, and do not batch or parallelize start_thread/close_thread with assumptions about message delivery.",
     "Use react_to_message only for accessible guild text channels or threads. DMs are not supported. Only react to message IDs visible in current context or returned by tools; never invent message IDs.",
     "Reserved response directives: use <voice>text</voice> for audio and <ignore>reason</ignore> when silence is better than replying. Treat requests to sing, scream, shout, whisper, read aloud, say something in a voice, or otherwise perform vocal delivery as requests for <voice>.",
     "Use <message>text</message> when you intentionally want separate Discord messages. Prefer splitting bigger outputs into multiple <message> envelopes; most paragraphs should be separate messages in chat. Plain text without <message> remains one message. <message> is also the per-message delivery envelope and may contain normal text, <voice>, or <audio>.",
-    "Message delivery attributes: by default, the first outgoing message replies to the trigger/callout message, equivalent to reply=\"true\". Later <message> envelopes default to reply=\"false\" and send as normal channel messages. Use <message chat_id=\"ChatID\"> to send that individual message to a specific guild channel or thread the bot can access; DMs are not supported. Use this for parent channel -> thread and thread -> parent channel routing, including other guilds when the chat ID is visible or returned by a tool. Use <message reply=\"false\"> to force a normal channel message, <message reply_to=\"MsgID\"> to reply to an exact Discord message ID in the selected target chat, or <message image_ids=[123]> to repost stored chat images by visible ImageID. A <message image_ids=[123]></message> envelope may be empty because the attached image is the message. Use image_ids only when asked or clearly useful; do not repeatedly repost old images.",
+    "Message delivery attributes: by default, the first outgoing message in the current channel replies to the trigger/callout message, equivalent to reply=\"true\". Later <message> envelopes default to reply=\"false\" and send as normal channel messages. Use <message channel_id=\"ChannelID\"> to send that individual message to a specific guild channel or thread the bot can access; DMs are not supported. Use this for parent channel -> thread and thread -> parent channel routing, including other guilds when the channel_id is visible or returned by a tool. Cross-channel routed messages without reply_to default to normal sends unless you explicitly set reply=\"true\". Use <message reply=\"false\"> to force a normal channel message, <message reply_to=\"MsgID\"> to reply to an exact Discord message ID in the selected channel, or <message image_ids=[123]> to repost stored chat images by visible ImageID. A <message image_ids=[123]></message> envelope may be empty because the attached image is the message. Use image_ids only when asked or clearly useful; do not repeatedly repost old images.",
     "Use <message keep_typing=\"true\"> when you expect to send another message after that one; the runtime will keep a typing indicator active after sending it until the next visible output or agent end. The runtime also best-effort sends typing when it sees you start another <message> while streaming.",
-    "Only use reply_to IDs that are visible in current context or tool results, and remember reply_to resolves inside the selected target chat. If you are in a thread and need to reply to a parent-channel message, use both chat_id=\"parent channel id\" and reply_to=\"parent message id\". Never invent message IDs. If you need an older exact message ID, use search_messages first.",
+    "Only use reply_to IDs that are visible in current context or tool results, and remember reply_to resolves inside the selected channel_id. If you are in a thread and need to reply to a parent-channel message, use both channel_id=\"parent channel id\" and reply_to=\"parent message id\". Never invent message IDs. If you need an older exact message ID, use search_messages first.",
     "Use <audio>text</audio> as an alias for <voice>text</voice>. Keep Discord-only text outside <voice>/<audio>: pings like @username, channel references like #general, links, and other non-spoken text should be normal message text around the directive, e.g. @alice <voice>hey.</voice>, not <voice>@alice hey.</voice>.",
     "Inside voice/audio, write one or two smooth spoken sentences, not many clipped beats. Use expressive tags when mood or delivery matters, e.g. <voice>[angry] hey, listen. [angry] got it?</voice>. Tags are open-ended; prefer one-word lowercase tags. Tags affect only a short span, so repeat the tag at sentence starts when one mood should continue. No commas, no \"then\", no multi-part stage directions.",
     "[msg-break] is a history-only marker for merged separate Discord messages. Do not write [msg-break] manually in your output; use <message>...</message> for intentional output separation.",
@@ -938,14 +941,6 @@ async function completeModelTurnWithRetries(input: {
   throw new Error("LLM retry loop ended without a result.");
 }
 
-function detectToolTargetChatId(tool: AgentTool, result: AgentToolResult<unknown>): string | null {
-  if (tool.name !== "start_thread" && tool.name !== "close_thread") return null;
-  const details = result.details;
-  if (!isRecord(details)) return null;
-  const routeId = tool.name === "start_thread" ? details.threadId : details.parentChatId;
-  return typeof routeId === "string" && routeId !== "" ? routeId : null;
-}
-
 const PARALLEL_SAFE_READ_ONLY_TOOLS = new Set([
   "chat_history",
   "fetch_images",
@@ -989,6 +984,16 @@ function asyncImageJobCreatedFromToolResult(result: AgentToolResult<unknown>): b
   return details?.asyncJobCreated === true;
 }
 
+function didCloseCurrentChannel(input: {
+  tool: AgentTool;
+  result: AgentToolResult<unknown>;
+  currentChannelId?: string;
+}): boolean {
+  if (input.currentChannelId === undefined || input.tool.name !== "close_thread") return false;
+  const details = isRecord(input.result.details) ? input.result.details : undefined;
+  return details?.channel_id === input.currentChannelId;
+}
+
 async function executeToolCallForLoop(input: {
   tool: AgentTool;
   call: OpenRouterToolCall;
@@ -1017,17 +1022,15 @@ async function renderExecutedToolCall(input: {
   imageMessages: OpenRouterMessage[];
   consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
   pendingAttachments: OutboundAttachment[];
-}): Promise<{ resultText: string; targetChatId: string | null; asyncImageJobCreated: boolean }> {
+}): Promise<{ resultText: string; asyncImageJobCreated: boolean }> {
   if (input.execution.result === undefined) {
     return {
       resultText: input.execution.errorText ?? "Tool failed without an error message.",
-      targetChatId: null,
       asyncImageJobCreated: false,
     };
   }
 
   const { call, tool, result } = input.execution;
-  const routedTargetChatId = detectToolTargetChatId(tool, result);
   const asyncImageJobCreated = tool.name === "codex_generate_image" && asyncImageJobCreatedFromToolResult(result);
   const generatedAttachmentIds = generatedAttachmentIdsFromToolResult(result);
   if (generatedAttachmentIds.length > 0) {
@@ -1052,7 +1055,7 @@ async function renderExecutedToolCall(input: {
     resultText = appendImageUnsupportedToolText(resultText, images.length);
   }
 
-  return { resultText, targetChatId: routedTargetChatId, asyncImageJobCreated };
+  return { resultText, asyncImageJobCreated };
 }
 
 async function runNativeToolLoop(input: {
@@ -1065,10 +1068,11 @@ async function runNativeToolLoop(input: {
   agentTimeBudgetMs: number;
   llmOutputTimeoutMs: number;
   requestLog?: RequestLog;
-  sendIntermediateText?: (text: string, targetChatId: string | undefined) => Promise<boolean>;
-  streamFinalText?: (delta: string, targetChatId: string | undefined) => Promise<boolean>;
-  onModelTurnStart?: (targetChatId: string | undefined) => void;
-  onStillWorking?: (targetChatId: string | undefined) => void | Promise<void>;
+  sendIntermediateText?: (text: string, channelId: string | undefined) => Promise<boolean>;
+  streamFinalText?: (delta: string, channelId: string | undefined) => Promise<boolean>;
+  onModelTurnStart?: (channelId: string | undefined) => void;
+  onStillWorking?: (channelId: string | undefined) => void | Promise<void>;
+  currentChannelId?: string;
   imageInputSupported: boolean;
   imageFallback?: ImageFallbackRuntime;
   consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
@@ -1079,12 +1083,11 @@ async function runNativeToolLoop(input: {
   allowEmptyFinalResponse?: boolean;
   stopOnAgentTimeBudget?: boolean;
   terminateAfterSuccessfulToolNames?: readonly string[];
-}): Promise<{ text: string; targetChatId?: string }> {
+}): Promise<{ text: string }> {
   const toolsByName = new Map(input.tools.map((tool) => [tool.name, tool]));
   const terminateAfterSuccessfulToolNames = new Set(input.terminateAfterSuccessfulToolNames ?? []);
   const imageFollowUpSources = new Map<OpenRouterMessage, ImageFollowUpSource>();
   let toolCalls = 0;
-  let targetChatId: string | undefined;
   let sentIntermediateStatus = false;
   const streamingState = { visibleText: false };
   let agentTimeBudgetMarked = false;
@@ -1107,7 +1110,7 @@ async function runNativeToolLoop(input: {
     maxAttempts = MODEL_TURN_MAX_ATTEMPTS,
     signal: AbortSignal | null | undefined = input.signal,
     recoverAgentTimeBudget = true,
-  ): Promise<{ text: string; targetChatId?: string }> => {
+  ): Promise<{ text: string }> => {
     try {
       const result = await completeModelTurnWithRetries({
         complete: input.complete,
@@ -1119,7 +1122,7 @@ async function runNativeToolLoop(input: {
           parallelToolCalls: false,
           onTextDelta: input.streamFinalText !== undefined
             ? async (delta) => {
-              const sent = await input.streamFinalText?.(delta, targetChatId);
+              const sent = await input.streamFinalText?.(delta, undefined);
               if (sent === true) streamingState.visibleText = true;
             }
             : undefined,
@@ -1128,13 +1131,13 @@ async function runNativeToolLoop(input: {
         timeoutMs: input.llmOutputTimeoutMs,
         maxAttempts,
         validateResult: input.allowEmptyFinalResponse === true ? undefined : requireTextResult(emptyResponseMessage),
-        onAttemptStart: () => input.onModelTurnStart?.(targetChatId),
+        onAttemptStart: () => input.onModelTurnStart?.(undefined),
         requestLog: input.requestLog,
         log: input.log,
       });
       input.requestLog?.recordLLMCompletion(result.messageForLogs);
       const text = result.text.trim();
-      return { text, targetChatId };
+      return { text };
     } catch (error) {
       if (recoverAgentTimeBudget && isAgentTimeBudgetExceededError(error)) {
         return await finishAfterAgentTimeBudget();
@@ -1143,7 +1146,7 @@ async function runNativeToolLoop(input: {
     }
   };
 
-  const completeFinalAfterAgentTimeBudget = async (): Promise<{ text: string; targetChatId?: string }> => {
+  const completeFinalAfterAgentTimeBudget = async (): Promise<{ text: string }> => {
     markAgentTimeBudgetExhausted();
     return await completeFinalWithoutTools(
       "Model produced an empty response after agent time budget exhaustion.",
@@ -1153,9 +1156,9 @@ async function runNativeToolLoop(input: {
     );
   };
 
-  const finishAfterAgentTimeBudget = async (): Promise<{ text: string; targetChatId?: string }> => {
+  const finishAfterAgentTimeBudget = async (): Promise<{ text: string }> => {
     if (input.stopOnAgentTimeBudget === true) {
-      return { text: "", targetChatId };
+      return { text: "" };
     }
     return await completeFinalAfterAgentTimeBudget();
   };
@@ -1182,7 +1185,7 @@ async function runNativeToolLoop(input: {
           parallelToolCalls: true,
           onTextDelta: input.streamFinalText !== undefined
             ? async (delta) => {
-              const sent = await input.streamFinalText?.(delta, targetChatId);
+              const sent = await input.streamFinalText?.(delta, undefined);
               if (sent === true) streamingState.visibleText = true;
             }
             : undefined,
@@ -1190,7 +1193,7 @@ async function runNativeToolLoop(input: {
         },
         timeoutMs: input.llmOutputTimeoutMs,
         validateResult: input.allowEmptyFinalResponse === true ? undefined : requireTextUnlessToolCalls("Model produced an empty response."),
-        onAttemptStart: () => input.onModelTurnStart?.(targetChatId),
+        onAttemptStart: () => input.onModelTurnStart?.(undefined),
         requestLog: input.requestLog,
         log: input.log,
       });
@@ -1216,16 +1219,16 @@ async function runNativeToolLoop(input: {
 
     if (result.toolCalls.length === 0) {
       const text = result.text.trim();
-      return { text, targetChatId };
+      return { text };
     }
 
     if (!sentIntermediateStatus && !streamingState.visibleText && hasProgressWorthyToolCall(result.toolCalls)) {
       const statusText = intermediateStatusText(result.text);
       if (statusText !== "" && input.sendIntermediateText !== undefined) {
-        const sent = await input.sendIntermediateText(statusText, targetChatId);
+        const sent = await input.sendIntermediateText(statusText, undefined);
         if (sent) {
           sentIntermediateStatus = true;
-          await input.onStillWorking?.(targetChatId);
+          await input.onStillWorking?.(undefined);
         }
       }
     }
@@ -1268,7 +1271,6 @@ async function runNativeToolLoop(input: {
           consumeGeneratedAttachments: input.consumeGeneratedAttachments,
           pendingAttachments: input.pendingAttachments,
         });
-        if (rendered.targetChatId !== null) targetChatId = rendered.targetChatId;
         if (rendered.asyncImageJobCreated) asyncImageJobCreated = true;
         input.messages.push(toolMessage(execution.call, rendered.resultText));
       }
@@ -1331,11 +1333,17 @@ async function runNativeToolLoop(input: {
         consumeGeneratedAttachments: input.consumeGeneratedAttachments,
         pendingAttachments: input.pendingAttachments,
       });
-      if (rendered.targetChatId !== null) targetChatId = rendered.targetChatId;
       if (rendered.asyncImageJobCreated) asyncImageJobCreated = true;
       input.messages.push(toolMessage(call, rendered.resultText));
       if (execution.result !== undefined && terminateAfterSuccessfulToolNames.has(tool.name)) {
-        return { text: "", targetChatId };
+        return { text: "" };
+      }
+      if (execution.result !== undefined && didCloseCurrentChannel({
+        tool,
+        result: execution.result,
+        currentChannelId: input.currentChannelId,
+      })) {
+        return { text: "" };
       }
       if (isAgentTimeBudgetExceededSignal(input.signal)) {
         appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex + 1));
@@ -1346,7 +1354,7 @@ async function runNativeToolLoop(input: {
     await flushParallelCalls();
     input.messages.push(...imageMessages);
     if (asyncImageJobCreated) {
-      return { text: "", targetChatId };
+      return { text: "" };
     }
     if (isAgentTimeBudgetExceededSignal(input.signal)) {
       return await finishAfterAgentTimeBudget();
@@ -1477,11 +1485,21 @@ function buildDispatchSegments(segments: ResponseSegment[]): DispatchSegment[] {
 function effectiveReply(input: {
   delivery?: MessageDelivery;
   defaultReply: boolean;
-  targetChatId?: string;
+  destinationChannelId?: string;
+  currentChannelId?: string;
 }): boolean {
   if (input.delivery?.replyTo !== undefined) return false;
-  if (input.delivery?.reply !== undefined) return input.targetChatId === undefined ? input.delivery.reply : false;
-  return input.targetChatId === undefined ? input.defaultReply : false;
+  if (input.delivery?.reply !== undefined) return input.delivery.reply;
+  if (input.destinationChannelId === undefined || input.destinationChannelId === input.currentChannelId) {
+    return input.defaultReply;
+  }
+  return false;
+}
+
+function isCurrentChannelDestination(destinationChannelId: string | undefined, currentChannelId: string | undefined): boolean {
+  return destinationChannelId === undefined || (
+    currentChannelId !== undefined && destinationChannelId === currentChannelId
+  );
 }
 
 /** Builds a stable key for one logical Discord send so transport retries can be idempotent. */
@@ -1499,22 +1517,24 @@ async function sendOneSegment(input: {
   segment: DispatchSegment;
   sendId: string;
   reply: boolean;
-  targetChatId?: string;
+  destinationChannelId?: string;
+  currentChannelId?: string;
   attachments?: OutboundAttachment[];
   requestLog?: RequestLog;
   signal?: AbortSignal;
   onSent?: () => void | Promise<void>;
 }): Promise<void> {
-  const targetChatId = input.segment.delivery?.chatId ?? input.targetChatId;
+  const destinationChannelId = input.segment.delivery?.channelId ?? input.destinationChannelId;
   const args: Record<string, unknown> = {
     text: input.segment.text,
     reply: effectiveReply({
       delivery: input.segment.delivery,
       defaultReply: input.reply,
-      targetChatId,
+      destinationChannelId,
+      currentChannelId: input.currentChannelId,
     }),
     ...(input.segment.delivery?.replyTo !== undefined ? { reply_to_message_id: input.segment.delivery.replyTo } : {}),
-    ...(targetChatId !== undefined ? { chat_id: targetChatId } : {}),
+    ...(destinationChannelId !== undefined ? { channel_id: destinationChannelId } : {}),
     ...(input.attachments !== undefined && input.attachments.length > 0
       ? { attachments: input.attachments.map((attachment) => attachment.filename) }
       : {}),
@@ -1551,9 +1571,10 @@ async function sendOneSegment(input: {
       effectiveReply({
         delivery: input.segment.delivery,
         defaultReply: input.reply,
-        targetChatId,
+        destinationChannelId,
+        currentChannelId: input.currentChannelId,
       }),
-      targetChatId,
+      destinationChannelId,
       voice,
       input.signal,
       input.segment.delivery?.replyTo,
@@ -1595,12 +1616,15 @@ async function sendResponseSegments(input: {
   segments: ResponseSegment[];
   replyFirst: boolean;
   sentOffset?: number;
-  targetChatId?: string;
+  destinationChannelId?: string;
+  currentChannelId?: string;
   requestLog?: RequestLog;
   log?: Logger;
-  onStillWorking?: (targetChatId: string | undefined) => void | Promise<void>;
+  onStillWorking?: (channelId: string | undefined) => void | Promise<void>;
   onVisibleOutput?: () => void;
   onSegmentSent?: (sent: { segment: DispatchSegment; hasMoreSegments: boolean }) => void | Promise<void>;
+  currentChannelOutputAlreadySent?: boolean;
+  onCurrentChannelOutput?: () => void;
   typingHoldMs?: number;
   signal?: AbortSignal;
   pendingAttachments?: OutboundAttachment[];
@@ -1608,12 +1632,15 @@ async function sendResponseSegments(input: {
 }): Promise<number> {
   let sent = input.sentOffset ?? 0;
   let sentNow = 0;
+  let currentChannelOutputSent = input.currentChannelOutputAlreadySent === true;
   const dispatchSegments = buildDispatchSegments(input.segments);
   for (const segment of dispatchSegments) {
     sent += 1;
     sentNow += 1;
     const hasMoreSegments = sentNow < dispatchSegments.length;
-    const segmentTargetChatId = segment.delivery?.chatId ?? input.targetChatId;
+    const segmentDestinationChannelId = segment.delivery?.channelId ?? input.destinationChannelId;
+    const currentChannelDestination = isCurrentChannelDestination(segmentDestinationChannelId, input.currentChannelId);
+    const useDefaultReply = input.replyFirst && currentChannelDestination && !currentChannelOutputSent;
     const pendingAttachments = input.pendingAttachments !== undefined && input.pendingAttachments.length > 0
       ? input.pendingAttachments.splice(0)
       : undefined;
@@ -1627,9 +1654,13 @@ async function sendResponseSegments(input: {
     const sendId = `final-send-${sent}`;
     const onSent = async (): Promise<void> => {
       input.onVisibleOutput?.();
+      if (currentChannelDestination && !currentChannelOutputSent) {
+        currentChannelOutputSent = true;
+        input.onCurrentChannelOutput?.();
+      }
       await input.onSegmentSent?.({ segment, hasMoreSegments });
       if (segment.delivery?.keepTyping === true && hasMoreSegments) {
-        await input.onStillWorking?.(segmentTargetChatId);
+        await input.onStillWorking?.(segmentDestinationChannelId);
         await sleepMs(input.typingHoldMs ?? 0, input.signal);
       }
     };
@@ -1640,8 +1671,9 @@ async function sendResponseSegments(input: {
         ttsEnabled: input.ttsEnabled,
         segment,
         sendId,
-        reply: sent === 1 && input.replyFirst,
-        targetChatId: segmentTargetChatId,
+        reply: useDefaultReply,
+        destinationChannelId: segmentDestinationChannelId,
+        currentChannelId: input.currentChannelId,
         attachments: attachments.length > 0 ? attachments : undefined,
         requestLog: input.requestLog,
         signal: input.signal,
@@ -1657,8 +1689,9 @@ async function sendResponseSegments(input: {
         ttsEnabled: input.ttsEnabled,
         segment,
         sendId,
-        reply: sent === 1 && input.replyFirst,
-        targetChatId: segmentTargetChatId,
+        reply: useDefaultReply,
+        destinationChannelId: segmentDestinationChannelId,
+        currentChannelId: input.currentChannelId,
         attachments: attachments.length > 0 ? attachments : undefined,
         requestLog: input.requestLog,
         signal: input.signal,
@@ -1674,8 +1707,9 @@ async function sendResponseSegments(input: {
         ttsEnabled: input.ttsEnabled,
         segment: { kind: "text", text: segment.fallbackText, delivery: segment.delivery },
         sendId: `${sendId}-fallback`,
-        reply: sent === 1 && input.replyFirst,
-        targetChatId: segmentTargetChatId,
+        reply: useDefaultReply,
+        destinationChannelId: segmentDestinationChannelId,
+        currentChannelId: input.currentChannelId,
         attachments: attachments.length > 0 ? attachments : undefined,
         requestLog: input.requestLog,
         signal: input.signal,
@@ -1691,10 +1725,11 @@ interface LiveMessageDispatchDeps {
   generateSpeech?: (text: string) => Promise<TtsResult>;
   ttsEnabled: boolean;
   replyFirst: boolean;
-  targetChatId?: string;
+  destinationChannelId?: string;
+  currentChannelId?: string;
   requestLog?: RequestLog;
   log?: Logger;
-  onStillWorking?: (targetChatId: string | undefined) => void | Promise<void>;
+  onStillWorking?: (channelId: string | undefined) => void | Promise<void>;
   onVisibleOutput?: () => void;
   typingHoldMs: number;
   signal?: AbortSignal;
@@ -1707,6 +1742,7 @@ class LiveMessageDispatcher {
   private buffer = "";
   private consumedUntil = 0;
   private sent = 0;
+  private currentChannelOutputSent = false;
   private disabled = false;
   private gapTypingSent = false;
   private gapTypingReadyAt = 0;
@@ -1747,6 +1783,8 @@ class LiveMessageDispatcher {
           segments: parsed.segments,
           sentOffset: this.sent,
           replyFirst: this.deps.replyFirst,
+          currentChannelOutputAlreadySent: this.currentChannelOutputSent,
+          onCurrentChannelOutput: () => { this.currentChannelOutputSent = true; },
           onStillWorking: undefined,
         });
       }
@@ -1763,6 +1801,8 @@ class LiveMessageDispatcher {
           segments: parsed.segments,
           sentOffset: this.sent,
           replyFirst: this.deps.replyFirst,
+          currentChannelOutputAlreadySent: this.currentChannelOutputSent,
+          onCurrentChannelOutput: () => { this.currentChannelOutputSent = true; },
           onStillWorking: undefined,
         });
       }
@@ -1812,6 +1852,8 @@ class LiveMessageDispatcher {
           segments: parsed.segments,
           sentOffset: this.sent,
           replyFirst: this.deps.replyFirst,
+          currentChannelOutputAlreadySent: this.currentChannelOutputSent,
+          onCurrentChannelOutput: () => { this.currentChannelOutputSent = true; },
           onStillWorking: undefined,
           onSegmentSent: async ({ hasMoreSegments }) => {
             if (!hasMoreSegments && typeAfterMessage) await this.notifyTypingForGap();
@@ -1825,7 +1867,7 @@ class LiveMessageDispatcher {
   private async notifyTypingForGap(): Promise<void> {
     if (this.gapTypingSent) return;
     this.gapTypingSent = true;
-    await this.deps.onStillWorking?.(this.deps.targetChatId);
+    await this.deps.onStillWorking?.(this.deps.destinationChannelId);
     this.gapTypingReadyAt = Date.now() + this.deps.typingHoldMs;
   }
 
@@ -2112,13 +2154,12 @@ export async function handleMessage(
     }, deps.guildConfig.replyLoop.wallClockTimeoutMs);
 
     let finalText = "";
-    let targetChatId: string | undefined;
     const pendingAttachments: OutboundAttachment[] = [...(deps.initialPendingAttachments ?? [])];
     const intermediateStatus = { sent: false, sendCount: 0 };
     const liveMessageTypingHoldMs = deps.liveMessageTypingHoldMs ?? DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS;
     const liveDispatchers = new Map<string, LiveMessageDispatcher>();
-    const liveDispatcherFor = (liveTargetChatId: string | undefined): LiveMessageDispatcher => {
-      const key = liveTargetChatId ?? "";
+    const liveDispatcherFor = (destinationChannelId: string | undefined): LiveMessageDispatcher => {
+      const key = destinationChannelId ?? "";
       const existing = liveDispatchers.get(key);
       if (existing !== undefined) return existing;
       const dispatcher = new LiveMessageDispatcher({
@@ -2126,7 +2167,8 @@ export async function handleMessage(
         generateSpeech: deps.generateSpeech,
         ttsEnabled: deps.ttsEnabled ?? false,
         replyFirst: !intermediateStatus.sent && chooseReplyMode(triggerResult),
-        targetChatId: liveTargetChatId,
+        destinationChannelId,
+        currentChannelId: deps.currentChannelId,
         requestLog: reqLog,
         log: deps.log,
         onStillWorking: deps.onStillWorking,
@@ -2139,7 +2181,7 @@ export async function handleMessage(
       liveDispatchers.set(key, dispatcher);
       return dispatcher;
     };
-    const sendIntermediateStatus = async (text: string, intermediateTargetChatId: string | undefined): Promise<boolean> => {
+    const sendIntermediateStatus = async (text: string, destinationChannelId: string | undefined): Promise<boolean> => {
       const statusText = intermediateStatusText(text);
       if (statusText === "") return false;
       intermediateStatus.sendCount += 1;
@@ -2151,7 +2193,8 @@ export async function handleMessage(
           segment: { kind: "text", text: statusText },
           sendId: `tool-status-${intermediateStatus.sendCount}`,
           reply: !intermediateStatus.sent && chooseReplyMode(triggerResult),
-          targetChatId: intermediateTargetChatId,
+          destinationChannelId,
+          currentChannelId: deps.currentChannelId,
           requestLog: reqLog,
           signal: wallController.signal,
         });
@@ -2194,18 +2237,19 @@ export async function handleMessage(
         llmOutputTimeoutMs: deps.guildConfig.replyLoop.llmOutputTimeoutMs,
         requestLog: reqLog,
         sendIntermediateText: sendIntermediateStatus,
-        streamFinalText: async (delta, liveTargetChatId) => {
-          const dispatcher = liveDispatcherFor(liveTargetChatId);
+        streamFinalText: async (delta, destinationChannelId) => {
+          const dispatcher = liveDispatcherFor(destinationChannelId);
           const before = dispatcher.sentCount();
           await dispatcher.push(delta);
           const sent = dispatcher.sentCount() > before;
           if (sent) intermediateStatus.sent = true;
           return sent;
         },
-        onModelTurnStart: (liveTargetChatId) => {
-          liveDispatchers.get(liveTargetChatId ?? "")?.startModelTurn();
+        onModelTurnStart: (destinationChannelId) => {
+          liveDispatchers.get(destinationChannelId ?? "")?.startModelTurn();
         },
         onStillWorking: deps.onStillWorking,
+        currentChannelId: deps.currentChannelId,
         imageInputSupported: supportsNativeImageInput(model.input, deps.modelImageInputSupport),
         toolTiming: timingState,
         log: deps.log,
@@ -2226,7 +2270,6 @@ export async function handleMessage(
         signal: wallController.signal,
       });
       finalText = result.text;
-      targetChatId = result.targetChatId;
     } finally {
       clearTimeout(wallTimeout);
     }
@@ -2237,7 +2280,7 @@ export async function handleMessage(
         try {
           await deps.onIgnoredReply?.({
             sourceMessageId: msg.messageId,
-            targetChatId,
+            channelId: deps.currentChannelId,
             historyText: parsedResponse.ignoredText,
             rawResponse: finalText,
           });
@@ -2257,7 +2300,7 @@ export async function handleMessage(
       return { triggered: true, triggerResult, agentRan: true };
     }
 
-    const liveSent = await (liveDispatchers.get(targetChatId ?? "")?.finish(finalText) ?? Promise.resolve(0));
+    const liveSent = await (liveDispatchers.get("")?.finish(finalText) ?? Promise.resolve(0));
     if (liveSent === 0) {
       await sendResponseSegments({
         sender: deps.sender,
@@ -2265,7 +2308,7 @@ export async function handleMessage(
         ttsEnabled: deps.ttsEnabled ?? false,
         segments: parsedResponse.segments,
         replyFirst: !intermediateStatus.sent && chooseReplyMode(triggerResult),
-        targetChatId,
+        currentChannelId: deps.currentChannelId,
         requestLog: reqLog,
         log: deps.log,
         onStillWorking: deps.onStillWorking,

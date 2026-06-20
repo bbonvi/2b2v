@@ -7,25 +7,25 @@ import {
 } from "./react-to-message-tool.ts";
 
 describe("normalizeReactToMessageInput", () => {
-  test("defaults chat_id to the current channel", () => {
+  test("defaults channel_id to the current channel", () => {
     expect(normalizeReactToMessageInput({
       message_id: " msg-1 ",
       emoji: " 👍 ",
     }, "channel-1")).toEqual({
       messageId: "msg-1",
-      chatId: "channel-1",
+      channelId: "channel-1",
       emoji: "👍",
     });
   });
 
-  test("uses explicit chat_id when provided", () => {
+  test("uses explicit channel_id when provided", () => {
     expect(normalizeReactToMessageInput({
       message_id: "msg-1",
-      chat_id: " thread-1 ",
+      channel_id: " thread-1 ",
       emoji: ":thumbsup:",
     }, "channel-1")).toEqual({
       messageId: "msg-1",
-      chatId: "thread-1",
+      channelId: "thread-1",
       emoji: ":thumbsup:",
     });
   });
@@ -49,7 +49,7 @@ describe("createReactToMessageTool", () => {
   });
 
   test("reacts through dependency and returns details", async () => {
-    const calls: Array<{ messageId: string; chatId: string; emoji: string }> = [];
+    const calls: Array<{ messageId: string; channelId: string; emoji: string }> = [];
     const tool = createReactToMessageTool({
       currentChannelId: "channel-1",
       reactToMessage: (input) => {
@@ -60,8 +60,8 @@ describe("createReactToMessageTool", () => {
 
     const result = await tool.execute("call-1", { message_id: "msg-1", emoji: "👍" }, AbortSignal.timeout(5000));
 
-    expect(calls).toEqual([{ messageId: "msg-1", chatId: "channel-1", emoji: "👍" }]);
-    expect(result.details).toEqual({ messageId: "msg-1", chatId: "channel-1", emoji: "👍" });
+    expect(calls).toEqual([{ messageId: "msg-1", channelId: "channel-1", emoji: "👍" }]);
+    expect(result.details).toEqual({ messageId: "msg-1", channelId: "channel-1", emoji: "👍" });
     expect((result.content[0] as TextContent).text).toContain("Reacted to message msg-1");
   });
 

@@ -29,7 +29,7 @@ export interface AssembledContext {
 
 /** Thread metadata for thread context assembly. */
 export interface ThreadMetadata {
-  parentChatId: string;
+  parentChannelId: string;
   threadId: string;
   starterMessageId: string;
   threadName: string;
@@ -45,7 +45,7 @@ export interface ContextAssemblyInput {
   members: string;
   memories: string;
   upcomingSchedules: string;
-  /** Threads in this chat (for parent channels only). */
+  /** Threads in this channel (for parent channels only). */
   threadsInChat: string;
   /** Thread metadata (for thread channels only). */
   threadMetadata?: ThreadMetadata;
@@ -79,8 +79,8 @@ function computeThreadMetadata(input: ContextAssemblyInput): string {
   if (input.threadMetadata === undefined) return "";
   const m = input.threadMetadata;
   return [
-    `Parent Chat: ${m.parentChatId}`,
-    `Thread: ${m.threadId}`,
+    `Parent Channel: ${m.parentChannelId}`,
+    `Thread Channel: ${m.threadId}`,
     `Starter Message: ${m.starterMessageId}`,
     `Thread Name: "${m.threadName}"`,
     ...(m.createdByBot !== undefined ? [`Created By Bot: ${m.createdByBot ? "yes" : "no"}`] : []),
@@ -102,7 +102,7 @@ export const SECTION_DEFS: readonly SectionDef[] = [
 
   // Group 3: developer, uncached (volatile per-message)
   { label: "Server Members",       role: "developer", cached: false, source: { kind: "field", inputKey: "members", header: "## Server Members" } },
-  { label: "Threads In This Chat", role: "developer", cached: false, source: { kind: "field", inputKey: "threadsInChat", header: "## Threads In This Chat" } },
+  { label: "Threads In This Channel", role: "developer", cached: false, source: { kind: "field", inputKey: "threadsInChat", header: "## Threads In This Channel" } },
   { label: "Upcoming Schedules",   role: "developer", cached: false, source: { kind: "field", inputKey: "upcomingSchedules", header: "## Upcoming Schedules" } },
   { label: "Memories",             role: "developer", cached: false, source: { kind: "field", inputKey: "memories", header: "## Memory" } },
   { label: "Chat History — Newer", role: "developer", cached: false, source: { kind: "field", inputKey: "newerHistory" } },

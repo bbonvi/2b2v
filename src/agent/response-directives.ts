@@ -5,7 +5,7 @@ export type ResponseSegment =
   | { kind: "emptyMessage"; delivery: MessageDelivery };
 
 export interface MessageDelivery {
-  chatId?: string;
+  channelId?: string;
   reply?: boolean;
   replyTo?: string;
   keepTyping?: boolean;
@@ -122,15 +122,15 @@ function unescapeAttributeValue(value: string): string {
 
 function parseMessageDelivery(attrs: string): MessageDelivery | undefined {
   const delivery: MessageDelivery = {};
-  const attrRe = /\s(chat_id|reply|reply_to|keep_typing)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/gi;
+  const attrRe = /\s(channel_id|reply|reply_to|keep_typing)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/gi;
   for (;;) {
     const match = attrRe.exec(attrs);
     if (match === null) break;
     const rawName = match[1];
     if (rawName === undefined) continue;
     const value = unescapeAttributeValue(match[2] ?? match[3] ?? match[4] ?? "").trim();
-    if (rawName.toLowerCase() === "chat_id") {
-      if (value !== "") delivery.chatId = value;
+    if (rawName.toLowerCase() === "channel_id") {
+      if (value !== "") delivery.channelId = value;
     } else if (rawName.toLowerCase() === "reply") {
       if (value.toLowerCase() === "true") delivery.reply = true;
       if (value.toLowerCase() === "false") delivery.reply = false;
@@ -143,7 +143,7 @@ function parseMessageDelivery(attrs: string): MessageDelivery | undefined {
   }
   const imageIds = parseImageIdsAttribute(attrs);
   if (imageIds !== undefined && imageIds.length > 0) delivery.imageIds = imageIds;
-  return delivery.chatId !== undefined
+  return delivery.channelId !== undefined
     || delivery.reply !== undefined
     || delivery.replyTo !== undefined
     || delivery.keepTyping !== undefined

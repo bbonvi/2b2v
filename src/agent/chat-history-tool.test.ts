@@ -10,7 +10,7 @@ function makeDeps(messages: ChatHistoryMessage[]): ChatHistoryToolDeps {
   return {
     guildId: "g1",
     timezone: "UTC",
-    fetchMessages: (_chatId, _limit) => Promise.resolve(messages),
+    fetchMessages: (_channelId, _limit) => Promise.resolve(messages),
   };
 }
 
@@ -30,7 +30,7 @@ describe("createChatHistoryTool", () => {
 
   test("returns chat messages", async () => {
     const tool = createChatHistoryTool(makeDeps(MESSAGES));
-    const result = await tool.execute("tc1", { chat_id: "c1" }, AbortSignal.timeout(5000));
+    const result = await tool.execute("tc1", { channel_id: "c1" }, AbortSignal.timeout(5000));
     const text = (result.content[0] as TextContent).text;
     expect(text).toContain("alice");
     expect(text).toContain("Hello world");
@@ -43,13 +43,13 @@ describe("createChatHistoryTool", () => {
     const deps: ChatHistoryToolDeps = {
       guildId: "g1",
       timezone: "UTC",
-      fetchMessages: (_chatId, limit) => {
+      fetchMessages: (_channelId, limit) => {
         passedLimit = limit;
         return Promise.resolve(MESSAGES.slice(0, limit));
       },
     };
     const tool = createChatHistoryTool(deps);
-    await tool.execute("tc1", { chat_id: "c1", limit: 2 }, AbortSignal.timeout(5000));
+    await tool.execute("tc1", { channel_id: "c1", limit: 2 }, AbortSignal.timeout(5000));
     expect(passedLimit).toBe(2);
   });
 
@@ -58,19 +58,19 @@ describe("createChatHistoryTool", () => {
     const deps: ChatHistoryToolDeps = {
       guildId: "g1",
       timezone: "UTC",
-      fetchMessages: (_chatId, limit) => {
+      fetchMessages: (_channelId, limit) => {
         passedLimit = limit;
         return Promise.resolve(MESSAGES);
       },
     };
     const tool = createChatHistoryTool(deps);
-    await tool.execute("tc1", { chat_id: "c1" }, AbortSignal.timeout(5000));
+    await tool.execute("tc1", { channel_id: "c1" }, AbortSignal.timeout(5000));
     expect(passedLimit).toBe(50);
   });
 
   test("handles empty results", async () => {
     const tool = createChatHistoryTool(makeDeps([]));
-    const result = await tool.execute("tc1", { chat_id: "c1" }, AbortSignal.timeout(5000));
+    const result = await tool.execute("tc1", { channel_id: "c1" }, AbortSignal.timeout(5000));
     const text = (result.content[0] as TextContent).text;
     expect(text).toContain("No messages");
     expect((result.details as { count: number }).count).toBe(0);
@@ -83,14 +83,14 @@ describe("createChatHistoryTool", () => {
       fetchMessages: () => { throw new Error("Missing Access"); },
     };
     const tool = createChatHistoryTool(deps);
-    const result = await tool.execute("tc1", { chat_id: "c1" }, AbortSignal.timeout(5000));
+    const result = await tool.execute("tc1", { channel_id: "c1" }, AbortSignal.timeout(5000));
     const text = (result.content[0] as TextContent).text;
     expect(text).toContain("Unable to fetch");
   });
 
   test("formats messages with local wall-clock timestamps", async () => {
     const tool = createChatHistoryTool(makeDeps(MESSAGES));
-    const result = await tool.execute("tc1", { chat_id: "c1" }, AbortSignal.timeout(5000));
+    const result = await tool.execute("tc1", { channel_id: "c1" }, AbortSignal.timeout(5000));
     const text = (result.content[0] as TextContent).text;
     // Local wall-clock format: [YYYY-MM-DD HH:mm], no "UTC" suffix
     expect(text).toMatch(/\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]/);

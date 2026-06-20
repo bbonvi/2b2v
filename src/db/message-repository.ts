@@ -877,7 +877,7 @@ export interface ChatHistoryRow {
 }
 
 /**
- * Fetch chat history for the chat_history tool.
+ * Fetch channel history for the chat_history tool.
  * Returns chronological order (oldest first).
  *
  * Note: Includes synthetic events (thread creation, etc.) but excludes
@@ -886,7 +886,7 @@ export interface ChatHistoryRow {
 export function getChatHistory(
   db: Database,
   guildId: string,
-  chatId: string,
+  channelId: string,
   limit: number,
 ): ChatHistoryRow[] {
   const rows = db.raw
@@ -897,7 +897,7 @@ export function getChatHistory(
        ORDER BY created_at DESC
        LIMIT ?`
     )
-    .all(guildId, chatId, limit) as Array<{
+    .all(guildId, channelId, limit) as Array<{
       id: string;
       author_username: string;
       translated_content: string;
@@ -925,7 +925,7 @@ export interface InsertSyntheticEventInput {
   botUserId: string;
   /** Bot username for display. */
   botUsername: string;
-  /** Thread ID this event references. */
+  /** Thread channel ID this event references. */
   threadId: string;
   /** Thread name for the event content. */
   threadName: string;
@@ -947,12 +947,12 @@ export interface InsertPromptOnlyBotMessageInput {
 
 /**
  * Insert a synthetic "Event" row for thread creation/handoff.
- * Stored in the parent chat with is_synthetic=1 and related_thread_id set.
+ * Stored in the parent channel with is_synthetic=1 and related_thread_id set.
  * Never embedded or included in search results.
  */
 export function insertSyntheticEvent(db: Database, input: InsertSyntheticEventInput): void {
   const now = Date.now();
-  const content = `Event: Thread created — request handed off to thread — ${input.threadName} (thread_id: ${input.threadId})`;
+  const content = `Event: Thread created — request handed off to thread — ${input.threadName} (channel_id: ${input.threadId})`;
 
   db.raw
     .prepare(

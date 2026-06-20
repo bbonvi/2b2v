@@ -152,21 +152,21 @@ describe("createSearchTool", () => {
     const text = getResultText(result);
     expect(text).toContain("bob");
     expect(text).toContain("[id m1]");
-    expect(text).not.toContain("[chat_id");
+    expect(text).not.toContain("[channel_id");
     expect(result.details.count).toBe(1);
   });
 
-  test("defaults searches to the current chat", async () => {
-    await insertWithEmbedding("m1", "same phrase current chat", { channelId: "c1" });
-    await insertWithEmbedding("m2", "same phrase other chat", { channelId: "c2" });
+  test("defaults searches to the current channel", async () => {
+    await insertWithEmbedding("m1", "same phrase current channel", { channelId: "c1" });
+    await insertWithEmbedding("m2", "same phrase other channel", { channelId: "c2" });
 
     const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { query: "same phrase" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
 
     const text = getResultText(result);
-    expect(text).toContain("same phrase current chat");
-    expect(text).not.toContain("same phrase other chat");
-    expect(text).not.toContain("[chat_id");
+    expect(text).toContain("same phrase current channel");
+    expect(text).not.toContain("same phrase other channel");
+    expect(text).not.toContain("[channel_id");
   });
 
   test("returns semantic results in rank order with scores", async () => {
@@ -327,14 +327,14 @@ describe("search mode: literal", () => {
     expect(result.details.count).toBe(1);
   });
 
-  test("omits repeated chat_id when search is scoped to a chat", async () => {
+  test("omits repeated channel_id when search is scoped to a channel", async () => {
     insertMessage("m1", "topic here", { channelId: "c1" });
     insertMessage("m2", "topic here", { channelId: "c2" });
     const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "topic", mode: "literal", chat_id: "c1" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const result = await tool.execute("tc1", { query: "topic", mode: "literal", channel_id: "c1" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).toContain("[id m1]");
-    expect(text).not.toContain("[chat_id");
+    expect(text).not.toContain("[channel_id");
     expect(text).not.toContain("[id m2]");
   });
 
@@ -401,10 +401,10 @@ describe("search mode: context", () => {
     const result = await tool.execute("tc1", { mode: "context", message_id: "m2", limit: 3 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
 
-    expect(text).toContain("Surrounding chat context around message id m2 in chat c1");
+    expect(text).toContain("Surrounding channel context around message id m2 in channel c1");
     expect(text.indexOf("[id m1]")).toBeLessThan(text.indexOf("[id m2]"));
     expect(text.indexOf("[id m2]")).toBeLessThan(text.indexOf("[id m3]"));
-    expect(text).not.toContain("[chat_id");
+    expect(text).not.toContain("[channel_id");
     expect(result.details.count).toBe(3);
   });
 
@@ -412,29 +412,29 @@ describe("search mode: context", () => {
     const aroundMs = Date.UTC(2026, 4, 28, 14, 12);
     insertMessage("m1", "before timestamp", { channelId: "c1", createdAt: aroundMs - 60_000 });
     insertMessage("m2", "after timestamp", { channelId: "c1", createdAt: aroundMs + 60_000 });
-    insertMessage("m3", "wrong chat", { channelId: "c2", createdAt: aroundMs });
+    insertMessage("m3", "wrong channel", { channelId: "c2", createdAt: aroundMs });
 
     const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { mode: "context", chat_id: "c1", around: "2026-05-28 14:12", limit: 2 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const result = await tool.execute("tc1", { mode: "context", channel_id: "c1", around: "2026-05-28 14:12", limit: 2 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
 
-    expect(text).toContain("Surrounding chat context around 2026-05-28 14:12 in chat c1");
+    expect(text).toContain("Surrounding channel context around 2026-05-28 14:12 in channel c1");
     expect(text).toContain("[id m1]");
     expect(text).toContain("[id m2]");
     expect(text).not.toContain("[id m3]");
   });
 
-  test("defaults timestamp context to current chat", async () => {
+  test("defaults timestamp context to current channel", async () => {
     const aroundMs = Date.UTC(2026, 4, 28, 14, 12);
-    insertMessage("m1", "current chat timestamp", { channelId: "c1", createdAt: aroundMs });
-    insertMessage("m2", "other chat timestamp", { channelId: "c2", createdAt: aroundMs });
+    insertMessage("m1", "current channel timestamp", { channelId: "c1", createdAt: aroundMs });
+    insertMessage("m2", "other channel timestamp", { channelId: "c2", createdAt: aroundMs });
 
     const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
     const result = await tool.execute("tc1", { mode: "context", around: "2026-05-28 14:12" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
-    expect(text).toContain("current chat timestamp");
-    expect(text).not.toContain("other chat timestamp");
-    expect(text).not.toContain("[chat_id");
+    expect(text).toContain("current channel timestamp");
+    expect(text).not.toContain("other channel timestamp");
+    expect(text).not.toContain("[channel_id");
   });
 });
 

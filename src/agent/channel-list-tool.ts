@@ -28,7 +28,7 @@ export function createChannelListTool(deps: ChannelListToolDeps): AgentTool {
     name: "list_channels",
     label: "list_channels",
     description:
-      "List visible Discord guild channels and threads before cross-channel handoff/sending or mentioning a channel. Returns chat_id/channel IDs and sendability. DMs are unsupported and never listed.",
+      "List visible Discord guild channels and threads before cross-channel handoff/sending or mentioning a channel. Returns channel_id values and sendability. DMs are unsupported and never listed.",
     parameters: ListChannelsParams,
 
     async execute(_toolCallId: string): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {
@@ -63,7 +63,7 @@ export function createChannelListTool(deps: ChannelListToolDeps): AgentTool {
 
 export function formatChannelList(channels: readonly ChannelInfo[]): string {
   const lines = [
-    "Legend: * = current chat/thread; id = chat_id for <message chat_id=\"...\">; mention = Discord channel mention; send=yes means bot can send there; DMs unsupported.",
+    "Legend: * = current channel/thread; id = channel_id for <message channel_id=\"...\">; mention = Discord channel mention; send=yes means bot can send there; DMs unsupported.",
     ...channels.map(formatChannel),
   ];
   return lines.join("\n");

@@ -49,21 +49,35 @@ describe("AgentJobStore", () => {
     expect(second.job.id).not.toBe(first.job.id);
   });
 
-  test("tracks source and delivery chats separately", () => {
+  test("tracks source and delivery channels separately", () => {
     const store = new AgentJobStore(config);
     const result = enqueue(store, {
       guildId: "source-guild",
-      channelId: "source-chat",
+      channelId: "source-channel",
       deliveryGuildId: "delivery-guild",
-      deliveryChannelId: "thread-chat",
+      deliveryChannelId: "thread-channel",
     });
 
     expect(result.job.guildId).toBe("source-guild");
-    expect(result.job.channelId).toBe("source-chat");
+    expect(result.job.channelId).toBe("source-channel");
     expect(result.job.deliveryGuildId).toBe("delivery-guild");
-    expect(result.job.deliveryChannelId).toBe("thread-chat");
-    expect(store.listVisible("source-guild", "source-chat")).toHaveLength(1);
-    expect(store.listVisible("delivery-guild", "thread-chat")).toHaveLength(1);
+    expect(result.job.deliveryChannelId).toBe("thread-channel");
+    expect(store.listVisible("source-guild", "source-channel")).toHaveLength(1);
+    expect(store.listVisible("delivery-guild", "thread-channel")).toHaveLength(1);
+  });
+
+  test("renders cross-channel delivery annotations with channel_id", () => {
+    const store = new AgentJobStore(config);
+    const result = enqueue(store, {
+      guildId: "source-guild",
+      channelId: "source-channel",
+      deliveryGuildId: "delivery-guild",
+      deliveryChannelId: "thread-channel",
+    });
+
+    expect(store.annotationForMessage("m1", "source-guild", "source-channel")).toEqual([
+      `ImageJob: ${result.job.id} queued -> channel_id thread-channel`,
+    ]);
   });
 
   test("rejects replacement cancellation after grace window", () => {

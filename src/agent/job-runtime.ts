@@ -273,7 +273,7 @@ export class AgentJobStore {
       .filter((job) => job.sourceMessageId === messageId);
     return jobs.map((job) => {
       const delivery = job.deliveryGuildId !== job.guildId || job.deliveryChannelId !== job.channelId
-        ? ` -> chat ${job.deliveryChannelId}`
+        ? ` -> channel_id ${job.deliveryChannelId}`
         : "";
       return `ImageJob: ${job.id} ${job.status}${job.input.is4k ? " 4K" : ""}${delivery}`;
     });

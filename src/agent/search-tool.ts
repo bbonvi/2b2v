@@ -46,8 +46,8 @@ const SearchParams = Type.Object({
   query: Type.Optional(Type.String({ description: "Semantic: short 2-5 word topic phrase; put names/times/channels in filters. Literal: exact string." })),
   message_id: Type.Optional(Type.String({ description: "Anchor message ID for mode='context'." })),
   username: Type.Optional(Type.String({ description: "Filter results to a specific username." })),
-  chat_id: Type.Optional(Type.String({ description: "Search a specific guild channel or thread. Defaults to the current chat. DMs are not supported." })),
-  around: Type.Optional(Type.String({ description: "Local wall-clock timestamp for mode='context', formatted YYYY-MM-DD HH:mm in the server timezone. Defaults to the current chat unless chat_id is provided." })),
+  channel_id: Type.Optional(Type.String({ description: "Search a specific guild channel or thread. Defaults to the current channel. DMs are not supported." })),
+  around: Type.Optional(Type.String({ description: "Local wall-clock timestamp for mode='context', formatted YYYY-MM-DD HH:mm in the server timezone. Defaults to the current channel unless channel_id is provided." })),
   afterMs: Type.Optional(Type.Number({ description: "Only messages after this epoch ms timestamp." })),
   beforeMs: Type.Optional(Type.Number({ description: "Only messages before this epoch ms timestamp." })),
   is_bot: Type.Optional(Type.Boolean({ description: "Semantic search only: true for bot-authored results, false for human-authored results." })),
@@ -81,7 +81,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
     name: "search_messages",
     label: "Search Messages",
     description:
-      "Search chat history when context is missing or a request refers to prior chat. Modes: 'semantic' (default) for vague meaning, 'literal' for exact words/errors/URLs/commands, 'id' for direct lookup, and 'context' for surrounding conversation around a result id or local timestamp. For semantic mode, use a short topic phrase and put names, chats, times, or bot/human constraints in filters. Search defaults to the current chat; set chat_id only for another chat. include_attachments is slow and should be enabled only when attachment filenames/types matter.",
+      "Search channel history when context is missing or a request refers to prior messages. Modes: 'semantic' (default) for vague meaning, 'literal' for exact words/errors/URLs/commands, 'id' for direct lookup, and 'context' for surrounding conversation around a result id or local timestamp. For semantic mode, use a short topic phrase and put names, channels, times, or bot/human constraints in filters. Search defaults to the current channel; set channel_id only for another channel/thread. include_attachments is slow and should be enabled only when attachment filenames/types matter.",
     parameters: SearchParams,
     execute: async (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as {
@@ -89,7 +89,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         query?: string;
         message_id?: string;
         username?: string;
-        chat_id?: string;
+        channel_id?: string;
         around?: string;
         afterMs?: number;
         beforeMs?: number;
@@ -101,7 +101,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
       };
       const mode = p.mode ?? "semantic";
       const limit = Math.max(1, Math.min(p.limit ?? 10, 50));
-      const scopedChatId = p.chat_id !== undefined && p.chat_id.trim() !== "" ? p.chat_id : currentChannelId;
+      const scopedChannelId = p.channel_id !== undefined && p.channel_id.trim() !== "" ? p.channel_id : currentChannelId;
       const excludedMessageIds = [...new Set(deps.excludedMessageIds ?? [])];
       let contextIntro: string | undefined;
 
@@ -124,8 +124,8 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         if (result === null) {
           return { content: [{ type: "text", text: "Message not found." }], details: undefined };
         }
-        if (result.channelId !== scopedChatId) {
-          return { content: [{ type: "text", text: "Message not found in that chat." }], details: undefined };
+        if (result.channelId !== scopedChannelId) {
+          return { content: [{ type: "text", text: "Message not found in that channel." }], details: undefined };
         }
         if (excludedMessageIds.includes(result.id)) {
           return { content: [{ type: "text", text: "Message is already present in the current prompt context." }], details: { count: 0 } };
@@ -136,14 +136,14 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         if (p.message_id !== undefined && p.message_id.trim() !== "") {
           const contextResults = getMessagesAroundMessage(db, p.message_id, {
             guildId,
-            channelId: scopedChatId,
+            channelId: scopedChannelId,
             limit: contextLimit,
           });
           if (contextResults === null) {
             return { content: [{ type: "text", text: "Message not found." }], details: undefined };
           }
           results = contextResults;
-          contextIntro = `Surrounding chat context around message id ${p.message_id} in chat ${scopedChatId}, ordered oldest to newest.`;
+          contextIntro = `Surrounding channel context around message id ${p.message_id} in channel ${scopedChannelId}, ordered oldest to newest.`;
         } else if (p.around !== undefined && p.around.trim() !== "") {
           const parsed = parseLocalDateTimeToEpoch(p.around, timezone);
           if (!parsed.ok) {
@@ -151,11 +151,11 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
           }
           results = getMessagesAroundTimestamp(db, {
             guildId,
-            channelId: scopedChatId,
+            channelId: scopedChannelId,
             around: parsed.epochMs,
             limit: contextLimit,
           });
-          contextIntro = `Surrounding chat context around ${p.around} in chat ${scopedChatId}, ordered oldest to newest.`;
+          contextIntro = `Surrounding channel context around ${p.around} in channel ${scopedChannelId}, ordered oldest to newest.`;
         } else {
           return { content: [{ type: "text", text: "mode='context' requires message_id or around." }], details: undefined };
         }
@@ -167,7 +167,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
           results = searchMessagesLiteral(db, p.query, {
             guildId,
             userId: userId,
-            channelId: scopedChatId,
+            channelId: scopedChannelId,
             after: p.afterMs,
             before: p.beforeMs,
             excludeIds: excludedMessageIds,
@@ -201,7 +201,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
           results = await searchMessages(db, qdrant, queryVec, {
             guildId,
             userId: userId,
-            channelId: scopedChatId,
+            channelId: scopedChannelId,
             after: p.afterMs,
             before: p.beforeMs,
             excludeIds: excludedMessageIds,
@@ -251,7 +251,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         contextIntro ?? formatResultIntro(mode),
         ...results.map((r) => formatResult(r, timezone, {
           includeScore: mode === "semantic",
-          includeChatId: false,
+          includeChannelId: false,
           attachments: attachmentMap.get(r.id),
         })),
       ];
@@ -273,16 +273,16 @@ function formatResultIntro(mode: "semantic" | "literal" | "id" | "context"): str
 function formatResult(
   r: MessageSearchResult,
   timezone: string,
-  options: { includeScore: boolean; includeChatId: boolean; attachments?: AttachmentInfo[] },
+  options: { includeScore: boolean; includeChannelId: boolean; attachments?: AttachmentInfo[] },
 ): string {
   const date = formatLocalWallClock(r.createdAt, timezone);
   const replyTag = r.replyToId !== null ? ` (reply to ${r.replyToId})` : "";
   const scoreTag = options.includeScore ? `[score ${r.score.toFixed(3)}] ` : "";
-  const chatTag = options.includeChatId ? ` [chat_id ${r.channelId}]` : "";
+  const channelTag = options.includeChannelId ? ` [channel_id ${r.channelId}]` : "";
   const ids = r.matchedMessageIds !== undefined && r.matchedMessageIds.length > 1
     ? ` [ids ${r.matchedMessageIds.join(",")}]`
     : ` [id ${r.id}]`;
-  let line = `${scoreTag}[${date}]${chatTag}${ids} ${r.authorUsername}${replyTag}: ${r.translatedContent}`;
+  let line = `${scoreTag}[${date}]${channelTag}${ids} ${r.authorUsername}${replyTag}: ${r.translatedContent}`;
   if (options.attachments !== undefined && options.attachments.length > 0) {
     for (const a of options.attachments) {
       const sizeStr = formatFileSize(a.size);

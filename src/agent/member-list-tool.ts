@@ -24,7 +24,7 @@ const ListMembersParams = Type.Object({
   ),
 });
 
-/** Create a compact current-guild user listing tool for chat identity and admin awareness. */
+/** Create a compact current-guild user listing tool for channel identity and admin awareness. */
 export function createChatUserListTool(deps: MemberListToolDeps): AgentTool {
   const { guildId, fetchMembers, getMemoryCounts, adminUserIds } = deps;
 

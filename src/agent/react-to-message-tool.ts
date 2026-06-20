@@ -2,8 +2,8 @@ import { Type, type Static } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 
 const ReactToMessageParams = Type.Object({
-  message_id: Type.String({ description: "Discord message ID to react to. Must be visible or retrievable in the selected guild chat." }),
-  chat_id: Type.Optional(Type.String({ description: "Guild text channel or thread ID containing the message. Defaults to the current chat. DMs are not supported." })),
+  message_id: Type.String({ description: "Discord message ID to react to. Must be visible or retrievable in the selected guild channel/thread." }),
+  channel_id: Type.Optional(Type.String({ description: "Guild text channel or thread ID containing the message. Defaults to the current channel. DMs are not supported." })),
   emoji: Type.String({ description: "Reaction emoji to add. Use a small Unicode emoji like 👍 when possible; custom emoji names, :name:, or Discord emoji markup may also work." }),
 });
 
@@ -11,13 +11,13 @@ export type ReactToMessageInput = Static<typeof ReactToMessageParams>;
 
 export interface ReactToMessageDetails {
   messageId: string;
-  chatId: string;
+  channelId: string;
   emoji: string;
 }
 
 export interface ReactToMessageRequest {
   messageId: string;
-  chatId: string;
+  channelId: string;
   emoji: string;
 }
 
@@ -28,21 +28,21 @@ export interface ReactToMessageToolDeps {
   reactToMessage: MessageReactor;
 }
 
-/** Normalize react_to_message tool input and apply the current-chat default. */
+/** Normalize react_to_message tool input and apply the current-channel default. */
 export function normalizeReactToMessageInput(
   params: ReactToMessageInput,
   currentChannelId: string,
 ): ReactToMessageRequest | { error: string } {
   const messageId = params.message_id.trim();
-  const chatId = params.chat_id?.trim() === undefined || params.chat_id.trim() === ""
+  const channelId = params.channel_id?.trim() === undefined || params.channel_id.trim() === ""
     ? currentChannelId
-    : params.chat_id.trim();
+    : params.channel_id.trim();
   const emoji = params.emoji.trim();
 
   if (messageId === "") return { error: "message_id is required." };
-  if (chatId === "") return { error: "chat_id is required." };
+  if (channelId === "") return { error: "channel_id is required." };
   if (emoji === "") return { error: "emoji is required." };
-  return { messageId, chatId, emoji };
+  return { messageId, channelId, emoji };
 }
 
 /** Create the react_to_message AgentTool. */
@@ -70,7 +70,7 @@ export function createReactToMessageTool(deps: ReactToMessageToolDeps): AgentToo
         return {
           content: [{
             type: "text",
-            text: `Reacted to message ${details.messageId} in chat ${details.chatId} with ${details.emoji}. If no text reply is needed, stop here or use <ignore> to stay silent.`,
+            text: `Reacted to message ${details.messageId} in channel ${details.channelId} with ${details.emoji}. If no text reply is needed, stop here or use <ignore> to stay silent.`,
           }],
           details,
         };
