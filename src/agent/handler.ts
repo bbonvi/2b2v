@@ -949,6 +949,7 @@ const PARALLEL_SAFE_READ_ONLY_TOOLS = new Set([
   "fetch_images",
   "fetch_url",
   "get_user_memory",
+  "list_emojis",
   "list_scheduled_messages",
   "list_chat_users",
   "list_channels",

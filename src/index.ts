@@ -44,6 +44,7 @@ import { createSearchTool } from "./agent/search-tool";
 import { createScheduleTools } from "./agent/schedule-tool";
 import { createChatUserListTool, type MemberInfo } from "./agent/member-list-tool";
 import { createChannelListTool, type ChannelInfo } from "./agent/channel-list-tool";
+import { createEmojiListTool } from "./agent/emoji-list-tool";
 import { createUserMemoryTool } from "./agent/user-memory-tool";
 import { createChatHistoryTool } from "./agent/chat-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
@@ -1728,14 +1729,24 @@ function resolveGuildUsername(guild: Guild, username: string): string | undefine
 }
 
 // --- 18. Refresh emoji cache for a guild ---
-function refreshEmojiCache(guild: Guild): void {
-  if (!emojiCache.isStale(guild.id, EMOJI_TTL_MS)) return;
-  const emojis: EmojiEntry[] = guild.emojis.cache.map((e) => ({
+function mapGuildEmojis(guild: Guild): EmojiEntry[] {
+  return guild.emojis.cache.map((e) => ({
     name: e.name,
     id: e.id,
     animated: e.animated,
   }));
+}
+
+function refreshEmojiCache(guild: Guild): void {
+  if (!emojiCache.isStale(guild.id, EMOJI_TTL_MS)) return;
+  emojiCache.set(guild.id, mapGuildEmojis(guild));
+}
+
+async function fetchEmojiCache(guild: Guild): Promise<EmojiEntry[]> {
+  await guild.emojis.fetch();
+  const emojis = mapGuildEmojis(guild);
   emojiCache.set(guild.id, emojis);
+  return emojis;
 }
 
 // --- 19. Build assembled context for a guild+channel ---
@@ -2289,6 +2300,13 @@ function buildAgentTools(
     },
   });
 
+  const emojiListTool = createEmojiListTool({
+    guildId,
+    getCachedEmojis: (gId) => emojiCache.get(gId),
+    shouldRefresh: (gId) => emojiCache.isStale(gId, EMOJI_TTL_MS),
+    refreshEmojis: async () => fetchEmojiCache(guild),
+  });
+
   const userMemoryTool = createUserMemoryTool({
     db,
     guildId,
@@ -2375,7 +2393,7 @@ function buildAgentTools(
     },
   });
 
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, userMemoryTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, userMemoryTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (includeImageGenerationTools) {
     const codexImageModel = guildConfig.llmProvider === "openai-codex"
       ? guildConfig.model ?? globalConfig.defaultModel

@@ -62,6 +62,8 @@ export { createChatUserListTool, type MemberListToolDeps, type MemberInfo } from
 
 export { createChannelListTool, type ChannelListToolDeps, type ChannelInfo } from "./channel-list-tool.ts";
 
+export { createEmojiListTool, buildEmojiListOutput, type EmojiListToolDeps } from "./emoji-list-tool.ts";
+
 export { createUserMemoryTool, type UserMemoryToolDeps } from "./user-memory-tool.ts";
 
 export { createChatHistoryTool, type ChatHistoryToolDeps, type ChatHistoryMessage } from "./chat-history-tool.ts";
