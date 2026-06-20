@@ -1,4 +1,5 @@
 import type { Database } from "./database";
+import type { ImageSourceKind } from "./image-repository.ts";
 import type { QdrantClient } from "@qdrant/js-client-rest";
 import { searchPoints, type SearchResult } from "../qdrant/adapter";
 import type { HistoryMessage } from "../agent/history-types";
@@ -73,7 +74,7 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
   const placeholders = messageIds.map(() => "?").join(",");
   const imageRows = db.raw
     .prepare(
-      `SELECT message_id, id, caption
+      `SELECT message_id, id, caption, source_kind
        FROM images
        WHERE message_id IN (${placeholders})
        ORDER BY id ASC`
@@ -82,16 +83,17 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
       message_id: string;
       id: number;
       caption: string | null;
+      source_kind: ImageSourceKind;
     }>;
 
-  const imageMap = new Map<string, Array<{ id: number; caption: string | null }>>();
+  const imageMap = new Map<string, Array<{ id: number; caption: string | null; sourceKind: ImageSourceKind }>>();
   for (const img of imageRows) {
     let arr = imageMap.get(img.message_id);
     if (arr === undefined) {
       arr = [];
       imageMap.set(img.message_id, arr);
     }
-    arr.push({ id: img.id, caption: img.caption });
+    arr.push({ id: img.id, caption: img.caption, sourceKind: img.source_kind });
   }
 
   return rows.map((r) => {
@@ -106,6 +108,7 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
       replyToId: r.reply_to_id,
       imageIds: images.map((i) => i.id),
       captions: images.map((i) => i.caption ?? ""),
+      ...(images.length > 0 ? { imageSourceKinds: images.map((i) => i.sourceKind) } : {}),
       hasEmbeds: false,
       isSynthetic: r.is_synthetic === 1,
       isPromptOnly: r.is_prompt_only === 1,
@@ -656,7 +659,7 @@ export function getParentPreContext(
   const placeholders = messageIds.map(() => "?").join(",");
   const imageRows = db.raw
     .prepare(
-      `SELECT message_id, id, caption
+      `SELECT message_id, id, caption, source_kind
        FROM images
        WHERE message_id IN (${placeholders})
        ORDER BY id ASC`
@@ -665,17 +668,18 @@ export function getParentPreContext(
       message_id: string;
       id: number;
       caption: string | null;
+      source_kind: ImageSourceKind;
     }>;
 
   // Group images by message_id
-  const imageMap = new Map<string, Array<{ id: number; caption: string | null }>>();
+  const imageMap = new Map<string, Array<{ id: number; caption: string | null; sourceKind: ImageSourceKind }>>();
   for (const img of imageRows) {
     let arr = imageMap.get(img.message_id);
     if (arr === undefined) {
       arr = [];
       imageMap.set(img.message_id, arr);
     }
-    arr.push({ id: img.id, caption: img.caption });
+    arr.push({ id: img.id, caption: img.caption, sourceKind: img.source_kind });
   }
 
   return rows.map((r) => {
@@ -690,6 +694,7 @@ export function getParentPreContext(
       replyToId: r.reply_to_id,
       imageIds: images.map((i) => i.id),
       captions: images.map((i) => i.caption ?? ""),
+      ...(images.length > 0 ? { imageSourceKinds: images.map((i) => i.sourceKind) } : {}),
       hasEmbeds: false,
       isSynthetic: r.is_synthetic === 1,
       isPromptOnly: r.is_prompt_only === 1,

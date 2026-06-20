@@ -238,6 +238,7 @@ describe("images table", () => {
     expect(row.guild_id).toBe("guild-1");
     expect(row.width).toBe(768);
     expect(row.caption).toBeNull();
+    expect(row.source_kind).toBe("image");
   });
 
   test("autoincrement produces sequential IDs", () => {
@@ -272,6 +273,17 @@ describe("images table", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_images_message_id'")
       .get() as { name: string } | undefined;
     expect(idx?.name).toBe("idx_images_message_id");
+  });
+
+  test("source_kind only accepts known media kinds", () => {
+    expect(() => {
+      db.raw
+        .prepare(
+          `INSERT INTO images (message_id, guild_id, channel_id, source_kind, path, mime, width, height, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run("msg-bad", "g", "c", "video", "p.jpg", "image/jpeg", 100, 100, Date.now());
+    }).toThrow();
   });
 });
 

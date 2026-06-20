@@ -76,6 +76,22 @@ describe("image-repository", () => {
       expect(rec.caption).toBe("a red car");
     });
 
+    test("stores source kind when provided", () => {
+      const rec = insertImage(db, {
+        messageId: "msg-1",
+        guildId: "g1",
+        channelId: "c1",
+        path: "/data/1.webp",
+        mime: "image/webp",
+        width: 100,
+        height: 100,
+        createdAt: 1000,
+        sourceKind: "gif",
+      });
+      expect(rec.sourceKind).toBe("gif");
+      expect(getImageById(db, rec.id)?.sourceKind).toBe("gif");
+    });
+
     test("multiple images per message", () => {
       const a = insertImage(db, {
         messageId: "msg-1",

@@ -158,11 +158,13 @@ describe("processAndStoreImage", () => {
       messageId: "msg-1",
       guildId: "g1",
       channelId: "c1",
+      sourceKind: "gif",
     });
 
     // DB record created
     expect(record.id).toBeGreaterThan(0);
     expect(record.mime).toBe("image/webp");
+    expect(record.sourceKind).toBe("gif");
     expect(record.width).toBeLessThanOrEqual(500);
 
     // File written to disk at deterministic path

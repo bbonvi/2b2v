@@ -121,6 +121,7 @@ function buildReplyContext(
     replyMsgId: message.replyToId,
     missingTarget: false,
     replyImageIds: target.imageIds,
+    replyImageSourceKinds: target.imageSourceKinds,
     replyCaptions: captioningEnabled ? target.captions : [],
   };
 }

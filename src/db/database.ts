@@ -78,6 +78,7 @@ const SCHEMA_SQL = `
     guild_id    TEXT NOT NULL,
     channel_id  TEXT NOT NULL,
     caption     TEXT,
+    source_kind TEXT NOT NULL DEFAULT 'image' CHECK(source_kind IN ('image', 'gif', 'sticker')),
     path        TEXT NOT NULL,
     mime        TEXT NOT NULL DEFAULT 'image/jpeg',
     width       INTEGER NOT NULL,
@@ -131,6 +132,7 @@ export function createDatabase(dbPath: string): Database {
   try { raw.run("ALTER TABLE messages ADD COLUMN is_synthetic INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try { raw.run("ALTER TABLE messages ADD COLUMN is_prompt_only INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try { raw.run("ALTER TABLE messages ADD COLUMN related_thread_id TEXT"); } catch { /* already exists */ }
+  try { raw.run("ALTER TABLE images ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'image' CHECK(source_kind IN ('image', 'gif', 'sticker'))"); } catch { /* already exists */ }
 
   // Idempotent migration: thread ownership and close/archive state.
   try { raw.run("ALTER TABLE threads ADD COLUMN created_by_bot INTEGER NOT NULL DEFAULT 1"); } catch { /* already exists */ }

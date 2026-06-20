@@ -1,11 +1,14 @@
 import type { Database } from "./database.ts";
 
+export type ImageSourceKind = "image" | "gif" | "sticker";
+
 export interface ImageRecord {
   id: number;
   messageId: string;
   guildId: string;
   channelId: string;
   caption: string | null;
+  sourceKind: ImageSourceKind;
   path: string;
   mime: string;
   width: number;
@@ -23,6 +26,7 @@ export interface InsertImageInput {
   height: number;
   createdAt: number;
   caption?: string;
+  sourceKind?: ImageSourceKind;
 }
 
 /**
@@ -30,14 +34,15 @@ export interface InsertImageInput {
  */
 export function insertImage(db: Database, input: InsertImageInput): ImageRecord {
   const stmt = db.raw.prepare(
-    `INSERT INTO images (message_id, guild_id, channel_id, caption, path, mime, width, height, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO images (message_id, guild_id, channel_id, caption, source_kind, path, mime, width, height, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   stmt.run(
     input.messageId,
     input.guildId,
     input.channelId,
     input.caption ?? null,
+    input.sourceKind ?? "image",
     input.path,
     input.mime,
     input.width,
@@ -53,6 +58,7 @@ export function insertImage(db: Database, input: InsertImageInput): ImageRecord 
     guildId: input.guildId,
     channelId: input.channelId,
     caption: input.caption ?? null,
+    sourceKind: input.sourceKind ?? "image",
     path: input.path,
     mime: input.mime,
     width: input.width,
@@ -67,7 +73,7 @@ export function insertImage(db: Database, input: InsertImageInput): ImageRecord 
 export function getImagesByMessageId(db: Database, messageId: string): ImageRecord[] {
   const rows = db.raw
     .prepare(
-      `SELECT id, message_id, guild_id, channel_id, caption, path, mime, width, height, created_at
+      `SELECT id, message_id, guild_id, channel_id, caption, source_kind, path, mime, width, height, created_at
        FROM images WHERE message_id = ? ORDER BY id ASC`
     )
     .all(messageId) as Array<{
@@ -76,6 +82,7 @@ export function getImagesByMessageId(db: Database, messageId: string): ImageReco
       guild_id: string;
       channel_id: string;
       caption: string | null;
+      source_kind: ImageSourceKind;
       path: string;
       mime: string;
       width: number;
@@ -92,7 +99,7 @@ export function getImagesByMessageId(db: Database, messageId: string): ImageReco
 export function getImageById(db: Database, imageId: number): ImageRecord | null {
   const row = db.raw
     .prepare(
-      `SELECT id, message_id, guild_id, channel_id, caption, path, mime, width, height, created_at
+      `SELECT id, message_id, guild_id, channel_id, caption, source_kind, path, mime, width, height, created_at
        FROM images WHERE id = ?`
     )
     .get(imageId) as {
@@ -101,6 +108,7 @@ export function getImageById(db: Database, imageId: number): ImageRecord | null 
       guild_id: string;
       channel_id: string;
       caption: string | null;
+      source_kind: ImageSourceKind;
       path: string;
       mime: string;
       width: number;
@@ -117,6 +125,7 @@ function toRecord(row: {
   guild_id: string;
   channel_id: string;
   caption: string | null;
+  source_kind: ImageSourceKind;
   path: string;
   mime: string;
   width: number;
@@ -129,6 +138,7 @@ function toRecord(row: {
     guildId: row.guild_id,
     channelId: row.channel_id,
     caption: row.caption,
+    sourceKind: row.source_kind,
     path: row.path,
     mime: row.mime,
     width: row.width,

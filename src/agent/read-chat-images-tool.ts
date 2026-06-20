@@ -1,6 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
+import type { ImageSourceKind } from "../db/image-repository.ts";
 
 const ReadChatImagesParams = Type.Object({
   image_ids: Type.Array(Type.Number(), {
@@ -10,7 +11,7 @@ const ReadChatImagesParams = Type.Object({
 
 export interface ReadChatImagesToolDeps {
   imageReadMaxPerCall: number;
-  getImageById: (id: number) => { id: number; mime: string; width: number; height: number; path: string } | null;
+  getImageById: (id: number) => { id: number; mime: string; width: number; height: number; path: string; sourceKind?: ImageSourceKind } | null;
   readFile: (path: string) => Buffer | null;
   prepareImageForContext: (buffer: Buffer, mimeType: string) => Promise<{ data: Buffer; mime: string; width: number; height: number }>;
 }
@@ -75,6 +76,7 @@ export function createReadChatImagesTool(deps: ReadChatImagesToolDeps): AgentToo
             height: prepared.height,
             source_width: record.width,
             source_height: record.height,
+            source_kind: record.sourceKind ?? "image",
           }),
         });
         content.push({ type: "image", data: prepared.data.toString("base64"), mimeType: prepared.mime });

@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import { mkdirSync, writeFileSync } from "fs";
 import { dirname } from "path";
-import { insertImage, type ImageRecord } from "./image-repository.ts";
+import { insertImage, type ImageRecord, type ImageSourceKind } from "./image-repository.ts";
 import { imagePath } from "./image-storage.ts";
 import type { Database } from "./database.ts";
 
@@ -31,6 +31,7 @@ export interface ImageIngestInput {
   messageId: string;
   guildId: string;
   channelId: string;
+  sourceKind?: ImageSourceKind;
 }
 
 export interface ImageBufferStoreInput {
@@ -40,6 +41,7 @@ export interface ImageBufferStoreInput {
   guildId: string;
   channelId: string;
   caption?: string;
+  sourceKind?: ImageSourceKind;
 }
 
 const MIME_EXTENSION: Record<string, string> = {
@@ -196,6 +198,7 @@ export async function processAndStoreImage(
     messageId: input.messageId,
     guildId: input.guildId,
     channelId: input.channelId,
+    sourceKind: input.sourceKind,
   });
 }
 
@@ -241,6 +244,7 @@ function insertAndWriteImage(
     height: stored.height,
     createdAt: Date.now(),
     caption: input.caption,
+    sourceKind: input.sourceKind,
   });
 
   // Compute deterministic path from the ID

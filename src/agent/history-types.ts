@@ -1,4 +1,5 @@
 import type { TrimConfig } from "../config/types.ts";
+import type { ImageSourceKind } from "../db/image-repository.ts";
 
 /** A stored message with full metadata for history processing. */
 export interface HistoryMessage {
@@ -24,6 +25,8 @@ export interface HistoryMessage {
   imageIds: number[];
   /** Image captions (parallel to imageIds), empty strings if no caption. */
   captions: string[];
+  /** Source media kinds (parallel to imageIds), used to mark GIF/sticker previews in history. */
+  imageSourceKinds?: ImageSourceKind[];
   /** Whether the message has embeds (prevents merging). */
   hasEmbeds: boolean;
   /** Whether this is a synthetic event (e.g., thread creation). Prevents merging. */

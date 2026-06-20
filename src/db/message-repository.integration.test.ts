@@ -650,18 +650,20 @@ describe("getHistoryMessages", () => {
       mime?: string;
       width?: number;
       height?: number;
+      sourceKind?: string;
     } = {}
   ): number {
     const result = db.raw
       .prepare(
-        `INSERT INTO images (message_id, guild_id, channel_id, caption, path, mime, width, height, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO images (message_id, guild_id, channel_id, caption, source_kind, path, mime, width, height, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         messageId,
         opts.guildId ?? "g1",
         opts.channelId ?? "c1",
         opts.caption ?? null,
+        opts.sourceKind ?? "image",
         opts.path ?? "/tmp/img.jpg",
         opts.mime ?? "image/jpeg",
         opts.width ?? 100,
@@ -720,6 +722,7 @@ describe("getHistoryMessages", () => {
     expect(msg1.id).toBe("m1");
     expect(msg1.imageIds).toEqual([imgId1, imgId2]);
     expect(msg1.captions).toEqual(["cat photo", "dog photo"]);
+    expect(msg1.imageSourceKinds).toEqual(["image", "image"]);
 
     const msg2 = results[1];
     if (msg2 === undefined) throw new Error("unreachable");
@@ -862,18 +865,20 @@ describe("getParentPreContext", () => {
       mime?: string;
       width?: number;
       height?: number;
+      sourceKind?: string;
     } = {}
   ): number {
     const result = db.raw
       .prepare(
-        `INSERT INTO images (message_id, guild_id, channel_id, caption, path, mime, width, height, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO images (message_id, guild_id, channel_id, caption, source_kind, path, mime, width, height, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         messageId,
         opts.guildId ?? "g1",
         opts.channelId ?? "parent-chan",
         opts.caption ?? null,
+        opts.sourceKind ?? "image",
         opts.path ?? "/tmp/img.jpg",
         opts.mime ?? "image/jpeg",
         opts.width ?? 100,

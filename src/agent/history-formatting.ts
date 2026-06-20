@@ -1,4 +1,5 @@
 import type { HistoryMessage } from "./history-types.ts";
+import type { ImageSourceKind } from "../db/image-repository.ts";
 
 /** Reply context resolved for formatting. */
 export interface ReplyContext {
@@ -18,6 +19,8 @@ export interface ReplyContext {
   missingTarget: boolean;
   /** Image IDs on the reply target. */
   replyImageIds: number[];
+  /** Source media kinds on the reply target, parallel to replyImageIds. */
+  replyImageSourceKinds?: ImageSourceKind[];
   /** Captions on the reply target. */
   replyCaptions: string[];
 }
@@ -66,18 +69,18 @@ export function formatMessageLine(input: FormatInput): string {
       metaParts.push("MissingTarget: true");
     }
     if (reply.replyImageIds.length > 0) {
-      metaParts.push(`ReplyImageIDs: [${reply.replyImageIds.join(", ")}]`);
+      metaParts.push(...formatImageIdMeta("Reply", reply.replyImageIds, reply.replyImageSourceKinds));
     }
     if (captioningEnabled && reply.replyCaptions.length > 0) {
-      metaParts.push(`ReplyCaptions: [${reply.replyCaptions.map((c) => `"${c}"`).join(", ")}]`);
+      metaParts.push(formatCaptionsMeta("Reply", reply.replyImageIds, reply.replyCaptions, reply.replyImageSourceKinds));
     }
   }
 
   if (message.imageIds.length > 0) {
-    metaParts.push(`ImageIDs: [${message.imageIds.join(", ")}]`);
+    metaParts.push(...formatImageIdMeta("", message.imageIds, message.imageSourceKinds));
   }
   if (captioningEnabled && message.captions.length > 0) {
-    metaParts.push(`Captions: [${message.captions.map((c) => `"${c}"`).join(", ")}]`);
+    metaParts.push(formatCaptionsMeta("", message.imageIds, message.captions, message.imageSourceKinds));
   }
   if (message.jobAnnotations !== undefined && message.jobAnnotations.length > 0) {
     metaParts.push(...message.jobAnnotations);
@@ -90,6 +93,49 @@ export function formatMessageLine(input: FormatInput): string {
   const metaPart = metaParts.length > 0 ? ` (${metaParts.join("; ")})` : "";
 
   return `[${authorPart}${targetPart}${metaPart}]: ${message.content}`;
+}
+
+function formatImageIdMeta(prefix: "Reply" | "", imageIds: number[], sourceKinds: ImageSourceKind[] | undefined): string[] {
+  const groups: Record<ImageSourceKind, number[]> = {
+    image: [],
+    gif: [],
+    sticker: [],
+  };
+  for (let i = 0; i < imageIds.length; i++) {
+    const id = imageIds[i];
+    if (id === undefined) continue;
+    const kind = sourceKinds?.[i];
+    if (kind === "gif" || kind === "sticker") {
+      groups[kind].push(id);
+    } else {
+      groups.image.push(id);
+    }
+  }
+
+  const reply = prefix === "Reply" ? "Reply" : "";
+  const parts: string[] = [];
+  if (groups.image.length > 0) parts.push(`${reply}ImageIDs: [${groups.image.join(", ")}]`);
+  if (groups.gif.length > 0) parts.push(`${reply}GIFImageIDs: [${groups.gif.join(", ")}]`);
+  if (groups.sticker.length > 0) parts.push(`${reply}StickerImageIDs: [${groups.sticker.join(", ")}]`);
+  return parts;
+}
+
+function formatCaptionsMeta(
+  prefix: "Reply" | "",
+  imageIds: number[],
+  captions: string[],
+  sourceKinds: ImageSourceKind[] | undefined,
+): string {
+  const key = prefix === "Reply" ? "ReplyCaptions" : "Captions";
+  const hasTypedImages = sourceKinds?.some((kind) => kind === "gif" || kind === "sticker") === true;
+  if (!hasTypedImages) return `${key}: [${captions.map((c) => `"${c}"`).join(", ")}]`;
+
+  const typedKey = prefix === "Reply" ? "ReplyCaptionByImageID" : "CaptionByImageID";
+  const entries = captions.map((caption, index) => {
+    const id = imageIds[index];
+    return id !== undefined ? `${id}: "${caption}"` : `"${caption}"`;
+  });
+  return `${typedKey}: [${entries.join(", ")}]`;
 }
 
 function formatDisplayNameSuffix(
@@ -105,12 +151,12 @@ function formatDisplayNameSuffix(
 
 /** The legend block prepended to the newer slice. */
 export const NEWER_LEGEND = [
-  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyCaptions/ImageIDs/Captions/ImageJob)]: content",
+  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyGIFImageIDs/ReplyStickerImageIDs/ReplyCaptions/ReplyCaptionByImageID/ImageIDs/GIFImageIDs/StickerImageIDs/Captions/CaptionByImageID/ImageJob)]: content",
   "Legend: Parenthesized names are current Discord display names, not stable identity. Users change them often and they may contain jokes, moods, or temporary labels; use @username for exact pings.",
 ].join("\n");
 
 /** The legend block prepended to the older slice. */
 export const OLDER_LEGEND = [
-  "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyCaptions/ImageIDs/Captions/ImageJob)]: content",
-  "Legend: Newer history exposes MsgID for reply_to. Dates use [DATE ...]. Merged messages use history-only [msg-break]. Quotes are excerpts; use search_messages(id). Images use read_chat_images([id]).",
+  "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyGIFImageIDs/ReplyStickerImageIDs/ReplyCaptions/ReplyCaptionByImageID/ImageIDs/GIFImageIDs/StickerImageIDs/Captions/CaptionByImageID/ImageJob)]: content",
+  "Legend: Newer history exposes MsgID for reply_to. Dates use [DATE ...]. Merged messages use history-only [msg-break]. Quotes are excerpts; use search_messages(id). Images/GIF first frames/sticker previews use read_chat_images([id]).",
 ].join("\n");

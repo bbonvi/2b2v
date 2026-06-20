@@ -13,6 +13,7 @@ import { sendWithUnknownMessageReferenceFallback } from "./discord/message-refer
 import { translateInbound, translateOutbound, buildDisplayNameContext, type InboundResolvers, type OutboundResolvers } from "./discord/translation";
 import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
+import { appendStickerTags, guessImageMimeFromUrl, imageKindForAttachment, imageKindForEmbed, stickerImagePreview } from "./discord/message-media";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { handleMessage, runSilentMemoryAgentPass, type ImageAttachmentResolver, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
 import { shouldRespond, type TriggerResult } from "./agent/triggers";
@@ -294,20 +295,32 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
               url: a.url,
               contentType: a.contentType,
             })),
+            embeds: fetched.embeds.map((embed) => ({
+              type: embed.data.type,
+              url: embed.url,
+              provider: embed.provider,
+              ...(embed.image?.url !== undefined ? { image: { url: embed.image.url } } : {}),
+              ...(embed.thumbnail?.url !== undefined ? { thumbnail: { url: embed.thumbnail.url } } : {}),
+            })),
+            stickers: [...fetched.stickers.values()].map((sticker) => ({
+              name: sticker.name,
+              url: sticker.url,
+              format: sticker.format,
+            })),
           };
         } catch { return null; }
       },
       enqueueEmbedding: async (id, text, metadata) => {
         await embeddingQueue.enqueue({ id, text, target: "message", metadata });
       },
-      processImage: async (url, contentType, messageId) => {
+      processImage: async (url, contentType, messageId, sourceKind) => {
         const ingestDeps: ImageIngestDeps = {
           db,
           attachmentsDir: deliveryGuildConfig.attachmentsDir,
           maxDimension: deliveryGuildConfig.imageMaxDimension,
           fetchFn: fetch,
         };
-        await processAndStoreImage(ingestDeps, { url, mimeType: contentType, messageId, guildId: job.deliveryGuildId, channelId: job.deliveryChannelId });
+        await processAndStoreImage(ingestDeps, { url, mimeType: contentType, messageId, guildId: job.deliveryGuildId, channelId: job.deliveryChannelId, sourceKind });
       },
     };
     const syntheticLatestMessage: HistoryMessage = {
@@ -2358,7 +2371,10 @@ async function processTriggeredMessage(
 
   try {
     const inboundResolvers = buildInboundResolvers(guild);
-    const translatedContent = translateInbound(message.content, inboundResolvers);
+    const translatedContent = appendStickerTags(
+      translateInbound(message.content, inboundResolvers),
+      message.stickers.values(),
+    );
     const currentChannelObj = message.channel as SendableGuildChannel;
     const resolveTargetChannel = createTargetChannelResolver(client, currentChannelObj);
     const typing = createTypingController({
@@ -2388,7 +2404,8 @@ async function processTriggeredMessage(
       timestamp: now,
       replyToId: message.reference?.messageId ?? null,
       imageIds: ingestedImages.map((img) => img.id),
-      captions: ingestedImages.map((img) => img.caption).filter((c): c is string => c !== null),
+      captions: ingestedImages.map((img) => img.caption ?? ""),
+      imageSourceKinds: ingestedImages.map((img) => img.sourceKind),
       hasEmbeds: message.embeds.length > 0,
       isSynthetic: false,
       relatedThreadId: null,
@@ -2416,20 +2433,32 @@ async function processTriggeredMessage(
               url: a.url,
               contentType: a.contentType,
             })),
+            embeds: fetched.embeds.map((embed) => ({
+              type: embed.data.type,
+              url: embed.url,
+              provider: embed.provider,
+              ...(embed.image?.url !== undefined ? { image: { url: embed.image.url } } : {}),
+              ...(embed.thumbnail?.url !== undefined ? { thumbnail: { url: embed.thumbnail.url } } : {}),
+            })),
+            stickers: [...fetched.stickers.values()].map((sticker) => ({
+              name: sticker.name,
+              url: sticker.url,
+              format: sticker.format,
+            })),
           };
         } catch { return null; }
       },
       enqueueEmbedding: async (id, text, metadata) => {
         await embeddingQueue.enqueue({ id, text, target: "message", metadata });
       },
-      processImage: async (url, contentType, messageId) => {
+      processImage: async (url, contentType, messageId, sourceKind) => {
         const ingestDeps: ImageIngestDeps = {
           db,
           attachmentsDir: guildConfig.attachmentsDir,
           maxDimension: guildConfig.imageMaxDimension,
           fetchFn: fetch,
         };
-        await processAndStoreImage(ingestDeps, { url, mimeType: contentType, messageId, guildId, channelId });
+        await processAndStoreImage(ingestDeps, { url, mimeType: contentType, messageId, guildId, channelId, sourceKind });
       },
     };
 
@@ -2743,7 +2772,10 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
 
     // Build inbound resolvers and translate
     const inboundResolvers = buildInboundResolvers(guild);
-    const translatedContent = translateInbound(message.content, inboundResolvers);
+    const translatedContent = appendStickerTags(
+      translateInbound(message.content, inboundResolvers),
+      message.stickers.values(),
+    );
 
     // Store message in SQLite
     const now = Date.now();
@@ -2813,7 +2845,14 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
       imageIngestPromises.push(
         processAndStoreImage(
           ingestDeps,
-          { url: attachment.url, mimeType: contentType, messageId: message.id, guildId, channelId },
+          {
+            url: attachment.url,
+            mimeType: contentType,
+            messageId: message.id,
+            guildId,
+            channelId,
+            sourceKind: imageKindForAttachment(contentType, attachment.name),
+          },
         ).then(() => undefined).catch((err: unknown) => {
           log.warn("image ingest failed", {
             attachmentId: attachment.id,
@@ -2828,21 +2867,41 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
       const embedUrl = embed.image?.url ?? embed.thumbnail?.url;
       if (embedUrl === undefined) continue;
 
-      // Infer MIME type from URL; default to image/png
-      const mimeGuess = embedUrl.includes(".gif") ? "image/gif"
-                      : embedUrl.includes(".webp") ? "image/webp"
-                      : "image/png";
-
       imageIngestPromises.push(
         processAndStoreImage(ingestDeps, {
           url: embedUrl,
-          mimeType: mimeGuess,
+          mimeType: guessImageMimeFromUrl(embedUrl),
           messageId: message.id,
           guildId,
           channelId,
+          sourceKind: imageKindForEmbed({ type: embed.data.type, url: embed.url, provider: embed.provider }, embedUrl),
         }).then(() => undefined).catch((err: unknown) => {
           log.warn("embed image ingest failed", {
             embedUrl,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }),
+      );
+    }
+
+    for (const sticker of message.stickers.values()) {
+      const preview = stickerImagePreview({
+        name: sticker.name,
+        url: sticker.url,
+        format: sticker.format,
+      });
+      if (preview === null) continue;
+      imageIngestPromises.push(
+        processAndStoreImage(ingestDeps, {
+          url: preview.url,
+          mimeType: preview.mimeType,
+          messageId: message.id,
+          guildId,
+          channelId,
+          sourceKind: preview.sourceKind,
+        }).then(() => undefined).catch((err: unknown) => {
+          log.warn("sticker image ingest failed", {
+            stickerName: sticker.name,
             error: err instanceof Error ? err.message : String(err),
           });
         }),

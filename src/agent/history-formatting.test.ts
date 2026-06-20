@@ -83,6 +83,15 @@ describe("formatMessageLine", () => {
     expect(formatMessageLine(input)).toBe("[@alice (ImageIDs: [12, 13])]: hello");
   });
 
+  test("message with GIF and sticker image previews", () => {
+    const input: FormatInput = {
+      message: msg({ imageIds: [12, 13, 14], imageSourceKinds: ["gif", "sticker", "image"] }),
+      reply: null,
+      captioningEnabled: false,
+    };
+    expect(formatMessageLine(input)).toBe("[@alice (ImageIDs: [14]; GIFImageIDs: [12]; StickerImageIDs: [13])]: hello");
+  });
+
   test("message with images and captions when captioning enabled", () => {
     const input: FormatInput = {
       message: msg({ imageIds: [12, 13], captions: ["red car", "street sign"] }),
@@ -91,6 +100,17 @@ describe("formatMessageLine", () => {
     };
     expect(formatMessageLine(input)).toBe(
       '[@alice (ImageIDs: [12, 13]; Captions: ["red car", "street sign"])]: hello'
+    );
+  });
+
+  test("message with typed images keys captions by image ID", () => {
+    const input: FormatInput = {
+      message: msg({ imageIds: [12, 13], imageSourceKinds: ["gif", "sticker"], captions: ["dance", "wave"] }),
+      reply: null,
+      captioningEnabled: true,
+    };
+    expect(formatMessageLine(input)).toBe(
+      '[@alice (GIFImageIDs: [12]; StickerImageIDs: [13]; CaptionByImageID: [12: "dance", 13: "wave"])]: hello'
     );
   });
 
@@ -154,11 +174,12 @@ describe("formatMessageLine", () => {
       replyMsgId: "100",
       missingTarget: false,
       replyImageIds: [5, 6],
+      replyImageSourceKinds: ["gif", "sticker"],
       replyCaptions: [],
     };
     const input: FormatInput = { message: msg(), reply, captioningEnabled: false };
     expect(formatMessageLine(input)).toBe(
-      '[@alice to @bob (Quote: "check this"; ReplyImageIDs: [5, 6])]: hello'
+      '[@alice to @bob (Quote: "check this"; ReplyGIFImageIDs: [5]; ReplyStickerImageIDs: [6])]: hello'
     );
   });
 
@@ -174,6 +195,22 @@ describe("formatMessageLine", () => {
     const input: FormatInput = { message: msg(), reply, captioningEnabled: true };
     expect(formatMessageLine(input)).toBe(
       '[@alice to @bob (ReplyImageIDs: [5]; ReplyCaptions: ["a photo"])]: hello'
+    );
+  });
+
+  test("reply with typed image captions keys captions by image ID", () => {
+    const reply: ReplyContext = {
+      targetAuthor: "bob",
+      quote: null,
+      replyMsgId: "100",
+      missingTarget: false,
+      replyImageIds: [5],
+      replyImageSourceKinds: ["gif"],
+      replyCaptions: ["a GIF"],
+    };
+    const input: FormatInput = { message: msg(), reply, captioningEnabled: true };
+    expect(formatMessageLine(input)).toBe(
+      '[@alice to @bob (ReplyGIFImageIDs: [5]; ReplyCaptionByImageID: [5: "a GIF"])]: hello'
     );
   });
 

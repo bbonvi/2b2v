@@ -1,5 +1,7 @@
 import type { Database } from "../db/database.ts";
+import type { ImageSourceKind } from "../db/image-repository.ts";
 import type { HistoryMessage } from "./history-types.ts";
+import { appendStickerTags, guessImageMimeFromUrl, imageKindForAttachment, imageKindForEmbed, stickerImagePreview, type StickerLike } from "../discord/message-media.ts";
 
 /** A Discord message as returned by the fetch callback. */
 export interface FetchedDiscordMessage {
@@ -17,9 +19,13 @@ export interface FetchedDiscordMessage {
     contentType: string | null;
   }>;
   embeds?: Array<{
+    type?: string | null;
+    url?: string | null;
+    provider?: { name?: string | null } | null;
     image?: { url: string };
     thumbnail?: { url: string };
   }>;
+  stickers?: StickerLike[];
 }
 
 /** Dependencies injected for testability. */
@@ -39,8 +45,8 @@ export interface ReplyFallbackDeps {
     source?: "live" | "backfill" | "reindex";
     embedding_kind?: "single" | "merged";
   }) => Promise<void>;
-  /** Process and store an image attachment (fire-and-forget semantics). */
-  processImage: (url: string, contentType: string, messageId: string) => Promise<void>;
+  /** Process and store an image attachment or preview (fire-and-forget semantics). */
+  processImage: (url: string, contentType: string, messageId: string, sourceKind?: ImageSourceKind) => Promise<void>;
 }
 
 function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMessage[] {
@@ -71,7 +77,7 @@ function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMess
   const imagePlaceholders = messageIds.map(() => "?").join(",");
   const imageRows = deps.db.raw
     .prepare(
-      `SELECT message_id, id, caption
+      `SELECT message_id, id, caption, source_kind
        FROM images
        WHERE message_id IN (${imagePlaceholders})
        ORDER BY id ASC`
@@ -80,15 +86,16 @@ function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMess
       message_id: string;
       id: number;
       caption: string | null;
+      source_kind: ImageSourceKind;
     }>;
 
-  const imageMap = new Map<string, Array<{ id: number; caption: string | null }>>();
+  const imageMap = new Map<string, Array<{ id: number; caption: string | null; sourceKind: ImageSourceKind }>>();
   for (const image of imageRows) {
     const existing = imageMap.get(image.message_id);
     if (existing !== undefined) {
-      existing.push({ id: image.id, caption: image.caption });
+      existing.push({ id: image.id, caption: image.caption, sourceKind: image.source_kind });
     } else {
-      imageMap.set(image.message_id, [{ id: image.id, caption: image.caption }]);
+      imageMap.set(image.message_id, [{ id: image.id, caption: image.caption, sourceKind: image.source_kind }]);
     }
   }
 
@@ -108,6 +115,7 @@ function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMess
       replyToId: row.reply_to_id,
       imageIds: images.map((image) => image.id),
       captions: images.map((image) => image.caption ?? ""),
+      ...(images.length > 0 ? { imageSourceKinds: images.map((image) => image.sourceKind) } : {}),
       hasEmbeds: false,
       isSynthetic: row.is_synthetic === 1,
       relatedThreadId: row.related_thread_id,
@@ -169,6 +177,8 @@ export async function fetchMissingReplyTargets(
 
     if (discordMsg === null) continue; // Deleted or no permissions
 
+    const visibleContent = appendStickerTags(discordMsg.content, discordMsg.stickers ?? []);
+
     // Persist to SQLite
     deps.db.raw
       .prepare(
@@ -181,15 +191,15 @@ export async function fetchMissingReplyTargets(
         deps.channelId,
         discordMsg.authorId,
         discordMsg.authorUsername,
-        discordMsg.content,
-        discordMsg.content, // translated_content = raw for fetched messages (no translation context)
+        visibleContent,
+        visibleContent, // translated_content = raw for fetched messages (no translation context)
         discordMsg.isBot ? 1 : 0,
         discordMsg.timestamp,
         discordMsg.replyToId,
       );
 
     // Enqueue for embedding (fire-and-forget)
-    void deps.enqueueEmbedding(discordMsg.id, discordMsg.content, {
+    void deps.enqueueEmbedding(discordMsg.id, visibleContent, {
       guild_id: deps.guildId,
       channel_id: deps.channelId,
       user_id: discordMsg.authorId,
@@ -205,7 +215,7 @@ export async function fetchMissingReplyTargets(
     for (const att of discordMsg.attachments) {
       const ct = att.contentType ?? "";
       if (!ct.startsWith("image/")) continue;
-      void deps.processImage(att.url, ct, discordMsg.id).catch(() => {
+      void deps.processImage(att.url, ct, discordMsg.id, imageKindForAttachment(ct, att.url)).catch(() => {
         // Image ingest failure is non-fatal
       });
     }
@@ -215,12 +225,16 @@ export async function fetchMissingReplyTargets(
       const embedUrl = embed.image?.url ?? embed.thumbnail?.url;
       if (embedUrl === undefined) continue;
 
-      const mimeGuess = embedUrl.includes(".gif") ? "image/gif"
-                      : embedUrl.includes(".webp") ? "image/webp"
-                      : "image/png";
-
-      void deps.processImage(embedUrl, mimeGuess, discordMsg.id).catch(() => {
+      void deps.processImage(embedUrl, guessImageMimeFromUrl(embedUrl), discordMsg.id, imageKindForEmbed(embed, embedUrl)).catch(() => {
         // Embed image ingest failure is non-fatal
+      });
+    }
+
+    for (const sticker of discordMsg.stickers ?? []) {
+      const preview = stickerImagePreview(sticker);
+      if (preview === null) continue;
+      void deps.processImage(preview.url, preview.mimeType, discordMsg.id, preview.sourceKind).catch(() => {
+        // Sticker ingest failure is non-fatal
       });
     }
 
@@ -229,7 +243,7 @@ export async function fetchMissingReplyTargets(
       author: discordMsg.authorUsername,
       authorDisplayName: discordMsg.authorDisplayName,
       authorId: discordMsg.authorId,
-      content: discordMsg.content,
+      content: visibleContent,
       isBot: discordMsg.isBot,
       timestamp: discordMsg.timestamp,
       replyToId: discordMsg.replyToId,

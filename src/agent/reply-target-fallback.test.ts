@@ -138,7 +138,7 @@ describe("fetchMissingReplyTargets", () => {
   });
 
   test("processes attachments on fetched message", async () => {
-    const processImageCalls: Array<{ url: string; messageId: string }> = [];
+    const processImageCalls: Array<{ url: string; messageId: string; sourceKind: string | undefined }> = [];
 
     const fetched: FetchedDiscordMessage = {
       id: "target-1",
@@ -156,8 +156,8 @@ describe("fetchMissingReplyTargets", () => {
 
     const deps = baseDeps({
       fetchDiscordMessage: () => Promise.resolve(fetched),
-      processImage: (url, _contentType, messageId) => {
-        processImageCalls.push({ url, messageId });
+      processImage: (url, _contentType, messageId, sourceKind) => {
+        processImageCalls.push({ url, messageId, sourceKind });
         return Promise.resolve();
       },
     });
@@ -169,6 +169,108 @@ describe("fetchMissingReplyTargets", () => {
     expect(processImageCalls).toHaveLength(1);
     expect(processImageCalls[0]?.url).toBe("https://cdn.example.com/img1.png");
     expect(processImageCalls[0]?.messageId).toBe("target-1");
+    expect(processImageCalls[0]?.sourceKind).toBe("image");
+  });
+
+  test("adds sticker tags and processes sticker previews", async () => {
+    const processImageCalls: Array<{ url: string; sourceKind: string | undefined }> = [];
+    const enqueueCalls: Array<{ id: string; text: string }> = [];
+
+    const fetched: FetchedDiscordMessage = {
+      id: "target-1",
+      authorId: "u99",
+      authorUsername: "targetuser",
+      content: "",
+      timestamp: 500,
+      isBot: false,
+      replyToId: null,
+      attachments: [],
+      stickers: [{ name: "Blob Dance", url: "https://cdn.example.com/blob.png", format: 1 }],
+    };
+
+    const deps = baseDeps({
+      fetchDiscordMessage: () => Promise.resolve(fetched),
+      enqueueEmbedding: (id, text) => {
+        enqueueCalls.push({ id, text });
+        return Promise.resolve();
+      },
+      processImage: (url, _contentType, _messageId, sourceKind) => {
+        processImageCalls.push({ url, sourceKind });
+        return Promise.resolve();
+      },
+    });
+
+    const result = await fetchMissingReplyTargets(deps, [makeMsg({ id: "2", replyToId: "target-1" })]);
+
+    expect(result[0]?.content).toBe("<sticker>Blob Dance</sticker>");
+    expect(enqueueCalls[0]?.text).toBe("<sticker>Blob Dance</sticker>");
+    expect(processImageCalls).toEqual([{ url: "https://cdn.example.com/blob.png", sourceKind: "sticker" }]);
+  });
+
+  test("marks GIF-like embed previews as GIF images", async () => {
+    const processImageCalls: Array<{ url: string; contentType: string; sourceKind: string | undefined }> = [];
+    const fetched: FetchedDiscordMessage = {
+      id: "target-1",
+      authorId: "u99",
+      authorUsername: "targetuser",
+      content: "https://tenor.com/view/dance",
+      timestamp: 500,
+      isBot: false,
+      replyToId: null,
+      attachments: [],
+      embeds: [{
+        provider: { name: "Tenor" },
+        url: "https://tenor.com/view/dance",
+        thumbnail: { url: "https://media.tenor.com/dance.webp" },
+      }],
+    };
+
+    const deps = baseDeps({
+      fetchDiscordMessage: () => Promise.resolve(fetched),
+      processImage: (url, contentType, _messageId, sourceKind) => {
+        processImageCalls.push({ url, contentType, sourceKind });
+        return Promise.resolve();
+      },
+    });
+
+    await fetchMissingReplyTargets(deps, [makeMsg({ id: "2", replyToId: "target-1" })]);
+
+    expect(processImageCalls).toEqual([{
+      url: "https://media.tenor.com/dance.webp",
+      contentType: "image/webp",
+      sourceKind: "gif",
+    }]);
+  });
+
+  test("marks gifv embed previews as GIF images without provider hints", async () => {
+    const processImageCalls: Array<{ url: string; sourceKind: string | undefined }> = [];
+    const fetched: FetchedDiscordMessage = {
+      id: "target-1",
+      authorId: "u99",
+      authorUsername: "targetuser",
+      content: "https://example.com/clip",
+      timestamp: 500,
+      isBot: false,
+      replyToId: null,
+      attachments: [],
+      embeds: [{
+        type: "gifv",
+        url: "https://example.com/clip",
+        image: { url: "https://cdn.example.com/clip.png" },
+      }],
+    };
+
+    const deps = baseDeps({
+      fetchDiscordMessage: () => Promise.resolve(fetched),
+      processImage: (url, _contentType, _messageId, sourceKind) => {
+        processImageCalls.push({ url, sourceKind });
+        return Promise.resolve();
+      },
+    });
+
+    await fetchMissingReplyTargets(deps, [makeMsg({ id: "2", replyToId: "target-1" })]);
+
+    expect(processImageCalls).toEqual([{ url: "https://cdn.example.com/clip.png", sourceKind: "gif" }]);
   });
 
   test("handles multiple missing targets", async () => {
