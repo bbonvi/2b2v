@@ -338,7 +338,17 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       context.contextMessageIds,
       undefined,
       undefined,
-      { includeImageGenerationTools: false },
+      {
+        includeImageGenerationTools: input.event === "failed",
+        ...(input.event === "failed" ? {
+          currentRequest: {
+            requesterId: job.requesterId,
+            requesterUsername: job.requesterUsername,
+            sourceMessageId: job.sourceMessageId,
+            sourceQuote: job.sourceQuote,
+          },
+        } : {}),
+      },
     );
     let sentMessageId: string | undefined;
     const completionSender: MessageSender = async (...args) => {
@@ -527,6 +537,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
           `Failure detail for context: ${message}`,
           "The image was not generated and there is no outgoing image attachment.",
           `Use the normal persona and current chat history. Prefer replying to the original request: <message reply="true" reply_to="${job.sourceMessageId}">your response text</message>. If the current chat context makes another message the clearly better target, you may reply to that message instead.`,
+          "You may retry with codex_generate_image from this failure turn, but prefer not to unless the user asked for a retry or you are certain a revised prompt will work this time. If you retry, first tell the user the image failed and that you are trying again, then call codex_generate_image. Do not retry the same request more than 3 times unless the current chat or user explicitly overrides that limit.",
           "Explain the failure naturally in chat. Do not paste raw JSON, stack traces, or long internal errors unless the user explicitly asks for technical details.",
         ].join("\n");
         await runAsyncImageStatusTurn({
@@ -1909,9 +1920,18 @@ function buildAgentTools(
     sourceMessageId: string;
     sourceQuote: string;
   },
-  options: { includeImageGenerationTools?: boolean } = {},
+  options: {
+    includeImageGenerationTools?: boolean;
+    currentRequest?: {
+      requesterId: string;
+      requesterUsername: string;
+      sourceMessageId: string;
+      sourceQuote: string;
+    };
+  } = {},
 ) {
   const includeImageGenerationTools = options.includeImageGenerationTools ?? true;
+  const effectiveCurrentRequest = options.currentRequest ?? currentRequest;
   const resolveUsername = (username: string): string | undefined => resolveGuildUsername(guild, username);
 
   const searchTool = createSearchTool({
@@ -2052,14 +2072,14 @@ function buildAgentTools(
         }
       },
       onGeneratedImage: onGeneratedImage ?? (() => {}),
-      ...(currentRequest === undefined ? {} : { enqueueImageJob: (input) => {
+      ...(effectiveCurrentRequest === undefined ? {} : { enqueueImageJob: (input) => {
         const result = agentJobs.enqueueImageJob({
           guildId,
           channelId,
-          requesterId: currentRequest.requesterId,
-          requesterUsername: currentRequest.requesterUsername,
-          sourceMessageId: currentRequest.sourceMessageId,
-          sourceQuote: currentRequest.sourceQuote,
+          requesterId: effectiveCurrentRequest.requesterId,
+          requesterUsername: effectiveCurrentRequest.requesterUsername,
+          sourceMessageId: effectiveCurrentRequest.sourceMessageId,
+          sourceQuote: effectiveCurrentRequest.sourceQuote,
           prompt: input.prompt,
           promptHash: input.promptHash,
           imageIds: input.imageIds,
@@ -2083,7 +2103,7 @@ function buildAgentTools(
 
     const cancelJobTool = createCancelAgentJobTool({
       store: agentJobs,
-      requesterId: currentRequest?.requesterId ?? "unknown",
+      requesterId: effectiveCurrentRequest?.requesterId ?? "unknown",
     });
     tools.push(codexGenerateImageTool, cancelJobTool);
   }

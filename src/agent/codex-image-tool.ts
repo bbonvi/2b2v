@@ -1000,7 +1000,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
       "Set 4k=true only when the user explicitly asks for 4K, UHD, highest/maximum resolution, print-resolution, or a final high-resolution render. Leave it false for ordinary high quality, detailed, HD, or good images. 4K requests can take roughly twice as long as normal image jobs.",
       "Before calling, turn the user's request into a concrete, safe, neutral image prompt. Preserve explicit visual requirements, add useful visual specifics for vague requests, and avoid inventing unrelated subjects, brands, text, or narrative details.",
       "Do not call this when an active image job already covers the same concrete request; answer with that job's status instead.",
-      "If generation fails because Codex returns no image, rejects the prompt, or reports a safety/filter failure, the async worker will report failure. Do not retry unless the user asks to try again.",
+      "If generation fails because Codex returns no image, rejects the prompt, or reports a safety/filter failure, the async worker will report failure. Retry only when the user asks, when you are certain a revised prompt will work, or when the current chat explicitly overrides the retry policy.",
       "The generated image will be attached to a later Discord reply automatically.",
     ].join(" "),
     parameters: CodexGenerateImageParams,
