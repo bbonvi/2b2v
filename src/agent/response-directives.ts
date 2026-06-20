@@ -1,12 +1,14 @@
 export type ResponseSegment =
   | { kind: "text"; text: string }
   | { kind: "voice"; text: string }
-  | { kind: "messageBreak"; delivery?: MessageDelivery };
+  | { kind: "messageBreak"; delivery?: MessageDelivery }
+  | { kind: "emptyMessage"; delivery: MessageDelivery };
 
 export interface MessageDelivery {
   reply?: boolean;
   replyTo?: string;
   keepTyping?: boolean;
+  imageIds?: number[];
 }
 
 export interface ParsedResponseDirectives {
@@ -71,6 +73,10 @@ function pushMessageBreak(segments: ResponseSegment[], delivery?: MessageDeliver
   segments.push({ kind: "messageBreak", ...(delivery !== undefined ? { delivery } : {}) });
 }
 
+function pushEmptyMessage(segments: ResponseSegment[], delivery: MessageDelivery): void {
+  segments.push({ kind: "emptyMessage", delivery });
+}
+
 /** Split Discord-only tokens out of voice text so pings/channels are sent as message content, not spoken. */
 function pushVoiceTextSegments(segments: ResponseSegment[], rawText: string): void {
   let cursor = 0;
@@ -132,7 +138,32 @@ function parseMessageDelivery(attrs: string): MessageDelivery | undefined {
       delivery.replyTo = value;
     }
   }
-  return delivery.reply !== undefined || delivery.replyTo !== undefined || delivery.keepTyping !== undefined ? delivery : undefined;
+  const imageIds = parseImageIdsAttribute(attrs);
+  if (imageIds !== undefined && imageIds.length > 0) delivery.imageIds = imageIds;
+  return delivery.reply !== undefined
+    || delivery.replyTo !== undefined
+    || delivery.keepTyping !== undefined
+    || delivery.imageIds !== undefined
+    ? delivery
+    : undefined;
+}
+
+function parseImageIdsAttribute(attrs: string): number[] | undefined {
+  const match = /\simage_ids\s*=\s*(?:"([^"]*)"|'([^']*)'|(\[[^\]]*\]))/i.exec(attrs);
+  if (match === null) return undefined;
+  const raw = unescapeAttributeValue(match[1] ?? match[2] ?? match[3] ?? "").trim();
+  if (!raw.startsWith("[") || !raw.endsWith("]")) return undefined;
+  const inner = raw.slice(1, -1).trim();
+  if (inner === "") return [];
+  const ids: number[] = [];
+  for (const part of inner.split(",")) {
+    const trimmed = part.trim();
+    if (!/^\d+$/.test(trimmed)) return undefined;
+    const id = Number(trimmed);
+    if (!Number.isSafeInteger(id) || id <= 0) return undefined;
+    ids.push(id);
+  }
+  return ids;
 }
 
 function renderIgnoredText(rawText: string): string {
@@ -152,6 +183,10 @@ function closingTagEnd(text: string, tag: "voice" | "audio" | "message", from: n
 
 function hasOutputSegment(segments: ResponseSegment[]): boolean {
   return segments.some((segment) => segment.kind !== "messageBreak");
+}
+
+function hasImageIds(delivery: MessageDelivery | undefined): delivery is MessageDelivery & { imageIds: number[] } {
+  return delivery?.imageIds !== undefined && delivery.imageIds.length > 0;
 }
 
 export function sanitizeVoiceText(text: string): string {
@@ -219,9 +254,8 @@ function parseRange(
     }
 
     if (tag === "message") {
-      pushMessageBreak(segments, parseMessageDelivery(attrs));
+      const delivery = parseMessageDelivery(attrs);
       const nested = parseRange(text, tagEnd, { kind: "text" }, "message");
-      segments.push(...nested.segments);
       if (nested.ignored) {
         if (hasOutputSegment(segments)) {
           cursor = closingTagEnd(text, "message", nested.index);
@@ -230,7 +264,13 @@ function parseRange(
         }
         return { ignored: true, ignoredText: nested.ignoredText, segments, index: text.length, closed: false };
       }
-      pushMessageBreak(segments);
+      if (hasOutputSegment(nested.segments)) {
+        pushMessageBreak(segments, delivery);
+        segments.push(...nested.segments);
+        pushMessageBreak(segments);
+      } else if (hasImageIds(delivery)) {
+        pushEmptyMessage(segments, delivery);
+      }
       cursor = nested.index;
       tagRe.lastIndex = cursor;
       continue;
@@ -269,6 +309,7 @@ function normalizeMessageBreaks(segments: ResponseSegment[]): ResponseSegment[] 
   for (const segment of segments) {
     if (segment.kind === "messageBreak") {
       const previous = normalized[normalized.length - 1];
+      if (previous?.kind === "emptyMessage" && segment.delivery === undefined) continue;
       if (previous === undefined) {
         if (segment.delivery !== undefined) normalized.push(segment);
         continue;
@@ -300,12 +341,14 @@ function escapeXmlText(text: string): string {
 export function renderSegmentForHistory(segment: ResponseSegment): string {
   if (segment.kind === "text") return segment.text;
   if (segment.kind === "messageBreak") return "[msg-break]";
+  if (segment.kind === "emptyMessage") return "";
   return `<voice>${escapeXmlText(segment.text)}</voice>`;
 }
 
 export function renderSegmentsForMemory(segments: ResponseSegment[]): string {
   const rendered: string[] = [];
   for (const segment of segments) {
+    if (segment.kind === "emptyMessage") continue;
     if (segment.kind === "messageBreak") {
       if (rendered.length > 0) rendered.push(renderSegmentForHistory(segment));
       continue;

@@ -14,7 +14,7 @@ import { translateInbound, translateOutbound, buildDisplayNameContext, type Inbo
 import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
-import { handleMessage, runSilentMemoryAgentPass, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
+import { handleMessage, runSilentMemoryAgentPass, type ImageAttachmentResolver, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
 import { shouldRespond, type TriggerResult } from "./agent/triggers";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
@@ -54,7 +54,7 @@ import { createSummarizeVideoTool } from "./agent/summarize-video-tool";
 import { createStartThreadTool } from "./agent/start-thread-tool";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { insertThread, updateThreadActivity, markBotParticipating, listThreadsForContext, getThreadMetadata } from "./db/thread-repository";
-import { prepareImageBufferForContext, processAndStoreImage, storeImageBufferUnmodified, type ImageIngestDeps } from "./db/image-ingest";
+import { imageExtensionForMime, prepareImageBufferForContext, processAndStoreImage, storeImageBufferUnmodified, type ImageIngestDeps } from "./db/image-ingest";
 import { deleteExpiredMemories, countUserMemoriesByUser } from "./db/memory-repository";
 import { listUpcomingForContext, createSchedule, deleteScheduleForGuild, listSchedules } from "./db/schedule-repository";
 import { registerSlashCommands } from "./commands/registry";
@@ -397,6 +397,10 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       ttsEnabled,
       generateSpeech,
       ...(attachment !== undefined ? { initialPendingAttachments: [attachment] } : {}),
+      resolveImageAttachments: createStoredImageAttachmentResolver({
+        guildId: job.guildId,
+        logger: log.child({ component: "stored-image-attachments", guildId: job.guildId, channelId: job.channelId, jobId: job.id }),
+      }),
       forceTrigger: true,
       triggerInstructions: guildConfig.triggerInstructions,
       modelImageInputSupport: getModelImageInputSupport(guildConfig),
@@ -886,6 +890,41 @@ function createDiscordMessageSender(input: {
   };
 }
 
+function createStoredImageAttachmentResolver(input: {
+  guildId: string;
+  logger: Logger;
+}): ImageAttachmentResolver {
+  return (imageIds) => {
+    const attachments: OutboundAttachment[] = [];
+    for (const imageId of imageIds) {
+      const record = getImageById(db, imageId);
+      if (record === null || record.guildId !== input.guildId) {
+        input.logger.warn("stored image attachment not found", { imageId, guildId: input.guildId });
+        continue;
+      }
+      let buffer: Buffer;
+      try {
+        buffer = Buffer.from(readFileSync(record.path));
+      } catch (error) {
+        input.logger.warn("stored image attachment read failed", {
+          imageId,
+          path: record.path,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
+      attachments.push({
+        id: `chat-image-${record.id}`,
+        buffer,
+        filename: `chat-image-${record.id}.${imageExtensionForMime(record.mime)}`,
+        contentType: record.mime,
+        historyText: record.caption ?? `Reposted stored ImageID ${record.id}.`,
+      });
+    }
+    return Promise.resolve(attachments);
+  };
+}
+
 function createTtsGenerator(guildConfig: GuildConfig): {
   ttsEnabled: boolean;
   generateSpeech?: (text: string) => Promise<TtsResult>;
@@ -1247,6 +1286,10 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         ttsEnabled,
         generateSpeech,
         consumeGeneratedAttachments: generatedImages.consumeGeneratedAttachments,
+        resolveImageAttachments: createStoredImageAttachmentResolver({
+          guildId,
+          logger: scheduleLog.child({ component: "stored-image-attachments", guildId, channelId }),
+        }),
         onTriggered: () => { typing.startLoop(); },
         onStillWorking: (targetChatId) => { typing.startLoop(targetChatId); },
         onVisibleOutput: typing.stopLoop,
@@ -2388,6 +2431,10 @@ async function processTriggeredMessage(
       ttsEnabled,
       generateSpeech,
       consumeGeneratedAttachments: generatedImages.consumeGeneratedAttachments,
+      resolveImageAttachments: createStoredImageAttachmentResolver({
+        guildId,
+        logger: log.child({ component: "stored-image-attachments", guildId, channelId, requestId: requestLog.requestId }),
+      }),
       triggerOverride,
       triggerInstructions: guildConfig.triggerInstructions,
       modelImageInputSupport: getModelImageInputSupport(guildConfig),

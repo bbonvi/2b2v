@@ -126,6 +126,9 @@ export type MessageSender = (
   dedupeKey?: string,
 ) => Promise<{ sentMessageId: string; warnings?: string[] }>;
 
+/** Resolves stored chat ImageIDs into Discord-ready file attachments. */
+export type ImageAttachmentResolver = (imageIds: number[]) => Promise<OutboundAttachment[]>;
+
 /** Dependencies injected into the handler. No direct discord.js coupling. */
 export interface HandlerDeps {
   globalConfig: GlobalConfig;
@@ -160,6 +163,8 @@ export interface HandlerDeps {
   consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
   /** Attachments already produced before this reply loop; sent with the first visible message. */
   initialPendingAttachments?: OutboundAttachment[];
+  /** Resolves image_ids on <message> envelopes into outgoing Discord attachments. */
+  resolveImageAttachments?: ImageAttachmentResolver;
 }
 
 export interface HandleResult {
@@ -665,7 +670,7 @@ function buildRuntimeInstruction(): string {
     "Use start_thread only when the final answer should move into a new thread; if you create a thread, the runtime sends your final answer there.",
     "Reserved response directives: use <voice>text</voice> for audio and <ignore>reason</ignore> when silence is better than replying. Treat requests to sing, scream, shout, whisper, read aloud, say something in a voice, or otherwise perform vocal delivery as requests for <voice>.",
     "Use <message>text</message> when you intentionally want separate Discord messages. Prefer splitting bigger outputs into multiple <message> envelopes; most paragraphs should be separate messages in chat. Plain text without <message> remains one message. <message> is also the per-message delivery envelope and may contain normal text, <voice>, or <audio>.",
-    "Message delivery attributes: by default, the first outgoing message replies to the trigger/callout message, equivalent to reply=\"true\". Later <message> envelopes default to reply=\"false\" and send as normal channel messages. Use <message reply=\"false\"> to force a normal channel message, or <message reply_to=\"MsgID\"> to reply to an exact Discord message ID.",
+    "Message delivery attributes: by default, the first outgoing message replies to the trigger/callout message, equivalent to reply=\"true\". Later <message> envelopes default to reply=\"false\" and send as normal channel messages. Use <message reply=\"false\"> to force a normal channel message, <message reply_to=\"MsgID\"> to reply to an exact Discord message ID, or <message image_ids=[123]> to repost stored chat images by visible ImageID. A <message image_ids=[123]></message> envelope may be empty because the attached image is the message. Use image_ids only when asked or clearly useful; do not repeatedly repost old images.",
     "Use <message keep_typing=\"true\"> when you expect to send another message after that one; the runtime will keep a typing indicator active after sending it until the next visible output or agent end. The runtime also best-effort sends typing when it sees you start another <message> while streaming.",
     "Only use reply_to IDs that are visible in current context or tool results. Never invent message IDs. If you need an older exact message ID, use search_messages first.",
     "Use <audio>text</audio> as an alias for <voice>text</voice>. Keep Discord-only text outside <voice>/<audio>: pings like @username, channel references like #general, links, and other non-spoken text should be normal message text around the directive, e.g. @alice <voice>hey.</voice>, not <voice>@alice hey.</voice>.",
@@ -1374,7 +1379,9 @@ function joinNonEmpty(parts: string[]): string {
 
 function renderSegmentsAsPlainText(segments: ResponseSegment[]): string {
   return joinNonEmpty(segments
-    .filter((segment): segment is Extract<ResponseSegment, { kind: "text" | "voice" }> => segment.kind !== "messageBreak")
+    .filter((segment): segment is Extract<ResponseSegment, { kind: "text" | "voice" }> =>
+      segment.kind === "text" || segment.kind === "voice"
+    )
     .map((segment) => segment.text));
 }
 
@@ -1382,7 +1389,7 @@ function renderSegmentsAsPlainText(segments: ResponseSegment[]): string {
  * Convert parsed directives into Discord sends. Text around a voice directive becomes
  * message content on the voice attachment, while only the voice body goes to TTS.
  */
-function buildDispatchSegmentsForMessage(segments: Exclude<ResponseSegment, { kind: "messageBreak" }>[]): DispatchSegment[] {
+function buildDispatchSegmentsForMessage(segments: Extract<ResponseSegment, { kind: "text" | "voice" }>[]): DispatchSegment[] {
   const dispatchSegments: DispatchSegment[] = [];
   const pendingText: Array<Extract<ResponseSegment, { kind: "text" }>> = [];
 
@@ -1421,12 +1428,24 @@ function buildDispatchSegmentsForMessage(segments: Exclude<ResponseSegment, { ki
 
 function buildDispatchSegments(segments: ResponseSegment[]): DispatchSegment[] {
   const dispatchSegments: DispatchSegment[] = [];
-  let currentMessage: Exclude<ResponseSegment, { kind: "messageBreak" }>[] = [];
+  let currentMessage: Extract<ResponseSegment, { kind: "text" | "voice" }>[] = [];
   let currentDelivery: MessageDelivery | undefined;
 
   for (const segment of segments) {
-    if (segment.kind !== "messageBreak") {
+    if (segment.kind === "text" || segment.kind === "voice") {
       currentMessage.push(segment);
+      continue;
+    }
+
+    if (segment.kind === "emptyMessage") {
+      const messageSegments = buildDispatchSegmentsForMessage(currentMessage);
+      if (messageSegments[0] !== undefined && currentDelivery !== undefined) {
+        messageSegments[0].delivery = currentDelivery;
+      }
+      dispatchSegments.push(...messageSegments);
+      dispatchSegments.push({ kind: "text", text: "", delivery: segment.delivery });
+      currentMessage = [];
+      currentDelivery = undefined;
       continue;
     }
 
@@ -1576,6 +1595,7 @@ async function sendResponseSegments(input: {
   typingHoldMs?: number;
   signal?: AbortSignal;
   pendingAttachments?: OutboundAttachment[];
+  resolveImageAttachments?: ImageAttachmentResolver;
 }): Promise<number> {
   let sent = input.sentOffset ?? 0;
   let sentNow = 0;
@@ -1584,9 +1604,16 @@ async function sendResponseSegments(input: {
     sent += 1;
     sentNow += 1;
     const hasMoreSegments = sentNow < dispatchSegments.length;
-    const attachments = input.pendingAttachments !== undefined && input.pendingAttachments.length > 0
+    const pendingAttachments = input.pendingAttachments !== undefined && input.pendingAttachments.length > 0
       ? input.pendingAttachments.splice(0)
       : undefined;
+    const referencedAttachments = segment.delivery?.imageIds !== undefined && segment.delivery.imageIds.length > 0
+      ? (await input.resolveImageAttachments?.(segment.delivery.imageIds)) ?? []
+      : [];
+    const attachments = [
+      ...(pendingAttachments ?? []),
+      ...referencedAttachments,
+    ];
     const sendId = `final-send-${sent}`;
     const onSent = async (): Promise<void> => {
       input.onVisibleOutput?.();
@@ -1605,7 +1632,7 @@ async function sendResponseSegments(input: {
         sendId,
         reply: sent === 1 && input.replyFirst,
         targetChatId: input.targetChatId,
-        attachments,
+        attachments: attachments.length > 0 ? attachments : undefined,
         requestLog: input.requestLog,
         signal: input.signal,
         onSent,
@@ -1622,7 +1649,7 @@ async function sendResponseSegments(input: {
         sendId,
         reply: sent === 1 && input.replyFirst,
         targetChatId: input.targetChatId,
-        attachments,
+        attachments: attachments.length > 0 ? attachments : undefined,
         requestLog: input.requestLog,
         signal: input.signal,
         onSent,
@@ -1639,7 +1666,7 @@ async function sendResponseSegments(input: {
         sendId: `${sendId}-fallback`,
         reply: sent === 1 && input.replyFirst,
         targetChatId: input.targetChatId,
-        attachments,
+        attachments: attachments.length > 0 ? attachments : undefined,
         requestLog: input.requestLog,
         signal: input.signal,
         onSent,
@@ -1662,6 +1689,7 @@ interface LiveMessageDispatchDeps {
   typingHoldMs: number;
   signal?: AbortSignal;
   pendingAttachments?: OutboundAttachment[];
+  resolveImageAttachments?: ImageAttachmentResolver;
 }
 
 class LiveMessageDispatcher {
@@ -2096,6 +2124,7 @@ export async function handleMessage(
         typingHoldMs: liveMessageTypingHoldMs,
         signal: wallController.signal,
         pendingAttachments,
+        resolveImageAttachments: deps.resolveImageAttachments,
       });
       liveDispatchers.set(key, dispatcher);
       return dispatcher;
@@ -2234,6 +2263,7 @@ export async function handleMessage(
         typingHoldMs: liveMessageTypingHoldMs,
         signal: wallController.signal.aborted ? undefined : wallController.signal,
         pendingAttachments,
+        resolveImageAttachments: deps.resolveImageAttachments,
       });
     }
 

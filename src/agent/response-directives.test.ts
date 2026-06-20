@@ -63,6 +63,28 @@ describe("parseResponseDirectives", () => {
     });
   });
 
+  test("parses message image_ids delivery attribute", () => {
+    expect(parseResponseDirectives("<message image_ids=[12, 13]>again</message><message image_ids=\"[14]\">quoted</message>")).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "messageBreak", delivery: { imageIds: [12, 13] } },
+        { kind: "text", text: "again" },
+        { kind: "messageBreak", delivery: { imageIds: [14] } },
+        { kind: "text", text: "quoted" },
+      ],
+    });
+  });
+
+  test("preserves image-only message directives", () => {
+    expect(parseResponseDirectives("<message image_ids=[12]></message><message>next</message>")).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "emptyMessage", delivery: { imageIds: [12] } },
+        { kind: "text", text: "next" },
+      ],
+    });
+  });
+
   test("allows audio directives inside message directives", () => {
     expect(parseResponseDirectives("<message>text</message><message><audio>spoken</audio></message>")).toEqual({
       ignored: false,

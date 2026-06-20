@@ -666,6 +666,40 @@ describe("handleMessage", () => {
     ]);
   });
 
+  test("attaches stored image_ids on the requested message only", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<message image_ids=[12]>again</message><message image_ids=[13]></message><message>done</message>",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    });
+    const senderCalls: Array<{ text: string; attachmentIds: string[] }> = [];
+    const sender: MessageSender = (text, _reply, _chatId, _voice, _signal, _replyToMessageId, attachments) => {
+      senderCalls.push({ text, attachmentIds: attachments?.map((attachment) => attachment.id) ?? [] });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        sender,
+        resolveImageAttachments: (imageIds) => Promise.resolve(imageIds.map((id) => ({
+          id: `chat-image-${id}`,
+          buffer: Buffer.from("image"),
+          filename: `chat-image-${id}.png`,
+          contentType: "image/png",
+        }))),
+      }),
+    );
+
+    expect(senderCalls).toEqual([
+      { text: "again", attachmentIds: ["chat-image-12"] },
+      { text: "", attachmentIds: ["chat-image-13"] },
+      { text: "done", attachmentIds: [] },
+    ]);
+  });
+
   test("streams final message envelopes as they close", async () => {
     const lookupTool: AgentTool = {
       name: "search_messages",
