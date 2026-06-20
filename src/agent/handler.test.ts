@@ -335,7 +335,7 @@ describe("handleMessage", () => {
       expect(text).toContain("include one brief user-facing status line");
       expect(text).toContain("To ping, write @username exactly");
       expect(text).toContain("the exact Discord username is not already visible in context");
-      expect(text).toContain("use list_members first instead of guessing");
+      expect(text).toContain("use list_chat_users first instead of guessing");
       expect(text).toContain("If a request does not make sense");
       expect(text).toContain("Try several targeted search_messages calls");
       expect(text).toContain("For missing or old chat context, use search_messages");

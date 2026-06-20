@@ -42,7 +42,7 @@ import type { TtsResult } from "./tts/types";
 import { buildMemoryContext, buildVisibleUserMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
 import { createSearchTool } from "./agent/search-tool";
 import { createScheduleTools } from "./agent/schedule-tool";
-import { createMemberListTool, type MemberInfo } from "./agent/member-list-tool";
+import { createChatUserListTool, type MemberInfo } from "./agent/member-list-tool";
 import { createUserMemoryTool } from "./agent/user-memory-tool";
 import { createChatHistoryTool } from "./agent/chat-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
@@ -75,7 +75,7 @@ import { createHash } from "node:crypto";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch, unlinkSync } from "fs";
 import type { Database } from "./db/database";
-import { AttachmentBuilder, MessageFlags, type ChatInputCommandInteraction, type Client, type Guild, type GuildTextBasedChannel, type Message, type MessageReaction, type PartialMessage, type PartialMessageReaction, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
+import { AttachmentBuilder, MessageFlags, PermissionFlagsBits, type ChatInputCommandInteraction, type Client, type Guild, type GuildTextBasedChannel, type Message, type MessageReaction, type PartialMessage, type PartialMessageReaction, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
 
 const pkg = await Bun.file(new URL("../package.json", import.meta.url).pathname).json() as { version?: string };
 const CONTEXT_IMAGE_MAX_DIMENSION = 1024;
@@ -670,6 +670,7 @@ function createTargetChannelResolver(discordClient: Client, defaultChannel: Send
     const cached = discordClient.channels.cache.get(chatId);
     const resolved = cached ?? await discordClient.channels.fetch(chatId).catch(() => null);
     if (resolved === null) throw new Error(`Invalid chat_id: channel "${chatId}" not found`);
+    // PM/DM sends are intentionally disabled for now; guild channel/thread delivery may expand later.
     if (!isSendableGuildChannel(resolved)) {
       throw new Error(`Invalid chat_id: channel "${chatId}" is not a supported guild text channel or thread`);
     }
@@ -2166,7 +2167,7 @@ function buildAgentTools(
     onScheduleDeleted: (id) => scheduler.removeSchedule(id),
   });
 
-  const memberListTool = createMemberListTool({
+  const chatUserListTool = createChatUserListTool({
     guildId,
     fetchMembers: async (_gId, onlineOnly) => {
       const members: MemberInfo[] = [];
@@ -2185,11 +2186,14 @@ function buildAgentTools(
           displayName: member.displayName,
           status: status as "online" | "idle" | "dnd" | "offline",
           isBot: member.user.bot,
+          hasAdministratorPermission: member.permissions.has(PermissionFlagsBits.Administrator),
+          ...(member.user.dmChannel === null ? {} : { dmChannelId: member.user.dmChannel.id }),
         });
       }
       return members;
     },
     getMemoryCounts: (gId) => countUserMemoriesByUser(db, gId),
+    adminUserIds: guildConfig.adminUserIds,
   });
 
   const userMemoryTool = createUserMemoryTool({
@@ -2278,7 +2282,7 @@ function buildAgentTools(
     },
   });
 
-  const tools = [searchTool, ...scheduleTools, memberListTool, userMemoryTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, userMemoryTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (includeImageGenerationTools) {
     const codexImageModel = guildConfig.llmProvider === "openai-codex"
       ? guildConfig.model ?? globalConfig.defaultModel

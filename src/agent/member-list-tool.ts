@@ -7,12 +7,15 @@ export interface MemberInfo {
   displayName: string;
   status: "online" | "idle" | "dnd" | "offline";
   isBot: boolean;
+  hasAdministratorPermission: boolean;
+  dmChannelId?: string;
 }
 
 export interface MemberListToolDeps {
   guildId: string;
   fetchMembers: (guildId: string, onlineOnly: boolean) => Promise<MemberInfo[]>;
   getMemoryCounts: (guildId: string) => Map<string, number>;
+  adminUserIds: string[];
 }
 
 const ListMembersParams = Type.Object({
@@ -21,14 +24,15 @@ const ListMembersParams = Type.Object({
   ),
 });
 
-export function createMemberListTool(deps: MemberListToolDeps): AgentTool {
-  const { guildId, fetchMembers, getMemoryCounts } = deps;
+/** Create a compact current-guild user listing tool for chat identity and admin awareness. */
+export function createChatUserListTool(deps: MemberListToolDeps): AgentTool {
+  const { guildId, fetchMembers, getMemoryCounts, adminUserIds } = deps;
 
   return {
-    name: "list_members",
-    label: "list_members",
+    name: "list_chat_users",
+    label: "list_chat_users",
     description:
-      "List server members. Optionally filter to only online members. Returns exact @usernames for Discord pings, display names, online status and the number of memories associated.",
+      "List relevant current-guild chat users. Returns exact usernames, display names/nicknames when different, online status, bot flag, admin flag from Discord Administrator or guild adminUserIds, nonzero memory counts, and any existing cached dm_channel_id. 2B still cannot send PMs/DMs.",
     parameters: ListMembersParams,
 
     async execute(_toolCallId: string, params: unknown): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {
@@ -45,16 +49,22 @@ export function createMemberListTool(deps: MemberListToolDeps): AgentTool {
         };
       }
 
+      const scope = onlineOnly ? "online" : "all";
+      const header = `Legend: username display_name(if different) status flags(bot,admin) mem(nonzero) dm_channel_id(existing cached only); scope=${scope}; count=${members.length}`;
+
       if (members.length === 0) {
         return {
-          content: [{ type: "text", text: onlineOnly ? "No members currently online." : "No members found." }],
+          content: [{ type: "text", text: `${header}\n(no rows)` }],
           details: { count: 0 },
         };
       }
 
       const memoryCounts = getMemoryCounts(guildId);
-      const lines = members.map((m) => formatMember(m, memoryCounts.get(m.userId) ?? 0));
-      const header = onlineOnly ? `Online members (${members.length}):` : `All members (${members.length}):`;
+      const lines = members.map((m) => formatMember(
+        m,
+        memoryCounts.get(m.userId) ?? 0,
+        adminUserIds.includes(m.userId),
+      ));
       return {
         content: [{ type: "text", text: `${header}\n${lines.join("\n")}` }],
         details: { count: members.length },
@@ -63,9 +73,20 @@ export function createMemberListTool(deps: MemberListToolDeps): AgentTool {
   };
 }
 
-function formatMember(m: MemberInfo, memoryCount: number): string {
-  const bot = m.isBot ? " [BOT]" : "";
-  const status = m.status !== "offline" ? ` (${m.status})` : "";
-  const memories = memoryCount > 0 ? ` — ${memoryCount} memories` : "";
-  return `@${m.username} — ${m.displayName}${bot}${status}${memories}`;
+function formatMember(m: MemberInfo, memoryCount: number, isConfiguredAdmin: boolean): string {
+  const parts = [`username=${quoteValue(m.username)}`];
+  if (m.displayName !== m.username) parts.push(`display_name=${quoteValue(m.displayName)}`);
+  parts.push(`status=${m.status}`);
+
+  const flags = [];
+  if (m.isBot) flags.push("bot");
+  if (m.hasAdministratorPermission || isConfiguredAdmin) flags.push("admin");
+  if (flags.length > 0) parts.push(`flags=${flags.join(",")}`);
+  if (memoryCount > 0) parts.push(`mem=${memoryCount}`);
+  if (m.dmChannelId !== undefined) parts.push(`dm_channel_id=${m.dmChannelId}`);
+  return parts.join(" ");
+}
+
+function quoteValue(value: string): string {
+  return JSON.stringify(value);
 }

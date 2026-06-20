@@ -58,7 +58,7 @@ export {
   type ScheduleToolDeps,
 } from "./schedule-tool.ts";
 
-export { createMemberListTool, type MemberListToolDeps, type MemberInfo } from "./member-list-tool.ts";
+export { createChatUserListTool, type MemberListToolDeps, type MemberInfo } from "./member-list-tool.ts";
 
 export { createUserMemoryTool, type UserMemoryToolDeps } from "./user-memory-tool.ts";
 
