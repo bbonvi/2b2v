@@ -1,6 +1,8 @@
 # Architecture
 
-This file records invariants that are easy to break and not obvious from file names. Prefer code and tests for ordinary module maps, option lists, and implementation inventory.
+This file records maintainer invariants that are easy to break and not obvious from file names, types, or tests. Keep setup, commands, and config reference material in `README.md`; keep ordinary implementation inventory in code.
+
+Good entries explain a durable constraint, a cross-module data contract, or a product/security boundary. If an entry only says which file implements something, what options exist, or how to run a script, prefer deleting it.
 
 ## Reply Loop
 
@@ -85,9 +87,3 @@ ElevenLabs v3 bracket delivery tags inside `<voice>` are prompt policy, not code
 ## Config Changes
 
 When adding or removing config fields, update the example config files, config types, loader logic, loader tests, README reference text, and any invariant in this file affected by the change.
-
-## Maintenance Scripts
-
-`scripts/import-legacy-channel-history.ts` streams older Discord channel messages into SQLite and Qdrant. It starts before the oldest stored message for that guild/channel and skips existing message IDs.
-
-`scripts/reindex-message-vectors.ts` is the repair path for garbage or stale message vectors. Dry-run counts source messages and merged blocks; `--apply` deletes matching message vectors and rebuilds them from SQLite with the current normalizer and payload schema.

@@ -2,6 +2,10 @@
 
 Personal Discord bot with a single persona reply loop, native tool calling, and lightweight persistent memory. Built for small personal servers with per-guild isolation.
 
+## Documentation
+
+This README covers setup, operation, and user-facing configuration. `ARCHITECTURE.md` is for maintainer invariants that are easy to break across modules; avoid duplicating command reference or implementation inventory there.
+
 ## What it does
 
 - Responds to @mentions, configurable keywords, or random chance per guild
