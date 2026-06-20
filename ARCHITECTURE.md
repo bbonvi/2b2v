@@ -74,6 +74,10 @@ Slash commands are the broader admin surface for guild schedule inspection and m
 
 One-off timers longer than 2,147,483,647 ms must be chunked and re-armed because JavaScript timers cannot represent longer delays safely.
 
+## Moderation
+
+`timeout_user` is intentionally narrow: it is for rare, admin-requested Discord member timeouts only, and runtime validation must keep rejecting DMs, bot self-timeouts, known guild-owner targets, non-positive durations, and durations above ten minutes. Prompt/tool instructions should continue to direct the model to verify unclear admin status through `list_chat_users` before using it.
+
 ## Images And Voice
 
 Image tool results become multimodal model input according to provider metadata. OpenRouter support is refreshed from `/api/v1/models?output_modalities=all`; Codex support comes from the pi-ai model registry. If metadata says the selected main model lacks `image` input, text-only models receive tool text or, when enabled, a fallback vision-model description; if metadata is unavailable, the agent tries native image input first and only falls back after an endpoint rejection.

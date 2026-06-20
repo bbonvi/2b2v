@@ -14,6 +14,7 @@ This README covers setup, operation, and user-facing configuration. `ARCHITECTUR
 - Stores and recalls images shared in chats
 - Generates images through Codex subscription auth and stores bot images like chat images
 - Schedules messages (recurring, one-off, relative time)
+- Can apply tightly capped admin-requested Discord member timeouts
 - Searches the web via Brave Search
 - Reads webpages and extracts YouTube/media transcripts for summaries
 - Can reference server members, visible guild channels, channel history, and bot-managed Discord threads

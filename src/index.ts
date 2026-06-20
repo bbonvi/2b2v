@@ -45,6 +45,7 @@ import { createScheduleTools } from "./agent/schedule-tool";
 import { createChatUserListTool, type MemberInfo } from "./agent/member-list-tool";
 import { createChannelListTool, type ChannelInfo } from "./agent/channel-list-tool";
 import { createEmojiListTool } from "./agent/emoji-list-tool";
+import { createTimeoutUserTool, type TimeoutMember } from "./agent/timeout-user-tool";
 import { createUserMemoryTool } from "./agent/user-memory-tool";
 import { createChatHistoryTool } from "./agent/chat-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
@@ -2337,6 +2338,58 @@ function buildAgentTools(
     refreshEmojis: async () => fetchEmojiCache(guild),
   });
 
+  const timeoutUserTool = createTimeoutUserTool({
+    guildId,
+    botUserId: client.user?.id ?? "",
+    guildOwnerId: guild.ownerId,
+    resolveMember: async (target) => {
+      const raw = target.trim();
+      const mentionMatch = raw.match(/^<@!?(\d+)>$/);
+      const userId = mentionMatch?.[1] ?? (/^\d{5,25}$/.test(raw) ? raw : undefined);
+      const toTimeoutMember = (member: GuildMember): TimeoutMember => ({
+        id: member.id,
+        username: member.user.username,
+        displayName: member.displayName,
+        isBot: member.user.bot,
+        moderatable: member.moderatable,
+        timeout: async (durationMs, reason) => {
+          await member.timeout(durationMs, reason);
+        },
+      });
+
+      if (userId !== undefined) {
+        try {
+          return toTimeoutMember(await guild.members.fetch(userId));
+        } catch {
+          const cached = guild.members.cache.get(userId);
+          return cached !== undefined ? toTimeoutMember(cached) : null;
+        }
+      }
+
+      const normalized = raw.startsWith("@")
+        ? raw.slice(1).trim().toLowerCase()
+        : raw.toLowerCase();
+      if (normalized === "") return null;
+      const findCached = (): GuildMember | undefined => guild.members.cache.find((member) => {
+        const nickname = member.nickname?.toLowerCase();
+        return member.user.username.toLowerCase() === normalized
+          || member.displayName.toLowerCase() === normalized
+          || nickname === normalized;
+      });
+
+      let member = findCached();
+      if (member === undefined) {
+        try {
+          await guild.members.fetch();
+        } catch {
+          // Cache-only fallback below handles missing member-list permission.
+        }
+        member = findCached();
+      }
+      return member !== undefined ? toTimeoutMember(member) : null;
+    },
+  });
+
   const userMemoryTool = createUserMemoryTool({
     db,
     guildId,
@@ -2440,7 +2493,7 @@ function buildAgentTools(
     },
   });
 
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, userMemoryTool, chatHistoryTool, readChatImagesTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, timeoutUserTool, userMemoryTool, chatHistoryTool, readChatImagesTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (includeImageGenerationTools) {
     const codexImageModel = guildConfig.llmProvider === "openai-codex"
       ? guildConfig.model ?? globalConfig.defaultModel
