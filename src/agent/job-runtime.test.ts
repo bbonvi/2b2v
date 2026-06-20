@@ -49,6 +49,23 @@ describe("AgentJobStore", () => {
     expect(second.job.id).not.toBe(first.job.id);
   });
 
+  test("tracks source and delivery chats separately", () => {
+    const store = new AgentJobStore(config);
+    const result = enqueue(store, {
+      guildId: "source-guild",
+      channelId: "source-chat",
+      deliveryGuildId: "delivery-guild",
+      deliveryChannelId: "thread-chat",
+    });
+
+    expect(result.job.guildId).toBe("source-guild");
+    expect(result.job.channelId).toBe("source-chat");
+    expect(result.job.deliveryGuildId).toBe("delivery-guild");
+    expect(result.job.deliveryChannelId).toBe("thread-chat");
+    expect(store.listVisible("source-guild", "source-chat")).toHaveLength(1);
+    expect(store.listVisible("delivery-guild", "thread-chat")).toHaveLength(1);
+  });
+
   test("rejects replacement cancellation after grace window", () => {
     const store = new AgentJobStore(config);
     const first = enqueue(store, { now: 1_000 });

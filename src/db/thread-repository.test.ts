@@ -2,9 +2,11 @@ import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import { createDatabase, type Database } from "./database";
 import {
   insertThread,
+  upsertThread,
   getThread,
   updateThreadActivity,
   markBotParticipating,
+  markThreadArchived,
   listThreadsForContext,
   getThreadMetadata,
 } from "./thread-repository";
@@ -38,6 +40,8 @@ describe("insertThread", () => {
     expect(row?.threadName).toBe("Help Thread");
     expect(row?.messageCount).toBe(0);
     expect(row?.botParticipating).toBe(false);
+    expect(row?.createdByBot).toBe(true);
+    expect(row?.archivedAt).toBeNull();
     expect(row?.lastMessageId).toBeNull();
   });
 
@@ -118,6 +122,25 @@ describe("updateThreadActivity", () => {
     });
     expect(updated).toBe(false);
   });
+
+  test("clears archived state when live activity is in an open thread", () => {
+    insertThread(db, {
+      threadId: "thread-1",
+      guildId: "guild-1",
+      parentChatId: "ch-1",
+      starterMessageId: "msg-trigger",
+      threadName: "Thread",
+    });
+    markThreadArchived(db, "thread-1", 1234);
+
+    updateThreadActivity(db, "thread-1", {
+      lastActivityAt: Date.now(),
+      lastMessageId: "msg-1",
+      archivedAt: null,
+    });
+
+    expect(getThread(db, "thread-1")?.archivedAt).toBeNull();
+  });
 });
 
 describe("markBotParticipating", () => {
@@ -163,7 +186,7 @@ describe("listThreadsForContext", () => {
     expect(threads).toEqual([]);
   });
 
-  test("only returns bot-participating threads", () => {
+  test("returns bot-created handoffs even before bot participation", () => {
     insertThread(db, {
       threadId: "thread-1",
       guildId: "guild-1",
@@ -182,11 +205,25 @@ describe("listThreadsForContext", () => {
     markBotParticipating(db, "thread-1");
 
     const threads = listThreadsForContext(db, "ch-1");
-    expect(threads).toHaveLength(1);
+    expect(threads).toHaveLength(2);
     const t = threads[0];
     if (t === undefined) throw new Error("unreachable");
-    expect(t.threadId).toBe("thread-1");
-    expect(t.threadName).toBe("Participating Thread");
+    expect(threads.map((thread) => thread.threadId).sort()).toEqual(["thread-1", "thread-2"]);
+  });
+
+  test("does not return discovered non-bot threads until bot participates", () => {
+    upsertThread(db, {
+      threadId: "thread-1",
+      guildId: "guild-1",
+      parentChatId: "ch-1",
+      starterMessageId: "thread-1",
+      threadName: "Other Thread",
+      createdByBot: false,
+    });
+
+    expect(listThreadsForContext(db, "ch-1")).toEqual([]);
+    markBotParticipating(db, "thread-1");
+    expect(listThreadsForContext(db, "ch-1")).toHaveLength(1);
   });
 
   test("filters by parent chat", () => {
@@ -281,9 +318,70 @@ describe("listThreadsForContext", () => {
     expect(threads[0]).toEqual({
       threadId: "thread-1",
       threadName: "Test Thread",
+      starterMessageId: "msg-1",
       messageCount: 2,
       lastActivityAt: now + 2000,
+      lastMessageId: "m2",
+      botParticipating: true,
+      createdByBot: true,
+      archivedAt: null,
     });
+  });
+});
+
+describe("upsertThread", () => {
+  test("inserts discovered non-bot thread metadata", () => {
+    upsertThread(db, {
+      threadId: "thread-live",
+      guildId: "guild-1",
+      parentChatId: "ch-1",
+      starterMessageId: "thread-live",
+      threadName: "Live Thread",
+      createdByBot: false,
+      messageCount: 3,
+    });
+
+    const row = getThread(db, "thread-live");
+    expect(row?.createdByBot).toBe(false);
+    expect(row?.messageCount).toBe(3);
+  });
+
+  test("preserves bot-created ownership on later live discovery", () => {
+    insertThread(db, {
+      threadId: "thread-1",
+      guildId: "guild-1",
+      parentChatId: "ch-1",
+      starterMessageId: "msg-1",
+      threadName: "Bot Thread",
+    });
+
+    upsertThread(db, {
+      threadId: "thread-1",
+      guildId: "guild-1",
+      parentChatId: "ch-1",
+      starterMessageId: "thread-1",
+      threadName: "Renamed",
+      createdByBot: false,
+    });
+
+    const row = getThread(db, "thread-1");
+    expect(row?.threadName).toBe("Renamed");
+    expect(row?.createdByBot).toBe(true);
+  });
+});
+
+describe("markThreadArchived", () => {
+  test("records archive time", () => {
+    insertThread(db, {
+      threadId: "thread-1",
+      guildId: "guild-1",
+      parentChatId: "ch-1",
+      starterMessageId: "msg-1",
+      threadName: "Thread",
+    });
+
+    expect(markThreadArchived(db, "thread-1", 1234)).toBe(true);
+    expect(getThread(db, "thread-1")?.archivedAt).toBe(1234);
   });
 });
 

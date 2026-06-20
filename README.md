@@ -12,7 +12,7 @@ Personal Discord bot with a single persona reply loop, native tool calling, and 
 - Schedules messages (recurring, one-off, relative time)
 - Searches the web via Brave Search
 - Reads webpages and extracts YouTube/media transcripts for summaries
-- Can reference server members and channel history
+- Can reference server members, channel history, and bot-managed Discord threads
 
 ## Requirements
 
@@ -72,7 +72,7 @@ All fields are optional; missing values fall back to global defaults. `imageMaxD
 
 ### Persona
 
-`<message>text</message>` separates an intentional multi-message reply; plain text remains a single message. Per-message delivery can use `reply="false"` for a normal channel send, `reply_to="<message id>"` to reply to a specific Discord message, `keep_typing="true"` to keep typing while more messages are expected, or `image_ids=[123]` to attach stored chat images by ImageID. Closed `<message>` envelopes in streamed assistant answers are sent as soon as they arrive; streamed follow-up bubbles are paced behind typing so buffered messages do not visually collapse into one burst. `<voice>text</voice>` or `<audio>text</audio>` sends generated audio when ElevenLabs is configured. Text outside the voice/audio directive is sent as normal Discord content on the audio attachment. As a full reply, `<ignore>reason</ignore>` sends nothing, but is retained as prompt-only bot history so future turns can see that silence was intentional; it is not embedded or returned by history/search tools. Other XML is normal text. `[msg-break]` is a history-only marker for merged separate messages, not an output directive.
+`<message>text</message>` separates an intentional multi-message reply; plain text remains a single message. Per-message delivery can use `chat_id="<channel or thread id>"` to route one output message to a guild channel/thread the bot can access, `reply="false"` for a normal channel send, `reply_to="<message id>"` to reply to a specific Discord message in the selected chat, `keep_typing="true"` to keep typing while more messages are expected, or `image_ids=[123]` to attach stored chat images by ImageID. DMs are not supported. Closed `<message>` envelopes in streamed assistant answers are sent as soon as they arrive; streamed follow-up bubbles are paced behind typing so buffered messages do not visually collapse into one burst. `<voice>text</voice>` or `<audio>text</audio>` sends generated audio when ElevenLabs is configured. Text outside the voice/audio directive is sent as normal Discord content on the audio attachment. As a full reply, `<ignore>reason</ignore>` sends nothing, but is retained as prompt-only bot history so future turns can see that silence was intentional; it is not embedded or returned by history/search tools. Other XML is normal text. `[msg-break]` is a history-only marker for merged separate messages, not an output directive.
 
 ## History Search Maintenance
 

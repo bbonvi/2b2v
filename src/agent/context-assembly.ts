@@ -33,6 +33,8 @@ export interface ThreadMetadata {
   threadId: string;
   starterMessageId: string;
   threadName: string;
+  createdByBot?: boolean;
+  archivedAt?: number | null;
 }
 
 /** Input for context assembly. All string fields may be empty to indicate omission. */
@@ -81,6 +83,8 @@ function computeThreadMetadata(input: ContextAssemblyInput): string {
     `Thread: ${m.threadId}`,
     `Starter Message: ${m.starterMessageId}`,
     `Thread Name: "${m.threadName}"`,
+    ...(m.createdByBot !== undefined ? [`Created By Bot: ${m.createdByBot ? "yes" : "no"}`] : []),
+    ...(m.archivedAt !== undefined && m.archivedAt !== null ? [`Archived At: ${m.archivedAt}`] : []),
   ].join("\n");
 }
 

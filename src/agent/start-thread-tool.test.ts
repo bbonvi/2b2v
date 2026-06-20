@@ -1,6 +1,8 @@
 import { test, expect, describe, mock } from "bun:test";
 import {
+  createCloseThreadTool,
   createStartThreadTool,
+  type CloseThreadDetails,
   type StartThreadToolDeps,
   type StartThreadDetails,
 } from "./start-thread-tool";
@@ -205,5 +207,98 @@ describe("createStartThreadTool", () => {
     // Should not throw
     const text = (result.content[0] as TextContent).text;
     expect(text).toContain("Thread created");
+  });
+});
+
+describe("createCloseThreadTool", () => {
+  test("closes a known bot-created thread", async () => {
+    const archived: string[] = [];
+    const tool = createCloseThreadTool({
+      currentGuildId: "g1",
+      currentChannelId: "thread-123",
+      currentIsThread: true,
+      lookupThread: (threadId) => threadId === "thread-123"
+        ? { threadId, guildId: "g1", threadName: "Thread", parentChatId: "channel-456", createdByBot: true }
+        : null,
+      closeThread: (threadId) => Promise.resolve({
+        threadId,
+        threadName: "Thread",
+        parentChatId: "channel-456",
+      }),
+      persistArchived: (threadId) => {
+        archived.push(threadId);
+      },
+    });
+
+    const result = await tool.execute("tc1", {}, AbortSignal.timeout(5000));
+    const details = result.details as CloseThreadDetails;
+    expect(details.threadId).toBe("thread-123");
+    expect(archived).toEqual(["thread-123"]);
+  });
+
+  test("refuses non-bot-created threads", async () => {
+    const tool = createCloseThreadTool({
+      currentGuildId: "g1",
+      currentChannelId: "thread-123",
+      currentIsThread: true,
+      lookupThread: (threadId) => ({ threadId, guildId: "g1", threadName: "Thread", parentChatId: "channel-456", createdByBot: false }),
+      closeThread: () => Promise.reject(new Error("should not run")),
+      persistArchived: () => {},
+    });
+
+    const result = await tool.execute("tc1", { thread_id: "thread-123" }, AbortSignal.timeout(5000));
+    expect((result.details as { error: string }).error).toBe("not_bot_created");
+  });
+
+  test("uses explicit thread_id from parent channel", async () => {
+    let closed: string | undefined;
+    const tool = createCloseThreadTool({
+      currentGuildId: "g1",
+      currentChannelId: "parent-1",
+      currentIsThread: false,
+      lookupThread: (threadId) => ({ threadId, guildId: "g1", threadName: "Thread", parentChatId: "parent-1", createdByBot: true }),
+      closeThread: (threadId) => {
+        closed = threadId;
+        return Promise.resolve({ threadId, threadName: "Thread", parentChatId: "parent-1" });
+      },
+      persistArchived: () => {},
+    });
+
+    await tool.execute("tc1", { thread_id: "thread-456" }, AbortSignal.timeout(5000));
+    expect(closed).toBe("thread-456");
+  });
+
+  test("trims explicit thread_id before closing", async () => {
+    let closed: string | undefined;
+    const tool = createCloseThreadTool({
+      currentGuildId: "g1",
+      currentChannelId: "parent-1",
+      currentIsThread: false,
+      lookupThread: (threadId) => threadId === "thread-456"
+        ? { threadId, guildId: "g1", threadName: "Thread", parentChatId: "parent-1", createdByBot: true }
+        : null,
+      closeThread: (threadId) => {
+        closed = threadId;
+        return Promise.resolve({ threadId, threadName: "Thread", parentChatId: "parent-1" });
+      },
+      persistArchived: () => {},
+    });
+
+    await tool.execute("tc1", { thread_id: " thread-456 " }, AbortSignal.timeout(5000));
+    expect(closed).toBe("thread-456");
+  });
+
+  test("refuses a bot-created thread outside the current parent channel", async () => {
+    const tool = createCloseThreadTool({
+      currentGuildId: "g1",
+      currentChannelId: "parent-1",
+      currentIsThread: false,
+      lookupThread: (threadId) => ({ threadId, guildId: "g1", threadName: "Thread", parentChatId: "parent-2", createdByBot: true }),
+      closeThread: () => Promise.reject(new Error("should not run")),
+      persistArchived: () => {},
+    });
+
+    const result = await tool.execute("tc1", { thread_id: "thread-456" }, AbortSignal.timeout(5000));
+    expect((result.details as { error: string }).error).toBe("not_visible_in_parent");
   });
 });

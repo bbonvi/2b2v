@@ -775,13 +775,13 @@ export interface InsertPromptOnlyBotMessageInput {
 }
 
 /**
- * Insert a synthetic "Event" row for thread creation.
+ * Insert a synthetic "Event" row for thread creation/handoff.
  * Stored in the parent chat with is_synthetic=1 and related_thread_id set.
  * Never embedded or included in search results.
  */
 export function insertSyntheticEvent(db: Database, input: InsertSyntheticEventInput): void {
   const now = Date.now();
-  const content = `Event: Thread created — ${input.threadName} (thread_id: ${input.threadId})`;
+  const content = `Event: Thread created — request handed off to thread — ${input.threadName} (thread_id: ${input.threadId})`;
 
   db.raw
     .prepare(

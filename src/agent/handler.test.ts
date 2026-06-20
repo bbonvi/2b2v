@@ -233,6 +233,36 @@ describe("handleMessage", () => {
     expect(senderCalls).toEqual([{ text: "hello user", reply: true, chatId: undefined }]);
   });
 
+  test("routes individual message envelopes by chat_id", async () => {
+    const senderCalls: Array<{ text: string; reply: boolean; chatId?: string; replyTo?: string }> = [];
+    const sender: MessageSender = (text, reply, chatId, _voice, _signal, replyTo) => {
+      senderCalls.push({ text, reply, chatId, replyTo });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<message>here</message><message chat_id=\"thread-1\" reply_to=\"msg-9\">there</message>",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: {
+        role: "assistant",
+        model: "m",
+        stopReason: "stop",
+        content: [{ type: "text", text: "routed" }],
+        usage: { input: 1, output: 1, totalTokens: 2, cost: { total: 0 } },
+      },
+    });
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ sender, completeChat }),
+    );
+
+    expect(senderCalls).toEqual([
+      { text: "here", reply: true, chatId: undefined, replyTo: undefined },
+      { text: "there", reply: false, chatId: "thread-1", replyTo: "msg-9" },
+    ]);
+  });
+
   test("does not require OpenRouter image fallback options when Codex fallback is disabled", async () => {
     const completeChat: ChatCompleteFn = (request) => {
       expect(request.provider).toBe("openai-codex");
@@ -2463,6 +2493,49 @@ describe("handleMessage", () => {
     );
 
     expect(senderCalls).toEqual([{ text: "thread answer", reply: false, chatId: "thread-1" }]);
+  });
+
+  test("routes final answer to parent after closing a thread", async () => {
+    const closeTool: AgentTool = {
+      name: "close_thread",
+      label: "Close Thread",
+      description: "Close a thread",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({
+        content: [{ type: "text", text: "Thread closed" }],
+        details: { threadId: "thread-1", threadName: "Thread", parentChatId: "channel-1" },
+      }),
+    };
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{ id: "call-1", type: "function", function: { name: "close_thread", arguments: "{}" } }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      return Promise.resolve({
+        text: "closed",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "closed" }] },
+      });
+    };
+    const senderCalls: Array<{ text: string; reply: boolean; chatId?: string }> = [];
+    const sender: MessageSender = (text, reply, chatId) => {
+      senderCalls.push({ text, reply, chatId });
+      return Promise.resolve({ sentMessageId: "sent-1" });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ extraTools: [closeTool], completeChat, sender }),
+    );
+
+    expect(senderCalls).toEqual([{ text: "closed", reply: false, chatId: "channel-1" }]);
   });
 
   test("silent memory pass terminates after one successful memory tool call", async () => {

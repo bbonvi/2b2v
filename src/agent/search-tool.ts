@@ -46,7 +46,7 @@ const SearchParams = Type.Object({
   query: Type.Optional(Type.String({ description: "Semantic: short 2-5 word topic phrase; put names/times/channels in filters. Literal: exact string." })),
   message_id: Type.Optional(Type.String({ description: "Anchor message ID for mode='context'." })),
   username: Type.Optional(Type.String({ description: "Filter results to a specific username." })),
-  chat_id: Type.Optional(Type.String({ description: "Search a specific chat (channel, thread, or DM). Defaults to the current chat." })),
+  chat_id: Type.Optional(Type.String({ description: "Search a specific guild channel or thread. Defaults to the current chat. DMs are not supported." })),
   around: Type.Optional(Type.String({ description: "Local wall-clock timestamp for mode='context', formatted YYYY-MM-DD HH:mm in the server timezone. Defaults to the current chat unless chat_id is provided." })),
   afterMs: Type.Optional(Type.Number({ description: "Only messages after this epoch ms timestamp." })),
   beforeMs: Type.Optional(Type.Number({ description: "Only messages before this epoch ms timestamp." })),

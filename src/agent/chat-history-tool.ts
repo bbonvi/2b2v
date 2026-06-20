@@ -16,7 +16,7 @@ export interface ChatHistoryToolDeps {
 }
 
 const ChatHistoryParams = Type.Object({
-  chat_id: Type.String({ description: "The chat ID to fetch history from (channel, thread, or DM)." }),
+  chat_id: Type.String({ description: "The guild channel or thread ID to fetch history from. DMs are not supported." }),
   limit: Type.Optional(
     Type.Number({ description: "Maximum number of messages to retrieve. Default: 50, max: 100." })
   ),
@@ -29,7 +29,7 @@ export function createChatHistoryTool(deps: ChatHistoryToolDeps): AgentTool {
     name: "chat_history",
     label: "chat_history",
     description:
-      "Fetch recent messages from a Discord chat. Useful for reviewing conversation context in a specific channel, thread, or DM.",
+      "Fetch recent messages from a Discord guild channel or thread. Useful for reviewing conversation context in a specific channel or thread. DMs are not supported.",
     parameters: ChatHistoryParams,
 
     async execute(

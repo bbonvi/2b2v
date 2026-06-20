@@ -101,7 +101,9 @@ const SCHEMA_SQL = `
     last_activity_at    INTEGER NOT NULL,
     message_count       INTEGER NOT NULL DEFAULT 0,
     last_message_id     TEXT,
-    bot_participating   INTEGER NOT NULL DEFAULT 0
+    bot_participating   INTEGER NOT NULL DEFAULT 0,
+    created_by_bot      INTEGER NOT NULL DEFAULT 1,
+    archived_at         INTEGER
   );
 
   CREATE INDEX IF NOT EXISTS idx_threads_parent_chat
@@ -129,6 +131,10 @@ export function createDatabase(dbPath: string): Database {
   try { raw.run("ALTER TABLE messages ADD COLUMN is_synthetic INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try { raw.run("ALTER TABLE messages ADD COLUMN is_prompt_only INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try { raw.run("ALTER TABLE messages ADD COLUMN related_thread_id TEXT"); } catch { /* already exists */ }
+
+  // Idempotent migration: thread ownership and close/archive state.
+  try { raw.run("ALTER TABLE threads ADD COLUMN created_by_bot INTEGER NOT NULL DEFAULT 1"); } catch { /* already exists */ }
+  try { raw.run("ALTER TABLE threads ADD COLUMN archived_at INTEGER"); } catch { /* already exists */ }
 
   // Idempotent migration: add optional expiry to memories before shape migrations can copy it.
   try { raw.run("ALTER TABLE memories ADD COLUMN expires_at INTEGER"); } catch { /* already exists */ }

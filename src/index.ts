@@ -51,9 +51,9 @@ import { createCodexGenerateImageTool, type GeneratedImageAttachment } from "./a
 import { AgentJobStore, createCancelAgentJobTool, isActiveJobStatus, type AgentJob, type ImageGenerationJobResult } from "./agent/job-runtime";
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createSummarizeVideoTool } from "./agent/summarize-video-tool";
-import { createStartThreadTool } from "./agent/start-thread-tool";
+import { createCloseThreadTool, createStartThreadTool } from "./agent/start-thread-tool";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
-import { insertThread, updateThreadActivity, markBotParticipating, listThreadsForContext, getThreadMetadata } from "./db/thread-repository";
+import { upsertThread, updateThreadActivity, markBotParticipating, markThreadArchived, listThreadsForContext, getThreadMetadata, getThread } from "./db/thread-repository";
 import { imageExtensionForMime, prepareImageBufferForContext, processAndStoreImage, storeImageBufferUnmodified, type ImageIngestDeps } from "./db/image-ingest";
 import { deleteExpiredMemories, countUserMemoriesByUser } from "./db/memory-repository";
 import { listUpcomingForContext, createSchedule, deleteScheduleForGuild, listSchedules } from "./db/schedule-repository";
@@ -72,7 +72,7 @@ import { createHash } from "node:crypto";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch, unlinkSync } from "fs";
 import type { Database } from "./db/database";
-import { AttachmentBuilder, MessageFlags, type ChatInputCommandInteraction, type Client, type Guild, type Message, type TextChannel, type Typing } from "discord.js";
+import { AttachmentBuilder, MessageFlags, type ChatInputCommandInteraction, type Client, type Guild, type GuildTextBasedChannel, type Message, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
 
 const pkg = await Bun.file(new URL("../package.json", import.meta.url).pathname).json() as { version?: string };
 const CONTEXT_IMAGE_MAX_DIMENSION = 1024;
@@ -88,7 +88,8 @@ type AttachmentSendPayload = {
   nonce?: string;
   enforceNonce?: boolean;
 };
-type ResolveTargetChannel = (chatId: string | undefined) => TextChannel;
+type SendableGuildChannel = GuildTextBasedChannel & { sendTyping: () => Promise<void> };
+type ResolveTargetChannel = (chatId: string | undefined) => Promise<SendableGuildChannel>;
 
 const TYPING_INTERVAL_MS = 8_000;
 const DEFAULT_CODEX_IMAGE_ROUTER_MODEL = "gpt-5.2";
@@ -184,8 +185,11 @@ function renderAgentJobsContext(jobs: AgentJob[], now = Date.now()): string {
     const sent = job.sentMessageId !== undefined ? ` sent MsgID ${job.sentMessageId}` : "";
     const error = job.error !== undefined ? formatJobErrorForContext(job.error) : "";
     const highRes = job.input.is4k ? " 4K" : "";
+    const delivery = job.deliveryGuildId !== job.guildId || job.deliveryChannelId !== job.channelId
+      ? ` delivery chat ${job.deliveryChannelId}`
+      : "";
     lines.push(
-      `- ${job.id} ${job.status}${highRes} (${state}) for @${job.requesterUsername} from MsgID ${job.sourceMessageId}${replacement}; requested ${formatJobAge(job, now)}; quote: "${job.sourceQuote}"${sent}${error}`,
+      `- ${job.id} ${job.status}${highRes} (${state}) for @${job.requesterUsername} from MsgID ${job.sourceMessageId}${delivery}${replacement}; requested ${formatJobAge(job, now)}; quote: "${job.sourceQuote}"${sent}${error}`,
     );
   }
   return lines.join("\n");
@@ -206,29 +210,34 @@ function annotateHistoryJobs(
 async function runImageGenerationJob(jobId: string): Promise<void> {
   const job = agentJobs.get(jobId);
   if (job === undefined) return;
-  const guildConfig = getGuildConfig(job.guildId);
-  const guild = client.guilds.cache.get(job.guildId);
+  const sourceGuildConfig = getGuildConfig(job.guildId);
+  const deliveryGuildConfig = getGuildConfig(job.deliveryGuildId);
+  const guild = client.guilds.cache.get(job.deliveryGuildId);
   if (guild === undefined) {
-    agentJobs.markFailed(job.id, "Guild is unavailable.");
+    agentJobs.markFailed(job.id, "Delivery guild is unavailable.");
     return;
   }
-  const channel = guild.channels.cache.get(job.channelId);
-  if (channel === undefined || !("send" in channel) || !("sendTyping" in channel)) {
-    agentJobs.markFailed(job.id, "Target channel is unavailable.");
+  const channel = await client.channels.fetch(job.deliveryChannelId).catch(() => guild.channels.cache.get(job.deliveryChannelId) ?? null);
+  if (channel === null || !("send" in channel) || !("sendTyping" in channel)) {
+    agentJobs.markFailed(job.id, "Delivery channel is unavailable.");
     return;
   }
-  const textChannel = channel as TextChannel;
+  if (!isSendableGuildChannel(channel)) {
+    agentJobs.markFailed(job.id, "Delivery channel is not a supported guild text channel.");
+    return;
+  }
+  const textChannel = channel;
   const controller = new AbortController();
   const timeout = setTimeout(() => {
-    controller.abort(new Error(`Image job ${job.id} timed out after ${guildConfig.agentJobs.imageTimeoutMs}ms`));
-  }, guildConfig.agentJobs.imageTimeoutMs);
+    controller.abort(new Error(`Image job ${job.id} timed out after ${deliveryGuildConfig.agentJobs.imageTimeoutMs}ms`));
+  }, deliveryGuildConfig.agentJobs.imageTimeoutMs);
   const typingTimer = setInterval(() => {
     void textChannel.sendTyping().catch(() => {});
   }, TYPING_INTERVAL_MS);
   void textChannel.sendTyping().catch(() => {});
   agentJobs.start(job.id, () => controller.abort(new Error(`Image job ${job.id} cancelled.`)));
 
-  const requestLog = new RequestLog(job.guildId, job.channelId);
+  const requestLog = new RequestLog(job.deliveryGuildId, job.deliveryChannelId);
   requestLog.setAuthor(job.requesterUsername);
   requestLog.setTrigger({ type: "async_image_generation", jobId: job.id, sourceMessageId: job.sourceMessageId });
   requestLog.setAgentRan(true);
@@ -242,7 +251,6 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     instruction: string;
     attachment?: OutboundAttachment;
   }): Promise<string | undefined> => {
-    const outboundResolvers = buildOutboundResolvers(guild);
     let sourceMessage: Message | undefined;
     try {
       sourceMessage = await textChannel.messages.fetch(job.sourceMessageId);
@@ -251,30 +259,26 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     }
     const completionTyping = createTypingController({
       defaultChannel: textChannel,
-      resolveTargetChannel: createTargetChannelResolver(guild, textChannel),
+      resolveTargetChannel: createTargetChannelResolver(client, textChannel),
     });
     const sender = createDiscordMessageSender({
-      guildId: job.guildId,
-      guild,
       defaultChannel: textChannel,
-      outboundResolvers,
+      resolveTargetChannel: createTargetChannelResolver(client, textChannel),
       botUserId: client.user?.id ?? "",
       botUsername: client.user?.username ?? "bot",
       logger: log,
       ...(sourceMessage !== undefined ? { replySourceMessage: sourceMessage } : {}),
       getLastTypingAt: completionTyping.getLastTypingAt,
-      imageStore: {
-        attachmentsDir: guildConfig.attachmentsDir,
-      },
+      getAttachmentsDir: (targetGuildId) => getGuildConfig(targetGuildId).attachmentsDir,
     });
 
     const replyFallbackDeps: ReplyFallbackDeps = {
       db,
-      guildId: job.guildId,
-      channelId: job.channelId,
+      guildId: job.deliveryGuildId,
+      channelId: job.deliveryChannelId,
       fetchDiscordMessage: async (chId, msgId) => {
-        const ch = guild.channels.cache.get(chId);
-        if (ch === undefined || !("messages" in ch)) return null;
+        const ch = await client.channels.fetch(chId).catch(() => guild.channels.cache.get(chId) ?? null);
+        if (ch === null || !("messages" in ch)) return null;
         try {
           const fetched = await (ch as TextChannel).messages.fetch(msgId);
           return {
@@ -299,11 +303,11 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       processImage: async (url, contentType, messageId) => {
         const ingestDeps: ImageIngestDeps = {
           db,
-          attachmentsDir: guildConfig.attachmentsDir,
-          maxDimension: guildConfig.imageMaxDimension,
+          attachmentsDir: deliveryGuildConfig.attachmentsDir,
+          maxDimension: deliveryGuildConfig.imageMaxDimension,
           fetchFn: fetch,
         };
-        await processAndStoreImage(ingestDeps, { url, mimeType: contentType, messageId, guildId: job.guildId, channelId: job.channelId });
+        await processAndStoreImage(ingestDeps, { url, mimeType: contentType, messageId, guildId: job.deliveryGuildId, channelId: job.deliveryChannelId });
       },
     };
     const syntheticLatestMessage: HistoryMessage = {
@@ -321,19 +325,19 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       relatedThreadId: null,
     };
     const context = await buildContext(
-      job.guildId,
-      job.channelId,
+      job.deliveryGuildId,
+      job.deliveryChannelId,
       guild,
-      guildConfig,
+      deliveryGuildConfig,
       input.instruction,
       syntheticLatestMessage,
       replyFallbackDeps,
       textChannel.isThread(),
     );
     const extraTools = buildAgentTools(
-      job.guildId,
-      job.channelId,
-      guildConfig,
+      job.deliveryGuildId,
+      job.deliveryChannelId,
+      deliveryGuildConfig,
       guild,
       context.contextMessageIds,
       undefined,
@@ -356,7 +360,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       sentMessageId ??= sent.sentMessageId;
       return sent;
     };
-    const { ttsEnabled, generateSpeech } = createTtsGenerator(guildConfig);
+    const { ttsEnabled, generateSpeech } = createTtsGenerator(deliveryGuildConfig);
     const attachment = input.attachment;
     const contextAttachment = attachment !== undefined
       ? await prepareImageBufferForContext(attachment.buffer, attachment.contentType, CONTEXT_IMAGE_MAX_DIMENSION)
@@ -387,31 +391,31 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     };
     const completionResult = await handleMessage(completionIncoming, {
       globalConfig,
-      guildConfig,
+      guildConfig: deliveryGuildConfig,
       context,
       personaPrompt: persona,
       sender: completionSender,
       extraTools,
-      log: log.child({ component: `async-image-${input.event}`, guildId: job.guildId, channelId: job.channelId, jobId: job.id, requestId: requestLog.requestId }),
+      log: log.child({ component: `async-image-${input.event}`, guildId: job.deliveryGuildId, channelId: job.deliveryChannelId, sourceGuildId: job.guildId, sourceChannelId: job.channelId, jobId: job.id, requestId: requestLog.requestId }),
       requestLog,
       ttsEnabled,
       generateSpeech,
       ...(attachment !== undefined ? { initialPendingAttachments: [attachment] } : {}),
       resolveImageAttachments: createStoredImageAttachmentResolver({
-        guildId: job.guildId,
-        logger: log.child({ component: "stored-image-attachments", guildId: job.guildId, channelId: job.channelId, jobId: job.id }),
+        guildId: job.deliveryGuildId,
+        logger: log.child({ component: "stored-image-attachments", guildId: job.deliveryGuildId, channelId: job.deliveryChannelId, jobId: job.id }),
       }),
       forceTrigger: true,
-      triggerInstructions: guildConfig.triggerInstructions,
-      modelImageInputSupport: getModelImageInputSupport(guildConfig),
+      triggerInstructions: deliveryGuildConfig.triggerInstructions,
+      modelImageInputSupport: getModelImageInputSupport(deliveryGuildConfig),
       onTriggered: () => { completionTyping.startLoop(); },
       onStillWorking: (targetChatId) => { completionTyping.startLoop(targetChatId); },
       onVisibleOutput: completionTyping.stopLoop,
       onAgentEnd: completionTyping.stopLoop,
       onIgnoredReply: ({ targetChatId, historyText }) => {
         persistIgnoredBotReply({
-          guildId: job.guildId,
-          channelId: job.channelId,
+          guildId: job.deliveryGuildId,
+          channelId: job.deliveryChannelId,
           targetChatId,
           botUserId: client.user?.id ?? "",
           botUsername: client.user?.username ?? "bot",
@@ -427,13 +431,13 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     const generated = createGeneratedImageRuntime();
     const tool = createCodexGenerateImageTool({
       codexAuthPath: globalConfig.codexAuthPath,
-      model: guildConfig.llmProvider === "openai-codex"
-        ? guildConfig.model ?? globalConfig.defaultModel
+      model: sourceGuildConfig.llmProvider === "openai-codex"
+        ? sourceGuildConfig.model ?? globalConfig.defaultModel
         : DEFAULT_CODEX_IMAGE_ROUTER_MODEL,
-      sessionId: `2b2v-image-job:${job.guildId}:${job.channelId}:${job.id}`,
-      logger: log.child({ component: "async-image-job", guildId: job.guildId, channelId: job.channelId, jobId: job.id }),
-      imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
-      imageGenerationQuality: guildConfig.imageGeneration.quality,
+      sessionId: `2b2v-image-job:${job.guildId}:${job.channelId}:${job.deliveryGuildId}:${job.deliveryChannelId}:${job.id}`,
+      logger: log.child({ component: "async-image-job", guildId: job.deliveryGuildId, channelId: job.deliveryChannelId, sourceGuildId: job.guildId, sourceChannelId: job.channelId, jobId: job.id }),
+      imageReadMaxPerCall: sourceGuildConfig.imageReadMaxPerCall,
+      imageGenerationQuality: sourceGuildConfig.imageGeneration.quality,
       getImageById: (id: number) => {
         const record = getImageById(db, id);
         return record !== null && record.guildId === job.guildId ? record : null;
@@ -575,26 +579,25 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
 }
 
 function createBotMessageStore(input: {
-  guildId: string;
   botUserId: string;
   botUsername: string;
   logger: Logger;
-}): (sentId: string, targetChannelId: string, rawContent: string, plainContent: string) => void {
-  return (sentId, targetChannelId, rawContent, plainContent) => {
+}): (sentId: string, targetGuildId: string, targetChannelId: string, rawContent: string, plainContent: string) => void {
+  return (sentId, targetGuildId, targetChannelId, rawContent, plainContent) => {
     const ts = Date.now();
     db.raw
       .prepare(
         `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(sentId, input.guildId, targetChannelId, input.botUserId, input.botUsername, rawContent, plainContent, 1, ts, null);
+      .run(sentId, targetGuildId, targetChannelId, input.botUserId, input.botUsername, rawContent, plainContent, 1, ts, null);
 
     void embeddingQueue.enqueue({
       id: sentId,
       text: plainContent,
       target: "message",
       metadata: {
-        guild_id: input.guildId,
+        guild_id: targetGuildId,
         channel_id: targetChannelId,
         user_id: input.botUserId,
         created_at: ts,
@@ -631,18 +634,36 @@ function persistIgnoredBotReply(input: {
   });
 }
 
-function createTargetChannelResolver(guild: Guild, defaultChannel: TextChannel): ResolveTargetChannel {
-  return (chatId) => {
+function isSendableGuildChannel(channel: unknown): channel is SendableGuildChannel {
+  return channel !== null
+    && typeof channel === "object"
+    && "send" in channel
+    && "sendTyping" in channel
+    && "guild" in channel
+    && "guildId" in channel;
+}
+
+async function fetchAccessibleGuildChannel(chatId: string): Promise<SendableGuildChannel | null> {
+  const cached = client.channels.cache.get(chatId);
+  const resolved = cached ?? await client.channels.fetch(chatId).catch(() => null);
+  return isSendableGuildChannel(resolved) ? resolved : null;
+}
+
+function createTargetChannelResolver(discordClient: Client, defaultChannel: SendableGuildChannel): ResolveTargetChannel {
+  return async (chatId) => {
     if (chatId === undefined) return defaultChannel;
-    const resolved = guild.channels.cache.get(chatId);
-    if (resolved === undefined) throw new Error(`Invalid chat_id: channel "${chatId}" not found`);
-    if (!("send" in resolved)) throw new Error(`Invalid chat_id: channel "${chatId}" is not a text channel`);
-    return resolved as TextChannel;
+    const cached = discordClient.channels.cache.get(chatId);
+    const resolved = cached ?? await discordClient.channels.fetch(chatId).catch(() => null);
+    if (resolved === null) throw new Error(`Invalid chat_id: channel "${chatId}" not found`);
+    if (!isSendableGuildChannel(resolved)) {
+      throw new Error(`Invalid chat_id: channel "${chatId}" is not a supported guild text channel or thread`);
+    }
+    return resolved;
   };
 }
 
 function createTypingController(input: {
-  defaultChannel: TextChannel;
+  defaultChannel: SendableGuildChannel;
   resolveTargetChannel: ResolveTargetChannel;
 }): {
   getLastTypingAt: () => number;
@@ -655,14 +676,14 @@ function createTypingController(input: {
   let typingChatId: string | undefined;
 
   const sendNow = async (chatId?: string): Promise<void> => {
-    const targetChannel = (() => {
-      if (chatId === undefined) return input.defaultChannel;
+    let targetChannel = input.defaultChannel;
+    if (chatId !== undefined) {
       try {
-        return input.resolveTargetChannel(chatId);
+        targetChannel = await input.resolveTargetChannel(chatId);
       } catch {
-        return input.defaultChannel;
+        targetChannel = input.defaultChannel;
       }
-    })();
+    }
     lastTypingAt = Date.now();
     await targetChannel.sendTyping().catch(() => {});
   };
@@ -690,26 +711,20 @@ function createTypingController(input: {
 }
 
 function createDiscordMessageSender(input: {
-  guildId: string;
-  guild: Guild;
-  defaultChannel: TextChannel;
-  outboundResolvers: OutboundResolvers;
+  defaultChannel: SendableGuildChannel;
+  resolveTargetChannel: ResolveTargetChannel;
   botUserId: string;
   botUsername: string;
   logger: Logger;
   replySourceMessage?: Message;
   getLastTypingAt?: () => number;
-  imageStore?: {
-    attachmentsDir: string;
-  };
+  getAttachmentsDir: (guildId: string) => string;
 }): MessageSender {
   const storeBotMessage = createBotMessageStore({
-    guildId: input.guildId,
     botUserId: input.botUserId,
     botUsername: input.botUsername,
     logger: input.logger,
   });
-  const resolveTargetChannel = createTargetChannelResolver(input.guild, input.defaultChannel);
 
   async function waitAfterRecentTyping(): Promise<void> {
     const lastTypingAt = input.getLastTypingAt?.() ?? 0;
@@ -721,20 +736,20 @@ function createDiscordMessageSender(input: {
 
   async function storeBotImageAttachments(
     messageId: string,
+    targetGuildId: string,
     targetChannelId: string,
     attachments: OutboundAttachment[] | undefined,
   ): Promise<void> {
-    if (attachments === undefined || attachments.length === 0 || input.imageStore === undefined) return;
-    const imageStore = input.imageStore;
+    if (attachments === undefined || attachments.length === 0) return;
     const results = await Promise.allSettled(attachments.map((attachment) =>
       storeImageBufferUnmodified({
         db,
-        attachmentsDir: imageStore.attachmentsDir,
+        attachmentsDir: input.getAttachmentsDir(targetGuildId),
       }, {
         buffer: attachment.buffer,
         mimeType: attachment.contentType,
         messageId,
-        guildId: input.guildId,
+        guildId: targetGuildId,
         channelId: targetChannelId,
         caption: attachment.historyText,
       })
@@ -756,8 +771,10 @@ function createDiscordMessageSender(input: {
   }
 
   return async (text, reply, chatId, voice, _signal, replyToMessageId, attachments, dedupeKey) => {
-    const targetChannel = resolveTargetChannel(chatId);
+    const targetChannel = await input.resolveTargetChannel(chatId);
+    const targetGuildId = targetChannel.guildId;
     const targetChannelId = targetChannel.id;
+    const outboundResolvers = buildOutboundResolvers(targetChannel.guild);
 
     await waitAfterRecentTyping();
 
@@ -823,7 +840,7 @@ function createDiscordMessageSender(input: {
       const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
       const imageAttachments = attachmentBuilders(attachments);
       const warnings: string[] = [];
-      const translated = translateOutbound(text, input.outboundResolvers, warnings);
+      const translated = translateOutbound(text, outboundResolvers, warnings);
       const chunks = splitMessage(translated);
       const firstChunk = chunks[0] ?? "";
       const payload = buildAttachmentPayload(
@@ -839,8 +856,8 @@ function createDiscordMessageSender(input: {
       } else {
         sent = await sendToTargetChannel(payload);
       }
-      storeBotMessage(sent.id, targetChannelId, voiceRawContent(firstChunk), voice.historyText ?? text);
-      await storeBotImageAttachments(sent.id, targetChannelId, attachments);
+      storeBotMessage(sent.id, targetGuildId, targetChannelId, voiceRawContent(firstChunk), voice.historyText ?? text);
+      await storeBotImageAttachments(sent.id, targetGuildId, targetChannelId, attachments);
       for (let i = 1; i < chunks.length; i++) {
         const chunk = chunks[i] as string;
         const followup = await sendToTargetChannel(buildAttachmentPayload(
@@ -848,17 +865,37 @@ function createDiscordMessageSender(input: {
           [],
           discordMessageNonce(dedupeKey, `voice-${i}`),
         ));
-        storeBotMessage(followup.id, targetChannelId, chunk, chunk);
+        storeBotMessage(followup.id, targetGuildId, targetChannelId, chunk, chunk);
       }
       if (targetChannel.isThread()) {
-        updateThreadActivity(db, targetChannelId, { lastActivityAt: Date.now(), lastMessageId: sent.id });
+        const activityAt = Date.now();
+        const updated = updateThreadActivity(db, targetChannelId, {
+          lastActivityAt: activityAt,
+          lastMessageId: sent.id,
+          archivedAt: targetChannel.archived === true ? activityAt : null,
+        });
+        if (!updated) {
+          upsertThread(db, {
+            threadId: targetChannelId,
+            guildId: targetGuildId,
+            parentChatId: targetChannel.parentId ?? targetChannelId,
+            starterMessageId: targetChannelId,
+            threadName: targetChannel.name,
+            createdAt: targetChannel.createdTimestamp ?? activityAt,
+            lastActivityAt: activityAt,
+            lastMessageId: sent.id,
+            messageCount: targetChannel.messageCount ?? 1,
+            createdByBot: targetChannel.ownerId === input.botUserId,
+            archivedAt: targetChannel.archived === true ? activityAt : null,
+          });
+        }
         markBotParticipating(db, targetChannelId);
       }
       return { sentMessageId: sent.id, warnings: unresolvedEmojiWarnings(warnings) };
     }
 
     const warnings: string[] = [];
-    const translated = translateOutbound(text, input.outboundResolvers, warnings);
+    const translated = translateOutbound(text, outboundResolvers, warnings);
     const imageAttachments = attachmentBuilders(attachments);
     const chunks = splitMessage(translated);
     if (chunks.length === 0 && imageAttachments.length > 0) chunks.push("");
@@ -879,11 +916,31 @@ function createDiscordMessageSender(input: {
         sent = await sendToTargetChannel(payload);
       }
       if (i === 0) firstId = sent.id;
-      storeBotMessage(sent.id, targetChannelId, chunk, i === 0 ? text : chunk);
-      if (i === 0) await storeBotImageAttachments(sent.id, targetChannelId, attachments);
+      storeBotMessage(sent.id, targetGuildId, targetChannelId, chunk, i === 0 ? text : chunk);
+      if (i === 0) await storeBotImageAttachments(sent.id, targetGuildId, targetChannelId, attachments);
     }
     if (targetChannel.isThread()) {
-      updateThreadActivity(db, targetChannelId, { lastActivityAt: Date.now(), lastMessageId: firstId });
+      const activityAt = Date.now();
+      const updated = updateThreadActivity(db, targetChannelId, {
+        lastActivityAt: activityAt,
+        lastMessageId: firstId,
+        archivedAt: targetChannel.archived === true ? activityAt : null,
+      });
+      if (!updated) {
+        upsertThread(db, {
+          threadId: targetChannelId,
+          guildId: targetGuildId,
+          parentChatId: targetChannel.parentId ?? targetChannelId,
+          starterMessageId: targetChannelId,
+          threadName: targetChannel.name,
+          createdAt: targetChannel.createdTimestamp ?? activityAt,
+          lastActivityAt: activityAt,
+          lastMessageId: firstId,
+          messageCount: targetChannel.messageCount ?? 1,
+          createdByBot: targetChannel.ownerId === input.botUserId,
+          archivedAt: targetChannel.archived === true ? activityAt : null,
+        });
+      }
       markBotParticipating(db, targetChannelId);
     }
     return { sentMessageId: firstId, warnings: unresolvedEmojiWarnings(warnings) };
@@ -1177,24 +1234,19 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
       const botUserId = client.user?.id ?? "";
       const botUsername = client.user?.username ?? "bot";
 
-      const outboundResolvers = buildOutboundResolvers(guild);
-      const resolveTargetChannel = createTargetChannelResolver(guild, textChannel);
+      const resolveTargetChannel = createTargetChannelResolver(client, textChannel);
       const typing = createTypingController({
         defaultChannel: textChannel,
         resolveTargetChannel,
       });
       const sender = createDiscordMessageSender({
-        guildId,
-        guild,
         defaultChannel: textChannel,
-        outboundResolvers,
+        resolveTargetChannel,
         botUserId,
         botUsername,
         logger: scheduleLog,
         getLastTypingAt: typing.getLastTypingAt,
-        imageStore: {
-          attachmentsDir: guildConfig.attachmentsDir,
-        },
+        getAttachmentsDir: (targetGuildId) => getGuildConfig(targetGuildId).attachmentsDir,
       });
 
       // Build simplified context for scheduled task
@@ -1704,13 +1756,54 @@ async function buildContext(
   // Current context metadata — local wall-clock time, no ISO Z strings
   const currentContext = `Guild: ${guildId} | Channel: ${channelId}\n${currentLocalContext(guildConfig.timezone)}`;
 
+  const liveChannel = await client.channels.fetch(channelId).catch(() => guild.channels.cache.get(channelId) ?? null);
+  if (liveChannel !== null && isSendableGuildChannel(liveChannel) && liveChannel.isThread()) {
+    const existing = getThread(db, liveChannel.id);
+    const createdAt = liveChannel.createdTimestamp ?? existing?.createdAt ?? Date.now();
+    upsertThread(db, {
+      threadId: liveChannel.id,
+      guildId: liveChannel.guildId,
+      parentChatId: liveChannel.parentId ?? channelId,
+      starterMessageId: liveChannel.id,
+      threadName: liveChannel.name,
+      createdAt,
+      lastActivityAt: existing?.lastActivityAt ?? createdAt,
+      messageCount: liveChannel.messageCount ?? 0,
+      botParticipating: false,
+      createdByBot: liveChannel.ownerId === client.user?.id,
+      archivedAt: liveChannel.archived === true ? Date.now() : null,
+    });
+  }
+
   // Thread list for parent channels (bot-participating threads only)
   // Only shown when NOT in a thread
   let threadsInChat = "";
   if (!isThread) {
+    for (const cached of guild.channels.cache.values()) {
+      if (!cached.isThread() || cached.parentId !== channelId) continue;
+      const existing = getThread(db, cached.id);
+      const createdAt = cached.createdTimestamp ?? existing?.createdAt ?? Date.now();
+      upsertThread(db, {
+        threadId: cached.id,
+        guildId: cached.guildId,
+        parentChatId: channelId,
+        starterMessageId: cached.id,
+        threadName: cached.name,
+        createdAt,
+        lastActivityAt: existing?.lastActivityAt ?? createdAt,
+        messageCount: cached.messageCount ?? 0,
+        createdByBot: cached.ownerId === client.user?.id,
+        archivedAt: cached.archived === true ? Date.now() : null,
+      });
+    }
     const threads = listThreadsForContext(db, channelId);
     threadsInChat = threads
-      .map((t) => `- "${t.threadName}" (thread_id: ${t.threadId}) — ${t.messageCount} msgs, ${formatRelativeAgo(t.lastActivityAt)}`)
+      .map((t) => {
+        const status = t.archivedAt !== null ? "closed" : "open";
+        const handoff = t.createdByBot ? "handoff" : "recent";
+        const last = t.lastMessageId !== null ? `, last MsgID ${t.lastMessageId}` : "";
+        return `- "${t.threadName}" (thread_id: ${t.threadId}, starter_msg_id: ${t.starterMessageId}) — ${status} ${handoff}, ${t.messageCount} msgs, last active ${formatRelativeAgo(t.lastActivityAt)}${last}`;
+      })
       .join("\n");
   }
 
@@ -1725,6 +1818,8 @@ async function buildContext(
         threadId: channelId,
         starterMessageId: meta.starterMessageId,
         threadName: meta.threadName,
+        createdByBot: meta.createdByBot,
+        archivedAt: meta.archivedAt,
       };
 
       // Fetch parent pre-context: last 20 messages before thread creation
@@ -2007,6 +2102,7 @@ function buildAgentTools(
   },
   options: {
     includeImageGenerationTools?: boolean;
+    getDeliveryChatId?: () => string | undefined;
     currentRequest?: {
       requesterId: string;
       requesterUsername: string;
@@ -2029,8 +2125,8 @@ function buildAgentTools(
     resolveUsername,
     excludedMessageIds,
     fetchMessage: async (chId, msgId) => {
-      const channel = guild.channels.cache.get(chId);
-      if (channel === undefined || !("messages" in channel)) return null;
+      const channel = await fetchAccessibleGuildChannel(chId);
+      if (channel === null || !("messages" in channel)) return null;
       try {
         const msg = await (channel as TextChannel).messages.fetch(msgId);
         return {
@@ -2099,12 +2195,10 @@ function buildAgentTools(
   const chatHistoryTool = createChatHistoryTool({
     guildId,
     timezone: guildConfig.timezone,
-    fetchMessages: (chatId, limit) => {
-      // Validate channel is accessible in guild before querying DB
-      const channel = guild.channels.cache.get(chatId);
-      if (channel === undefined || !("messages" in channel)) return Promise.resolve([]);
-      // Fetch from DB — includes synthetic events (thread creation, etc.)
-      return Promise.resolve(getChatHistory(db, guildId, chatId, limit));
+    fetchMessages: async (chatId, limit) => {
+      const channel = await fetchAccessibleGuildChannel(chatId);
+      if (channel === null || channel.guildId !== guildId || !("messages" in channel)) return [];
+      return getChatHistory(db, guildId, channel.id, limit);
     },
   });
 
@@ -2158,9 +2252,15 @@ function buildAgentTools(
       },
       onGeneratedImage: onGeneratedImage ?? (() => {}),
       ...(effectiveCurrentRequest === undefined ? {} : { enqueueImageJob: (input) => {
+        const deliveryChatId = options.getDeliveryChatId?.() ?? channelId;
+        const deliveryGuildId = client.channels.cache.get(deliveryChatId) !== undefined && isSendableGuildChannel(client.channels.cache.get(deliveryChatId))
+          ? (client.channels.cache.get(deliveryChatId) as SendableGuildChannel).guildId
+          : guildId;
         const result = agentJobs.enqueueImageJob({
           guildId,
           channelId,
+          deliveryGuildId,
+          deliveryChannelId: deliveryChatId,
           requesterId: effectiveCurrentRequest.requesterId,
           requesterUsername: effectiveCurrentRequest.requesterUsername,
           sourceMessageId: effectiveCurrentRequest.sourceMessageId,
@@ -2259,26 +2359,21 @@ async function processTriggeredMessage(
   try {
     const inboundResolvers = buildInboundResolvers(guild);
     const translatedContent = translateInbound(message.content, inboundResolvers);
-    const outboundResolvers = buildOutboundResolvers(guild);
-    const currentChannelObj = message.channel as TextChannel;
-    const resolveTargetChannel = createTargetChannelResolver(guild, currentChannelObj);
+    const currentChannelObj = message.channel as SendableGuildChannel;
+    const resolveTargetChannel = createTargetChannelResolver(client, currentChannelObj);
     const typing = createTypingController({
       defaultChannel: currentChannelObj,
       resolveTargetChannel,
     });
     const sender = createDiscordMessageSender({
-      guildId,
-      guild,
       defaultChannel: currentChannelObj,
-      outboundResolvers,
+      resolveTargetChannel,
       botUserId: client.user?.id ?? "",
       botUsername: client.user?.username ?? "bot",
       logger: log,
       replySourceMessage: message,
       getLastTypingAt: typing.getLastTypingAt,
-      imageStore: {
-        attachmentsDir: guildConfig.attachmentsDir,
-      },
+      getAttachmentsDir: (targetGuildId) => getGuildConfig(targetGuildId).attachmentsDir,
     });
 
     const ingestedImages = getImagesByMessageId(db, message.id);
@@ -2341,6 +2436,7 @@ async function processTriggeredMessage(
     const isThread = message.channel.isThread();
     const context = await buildContext(guildId, channelId, guild, guildConfig, translatedContent, latestUserMessage, replyFallbackDeps, isThread);
 
+    let routedChatId: string | undefined;
     const startThreadTool = createStartThreadTool({
       guildId,
       createThread: async (name: string) => {
@@ -2352,13 +2448,14 @@ async function processTriggeredMessage(
           starterMessageId: message.id,
         };
       },
-      persistThread: (input) => insertThread(db, input),
+      persistThread: (input) => upsertThread(db, { ...input, createdByBot: true }),
       onPersistError: (err) => {
         log.error("failed to persist thread record", {
           error: err instanceof Error ? err.message : String(err),
         });
       },
       onSuccess: (payload) => {
+        routedChatId = payload.threadId;
         try {
           insertSyntheticEvent(db, {
             id: crypto.randomUUID(),
@@ -2377,6 +2474,35 @@ async function processTriggeredMessage(
         }
       },
     });
+    const closeThreadTool = createCloseThreadTool({
+      currentGuildId: guildId,
+      currentChannelId: channelId,
+      currentIsThread: isThread,
+      lookupThread: (threadId) => {
+        const row = getThread(db, threadId);
+        if (row === null) return null;
+        return {
+          threadId: row.threadId,
+          guildId: row.guildId,
+          threadName: row.threadName,
+          parentChatId: row.parentChatId,
+          createdByBot: row.createdByBot,
+        };
+      },
+      closeThread: async (threadId) => {
+        const resolved = await createTargetChannelResolver(client, currentChannelObj)(threadId);
+        if (!resolved.isThread()) throw new Error("Target chat is not a thread.");
+        await (resolved as ThreadChannel).setArchived(true, "closed by close_thread tool");
+        return {
+          threadId: resolved.id,
+          threadName: resolved.name,
+          parentChatId: resolved.parentId ?? channelId,
+        };
+      },
+      persistArchived: (threadId) => {
+        markThreadArchived(db, threadId);
+      },
+    });
     const generatedImages = createGeneratedImageRuntime();
     const extraTools = [
       ...buildAgentTools(
@@ -2392,8 +2518,10 @@ async function processTriggeredMessage(
           sourceMessageId: message.id,
           sourceQuote: shortQuote(translatedContent),
         },
+        { getDeliveryChatId: () => routedChatId },
       ),
       startThreadTool,
+      closeThreadTool,
     ];
 
     const incoming: IncomingMessage = {
@@ -2649,10 +2777,26 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
 
     // Update thread activity if message is in a thread
     if (message.channel.isThread()) {
-      updateThreadActivity(db, channelId, {
+      const updated = updateThreadActivity(db, channelId, {
         lastActivityAt: now,
         lastMessageId: message.id,
+        archivedAt: message.channel.archived === true ? now : null,
       });
+      if (!updated) {
+        upsertThread(db, {
+          threadId: channelId,
+          guildId,
+          parentChatId: message.channel.parentId ?? channelId,
+          starterMessageId: channelId,
+          threadName: message.channel.name,
+          createdAt: message.channel.createdTimestamp ?? now,
+          lastActivityAt: now,
+          lastMessageId: message.id,
+          messageCount: message.channel.messageCount ?? 1,
+          createdByBot: message.channel.ownerId === client.user?.id,
+          archivedAt: message.channel.archived === true ? now : null,
+        });
+      }
     }
 
     // Process and persist images (no inline payloads — LLM uses read_images tool)

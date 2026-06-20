@@ -31,8 +31,12 @@ export interface ImageGenerationJobResult {
 export interface AgentJob {
   id: string;
   kind: AgentJobKind;
+  /** Guild/channel where the request originated and where source metadata belongs. */
   guildId: string;
   channelId: string;
+  /** Guild/channel where async job progress and completion should be delivered. */
+  deliveryGuildId: string;
+  deliveryChannelId: string;
   requesterId: string;
   requesterUsername: string;
   sourceMessageId: string;
@@ -62,6 +66,8 @@ export interface AgentJobConfig {
 export interface EnqueueImageJobInput {
   guildId: string;
   channelId: string;
+  deliveryGuildId?: string;
+  deliveryChannelId?: string;
   requesterId: string;
   requesterUsername: string;
   sourceMessageId: string;
@@ -123,6 +129,8 @@ export class AgentJobStore {
       kind: "image_generation",
       guildId: input.guildId,
       channelId: input.channelId,
+      deliveryGuildId: input.deliveryGuildId ?? input.guildId,
+      deliveryChannelId: input.deliveryChannelId ?? input.channelId,
       requesterId: input.requesterId,
       requesterUsername: input.requesterUsername,
       sourceMessageId: input.sourceMessageId,
@@ -153,7 +161,10 @@ export class AgentJobStore {
 
   listVisible(guildId: string, channelId: string, now = Date.now()): AgentJob[] {
     return [...this.jobs.values()]
-      .filter((job) => job.guildId === guildId && job.channelId === channelId)
+      .filter((job) =>
+        (job.guildId === guildId && job.channelId === channelId)
+        || (job.deliveryGuildId === guildId && job.deliveryChannelId === channelId)
+      )
       .filter((job) => this.isActive(job) || (job.completedAt !== undefined && now - job.completedAt <= this.config.terminalVisibleMs))
       .sort((a, b) => {
         const timeDiff = a.createdAt - b.createdAt;
@@ -163,7 +174,13 @@ export class AgentJobStore {
 
   listActive(guildId: string, channelId: string): AgentJob[] {
     return [...this.jobs.values()]
-      .filter((job) => job.guildId === guildId && job.channelId === channelId && this.isActive(job))
+      .filter((job) =>
+        this.isActive(job)
+        && (
+          (job.guildId === guildId && job.channelId === channelId)
+          || (job.deliveryGuildId === guildId && job.deliveryChannelId === channelId)
+        )
+      )
       .sort((a, b) => {
         const timeDiff = a.createdAt - b.createdAt;
         return timeDiff !== 0 ? timeDiff : a.id.localeCompare(b.id);
@@ -254,7 +271,12 @@ export class AgentJobStore {
   annotationForMessage(messageId: string, guildId: string, channelId: string, now = Date.now()): string[] {
     const jobs = this.listVisible(guildId, channelId, now)
       .filter((job) => job.sourceMessageId === messageId);
-    return jobs.map((job) => `ImageJob: ${job.id} ${job.status}${job.input.is4k ? " 4K" : ""}`);
+    return jobs.map((job) => {
+      const delivery = job.deliveryGuildId !== job.guildId || job.deliveryChannelId !== job.channelId
+        ? ` -> chat ${job.deliveryChannelId}`
+        : "";
+      return `ImageJob: ${job.id} ${job.status}${job.input.is4k ? " 4K" : ""}${delivery}`;
+    });
   }
 
   private isActive(job: AgentJob): boolean {

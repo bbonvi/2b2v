@@ -52,10 +52,10 @@ describe("parseResponseDirectives", () => {
   });
 
   test("parses message delivery attributes", () => {
-    expect(parseResponseDirectives("<message reply=\"false\" keep_typing=\"true\">first</message><message reply_to=\"12345\">second</message>")).toEqual({
+    expect(parseResponseDirectives("<message chat_id=\"chan-2\" reply=\"false\" keep_typing=\"true\">first</message><message reply_to=\"12345\">second</message>")).toEqual({
       ignored: false,
       segments: [
-        { kind: "messageBreak", delivery: { reply: false, keepTyping: true } },
+        { kind: "messageBreak", delivery: { chatId: "chan-2", reply: false, keepTyping: true } },
         { kind: "text", text: "first" },
         { kind: "messageBreak", delivery: { replyTo: "12345" } },
         { kind: "text", text: "second" },

@@ -1041,8 +1041,8 @@ describe("insertSyntheticEvent", () => {
     expect(row.is_bot).toBe(1);
     expect(row.is_synthetic).toBe(1);
     expect(row.related_thread_id).toBe("thread-456");
-    expect(row.translated_content).toBe("Event: Thread created — Help Discussion (thread_id: thread-456)");
-    expect(row.raw_content).toBe("Event: Thread created — Help Discussion (thread_id: thread-456)");
+    expect(row.translated_content).toBe("Event: Thread created — request handed off to thread — Help Discussion (thread_id: thread-456)");
+    expect(row.raw_content).toBe("Event: Thread created — request handed off to thread — Help Discussion (thread_id: thread-456)");
   });
 
   test("synthetic event is excluded from literal search", () => {
