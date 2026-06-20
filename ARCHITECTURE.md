@@ -10,6 +10,8 @@ Good entries explain a durable constraint, a cross-module data contract, or a pr
 
 Tool results are appended as `role: "tool"` messages, then the same model produces final text. Read-only tools may run concurrently only when they are in the same model turn and on the allowlist. State-changing or unknown tools remain ordered execution barriers.
 
+`react_to_message` is a state-changing acknowledgement tool. It may only target visible or retrievable messages in accessible guild text channels/threads; DMs and inaccessible channels are rejected by the Discord channel resolver. When a reaction fully handles the turn, the final assistant output should be `<ignore>` so the bot behaves like a normal chat user instead of sending redundant text.
+
 `start_thread` changes final-answer and async image-job delivery routing: after the tool creates a thread, later final-answer messages default there, and `codex_generate_image` jobs created after the handoff deliver typing/completion/failure turns there while preserving the original request metadata. The parent channel also receives a synthetic handoff event so future parent context can see that the request moved to a thread.
 
 Per-message `<message chat_id="...">` delivery can route individual output messages to any accessible guild channel or thread, including another guild. DMs are out of scope and rejected by the Discord channel resolver. Cross-guild `chat_id` is send-only: history and image read tools remain scoped to the current guild unless a future ACL-backed product decision expands read access. For cross-guild sends, sent bot messages and generated/bot image attachments are stored under the target guild/channel, while source request metadata remains tied to the originating guild/channel.

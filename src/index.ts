@@ -53,6 +53,7 @@ import { AgentJobStore, createCancelAgentJobTool, isActiveJobStatus, type AgentJ
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createSummarizeVideoTool } from "./agent/summarize-video-tool";
 import { createCloseThreadTool, createStartThreadTool } from "./agent/start-thread-tool";
+import { createReactToMessageTool } from "./agent/react-to-message-tool";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { upsertThread, updateThreadActivity, markBotParticipating, markThreadArchived, listThreadsForContext, getThreadMetadata, getThread } from "./db/thread-repository";
 import { imageExtensionForMime, prepareImageBufferForContext, processAndStoreImage, storeImageBufferUnmodified, type ImageIngestDeps } from "./db/image-ingest";
@@ -69,6 +70,7 @@ import { handleVpnCommand, handleVpnComponent, type VpnHandlerDeps } from "./vpn
 import { getVpnLocale } from "./vpn/i18n";
 import { loadPromptProfile } from "./config/prompt-profile";
 import { fetchOpenRouterModelMetadata, imageInputSupportFromMetadata, resolveModel, resolveGuildModelKey, type ModelImageInputSupport } from "./llm/client";
+import { resolveReactionEmojiInput } from "./discord/reaction-emoji";
 import { createHash } from "node:crypto";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch, unlinkSync } from "fs";
@@ -2239,8 +2241,44 @@ function buildAgentTools(
 
   const fetchUrlTool = createFetchUrlTool();
   const summarizeVideoTool = createSummarizeVideoTool();
+  const reactToMessageTool = createReactToMessageTool({
+    currentChannelId: channelId,
+    reactToMessage: async (input) => {
+      const targetChannel = await fetchAccessibleGuildChannel(input.chatId);
+      if (targetChannel === null || !("messages" in targetChannel)) {
+        throw new Error(`Chat ${input.chatId} is not an accessible guild text channel or thread.`);
+      }
 
-  const tools = [searchTool, ...scheduleTools, memberListTool, userMemoryTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool];
+      refreshEmojiCache(targetChannel.guild);
+      const emoji = resolveReactionEmojiInput(
+        input.emoji,
+        (name) => emojiCache.lookup(targetChannel.guildId, name),
+      );
+      if (emoji === null) throw new Error("emoji is required.");
+
+      let targetMessage: Message;
+      try {
+        targetMessage = await targetChannel.messages.fetch(input.messageId);
+      } catch {
+        throw new Error(`Message ${input.messageId} was not found or is not accessible in chat ${input.chatId}.`);
+      }
+
+      try {
+        await targetMessage.react(emoji);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown reaction error";
+        throw new Error(`Discord rejected the reaction: ${message}`);
+      }
+
+      return {
+        messageId: targetMessage.id,
+        chatId: targetChannel.id,
+        emoji,
+      };
+    },
+  });
+
+  const tools = [searchTool, ...scheduleTools, memberListTool, userMemoryTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (includeImageGenerationTools) {
     const codexImageModel = guildConfig.llmProvider === "openai-codex"
       ? guildConfig.model ?? globalConfig.defaultModel

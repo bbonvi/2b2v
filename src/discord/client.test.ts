@@ -6,6 +6,7 @@ describe("REQUIRED_INTENTS", () => {
   test("includes all intents from spec", () => {
     expect(REQUIRED_INTENTS).toContain(GatewayIntentBits.Guilds);
     expect(REQUIRED_INTENTS).toContain(GatewayIntentBits.GuildMessages);
+    expect(REQUIRED_INTENTS).toContain(GatewayIntentBits.GuildMessageReactions);
     expect(REQUIRED_INTENTS).toContain(GatewayIntentBits.GuildMessageTyping);
     expect(REQUIRED_INTENTS).toContain(GatewayIntentBits.MessageContent);
     expect(REQUIRED_INTENTS).toContain(GatewayIntentBits.GuildMembers);

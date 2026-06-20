@@ -83,3 +83,10 @@ export { createFetchUrlTool, type FetchUrlToolDeps } from "./fetch-url-tool.ts";
 export { createSummarizeVideoTool, type SummarizeVideoToolDeps } from "./summarize-video-tool.ts";
 
 export { createStartThreadTool, type StartThreadToolDeps, type StartThreadDetails } from "./start-thread-tool.ts";
+
+export {
+  createReactToMessageTool,
+  normalizeReactToMessageInput,
+  type ReactToMessageToolDeps,
+  type ReactToMessageDetails,
+} from "./react-to-message-tool.ts";

@@ -10,6 +10,7 @@ import type { Logger } from "../logger";
 export const REQUIRED_INTENTS = [
   GatewayIntentBits.Guilds,
   GatewayIntentBits.GuildMessages,
+  GatewayIntentBits.GuildMessageReactions,
   GatewayIntentBits.GuildMessageTyping,
   GatewayIntentBits.MessageContent,
   GatewayIntentBits.GuildMessageReactions,
