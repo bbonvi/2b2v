@@ -13,7 +13,6 @@ export const REQUIRED_INTENTS = [
   GatewayIntentBits.GuildMessageReactions,
   GatewayIntentBits.GuildMessageTyping,
   GatewayIntentBits.MessageContent,
-  GatewayIntentBits.GuildMessageReactions,
   GatewayIntentBits.GuildMembers,
   GatewayIntentBits.GuildExpressions,
   GatewayIntentBits.GuildPresences,
