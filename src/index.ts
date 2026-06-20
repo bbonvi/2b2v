@@ -20,7 +20,7 @@ import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
-import { getContextHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory, deleteRecentMessages } from "./db/message-repository";
+import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, deleteRecentMessages } from "./db/message-repository";
 import {
   countMessagesSinceMemoryExtraction,
   getMemoryExtractionCheckpoint,
@@ -404,6 +404,17 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       onStillWorking: (targetChatId) => { completionTyping.startLoop(targetChatId); },
       onVisibleOutput: completionTyping.stopLoop,
       onAgentEnd: completionTyping.stopLoop,
+      onIgnoredReply: ({ targetChatId, historyText }) => {
+        persistIgnoredBotReply({
+          guildId: job.guildId,
+          channelId: job.channelId,
+          targetChatId,
+          botUserId: client.user?.id ?? "",
+          botUsername: client.user?.username ?? "bot",
+          sourceMessageId: syntheticLatestMessage.id,
+          historyText,
+        });
+      },
     });
     return completionResult.agentRan ? sentMessageId : undefined;
   };
@@ -594,6 +605,26 @@ function createBotMessageStore(input: {
       });
     });
   };
+}
+
+function persistIgnoredBotReply(input: {
+  guildId: string;
+  channelId: string;
+  targetChatId?: string;
+  botUserId: string;
+  botUsername: string;
+  sourceMessageId: string;
+  historyText: string;
+}): void {
+  insertPromptOnlyBotMessage(db, {
+    id: `prompt-only:ignore:${input.sourceMessageId}`,
+    guildId: input.guildId,
+    channelId: input.targetChatId ?? input.channelId,
+    botUserId: input.botUserId,
+    botUsername: input.botUsername,
+    content: input.historyText,
+    replyToId: input.sourceMessageId,
+  });
 }
 
 function createTargetChannelResolver(guild: Guild, defaultChannel: TextChannel): ResolveTargetChannel {
@@ -1220,6 +1251,17 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         onStillWorking: (targetChatId) => { typing.startLoop(targetChatId); },
         onVisibleOutput: typing.stopLoop,
         onAgentEnd: typing.stopLoop,
+        onIgnoredReply: ({ targetChatId, historyText }) => {
+          persistIgnoredBotReply({
+            guildId,
+            channelId,
+            targetChatId,
+            botUserId,
+            botUsername,
+            sourceMessageId: syntheticLatestMessage.id,
+            historyText,
+          });
+        },
         forceTrigger: true,
         triggerInstructions: guildConfig.triggerInstructions,
         afterReply: async (memoryRequest) => {
@@ -2349,6 +2391,17 @@ async function processTriggeredMessage(
       triggerOverride,
       triggerInstructions: guildConfig.triggerInstructions,
       modelImageInputSupport: getModelImageInputSupport(guildConfig),
+      onIgnoredReply: ({ targetChatId, historyText }) => {
+        persistIgnoredBotReply({
+          guildId,
+          channelId,
+          targetChatId,
+          botUserId: client.user?.id ?? "",
+          botUsername: client.user?.username ?? "bot",
+          sourceMessageId: message.id,
+          historyText,
+        });
+      },
       afterReply: async (memoryRequest) => {
         if (!guildConfig.memoryExtraction.postReply) return;
         const memoryLog = new RequestLog(guildId, channelId);

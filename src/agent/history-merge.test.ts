@@ -101,6 +101,15 @@ describe("mergeConsecutiveMessages", () => {
     expect(result).toHaveLength(2);
   });
 
+  test("does not merge prompt-only rows", () => {
+    const msgs = [
+      msg("1", 1000, { isBot: true, isPromptOnly: true, content: "<ignore>no</ignore>" }),
+      msg("2", 1000 + 30_000, { isBot: true, isPromptOnly: true, content: "<ignore>still no</ignore>" }),
+    ];
+    const result = mergeConsecutiveMessages(msgs, GAP);
+    expect(result).toHaveLength(2);
+  });
+
   test("first message with images blocks merge even if second is plain", () => {
     const msgs = [
       msg("1", 1000, { imageIds: [1] }),

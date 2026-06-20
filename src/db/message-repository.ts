@@ -62,6 +62,7 @@ interface HistoryRow {
   created_at: number;
   reply_to_id: string | null;
   is_synthetic: number;
+  is_prompt_only: number;
   related_thread_id: string | null;
 }
 
@@ -107,6 +108,7 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
       captions: images.map((i) => i.caption ?? ""),
       hasEmbeds: false,
       isSynthetic: r.is_synthetic === 1,
+      isPromptOnly: r.is_prompt_only === 1,
       relatedThreadId: r.related_thread_id,
     };
   });
@@ -168,6 +170,7 @@ export async function searchMessages(
     `id IN (${placeholders})`,
     "guild_id = ?",
     "is_synthetic = 0",
+    "is_prompt_only = 0",
     "TRIM(translated_content) <> ''",
   ];
   const rowParams: Array<string | number> = [...ids, filter.guildId];
@@ -288,7 +291,7 @@ function contextBeforeMessage(
     `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
      FROM messages
      WHERE guild_id = ? AND channel_id = ?
-       AND is_synthetic = 0 AND TRIM(translated_content) <> ''
+       AND is_synthetic = 0 AND is_prompt_only = 0 AND TRIM(translated_content) <> ''
        AND (created_at < ? OR (created_at = ? AND id < ?))
      ORDER BY created_at DESC, id DESC
      LIMIT ?`,
@@ -312,7 +315,7 @@ function contextAfterMessage(
     `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
      FROM messages
      WHERE guild_id = ? AND channel_id = ?
-       AND is_synthetic = 0 AND TRIM(translated_content) <> ''
+       AND is_synthetic = 0 AND is_prompt_only = 0 AND TRIM(translated_content) <> ''
        AND (created_at > ? OR (created_at = ? AND id > ?))
      ORDER BY created_at ASC, id ASC
      LIMIT ?`,
@@ -333,7 +336,7 @@ function contextBeforeTimestamp(
     `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
      FROM messages
      WHERE guild_id = ? AND channel_id = ?
-       AND is_synthetic = 0 AND TRIM(translated_content) <> ''
+       AND is_synthetic = 0 AND is_prompt_only = 0 AND TRIM(translated_content) <> ''
        AND created_at < ?
      ORDER BY created_at DESC, id DESC
      LIMIT ?`,
@@ -356,7 +359,7 @@ function contextAfterTimestamp(
     `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
      FROM messages
      WHERE guild_id = ? AND channel_id = ?
-       AND is_synthetic = 0 AND TRIM(translated_content) <> ''
+       AND is_synthetic = 0 AND is_prompt_only = 0 AND TRIM(translated_content) <> ''
        AND created_at >= ?
      ORDER BY created_at ASC, id ASC
      LIMIT ?`,
@@ -386,7 +389,7 @@ export function getMessagesAroundMessage(
       `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
        FROM messages
        WHERE id = ? AND guild_id = ?${channelClause}
-         AND is_synthetic = 0 AND TRIM(translated_content) <> ''`
+         AND is_synthetic = 0 AND is_prompt_only = 0 AND TRIM(translated_content) <> ''`
     )
     .get(...params) as MessageSearchRow | null;
 
@@ -442,7 +445,7 @@ export function getMessageById(
     .prepare(
       `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
        FROM messages
-       WHERE id = ? AND guild_id = ?`
+       WHERE id = ? AND guild_id = ? AND is_prompt_only = 0`
     )
     .get(messageId, guildId) as {
       id: string;
@@ -473,7 +476,7 @@ export function getHistoryMessages(
 ): HistoryMessage[] {
   const rows = db.raw
     .prepare(
-      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, related_thread_id
+      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, is_prompt_only, related_thread_id
        FROM messages
        WHERE channel_id = ?
        ORDER BY created_at DESC
@@ -519,7 +522,7 @@ export function getContextHistoryMessages(
 
   const rows = db.raw
     .prepare(
-      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, related_thread_id
+      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, is_prompt_only, related_thread_id
        FROM messages
        WHERE channel_id = ?${excludeClause}
        ORDER BY created_at DESC
@@ -553,6 +556,7 @@ export function searchMessagesLiteral(
 
   // Exclude synthetic messages (thread creation events, etc.)
   conditions.push("is_synthetic = 0");
+  conditions.push("is_prompt_only = 0");
   conditions.push("TRIM(translated_content) <> ''");
 
   conditions.push("translated_content LIKE ? ESCAPE '\\'");
@@ -623,7 +627,7 @@ export function getParentPreContext(
 ): HistoryMessage[] {
   const rows = db.raw
     .prepare(
-      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, related_thread_id
+      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, is_prompt_only, related_thread_id
        FROM messages
        WHERE channel_id = ? AND created_at < ? AND is_synthetic = 0
        ORDER BY created_at DESC
@@ -638,6 +642,7 @@ export function getParentPreContext(
       created_at: number;
       reply_to_id: string | null;
       is_synthetic: number;
+      is_prompt_only: number;
       related_thread_id: string | null;
     }>;
 
@@ -687,6 +692,7 @@ export function getParentPreContext(
       captions: images.map((i) => i.caption ?? ""),
       hasEmbeds: false,
       isSynthetic: r.is_synthetic === 1,
+      isPromptOnly: r.is_prompt_only === 1,
       relatedThreadId: r.related_thread_id,
     };
   });
@@ -703,8 +709,8 @@ export interface ChatHistoryRow {
  * Fetch chat history for the chat_history tool.
  * Returns chronological order (oldest first).
  *
- * Note: Includes synthetic events (thread creation, etc.). This is up to debate —
- * synthetic events could be filtered out if they prove noisy for the LLM.
+ * Note: Includes synthetic events (thread creation, etc.) but excludes
+ * prompt-only assistant traces that should be visible only in assembled context.
  */
 export function getChatHistory(
   db: Database,
@@ -716,7 +722,7 @@ export function getChatHistory(
     .prepare(
       `SELECT id, author_username, translated_content, created_at
        FROM messages
-       WHERE guild_id = ? AND channel_id = ?
+       WHERE guild_id = ? AND channel_id = ? AND is_prompt_only = 0
        ORDER BY created_at DESC
        LIMIT ?`
     )
@@ -754,6 +760,20 @@ export interface InsertSyntheticEventInput {
   threadName: string;
 }
 
+export interface InsertPromptOnlyBotMessageInput {
+  /** Stable row ID; use a deterministic source-derived ID for idempotency. */
+  id: string;
+  guildId: string;
+  channelId: string;
+  botUserId: string;
+  botUsername: string;
+  /** Prompt-rendered assistant content, e.g. <ignore>reason</ignore>. */
+  content: string;
+  /** User message this prompt-only trace responded to, when available. */
+  replyToId?: string | null;
+  createdAt?: number;
+}
+
 /**
  * Insert a synthetic "Event" row for thread creation.
  * Stored in the parent chat with is_synthetic=1 and related_thread_id set.
@@ -780,6 +800,31 @@ export function insertSyntheticEvent(db: Database, input: InsertSyntheticEventIn
       now,
       1,
       input.threadId
+    );
+}
+
+/**
+ * Insert a bot-authored row that is visible in prompt history only.
+ * Prompt-only rows are never embedded and repository search/tool reads filter them out.
+ */
+export function insertPromptOnlyBotMessage(db: Database, input: InsertPromptOnlyBotMessageInput): void {
+  db.raw
+    .prepare(
+      `INSERT OR IGNORE INTO messages
+         (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id, is_prompt_only)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
+    )
+    .run(
+      input.id,
+      input.guildId,
+      input.channelId,
+      input.botUserId,
+      input.botUsername,
+      input.content,
+      input.content,
+      1,
+      input.createdAt ?? Date.now(),
+      input.replyToId ?? null,
     );
 }
 

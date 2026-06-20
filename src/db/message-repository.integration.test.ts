@@ -3,7 +3,7 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "./database";
 import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
-import { searchMessages, getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, insertSyntheticEvent, getParentPreContext, getChatHistory } from "./message-repository";
+import { searchMessages, getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory } from "./message-repository";
 import { createMockPipeline } from "../embeddings/test-utils";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
@@ -41,13 +41,14 @@ function insertMessage(
     createdAt?: number;
     replyToId?: string | null;
     isSynthetic?: boolean;
+    isPromptOnly?: boolean;
     relatedThreadId?: string | null;
   } = {}
 ) {
   db.raw
     .prepare(
-      `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id, is_synthetic, related_thread_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id, is_synthetic, is_prompt_only, related_thread_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -61,6 +62,7 @@ function insertMessage(
       opts.createdAt ?? now,
       opts.replyToId ?? null,
       opts.isSynthetic === true ? 1 : 0,
+      opts.isPromptOnly === true ? 1 : 0,
       opts.relatedThreadId ?? null
     );
 }
@@ -284,6 +286,16 @@ describe("searchMessages", () => {
     expect(results[0]?.id).toBe("real-msg");
   });
 
+  test("excludes prompt-only messages from semantic search", async () => {
+    await insertWithEmbedding("real-msg", "private ignore reason visible topic");
+    await insertWithEmbedding("prompt-only-msg", "private ignore reason visible topic", { isPromptOnly: true });
+
+    const queryVec = await embedOne("private ignore reason");
+    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
+
+    expect(results.map((r) => r.id)).toEqual(["real-msg"]);
+  });
+
   test("skips empty semantic hits and continues to real messages", async () => {
     insertMessage("empty-hit", { guildId: "g1", translatedContent: "" });
     const queryVec = await embedOne("important topic");
@@ -413,6 +425,11 @@ describe("getMessageById", () => {
     expect(result).toBeNull();
   });
 
+  test("returns null for prompt-only rows", () => {
+    insertMessage("ignored-row", { guildId: "g1", translatedContent: "<ignore>no</ignore>", isPromptOnly: true });
+    expect(getMessageById(db, "ignored-row", "g1")).toBeNull();
+  });
+
   test("returns replyToId when message is a reply", () => {
     insertMessage("m1", { guildId: "g1", translatedContent: "original" });
     insertMessage("m2", { guildId: "g1", translatedContent: "reply", replyToId: "m1" });
@@ -461,12 +478,13 @@ describe("message context search", () => {
     expect(getMessagesAroundMessage(db, "m1", { guildId: "g1", channelId: "c2", limit: 5 })).toBeNull();
   });
 
-  test("excludes synthetic and empty messages from message-id context", () => {
+  test("excludes synthetic, prompt-only, and empty messages from message-id context", () => {
     insertMessage("m1", { translatedContent: "one", createdAt: now - 2_000 });
     insertMessage("empty", { translatedContent: "", createdAt: now - 1_000 });
     insertMessage("m2", { translatedContent: "two", createdAt: now });
     insertMessage("synthetic", { translatedContent: "event", createdAt: now + 1_000, isSynthetic: true });
-    insertMessage("m3", { translatedContent: "three", createdAt: now + 2_000 });
+    insertMessage("prompt-only", { translatedContent: "<ignore>skip</ignore>", createdAt: now + 2_000, isPromptOnly: true });
+    insertMessage("m3", { translatedContent: "three", createdAt: now + 3_000 });
 
     const results = getMessagesAroundMessage(db, "m2", { guildId: "g1", limit: 5 });
 
@@ -612,6 +630,13 @@ describe("searchMessagesLiteral", () => {
     expect(results.length).toBe(1);
     expect(results[0]?.id).toBe("real-msg");
   });
+
+  test("excludes prompt-only messages from literal search", () => {
+    insertMessage("real-msg", { guildId: "g1", translatedContent: "ignore reason topic" });
+    insertMessage("prompt-only-msg", { guildId: "g1", translatedContent: "<ignore>ignore reason topic</ignore>", isPromptOnly: true });
+    const results = searchMessagesLiteral(db, "ignore reason topic", { guildId: "g1", limit: 10 });
+    expect(results.map((r) => r.id)).toEqual(["real-msg"]);
+  });
 });
 
 describe("getHistoryMessages", () => {
@@ -674,6 +699,7 @@ describe("getHistoryMessages", () => {
       captions: [],
       hasEmbeds: false,
       isSynthetic: false,
+      isPromptOnly: false,
       relatedThreadId: null,
     });
   });
@@ -796,6 +822,33 @@ describe("getContextHistoryMessages", () => {
     const withoutLatest = getContextHistoryMessages(db, "c1", trim, "m10");
     expect(withoutLatest.map((m) => m.id)).toEqual(["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9"]);
   });
+
+  test("includes prompt-only bot rows in context history", () => {
+    const trim = {
+      trimTrigger: 10,
+      trimTarget: 8,
+      windowSize: 3,
+      messageCharLimit: 200,
+      replyQuoteChars: 50,
+    };
+    insertMessage("user-msg", { channelId: "c1", translatedContent: "hello", createdAt: now });
+    insertPromptOnlyBotMessage(db, {
+      id: "prompt-only:ignore:user-msg",
+      guildId: "g1",
+      channelId: "c1",
+      botUserId: "bot-1",
+      botUsername: "2b",
+      content: "<ignore>not worth answering</ignore>",
+      replyToId: "user-msg",
+      createdAt: now + 1,
+    });
+
+    const rows = getContextHistoryMessages(db, "c1", trim);
+    expect(rows.map((m) => [m.id, m.content, m.isPromptOnly])).toEqual([
+      ["user-msg", "hello", false],
+      ["prompt-only:ignore:user-msg", "<ignore>not worth answering</ignore>", true],
+    ]);
+  });
 });
 
 describe("getParentPreContext", () => {
@@ -915,6 +968,7 @@ describe("getParentPreContext", () => {
       captions: [],
       hasEmbeds: false,
       isSynthetic: false,
+      isPromptOnly: false,
       relatedThreadId: null,
     });
   });
@@ -1063,6 +1117,22 @@ describe("getChatHistory", () => {
     const syntheticResult = results.find((r) => r.id === "syn-event");
     expect(syntheticResult).toBeDefined();
     expect(syntheticResult?.content).toContain("Event: Thread created");
+  });
+
+  test("excludes prompt-only bot rows", () => {
+    insertMessage("real-msg", { guildId: "g1", channelId: "c1", translatedContent: "visible" });
+    insertPromptOnlyBotMessage(db, {
+      id: "prompt-only:ignore:real-msg",
+      guildId: "g1",
+      channelId: "c1",
+      botUserId: "bot-1",
+      botUsername: "2b",
+      content: "<ignore>private</ignore>",
+      replyToId: "real-msg",
+    });
+
+    const results = getChatHistory(db, "g1", "c1", 10);
+    expect(results.map((r) => r.id)).toEqual(["real-msg"]);
   });
 
   test("returns correct ChatHistoryRow structure", () => {

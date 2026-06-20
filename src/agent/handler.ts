@@ -61,6 +61,13 @@ export interface MemoryExtractionRequest {
   visibleReplySent: boolean;
 }
 
+export interface IgnoredReplyRequest {
+  sourceMessageId?: string;
+  targetChatId?: string;
+  historyText: string;
+  rawResponse: string;
+}
+
 export interface SilentMemoryAgentInput {
   globalConfig: GlobalConfig;
   guildConfig: GuildConfig;
@@ -145,6 +152,8 @@ export interface HandlerDeps {
   triggerInstructions?: TriggerInstructions;
   completeChat?: ChatCompleteFn;
   afterReply?: (request: MemoryExtractionRequest) => Promise<void>;
+  /** Persists prompt-only assistant traces such as ignored replies. */
+  onIgnoredReply?: (request: IgnoredReplyRequest) => void | Promise<void>;
   /** Live OpenRouter metadata result for the selected main model. Unknown means try native image input first. */
   modelImageInputSupport?: ModelImageInputSupport;
   /** Consume generated image attachments by opaque IDs returned from image tools. */
@@ -1728,6 +1737,12 @@ class LiveMessageDispatcher {
     for (;;) {
       const cursor = this.skipWhitespace(this.consumedUntil);
       if (this.buffer.slice(cursor).toLowerCase().startsWith("<ignore")) {
+        if (this.sent > 0) {
+          const ignoredEnd = this.completeIgnoreDirectiveEnd(cursor);
+          if (ignoredEnd === null) return;
+          this.consumedUntil = ignoredEnd;
+          continue;
+        }
         this.disabled = true;
         return;
       }
@@ -1797,6 +1812,15 @@ class LiveMessageDispatcher {
       cursor += 1;
     }
     return cursor;
+  }
+
+  private completeIgnoreDirectiveEnd(index: number): number | null {
+    const tagEnd = this.buffer.indexOf(">", index);
+    if (tagEnd === -1) return null;
+    const rawTag = this.buffer.slice(index, tagEnd + 1);
+    if (/\/\s*>$/.test(rawTag)) return tagEnd + 1;
+    const closeStart = this.buffer.toLowerCase().indexOf("</ignore>", tagEnd + 1);
+    return closeStart === -1 ? null : closeStart + "</ignore>".length;
   }
 }
 
@@ -2170,6 +2194,20 @@ export async function handleMessage(
 
     const parsedResponse = parseResponseDirectives(finalText);
     if (parsedResponse.ignored) {
+      if (parsedResponse.ignoredText !== undefined) {
+        try {
+          await deps.onIgnoredReply?.({
+            sourceMessageId: msg.messageId,
+            targetChatId,
+            historyText: parsedResponse.ignoredText,
+            rawResponse: finalText,
+          });
+        } catch (error) {
+          deps.log?.warn("ignored reply persistence failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       scheduleMemoryPass("", false);
       deps.log?.debug("native_reply_ignored", { durationMs: Date.now() - startedAt });
       return { triggered: true, triggerResult, agentRan: true };

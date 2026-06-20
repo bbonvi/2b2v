@@ -11,6 +11,7 @@ export interface MessageDelivery {
 
 export interface ParsedResponseDirectives {
   ignored: boolean;
+  ignoredText?: string;
   segments: ResponseSegment[];
 }
 
@@ -20,6 +21,7 @@ type SegmentMode =
 
 interface ParseResult {
   ignored: boolean;
+  ignoredText?: string;
   segments: ResponseSegment[];
   index: number;
   closed: boolean;
@@ -133,6 +135,25 @@ function parseMessageDelivery(attrs: string): MessageDelivery | undefined {
   return delivery.reply !== undefined || delivery.replyTo !== undefined || delivery.keepTyping !== undefined ? delivery : undefined;
 }
 
+function renderIgnoredText(rawText: string): string {
+  const text = rawText.trim();
+  return `<ignore>${text}</ignore>`;
+}
+
+function ignoreDirectiveEnd(text: string, tagEnd: number): number {
+  const closeStart = text.toLowerCase().indexOf("</ignore>", tagEnd);
+  return closeStart === -1 ? text.length : closeStart + "</ignore>".length;
+}
+
+function closingTagEnd(text: string, tag: "voice" | "audio" | "message", from: number): number {
+  const closeStart = text.toLowerCase().indexOf(`</${tag}>`, from);
+  return closeStart === -1 ? from : closeStart + tag.length + 3;
+}
+
+function hasOutputSegment(segments: ResponseSegment[]): boolean {
+  return segments.some((segment) => segment.kind !== "messageBreak");
+}
+
 export function sanitizeVoiceText(text: string): string {
   return text
     .replace(/\s+/g, " ")
@@ -176,7 +197,20 @@ function parseRange(
     }
 
     if (tag === "ignore") {
-      return { ignored: true, segments, index: text.length, closed: false };
+      if (hasOutputSegment(segments)) {
+        cursor = selfClosing ? tagEnd : ignoreDirectiveEnd(text, tagEnd);
+        tagRe.lastIndex = cursor;
+        continue;
+      }
+      if (selfClosing) {
+        return { ignored: true, ignoredText: renderIgnoredText(""), segments, index: tagEnd, closed: true };
+      }
+      const closeStart = text.toLowerCase().indexOf("</ignore>", tagEnd);
+      if (closeStart === -1) {
+        return { ignored: true, ignoredText: renderIgnoredText(text.slice(tagEnd)), segments, index: text.length, closed: false };
+      }
+      const closeEnd = closeStart + "</ignore>".length;
+      return { ignored: true, ignoredText: renderIgnoredText(text.slice(tagEnd, closeStart)), segments, index: closeEnd, closed: true };
     }
 
     if (selfClosing) {
@@ -189,7 +223,12 @@ function parseRange(
       const nested = parseRange(text, tagEnd, { kind: "text" }, "message");
       segments.push(...nested.segments);
       if (nested.ignored) {
-        return { ignored: true, segments, index: text.length, closed: false };
+        if (hasOutputSegment(segments)) {
+          cursor = closingTagEnd(text, "message", nested.index);
+          tagRe.lastIndex = cursor;
+          continue;
+        }
+        return { ignored: true, ignoredText: nested.ignoredText, segments, index: text.length, closed: false };
       }
       pushMessageBreak(segments);
       cursor = nested.index;
@@ -200,7 +239,12 @@ function parseRange(
     const nested = parseRange(text, tagEnd, { kind: "voice" }, tag);
     segments.push(...nested.segments);
     if (nested.ignored) {
-      return { ignored: true, segments, index: text.length, closed: false };
+      if (hasOutputSegment(segments)) {
+        cursor = closingTagEnd(text, tag, nested.index);
+        tagRe.lastIndex = cursor;
+        continue;
+      }
+      return { ignored: true, ignoredText: nested.ignoredText, segments, index: text.length, closed: false };
     }
     cursor = nested.index;
     tagRe.lastIndex = cursor;
@@ -215,6 +259,7 @@ export function parseResponseDirectives(response: string): ParsedResponseDirecti
   const parsed = parseRange(normalized, 0, { kind: "text" }, null);
   return {
     ignored: parsed.ignored,
+    ...(parsed.ignoredText !== undefined ? { ignoredText: parsed.ignoredText } : {}),
     segments: parsed.ignored ? [] : normalizeMessageBreaks(parsed.segments),
   };
 }

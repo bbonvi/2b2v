@@ -780,6 +780,37 @@ describe("handleMessage", () => {
     expect(result.responseText).toBe("first normal\n[msg-break]\nsecond normal");
   });
 
+  test("streaming consumes late ignore directives without dropping later messages", async () => {
+    const finalText = "<message>first</message><ignore>skip</ignore><message>second</message>";
+    const completeChat: ChatCompleteFn = async (request) => {
+      await request.onTextDelta?.(finalText);
+      return {
+        text: finalText,
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      };
+    };
+    const senderCalls: Array<{ text: string; reply: boolean }> = [];
+    const sender: MessageSender = (text, reply) => {
+      senderCalls.push({ text, reply });
+      return Promise.resolve({ sentMessageId: `sent-${senderCalls.length}` });
+    };
+    const onIgnoredReply = mock(() => {});
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, onIgnoredReply }),
+    );
+
+    expect(senderCalls).toEqual([
+      { text: "first", reply: true },
+      { text: "second", reply: false },
+    ]);
+    expect(onIgnoredReply).toHaveBeenCalledTimes(0);
+    expect(result.responseText).toBe("first\n[msg-break]\nsecond");
+  });
+
   test("waits for typing indicator before sending the next streamed message", async () => {
     const events: string[] = [];
     let releaseTyping: (() => void) | undefined;
@@ -1071,15 +1102,25 @@ describe("handleMessage", () => {
       afterReplyCalls.push(request);
       return Promise.resolve();
     });
+    const ignoredReplyCalls: unknown[] = [];
+    const onIgnoredReply = mock((request: unknown) => {
+      ignoredReplyCalls.push(request);
+    });
 
     const result = await handleMessage(
       makeMessage({ mentionedUserIds: ["bot-1"] }),
-      makeDeps({ completeChat, sender, afterReply }),
+      makeDeps({ completeChat, sender, afterReply, onIgnoredReply }),
     );
 
     expect(result.agentRan).toBe(true);
     expect(result.responseText).toBeUndefined();
     expect(sender).toHaveBeenCalledTimes(0);
+    expect(onIgnoredReply).toHaveBeenCalledTimes(1);
+    expect(ignoredReplyCalls[0]).toMatchObject({
+      sourceMessageId: "msg-1",
+      historyText: "<ignore>not worth answering</ignore>",
+      rawResponse: "<ignore>not worth answering</ignore>",
+    });
     expect(afterReply).toHaveBeenCalledTimes(1);
     expect(afterReplyCalls[0]).toMatchObject({
       assistantReply: "",

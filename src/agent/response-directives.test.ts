@@ -140,8 +140,32 @@ describe("parseResponseDirectives", () => {
   });
 
   test("ignore directive suppresses all output", () => {
-    expect(parseResponseDirectives("not sending <ignore>spam</ignore>")).toEqual({
+    expect(parseResponseDirectives(" \n<ignore>spam</ignore>")).toEqual({
       ignored: true,
+      ignoredText: "<ignore>spam</ignore>",
+      segments: [],
+    });
+  });
+
+  test("late ignore directives do not cancel already parsed output", () => {
+    expect(parseResponseDirectives("<message>first</message><ignore>skip</ignore>")).toEqual({
+      ignored: false,
+      segments: [{ kind: "text", text: "first" }],
+    });
+    expect(parseResponseDirectives("<message>first</message><message><ignore>skip</ignore></message><message>second</message>")).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "text", text: "first" },
+        { kind: "messageBreak" },
+        { kind: "text", text: "second" },
+      ],
+    });
+  });
+
+  test("normalizes ignore directive text for prompt-only history", () => {
+    expect(parseResponseDirectives("<message><ignore>\n  enough \n</ignore></message>")).toEqual({
+      ignored: true,
+      ignoredText: "<ignore>enough</ignore>",
       segments: [],
     });
   });

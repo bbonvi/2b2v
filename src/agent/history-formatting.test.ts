@@ -32,6 +32,16 @@ describe("formatMessageLine", () => {
     expect(formatMessageLine(input)).toBe("[@alice (MsgID: 123)]: hello");
   });
 
+  test("omits message id metadata for prompt-only rows", () => {
+    const input: FormatInput = {
+      message: msg({ id: "prompt-only:ignore:123", content: "<ignore>no</ignore>", isBot: true, isPromptOnly: true }),
+      reply: null,
+      captioningEnabled: false,
+      includeMessageIds: true,
+    };
+    expect(formatMessageLine(input)).toBe("[@alice]: <ignore>no</ignore>");
+  });
+
   test("includes author display name before metadata when requested", () => {
     const input: FormatInput = {
       message: msg({ id: "123", authorDisplayName: "Alice W" }),

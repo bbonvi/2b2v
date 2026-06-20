@@ -49,7 +49,7 @@ export function formatMessageLine(input: FormatInput): string {
 
   const metaParts: string[] = [];
 
-  if (includeMessageIds === true) {
+  if (includeMessageIds === true && message.isPromptOnly !== true) {
     const ids = message.mergedMessageIds ?? [message.id];
     if (ids.length > 1) {
       metaParts.push(`MsgIDs: [${ids.join(", ")}]`);

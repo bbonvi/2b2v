@@ -32,6 +32,7 @@ const SCHEMA_SQL = `
     created_at          INTEGER NOT NULL,
     reply_to_id         TEXT,
     is_synthetic        INTEGER NOT NULL DEFAULT 0,
+    is_prompt_only      INTEGER NOT NULL DEFAULT 0,
     related_thread_id   TEXT
   );
 
@@ -126,6 +127,7 @@ export function createDatabase(dbPath: string): Database {
 
   // Idempotent migration: add is_synthetic and related_thread_id to existing databases
   try { raw.run("ALTER TABLE messages ADD COLUMN is_synthetic INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
+  try { raw.run("ALTER TABLE messages ADD COLUMN is_prompt_only INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try { raw.run("ALTER TABLE messages ADD COLUMN related_thread_id TEXT"); } catch { /* already exists */ }
 
   // Idempotent migration: add optional expiry to memories before shape migrations can copy it.

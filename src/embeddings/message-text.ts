@@ -148,6 +148,7 @@ export function fetchMessageEmbeddingSources(
   const conditions = [
     "guild_id = ?",
     "is_synthetic = 0",
+    "is_prompt_only = 0",
     "TRIM(translated_content) <> ''",
   ];
   const params: (string | number)[] = [filter.guildId];

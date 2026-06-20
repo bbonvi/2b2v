@@ -28,6 +28,8 @@ export interface HistoryMessage {
   hasEmbeds: boolean;
   /** Whether this is a synthetic event (e.g., thread creation). Prevents merging. */
   isSynthetic: boolean;
+  /** Whether this row is prompt-visible only and must never be searchable or tool-retrievable. */
+  isPromptOnly?: boolean;
   /** Thread ID this synthetic event references, or null. */
   relatedThreadId: string | null;
   /** Runtime-only prompt annotations, e.g. async jobs triggered by this message. */
