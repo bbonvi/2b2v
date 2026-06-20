@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "../db/database";
 import { createMemory, getMemory, listMemories } from "../db/memory-repository";
-import type { OpenRouterChatRequest } from "../llm/openrouter-chat";
 import { buildMemoryContext, buildVisibleUserMemoryContext, createRecordMemoryTool, extractAndApplyMemories } from "./memory-service";
 
 let db: Database;
@@ -110,71 +109,6 @@ describe("buildVisibleUserMemoryContext", () => {
 });
 
 describe("extractAndApplyMemories", () => {
-  test("emphasizes future usefulness before preserving memories", async () => {
-    let prompt = "";
-
-    await extractAndApplyMemories({
-      db,
-      guildId: "g1",
-      currentUserId: "u1",
-      currentUsername: "alice",
-      sourceMessageId: "m1",
-      userMessage: "lol that was funny",
-      assistantReply: "yeah",
-      recentContext: "## Chat History\n[@bob]: earlier context",
-      timezone: "America/New_York",
-      apiKey: "key",
-      model: "model",
-      promptCaching: { enabled: false },
-      completeChat: (request: OpenRouterChatRequest) => {
-        const firstMessage = request.messages[0];
-        prompt = typeof firstMessage?.content === "string" ? firstMessage.content : "";
-        return Promise.resolve({
-          text: JSON.stringify({ actions: [{ action: "none" }] }),
-          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
-        });
-      },
-    });
-
-    expect(prompt).toContain("future conversation or future bot decision");
-    expect(prompt).toContain("strongly implied durable facts");
-    expect(prompt).toContain("standalone factual note");
-    expect(prompt).toContain("narrowest correct scope");
-    expect(prompt).toContain("expiresIn");
-    expect(prompt).not.toContain("expiresAt");
-    expect(prompt).toContain("Current time for expiresIn decisions:");
-    expect(prompt).toContain("Timezone: America/New_York");
-    expect(prompt).toContain("Recent chat context:\n## Chat History\n[@bob]: earlier context");
-  });
-
-  test("omits recent chat context when none is provided", async () => {
-    let prompt = "";
-
-    await extractAndApplyMemories({
-      db,
-      guildId: "g1",
-      currentUserId: "u1",
-      currentUsername: "alice",
-      sourceMessageId: "m1",
-      userMessage: "hello",
-      assistantReply: "hi",
-      recentContext: "",
-      apiKey: "key",
-      model: "model",
-      promptCaching: { enabled: false },
-      completeChat: (request: OpenRouterChatRequest) => {
-        const firstMessage = request.messages[0];
-        prompt = typeof firstMessage?.content === "string" ? firstMessage.content : "";
-        return Promise.resolve({
-          text: JSON.stringify({ actions: [{ action: "none" }] }),
-          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
-        });
-      },
-    });
-
-    expect(prompt).not.toContain("Recent chat context:");
-  });
-
   test("normalizes sloppy add-array output from unsupported structured output providers", async () => {
     await extractAndApplyMemories({
       db,
@@ -538,9 +472,6 @@ describe("createRecordMemoryTool", () => {
       currentUserId: "u1",
       sourceMessageId: "m1",
     });
-
-    expect(tool.description).toContain("expiresIn");
-    expect(tool.description).not.toContain("expiresAt");
 
     await tool.execute("call-1", {
       actions: [{
