@@ -63,7 +63,7 @@ describe("buildMemoryContext", () => {
       currentUserId: "u1",
     });
 
-    expect(context).toContain("capped at 50 visible memories");
+    expect(context).toContain("capped at 80 visible memories");
     expect(context.indexOf("Older memory.")).toBeLessThan(context.indexOf("Fresh memory."));
   });
 });

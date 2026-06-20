@@ -235,7 +235,7 @@ export function buildMemoryContext(input: MemoryContextInput): string {
     guildId: input.guildId,
     subjectUserId: input.currentUserId,
     includeGlobal: true,
-    limit: input.limit ?? 50,
+    limit: input.limit ?? 80,
   }).filter((row) => row.content.trim() !== "");
 
   if (rows.length === 0) return "";
@@ -246,7 +246,7 @@ export function buildMemoryContext(input: MemoryContextInput): string {
     return `- ${row.id} [${label}] [${formatConfidence(row.confidence)}] [${row.kind}]${expiry} ${row.content}`;
   });
   return [
-    "Use these durable memories as background context. Current chat instructions override memory. The number after scope is confidence (0-1); weigh lower confidence accordingly. This block is capped at 50 visible memories; additional memories may exist but are not shown. Within this visible block, the most recently updated and usually most relevant memories are closer to the bottom.",
+    "Use these durable memories as background context. Current chat instructions override memory. The number after scope is confidence (0-1); weigh lower confidence accordingly. This block is capped at 80 visible memories; additional memories may exist but are not shown. Within this visible block, the most recently updated and usually most relevant memories are closer to the bottom.",
     ...lines,
   ].join("\n");
 }
