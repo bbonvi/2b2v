@@ -31,11 +31,19 @@ export interface TimeoutMember {
   timeout: (durationMs: number, reason?: string) => Promise<void>;
 }
 
+export interface TimeoutMemberResolveError {
+  error: string;
+  message: string;
+}
+
+export type TimeoutMemberResolution = TimeoutMember | TimeoutMemberResolveError | null;
+
 export interface TimeoutUserToolDeps {
   guildId?: string;
   botUserId: string;
   guildOwnerId?: string;
-  resolveMember: (target: string) => Promise<TimeoutMember | null>;
+  isRequesterAdmin: () => Promise<boolean>;
+  resolveMember: (target: string) => Promise<TimeoutMemberResolution>;
 }
 
 type TimeoutUserResult = AgentToolResult<
@@ -57,6 +65,19 @@ export function createTimeoutUserTool(deps: TimeoutUserToolDeps): AgentTool {
         return failure("timeout_user only works in a Discord guild/server, not DMs.", "not_guild");
       }
 
+      let requesterAdmin: boolean;
+      try {
+        requesterAdmin = await deps.isRequesterAdmin();
+      } catch {
+        requesterAdmin = false;
+      }
+      if (!requesterAdmin) {
+        return failure(
+          "Refusing to time out a user unless the requesting Discord user is an admin.",
+          "requester_not_admin",
+        );
+      }
+
       const p = params as Partial<TimeoutUserInput>;
       const target = typeof p.target === "string" ? p.target.trim() : "";
       if (target === "") {
@@ -75,6 +96,9 @@ export function createTimeoutUserTool(deps: TimeoutUserToolDeps): AgentTool {
 
       if (member === null) {
         return failure(`No guild member found for '${target}'.`, "target_not_found");
+      }
+      if (isResolveError(member)) {
+        return failure(member.message, member.error);
       }
 
       if (member.id === deps.botUserId) {
@@ -118,6 +142,10 @@ export function createTimeoutUserTool(deps: TimeoutUserToolDeps): AgentTool {
       };
     },
   };
+}
+
+function isResolveError(value: TimeoutMemberResolution): value is TimeoutMemberResolveError {
+  return value !== null && "message" in value && "error" in value && !("timeout" in value);
 }
 
 function parseDurationSeconds(duration: unknown, unit: unknown): number | string {

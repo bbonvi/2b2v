@@ -329,6 +329,9 @@ export function deleteBotMessageState(
     .prepare("DELETE FROM images WHERE message_id = ? AND guild_id = ? AND channel_id = ?")
     .run(input.id, input.guildId, input.channelId) as { changes: number };
   db.raw
+    .prepare("DELETE FROM message_reactions WHERE message_id = ? AND guild_id = ? AND channel_id = ?")
+    .run(input.id, input.guildId, input.channelId);
+  db.raw
     .prepare("DELETE FROM messages WHERE id = ? AND guild_id = ? AND channel_id = ? AND user_id = ? AND is_bot = 1")
     .run(input.id, input.guildId, input.channelId, input.botUserId);
 

@@ -41,6 +41,7 @@ function makeTool(member: TimeoutMember | null, overrides: Partial<TimeoutUserTo
     guildId: "guild-1",
     botUserId: "bot-1",
     guildOwnerId: "owner-1",
+    isRequesterAdmin: () => Promise.resolve(true),
     resolveMember: () => Promise.resolve(member),
     ...overrides,
   });
@@ -64,6 +65,20 @@ describe("createTimeoutUserTool", () => {
     const tool = makeTool(makeMember(), { guildId: undefined });
     const result = await tool.execute("call-1", { target: "alice", duration: 1, unit: "minutes" });
     expect(text(result)).toContain("only works in a Discord guild");
+  });
+
+  test("rejects non-admin requesters before resolving the target", async () => {
+    let resolved = false;
+    const tool = makeTool(makeMember(), {
+      isRequesterAdmin: () => Promise.resolve(false),
+      resolveMember: () => {
+        resolved = true;
+        return Promise.resolve(makeMember());
+      },
+    });
+    const result = await tool.execute("call-1", { target: "alice", duration: 1, unit: "minutes" });
+    expect(text(result)).toContain("requesting Discord user is an admin");
+    expect(resolved).toBe(false);
   });
 
   test("rejects non-positive durations", async () => {
@@ -99,6 +114,21 @@ describe("createTimeoutUserTool", () => {
     const tool = makeTool(null);
     const result = await tool.execute("call-1", { target: "nobody", duration: 1, unit: "minutes" });
     expect(text(result)).toContain("No guild member found");
+  });
+
+  test("reports ambiguous target resolution", async () => {
+    const tool = createTimeoutUserTool({
+      guildId: "guild-1",
+      botUserId: "bot-1",
+      guildOwnerId: "owner-1",
+      isRequesterAdmin: () => Promise.resolve(true),
+      resolveMember: () => Promise.resolve({
+        error: "ambiguous_target",
+        message: "Multiple guild members match 'alice'. Use a mention or raw user ID.",
+      }),
+    });
+    const result = await tool.execute("call-1", { target: "alice", duration: 1, unit: "minutes" });
+    expect(text(result)).toContain("Multiple guild members match");
   });
 
   test("refuses to time out the bot itself or guild owner", async () => {

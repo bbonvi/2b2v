@@ -45,7 +45,7 @@ import { createScheduleTools } from "./agent/schedule-tool";
 import { createChatUserListTool, type MemberInfo } from "./agent/member-list-tool";
 import { createChannelListTool, type ChannelInfo } from "./agent/channel-list-tool";
 import { createEmojiListTool } from "./agent/emoji-list-tool";
-import { createTimeoutUserTool, type TimeoutMember } from "./agent/timeout-user-tool";
+import { createTimeoutUserTool, type TimeoutMember, type TimeoutMemberResolution } from "./agent/timeout-user-tool";
 import { createUserMemoryTool } from "./agent/user-memory-tool";
 import { createChatHistoryTool } from "./agent/chat-history-tool";
 import { createOwnMessageTools } from "./agent/own-message-tool";
@@ -2398,6 +2398,20 @@ function buildAgentTools(
     guildId,
     botUserId: client.user?.id ?? "",
     guildOwnerId: guild.ownerId,
+    isRequesterAdmin: async () => {
+      const requesterId = effectiveCurrentRequest?.requesterId;
+      if (requesterId === undefined || requesterId === "scheduler") return false;
+      if (guildConfig.adminUserIds.includes(requesterId)) return true;
+      let requester = guild.members.cache.get(requesterId);
+      if (requester === undefined) {
+        try {
+          requester = await guild.members.fetch(requesterId);
+        } catch {
+          return false;
+        }
+      }
+      return requester.permissions.has(PermissionFlagsBits.Administrator);
+    },
     resolveMember: async (target) => {
       const raw = target.trim();
       const mentionMatch = raw.match(/^<@!?(\d+)>$/);
@@ -2426,22 +2440,38 @@ function buildAgentTools(
         ? raw.slice(1).trim().toLowerCase()
         : raw.toLowerCase();
       if (normalized === "") return null;
-      const findCached = (): GuildMember | undefined => guild.members.cache.find((member) => {
-        const nickname = member.nickname?.toLowerCase();
-        return member.user.username.toLowerCase() === normalized
-          || member.displayName.toLowerCase() === normalized
-          || nickname === normalized;
-      });
+      const findCached = (): GuildMember[] => {
+        const matches: GuildMember[] = [];
+        for (const [, member] of guild.members.cache) {
+          const nickname = member.nickname?.toLowerCase();
+          if (
+            member.user.username.toLowerCase() === normalized
+            || member.displayName.toLowerCase() === normalized
+            || nickname === normalized
+          ) {
+            matches.push(member);
+          }
+        }
+        return matches;
+      };
 
-      let member = findCached();
-      if (member === undefined) {
+      let matches = findCached();
+      if (matches.length === 0) {
         try {
           await guild.members.fetch();
         } catch {
           // Cache-only fallback below handles missing member-list permission.
         }
-        member = findCached();
+        matches = findCached();
       }
+      if (matches.length === 0) return null;
+      if (matches.length > 1) {
+        return {
+          error: "ambiguous_target",
+          message: `Multiple guild members match '${target}'. Use a mention or raw user ID.`,
+        } satisfies TimeoutMemberResolution;
+      }
+      const member = matches[0];
       return member !== undefined ? toTimeoutMember(member) : null;
     },
   });

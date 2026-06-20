@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "./database";
-import { deleteBotMessageState, upsertBotMessageContent } from "./message-repository";
+import { deleteBotMessageState, upsertBotMessageContent, upsertMessageReaction } from "./message-repository";
 import { insertImage } from "./image-repository";
 
 let db: Database;
@@ -131,6 +131,24 @@ describe("bot message state helpers", () => {
       height: 10,
       createdAt: 100,
     });
+    expect(upsertMessageReaction(db, {
+      messageId: "bot-msg",
+      guildId: "g1",
+      channelId: "c1",
+      emojiKey: "thumbsup",
+      emojiLabel: "👍",
+      count: 2,
+      updatedAt: 100,
+    })).toBe(true);
+    expect(upsertMessageReaction(db, {
+      messageId: "user-msg",
+      guildId: "g1",
+      channelId: "c1",
+      emojiKey: "heart",
+      emojiLabel: "❤️",
+      count: 1,
+      updatedAt: 100,
+    })).toBe(true);
 
     const result = deleteBotMessageState(db, {
       id: "bot-msg",
@@ -144,5 +162,7 @@ describe("bot message state helpers", () => {
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = 'user-msg'").get()).toEqual({ count: 1 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images WHERE message_id = 'bot-msg'").get()).toEqual({ count: 0 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images WHERE message_id = 'user-msg'").get()).toEqual({ count: 1 });
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_reactions WHERE message_id = 'bot-msg'").get()).toEqual({ count: 0 });
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_reactions WHERE message_id = 'user-msg'").get()).toEqual({ count: 1 });
   });
 });
