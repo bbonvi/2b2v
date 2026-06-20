@@ -74,6 +74,8 @@ export { createUserMemoryTool, type UserMemoryToolDeps } from "./user-memory-too
 
 export { createChatHistoryTool, type ChatHistoryToolDeps, type ChatHistoryMessage } from "./chat-history-tool.ts";
 
+export { createOwnMessageTools, type OwnMessageToolsDeps } from "./own-message-tool.ts";
+
 export { createBraveSearchTool, type BraveSearchToolDeps, type BraveSearchResult } from "./brave-search-tool.ts";
 
 export { createReadChatImagesTool, type ReadChatImagesToolDeps } from "./read-chat-images-tool.ts";

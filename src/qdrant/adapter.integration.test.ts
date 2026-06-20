@@ -5,6 +5,7 @@ import {
   upsertPoint,
   upsertPoints,
   deletePoint,
+  deleteMessagePointsByMessageId,
   pointExists,
   searchPoints,
   toPointId,
@@ -133,6 +134,66 @@ describe("deletePoint", () => {
 
   test("does not error when deleting non-existent point", async () => {
     await deletePoint(client, "nonexistent");
+  });
+});
+
+describe("deleteMessagePointsByMessageId", () => {
+  test("removes single and merged message vectors that reference a message", async () => {
+    const [singleVec, mergedVec] = await embedMany("edited content", "old merged content");
+    assertDefined(singleVec);
+    assertDefined(mergedVec);
+    await upsertPoints(client, [
+      {
+        id: "m1",
+        vector: vecToArray(singleVec),
+        payload: {
+          type: "message",
+          entity_id: "m1",
+          guild_id: "g1",
+          channel_id: "c1",
+          user_id: "bot-1",
+          message_id: "m1",
+          message_ids: ["m1"],
+          created_at: Date.now(),
+        },
+      },
+      {
+        id: "msgblock:m1:m2",
+        vector: vecToArray(mergedVec),
+        payload: {
+          type: "message",
+          entity_id: "msgblock:m1:m2",
+          guild_id: "g1",
+          channel_id: "c1",
+          user_id: "bot-1",
+          message_ids: ["m1", "m2"],
+          first_message_id: "m1",
+          last_message_id: "m2",
+          message_count: 2,
+          created_at: Date.now(),
+        },
+      },
+      {
+        id: "m-user",
+        vector: vecToArray(singleVec),
+        payload: {
+          type: "message",
+          entity_id: "m-user",
+          guild_id: "g1",
+          channel_id: "c1",
+          user_id: "user-1",
+          message_id: "m-user",
+          message_ids: ["m-user"],
+          created_at: Date.now(),
+        },
+      },
+    ]);
+
+    await deleteMessagePointsByMessageId(client, { guildId: "g1", messageId: "m1" });
+
+    expect(await pointExists(client, "m1")).toBe(false);
+    expect(await pointExists(client, "msgblock:m1:m2")).toBe(false);
+    expect(await pointExists(client, "m-user")).toBe(true);
   });
 });
 

@@ -18,6 +18,7 @@ This README covers setup, operation, and user-facing configuration. `ARCHITECTUR
 - Searches the web via Brave Search
 - Reads webpages and extracts YouTube/media transcripts for summaries
 - Can reference server members, visible guild channels, channel history, and bot-managed Discord threads
+- Can edit or delete its own messages while refusing to modify user messages
 - Shows concise Discord reaction counts in recent chat context
 
 ## Requirements

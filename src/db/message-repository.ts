@@ -10,6 +10,35 @@ export interface DeleteRecentResult {
   imagePaths: string[];
 }
 
+export interface StoredBotMessageState {
+  id: string;
+  guildId: string;
+  channelId: string;
+  userId: string;
+  authorUsername: string;
+  translatedContent: string;
+  createdAt: number;
+  replyToId: string | null;
+}
+
+export interface UpsertBotMessageContentInput {
+  id: string;
+  guildId: string;
+  channelId: string;
+  botUserId: string;
+  botUsername: string;
+  rawContent: string;
+  translatedContent: string;
+  createdAt: number;
+  replyToId: string | null;
+}
+
+export interface DeleteBotMessageStateResult {
+  deleted: boolean;
+  imageCount: number;
+  imagePaths: string[];
+}
+
 export interface MessageSearchFilter {
   guildId: string;
   userId?: string;
@@ -158,6 +187,152 @@ function messageIdsFromPayload(result: SearchResult): string[] {
   if (Array.isArray(payload.message_ids)) return payload.message_ids.filter((id) => id !== "");
   if (payload.message_id !== undefined && payload.message_id !== "") return [payload.message_id];
   return [result.id];
+}
+
+function storedBotMessageFromRow(row: {
+  id: string;
+  guild_id: string;
+  channel_id: string;
+  user_id: string;
+  author_username: string;
+  translated_content: string;
+  created_at: number;
+  reply_to_id: string | null;
+}): StoredBotMessageState {
+  return {
+    id: row.id,
+    guildId: row.guild_id,
+    channelId: row.channel_id,
+    userId: row.user_id,
+    authorUsername: row.author_username,
+    translatedContent: row.translated_content,
+    createdAt: row.created_at,
+    replyToId: row.reply_to_id,
+  };
+}
+
+/**
+ * Store the latest content for a real bot-authored Discord message.
+ *
+ * Existing rows keep their created/reply/thread metadata; missing rows are
+ * inserted from live Discord metadata so search/history can recover.
+ */
+export function upsertBotMessageContent(
+  db: Database,
+  input: UpsertBotMessageContentInput,
+): StoredBotMessageState {
+  const existing = db.raw
+    .prepare(
+      `SELECT id, guild_id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id,
+              is_bot, is_synthetic, is_prompt_only
+       FROM messages
+       WHERE id = ? AND guild_id = ? AND channel_id = ?`
+    )
+    .get(input.id, input.guildId, input.channelId) as ({
+      id: string;
+      guild_id: string;
+      channel_id: string;
+      user_id: string;
+      author_username: string;
+      translated_content: string;
+      created_at: number;
+      reply_to_id: string | null;
+      is_bot: number;
+      is_synthetic: number;
+      is_prompt_only: number;
+    } | null);
+
+  if (existing !== null) {
+    if (existing.user_id !== input.botUserId || existing.is_bot !== 1 || existing.is_synthetic !== 0 || existing.is_prompt_only !== 0) {
+      throw new Error("Refusing to update a non-bot or non-real message row.");
+    }
+    db.raw
+      .prepare(
+        `UPDATE messages
+         SET raw_content = ?, translated_content = ?, author_username = ?, reply_to_id = COALESCE(?, reply_to_id)
+         WHERE id = ? AND guild_id = ? AND channel_id = ? AND user_id = ? AND is_bot = 1
+           AND is_synthetic = 0 AND is_prompt_only = 0`
+      )
+      .run(
+        input.rawContent,
+        input.translatedContent,
+        input.botUsername,
+        input.replyToId,
+        input.id,
+        input.guildId,
+        input.channelId,
+        input.botUserId,
+      );
+  } else {
+    db.raw
+      .prepare(
+        `INSERT INTO messages
+           (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+      )
+      .run(
+        input.id,
+        input.guildId,
+        input.channelId,
+        input.botUserId,
+        input.botUsername,
+        input.rawContent,
+        input.translatedContent,
+        input.createdAt,
+        input.replyToId,
+      );
+  }
+
+  const row = db.raw
+    .prepare(
+      `SELECT id, guild_id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
+       FROM messages
+       WHERE id = ? AND guild_id = ? AND channel_id = ?`
+    )
+    .get(input.id, input.guildId, input.channelId) as {
+      id: string;
+      guild_id: string;
+      channel_id: string;
+      user_id: string;
+      author_username: string;
+      translated_content: string;
+      created_at: number;
+      reply_to_id: string | null;
+    };
+
+  return storedBotMessageFromRow(row);
+}
+
+/**
+ * Delete a real bot-authored message row and only image metadata attached to it.
+ * The caller is responsible for deleting corresponding Qdrant points.
+ */
+export function deleteBotMessageState(
+  db: Database,
+  input: { id: string; guildId: string; channelId: string; botUserId: string },
+): DeleteBotMessageStateResult {
+  const existing = db.raw
+    .prepare(
+      `SELECT id FROM messages
+       WHERE id = ? AND guild_id = ? AND channel_id = ? AND user_id = ? AND is_bot = 1
+         AND is_synthetic = 0 AND is_prompt_only = 0`
+    )
+    .get(input.id, input.guildId, input.channelId, input.botUserId) as { id: string } | null;
+  if (existing === null) {
+    return { deleted: false, imageCount: 0, imagePaths: [] };
+  }
+
+  const imageRows = db.raw
+    .prepare("SELECT path FROM images WHERE message_id = ? AND guild_id = ? AND channel_id = ?")
+    .all(input.id, input.guildId, input.channelId) as Array<{ path: string }>;
+  const imageResult = db.raw
+    .prepare("DELETE FROM images WHERE message_id = ? AND guild_id = ? AND channel_id = ?")
+    .run(input.id, input.guildId, input.channelId) as { changes: number };
+  db.raw
+    .prepare("DELETE FROM messages WHERE id = ? AND guild_id = ? AND channel_id = ? AND user_id = ? AND is_bot = 1")
+    .run(input.id, input.guildId, input.channelId, input.botUserId);
+
+  return { deleted: true, imageCount: imageResult.changes, imagePaths: imageRows.map((row) => row.path) };
 }
 
 /**

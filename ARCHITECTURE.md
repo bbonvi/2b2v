@@ -16,6 +16,8 @@ Tool results are appended as `role: "tool"` messages, then the same model produc
 
 Per-message `<message chat_id="...">` delivery can route individual output messages to any accessible guild channel or thread, including another guild. DMs are out of scope and rejected by the Discord channel resolver. Cross-guild `chat_id` is send-only: history and image read tools remain scoped to the current guild unless a future ACL-backed product decision expands read access. For cross-guild sends, sent bot messages and generated/bot image attachments are stored under the target guild/channel, while source request metadata remains tied to the originating guild/channel.
 
+`edit_own_message` and `delete_own_message` must authorize against the live Discord message before mutating anything. They may only touch messages authored by the current bot user in accessible guild text channels/threads; user-authored messages and DMs are rejected. Local SQLite and Qdrant state are updated after the Discord mutation, and vector cleanup must remove merged message blocks that reference the edited/deleted message ID.
+
 Tool-budget exhaustion is recoverable. Pending tool calls get synthetic results, then the model gets one final no-tools turn to answer from available context.
 
 Typing is runtime-owned. The model has no typing tool.

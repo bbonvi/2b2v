@@ -123,6 +123,38 @@ export async function deletePoints(
 }
 
 /**
+ * Delete every message vector that directly references a Discord message ID.
+ * This covers both live single-message points and reindex/backfill merged blocks.
+ */
+export async function deleteMessagePointsByMessageId(
+  client: QdrantClient,
+  input: { guildId: string; messageId: string },
+): Promise<void> {
+  const baseMust = [
+    { key: "guild_id", match: { value: input.guildId } },
+    { key: "type", match: { value: "message" } },
+  ];
+  await client.delete(COLLECTION_NAME, {
+    wait: true,
+    filter: {
+      must: [
+        ...baseMust,
+        { key: "message_id", match: { value: input.messageId } },
+      ],
+    },
+  });
+  await client.delete(COLLECTION_NAME, {
+    wait: true,
+    filter: {
+      must: [
+        ...baseMust,
+        { key: "message_ids", match: { value: input.messageId } },
+      ],
+    },
+  });
+}
+
+/**
  * Check if a point exists by entity ID.
  */
 export async function pointExists(

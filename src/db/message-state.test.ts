@@ -1,0 +1,148 @@
+import { beforeEach, describe, expect, test } from "bun:test";
+import { createDatabase, type Database } from "./database";
+import { deleteBotMessageState, upsertBotMessageContent } from "./message-repository";
+import { insertImage } from "./image-repository";
+
+let db: Database;
+
+function insertMessage(input: {
+  id: string;
+  userId: string;
+  isBot: boolean;
+  content?: string;
+  replyToId?: string | null;
+  relatedThreadId?: string | null;
+}) {
+  db.raw
+    .prepare(
+      `INSERT INTO messages
+         (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id, related_thread_id)
+       VALUES (?, 'g1', 'c1', ?, 'author', ?, ?, ?, 100, ?, ?)`
+    )
+    .run(
+      input.id,
+      input.userId,
+      input.content ?? "old raw",
+      input.content ?? "old text",
+      input.isBot ? 1 : 0,
+      input.replyToId ?? null,
+      input.relatedThreadId ?? null,
+    );
+}
+
+beforeEach(() => {
+  db = createDatabase(":memory:");
+});
+
+describe("bot message state helpers", () => {
+  test("upsertBotMessageContent updates content while preserving reply and thread metadata", () => {
+    insertMessage({
+      id: "m1",
+      userId: "bot-1",
+      isBot: true,
+      replyToId: "user-msg",
+      relatedThreadId: "thread-1",
+    });
+
+    const row = upsertBotMessageContent(db, {
+      id: "m1",
+      guildId: "g1",
+      channelId: "c1",
+      botUserId: "bot-1",
+      botUsername: "2b",
+      rawContent: "new raw",
+      translatedContent: "new text",
+      createdAt: 999,
+      replyToId: null,
+    });
+
+    expect(row.translatedContent).toBe("new text");
+    expect(row.createdAt).toBe(100);
+    expect(row.replyToId).toBe("user-msg");
+    const dbRow = db.raw
+      .prepare("SELECT raw_content, translated_content, related_thread_id FROM messages WHERE id = 'm1'")
+      .get() as { raw_content: string; translated_content: string; related_thread_id: string | null };
+    expect(dbRow).toEqual({
+      raw_content: "new raw",
+      translated_content: "new text",
+      related_thread_id: "thread-1",
+    });
+  });
+
+  test("upsertBotMessageContent fills missing reply metadata from the live message", () => {
+    insertMessage({
+      id: "m1",
+      userId: "bot-1",
+      isBot: true,
+      replyToId: null,
+    });
+
+    const row = upsertBotMessageContent(db, {
+      id: "m1",
+      guildId: "g1",
+      channelId: "c1",
+      botUserId: "bot-1",
+      botUsername: "2b",
+      rawContent: "new raw",
+      translatedContent: "new text",
+      createdAt: 999,
+      replyToId: "live-reply",
+    });
+
+    expect(row.replyToId).toBe("live-reply");
+  });
+
+  test("upsertBotMessageContent refuses to update user-authored rows", () => {
+    insertMessage({ id: "m1", userId: "user-1", isBot: false });
+
+    expect(() => upsertBotMessageContent(db, {
+      id: "m1",
+      guildId: "g1",
+      channelId: "c1",
+      botUserId: "bot-1",
+      botUsername: "2b",
+      rawContent: "new raw",
+      translatedContent: "new text",
+      createdAt: 999,
+      replyToId: null,
+    })).toThrow("Refusing");
+  });
+
+  test("deleteBotMessageState deletes only the bot message and its own image metadata", () => {
+    insertMessage({ id: "bot-msg", userId: "bot-1", isBot: true });
+    insertMessage({ id: "user-msg", userId: "user-1", isBot: false });
+    insertImage(db, {
+      messageId: "bot-msg",
+      guildId: "g1",
+      channelId: "c1",
+      path: "/tmp/bot.webp",
+      mime: "image/webp",
+      width: 10,
+      height: 10,
+      createdAt: 100,
+    });
+    insertImage(db, {
+      messageId: "user-msg",
+      guildId: "g1",
+      channelId: "c1",
+      path: "/tmp/user.webp",
+      mime: "image/webp",
+      width: 10,
+      height: 10,
+      createdAt: 100,
+    });
+
+    const result = deleteBotMessageState(db, {
+      id: "bot-msg",
+      guildId: "g1",
+      channelId: "c1",
+      botUserId: "bot-1",
+    });
+
+    expect(result).toEqual({ deleted: true, imageCount: 1, imagePaths: ["/tmp/bot.webp"] });
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = 'bot-msg'").get()).toEqual({ count: 0 });
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = 'user-msg'").get()).toEqual({ count: 1 });
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images WHERE message_id = 'bot-msg'").get()).toEqual({ count: 0 });
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images WHERE message_id = 'user-msg'").get()).toEqual({ count: 1 });
+  });
+});

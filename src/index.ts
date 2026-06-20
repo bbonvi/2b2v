@@ -5,7 +5,7 @@ import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, validateTrimCon
 import type { GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
 import { createQdrantClient, ensureCollection, healthCheck } from "./qdrant/client";
-import { deletePoint, deletePoints } from "./qdrant/adapter";
+import { deleteMessagePointsByMessageId } from "./qdrant/adapter";
 import { getEmbeddingPipeline, disposePipeline } from "./embeddings/pipeline";
 import { createEmbeddingQueue, type EmbeddingQueue } from "./embeddings/queue";
 import { createDiscordClient, loginDiscordClient } from "./discord/client";
@@ -21,7 +21,7 @@ import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
-import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, deleteRecentMessages, upsertMessageReaction, deleteMessageReactions, deleteMessageEmojiReaction } from "./db/message-repository";
+import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, deleteRecentMessages, upsertMessageReaction, deleteMessageReactions, deleteMessageEmojiReaction, upsertBotMessageContent, deleteBotMessageState } from "./db/message-repository";
 import {
   countMessagesSinceMemoryExtraction,
   getMemoryExtractionCheckpoint,
@@ -48,6 +48,7 @@ import { createEmojiListTool } from "./agent/emoji-list-tool";
 import { createTimeoutUserTool, type TimeoutMember } from "./agent/timeout-user-tool";
 import { createUserMemoryTool } from "./agent/user-memory-tool";
 import { createChatHistoryTool } from "./agent/chat-history-tool";
+import { createOwnMessageTools } from "./agent/own-message-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
 import { createReadChatImagesTool } from "./agent/read-chat-images-tool";
 import { createReadUserAvatarTool, type AvatarSize } from "./agent/read-user-avatar-tool";
@@ -1050,6 +1051,63 @@ function createStoredImageAttachmentResolver(input: {
   };
 }
 
+async function syncEditedOwnBotMessage(input: {
+  messageId: string;
+  guildId: string;
+  channelId: string;
+  botUserId: string;
+  botUsername: string;
+  rawContent: string;
+  translatedContent: string;
+  createdAt: number;
+  replyToId: string | null;
+}): Promise<void> {
+  const row = upsertBotMessageContent(db, {
+    id: input.messageId,
+    guildId: input.guildId,
+    channelId: input.channelId,
+    botUserId: input.botUserId,
+    botUsername: input.botUsername,
+    rawContent: input.rawContent,
+    translatedContent: input.translatedContent,
+    createdAt: input.createdAt,
+    replyToId: input.replyToId,
+  });
+  await deleteMessagePointsByMessageId(qdrant, { guildId: row.guildId, messageId: row.id });
+  await embeddingQueue.enqueue({
+    id: row.id,
+    text: row.translatedContent,
+    target: "message",
+    metadata: {
+      guild_id: row.guildId,
+      channel_id: row.channelId,
+      user_id: row.userId,
+      created_at: row.createdAt,
+      is_bot: true,
+      source: "live",
+      embedding_kind: "single",
+    },
+  });
+}
+
+async function syncDeletedOwnBotMessage(input: {
+  messageId: string;
+  guildId: string;
+  channelId: string;
+  botUserId: string;
+}): Promise<void> {
+  const deleted = deleteBotMessageState(db, {
+    id: input.messageId,
+    guildId: input.guildId,
+    channelId: input.channelId,
+    botUserId: input.botUserId,
+  });
+  await deleteMessagePointsByMessageId(qdrant, { guildId: input.guildId, messageId: input.messageId });
+  for (const path of deleted.imagePaths) {
+    try { unlinkSync(path); } catch { /* ignore missing */ }
+  }
+}
+
 function createTtsGenerator(guildConfig: GuildConfig): {
   ttsEnabled: boolean;
   generateSpeech?: (text: string) => Promise<TtsResult>;
@@ -1587,10 +1645,8 @@ function setupCommandHandlers(guildId: string): void {
     wipeRecent: async (_gId, chId, count) => {
       const { messageIds, imagePaths } = deleteRecentMessages(db, chId, count);
 
-      // Qdrant cleanup
-      if (messageIds.length > 0) {
-        await deletePoints(qdrant, messageIds);
-      }
+      // Qdrant cleanup, including any merged reindex/backfill blocks.
+      await Promise.all(messageIds.map((messageId) => deleteMessagePointsByMessageId(qdrant, { guildId: _gId, messageId })));
 
       // Image file cleanup (best effort)
       for (const p of imagePaths) {
@@ -2415,6 +2471,54 @@ function buildAgentTools(
     },
   });
 
+  const ownMessageTools = createOwnMessageTools({
+    currentChannelId: channelId,
+    botUserId: client.user?.id ?? "",
+    fetchMessage: async (chatId, messageId) => {
+      const channel = await fetchAccessibleGuildChannel(chatId);
+      if (channel === null || !("messages" in channel)) return null;
+      try {
+        const msg = await (channel as TextChannel | ThreadChannel).messages.fetch(messageId);
+        return {
+          id: msg.id,
+          guildId: msg.guildId,
+          channelId: msg.channelId,
+          authorId: msg.author.id,
+          authorUsername: msg.author.username,
+          content: msg.content,
+          createdAt: msg.createdTimestamp,
+          replyToId: msg.reference?.messageId ?? null,
+        };
+      } catch {
+        return null;
+      }
+    },
+    editMessage: async (chatId, messageId, content) => {
+      const channel = await fetchAccessibleGuildChannel(chatId);
+      if (channel === null || !("messages" in channel)) throw new Error("Target chat is inaccessible.");
+      const warnings: string[] = [];
+      const translated = translateOutbound(content, buildOutboundResolvers(channel.guild), warnings);
+      const chunks = splitMessage(translated);
+      if (chunks.length !== 1) {
+        throw new Error("Replacement content is too long for one Discord message.");
+      }
+      const msg = await (channel as TextChannel | ThreadChannel).messages.fetch(messageId);
+      const edited = await msg.edit(chunks[0] ?? "");
+      return { rawContent: edited.content };
+    },
+    deleteMessage: async (chatId, messageId) => {
+      const channel = await fetchAccessibleGuildChannel(chatId);
+      if (channel === null || !("messages" in channel)) throw new Error("Target chat is inaccessible.");
+      const msg = await (channel as TextChannel | ThreadChannel).messages.fetch(messageId);
+      await msg.delete();
+    },
+    afterEdit: (input) => syncEditedOwnBotMessage(input),
+    afterDelete: (input) => syncDeletedOwnBotMessage({
+      ...input,
+      botUserId: client.user?.id ?? "",
+    }),
+  });
+
   const readChatImagesTool = createReadChatImagesTool({
     imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
     getImageById: (id: number) => {
@@ -2493,7 +2597,7 @@ function buildAgentTools(
     },
   });
 
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, timeoutUserTool, userMemoryTool, chatHistoryTool, readChatImagesTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, timeoutUserTool, userMemoryTool, chatHistoryTool, ...ownMessageTools, readChatImagesTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (includeImageGenerationTools) {
     const codexImageModel = guildConfig.llmProvider === "openai-codex"
       ? guildConfig.model ?? globalConfig.defaultModel
@@ -3312,8 +3416,8 @@ client.on("messageDelete", (message) => void (async () => {
 
     if (result.changes === 0) return; // Not in DB
 
-    // Delete Qdrant point
-    await deletePoint(qdrant, messageId);
+    // Delete Qdrant points, including any merged reindex/backfill blocks.
+    await deleteMessagePointsByMessageId(qdrant, { guildId, messageId });
 
     // Delete image files (best effort)
     for (const img of images) {

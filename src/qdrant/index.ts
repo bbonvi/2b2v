@@ -10,6 +10,7 @@ export {
   upsertPoint,
   upsertPoints,
   deletePoint,
+  deleteMessagePointsByMessageId,
   pointExists,
   searchPoints,
   toPointId,
