@@ -3,7 +3,7 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "./database";
 import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
-import { searchMessages, getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory } from "./message-repository";
+import { searchMessages, getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, upsertMessageReaction, deleteMessageEmojiReaction, deleteMessageReactions } from "./message-repository";
 import { createMockPipeline } from "../embeddings/test-utils";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
@@ -776,15 +776,15 @@ describe("getHistoryMessages", () => {
 });
 
 describe("getContextHistoryMessages", () => {
-  test("keeps oldest included message stable until a full window chunk accumulates", () => {
-    const trim = {
-      trimTrigger: 10,
-      trimTarget: 8,
-      windowSize: 3,
-      messageCharLimit: 200,
-      replyQuoteChars: 50,
-    };
+  const trim = {
+    trimTrigger: 10,
+    trimTarget: 8,
+    windowSize: 3,
+    messageCharLimit: 200,
+    replyQuoteChars: 50,
+  };
 
+  test("keeps oldest included message stable until a full window chunk accumulates", () => {
     for (let i = 0; i < 10; i += 1) {
       insertMessage(`m${i}`, { channelId: "c1", createdAt: now + i });
     }
@@ -810,14 +810,6 @@ describe("getContextHistoryMessages", () => {
   });
 
   test("excludes latest message before calculating the chunked context window", () => {
-    const trim = {
-      trimTrigger: 10,
-      trimTarget: 8,
-      windowSize: 3,
-      messageCharLimit: 200,
-      replyQuoteChars: 50,
-    };
-
     for (let i = 0; i < 11; i += 1) {
       insertMessage(`m${i}`, { channelId: "c1", createdAt: now + i });
     }
@@ -827,13 +819,6 @@ describe("getContextHistoryMessages", () => {
   });
 
   test("includes prompt-only bot rows in context history", () => {
-    const trim = {
-      trimTrigger: 10,
-      trimTarget: 8,
-      windowSize: 3,
-      messageCharLimit: 200,
-      replyQuoteChars: 50,
-    };
     insertMessage("user-msg", { channelId: "c1", translatedContent: "hello", createdAt: now });
     insertPromptOnlyBotMessage(db, {
       id: "prompt-only:ignore:user-msg",
@@ -851,6 +836,89 @@ describe("getContextHistoryMessages", () => {
       ["user-msg", "hello", false],
       ["prompt-only:ignore:user-msg", "<ignore>not worth answering</ignore>", true],
     ]);
+  });
+
+  test("hydrates durable reaction summaries for known messages", () => {
+    insertMessage("m1", { channelId: "c1", translatedContent: "hello", createdAt: now });
+
+    expect(upsertMessageReaction(db, {
+      messageId: "m1",
+      guildId: "g1",
+      channelId: "c1",
+      emojiKey: "unicode:👍",
+      emojiLabel: "👍",
+      count: 3,
+      updatedAt: now + 1,
+    })).toBe(true);
+    expect(upsertMessageReaction(db, {
+      messageId: "m1",
+      guildId: "g1",
+      channelId: "c1",
+      emojiKey: "custom:123",
+      emojiLabel: ":party:",
+      count: 1,
+      updatedAt: now + 2,
+    })).toBe(true);
+
+    const rows = getContextHistoryMessages(db, "c1", trim);
+    expect(rows[0]?.reactions).toBe("👍:3 :party::1");
+  });
+
+  test("reaction upserts ignore unknown messages and removals clear counts", () => {
+    insertMessage("m1", { channelId: "c1", translatedContent: "hello", createdAt: now });
+
+    expect(upsertMessageReaction(db, {
+      messageId: "missing",
+      guildId: "g1",
+      channelId: "c1",
+      emojiKey: "unicode:👍",
+      emojiLabel: "👍",
+      count: 2,
+    })).toBe(false);
+    expect(upsertMessageReaction(db, {
+      messageId: "m1",
+      guildId: "g1",
+      channelId: "c1",
+      emojiKey: "unicode:👍",
+      emojiLabel: "👍",
+      count: 2,
+    })).toBe(true);
+    expect(upsertMessageReaction(db, {
+      messageId: "m1",
+      guildId: "g1",
+      channelId: "c1",
+      emojiKey: "unicode:👍",
+      emojiLabel: "👍",
+      count: 0,
+    })).toBe(true);
+
+    expect(getContextHistoryMessages(db, "c1", trim)[0]?.reactions).toBeUndefined();
+  });
+
+  test("can delete one emoji reaction or all reactions for a message", () => {
+    insertMessage("m1", { channelId: "c1", translatedContent: "hello", createdAt: now });
+    upsertMessageReaction(db, {
+      messageId: "m1",
+      guildId: "g1",
+      channelId: "c1",
+      emojiKey: "unicode:👍",
+      emojiLabel: "👍",
+      count: 2,
+    });
+    upsertMessageReaction(db, {
+      messageId: "m1",
+      guildId: "g1",
+      channelId: "c1",
+      emojiKey: "custom:123",
+      emojiLabel: ":party:",
+      count: 1,
+    });
+
+    deleteMessageEmojiReaction(db, "m1", "custom:123", "g1");
+    expect(getContextHistoryMessages(db, "c1", trim)[0]?.reactions).toBe("👍:2");
+
+    deleteMessageReactions(db, "m1", "g1");
+    expect(getContextHistoryMessages(db, "c1", trim)[0]?.reactions).toBeUndefined();
   });
 });
 

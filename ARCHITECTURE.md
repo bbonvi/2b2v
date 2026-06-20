@@ -38,6 +38,8 @@ Older chat history moves only in `trim.windowSize` chunks. Do not promote one me
 
 Recent uncached history may show current Discord display names next to usernames for social context. Keep those volatile names out of older cached history because users change them frequently and may use temporary joke/mood labels.
 
+Discord reaction counts are durable SQLite message metadata, but prompt formatting exposes them only in recent uncached history so normal feedback is visible without invalidating older cached context.
+
 `ReplyMsgID` is resolved internally for quote and image context, but is intentionally hidden from normal prompt history until direct replies are explicitly supported.
 
 Merged history rows must preserve all component Discord message IDs. Reply resolution and prompt-visible search exclusions must treat aliases as present, not only the retained first ID.

@@ -67,6 +67,22 @@ interface HistoryRow {
   related_thread_id: string | null;
 }
 
+export interface UpsertMessageReactionInput {
+  messageId: string;
+  guildId: string;
+  channelId: string;
+  emojiKey: string;
+  emojiLabel: string;
+  count: number;
+  updatedAt?: number;
+}
+
+interface ReactionRow {
+  message_id: string;
+  emoji_label: string;
+  count: number;
+}
+
 function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] {
   if (rows.length === 0) return [];
 
@@ -96,6 +112,25 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
     arr.push({ id: img.id, caption: img.caption, sourceKind: img.source_kind });
   }
 
+  const reactionRows = db.raw
+    .prepare(
+      `SELECT message_id, emoji_label, count
+       FROM message_reactions
+       WHERE message_id IN (${placeholders}) AND count > 0
+       ORDER BY count DESC, emoji_label COLLATE NOCASE ASC`
+    )
+    .all(...messageIds) as ReactionRow[];
+
+  const reactionMap = new Map<string, string[]>();
+  for (const reaction of reactionRows) {
+    let arr = reactionMap.get(reaction.message_id);
+    if (arr === undefined) {
+      arr = [];
+      reactionMap.set(reaction.message_id, arr);
+    }
+    arr.push(`${reaction.emoji_label}:${reaction.count}`);
+  }
+
   return rows.map((r) => {
     const images = imageMap.get(r.id) ?? [];
     return {
@@ -113,6 +148,7 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
       isSynthetic: r.is_synthetic === 1,
       isPromptOnly: r.is_prompt_only === 1,
       relatedThreadId: r.related_thread_id,
+      reactions: reactionMap.get(r.id)?.join(" "),
     };
   });
 }
@@ -652,55 +688,7 @@ export function getParentPreContext(
   // Reverse to chronological order (oldest first)
   rows.reverse();
 
-  if (rows.length === 0) return [];
-
-  // Batch fetch images for all messages
-  const messageIds = rows.map((r) => r.id);
-  const placeholders = messageIds.map(() => "?").join(",");
-  const imageRows = db.raw
-    .prepare(
-      `SELECT message_id, id, caption, source_kind
-       FROM images
-       WHERE message_id IN (${placeholders})
-       ORDER BY id ASC`
-    )
-    .all(...messageIds) as Array<{
-      message_id: string;
-      id: number;
-      caption: string | null;
-      source_kind: ImageSourceKind;
-    }>;
-
-  // Group images by message_id
-  const imageMap = new Map<string, Array<{ id: number; caption: string | null; sourceKind: ImageSourceKind }>>();
-  for (const img of imageRows) {
-    let arr = imageMap.get(img.message_id);
-    if (arr === undefined) {
-      arr = [];
-      imageMap.set(img.message_id, arr);
-    }
-    arr.push({ id: img.id, caption: img.caption, sourceKind: img.source_kind });
-  }
-
-  return rows.map((r) => {
-    const images = imageMap.get(r.id) ?? [];
-    return {
-      id: r.id,
-      author: r.author_username,
-      authorId: r.user_id,
-      content: r.translated_content,
-      isBot: r.is_bot === 1,
-      timestamp: r.created_at,
-      replyToId: r.reply_to_id,
-      imageIds: images.map((i) => i.id),
-      captions: images.map((i) => i.caption ?? ""),
-      ...(images.length > 0 ? { imageSourceKinds: images.map((i) => i.sourceKind) } : {}),
-      hasEmbeds: false,
-      isSynthetic: r.is_synthetic === 1,
-      isPromptOnly: r.is_prompt_only === 1,
-      relatedThreadId: r.related_thread_id,
-    };
-  });
+  return hydrateHistoryRows(db, rows);
 }
 
 export interface ChatHistoryRow {
@@ -834,6 +822,71 @@ export function insertPromptOnlyBotMessage(db: Database, input: InsertPromptOnly
 }
 
 /**
+ * Persist the current aggregate count for one emoji reaction on a stored message.
+ * Returns false when the message is not known to SQLite.
+ */
+export function upsertMessageReaction(db: Database, input: UpsertMessageReactionInput): boolean {
+  const message = db.raw
+    .prepare("SELECT guild_id, channel_id FROM messages WHERE id = ? AND guild_id = ? LIMIT 1")
+    .get(input.messageId, input.guildId) as { guild_id: string; channel_id: string } | null;
+  if (message === null) return false;
+
+  if (input.count <= 0) {
+    db.raw
+      .prepare("DELETE FROM message_reactions WHERE message_id = ? AND emoji_key = ?")
+      .run(input.messageId, input.emojiKey);
+    return true;
+  }
+
+  db.raw
+    .prepare(
+      `INSERT INTO message_reactions (message_id, guild_id, channel_id, emoji_key, emoji_label, count, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(message_id, emoji_key)
+       DO UPDATE SET emoji_label = excluded.emoji_label, count = excluded.count, updated_at = excluded.updated_at`
+    )
+    .run(
+      input.messageId,
+      message.guild_id,
+      message.channel_id,
+      input.emojiKey,
+      input.emojiLabel,
+      input.count,
+      input.updatedAt ?? Date.now(),
+    );
+  return true;
+}
+
+/** Delete all stored reactions for one known message. */
+export function deleteMessageReactions(db: Database, messageId: string, guildId?: string): void {
+  if (guildId === undefined) {
+    db.raw.prepare("DELETE FROM message_reactions WHERE message_id = ?").run(messageId);
+    return;
+  }
+  db.raw
+    .prepare("DELETE FROM message_reactions WHERE message_id = ? AND guild_id = ?")
+    .run(messageId, guildId);
+}
+
+/** Delete one stored emoji reaction summary from one message. */
+export function deleteMessageEmojiReaction(
+  db: Database,
+  messageId: string,
+  emojiKey: string,
+  guildId?: string,
+): void {
+  if (guildId === undefined) {
+    db.raw
+      .prepare("DELETE FROM message_reactions WHERE message_id = ? AND emoji_key = ?")
+      .run(messageId, emojiKey);
+    return;
+  }
+  db.raw
+    .prepare("DELETE FROM message_reactions WHERE message_id = ? AND guild_id = ? AND emoji_key = ?")
+    .run(messageId, guildId, emojiKey);
+}
+
+/**
  * Delete the N most recent messages from a channel.
  * Returns the deleted message IDs and their associated image file paths
  * for cleanup by the caller (Qdrant points, file system).
@@ -864,6 +917,7 @@ export function deleteRecentMessages(
 
   // Delete images then messages (foreign key order)
   db.raw.prepare(`DELETE FROM images WHERE message_id IN (${placeholders})`).run(...messageIds);
+  db.raw.prepare(`DELETE FROM message_reactions WHERE message_id IN (${placeholders})`).run(...messageIds);
   db.raw.prepare(`DELETE FROM messages WHERE id IN (${placeholders})`).run(...messageIds);
 
   return { messageIds, imagePaths: imageRows.map((r) => r.path) };

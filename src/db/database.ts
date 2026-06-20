@@ -42,6 +42,20 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_messages_user_guild
     ON messages(user_id, guild_id);
 
+  CREATE TABLE IF NOT EXISTS message_reactions (
+    message_id    TEXT NOT NULL,
+    guild_id      TEXT NOT NULL,
+    channel_id    TEXT NOT NULL,
+    emoji_key     TEXT NOT NULL,
+    emoji_label   TEXT NOT NULL,
+    count         INTEGER NOT NULL CHECK(count >= 0),
+    updated_at    INTEGER NOT NULL,
+    PRIMARY KEY (message_id, emoji_key)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_message_reactions_message
+    ON message_reactions(message_id);
+
   CREATE TABLE IF NOT EXISTS memory_extraction_checkpoints (
     guild_id                 TEXT NOT NULL,
     channel_id               TEXT NOT NULL,

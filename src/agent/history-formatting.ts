@@ -40,7 +40,7 @@ export interface FormatInput {
  *
  * Synthetic events (e.g., thread creation) are formatted as-is without author prefix.
  *
- * Meta keys in order: Quote, MissingTarget, ReplyImageIDs, ReplyCaptions, ImageIDs, Captions
+ * Meta keys in order: Quote, MissingTarget, ReplyImageIDs, ReplyCaptions, ImageIDs, Captions, Reactions
  */
 export function formatMessageLine(input: FormatInput): string {
   const { message, reply, captioningEnabled, includeMessageIds, includeDisplayNames } = input;
@@ -84,6 +84,9 @@ export function formatMessageLine(input: FormatInput): string {
   }
   if (message.jobAnnotations !== undefined && message.jobAnnotations.length > 0) {
     metaParts.push(...message.jobAnnotations);
+  }
+  if (includeMessageIds === true && message.reactions !== undefined && message.reactions !== "") {
+    metaParts.push(`Reactions: ${message.reactions}`);
   }
 
   const authorPart = `@${message.author}${formatDisplayNameSuffix(message.author, message.authorDisplayName, includeDisplayNames)}`;
@@ -151,7 +154,7 @@ function formatDisplayNameSuffix(
 
 /** The legend block prepended to the newer slice. */
 export const NEWER_LEGEND = [
-  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyGIFImageIDs/ReplyStickerImageIDs/ReplyCaptions/ReplyCaptionByImageID/ImageIDs/GIFImageIDs/StickerImageIDs/Captions/CaptionByImageID/ImageJob)]: content",
+  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyGIFImageIDs/ReplyStickerImageIDs/ReplyCaptions/ReplyCaptionByImageID/ImageIDs/GIFImageIDs/StickerImageIDs/Captions/CaptionByImageID/ImageJob/Reactions)]: content",
   "Legend: Parenthesized names are current Discord display names, not stable identity. Users change them often and they may contain jokes, moods, or temporary labels; use @username for exact pings.",
 ].join("\n");
 

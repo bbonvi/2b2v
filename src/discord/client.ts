@@ -12,6 +12,7 @@ export const REQUIRED_INTENTS = [
   GatewayIntentBits.GuildMessages,
   GatewayIntentBits.GuildMessageTyping,
   GatewayIntentBits.MessageContent,
+  GatewayIntentBits.GuildMessageReactions,
   GatewayIntentBits.GuildMembers,
   GatewayIntentBits.GuildExpressions,
   GatewayIntentBits.GuildPresences,
@@ -30,7 +31,7 @@ export function checkMessageContentIntent(content: string | undefined): boolean 
 export function buildClientOptions(): ClientOptions {
   return {
     intents: [...REQUIRED_INTENTS],
-    partials: [Partials.Message, Partials.Channel],
+    partials: [Partials.Message, Partials.Channel, Partials.Reaction],
   };
 }
 

@@ -37,6 +37,8 @@ export interface HistoryMessage {
   relatedThreadId: string | null;
   /** Runtime-only prompt annotations, e.g. async jobs triggered by this message. */
   jobAnnotations?: string[];
+  /** Durable reaction summary shown only in volatile recent history. */
+  reactions?: string;
 }
 
 /** Result of the slicing algorithm. */

@@ -114,6 +114,23 @@ describe("formatMessageLine", () => {
     );
   });
 
+  test("includes reactions only for newer history with message ids", () => {
+    const message = msg({ id: "123", reactions: "👍:3 :party::1" });
+
+    expect(formatMessageLine({
+      message,
+      reply: null,
+      captioningEnabled: false,
+      includeMessageIds: true,
+    })).toBe("[@alice (MsgID: 123; Reactions: 👍:3 :party::1)]: hello");
+
+    expect(formatMessageLine({
+      message,
+      reply: null,
+      captioningEnabled: false,
+    })).toBe("[@alice]: hello");
+  });
+
   test("captions omitted when captioning disabled", () => {
     const input: FormatInput = {
       message: msg({ imageIds: [12], captions: ["car"] }),

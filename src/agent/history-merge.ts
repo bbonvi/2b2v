@@ -7,6 +7,7 @@ function isPlain(m: HistoryMessage): boolean {
   return m.replyToId === null
     && m.imageIds.length === 0
     && (m.jobAnnotations?.length ?? 0) === 0
+    && (m.reactions === undefined || m.reactions === "")
     && !m.hasEmbeds
     && m.isPromptOnly !== true
     && !m.isSynthetic;
