@@ -43,6 +43,7 @@ import { buildMemoryContext, buildVisibleUserMemoryContext, createRecordMemoryTo
 import { createSearchTool } from "./agent/search-tool";
 import { createScheduleTools } from "./agent/schedule-tool";
 import { createChatUserListTool, type MemberInfo } from "./agent/member-list-tool";
+import { createChannelListTool, type ChannelInfo } from "./agent/channel-list-tool";
 import { createUserMemoryTool } from "./agent/user-memory-tool";
 import { createChatHistoryTool } from "./agent/chat-history-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
@@ -75,7 +76,7 @@ import { createHash } from "node:crypto";
 import { join } from "path";
 import { mkdirSync, existsSync, readFileSync, watch, unlinkSync } from "fs";
 import type { Database } from "./db/database";
-import { AttachmentBuilder, MessageFlags, PermissionFlagsBits, type ChatInputCommandInteraction, type Client, type Guild, type GuildTextBasedChannel, type Message, type MessageReaction, type PartialMessage, type PartialMessageReaction, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
+import { AttachmentBuilder, ChannelType, MessageFlags, PermissionFlagsBits, type ChatInputCommandInteraction, type Client, type Guild, type GuildBasedChannel, type GuildTextBasedChannel, type Message, type MessageReaction, type PartialMessage, type PartialMessageReaction, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
 
 const pkg = await Bun.file(new URL("../package.json", import.meta.url).pathname).json() as { version?: string };
 const CONTEXT_IMAGE_MAX_DIMENSION = 1024;
@@ -656,6 +657,54 @@ function isSendableGuildChannel(channel: unknown): channel is SendableGuildChann
     && "sendTyping" in channel
     && "guild" in channel
     && "guildId" in channel;
+}
+
+function channelTypeLabel(channel: GuildBasedChannel | ThreadChannel): string {
+  if (channel.isThread()) return "thread";
+  switch (channel.type) {
+    case ChannelType.GuildText:
+      return "text";
+    case ChannelType.GuildAnnouncement:
+      return "announcement";
+    case ChannelType.GuildForum:
+      return "forum";
+    case ChannelType.GuildMedia:
+      return "media";
+    case ChannelType.GuildVoice:
+      return "voice";
+    case ChannelType.GuildStageVoice:
+      return "stage";
+    case ChannelType.GuildCategory:
+      return "category";
+    case ChannelType.AnnouncementThread:
+    case ChannelType.PublicThread:
+    case ChannelType.PrivateThread:
+      return "thread";
+    default:
+      return "channel";
+  }
+}
+
+function botChannelPermissions(channel: GuildBasedChannel | ThreadChannel): {
+  canView: boolean;
+  canSend: boolean;
+} {
+  if (channel.isThread()) {
+    const canView = channel.viewable && (channel.type !== ChannelType.PrivateThread || channel.joined || channel.manageable);
+    return { canView, canSend: canView && channel.sendable };
+  }
+
+  const canView = channel.viewable;
+  if (!canView) return { canView: false, canSend: false };
+
+  const sendable = isSendableGuildChannel(channel);
+  if (!sendable) return { canView, canSend: false };
+
+  const permissions = client.user === null ? null : channel.permissionsFor(client.user);
+  const hasAdmin = permissions?.has(PermissionFlagsBits.Administrator, false) ?? false;
+  const timedOut = (channel.guild.members.me?.communicationDisabledUntilTimestamp ?? 0) > Date.now();
+  const canSend = (hasAdmin || !timedOut) && (permissions?.has(PermissionFlagsBits.SendMessages) ?? false);
+  return { canView, canSend };
 }
 
 async function fetchAccessibleGuildChannel(chatId: string): Promise<SendableGuildChannel | null> {
@@ -2196,6 +2245,50 @@ function buildAgentTools(
     adminUserIds: guildConfig.adminUserIds,
   });
 
+  const channelListTool = createChannelListTool({
+    guildId,
+    fetchChannels: async () => {
+      try {
+        await guild.channels.fetch();
+      } catch {
+        // Cache-only fallback below handles missing permissions.
+      }
+      const activeThreads = await guild.channels.fetchActiveThreads().catch(() => null);
+      if (activeThreads === null) {
+        // Threads already present in cache will still be listed.
+      }
+
+      const channels = new Map<string, GuildBasedChannel | ThreadChannel>();
+      for (const [, channel] of guild.channels.cache) {
+        if (channel.type !== ChannelType.GuildCategory) channels.set(channel.id, channel);
+      }
+      for (const [, thread] of activeThreads?.threads ?? []) {
+        channels.set(thread.id, thread);
+      }
+      for (const [, channel] of client.channels.cache) {
+        if ("guildId" in channel && channel.guildId === guildId && "isThread" in channel && typeof channel.isThread === "function" && channel.isThread()) {
+          channels.set(channel.id, channel as ThreadChannel);
+        }
+      }
+
+      return [...channels.values()].map((channel): ChannelInfo => {
+        const permissions = botChannelPermissions(channel);
+        const parentName = channel.isThread() ? channel.parent?.name : undefined;
+        const categoryName = channel.isThread() ? channel.parent?.parent?.name : channel.parent?.name;
+        return {
+          id: channel.id,
+          name: channel.name,
+          type: channelTypeLabel(channel),
+          canView: permissions.canView,
+          canSend: permissions.canSend,
+          isCurrent: channel.id === channelId,
+          ...(categoryName !== undefined ? { categoryName } : {}),
+          ...(parentName !== undefined ? { parentName } : {}),
+        };
+      });
+    },
+  });
+
   const userMemoryTool = createUserMemoryTool({
     db,
     guildId,
@@ -2282,7 +2375,7 @@ function buildAgentTools(
     },
   });
 
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, userMemoryTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, userMemoryTool, chatHistoryTool, readChatImagesTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (includeImageGenerationTools) {
     const codexImageModel = guildConfig.llmProvider === "openai-codex"
       ? guildConfig.model ?? globalConfig.defaultModel

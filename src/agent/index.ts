@@ -60,6 +60,8 @@ export {
 
 export { createChatUserListTool, type MemberListToolDeps, type MemberInfo } from "./member-list-tool.ts";
 
+export { createChannelListTool, type ChannelListToolDeps, type ChannelInfo } from "./channel-list-tool.ts";
+
 export { createUserMemoryTool, type UserMemoryToolDeps } from "./user-memory-tool.ts";
 
 export { createChatHistoryTool, type ChatHistoryToolDeps, type ChatHistoryMessage } from "./chat-history-tool.ts";
