@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { Database } from "../db/database";
-import { listMemories } from "../db/memory-repository";
+import { countMemories, listMemories } from "../db/memory-repository";
 
 export interface UserMemoryToolDeps {
   db: Database;
@@ -10,14 +10,14 @@ export interface UserMemoryToolDeps {
   resolveUsername: (username: string) => Promise<string | undefined>;
 }
 
-type UserMemoryToolResult = AgentToolResult<{ userId: string; count: number } | { error: boolean }>;
+type UserMemoryToolResult = AgentToolResult<{ userId: string; count: number; total: number } | { error: boolean }>;
 
 const UserMemoryParams = Type.Object({
   username: Type.String({
     minLength: 1,
     description: "Discord username to retrieve memories for. A leading @ is optional.",
   }),
-  limit: Type.Optional(Type.Number({ description: "Max memories to return. Default 20, max 50." })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Max memories to return. Default 30." })),
 });
 
 /** Create a read-only tool for retrieving another guild member's user-scoped memories. */
@@ -50,7 +50,13 @@ export function createUserMemoryTool(deps: UserMemoryToolDeps): AgentTool {
         };
       }
 
-      const limit = Math.max(1, Math.min(p.limit ?? 20, 50));
+      const limit = typeof p.limit === "number" && Number.isFinite(p.limit)
+        ? Math.max(1, Math.min(Math.floor(p.limit), 50))
+        : 30;
+      const total = countMemories(db, {
+        guildId,
+        subjectUserId: userId,
+      });
       const rows = listMemories(db, {
         guildId,
         subjectUserId: userId,
@@ -60,14 +66,14 @@ export function createUserMemoryTool(deps: UserMemoryToolDeps): AgentTool {
       if (rows.length === 0) {
         return {
           content: [{ type: "text", text: `No user-specific memories found for @${username}. Global memories are already present in the prompt.` }],
-          details: { userId, count: 0 },
+          details: { userId, count: 0, total },
         };
       }
 
       const lines = rows.map((row) => `- ${row.id} [${row.kind}] ${row.content}`);
       return {
-        content: [{ type: "text", text: `User-specific memories for @${username}:\n${lines.join("\n")}` }],
-        details: { userId, count: rows.length },
+        content: [{ type: "text", text: `User-specific memories for @${username} (${rows.length}/${total} shown):\n${lines.join("\n")}` }],
+        details: { userId, count: rows.length, total },
       };
     },
   };

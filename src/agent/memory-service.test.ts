@@ -26,7 +26,8 @@ describe("buildMemoryContext", () => {
       resolveUserId: (id) => id === "u1" ? "alice" : undefined,
     });
 
-    expect(context).toContain("The number after scope is confidence");
+    expect(context).toContain("Showing 2/2 memories.");
+    expect(context).toContain("Number after scope is confidence");
     expect(context).toContain("[global] [0.7] [global_note] Global note");
     expect(context).toContain("[@alice] [0.8] [preference] Likes concise answers");
     expect(context).not.toContain("Other user fact");
@@ -63,8 +64,26 @@ describe("buildMemoryContext", () => {
       currentUserId: "u1",
     });
 
-    expect(context).toContain("capped at 80 visible memories");
+    expect(context).toContain("Showing 2/2 memories.");
     expect(context.indexOf("Older memory.")).toBeLessThan(context.indexOf("Fresh memory."));
+  });
+
+  test("shows visible memories out of total when capped", () => {
+    const old = createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Older memory." });
+    const fresh = createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Fresh memory." });
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, old);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, fresh);
+
+    const context = buildMemoryContext({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      limit: 1,
+    });
+
+    expect(context).toContain("Showing 1/2 memories.");
+    expect(context).toContain("Fresh memory.");
+    expect(context).not.toContain("Older memory.");
   });
 });
 

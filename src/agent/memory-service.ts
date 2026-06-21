@@ -3,6 +3,7 @@ import { Value } from "@sinclair/typebox/value";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { Database } from "../db/database";
 import {
+  countMemories,
   createMemory,
   deleteMemory,
   getMemory,
@@ -231,11 +232,17 @@ export function buildMemoryPolicyInstructions(): string[] {
 
 /** Build the uncached memory block injected into the conversation prompt. */
 export function buildMemoryContext(input: MemoryContextInput): string {
+  const limit = input.limit ?? 80;
+  const total = countMemories(input.db, {
+    guildId: input.guildId,
+    subjectUserId: input.currentUserId,
+    includeGlobal: true,
+  });
   const rows = listMemories(input.db, {
     guildId: input.guildId,
     subjectUserId: input.currentUserId,
     includeGlobal: true,
-    limit: input.limit ?? 80,
+    limit,
   }).filter((row) => row.content.trim() !== "");
 
   if (rows.length === 0) return "";
@@ -246,7 +253,8 @@ export function buildMemoryContext(input: MemoryContextInput): string {
     return `- ${row.id} [${label}] [${formatConfidence(row.confidence)}] [${row.kind}]${expiry} ${row.content}`;
   });
   return [
-    "Use these durable memories as background context. Current chat instructions override memory. The number after scope is confidence (0-1); weigh lower confidence accordingly. This block is capped at 80 visible memories; additional memories may exist but are not shown. Within this visible block, the most recently updated and usually most relevant memories are closer to the bottom.",
+    `Showing ${rows.length}/${total} memories.`,
+    "Use as background context; current chat instructions override memory. Number after scope is confidence (0-1). Newer/relevant memories are closer to the bottom.",
     ...lines,
   ].join("\n");
 }

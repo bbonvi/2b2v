@@ -45,12 +45,12 @@ describe("createUserMemoryTool", () => {
     const result = await tool.execute("tc1", { username: "@Alice" }, AbortSignal.timeout(5000));
     const text = textOf(result);
 
-    expect(text).toContain("User-specific memories for @Alice:");
+    expect(text).toContain("User-specific memories for @Alice (1/1 shown):");
     expect(text).toContain("[preference] Likes concise answers");
     expect(text).not.toContain("Global note");
     expect(text).not.toContain("Other user fact");
     expect(text).not.toContain("Other guild fact");
-    expect(result.details).toEqual({ userId: "u1", count: 1 });
+    expect(result.details).toEqual({ userId: "u1", count: 1, total: 1 });
   });
 
   test("limits returned memories", async () => {
@@ -67,7 +67,27 @@ describe("createUserMemoryTool", () => {
 
     expect(text).toContain("Second memory");
     expect(text).not.toContain("First memory");
-    expect(result.details).toEqual({ userId: "u1", count: 1 });
+    expect(text).toContain("User-specific memories for @alice (1/2 shown):");
+    expect(result.details).toEqual({ userId: "u1", count: 1, total: 2 });
+  });
+
+  test("defaults returned memories to 30", async () => {
+    for (let i = 1; i <= 31; i += 1) {
+      createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: `Memory ${i}` });
+    }
+
+    const tool = createUserMemoryTool({
+      db,
+      guildId: "g1",
+      resolveUsername: () => Promise.resolve("u1"),
+    });
+    const result = await tool.execute("tc1", { username: "alice" }, AbortSignal.timeout(5000));
+    const text = textOf(result);
+
+    expect(text).toContain("User-specific memories for @alice (30/31 shown):");
+    expect(text).toContain("Memory 31");
+    expect(text).not.toContain("[fact] Memory 1\n");
+    expect(result.details).toEqual({ userId: "u1", count: 30, total: 31 });
   });
 
   test("reports no memories without returning global memories", async () => {
@@ -84,7 +104,7 @@ describe("createUserMemoryTool", () => {
     expect(text).toContain("No user-specific memories found for @alice");
     expect(text).toContain("Global memories are already present");
     expect(text).not.toContain("Global note");
-    expect(result.details).toEqual({ userId: "u1", count: 0 });
+    expect(result.details).toEqual({ userId: "u1", count: 0, total: 0 });
   });
 
   test("reports unknown users", async () => {

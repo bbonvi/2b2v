@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { createDatabase, type Database } from "./database";
 import {
+  countMemories,
   createMemory,
   countUserMemoriesByUser,
   deleteExpiredMemories,
@@ -125,6 +126,7 @@ describe("listMemories", () => {
     });
 
     expect(rows.map((row) => row.content).sort()).toEqual(["A", "C"]);
+    expect(countMemories(db, { guildId: "g1", subjectUserId: "u1", includeGlobal: true })).toBe(2);
   });
 
   test("returns newest updated memories first and enforces limit", () => {

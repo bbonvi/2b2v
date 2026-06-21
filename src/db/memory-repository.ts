@@ -50,9 +50,39 @@ export interface ListMemoriesFilter {
   limit?: number;
 }
 
+export type CountMemoriesFilter = Omit<ListMemoriesFilter, "limit">;
+
 function clampConfidence(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value)) return 0.7;
   return Math.max(0, Math.min(1, value));
+}
+
+function memoryFilterConditions(filter: CountMemoriesFilter): {
+  conditions: string[];
+  params: (string | number | null)[];
+} {
+  const conditions = ["guild_id = ?"];
+  const params: (string | number | null)[] = [filter.guildId];
+
+  if (filter.subjectUserId !== undefined) {
+    if (filter.includeGlobal === true) {
+      conditions.push("(subject_user_id = ? OR subject_user_id IS NULL)");
+      params.push(filter.subjectUserId);
+    } else if (filter.subjectUserId === null) {
+      conditions.push("subject_user_id IS NULL");
+    } else {
+      conditions.push("subject_user_id = ?");
+      params.push(filter.subjectUserId);
+    }
+  }
+
+  if (filter.includeDeleted !== true) {
+    conditions.push("deleted_at IS NULL");
+    conditions.push("(expires_at IS NULL OR expires_at > ?)");
+    params.push(Date.now());
+  }
+
+  return { conditions, params };
 }
 
 /** Create a structured memory row and return its generated ID. */
@@ -144,26 +174,7 @@ export function getMemory(db: Database, id: number): MemoryRow | null {
 
 /** List active memories for a guild, optionally scoped to a subject user plus global rows. */
 export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRow[] {
-  const conditions = ["guild_id = ?"];
-  const params: (string | number | null)[] = [filter.guildId];
-
-  if (filter.subjectUserId !== undefined) {
-    if (filter.includeGlobal === true) {
-      conditions.push("(subject_user_id = ? OR subject_user_id IS NULL)");
-      params.push(filter.subjectUserId);
-    } else if (filter.subjectUserId === null) {
-      conditions.push("subject_user_id IS NULL");
-    } else {
-      conditions.push("subject_user_id = ?");
-      params.push(filter.subjectUserId);
-    }
-  }
-
-  if (filter.includeDeleted !== true) {
-    conditions.push("deleted_at IS NULL");
-    conditions.push("(expires_at IS NULL OR expires_at > ?)");
-    params.push(Date.now());
-  }
+  const { conditions, params } = memoryFilterConditions(filter);
 
   let sql = `SELECT * FROM memories WHERE ${conditions.join(" AND ")} ORDER BY updated_at DESC, id DESC`;
   if (filter.limit !== undefined && filter.limit > 0) {
@@ -173,6 +184,15 @@ export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRo
 
   const rows = db.raw.prepare(sql).all(...params) as Record<string, unknown>[];
   return rows.map(mapRow);
+}
+
+/** Count memories matching the same active/deleted/scope filters as listMemories. */
+export function countMemories(db: Database, filter: CountMemoriesFilter): number {
+  const { conditions, params } = memoryFilterConditions(filter);
+  const row = db.raw
+    .prepare(`SELECT COUNT(*) AS count FROM memories WHERE ${conditions.join(" AND ")}`)
+    .get(...params) as { count: number };
+  return row.count;
 }
 
 /** Count active subject-user memories per userId in a guild. */
