@@ -43,6 +43,8 @@ export interface RequestLogFilters {
 
 export interface RequestTriggerContext {
   messageId?: string;
+  guildName?: string;
+  channelName?: string;
   authorUsername?: string;
   content?: string;
   translatedContent?: string;

@@ -248,6 +248,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
   const requestLog = new RequestLog(job.deliveryGuildId, job.deliveryChannelId, requestLogStore);
   requestLog.setAuthor(job.requesterUsername);
   requestLog.setTriggerContext({
+    ...dashboardTriggerLocation(guild, textChannel),
     authorUsername: job.requesterUsername,
     sourceMessageId: job.sourceMessageId,
     sourceQuote: job.sourceQuote,
@@ -693,6 +694,20 @@ function channelTypeLabel(channel: GuildBasedChannel | ThreadChannel): string {
     default:
       return "channel";
   }
+}
+
+function dashboardTriggerLocation(guild: Guild, channel: unknown): { guildName: string; channelName?: string } {
+  const channelName = channel !== null
+    && typeof channel === "object"
+    && "name" in channel
+    && typeof channel.name === "string"
+    && channel.name !== ""
+    ? channel.name
+    : undefined;
+  return {
+    guildName: guild.name,
+    ...(channelName !== undefined ? { channelName } : {}),
+  };
 }
 
 function botChannelPermissions(channel: GuildBasedChannel | ThreadChannel): {
@@ -1456,6 +1471,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
       const requestLog = new RequestLog(guildId, channelId, requestLogStore);
       requestLog.setAuthor("scheduler");
       requestLog.setTriggerContext({
+        ...dashboardTriggerLocation(guild, textChannel),
         messageId: syntheticLatestMessage.id,
         authorUsername: "scheduler",
         content: schedule.messageContent,
@@ -1504,6 +1520,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
           const memoryLog = new RequestLog(guildId, channelId, requestLogStore);
           memoryLog.setAuthor("scheduler");
           memoryLog.setTriggerContext({
+            ...dashboardTriggerLocation(guild, textChannel),
             messageId: memoryRequest.sourceMessageId ?? syntheticLatestMessage.id,
             authorUsername: "scheduler",
             content: memoryRequest.userMessage,
@@ -2144,6 +2161,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
     const memoryLog = new RequestLog(guildId, channelId, requestLogStore);
     memoryLog.setAuthor("ambient");
     memoryLog.setTriggerContext({
+      ...dashboardTriggerLocation(guild, message.channel),
       messageId: message.id,
       authorUsername: message.author.username,
       content: message.content,
@@ -2986,6 +3004,7 @@ async function processTriggeredMessage(
     const requestLog = new RequestLog(guildId, channelId, requestLogStore);
     requestLog.setAuthor(message.author.username);
     requestLog.setTriggerContext({
+      ...dashboardTriggerLocation(guild, message.channel),
       messageId: message.id,
       authorUsername: message.author.username,
       content: message.content,
@@ -3034,6 +3053,7 @@ async function processTriggeredMessage(
         const memoryLog = new RequestLog(guildId, channelId, requestLogStore);
         memoryLog.setAuthor(message.author.username);
         memoryLog.setTriggerContext({
+          ...dashboardTriggerLocation(guild, message.channel),
           messageId: memoryRequest.sourceMessageId ?? message.id,
           authorUsername: message.author.username,
           content: memoryRequest.userMessage,

@@ -1,8 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { runInNewContext } from "node:vm";
+import { runInNewContext, Script } from "node:vm";
 
 type FormatPayload = (obj: unknown) => string;
+
+function loadDashboardScript(): string {
+  const html = readFileSync("src/dashboard/index.html", "utf8");
+  const match = html.match(/<script>\n([\s\S]*)\n<\/script>/);
+  if (match?.[1] === undefined) {
+    throw new Error("dashboard inline script not found");
+  }
+  return match[1];
+}
 
 function loadFormatPayload(): FormatPayload {
   const html = readFileSync("src/dashboard/index.html", "utf8");
@@ -41,6 +50,10 @@ function loadFormatPayload(): FormatPayload {
 }
 
 describe("dashboard payload formatter", () => {
+  test("dashboard inline script parses", () => {
+    expect(() => new Script(loadDashboardScript())).not.toThrow();
+  });
+
   test("renders escaped newlines as real line breaks for all multiline strings", () => {
     const formatPayload = loadFormatPayload();
 

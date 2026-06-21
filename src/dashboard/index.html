@@ -466,12 +466,16 @@
     return ctx.translatedContent || ctx.content || ctx.sourceQuote || '';
   }
 
-  function triggerContextMeta(ctx) {
+  function triggerContextMeta(ctx, entry, includeIds) {
     if (ctx == null) return '';
     const parts = [];
+    const guildLabel = ctx.guildName || (entry && entry.guildId) || '';
+    const channelLabel = ctx.channelName || (entry && entry.channelId) || '';
+    if (guildLabel !== '') parts.push(guildLabel);
+    if (channelLabel !== '') parts.push(channelLabel);
     if (ctx.authorUsername) parts.push('@' + ctx.authorUsername);
-    if (ctx.messageId) parts.push('msg ' + shortId(ctx.messageId));
-    if (ctx.sourceMessageId && ctx.sourceMessageId !== ctx.messageId) parts.push('source ' + shortId(ctx.sourceMessageId));
+    if (includeIds === true && ctx.messageId) parts.push('msg ' + shortId(ctx.messageId));
+    if (includeIds === true && ctx.sourceMessageId && ctx.sourceMessageId !== ctx.messageId) parts.push('source ' + shortId(ctx.sourceMessageId));
     return parts.join(' | ');
   }
 
@@ -510,6 +514,57 @@
   const detailCache = new Map();
   const detailErrors = new Map();
   const detailRequests = new Map();
+  const rowNodes = new Map();
+
+  function htmlToElement(html) {
+    const template = document.createElement('template');
+    template.innerHTML = html.trim();
+    return template.content.firstElementChild;
+  }
+
+  function syncAttributes(current, next) {
+    for (const attr of Array.from(current.attributes)) {
+      if (!next.hasAttribute(attr.name)) current.removeAttribute(attr.name);
+    }
+    for (const attr of Array.from(next.attributes)) {
+      if (current.getAttribute(attr.name) !== attr.value) current.setAttribute(attr.name, attr.value);
+    }
+  }
+
+  function patchNode(current, next) {
+    if (current.nodeType !== next.nodeType || current.nodeName !== next.nodeName) {
+      current.replaceWith(next);
+      return next;
+    }
+
+    if (current.nodeType === Node.TEXT_NODE) {
+      if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
+      return current;
+    }
+
+    if (current.nodeType !== Node.ELEMENT_NODE) return current;
+    syncAttributes(current, next);
+
+    let currentChild = current.firstChild;
+    let nextChild = next.firstChild;
+    while (nextChild !== null) {
+      const followingNext = nextChild.nextSibling;
+      if (currentChild === null) {
+        current.appendChild(nextChild.cloneNode(true));
+      } else {
+        const followingCurrent = currentChild.nextSibling;
+        patchNode(currentChild, nextChild);
+        currentChild = followingCurrent;
+      }
+      nextChild = followingNext;
+    }
+    while (currentChild !== null) {
+      const followingCurrent = currentChild.nextSibling;
+      current.removeChild(currentChild);
+      currentChild = followingCurrent;
+    }
+    return current;
+  }
 
   function toggleExpand(requestId) {
     if (expandedIds.has(requestId)) {
@@ -636,7 +691,7 @@
     }
 
     const contextText = triggerContextText(e.triggerContext);
-    const contextMeta = triggerContextMeta(e.triggerContext);
+    const contextMeta = triggerContextMeta(e.triggerContext, e, true);
     return (contextText !== '' || contextMeta !== '' ? '<div class="detail-section"><div class="detail-label">Trigger Context</div><div class="trigger-context">'
         + (contextMeta !== '' ? '<div class="model-meta">' + esc(contextMeta) + '</div>' : '')
         + (contextText !== '' ? esc(contextText) : '<span style="color:var(--text-dim);font-style:italic">no trigger text</span>')
@@ -694,7 +749,7 @@
 
     const rid = esc(e.requestId);
     const contextText = triggerContextText(e.triggerContext);
-    const contextMeta = triggerContextMeta(e.triggerContext);
+    const contextMeta = triggerContextMeta(e.triggerContext, e, false);
     return '<div class="' + cls.join(' ') + '" data-rid="' + rid + '">'
       + '<div class="entry-header" onclick="window.__toggleExpand(\'' + rid + '\')">'
         + '<span class="entry-time">' + fmtTime(e.timestamp) + '</span>'
@@ -716,9 +771,6 @@
   // Expose toggle for inline onclick
   window.__toggleExpand = toggleExpand;
 
-  // Last-seen data fingerprint to skip redundant DOM writes
-  let lastLogHash = '';
-
   function currentLogParams() {
     const params = new URLSearchParams();
     if (fGuild.value) params.set('guildId', fGuild.value);
@@ -734,28 +786,31 @@
     const data = await r.json();
     if (currentLogParams().toString() !== requestQuery) return;
 
-    // Small summaries only; include active counts/status so live rows can update.
-    const hash = JSON.stringify(data.map(e => [
-      e.requestId,
-      e.status || '',
-      e.toolCount,
-      e.llmCallCount,
-      e.totalDurationMs,
-      e.hasError,
-      e.estimatedCostUsd,
-      triggerContextText(e.triggerContext),
-    ]));
-    if (hash === lastLogHash) return;
-    lastLogHash = hash;
-
     logCount.textContent = data.length + ' entries';
     if (data.length === 0) {
-      logList.innerHTML = '<div class="empty-state">No log entries yet. Trigger some bot messages.</div>';
+      rowNodes.clear();
+      if (logList.children.length !== 1 || !logList.firstElementChild.classList.contains('empty-state')) {
+        logList.replaceChildren(htmlToElement('<div class="empty-state">No log entries yet. Trigger some bot messages.</div>'));
+      }
     } else {
-      // Preserve scroll position
-      const scrollY = window.scrollY;
-      logList.innerHTML = data.map(renderEntry).join('');
-      window.scrollTo(0, scrollY);
+      const emptyState = logList.querySelector('.empty-state');
+      if (emptyState != null) emptyState.remove();
+      const seen = new Set();
+      let cursor = logList.firstElementChild;
+      for (const entry of data) {
+        seen.add(entry.requestId);
+        const next = htmlToElement(renderEntry(entry));
+        const existing = rowNodes.get(entry.requestId);
+        const node = existing == null ? next : patchNode(existing, next);
+        rowNodes.set(entry.requestId, node);
+        if (node !== cursor) logList.insertBefore(node, cursor);
+        cursor = node.nextElementSibling;
+      }
+      for (const [requestId, node] of Array.from(rowNodes.entries())) {
+        if (seen.has(requestId)) continue;
+        rowNodes.delete(requestId);
+        node.remove();
+      }
     }
   }
 
@@ -794,10 +849,10 @@
     await Promise.all([refreshLogs(), fetchFilters()]);
   }
 
-  btnRefresh.addEventListener('click', () => { lastLogHash = ''; refresh(); });
-  fGuild.addEventListener('change', () => { lastLogHash = ''; refreshLogs(); });
-  fChannel.addEventListener('change', () => { lastLogHash = ''; refreshLogs(); });
-  fUser.addEventListener('change', () => { lastLogHash = ''; refreshLogs(); });
+  btnRefresh.addEventListener('click', () => { refresh(); });
+  fGuild.addEventListener('change', () => { refreshLogs(); });
+  fChannel.addEventListener('change', () => { refreshLogs(); });
+  fUser.addEventListener('change', () => { refreshLogs(); });
 
   async function refreshStatus() {
     try {
@@ -862,7 +917,7 @@
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) stopPolling(); else { lastLogHash = ''; startPolling(); }
+    if (document.hidden) stopPolling(); else { startPolling(); }
   });
 
   // Modal for LLM request payloads
