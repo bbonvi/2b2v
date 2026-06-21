@@ -491,13 +491,13 @@
     return text;
   }
 
-  function statusText(status, isError) {
+  function fmtStatus(status, isError) {
     if (isError) return 'error';
     return status || 'completed';
   }
 
   function statusClass(status, isError) {
-    return 'status-' + statusText(status, isError);
+    return 'status-' + fmtStatus(status, isError);
   }
 
   function shortId(id) {
@@ -567,7 +567,7 @@
       for (const row of batch.calls) {
         const t = row.execution;
         const emittedCall = row.emitted;
-        const status = statusText(t && t.status, t && t.isError);
+        const status = fmtStatus(t && t.status, t && t.isError);
         const args = t && t.args ? t.args : emittedCall.args;
         const result = t && t.result != null ? fmtResult(t.result) : (emittedCall.skippedReason || '');
         html += '<tr' + (status === 'error' ? ' class="tool-error"' : '') + '>'
@@ -588,7 +588,7 @@
     if (runtimeTools.length === 0) return '';
     let rows = '';
     for (const t of runtimeTools) {
-      const status = statusText(t.status, t.isError);
+      const status = fmtStatus(t.status, t.isError);
       rows += '<tr' + (status === 'error' ? ' class="tool-error"' : '') + '>'
         + '<td>' + esc(t.tool) + '</td>'
         + '<td class="tool-result">' + esc(JSON.stringify(t.args, null, 2)) + '</td>'
@@ -611,7 +611,7 @@
     let modelSections = '';
     for (let li = 0; li < e.llmCalls.length; li++) {
       const l = e.llmCalls[li];
-      const status = statusText(l.status, l.isError);
+      const status = fmtStatus(l.status, l.isError);
       const cost = l.estimatedCostUsd != null ? '$' + l.estimatedCostUsd.toFixed(4) : '-';
       const duration = l.durationMs != null ? fmtDuration(l.durationMs) : (status === 'running' ? 'running' : '-');
       modelSections += '<div class="model-request">'
