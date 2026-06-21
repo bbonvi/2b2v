@@ -212,6 +212,39 @@ describe("RequestLogStore", () => {
     expect(store.getActiveCount()).toBe(0);
   });
 
+  test("active entries appear before completed entries and are removed by push", () => {
+    const store = new RequestLogStore();
+    const active = makeEntry({
+      requestId: "active-1",
+      status: "active",
+      timestamp: "2026-06-17T00:00:02.000Z",
+      llmCalls: [{
+        id: "model-request-1",
+        status: "running",
+        startedAt: "2026-06-17T00:00:02.000Z",
+        model: "model",
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        stopReason: "running",
+        contentTypes: [],
+        emittedToolCalls: [],
+      }],
+    });
+    store.push(makeEntry({ requestId: "done-1", timestamp: "2026-06-17T00:00:01.000Z" }));
+    store.upsertActive(active);
+
+    expect(store.query().map((entry) => entry.requestId)).toEqual(["active-1", "done-1"]);
+    expect(store.querySummaries()[0]?.status).toBe("active");
+    expect(store.getByRequestId("active-1")?.llmCalls[0]?.status).toBe("running");
+
+    const completed = { ...active };
+    delete completed.status;
+    store.push(completed);
+    expect(store.query().map((entry) => entry.requestId)).toEqual(["active-1", "done-1"]);
+    expect(store.querySummaries()[0]?.status).toBeUndefined();
+  });
+
   test("decrementActive does not go below zero", () => {
     const store = new RequestLogStore();
     store.decrementActive();

@@ -10,6 +10,8 @@ Good entries explain a durable constraint, a cross-module data contract, or a pr
 
 Tool results are appended as `role: "tool"` messages, then the same model produces final text. Read-only tools may run concurrently only when they are in the same model turn and on the allowlist. State-changing or unknown tools remain ordered execution barriers.
 
+Dashboard request logs are grouped by model request. Token usage, cache read/write, cache discount, and cost belong to the model request that produced them; emitted tool calls are linked back to that model request by tool-call ID. Parallel read-only tools share a dashboard tool batch, while ordered/state-changing calls are separate batches. Active request snapshots are in-memory only and are replaced by the terminal ring-buffer entry when the request emits.
+
 `react_to_message` is a state-changing acknowledgement tool. It may only target visible or retrievable messages in accessible guild text channels/threads; DMs and inaccessible channels are rejected by the Discord channel resolver. When a reaction fully handles the turn, the final assistant output should be `<ignore>` so the bot behaves like a normal chat user instead of sending redundant text.
 
 `start_thread` and `close_thread` manage thread state only. They must not mutate hidden delivery routing for later final answers, intermediate status, typing, ignored-reply persistence, or async image jobs. To send to a created thread, the model must use an explicit `<message channel_id="...">` directive.

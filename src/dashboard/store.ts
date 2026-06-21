@@ -7,11 +7,14 @@ export interface RequestLogEntry {
   channelId: string;
   authorUsername: string;
   trigger: unknown;
+  triggerContext?: RequestTriggerContext;
   agentRan: boolean;
+  status?: "active";
   tools: RequestToolCall[];
   llmCalls: RequestLLMCall[];
   totalDurationMs: number;
   error?: string;
+  startedAt?: string;
   timestamp: string;
 }
 
@@ -21,12 +24,14 @@ export interface RequestLogSummary {
   channelId: string;
   authorUsername: string;
   trigger: unknown;
+  triggerContext?: RequestTriggerContext;
   agentRan: boolean;
   toolCount: number;
   llmCallCount: number;
   estimatedCostUsd: number | null;
   totalDurationMs: number;
   hasError: boolean;
+  status?: "active";
   timestamp: string;
 }
 
@@ -34,6 +39,15 @@ export interface RequestLogFilters {
   guildId?: string;
   channelId?: string;
   authorUsername?: string;
+}
+
+export interface RequestTriggerContext {
+  messageId?: string;
+  authorUsername?: string;
+  content?: string;
+  translatedContent?: string;
+  sourceMessageId?: string;
+  sourceQuote?: string;
 }
 
 const BASE64_PLACEHOLDER_MIN_LENGTH = 1_024;
@@ -47,6 +61,7 @@ export class RequestLogStore {
   private head = 0;
   private count = 0;
   private activeRequests = 0;
+  private readonly activeEntries = new Map<string, RequestLogEntry>();
 
   constructor(maxEntries = 1000, filePath?: string) {
     this.maxEntries = maxEntries;
@@ -56,6 +71,7 @@ export class RequestLogStore {
   }
 
   push(entry: RequestLogEntry): void {
+    this.activeEntries.delete(entry.requestId);
     this.entries[this.head] = entry;
     this.head = (this.head + 1) % this.maxEntries;
     if (this.count < this.maxEntries) this.count++;
@@ -96,12 +112,15 @@ export class RequestLogStore {
   query(filters: RequestLogFilters = {}, limit?: number): RequestLogEntry[] {
     const result: RequestLogEntry[] = [];
     if (limit !== undefined && limit <= 0) return result;
+    for (const entry of [...this.activeEntries.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp))) {
+      if (!entryMatchesFilters(entry, filters)) continue;
+      result.push(withLiveActiveDurations(entry));
+      if (limit !== undefined && result.length >= limit) return result;
+    }
     for (let i = 0; i < this.count; i++) {
       const idx = (this.head - 1 - i + this.maxEntries) % this.maxEntries;
       const entry = this.entries[idx] as RequestLogEntry;
-      if (filters.guildId !== undefined && entry.guildId !== filters.guildId) continue;
-      if (filters.channelId !== undefined && entry.channelId !== filters.channelId) continue;
-      if (filters.authorUsername !== undefined && entry.authorUsername !== filters.authorUsername) continue;
+      if (!entryMatchesFilters(entry, filters)) continue;
       result.push(entry);
       if (limit !== undefined && result.length >= limit) break;
     }
@@ -115,6 +134,8 @@ export class RequestLogStore {
 
   /** Finds one full dashboard log entry by request ID for on-demand expansion. */
   getByRequestId(requestId: string): RequestLogEntry | null {
+    const active = this.activeEntries.get(requestId);
+    if (active !== undefined) return withLiveActiveDurations(active);
     for (let i = 0; i < this.count; i++) {
       const idx = (this.head - 1 - i + this.maxEntries) % this.maxEntries;
       const entry = this.entries[idx] as RequestLogEntry;
@@ -133,6 +154,11 @@ export class RequestLogStore {
     const guildIds = new Set<string>();
     const channelIds = new Set<string>();
     const usernames = new Set<string>();
+    for (const entry of this.activeEntries.values()) {
+      guildIds.add(entry.guildId);
+      channelIds.add(entry.channelId);
+      usernames.add(entry.authorUsername);
+    }
     for (let i = 0; i < this.count; i++) {
       const idx = (this.head - 1 - i + this.maxEntries) % this.maxEntries;
       const entry = this.entries[idx] as RequestLogEntry;
@@ -156,14 +182,59 @@ export class RequestLogStore {
   }
 
   getActiveCount(): number {
-    return this.activeRequests;
+    return Math.max(this.activeRequests, this.activeEntries.size);
   }
+
+  upsertActive(entry: RequestLogEntry): void {
+    this.activeEntries.set(entry.requestId, entry);
+  }
+
+  removeActive(requestId: string): void {
+    this.activeEntries.delete(requestId);
+  }
+}
+
+function entryMatchesFilters(entry: RequestLogEntry, filters: RequestLogFilters): boolean {
+  if (filters.guildId !== undefined && entry.guildId !== filters.guildId) return false;
+  if (filters.channelId !== undefined && entry.channelId !== filters.channelId) return false;
+  if (filters.authorUsername !== undefined && entry.authorUsername !== filters.authorUsername) return false;
+  return true;
+}
+
+function elapsedSince(iso: string | undefined, now: number): number | undefined {
+  if (iso === undefined) return undefined;
+  const startedAt = Date.parse(iso);
+  return Number.isFinite(startedAt) ? Math.max(0, now - startedAt) : undefined;
+}
+
+function withLiveActiveDurations(entry: RequestLogEntry): RequestLogEntry {
+  if (entry.status !== "active") return entry;
+  const now = Date.now();
+  return {
+    ...entry,
+    totalDurationMs: elapsedSince(entry.startedAt ?? entry.timestamp, now) ?? entry.totalDurationMs,
+    tools: entry.tools.map((tool) => ({
+      ...tool,
+      durationMs: tool.status === "running"
+        ? elapsedSince(tool.startedAt, now) ?? tool.durationMs
+        : tool.durationMs,
+    })),
+    llmCalls: entry.llmCalls.map((call) => ({
+      ...call,
+      durationMs: call.status === "running"
+        ? elapsedSince(call.startedAt, now) ?? call.durationMs
+        : call.durationMs,
+    })),
+  };
 }
 
 function sanitizeDashboardLogEntry(entry: RequestLogEntry): RequestLogEntry {
   return {
     ...entry,
     trigger: sanitizeDashboardValue(entry.trigger),
+    triggerContext: entry.triggerContext !== undefined
+      ? sanitizeDashboardValue(entry.triggerContext) as RequestTriggerContext
+      : undefined,
     tools: entry.tools.map((tool) => ({
       ...tool,
       args: sanitizeDashboardRecord(tool.args),
@@ -172,6 +243,10 @@ function sanitizeDashboardLogEntry(entry: RequestLogEntry): RequestLogEntry {
     llmCalls: entry.llmCalls.map((call) => ({
       ...call,
       contentTypes: [...call.contentTypes],
+      emittedToolCalls: call.emittedToolCalls?.map((toolCall) => ({
+        ...toolCall,
+        args: sanitizeDashboardRecord(toolCall.args),
+      })),
       outputText: call.outputText !== undefined ? sanitizeDashboardString(call.outputText, "outputText") : undefined,
       requestPayload: sanitizeDashboardValue(call.requestPayload, "requestPayload"),
       responsePayload: sanitizeDashboardValue(call.responsePayload, "responsePayload"),
@@ -239,12 +314,13 @@ function toSummary(entry: RequestLogEntry): RequestLogSummary {
   for (const call of entry.llmCalls) {
     if (call.estimatedCostUsd !== undefined) estimatedCostUsd += call.estimatedCostUsd;
   }
-  return {
+  const summary: RequestLogSummary = {
     requestId: entry.requestId,
     guildId: entry.guildId,
     channelId: entry.channelId,
     authorUsername: entry.authorUsername,
     trigger: entry.trigger,
+    triggerContext: entry.triggerContext,
     agentRan: entry.agentRan,
     toolCount: entry.tools.length,
     llmCallCount: entry.llmCalls.length,
@@ -253,6 +329,8 @@ function toSummary(entry: RequestLogEntry): RequestLogSummary {
     hasError: entry.error !== undefined,
     timestamp: entry.timestamp,
   };
+  if (entry.status !== undefined) summary.status = entry.status;
+  return summary;
 }
 
 const logDir = process.env.LOG_DIR;

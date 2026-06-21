@@ -1341,10 +1341,11 @@ describe("handleMessage", () => {
 
     expect(thrown).toBeInstanceOf(Error);
     expect((thrown as Error).message).toBe("OpenRouter request failed: Not Found");
-    expect(requestLog.toEntry().llmCalls).toHaveLength(1);
-    expect(requestLog.toEntry().llmCalls[0]?.isError).toBe(true);
-    expect(requestLog.toEntry().llmCalls[0]?.error).toBe("OpenRouter request failed: Not Found");
-    expect(requestLog.toEntry().llmCalls[0]?.requestPayload).toEqual({ model: "moonshotai/kimi-k2.5", route: "test-route" });
+    const llmCalls = requestLog.toEntry().llmCalls;
+    expect(llmCalls).toHaveLength(3);
+    expect(llmCalls.every((call) => call.isError === true)).toBe(true);
+    expect(llmCalls[2]?.error).toBe("OpenRouter request failed: Not Found");
+    expect(llmCalls[2]?.requestPayload).toEqual({ model: "moonshotai/kimi-k2.5", route: "test-route" });
   });
 
   test("retries empty final model responses before sending final response", async () => {

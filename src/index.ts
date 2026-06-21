@@ -245,8 +245,13 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
   void textChannel.sendTyping().catch(() => {});
   agentJobs.start(job.id, () => controller.abort(new Error(`Image job ${job.id} cancelled.`)));
 
-  const requestLog = new RequestLog(job.deliveryGuildId, job.deliveryChannelId);
+  const requestLog = new RequestLog(job.deliveryGuildId, job.deliveryChannelId, requestLogStore);
   requestLog.setAuthor(job.requesterUsername);
+  requestLog.setTriggerContext({
+    authorUsername: job.requesterUsername,
+    sourceMessageId: job.sourceMessageId,
+    sourceQuote: job.sourceQuote,
+  });
   requestLog.setTrigger({ type: "async_image_generation", jobId: job.id, sourceMessageId: job.sourceMessageId });
   requestLog.setAgentRan(true);
   requestLogStore.incrementActive();
@@ -1448,8 +1453,14 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
       };
 
       // Build request log
-      const requestLog = new RequestLog(guildId, channelId);
+      const requestLog = new RequestLog(guildId, channelId, requestLogStore);
       requestLog.setAuthor("scheduler");
+      requestLog.setTriggerContext({
+        messageId: syntheticLatestMessage.id,
+        authorUsername: "scheduler",
+        content: schedule.messageContent,
+        translatedContent: schedule.messageContent,
+      });
 
       const { ttsEnabled, generateSpeech } = createTtsGenerator(guildConfig);
 
@@ -1490,8 +1501,14 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         triggerInstructions: guildConfig.triggerInstructions,
         afterReply: async (memoryRequest) => {
           if (!guildConfig.memoryExtraction.postReply) return;
-          const memoryLog = new RequestLog(guildId, channelId);
+          const memoryLog = new RequestLog(guildId, channelId, requestLogStore);
           memoryLog.setAuthor("scheduler");
+          memoryLog.setTriggerContext({
+            messageId: memoryRequest.sourceMessageId ?? syntheticLatestMessage.id,
+            authorUsername: "scheduler",
+            content: memoryRequest.userMessage,
+            translatedContent: memoryRequest.userMessage,
+          });
           memoryLog.setTrigger({ type: "background_memory_extraction", sourceRequestId: requestLog.requestId, source: "scheduled" });
           memoryLog.setAgentRan(true);
           requestLogStore.incrementActive();
@@ -2124,8 +2141,13 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
   ambientMemoryPasses.add(key);
   try {
     const guild = message.guild;
-    const memoryLog = new RequestLog(guildId, channelId);
+    const memoryLog = new RequestLog(guildId, channelId, requestLogStore);
     memoryLog.setAuthor("ambient");
+    memoryLog.setTriggerContext({
+      messageId: message.id,
+      authorUsername: message.author.username,
+      content: message.content,
+    });
     memoryLog.setTrigger({ type: "background_memory_extraction", mode: "ambient" });
     memoryLog.setAgentRan(true);
     requestLogStore.incrementActive();
@@ -2961,8 +2983,14 @@ async function processTriggeredMessage(
       replyToMessageId: message.reference?.messageId,
     };
 
-    const requestLog = new RequestLog(guildId, channelId);
+    const requestLog = new RequestLog(guildId, channelId, requestLogStore);
     requestLog.setAuthor(message.author.username);
+    requestLog.setTriggerContext({
+      messageId: message.id,
+      authorUsername: message.author.username,
+      content: message.content,
+      translatedContent,
+    });
 
     const { ttsEnabled, generateSpeech } = createTtsGenerator(guildConfig);
 
@@ -3003,8 +3031,14 @@ async function processTriggeredMessage(
       },
       afterReply: async (memoryRequest) => {
         if (!guildConfig.memoryExtraction.postReply) return;
-        const memoryLog = new RequestLog(guildId, channelId);
+        const memoryLog = new RequestLog(guildId, channelId, requestLogStore);
         memoryLog.setAuthor(message.author.username);
+        memoryLog.setTriggerContext({
+          messageId: memoryRequest.sourceMessageId ?? message.id,
+          authorUsername: message.author.username,
+          content: memoryRequest.userMessage,
+          translatedContent: memoryRequest.userMessage,
+        });
         memoryLog.setTrigger({ type: "background_memory_extraction", sourceRequestId: requestLog.requestId });
         memoryLog.setAgentRan(true);
         requestLogStore.incrementActive();

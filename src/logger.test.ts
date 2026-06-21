@@ -338,6 +338,56 @@ describe("RequestLog", () => {
     expect((entry.llmCalls as unknown[]).length).toBe(2);
   });
 
+  test("correlates emitted tool calls with executed batches", () => {
+    const rl = new RequestLog("g1", "c1");
+    rl.recordLLMRequest({ model: "m" });
+    rl.recordLLMCompletion({
+      role: "assistant",
+      model: "m",
+      content: [],
+      usage: { input: 10, output: 5, totalTokens: 15 },
+      stopReason: "toolUse",
+      toolCalls: [
+        { id: "call-a", type: "function", function: { name: "search", arguments: "{\"q\":\"a\"}" } },
+        { id: "call-b", type: "function", function: { name: "fetch", arguments: "{\"url\":\"https://example.com\"}" } },
+      ],
+    });
+    rl.beginToolBatch(["call-a", "call-b"], "parallel");
+    rl.recordToolStart("call-a", "search", { q: "a" });
+    rl.recordToolStart("call-b", "fetch", { url: "https://example.com" });
+    rl.recordToolEnd("call-a", false, { content: [{ type: "text", text: "a result" }] });
+    rl.recordToolEnd("call-b", true, { content: [{ type: "text", text: "fetch failed" }] });
+
+    const entry = rl.toEntry();
+    const modelRequest = entry.llmCalls[0];
+    expect(modelRequest?.emittedToolCalls?.map((call) => call.status)).toEqual(["completed", "error"]);
+    expect(entry.tools.map((tool) => tool.modelRequestId)).toEqual([modelRequest?.id, modelRequest?.id]);
+    expect(entry.tools[0]?.batchId).toBe(entry.tools[1]?.batchId);
+    expect(entry.tools[0]?.batchKind).toBe("parallel");
+  });
+
+  test("records skipped emitted tool calls", () => {
+    const rl = new RequestLog("g1", "c1");
+    rl.recordLLMRequest({ model: "m" });
+    rl.recordLLMCompletion({
+      role: "assistant",
+      model: "m",
+      content: [],
+      usage: { input: 10, output: 5, totalTokens: 15 },
+      stopReason: "toolUse",
+      toolCalls: [
+        { id: "call-missing", type: "function", function: { name: "missing_tool", arguments: "{}" } },
+      ],
+    });
+    rl.recordToolSkipped("call-missing", "missing_tool", {}, "Unknown tool: missing_tool");
+
+    const entry = rl.toEntry();
+    expect(entry.tools[0]?.status).toBe("skipped");
+    expect(entry.tools[0]?.result).toBe("Unknown tool: missing_tool");
+    expect(entry.llmCalls[0]?.emittedToolCalls?.[0]?.status).toBe("skipped");
+    expect(entry.llmCalls[0]?.emittedToolCalls?.[0]?.skippedReason).toBe("Unknown tool: missing_tool");
+  });
+
   test("error captured when set", () => {
     const logger = createLogger({ level: "info" });
     const rl = new RequestLog("g1", "c1");

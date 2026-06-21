@@ -137,6 +137,15 @@
     font-size: .72rem;
     cursor: pointer;
   }
+  .entry-context {
+    color: var(--text);
+    font-size: .68rem;
+    padding: 0 .75rem .55rem 10.4rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .entry-context .context-author { color: var(--text-dim) }
   .entry-time {
     color: var(--text-dim);
     font-size: .65rem;
@@ -199,6 +208,55 @@
     font-family: var(--sans);
     font-weight: 600;
   }
+  .model-request {
+    border-top: 1px solid var(--border);
+    padding: .65rem 0;
+  }
+  .model-request:first-child { border-top: none; padding-top: 0 }
+  .model-head {
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) auto;
+    gap: .5rem;
+    align-items: start;
+    margin-bottom: .45rem;
+  }
+  .model-title {
+    color: var(--text-bright);
+    font-size: .72rem;
+    font-weight: 600;
+  }
+  .model-meta {
+    color: var(--text-dim);
+    font-size: .62rem;
+    margin-top: .15rem;
+  }
+  .model-stats {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: .35rem .7rem;
+    color: var(--text-dim);
+    font-size: .62rem;
+  }
+  .status-running { color: var(--amber) }
+  .status-completed { color: var(--green) }
+  .status-error { color: var(--red) }
+  .status-skipped { color: var(--text-dim) }
+  .batch-label {
+    color: var(--text-dim);
+    font-size: .6rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    margin: .5rem 0 .15rem;
+  }
+  .entry.active { border-left: 2px solid var(--amber) }
+  .entry-status {
+    color: var(--amber);
+    font-size: .6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
 
   .detail-table {
     width: 100%;
@@ -241,6 +299,15 @@
     background: var(--red-dim);
     padding: .35rem .5rem;
     font-size: .7rem;
+  }
+  .trigger-context {
+    color: var(--text);
+    background: #0b0c0d;
+    border-left: 2px solid var(--border-active);
+    padding: .45rem .6rem;
+    font-size: .68rem;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
   .detail-state {
     color: var(--text-dim);
@@ -394,6 +461,20 @@
     return JSON.stringify(t);
   }
 
+  function triggerContextText(ctx) {
+    if (ctx == null) return '';
+    return ctx.translatedContent || ctx.content || ctx.sourceQuote || '';
+  }
+
+  function triggerContextMeta(ctx) {
+    if (ctx == null) return '';
+    const parts = [];
+    if (ctx.authorUsername) parts.push('@' + ctx.authorUsername);
+    if (ctx.messageId) parts.push('msg ' + shortId(ctx.messageId));
+    if (ctx.sourceMessageId && ctx.sourceMessageId !== ctx.messageId) parts.push('source ' + shortId(ctx.sourceMessageId));
+    return parts.join(' | ');
+  }
+
   function fmtArgs(args) {
     if (args == null) return '';
     const s = JSON.stringify(args);
@@ -408,6 +489,20 @@
       try { return JSON.stringify(JSON.parse(trimmed), null, 2); } catch {}
     }
     return text;
+  }
+
+  function statusText(status, isError) {
+    if (isError) return 'error';
+    return status || 'completed';
+  }
+
+  function statusClass(status, isError) {
+    return 'status-' + statusText(status, isError);
+  }
+
+  function shortId(id) {
+    if (id == null || id === '') return '';
+    return String(id).length > 12 ? String(id).slice(0, 8) : String(id);
   }
 
   // Track which entries are expanded by requestId
@@ -436,52 +531,119 @@
   // Store payloads by key for modal lookup (avoids inline JSON escaping issues)
   const payloadStore = new Map();
 
-  function renderEntryDetail(e) {
-    let toolRows = '';
-    for (const t of e.tools) {
-      toolRows += '<tr' + (t.isError ? ' class="tool-error"' : '') + '>'
+  function payloadButton(e, li, kind, payload) {
+    if (payload == null) return '-';
+    const pkey = e.requestId + ':' + li;
+    const key = kind + ':' + pkey;
+    payloadStore.set(key, payload);
+    const label = kind === 'req' ? 'request' : 'response';
+    const title = kind === 'req' ? 'Request' : 'Response';
+    return '<button class="btn btn-sm" onclick="event.stopPropagation(); window.__showPayload(\'' + esc(key) + '\', \'' + title + '\')">' + label + '</button>';
+  }
+
+  function renderToolRowsForModel(modelCall, toolsById) {
+    const emitted = modelCall.emittedToolCalls || [];
+    if (emitted.length === 0) return '';
+
+    const batches = [];
+    const batchIndex = new Map();
+    for (const emittedCall of emitted) {
+      const execution = toolsById.get(emittedCall.id);
+      const batchId = execution && execution.batchId ? execution.batchId : (emittedCall.batchId || 'unbatched');
+      const batchKind = execution && execution.batchKind ? execution.batchKind : (emittedCall.batchKind || 'queued');
+      const key = batchId + ':' + batchKind;
+      if (!batchIndex.has(key)) {
+        batchIndex.set(key, batches.length);
+        batches.push({ id: batchId, kind: batchKind, calls: [] });
+      }
+      batches[batchIndex.get(key)].calls.push({ emitted: emittedCall, execution });
+    }
+
+    let html = '';
+    for (const batch of batches) {
+      const kind = batch.kind === 'parallel' ? 'parallel batch' : batch.kind === 'sequential' ? 'ordered call' : batch.kind;
+      html += '<div class="batch-label">' + esc(kind) + (batch.id !== 'unbatched' ? ' ' + esc(batch.id) : '') + '</div>';
+      html += '<table class="detail-table"><tr><th>Tool</th><th>Args</th><th>Duration</th><th>Status</th><th>Result</th></tr>';
+      for (const row of batch.calls) {
+        const t = row.execution;
+        const emittedCall = row.emitted;
+        const status = statusText(t && t.status, t && t.isError);
+        const args = t && t.args ? t.args : emittedCall.args;
+        const result = t && t.result != null ? fmtResult(t.result) : (emittedCall.skippedReason || '');
+        html += '<tr' + (status === 'error' ? ' class="tool-error"' : '') + '>'
+          + '<td>' + esc(emittedCall.name) + '<div class="model-meta">' + esc(shortId(emittedCall.id)) + '</div></td>'
+          + '<td class="tool-result">' + esc(JSON.stringify(args, null, 2)) + '</td>'
+          + '<td>' + (t && t.durationMs != null ? fmtDuration(t.durationMs) : '-') + '</td>'
+          + '<td class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</td>'
+          + '<td class="tool-result">' + (result !== '' ? esc(result) : '<span style="color:var(--text-dim);font-style:italic">pending</span>') + '</td>'
+          + '</tr>';
+      }
+      html += '</table>';
+    }
+    return html;
+  }
+
+  function renderRuntimeTools(e) {
+    const runtimeTools = (e.tools || []).filter(t => !t.modelRequestId);
+    if (runtimeTools.length === 0) return '';
+    let rows = '';
+    for (const t of runtimeTools) {
+      const status = statusText(t.status, t.isError);
+      rows += '<tr' + (status === 'error' ? ' class="tool-error"' : '') + '>'
         + '<td>' + esc(t.tool) + '</td>'
         + '<td class="tool-result">' + esc(JSON.stringify(t.args, null, 2)) + '</td>'
         + '<td>' + (t.durationMs != null ? fmtDuration(t.durationMs) : '-') + '</td>'
-        + '<td>' + (t.isError ? 'ERR' : 'ok') + '</td>'
+        + '<td class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</td>'
         + '<td class="tool-result">' + esc(fmtResult(t.result)) + '</td>'
         + '</tr>';
     }
+    return '<div class="detail-section"><div class="detail-label">Runtime Actions</div>'
+      + '<table class="detail-table"><tr><th>Action</th><th>Args</th><th>Duration</th><th>Status</th><th>Result</th></tr>'
+      + rows + '</table></div>';
+  }
 
-    let llmRows = '';
-    for (let li = 0; li < e.llmCalls.length; li++) {
-      const l = e.llmCalls[li];
-      let payloadCell = '-';
-      let responseCell = '-';
-      const pkey = e.requestId + ':' + li;
-      if (l.requestPayload != null) {
-        payloadStore.set('req:' + pkey, l.requestPayload);
-        payloadCell = '<button class="btn btn-sm" onclick="event.stopPropagation(); window.__showPayload(\'req:' + esc(pkey) + '\', \'Request\')">request</button>';
-      }
-      if (l.responsePayload != null) {
-        payloadStore.set('res:' + pkey, l.responsePayload);
-        responseCell = '<button class="btn btn-sm" onclick="event.stopPropagation(); window.__showPayload(\'res:' + esc(pkey) + '\', \'Response\')">response</button>';
-      }
-      llmRows += '<tr>'
-        + '<td>' + esc(l.model) + '</td>'
-        + '<td>' + l.promptTokens + ' / ' + l.completionTokens + '</td>'
-        + '<td>' + esc(fmtCache(l)) + '</td>'
-        + '<td>' + (l.estimatedCostUsd != null ? '$' + l.estimatedCostUsd.toFixed(4) : '-') + '</td>'
-        + '<td>' + esc(l.stopReason) + '</td>'
-        + '<td>' + esc(l.contentTypes.join(', ')) + '</td>'
-        + '<td class="tool-result">' + (l.outputText != null ? esc(l.outputText) : '<span style="color:var(--text-dim);font-style:italic">no text output</span>') + '</td>'
-        + '<td>' + payloadCell + '</td>'
-        + '<td>' + responseCell + '</td>'
-        + '</tr>';
+  function renderEntryDetail(e) {
+    const toolsById = new Map();
+    for (const t of e.tools || []) {
+      if (t.id) toolsById.set(t.id, t);
     }
 
-    return (e.error != null ? '<div class="detail-section"><div class="detail-label">Error</div><div class="error-text">' + esc(e.error) + '</div></div>' : '')
-      + (e.tools.length > 0 ? '<div class="detail-section"><div class="detail-label">Tool Calls</div>'
-        + '<table class="detail-table"><tr><th>Tool</th><th>Args</th><th>Duration</th><th>Status</th><th>Result</th></tr>'
-        + toolRows + '</table></div>' : '')
-      + (e.llmCalls.length > 0 ? '<div class="detail-section"><div class="detail-label">LLM Calls</div>'
-        + '<table class="detail-table"><tr><th>Model</th><th>Tokens (in/out)</th><th>Cache (read/write)</th><th>Cost</th><th>Stop</th><th>Content Types</th><th>Output</th><th>Request</th><th>Response</th></tr>'
-        + llmRows + '</table></div>' : '')
+    let modelSections = '';
+    for (let li = 0; li < e.llmCalls.length; li++) {
+      const l = e.llmCalls[li];
+      const status = statusText(l.status, l.isError);
+      const cost = l.estimatedCostUsd != null ? '$' + l.estimatedCostUsd.toFixed(4) : '-';
+      const duration = l.durationMs != null ? fmtDuration(l.durationMs) : (status === 'running' ? 'running' : '-');
+      modelSections += '<div class="model-request">'
+        + '<div class="model-head">'
+          + '<div>'
+            + '<div class="model-title">Model Request #' + (li + 1) + ' <span class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</span></div>'
+            + '<div class="model-meta">' + esc(l.model) + ' | stop ' + esc(l.stopReason) + ' | ' + esc(l.contentTypes.join(', ') || 'no content yet') + '</div>'
+          + '</div>'
+          + '<div class="model-stats">'
+            + '<span>' + esc(duration) + '</span>'
+            + '<span>tokens <span class="stat-val">' + l.promptTokens + ' / ' + l.completionTokens + '</span></span>'
+            + '<span>cache <span class="stat-val">' + esc(fmtCache(l)) + '</span></span>'
+            + '<span class="entry-cost">' + esc(cost) + '</span>'
+            + '<span>' + payloadButton(e, li, 'req', l.requestPayload) + '</span>'
+            + '<span>' + payloadButton(e, li, 'res', l.responsePayload) + '</span>'
+          + '</div>'
+        + '</div>'
+        + (l.error != null ? '<div class="error-text">' + esc(l.error) + '</div>' : '')
+        + (l.outputText != null ? '<div class="tool-result">' + esc(l.outputText) + '</div>' : '')
+        + renderToolRowsForModel(l, toolsById)
+      + '</div>';
+    }
+
+    const contextText = triggerContextText(e.triggerContext);
+    const contextMeta = triggerContextMeta(e.triggerContext);
+    return (contextText !== '' || contextMeta !== '' ? '<div class="detail-section"><div class="detail-label">Trigger Context</div><div class="trigger-context">'
+        + (contextMeta !== '' ? '<div class="model-meta">' + esc(contextMeta) + '</div>' : '')
+        + (contextText !== '' ? esc(contextText) : '<span style="color:var(--text-dim);font-style:italic">no trigger text</span>')
+      + '</div></div>' : '')
+      + (e.error != null ? '<div class="detail-section"><div class="detail-label">Error</div><div class="error-text">' + esc(e.error) + '</div></div>' : '')
+      + (e.llmCalls.length > 0 ? '<div class="detail-section"><div class="detail-label">Model Requests</div>' + modelSections + '</div>' : '')
+      + renderRuntimeTools(e)
       + (e.error == null && e.tools.length === 0 && e.llmCalls.length === 0 ? '<div class="detail-state">No tool or LLM detail for this entry.</div>' : '');
   }
 
@@ -499,7 +661,9 @@
   }
 
   async function loadEntryDetail(requestId) {
-    if (detailCache.has(requestId) || detailRequests.has(requestId)) return;
+    const cached = detailCache.get(requestId);
+    if (cached != null && cached.status !== 'active') return;
+    if (detailRequests.has(requestId)) return;
     detailErrors.delete(requestId);
     const request = (async function() {
       const r = await fetch('/api/logs/' + encodeURIComponent(requestId));
@@ -521,17 +685,22 @@
   function renderEntry(e) {
     const cost = e.estimatedCostUsd != null ? '$' + e.estimatedCostUsd.toFixed(4) : null;
     const hasErr = e.hasError === true;
+    const isActive = e.status === 'active';
     const cls = ['entry'];
     if (hasErr) cls.push('has-error');
-    if (!e.agentRan) cls.push('no-agent');
+    if (isActive) cls.push('active');
+    if (!e.agentRan && !isActive) cls.push('no-agent');
     if (expandedIds.has(e.requestId)) cls.push('expanded');
 
     const rid = esc(e.requestId);
+    const contextText = triggerContextText(e.triggerContext);
+    const contextMeta = triggerContextMeta(e.triggerContext);
     return '<div class="' + cls.join(' ') + '" data-rid="' + rid + '">'
       + '<div class="entry-header" onclick="window.__toggleExpand(\'' + rid + '\')">'
         + '<span class="entry-time">' + fmtTime(e.timestamp) + '</span>'
         + '<span class="entry-user">' + esc(e.authorUsername) + '</span>'
         + '<span class="entry-trigger">' + esc(fmtTrigger(e.trigger)) + '</span>'
+        + (isActive ? '<span class="entry-status">running</span>' : '')
         + (hasErr ? '<span class="entry-error-badge">error</span>' : '')
         + '<div class="entry-stats">'
           + '<span>' + fmtDuration(e.totalDurationMs) + '</span>'
@@ -540,6 +709,7 @@
           + (cost ? '<span class="entry-cost">' + cost + '</span>' : '')
         + '</div>'
       + '</div>'
+      + (contextText !== '' ? '<div class="entry-context"><span class="context-author">' + esc(contextMeta) + '</span>' + (contextMeta !== '' ? ' ' : '') + esc(contextText) + '</div>' : '')
       + '<div class="entry-detail" data-detail-rid="' + rid + '">' + (expandedIds.has(e.requestId) ? detailStateHtml(e.requestId) : '') + '</div>'
     + '</div>';
   }
@@ -564,8 +734,17 @@
     const data = await r.json();
     if (currentLogParams().toString() !== requestQuery) return;
 
-    // Cheap fingerprint: count + newest requestId. Skip re-render if unchanged.
-    const hash = data.length + ':' + (data.length > 0 ? data[0].requestId : '');
+    // Small summaries only; include active counts/status so live rows can update.
+    const hash = JSON.stringify(data.map(e => [
+      e.requestId,
+      e.status || '',
+      e.toolCount,
+      e.llmCallCount,
+      e.totalDurationMs,
+      e.hasError,
+      e.estimatedCostUsd,
+      triggerContextText(e.triggerContext),
+    ]));
     if (hash === lastLogHash) return;
     lastLogHash = hash;
 
@@ -643,6 +822,7 @@
     if (!logPollingActive) return;
     try {
       await refreshLogs();
+      await refreshExpandedActiveDetails();
     } catch {}
     if (!logPollingActive) return;
     logPollTimer = setTimeout(() => { logPollTimer = null; pollLogs(); }, 1000);
@@ -667,6 +847,18 @@
       logPollTimer = null;
     }
     logPollingActive = false;
+  }
+
+  async function refreshExpandedActiveDetails() {
+    const activeIds = [];
+    for (const requestId of expandedIds) {
+      const cached = detailCache.get(requestId);
+      const row = document.querySelector('[data-rid="' + requestId + '"]');
+      if ((cached != null && cached.status === 'active') || (row != null && row.classList.contains('active'))) {
+        activeIds.push(requestId);
+      }
+    }
+    await Promise.all(activeIds.map((requestId) => loadEntryDetail(requestId)));
   }
 
   document.addEventListener('visibilitychange', () => {

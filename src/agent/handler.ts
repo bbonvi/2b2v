@@ -924,10 +924,10 @@ async function completeModelTurnWithRetries(input: {
     } catch (error) {
       const normalizedError = normalizeModelTurnError(error, input.request);
       const shouldRetry = attempt < maxAttempts && isRetriableModelTurnError(normalizedError);
+      if (!isAgentTimeBudgetExceededError(normalizedError)) {
+        input.requestLog?.recordLLMError(normalizedError);
+      }
       if (!shouldRetry) {
-        if (!isAgentTimeBudgetExceededError(normalizedError)) {
-          input.requestLog?.recordLLMError(normalizedError);
-        }
         throw normalizedError;
       }
       input.log?.warn("retrying LLM turn", {
@@ -1167,6 +1167,12 @@ async function runNativeToolLoop(input: {
 
   const appendSkippedToolCallsForAgentTimeBudget = (calls: OpenRouterToolCall[]): void => {
     for (const skippedCall of calls) {
+      input.requestLog?.recordToolSkipped(
+        skippedCall.id,
+        skippedCall.function.name,
+        parseToolArgumentsSafe(skippedCall),
+        agentTimeBudgetToolMessage(),
+      );
       input.messages.push(toolMessage(skippedCall, agentTimeBudgetToolMessage()));
     }
   };
@@ -1240,6 +1246,12 @@ async function runNativeToolLoop(input: {
     if (round === input.maxToolRounds) {
       input.messages.push(assistantMessageFromResult(result));
       for (const call of result.toolCalls) {
+        input.requestLog?.recordToolSkipped(
+          call.id,
+          call.function.name,
+          parseToolArgumentsSafe(call),
+          toolBudgetExhaustedMessage("rounds"),
+        );
         input.messages.push(toolMessage(call, toolBudgetExhaustedMessage("rounds")));
       }
       return await completeFinalWithoutTools();
@@ -1251,6 +1263,7 @@ async function runNativeToolLoop(input: {
     const pendingParallelCalls: Array<{ call: OpenRouterToolCall; tool: AgentTool }> = [];
     const flushParallelCalls = async (): Promise<void> => {
       if (pendingParallelCalls.length === 0) return;
+      input.requestLog?.beginToolBatch(pendingParallelCalls.map(({ call }) => call.id), "parallel");
       const executions = await Promise.all(pendingParallelCalls.map(({ call, tool }) =>
         executeToolCallForLoop({
           tool,
@@ -1293,6 +1306,12 @@ async function runNativeToolLoop(input: {
           return await finishAfterAgentTimeBudget();
         }
         for (const skippedCall of result.toolCalls.slice(callIndex)) {
+          input.requestLog?.recordToolSkipped(
+            skippedCall.id,
+            skippedCall.function.name,
+            parseToolArgumentsSafe(skippedCall),
+            toolBudgetExhaustedMessage("calls"),
+          );
           input.messages.push(toolMessage(skippedCall, toolBudgetExhaustedMessage("calls")));
         }
         input.messages.push(...imageMessages);
@@ -1303,6 +1322,12 @@ async function runNativeToolLoop(input: {
       const tool = toolsByName.get(call.function.name);
       if (tool === undefined) {
         await flushParallelCalls();
+        input.requestLog?.recordToolSkipped(
+          call.id,
+          call.function.name,
+          parseToolArgumentsSafe(call),
+          `Unknown tool: ${call.function.name}`,
+        );
         input.messages.push(toolMessage(call, `Unknown tool: ${call.function.name}`));
         continue;
       }
@@ -1318,6 +1343,7 @@ async function runNativeToolLoop(input: {
         input.messages.push(...imageMessages);
         return await finishAfterAgentTimeBudget();
       }
+      input.requestLog?.beginToolBatch([call.id], "sequential");
       const execution = await executeToolCallForLoop({
         tool,
         call,
