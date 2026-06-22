@@ -105,7 +105,7 @@ describe("createChannelDispatcher", () => {
     };
 
     const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 20 });
-    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers(), handler });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers({ keywordDebounceMs: 20 }), handler });
 
     enqueue(dispatcher, makeMessage("ch-1", "m-1"), { reason: "mention" });
     await delay(30); // first handler starts
@@ -128,7 +128,7 @@ describe("createChannelDispatcher", () => {
     };
 
     const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 20 });
-    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers(), handler });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers({ keywordDebounceMs: 20 }), handler });
 
     enqueue(dispatcher, makeMessage("ch-1", "m-1"), { reason: "mention" });
     await delay(60);
@@ -159,12 +159,12 @@ describe("createChannelDispatcher", () => {
     dispatcher.dispose();
   });
 
-  test("mention shortens debounce from default to mention timing", async () => {
+  test("mention shortens debounce from default to mention timing when typing wait is disabled", async () => {
     const batches: PendingMessage[][] = [];
     const handler: DispatchHandler = (msgs) => { batches.push([...msgs]); return Promise.resolve(undefined); };
 
     const config = makeConfig({ mentionDebounceMs: 30, defaultDebounceMs: 200 });
-    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers(), handler });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers({ typingIdleMs: 0 }), handler });
 
     // First message starts default debounce
     enqueue(dispatcher, makeMessage("ch-1"));
@@ -213,7 +213,7 @@ describe("createChannelDispatcher", () => {
     };
 
     const config = makeConfig({ mentionDebounceMs: 20 });
-    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers(), handler });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers({ keywordDebounceMs: 20 }), handler });
 
     enqueue(dispatcher, makeMessage("ch-1", "m-first"), { reason: "mention" }, "user-1");
     enqueue(dispatcher, makeMessage("ch-1", "m-second"), { reason: "mention" }, "user-2");
@@ -344,7 +344,7 @@ describe("createChannelDispatcher", () => {
     dispatcher.dispose();
   });
 
-  test("waits for mention triggering user to stop typing", async () => {
+  test("waits for mention triggering user to stop typing after short mention debounce window", async () => {
     let callCount = 0;
     const handler: DispatchHandler = () => {
       callCount++;
@@ -352,17 +352,18 @@ describe("createChannelDispatcher", () => {
     };
 
     const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 200 });
-    const triggers = makeTriggers({ typingIdleMs: 50, typingMaxWaitMs: 200 });
+    const triggers = makeTriggers({ keywordDebounceMs: 80, typingIdleMs: 50, typingMaxWaitMs: 200 });
     const dispatcher = createChannelDispatcher({ config, triggers, handler });
 
     enqueue(dispatcher, makeMessage("ch-1", "m-mention"), { reason: "mention" }, "user-1");
-    await delay(5);
+    await delay(40);
+    expect(callCount).toBe(0);
     dispatcher.recordTyping("ch-1", "user-1");
 
-    await delay(35);
+    await delay(30);
     expect(callCount).toBe(0);
 
-    await delay(60);
+    await delay(40);
     expect(callCount).toBe(1);
 
     dispatcher.dispose();
@@ -376,7 +377,7 @@ describe("createChannelDispatcher", () => {
     };
 
     const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 200 });
-    const triggers = makeTriggers({ typingIdleMs: 80, typingMaxWaitMs: 300 });
+    const triggers = makeTriggers({ keywordDebounceMs: 20, typingIdleMs: 80, typingMaxWaitMs: 300 });
     const dispatcher = createChannelDispatcher({ config, triggers, handler });
 
     enqueue(dispatcher, makeMessage("ch-1", "m-mention"), { reason: "mention" }, "user-1");
@@ -401,7 +402,7 @@ describe("createChannelDispatcher", () => {
     };
 
     const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 200 });
-    const triggers = makeTriggers({ typingIdleMs: 80, typingMaxWaitMs: 300 });
+    const triggers = makeTriggers({ keywordDebounceMs: 20, typingIdleMs: 80, typingMaxWaitMs: 300 });
     const dispatcher = createChannelDispatcher({ config, triggers, handler });
 
     enqueue(dispatcher, makeMessage("ch-1", "m-mention"), { reason: "mention" }, "user-1");
@@ -518,7 +519,7 @@ describe("createChannelDispatcher", () => {
     };
 
     const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 20 });
-    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers(), handler });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers({ keywordDebounceMs: 20 }), handler });
 
     enqueue(dispatcher, makeMessage("ch-1", "m-1"), { reason: "mention" });
     await delay(30);

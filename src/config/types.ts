@@ -26,7 +26,7 @@ export interface MembersConfig {
 export interface DispatcherConfig {
   /** Whether the channel dispatcher is enabled. Default true. */
   enabled: boolean;
-  /** Debounce ms for mention triggers. Default 500. */
+  /** Debounce ms for mention triggers when typing-aware waits are disabled. Default 500. */
   mentionDebounceMs: number;
   /** Debounce ms for non-mention triggers (keyword, random). Default 2000. */
   defaultDebounceMs: number;
@@ -144,7 +144,7 @@ export interface TriggerConfig {
   mention: boolean;
   keywords: string[];
   randomChance: number; // 0–1
-  /** Debounce ms after a keyword trigger before the agent runs. */
+  /** Debounce ms after a keyword trigger, and after typing-aware mention triggers, before the agent runs. */
   keywordDebounceMs: number;
   /** Treat typingStart from the keyword/mention-triggering user as active for this long. */
   typingIdleMs: number;

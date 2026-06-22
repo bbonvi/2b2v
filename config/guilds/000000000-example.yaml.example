@@ -7,7 +7,7 @@ triggers:
   mention: true            # Respond when @mentioned
   keywords: [2b, yorha]   # Keywords that trigger a response
   randomChance: 0.02       # 0–1 probability of responding to any message
-  keywordDebounceMs: 2500  # Wait after a keyword trigger before replying
+  keywordDebounceMs: 2500  # Wait after a keyword or typing-aware mention trigger before replying
   typingIdleMs: 10000      # Treat typingStart from the triggering user as active for this long
   typingMaxWaitMs: 15000   # Hard cap for typing-aware keyword/mention waits
 
@@ -112,7 +112,7 @@ promptCaching:
 # Channel dispatcher (overrides global defaults)
 # dispatcher:
 #   enabled: true
-#   mentionDebounceMs: 500
+#   mentionDebounceMs: 500 # Used for mentions when typing-aware waits are disabled
 #   defaultDebounceMs: 2000
 
 # Async agent job overrides (currently image generation)

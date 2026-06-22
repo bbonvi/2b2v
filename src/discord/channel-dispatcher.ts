@@ -183,9 +183,15 @@ export function createChannelDispatcher(opts: {
   }
 
   function getDebounceMs(trigger: SelectedDispatchTrigger | null): number {
-    if (trigger?.result.reason === "mention") return Math.max(0, config.mentionDebounceMs);
+    if (trigger?.result.reason === "mention") {
+      return typingWaitEnabled() ? Math.max(0, triggers.keywordDebounceMs) : Math.max(0, config.mentionDebounceMs);
+    }
     if (trigger?.result.reason === "keyword") return Math.max(0, triggers.keywordDebounceMs);
     return Math.max(0, config.defaultDebounceMs);
+  }
+
+  function typingWaitEnabled(): boolean {
+    return triggers.typingIdleMs > 0 && triggers.typingMaxWaitMs > 0;
   }
 
   function latestMessageAtForUser(messages: readonly PendingMessage[], userId: string): number {
@@ -202,7 +208,7 @@ export function createChannelDispatcher(opts: {
     trigger: SelectedDispatchTrigger | null,
   ): number {
     if (trigger === null || !usesTypingWait(trigger.result)) return 0;
-    if (triggers.typingIdleMs <= 0 || triggers.typingMaxWaitMs <= 0) return 0;
+    if (!typingWaitEnabled()) return 0;
 
     const userId = trigger.message.authorId;
     const lastTypingAt = state.typingByUser.get(userId);
