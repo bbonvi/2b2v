@@ -7,7 +7,9 @@ import {
   createMemory,
   deleteMemory,
   getMemory,
+  isMemoryKind,
   listMemories,
+  MEMORY_KINDS,
   updateMemory,
   type MemoryKind,
   type MemoryRow,
@@ -79,6 +81,7 @@ interface MemoryMutationInput {
 
 type MemorySubject = "global" | "current_user" | "user";
 type ExpiresInUnit = "minutes" | "hours" | "days" | "weeks" | "months";
+const MAX_SCRATCHPAD_TTL_MS = 24 * 60 * 60 * 1000;
 
 interface ExpiresIn {
   amount: number;
@@ -113,14 +116,7 @@ const MemoryActionSchema = Type.Union([
       minLength: 1,
       description: "Required when subject=user. Leading @ is optional.",
     })),
-    kind: Type.Union([
-      Type.Literal("global_note"),
-      Type.Literal("user_note"),
-      Type.Literal("preference"),
-      Type.Literal("relationship"),
-      Type.Literal("project"),
-      Type.Literal("fact"),
-    ]),
+    kind: Type.String({ enum: [...MEMORY_KINDS] }),
     content: Type.String({ minLength: 1 }),
     confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
     expiresIn: Type.Optional(Type.Union([ExpiresInSchema, Type.Null()], {
@@ -153,8 +149,6 @@ type MemoryExtraction = {
     | { action: "delete"; id: number }
   >;
 };
-
-const MEMORY_KINDS = ["global_note", "user_note", "preference", "relationship", "project", "fact"] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -195,10 +189,10 @@ export function buildMemoryPolicyInstructions(): string[] {
   return [
     "Preserve a memory only if it is likely to be useful in a future conversation or future bot decision.",
     "If the fact cannot change how the bot should reply or act later, return action=none.",
-    "Save stable user preferences, preferred or real names, explicit name/pronoun/language corrections, long-term facts, recurring project context, relationships, and explicit corrections.",
-    "Record explicit and strongly implied durable facts, preferences, relationships, routines, constraints, identity details, projects, and recurring behaviors when they could matter later; the user does not need to ask you to remember.",
+    "Save stable user preferences, identity details, hard constraints, recurring interests, relationships, long-term facts, and explicit corrections.",
+    "Record explicit and strongly implied durable facts, preferences, relationships, routines, constraints, identity details, interests, and recurring behaviors when they could matter later; the user does not need to ask you to remember.",
     "The triggering user is only the source of this memory pass, not the only valid memory subject. Inspect the current exchange and recent chat context for durable, future-useful memories about any clearly identifiable user or shared context; use subject=user with username for another user when appropriate.",
-    "Be proactive but selective: record context-derived or implied memories only when they are likely to affect future replies, reveal a stable pattern, or clarify relationships, preferences, constraints, projects, or routines.",
+    "Be proactive but selective: record context-derived or implied memories only when they are likely to affect future replies, reveal a stable pattern, or clarify relationships, preferences, constraints, interests, identity, active work, or routines.",
     "Memory changes should be occasional, not routine. Prefer action=none when the signal is weak, incidental, or unlikely to matter in future conversations.",
     "For subtle, uncertain, or pattern-based memories, use lower confidence and tentative standalone phrasing; if the clue is likely to become stale, use a conservative expiresIn. Keep the memory content short and avoid verbose meta-commentary.",
     "Use lower confidence for indirect, inferred, or pattern-based memories.",
@@ -212,13 +206,16 @@ export function buildMemoryPolicyInstructions(): string[] {
     "Update an existing memory id only when the new chat meaningfully changes its facts, scope, confidence, expiry, or merges/removes a real duplicate. Do not update just to improve grammar, phrasing, capitalization, tense, style, or specificity.",
     "Prefer updating an existing memory id over creating duplicates when there is a real semantic change. Actively delete stale or superseded existing memories when the current exchange clearly replaces them.",
     "Only delete a memory when an existing memory is listed below and the new chat clearly makes that specific memory obsolete, false, or superseded. Never invent memory ids.",
-    "Prefer the narrowest correct scope: subject=current_user for triggering-user preferences/facts, subject=user with username for another named user, and subject=global only for shared server/project facts or explicit bot-wide rules.",
+    "Prefer the narrowest correct scope: subject=current_user for triggering-user preferences/facts, subject=user with username for another named user, and subject=global only for shared server or work-context facts or explicit bot-wide rules.",
     "Do not turn one user's preference into a global memory unless explicitly asked to apply it globally or to everyone.",
-    "Use kind=project only for named or clearly active work, durable project goals, constraints, architecture, conventions, decisions, or near-future work state that can guide the bot later.",
-    "Short-lived project scratchpad memories are allowed for active one-off work only when they may help a near-future follow-up. Keep them extremely small, require expiresIn, and use a very short TTL: usually hours, at most 1 day unless the user describes an ongoing project.",
-    "For one-off image generations, tool tasks, debugging sessions, or errands, do not write a permanent activity log. If useful at all, save only the tiny current work state as kind=project with expiresIn.",
-    "Set expiresIn only for clearly temporary memories, such as current-event context, short-lived projects, temporary availability, deadlines, or explicitly time-limited preferences. Use a structured relative duration like {amount: 3, unit: \"days\"}; do not calculate timestamps.",
-    "Do not overuse expiresIn. Do not set expiry for names, pronouns, stable preferences, relationships, durable facts, or things likely to live a long time; permanent is fine because stale memories can be removed later.",
+    "Use kind=identity for names, pronouns, languages, timezones, roles, handles, or stable self-descriptions.",
+    "Use kind=constraint for hard boundaries, privacy limits, standing requirements, do-not-do rules, and durable constraints on bot behavior.",
+    "Use kind=interest for recurring hobbies, tastes, subjects, media, activities, or preference-like interests that are not direct behavior instructions.",
+    "Use kind=scratchpad only for very short-lived internal notes that help the bot reason across immediate follow-up turns. Scratchpad is private working context, not user-facing memory.",
+    "Scratchpad is not a progress dump, transcript summary, or activity log. Do not save facts that message history can already recover; save only the tiny hidden note needed for the next iteration.",
+    "Scratchpad must always include expiresIn when created or when converted from another kind. Use minutes or hours; at most 1 day. Update expiresIn to reset the short TTL only while the note remains useful.",
+    "Set expiresIn only for clearly temporary memories, such as current-event context, scratchpad, temporary availability, deadlines, or explicitly time-limited preferences. Use a structured relative duration like {amount: 3, unit: \"days\"}; do not calculate timestamps.",
+    "Do not overuse expiresIn except for scratchpad. Do not set expiry for names, pronouns, stable preferences, relationships, durable facts, constraints, identity details, or things likely to live a long time; permanent is fine because stale memories can be removed later.",
     "When a temporary memory is reinforced into a permanent memory, set expiresIn=null on that existing id. When temporary context is extended, update expiresIn to the full new relative duration from now.",
     "Do not persist facts that come only from system/developer context, persona, tool instructions, existing memory text, member lists, schedules, or bot implementation details.",
     "Focus on what the human user newly revealed or corrected in the chat exchange. Recent chat context is supporting evidence, not the only source.",
@@ -316,10 +313,8 @@ function normalizeSubject(value: unknown): MemorySubject {
   return "current_user";
 }
 
-function normalizeKind(value: unknown): MemoryKind {
-  return typeof value === "string" && (MEMORY_KINDS as readonly string[]).includes(value)
-    ? value as MemoryKind
-    : "fact";
+function normalizeKind(value: unknown): MemoryKind | null {
+  return isMemoryKind(value) ? value : null;
 }
 
 function normalizeExpiresIn(value: unknown): ExpiresIn | null | undefined {
@@ -339,7 +334,7 @@ function normalizeExpiresIn(value: unknown): ExpiresIn | null | undefined {
   return { amount, unit };
 }
 
-function expiresInToExpiresAt(expiresIn: ExpiresIn, now = Date.now()): number {
+function expiresInToMilliseconds(expiresIn: ExpiresIn): number {
   const minuteMs = 60 * 1000;
   const unitMs: Record<ExpiresInUnit, number> = {
     minutes: minuteMs,
@@ -348,7 +343,21 @@ function expiresInToExpiresAt(expiresIn: ExpiresIn, now = Date.now()): number {
     weeks: 7 * 24 * 60 * minuteMs,
     months: 30 * 24 * 60 * minuteMs,
   };
-  return Math.round(now + expiresIn.amount * unitMs[expiresIn.unit]);
+  return expiresIn.amount * unitMs[expiresIn.unit];
+}
+
+function expiresInToExpiresAt(expiresIn: ExpiresIn, now = Date.now()): number {
+  return Math.round(now + expiresInToMilliseconds(expiresIn));
+}
+
+function scratchpadExpiryIsValid(
+  action: Extract<MemoryExtraction["actions"][number], { action: "upsert" }>,
+  existing: MemoryRow | null,
+): boolean {
+  if (action.kind !== "scratchpad") return true;
+  if (action.expiresIn === null) return false;
+  if (action.expiresIn !== undefined) return expiresInToMilliseconds(action.expiresIn) <= MAX_SCRATCHPAD_TTL_MS;
+  return existing?.kind === "scratchpad" && existing.expiresAt !== null;
 }
 
 function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][number] | null {
@@ -371,6 +380,8 @@ function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][
     if ("expiresAt" in value) return null;
     const expiresIn = normalizeExpiresIn(value.expiresIn);
     if ("expiresIn" in value && expiresIn === undefined) return null;
+    const kind = "kind" in value ? normalizeKind(value.kind) : "fact";
+    if (kind === null) return null;
     return {
       action: "upsert",
       ...(id !== undefined ? { id } : {}),
@@ -378,7 +389,7 @@ function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][
       ...(normalizeUsername(value.username ?? value.subject) !== undefined
         ? { username: normalizeUsername(value.username ?? value.subject) }
         : {}),
-      kind: normalizeKind(value.kind),
+      kind,
       content,
       ...(confidence !== undefined ? { confidence } : {}),
       ...(expiresIn !== undefined ? { expiresIn } : {}),
@@ -446,7 +457,7 @@ function memoryExtractionResponseFormat(): Record<string, unknown> {
                     id: { type: "integer", minimum: 1 },
                     subject: { type: "string", enum: ["global", "current_user", "user"] },
                     username: { type: "string", minLength: 1 },
-                    kind: { type: "string", enum: ["global_note", "user_note", "preference", "relationship", "project", "fact"] },
+                    kind: { type: "string", enum: [...MEMORY_KINDS] },
                     content: { type: "string", minLength: 1 },
                     confidence: { type: "number", minimum: 0, maximum: 1 },
                     expiresIn: {
@@ -490,7 +501,7 @@ function buildExtractionPrompt(input: MemoryExtractionInput): string {
     currentUserId: input.currentUserId,
   });
   return [
-    "Extract only durable memory updates from this Discord exchange.",
+    "Extract only durable memory updates or short-lived scratchpad updates from this Discord exchange.",
     ...buildMemoryPolicyInstructions(),
     "If Existing memories is (none), deletion is impossible; return none or upsert only.",
     "",
@@ -567,6 +578,7 @@ async function applyMemoryActions(input: MemoryMutationInput, extraction: Memory
 
     const subjectUserId = await actionSubjectUserId(input, action, existing);
     if (subjectUserId === undefined) continue;
+    if (!scratchpadExpiryIsValid(action, existing)) continue;
     const expiresAt = action.expiresIn === undefined
       ? undefined
       : action.expiresIn === null
@@ -607,7 +619,7 @@ export function createRecordMemoryTool(deps: RecordMemoryToolDeps): AgentTool {
     name: "record_memory",
     label: "record_memory",
     description: [
-      "Record durable memory updates after a Discord turn has already completed.",
+      "Record durable memory updates or short-lived scratchpad updates after a Discord turn has already completed.",
       ...buildMemoryPolicyInstructions(),
       "Call this tool at most once per pass; put all memory changes in the single actions array.",
       "When recording a claim about another user that they did not directly confirm, use lower confidence.",

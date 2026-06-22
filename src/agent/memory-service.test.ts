@@ -37,7 +37,7 @@ describe("buildMemoryContext", () => {
     createMemory(db, {
       guildId: "g1",
       subjectUserId: "u1",
-      kind: "project",
+      kind: "scratchpad",
       content: "Alice is temporarily focused on launch prep.",
       expiresAt: Date.now() + (3 * 24 * 60 * 60 * 1000),
     });
@@ -48,7 +48,7 @@ describe("buildMemoryContext", () => {
       currentUserId: "u1",
     });
 
-    expect(context).toContain("[project] [expires in 3 days] Alice is temporarily focused on launch prep.");
+    expect(context).toContain("[scratchpad] [expires in 3 days] Alice is temporarily focused on launch prep.");
     expect(context).not.toContain("expiresAt");
   });
 
@@ -92,7 +92,7 @@ describe("buildVisibleUserMemoryContext", () => {
     const newest = createMemory(db, { guildId: "g1", subjectUserId: "u-new", kind: "fact", content: "Newest visible-user memory." });
     const middle = createMemory(db, { guildId: "g1", subjectUserId: "u-new", kind: "fact", content: "Middle visible-user memory." });
     const oldest = createMemory(db, { guildId: "g1", subjectUserId: "u-new", kind: "fact", content: "Oldest visible-user memory." });
-    const midUser = createMemory(db, { guildId: "g1", subjectUserId: "u-mid", kind: "project", content: "Mid user memory." });
+    const midUser = createMemory(db, { guildId: "g1", subjectUserId: "u-mid", kind: "interest", content: "Mid user memory." });
     createMemory(db, { guildId: "g1", subjectUserId: "u-old", kind: "fact", content: "Old visible-user memory." });
     createMemory(db, { guildId: "g1", subjectUserId: "u-current", kind: "preference", content: "Current user memory." });
     createMemory(db, { guildId: "g1", kind: "global_note", content: "Global memory." });
@@ -177,7 +177,7 @@ describe("extractAndApplyMemories", () => {
           actions: [{
             action: "upsert",
             subject: "current_user",
-            kind: "fact",
+            kind: "identity",
             content: "Preferred name is Sasha.",
           }],
         }),
@@ -265,7 +265,7 @@ describe("extractAndApplyMemories", () => {
             {
               action: "upsert",
               subject: "global",
-              kind: "project",
+              kind: "interest",
               content: "The server is testing the bot rewrite.",
             },
             { action: "delete", id: removed },
@@ -280,7 +280,36 @@ describe("extractAndApplyMemories", () => {
     expect(getMemory(db, existing)?.content).toBe("Prefers short replies.");
     expect(getMemory(db, existing)?.confidence).toBe(0.95);
     expect(getMemory(db, removed)).toBeNull();
-    expect(listMemories(db, { guildId: "g1" }).some((row) => row.kind === "project")).toBe(true);
+    expect(listMemories(db, { guildId: "g1" }).some((row) => row.kind === "interest")).toBe(true);
+  });
+
+  test("ignores explicit legacy project kind from sloppy providers", async () => {
+    await extractAndApplyMemories({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      currentUsername: "alice",
+      sourceMessageId: "m1",
+      userMessage: "remember the rewrite project",
+      assistantReply: "got it",
+      recentContext: "",
+      apiKey: "key",
+      model: "model",
+      promptCaching: { enabled: false },
+      completeChat: () => Promise.resolve({
+        text: JSON.stringify({
+          actions: [{
+            action: "upsert",
+            subject: "current_user",
+            kind: "project",
+            content: "Legacy project kind should not be coerced.",
+          }],
+        }),
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      }),
+    });
+
+    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
   });
 
   test("applies relative expiresIn from extractor output", async () => {
@@ -514,14 +543,14 @@ describe("createRecordMemoryTool", () => {
     const temporary = createMemory(db, {
       guildId: "g1",
       subjectUserId: "u1",
-      kind: "project",
+      kind: "fact",
       content: "Temporary launch focus.",
       expiresAt: Date.now() + 60_000,
     });
     const prolonged = createMemory(db, {
       guildId: "g1",
       subjectUserId: "u1",
-      kind: "project",
+      kind: "scratchpad",
       content: "Temporary dashboard focus.",
       expiresAt: Date.now() + 60_000,
     });
@@ -539,15 +568,15 @@ describe("createRecordMemoryTool", () => {
           action: "upsert",
           id: temporary,
           subject: "current_user",
-          kind: "project",
-          content: "Launch focus is now a durable project preference.",
+          kind: "fact",
+          content: "Launch focus is now durable context.",
           expiresIn: null,
         },
         {
           action: "upsert",
           id: prolonged,
           subject: "current_user",
-          kind: "project",
+          kind: "scratchpad",
           content: "Temporary dashboard focus lasts through tonight.",
           expiresIn: { amount: 3, unit: "hours" },
         },
@@ -559,6 +588,92 @@ describe("createRecordMemoryTool", () => {
     expect(getMemory(db, temporary)?.expiresAt).toBeNull();
     expect(prolongedExpiresAt).toBeGreaterThanOrEqual(before + 3 * 60 * 60 * 1000);
     expect(prolongedExpiresAt).toBeLessThanOrEqual(after + 3 * 60 * 60 * 1000);
+  });
+
+  test("preserves existing scratchpad expiry when update omits expiresIn", async () => {
+    const expiresAt = Date.now() + 60_000;
+    const scratchpad = createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      kind: "scratchpad",
+      content: "Check dashboard auth next.",
+      expiresAt,
+    });
+    const tool = createRecordMemoryTool({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      sourceMessageId: "m1",
+    });
+
+    await tool.execute("call-1", {
+      actions: [{
+        action: "upsert",
+        id: scratchpad,
+        subject: "current_user",
+        kind: "scratchpad",
+        content: "Check dashboard auth headers next.",
+      }],
+    });
+
+    expect(getMemory(db, scratchpad)?.content).toBe("Check dashboard auth headers next.");
+    expect(getMemory(db, scratchpad)?.expiresAt).toBe(expiresAt);
+  });
+
+  test("rejects scratchpad upserts without an expiry through a real tool", async () => {
+    const tool = createRecordMemoryTool({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      sourceMessageId: "m1",
+    });
+
+    await tool.execute("call-1", {
+      actions: [
+        {
+          action: "upsert",
+          subject: "current_user",
+          kind: "scratchpad",
+          content: "Missing expiry.",
+        },
+        {
+          action: "upsert",
+          subject: "current_user",
+          kind: "scratchpad",
+          content: "Null expiry.",
+          expiresIn: null,
+        },
+        {
+          action: "upsert",
+          subject: "current_user",
+          kind: "scratchpad",
+          content: "Too long.",
+          expiresIn: { amount: 2, unit: "days" },
+        },
+      ],
+    });
+
+    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
+  });
+
+  test("rejects explicit legacy project kind through a real tool", async () => {
+    const tool = createRecordMemoryTool({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      sourceMessageId: "m1",
+    });
+
+    await tool.execute("call-1", {
+      actions: [{
+        action: "upsert",
+        subject: "current_user",
+        kind: "project",
+        content: "Legacy project kind should not be coerced.",
+      }],
+    });
+
+    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
   });
 
   test("skips upserts with non-positive expiresIn through a real tool", async () => {

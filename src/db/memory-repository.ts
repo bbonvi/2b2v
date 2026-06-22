@@ -1,12 +1,6 @@
 import type { Database } from "./database";
-
-export type MemoryKind =
-  | "global_note"
-  | "user_note"
-  | "preference"
-  | "relationship"
-  | "project"
-  | "fact";
+import type { MemoryKind } from "./memory-kinds";
+export { MEMORY_KINDS, isMemoryKind, type MemoryKind } from "./memory-kinds";
 
 export interface MemoryRow {
   id: number;

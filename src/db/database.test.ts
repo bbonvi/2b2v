@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import { createDatabase, type Database } from "./database";
+import { Database as BunDatabase } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -112,6 +113,48 @@ describe("memories table", () => {
     expect(insert).toThrow();
   });
 
+  test("accepts current memory kinds", () => {
+    const now = Date.now();
+    const insert = db.raw.prepare(
+      `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+
+    insert.run("guild-1", "user-1", "identity", "Preferred name is Sasha.", null, 0.8, now, now, null, null);
+    insert.run("guild-1", "user-1", "constraint", "Do not use voice replies.", null, 0.8, now, now, null, null);
+    insert.run("guild-1", "user-1", "interest", "Likes puzzle games.", null, 0.8, now, now, null, null);
+    insert.run("guild-1", "user-1", "scratchpad", "Check auth headers next.", null, 0.8, now, now, now + 60_000, null);
+
+    const rows = db.raw.prepare("SELECT kind FROM memories ORDER BY id").all() as Array<{ kind: string }>;
+    expect(rows.map((row) => row.kind)).toEqual(["identity", "constraint", "interest", "scratchpad"]);
+  });
+
+  test("rejects legacy project memory kind", () => {
+    const now = Date.now();
+    const insert = () =>
+      db.raw
+        .prepare(
+          `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run("guild-1", null, "project", "Legacy project memory", null, 0.8, now, now, null);
+
+    expect(insert).toThrow();
+  });
+
+  test("rejects scratchpad memory without expiry", () => {
+    const now = Date.now();
+    const insert = () =>
+      db.raw
+        .prepare(
+          `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run("guild-1", "user-1", "scratchpad", "Missing expiry.", null, 0.8, now, now, null);
+
+    expect(insert).toThrow();
+  });
+
   test("rejects empty memory content due to CHECK constraint", () => {
     const now = Date.now();
     const insert = () =>
@@ -146,6 +189,47 @@ describe("memories table", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_memories_guild_subject'")
       .get() as { name: string } | undefined;
     expect(idx?.name).toBe("idx_memories_guild_subject");
+  });
+
+  test("migrates old structured memory schema and drops project rows", () => {
+    const legacyPath = path.join(tmpDir, "legacy-project.db");
+    const legacy = new BunDatabase(legacyPath);
+    const now = Date.now();
+    legacy.run(`CREATE TABLE memories (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id          TEXT NOT NULL,
+      subject_user_id   TEXT,
+      kind              TEXT NOT NULL CHECK(kind IN ('global_note', 'user_note', 'preference', 'relationship', 'project', 'fact')),
+      content           TEXT NOT NULL,
+      source_message_id TEXT,
+      confidence        REAL NOT NULL DEFAULT 0.7,
+      created_at        INTEGER NOT NULL,
+      updated_at        INTEGER NOT NULL,
+      expires_at        INTEGER,
+      deleted_at        INTEGER
+    )`);
+    const insert = legacy.prepare(
+      `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insert.run("guild-1", null, "project", "Drop this legacy project.", null, 0.7, now, now, null, null);
+    insert.run("guild-1", "user-1", "fact", "Keep this fact.", null, 0.7, now, now, null, null);
+    legacy.close();
+
+    const migrated = createDatabase(legacyPath);
+    try {
+      const rows = migrated.raw.prepare("SELECT kind, content FROM memories ORDER BY id").all() as Array<{ kind: string; content: string }>;
+      const schema = migrated.raw
+        .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='memories'")
+        .get() as { sql: string };
+
+      expect(rows).toEqual([{ kind: "fact", content: "Keep this fact." }]);
+      expect(schema.sql).toContain("'identity'");
+      expect(schema.sql).toContain("kind <> 'scratchpad' OR expires_at IS NOT NULL");
+      expect(schema.sql).not.toContain("'project'");
+    } finally {
+      migrated.close();
+    }
   });
 });
 

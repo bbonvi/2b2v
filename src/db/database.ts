@@ -1,24 +1,47 @@
 import { Database as BunDatabase } from "bun:sqlite";
+import { MEMORY_KIND_SQL_VALUES, MEMORY_KINDS } from "./memory-kinds";
 
 export interface Database {
   raw: BunDatabase;
   close(): void;
 }
 
-const SCHEMA_SQL = `
-  CREATE TABLE IF NOT EXISTS memories (
+const SCRATCHPAD_EXPIRY_CHECK_SQL = "CHECK(kind <> 'scratchpad' OR expires_at IS NOT NULL)";
+
+function memoriesTableSql(tableName: string, ifNotExists = false): string {
+  return `CREATE TABLE ${ifNotExists ? "IF NOT EXISTS " : ""}${tableName} (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id          TEXT NOT NULL,
     subject_user_id   TEXT,
-    kind              TEXT NOT NULL CHECK(kind IN ('global_note', 'user_note', 'preference', 'relationship', 'project', 'fact')),
+    kind              TEXT NOT NULL CHECK(kind IN (${MEMORY_KIND_SQL_VALUES})),
     content           TEXT NOT NULL CHECK(length(trim(content)) > 0),
     source_message_id TEXT,
     confidence        REAL NOT NULL DEFAULT 0.7 CHECK(confidence >= 0 AND confidence <= 1),
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
     expires_at        INTEGER,
-    deleted_at        INTEGER
-  );
+    deleted_at        INTEGER,
+    ${SCRATCHPAD_EXPIRY_CHECK_SQL}
+  )`;
+}
+
+function memorySchemaHasCurrentChecks(sql: string | undefined): boolean {
+  return sql !== undefined
+    && MEMORY_KINDS.every((kind) => sql.includes(`'${kind}'`))
+    && !sql.includes("'project'")
+    && sql.includes(SCRATCHPAD_EXPIRY_CHECK_SQL)
+    && sql.includes("CHECK(length(trim(content)) > 0)");
+}
+
+const STRUCTURED_MEMORY_KIND_SQL = `
+  CASE
+    WHEN kind IN (${MEMORY_KIND_SQL_VALUES}) THEN kind
+    ELSE 'fact'
+  END
+`;
+
+const SCHEMA_SQL = `
+  ${memoriesTableSql("memories", true)};
 
   CREATE TABLE IF NOT EXISTS messages (
     id                  TEXT PRIMARY KEY,
@@ -164,19 +187,7 @@ export function createDatabase(dbPath: string): Database {
   if (!hasStructuredMemorySchema) {
     raw.run("BEGIN TRANSACTION");
     try {
-      raw.run(`CREATE TABLE memories_new (
-        id                INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id          TEXT NOT NULL,
-        subject_user_id   TEXT,
-        kind              TEXT NOT NULL CHECK(kind IN ('global_note', 'user_note', 'preference', 'relationship', 'project', 'fact')),
-        content           TEXT NOT NULL CHECK(length(trim(content)) > 0),
-        source_message_id TEXT,
-        confidence        REAL NOT NULL DEFAULT 0.7 CHECK(confidence >= 0 AND confidence <= 1),
-        created_at        INTEGER NOT NULL,
-        updated_at        INTEGER NOT NULL,
-        expires_at        INTEGER,
-        deleted_at        INTEGER
-      )`);
+      raw.run(memoriesTableSql("memories_new"));
       raw.run(`INSERT INTO memories_new (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
         SELECT
           COALESCE(guild_id, ''),
@@ -211,33 +222,16 @@ export function createDatabase(dbPath: string): Database {
   const memorySchema = raw
     .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='memories'")
     .get() as { sql: string } | undefined;
-  const hasMemoryChecks = memorySchema?.sql.includes("CHECK(kind IN") === true
-    && memorySchema.sql.includes("CHECK(length(trim(content)) > 0)");
-  if (hasStructuredMemorySchema && !hasMemoryChecks) {
+  if (hasStructuredMemorySchema && !memorySchemaHasCurrentChecks(memorySchema?.sql)) {
     raw.run("BEGIN TRANSACTION");
     try {
-      raw.run(`CREATE TABLE memories_new (
-        id                INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id          TEXT NOT NULL,
-        subject_user_id   TEXT,
-        kind              TEXT NOT NULL CHECK(kind IN ('global_note', 'user_note', 'preference', 'relationship', 'project', 'fact')),
-        content           TEXT NOT NULL CHECK(length(trim(content)) > 0),
-        source_message_id TEXT,
-        confidence        REAL NOT NULL DEFAULT 0.7 CHECK(confidence >= 0 AND confidence <= 1),
-        created_at        INTEGER NOT NULL,
-        updated_at        INTEGER NOT NULL,
-        expires_at        INTEGER,
-        deleted_at        INTEGER
-      )`);
+      raw.run(memoriesTableSql("memories_new"));
       raw.run(`INSERT INTO memories_new (id, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
         SELECT
           id,
           guild_id,
           subject_user_id,
-          CASE
-            WHEN kind IN ('global_note', 'user_note', 'preference', 'relationship', 'project', 'fact') THEN kind
-            ELSE 'fact'
-          END,
+          ${STRUCTURED_MEMORY_KIND_SQL},
           TRIM(content),
           source_message_id,
           CASE
@@ -250,7 +244,9 @@ export function createDatabase(dbPath: string): Database {
           expires_at,
           deleted_at
         FROM memories
-        WHERE TRIM(content) <> ''`);
+        WHERE TRIM(content) <> ''
+          AND (kind IS NULL OR kind <> 'project')
+          AND (kind IS NULL OR kind <> 'scratchpad' OR expires_at IS NOT NULL)`);
       raw.run("DROP TABLE memories");
       raw.run("ALTER TABLE memories_new RENAME TO memories");
       raw.run("CREATE INDEX IF NOT EXISTS idx_memories_guild_subject ON memories(guild_id, subject_user_id)");

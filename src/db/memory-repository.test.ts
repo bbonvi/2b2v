@@ -53,6 +53,20 @@ describe("createMemory", () => {
 
     expect(getMemory(db, id)?.confidence).toBe(1);
   });
+
+  test("stores scratchpad rows only with expiry", () => {
+    const expiresAt = Date.now() + 60_000;
+    const id = createMemory(db, {
+      guildId: "g1",
+      kind: "scratchpad",
+      content: "Check dashboard headers next.",
+      expiresAt,
+    });
+
+    const row = getMemory(db, id);
+    expect(row?.kind).toBe("scratchpad");
+    expect(row?.expiresAt).toBe(expiresAt);
+  });
 });
 
 describe("updateMemory", () => {
