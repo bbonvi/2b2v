@@ -1,4 +1,5 @@
 import type { Database } from "./database";
+import { sanitizeMemoryContent } from "./memory-content";
 import type { MemoryKind } from "./memory-kinds";
 export { MEMORY_KINDS, isMemoryKind, type MemoryKind } from "./memory-kinds";
 
@@ -176,6 +177,10 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
   const now = Date.now();
   const { scope, guildId, subjectUserId } = createScopeFields(input);
   assertKindScope(input.kind, scope);
+  const content = sanitizeMemoryContent(input.content);
+  if (content === "") {
+    throw new Error("Memory content cannot be empty.");
+  }
   const result = db.raw
     .prepare(
       `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
@@ -186,7 +191,7 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
       guildId,
       subjectUserId,
       input.kind,
-      input.content,
+      content,
       input.sourceMessageId ?? null,
       clampConfidence(input.confidence),
       now,
@@ -226,8 +231,10 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
     params.push(input.kind);
   }
   if (input.content !== undefined) {
+    const content = sanitizeMemoryContent(input.content);
+    if (content === "") return false;
     sets.push("content = ?");
-    params.push(input.content);
+    params.push(content);
   }
   if ("sourceMessageId" in input) {
     sets.push("source_message_id = ?");
@@ -323,7 +330,7 @@ function mapRow(row: Record<string, unknown>): MemoryRow {
     guildId: row.guild_id as string | null,
     subjectUserId: row.subject_user_id as string | null,
     kind: row.kind as MemoryKind,
-    content: row.content as string,
+    content: sanitizeMemoryContent(row.content as string),
     sourceMessageId: row.source_message_id as string | null,
     confidence: Number(row.confidence),
     createdAt: row.created_at as number,

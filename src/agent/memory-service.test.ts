@@ -581,6 +581,30 @@ describe("createRecordMemoryTool", () => {
     expect(memories[0]?.expiresAt).toBeLessThanOrEqual(after + 90 * 60 * 1000);
   });
 
+  test("sanitizes copied memory metadata and raw guild id prefixes", async () => {
+    const tool = createRecordMemoryTool({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      currentUsername: "alice",
+      sourceMessageId: "m1",
+    });
+
+    await tool.execute("call-1", {
+      actions: [{
+        action: "upsert",
+        subject: "user",
+        username: "@alice",
+        kind: "preference",
+        content: "In guild 427489527263789058: 17 [user:209563208199962625] [preference] Prefers concise answers.",
+      }],
+    });
+
+    const memories = listMemories(db, { guildId: "g1", subjectUserId: "u1" });
+    expect(memories).toHaveLength(1);
+    expect(memories[0]?.content).toBe("Prefers concise answers.");
+  });
+
   test("clears and prolongs memory expiry through a real tool", async () => {
     const temporary = createMemory(db, {
       guildId: "g1",

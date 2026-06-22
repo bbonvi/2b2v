@@ -244,7 +244,7 @@ describe("memories table", () => {
         .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='memories'")
         .get() as { sql: string };
 
-      expect(rows).toEqual([{ kind: "fact", content: "In guild guild-1: Keep this fact." }]);
+      expect(rows).toEqual([{ kind: "fact", content: "Keep this fact." }]);
       expect(schema.sql).toContain("'identity'");
       expect(schema.sql).toContain("'journal'");
       expect(schema.sql).toContain("scope IN ('guild', 'user', 'self')");
@@ -252,6 +252,39 @@ describe("memories table", () => {
       expect(schema.sql).toContain("kind <> 'journal' OR scope = 'self'");
       expect(schema.sql).toContain("scope = 'user' AND subject_user_id IS NOT NULL AND guild_id IS NULL");
       expect(schema.sql).not.toContain("'project'");
+    } finally {
+      migrated.close();
+    }
+  });
+
+  test("sanitizes existing malformed memory content on startup", () => {
+    const dbPath = path.join(tmpDir, "malformed-memory.db");
+    const existing = createDatabase(dbPath);
+    const now = Date.now();
+    existing.raw
+      .prepare(
+        `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        "user",
+        null,
+        "user-1",
+        "preference",
+        "In guild guild-1: 17 [user:user-1] [preference] Prefers concise answers.",
+        null,
+        0.7,
+        now,
+        now,
+        null,
+        null,
+      );
+    existing.close();
+
+    const migrated = createDatabase(dbPath);
+    try {
+      const row = migrated.raw.prepare("SELECT content FROM memories").get() as { content: string };
+      expect(row.content).toBe("Prefers concise answers.");
     } finally {
       migrated.close();
     }

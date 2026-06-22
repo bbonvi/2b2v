@@ -1978,7 +1978,7 @@ function buildMemoryPassRuntimeInstruction(passKind: "post_reply" | "ambient" = 
     );
   }
   base.push(
-    "If memory should change, call record_memory. If no memory should change, produce no tool call and no visible text.",
+    "If memory should change, call record_memory once with every add, update, expiry change, and delete in the single actions array. If no memory should change, produce no tool call and no visible text.",
     "Use only the available memory tool. Do not mention this maintenance pass.",
   );
   return base.join("\n");
@@ -2007,7 +2007,7 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
         ? `Visible bot reply already sent:\n${input.assistantReply !== "" ? input.assistantReply : "(empty)"}`
         : "No visible bot reply was sent for this turn.",
     "",
-    "Decide silently whether durable memory should be updated. Call record_memory only if an update is useful.",
+    "Decide silently whether durable memory should be updated. Call record_memory only if an update is useful, and include all desired edits in that one call.",
   ].join("\n");
 }
 

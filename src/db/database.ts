@@ -1,4 +1,5 @@
 import { Database as BunDatabase } from "bun:sqlite";
+import { sanitizeMemoryContent } from "./memory-content";
 import { MEMORY_KIND_SQL_VALUES, MEMORY_KINDS } from "./memory-kinds";
 
 export interface Database {
@@ -48,6 +49,25 @@ const STRUCTURED_MEMORY_KIND_SQL = `
     ELSE 'fact'
   END
 `;
+
+function sanitizeExistingMemoryRows(raw: BunDatabase): void {
+  const rows = raw.prepare("SELECT id, content FROM memories").all() as Array<{ id: number; content: string }>;
+  if (rows.length === 0) return;
+  const update = raw.prepare("UPDATE memories SET content = ? WHERE id = ?");
+  raw.run("BEGIN TRANSACTION");
+  try {
+    for (const row of rows) {
+      const content = sanitizeMemoryContent(row.content);
+      if (content !== "" && content !== row.content) {
+        update.run(content, row.id);
+      }
+    }
+    raw.run("COMMIT");
+  } catch (e) {
+    raw.run("ROLLBACK");
+    throw e;
+  }
+}
 
 const SCHEMA_SQL = `
   ${memoriesTableSql("memories", true)};
@@ -212,9 +232,9 @@ export function createDatabase(dbPath: string): Database {
           CASE
             WHEN (short_description IS NULL OR TRIM(short_description) = '')
                  AND (long_description IS NULL OR TRIM(long_description) = '') THEN ''
-            WHEN scope = 'user' AND (short_description IS NULL OR TRIM(short_description) = '') THEN 'In guild ' || COALESCE(guild_id, 'unknown') || ': ' || long_description
-            WHEN scope = 'user' AND (long_description IS NULL OR TRIM(long_description) = '') THEN 'In guild ' || COALESCE(guild_id, 'unknown') || ': ' || short_description
-            WHEN scope = 'user' THEN 'In guild ' || COALESCE(guild_id, 'unknown') || ': ' || short_description || ': ' || long_description
+            WHEN scope = 'user' AND (short_description IS NULL OR TRIM(short_description) = '') THEN long_description
+            WHEN scope = 'user' AND (long_description IS NULL OR TRIM(long_description) = '') THEN short_description
+            WHEN scope = 'user' THEN short_description || ': ' || long_description
             WHEN short_description IS NULL OR TRIM(short_description) = '' THEN long_description
             WHEN long_description IS NULL OR TRIM(long_description) = '' THEN short_description
             ELSE short_description || ': ' || long_description
@@ -261,10 +281,7 @@ export function createDatabase(dbPath: string): Database {
           END,
           CASE WHEN ${scopeExpression} = 'user' THEN subject_user_id ELSE NULL END,
           ${kindExpression},
-          CASE
-            WHEN ${scopeExpression} = 'user' AND guild_id IS NOT NULL THEN 'In guild ' || guild_id || ': ' || TRIM(content)
-            ELSE TRIM(content)
-          END,
+          TRIM(content),
           source_message_id,
           CASE
             WHEN confidence < 0 THEN 0
@@ -293,6 +310,7 @@ export function createDatabase(dbPath: string): Database {
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_guild_subject ON memories(guild_id, subject_user_id)");
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_guild_active ON memories(guild_id, deleted_at)");
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_scope_active ON memories(scope, deleted_at, updated_at)");
+  sanitizeExistingMemoryRows(raw);
 
   return {
     raw,
