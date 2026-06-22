@@ -36,6 +36,10 @@ import { buildMemoryPolicyInstructions } from "./memory-service.ts";
 /** Minimal abstraction over a Discord message for the handler. */
 export interface IncomingMessage {
   content: string;
+  guildId?: string;
+  guildName?: string;
+  channelId?: string;
+  channelName?: string;
   authorId: string;
   authorUsername: string;
   authorDisplayName?: string;
@@ -719,6 +723,10 @@ function buildVolatileTurnContext(context: AssembledContext): string {
 
 function buildCurrentMessageMetadata(msg: IncomingMessage): string {
   const lines = [
+    ...(msg.guildId !== undefined ? [`Trigger GuildID: ${msg.guildId}`] : []),
+    ...(msg.guildName !== undefined && msg.guildName !== "" ? [`Trigger GuildName: ${msg.guildName}`] : []),
+    ...(msg.channelId !== undefined ? [`Trigger ChannelID: ${msg.channelId}`] : []),
+    ...(msg.channelName !== undefined && msg.channelName !== "" ? [`Trigger ChannelName: ${msg.channelName}`] : []),
     `Trigger MsgID: ${msg.messageId ?? "unknown"}`,
     `Trigger Author: @${msg.authorUsername}`,
     `Trigger AuthorID: ${msg.authorId}`,
@@ -945,7 +953,7 @@ const PARALLEL_SAFE_READ_ONLY_TOOLS = new Set([
   "chat_history",
   "fetch_images",
   "fetch_url",
-  "get_user_memory",
+  "list_memories",
   "list_emojis",
   "list_scheduled_messages",
   "list_chat_users",
@@ -1951,7 +1959,7 @@ function buildMemoryPassRuntimeInstruction(passKind: "post_reply" | "ambient" = 
   if (passKind === "ambient") {
     base.push(
       "Be stricter than a post-reply pass because nobody asked the bot to remember this chatter.",
-      "Do not use subject=current_user in ambient passes. For user-scoped memories, use subject=user with the person's username; use subject=global only for shared server or work context.",
+      "Do not use subject=current_user in ambient passes. For user-scoped memories, use subject=user with the person's username; use subject=global only for shared current-server or current-work context.",
     );
   }
   base.push(

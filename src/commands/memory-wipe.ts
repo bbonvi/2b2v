@@ -16,7 +16,7 @@ export interface WipeRecentResult {
 }
 
 export interface MemoryWipeDeps {
-  /** Wipe all guild-scoped memories and messages. Returns counts. */
+  /** Wipe guild memories and message history. Portable user memories are not guild-owned. */
   wipeGuild: (guildId: string) => Promise<WipeResult>;
   /** Wipe N most recent messages from a specific channel. */
   wipeRecent: (guildId: string, channelId: string, count: number) => Promise<WipeRecentResult>;

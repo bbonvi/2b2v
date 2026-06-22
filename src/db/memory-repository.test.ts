@@ -34,7 +34,7 @@ describe("createMemory", () => {
     });
 
     const row = getMemory(db, id);
-    expect(row?.guildId).toBe("g1");
+    expect(row?.guildId).toBeNull();
     expect(row?.subjectUserId).toBe("u1");
     expect(row?.kind).toBe("preference");
     expect(row?.content).toBe("User likes concise answers.");
@@ -127,7 +127,7 @@ describe("deleteMemory", () => {
 });
 
 describe("listMemories", () => {
-  test("filters by guild and optional subject with global rows", () => {
+  test("filters portable user memories and current-guild rows together", () => {
     createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "preference", content: "A" });
     createMemory(db, { guildId: "g1", subjectUserId: "u2", kind: "fact", content: "B" });
     createMemory(db, { guildId: "g1", kind: "global_note", content: "C" });
@@ -150,19 +150,19 @@ describe("listMemories", () => {
         `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("g1", "u1", "user_note", "Oldest", null, 0.7, now - 3000, now - 3000, null);
+      .run(null, "u1", "user_note", "Oldest", null, 0.7, now - 3000, now - 3000, null);
     db.raw
       .prepare(
         `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("g1", "u1", "user_note", "Middle", null, 0.7, now - 2000, now - 2000, null);
+      .run(null, "u1", "user_note", "Middle", null, 0.7, now - 2000, now - 2000, null);
     db.raw
       .prepare(
         `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("g1", "u1", "user_note", "Newest", null, 0.7, now - 1000, now - 1000, null);
+      .run(null, "u1", "user_note", "Newest", null, 0.7, now - 1000, now - 1000, null);
 
     const rows = listMemories(db, { guildId: "g1", subjectUserId: "u1", limit: 2 });
     expect(rows.map((row) => row.content)).toEqual(["Newest", "Middle"]);

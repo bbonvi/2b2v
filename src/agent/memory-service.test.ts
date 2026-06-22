@@ -28,7 +28,7 @@ describe("buildMemoryContext", () => {
 
     expect(context).toContain("Showing 2/2 memories.");
     expect(context).toContain("Number after scope is confidence");
-    expect(context).toContain("[global] [0.7] [global_note] Global note");
+    expect(context).toContain("[guild:g1] [0.7] [global_note] Global note");
     expect(context).toContain("[@alice] [0.8] [preference] Likes concise answers");
     expect(context).not.toContain("Other user fact");
   });
@@ -408,8 +408,7 @@ describe("extractAndApplyMemories", () => {
   test("ignores update actions outside the current guild while allowing same-guild user targets", async () => {
     const otherGuild = createMemory(db, {
       guildId: "g2",
-      subjectUserId: "u1",
-      kind: "preference",
+      kind: "global_note",
       content: "foreign guild",
     });
     const otherUser = createMemory(db, {

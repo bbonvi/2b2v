@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { TextContent } from "@mariozechner/pi-ai";
 import { createDatabase, type Database } from "../db/database";
 import { createMemory } from "../db/memory-repository";
-import { createUserMemoryTool } from "./user-memory-tool";
+import { createMemoryListTool } from "./user-memory-tool";
 
 let db: Database;
 
@@ -14,61 +14,61 @@ afterEach(() => {
   db.close();
 });
 
-function textOf(result: Awaited<ReturnType<ReturnType<typeof createUserMemoryTool>["execute"]>>): string {
+function textOf(result: Awaited<ReturnType<ReturnType<typeof createMemoryListTool>["execute"]>>): string {
   return (result.content[0] as TextContent).text;
 }
 
-describe("createUserMemoryTool", () => {
-  test("returns get_user_memory AgentTool with expected metadata", () => {
-    const tool = createUserMemoryTool({
+describe("createMemoryListTool", () => {
+  test("returns list_memories AgentTool with expected metadata", () => {
+    const tool = createMemoryListTool({
       db,
-      guildId: "g1",
+      currentGuildId: "g1",
       resolveUsername: () => Promise.resolve("u1"),
     });
 
-    expect(tool.name).toBe("get_user_memory");
-    expect(tool.description).toContain("global memories and memories for the user currently being replied to");
-    expect(tool.description).toContain("leading @");
+    expect(tool.name).toBe("list_memories");
+    expect(tool.description).toContain("User memories are Discord-user scoped");
+    expect(tool.description).toContain("target=guild");
   });
 
-  test("retrieves only user-scoped memories for the resolved guild user", async () => {
+  test("retrieves portable user memories for the resolved guild user", async () => {
     createMemory(db, { guildId: "g1", kind: "global_note", content: "Global note" });
     createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "preference", content: "Likes concise answers" });
     createMemory(db, { guildId: "g1", subjectUserId: "u2", kind: "fact", content: "Other user fact" });
     createMemory(db, { guildId: "g2", subjectUserId: "u1", kind: "fact", content: "Other guild fact" });
 
-    const tool = createUserMemoryTool({
+    const tool = createMemoryListTool({
       db,
-      guildId: "g1",
-      resolveUsername: (username) => Promise.resolve(username.toLowerCase() === "alice" ? "u1" : undefined),
+      currentGuildId: "g1",
+      resolveUsername: (username, guildId) => Promise.resolve(username.toLowerCase() === "alice" && guildId === "g1" ? "u1" : undefined),
     });
-    const result = await tool.execute("tc1", { username: "@Alice" }, AbortSignal.timeout(5000));
+    const result = await tool.execute("tc1", { target: "user", username: "@Alice" }, AbortSignal.timeout(5000));
     const text = textOf(result);
 
-    expect(text).toContain("User-specific memories for @Alice (1/1 shown):");
+    expect(text).toContain("Portable user memories for @Alice (2/2 shown):");
     expect(text).toContain("[preference] Likes concise answers");
+    expect(text).toContain("[fact] Other guild fact");
     expect(text).not.toContain("Global note");
     expect(text).not.toContain("Other user fact");
-    expect(text).not.toContain("Other guild fact");
-    expect(result.details).toEqual({ userId: "u1", count: 1, total: 1 });
+    expect(result.details).toEqual({ target: "user", userId: "u1", count: 2, total: 2 });
   });
 
   test("limits returned memories", async () => {
     createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "First memory" });
     createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Second memory" });
 
-    const tool = createUserMemoryTool({
+    const tool = createMemoryListTool({
       db,
-      guildId: "g1",
+      currentGuildId: "g1",
       resolveUsername: () => Promise.resolve("u1"),
     });
-    const result = await tool.execute("tc1", { username: "alice", limit: 1 }, AbortSignal.timeout(5000));
+    const result = await tool.execute("tc1", { target: "user", username: "alice", limit: 1 }, AbortSignal.timeout(5000));
     const text = textOf(result);
 
     expect(text).toContain("Second memory");
     expect(text).not.toContain("First memory");
-    expect(text).toContain("User-specific memories for @alice (1/2 shown):");
-    expect(result.details).toEqual({ userId: "u1", count: 1, total: 2 });
+    expect(text).toContain("Portable user memories for @alice (1/2 shown):");
+    expect(result.details).toEqual({ target: "user", userId: "u1", count: 1, total: 2 });
   });
 
   test("defaults returned memories to 30", async () => {
@@ -76,44 +76,97 @@ describe("createUserMemoryTool", () => {
       createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: `Memory ${i}` });
     }
 
-    const tool = createUserMemoryTool({
+    const tool = createMemoryListTool({
       db,
-      guildId: "g1",
+      currentGuildId: "g1",
       resolveUsername: () => Promise.resolve("u1"),
     });
-    const result = await tool.execute("tc1", { username: "alice" }, AbortSignal.timeout(5000));
+    const result = await tool.execute("tc1", { target: "user", username: "alice" }, AbortSignal.timeout(5000));
     const text = textOf(result);
 
-    expect(text).toContain("User-specific memories for @alice (30/31 shown):");
+    expect(text).toContain("Portable user memories for @alice (30/31 shown):");
     expect(text).toContain("Memory 31");
     expect(text).not.toContain("[fact] Memory 1\n");
-    expect(result.details).toEqual({ userId: "u1", count: 30, total: 31 });
+    expect(result.details).toEqual({ target: "user", userId: "u1", count: 30, total: 31 });
   });
 
-  test("reports no memories without returning global memories", async () => {
+  test("reports no user memories without returning guild memories", async () => {
     createMemory(db, { guildId: "g1", kind: "global_note", content: "Global note" });
 
-    const tool = createUserMemoryTool({
+    const tool = createMemoryListTool({
       db,
-      guildId: "g1",
+      currentGuildId: "g1",
       resolveUsername: () => Promise.resolve("u1"),
     });
-    const result = await tool.execute("tc1", { username: "alice" }, AbortSignal.timeout(5000));
+    const result = await tool.execute("tc1", { target: "user", username: "alice" }, AbortSignal.timeout(5000));
     const text = textOf(result);
 
-    expect(text).toContain("No user-specific memories found for @alice");
-    expect(text).toContain("Global memories are already present");
+    expect(text).toContain("No portable user memories found for @alice");
+    expect(text).toContain("target=guild");
     expect(text).not.toContain("Global note");
-    expect(result.details).toEqual({ userId: "u1", count: 0, total: 0 });
+    expect(result.details).toEqual({ target: "user", userId: "u1", count: 0, total: 0 });
+  });
+
+  test("retrieves guild memories by guild id", async () => {
+    createMemory(db, { guildId: "g1", kind: "global_note", content: "Current guild note" });
+    createMemory(db, { guildId: "g2", kind: "global_note", content: "Other guild note" });
+    createMemory(db, { guildId: "g2", subjectUserId: "u1", kind: "fact", content: "Portable user note" });
+
+    const tool = createMemoryListTool({
+      db,
+      currentGuildId: "g1",
+      resolveUsername: () => Promise.resolve(undefined),
+      resolveGuildName: (guildId) => guildId === "g2" ? "Guild Two" : undefined,
+    });
+    const result = await tool.execute("tc1", { target: "guild", guild_id: "g2" }, AbortSignal.timeout(5000));
+    const text = textOf(result);
+
+    expect(text).toContain("Guild memories for Guild Two (g2) (1/1 shown):");
+    expect(text).toContain("Other guild note");
+    expect(text).not.toContain("Current guild note");
+    expect(text).not.toContain("Portable user note");
+    expect(result.details).toEqual({ target: "guild", guildId: "g2", count: 1, total: 1 });
+  });
+
+  test("rejects inaccessible guild memory reads", async () => {
+    createMemory(db, { guildId: "g2", kind: "global_note", content: "Other guild note" });
+
+    const tool = createMemoryListTool({
+      db,
+      currentGuildId: "g1",
+      resolveUsername: () => Promise.resolve(undefined),
+      canAccessGuild: () => Promise.resolve(false),
+    });
+    const result = await tool.execute("tc1", { target: "guild", guild_id: "g2" }, AbortSignal.timeout(5000));
+
+    expect(textOf(result)).toContain("not found or not accessible");
+    expect(textOf(result)).not.toContain("Other guild note");
+    expect(result.details).toEqual({ error: true });
+  });
+
+  test("rejects raw user id reads when the user is not in the selected guild", async () => {
+    createMemory(db, { guildId: "g1", subjectUserId: "u2", kind: "fact", content: "Portable user note" });
+
+    const tool = createMemoryListTool({
+      db,
+      currentGuildId: "g1",
+      resolveUsername: () => Promise.resolve(undefined),
+      isUserInGuild: () => Promise.resolve(false),
+    });
+    const result = await tool.execute("tc1", { target: "user", user_id: "u2" }, AbortSignal.timeout(5000));
+
+    expect(textOf(result)).toContain("User 'u2' not found in guild g1");
+    expect(textOf(result)).not.toContain("Portable user note");
+    expect(result.details).toEqual({ error: true });
   });
 
   test("reports unknown users", async () => {
-    const tool = createUserMemoryTool({
+    const tool = createMemoryListTool({
       db,
-      guildId: "g1",
+      currentGuildId: "g1",
       resolveUsername: () => Promise.resolve(undefined),
     });
-    const result = await tool.execute("tc1", { username: "@missing" }, AbortSignal.timeout(5000));
+    const result = await tool.execute("tc1", { target: "user", username: "@missing" }, AbortSignal.timeout(5000));
 
     expect(textOf(result)).toContain("User '@missing' not found");
     expect(result.details).toEqual({ error: true });

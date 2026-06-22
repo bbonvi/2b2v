@@ -89,15 +89,17 @@ describe("translation → message storage pipeline", () => {
 });
 
 describe("memory repository → DB roundtrip", () => {
-  test("guild isolation: memories are filtered by guild", () => {
-    createMemory(db, { kind: "user_note", guildId: "guild-A", subjectUserId: "user-1", content: "A data" });
-    createMemory(db, { kind: "user_note", guildId: "guild-B", subjectUserId: "user-1", content: "B data" });
+  test("guild memories are isolated while user memories are portable", () => {
+    createMemory(db, { kind: "global_note", guildId: "guild-A", content: "A data" });
+    createMemory(db, { kind: "global_note", guildId: "guild-B", content: "B data" });
+    createMemory(db, { kind: "user_note", guildId: "guild-A", subjectUserId: "user-1", content: "Portable data" });
 
     const listA = listMemories(db, { guildId: "guild-A" });
     const listB = listMemories(db, { guildId: "guild-B" });
 
     expect(listA[0]?.content).toBe("A data");
     expect(listB[0]?.content).toBe("B data");
+    expect(listMemories(db, { guildId: "guild-B", subjectUserId: "user-1" })[0]?.content).toBe("Portable data");
   });
 
   test("subject-scoped memories are readable", () => {
@@ -219,7 +221,7 @@ describe("message storage and retrieval", () => {
     createMemory(db, { kind: "user_note", guildId: GUILD_ID, subjectUserId: "user-1", content: "still valid" });
     db.raw.prepare("UPDATE memories SET deleted_at = ? WHERE id = ?").run(Date.now(), deleted);
 
-    const visible = listMemories(db, { guildId: GUILD_ID }).map((row) => row.content);
+    const visible = listMemories(db, { guildId: GUILD_ID, subjectUserId: "user-1" }).map((row) => row.content);
     expect(visible).toContain("still valid");
     expect(visible).not.toContain("deleted");
   });

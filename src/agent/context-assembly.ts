@@ -44,6 +44,7 @@ export interface ContextAssemblyInput {
   emojis: string;
   members: string;
   memories: string;
+  discordContext: string;
   upcomingSchedules: string;
   /** Threads in this channel (for parent channels only). */
   threadsInChat: string;
@@ -103,6 +104,7 @@ export const SECTION_DEFS: readonly SectionDef[] = [
   // Group 3: developer, uncached (volatile per-message)
   { label: "Server Members",       role: "developer", cached: false, source: { kind: "field", inputKey: "members", header: "## Server Members" } },
   { label: "Threads In This Channel", role: "developer", cached: false, source: { kind: "field", inputKey: "threadsInChat", header: "## Threads In This Channel" } },
+  { label: "Discord Context",      role: "developer", cached: false, source: { kind: "field", inputKey: "discordContext", header: "## Discord Context" } },
   { label: "Upcoming Schedules",   role: "developer", cached: false, source: { kind: "field", inputKey: "upcomingSchedules", header: "## Upcoming Schedules" } },
   { label: "Memories",             role: "developer", cached: false, source: { kind: "field", inputKey: "memories", header: "## Memory" } },
   { label: "Chat History — Newer", role: "developer", cached: false, source: { kind: "field", inputKey: "newerHistory" } },

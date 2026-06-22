@@ -31,6 +31,9 @@ export interface SearchToolDeps {
   embed: EmbeddingPipeline;
   /** Resolve username to userId. Returns undefined if not found. */
   resolveUsername: (username: string) => string | undefined;
+  resolveUsernameInGuild?: (username: string, guildId: string) => Promise<string | undefined>;
+  resolveChannel?: (channelId: string) => Promise<{ guildId: string; channelId: string } | null>;
+  canAccessGuild?: (guildId: string) => Promise<boolean>;
   /** Message IDs already visible in prompt context; search should not repeat them. */
   excludedMessageIds?: Iterable<string>;
   fetchMessage?: (channelId: string, messageId: string) => Promise<{ attachments: AttachmentInfo[] } | null>;
@@ -46,6 +49,7 @@ const SearchParams = Type.Object({
   query: Type.Optional(Type.String({ description: "Semantic: short 2-5 word topic phrase; put names/times/channels in filters. Literal: exact string." })),
   message_id: Type.Optional(Type.String({ description: "Anchor message ID for mode='context'." })),
   username: Type.Optional(Type.String({ description: "Filter results to a specific username." })),
+  guild_id: Type.Optional(Type.String({ description: "Search a specific guild by ID. Defaults to the current guild. If channel_id is provided, the channel's guild is used." })),
   channel_id: Type.Optional(Type.String({ description: "Search a specific guild channel or thread. Defaults to the current channel. DMs are not supported." })),
   around: Type.Optional(Type.String({ description: "Local wall-clock timestamp for mode='context', formatted YYYY-MM-DD HH:mm in the server timezone. Defaults to the current channel unless channel_id is provided." })),
   afterMs: Type.Optional(Type.Number({ description: "Only messages after this epoch ms timestamp." })),
@@ -81,7 +85,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
     name: "search_messages",
     label: "Search Messages",
     description:
-      "Search channel history when context is missing or a request refers to prior messages. Modes: 'semantic' (default) for vague meaning, 'literal' for exact words/errors/URLs/commands, 'id' for direct lookup, and 'context' for surrounding conversation around a result id or local timestamp. For semantic mode, use a short topic phrase and put names, channels, times, or bot/human constraints in filters. Search defaults to the current channel; set channel_id only for another channel/thread. include_attachments is slow and should be enabled only when attachment filenames/types matter.",
+      "Search channel history when context is missing or a request refers to prior messages. Modes: 'semantic' (default) for vague meaning, 'literal' for exact words/errors/URLs/commands, 'id' for direct lookup, and 'context' for surrounding conversation around a result id or local timestamp. For semantic mode, use a short topic phrase and put names, channels, times, or bot/human constraints in filters. Search defaults to the current channel; set channel_id for another accessible channel/thread, including another guild. guild_id without channel_id searches that guild more broadly. include_attachments is slow and should be enabled only when attachment filenames/types matter.",
     parameters: SearchParams,
     execute: async (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as {
@@ -89,6 +93,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         query?: string;
         message_id?: string;
         username?: string;
+        guild_id?: string;
         channel_id?: string;
         around?: string;
         afterMs?: number;
@@ -101,16 +106,40 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
       };
       const mode = p.mode ?? "semantic";
       const limit = Math.max(1, Math.min(p.limit ?? 10, 50));
-      const scopedChannelId = p.channel_id !== undefined && p.channel_id.trim() !== "" ? p.channel_id : currentChannelId;
+      const explicitGuildId = p.guild_id !== undefined && p.guild_id.trim() !== "";
+      let targetGuildId = explicitGuildId ? p.guild_id?.trim() ?? guildId : guildId;
+      let scopedChannelId: string | undefined = explicitGuildId ? undefined : currentChannelId;
+      if (p.channel_id !== undefined && p.channel_id.trim() !== "") {
+        const rawChannelId = p.channel_id.trim();
+        if (deps.resolveChannel !== undefined) {
+          const channel = await deps.resolveChannel(rawChannelId);
+          if (channel === null) {
+            return { content: [{ type: "text", text: `Channel '${rawChannelId}' not found or not accessible.` }], details: undefined };
+          }
+          targetGuildId = channel.guildId;
+          scopedChannelId = channel.channelId;
+        } else {
+          scopedChannelId = rawChannelId;
+        }
+      }
+      if (scopedChannelId === undefined && targetGuildId !== guildId && deps.canAccessGuild !== undefined) {
+        const canAccess = await deps.canAccessGuild(targetGuildId);
+        if (!canAccess) {
+          return { content: [{ type: "text", text: `Guild '${targetGuildId}' not found or not accessible.` }], details: undefined };
+        }
+      }
       const excludedMessageIds = [...new Set(deps.excludedMessageIds ?? [])];
       let contextIntro: string | undefined;
 
       // Resolve username to userId if provided (normalize to strip leading @)
       let userId: string | undefined;
       if (p.username !== undefined) {
-        userId = resolveUsername(normalizeUsername(p.username));
+        const normalizedUsername = normalizeUsername(p.username);
+        userId = deps.resolveUsernameInGuild !== undefined
+          ? await deps.resolveUsernameInGuild(normalizedUsername, targetGuildId)
+          : resolveUsername(normalizedUsername);
         if (userId === undefined) {
-          return { content: [{ type: "text", text: `User '${p.username}' not found.` }], details: undefined };
+          return { content: [{ type: "text", text: `User '${p.username}' not found in guild ${targetGuildId}.` }], details: undefined };
         }
       }
 
@@ -120,11 +149,11 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         if (p.query === undefined || p.query.trim() === "") {
           return { content: [{ type: "text", text: "Message ID is required for id lookup." }], details: undefined };
         }
-        const result = getMessageById(db, p.query, guildId);
+        const result = getMessageById(db, p.query, targetGuildId);
         if (result === null) {
           return { content: [{ type: "text", text: "Message not found." }], details: undefined };
         }
-        if (result.channelId !== scopedChannelId) {
+        if (scopedChannelId !== undefined && result.channelId !== scopedChannelId) {
           return { content: [{ type: "text", text: "Message not found in that channel." }], details: undefined };
         }
         if (excludedMessageIds.includes(result.id)) {
@@ -135,7 +164,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         const contextLimit = Math.max(1, Math.min(p.limit ?? 20, 50));
         if (p.message_id !== undefined && p.message_id.trim() !== "") {
           const contextResults = getMessagesAroundMessage(db, p.message_id, {
-            guildId,
+            guildId: targetGuildId,
             channelId: scopedChannelId,
             limit: contextLimit,
           });
@@ -143,14 +172,17 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
             return { content: [{ type: "text", text: "Message not found." }], details: undefined };
           }
           results = contextResults;
-          contextIntro = `Surrounding channel context around message id ${p.message_id} in channel ${scopedChannelId}, ordered oldest to newest.`;
+          contextIntro = `Surrounding channel context around message id ${p.message_id}${scopedChannelId !== undefined ? ` in channel ${scopedChannelId}` : ""}, ordered oldest to newest.`;
         } else if (p.around !== undefined && p.around.trim() !== "") {
+          if (scopedChannelId === undefined) {
+            return { content: [{ type: "text", text: "mode='context' with around timestamp requires channel_id." }], details: undefined };
+          }
           const parsed = parseLocalDateTimeToEpoch(p.around, timezone);
           if (!parsed.ok) {
             return { content: [{ type: "text", text: `Invalid around timestamp: ${parsed.error}` }], details: undefined };
           }
           results = getMessagesAroundTimestamp(db, {
-            guildId,
+            guildId: targetGuildId,
             channelId: scopedChannelId,
             around: parsed.epochMs,
             limit: contextLimit,
@@ -165,7 +197,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         }
         try {
           results = searchMessagesLiteral(db, p.query, {
-            guildId,
+            guildId: targetGuildId,
             userId: userId,
             channelId: scopedChannelId,
             after: p.afterMs,
@@ -199,7 +231,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
 
         try {
           results = await searchMessages(db, qdrant, queryVec, {
-            guildId,
+            guildId: targetGuildId,
             userId: userId,
             channelId: scopedChannelId,
             after: p.afterMs,
@@ -220,6 +252,24 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
           ? "No messages found outside the current prompt context matching your query."
           : "No messages found matching your query.";
         return { content: [{ type: "text", text }], details: { count: 0 } };
+      }
+
+      if (scopedChannelId === undefined && deps.resolveChannel !== undefined) {
+        const visibleChannelIds = new Map<string, boolean>();
+        const visibleResults: MessageSearchResult[] = [];
+        for (const result of results) {
+          let visible = visibleChannelIds.get(result.channelId);
+          if (visible === undefined) {
+            const channel = await deps.resolveChannel(result.channelId);
+            visible = channel !== null && channel.guildId === targetGuildId;
+            visibleChannelIds.set(result.channelId, visible);
+          }
+          if (visible) visibleResults.push(result);
+        }
+        results = visibleResults;
+        if (results.length === 0) {
+          return { content: [{ type: "text", text: "No messages found in accessible channels matching your query." }], details: { count: 0 } };
+        }
       }
 
       // Fetch attachments from Discord only when explicitly requested. Older
@@ -251,7 +301,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
         contextIntro ?? formatResultIntro(mode),
         ...results.map((r) => formatResult(r, timezone, {
           includeScore: mode === "semantic",
-          includeChannelId: false,
+          includeChannelId: scopedChannelId === undefined || scopedChannelId !== currentChannelId || targetGuildId !== guildId,
           attachments: attachmentMap.get(r.id),
         })),
       ];

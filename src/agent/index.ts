@@ -70,7 +70,7 @@ export {
   type TimeoutUserToolDeps,
 } from "./timeout-user-tool.ts";
 
-export { createUserMemoryTool, type UserMemoryToolDeps } from "./user-memory-tool.ts";
+export { createMemoryListTool, createUserMemoryTool, type MemoryListToolDeps, type UserMemoryToolDeps } from "./user-memory-tool.ts";
 
 export { createChatHistoryTool, type ChatHistoryToolDeps, type ChatHistoryMessage } from "./chat-history-tool.ts";
 

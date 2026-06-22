@@ -13,6 +13,7 @@ function makeInput(overrides: Partial<ContextAssemblyInput> = {}): ContextAssemb
     emojis: ":wave: — custom emoji",
     members: "@alice — Alice\n@bob — Bob",
     memories: "- User likes cats",
+    discordContext: "Current guild: Test Guild (g1)",
     upcomingSchedules: "- [cron UTC] 0 9 * * *: Good morning",
     threadsInChat: "",
     parentPreContext: "",
@@ -98,14 +99,14 @@ describe("SECTION_DEFS", () => {
 });
 
 describe("assembleContext", () => {
-  test("produces all 8 sections when all inputs present (no instructions)", () => {
+  test("produces all 9 sections when all inputs present (no instructions)", () => {
     const result = assembleContext(makeInput());
-    expect(result.sections).toHaveLength(8);
+    expect(result.sections).toHaveLength(9);
   });
 
-  test("produces 9 sections when instructions present", () => {
+  test("produces 10 sections when instructions present", () => {
     const result = assembleContext(makeInput({ instructions: "Be concise and helpful." }));
-    expect(result.sections).toHaveLength(9);
+    expect(result.sections).toHaveLength(10);
     const labels = result.sections.map((s) => s.label);
     expect(labels).toContain("Instructions");
   });
@@ -129,6 +130,7 @@ describe("assembleContext", () => {
         emojis: "",
         members: "",
         memories: "",
+        discordContext: "",
         upcomingSchedules: "",
         olderHistory: "",
       })
@@ -157,6 +159,7 @@ describe("assembleContext", () => {
       .map((s) => s.label);
     expect(uncachedLabels).toEqual([
       "Server Members",
+      "Discord Context",
       "Upcoming Schedules",
       "Memories",
       "Chat History — Newer",
@@ -180,6 +183,12 @@ describe("assembleContext", () => {
     const result = assembleContext(makeInput({ memories: "- Entry one" }));
     const section = result.sections.find((s) => s.label === "Memories");
     expect(section?.text).toBe("## Memory\n- Entry one");
+  });
+
+  test("wraps discord context with section header", () => {
+    const result = assembleContext(makeInput({ discordContext: "Current guild: Test Guild (g1)" }));
+    const section = result.sections.find((s) => s.label === "Discord Context");
+    expect(section?.text).toBe("## Discord Context\nCurrent guild: Test Guild (g1)");
   });
 
   test("wraps schedules with section header", () => {
@@ -312,6 +321,7 @@ describe("assembleContext", () => {
         emojis: "",
         members: "",
         memories: "",
+        discordContext: "",
         upcomingSchedules: "",
         olderHistory: "",
         newerHistory: "",
@@ -331,6 +341,7 @@ describe("assembleContext", () => {
         emojis: "",
         members: "",
         memories: "",
+        discordContext: "",
         upcomingSchedules: "",
         olderHistory: "",
         newerHistory: "",
@@ -347,6 +358,7 @@ describe("contextToSystemPrompt", () => {
       emojis: "",
       members: "",
       memories: "",
+      discordContext: "",
       upcomingSchedules: "",
       olderHistory: "",
       newerHistory: "",
@@ -365,6 +377,7 @@ describe("contextToSystemPrompt", () => {
       emojis: "",
       members: "",
       memories: "",
+      discordContext: "",
       upcomingSchedules: "",
       olderHistory: "",
       newerHistory: "",

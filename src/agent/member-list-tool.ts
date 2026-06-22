@@ -32,7 +32,7 @@ export function createChatUserListTool(deps: MemberListToolDeps): AgentTool {
     name: "list_chat_users",
     label: "list_chat_users",
     description:
-      "List relevant current-guild chat users. Returns exact usernames, display names/nicknames when different, online status, bot flag, admin flag from Discord Administrator or guild adminUserIds, nonzero memory counts, and any existing cached dm_channel_id. 2B still cannot send PMs/DMs.",
+      "List relevant current-guild chat users. Returns exact usernames, display names/nicknames when different, online status, bot flag, admin flag from Discord Administrator or guild adminUserIds, nonzero portable user-memory counts, and any existing cached dm_channel_id. 2B still cannot send PMs/DMs.",
     parameters: ListMembersParams,
 
     async execute(_toolCallId: string, params: unknown): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {

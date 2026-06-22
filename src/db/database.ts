@@ -7,11 +7,12 @@ export interface Database {
 }
 
 const SCRATCHPAD_EXPIRY_CHECK_SQL = "CHECK(kind <> 'scratchpad' OR expires_at IS NOT NULL)";
+const MEMORY_SCOPE_CHECK_SQL = "CHECK((subject_user_id IS NULL AND guild_id IS NOT NULL) OR (subject_user_id IS NOT NULL AND guild_id IS NULL))";
 
 function memoriesTableSql(tableName: string, ifNotExists = false): string {
   return `CREATE TABLE ${ifNotExists ? "IF NOT EXISTS " : ""}${tableName} (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id          TEXT NOT NULL,
+    guild_id          TEXT,
     subject_user_id   TEXT,
     kind              TEXT NOT NULL CHECK(kind IN (${MEMORY_KIND_SQL_VALUES})),
     content           TEXT NOT NULL CHECK(length(trim(content)) > 0),
@@ -21,7 +22,8 @@ function memoriesTableSql(tableName: string, ifNotExists = false): string {
     updated_at        INTEGER NOT NULL,
     expires_at        INTEGER,
     deleted_at        INTEGER,
-    ${SCRATCHPAD_EXPIRY_CHECK_SQL}
+    ${SCRATCHPAD_EXPIRY_CHECK_SQL},
+    ${MEMORY_SCOPE_CHECK_SQL}
   )`;
 }
 
@@ -30,6 +32,7 @@ function memorySchemaHasCurrentChecks(sql: string | undefined): boolean {
     && MEMORY_KINDS.every((kind) => sql.includes(`'${kind}'`))
     && !sql.includes("'project'")
     && sql.includes(SCRATCHPAD_EXPIRY_CHECK_SQL)
+    && sql.includes(MEMORY_SCOPE_CHECK_SQL)
     && sql.includes("CHECK(length(trim(content)) > 0)");
 }
 
@@ -190,12 +193,15 @@ export function createDatabase(dbPath: string): Database {
       raw.run(memoriesTableSql("memories_new"));
       raw.run(`INSERT INTO memories_new (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
         SELECT
-          COALESCE(guild_id, ''),
+          CASE WHEN scope = 'user' THEN NULL ELSE COALESCE(guild_id, '') END,
           CASE WHEN scope = 'user' THEN user_id ELSE NULL END,
           CASE WHEN scope = 'user' THEN 'user_note' ELSE 'global_note' END,
           CASE
             WHEN (short_description IS NULL OR TRIM(short_description) = '')
                  AND (long_description IS NULL OR TRIM(long_description) = '') THEN ''
+            WHEN scope = 'user' AND (short_description IS NULL OR TRIM(short_description) = '') THEN 'In guild ' || COALESCE(guild_id, 'unknown') || ': ' || long_description
+            WHEN scope = 'user' AND (long_description IS NULL OR TRIM(long_description) = '') THEN 'In guild ' || COALESCE(guild_id, 'unknown') || ': ' || short_description
+            WHEN scope = 'user' THEN 'In guild ' || COALESCE(guild_id, 'unknown') || ': ' || short_description || ': ' || long_description
             WHEN short_description IS NULL OR TRIM(short_description) = '' THEN long_description
             WHEN long_description IS NULL OR TRIM(long_description) = '' THEN short_description
             ELSE short_description || ': ' || long_description
@@ -229,10 +235,13 @@ export function createDatabase(dbPath: string): Database {
       raw.run(`INSERT INTO memories_new (id, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
         SELECT
           id,
-          guild_id,
+          CASE WHEN subject_user_id IS NOT NULL THEN NULL ELSE guild_id END,
           subject_user_id,
           ${STRUCTURED_MEMORY_KIND_SQL},
-          TRIM(content),
+          CASE
+            WHEN subject_user_id IS NOT NULL AND guild_id IS NOT NULL THEN 'In guild ' || guild_id || ': ' || TRIM(content)
+            ELSE TRIM(content)
+          END,
           source_message_id,
           CASE
             WHEN confidence < 0 THEN 0

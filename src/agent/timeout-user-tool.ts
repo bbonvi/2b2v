@@ -87,7 +87,7 @@ export function createTimeoutUserTool(deps: TimeoutUserToolDeps): AgentTool {
       const durationSeconds = parseDurationSeconds(p.duration, p.unit);
       if (typeof durationSeconds === "string") return failure(durationSeconds, "invalid_duration");
 
-      let member: TimeoutMember | null;
+      let member: TimeoutMemberResolution;
       try {
         member = await deps.resolveMember(target);
       } catch {

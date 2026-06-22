@@ -2,6 +2,8 @@ import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 
 export interface ChannelInfo {
+  guildId: string;
+  guildName: string;
   id: string;
   name: string;
   type: string;
@@ -14,30 +16,38 @@ export interface ChannelInfo {
 }
 
 export interface ChannelListToolDeps {
-  guildId: string;
+  currentGuildId: string;
   fetchChannels: (guildId: string) => Promise<ChannelInfo[]>;
+  resolveGuildName?: (guildId: string) => string | undefined;
 }
 
-const ListChannelsParams = Type.Object({});
+const ListChannelsParams = Type.Object({
+  guild_id: Type.Optional(Type.String({
+    minLength: 1,
+    description: "Guild ID to list channels for. Defaults to the current guild.",
+  })),
+}, { additionalProperties: false });
 
 /** Create a tool that lists visible guild channels and threads for routing. */
 export function createChannelListTool(deps: ChannelListToolDeps): AgentTool {
-  const { guildId, fetchChannels } = deps;
+  const { currentGuildId, fetchChannels } = deps;
 
   return {
     name: "list_channels",
     label: "list_channels",
     description:
-      "List visible Discord guild channels and threads before cross-channel handoff/sending or mentioning a channel. Returns channel_id values and sendability. DMs are unsupported and never listed.",
+      "List visible Discord guild channels and threads before cross-channel or cross-guild handoff/sending, reading channel history, or mentioning a channel. Returns channel_id values and sendability. Pass guild_id to inspect another guild listed in Discord Context. DMs are unsupported and never listed.",
     parameters: ListChannelsParams,
 
-    async execute(_toolCallId: string): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {
+    async execute(_toolCallId: string, params: unknown): Promise<AgentToolResult<{ guildId: string; count: number } | { error: boolean }>> {
+      const p = params as { guild_id?: string };
+      const guildId = typeof p.guild_id === "string" && p.guild_id.trim() !== "" ? p.guild_id.trim() : currentGuildId;
       let channels: ChannelInfo[];
       try {
         channels = await fetchChannels(guildId);
       } catch {
         return {
-          content: [{ type: "text", text: "Unable to list channels. The bot may lack permission to view this guild." }],
+          content: [{ type: "text", text: `Unable to list channels for guild ${guildId}. The bot may lack permission to view this guild.` }],
           details: { error: true },
         };
       }
@@ -49,20 +59,22 @@ export function createChannelListTool(deps: ChannelListToolDeps): AgentTool {
       if (visible.length === 0) {
         return {
           content: [{ type: "text", text: "No visible guild channels or threads found. DMs are unsupported." }],
-          details: { count: 0 },
+          details: { guildId, count: 0 },
         };
       }
 
+      const guildName = deps.resolveGuildName?.(guildId) ?? visible[0]?.guildName ?? guildId;
       return {
-        content: [{ type: "text", text: formatChannelList(visible) }],
-        details: { count: visible.length },
+        content: [{ type: "text", text: formatChannelList(visible, { guildId, guildName }) }],
+        details: { guildId, count: visible.length },
       };
     },
   };
 }
 
-export function formatChannelList(channels: readonly ChannelInfo[]): string {
+export function formatChannelList(channels: readonly ChannelInfo[], guild?: { guildId: string; guildName: string }): string {
   const lines = [
+    ...(guild !== undefined ? [`Guild: ${guild.guildName} (${guild.guildId})`] : []),
     "Legend: * = current channel/thread; id = channel_id for <message channel_id=\"...\">; mention = Discord channel mention; send=yes means bot can send there; DMs unsupported.",
     ...channels.map(formatChannel),
   ];

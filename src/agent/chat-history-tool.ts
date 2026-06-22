@@ -29,7 +29,7 @@ export function createChatHistoryTool(deps: ChatHistoryToolDeps): AgentTool {
     name: "chat_history",
     label: "chat_history",
     description:
-      "Fetch recent messages from a Discord guild channel or thread. Useful for reviewing conversation context in a specific channel or thread. DMs are not supported.",
+      "Fetch recent messages from an accessible Discord guild channel or thread, including channels in other guilds. Useful for reviewing conversation context in a specific channel or thread. DMs are not supported.",
     parameters: ChatHistoryParams,
 
     async execute(

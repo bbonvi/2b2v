@@ -155,7 +155,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function scopeLabel(row: MemoryRow, resolveUserId?: (userId: string) => string | undefined): string {
-  if (row.subjectUserId === null) return "global";
+  if (row.subjectUserId === null) return row.guildId !== null ? `guild:${row.guildId}` : "guild";
   const username = resolveUserId?.(row.subjectUserId);
   return username !== undefined && username !== "" ? `@${username}` : `user:${row.subjectUserId}`;
 }
@@ -203,10 +203,12 @@ export function buildMemoryPolicyInstructions(): string[] {
     "Do not record preferences that only apply to the current request unless the user asks to remember them, the wording clearly describes a general future preference, or the surrounding pattern strongly implies a recurring durable preference or rapport detail.",
     "Before creating a new memory, check whether an existing memory should be updated, compressed, or deleted instead.",
     "Do not store the same underlying memory in multiple scopes. If a new memory overlaps an existing one, update that existing id with a shorter merged version instead of creating another row.",
-    "Update an existing memory id only when the new chat meaningfully changes its facts, scope, confidence, expiry, or merges/removes a real duplicate. Do not update just to improve grammar, phrasing, capitalization, tense, style, or specificity.",
+    "Update an existing memory id only when the new chat meaningfully changes its facts, confidence, expiry, or merges/removes a real duplicate. Do not update just to improve grammar, phrasing, capitalization, tense, style, or specificity.",
     "Prefer updating an existing memory id over creating duplicates when there is a real semantic change. Actively delete stale or superseded existing memories when the current exchange clearly replaces them.",
     "Only delete a memory when an existing memory is listed below and the new chat clearly makes that specific memory obsolete, false, or superseded. Never invent memory ids.",
-    "Prefer the narrowest correct scope: subject=current_user for triggering-user preferences/facts, subject=user with username for another named user, and subject=global only for shared server or work-context facts or explicit bot-wide rules.",
+    "User-scoped memories are Discord-user memories and are visible across guilds. If a user fact/preference only applies in the current guild or channel, keep the content explicit about that guild/channel by name or ID.",
+    "subject=global means a shared memory for the current guild/server, not a cross-guild bot-wide memory.",
+    "Prefer the narrowest correct scope: subject=current_user for triggering-user preferences/facts, subject=user with username for another named user, and subject=global only for shared current-server facts or explicit current-server bot rules.",
     "Do not turn one user's preference into a global memory unless explicitly asked to apply it globally or to everyone.",
     "Use kind=identity for names, pronouns, languages, timezones, roles, handles, or stable self-descriptions.",
     "Use kind=constraint for hard boundaries, privacy limits, standing requirements, do-not-do rules, and durable constraints on bot behavior.",
@@ -527,7 +529,7 @@ function buildExtractionPrompt(input: MemoryExtractionInput): string {
 function editableMemory(input: MemoryMutationInput, id: number): MemoryRow | null {
   const existing = getMemory(input.db, id);
   if (existing === null) return null;
-  if (existing.guildId !== input.guildId) return null;
+  if (existing.guildId !== null && existing.guildId !== input.guildId) return null;
   return existing;
 }
 
@@ -540,6 +542,7 @@ function duplicateMemory(
   const normalized = content.trim().toLowerCase();
   const rows = listMemories(input.db, {
     guildId: input.guildId,
+    subjectUserId,
   });
   return rows.find((row) =>
     row.subjectUserId === subjectUserId

@@ -123,6 +123,47 @@ describe("createSearchTool", () => {
     expect(text).not.toContain("guild two");
   });
 
+  test("rejects broad searches in inaccessible guilds", async () => {
+    await insertWithEmbedding("m2", "secret guild two data", { guildId: "g2" });
+
+    const tool = createTestSearchTool({
+      db,
+      qdrant,
+      guildId: "g1",
+      timezone: "UTC",
+      embed: pipeline,
+      resolveUsername: mockResolveUsername,
+      canAccessGuild: () => Promise.resolve(false),
+    });
+    const result = await tool.execute("tc1", { query: "secret data", guild_id: "g2" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+
+    const text = getResultText(result);
+    expect(text).toContain("not found or not accessible");
+    expect(text).not.toContain("secret guild two data");
+  });
+
+  test("filters broad guild searches to currently accessible channels", async () => {
+    insertMessage("m-open", "shared topic public", { guildId: "g2", channelId: "c-open" });
+    insertMessage("m-secret", "shared topic private", { guildId: "g2", channelId: "c-secret" });
+
+    const tool = createTestSearchTool({
+      db,
+      qdrant,
+      guildId: "g1",
+      timezone: "UTC",
+      embed: pipeline,
+      resolveUsername: mockResolveUsername,
+      canAccessGuild: () => Promise.resolve(true),
+      resolveChannel: (channelId) => Promise.resolve(channelId === "c-open" ? { guildId: "g2", channelId } : null),
+    });
+    const result = await tool.execute("tc1", { query: "shared topic", mode: "literal", guild_id: "g2" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+
+    const text = getResultText(result);
+    expect(text).toContain("shared topic public");
+    expect(text).not.toContain("shared topic private");
+    expect(result.details.count).toBe(1);
+  });
+
   test("passes optional filters through", async () => {
     await insertWithEmbedding("m1", "food topic", { authorUsername: "u1", channelId: "c1" });
     await insertWithEmbedding("m2", "food topic again", { userId: "u2", channelId: "c1" });

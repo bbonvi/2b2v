@@ -70,11 +70,11 @@ describe("memories table", () => {
         `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("guild-1", "user-1", "preference", "Prefers dark mode", "msg-42", 0.9, now, now, null);
+      .run(null, "user-1", "preference", "Prefers dark mode", "msg-42", 0.9, now, now, null);
 
     const memId = Number(result.lastInsertRowid);
     const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get(memId) as Record<string, unknown>;
-    expect(row.guild_id).toBe("guild-1");
+    expect(row.guild_id).toBeNull();
     expect(row.subject_user_id).toBe("user-1");
     expect(row.kind).toBe("preference");
     expect(row.content).toBe("Prefers dark mode");
@@ -120,10 +120,10 @@ describe("memories table", () => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
-    insert.run("guild-1", "user-1", "identity", "Preferred name is Sasha.", null, 0.8, now, now, null, null);
-    insert.run("guild-1", "user-1", "constraint", "Do not use voice replies.", null, 0.8, now, now, null, null);
-    insert.run("guild-1", "user-1", "interest", "Likes puzzle games.", null, 0.8, now, now, null, null);
-    insert.run("guild-1", "user-1", "scratchpad", "Check auth headers next.", null, 0.8, now, now, now + 60_000, null);
+    insert.run(null, "user-1", "identity", "Preferred name is Sasha.", null, 0.8, now, now, null, null);
+    insert.run(null, "user-1", "constraint", "Do not use voice replies.", null, 0.8, now, now, null, null);
+    insert.run(null, "user-1", "interest", "Likes puzzle games.", null, 0.8, now, now, null, null);
+    insert.run(null, "user-1", "scratchpad", "Check auth headers next.", null, 0.8, now, now, now + 60_000, null);
 
     const rows = db.raw.prepare("SELECT kind FROM memories ORDER BY id").all() as Array<{ kind: string }>;
     expect(rows.map((row) => row.kind)).toEqual(["identity", "constraint", "interest", "scratchpad"]);
@@ -150,7 +150,7 @@ describe("memories table", () => {
           `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run("guild-1", "user-1", "scratchpad", "Missing expiry.", null, 0.8, now, now, null);
+        .run(null, "user-1", "scratchpad", "Missing expiry.", null, 0.8, now, now, null);
 
     expect(insert).toThrow();
   });
@@ -175,9 +175,9 @@ describe("memories table", () => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
-    const r1 = insert.run("g1", "u1", "fact", "first", null, 0.8, now, now, null);
-    const r2 = insert.run("g1", "u1", "fact", "second", null, 0.8, now, now, null);
-    const r3 = insert.run("g1", "u1", "fact", "third", null, 0.8, now, now, null);
+    const r1 = insert.run(null, "u1", "fact", "first", null, 0.8, now, now, null);
+    const r2 = insert.run(null, "u1", "fact", "second", null, 0.8, now, now, null);
+    const r3 = insert.run(null, "u1", "fact", "third", null, 0.8, now, now, null);
 
     expect(Number(r1.lastInsertRowid)).toBe(1);
     expect(Number(r2.lastInsertRowid)).toBe(2);
@@ -223,9 +223,10 @@ describe("memories table", () => {
         .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='memories'")
         .get() as { sql: string };
 
-      expect(rows).toEqual([{ kind: "fact", content: "Keep this fact." }]);
+      expect(rows).toEqual([{ kind: "fact", content: "In guild guild-1: Keep this fact." }]);
       expect(schema.sql).toContain("'identity'");
       expect(schema.sql).toContain("kind <> 'scratchpad' OR expires_at IS NOT NULL");
+      expect(schema.sql).toContain("subject_user_id IS NOT NULL AND guild_id IS NULL");
       expect(schema.sql).not.toContain("'project'");
     } finally {
       migrated.close();

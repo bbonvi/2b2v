@@ -4,7 +4,7 @@ export { MEMORY_KINDS, isMemoryKind, type MemoryKind } from "./memory-kinds";
 
 export interface MemoryRow {
   id: number;
-  guildId: string;
+  guildId: string | null;
   subjectUserId: string | null;
   kind: MemoryKind;
   content: string;
@@ -55,19 +55,27 @@ function memoryFilterConditions(filter: CountMemoriesFilter): {
   conditions: string[];
   params: (string | number | null)[];
 } {
-  const conditions = ["guild_id = ?"];
-  const params: (string | number | null)[] = [filter.guildId];
+  const conditions: string[] = [];
+  const params: (string | number | null)[] = [];
 
   if (filter.subjectUserId !== undefined) {
     if (filter.includeGlobal === true) {
-      conditions.push("(subject_user_id = ? OR subject_user_id IS NULL)");
+      conditions.push("((subject_user_id = ? AND guild_id IS NULL) OR (subject_user_id IS NULL AND guild_id = ?))");
       params.push(filter.subjectUserId);
+      params.push(filter.guildId);
     } else if (filter.subjectUserId === null) {
       conditions.push("subject_user_id IS NULL");
+      conditions.push("guild_id = ?");
+      params.push(filter.guildId);
     } else {
       conditions.push("subject_user_id = ?");
+      conditions.push("guild_id IS NULL");
       params.push(filter.subjectUserId);
     }
+  } else {
+    conditions.push("subject_user_id IS NULL");
+    conditions.push("guild_id = ?");
+    params.push(filter.guildId);
   }
 
   if (filter.includeDeleted !== true) {
@@ -82,14 +90,16 @@ function memoryFilterConditions(filter: CountMemoriesFilter): {
 /** Create a structured memory row and return its generated ID. */
 export function createMemory(db: Database, input: CreateMemoryInput): number {
   const now = Date.now();
+  const subjectUserId = input.subjectUserId ?? null;
+  const guildId = subjectUserId === null ? input.guildId : null;
   const result = db.raw
     .prepare(
       `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
     )
     .run(
-      input.guildId,
-      input.subjectUserId ?? null,
+      guildId,
+      subjectUserId,
       input.kind,
       input.content,
       input.sourceMessageId ?? null,
@@ -110,6 +120,9 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
   if ("subjectUserId" in input) {
     sets.push("subject_user_id = ?");
     params.push(input.subjectUserId ?? null);
+    if (input.subjectUserId !== null && input.subjectUserId !== undefined) {
+      sets.push("guild_id = NULL");
+    }
   }
   if (input.kind !== undefined) {
     sets.push("kind = ?");
@@ -166,7 +179,7 @@ export function getMemory(db: Database, id: number): MemoryRow | null {
   return mapRow(row);
 }
 
-/** List active memories for a guild, optionally scoped to a subject user plus global rows. */
+/** List active guild memories or portable user memories, optionally combining both for prompt context. */
 export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRow[] {
   const { conditions, params } = memoryFilterConditions(filter);
 
@@ -189,15 +202,15 @@ export function countMemories(db: Database, filter: CountMemoriesFilter): number
   return row.count;
 }
 
-/** Count active subject-user memories per userId in a guild. */
-export function countUserMemoriesByUser(db: Database, guildId: string): Map<string, number> {
+/** Count active portable user memories per userId. The guild argument is kept for caller shape. */
+export function countUserMemoriesByUser(db: Database, _guildId: string): Map<string, number> {
   const rows = db.raw
     .prepare(
       `SELECT subject_user_id, COUNT(*) as count FROM memories
-       WHERE guild_id = ? AND subject_user_id IS NOT NULL AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
+       WHERE guild_id IS NULL AND subject_user_id IS NOT NULL AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
        GROUP BY subject_user_id`
     )
-    .all(guildId, Date.now()) as Array<{ subject_user_id: string; count: number }>;
+    .all(Date.now()) as Array<{ subject_user_id: string; count: number }>;
 
   const result = new Map<string, number>();
   for (const row of rows) {
@@ -209,7 +222,7 @@ export function countUserMemoriesByUser(db: Database, guildId: string): Map<stri
 function mapRow(row: Record<string, unknown>): MemoryRow {
   return {
     id: Number(row.id),
-    guildId: row.guild_id as string,
+    guildId: row.guild_id as string | null,
     subjectUserId: row.subject_user_id as string | null,
     kind: row.kind as MemoryKind,
     content: row.content as string,

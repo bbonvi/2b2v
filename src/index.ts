@@ -46,7 +46,7 @@ import { createChatUserListTool, type MemberInfo } from "./agent/member-list-too
 import { createChannelListTool, type ChannelInfo } from "./agent/channel-list-tool";
 import { createEmojiListTool } from "./agent/emoji-list-tool";
 import { createTimeoutUserTool, type TimeoutMember, type TimeoutMemberResolution } from "./agent/timeout-user-tool";
-import { createUserMemoryTool } from "./agent/user-memory-tool";
+import { createMemoryListTool } from "./agent/user-memory-tool";
 import { createChatHistoryTool } from "./agent/chat-history-tool";
 import { createOwnMessageTools } from "./agent/own-message-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
@@ -393,6 +393,10 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       : undefined;
     const completionIncoming: IncomingMessage = {
       content: input.instruction,
+      guildId: job.deliveryGuildId,
+      guildName: guild.name,
+      channelId: job.deliveryChannelId,
+      channelName: channelDisplayName(textChannel),
       authorId: "async_image_generation",
       authorUsername: "async_image_generation",
       botUserId: client.user?.id ?? "",
@@ -710,6 +714,9 @@ function dashboardTriggerLocation(guild: Guild, channel: unknown): { guildName: 
   };
 }
 
+const DISCORD_CONTEXT_MAX_GUILDS = 12;
+const DISCORD_CONTEXT_CHANNELS_PER_GUILD = 8;
+
 function botChannelPermissions(channel: GuildBasedChannel | ThreadChannel): {
   canView: boolean;
   canSend: boolean;
@@ -732,10 +739,99 @@ function botChannelPermissions(channel: GuildBasedChannel | ThreadChannel): {
   return { canView, canSend };
 }
 
+function channelDisplayName(channel: unknown): string | undefined {
+  return channel !== null
+    && typeof channel === "object"
+    && "name" in channel
+    && typeof channel.name === "string"
+    && channel.name !== ""
+    ? channel.name
+    : undefined;
+}
+
+async function resolveClientGuild(guildId: string): Promise<Guild | null> {
+  const cached = client.guilds.cache.get(guildId);
+  if (cached !== undefined) return cached;
+  return await client.guilds.fetch(guildId).catch(() => null);
+}
+
+function isMainDiscordContextChannel(channel: GuildBasedChannel): boolean {
+  return channel.type === ChannelType.GuildText
+    || channel.type === ChannelType.GuildAnnouncement
+    || channel.type === ChannelType.GuildForum
+    || channel.type === ChannelType.GuildMedia;
+}
+
+function mainDiscordContextChannels(guild: Guild, currentChannelId: string): ChannelInfo[] {
+  const channels: ChannelInfo[] = [];
+  for (const [, channel] of guild.channels.cache) {
+    if (!isMainDiscordContextChannel(channel)) continue;
+    const permissions = botChannelPermissions(channel);
+    if (!permissions.canView) continue;
+    const categoryName = channel.parent?.name;
+    channels.push({
+      guildId: guild.id,
+      guildName: guild.name,
+      id: channel.id,
+      name: channel.name,
+      type: channelTypeLabel(channel),
+      canView: permissions.canView,
+      canSend: permissions.canSend,
+      isCurrent: channel.id === currentChannelId,
+      ...(categoryName !== undefined ? { categoryName } : {}),
+    });
+  }
+  return channels
+    .sort((a, b) => (a.isCurrent === b.isCurrent ? a.name.localeCompare(b.name) : a.isCurrent ? -1 : 1))
+    .slice(0, DISCORD_CONTEXT_CHANNELS_PER_GUILD);
+}
+
+function buildDiscordContext(input: {
+  currentGuildId: string;
+  currentGuildName: string;
+  currentChannelId: string;
+  currentChannelName?: string;
+}): string {
+  const guilds = [...client.guilds.cache.values()]
+    .sort((a, b) => {
+      if (a.id === input.currentGuildId) return -1;
+      if (b.id === input.currentGuildId) return 1;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, DISCORD_CONTEXT_MAX_GUILDS);
+  const currentChannel = input.currentChannelName !== undefined
+    ? `#${input.currentChannelName} (${input.currentChannelId})`
+    : input.currentChannelId;
+  const lines = [
+    `Current guild: ${input.currentGuildName} (${input.currentGuildId})`,
+    `Current channel/thread: ${currentChannel}`,
+    "This list is navigation context only. Do not copy private details, drama, or local assumptions across guilds unless the user asks or it is necessary.",
+    "Prompt chat history is only for the current channel/thread. Use list_channels, chat_history, search_messages, or list_memories when another channel/guild needs context. Preserve cross-channel continuity with tiny user/guild memories or scratchpad only when it will matter later.",
+    "Guild/channel inventory:",
+  ];
+
+  for (const guild of guilds) {
+    const current = guild.id === input.currentGuildId ? " current" : "";
+    lines.push(`- ${guild.name} | guild_id=${guild.id}${current}`);
+    const channels = mainDiscordContextChannels(guild, input.currentChannelId);
+    if (channels.length === 0) {
+      lines.push("  channels: (none cached; use list_channels with guild_id if needed)");
+      continue;
+    }
+    for (const channel of channels) {
+      const marker = channel.isCurrent ? " *" : "";
+      lines.push(`  - #${channel.name} | channel_id=${channel.id} | type=${channel.type} | send=${channel.canSend ? "yes" : "no"}${marker}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 async function fetchAccessibleGuildChannel(channelId: string): Promise<SendableGuildChannel | null> {
   const cached = client.channels.cache.get(channelId);
   const resolved = cached ?? await client.channels.fetch(channelId).catch(() => null);
-  return isSendableGuildChannel(resolved) ? resolved : null;
+  if (!isSendableGuildChannel(resolved)) return null;
+  return botChannelPermissions(resolved).canView ? resolved : null;
 }
 
 function createTargetChannelResolver(discordClient: Client, defaultChannel: SendableGuildChannel): ResolveTargetChannel {
@@ -1458,6 +1554,10 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
       // Build synthetic incoming message
       const incoming: IncomingMessage = {
         content: schedule.messageContent,
+        guildId,
+        guildName: guild.name,
+        channelId,
+        channelName: channelDisplayName(textChannel),
         authorId: "scheduler",
         authorUsername: "scheduler",
         botUserId,
@@ -1924,6 +2024,14 @@ async function buildContext(
   const oneOffCount = pendingSchedules.filter((s) => s.type === "one_off").length;
   const cronCount = pendingSchedules.length - oneOffCount;
   const upcomingSchedules = `Pending schedules in this channel: ${pendingSchedules.length} (${oneOffCount} one-off, ${cronCount} cron). Use list_scheduled_messages if you need schedule details or IDs.`;
+  const liveChannel = await client.channels.fetch(channelId).catch(() => guild.channels.cache.get(channelId) ?? null);
+  const currentChannelName = channelDisplayName(liveChannel);
+  const discordContext = buildDiscordContext({
+    currentGuildId: guildId,
+    currentGuildName: guild.name,
+    currentChannelId: channelId,
+    currentChannelName,
+  });
 
   // Emoji cache refresh (always needed for outbound translation)
   refreshEmojiCache(guild);
@@ -1954,9 +2062,8 @@ async function buildContext(
   }
 
   // Current context metadata — local wall-clock time, no ISO Z strings
-  const currentContext = `Guild: ${guildId} | Channel: ${channelId}\n${currentLocalContext(guildConfig.timezone)}`;
+  const currentContext = currentLocalContext(guildConfig.timezone);
 
-  const liveChannel = await client.channels.fetch(channelId).catch(() => guild.channels.cache.get(channelId) ?? null);
   if (liveChannel !== null && isSendableGuildChannel(liveChannel) && liveChannel.isThread()) {
     const existing = getThread(db, liveChannel.id);
     const createdAt = liveChannel.createdTimestamp ?? existing?.createdAt ?? Date.now();
@@ -2062,6 +2169,7 @@ async function buildContext(
       emojis: emojiContext,
       members: displayNameContext,
       memories,
+      discordContext,
       upcomingSchedules,
       threadsInChat,
       threadMetadata,
@@ -2218,6 +2326,10 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
     });
     const incoming: IncomingMessage = {
       content: "",
+      guildId,
+      guildName: guild.name,
+      channelId,
+      channelName: channelDisplayName(message.channel),
       authorId: lastMessage.authorId,
       authorUsername: lastMessage.author,
       authorDisplayName: guild.members.cache.get(lastMessage.authorId)?.displayName,
@@ -2319,6 +2431,18 @@ function buildAgentTools(
   const includeImageGenerationTools = options.includeImageGenerationTools ?? true;
   const effectiveCurrentRequest = options.currentRequest ?? currentRequest;
   const resolveUsername = (username: string): string | undefined => resolveGuildUsername(guild, username);
+  const resolveUsernameInGuild = async (username: string, targetGuildId: string): Promise<string | undefined> => {
+    const targetGuild = targetGuildId === guild.id ? guild : await resolveClientGuild(targetGuildId);
+    if (targetGuild === null) return undefined;
+    const cached = resolveGuildUsername(targetGuild, username);
+    if (cached !== undefined) return cached;
+    try {
+      await targetGuild.members.fetch();
+    } catch {
+      // Cache-only fallback below handles missing permissions.
+    }
+    return resolveGuildUsername(targetGuild, username);
+  };
 
   const searchTool = createSearchTool({
     db,
@@ -2328,6 +2452,12 @@ function buildAgentTools(
     timezone: guildConfig.timezone,
     embed: embeddingPipeline,
     resolveUsername,
+    resolveUsernameInGuild,
+    resolveChannel: async (targetChannelId) => {
+      const channel = await fetchAccessibleGuildChannel(targetChannelId);
+      return channel === null ? null : { guildId: channel.guildId, channelId: channel.id };
+    },
+    canAccessGuild: async (targetGuildId) => await resolveClientGuild(targetGuildId) !== null,
     excludedMessageIds,
     fetchMessage: async (chId, msgId) => {
       const channel = await fetchAccessibleGuildChannel(chId);
@@ -2386,27 +2516,30 @@ function buildAgentTools(
   });
 
   const channelListTool = createChannelListTool({
-    guildId,
-    fetchChannels: async () => {
+    currentGuildId: guildId,
+    resolveGuildName: (targetGuildId) => client.guilds.cache.get(targetGuildId)?.name,
+    fetchChannels: async (targetGuildId) => {
+      const targetGuild = targetGuildId === guild.id ? guild : await resolveClientGuild(targetGuildId);
+      if (targetGuild === null) return [];
       try {
-        await guild.channels.fetch();
+        await targetGuild.channels.fetch();
       } catch {
         // Cache-only fallback below handles missing permissions.
       }
-      const activeThreads = await guild.channels.fetchActiveThreads().catch(() => null);
+      const activeThreads = await targetGuild.channels.fetchActiveThreads().catch(() => null);
       if (activeThreads === null) {
         // Threads already present in cache will still be listed.
       }
 
       const channels = new Map<string, GuildBasedChannel | ThreadChannel>();
-      for (const [, channel] of guild.channels.cache) {
+      for (const [, channel] of targetGuild.channels.cache) {
         if (channel.type !== ChannelType.GuildCategory) channels.set(channel.id, channel);
       }
       for (const [, thread] of activeThreads?.threads ?? []) {
         channels.set(thread.id, thread);
       }
       for (const [, channel] of client.channels.cache) {
-        if ("guildId" in channel && channel.guildId === guildId && "isThread" in channel && typeof channel.isThread === "function" && channel.isThread()) {
+        if ("guildId" in channel && channel.guildId === targetGuild.id && "isThread" in channel && typeof channel.isThread === "function" && channel.isThread()) {
           channels.set(channel.id, channel as ThreadChannel);
         }
       }
@@ -2416,6 +2549,8 @@ function buildAgentTools(
         const parentName = channel.isThread() ? channel.parent?.name : undefined;
         const categoryName = channel.isThread() ? channel.parent?.parent?.name : channel.parent?.name;
         return {
+          guildId: targetGuild.id,
+          guildName: targetGuild.name,
           id: channel.id,
           name: channel.name,
           type: channelTypeLabel(channel),
@@ -2518,18 +2653,26 @@ function buildAgentTools(
     },
   });
 
-  const userMemoryTool = createUserMemoryTool({
+  const memoryListTool = createMemoryListTool({
     db,
-    guildId,
-    resolveUsername: async (username) => {
-      const cached = resolveUsername(username);
-      if (cached !== undefined) return cached;
+    currentGuildId: guildId,
+    currentUserId: effectiveCurrentRequest?.requesterId !== undefined && effectiveCurrentRequest.requesterId !== "scheduler"
+      ? effectiveCurrentRequest.requesterId
+      : undefined,
+    resolveUsername: resolveUsernameInGuild,
+    resolveGuildName: (targetGuildId) => client.guilds.cache.get(targetGuildId)?.name,
+    resolveUsernameById: (userId) => client.users.cache.get(userId)?.username,
+    canAccessGuild: async (targetGuildId) => await resolveClientGuild(targetGuildId) !== null,
+    isUserInGuild: async (userId, targetGuildId) => {
+      const targetGuild = await resolveClientGuild(targetGuildId);
+      if (targetGuild === null) return false;
+      if (targetGuild.members.cache.has(userId)) return true;
       try {
-        await guild.members.fetch();
+        await targetGuild.members.fetch(userId);
+        return true;
       } catch {
-        // Cache-only fallback below handles missing permissions.
+        return false;
       }
-      return resolveUsername(username);
     },
   });
 
@@ -2538,8 +2681,8 @@ function buildAgentTools(
     timezone: guildConfig.timezone,
     fetchMessages: async (historyChannelId, limit) => {
       const channel = await fetchAccessibleGuildChannel(historyChannelId);
-      if (channel === null || channel.guildId !== guildId || !("messages" in channel)) return [];
-      return getChatHistory(db, guildId, channel.id, limit);
+      if (channel === null || !("messages" in channel)) return [];
+      return getChatHistory(db, channel.guildId, channel.id, limit);
     },
   });
 
@@ -2669,7 +2812,7 @@ function buildAgentTools(
     },
   });
 
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, timeoutUserTool, userMemoryTool, chatHistoryTool, ...ownMessageTools, readChatImagesTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, timeoutUserTool, memoryListTool, chatHistoryTool, ...ownMessageTools, readChatImagesTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (includeImageGenerationTools) {
     const codexImageModel = guildConfig.llmProvider === "openai-codex"
       ? guildConfig.model ?? globalConfig.defaultModel
@@ -2989,6 +3132,10 @@ async function processTriggeredMessage(
 
     const incoming: IncomingMessage = {
       content: message.content,
+      guildId,
+      guildName: guild.name,
+      channelId,
+      channelName: channelDisplayName(message.channel),
       authorId: message.author.id,
       authorUsername: message.author.username,
       authorDisplayName: authorDisplayName(message),
