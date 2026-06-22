@@ -59,7 +59,7 @@ function formatMemory(row: MemoryRow): string {
   const scope = row.scope === "self"
     ? "self"
     : row.subjectUserId === null
-    ? `guild:${row.guildId ?? "unknown"}`
+    ? "guild"
     : `user:${row.subjectUserId}`;
   return `- ${row.id} [${scope}] [${formatConfidence(row.confidence)}] [${row.kind}] ${row.content}`;
 }

@@ -157,9 +157,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function scopeLabel(row: MemoryRow, resolveUserId?: (userId: string) => string | undefined): string {
+function scopeLabel(row: MemoryRow, currentGuildId: string, resolveUserId?: (userId: string) => string | undefined): string {
   if (row.scope === "self") return "self";
-  if (row.subjectUserId === null) return row.guildId !== null ? `guild:${row.guildId}` : "guild";
+  if (row.subjectUserId === null) {
+    return row.guildId !== null && row.guildId !== currentGuildId ? `guild:${row.guildId}` : "guild";
+  }
   const username = resolveUserId?.(row.subjectUserId);
   return username !== undefined && username !== "" ? `@${username}` : `user:${row.subjectUserId}`;
 }
@@ -278,7 +280,7 @@ export function buildMemoryContext(input: MemoryContextInput): string {
   if (rows.length === 0) return "";
 
   const lines = rows.map((row) => {
-    const label = scopeLabel(row, input.resolveUserId);
+    const label = scopeLabel(row, input.guildId, input.resolveUserId);
     const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
     return `- ${row.id} [${label}] [${formatConfidence(row.confidence)}] [${row.kind}]${expiry} ${row.content}`;
   });
