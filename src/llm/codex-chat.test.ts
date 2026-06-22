@@ -67,4 +67,76 @@ describe("buildCodexContext", () => {
       content: [{ type: "text", text: "tool result" }],
     });
   });
+
+  test("preserves provider-native assistant reasoning blocks for Codex replay", () => {
+    const reasoningItem = {
+      type: "reasoning",
+      id: "rs_123",
+      encrypted_content: "sealed",
+      summary: [],
+      status: "completed",
+    };
+
+    const context = buildCodexContext({
+      provider: "openai-codex",
+      apiKey: "codex-token",
+      model: "gpt-5.5",
+      systemPrompt: "System root",
+      messages: [
+        { role: "user", content: "look this up" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call_abc|fc_123",
+            type: "function",
+            function: { name: "lookup", arguments: "{\"query\":\"fallback\"}" },
+          }],
+          providerNativeContent: [
+            {
+              type: "thinking",
+              thinking: "",
+              thinkingSignature: JSON.stringify(reasoningItem),
+            },
+            {
+              type: "text",
+              text: "I'll check.",
+              textSignature: "msg_123",
+            },
+            {
+              type: "toolCall",
+              id: "call_abc|fc_123",
+              name: "lookup",
+              arguments: { query: "x" },
+            },
+          ],
+        },
+        { role: "tool", tool_call_id: "call_abc|fc_123", name: "lookup", content: "tool result" },
+      ],
+      tools: [{
+        type: "function",
+        function: {
+          name: "lookup",
+          description: "Lookup things",
+          parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+        },
+      }],
+      toolChoice: "auto",
+    });
+
+    expect(context.messages[1]).toMatchObject({
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "", thinkingSignature: JSON.stringify(reasoningItem) },
+        { type: "text", text: "I'll check.", textSignature: "msg_123" },
+        { type: "toolCall", id: "call_abc|fc_123", name: "lookup", arguments: { query: "x" } },
+      ],
+    });
+    expect(context.messages[2]).toMatchObject({
+      role: "toolResult",
+      toolCallId: "call_abc|fc_123",
+      toolName: "lookup",
+      content: [{ type: "text", text: "tool result" }],
+    });
+  });
 });

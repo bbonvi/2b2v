@@ -805,6 +805,9 @@ function assistantMessageFromResult(result: OpenRouterChatResult): OpenRouterMes
     role: "assistant",
     content: result.text !== "" ? result.text : null,
     tool_calls: result.toolCalls,
+    ...(result.providerNativeContent !== undefined && result.providerNativeContent.length > 0
+      ? { providerNativeContent: result.providerNativeContent }
+      : {}),
   };
 }
 

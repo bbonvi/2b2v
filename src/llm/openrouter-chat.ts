@@ -13,12 +13,39 @@ export interface OpenRouterImageUrlPart {
 
 export type OpenRouterMessageContent = string | Array<OpenRouterTextPart | OpenRouterImageUrlPart> | null;
 
+export interface ProviderNativeThinkingPart {
+  type: "thinking";
+  thinking: string;
+  thinkingSignature?: string;
+}
+
+export interface ProviderNativeTextPart {
+  type: "text";
+  text: string;
+  textSignature?: string;
+}
+
+export interface ProviderNativeToolCallPart {
+  type: "toolCall";
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  thoughtSignature?: string;
+}
+
+export type ProviderNativeAssistantContent =
+  | ProviderNativeThinkingPart
+  | ProviderNativeTextPart
+  | ProviderNativeToolCallPart;
+
 export interface OpenRouterMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: OpenRouterMessageContent;
   tool_call_id?: string;
   name?: string;
   tool_calls?: OpenRouterToolCall[];
+  /** Internal provider-native assistant blocks for stateless continuation; never sent to OpenRouter. */
+  providerNativeContent?: ProviderNativeAssistantContent[];
 }
 
 export interface OpenRouterToolDefinition {
@@ -61,6 +88,8 @@ export interface OpenRouterChatRequest {
 export interface OpenRouterChatResult {
   text: string;
   toolCalls: OpenRouterToolCall[];
+  /** Internal provider-native assistant blocks for same-loop continuation. */
+  providerNativeContent?: ProviderNativeAssistantContent[];
   messageForLogs: Record<string, unknown>;
   rawResponse: Record<string, unknown>;
 }
@@ -342,6 +371,11 @@ function normalizeProviderParams(rawParams: Record<string, unknown>): Record<str
   return params;
 }
 
+function openRouterMessageForPayload(message: OpenRouterMessage): Omit<OpenRouterMessage, "providerNativeContent"> {
+  const { providerNativeContent: _providerNativeContent, ...payloadMessage } = message;
+  return payloadMessage;
+}
+
 function extractNestedProviderErrorMessage(rawRecord: Record<string, unknown> | null): string | null {
   const errorRecord = asRecord(rawRecord?.error);
   const metadataRecord = asRecord(errorRecord?.metadata);
@@ -391,7 +425,7 @@ export async function completeOpenRouterChat(request: OpenRouterChatRequest): Pr
     model: request.model,
     messages: [
       ...(request.systemPrompt !== "" ? [{ role: "system", content: request.systemPrompt }] : []),
-      ...request.messages,
+      ...request.messages.map(openRouterMessageForPayload),
     ],
     stream: request.onTextDelta !== undefined,
   };

@@ -1504,6 +1504,79 @@ describe("handleMessage", () => {
     expect(sender).toHaveBeenCalledTimes(1);
   });
 
+  test("retains Codex provider-native reasoning content into the next tool turn request", async () => {
+    const providerNativeContent = [
+      {
+        type: "thinking" as const,
+        thinking: "",
+        thinkingSignature: "{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"sealed\",\"summary\":[]}",
+      },
+      {
+        type: "toolCall" as const,
+        id: "call_abc|fc_123",
+        name: "lookup",
+        arguments: { query: "x" },
+      },
+    ];
+    const tool: AgentTool = {
+      name: "lookup",
+      label: "Lookup",
+      description: "Look something up",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: () => Promise.resolve({ content: [{ type: "text", text: "tool says 42" }], details: {} }),
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call_abc|fc_123",
+            type: "function",
+            function: { name: "lookup", arguments: "{\"query\":\"x\"}" },
+          }],
+          providerNativeContent,
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+
+      const assistantMessage = request.messages.find((message) => message.role === "assistant");
+      expect(assistantMessage?.providerNativeContent).toEqual(providerNativeContent);
+      expect(assistantMessage?.tool_calls?.[0]?.id).toBe("call_abc|fc_123");
+      expect(request.messages.some((message) =>
+        message.role === "tool"
+          && message.tool_call_id === "call_abc|fc_123"
+          && typeof message.content === "string"
+          && message.content.includes("tool says 42")
+      )).toBe(true);
+      return Promise.resolve({
+        text: "answer is 42",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "answer is 42" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        completeChat,
+        globalConfig: makeGlobalConfig({ defaultLlmProvider: "openai-codex", defaultModel: "gpt-5.5" }),
+        guildConfig: makeGuildConfig({
+          llmProvider: "openai-codex",
+          model: "gpt-5.5",
+        }),
+      }),
+    );
+
+    expect(result.responseText).toBe("answer is 42");
+    expect(calls).toBe(2);
+  });
+
   test("attaches generated image tool output to the final reply", async () => {
     const tool: AgentTool = {
       name: "codex_generate_image",

@@ -73,6 +73,48 @@ describe("completeOpenRouterChat", () => {
     fetchSpy.mockRestore();
   });
 
+  test("omits provider-native assistant content from OpenRouter payloads", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      makeResponse({
+        model: "m",
+        choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      })
+    );
+
+    await completeOpenRouterChat({
+      apiKey: "key",
+      model: "moonshotai/kimi-k2.5",
+      systemPrompt: "system",
+      messages: [
+        { role: "user", content: "hello" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "lookup", arguments: "{\"query\":\"x\"}" },
+          }],
+          providerNativeContent: [{
+            type: "thinking",
+            thinking: "",
+            thinkingSignature: "{\"type\":\"reasoning\",\"id\":\"rs_1\"}",
+          }],
+        },
+      ],
+      baseUrl: "https://example.com",
+    });
+
+    const init = fetchSpy.mock.calls[0]?.[1];
+    const bodyRaw = init?.body;
+    const bodyText = typeof bodyRaw === "string" ? bodyRaw : "";
+    const body = JSON.parse(bodyText) as { messages?: Array<Record<string, unknown>> };
+    expect(body.messages?.some((message) => "providerNativeContent" in message)).toBe(false);
+
+    fetchSpy.mockRestore();
+  });
+
   test("streams text deltas and returns accumulated result", async () => {
     const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
       makeSseResponse([

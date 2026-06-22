@@ -5,6 +5,7 @@ import type {
   ImageContent,
   Message,
   TextContent,
+  ThinkingContent,
   Tool,
   ToolCall as PiToolCall,
   ToolResultMessage,
@@ -17,6 +18,7 @@ import type {
   OpenRouterChatResult,
   OpenRouterImageUrlPart,
   OpenRouterMessage,
+  ProviderNativeAssistantContent,
   OpenRouterTextPart,
   OpenRouterToolCall,
 } from "./openrouter-chat.ts";
@@ -87,6 +89,34 @@ function toolCallsToBlocks(toolCalls: OpenRouterToolCall[] | undefined): PiToolC
   }));
 }
 
+type PiAssistantContentBlock = TextContent | ThinkingContent | PiToolCall;
+
+function nativeContentToPiBlocks(content: ProviderNativeAssistantContent[]): PiAssistantContentBlock[] {
+  return content.map((block) => {
+    if (block.type === "thinking") {
+      return {
+        type: "thinking",
+        thinking: block.thinking,
+        ...(block.thinkingSignature !== undefined ? { thinkingSignature: block.thinkingSignature } : {}),
+      };
+    }
+    if (block.type === "text") {
+      return {
+        type: "text",
+        text: block.text,
+        ...(block.textSignature !== undefined ? { textSignature: block.textSignature } : {}),
+      };
+    }
+    return {
+      type: "toolCall",
+      id: block.id,
+      name: block.name,
+      arguments: { ...block.arguments },
+      ...(block.thoughtSignature !== undefined ? { thoughtSignature: block.thoughtSignature } : {}),
+    };
+  });
+}
+
 function messageToPiMessage(message: OpenRouterMessage, model: string): Message[] {
   const timestamp = Date.now();
   if (message.role === "user") {
@@ -94,11 +124,14 @@ function messageToPiMessage(message: OpenRouterMessage, model: string): Message[
   }
   if (message.role === "assistant") {
     const text = contentToText(message.content).trim();
-    const content = [
-      ...(text !== "" ? [textPart(text)] : []),
-      ...toolCallsToBlocks(message.tool_calls),
-    ];
+    const content = message.providerNativeContent !== undefined && message.providerNativeContent.length > 0
+      ? nativeContentToPiBlocks(message.providerNativeContent)
+      : [
+        ...(text !== "" ? [textPart(text)] : []),
+        ...toolCallsToBlocks(message.tool_calls),
+      ];
     if (content.length === 0) return [];
+    const hasToolCalls = content.some((block) => block.type === "toolCall");
     return [{
       role: "assistant",
       content,
@@ -106,7 +139,7 @@ function messageToPiMessage(message: OpenRouterMessage, model: string): Message[
       provider: "openai-codex",
       model,
       usage: zeroUsage(),
-      stopReason: message.tool_calls !== undefined && message.tool_calls.length > 0 ? "toolUse" : "stop",
+      stopReason: hasToolCalls ? "toolUse" : "stop",
       timestamp,
     }];
   }
@@ -184,6 +217,32 @@ function resultToolCalls(message: AssistantMessage): OpenRouterToolCall[] {
     }));
 }
 
+function resultProviderNativeContent(message: AssistantMessage): ProviderNativeAssistantContent[] {
+  return message.content.map((block) => {
+    if (block.type === "thinking") {
+      return {
+        type: "thinking",
+        thinking: block.thinking,
+        ...(block.thinkingSignature !== undefined ? { thinkingSignature: block.thinkingSignature } : {}),
+      };
+    }
+    if (block.type === "text") {
+      return {
+        type: "text",
+        text: block.text,
+        ...(block.textSignature !== undefined ? { textSignature: block.textSignature } : {}),
+      };
+    }
+    return {
+      type: "toolCall",
+      id: block.id,
+      name: block.name,
+      arguments: { ...block.arguments },
+      ...(block.thoughtSignature !== undefined ? { thoughtSignature: block.thoughtSignature } : {}),
+    };
+  });
+}
+
 function usageForLogs(usage: Usage): Record<string, unknown> {
   return {
     input: usage.input + usage.cacheRead,
@@ -248,9 +307,11 @@ export async function completeCodexChat(request: OpenRouterChatRequest): Promise
 
     const text = resultText(response);
     const toolCalls = resultToolCalls(response);
+    const providerNativeContent = resultProviderNativeContent(response);
     return {
       text,
       toolCalls,
+      providerNativeContent,
       messageForLogs: messageForLogs(response, text, toolCalls),
       rawResponse: response as unknown as Record<string, unknown>,
     };
@@ -266,9 +327,11 @@ export async function completeCodexChat(request: OpenRouterChatRequest): Promise
 
   const text = resultText(response);
   const toolCalls = resultToolCalls(response);
+  const providerNativeContent = resultProviderNativeContent(response);
   return {
     text,
     toolCalls,
+    providerNativeContent,
     messageForLogs: messageForLogs(response, text, toolCalls),
     rawResponse: response as unknown as Record<string, unknown>,
   };
