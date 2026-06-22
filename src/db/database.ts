@@ -7,11 +7,13 @@ export interface Database {
 }
 
 const SCRATCHPAD_EXPIRY_CHECK_SQL = "CHECK(kind <> 'scratchpad' OR expires_at IS NOT NULL)";
-const MEMORY_SCOPE_CHECK_SQL = "CHECK((subject_user_id IS NULL AND guild_id IS NOT NULL) OR (subject_user_id IS NOT NULL AND guild_id IS NULL))";
+const JOURNAL_SCOPE_CHECK_SQL = "CHECK(kind <> 'journal' OR scope = 'self')";
+const MEMORY_SCOPE_CHECK_SQL = "CHECK((scope = 'guild' AND subject_user_id IS NULL AND guild_id IS NOT NULL) OR (scope = 'user' AND subject_user_id IS NOT NULL AND guild_id IS NULL) OR (scope = 'self' AND subject_user_id IS NULL AND guild_id IS NULL))";
 
 function memoriesTableSql(tableName: string, ifNotExists = false): string {
   return `CREATE TABLE ${ifNotExists ? "IF NOT EXISTS " : ""}${tableName} (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope             TEXT NOT NULL CHECK(scope IN ('guild', 'user', 'self')),
     guild_id          TEXT,
     subject_user_id   TEXT,
     kind              TEXT NOT NULL CHECK(kind IN (${MEMORY_KIND_SQL_VALUES})),
@@ -23,6 +25,7 @@ function memoriesTableSql(tableName: string, ifNotExists = false): string {
     expires_at        INTEGER,
     deleted_at        INTEGER,
     ${SCRATCHPAD_EXPIRY_CHECK_SQL},
+    ${JOURNAL_SCOPE_CHECK_SQL},
     ${MEMORY_SCOPE_CHECK_SQL}
   )`;
 }
@@ -30,8 +33,11 @@ function memoriesTableSql(tableName: string, ifNotExists = false): string {
 function memorySchemaHasCurrentChecks(sql: string | undefined): boolean {
   return sql !== undefined
     && MEMORY_KINDS.every((kind) => sql.includes(`'${kind}'`))
+    && sql.includes("scope")
+    && sql.includes("'self'")
     && !sql.includes("'project'")
     && sql.includes(SCRATCHPAD_EXPIRY_CHECK_SQL)
+    && sql.includes(JOURNAL_SCOPE_CHECK_SQL)
     && sql.includes(MEMORY_SCOPE_CHECK_SQL)
     && sql.includes("CHECK(length(trim(content)) > 0)");
 }
@@ -197,8 +203,9 @@ export function createDatabase(dbPath: string): Database {
     raw.run("BEGIN TRANSACTION");
     try {
       raw.run(memoriesTableSql("memories_new"));
-      raw.run(`INSERT INTO memories_new (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
+      raw.run(`INSERT INTO memories_new (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
         SELECT
+          CASE WHEN scope = 'user' THEN 'user' ELSE 'guild' END,
           CASE WHEN scope = 'user' THEN NULL ELSE COALESCE(guild_id, '') END,
           CASE WHEN scope = 'user' THEN user_id ELSE NULL END,
           CASE WHEN scope = 'user' THEN 'user_note' ELSE 'global_note' END,
@@ -235,17 +242,27 @@ export function createDatabase(dbPath: string): Database {
     .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='memories'")
     .get() as { sql: string } | undefined;
   if (hasStructuredMemorySchema && !memorySchemaHasCurrentChecks(memorySchema?.sql)) {
+    const hasScopeColumn = memoryColumns.some((c) => c.name === "scope");
+    const scopeExpression = hasScopeColumn
+      ? "CASE WHEN scope IN ('guild', 'user', 'self') THEN scope WHEN subject_user_id IS NOT NULL THEN 'user' ELSE 'guild' END"
+      : "CASE WHEN subject_user_id IS NOT NULL THEN 'user' ELSE 'guild' END";
+    const kindExpression = `CASE WHEN ${STRUCTURED_MEMORY_KIND_SQL} = 'journal' AND ${scopeExpression} <> 'self' THEN 'fact' ELSE ${STRUCTURED_MEMORY_KIND_SQL} END`;
     raw.run("BEGIN TRANSACTION");
     try {
       raw.run(memoriesTableSql("memories_new"));
-      raw.run(`INSERT INTO memories_new (id, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
+      raw.run(`INSERT INTO memories_new (id, scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
         SELECT
           id,
-          CASE WHEN subject_user_id IS NOT NULL THEN NULL ELSE guild_id END,
-          subject_user_id,
-          ${STRUCTURED_MEMORY_KIND_SQL},
+          ${scopeExpression},
           CASE
-            WHEN subject_user_id IS NOT NULL AND guild_id IS NOT NULL THEN 'In guild ' || guild_id || ': ' || TRIM(content)
+            WHEN ${scopeExpression} = 'self' THEN NULL
+            WHEN subject_user_id IS NOT NULL THEN NULL
+            ELSE guild_id
+          END,
+          CASE WHEN ${scopeExpression} = 'user' THEN subject_user_id ELSE NULL END,
+          ${kindExpression},
+          CASE
+            WHEN ${scopeExpression} = 'user' AND guild_id IS NOT NULL THEN 'In guild ' || guild_id || ': ' || TRIM(content)
             ELSE TRIM(content)
           END,
           source_message_id,
@@ -275,6 +292,7 @@ export function createDatabase(dbPath: string): Database {
 
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_guild_subject ON memories(guild_id, subject_user_id)");
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_guild_active ON memories(guild_id, deleted_at)");
+  raw.run("CREATE INDEX IF NOT EXISTS idx_memories_scope_active ON memories(scope, deleted_at, updated_at)");
 
   return {
     raw,

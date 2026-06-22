@@ -2334,6 +2334,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       db,
       guildId,
       currentUserId: lastMessage.authorId,
+      currentUsername: lastMessage.author,
       sourceMessageId: lastMessage.id,
       resolveUsername: async (username) => {
         const cached = resolveGuildUsername(guild, username);
@@ -2678,9 +2679,6 @@ function buildAgentTools(
   const memoryListTool = createMemoryListTool({
     db,
     currentGuildId: guildId,
-    currentUserId: effectiveCurrentRequest?.requesterId !== undefined && effectiveCurrentRequest.requesterId !== "scheduler"
-      ? effectiveCurrentRequest.requesterId
-      : undefined,
     resolveUsername: resolveUsernameInGuild,
     resolveGuildName: (targetGuildId) => client.guilds.cache.get(targetGuildId)?.name,
     resolveUsernameById: (userId) => client.users.cache.get(userId)?.username,
@@ -3256,6 +3254,7 @@ async function processTriggeredMessage(
           db,
           guildId,
           currentUserId: message.author.id,
+          currentUsername: message.author.username,
           sourceMessageId: memoryRequest.sourceMessageId ?? message.id,
           resolveUsername: async (username) => {
             const cached = resolveGuildUsername(guild, username);

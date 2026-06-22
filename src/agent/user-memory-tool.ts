@@ -6,7 +6,6 @@ import { countMemories, listMemories, type MemoryRow } from "../db/memory-reposi
 export interface MemoryListToolDeps {
   db: Database;
   currentGuildId: string;
-  currentUserId?: string;
   /** Resolve a Discord username, with or without @, to a user ID in the requested guild. */
   resolveUsername: (username: string, guildId: string) => Promise<string | undefined>;
   resolveGuildName?: (guildId: string) => string | undefined;
@@ -19,17 +18,18 @@ export type UserMemoryToolDeps = MemoryListToolDeps;
 
 type MemoryListToolResult = AgentToolResult<
   | { target: "guild"; guildId: string; count: number; total: number }
-  | { target: "user" | "current_user"; userId: string; count: number; total: number }
+  | { target: "self"; count: number; total: number }
+  | { target: "user"; userId: string; count: number; total: number }
   | { error: boolean }
 >;
 
 const MemoryListParams = Type.Object({
   target: Type.Optional(Type.Union([
-    Type.Literal("current_user"),
     Type.Literal("user"),
     Type.Literal("guild"),
+    Type.Literal("self"),
   ], {
-    description: "Memory target. Defaults to user when username/user_id is provided, otherwise guild.",
+    description: "Memory target. Defaults to user when username/user_id is provided, otherwise guild. Use self for the bot/persona's own continuity and journal.",
   })),
   username: Type.Optional(Type.String({
     minLength: 1,
@@ -56,7 +56,9 @@ function formatConfidence(confidence: number): string {
 }
 
 function formatMemory(row: MemoryRow): string {
-  const scope = row.subjectUserId === null
+  const scope = row.scope === "self"
+    ? "self"
+    : row.subjectUserId === null
     ? `guild:${row.guildId ?? "unknown"}`
     : `user:${row.subjectUserId}`;
   return `- ${row.id} [${scope}] [${formatConfidence(row.confidence)}] [${row.kind}] ${row.content}`;
@@ -70,12 +72,12 @@ export function createMemoryListTool(deps: MemoryListToolDeps): AgentTool {
     name: "list_memories",
     label: "list_memories",
     description:
-      "Retrieve bot memories. User memories are Discord-user scoped and shared across guilds; guild memories are shared facts for one guild/server. The prompt already includes current-user memories and current-guild memories. Use target=user for another person, target=guild for another guild's shared memories, or target=current_user to inspect the current user's portable memories. Do not casually reveal private facts learned in one guild to another; use only what is needed for the current conversation.",
+      "Retrieve bot memories. User memories are Discord-user scoped and shared across guilds; guild memories are shared facts for one guild/server; self memories are the bot/persona's own portable continuity and private journal. The prompt already includes current-speaker user memories, current-guild memories, and self memories. Use target=user with username/user_id for a person, target=guild for a guild's shared memories, or target=self to inspect the bot/persona's own continuity. Do not casually reveal private facts learned in one guild to another; use only what is needed for the current conversation.",
     parameters: MemoryListParams,
 
     async execute(_toolCallId: string, params: unknown): Promise<MemoryListToolResult> {
       const p = params as {
-        target?: "current_user" | "user" | "guild";
+        target?: "user" | "guild" | "self";
         username?: string;
         user_id?: string;
         guild_id?: string;
@@ -111,12 +113,24 @@ export function createMemoryListTool(deps: MemoryListToolDeps): AgentTool {
         };
       }
 
+      if (target === "self") {
+        const total = countMemories(db, { guildId, scope: "self" });
+        const rows = listMemories(db, { guildId, scope: "self", limit }).filter((row) => row.content.trim() !== "");
+        if (rows.length === 0) {
+          return {
+            content: [{ type: "text", text: "No self memories found." }],
+            details: { target: "self", count: 0, total },
+          };
+        }
+        return {
+          content: [{ type: "text", text: `Self memories (${rows.length}/${total} shown):\n${rows.map(formatMemory).join("\n")}` }],
+          details: { target: "self", count: rows.length, total },
+        };
+      }
+
       let userId: string | undefined;
       let label: string;
-      if (target === "current_user") {
-        userId = deps.currentUserId;
-        label = deps.resolveUsernameById?.(userId ?? "") ?? userId ?? "current user";
-      } else if (typeof p.user_id === "string" && p.user_id.trim() !== "") {
+      if (typeof p.user_id === "string" && p.user_id.trim() !== "") {
         userId = p.user_id.trim();
         label = deps.resolveUsernameById?.(userId) ?? userId;
         if (deps.isUserInGuild !== undefined && !await deps.isUserInGuild(userId, guildId)) {

@@ -1974,7 +1974,7 @@ function buildMemoryPassRuntimeInstruction(passKind: "post_reply" | "ambient" = 
   if (passKind === "ambient") {
     base.push(
       "Be stricter than a post-reply pass because nobody asked the bot to remember this chatter.",
-      "Do not use subject=current_user in ambient passes. For user-scoped memories, use subject=user with the person's username; use subject=global only for shared current-server or current-work context.",
+      "For user-scoped memories, use subject=user with the person's username; use subject=self only when the chat established bot/persona continuity; use subject=global only for shared current-server or current-work context.",
     );
   }
   base.push(

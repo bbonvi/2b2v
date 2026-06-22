@@ -77,7 +77,7 @@ All fields are optional; missing values fall back to global defaults. `imageMaxD
 
 `memoryExtraction.postReply` controls the silent memory pass after visible bot replies. `memoryExtraction.ambient` can periodically review non-triggered human chatter; `everyMessages` counts from the last successful memory pass in that channel, including post-reply passes, and `minIntervalSeconds` prevents bursty background spend.
 
-Guild memories are shared server facts. User memories are keyed by Discord user ID and follow that user across guilds; if a user fact only applies in one guild or channel, the memory text should say so explicitly.
+Guild memories are shared server facts. User memories are keyed by Discord user ID and follow that user across guilds; if a user fact only applies in one guild or channel, the memory text should say so explicitly. Self memories are the bot/persona's own portable continuity and private journal.
 
 ### Persona
 

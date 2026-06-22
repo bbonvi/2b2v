@@ -67,10 +67,10 @@ describe("memories table", () => {
     const now = Date.now();
     const result = db.raw
       .prepare(
-        `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(null, "user-1", "preference", "Prefers dark mode", "msg-42", 0.9, now, now, null);
+      .run("user", null, "user-1", "preference", "Prefers dark mode", "msg-42", 0.9, now, now, null);
 
     const memId = Number(result.lastInsertRowid);
     const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get(memId) as Record<string, unknown>;
@@ -87,10 +87,10 @@ describe("memories table", () => {
     const now = Date.now();
     const result = db.raw
       .prepare(
-        `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("guild-1", null, "global_note", "Movie night is every Friday", null, 0.8, now, now, null);
+      .run("guild", "guild-1", null, "global_note", "Movie night is every Friday", null, 0.8, now, now, null);
 
     const memId = Number(result.lastInsertRowid);
     const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get(memId) as Record<string, unknown>;
@@ -105,10 +105,10 @@ describe("memories table", () => {
     const insert = () =>
       db.raw
         .prepare(
-          `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run("guild-1", null, "unknown", "Movie night is every Friday", null, 0.8, now, now, null);
+        .run("guild", "guild-1", null, "unknown", "Movie night is every Friday", null, 0.8, now, now, null);
 
     expect(insert).toThrow();
   });
@@ -116,17 +116,18 @@ describe("memories table", () => {
   test("accepts current memory kinds", () => {
     const now = Date.now();
     const insert = db.raw.prepare(
-      `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
-    insert.run(null, "user-1", "identity", "Preferred name is Sasha.", null, 0.8, now, now, null, null);
-    insert.run(null, "user-1", "constraint", "Do not use voice replies.", null, 0.8, now, now, null, null);
-    insert.run(null, "user-1", "interest", "Likes puzzle games.", null, 0.8, now, now, null, null);
-    insert.run(null, "user-1", "scratchpad", "Check auth headers next.", null, 0.8, now, now, now + 60_000, null);
+    insert.run("user", null, "user-1", "identity", "Preferred name is Sasha.", null, 0.8, now, now, null, null);
+    insert.run("user", null, "user-1", "constraint", "Do not use voice replies.", null, 0.8, now, now, null, null);
+    insert.run("user", null, "user-1", "interest", "Likes puzzle games.", null, 0.8, now, now, null, null);
+    insert.run("self", null, null, "journal", "Privately decided the test room matters.", null, 0.8, now, now, null, null);
+    insert.run("user", null, "user-1", "scratchpad", "Check auth headers next.", null, 0.8, now, now, now + 60_000, null);
 
     const rows = db.raw.prepare("SELECT kind FROM memories ORDER BY id").all() as Array<{ kind: string }>;
-    expect(rows.map((row) => row.kind)).toEqual(["identity", "constraint", "interest", "scratchpad"]);
+    expect(rows.map((row) => row.kind)).toEqual(["identity", "constraint", "interest", "journal", "scratchpad"]);
   });
 
   test("rejects legacy project memory kind", () => {
@@ -134,10 +135,10 @@ describe("memories table", () => {
     const insert = () =>
       db.raw
         .prepare(
-          `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run("guild-1", null, "project", "Legacy project memory", null, 0.8, now, now, null);
+        .run("guild", "guild-1", null, "project", "Legacy project memory", null, 0.8, now, now, null);
 
     expect(insert).toThrow();
   });
@@ -147,10 +148,23 @@ describe("memories table", () => {
     const insert = () =>
       db.raw
         .prepare(
-          `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(null, "user-1", "scratchpad", "Missing expiry.", null, 0.8, now, now, null);
+        .run("user", null, "user-1", "scratchpad", "Missing expiry.", null, 0.8, now, now, null);
+
+    expect(insert).toThrow();
+  });
+
+  test("rejects journal memories outside self scope", () => {
+    const now = Date.now();
+    const insert = () =>
+      db.raw
+        .prepare(
+          `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run("user", null, "user-1", "journal", "Wrong scope.", null, 0.8, now, now, null);
 
     expect(insert).toThrow();
   });
@@ -160,10 +174,10 @@ describe("memories table", () => {
     const insert = () =>
       db.raw
         .prepare(
-          `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run("guild-1", null, "global_note", "", null, 0.8, now, now, null);
+        .run("guild", "guild-1", null, "global_note", "", null, 0.8, now, now, null);
 
     expect(insert).toThrow();
   });
@@ -171,13 +185,13 @@ describe("memories table", () => {
   test("autoincrement produces unique sequential IDs", () => {
     const now = Date.now();
     const insert = db.raw.prepare(
-      `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
-    const r1 = insert.run(null, "u1", "fact", "first", null, 0.8, now, now, null);
-    const r2 = insert.run(null, "u1", "fact", "second", null, 0.8, now, now, null);
-    const r3 = insert.run(null, "u1", "fact", "third", null, 0.8, now, now, null);
+    const r1 = insert.run("user", null, "u1", "fact", "first", null, 0.8, now, now, null);
+    const r2 = insert.run("user", null, "u1", "fact", "second", null, 0.8, now, now, null);
+    const r3 = insert.run("user", null, "u1", "fact", "third", null, 0.8, now, now, null);
 
     expect(Number(r1.lastInsertRowid)).toBe(1);
     expect(Number(r2.lastInsertRowid)).toBe(2);
@@ -189,6 +203,13 @@ describe("memories table", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_memories_guild_subject'")
       .get() as { name: string } | undefined;
     expect(idx?.name).toBe("idx_memories_guild_subject");
+  });
+
+  test("scope index supports self-memory queries", () => {
+    const idx = db.raw
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_memories_scope_active'")
+      .get() as { name: string } | undefined;
+    expect(idx?.name).toBe("idx_memories_scope_active");
   });
 
   test("migrates old structured memory schema and drops project rows", () => {
@@ -225,8 +246,11 @@ describe("memories table", () => {
 
       expect(rows).toEqual([{ kind: "fact", content: "In guild guild-1: Keep this fact." }]);
       expect(schema.sql).toContain("'identity'");
+      expect(schema.sql).toContain("'journal'");
+      expect(schema.sql).toContain("scope IN ('guild', 'user', 'self')");
       expect(schema.sql).toContain("kind <> 'scratchpad' OR expires_at IS NOT NULL");
-      expect(schema.sql).toContain("subject_user_id IS NOT NULL AND guild_id IS NULL");
+      expect(schema.sql).toContain("kind <> 'journal' OR scope = 'self'");
+      expect(schema.sql).toContain("scope = 'user' AND subject_user_id IS NOT NULL AND guild_id IS NULL");
       expect(schema.sql).not.toContain("'project'");
     } finally {
       migrated.close();

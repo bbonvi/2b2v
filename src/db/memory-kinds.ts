@@ -7,6 +7,7 @@ export const MEMORY_KINDS = [
   "identity",
   "constraint",
   "interest",
+  "journal",
   "scratchpad",
 ] as const;
 

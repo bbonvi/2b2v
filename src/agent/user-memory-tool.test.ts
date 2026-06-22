@@ -29,6 +29,7 @@ describe("createMemoryListTool", () => {
     expect(tool.name).toBe("list_memories");
     expect(tool.description).toContain("User memories are Discord-user scoped");
     expect(tool.description).toContain("target=guild");
+    expect(tool.description).toContain("target=self");
   });
 
   test("retrieves portable user memories for the resolved guild user", async () => {
@@ -126,6 +127,26 @@ describe("createMemoryListTool", () => {
     expect(text).not.toContain("Current guild note");
     expect(text).not.toContain("Portable user note");
     expect(result.details).toEqual({ target: "guild", guildId: "g2", count: 1, total: 1 });
+  });
+
+  test("retrieves self memories", async () => {
+    createMemory(db, { guildId: "g1", scope: "self", kind: "journal", content: "Privately decided the room matters." });
+    createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Portable user note" });
+    createMemory(db, { guildId: "g1", kind: "global_note", content: "Guild note" });
+
+    const tool = createMemoryListTool({
+      db,
+      currentGuildId: "g1",
+      resolveUsername: () => Promise.resolve(undefined),
+    });
+    const result = await tool.execute("tc1", { target: "self" }, AbortSignal.timeout(5000));
+    const text = textOf(result);
+
+    expect(text).toContain("Self memories (1/1 shown):");
+    expect(text).toContain("[self] [0.7] [journal] Privately decided the room matters.");
+    expect(text).not.toContain("Portable user note");
+    expect(text).not.toContain("Guild note");
+    expect(result.details).toEqual({ target: "self", count: 1, total: 1 });
   });
 
   test("rejects inaccessible guild memory reads", async () => {

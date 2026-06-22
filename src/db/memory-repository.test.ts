@@ -67,6 +67,22 @@ describe("createMemory", () => {
     expect(row?.kind).toBe("scratchpad");
     expect(row?.expiresAt).toBe(expiresAt);
   });
+
+  test("stores self memories without guild or user ownership", () => {
+    const id = createMemory(db, {
+      guildId: "g1",
+      scope: "self",
+      kind: "journal",
+      content: "Privately decided the server is worth returning to.",
+      confidence: 0.8,
+    });
+
+    const row = getMemory(db, id);
+    expect(row?.scope).toBe("self");
+    expect(row?.guildId).toBeNull();
+    expect(row?.subjectUserId).toBeNull();
+    expect(row?.kind).toBe("journal");
+  });
 });
 
 describe("updateMemory", () => {
@@ -103,6 +119,55 @@ describe("updateMemory", () => {
     expect(getMemory(db, id)?.expiresAt).toBeNull();
   });
 
+  test("updates scope only with required ownership fields", () => {
+    const id = createMemory(db, {
+      guildId: "g1",
+      kind: "global_note",
+      content: "Old scope",
+    });
+
+    expect(() => updateMemory(db, id, { scope: "user", content: "Invalid user scope" })).toThrow();
+    expect(() => updateMemory(db, id, { scope: "guild", content: "Invalid guild scope" })).toThrow();
+    expect(() => updateMemory(db, id, { subjectUserId: "u1" })).toThrow("Changing memory scope fields requires scope.");
+    expect(() => updateMemory(db, id, { guildId: "g2" })).toThrow("Changing memory scope fields requires scope.");
+
+    expect(updateMemory(db, id, {
+      scope: "self",
+      kind: "journal",
+      content: "Moved to self journal.",
+    })).toBe(true);
+
+    const row = getMemory(db, id);
+    expect(row?.scope).toBe("self");
+    expect(row?.guildId).toBeNull();
+    expect(row?.subjectUserId).toBeNull();
+    expect(row?.kind).toBe("journal");
+  });
+
+  test("rejects journal scope transitions before SQL constraints", () => {
+    const selfJournal = createMemory(db, {
+      guildId: "g1",
+      scope: "self",
+      kind: "journal",
+      content: "Self-only journal.",
+    });
+    const guildMemory = createMemory(db, {
+      guildId: "g1",
+      kind: "fact",
+      content: "Guild fact.",
+    });
+
+    expect(() => updateMemory(db, selfJournal, {
+      scope: "guild",
+      guildId: "g1",
+      content: "Invalid journal move.",
+    })).toThrow("Journal memories must use self scope.");
+    expect(() => updateMemory(db, guildMemory, {
+      kind: "journal",
+      content: "Invalid journal kind.",
+    })).toThrow("Journal memories must use self scope.");
+  });
+
   test("returns false when row does not exist", () => {
     expect(updateMemory(db, 999999, { content: "nope" })).toBe(false);
   });
@@ -131,6 +196,7 @@ describe("listMemories", () => {
     createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "preference", content: "A" });
     createMemory(db, { guildId: "g1", subjectUserId: "u2", kind: "fact", content: "B" });
     createMemory(db, { guildId: "g1", kind: "global_note", content: "C" });
+    createMemory(db, { guildId: "g1", scope: "self", kind: "journal", content: "E" });
     createMemory(db, { guildId: "g2", kind: "global_note", content: "D" });
 
     const rows = listMemories(db, {
@@ -141,28 +207,30 @@ describe("listMemories", () => {
 
     expect(rows.map((row) => row.content).sort()).toEqual(["A", "C"]);
     expect(countMemories(db, { guildId: "g1", subjectUserId: "u1", includeGlobal: true })).toBe(2);
+    expect(listMemories(db, { guildId: "g1", scope: "self" }).map((row) => row.content)).toEqual(["E"]);
+    expect(countMemories(db, { guildId: "g1", scope: "self" })).toBe(1);
   });
 
   test("returns newest updated memories first and enforces limit", () => {
     const now = Date.now();
     db.raw
       .prepare(
-        `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(null, "u1", "user_note", "Oldest", null, 0.7, now - 3000, now - 3000, null);
+      .run("user", null, "u1", "user_note", "Oldest", null, 0.7, now - 3000, now - 3000, null);
     db.raw
       .prepare(
-        `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(null, "u1", "user_note", "Middle", null, 0.7, now - 2000, now - 2000, null);
+      .run("user", null, "u1", "user_note", "Middle", null, 0.7, now - 2000, now - 2000, null);
     db.raw
       .prepare(
-        `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(null, "u1", "user_note", "Newest", null, 0.7, now - 1000, now - 1000, null);
+      .run("user", null, "u1", "user_note", "Newest", null, 0.7, now - 1000, now - 1000, null);
 
     const rows = listMemories(db, { guildId: "g1", subjectUserId: "u1", limit: 2 });
     expect(rows.map((row) => row.content)).toEqual(["Newest", "Middle"]);

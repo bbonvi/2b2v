@@ -2,8 +2,11 @@ import type { Database } from "./database";
 import type { MemoryKind } from "./memory-kinds";
 export { MEMORY_KINDS, isMemoryKind, type MemoryKind } from "./memory-kinds";
 
+export type MemoryScope = "guild" | "user" | "self";
+
 export interface MemoryRow {
   id: number;
+  scope: MemoryScope;
   guildId: string | null;
   subjectUserId: string | null;
   kind: MemoryKind;
@@ -18,6 +21,7 @@ export interface MemoryRow {
 
 export interface CreateMemoryInput {
   guildId: string;
+  scope?: MemoryScope;
   subjectUserId?: string | null;
   kind: MemoryKind;
   content: string;
@@ -27,6 +31,8 @@ export interface CreateMemoryInput {
 }
 
 export interface UpdateMemoryInput {
+  scope?: MemoryScope;
+  guildId?: string | null;
   subjectUserId?: string | null;
   kind?: MemoryKind;
   content?: string;
@@ -38,8 +44,10 @@ export interface UpdateMemoryInput {
 
 export interface ListMemoriesFilter {
   guildId: string;
+  scope?: MemoryScope;
   subjectUserId?: string | null;
   includeGlobal?: boolean;
+  includeSelf?: boolean;
   includeDeleted?: boolean;
   limit?: number;
 }
@@ -51,6 +59,58 @@ function clampConfidence(value: number | undefined): number {
   return Math.max(0, Math.min(1, value));
 }
 
+function scopeForSubject(subjectUserId: string | null | undefined): MemoryScope {
+  return subjectUserId !== undefined && subjectUserId !== null ? "user" : "guild";
+}
+
+function createScopeFields(input: CreateMemoryInput): {
+  scope: MemoryScope;
+  guildId: string | null;
+  subjectUserId: string | null;
+} {
+  const scope = input.scope ?? scopeForSubject(input.subjectUserId);
+  if (scope === "self") {
+    return { scope, guildId: null, subjectUserId: null };
+  }
+  if (scope === "user") {
+    if (input.subjectUserId === undefined || input.subjectUserId === null || input.subjectUserId === "") {
+      throw new Error("User-scoped memories require subjectUserId.");
+    }
+    return { scope, guildId: null, subjectUserId: input.subjectUserId };
+  }
+  return { scope, guildId: input.guildId, subjectUserId: null };
+}
+
+function assertKindScope(kind: MemoryKind, scope: MemoryScope): void {
+  if (kind === "journal" && scope !== "self") {
+    throw new Error("Journal memories must use self scope.");
+  }
+}
+
+function updateScopeFields(input: UpdateMemoryInput): {
+  scope: MemoryScope;
+  guildId: string | null;
+  subjectUserId: string | null;
+} {
+  const scope = input.scope;
+  if (scope === undefined) {
+    throw new Error("scope is required.");
+  }
+  if (scope === "self") {
+    return { scope, guildId: null, subjectUserId: null };
+  }
+  if (scope === "user") {
+    if (input.subjectUserId === undefined || input.subjectUserId === null || input.subjectUserId === "") {
+      throw new Error("User-scoped memories require subjectUserId.");
+    }
+    return { scope, guildId: null, subjectUserId: input.subjectUserId };
+  }
+  if (input.guildId === undefined || input.guildId === null || input.guildId === "") {
+    throw new Error("Guild-scoped memories require guildId.");
+  }
+  return { scope, guildId: input.guildId, subjectUserId: null };
+}
+
 function memoryFilterConditions(filter: CountMemoriesFilter): {
   conditions: string[];
   params: (string | number | null)[];
@@ -58,21 +118,45 @@ function memoryFilterConditions(filter: CountMemoriesFilter): {
   const conditions: string[] = [];
   const params: (string | number | null)[] = [];
 
-  if (filter.subjectUserId !== undefined) {
+  if (filter.scope === "self") {
+    conditions.push("scope = 'self'");
+  } else if (filter.scope === "guild") {
+    conditions.push("scope = 'guild'");
+    conditions.push("guild_id = ?");
+    params.push(filter.guildId);
+  } else if (filter.scope === "user") {
+    if (filter.subjectUserId === undefined || filter.subjectUserId === null) {
+      conditions.push("1 = 0");
+    } else {
+      conditions.push("scope = 'user'");
+      conditions.push("subject_user_id = ?");
+      params.push(filter.subjectUserId);
+    }
+  } else if (filter.subjectUserId !== undefined) {
     if (filter.includeGlobal === true) {
-      conditions.push("((subject_user_id = ? AND guild_id IS NULL) OR (subject_user_id IS NULL AND guild_id = ?))");
+      const clauses = [
+        "(scope = 'user' AND subject_user_id = ? AND guild_id IS NULL)",
+        "(scope = 'guild' AND subject_user_id IS NULL AND guild_id = ?)",
+      ];
       params.push(filter.subjectUserId);
       params.push(filter.guildId);
+      if (filter.includeSelf === true) {
+        clauses.push("(scope = 'self' AND subject_user_id IS NULL AND guild_id IS NULL)");
+      }
+      conditions.push(`(${clauses.join(" OR ")})`);
     } else if (filter.subjectUserId === null) {
+      conditions.push("scope = 'guild'");
       conditions.push("subject_user_id IS NULL");
       conditions.push("guild_id = ?");
       params.push(filter.guildId);
     } else {
+      conditions.push("scope = 'user'");
       conditions.push("subject_user_id = ?");
       conditions.push("guild_id IS NULL");
       params.push(filter.subjectUserId);
     }
   } else {
+    conditions.push("scope = 'guild'");
     conditions.push("subject_user_id IS NULL");
     conditions.push("guild_id = ?");
     params.push(filter.guildId);
@@ -90,14 +174,15 @@ function memoryFilterConditions(filter: CountMemoriesFilter): {
 /** Create a structured memory row and return its generated ID. */
 export function createMemory(db: Database, input: CreateMemoryInput): number {
   const now = Date.now();
-  const subjectUserId = input.subjectUserId ?? null;
-  const guildId = subjectUserId === null ? input.guildId : null;
+  const { scope, guildId, subjectUserId } = createScopeFields(input);
+  assertKindScope(input.kind, scope);
   const result = db.raw
     .prepare(
-      `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+      `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
     )
     .run(
+      scope,
       guildId,
       subjectUserId,
       input.kind,
@@ -116,13 +201,25 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
 export function updateMemory(db: Database, id: number, input: UpdateMemoryInput): boolean {
   const sets: string[] = [];
   const params: (string | number | null)[] = [];
+  const existing = db.raw
+    .prepare("SELECT scope, kind FROM memories WHERE id = ?")
+    .get(id) as { scope: MemoryScope; kind: MemoryKind } | null;
+  if (existing === null) return false;
+  if (input.scope === undefined && ("guildId" in input || "subjectUserId" in input)) {
+    throw new Error("Changing memory scope fields requires scope.");
+  }
+  const effectiveScope = input.scope ?? existing.scope;
+  const effectiveKind = input.kind ?? existing.kind;
+  assertKindScope(effectiveKind, effectiveScope);
 
-  if ("subjectUserId" in input) {
+  if (input.scope !== undefined) {
+    const scopeFields = updateScopeFields(input);
+    sets.push("scope = ?");
+    params.push(scopeFields.scope);
+    sets.push("guild_id = ?");
+    params.push(scopeFields.guildId);
     sets.push("subject_user_id = ?");
-    params.push(input.subjectUserId ?? null);
-    if (input.subjectUserId !== null && input.subjectUserId !== undefined) {
-      sets.push("guild_id = NULL");
-    }
+    params.push(scopeFields.subjectUserId);
   }
   if (input.kind !== undefined) {
     sets.push("kind = ?");
@@ -179,7 +276,7 @@ export function getMemory(db: Database, id: number): MemoryRow | null {
   return mapRow(row);
 }
 
-/** List active guild memories or portable user memories, optionally combining both for prompt context. */
+/** List active memories by scope, optionally combining current guild and portable user rows for prompt context. */
 export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRow[] {
   const { conditions, params } = memoryFilterConditions(filter);
 
@@ -207,7 +304,7 @@ export function countUserMemoriesByUser(db: Database, _guildId: string): Map<str
   const rows = db.raw
     .prepare(
       `SELECT subject_user_id, COUNT(*) as count FROM memories
-       WHERE guild_id IS NULL AND subject_user_id IS NOT NULL AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
+       WHERE scope = 'user' AND guild_id IS NULL AND subject_user_id IS NOT NULL AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
        GROUP BY subject_user_id`
     )
     .all(Date.now()) as Array<{ subject_user_id: string; count: number }>;
@@ -222,6 +319,7 @@ export function countUserMemoriesByUser(db: Database, _guildId: string): Map<str
 function mapRow(row: Record<string, unknown>): MemoryRow {
   return {
     id: Number(row.id),
+    scope: row.scope as MemoryScope,
     guildId: row.guild_id as string | null,
     subjectUserId: row.subject_user_id as string | null,
     kind: row.kind as MemoryKind,
