@@ -715,7 +715,6 @@ function dashboardTriggerLocation(guild: Guild, channel: unknown): { guildName: 
 }
 
 const DISCORD_CONTEXT_MAX_GUILDS = 12;
-const DISCORD_CONTEXT_CHANNELS_PER_GUILD = 8;
 
 function botChannelPermissions(channel: GuildBasedChannel | ThreadChannel): {
   canView: boolean;
@@ -762,28 +761,25 @@ function isMainDiscordContextChannel(channel: GuildBasedChannel): boolean {
     || channel.type === ChannelType.GuildMedia;
 }
 
-function mainDiscordContextChannels(guild: Guild, currentChannelId: string): ChannelInfo[] {
-  const channels: ChannelInfo[] = [];
-  for (const [, channel] of guild.channels.cache) {
-    if (!isMainDiscordContextChannel(channel)) continue;
-    const permissions = botChannelPermissions(channel);
-    if (!permissions.canView) continue;
-    const categoryName = channel.parent?.name;
-    channels.push({
-      guildId: guild.id,
-      guildName: guild.name,
-      id: channel.id,
-      name: channel.name,
-      type: channelTypeLabel(channel),
-      canView: permissions.canView,
-      canSend: permissions.canSend,
-      isCurrent: channel.id === currentChannelId,
-      ...(categoryName !== undefined ? { categoryName } : {}),
-    });
-  }
-  return channels
-    .sort((a, b) => (a.isCurrent === b.isCurrent ? a.name.localeCompare(b.name) : a.isCurrent ? -1 : 1))
-    .slice(0, DISCORD_CONTEXT_CHANNELS_PER_GUILD);
+function systemDiscordContextChannel(guild: Guild, currentChannelId: string): ChannelInfo | null {
+  if (guild.systemChannelId === null) return null;
+  const channel = guild.channels.cache.get(guild.systemChannelId);
+  if (channel === undefined || !isMainDiscordContextChannel(channel)) return null;
+
+  const permissions = botChannelPermissions(channel);
+  if (!permissions.canView) return null;
+  const categoryName = channel.parent?.name;
+  return {
+    guildId: guild.id,
+    guildName: guild.name,
+    id: channel.id,
+    name: channel.name,
+    type: channelTypeLabel(channel),
+    canView: permissions.canView,
+    canSend: permissions.canSend,
+    isCurrent: channel.id === currentChannelId,
+    ...(categoryName !== undefined ? { categoryName } : {}),
+  };
 }
 
 function buildDiscordContext(input: {
@@ -807,21 +803,19 @@ function buildDiscordContext(input: {
     `Current channel/thread: ${currentChannel}`,
     "This list is navigation context only. Do not copy private details, drama, or local assumptions across guilds unless the user asks or it is necessary.",
     "Prompt chat history is only for the current channel/thread. Use list_channels, chat_history, search_messages, or list_memories when another channel/guild needs context. Preserve cross-channel continuity with tiny user/guild memories or scratchpad only when it will matter later.",
-    "Guild/channel inventory:",
+    "Guild shortlist: one Discord system channel per guild. Use list_channels with guild_id for the full visible channel list before assuming other channels.",
   ];
 
   for (const guild of guilds) {
     const current = guild.id === input.currentGuildId ? " current" : "";
     lines.push(`- ${guild.name} | guild_id=${guild.id}${current}`);
-    const channels = mainDiscordContextChannels(guild, input.currentChannelId);
-    if (channels.length === 0) {
-      lines.push("  channels: (none cached; use list_channels with guild_id if needed)");
+    const channel = systemDiscordContextChannel(guild, input.currentChannelId);
+    if (channel === null) {
+      lines.push("  system_channel: (none cached/visible; use list_channels with guild_id if needed)");
       continue;
     }
-    for (const channel of channels) {
-      const marker = channel.isCurrent ? " *" : "";
-      lines.push(`  - #${channel.name} | channel_id=${channel.id} | type=${channel.type} | send=${channel.canSend ? "yes" : "no"}${marker}`);
-    }
+    const marker = channel.isCurrent ? " *" : "";
+    lines.push(`  system_channel: #${channel.name} | channel_id=${channel.id} | type=${channel.type} | send=${channel.canSend ? "yes" : "no"}${marker}`);
   }
 
   return lines.join("\n");
