@@ -91,15 +91,15 @@ function selectNextDispatchTrigger(messages: readonly PendingMessage[]): Selecte
 
 /**
  * Choose the concrete message to process for a selected trigger.
- * Keyword batches may include same-author follow-up text after the triggering
- * message. Mention and random triggers stay pinned to the actual triggering
+ * Typing-aware triggers may include same-author follow-up text after the
+ * triggering message. Random triggers stay pinned to the actual triggering
  * message so Discord replies do not target unrelated non-triggering chatter.
  */
 export function selectDispatchMessageForTrigger(
   batch: readonly PendingMessage[],
   trigger: SelectedDispatchTrigger,
 ): PendingMessage | undefined {
-  if (trigger.result.reason === "keyword") {
+  if (allowsSameAuthorFollowup(trigger.result)) {
     for (let i = batch.length - 1; i >= 0; i--) {
       const message = batch[i];
       if (message !== undefined && message.authorId === trigger.message.authorId) return message;
@@ -129,7 +129,7 @@ function takeNextDispatchBatch(state: ChannelState): {
   }
 
   let endIndex = triggerIndex;
-  if (trigger.result.reason === "keyword") {
+  if (allowsSameAuthorFollowup(trigger.result)) {
     for (let i = triggerIndex + 1; i < state.pending.length; i += 1) {
       const message = state.pending[i];
       if (message === undefined || message.triggerResult !== null) break;
@@ -201,7 +201,7 @@ export function createChannelDispatcher(opts: {
     messages: readonly PendingMessage[],
     trigger: SelectedDispatchTrigger | null,
   ): number {
-    if (trigger?.result.reason !== "keyword") return 0;
+    if (trigger === null || !usesTypingWait(trigger.result)) return 0;
     if (triggers.typingIdleMs <= 0 || triggers.typingMaxWaitMs <= 0) return 0;
 
     const userId = trigger.message.authorId;
@@ -335,7 +335,7 @@ export function createChannelDispatcher(opts: {
     if (state === undefined) return;
     const messages = [...state.queued, ...state.pending];
     const trigger = selectNextDispatchTrigger(messages);
-    if (trigger?.result.reason !== "keyword") return;
+    if (trigger === null || !usesTypingWait(trigger.result)) return;
     if (trigger.message.authorId !== userId) return;
 
     const observedAt = Date.now();
@@ -364,4 +364,12 @@ function triggerPriority(trigger: DispatchTrigger): number {
     case "keyword": return 2;
     case "random": return 1;
   }
+}
+
+function allowsSameAuthorFollowup(trigger: DispatchTrigger): boolean {
+  return trigger.reason === "keyword" || trigger.reason === "mention";
+}
+
+function usesTypingWait(trigger: DispatchTrigger): boolean {
+  return trigger.reason === "keyword" || trigger.reason === "mention";
 }

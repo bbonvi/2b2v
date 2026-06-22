@@ -146,9 +146,9 @@ export interface TriggerConfig {
   randomChance: number; // 0–1
   /** Debounce ms after a keyword trigger before the agent runs. */
   keywordDebounceMs: number;
-  /** Treat a typingStart from the keyword-triggering user as active for this long. */
+  /** Treat typingStart from the keyword/mention-triggering user as active for this long. */
   typingIdleMs: number;
-  /** Maximum extra wait after a keyword trigger, even if typing keeps refreshing. */
+  /** Maximum extra wait after a keyword/mention trigger, even if typing keeps refreshing. */
   typingMaxWaitMs: number;
 }
 

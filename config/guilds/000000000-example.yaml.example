@@ -9,7 +9,7 @@ triggers:
   randomChance: 0.02       # 0–1 probability of responding to any message
   keywordDebounceMs: 2500  # Wait after a keyword trigger before replying
   typingIdleMs: 10000      # Treat typingStart from the triggering user as active for this long
-  typingMaxWaitMs: 15000   # Hard cap for typing-aware keyword waits
+  typingMaxWaitMs: 15000   # Hard cap for typing-aware keyword/mention waits
 
 # Trigger-specific instructions (overrides global defaults per-key).
 # triggerInstructions:

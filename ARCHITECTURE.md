@@ -24,7 +24,7 @@ Tool-budget exhaustion is recoverable. Pending tool calls get synthetic results,
 
 Typing is runtime-owned. The model has no typing tool.
 
-Channel dispatch batches preserve the causal reply target and run triggering messages in chronological dispatch units. Mentions and random triggers process the actual triggering message; keyword triggers may process same-author follow-up text until the next triggering message. Unrelated later chatter must not inherit another message's trigger reason, and later triggers in the same accumulated batch must remain pending for their own run.
+Channel dispatch batches preserve the causal reply target and run triggering messages in chronological dispatch units. Mention and keyword triggers may process same-author follow-up text until the next triggering message; random triggers process the actual triggering message. Unrelated later chatter must not inherit another message's trigger reason, and later triggers in the same accumulated batch must remain pending for their own run.
 
 When a long-running handler finishes, queued messages and still-pending debounce messages must be merged into the next batch; promotion must not replace one bucket with the other.
 

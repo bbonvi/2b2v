@@ -70,7 +70,7 @@ describe("createChannelDispatcher", () => {
     expect(selected?.id).toBe("m-mentioned");
   });
 
-  test("keeps mention replies pinned to the mentioned message despite same-author follow-up", () => {
+  test("selects same-author mention follow-up as concrete dispatch message", () => {
     const mentioned = makePending("m-mentioned", "user-1", { reason: "mention" }, 1000);
     const followup = makePending("m-followup", "user-1", null, 1001);
     const selected = selectDispatchMessageForTrigger(
@@ -78,7 +78,7 @@ describe("createChannelDispatcher", () => {
       { result: { reason: "mention" }, message: mentioned },
     );
 
-    expect(selected?.id).toBe("m-mentioned");
+    expect(selected?.id).toBe("m-followup");
   });
 
   test("selects the randomly triggered message instead of latest batch message", () => {
@@ -253,6 +253,30 @@ describe("createChannelDispatcher", () => {
     dispatcher.dispose();
   });
 
+  test("keeps mention follow-up together without swallowing a later trigger", async () => {
+    const calls: Array<{ ids: string[]; trigger: TriggerResult }> = [];
+    const handler: DispatchHandler = (msgs, trigger) => {
+      calls.push({ ids: msgs.map((m) => m.id), trigger: trigger?.result ?? null });
+      return Promise.resolve({ coveredMessageIds: [msgs[0]?.id ?? ""] });
+    };
+
+    const config = makeConfig({ mentionDebounceMs: 20 });
+    const dispatcher = createChannelDispatcher({ config, triggers: makeTriggers({ keywordDebounceMs: 20 }), handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-mention"), { reason: "mention" }, "user-1");
+    enqueue(dispatcher, makeMessage("ch-1", "m-followup"), null, "user-1");
+    enqueue(dispatcher, makeMessage("ch-1", "m-key"), { reason: "keyword", keyword: "bot" }, "user-2");
+
+    await delay(100);
+
+    expect(calls).toEqual([
+      { ids: ["m-mention", "m-followup"], trigger: { reason: "mention" } },
+      { ids: ["m-key"], trigger: { reason: "keyword", keyword: "bot" } },
+    ]);
+
+    dispatcher.dispose();
+  });
+
   test("waits for keyword triggering user to stop typing", async () => {
     let callCount = 0;
     const handler: DispatchHandler = () => {
@@ -312,6 +336,75 @@ describe("createChannelDispatcher", () => {
     const dispatcher = createChannelDispatcher({ config, triggers, handler });
 
     enqueue(dispatcher, makeMessage("ch-1", "m-key"), { reason: "keyword", keyword: "туби" }, "user-1");
+    dispatcher.recordTyping("ch-1", "user-2");
+
+    await delay(50);
+    expect(callCount).toBe(1);
+
+    dispatcher.dispose();
+  });
+
+  test("waits for mention triggering user to stop typing", async () => {
+    let callCount = 0;
+    const handler: DispatchHandler = () => {
+      callCount++;
+      return Promise.resolve(undefined);
+    };
+
+    const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 200 });
+    const triggers = makeTriggers({ typingIdleMs: 50, typingMaxWaitMs: 200 });
+    const dispatcher = createChannelDispatcher({ config, triggers, handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-mention"), { reason: "mention" }, "user-1");
+    await delay(5);
+    dispatcher.recordTyping("ch-1", "user-1");
+
+    await delay(35);
+    expect(callCount).toBe(0);
+
+    await delay(60);
+    expect(callCount).toBe(1);
+
+    dispatcher.dispose();
+  });
+
+  test("message from mention triggering user clears typing wait", async () => {
+    const calls: Array<{ ids: string[]; trigger: TriggerResult }> = [];
+    const handler: DispatchHandler = (msgs, trigger) => {
+      calls.push({ ids: msgs.map((m) => m.id), trigger: trigger?.result ?? null });
+      return Promise.resolve(undefined);
+    };
+
+    const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 200 });
+    const triggers = makeTriggers({ typingIdleMs: 80, typingMaxWaitMs: 300 });
+    const dispatcher = createChannelDispatcher({ config, triggers, handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-mention"), { reason: "mention" }, "user-1");
+    await delay(5);
+    dispatcher.recordTyping("ch-1", "user-1");
+    await delay(5);
+    enqueue(dispatcher, makeMessage("ch-1", "m-followup"), null, "user-1");
+
+    await delay(50);
+    expect(calls).toEqual([
+      { ids: ["m-mention", "m-followup"], trigger: { reason: "mention" } },
+    ]);
+
+    dispatcher.dispose();
+  });
+
+  test("typing by other users does not delay mention trigger", async () => {
+    let callCount = 0;
+    const handler: DispatchHandler = () => {
+      callCount++;
+      return Promise.resolve(undefined);
+    };
+
+    const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 200 });
+    const triggers = makeTriggers({ typingIdleMs: 80, typingMaxWaitMs: 300 });
+    const dispatcher = createChannelDispatcher({ config, triggers, handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-mention"), { reason: "mention" }, "user-1");
     dispatcher.recordTyping("ch-1", "user-2");
 
     await delay(50);
