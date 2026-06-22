@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "./database";
-import { deleteBotMessageState, upsertBotMessageContent, upsertMessageReaction } from "./message-repository";
+import { deleteBotMessageState, getRoutedMessageSource, upsertBotMessageContent, upsertMessageReaction } from "./message-repository";
 import { insertImage } from "./image-repository";
 
 let db: Database;
@@ -90,6 +90,31 @@ describe("bot message state helpers", () => {
     });
 
     expect(row.replyToId).toBe("live-reply");
+  });
+
+  test("upsertBotMessageContent stores routed source metadata for bot messages", () => {
+    upsertBotMessageContent(db, {
+      id: "m1",
+      guildId: "g2",
+      channelId: "c2",
+      botUserId: "bot-1",
+      botUsername: "2b",
+      rawContent: "cross-channel raw",
+      translatedContent: "cross-channel text",
+      createdAt: 999,
+      replyToId: null,
+      routedFrom: {
+        routedFromGuildId: "g1",
+        routedFromChannelId: "c1",
+        routedFromMessageId: "source-msg",
+      },
+    });
+
+    expect(getRoutedMessageSource(db, { messageId: "m1", guildId: "g2", channelId: "c2" })).toEqual({
+      routedFromGuildId: "g1",
+      routedFromChannelId: "c1",
+      routedFromMessageId: "source-msg",
+    });
   });
 
   test("upsertBotMessageContent refuses to update user-authored rows", () => {

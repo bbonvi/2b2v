@@ -59,7 +59,10 @@ const SCHEMA_SQL = `
     reply_to_id         TEXT,
     is_synthetic        INTEGER NOT NULL DEFAULT 0,
     is_prompt_only      INTEGER NOT NULL DEFAULT 0,
-    related_thread_id   TEXT
+    related_thread_id   TEXT,
+    routed_from_guild_id   TEXT,
+    routed_from_channel_id TEXT,
+    routed_from_message_id TEXT
   );
 
   CREATE INDEX IF NOT EXISTS idx_messages_guild_channel_time
@@ -172,6 +175,9 @@ export function createDatabase(dbPath: string): Database {
   try { raw.run("ALTER TABLE messages ADD COLUMN is_synthetic INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try { raw.run("ALTER TABLE messages ADD COLUMN is_prompt_only INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try { raw.run("ALTER TABLE messages ADD COLUMN related_thread_id TEXT"); } catch { /* already exists */ }
+  try { raw.run("ALTER TABLE messages ADD COLUMN routed_from_guild_id TEXT"); } catch { /* already exists */ }
+  try { raw.run("ALTER TABLE messages ADD COLUMN routed_from_channel_id TEXT"); } catch { /* already exists */ }
+  try { raw.run("ALTER TABLE messages ADD COLUMN routed_from_message_id TEXT"); } catch { /* already exists */ }
   try { raw.run("ALTER TABLE images ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'image' CHECK(source_kind IN ('image', 'gif', 'sticker'))"); } catch { /* already exists */ }
 
   // Idempotent migration: thread ownership and close/archive state.

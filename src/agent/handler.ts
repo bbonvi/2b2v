@@ -50,6 +50,11 @@ export interface IncomingMessage {
   translatedContent: string;
   messageId?: string;
   replyToMessageId?: string;
+  repliedToBotRouteSource?: {
+    sourceGuildId: string;
+    sourceChannelId: string;
+    sourceMessageId: string;
+  };
   imageInputs?: CurrentTurnImageInput[];
 }
 
@@ -742,6 +747,13 @@ function buildCurrentMessageMetadata(msg: IncomingMessage): string {
   }
   if (msg.replyToMessageId !== undefined) {
     lines.push(`Trigger ReplyToMsgID: ${msg.replyToMessageId}`);
+  }
+  if (msg.repliedToBotRouteSource !== undefined) {
+    lines.push("Reply Context: The user is replying to a message you previously sent here from another channel.");
+    lines.push(`Source GuildID: ${msg.repliedToBotRouteSource.sourceGuildId}`);
+    lines.push(`Source ChannelID: ${msg.repliedToBotRouteSource.sourceChannelId}`);
+    lines.push(`Source MsgID: ${msg.repliedToBotRouteSource.sourceMessageId}`);
+    lines.push("If you need to understand why you sent it, use chat_history or search_messages with that source channel/message. Do not expose source-channel details unless they are relevant here.");
   }
   return lines.join("\n");
 }

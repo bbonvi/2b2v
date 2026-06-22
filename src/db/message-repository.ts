@@ -21,6 +21,12 @@ export interface StoredBotMessageState {
   replyToId: string | null;
 }
 
+export interface RoutedMessageSource {
+  routedFromGuildId: string;
+  routedFromChannelId: string;
+  routedFromMessageId: string;
+}
+
 export interface UpsertBotMessageContentInput {
   id: string;
   guildId: string;
@@ -31,6 +37,7 @@ export interface UpsertBotMessageContentInput {
   translatedContent: string;
   createdAt: number;
   replyToId: string | null;
+  routedFrom?: RoutedMessageSource | null;
 }
 
 export interface DeleteBotMessageStateResult {
@@ -249,7 +256,10 @@ export function upsertBotMessageContent(
     db.raw
       .prepare(
         `UPDATE messages
-         SET raw_content = ?, translated_content = ?, author_username = ?, reply_to_id = COALESCE(?, reply_to_id)
+         SET raw_content = ?, translated_content = ?, author_username = ?, reply_to_id = COALESCE(?, reply_to_id),
+             routed_from_guild_id = COALESCE(?, routed_from_guild_id),
+             routed_from_channel_id = COALESCE(?, routed_from_channel_id),
+             routed_from_message_id = COALESCE(?, routed_from_message_id)
          WHERE id = ? AND guild_id = ? AND channel_id = ? AND user_id = ? AND is_bot = 1
            AND is_synthetic = 0 AND is_prompt_only = 0`
       )
@@ -258,6 +268,9 @@ export function upsertBotMessageContent(
         input.translatedContent,
         input.botUsername,
         input.replyToId,
+        input.routedFrom?.routedFromGuildId ?? null,
+        input.routedFrom?.routedFromChannelId ?? null,
+        input.routedFrom?.routedFromMessageId ?? null,
         input.id,
         input.guildId,
         input.channelId,
@@ -267,8 +280,9 @@ export function upsertBotMessageContent(
     db.raw
       .prepare(
         `INSERT INTO messages
-           (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+           (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id,
+            routed_from_guild_id, routed_from_channel_id, routed_from_message_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`
       )
       .run(
         input.id,
@@ -280,6 +294,9 @@ export function upsertBotMessageContent(
         input.translatedContent,
         input.createdAt,
         input.replyToId,
+        input.routedFrom?.routedFromGuildId ?? null,
+        input.routedFrom?.routedFromChannelId ?? null,
+        input.routedFrom?.routedFromMessageId ?? null,
       );
   }
 
@@ -301,6 +318,39 @@ export function upsertBotMessageContent(
     };
 
   return storedBotMessageFromRow(row);
+}
+
+/** Return source channel breadcrumbs for a bot message sent from another channel context. */
+export function getRoutedMessageSource(
+  db: Database,
+  input: { messageId: string; guildId: string; channelId: string },
+): RoutedMessageSource | null {
+  const row = db.raw
+    .prepare(
+      `SELECT routed_from_guild_id, routed_from_channel_id, routed_from_message_id
+       FROM messages
+       WHERE id = ? AND guild_id = ? AND channel_id = ?
+         AND is_bot = 1 AND is_synthetic = 0 AND is_prompt_only = 0`
+    )
+    .get(input.messageId, input.guildId, input.channelId) as {
+      routed_from_guild_id: string | null;
+      routed_from_channel_id: string | null;
+      routed_from_message_id: string | null;
+    } | null;
+
+  if (
+    row === null
+    || row.routed_from_guild_id === null
+    || row.routed_from_channel_id === null
+    || row.routed_from_message_id === null
+  ) {
+    return null;
+  }
+  return {
+    routedFromGuildId: row.routed_from_guild_id,
+    routedFromChannelId: row.routed_from_channel_id,
+    routedFromMessageId: row.routed_from_message_id,
+  };
 }
 
 /**

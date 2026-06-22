@@ -21,7 +21,7 @@ import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
-import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, deleteRecentMessages, upsertMessageReaction, deleteMessageReactions, deleteMessageEmojiReaction, upsertBotMessageContent, deleteBotMessageState } from "./db/message-repository";
+import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, deleteRecentMessages, upsertMessageReaction, deleteMessageReactions, deleteMessageEmojiReaction, upsertBotMessageContent, deleteBotMessageState, getRoutedMessageSource, type RoutedMessageSource } from "./db/message-repository";
 import {
   countMessagesSinceMemoryExtraction,
   getMemoryExtractionCheckpoint,
@@ -284,6 +284,11 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       ...(sourceMessage !== undefined ? { replySourceMessage: sourceMessage } : {}),
       getLastTypingAt: completionTyping.getLastTypingAt,
       getAttachmentsDir: (targetGuildId) => getGuildConfig(targetGuildId).attachmentsDir,
+      routedFrom: {
+        routedFromGuildId: job.guildId,
+        routedFromChannelId: job.channelId,
+        routedFromMessageId: job.sourceMessageId,
+      },
     });
 
     const replyFallbackDeps: ReplyFallbackDeps = {
@@ -613,15 +618,36 @@ function createBotMessageStore(input: {
   botUserId: string;
   botUsername: string;
   logger: Logger;
+  routedFrom?: RoutedMessageSource;
 }): (sentId: string, targetGuildId: string, targetChannelId: string, rawContent: string, plainContent: string) => void {
   return (sentId, targetGuildId, targetChannelId, rawContent, plainContent) => {
     const ts = Date.now();
+    const routedFrom = input.routedFrom !== undefined
+      && (input.routedFrom.routedFromGuildId !== targetGuildId || input.routedFrom.routedFromChannelId !== targetChannelId)
+      ? input.routedFrom
+      : undefined;
     db.raw
       .prepare(
-        `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT OR IGNORE INTO messages
+           (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id,
+            routed_from_guild_id, routed_from_channel_id, routed_from_message_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(sentId, targetGuildId, targetChannelId, input.botUserId, input.botUsername, rawContent, plainContent, 1, ts, null);
+      .run(
+        sentId,
+        targetGuildId,
+        targetChannelId,
+        input.botUserId,
+        input.botUsername,
+        rawContent,
+        plainContent,
+        1,
+        ts,
+        null,
+        routedFrom?.routedFromGuildId ?? null,
+        routedFrom?.routedFromChannelId ?? null,
+        routedFrom?.routedFromMessageId ?? null,
+      );
 
     void embeddingQueue.enqueue({
       id: sentId,
@@ -899,11 +925,13 @@ function createDiscordMessageSender(input: {
   replySourceMessage?: Message;
   getLastTypingAt?: () => number;
   getAttachmentsDir: (guildId: string) => string;
+  routedFrom?: RoutedMessageSource;
 }): MessageSender {
   const storeBotMessage = createBotMessageStore({
     botUserId: input.botUserId,
     botUsername: input.botUsername,
     logger: input.logger,
+    routedFrom: input.routedFrom,
   });
 
   async function waitAfterRecentTyping(): Promise<void> {
@@ -2956,10 +2984,22 @@ async function processTriggeredMessage(
       replySourceMessage: message,
       getLastTypingAt: typing.getLastTypingAt,
       getAttachmentsDir: (targetGuildId) => getGuildConfig(targetGuildId).attachmentsDir,
+      routedFrom: {
+        routedFromGuildId: guildId,
+        routedFromChannelId: channelId,
+        routedFromMessageId: message.id,
+      },
     });
 
     const ingestedImages = getImagesByMessageId(db, message.id);
     const now = Date.now();
+    const repliedToBotRouteSource = message.reference?.messageId !== undefined
+      ? getRoutedMessageSource(db, {
+          messageId: message.reference.messageId,
+          guildId,
+          channelId,
+        })
+      : null;
     const latestUserMessage: HistoryMessage = {
       id: message.id,
       author: message.author.username,
@@ -3140,6 +3180,15 @@ async function processTriggeredMessage(
       translatedContent,
       messageId: message.id,
       replyToMessageId: message.reference?.messageId,
+      ...(repliedToBotRouteSource !== null
+        ? {
+            repliedToBotRouteSource: {
+              sourceGuildId: repliedToBotRouteSource.routedFromGuildId,
+              sourceChannelId: repliedToBotRouteSource.routedFromChannelId,
+              sourceMessageId: repliedToBotRouteSource.routedFromMessageId,
+            },
+          }
+        : {}),
     };
 
     const requestLog = new RequestLog(guildId, channelId, requestLogStore);

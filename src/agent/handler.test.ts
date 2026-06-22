@@ -464,6 +464,10 @@ describe("handleMessage", () => {
       expect(messages[3]?.content).toContain("Trigger GlobalName: Test Global");
       expect(messages[3]?.content).toContain("Trigger AuthorIsBot: false");
       expect(messages[3]?.content).toContain("Trigger ReplyToMsgID: parent-msg");
+      expect(messages[3]?.content).toContain("Reply Context: The user is replying to a message you previously sent here from another channel.");
+      expect(messages[3]?.content).toContain("Source GuildID: source-guild");
+      expect(messages[3]?.content).toContain("Source ChannelID: source-channel");
+      expect(messages[3]?.content).toContain("Source MsgID: source-msg");
       expect(messages[3]?.content).toContain("## Current User Message");
       expect(messages[3]?.content).toContain("hello bot");
 
@@ -482,6 +486,11 @@ describe("handleMessage", () => {
         authorDisplayName: "Test Nick",
         authorGlobalName: "Test Global",
         authorIsBot: false,
+        repliedToBotRouteSource: {
+          sourceGuildId: "source-guild",
+          sourceChannelId: "source-channel",
+          sourceMessageId: "source-msg",
+        },
       }),
       makeDeps({ completeChat }),
     );
