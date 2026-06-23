@@ -790,10 +790,7 @@ function codexSystemPromptForStableSections(
   if (transport.mode === "legacy-instructions") {
     return stableSections.map((section) => section.text).join("\n\n");
   }
-  return stableSections
-    .filter((section) => section.target === "instructions")
-    .map((section) => section.text)
-    .join("\n\n");
+  return "";
 }
 
 function buildCurrentMessageMetadata(msg: IncomingMessage, runtimePrompts?: RuntimePromptBundle): string {

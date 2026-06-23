@@ -596,6 +596,48 @@ describe("handleMessage", () => {
     );
   });
 
+  test("does not duplicate Codex instruction-target core prompt", async () => {
+    const transport = makePromptTransportConfig();
+    transport.openaiCodex.sections.core = {
+      ...transport.openaiCodex.sections.core,
+      target: "instructions",
+    };
+    let capturedPayload: { instructions?: unknown; input: unknown[] } | undefined;
+    const completeChat: ChatCompleteFn = (request) => {
+      const payload = {
+        instructions: request.systemPrompt,
+        input: request.messages.map((message) => ({
+          type: "message",
+          role: message.role,
+          content: contentText(message.content),
+        })),
+      };
+      request.onPayload?.(payload);
+      capturedPayload = payload;
+
+      return Promise.resolve({
+        text: "done",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        guildConfig: makeGuildConfig({ llmProvider: "openai-codex", model: "gpt-5.5", promptTransport: transport }),
+      }),
+    );
+
+    if (capturedPayload === undefined) throw new Error("expected payload capture");
+    expect(typeof capturedPayload.instructions).toBe("string");
+    expect(capturedPayload.instructions).toContain("You are a test bot.");
+    const promptText = JSON.stringify(capturedPayload);
+    expect(promptText.match(/You are a test bot\./g)?.length).toBe(1);
+  });
+
   test("keeps older chat history in the stable prompt instead of volatile turn context", async () => {
     const completeChat: ChatCompleteFn = (request) => {
       const payload = { messages: [...request.messages] };
