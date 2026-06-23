@@ -44,8 +44,7 @@ describe("createReactToMessageTool", () => {
     });
 
     expect(tool.name).toBe("react_to_message");
-    expect(tool.description).toContain("small acknowledgements");
-    expect(tool.description).toContain("async image generation");
+    expect(tool.description).toBe("Add a Discord reaction to a guild message.");
   });
 
   test("reacts through dependency and returns details", async () => {

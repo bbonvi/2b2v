@@ -1,0 +1,1 @@
+These memories are shown only so this memory pass can update existing rows or avoid duplicates for other users visible in the rendered chat history. Do not copy them into new memories unless the current exchange adds new information. Fresher memories and users with more recent visible activity are lower in this section.

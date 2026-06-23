@@ -2,9 +2,9 @@ import { Type, type Static } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 
 const ReactToMessageParams = Type.Object({
-  message_id: Type.String({ description: "Discord message ID to react to. Must be visible or retrievable in the selected guild channel/thread." }),
-  channel_id: Type.Optional(Type.String({ description: "Guild text channel or thread ID containing the message. Defaults to the current channel. DMs are not supported." })),
-  emoji: Type.String({ description: "Reaction emoji to add. Use a small Unicode emoji like 👍 when possible; custom emoji names, :name:, or Discord emoji markup may also work." }),
+  message_id: Type.String({ description: "Discord message ID to react to." }),
+  channel_id: Type.Optional(Type.String({ description: "Guild text channel or thread ID containing the message." })),
+  emoji: Type.String({ description: "Reaction emoji to add." }),
 });
 
 export type ReactToMessageInput = Static<typeof ReactToMessageParams>;
@@ -50,8 +50,7 @@ export function createReactToMessageTool(deps: ReactToMessageToolDeps): AgentToo
   return {
     name: "react_to_message",
     label: "React To Message",
-    description:
-      "Add a Discord reaction to a visible or retrievable guild message in an accessible guild text channel/thread. Use this for small acknowledgements like 👍 instead of sending a text reply when the task is already handled and no text is needed, especially after starting async image generation. Do not use in DMs.",
+    description: "Add a Discord reaction to a guild message.",
     parameters: ReactToMessageParams,
     execute: async (
       _toolCallId,
@@ -70,7 +69,7 @@ export function createReactToMessageTool(deps: ReactToMessageToolDeps): AgentToo
         return {
           content: [{
             type: "text",
-            text: `Reacted to message ${details.messageId} in channel ${details.channelId} with ${details.emoji}. If no text reply is needed, stop here or use <ignore> to stay silent.`,
+            text: `Reacted to message ${details.messageId} in channel ${details.channelId} with ${details.emoji}; if no text reply is needed, stop here or use <ignore> to stay silent.`,
           }],
           details,
         };

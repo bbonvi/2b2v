@@ -29,21 +29,21 @@ const MemoryListParams = Type.Object({
     Type.Literal("guild"),
     Type.Literal("self"),
   ], {
-    description: "Memory target. Defaults to user when username/user_id is provided, otherwise guild. Use self for the bot/persona's own continuity and journal.",
+    description: "Memory target.",
   })),
   username: Type.Optional(Type.String({
     minLength: 1,
-    description: "Discord username for target=user. A leading @ is optional. Resolved in guild_id or the current guild.",
+    description: "Discord username for target=user.",
   })),
   user_id: Type.Optional(Type.String({
     minLength: 1,
-    description: "Discord user ID for target=user. User memories are guild-agnostic.",
+    description: "Discord user ID for target=user.",
   })),
   guild_id: Type.Optional(Type.String({
     minLength: 1,
-    description: "Guild ID for target=guild, or the guild to resolve username in. Defaults to the current guild.",
+    description: "Guild ID for target=guild or username resolution.",
   })),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Max memories to return. Default 30." })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Max memories to return." })),
 });
 
 function normalizeUsername(value: string): string {
@@ -71,8 +71,7 @@ export function createMemoryListTool(deps: MemoryListToolDeps): AgentTool {
   return {
     name: "list_memories",
     label: "list_memories",
-    description:
-      "Retrieve bot memories. User memories are Discord-user scoped and shared across guilds; guild memories are shared facts for one guild/server; self memories are the bot/persona's own portable continuity and private journal. The prompt already includes current-speaker user memories, current-guild memories, and self memories. Use target=user with username/user_id for a person, target=guild for a guild's shared memories, or target=self to inspect the bot/persona's own continuity. Do not casually reveal private facts learned in one guild to another; use only what is needed for the current conversation.",
+    description: "Retrieve bot memories.",
     parameters: MemoryListParams,
 
     async execute(_toolCallId: string, params: unknown): Promise<MemoryListToolResult> {
@@ -162,7 +161,7 @@ export function createMemoryListTool(deps: MemoryListToolDeps): AgentTool {
       const resolvedLabel = label.startsWith("@") || label === userId ? label : `@${label}`;
       if (rows.length === 0) {
         return {
-          content: [{ type: "text", text: `No portable user memories found for ${resolvedLabel}. Current-guild memories are separate; use target=guild for shared server facts.` }],
+          content: [{ type: "text", text: `No portable user memories found for ${resolvedLabel}; current-guild memories are separate, so use target=guild for shared server facts.` }],
           details: { target, userId, count: 0, total },
         };
       }

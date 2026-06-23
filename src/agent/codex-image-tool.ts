@@ -7,6 +7,7 @@ import { getCodexApiKey } from "../llm/codex-auth.ts";
 import type { Logger } from "../logger.ts";
 import type { EnqueueImageJobResult } from "./job-runtime.ts";
 import type { ImageGenerationQuality } from "../config/types.ts";
+import { renderPromptTemplate, type PromptTemplateVariables } from "../config/prompt-template.ts";
 import { imageExtensionForMime, imageMimeFromBuffer } from "../db/image-ingest.ts";
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
@@ -29,35 +30,30 @@ const MAX_DIAGNOSTIC_STRING_LENGTH = 2000;
 
 const CodexGenerateImageParams = Type.Object({
   prompt: Type.String({
-    description:
-      "The final visual brief sent to Codex image generation. Preserve the user's visual request and concrete subject/composition/style/lighting constraints, but phrase it as a safe neutral image prompt. If retrying after a rejected/no-image attempt, rewrite the prompt instead of resending it exactly: remove or soften words that can be misread as sexual, violent, coercive, or logo/brand-mark-focused while keeping the intended subject and composition. Do not include chat/message tags, status text, tool names, or unrelated additions.",
+    description: "The final visual brief sent to Codex image generation.",
   }),
   image_ids: Type.Optional(Type.Array(Type.Number(), {
-    description:
-      "Chat ImageIDs to pass as visual reference inputs. Include the user's attached image, replied-to image, or other specific context image when the request clearly depends on it.",
+    description: "Chat ImageIDs to pass as visual reference inputs.",
   })),
   output_format: Type.Optional(Type.Union([
     Type.Literal("png"),
     Type.Literal("jpeg"),
     Type.Literal("webp"),
   ], {
-    description: "Output image format. Defaults to webp.",
+    description: "Output image format.",
   })),
   "4k": Type.Optional(Type.Boolean({
-    description:
-      "Set true only when the user explicitly asks for 4K, UHD, highest/maximum resolution, print-resolution, or a final high-resolution render. Leave false for ordinary high quality, detailed, HD, or good images.",
+    description: "Request a 4K image.",
   })),
   separate_job: Type.Optional(Type.Boolean({
-    description:
-      "Set true only when the user explicitly asks for a separate new image/variant while another image job is active. Leave false for status checks, confusion, or duplicate requests.",
+    description: "Request a separate image job.",
   })),
   allows_group_corrections: Type.Optional(Type.Boolean({
-    description:
-      "Set true only when the image request is explicitly about the whole chat/group/all visible users, so omitted participants can correct the still-young job.",
+    description: "Allow group correction replacement handling.",
   })),
   replaces_job_id: Type.Optional(Type.String({
     description:
-      "Set only after cancel_agent_job succeeds for a replacement. Use the cancelled job id being replaced.",
+      "Cancelled job id being replaced.",
   })),
 });
 
@@ -105,6 +101,10 @@ export interface CodexGenerateImageToolDeps {
   getImageById: (id: number) => ReferenceImageRecord | null;
   readFile: (path: string) => Buffer | null;
   onGeneratedImage: (attachment: GeneratedImageAttachment) => void;
+  /** Tool-result template used when a related async image job is already active. */
+  asyncJobAlreadyActiveTemplate?: string;
+  /** Tool-result template used after a new async image job is queued. */
+  asyncJobStartedTemplate?: string;
   enqueueImageJob?: (input: {
     prompt: string;
     promptHash: string;
@@ -967,7 +967,7 @@ function parseImageIds(value: unknown): number[] {
 
 function loadReferenceImages(deps: CodexGenerateImageToolDeps, imageIds: number[]): ReferenceImageInput[] {
   if (imageIds.length > deps.imageReadMaxPerCall) {
-    throw new Error(`Too many reference image IDs requested (${imageIds.length}). Maximum is ${deps.imageReadMaxPerCall} per call.`);
+    throw new Error(`Too many reference image IDs requested (${imageIds.length}); maximum is ${deps.imageReadMaxPerCall} per call.`);
   }
 
   const images: ReferenceImageInput[] = [];
@@ -987,22 +987,21 @@ function loadReferenceImages(deps: CodexGenerateImageToolDeps, imageIds: number[
   return images;
 }
 
+function renderOptionalPromptTemplate(
+  template: string | undefined,
+  variables: PromptTemplateVariables,
+  fallback: string,
+): string {
+  const trimmed = template?.trim();
+  return trimmed !== undefined && trimmed !== "" ? renderPromptTemplate(trimmed, variables) : fallback;
+}
+
 /** Create a tool that generates images through Codex subscription image_generation. */
 export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): AgentTool {
   return {
     name: "codex_generate_image",
     label: "Codex Image",
-    description: [
-      "Start image generation with OpenAI Codex's built-in image_generation tool using the ChatGPT/Codex subscription backend. Does not require OPENAI_API_KEY.",
-      "In Discord runtime this starts an async image job and returns immediately; the generated image will be posted later by the runtime.",
-      "Use this only when the user asks for a raster image, photo, illustration, sprite, icon draft, banner, mockup, or similar bitmap output.",
-      "When the visual request is based on a specific chat image, include its ImageID in image_ids. This includes images attached in the user's current post, images on the replied-to message, or images clearly referenced from recent context. Include several ImageIDs when the request asks to combine or compare multiple specific images; omit image_ids only when the image is generic background context or irrelevant.",
-      "Set 4k=true only when the user explicitly asks for 4K, UHD, highest/maximum resolution, print-resolution, or a final high-resolution render. Leave it false for ordinary high quality, detailed, HD, or good images. 4K requests can take roughly twice as long as normal image jobs.",
-      "Before calling, turn the user's request into a concrete, safe, neutral image prompt. Preserve explicit visual requirements, add useful visual specifics for vague requests, and avoid inventing unrelated subjects, brands, text, or narrative details.",
-      "Do not call this when an active image job already covers the same concrete request; answer with that job's status instead.",
-      "If generation fails because Codex returns no image, rejects the prompt, or reports a safety/filter failure, the async worker will report failure. Retry only when the user asks, when you are certain a revised prompt will work, or when the current channel explicitly overrides the retry policy.",
-      "The generated image will be attached to a later Discord reply automatically.",
-    ].join(" "),
+    description: "Start async image generation.",
     parameters: CodexGenerateImageParams,
     async execute(
       _toolCallId: string,
@@ -1038,14 +1037,19 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
           ...(replacesJobId !== undefined ? { replacesJobId } : {}),
         });
         if (!enqueueResult.created) {
+          const text = renderOptionalPromptTemplate(
+            deps.asyncJobAlreadyActiveTemplate,
+            {
+              jobId: enqueueResult.job.id,
+              jobStatus: enqueueResult.job.status,
+              reason: enqueueResult.reason,
+            },
+            `No new image job was started because related image job ${enqueueResult.job.id} is ${enqueueResult.job.status}; answer the user with this status.`,
+          );
           return {
             content: [{
               type: "text",
-              text: [
-                `No new image job was started. Active related image job ${enqueueResult.job.id} is ${enqueueResult.job.status}.`,
-                "Do not call codex_generate_image again for the same request while this job is active.",
-                "Answer the user with this status unless they explicitly asked for a separate variant or a valid replacement.",
-              ].join(" "),
+              text,
             }],
             details: {
               asyncJobId: enqueueResult.job.id,
@@ -1056,14 +1060,18 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
             },
           };
         }
+        const text = renderOptionalPromptTemplate(
+          deps.asyncJobStartedTemplate,
+          {
+            jobId: enqueueResult.job.id,
+            jobStatus: enqueueResult.job.status,
+          },
+          `Started async image generation job ${enqueueResult.job.id}; do not wait for the image in this reply loop.`,
+        );
         return {
           content: [{
             type: "text",
-            text: [
-              `Started async image generation job ${enqueueResult.job.id}.`,
-              "The job will keep typing in the channel and reply to the original message with the image when ready.",
-              "Do not wait for the image in this reply loop and do not start another job for the same request.",
-            ].join(" "),
+            text,
           }],
           details: {
             asyncJobId: enqueueResult.job.id,

@@ -40,11 +40,7 @@ export function createFetchUrlTool(deps: FetchUrlToolDeps = {}): AgentTool {
   return {
     name: "fetch_url",
     label: "fetch_url",
-    description:
-      "Fetch a webpage URL and extract its readable content as markdown. " +
-      "Use this to read articles, documentation, or any web page. " +
-      "Returns the page title and main content. " +
-      "Might take 10+ seconds.",
+    description: "Fetch readable webpage content.",
     parameters: FetchUrlParams,
 
     async execute(

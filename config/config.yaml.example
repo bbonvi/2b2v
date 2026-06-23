@@ -152,21 +152,6 @@ tts:
     #   useSpeakerBoost: false
     #   model: eleven_v3
 
-# Composable prompt profile for local prompt files.
-# Sources are resolved in order and concatenated with blank lines.
-# Each source supports:
-# - file: path to markdown/text file
-# - text: inline text
-# - optional: true to skip missing file without warning
-# Copy prompts/*.md.example to prompts/*.md before running with this default profile.
-promptProfile:
-  persona:
-    - file: prompts/persona.md
-  toolInstructions: []
-  instructions: []
-  lateInstructions:
-    - file: prompts/style.md
-
 # Log level: debug | info | warn | error
 logLevel: info
 

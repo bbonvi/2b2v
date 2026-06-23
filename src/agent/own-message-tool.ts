@@ -2,14 +2,14 @@ import { Type, type Static } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 
 const EditOwnMessageParams = Type.Object({
-  message_id: Type.String({ description: "Discord message ID to edit. The message must have been authored by this bot." }),
-  content: Type.String({ description: "Replacement message content. Only this bot's own messages can be edited." }),
-  channel_id: Type.Optional(Type.String({ description: "Guild channel or thread containing the bot-authored message. Defaults to the current channel. DMs are not supported." })),
+  message_id: Type.String({ description: "Discord message ID to edit." }),
+  content: Type.String({ description: "Replacement message content." }),
+  channel_id: Type.Optional(Type.String({ description: "Guild channel or thread containing the bot-authored message." })),
 });
 
 const DeleteOwnMessageParams = Type.Object({
-  message_id: Type.String({ description: "Discord message ID to delete. The message must have been authored by this bot." }),
-  channel_id: Type.Optional(Type.String({ description: "Guild channel or thread containing the bot-authored message. Defaults to the current channel. DMs are not supported." })),
+  message_id: Type.String({ description: "Discord message ID to delete." }),
+  channel_id: Type.Optional(Type.String({ description: "Guild channel or thread containing the bot-authored message." })),
 });
 
 export type EditOwnMessageInput = Static<typeof EditOwnMessageParams>;
@@ -83,7 +83,7 @@ export async function authorizeOwnMessageOperation(
     return {
       ok: false,
       error: "message_not_found",
-      message: `Cannot access message ${messageId} in channel ${channelId}. Use a guild text channel/thread ID; DMs are not supported.`,
+      message: `Cannot access message ${messageId} in channel ${channelId}; use a guild text channel/thread ID because DMs are not supported.`,
     };
   }
   if (message.guildId === null) {
@@ -117,8 +117,7 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
     {
       name: "edit_own_message",
       label: "Edit Own Message",
-      description:
-        "Edit a Discord message authored by this bot only. This tool can never edit user messages. Defaults channel_id to the current guild channel/thread; DMs and inaccessible channels are rejected.",
+      description: "Edit a Discord message authored by this bot only.",
       parameters: EditOwnMessageParams,
       execute: async (
         _toolCallId,
@@ -128,7 +127,7 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
         const content = p.content.trim();
         if (content === "") {
           return {
-            content: [{ type: "text", text: "Cannot edit a message to empty content. Use delete_own_message to retract it." }],
+            content: [{ type: "text", text: "Cannot edit a message to empty content; use delete_own_message to retract it." }],
             details: { error: "empty_content" },
           };
         }
@@ -176,8 +175,7 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
     {
       name: "delete_own_message",
       label: "Delete Own Message",
-      description:
-        "Delete a Discord message authored by this bot only. This tool can never delete user messages. Defaults channel_id to the current guild channel/thread; DMs and inaccessible channels are rejected.",
+      description: "Delete a Discord message authored by this bot only.",
       parameters: DeleteOwnMessageParams,
       execute: async (
         _toolCallId,

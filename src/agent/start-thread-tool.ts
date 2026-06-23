@@ -3,13 +3,13 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 
 const StartThreadParams = Type.Object({
   name: Type.Optional(
-    Type.String({ description: "Thread title. If omitted, defaults to 'Thread'." })
+    Type.String({ description: "Thread title." })
   ),
 });
 
 const CloseThreadParams = Type.Object({
   channel_id: Type.Optional(
-    Type.String({ description: "Bot-created thread channel ID to archive. Omit only when closing the current channel and the current channel is a thread." })
+    Type.String({ description: "Bot-created thread channel ID to archive." })
   ),
 });
 
@@ -115,8 +115,7 @@ export function createStartThreadTool(deps: StartThreadToolDeps): AgentTool {
   return {
     name: "start_thread",
     label: "Start Thread",
-    description:
-      "Create a new thread attached to the trigger message. Use when the user asked for a thread or approved moving a focused discussion out of the current channel. Creating a thread does not route later messages; send inside it with <message channel_id=\"RETURNED_CHANNEL_ID\">...</message>.",
+    description: "Create a new thread attached to the trigger message.",
     parameters: StartThreadParams,
     execute: async (
       _toolCallId,
@@ -165,7 +164,7 @@ export function createStartThreadTool(deps: StartThreadToolDeps): AgentTool {
         content: [
           {
             type: "text",
-            text: `Thread created: "${result.threadName}" (channel_id: ${result.threadId}, parent_channel_id: ${result.parentChannelId}). To send inside this thread, use <message channel_id="${result.threadId}">...</message>.`,
+            text: `Thread created: "${result.threadName}" (channel_id: ${result.threadId}, parent_channel_id: ${result.parentChannelId}); to send inside this thread, use <message channel_id="${result.threadId}">...</message>.`,
           },
         ],
         details: {
@@ -186,8 +185,7 @@ export function createCloseThreadTool(deps: CloseThreadToolDeps): AgentTool {
   return {
     name: "close_thread",
     label: "Close Thread",
-    description:
-      "Archive a bot-created Discord thread by its channel_id. Omit channel_id only when closing the current channel and the current channel is a thread. Use only after checking context/history enough to avoid closing a side thread for an unrelated bystander.",
+    description: "Archive a bot-created Discord thread.",
     parameters: CloseThreadParams,
     execute: async (
       _toolCallId,

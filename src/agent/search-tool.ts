@@ -45,13 +45,13 @@ const SearchParams = Type.Object({
     Type.Literal("literal"),
     Type.Literal("id"),
     Type.Literal("context"),
-  ], { description: "Search mode. 'semantic' (default): AI similarity search. 'literal': exact keyword/phrase match (case-insensitive). 'id': direct message ID lookup. 'context': chronological messages around a message_id or local timestamp." })),
-  query: Type.Optional(Type.String({ description: "Semantic: short 2-5 word topic phrase; put names/times/channels in filters. Literal: exact string." })),
+  ], { description: "Search mode." })),
+  query: Type.Optional(Type.String({ description: "Search query." })),
   message_id: Type.Optional(Type.String({ description: "Anchor message ID for mode='context'." })),
   username: Type.Optional(Type.String({ description: "Filter results to a specific username." })),
-  guild_id: Type.Optional(Type.String({ description: "Search a specific guild by ID. Defaults to the current guild. If channel_id is provided, the channel's guild is used." })),
-  channel_id: Type.Optional(Type.String({ description: "Search a specific guild channel or thread. Defaults to the current channel. DMs are not supported." })),
-  around: Type.Optional(Type.String({ description: "Local wall-clock timestamp for mode='context', formatted YYYY-MM-DD HH:mm in the server timezone. Defaults to the current channel unless channel_id is provided." })),
+  guild_id: Type.Optional(Type.String({ description: "Guild ID filter." })),
+  channel_id: Type.Optional(Type.String({ description: "Guild channel or thread filter." })),
+  around: Type.Optional(Type.String({ description: "Local wall-clock timestamp for context mode." })),
   afterMs: Type.Optional(Type.Number({ description: "Only messages after this epoch ms timestamp." })),
   beforeMs: Type.Optional(Type.Number({ description: "Only messages before this epoch ms timestamp." })),
   is_bot: Type.Optional(Type.Boolean({ description: "Semantic search only: true for bot-authored results, false for human-authored results." })),
@@ -59,13 +59,13 @@ const SearchParams = Type.Object({
     Type.Literal("live"),
     Type.Literal("backfill"),
     Type.Literal("reindex"),
-  ], { description: "Semantic search only: filter vector source. Usually omit unless debugging." })),
+  ], { description: "Semantic vector source filter." })),
   embedding_kind: Type.Optional(Type.Union([
     Type.Literal("single"),
     Type.Literal("merged"),
-  ], { description: "Semantic search only: 'merged' searches same-author message blocks; 'single' searches individual-message vectors. Usually omit." })),
-  include_attachments: Type.Optional(Type.Boolean({ description: "Fetch Discord attachment metadata for returned messages. Defaults to false because it can be slow for older uncached messages." })),
-  limit: Type.Optional(Type.Number({ description: "Max results to return. Default 10." })),
+  ], { description: "Semantic vector granularity filter." })),
+  include_attachments: Type.Optional(Type.Boolean({ description: "Fetch attachment metadata." })),
+  limit: Type.Optional(Type.Number({ description: "Max results to return." })),
 });
 
 /** Strip one leading @ and trim whitespace from a username-like input. */
@@ -84,8 +84,7 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
   return {
     name: "search_messages",
     label: "Search Messages",
-    description:
-      "Search channel history when context is missing or a request refers to prior messages. Modes: 'semantic' (default) for vague meaning, 'literal' for exact words/errors/URLs/commands, 'id' for direct lookup, and 'context' for surrounding conversation around a result id or local timestamp. For semantic mode, use a short topic phrase and put names, channels, times, or bot/human constraints in filters. Search defaults to the current channel; set channel_id for another accessible channel/thread, including another guild. guild_id without channel_id searches that guild more broadly. include_attachments is slow and should be enabled only when attachment filenames/types matter.",
+    description: "Search Discord message history.",
     parameters: SearchParams,
     execute: async (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as {

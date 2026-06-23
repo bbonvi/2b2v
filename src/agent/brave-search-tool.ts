@@ -16,9 +16,9 @@ export interface BraveSearchToolDeps {
 }
 
 const WebSearchParams = Type.Object({
-  query: Type.String({ description: "The search query to execute. Prefer English queries when the target information is not language-specific." }),
+  query: Type.String({ description: "The search query to execute." }),
   count: Type.Optional(
-    Type.Number({ description: "Number of results to return. Default: 5, max: 20." })
+    Type.Number({ description: "Number of results to return." })
   ),
 });
 
@@ -31,8 +31,7 @@ export function createBraveSearchTool(deps: BraveSearchToolDeps): AgentTool {
   return {
     name: "web_search",
     label: "web_search",
-    description:
-      "Search the web using Brave Search. Prefer English queries when applicable. Returns titles, URLs, and descriptions for each result.",
+    description: "Search the web using Brave Search.",
     parameters: WebSearchParams,
 
     async execute(

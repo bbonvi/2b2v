@@ -1,6 +1,6 @@
 import { parse, stringify } from "yaml";
 import { readFileSync, readdirSync, writeFileSync, existsSync } from "fs";
-import { join, basename, dirname } from "path";
+import { join, basename } from "path";
 import type {
   GlobalConfig,
   GuildConfig,
@@ -24,14 +24,10 @@ import type {
   ImageGenerationQuality,
   ReplyLoopConfig,
   MemoryExtractionConfig,
-  PromptProfileConfig,
-  PromptSource,
   ServiceTier,
   LlmProvider,
 } from "./types.ts";
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
-import type { Logger, TokenUsage } from "../logger.ts";
-import { loadPromptSourceChain } from "./prompt-profile.ts";
 
 const DEFAULT_TRIGGER: TriggerConfig = {
   mention: true,
@@ -193,77 +189,6 @@ const DEFAULT_REPLY_LOOP: ReplyLoopConfig = {
   wallClockTimeoutMs: 45_000,
   llmOutputTimeoutMs: 12_000,
 };
-
-type PromptSourceYaml =
-  NonNullable<NonNullable<MainConfigYaml["promptProfile"]>["persona"]>[number];
-
-const SILENT_PROMPT_LOGGER: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-  logTokenUsage: (_usage: TokenUsage) => {},
-  child: () => SILENT_PROMPT_LOGGER,
-};
-
-function defaultPromptProfile(
-  configPath: string,
-): PromptProfileConfig {
-  const promptDir = join(dirname(configPath), "..", "prompts");
-  return {
-    persona: [{ kind: "file", path: join(promptDir, "persona.md"), optional: false }],
-    toolInstructions: [],
-    instructions: [],
-    lateInstructions: [{ kind: "file", path: join(promptDir, "style.md"), optional: false }],
-  };
-}
-
-function resolvePromptSource(
-  source: PromptSourceYaml,
-  section: "persona" | "toolInstructions" | "instructions" | "lateInstructions",
-  index: number,
-): PromptSource {
-  const filePath = source.file;
-  const hasFile = typeof filePath === "string" && filePath !== "";
-  const hasText = typeof source.text === "string";
-  if (hasFile === hasText) {
-    throw new Error(`promptProfile.${section}[${index}] must define exactly one of "file" or "text"`);
-  }
-  if (hasFile) {
-    return {
-      kind: "file",
-      path: filePath,
-      optional: source.optional === true,
-    };
-  }
-  return {
-    kind: "inline",
-    text: source.text ?? "",
-  };
-}
-
-function resolvePromptSources(
-  sources: PromptSourceYaml[] | undefined,
-  fallback: PromptSource[],
-  section: "persona" | "toolInstructions" | "instructions" | "lateInstructions",
-): PromptSource[] {
-  if (sources === undefined) return fallback;
-  return sources.map((source, idx) => resolvePromptSource(source, section, idx));
-}
-
-function resolvePromptProfile(
-  partial: MainConfigYaml["promptProfile"] | undefined,
-  configPath: string,
-): PromptProfileConfig {
-  const fallback = defaultPromptProfile(configPath);
-  if (partial === undefined) return fallback;
-  return {
-    persona: resolvePromptSources(partial.persona, fallback.persona, "persona"),
-    toolInstructions: resolvePromptSources(partial.toolInstructions, fallback.toolInstructions, "toolInstructions"),
-    instructions: resolvePromptSources(partial.instructions, fallback.instructions, "instructions"),
-    lateInstructions: resolvePromptSources(partial.lateInstructions, fallback.lateInstructions, "lateInstructions"),
-  };
-}
 
 function resolveGlobalPromptCaching(
   partial: MainConfigYaml["promptCaching"] | undefined
@@ -576,7 +501,7 @@ function assertNoDeprecatedGlobalPromptKeys(yaml: MainConfigYaml): void {
   const deprecatedKeys = ["personaPath", "toolInstructionsPath", "instructionsPath", "instructions"] as const;
   for (const key of deprecatedKeys) {
     if (raw[key] !== undefined) {
-      throw new Error(`Deprecated config key "${key}" is no longer supported. Use promptProfile instead.`);
+      throw new Error(`Deprecated config key "${key}" is no longer supported. Put prompt markdown in prompts/ instead.`);
     }
   }
 }
@@ -617,18 +542,6 @@ export function loadGlobalConfig(
   }
 
   const defaultAttachmentsDir = yaml.attachmentsDir ?? `${dataDir}/attachments`;
-  const promptProfile = resolvePromptProfile(yaml.promptProfile, configPath);
-
-  const defaultInstructions = loadPromptSourceChain(
-    promptProfile.instructions,
-    "instructions",
-    SILENT_PROMPT_LOGGER,
-  );
-  const defaultLateInstruction = loadPromptSourceChain(
-    promptProfile.lateInstructions,
-    "lateInstructions",
-    SILENT_PROMPT_LOGGER,
-  );
 
   return {
     discordToken,
@@ -668,9 +581,7 @@ export function loadGlobalConfig(
     defaultImageReading,
     defaultImageGeneration,
     defaultAttachmentsDir,
-    defaultInstructions,
-    defaultLateInstruction,
-    promptProfile,
+    defaultInstructions: "",
     logLevel: yaml.logLevel ?? "info",
     dataDir,
     modelCacheDir: yaml.modelCacheDir ?? "model-cache",

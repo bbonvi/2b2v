@@ -163,7 +163,7 @@ describe("createFetchImagesTool", () => {
 
     expect(() =>
       tool.execute("call-6", { urls: ["https://a.com/1.jpg", "https://a.com/2.jpg", "https://a.com/3.jpg"] })
-    ).toThrow("Maximum is 2");
+    ).toThrow("maximum is 2");
   });
 
   test("handles multiple URLs with mixed success/failure", async () => {

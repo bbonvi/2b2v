@@ -1,0 +1,1 @@
+Fetch external images by URL. Downloads, validates as image, resizes to a maximum edge of {{maxDimension}}px, converts to JPEG, and returns image data with metadata. Does not store the image; this is ephemeral fetch only. Use read_chat_images for stored chat history images. Maximum URLs per call: {{maxImagesPerCall}}.

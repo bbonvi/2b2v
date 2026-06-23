@@ -30,20 +30,20 @@ const UNIT_TO_MS: Record<string, number> = {
 const ScheduleMessageParams = Type.Object({
   mode: Type.Union(
     [Type.Literal("in"), Type.Literal("at"), Type.Literal("cron")],
-    { default: "in", description: "\"in\" for relative delay, \"at\" for absolute local datetime, \"cron\" for recurring schedules." },
+    { default: "in", description: "Schedule mode." },
   ),
-  instructions: Type.String({ description: "Detailed instruction for the future scheduled turn, not literal text to send. Include original user intent, who to notify, whether to ping, desired wording/tone, and any needed context." }),
+  instructions: Type.String({ description: "Instruction for the future scheduled turn." }),
   amount: Type.Optional(Type.Number({ description: "How many units from now. Required when mode is \"in\"." })),
   unit: Type.Optional(Type.Union(
     [Type.Literal("seconds"), Type.Literal("minutes"), Type.Literal("hours")],
     { description: "Time unit. Required when mode is \"in\"." },
   )),
-  localDateTime: Type.Optional(Type.String({ description: "Local date-time as YYYY-MM-DD HH:mm (guild timezone). Required when mode is \"at\"." })),
-  cronExpression: Type.Optional(Type.String({ description: "Cron expression for recurring schedules. Required when mode is \"cron\". Uses the guild timezone." })),
+  localDateTime: Type.Optional(Type.String({ description: "Local date-time for mode at." })),
+  cronExpression: Type.Optional(Type.String({ description: "Cron expression for recurring schedules." })),
 });
 
 const ListScheduledMessagesParams = Type.Object({
-  limit: Type.Optional(Type.Number({ description: "Maximum schedules to return. Default: 20, max: 50." })),
+  limit: Type.Optional(Type.Number({ description: "Maximum schedules to return." })),
 });
 
 const DeleteScheduledMessageParams = Type.Object({
@@ -72,8 +72,7 @@ export function createScheduleTool(deps: ScheduleToolDeps): AgentTool {
   return {
     name: "schedule_message",
     label: "schedule_message",
-    description:
-      "Schedule a message to be sent in the current channel. Modes: 'in' for relative delay (e.g. in 30 minutes), 'at' for absolute local datetime (e.g. 2026-06-15 10:00), and 'cron' for recurring schedules. 'at' and 'cron' use the guild timezone. For recurring schedules, avoid useless or annoying repeats; if there are already several pending schedules, especially around 10+ recurring schedules, inspect list_scheduled_messages and use caution unless an admin explicitly asked for the schedule. Reasonable low-noise recurring chat rituals such as a daily good morning message are fine.",
+    description: "Schedule a message in the current channel.",
     parameters: ScheduleMessageParams,
 
     execute(
@@ -101,8 +100,7 @@ export function createListScheduledMessagesTool(deps: ScheduleToolDeps): AgentTo
   return {
     name: "list_scheduled_messages",
     label: "list_scheduled_messages",
-    description:
-      "List pending scheduled messages in the current channel only. Use this to inspect reminders/follow-ups before answering or before deleting one.",
+    description: "List pending scheduled messages in the current channel.",
     parameters: ListScheduledMessagesParams,
 
     execute(
@@ -142,8 +140,7 @@ export function createDeleteScheduledMessageTool(deps: ScheduleToolDeps): AgentT
   return {
     name: "delete_scheduled_message",
     label: "delete_scheduled_message",
-    description:
-      "Delete a pending scheduled message by ID in the current channel only. Use list_scheduled_messages first if the exact ID is not already known.",
+    description: "Delete a pending scheduled message in the current channel.",
     parameters: DeleteScheduledMessageParams,
 
     execute(
@@ -199,7 +196,7 @@ function handleRelativeMode(
   const multiplier = UNIT_TO_MS[unit];
   if (multiplier === undefined) {
     return Promise.resolve({
-      content: [{ type: "text", text: "Invalid unit. Use seconds, minutes, or hours." }],
+      content: [{ type: "text", text: "Invalid unit; use seconds, minutes, or hours." }],
       details: { error: true },
     });
   }
@@ -263,7 +260,7 @@ function handleAbsoluteMode(
 
   if (parsed.epochMs <= Date.now()) {
     return Promise.resolve({
-      content: [{ type: "text", text: "Time is in the past. Choose a future time." }],
+      content: [{ type: "text", text: "Time is in the past; choose a future time." }],
       details: { error: true },
     });
   }

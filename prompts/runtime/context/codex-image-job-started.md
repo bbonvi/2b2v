@@ -1,0 +1,1 @@
+Started async image generation job {{jobId}}. The job will keep typing in the channel and reply to the original message with the image when ready. Do not wait for the image in this reply loop and do not start another job for the same request.

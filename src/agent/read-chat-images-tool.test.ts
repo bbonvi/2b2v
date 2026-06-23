@@ -101,7 +101,7 @@ describe("createReadChatImagesTool", () => {
     const deps = makeDeps({ imageReadMaxPerCall: 2 });
     tool = createReadChatImagesTool(deps);
 
-    return expect(Promise.resolve(tool.execute("call-4", { image_ids: [1, 2, 5] }))).rejects.toThrow("Maximum is 2");
+    return expect(Promise.resolve(tool.execute("call-4", { image_ids: [1, 2, 5] }))).rejects.toThrow("maximum is 2");
   });
 
   test("returns empty content for empty input", async () => {

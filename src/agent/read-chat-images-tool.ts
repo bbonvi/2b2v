@@ -20,8 +20,7 @@ export function createReadChatImagesTool(deps: ReadChatImagesToolDeps): AgentToo
   return {
     name: "read_chat_images",
     label: "Read Chat Images",
-    description:
-      "Retrieve stored images by their IDs from chat history. Returns image data with metadata. Use this to view images referenced by image_ids in chat history.",
+    description: "Retrieve stored chat images by ID.",
     parameters: ReadChatImagesParams,
     execute: async (
       _toolCallId,
@@ -32,7 +31,7 @@ export function createReadChatImagesTool(deps: ReadChatImagesToolDeps): AgentToo
 
       if (ids.length > deps.imageReadMaxPerCall) {
         throw new Error(
-          `Too many image IDs requested (${ids.length}). Maximum is ${deps.imageReadMaxPerCall} per call.`
+          `Too many image IDs requested (${ids.length}); maximum is ${deps.imageReadMaxPerCall} per call.`
         );
       }
 

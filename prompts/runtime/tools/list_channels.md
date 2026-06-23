@@ -1,0 +1,1 @@
+List visible Discord guild channels and threads before cross-channel or cross-guild handoff/sending, reading channel history, or mentioning a channel. Returns channel_id values and sendability. Pass guild_id to inspect another guild listed in Discord Context. DMs are unsupported and never listed.

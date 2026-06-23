@@ -30,7 +30,7 @@ export function buildEmojiListOutput(emojis: EmojiEntry[]): string {
 
   return [
     `Available custom emojis (${emojis.length})`,
-    "Legend: S=static, A=animated; use :name: in replies. Outbound translation sends the Discord form.",
+    "Legend: S=static, A=animated; use :name: in replies and let outbound translation send the Discord form.",
     "Rows: kind | name | use | discord",
     ...rows,
   ].join("\n");
@@ -42,8 +42,7 @@ export function createEmojiListTool(deps: EmojiListToolDeps): AgentTool {
   return {
     name: "list_emojis",
     label: "list_emojis",
-    description:
-      "Discover this server's custom emojis. Use this only for discovery; 2B can use matching emojis sparingly through the :name: syntax, but she should not spam emojis.",
+    description: "Discover this server's custom emojis.",
     parameters: ListEmojisParams,
 
     async execute(_toolCallId: string): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {
@@ -55,7 +54,7 @@ export function createEmojiListTool(deps: EmojiListToolDeps): AgentTool {
         } catch {
           if (emojis === undefined) {
             return {
-              content: [{ type: "text", text: "Unable to fetch custom emojis. The bot may lack permission to view server emojis." }],
+              content: [{ type: "text", text: "Unable to fetch custom emojis; the bot may lack permission to view server emojis." }],
               details: { error: true },
             };
           }

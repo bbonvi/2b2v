@@ -24,7 +24,7 @@ export interface ChannelListToolDeps {
 const ListChannelsParams = Type.Object({
   guild_id: Type.Optional(Type.String({
     minLength: 1,
-    description: "Guild ID to list channels for. Defaults to the current guild.",
+    description: "Guild ID to list channels for.",
   })),
 }, { additionalProperties: false });
 
@@ -35,8 +35,7 @@ export function createChannelListTool(deps: ChannelListToolDeps): AgentTool {
   return {
     name: "list_channels",
     label: "list_channels",
-    description:
-      "List visible Discord guild channels and threads before cross-channel or cross-guild handoff/sending, reading channel history, or mentioning a channel. Returns channel_id values and sendability. Pass guild_id to inspect another guild listed in Discord Context. DMs are unsupported and never listed.",
+    description: "List visible Discord guild channels and threads.",
     parameters: ListChannelsParams,
 
     async execute(_toolCallId: string, params: unknown): Promise<AgentToolResult<{ guildId: string; count: number } | { error: boolean }>> {
@@ -47,7 +46,7 @@ export function createChannelListTool(deps: ChannelListToolDeps): AgentTool {
         channels = await fetchChannels(guildId);
       } catch {
         return {
-          content: [{ type: "text", text: `Unable to list channels for guild ${guildId}. The bot may lack permission to view this guild.` }],
+          content: [{ type: "text", text: `Unable to list channels for guild ${guildId}; the bot may lack permission to view this guild.` }],
           details: { error: true },
         };
       }
@@ -58,7 +57,7 @@ export function createChannelListTool(deps: ChannelListToolDeps): AgentTool {
 
       if (visible.length === 0) {
         return {
-          content: [{ type: "text", text: "No visible guild channels or threads found. DMs are unsupported." }],
+          content: [{ type: "text", text: "No visible guild channels or threads found; DMs are unsupported." }],
           details: { guildId, count: 0 },
         };
       }

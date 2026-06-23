@@ -14,9 +14,7 @@ describe("createChannelListTool", () => {
   test("returns list_channels AgentTool with expected metadata", () => {
     const tool = createChannelListTool(makeDeps([]));
     expect(tool.label).toBe("list_channels");
-    expect(tool.description).toContain("cross-channel");
-    expect(tool.description).toContain("cross-guild");
-    expect(tool.description).toContain("DMs");
+    expect(tool.description).toBe("List visible Discord guild channels and threads.");
     expect(tool.parameters).toBeDefined();
   });
 

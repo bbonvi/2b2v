@@ -39,9 +39,7 @@ describe("createEmojiListTool", () => {
     const tool = createEmojiListTool(makeDeps());
 
     expect(tool.name).toBe("list_emojis");
-    expect(tool.description).toContain("discovery");
-    expect(tool.description).toContain("sparingly");
-    expect(tool.description).toContain("should not spam");
+    expect(tool.description).toBe("Discover this server's custom emojis.");
   });
 
   test("sorts emoji rows by name", async () => {

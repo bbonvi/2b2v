@@ -56,9 +56,7 @@ describe("createTimeoutUserTool", () => {
   test("exposes constrained moderation instructions", () => {
     const tool = makeTool(makeMember());
     expect(tool.name).toBe("timeout_user");
-    expect(tool.description).toContain("almost never");
-    expect(tool.description).toContain("list_chat_users");
-    expect(tool.description).toContain("10 minutes");
+    expect(tool.description).toBe("Temporarily time out one Discord guild member.");
   });
 
   test("rejects non-guild use", async () => {
@@ -124,7 +122,7 @@ describe("createTimeoutUserTool", () => {
       isRequesterAdmin: () => Promise.resolve(true),
       resolveMember: () => Promise.resolve({
         error: "ambiguous_target",
-        message: "Multiple guild members match 'alice'. Use a mention or raw user ID.",
+        message: "Multiple guild members match 'alice'; use a mention or raw user ID.",
       }),
     });
     const result = await tool.execute("call-1", { target: "alice", duration: 1, unit: "minutes" });

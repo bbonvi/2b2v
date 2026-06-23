@@ -1,0 +1,1 @@
+Archive a bot-created Discord thread by its channel_id. Omit channel_id only when closing the current channel and the current channel is a thread. Use only after checking context/history enough to avoid closing a side thread for an unrelated bystander.

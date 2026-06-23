@@ -243,7 +243,7 @@ export class AgentJobStore {
     const now = input.now ?? Date.now();
     const ageMs = now - (job.startedAt ?? job.createdAt);
     if (input.mode === "replacement" && ageMs > this.config.imageCancelGraceMs) {
-      return { ok: false, message: `Job ${id} is already ${Math.round(ageMs / 1000)}s old; do not cancel it for revisions. Start a separate variant only if explicitly requested.` };
+      return { ok: false, message: `Job ${id} is already ${Math.round(ageMs / 1000)}s old; do not cancel it for revisions, and start a separate variant only if explicitly requested.` };
     }
     if (input.mode === "replacement" && job.replacementCount >= this.config.maxImageReplacements) {
       return { ok: false, message: `Job ${id} has already reached the replacement limit.` };
@@ -309,13 +309,13 @@ export class AgentJobStore {
 
 const CancelAgentJobParams = Type.Object({
   job_id: Type.String({
-    description: "Visible async job id, such as img-k7p2q. Must be visible in Active Image Jobs or recent history annotations.",
+    description: "Visible async job id.",
   }),
   reason: Type.String({
-    description: "Short concrete reason from the user's message. Do not invent a cancellation reason.",
+    description: "Short concrete cancellation reason.",
   }),
   mode: Type.Union([Type.Literal("replacement"), Type.Literal("explicit_cancel")], {
-    description: "Use replacement only when the user clearly corrects/replaces an active image request. Use explicit_cancel only when the user asks to stop/cancel/never mind.",
+    description: "Cancellation mode.",
   }),
 });
 
@@ -327,12 +327,7 @@ export function createCancelAgentJobTool(deps: {
   return {
     name: "cancel_agent_job",
     label: "Cancel Job",
-    description: [
-      "Cancel a visible async job. Use this only for active image generation jobs.",
-      "For replacements, cancel only when the user's new message clearly corrects or invalidates the still-young active image job.",
-      "Do not cancel for status checks, jokes, unrelated chat, or late minor preferences.",
-      "After a successful replacement cancellation, call codex_generate_image once with the complete revised prompt and replaces_job_id.",
-    ].join(" "),
+    description: "Cancel a visible async job.",
     parameters: CancelAgentJobParams,
     execute: (_toolCallId, params): Promise<AgentToolResult<{ jobId: string; cancelled: boolean }>> => {
       const p = params as { job_id: string; reason: string; mode: CancelMode };

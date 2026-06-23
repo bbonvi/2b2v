@@ -1,0 +1,1 @@
+Extract video/audio content for summarization, especially YouTube URLs. Uses transcript extraction when available and can process direct media or podcast URLs. Returns extracted transcript/content; use it when the user asks to summarize or understand a YouTube/video/podcast link.

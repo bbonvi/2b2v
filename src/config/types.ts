@@ -115,30 +115,6 @@ export interface ReplyLoopConfig {
   llmOutputTimeoutMs: number;
 }
 
-/** File-based source for prompt profile content. */
-export interface PromptFileSource {
-  kind: "file";
-  path: string;
-  optional: boolean;
-}
-
-/** Inline text source for prompt profile content. */
-export interface PromptInlineSource {
-  kind: "inline";
-  text: string;
-}
-
-/** Ordered prompt source chain for persona, optional tool guidance, and style sections. */
-export type PromptSource = PromptFileSource | PromptInlineSource;
-
-/** Config-driven prompt profile. `lateInstructions` is the stable style prompt. */
-export interface PromptProfileConfig {
-  persona: PromptSource[];
-  toolInstructions: PromptSource[];
-  instructions: PromptSource[];
-  lateInstructions: PromptSource[];
-}
-
 /** Trigger configuration per guild. All independently toggleable. */
 export interface TriggerConfig {
   mention: boolean;
@@ -252,8 +228,6 @@ export interface GlobalConfig {
   defaultImageGeneration: ImageGenerationConfig;
   defaultAttachmentsDir: string;
   defaultInstructions: string;
-  defaultLateInstruction: string;
-  promptProfile: PromptProfileConfig;
   logLevel: string;
   dataDir: string;
   modelCacheDir: string;
@@ -392,28 +366,6 @@ export interface MainConfigYaml {
     quality?: ImageGenerationQuality;
   };
   attachmentsDir?: string;
-  promptProfile?: {
-    persona?: Array<{
-      file?: string;
-      text?: string;
-      optional?: boolean;
-    }>;
-    toolInstructions?: Array<{
-      file?: string;
-      text?: string;
-      optional?: boolean;
-    }>;
-    instructions?: Array<{
-      file?: string;
-      text?: string;
-      optional?: boolean;
-    }>;
-    lateInstructions?: Array<{
-      file?: string;
-      text?: string;
-      optional?: boolean;
-    }>;
-  };
   logLevel?: string;
   dataDir?: string;
   modelCacheDir?: string;

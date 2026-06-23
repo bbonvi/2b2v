@@ -8,11 +8,10 @@ export type AvatarSize = typeof AVATAR_SIZE_VALUES[number];
 const ReadUserAvatarParams = Type.Object({
   user: Type.String({
     minLength: 1,
-    description:
-      "Discord username, @username, raw user mention such as <@123>, or user ID. Resolves in the current guild only; DMs are unsupported.",
+    description: "Discord user reference.",
   }),
   size: Type.Optional(Type.Union(AVATAR_SIZE_VALUES.map((value) => Type.Literal(value)), {
-    description: "Optional Discord CDN avatar size. Defaults to 512.",
+    description: "Optional Discord CDN avatar size.",
   })),
 });
 
@@ -47,8 +46,7 @@ export function createReadUserAvatarTool(deps: ReadUserAvatarToolDeps): AgentToo
   return {
     name: "read_user_avatar",
     label: "read_user_avatar",
-    description:
-      "Read a guild member's current Discord display avatar/profile picture as image context without storing it. Accepts username, @username, raw mention, or user ID. Current-guild only; DMs are unsupported.",
+    description: "Read a guild member's current Discord avatar.",
     parameters: ReadUserAvatarParams,
 
     async execute(_toolCallId: string, params: unknown): Promise<AgentToolResult<ReadUserAvatarDetails>> {
@@ -64,7 +62,7 @@ export function createReadUserAvatarTool(deps: ReadUserAvatarToolDeps): AgentToo
       const size = normalizeAvatarSize(p.size);
       if (size === undefined) {
         return {
-          content: [{ type: "text", text: `Invalid avatar size. Use one of: ${AVATAR_SIZE_VALUES.join(", ")}.` }],
+          content: [{ type: "text", text: `Invalid avatar size; use one of: ${AVATAR_SIZE_VALUES.join(", ")}.` }],
           details: { error: true },
         };
       }
@@ -72,7 +70,7 @@ export function createReadUserAvatarTool(deps: ReadUserAvatarToolDeps): AgentToo
       const user = await deps.resolveUserAvatar(reference, size);
       if (user === null) {
         return {
-          content: [{ type: "text", text: `User '${reference}' not found in this guild. DMs are not supported.` }],
+          content: [{ type: "text", text: `User '${reference}' not found in this guild; DMs are not supported.` }],
           details: { error: true },
         };
       }

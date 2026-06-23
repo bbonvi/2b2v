@@ -4,6 +4,7 @@ import type { AssembledContext } from "./context-assembly.ts";
 export interface StablePromptSection {
   role: "system" | "developer";
   text: string;
+  cacheGroup?: string;
 }
 
 interface PromptTextPart {
@@ -34,7 +35,13 @@ function stableSectionGroups(stableSections: StablePromptSection[]): StablePromp
   const groups: StablePromptSection[][] = [];
   for (const section of stableSections) {
     const last = groups.at(-1);
-    if (last !== undefined && last[0]?.role === section.role) {
+    const first = last?.[0];
+    if (
+      last !== undefined
+      && first !== undefined
+      && first.role === section.role
+      && (first.cacheGroup ?? "") === (section.cacheGroup ?? "")
+    ) {
       last.push(section);
       continue;
     }
@@ -75,7 +82,7 @@ function buildCacheAnchorMessages(promptCaching: PromptCachingConfig): Array<Rec
   return [
     {
       role: "user",
-      content: "Stable context is loaded. Wait for the current Discord turn.",
+      content: "Stable context is loaded; wait for the current Discord turn.",
     },
     {
       role: "assistant",
@@ -87,7 +94,11 @@ function buildCacheAnchorMessages(promptCaching: PromptCachingConfig): Array<Rec
 export function getStablePromptSections(context: AssembledContext): StablePromptSection[] {
   return context.sections
     .filter((section) => section.cached)
-    .map((section) => ({ role: section.role, text: section.text }));
+    .map((section) => ({
+      role: section.role,
+      text: section.text,
+      cacheGroup: section.label === "Chat History — Older" ? "older-history" : "stable-context",
+    }));
 }
 
 /**

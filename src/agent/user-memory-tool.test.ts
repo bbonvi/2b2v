@@ -27,9 +27,7 @@ describe("createMemoryListTool", () => {
     });
 
     expect(tool.name).toBe("list_memories");
-    expect(tool.description).toContain("User memories are Discord-user scoped");
-    expect(tool.description).toContain("target=guild");
-    expect(tool.description).toContain("target=self");
+    expect(tool.description).toBe("Retrieve bot memories.");
   });
 
   test("retrieves portable user memories for the resolved guild user", async () => {

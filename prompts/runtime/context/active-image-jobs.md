@@ -1,0 +1,1 @@
+Image generation is asynchronous. Active jobs keep typing while the worker runs. When ready, the runtime starts a normal 2b reply loop with the generated image attached to the current turn and sends that reply to the original message. Do not start a duplicate job for the same concrete request while a matching active job is visible here.

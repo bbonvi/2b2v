@@ -155,11 +155,11 @@ function formatDisplayNameSuffix(
 /** The legend block prepended to the newer slice. */
 export const NEWER_LEGEND = [
   "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyGIFImageIDs/ReplyStickerImageIDs/ReplyCaptions/ReplyCaptionByImageID/ImageIDs/GIFImageIDs/StickerImageIDs/Captions/CaptionByImageID/ImageJob/Reactions)]: content",
-  "Legend: Parenthesized names are current Discord display names, not stable identity. Users change them often and they may contain jokes, moods, or temporary labels; use @username for exact pings.",
+  "Legend: Parenthesized names are current Discord display names, not stable identity, and may contain jokes, moods, or temporary labels; use @username for exact pings.",
 ].join("\n");
 
 /** The legend block prepended to the older slice. */
 export const OLDER_LEGEND = [
   "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyGIFImageIDs/ReplyStickerImageIDs/ReplyCaptions/ReplyCaptionByImageID/ImageIDs/GIFImageIDs/StickerImageIDs/Captions/CaptionByImageID/ImageJob)]: content",
-  "Legend: Newer history exposes MsgID for reply_to. Dates use [DATE ...]. Merged messages use history-only [msg-break]. Quotes are excerpts; use search_messages(id). Images/GIF first frames/sticker previews use read_chat_images([id]).",
+  "Legend: Newer history exposes MsgID for reply_to; dates use [DATE ...], merged messages use history-only [msg-break], quotes are excerpts for search_messages(id), and images/GIF first frames/sticker previews use read_chat_images([id]).",
 ].join("\n");

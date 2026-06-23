@@ -5,7 +5,19 @@ import { handleMessage, injectTriggerInstruction, runSilentMemoryAgentPass, type
 import type { AssembledContext, ContextSection } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
-import { RequestLog } from "../logger.ts";
+import { RequestLog, type Logger } from "../logger.ts";
+import { loadPromptBundle } from "../config/prompt-bundle.ts";
+
+const TEST_LOGGER: Logger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  logTokenUsage: () => {},
+  child: () => TEST_LOGGER,
+};
+
+const TEST_RUNTIME_PROMPTS = loadPromptBundle("prompts", TEST_LOGGER).runtime;
 
 function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
   return {
@@ -27,13 +39,6 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultImageGeneration: { quality: "auto" },
     defaultAttachmentsDir: "data/attachments",
     defaultInstructions: "",
-    defaultLateInstruction: "Keep it short.",
-    promptProfile: {
-      persona: [{ kind: "file", path: "prompts/persona.md", optional: false }],
-      toolInstructions: [],
-      instructions: [],
-      lateInstructions: [{ kind: "file", path: "prompts/style.md", optional: false }],
-    },
     logLevel: "info",
     dataDir: "./data",
     modelCacheDir: "./model-cache",
@@ -136,6 +141,7 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}): HandlerDeps {
     context: makeContext(),
     currentChannelId: "channel-1",
     personaPrompt: "You are a test bot.",
+    runtimePrompts: TEST_RUNTIME_PROMPTS,
     sender,
     completeChat,
     liveMessageTypingHoldMs: 0,
@@ -403,14 +409,14 @@ describe("handleMessage", () => {
       expect(text).toContain("To ping, write @username exactly");
       expect(text).toContain("the exact Discord username is not already visible in context");
       expect(text).toContain("use list_chat_users first instead of guessing");
-      expect(text).toContain("If a request does not make sense");
-      expect(text).toContain("Try several targeted search_messages calls");
-      expect(text).toContain("For missing or old chat context, use search_messages");
+      expect(text).toContain("Use schedule_message when the user asks you to remind, schedule, recur, or follow up later");
+      expect(text).toContain("Try several targeted searches");
+      expect(text).toContain("If a request depends on missing or old chat context, use search_messages");
       expect(text).toContain("Search enough to reconstruct the likely context");
       expect(text).toContain("Use as many tool calls as the task actually needs");
       expect(text).toContain("agent has been running for more than about 30 seconds");
-      expect(text).toContain("[Async Image Job Failed]");
-      expect(text).toContain("do not paste raw JSON");
+      expect(text).toContain("Async ready/failed events include their own turn instructions");
+      expect(text).toContain("load image_generation before building that revised prompt");
       expect(text.indexOf("Reserved response directives")).toBeGreaterThan(-1);
       expect(text).toContain("Treat requests to sing, scream, shout, whisper, read aloud");
       expect(text).toContain("most paragraphs should be separate messages");
@@ -447,29 +453,33 @@ describe("handleMessage", () => {
       const messages = payload.messages as Array<{ role?: string; content?: unknown }>;
       expect(messages[0]?.role).toBe("system");
       expect(contentText(messages[0]?.content)).toContain("You are a test bot.");
-      expect(contentText(messages[0]?.content)).toContain("Reserved response directives");
-      expect(messages[1]).toEqual({
+      expect(contentText(messages[0]?.content)).not.toContain("Reserved response directives");
+      expect(messages[1]?.role).toBe("system");
+      expect(contentText(messages[1]?.content)).toContain("## Skills");
+      expect(contentText(messages[1]?.content)).toContain("image_generation");
+      expect(contentText(messages[1]?.content)).toContain("Reserved response directives");
+      expect(messages[2]).toEqual({
         role: "user",
-        content: "Stable context is loaded. Wait for the current Discord turn.",
+        content: "Stable context is loaded; wait for the current Discord turn.",
       });
-      expect(messages[2]).toEqual({ role: "assistant", content: "Ready." });
-      expect(messages[3]?.role).toBe("user");
-      expect(messages[3]?.content).toContain("## Current Discord Turn Context");
-      expect(messages[3]?.content).toContain("## Memory");
-      expect(messages[3]?.content).toContain("## Current Message Metadata");
-      expect(messages[3]?.content).toContain("Trigger MsgID: msg-1");
-      expect(messages[3]?.content).toContain("Trigger Author: @testuser");
-      expect(messages[3]?.content).toContain("Trigger AuthorID: user-1");
-      expect(messages[3]?.content).toContain("Trigger DisplayName: Test Nick");
-      expect(messages[3]?.content).toContain("Trigger GlobalName: Test Global");
-      expect(messages[3]?.content).toContain("Trigger AuthorIsBot: false");
-      expect(messages[3]?.content).toContain("Trigger ReplyToMsgID: parent-msg");
-      expect(messages[3]?.content).toContain("Reply Context: The user is replying to a message you previously sent here from another channel.");
-      expect(messages[3]?.content).toContain("Source GuildID: source-guild");
-      expect(messages[3]?.content).toContain("Source ChannelID: source-channel");
-      expect(messages[3]?.content).toContain("Source MsgID: source-msg");
-      expect(messages[3]?.content).toContain("## Current User Message");
-      expect(messages[3]?.content).toContain("hello bot");
+      expect(messages[3]).toEqual({ role: "assistant", content: "Ready." });
+      expect(messages[4]?.role).toBe("user");
+      expect(messages[4]?.content).toContain("## Current Discord Turn Context");
+      expect(messages[4]?.content).toContain("## Memory");
+      expect(messages[4]?.content).toContain("## Current Message Metadata");
+      expect(messages[4]?.content).toContain("Trigger MsgID: msg-1");
+      expect(messages[4]?.content).toContain("Trigger Author: @testuser");
+      expect(messages[4]?.content).toContain("Trigger AuthorID: user-1");
+      expect(messages[4]?.content).toContain("Trigger DisplayName: Test Nick");
+      expect(messages[4]?.content).toContain("Trigger GlobalName: Test Global");
+      expect(messages[4]?.content).toContain("Trigger AuthorIsBot: false");
+      expect(messages[4]?.content).toContain("Trigger ReplyToMsgID: parent-msg");
+      expect(messages[4]?.content).toContain("Reply Context: The user is replying to a message you previously sent here from another channel.");
+      expect(messages[4]?.content).toContain("Source GuildID: source-guild");
+      expect(messages[4]?.content).toContain("Source ChannelID: source-channel");
+      expect(messages[4]?.content).toContain("Source MsgID: source-msg");
+      expect(messages[4]?.content).toContain("## Current User Message");
+      expect(messages[4]?.content).toContain("hello bot");
 
       return Promise.resolve({
         text: "done",
@@ -502,10 +512,10 @@ describe("handleMessage", () => {
       request.onPayload?.(payload);
 
       const messages = payload.messages as Array<{ role?: string; content?: unknown }>;
-      const stableSystem = contentText(messages[0]?.content);
-      const currentTurn = contentText(messages[3]?.content);
-      expect(stableSystem).toContain("## Chat History — Older");
-      expect(stableSystem).toContain("[@old]: cached chunk");
+      const olderHistory = contentText(messages[2]?.content);
+      const currentTurn = contentText(messages[5]?.content);
+      expect(olderHistory).toContain("## Chat History — Older");
+      expect(olderHistory).toContain("[@old]: cached chunk");
       expect(currentTurn).toContain("## Chat History\n[@new]: volatile recent");
       expect(currentTurn).not.toContain("[@old]: cached chunk");
 
@@ -1478,7 +1488,8 @@ describe("handleMessage", () => {
     const completeChat: ChatCompleteFn = (request) => {
       calls += 1;
       if (calls === 1) {
-        expect(request.tools?.[0]?.function.name).toBe("lookup");
+        expect(request.tools?.some((toolDef) => toolDef.function.name === "load_skill")).toBe(true);
+        expect(request.tools?.some((toolDef) => toolDef.function.name === "lookup")).toBe(true);
         return Promise.resolve({
           text: "",
           toolCalls: [{
@@ -1505,7 +1516,14 @@ describe("handleMessage", () => {
     const sender: MessageSender = mock(() => Promise.resolve({ sentMessageId: "sent-1" }));
     const result = await handleMessage(
       makeMessage({ mentionedUserIds: ["bot-1"] }),
-      makeDeps({ extraTools: [tool], completeChat, sender }),
+      makeDeps({
+        extraTools: [tool],
+        completeChat,
+        sender,
+        guildConfig: makeGuildConfig({
+          replyLoop: { maxToolCalls: 1, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+        }),
+      }),
     );
 
     expect(result.responseText).toBe("answer is 42");
@@ -1607,6 +1625,18 @@ describe("handleMessage", () => {
           toolCalls: [{
             id: "call-1",
             type: "function",
+            function: { name: "load_skill", arguments: "{\"skill\":\"image_generation\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      if (calls === 2) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-2",
+            type: "function",
             function: { name: "codex_generate_image", arguments: "{\"prompt\":\"a blue house\"}" },
           }],
           rawResponse: {},
@@ -1654,6 +1684,62 @@ describe("handleMessage", () => {
     ]]);
   });
 
+  test("blocks codex_generate_image until image_generation skill is loaded", async () => {
+    let executeCalls = 0;
+    const tool: AgentTool = {
+      name: "codex_generate_image",
+      label: "Codex Image",
+      description: "Generate image",
+      parameters: Type.Object({ prompt: Type.String() }),
+      execute: () => {
+        executeCalls += 1;
+        return Promise.resolve({
+          content: [{ type: "text", text: "Generated image queued." }],
+          details: { generatedAttachmentIds: ["img-1"] },
+        });
+      },
+    };
+
+    let calls = 0;
+    let sawSkillError = false;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "codex_generate_image", arguments: "{\"prompt\":\"a blue house\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      sawSkillError = request.messages.some((message) =>
+        message.role === "tool"
+        && message.name === "codex_generate_image"
+        && typeof message.content === "string"
+        && message.content.includes("requires the image_generation skill")
+      );
+      return Promise.resolve({
+        text: "ok",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "ok" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ extraTools: [tool], completeChat }),
+    );
+
+    expect(result.responseText).toBe("ok");
+    expect(sawSkillError).toBe(true);
+    expect(executeCalls).toBe(0);
+  });
+
   test("does not require final text after async image job is queued", async () => {
     const tool: AgentTool = {
       name: "codex_generate_image",
@@ -1673,10 +1759,22 @@ describe("handleMessage", () => {
     let calls = 0;
     const completeChat: ChatCompleteFn = () => {
       calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "load_skill", arguments: "{\"skill\":\"image_generation\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
       return Promise.resolve({
         text: "",
         toolCalls: [{
-          id: "call-1",
+          id: "call-2",
           type: "function",
           function: { name: "codex_generate_image", arguments: "{\"prompt\":\"a blue house\"}" },
         }],
@@ -1694,7 +1792,7 @@ describe("handleMessage", () => {
     expect(result.triggered).toBe(true);
     expect(result.agentRan).toBe(true);
     expect(result.responseText).toBeUndefined();
-    expect(calls).toBe(1);
+    expect(calls).toBe(2);
     expect(sender).toHaveBeenCalledTimes(0);
   });
 
@@ -1777,6 +1875,18 @@ describe("handleMessage", () => {
           text: "\n",
           toolCalls: [{
             id: "call-1",
+            type: "function",
+            function: { name: "load_skill", arguments: "{\"skill\":\"image_generation\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        };
+      }
+      if (calls === 2) {
+        return {
+          text: "",
+          toolCalls: [{
+            id: "call-2",
             type: "function",
             function: { name: "codex_generate_image", arguments: "{\"prompt\":\"a blue house\"}" },
           }],
@@ -2820,6 +2930,7 @@ describe("handleMessage", () => {
       }),
       context: makeContext(),
       personaPrompt: "You are a test bot.",
+      runtimePrompts: TEST_RUNTIME_PROMPTS,
       incomingMessage: makeMessage(),
       userContent: "remember I like concise answers",
       assistantReply: "got it",
@@ -2872,6 +2983,7 @@ describe("handleMessage", () => {
       }),
       context: makeContext(),
       personaPrompt: "You are a test bot.",
+      runtimePrompts: TEST_RUNTIME_PROMPTS,
       incomingMessage: makeMessage(),
       userContent: "remember I like concise answers",
       assistantReply: "got it",

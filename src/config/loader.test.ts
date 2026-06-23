@@ -179,7 +179,7 @@ describe("loadGlobalConfig", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, "instructionsPath: config/instructions.md\n");
     expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
-      'Deprecated config key "instructionsPath" is no longer supported. Use promptProfile instead.',
+      'Deprecated config key "instructionsPath" is no longer supported. Put prompt markdown in prompts/ instead.',
     );
   });
 
@@ -187,23 +187,18 @@ describe("loadGlobalConfig", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, "personaPath: config/persona.md\n");
     expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
-      'Deprecated config key "personaPath" is no longer supported. Use promptProfile instead.',
+      'Deprecated config key "personaPath" is no longer supported. Put prompt markdown in prompts/ instead.',
     );
   });
 
-  test("derives default promptProfile when promptProfile is omitted", () => {
+  test("does not derive legacy promptProfile when promptProfile is omitted", () => {
     const cfgPath = join(TEST_DIR, "nonexistent.yaml");
     const cfg = loadGlobalConfig(BASE_ENV, cfgPath);
-    const promptDir = join(TEST_DIR, "..", "prompts");
-    expect((cfg as unknown as { promptProfile?: unknown }).promptProfile).toEqual({
-      persona: [{ kind: "file", path: join(promptDir, "persona.md"), optional: false }],
-      toolInstructions: [],
-      instructions: [],
-      lateInstructions: [{ kind: "file", path: join(promptDir, "style.md"), optional: false }],
-    });
+    expect((cfg as unknown as { promptProfile?: unknown }).promptProfile).toBeUndefined();
+    expect(cfg.defaultInstructions).toBe("");
   });
 
-  test("parses explicit promptProfile sources from YAML", () => {
+  test("ignores legacy promptProfile sources from YAML", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(
       file,
@@ -225,34 +220,18 @@ describe("loadGlobalConfig", () => {
       ].join("\n"),
     );
     const cfg = loadGlobalConfig(BASE_ENV, file);
-    expect((cfg as unknown as { promptProfile?: unknown }).promptProfile).toEqual({
-      persona: [
-        { kind: "file", path: "config/persona.md", optional: false },
-        { kind: "inline", text: "Persona addon" },
-      ],
-      toolInstructions: [
-        { kind: "file", path: "config/tool_instructions.md", optional: false },
-        { kind: "file", path: "config/ops.md", optional: true },
-      ],
-      instructions: [
-        { kind: "file", path: "config/instructions.md", optional: false },
-        { kind: "inline", text: "Instruction addon" },
-      ],
-      lateInstructions: [
-        { kind: "file", path: "config/late_instructions.md", optional: false },
-        { kind: "inline", text: "Late reinforcement" },
-      ],
-    });
+    expect((cfg as unknown as { promptProfile?: unknown }).promptProfile).toBeUndefined();
+    expect(cfg.defaultInstructions).toBe("");
   });
 
-  test("loads defaultInstructions from promptProfile.instructions inline source", () => {
+  test("does not load defaultInstructions from legacy promptProfile inline source", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, "promptProfile:\n  instructions:\n    - text: Legacy global instructions\n");
     const cfg = loadGlobalConfig(BASE_ENV, file);
-    expect(cfg.defaultInstructions).toBe("Legacy global instructions");
+    expect(cfg.defaultInstructions).toBe("");
   });
 
-  test("loads defaultInstructions from promptProfile.instructions file source", () => {
+  test("does not load defaultInstructions from legacy promptProfile file source", () => {
     const instrFile = join(TEST_DIR, "instr.md");
     writeFileSync(instrFile, "File-based instructions\n");
     const file = join(TEST_DIR, "config.yaml");
@@ -265,10 +244,10 @@ describe("loadGlobalConfig", () => {
       ].join("\n"),
     );
     const cfg = loadGlobalConfig(BASE_ENV, file);
-    expect(cfg.defaultInstructions).toBe("File-based instructions");
+    expect(cfg.defaultInstructions).toBe("");
   });
 
-  test("rejects invalid promptProfile sources", () => {
+  test("does not validate ignored legacy promptProfile sources", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(
       file,
@@ -279,9 +258,7 @@ describe("loadGlobalConfig", () => {
         '      text: "invalid"',
       ].join("\n"),
     );
-    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
-      'promptProfile.persona[0] must define exactly one of "file" or "text"',
-    );
+    expect(() => loadGlobalConfig(BASE_ENV, file)).not.toThrow();
   });
 
   test("QDRANT_URL env overrides YAML qdrantUrl", () => {
@@ -663,13 +640,13 @@ describe("resolveGuildConfig", () => {
     const cfgFile = join(TEST_DIR, "config.yaml");
     writeFileSync(cfgFile, "promptProfile:\n  instructions:\n    - text: Global default\n");
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
-    expect(global.defaultInstructions).toBe("Global default");
+    expect(global.defaultInstructions).toBe("");
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {
       guildId: "52",
       slug: "no-instr",
     };
     const resolved = resolveGuildConfig(global, partial);
-    expect(resolved.instructions).toBe("Global default");
+    expect(resolved.instructions).toBe("");
   });
 
   test("merges global defaultModelParams with guild modelParams", () => {

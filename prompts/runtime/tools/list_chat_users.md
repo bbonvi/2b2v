@@ -1,0 +1,1 @@
+List relevant current-guild chat users. Returns exact usernames, display names/nicknames when different, online status, bot flag, admin flag from Discord Administrator or guild adminUserIds, nonzero portable user-memory counts, and any existing cached dm_channel_id. 2B still cannot send PMs/DMs.

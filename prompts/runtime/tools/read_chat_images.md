@@ -1,0 +1,1 @@
+Retrieve stored images by their IDs from chat history. Returns image data with metadata. Use this to view images referenced by image_ids in chat history. Maximum image IDs per call: {{imageReadMaxPerCall}}.

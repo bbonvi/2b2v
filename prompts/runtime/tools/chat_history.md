@@ -1,0 +1,1 @@
+Fetch recent messages from an accessible Discord guild channel or thread, including channels in other guilds. Useful for reviewing conversation context in a specific channel or thread. DMs are not supported.

@@ -26,6 +26,7 @@ export interface MemoryContextInput {
   currentUserId: string;
   resolveUserId?: (userId: string) => string | undefined;
   limit?: number;
+  contextInstruction?: string;
 }
 
 export interface VisibleUserMemoryContextInput {
@@ -38,6 +39,7 @@ export interface VisibleUserMemoryContextInput {
   maxUsers?: number;
   maxMemoriesPerUser?: number;
   maxRows?: number;
+  contextInstruction?: string;
 }
 
 export interface MemoryExtractionInput {
@@ -67,6 +69,10 @@ export interface RecordMemoryToolDeps {
   currentUserId: string;
   currentUsername?: string;
   sourceMessageId: string;
+  /** Externalized memory-selection policy from prompts/runtime/memory/policy/**. */
+  memoryPolicy?: string;
+  /** Externalized record_memory tool description with memory policy already rendered. */
+  recordMemoryDescription?: string;
   /** Resolve a Discord username, with or without @, to a guild-scoped user ID. */
   resolveUsername?: (username: string) => Promise<string | undefined>;
 }
@@ -113,11 +119,11 @@ const MemoryActionSchema = Type.Union([
     action: Type.Literal("upsert"),
     id: Type.Optional(Type.Integer({ minimum: 1 })),
     subject: Type.Union([Type.Literal("global"), Type.Literal("user"), Type.Literal("self")], {
-      description: "global for shared context, user for a Discord user, self for the bot/persona's own continuity and journal.",
+      description: "Memory subject scope.",
     }),
     username: Type.Optional(Type.String({
       minLength: 1,
-      description: "Required when subject=user. Leading @ is optional.",
+      description: "Username for subject=user.",
     })),
     kind: Type.String({ enum: [...MEMORY_KINDS] }),
     content: Type.String({ minLength: 1 }),
@@ -193,53 +199,7 @@ function memoryClockContext(timezone: string | undefined, now = Date.now()): str
 /** Shared policy for memory-writing prompts and the record_memory tool. */
 export function buildMemoryPolicyInstructions(): string[] {
   return [
-    "Preserve a memory only if it is likely to be useful in a future conversation or future bot decision.",
-    "If the fact cannot change how the bot should reply or act later, return action=none.",
-    "Save stable user preferences, identity details, hard constraints, recurring interests, relationships, long-term facts, and explicit corrections.",
-    "Record explicit and strongly implied durable facts, preferences, relationships, routines, constraints, identity details, interests, and recurring behaviors when they could matter later; the user does not need to ask you to remember.",
-    "The triggering user is only the source of this memory pass, not the only valid memory subject. Inspect the current exchange and recent chat context for durable, future-useful memories about any clearly identifiable user, shared context, or the bot/persona's own continuity; use subject=user with username for another user and subject=self for the bot/persona when appropriate.",
-    "You may record durable facts retrospectively from visible recent chat when this pass finally notices them. Do not require the fact to appear in the latest message, but be stricter for older context and skip anything ambiguous, already stale, or merely recoverable from search/history.",
-    "Self memories are for the bot/persona's own durable continuity: invented backstory details, personal facts established in chat, choices she made, names/places she introduced, recurring self-preferences, relationship stance, and journal-worthy private reflections that would prevent future contradictions.",
-    "Treat self memories as both a fact list and a small personal journal. Keep journal entries short, grounded, and useful for future consistency.",
-    "Do not record every bot action, every reply decision, every passing mood, every joke, every drink or weed mention, or routine help as self memory.",
-    "Be proactive but selective: record context-derived or implied memories only when they are likely to affect future replies, reveal a stable pattern, or clarify relationships, preferences, constraints, interests, identity, active work, or routines.",
-    "Memory changes should be selective but proactive. When a turn clearly creates several useful memory edits, include all of them instead of saving only the most obvious one.",
-    "For subtle, uncertain, or pattern-based memories, use lower confidence and tentative standalone phrasing; if the clue is likely to become stale, use a conservative expiresIn. Keep the memory content short and avoid verbose meta-commentary.",
-    "Use lower confidence for indirect, inferred, or pattern-based memories.",
-    "Write each memory as a standalone factual note that remains clear without hidden chat context, prior assumptions, or what the bot previously believed.",
-    "Keep memory content tiny and atomic. Most memories should be under 160 characters; use up to 220 characters only for explicit multi-part user instructions. Never summarize a conversation.",
-    "Do not save jokes, transient moods, ordinary chat, pleasantries, reactions, filler, or one-off requests.",
-    "When in doubt, do not save it.",
-    "Do not record preferences that only apply to the current request unless the user asks to remember them, the wording clearly describes a general future preference, or the surrounding pattern strongly implies a recurring durable preference or rapport detail.",
-    "Before creating a new memory, check whether an existing memory should be updated, compressed, or deleted instead.",
-    "Do not store the same underlying memory in multiple scopes. If a new memory overlaps an existing one, update that existing id with a shorter merged version instead of creating another row.",
-    "Update an existing memory id only when the new chat meaningfully changes its facts, confidence, expiry, or merges/removes a real duplicate. Do not update just to improve grammar, phrasing, capitalization, tense, style, or specificity.",
-    "Prefer updating an existing memory id over creating duplicates when there is a real semantic change. Actively delete stale or superseded existing memories when the current exchange clearly replaces them.",
-    "Existing memories can become outdated, irrelevant, or factually wrong. Prune them when current chat or visible context clearly proves they are obsolete, false, superseded, or no longer useful.",
-    "Only delete a memory when an existing memory is listed below and the new chat clearly makes that specific memory obsolete, false, or superseded. Never invent memory ids.",
-    "User-scoped memories are Discord-user memories and are visible across guilds. Do not write literal guild IDs into memory content; use natural wording only when local context is essential.",
-    "subject=global means a shared memory for the current guild/server, not a cross-guild bot-wide memory.",
-    "subject=self means the bot/persona's own portable continuity and private journal, not any human user and not a shared server fact.",
-    "Prefer the narrowest correct scope: subject=user with username for any Discord user, subject=self for the bot/persona's own continuity, and subject=global only for shared current-server facts or explicit current-server bot rules.",
-    "Do not turn one user's preference into a global memory unless explicitly asked to apply it globally or to everyone.",
-    "Use kind=identity for names, pronouns, languages, timezones, roles, handles, or stable self-descriptions.",
-    "Use kind=constraint for hard boundaries, privacy limits, standing requirements, do-not-do rules, and durable constraints on bot behavior.",
-    "Use kind=interest for recurring hobbies, tastes, subjects, media, activities, or preference-like interests that are not direct behavior instructions.",
-    "Use kind=journal for concise self-scope private journal notes about established experiences, decisions, emotional continuity, or personal story details that should shape future consistency.",
-    "Use kind=scratchpad only for very short-lived internal notes that help the bot reason across immediate follow-up turns. Scratchpad is private working context, not user-facing memory.",
-    "Scratchpad is not a progress dump, transcript summary, or activity log. Do not save facts that message history can already recover; save only the tiny hidden note needed for the next iteration.",
-    "Scratchpad must always include expiresIn when created or when converted from another kind. Use minutes or hours; at most 1 day. Update expiresIn to reset the short TTL only while the note remains useful.",
-    "Set expiresIn only for clearly temporary memories, such as current-event context, scratchpad, temporary availability, deadlines, explicitly time-limited preferences, or temporary self plans and moods. Use a structured relative duration like {amount: 3, unit: \"days\"}; do not calculate timestamps. After a temporary self moment passes, preserve only a short durable aftermath note if it still matters for character continuity.",
-    "Do not overuse expiresIn except for scratchpad. Do not set expiry for names, pronouns, stable preferences, relationships, durable facts, constraints, identity details, or things likely to live a long time; permanent is fine because stale memories can be removed later.",
-    "When a temporary memory is reinforced into a permanent memory, set expiresIn=null on that existing id. When temporary context is extended, update expiresIn to the full new relative duration from now.",
-    "Do not persist facts that come only from system/developer context, persona, tool instructions, existing memory text, member lists, schedules, or bot implementation details.",
-    "For self memories, persist only details newly established by visible chat, the bot's visible reply, or a concrete decision made during this exchange; do not copy base persona instructions into memory.",
-    "Focus on what the human user newly revealed or corrected and what the bot/persona visibly established in the chat exchange. Recent chat context is supporting evidence, not the only source.",
-    "If the user asks to remember something, treat that as strong intent to preserve the underlying fact/preference if it can matter later.",
-    "If the bot reply says it will remember something, do not save the promise itself; save the user's underlying fact/preference when it is future-useful.",
-    "Save rapport, teasing, tone, or help preferences only when the user clearly revealed a durable preference or relationship fact.",
-    "Do not save trivia just because it is interesting.",
-    "If the current speaker says their name, preferred name, or corrects what they should be called, preserve it as subject=user with their username unless it is obviously a joke or roleplay.",
+    "Preserve only durable, future-useful memory, prefer updating existing rows over duplicates, and use the narrowest correct scope.",
   ];
 }
 
@@ -287,9 +247,12 @@ export function buildMemoryContext(input: MemoryContextInput): string {
   const showingLine = selfTotal > 0
     ? `Showing ${rows.length}/${total} memories (${conversationalRows.length}/${conversationalTotal} guild/user, ${selfRows.length}/${selfTotal} self).`
     : `Showing ${rows.length}/${total} memories.`;
+  const contextInstruction = input.contextInstruction?.trim() !== ""
+    ? input.contextInstruction ?? "Use memory as background context."
+    : "Use memory as background context.";
   return [
     showingLine,
-    "Use as background context; current chat instructions override memory. Number after scope is confidence (0-1). Newer/relevant memories are closer to the bottom.",
+    contextInstruction,
     ...lines,
   ].join("\n");
 }
@@ -322,9 +285,12 @@ export function buildVisibleUserMemoryContext(input: VisibleUserMemoryContextInp
 
   if (groups.length === 0) return "";
 
+  const contextInstruction = input.contextInstruction?.trim() !== ""
+    ? input.contextInstruction ?? "Use these memories for dedupe only."
+    : "Use these memories for dedupe only.";
   const lines = [
     "## Existing Memories For Other Visible Users",
-    "These memories are shown only so this memory pass can update existing rows or avoid duplicates for other users visible in the rendered chat history. Do not copy them into new memories unless the current exchange adds new information. Fresher memories and users with more recent visible activity are lower in this section.",
+    contextInstruction,
   ];
   for (const group of [...groups].reverse()) {
     const username = input.resolveUserId?.(group.userId);
@@ -675,18 +641,17 @@ async function applyMemoryActions(input: MemoryMutationInput, extraction: Memory
 
 /** Create the state-changing tool used by the silent post-reply memory pass. */
 export function createRecordMemoryTool(deps: RecordMemoryToolDeps): AgentTool {
+  const externalPolicy = deps.memoryPolicy?.trim();
+  const policy = externalPolicy !== undefined && externalPolicy !== ""
+    ? externalPolicy
+    : buildMemoryPolicyInstructions().join(" ");
+  const description = deps.recordMemoryDescription?.trim();
   return {
     name: "record_memory",
     label: "record_memory",
-    description: [
-      "Record durable memory updates or short-lived scratchpad updates after a Discord turn has already completed.",
-      ...buildMemoryPolicyInstructions(),
-      "This record_memory turn runs only once. Call this tool at most once per pass; put every add, update, expiry change, and delete you want performed in the single actions array.",
-      "If several memories should change, include several actions in that one call instead of saving only one.",
-      "When recording a claim about another user that they did not directly confirm, use lower confidence.",
-      "When recording bot/persona self-continuity or private journal notes, use subject=self, not subject=global.",
-      "When saving personal knowledge as global, include the person's name or the group scope in the content so future turns are not ambiguous.",
-    ].join(" "),
+    description: description !== undefined && description !== ""
+      ? description
+      : `Record memory updates after a Discord turn. ${policy}`,
     parameters: MemoryExtractionSchema,
 
     async execute(_toolCallId: string, params: unknown): Promise<RecordMemoryToolResult> {
@@ -701,7 +666,7 @@ export function createRecordMemoryTool(deps: RecordMemoryToolDeps): AgentTool {
       const extraction = normalized as MemoryExtraction;
       const applied = await applyMemoryActions(deps, extraction);
       return {
-        content: [{ type: "text", text: `Memory update complete. Applied ${applied} of ${extraction.actions.length} requested action(s).` }],
+        content: [{ type: "text", text: `Memory update complete; applied ${applied} of ${extraction.actions.length} requested action(s).` }],
         details: { applied, requested: extraction.actions.length },
       };
     },
@@ -713,7 +678,7 @@ export async function extractAndApplyMemories(input: MemoryExtractionInput): Pro
   const complete = input.completeChat ?? completeLlmChat;
   const stable: StablePromptSection[] = [{
     role: "system",
-    text: "You are a memory extraction routine. Return only JSON matching the schema.",
+    text: "You are a memory extraction routine; return only JSON matching the schema.",
   }];
   const result = await complete({
     provider: input.provider,

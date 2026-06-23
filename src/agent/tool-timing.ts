@@ -72,6 +72,7 @@ export function wrapToolsWithTiming(tools: AgentTool[]): { tools: AgentTool[]; s
     ): Promise<AgentToolResult<unknown>> => {
       const toolStartedAt = Date.now();
       const result = await tool.execute(toolCallId, params, signal);
+      if (tool.name === "load_skill") return result;
       const completedAt = Date.now();
       const toolCallGenerationMs = Math.max(0, toolCallsReadyAt - modelTurnStartedAt);
       const toolExecutionMs = completedAt - toolStartedAt;

@@ -45,7 +45,7 @@ import { createScheduleTools } from "./agent/schedule-tool";
 import { createChatUserListTool, type MemberInfo } from "./agent/member-list-tool";
 import { createChannelListTool, type ChannelInfo } from "./agent/channel-list-tool";
 import { createEmojiListTool } from "./agent/emoji-list-tool";
-import { createTimeoutUserTool, type TimeoutMember, type TimeoutMemberResolution } from "./agent/timeout-user-tool";
+import { createTimeoutUserTool, MAX_TIMEOUT_SECONDS, type TimeoutMember, type TimeoutMemberResolution } from "./agent/timeout-user-tool";
 import { createMemoryListTool } from "./agent/user-memory-tool";
 import { createChatHistoryTool } from "./agent/chat-history-tool";
 import { createOwnMessageTools } from "./agent/own-message-tool";
@@ -59,6 +59,7 @@ import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createSummarizeVideoTool } from "./agent/summarize-video-tool";
 import { createCloseThreadTool, createStartThreadTool } from "./agent/start-thread-tool";
 import { createReactToMessageTool } from "./agent/react-to-message-tool";
+import { applyRuntimeToolPrompts, type ToolPromptVariables } from "./agent/runtime-tool-prompts";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { upsertThread, updateThreadActivity, markBotParticipating, markThreadArchived, listThreadsForContext, getThreadMetadata, getThread } from "./db/thread-repository";
 import { imageExtensionForMime, prepareImageBufferForContext, processAndStoreImage, storeImageBufferUnmodified, type ImageIngestDeps } from "./db/image-ingest";
@@ -73,7 +74,8 @@ import { createVpnClient, type VpnClient } from "./vpn/api-client";
 import { createSessionStore, type SessionStore } from "./vpn/session";
 import { handleVpnCommand, handleVpnComponent, type VpnHandlerDeps } from "./vpn/handler";
 import { getVpnLocale } from "./vpn/i18n";
-import { loadPromptProfile } from "./config/prompt-profile";
+import { loadPromptBundle, type PromptBundle } from "./config/prompt-bundle";
+import { renderPromptTemplate } from "./config/prompt-template";
 import { fetchOpenRouterModelMetadata, imageInputSupportFromMetadata, resolveModel, resolveGuildModelKey, type ModelImageInputSupport } from "./llm/client";
 import { resolveReactionEmojiInput } from "./discord/reaction-emoji";
 import { createHash } from "node:crypto";
@@ -185,7 +187,7 @@ function renderAgentJobsContext(jobs: AgentJob[], now = Date.now()): string {
   if (jobs.length === 0) return "";
   const lines = [
     "## Active Image Jobs",
-    "Image generation is asynchronous. Active jobs keep typing while the worker runs. When ready, the runtime starts a normal 2b reply loop with the generated image attached to the current turn and sends that reply to the original message. Do not start a duplicate job for the same concrete request while a matching active job is visible here.",
+    runtimeContextTemplate("active-image-jobs", {}, "Image generation is asynchronous."),
   ];
   for (const job of jobs) {
     const state = isActiveJobStatus(job.status) ? "active" : "recent terminal";
@@ -429,7 +431,8 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       guildConfig: deliveryGuildConfig,
       context,
       currentChannelId: job.deliveryChannelId,
-      personaPrompt: persona,
+      personaPrompt: promptBundle.corePrompt,
+      runtimePrompts: promptBundle.runtime,
       sender: completionSender,
       extraTools,
       log: log.child({ component: `async-image-${input.event}`, guildId: job.deliveryGuildId, channelId: job.deliveryChannelId, sourceGuildId: job.guildId, sourceChannelId: job.channelId, jobId: job.id, requestId: requestLog.requestId }),
@@ -474,6 +477,8 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       logger: log.child({ component: "async-image-job", guildId: job.deliveryGuildId, channelId: job.deliveryChannelId, sourceGuildId: job.guildId, sourceChannelId: job.channelId, jobId: job.id }),
       imageReadMaxPerCall: sourceGuildConfig.imageReadMaxPerCall,
       imageGenerationQuality: sourceGuildConfig.imageGeneration.quality,
+      asyncJobAlreadyActiveTemplate: promptBundle.runtime.contextTemplates["codex-image-job-existing"],
+      asyncJobStartedTemplate: promptBundle.runtime.contextTemplates["codex-image-job-started"],
       getImageById: (id: number) => {
         const record = getImageById(db, id);
         return record !== null && record.guildId === job.guildId ? record : null;
@@ -535,19 +540,18 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       ].filter((part) => part !== "").join("\n"),
     };
 
-    const completionInstruction = [
-      `[Async Image Job Ready] Job ${job.id} generated an image for @${job.requesterUsername}.`,
-      `4K: ${job.input.is4k ? "yes" : "no"}`,
-      details?.transport !== undefined ? `Transport: ${details.transport}` : "",
-      details?.requestedSize !== undefined ? `Requested size: ${details.requestedSize}` : "",
-      details?.actualSize !== undefined ? `Actual size: ${details.actualSize}` : "",
-      `Original request MsgID ${job.sourceMessageId}: "${job.sourceQuote}"`,
-      `Generation prompt: ${job.input.prompt}`,
-      typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}` : "",
-      "The generated image is attached to this current turn as image input and is already queued as an outgoing attachment on your first visible Discord reply.",
-      `Use the normal persona, current channel history, and the visible image itself. Prefer replying to the original request: <message reply="true" reply_to="${job.sourceMessageId}">your response text</message>. If the current channel context makes another message the clearly better target, you may reply to that message instead, but do not use reply="false" for the first response.`,
-      "Do not call codex_generate_image, cancel_agent_job, or start another image job for this completion.",
-    ].filter((part) => part !== "").join("\n");
+    const completionInstruction = runtimeContextTemplate("async-image-ready", {
+      jobId: job.id,
+      requesterUsername: job.requesterUsername,
+      is4k: job.input.is4k ? "yes" : "no",
+      transportLine: details?.transport !== undefined ? `Transport: ${details.transport}\n` : "",
+      requestedSizeLine: details?.requestedSize !== undefined ? `Requested size: ${details.requestedSize}\n` : "",
+      actualSizeLine: details?.actualSize !== undefined ? `Actual size: ${details.actualSize}\n` : "",
+      sourceMessageId: job.sourceMessageId,
+      sourceQuote: job.sourceQuote,
+      generationPrompt: job.input.prompt,
+      revisedPromptLine: typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}\n` : "",
+    }, `[Async Image Job Ready] Job ${job.id} generated an image.`);
     const sentMessageId = await runAsyncImageStatusTurn({
       event: "ready",
       instruction: completionInstruction,
@@ -585,16 +589,15 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     const latest = agentJobs.get(job.id);
     if (latest?.status === "failed" || latest?.status === "timed_out") {
       try {
-        const failureInstruction = [
-          `[Async Image Job Failed] Job ${job.id} ${latest.status === "timed_out" ? "timed out" : "failed"} for @${job.requesterUsername}.`,
-          `Original request MsgID ${job.sourceMessageId}: "${job.sourceQuote}"`,
-          `Generation prompt: ${job.input.prompt}`,
-          `Failure detail for context: ${message}`,
-          "The image was not generated and there is no outgoing image attachment.",
-          `Use the normal persona and current channel history. Prefer replying to the original request: <message reply="true" reply_to="${job.sourceMessageId}">your response text</message>. If the current channel context makes another message the clearly better target, you may reply to that message instead.`,
-          "You may retry with codex_generate_image from this failure turn, but prefer not to unless the user asked for a retry or you are certain a revised prompt will work this time. If you retry, first tell the user the image failed and that you are trying again, then call codex_generate_image. Do not retry the same request more than 3 times unless the current channel or user explicitly overrides that limit.",
-          "Explain the failure naturally in the channel. Do not paste raw JSON, stack traces, or long internal errors unless the user explicitly asks for technical details.",
-        ].join("\n");
+        const failureInstruction = runtimeContextTemplate("async-image-failed", {
+          jobId: job.id,
+          statusText: latest.status === "timed_out" ? "timed out" : "failed",
+          requesterUsername: job.requesterUsername,
+          sourceMessageId: job.sourceMessageId,
+          sourceQuote: job.sourceQuote,
+          generationPrompt: job.input.prompt,
+          failureDetail: message,
+        }, `[Async Image Job Failed] Job ${job.id} ${latest.status}.`);
         await runAsyncImageStatusTurn({
           event: "failed",
           instruction: failureInstruction,
@@ -827,9 +830,7 @@ function buildDiscordContext(input: {
   const lines = [
     `Current guild: ${input.currentGuildName} (${input.currentGuildId})`,
     `Current channel/thread: ${currentChannel}`,
-    "This list is navigation context only. Do not copy private details, drama, or local assumptions across guilds unless the user asks or it is necessary.",
-    "Prompt chat history is only for the current channel/thread. Use list_channels, chat_history, search_messages, or list_memories when another channel/guild needs context. Preserve cross-channel continuity with tiny user/guild memories or scratchpad only when it will matter later.",
-    "Guild shortlist: one Discord system channel per guild. Use list_channels with guild_id for the full visible channel list before assuming other channels.",
+    ...runtimeContextTemplate("discord-navigation", {}, "Guild shortlist for navigation context only.").split(/\r?\n/),
   ];
 
   for (const guild of guilds) {
@@ -1430,8 +1431,25 @@ function getModelImageInputSupport(guildConfig: GuildConfig): ModelImageInputSup
 
 await refreshModelImageInputSupport(globalConfig, guildConfigs, "startup");
 
-// --- 8. Load prompt profile. Persona/style are stable prompt sections for the direct reply model.
-let { persona, toolInstructions } = loadPromptProfile(globalConfig.promptProfile, log);
+// --- 8. Load prompt bundle. prompts/core/** are stable core instructions; runtime prompts are scoped.
+let promptBundle: PromptBundle = loadPromptBundle("prompts", log);
+
+function runtimeToolDescription(
+  toolName: string,
+  variables: Record<string, string | number | boolean | undefined> = {},
+): string | undefined {
+  const template = promptBundle.runtime.toolDescriptions[toolName];
+  return template === undefined ? undefined : renderPromptTemplate(template, variables);
+}
+
+function runtimeContextTemplate(
+  name: string,
+  variables: Record<string, string | number | boolean | undefined> = {},
+  fallback = "",
+): string {
+  const template = promptBundle.runtime.contextTemplates[name];
+  return template === undefined ? fallback : renderPromptTemplate(template, variables);
+}
 
 // --- 9. Emoji cache ---
 const emojiCache = new EmojiCache();
@@ -1608,7 +1626,8 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         guildConfig,
         context,
         currentChannelId: channelId,
-        personaPrompt: persona,
+        personaPrompt: promptBundle.corePrompt,
+        runtimePrompts: promptBundle.runtime,
         sender,
         extraTools,
         log: scheduleLog,
@@ -1656,6 +1675,10 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
             guildId,
             currentUserId: "scheduler",
             sourceMessageId: memoryRequest.sourceMessageId ?? syntheticLatestMessage.id,
+            memoryPolicy: promptBundle.runtime.memoryPolicy,
+            recordMemoryDescription: runtimeToolDescription("record_memory", {
+              memoryPolicy: promptBundle.runtime.memoryPolicy,
+            }),
             resolveUsername: async (username) => {
               const cached = resolveGuildUsername(guild, username);
               if (cached !== undefined) return cached;
@@ -1673,13 +1696,15 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
             currentUserId: "scheduler",
             visibleUserIds: memoryRequest.context.visibleUserIds ?? [],
             resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
+            contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
           });
           try {
             await runSilentMemoryAgentPass({
               globalConfig,
               guildConfig,
               context: memoryRequest.context,
-              personaPrompt: persona,
+              personaPrompt: promptBundle.corePrompt,
+              runtimePrompts: promptBundle.runtime,
               incomingMessage: memoryRequest.incomingMessage,
               userContent: memoryRequest.userMessage,
               assistantReply: memoryRequest.assistantReply,
@@ -2040,12 +2065,17 @@ async function buildContext(
     guildId,
     currentUserId: latestUserMessage.authorId,
     resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
+    contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
   });
 
   const pendingSchedules = listUpcomingForContext(db, guildId, channelId);
   const oneOffCount = pendingSchedules.filter((s) => s.type === "one_off").length;
   const cronCount = pendingSchedules.length - oneOffCount;
-  const upcomingSchedules = `Pending schedules in this channel: ${pendingSchedules.length} (${oneOffCount} one-off, ${cronCount} cron). Use list_scheduled_messages if you need schedule details or IDs.`;
+  const upcomingSchedules = runtimeContextTemplate("upcoming-schedules", {
+    total: pendingSchedules.length,
+    oneOffCount,
+    cronCount,
+  }, `Pending schedules in this channel: ${pendingSchedules.length}.`);
   const liveChannel = await client.channels.fetch(channelId).catch(() => guild.channels.cache.get(channelId) ?? null);
   const currentChannelName = channelDisplayName(liveChannel);
   const discordContext = buildDiscordContext({
@@ -2186,7 +2216,7 @@ async function buildContext(
   ]));
 
   const assembled = assembleContext({
-      toolInstructions,
+      toolInstructions: "",
       instructions: guildConfig.instructions,
       emojis: emojiContext,
       members: displayNameContext,
@@ -2307,12 +2337,14 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       currentUserId: lastMessage.authorId,
       visibleUserIds,
       resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
+      contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
     });
     const currentUserMemories = buildMemoryContext({
       db,
       guildId,
       currentUserId: lastMessage.authorId,
       resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
+      contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
     });
     const context: AssembledContext = {
       sections: [
@@ -2336,6 +2368,10 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       currentUserId: lastMessage.authorId,
       currentUsername: lastMessage.author,
       sourceMessageId: lastMessage.id,
+      memoryPolicy: promptBundle.runtime.memoryPolicy,
+      recordMemoryDescription: runtimeToolDescription("record_memory", {
+        memoryPolicy: promptBundle.runtime.memoryPolicy,
+      }),
       resolveUsername: async (username) => {
         const cached = resolveGuildUsername(guild, username);
         if (cached !== undefined) return cached;
@@ -2368,7 +2404,8 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
         globalConfig,
         guildConfig,
         context,
-        personaPrompt: persona,
+        personaPrompt: promptBundle.corePrompt,
+        runtimePrompts: promptBundle.runtime,
         incomingMessage: incoming,
         userContent: "",
         assistantReply: "",
@@ -2668,7 +2705,7 @@ function buildAgentTools(
       if (matches.length > 1) {
         return {
           error: "ambiguous_target",
-          message: `Multiple guild members match '${target}'. Use a mention or raw user ID.`,
+          message: `Multiple guild members match '${target}'; use a mention or raw user ID.`,
         } satisfies TimeoutMemberResolution;
       }
       const member = matches[0];
@@ -2844,6 +2881,8 @@ function buildAgentTools(
       logger: log.child({ component: "codex-image", guildId, channelId }),
       imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
       imageGenerationQuality: guildConfig.imageGeneration.quality,
+      asyncJobAlreadyActiveTemplate: promptBundle.runtime.contextTemplates["codex-image-job-existing"],
+      asyncJobStartedTemplate: promptBundle.runtime.contextTemplates["codex-image-job-started"],
       getImageById: (id: number) => {
         const record = getImageById(db, id);
         return record !== null && record.guildId === guildId ? record : null;
@@ -2903,7 +2942,27 @@ function buildAgentTools(
     tools.push(createBraveSearchTool({ apiKey: globalConfig.braveApiKey }));
   }
 
-  return tools;
+  const toolPromptVariables: ToolPromptVariables = {
+    fetch_images: {
+      maxImagesPerCall: 5,
+      maxDimension: CONTEXT_IMAGE_MAX_DIMENSION,
+    },
+    read_chat_images: {
+      imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
+    },
+    codex_generate_image: {
+      imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
+      imageGenerationQuality: guildConfig.imageGeneration.quality,
+    },
+    schedule_message: {
+      timezone: guildConfig.timezone,
+    },
+    timeout_user: {
+      maxTimeoutMinutes: MAX_TIMEOUT_SECONDS / 60,
+    },
+  };
+
+  return applyRuntimeToolPrompts(tools, promptBundle.runtime, toolPromptVariables);
 }
 
 // --- 21. Channel dispatcher ---
@@ -3142,25 +3201,23 @@ async function processTriggeredMessage(
       },
     });
     const generatedImages = createGeneratedImageRuntime();
-    const extraTools = [
-      ...buildAgentTools(
-        guildId,
-        channelId,
-        guildConfig,
-        guild,
-        context.contextMessageIds,
-        generatedImages.onGeneratedImage,
-        {
-          requesterId: message.author.id,
-          requesterUsername: message.author.username,
-          sourceMessageId: message.id,
-          sourceQuote: shortQuote(translatedContent),
-        },
-        {},
-      ),
-      startThreadTool,
-      closeThreadTool,
-    ];
+    const agentTools = buildAgentTools(
+      guildId,
+      channelId,
+      guildConfig,
+      guild,
+      context.contextMessageIds,
+      generatedImages.onGeneratedImage,
+      {
+        requesterId: message.author.id,
+        requesterUsername: message.author.username,
+        sourceMessageId: message.id,
+        sourceQuote: shortQuote(translatedContent),
+      },
+      {},
+    );
+    const threadTools = applyRuntimeToolPrompts([startThreadTool, closeThreadTool], promptBundle.runtime);
+    const extraTools = [...agentTools, ...threadTools];
 
     const incoming: IncomingMessage = {
       content: message.content,
@@ -3206,7 +3263,8 @@ async function processTriggeredMessage(
       guildConfig,
       context,
       currentChannelId: channelId,
-      personaPrompt: persona,
+      personaPrompt: promptBundle.corePrompt,
+      runtimePrompts: promptBundle.runtime,
       sender,
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
@@ -3256,6 +3314,10 @@ async function processTriggeredMessage(
           currentUserId: message.author.id,
           currentUsername: message.author.username,
           sourceMessageId: memoryRequest.sourceMessageId ?? message.id,
+          memoryPolicy: promptBundle.runtime.memoryPolicy,
+          recordMemoryDescription: runtimeToolDescription("record_memory", {
+            memoryPolicy: promptBundle.runtime.memoryPolicy,
+          }),
           resolveUsername: async (username) => {
             const cached = resolveGuildUsername(guild, username);
             if (cached !== undefined) return cached;
@@ -3273,13 +3335,15 @@ async function processTriggeredMessage(
           currentUserId: message.author.id,
           visibleUserIds: memoryRequest.context.visibleUserIds ?? [],
           resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
+          contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
         });
         try {
           await runSilentMemoryAgentPass({
             globalConfig,
             guildConfig,
             context: memoryRequest.context,
-            personaPrompt: persona,
+            personaPrompt: promptBundle.corePrompt,
+            runtimePrompts: promptBundle.runtime,
             incomingMessage: memoryRequest.incomingMessage,
             userContent: memoryRequest.userMessage,
             assistantReply: memoryRequest.assistantReply,
@@ -3730,7 +3794,7 @@ async function reloadConfigs(): Promise<void> {
     await refreshModelImageInputSupport(newGlobal, newGuilds, "hot_reload");
 
     globalConfig = newGlobal;
-    ({ persona, toolInstructions } = loadPromptProfile(globalConfig.promptProfile, log));
+    promptBundle = loadPromptBundle("prompts", log);
 
     guildConfigs.clear();
     for (const [id, cfg] of newGuilds) {
@@ -3821,4 +3885,4 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-export { db, qdrant, embeddingQueue, guildConfigs, globalConfig, persona, scheduler, client };
+export { db, qdrant, embeddingQueue, guildConfigs, globalConfig, promptBundle, scheduler, client };

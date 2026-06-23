@@ -20,7 +20,7 @@ export interface MemberListToolDeps {
 
 const ListMembersParams = Type.Object({
   onlineOnly: Type.Optional(
-    Type.Boolean({ description: "If true, only list online/idle/dnd members. Default: false (all members)." })
+    Type.Boolean({ description: "Filter to online/idle/dnd members." })
   ),
 });
 
@@ -31,8 +31,7 @@ export function createChatUserListTool(deps: MemberListToolDeps): AgentTool {
   return {
     name: "list_chat_users",
     label: "list_chat_users",
-    description:
-      "List relevant current-guild chat users. Returns exact usernames, display names/nicknames when different, online status, bot flag, admin flag from Discord Administrator or guild adminUserIds, nonzero portable user-memory counts, and any existing cached dm_channel_id. 2B still cannot send PMs/DMs.",
+    description: "List relevant current-guild chat users.",
     parameters: ListMembersParams,
 
     async execute(_toolCallId: string, params: unknown): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {
@@ -44,7 +43,7 @@ export function createChatUserListTool(deps: MemberListToolDeps): AgentTool {
         members = await fetchMembers(guildId, onlineOnly);
       } catch {
         return {
-          content: [{ type: "text", text: "Unable to fetch members. The bot may lack permission to view the member list." }],
+          content: [{ type: "text", text: "Unable to fetch members; the bot may lack permission to view the member list." }],
           details: { error: true },
         };
       }

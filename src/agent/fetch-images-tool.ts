@@ -49,8 +49,7 @@ export function createFetchImagesTool(deps: FetchImagesToolDeps = {}): AgentTool
   return {
     name: "fetch_images",
     label: "Fetch Images",
-    description:
-      "Fetch external images by URL. Downloads, validates as image, resizes (max 1024px), converts to JPEG, returns base64 with metadata. Does NOT store — ephemeral fetch only. Use read_chat_images for stored chat history images.",
+    description: "Fetch external images by URL.",
     parameters: FetchImagesParams,
 
     async execute(
@@ -61,7 +60,7 @@ export function createFetchImagesTool(deps: FetchImagesToolDeps = {}): AgentTool
 
       if (urls.length > maxImagesPerCall) {
         throw new Error(
-          `Too many URLs requested (${urls.length}). Maximum is ${maxImagesPerCall} per call.`
+          `Too many URLs requested (${urls.length}); maximum is ${maxImagesPerCall} per call.`
         );
       }
 

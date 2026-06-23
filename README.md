@@ -34,12 +34,11 @@ This README covers setup, operation, and user-facing configuration. `ARCHITECTUR
 # 1. Copy and fill in secrets
 cp .env.example .env
 
-# 2. Create local config and prompts from examples
+# 2. Create local config from examples
 cp config/config.yaml.example config/config.yaml
 cp config/guilds/000000000-example.yaml.example config/guilds/<YOUR_GUILD_ID>-<slug>.yaml
-cp prompts/persona.md.example prompts/persona.md
-cp prompts/style.md.example prompts/style.md
-# Edit these files to match your setup and bot persona
+# Edit prompts/core/*.md to match your bot persona. Runtime instructions live in prompts/runtime/.
+# Older live deployments may still read ignored root prompts/persona.md and prompts/style.md during migration.
 
 # 3a. Development (live reload, debug logging; uses .env)
 docker compose -f docker-compose.dev.yml up -d --build --remove-orphans
@@ -73,7 +72,9 @@ timezone: UTC
 adminUserIds: []
 ```
 
-All fields are optional; missing values fall back to global defaults. `imageMaxDimension` controls canonical user-image storage only: uploads are stored as WebP q90 and clamped to that longest edge, while LLM context reads use temporary compressed copies. Generated bot PNGs are stored as generated. `promptProfile` selects files from `prompts/`. Live prompt files are local and ignored by git; copy `prompts/persona.md.example` to `prompts/persona.md` and `prompts/style.md.example` to `prompts/style.md`, then customize them for your bot.
+All fields are optional; missing values fall back to global defaults. `imageMaxDimension` controls canonical user-image storage only: uploads are stored as WebP q90 and clamped to that longest edge, while LLM context reads use temporary compressed copies. Generated bot PNGs are stored as generated.
+
+Prompt assembly is file-based: `prompts/core/**/*.md` files are loaded into the stable system prompt in deterministic recursive path order. Use numeric file or directory prefixes like `00-persona/`, `10-style/`, and `20-additional-instructions.md` when order matters. Runtime policy is loaded separately from `prompts/runtime/`: reply runtime from `reply/**`, silent memory pass text from `memory/pass/**`, memory policy from `memory/policy/**`, memory context snippets from `memory/context/**`, tool descriptions from `tools/*.md`, parameter descriptions from `tool-parameters/<tool>/<param>.md`, volatile context templates from `context/*.md`, and fallback vision instructions from `image-reading/fallback-system/**`. On-demand skills live in `prompts/skills/<id>/skill.yaml`; normal turns receive only the compact skill index, while `load_skill` returns the manifest-ordered markdown body and tools listed in `required_for_tools` are blocked until their skill is loaded. Runtime templates support scalar `{{variable}}` placeholders; missing variables fail fast so prompt output stays deterministic. Ignored root files such as `prompts/persona.md` and `prompts/style.md` are legacy/live-local migration files; current code does not read them.
 
 `memoryExtraction.postReply` controls the silent memory pass after visible bot replies. `memoryExtraction.ambient` can periodically review non-triggered human chatter; `everyMessages` counts from the last successful memory pass in that channel, including post-reply passes, and `minIntervalSeconds` prevents bursty background spend.
 

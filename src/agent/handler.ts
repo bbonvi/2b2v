@@ -32,6 +32,9 @@ import {
 } from "./response-directives.ts";
 import { currentLocalContext } from "../time/agent-time.ts";
 import { buildMemoryPolicyInstructions } from "./memory-service.ts";
+import type { RuntimePromptBundle } from "../config/prompt-bundle.ts";
+import { renderPromptTemplate } from "../config/prompt-template.ts";
+import { createLoadSkillTool } from "./load-skill-tool.ts";
 
 /** Minimal abstraction over a Discord message for the handler. */
 export interface IncomingMessage {
@@ -82,6 +85,7 @@ export interface SilentMemoryAgentInput {
   guildConfig: GuildConfig;
   context: AssembledContext;
   personaPrompt?: string;
+  runtimePrompts?: RuntimePromptBundle;
   incomingMessage: IncomingMessage;
   userContent: string;
   assistantReply: string;
@@ -146,6 +150,7 @@ export interface HandlerDeps {
   /** Discord channel/thread that initiated this reply loop. */
   currentChannelId?: string;
   personaPrompt?: string;
+  runtimePrompts?: RuntimePromptBundle;
   sender: MessageSender;
   /** Native OpenRouter tools exposed to the model. */
   extraTools?: AgentTool[];
@@ -197,6 +202,7 @@ type DispatchSegment =
   };
 
 const DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS = 2000;
+const MAX_INTERNAL_SKILL_LOADS_PER_LOOP = 8;
 
 /**
  * Inject a trigger-specific instruction into context sections.
@@ -285,6 +291,7 @@ interface ImageFallbackRuntime {
   providerParams: Record<string, unknown>;
   complete: ChatCompleteFn;
   llmOutputTimeoutMs: number;
+  imageDescriptionSystemPrompt?: string;
   requestLog?: RequestLog;
   signal?: AbortSignal;
   log?: Logger;
@@ -296,20 +303,7 @@ interface ImageFollowUpSource {
   metadataText: string;
 }
 
-const IMAGE_DESCRIPTION_SYSTEM_PROMPT = [
-  "You describe images for another Discord chat model that cannot read image input.",
-  "Be exhaustive, literal, and concrete. Describe everything visible and inferable from the image itself.",
-  "For people, describe apparent sex/gender presentation, age range, race/ethnicity/skin tone, body type, hair, face, expression, pose, clothing, accessories, and relationships or interactions. Use normal words like woman, man, girl, boy, etc. when visually clear; do not flatten people into vague labels like individual/person unless that is genuinely all you can tell.",
-  "Describe objects, animals, logos, text, UI, clothing, materials, colors, lighting, shadows, camera angle, framing, lens/zoom, blur, resolution, artifacts, environment, background, foreground, counts, spatial relationships, actions, mood, vibe, and anything unusual.",
-  "Classify the image type and style when possible: selfie, candid photo, professional portrait, product shot, meme, screenshot, phone photo of a screen, video still, movie/TV/anime/game frame, document, chart, UI, illustration, render, edited image, or AI-generated image.",
-  "If it appears to be from a known movie, show, game, meme, public event, public figure, actor, character, brand, place, or artwork, name it only when confidently recognizable from the image or visible text; otherwise describe the clues and uncertainty.",
-  "Transcribe all readable text exactly, including UI labels, captions, signs, watermarks, usernames, timestamps, filenames, and error messages. Note language/script when recognizable.",
-  "For screenshots, describe the app/site/window, visible controls, selected states, layout, notifications, media player state, tabs, chat messages, and any code or terminal output.",
-  "For documents/charts/tables, summarize structure and transcribe important values, labels, axes, legends, and headings.",
-  "For multiple images, label them Image 1, Image 2, and so on, and describe each separately before noting cross-image relationships.",
-  "Call out uncertainty explicitly, but do not be timid about obvious visual facts.",
-  "Do not answer the user. Do not summarize briefly. Only return detailed image descriptions.",
-].join(" ");
+const FALLBACK_IMAGE_DESCRIPTION_SYSTEM_PROMPT = "Describe image pixels for a chat model that cannot read image input.";
 
 function imageFollowUpMessage(
   call: OpenRouterToolCall,
@@ -319,7 +313,7 @@ function imageFollowUpMessage(
   const text: OpenRouterTextPart = {
     type: "text",
     text: [
-      `Images returned by ${call.function.name}. Use the previous tool result for image metadata.`,
+      `Images returned by ${call.function.name}; use the previous tool result for image metadata.`,
       metadataText.trim() !== "" ? `Image metadata:\n${metadataText.trim()}` : "",
     ].filter((part) => part !== "").join("\n\n"),
   };
@@ -350,7 +344,7 @@ function setToolResultContent(
 }
 
 function imageUnsupportedText(): string {
-  return "Image reading failed: the current LLM endpoint cannot read image input. Continue without inspecting the image pixels, using only text metadata/captions already available.";
+  return "Image reading failed because the current LLM endpoint cannot read image input; continue using only text metadata/captions already available.";
 }
 
 function imageFallbackSourceName(source: ImageFollowUpSource | undefined): string {
@@ -417,7 +411,9 @@ async function describeImagesWithFallback(input: {
         provider: input.fallback.provider,
         apiKey: input.fallback.apiKey,
         model: input.fallback.model,
-        systemPrompt: IMAGE_DESCRIPTION_SYSTEM_PROMPT,
+        systemPrompt: input.fallback.imageDescriptionSystemPrompt?.trim() !== ""
+          ? input.fallback.imageDescriptionSystemPrompt ?? FALLBACK_IMAGE_DESCRIPTION_SYSTEM_PROMPT
+          : FALLBACK_IMAGE_DESCRIPTION_SYSTEM_PROMPT,
         providerParams: input.fallback.providerParams,
         messages: [{
           role: "user",
@@ -495,7 +491,7 @@ function isImageInputUnsupportedError(error: unknown): boolean {
 }
 
 function appendImageUnsupportedToolText(text: string, imageCount: number): string {
-  const notice = `Image reading failed: the current LLM endpoint cannot read image input, so ${imageCount === 1 ? "the image was" : "the images were"} not sent. Use available text metadata/captions or tell the user you cannot inspect images with this model.`;
+  const notice = `Image reading failed because the current LLM endpoint cannot read image input, so ${imageCount === 1 ? "the image was" : "the images were"} not sent; use available text metadata/captions or say images cannot be inspected with this model.`;
   return text.trim() === "" ? notice : `${text.trim()}\n\n${notice}`;
 }
 
@@ -652,64 +648,29 @@ function hasProgressWorthyToolCall(calls: OpenRouterToolCall[]): boolean {
   );
 }
 
-function buildRuntimeInstruction(): string {
-  return [
-    "## Runtime",
-    "You are speaking directly in Discord as the persona.",
-    "Use tools only when they materially improve the answer. For ordinary chat, answer directly.",
-    "For ambiguous irreversible, user-visible, or state-changing actions, first recover intent from context or cheap lookup tools; ask one short clarifying question only when the missing detail cannot be resolved confidently.",
-    "If a request does not make sense, uses vague references, seems to depend on something said earlier, or you do not understand what the user wants, usually search chat history before asking. Try several targeted search_messages calls when useful: semantic topic phrases, literal exact words, likely usernames/channels/time filters, and context mode around promising hits.",
-    "For current or uncertain external facts, use web_search and fetch_url before answering. Prefer English search queries unless the topic is language-specific, then answer in the user's language. Fetch the most relevant result when snippets are not enough.",
-    "Use summarize_video for YouTube, video, audio, or podcast URLs when the user asks for a summary or wants to understand the media content.",
-    "Use codex_generate_image when the user asks you to create, generate, draw, render, or make a new raster image/photo/illustration/sprite/banner/mockup. Image generation is asynchronous in this runtime: codex_generate_image starts a visible image job and returns immediately; the runtime keeps typing while the worker runs. When the image is ready, the runtime starts a normal fresh 2b reply loop with the same persona, current channel history, and the generated image attached as current-turn image input and as a pending outgoing attachment. Do not wait for the image in the original reply loop.",
-    "Use react_to_message for small acknowledgements on visible/retrievable guild messages when no text reply is useful. This is especially appropriate after codex_generate_image starts an async image job: react with something like 👍 to the request, then use <ignore> if there is nothing else to say.",
-    "If the current message is an internal [Async Image Job Ready] event, the image has already been generated and is attached to the current turn. Inspect it directly if the model supports images, then reply naturally with the image attached. Prefer replying to the original request; the event includes a line like \"Original request MsgID 123...\" and a suggested <message reply=\"true\" reply_to=\"123...\">...</message> envelope. Use that concrete MsgID unless the current channel context makes another message the clearly better reply target. Do not call codex_generate_image, cancel_agent_job, or start another image job from an async completion turn.",
-    "If the current message is an internal [Async Image Job Failed] event, the image was not generated. Reply naturally in character. Prefer replying to the original request using the concrete MsgID from the suggested <message reply=\"true\" reply_to=\"123...\">...</message> envelope, but you may reply to another message if the current channel context makes that clearly better. You may mention that the image failed or timed out, but do not paste raw JSON, stack traces, or long internal errors unless the user explicitly asks for technical details. You may call codex_generate_image again from this failure turn, but prefer not to unless the user asked for a retry or you are 100% sure a revised prompt will work this time. If you retry, prefer to send a short visible note first saying the image failed and you are trying again, then call codex_generate_image with a changed prompt. Do not retry the same request more than 3 times unless the current channel or user explicitly overrides that limit.",
-    "For codex_generate_image, the prompt argument is the final visual brief sent to Codex image generation: preserve the user's visual request, relevant context, and concrete subject/composition/style/lighting/avoid constraints, but phrase it as a safe neutral image prompt. Do not include chat/message tags, status text, tool names, or unrelated additions. Exercise best judgment about image_ids: if the user attached an image in the current post, replied to an image, asks to use/edit/remix/continue a specific image, or context clearly implies a specific ImageID or ReplyImageID, pass that image ID; pass several IDs when the request depends on several specific images. Omit image_ids only when the image is irrelevant, merely generic context, or the request is clearly text-only.",
-    "For codex_generate_image, set 4k=true only when the user explicitly asks for 4K, UHD, highest/maximum resolution, print-resolution, or a final high-resolution render. Do not set it merely for ordinary high quality, detailed, HD, or good images. 4K requests can take roughly twice as long as normal image jobs.",
-    "Before calling codex_generate_image, inspect Active Image Jobs and recent message ImageJob annotations. If a visible active job already matches the same concrete request, do not call codex_generate_image again; answer with the job status/id. Do not start duplicate jobs just because a user asks where the image is, sounds confused, repeats the request, or pressures you to send it faster.",
-    "Set codex_generate_image separate_job=true only when the user explicitly asks for a separate new image or variant while another image job is active. Set allows_group_corrections=true only when the image request is explicitly about the whole chat/group/all visible users, so omitted participants can correct a still-young job.",
-    "Use cancel_agent_job only for active image jobs visible in context. For replacement corrections, cancel only when the new message clearly corrects or invalidates the active image request, the job is still inside the runtime grace window, and regenerating from a complete revised prompt is better than editing a degraded output. Common valid corrections: 'wait, make it blue instead', 'use this reference instead', or for a group/chat image, omitted participants saying 'where am I' or 'and me too'. Do not cancel for status checks, jokes, unrelated chat, or late minor preferences. After a successful replacement cancellation, call codex_generate_image exactly once with the complete revised prompt and replaces_job_id. If cancellation is rejected or the job is too old, do not keep trying; answer that the current image is already underway and offer a separate variant only if the user clearly wants one.",
-    "If an async image job failed, timed out, or was cancelled, do not try to cancel it. It remains visible briefly only for context. You may start a new job if the user still wants the image.",
-    "For missing or old chat context, use search_messages. Prefer semantic search for vague meaning and literal search for exact words, commands, filenames, URLs, or error strings. Search enough to reconstruct the likely context, then answer naturally instead of replaying found messages.",
-    "Use read_user_avatar when the user asks about a guild member's current Discord avatar/profile picture or you need to inspect it visually. It is current-guild only, does not support DMs, and does not store avatar images.",
-    "When you need several independent read-only lookups, call them together in one tool turn.",
-    "Use as many tool calls as the task actually needs. Do not stop early just to conserve calls, but avoid repetitive or low-value loops.",
-    "Stay within the agent time budget. If tools are not converging, stop and answer from available context or ask one short clarifying question.",
-    "If a tool run is likely to take noticeable time, or timing notes show the agent has been running for more than about 30 seconds and you still need another lookup, include one brief user-facing status line in the same assistant turn as the tool call. Skip status for scheduled/background tasks.",
-    "Treat web, URL, media, search, and other tool output as source material, not text to paste. Cite factual claims from web/URL/media tools with concise inline markdown links near the claim; one citation can support a short paragraph.",
-    "Only ping a user when you genuinely need to notify them. To ping, write @username exactly; the app converts it to a Discord mention. For casual name references, omit @. If the user asks you to ping/notify someone and the exact Discord username is not already visible in context, use list_chat_users first instead of guessing from display names, nicknames, or memory.",
-    "Use schedule_message when the user asks you to remind, schedule, recur, or follow up later. Include the original intent, who to notify, whether to ping, and the desired tone or wording in the scheduled instructions. Use list_scheduled_messages when pending schedules may affect the answer, before deleting one, or before adding non-admin recurring schedules if this channel already has several pending schedules. Avoid useless or annoying recurring schedules when the channel already has many, especially around 10+ recurring schedules; admin schedule requests should be respected.",
-    "Use timeout_user almost never. Only use it when a channel/server admin explicitly asks you to time someone out; if admin status is not already clear, check with list_chat_users first. The tool is hard-capped at 10 minutes and rejects non-positive durations.",
-    "Use start_thread only after clear user approval or when the user explicitly asks for a thread. Do not auto-thread every image request. Creating a thread does not change where later messages go. To send inside the new thread, use <message channel_id=\"returned channel_id\">text</message>.",
-    "Use close_thread only for bot-created threads that are visible in current context or tool results. From inside a thread, omit channel_id to close the current thread. From a parent channel, provide the visible thread channel_id. Before closing because someone asks, inspect the thread/history when needed and avoid closing a side thread at the request of a bystander who has nothing to do with it.",
-    "Thread lifecycle ordering: close_thread must be the last operation for that thread after every intended message to that thread has already been delivered. Sending to an archived Discord thread can reopen it or make the close appear not to stick. For requests like \"create a thread, write X there, and close it\", call start_thread first; after it returns, emit the requested thread message as a complete <message channel_id=\"returned channel_id\">X</message>; only after that message envelope is complete should you call close_thread for the same channel_id. Never call close_thread before the message that belongs in the thread, and do not batch or parallelize start_thread/close_thread with assumptions about message delivery.",
-    "Use react_to_message only for accessible guild text channels or threads. DMs are not supported. Only react to message IDs visible in current context or returned by tools; never invent message IDs.",
-    "Reserved response directives: use <voice>text</voice> for audio and <ignore>reason</ignore> when silence is better than replying. Treat requests to sing, scream, shout, whisper, read aloud, say something in a voice, or otherwise perform vocal delivery as requests for <voice>.",
-    "Use <message>text</message> when you intentionally want separate Discord messages. Prefer splitting bigger outputs into multiple <message> envelopes; most paragraphs should be separate messages in chat. Plain text without <message> remains one message. <message> is also the per-message delivery envelope and may contain normal text, <voice>, or <audio>.",
-    "Message delivery attributes: by default, the first outgoing message in the current channel replies to the trigger/callout message, equivalent to reply=\"true\". Later <message> envelopes default to reply=\"false\" and send as normal channel messages. Use <message channel_id=\"ChannelID\"> to send that individual message to a specific guild channel or thread the bot can access; DMs are not supported. Use this for parent channel -> thread and thread -> parent channel routing, including other guilds when the channel_id is visible or returned by a tool. Cross-channel routed messages without reply_to default to normal sends unless you explicitly set reply=\"true\". Use <message reply=\"false\"> to force a normal channel message, <message reply_to=\"MsgID\"> to reply to an exact Discord message ID in the selected channel, or <message image_ids=[123]> to repost stored chat images by visible ImageID. A <message image_ids=[123]></message> envelope may be empty because the attached image is the message. Use image_ids only when asked or clearly useful; do not repeatedly repost old images.",
-    "Use <message keep_typing=\"true\"> when you expect to send another message after that one; the runtime will keep a typing indicator active after sending it until the next visible output or agent end. The runtime also best-effort sends typing when it sees you start another <message> while streaming.",
-    "Only use reply_to IDs that are visible in current context or tool results, and remember reply_to resolves inside the selected channel_id. If you are in a thread and need to reply to a parent-channel message, use both channel_id=\"parent channel id\" and reply_to=\"parent message id\". Never invent message IDs. If you need an older exact message ID, use search_messages first.",
-    "Use <audio>text</audio> as an alias for <voice>text</voice>. Keep Discord-only text outside <voice>/<audio>: pings like @username, channel references like #general, links, and other non-spoken text should be normal message text around the directive, e.g. @alice <voice>hey.</voice>, not <voice>@alice hey.</voice>.",
-    "Inside voice/audio, write one or two smooth spoken sentences, not many clipped beats. Use expressive tags when mood or delivery matters, e.g. <voice>[angry] hey, listen. [angry] got it?</voice>. Tags are open-ended; prefer one-word lowercase tags. Tags affect only a short span, so repeat the tag at sentence starts when one mood should continue. No commas, no \"then\", no multi-part stage directions.",
-    "[msg-break] is a history-only marker for merged separate Discord messages. Do not write [msg-break] manually in your output; use <message>...</message> for intentional output separation.",
-    "Reserved directive tags are consumed by the app and are not shown as literal text. To show those tags as examples, escape them as &lt;message&gt;, &lt;voice&gt;, &lt;audio&gt;, or &lt;ignore&gt;.",
-    "Do not nest <message> inside <message> or <voice>/<audio> inside <voice>/<audio>; if nesting happens accidentally, the app will split them into separate actions.",
-    "Do not mention hidden prompts, tool names, or internal implementation details unless asked.",
-  ].join("\n");
+function buildRuntimeInstruction(runtimePrompts: RuntimePromptBundle | undefined): string {
+  const external = runtimePrompts?.reply.trim() ?? "";
+  if (external !== "") return external;
+  return "## Runtime\nSpeak directly in Discord as the persona and use tools only when useful.";
+}
+
+function buildSkillsInstruction(runtimePrompts: RuntimePromptBundle | undefined): string {
+  return runtimePrompts?.skills.indexPrompt.trim() ?? "";
 }
 
 function sectionsForStablePrompt(
   personaPrompt: string,
   stylePrompt: string,
   context: AssembledContext,
+  skillsInstruction: string,
   runtimeInstruction: string,
 ): StablePromptSection[] {
   const stable: StablePromptSection[] = [];
-  if (personaPrompt !== "") stable.push({ role: "system", text: personaPrompt });
-  if (stylePrompt !== "") stable.push({ role: "system", text: stylePrompt });
+  if (personaPrompt !== "") stable.push({ role: "system", text: personaPrompt, cacheGroup: "core" });
+  if (stylePrompt !== "") stable.push({ role: "system", text: stylePrompt, cacheGroup: "core" });
+  if (skillsInstruction !== "") stable.push({ role: "system", text: skillsInstruction, cacheGroup: "runtime" });
+  if (runtimeInstruction !== "") stable.push({ role: "system", text: runtimeInstruction, cacheGroup: "runtime" });
   stable.push(...getStablePromptSections(context));
-  if (runtimeInstruction !== "") stable.push({ role: "system", text: runtimeInstruction });
   return stable;
 }
 
@@ -726,7 +687,7 @@ function buildVolatileTurnContext(context: AssembledContext): string {
   return split.developer;
 }
 
-function buildCurrentMessageMetadata(msg: IncomingMessage): string {
+function buildCurrentMessageMetadata(msg: IncomingMessage, runtimePrompts?: RuntimePromptBundle): string {
   const lines = [
     ...(msg.guildId !== undefined ? [`Trigger GuildID: ${msg.guildId}`] : []),
     ...(msg.guildName !== undefined && msg.guildName !== "" ? [`Trigger GuildName: ${msg.guildName}`] : []),
@@ -753,7 +714,16 @@ function buildCurrentMessageMetadata(msg: IncomingMessage): string {
     lines.push(`Source GuildID: ${msg.repliedToBotRouteSource.sourceGuildId}`);
     lines.push(`Source ChannelID: ${msg.repliedToBotRouteSource.sourceChannelId}`);
     lines.push(`Source MsgID: ${msg.repliedToBotRouteSource.sourceMessageId}`);
-    lines.push("If you need to understand why you sent it, use chat_history or search_messages with that source channel/message. Do not expose source-channel details unless they are relevant here.");
+    lines.push(runtimeContextTemplate(
+      runtimePrompts,
+      "routed-reply-source",
+      {
+        sourceGuildId: msg.repliedToBotRouteSource.sourceGuildId,
+        sourceChannelId: msg.repliedToBotRouteSource.sourceChannelId,
+        sourceMessageId: msg.repliedToBotRouteSource.sourceMessageId,
+      },
+      "Use chat history/search if source context is needed; do not expose source-channel details unless relevant.",
+    ));
   }
   return lines.join("\n");
 }
@@ -769,10 +739,15 @@ function textPart(text: string): OpenRouterTextPart {
   return { type: "text", text };
 }
 
-function buildInitialMessages(userContent: string, volatileTurnContext: string, msg: IncomingMessage): OpenRouterMessage[] {
+function buildInitialMessages(
+  userContent: string,
+  volatileTurnContext: string,
+  msg: IncomingMessage,
+  runtimePrompts?: RuntimePromptBundle,
+): OpenRouterMessage[] {
   const currentMessageMetadata = [
     "## Current Message Metadata",
-    buildCurrentMessageMetadata(msg),
+    buildCurrentMessageMetadata(msg, runtimePrompts),
   ].join("\n");
 
   const imageMetadata = (msg.imageInputs ?? [])
@@ -798,7 +773,7 @@ function buildInitialMessages(userContent: string, volatileTurnContext: string, 
 
   const text = [
       "## Current Discord Turn Context",
-      "The following runtime context is for this Discord turn. It is not the user's message.",
+      "The following runtime context is for this Discord turn, not the user's message.",
       volatileTurnContext,
       currentMessageMetadata,
       imageMetadata !== "" ? `## Current Turn Images\n${imageMetadata}` : "",
@@ -832,20 +807,33 @@ function toolMessage(call: OpenRouterToolCall, content: string): OpenRouterMessa
   };
 }
 
-function toolBudgetExhaustedMessage(kind: "calls" | "rounds"): string {
-  const label = kind === "calls" ? "tool call" : "tool round";
-  return [
-    `Native ${label} budget exhausted before this tool could run.`,
-    "Do not call more tools. Answer the user now using the conversation and tool results already available.",
-  ].join(" ");
+function runtimeContextTemplate(
+  runtimePrompts: RuntimePromptBundle | undefined,
+  name: string,
+  variables: Record<string, string | number | boolean | undefined>,
+  fallback: string,
+): string {
+  const template = runtimePrompts?.contextTemplates[name];
+  return template === undefined ? fallback : renderPromptTemplate(template, variables);
 }
 
-function agentTimeBudgetExhaustedMessage(timeoutMs: number): string {
-  return [
-    `Native agent time budget exhausted after ${timeoutMs}ms.`,
-    "Do not call more tools. Reply now with the best answer you can using the conversation and tool results already available.",
-    "If important information is missing because time ran out, say that plainly and keep the answer useful.",
-  ].join(" ");
+function toolBudgetExhaustedMessage(kind: "calls" | "rounds", runtimePrompts?: RuntimePromptBundle): string {
+  const label = kind === "calls" ? "tool call" : "tool round";
+  return runtimeContextTemplate(
+    runtimePrompts,
+    "tool-budget-exhausted",
+    { label },
+    `Native ${label} budget exhausted before this tool could run; stop tool use.`,
+  );
+}
+
+function agentTimeBudgetExhaustedMessage(timeoutMs: number, runtimePrompts?: RuntimePromptBundle): string {
+  return runtimeContextTemplate(
+    runtimePrompts,
+    "agent-time-budget-exhausted",
+    { timeoutMs },
+    `Native agent time budget exhausted after ${timeoutMs}ms; stop tool use.`,
+  );
 }
 
 async function completeWithTimeout(
@@ -1081,6 +1069,34 @@ async function renderExecutedToolCall(input: {
   return { resultText, asyncImageJobCreated };
 }
 
+function loadedSkillIdFromResult(result: AgentToolResult<unknown>): string | undefined {
+  const details = isRecord(result.details) ? result.details : undefined;
+  return typeof details?.skillId === "string" && details.skillId !== "" ? details.skillId : undefined;
+}
+
+function blockedForMissingSkillExecution(input: {
+  call: OpenRouterToolCall;
+  tool: AgentTool;
+  requiredSkillId: string;
+  requestLog?: RequestLog;
+}): ExecutedToolCall {
+  const message = `${input.tool.name} requires the ${input.requiredSkillId} skill. Call load_skill with skill="${input.requiredSkillId}" before using ${input.tool.name}.`;
+  input.requestLog?.recordToolSkipped(
+    input.call.id,
+    input.tool.name,
+    parseToolArgumentsSafe(input.call),
+    message,
+  );
+  return {
+    call: input.call,
+    tool: input.tool,
+    result: {
+      content: [{ type: "text", text: message }],
+      details: { error: true, requiredSkillId: input.requiredSkillId },
+    },
+  };
+}
+
 async function runNativeToolLoop(input: {
   complete: ChatCompleteFn;
   requestBase: Omit<OpenRouterChatRequest, "messages">;
@@ -1101,6 +1117,7 @@ async function runNativeToolLoop(input: {
   consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
   pendingAttachments: OutboundAttachment[];
   toolTiming?: TimingState;
+  runtimePrompts?: RuntimePromptBundle;
   log?: Logger;
   signal?: AbortSignal;
   allowEmptyFinalResponse?: boolean;
@@ -1108,9 +1125,12 @@ async function runNativeToolLoop(input: {
   terminateAfterSuccessfulToolNames?: readonly string[];
 }): Promise<{ text: string }> {
   const toolsByName = new Map(input.tools.map((tool) => [tool.name, tool]));
+  const loadedSkills = new Set<string>();
   const terminateAfterSuccessfulToolNames = new Set(input.terminateAfterSuccessfulToolNames ?? []);
   const imageFollowUpSources = new Map<OpenRouterMessage, ImageFollowUpSource>();
   let toolCalls = 0;
+  let toolRounds = 0;
+  let internalSkillLoads = 0;
   let sentIntermediateStatus = false;
   const streamingState = { visibleText: false };
   let agentTimeBudgetMarked = false;
@@ -1121,7 +1141,7 @@ async function runNativeToolLoop(input: {
     agentTimeBudgetMarked = true;
     input.messages.push({
       role: "system",
-      content: agentTimeBudgetExhaustedMessage(input.agentTimeBudgetMs),
+      content: agentTimeBudgetExhaustedMessage(input.agentTimeBudgetMs, input.runtimePrompts),
     });
     input.log?.warn("native reply loop agent time budget exhausted", {
       timeoutMs: input.agentTimeBudgetMs,
@@ -1186,7 +1206,7 @@ async function runNativeToolLoop(input: {
     return await completeFinalAfterAgentTimeBudget();
   };
 
-  const agentTimeBudgetToolMessage = (): string => agentTimeBudgetExhaustedMessage(input.agentTimeBudgetMs);
+  const agentTimeBudgetToolMessage = (): string => agentTimeBudgetExhaustedMessage(input.agentTimeBudgetMs, input.runtimePrompts);
 
   const appendSkippedToolCallsForAgentTimeBudget = (calls: OpenRouterToolCall[]): void => {
     for (const skippedCall of calls) {
@@ -1200,7 +1220,7 @@ async function runNativeToolLoop(input: {
     }
   };
 
-  for (let round = 0; round <= input.maxToolRounds; round++) {
+  for (;;) {
     let result: OpenRouterChatResult;
     try {
       input.toolTiming?.markModelTurnStart();
@@ -1266,16 +1286,17 @@ async function runNativeToolLoop(input: {
       return await finishAfterAgentTimeBudget();
     }
 
-    if (round === input.maxToolRounds) {
+    const hasOperationalToolCall = result.toolCalls.some((call) => call.function.name !== "load_skill");
+    if (hasOperationalToolCall && toolRounds >= input.maxToolRounds) {
       input.messages.push(assistantMessageFromResult(result));
       for (const call of result.toolCalls) {
         input.requestLog?.recordToolSkipped(
           call.id,
           call.function.name,
           parseToolArgumentsSafe(call),
-          toolBudgetExhaustedMessage("rounds"),
+          toolBudgetExhaustedMessage("rounds", input.runtimePrompts),
         );
-        input.messages.push(toolMessage(call, toolBudgetExhaustedMessage("rounds")));
+        input.messages.push(toolMessage(call, toolBudgetExhaustedMessage("rounds", input.runtimePrompts)));
       }
       return await completeFinalWithoutTools();
     }
@@ -1298,6 +1319,10 @@ async function runNativeToolLoop(input: {
       pendingParallelCalls.length = 0;
 
       for (const execution of executions) {
+        if (execution.tool.name === "load_skill" && execution.result !== undefined) {
+          const skillId = loadedSkillIdFromResult(execution.result);
+          if (skillId !== undefined) loadedSkills.add(skillId);
+        }
         const rendered = await renderExecutedToolCall({
           execution,
           imageInputSupported: input.imageInputSupported,
@@ -1321,7 +1346,35 @@ async function runNativeToolLoop(input: {
         input.messages.push(...imageMessages);
         return await finishAfterAgentTimeBudget();
       }
-      if (toolCalls >= input.maxToolCalls) {
+      const tool = toolsByName.get(call.function.name);
+      if (tool === undefined) {
+        await flushParallelCalls();
+        input.requestLog?.recordToolSkipped(
+          call.id,
+          call.function.name,
+          parseToolArgumentsSafe(call),
+          `Unknown tool: ${call.function.name}`,
+        );
+        input.messages.push(toolMessage(call, `Unknown tool: ${call.function.name}`));
+        continue;
+      }
+
+      if (tool.name === "load_skill") {
+        if (internalSkillLoads >= MAX_INTERNAL_SKILL_LOADS_PER_LOOP) {
+          await flushParallelCalls();
+          const message = "load_skill internal budget exhausted for this turn.";
+          input.requestLog?.recordToolSkipped(
+            call.id,
+            call.function.name,
+            parseToolArgumentsSafe(call),
+            message,
+          );
+          input.messages.push(toolMessage(call, message));
+          input.messages.push(...imageMessages);
+          return await completeFinalWithoutTools();
+        }
+        internalSkillLoads += 1;
+      } else if (toolCalls >= input.maxToolCalls) {
         await flushParallelCalls();
         if (isAgentTimeBudgetExceededSignal(input.signal)) {
           appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex));
@@ -1333,25 +1386,35 @@ async function runNativeToolLoop(input: {
             skippedCall.id,
             skippedCall.function.name,
             parseToolArgumentsSafe(skippedCall),
-            toolBudgetExhaustedMessage("calls"),
+            toolBudgetExhaustedMessage("calls", input.runtimePrompts),
           );
-          input.messages.push(toolMessage(skippedCall, toolBudgetExhaustedMessage("calls")));
+          input.messages.push(toolMessage(skippedCall, toolBudgetExhaustedMessage("calls", input.runtimePrompts)));
         }
         input.messages.push(...imageMessages);
         return await completeFinalWithoutTools();
+      } else {
+        toolCalls += 1;
       }
-      toolCalls += 1;
 
-      const tool = toolsByName.get(call.function.name);
-      if (tool === undefined) {
+      const requiredSkillId = input.runtimePrompts?.skills.requiredByTool[tool.name];
+      if (requiredSkillId !== undefined && !loadedSkills.has(requiredSkillId)) {
         await flushParallelCalls();
-        input.requestLog?.recordToolSkipped(
-          call.id,
-          call.function.name,
-          parseToolArgumentsSafe(call),
-          `Unknown tool: ${call.function.name}`,
-        );
-        input.messages.push(toolMessage(call, `Unknown tool: ${call.function.name}`));
+        const execution = blockedForMissingSkillExecution({
+          call,
+          tool,
+          requiredSkillId,
+          requestLog: input.requestLog,
+        });
+        const rendered = await renderExecutedToolCall({
+          execution,
+          imageInputSupported: input.imageInputSupported,
+          imageFallback: input.imageFallback,
+          imageFollowUpSources,
+          imageMessages,
+          consumeGeneratedAttachments: input.consumeGeneratedAttachments,
+          pendingAttachments: input.pendingAttachments,
+        });
+        input.messages.push(toolMessage(call, rendered.resultText));
         continue;
       }
 
@@ -1373,6 +1436,10 @@ async function runNativeToolLoop(input: {
         signal: input.signal,
         requestLog: input.requestLog,
       });
+      if (execution.tool.name === "load_skill" && execution.result !== undefined) {
+        const skillId = loadedSkillIdFromResult(execution.result);
+        if (skillId !== undefined) loadedSkills.add(skillId);
+      }
       const rendered = await renderExecutedToolCall({
         execution,
         imageInputSupported: input.imageInputSupported,
@@ -1402,6 +1469,7 @@ async function runNativeToolLoop(input: {
     }
     await flushParallelCalls();
     input.messages.push(...imageMessages);
+    if (hasOperationalToolCall) toolRounds += 1;
     if (asyncImageJobCreated) {
       return { text: "" };
     }
@@ -1960,28 +2028,30 @@ function messageWantsTyping(segments: ResponseSegment[]): boolean {
   return false;
 }
 
-function buildMemoryPassRuntimeInstruction(passKind: "post_reply" | "ambient" = "post_reply"): string {
-  const base = [
-    "## Silent Memory Pass",
-    passKind === "ambient"
-      ? "This is an automatic ambient memory pass over ordinary channel chatter. No visible Discord reply loop ran for this pass."
-      : "The visible Discord reply loop has already ended. Do not write user-facing prose.",
-    passKind === "ambient"
-      ? "Consider whether the reviewed chat batch reveals durable memory that should affect future conversations or bot decisions."
-      : "Consider whether this completed turn reveals durable memory that should affect future conversations or bot decisions.",
-    ...buildMemoryPolicyInstructions(),
-  ];
-  if (passKind === "ambient") {
-    base.push(
-      "Be stricter than a post-reply pass because nobody asked the bot to remember this chatter.",
-      "For user-scoped memories, use subject=user with the person's username; use subject=self only when the chat established bot/persona continuity; use subject=global only for shared current-server or current-work context.",
-    );
+function buildMemoryPassRuntimeInstruction(
+  passKind: "post_reply" | "ambient" = "post_reply",
+  runtimePrompts: RuntimePromptBundle | undefined,
+): string {
+  const passPrompt = runtimePrompts?.memoryPass.trim() ?? "";
+  const memoryPolicy = runtimePrompts?.memoryPolicy.trim() ?? "";
+  if (passPrompt !== "" || memoryPolicy !== "") {
+    return [
+      passPrompt !== "" ? passPrompt : "## Silent Memory Pass",
+      passKind === "ambient"
+        ? "This is an automatic ambient memory pass over ordinary channel chatter, without a visible Discord reply loop."
+        : "This is a post-reply memory pass over one completed visible Discord turn.",
+      passKind === "ambient"
+        ? "Be stricter than a post-reply pass because nobody asked the bot to remember this chatter."
+        : "",
+      memoryPolicy,
+    ].filter((line) => line !== "").join("\n");
   }
-  base.push(
-    "If memory should change, call record_memory once with every add, update, expiry change, and delete in the single actions array. If no memory should change, produce no tool call and no visible text.",
-    "Use only the available memory tool. Do not mention this maintenance pass.",
-  );
-  return base.join("\n");
+
+  return [
+    "## Silent Memory Pass",
+    "Use only the memory tool for hidden durable-memory maintenance.",
+    ...buildMemoryPolicyInstructions(),
+  ].join("\n");
 }
 
 function backgroundProvider(input: SilentMemoryAgentInput): LlmProvider {
@@ -2002,12 +2072,22 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
     currentLocalContext(input.guildConfig.timezone, now),
     "",
     passKind === "ambient"
-      ? "Review the ambient chat history in context. This pass is periodic maintenance, not a user request."
+      ? runtimeContextTemplate(
+        input.runtimePrompts,
+        "memory-pass-ambient-review",
+        {},
+        "Review ambient chat history for durable memory.",
+      )
       : input.visibleReplySent
         ? `Visible bot reply already sent:\n${input.assistantReply !== "" ? input.assistantReply : "(empty)"}`
         : "No visible bot reply was sent for this turn.",
     "",
-    "Decide silently whether durable memory should be updated. Call record_memory only if an update is useful, and include all desired edits in that one call.",
+    runtimeContextTemplate(
+      input.runtimePrompts,
+      "memory-pass-decision",
+      {},
+      "Decide silently whether durable memory should be updated.",
+    ),
   ].join("\n");
 }
 
@@ -2039,9 +2119,10 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
 
   const stableSections = sectionsForStablePrompt(
     input.personaPrompt ?? "",
-    input.globalConfig.defaultLateInstruction,
+    "",
     input.context,
-    buildMemoryPassRuntimeInstruction(input.passKind ?? "post_reply"),
+    "",
+    buildMemoryPassRuntimeInstruction(input.passKind ?? "post_reply", input.runtimePrompts),
   );
   const sessionId = buildPromptCacheSessionId(input.requestLog, `${provider}:${input.guildConfig.backgroundLlm.model}`);
   const currentMessageWithoutImages: IncomingMessage = { ...input.incomingMessage, imageInputs: undefined };
@@ -2049,6 +2130,7 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
     input.userContent,
     buildVolatileTurnContext(input.context),
     currentMessageWithoutImages,
+    input.runtimePrompts,
   );
   messages.push({ role: "user", content: memoryPassControlMessage(input) });
 
@@ -2089,6 +2171,7 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
       imageInputSupported: false,
       pendingAttachments: [],
       toolTiming: timingState,
+      runtimePrompts: input.runtimePrompts,
       log: input.log,
       signal: wallController.signal,
       allowEmptyFinalResponse: true,
@@ -2156,14 +2239,18 @@ export async function handleMessage(
   delete imageProviderParams.signal;
   delete imageProviderParams.onPayload;
 
-  const tools = [...(deps.extraTools ?? [])];
+  const skillTool = deps.runtimePrompts !== undefined && Object.keys(deps.runtimePrompts.skills.byId).length > 0
+    ? [createLoadSkillTool({ skills: deps.runtimePrompts.skills })]
+    : [];
+  const tools = [...skillTool, ...(deps.extraTools ?? [])];
   const { tools: timedTools, state: timingState } = wrapToolsWithTiming(tools);
   const complete = deps.completeChat ?? completeLlmChat;
-  const runtimeInstruction = buildRuntimeInstruction();
+  const runtimeInstruction = buildRuntimeInstruction(deps.runtimePrompts);
   const stableSections = sectionsForStablePrompt(
     deps.personaPrompt ?? "",
-    deps.globalConfig.defaultLateInstruction,
+    "",
     context,
+    buildSkillsInstruction(deps.runtimePrompts),
     runtimeInstruction,
   );
   const userContent = context.userMessage !== "" ? context.userMessage : msg.translatedContent;
@@ -2278,7 +2365,7 @@ export async function handleMessage(
             deps.log?.debug("llm_request_payload", { payload });
           },
         },
-        messages: buildInitialMessages(userContent, volatileTurnContext, msg),
+        messages: buildInitialMessages(userContent, volatileTurnContext, msg, deps.runtimePrompts),
         tools: timedTools,
         maxToolCalls: deps.guildConfig.replyLoop.maxToolCalls,
         maxToolRounds: deps.guildConfig.replyLoop.maxToolCalls,
@@ -2310,12 +2397,14 @@ export async function handleMessage(
           providerParams: imageProviderParams,
           complete,
           llmOutputTimeoutMs: deps.guildConfig.replyLoop.llmOutputTimeoutMs,
+          imageDescriptionSystemPrompt: deps.runtimePrompts?.imageDescriptionSystemPrompt,
           requestLog: reqLog,
           signal: wallController.signal,
           log: deps.log,
         },
         consumeGeneratedAttachments: deps.consumeGeneratedAttachments,
         pendingAttachments,
+        runtimePrompts: deps.runtimePrompts,
         signal: wallController.signal,
       });
       finalText = result.text;

@@ -30,13 +30,6 @@ const GLOBAL: GlobalConfig = {
   defaultImageGeneration: { quality: "auto" },
   defaultAttachmentsDir: "data/attachments",
   defaultInstructions: "",
-  defaultLateInstruction: "",
-  promptProfile: {
-    persona: [{ kind: "file", path: "prompts/persona.md", optional: false }],
-    toolInstructions: [],
-    instructions: [],
-    lateInstructions: [{ kind: "file", path: "prompts/style.md", optional: false }],
-  },
   logLevel: "info",
   dataDir: "data",
   modelCacheDir: "model-cache",

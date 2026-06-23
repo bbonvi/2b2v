@@ -9,11 +9,11 @@ const TimeoutUserParams = Type.Object({
     description: "Target Discord guild member as a username, @mention, or raw user ID.",
   }),
   duration: Type.Number({
-    description: "Timeout duration amount. Must be positive and no more than 10 minutes after unit conversion.",
+    description: "Timeout duration amount.",
   }),
   unit: Type.Union(
     [Type.Literal("seconds"), Type.Literal("minutes")],
-    { description: "Duration unit. Only seconds and minutes are supported." },
+    { description: "Duration unit." },
   ),
   reason: Type.Optional(Type.String({
     description: "Optional short reason for Discord's audit log.",
@@ -56,8 +56,7 @@ export function createTimeoutUserTool(deps: TimeoutUserToolDeps): AgentTool {
   return {
     name: "timeout_user",
     label: "timeout_user",
-    description:
-      "Temporarily time out one Discord guild member using Discord communication-disabled-until/member timeout. 2B should almost never use this tool. Use it only when a channel/server admin explicitly asks her to time someone out. If admin status is not already clear, she can check admin status via list_chat_users before using this. Runtime rejects DMs, self-timeouts, guild-owner timeouts when known, non-positive durations, and durations over 10 minutes.",
+    description: "Temporarily time out one Discord guild member.",
     parameters: TimeoutUserParams,
 
     async execute(_toolCallId: string, params: unknown): Promise<TimeoutUserResult> {
@@ -91,7 +90,7 @@ export function createTimeoutUserTool(deps: TimeoutUserToolDeps): AgentTool {
       try {
         member = await deps.resolveMember(target);
       } catch {
-        return failure("Unable to resolve that guild member. The bot may lack permission to view members.", "resolve_failed");
+        return failure("Unable to resolve that guild member; the bot may lack permission to view members.", "resolve_failed");
       }
 
       if (member === null) {
@@ -111,7 +110,7 @@ export function createTimeoutUserTool(deps: TimeoutUserToolDeps): AgentTool {
 
       if (member.moderatable === false) {
         return failure(
-          `Cannot time out @${member.username}. The bot may lack Timeout Members permission, or the target may be above the bot in the role hierarchy.`,
+          `Cannot time out @${member.username}; the bot may lack Timeout Members permission, or the target may be above the bot in the role hierarchy.`,
           "not_moderatable",
         );
       }
@@ -122,7 +121,7 @@ export function createTimeoutUserTool(deps: TimeoutUserToolDeps): AgentTool {
         await member.timeout(durationMs, reason);
       } catch {
         return failure(
-          `Failed to time out @${member.username}. The bot may lack Timeout Members permission, or Discord rejected the role hierarchy.`,
+          `Failed to time out @${member.username}; the bot may lack Timeout Members permission, or Discord rejected the role hierarchy.`,
           "timeout_failed",
         );
       }

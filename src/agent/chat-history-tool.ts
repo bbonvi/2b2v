@@ -16,9 +16,9 @@ export interface ChatHistoryToolDeps {
 }
 
 const ChatHistoryParams = Type.Object({
-  channel_id: Type.String({ description: "The guild channel or thread ID to fetch history from. DMs are not supported." }),
+  channel_id: Type.String({ description: "Guild channel or thread ID." }),
   limit: Type.Optional(
-    Type.Number({ description: "Maximum number of messages to retrieve. Default: 50, max: 100." })
+    Type.Number({ description: "Maximum number of messages to retrieve." })
   ),
 });
 
@@ -28,8 +28,7 @@ export function createChatHistoryTool(deps: ChatHistoryToolDeps): AgentTool {
   return {
     name: "chat_history",
     label: "chat_history",
-    description:
-      "Fetch recent messages from an accessible Discord guild channel or thread, including channels in other guilds. Useful for reviewing conversation context in a specific channel or thread. DMs are not supported.",
+    description: "Fetch recent messages from an accessible guild channel or thread.",
     parameters: ChatHistoryParams,
 
     async execute(
@@ -44,7 +43,7 @@ export function createChatHistoryTool(deps: ChatHistoryToolDeps): AgentTool {
         messages = await fetchMessages(channel_id, limit);
       } catch {
         return {
-          content: [{ type: "text", text: "Unable to fetch channel history. The bot may lack permission to read this channel." }],
+          content: [{ type: "text", text: "Unable to fetch channel history; the bot may lack permission to read this channel." }],
           details: { error: true },
         };
       }

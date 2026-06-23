@@ -1,0 +1,1 @@
+Create a new thread attached to the trigger message. Use when the user asked for a thread or approved moving a focused discussion out of the current channel. Creating a thread does not route later messages; send inside it with <message channel_id="RETURNED_CHANNEL_ID">...</message>.

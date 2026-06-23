@@ -24,8 +24,7 @@ describe("createChatUserListTool", () => {
   test("returns list_chat_users AgentTool with correct metadata", () => {
     const tool = createChatUserListTool(makeDeps(MEMBERS));
     expect(tool.label).toBe("list_chat_users");
-    expect(tool.description).toContain("exact usernames");
-    expect(tool.description).toContain("2B still cannot send PMs/DMs");
+    expect(tool.description).toBe("List relevant current-guild chat users.");
     expect(tool.parameters).toBeDefined();
   });
 

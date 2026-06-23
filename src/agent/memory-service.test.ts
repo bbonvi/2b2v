@@ -27,7 +27,7 @@ describe("buildMemoryContext", () => {
     });
 
     expect(context).toContain("Showing 2/2 memories.");
-    expect(context).toContain("Number after scope is confidence");
+    expect(context).toContain("Use memory as background context.");
     expect(context).toContain("[guild] [0.7] [global_note] Global note");
     expect(context).toContain("[@alice] [0.8] [preference] Likes concise answers");
     expect(context).not.toContain("Other user fact");
