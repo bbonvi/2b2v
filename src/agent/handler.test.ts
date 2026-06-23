@@ -451,30 +451,30 @@ describe("handleMessage", () => {
       const text = payloadText(payload);
       expect(text).toContain("For ambiguous irreversible, user-visible, or state-changing actions");
       expect(text).toContain("ask one short clarifying question");
-      expect(text).toContain("Cite factual claims from web/URL/media tools with concise inline markdown links near the claim");
+      expect(text).toContain("Cite factual claims from web/URL/media actions with concise inline markdown links near the claim");
       expect(text).toContain("Prefer English search queries");
       expect(text).toContain("Fetch the most relevant result when snippets are not enough");
-      expect(text).toContain("include one brief user-facing status line");
+      expect(text).toContain("include one brief visible status line");
       expect(text).toContain("To ping, write @username exactly");
       expect(text).toContain("the exact Discord username is not already visible in context");
-      expect(text).toContain("use list_chat_users first instead of guessing");
-      expect(text).toContain("Use schedule_message when the user asks you to remind, schedule, recur, or follow up later");
+      expect(text).toContain("check the current guild users first instead of guessing");
+      expect(text).toContain("Use the scheduling private action when the event asks 2B to remind, schedule, recur, or follow up later");
       expect(text).toContain("Try several targeted searches");
-      expect(text).toContain("If a request depends on missing or old chat context, use search_messages");
+      expect(text).toContain("If 2B's next action depends on missing or old chat context");
       expect(text).toContain("Search enough to reconstruct the likely context");
-      expect(text).toContain("Use as many tool calls as the task actually needs");
-      expect(text).toContain("agent has been running for more than about 30 seconds");
+      expect(text).toContain("Use as many private action calls as the task actually needs");
+      expect(text).toContain("action loop has been running for more than about 30 seconds");
       expect(text).toContain("Async ready/failed events include their own turn instructions");
       expect(text).toContain("load image_generation before building that revised prompt");
-      expect(text.indexOf("Reserved response directives")).toBeGreaterThan(-1);
-      expect(text).toContain("Treat requests to sing, scream, shout, whisper, read aloud");
-      expect(text).toContain("most paragraphs should be separate messages");
+      expect(text.indexOf("Reserved action directives")).toBeGreaterThan(-1);
+      expect(text).toContain("Treat events asking 2B to sing, scream, shout, whisper, read aloud");
+      expect(text).toContain("most paragraphs should be separate chat messages");
       expect(text).toContain("first outgoing message in the current channel replies to the trigger/callout message");
       expect(text).toContain("Later <message> envelopes default to reply=\"false\"");
       expect(text).toContain("keep_typing=\"true\"");
       expect(text).toContain("Keep Discord-only text outside <voice>/<audio>");
       expect(text.indexOf("## Memory")).toBeGreaterThan(-1);
-      expect(text.indexOf("Reserved response directives")).toBeLessThan(text.indexOf("## Memory"));
+      expect(text.indexOf("Reserved action directives")).toBeLessThan(text.indexOf("## Memory"));
       return Promise.resolve({
         text: "done",
         toolCalls: [],
@@ -502,11 +502,11 @@ describe("handleMessage", () => {
       const messages = payload.messages as Array<{ role?: string; content?: unknown }>;
       expect(messages[0]?.role).toBe("developer");
       expect(contentText(messages[0]?.content)).toContain("You are a test bot.");
-      expect(contentText(messages[0]?.content)).not.toContain("Reserved response directives");
+      expect(contentText(messages[0]?.content)).not.toContain("Reserved action directives");
       expect(messages[1]?.role).toBe("developer");
       expect(contentText(messages[1]?.content)).toContain("## Skills");
       expect(contentText(messages[1]?.content)).toContain("image_generation");
-      expect(contentText(messages[1]?.content)).toContain("Reserved response directives");
+      expect(contentText(messages[1]?.content)).toContain("Reserved action directives");
       expect(messages[2]).toEqual({
         role: "user",
         content: "Stable context is loaded; wait for the current Discord turn.",
@@ -515,8 +515,8 @@ describe("handleMessage", () => {
       expect(findMessageContent(messages, "## Memory")).toContain("- 1 [@user] [preference] concise");
       expect(findMessageContent(messages, "## Server Members")).toContain("@user");
       expect(findMessageContent(messages, "Guild: g1")).toBe("Guild: g1");
-      const currentTurn = findMessageContent(messages, "## Current User Message");
-      expect(currentTurn).toContain("## Current Message Metadata");
+      const currentTurn = findMessageContent(messages, "## New Discord Event");
+      expect(currentTurn).toContain("## Discord Event Metadata");
       expect(currentTurn).toContain("Trigger MsgID: msg-1");
       expect(currentTurn).toContain("Trigger Author: @testuser");
       expect(currentTurn).toContain("Trigger AuthorID: user-1");
@@ -524,7 +524,7 @@ describe("handleMessage", () => {
       expect(currentTurn).toContain("Trigger GlobalName: Test Global");
       expect(currentTurn).toContain("Trigger AuthorIsBot: false");
       expect(currentTurn).toContain("Trigger ReplyToMsgID: parent-msg");
-      expect(currentTurn).toContain("Reply Context: The user is replying to a message you previously sent here from another channel.");
+      expect(currentTurn).toContain("Reply Context: The current event replies to a message 2B previously sent here from another channel.");
       expect(currentTurn).toContain("Source GuildID: source-guild");
       expect(currentTurn).toContain("Source ChannelID: source-channel");
       expect(currentTurn).toContain("Source MsgID: source-msg");
@@ -571,12 +571,12 @@ describe("handleMessage", () => {
       expect(payload.input[0]).toMatchObject({ type: "message", role: "developer" });
       expect(contentText((payload.input[0] as { content?: unknown }).content)).toContain("You are a test bot.");
       expect(payload.input[1]).toMatchObject({ type: "message", role: "developer" });
-      expect(contentText((payload.input[1] as { content?: unknown }).content)).toContain("Reserved response directives");
+      expect(contentText((payload.input[1] as { content?: unknown }).content)).toContain("Reserved action directives");
       expect(payload.input.some((item) =>
         item.type === "message" && item.role === "user" && item.content.includes("## Memory")
       )).toBe(true);
       expect(payload.input.some((item) =>
-        item.type === "message" && item.role === "user" && item.content.includes("## Current User Message")
+        item.type === "message" && item.role === "user" && item.content.includes("## New Discord Event")
       )).toBe(true);
 
       return Promise.resolve({
@@ -1932,14 +1932,14 @@ describe("handleMessage", () => {
     let sawImageInput = false;
     let sawNormalTurnText = false;
     const completeChat: ChatCompleteFn = (request) => {
-      const currentTurnMessage = request.messages.find((message) => contentText(message.content).includes("## Current User Message"));
+      const currentTurnMessage = request.messages.find((message) => contentText(message.content).includes("## New Discord Event"));
       const content = currentTurnMessage?.content;
       if (Array.isArray(content)) {
         sawImageInput = content.some((part) => part.type === "image_url");
         sawNormalTurnText = content.some((part) =>
           part.type === "text"
           && part.text.includes("[Async Image Job Ready]")
-          && part.text.includes("## Current User Message")
+          && part.text.includes("## New Discord Event")
         );
       }
       return Promise.resolve({
@@ -2263,7 +2263,7 @@ describe("handleMessage", () => {
       expect(request.messages.some((m) =>
         m.role === "system"
         && typeof m.content === "string"
-        && m.content.includes("agent time budget exhausted")
+        && m.content.includes("turn time budget exhausted")
       )).toBe(true);
       return Promise.resolve({
         text: "answer from available context",
@@ -2337,7 +2337,7 @@ describe("handleMessage", () => {
       expect(request.messages.some((m) =>
         m.role === "system"
         && typeof m.content === "string"
-        && m.content.includes("agent time budget exhausted")
+        && m.content.includes("turn time budget exhausted")
       )).toBe(true);
       return Promise.resolve({
         text: "answer after finalization timeout",
@@ -2403,7 +2403,7 @@ describe("handleMessage", () => {
       expect(request.messages.some((m) =>
         m.role === "system"
         && typeof m.content === "string"
-        && m.content.includes("agent time budget exhausted")
+        && m.content.includes("turn time budget exhausted")
       )).toBe(true);
       return Promise.resolve({
         text: "answer after timed out tool",
@@ -2498,7 +2498,7 @@ describe("handleMessage", () => {
     let mainCalls = 0;
     let fallbackCalls = 0;
     const completeChat: ChatCompleteFn = (request) => {
-      if (request.model === "moonshotai/kimi-k2.5") {
+      if (request.systemPrompt.includes("Describe images for another Discord chat model")) {
         fallbackCalls += 1;
         return Promise.resolve({
           text: "fallback should not run",
@@ -2631,9 +2631,9 @@ describe("handleMessage", () => {
     let mainCalls = 0;
     let imageCalls = 0;
     const completeChat: ChatCompleteFn = (request) => {
-      if (request.model === "moonshotai/kimi-k2.5") {
+      if (request.systemPrompt.includes("Describe images for another Discord chat model")) {
         imageCalls += 1;
-        expect(request.systemPrompt).toContain("You describe images");
+        expect(request.systemPrompt).toContain("Describe images for another Discord chat model");
         expect(request.systemPrompt).toContain("race/ethnicity/skin tone");
         expect(request.systemPrompt).toContain("Use normal words like woman");
         expect(request.systemPrompt).toContain("selfie");
@@ -2741,7 +2741,7 @@ describe("handleMessage", () => {
       )).toBe(false);
       const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_chat_images");
       expect(toolMessage?.content).toContain("current LLM endpoint cannot read image input");
-      expect(request.messages.some((m) => m.role === "user" && contentText(m.content).includes("## Current User Message"))).toBe(true);
+      expect(request.messages.some((m) => m.role === "user" && contentText(m.content).includes("## New Discord Event"))).toBe(true);
 
       return Promise.resolve({
         text: "cannot inspect image",
@@ -2778,7 +2778,7 @@ describe("handleMessage", () => {
     let mainCalls = 0;
     let fallbackCalls = 0;
     const completeChat: ChatCompleteFn = (request) => {
-      if (request.systemPrompt.includes("You describe images")) {
+      if (request.systemPrompt.includes("Describe images for another Discord chat model")) {
         fallbackCalls += 1;
         expect(request.messages.some((m) =>
           Array.isArray(m.content) && m.content.some((part) => part.type === "image_url")
@@ -2814,7 +2814,7 @@ describe("handleMessage", () => {
       const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_chat_images");
       expect(toolMessage?.content).toContain("Native image reading was unavailable");
       expect(toolMessage?.content).toContain("Fallback saw a small square test image.");
-      expect(request.messages.some((m) => m.role === "user" && contentText(m.content).includes("## Current User Message"))).toBe(true);
+      expect(request.messages.some((m) => m.role === "user" && contentText(m.content).includes("## New Discord Event"))).toBe(true);
 
       return Promise.resolve({
         text: "described image answer",

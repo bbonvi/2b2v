@@ -854,7 +854,7 @@ function buildInitialMessages(
 ): OpenRouterMessage[] {
   const roleAt = (index: number): PromptTransportRole => roles[index] ?? "user";
   const currentMessageMetadata = [
-    "## Current Message Metadata",
+    "## Discord Event Metadata",
     buildCurrentMessageMetadata(msg, runtimePrompts),
   ].join("\n");
 
@@ -875,8 +875,8 @@ function buildInitialMessages(
 
   const text = [
       currentMessageMetadata,
-      imageMetadata !== "" ? `## Current Turn Images\n${imageMetadata}` : "",
-      "## Current Discord Event",
+      imageMetadata !== "" ? `## Event Images\n${imageMetadata}` : "",
+      "## New Discord Event",
       userContent,
   ].filter((part) => part !== "").join("\n\n");
   const images = imagePartsFromCurrentTurn(msg);
