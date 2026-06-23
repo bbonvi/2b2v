@@ -12,7 +12,8 @@ services:
       - bot-data:/app/data
       - model-cache:/app/model-cache
       - ./config:/app/config:ro
-      - ./prompts:/app/prompts:ro
+      # - ./prompts:/app/prompts:ro
+      - ./prompts-prod:/app/prompts:ro
     ports:
       - "127.0.0.1:${DASHBOARD_PORT:-31456}:3000"
     depends_on:

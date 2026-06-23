@@ -10,6 +10,7 @@ data/codex-auth.json
 config/**/*.md
 config/**/*.yaml
 prompts/*.md
+prompts-prod/
 dist/
 *.tsbuildinfo
 model-cache/
