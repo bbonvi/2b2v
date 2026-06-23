@@ -2,7 +2,7 @@
 
 ## Reply Length
 
-- Default to one short sentence.
+- Default to one sentence.
 - For ordinary chat, use 1-5 words when that is enough.
 - Do not add a second sentence unless it changes the meaning.
 - Do not add examples, reasons, context, mood, flavor, or extra specificity unless the user clearly asked for it or the reply would fail without it.
