@@ -106,9 +106,37 @@
     letter-spacing: .08em;
   }
   .btn:hover { border-color: var(--accent); color: var(--text-bright) }
+  .btn.danger { color: var(--red); border-color: var(--red-dim); }
+  .btn.danger:hover { border-color: var(--red); color: #ffb4b4; }
+  .btn.primary { color: var(--text-bright); border-color: var(--accent-dim); }
+  .btn:disabled {
+    opacity: .35;
+    cursor: not-allowed;
+    border-color: var(--border);
+    color: var(--text-dim);
+  }
+  .tabs { display: flex; gap: .35rem; align-items: center; }
+  .tab-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-dim);
+    font-family: var(--sans);
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    padding: .32rem .55rem;
+    cursor: pointer;
+  }
+  .tab-btn.active {
+    color: var(--text-bright);
+    border-color: var(--border-active);
+    background: var(--bg);
+  }
 
   /* Content */
   .content { padding: 1rem 1.25rem; }
+  .content[hidden] { display: none; }
 
   .log-count {
     font-size: .65rem;
@@ -325,6 +353,303 @@
 
   .btn-sm { font-size: .6rem; padding: .15rem .4rem; }
 
+  .management-toolbar {
+    display: grid;
+    grid-template-columns: minmax(140px, 220px) minmax(160px, 260px) minmax(90px, 130px) auto;
+    gap: .5rem;
+    align-items: center;
+    margin-bottom: .85rem;
+  }
+  .management-actions { display: flex; gap: .45rem; justify-content: flex-end; align-items: center; }
+  .discord-delete-toggle {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-dim);
+    font-size: .62rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: .28rem .45rem;
+  }
+  .discord-delete-toggle input {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--red);
+  }
+  .discord-delete-toggle.active {
+    border-color: var(--red);
+    background: var(--red-dim);
+    color: #ffb4b4;
+  }
+  .number-input {
+    width: 54px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: .7rem;
+    padding: .35rem .4rem;
+    outline: none;
+  }
+  .number-input:focus, textarea:focus, input:focus { border-color: var(--accent); }
+  .prompt-lab {
+    display: none;
+    grid-template-columns: minmax(150px, 220px) minmax(0, 1fr) auto;
+    gap: .5rem;
+    align-items: start;
+    margin-bottom: .85rem;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: .65rem 0;
+  }
+  .prompt-lab.active { display: grid; }
+  .prompt-lab textarea {
+    width: 100%;
+    min-height: 68px;
+    resize: vertical;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-bright);
+    font-family: var(--mono);
+    font-size: .75rem;
+    line-height: 1.45;
+    padding: .55rem;
+    outline: none;
+  }
+  .prompt-lab-run {
+    display: grid;
+    gap: .4rem;
+    justify-items: end;
+  }
+  .prompt-lab-status {
+    color: var(--text-dim);
+    font-size: .62rem;
+    text-align: right;
+    border: 1px solid transparent;
+    padding: .28rem .4rem;
+    min-width: 74px;
+  }
+  .prompt-lab-status.running {
+    color: var(--amber);
+    border-color: var(--amber);
+    background: var(--amber-dim);
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .prompt-lab-status.error {
+    color: var(--red);
+    border-color: var(--red);
+    background: var(--red-dim);
+    font-weight: 700;
+  }
+  .prompt-lab-report {
+    display: none;
+    margin-bottom: 1rem;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: .65rem 0;
+  }
+  .prompt-lab-report.active { display: block; }
+  .prompt-lab-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem .75rem;
+    color: var(--text-dim);
+    font-size: .63rem;
+    margin-bottom: .55rem;
+  }
+  .draft-message {
+    border-left: 3px solid var(--green);
+    background: rgba(34,197,94,.055);
+    padding: .45rem .55rem;
+    margin-top: .35rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: .72rem;
+  }
+  .lab-live {
+    margin-top: .75rem;
+    border-top: 1px solid var(--border);
+    padding-top: .6rem;
+  }
+  .lab-live-row {
+    display: grid;
+    grid-template-columns: 80px minmax(0, 1fr) auto;
+    gap: .5rem;
+    align-items: start;
+    border-bottom: 1px solid var(--border);
+    padding: .35rem 0;
+    font-size: .65rem;
+  }
+  .lab-live-row:last-child { border-bottom: none; }
+  .lab-live-kind {
+    color: var(--text-dim);
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .lab-live-title {
+    color: var(--text-bright);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .lab-live-meta {
+    color: var(--text-dim);
+    font-size: .6rem;
+    margin-top: .12rem;
+  }
+  .dry-run-row {
+    color: var(--amber);
+    font-size: .65rem;
+    margin-top: .22rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .management-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(320px, .75fr);
+    gap: 1rem;
+    align-items: start;
+  }
+  .management-section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    color: var(--text-dim);
+    font-family: var(--sans);
+    font-size: .64rem;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    margin-bottom: .45rem;
+  }
+  .management-list {
+    border-top: 1px solid var(--border);
+  }
+  .management-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: .65rem;
+    padding: .55rem .55rem .55rem .7rem;
+    border-bottom: 1px solid var(--border);
+    border-left: 3px solid transparent;
+  }
+  .management-row:hover { background: rgba(255,255,255,.018); }
+  .management-row.message-bot {
+    border-left-color: var(--green);
+    background: linear-gradient(90deg, rgba(34,197,94,.055), transparent 160px);
+  }
+  .management-row.message-user {
+    border-left-color: var(--accent);
+    background: linear-gradient(90deg, rgba(61,139,253,.05), transparent 160px);
+  }
+  .management-row.message-selectable {
+    cursor: pointer;
+  }
+  .management-row.message-selected {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+    background:
+      linear-gradient(90deg, rgba(61,139,253,.13), rgba(61,139,253,.035) 220px, transparent),
+      var(--surface);
+  }
+  .management-row.message-bot.message-selected {
+    outline-color: var(--green);
+    background:
+      linear-gradient(90deg, rgba(34,197,94,.15), rgba(34,197,94,.035) 220px, transparent),
+      var(--surface);
+  }
+  .selected-marker {
+    color: var(--accent);
+    font-size: .58rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .management-row.message-bot .selected-marker {
+    color: var(--green);
+  }
+  .management-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem .65rem;
+    color: var(--text-dim);
+    font-size: .62rem;
+    margin-bottom: .22rem;
+  }
+  .management-author { color: var(--accent); }
+  .management-row.message-bot .management-author { color: var(--green); }
+  .author-type {
+    font-size: .58rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .author-type.bot { color: var(--green); }
+  .author-type.user { color: var(--accent); }
+  .management-content {
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: .7rem;
+  }
+  .management-row-actions {
+    display: flex;
+    gap: .35rem;
+    align-items: start;
+  }
+  .management-editor {
+    grid-column: 1 / 3;
+    display: grid;
+    gap: .45rem;
+    margin-top: -.25rem;
+  }
+  .management-editor textarea {
+    width: 100%;
+    min-height: 92px;
+    resize: vertical;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-bright);
+    font-family: var(--mono);
+    font-size: .7rem;
+    line-height: 1.5;
+    padding: .55rem;
+    outline: none;
+  }
+  .memory-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .memory-row .management-editor { grid-column: 1 / 3; }
+  .memory-controls {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) 90px minmax(145px, 1fr);
+    gap: .45rem;
+  }
+  .inline-input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: .68rem;
+    padding: .35rem .45rem;
+    min-width: 0;
+  }
+  @media (max-width: 900px) {
+    .management-toolbar { grid-template-columns: 1fr 1fr; }
+    .prompt-lab { grid-template-columns: 1fr; }
+    .prompt-lab-run { justify-items: stretch; }
+    .management-actions { justify-content: flex-start; flex-wrap: wrap; }
+    .management-grid { grid-template-columns: 1fr; }
+  }
+
   /* Modal */
   .modal-overlay {
     position: fixed; inset: 0; z-index: 200;
@@ -375,13 +700,18 @@
 <body>
 
 <div class="topbar">
-  <div class="topbar-title">Request Log</div>
+  <div class="topbar-title">Dashboard</div>
+  <div class="topbar-sep"></div>
+  <div class="tabs">
+    <button class="tab-btn active" id="tab-logs">Logs</button>
+    <button class="tab-btn" id="tab-management">Management</button>
+  </div>
   <div class="topbar-sep"></div>
   <div class="status-badge" id="status-badge">
     <div class="status-dot"></div>
     <span id="status-text">0 active</span>
   </div>
-  <div class="filters">
+  <div class="filters" id="log-filters">
     <select id="f-guild"><option value="">All guilds</option></select>
     <select id="f-channel"><option value="">All channels</option></select>
     <select id="f-user"><option value="">All users</option></select>
@@ -389,9 +719,58 @@
   </div>
 </div>
 
-<div class="content">
+<div class="content" id="log-view">
   <div class="log-count" id="log-count"></div>
   <div id="log-list"></div>
+</div>
+
+<div class="content" id="management-view" hidden>
+  <div class="management-toolbar">
+    <select id="m-guild"><option value="">All guilds</option></select>
+    <select id="m-channel"><option value="">All channels</option></select>
+    <select id="m-scope">
+      <option value="">All memory scopes</option>
+      <option value="guild">Guild memories</option>
+      <option value="user">User memories</option>
+      <option value="self">Self memories</option>
+    </select>
+    <div class="management-actions">
+      <label class="discord-delete-toggle" id="m-discord-delete-wrap">
+        <input id="m-discord-delete" type="checkbox">
+        Also delete in Discord
+      </label>
+      <button class="btn danger" id="m-delete-selected" disabled>Delete selected</button>
+      <span style="color:var(--text-dim);font-size:.65rem">last</span>
+      <input class="number-input" id="m-last-count" type="number" min="1" max="20" value="2">
+      <button class="btn danger" id="m-delete-last" disabled>Delete</button>
+      <button class="btn" id="m-refresh">Refresh</button>
+    </div>
+  </div>
+  <div class="prompt-lab" id="prompt-lab">
+    <select id="lab-user"><option value="">Sender</option></select>
+    <textarea id="lab-prompt" placeholder="Test prompt as a virtual mention..."></textarea>
+    <div class="prompt-lab-run">
+      <button class="btn primary" id="lab-run">Run as mention</button>
+      <div class="prompt-lab-status" id="lab-status">dry-run writes</div>
+    </div>
+  </div>
+  <div class="prompt-lab-report" id="lab-report"></div>
+  <div class="management-grid">
+    <section>
+      <div class="management-section-title">
+        <span>Latest messages</span>
+        <span id="m-message-count"></span>
+      </div>
+      <div class="management-list" id="m-message-list"></div>
+    </section>
+    <section>
+      <div class="management-section-title">
+        <span>Memories</span>
+        <span id="m-memory-count"></span>
+      </div>
+      <div class="management-list" id="m-memory-list"></div>
+    </section>
+  </div>
 </div>
 
 <div class="modal-overlay" id="modal-overlay" style="display:none">
@@ -414,6 +793,40 @@
   const btnRefresh = document.getElementById('btn-refresh');
   const statusBadge = document.getElementById('status-badge');
   const statusText = document.getElementById('status-text');
+  const tabLogs = document.getElementById('tab-logs');
+  const tabManagement = document.getElementById('tab-management');
+  const logFilters = document.getElementById('log-filters');
+  const logView = document.getElementById('log-view');
+  const managementView = document.getElementById('management-view');
+  const mGuild = document.getElementById('m-guild');
+  const mChannel = document.getElementById('m-channel');
+  const mScope = document.getElementById('m-scope');
+  const mRefresh = document.getElementById('m-refresh');
+  const mDeleteSelected = document.getElementById('m-delete-selected');
+  const mDeleteLast = document.getElementById('m-delete-last');
+  const mLastCount = document.getElementById('m-last-count');
+  const mDiscordDelete = document.getElementById('m-discord-delete');
+  const mDiscordDeleteWrap = document.getElementById('m-discord-delete-wrap');
+  const mMessageList = document.getElementById('m-message-list');
+  const mMemoryList = document.getElementById('m-memory-list');
+  const mMessageCount = document.getElementById('m-message-count');
+  const mMemoryCount = document.getElementById('m-memory-count');
+  const promptLab = document.getElementById('prompt-lab');
+  const labUser = document.getElementById('lab-user');
+  const labPrompt = document.getElementById('lab-prompt');
+  const labRun = document.getElementById('lab-run');
+  const labStatus = document.getElementById('lab-status');
+  const labReport = document.getElementById('lab-report');
+  const managementStateKey = '2b2v.dashboard.management.v1';
+  const promptLabSenderStateKey = '2b2v.dashboard.promptLab.sender.v1';
+  let activeTab = location.hash === '#management' ? 'management' : 'logs';
+  let managementDirectory = { guilds: [], channels: [], users: [] };
+  let managementMessages = [];
+  let managementMemories = [];
+  let editingMessageId = null;
+  let editingMemoryId = null;
+  let promptLabPollSeq = 0;
+  const selectedManagementMessages = new Set();
 
   function esc(s) {
     const d = document.createElement('div');
@@ -429,6 +842,22 @@
   function fmtDuration(ms) {
     if (ms < 1000) return ms + 'ms';
     return (ms / 1000).toFixed(1) + 's';
+  }
+
+  function fmtDateTime(ms) {
+    const d = new Date(ms);
+    return d.toLocaleString('en-US', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+  }
+
+  function jsStr(s) {
+    return JSON.stringify(String(s));
   }
 
   function fmtCost(calls) {
@@ -825,6 +1254,566 @@
     fGuild.value = gv; fChannel.value = cv; fUser.value = uv;
   }
 
+  function loadManagementState() {
+    try {
+      const raw = localStorage.getItem(managementStateKey);
+      if (raw == null) return;
+      const state = JSON.parse(raw);
+      if (typeof state.guildId === 'string') mGuild.value = state.guildId;
+      if (typeof state.channelId === 'string') mChannel.value = state.channelId;
+      if (typeof state.scope === 'string') mScope.value = state.scope;
+      if (typeof state.lastCount === 'number') mLastCount.value = String(state.lastCount);
+      if (typeof state.deleteDiscord === 'boolean') mDiscordDelete.checked = state.deleteDiscord;
+      syncDiscordDeleteToggle();
+    } catch {}
+  }
+
+  function saveManagementState() {
+    localStorage.setItem(managementStateKey, JSON.stringify({
+      guildId: mGuild.value,
+      channelId: mChannel.value,
+      scope: mScope.value,
+      lastCount: Number(mLastCount.value) || 2,
+      deleteDiscord: mDiscordDelete.checked === true
+    }));
+  }
+
+  function promptLabSenderKey() {
+    return mGuild.value + ':' + mChannel.value;
+  }
+
+  function loadPromptLabSender() {
+    try {
+      const raw = localStorage.getItem(promptLabSenderStateKey);
+      if (raw == null) return '';
+      const state = JSON.parse(raw);
+      const key = promptLabSenderKey();
+      return typeof state[key] === 'string' ? state[key] : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function savePromptLabSender() {
+    try {
+      const raw = localStorage.getItem(promptLabSenderStateKey);
+      const state = raw == null ? {} : JSON.parse(raw);
+      state[promptLabSenderKey()] = labUser.value;
+      localStorage.setItem(promptLabSenderStateKey, JSON.stringify(state));
+    } catch {}
+  }
+
+  function syncDiscordDeleteToggle() {
+    mDiscordDeleteWrap.classList.toggle('active', mDiscordDelete.checked === true);
+  }
+
+  function discordDeleteEnabled() {
+    return mDiscordDelete.checked === true;
+  }
+
+  function setTab(tab) {
+    activeTab = tab;
+    tabLogs.classList.toggle('active', tab === 'logs');
+    tabManagement.classList.toggle('active', tab === 'management');
+    logView.hidden = tab !== 'logs';
+    managementView.hidden = tab !== 'management';
+    logFilters.style.display = tab === 'logs' ? 'flex' : 'none';
+    location.hash = tab === 'management' ? 'management' : 'logs';
+    if (tab === 'management') {
+      refreshManagement();
+      if (logPollingActive && managementPollTimer === null) pollManagement();
+    } else if (managementPollTimer !== null) {
+      clearTimeout(managementPollTimer);
+      managementPollTimer = null;
+    }
+  }
+
+  function optionHtml(value, label, extra) {
+    return '<option value="' + esc(value) + '"' + (extra || '') + '>' + esc(label) + '</option>';
+  }
+
+  function labelForGuild(id) {
+    const hit = managementDirectory.guilds.find(g => g.id === id);
+    return hit ? hit.name : id;
+  }
+
+  function labelForChannel(id) {
+    const hit = managementDirectory.channels.find(c => c.id === id);
+    return hit ? '#' + hit.name : id;
+  }
+
+  function syncManagementDeleteButtons() {
+    const hasExactChannel = mGuild.value !== '' && mChannel.value !== '';
+    mDeleteLast.disabled = !hasExactChannel;
+    mDeleteSelected.disabled = selectedManagementMessages.size === 0;
+    mDeleteSelected.textContent = selectedManagementMessages.size === 0
+      ? 'Delete selected'
+      : 'Delete selected (' + selectedManagementMessages.size + ')';
+    promptLab.classList.toggle('active', hasExactChannel);
+    labRun.disabled = !hasExactChannel || labUser.value === '' || labPrompt.value.trim() === '';
+  }
+
+  function renderPromptLabUsers() {
+    const saved = loadPromptLabSender();
+    const userMap = new Map();
+    for (const message of managementMessages) {
+      if (message.userId === '') continue;
+      userMap.set(message.userId, message.authorDisplayName || message.authorUsername || message.userId);
+    }
+    for (const user of managementDirectory.users) {
+      if (!userMap.has(user.id)) userMap.set(user.id, user.name);
+    }
+    const options = [...userMap.entries()]
+      .sort((a, b) => String(a[1]).localeCompare(String(b[1])) || String(a[0]).localeCompare(String(b[0])));
+    labUser.innerHTML = '<option value="">Sender</option>'
+      + options.map(([id, name]) => optionHtml(id, '@' + name)).join('');
+    if (saved !== '' && userMap.has(saved)) {
+      labUser.value = saved;
+    } else if (labUser.value === '' && options.length > 0) {
+      labUser.value = options[0][0];
+    }
+    syncManagementDeleteButtons();
+  }
+
+  function labStatusText(status, isError) {
+    if (isError) return 'error';
+    return status || 'completed';
+  }
+
+  function renderPromptLabLive(detail) {
+    if (detail == null) return '';
+    const llmRows = (detail.llmCalls || []).map((call, index) => {
+      const status = labStatusText(call.status, call.isError);
+      const cost = call.estimatedCostUsd != null ? ' · $' + Number(call.estimatedCostUsd).toFixed(4) : '';
+      const duration = call.durationMs != null ? fmtDuration(call.durationMs) : status;
+      return '<div class="lab-live-row">'
+        + '<div class="lab-live-kind">Model</div>'
+        + '<div><div class="lab-live-title">#' + (index + 1) + ' ' + esc(call.model || 'model') + '</div>'
+          + '<div class="lab-live-meta">tokens ' + esc(String(call.promptTokens || 0)) + ' / ' + esc(String(call.completionTokens || 0)) + cost + '</div></div>'
+        + '<div class="' + esc(statusClass(status, false)) + '">' + esc(duration) + '</div>'
+      + '</div>';
+    }).join('');
+    const toolRows = (detail.tools || []).map((tool) => {
+      const status = labStatusText(tool.status, tool.isError);
+      const dry = tool.result && String(tool.result).includes('Prompt Lab dry-run') ? ' · dry-run' : '';
+      const duration = tool.durationMs != null ? fmtDuration(tool.durationMs) : status;
+      return '<div class="lab-live-row">'
+        + '<div class="lab-live-kind">Tool</div>'
+        + '<div><div class="lab-live-title">' + esc(tool.tool || 'tool') + dry + '</div>'
+          + '<div class="lab-live-meta">' + esc(fmtArgs(tool.args || {})) + '</div></div>'
+        + '<div class="' + esc(statusClass(status, false)) + '">' + esc(duration) + '</div>'
+      + '</div>';
+    }).join('');
+    if (llmRows === '' && toolRows === '') {
+      return '<div class="lab-live"><div class="detail-state">Waiting for model request...</div></div>';
+    }
+    return '<div class="lab-live"><div class="detail-label">Live request</div>' + llmRows + toolRows + '</div>';
+  }
+
+  function renderPromptLabReport(result, detail) {
+    if (result == null) {
+      labReport.classList.remove('active');
+      labReport.innerHTML = '';
+      return;
+    }
+    const cost = result.estimatedCostUsd != null ? '$' + Number(result.estimatedCostUsd).toFixed(4) : '-';
+    const drafts = result.drafts || [];
+    const dryRuns = result.dryRuns || [];
+    labReport.classList.add('active');
+    const isRunning = result.running === true || (detail && detail.status === 'active');
+    labReport.innerHTML = '<div class="management-section-title"><span>' + (isRunning ? 'Prompt Lab Running' : 'Prompt Lab Run') + '</span><span>' + esc(shortId(result.requestId)) + '</span></div>'
+      + '<div class="prompt-lab-summary">'
+        + '<span>' + esc(fmtDuration(result.totalDurationMs || 0)) + '</span>'
+        + '<span>L:<span class="stat-val">' + esc(String(result.llmCallCount || 0)) + '</span></span>'
+        + '<span>T:<span class="stat-val">' + esc(String(result.toolCount || 0)) + '</span></span>'
+        + '<span>dry:<span class="stat-val">' + esc(String(dryRuns.length)) + '</span></span>'
+        + '<span class="entry-cost">' + esc(cost) + '</span>'
+        + (result.error ? '<span class="tool-error">' + esc(result.error) + '</span>' : '')
+      + '</div>'
+      + (drafts.length > 0
+        ? '<div class="detail-label">Draft replies</div>' + drafts.map(d => '<div class="draft-message">' + esc(d.text || '') + '</div>').join('')
+        : '<div class="detail-state">' + (isRunning ? 'Draft reply pending...' : 'No draft reply was produced.') + '</div>')
+      + (dryRuns.length > 0
+        ? '<div class="detail-label" style="margin-top:.7rem">Dry-run writes</div>' + dryRuns.map(d => '<div class="dry-run-row">' + esc(d.tool) + ' ' + esc(JSON.stringify(d.args)) + '</div>').join('')
+        : '')
+      + renderPromptLabLive(detail);
+  }
+
+  async function fetchManagementDirectory() {
+    const r = await fetch('/api/management/directory');
+    if (r.status === 401) { location.href = '/login'; return; }
+    if (!r.ok) throw new Error('Unable to load management directory');
+    managementDirectory = await r.json();
+    const gv = mGuild.value, cv = mChannel.value;
+    mGuild.innerHTML = '<option value="">All guilds</option>'
+      + managementDirectory.guilds.map(g => optionHtml(g.id, g.name)).join('');
+    const visibleChannels = managementDirectory.channels
+      .filter(c => gv === '' || c.guildId === gv)
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    mChannel.innerHTML = '<option value="">All channels</option>'
+      + visibleChannels.map(c => optionHtml(c.id, '#' + c.name + ' · ' + labelForGuild(c.guildId), ' data-guild-id="' + esc(c.guildId) + '"')).join('');
+    mGuild.value = gv;
+    if (visibleChannels.some(c => c.id === cv)) mChannel.value = cv; else mChannel.value = '';
+    syncManagementDeleteButtons();
+  }
+
+  function managementParams() {
+    const params = new URLSearchParams();
+    if (mGuild.value !== '') params.set('guildId', mGuild.value);
+    if (mChannel.value !== '') params.set('channelId', mChannel.value);
+    params.set('limit', '100');
+    return params;
+  }
+
+  function memoryParams() {
+    const params = new URLSearchParams();
+    if (mGuild.value !== '') params.set('guildId', mGuild.value);
+    if (mScope.value !== '') params.set('scope', mScope.value);
+    params.set('limit', '300');
+    return params;
+  }
+
+  function renderMessageEditor(message) {
+    return '<div class="management-editor" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">'
+      + '<textarea id="edit-message-' + esc(message.id) + '">' + esc(message.translatedContent) + '</textarea>'
+      + '<div class="management-row-actions">'
+        + '<button class="btn btn-sm primary" onclick=\'window.__saveManagementMessage(' + jsStr(message.id) + ',' + jsStr(message.guildId) + ',' + jsStr(message.channelId) + ')\'>Save</button>'
+        + '<button class="btn btn-sm" onclick="window.__cancelManagementEdit()">Cancel</button>'
+      + '</div>'
+    + '</div>';
+  }
+
+  function renderManagementMessage(message) {
+    const selected = selectedManagementMessages.has(message.id);
+    const authorType = message.isBot ? 'bot' : 'user';
+    const rowClass = 'management-row message-selectable message-' + authorType + (selected ? ' message-selected' : '');
+    return '<div class="' + rowClass + '" data-message-id="' + esc(message.id) + '" role="button" tabindex="0" onclick=\'window.__toggleManagementMessage(' + jsStr(message.id) + ')\' onkeydown=\'window.__messageRowKey(event,' + jsStr(message.id) + ')\'>'
+      + '<div>'
+        + '<div class="management-meta">'
+          + '<span>' + esc(fmtDateTime(message.createdAt)) + '</span>'
+          + '<span>' + esc(message.guildName || message.guildId) + ' / ' + esc(labelForChannel(message.channelId)) + '</span>'
+          + '<span class="author-type ' + authorType + '">' + authorType.toUpperCase() + '</span>'
+          + '<span class="management-author">' + esc(message.authorUsername) + '</span>'
+          + '<span>msg ' + esc(shortId(message.id)) + '</span>'
+          + (selected ? '<span class="selected-marker">Selected</span>' : '')
+        + '</div>'
+        + '<div class="management-content">' + (message.translatedContent !== '' ? esc(message.translatedContent) : '<span style="color:var(--text-dim);font-style:italic">empty stored content</span>') + '</div>'
+      + '</div>'
+      + '<div class="management-row-actions" onclick="event.stopPropagation()">'
+        + '<button class="btn btn-sm" onclick=\'window.__editManagementMessage(' + jsStr(message.id) + ')\'>Edit</button>'
+        + '<button class="btn btn-sm danger" onclick=\'window.__deleteManagementMessage(' + jsStr(message.id) + ',' + jsStr(message.guildId) + ',' + jsStr(message.channelId) + ')\'>Delete</button>'
+      + '</div>'
+      + (editingMessageId === message.id ? renderMessageEditor(message) : '')
+    + '</div>';
+  }
+
+  function renderMemoryEditor(memory) {
+    const expires = memory.expiresAt == null ? '' : new Date(memory.expiresAt).toISOString().slice(0, 16);
+    const kinds = ['global_note','user_note','preference','relationship','fact','identity','constraint','interest','journal','scratchpad'];
+    return '<div class="management-editor">'
+      + '<textarea id="edit-memory-content-' + memory.id + '">' + esc(memory.content) + '</textarea>'
+      + '<div class="memory-controls">'
+        + '<select id="edit-memory-kind-' + memory.id + '" class="inline-input">'
+          + kinds.map(k => '<option value="' + esc(k) + '"' + (memory.kind === k ? ' selected' : '') + '>' + esc(k) + '</option>').join('')
+        + '</select>'
+        + '<input id="edit-memory-confidence-' + memory.id + '" class="inline-input" type="number" min="0" max="1" step="0.05" value="' + esc(String(memory.confidence)) + '">'
+        + '<input id="edit-memory-expires-' + memory.id + '" class="inline-input" type="datetime-local" value="' + esc(expires) + '">'
+      + '</div>'
+      + '<div class="management-row-actions">'
+        + '<button class="btn btn-sm primary" onclick="window.__saveManagementMemory(' + memory.id + ')">Save</button>'
+        + '<button class="btn btn-sm" onclick="window.__cancelManagementEdit()">Cancel</button>'
+      + '</div>'
+    + '</div>';
+  }
+
+  function renderManagementMemory(memory) {
+    const owner = memory.scope === 'guild'
+      ? (memory.guildName || memory.guildId || 'guild')
+      : memory.scope === 'user'
+        ? (memory.subjectUsername || memory.subjectUserId || 'user')
+        : 'self';
+    return '<div class="management-row memory-row" data-memory-id="' + memory.id + '">'
+      + '<div>'
+        + '<div class="management-meta">'
+          + '<span>' + esc(memory.scope) + '</span>'
+          + '<span>' + esc(memory.kind) + '</span>'
+          + '<span>' + esc(owner) + '</span>'
+          + '<span>conf ' + esc(Number(memory.confidence).toFixed(2)) + '</span>'
+          + (memory.expiresAt != null ? '<span>expires ' + esc(fmtDateTime(memory.expiresAt)) + '</span>' : '')
+        + '</div>'
+        + '<div class="management-content">' + esc(memory.content) + '</div>'
+      + '</div>'
+      + '<div class="management-row-actions">'
+        + '<button class="btn btn-sm" onclick="window.__editManagementMemory(' + memory.id + ')">Edit</button>'
+        + '<button class="btn btn-sm danger" onclick="window.__deleteManagementMemory(' + memory.id + ')">Delete</button>'
+      + '</div>'
+      + (editingMemoryId === memory.id ? renderMemoryEditor(memory) : '')
+    + '</div>';
+  }
+
+  function renderManagement() {
+    mMessageCount.textContent = managementMessages.length + ' rows';
+    mMemoryCount.textContent = managementMemories.length + ' rows';
+    if (managementMessages.length === 0) {
+      mMessageList.innerHTML = '<div class="empty-state">No stored messages match these filters.</div>';
+    } else {
+      mMessageList.innerHTML = managementMessages.map(renderManagementMessage).join('');
+    }
+    if (managementMemories.length === 0) {
+      mMemoryList.innerHTML = '<div class="empty-state">No memories match these filters.</div>';
+    } else {
+      mMemoryList.innerHTML = managementMemories.map(renderManagementMemory).join('');
+    }
+    syncManagementDeleteButtons();
+  }
+
+  async function fetchManagementData() {
+    const messageQuery = managementParams().toString();
+    const memoryQuery = memoryParams().toString();
+    const [messagesRes, memoriesRes] = await Promise.all([
+      fetch('/api/management/messages?' + messageQuery),
+      fetch('/api/management/memories?' + memoryQuery)
+    ]);
+    if (messagesRes.status === 401 || memoriesRes.status === 401) { location.href = '/login'; return; }
+    if (!messagesRes.ok || !memoriesRes.ok) throw new Error('Unable to load management data');
+    const messageData = await messagesRes.json();
+    const memoryData = await memoriesRes.json();
+    if (managementParams().toString() !== messageQuery || memoryParams().toString() !== memoryQuery) return;
+    managementMessages = messageData.messages || [];
+    managementMemories = memoryData.memories || [];
+    for (const id of Array.from(selectedManagementMessages)) {
+      if (!managementMessages.some(m => m.id === id)) selectedManagementMessages.delete(id);
+    }
+    renderPromptLabUsers();
+    renderManagement();
+  }
+
+  async function refreshManagement() {
+    if (activeTab !== 'management') return;
+    await fetchManagementDirectory();
+    await fetchManagementData();
+  }
+
+  async function mutateManagement(request) {
+    const r = await request();
+    if (r.status === 401) { location.href = '/login'; return null; }
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok || body.error) {
+      alert(body.error || 'Management action failed');
+      return null;
+    }
+    if (body.discordDeletion && body.discordDeletion.attempted === true && body.discordDeletion.failures && body.discordDeletion.failures.length > 0) {
+      const sample = body.discordDeletion.failures.slice(0, 5)
+        .map(f => shortId(f.messageId) + ': ' + f.error)
+        .join('\n');
+      alert('Local cleanup completed. Discord deletion failed for ' + body.discordDeletion.failures.length + ' message(s):\n' + sample);
+    }
+    await refreshManagement();
+    return body;
+  }
+
+  async function fetchPromptLabDetailByRunToken(runToken) {
+    const summariesRes = await fetch('/api/logs');
+    if (summariesRes.status === 401) { location.href = '/login'; return null; }
+    if (!summariesRes.ok) return null;
+    const summaries = await summariesRes.json();
+    const entry = summaries.find(e => e.trigger && e.trigger.type === 'prompt_lab' && e.trigger.runToken === runToken);
+    if (!entry || !entry.requestId) return null;
+    const detailRes = await fetch('/api/logs/' + encodeURIComponent(entry.requestId));
+    if (!detailRes.ok) return null;
+    return await detailRes.json();
+  }
+
+  async function pollPromptLabRun(runToken, seq) {
+    if (seq !== promptLabPollSeq) return;
+    try {
+      const detail = await fetchPromptLabDetailByRunToken(runToken);
+      if (detail != null && seq === promptLabPollSeq) {
+        const estimatedCostUsd = (detail.llmCalls || []).reduce((sum, call) => sum + (call.estimatedCostUsd || 0), 0);
+        renderPromptLabReport({
+          requestId: detail.requestId,
+          running: detail.status === 'active',
+          drafts: [],
+          dryRuns: [],
+          toolCount: (detail.tools || []).length,
+          llmCallCount: (detail.llmCalls || []).length,
+          estimatedCostUsd: estimatedCostUsd > 0 ? estimatedCostUsd : null,
+          totalDurationMs: detail.totalDurationMs || 0,
+          error: detail.error
+        }, detail);
+      }
+    } catch {}
+    if (seq !== promptLabPollSeq) return;
+    setTimeout(() => { pollPromptLabRun(runToken, seq); }, 700);
+  }
+
+  async function runPromptLab() {
+    const guildId = mGuild.value;
+    const channelId = mChannel.value;
+    const userId = labUser.value;
+    const content = labPrompt.value.trim();
+    if (guildId === '' || channelId === '' || userId === '' || content === '') return;
+    savePromptLabSender();
+    const runToken = crypto.randomUUID();
+    promptLabPollSeq += 1;
+    const pollSeq = promptLabPollSeq;
+    labRun.disabled = true;
+    labStatus.textContent = 'RUNNING';
+    labStatus.classList.add('running');
+    labStatus.classList.remove('error');
+    renderPromptLabReport({
+      requestId: runToken,
+      running: true,
+      drafts: [],
+      dryRuns: [],
+      toolCount: 0,
+      llmCallCount: 0,
+      estimatedCostUsd: null,
+      totalDurationMs: 0
+    }, null);
+    pollPromptLabRun(runToken, pollSeq);
+    try {
+      const r = await fetch('/api/management/prompt-lab/run', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ guildId, channelId, userId, content, runToken })
+      });
+      promptLabPollSeq += 1;
+      if (r.status === 401) { location.href = '/login'; return; }
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        labStatus.classList.add('error');
+        alert(body.error || 'Prompt Lab run failed');
+        return;
+      }
+      const finalDetail = body.requestId ? await fetch('/api/logs/' + encodeURIComponent(body.requestId)).then(res => res.ok ? res.json() : null).catch(() => null) : null;
+      renderPromptLabReport(body, finalDetail);
+      if (body.error) {
+        labStatus.classList.add('error');
+        labStatus.textContent = 'completed with error';
+      } else {
+        labStatus.textContent = 'complete';
+      }
+    } catch (err) {
+      promptLabPollSeq += 1;
+      labStatus.classList.add('error');
+      alert(err instanceof Error ? err.message : 'Prompt Lab run failed');
+    } finally {
+      labStatus.classList.remove('running');
+      syncManagementDeleteButtons();
+      if (labStatus.textContent === 'RUNNING') labStatus.textContent = 'dry-run writes';
+    }
+  }
+
+  window.__toggleManagementMessage = function(messageId) {
+    if (selectedManagementMessages.has(messageId)) selectedManagementMessages.delete(messageId);
+    else selectedManagementMessages.add(messageId);
+    syncManagementDeleteButtons();
+    renderManagement();
+  };
+
+  window.__messageRowKey = function(event, messageId) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    window.__toggleManagementMessage(messageId);
+  };
+
+  window.__editManagementMessage = function(messageId) {
+    editingMessageId = messageId;
+    editingMemoryId = null;
+    renderManagement();
+  };
+
+  window.__editManagementMemory = function(memoryId) {
+    editingMemoryId = memoryId;
+    editingMessageId = null;
+    renderManagement();
+  };
+
+  window.__cancelManagementEdit = function() {
+    editingMessageId = null;
+    editingMemoryId = null;
+    renderManagement();
+  };
+
+  window.__saveManagementMessage = async function(messageId, guildId, channelId) {
+    const textarea = document.getElementById('edit-message-' + messageId);
+    const content = textarea ? textarea.value : '';
+    await mutateManagement(() => fetch('/api/management/messages/' + encodeURIComponent(messageId), {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ guildId, channelId, content })
+    }));
+    editingMessageId = null;
+  };
+
+  window.__deleteManagementMessage = async function(messageId, guildId, channelId) {
+    const deleteDiscord = discordDeleteEnabled();
+    const targetText = deleteDiscord
+      ? 'local context/search state and attempt Discord deletion'
+      : 'local context/search state only';
+    if (!confirm('Delete stored message ' + shortId(messageId) + ' from ' + targetText + '?')) return;
+    await mutateManagement(() => fetch('/api/management/messages/' + encodeURIComponent(messageId)
+      + '?guildId=' + encodeURIComponent(guildId)
+      + '&channelId=' + encodeURIComponent(channelId)
+      + '&deleteDiscord=' + encodeURIComponent(String(deleteDiscord)), { method: 'DELETE' }));
+  };
+
+  window.__saveManagementMemory = async function(memoryId) {
+    const content = document.getElementById('edit-memory-content-' + memoryId)?.value || '';
+    const kind = document.getElementById('edit-memory-kind-' + memoryId)?.value || 'note';
+    const confidence = Number(document.getElementById('edit-memory-confidence-' + memoryId)?.value || '0.7');
+    const expiresRaw = document.getElementById('edit-memory-expires-' + memoryId)?.value || '';
+    const expiresAt = expiresRaw === '' ? null : new Date(expiresRaw).getTime();
+    await mutateManagement(() => fetch('/api/management/memories/' + encodeURIComponent(memoryId), {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ content, kind, confidence, expiresAt })
+    }));
+    editingMemoryId = null;
+  };
+
+  window.__deleteManagementMemory = async function(memoryId) {
+    if (!confirm('Delete memory #' + memoryId + '?')) return;
+    await mutateManagement(() => fetch('/api/management/memories/' + encodeURIComponent(memoryId), { method: 'DELETE' }));
+  };
+
+  async function deleteSelectedManagementMessages() {
+    const selected = managementMessages.filter(m => selectedManagementMessages.has(m.id));
+    if (selected.length === 0) return;
+    const guildId = selected[0].guildId;
+    const channelId = selected[0].channelId;
+    if (!selected.every(m => m.guildId === guildId && m.channelId === channelId)) {
+      alert('Selected deletes must be in one exact guild/channel. Filter to a channel or reduce the selection.');
+      return;
+    }
+    const deleteDiscord = discordDeleteEnabled();
+    const mode = deleteDiscord ? 'Local rows will be deleted and Discord deletion will be attempted.' : 'Discord will not be touched.';
+    if (!confirm('Delete ' + selected.length + ' selected stored messages from ' + labelForGuild(guildId) + ' / ' + labelForChannel(channelId) + '? ' + mode)) return;
+    await mutateManagement(() => fetch('/api/management/messages/delete-selected', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ guildId, channelId, messageIds: selected.map(m => m.id), deleteDiscord })
+    }));
+    selectedManagementMessages.clear();
+  }
+
+  async function deleteLatestManagementMessages() {
+    const guildId = mGuild.value;
+    const channelId = mChannel.value;
+    const count = Math.max(1, Math.min(20, Number(mLastCount.value) || 2));
+    if (guildId === '' || channelId === '') return;
+    const deleteDiscord = discordDeleteEnabled();
+    const mode = deleteDiscord ? 'Local rows will be deleted and Discord deletion will be attempted.' : 'Discord will not be touched.';
+    if (!confirm('Delete the latest ' + count + ' stored messages from ' + labelForGuild(guildId) + ' / ' + labelForChannel(channelId) + '? ' + mode)) return;
+    await mutateManagement(() => fetch('/api/management/messages/delete-latest', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ guildId, channelId, count, deleteDiscord })
+    }));
+    selectedManagementMessages.clear();
+  }
+
   let logRefreshRunning = false;
   let logRefreshQueued = false;
 
@@ -853,6 +1842,38 @@
   fGuild.addEventListener('change', () => { refreshLogs(); });
   fChannel.addEventListener('change', () => { refreshLogs(); });
   fUser.addEventListener('change', () => { refreshLogs(); });
+  tabLogs.addEventListener('click', () => { setTab('logs'); });
+  tabManagement.addEventListener('click', () => { setTab('management'); });
+  mRefresh.addEventListener('click', () => { refreshManagement(); });
+  mDeleteSelected.addEventListener('click', () => { deleteSelectedManagementMessages(); });
+  mDeleteLast.addEventListener('click', () => { deleteLatestManagementMessages(); });
+  mGuild.addEventListener('change', () => {
+    saveManagementState();
+    selectedManagementMessages.clear();
+    renderPromptLabReport(null);
+    fetchManagementDirectory().then(fetchManagementData).catch(() => {});
+  });
+  mChannel.addEventListener('change', () => {
+    const opt = mChannel.selectedOptions[0];
+    const guildId = opt ? opt.getAttribute('data-guild-id') : null;
+    if (guildId != null && guildId !== '') mGuild.value = guildId;
+    saveManagementState();
+    selectedManagementMessages.clear();
+    renderPromptLabReport(null);
+    refreshManagement();
+  });
+  mScope.addEventListener('change', () => { saveManagementState(); refreshManagement(); });
+  mLastCount.addEventListener('change', () => { saveManagementState(); syncManagementDeleteButtons(); });
+  mDiscordDelete.addEventListener('change', () => { syncDiscordDeleteToggle(); saveManagementState(); });
+  labUser.addEventListener('change', () => { savePromptLabSender(); syncManagementDeleteButtons(); });
+  labPrompt.addEventListener('input', () => { labStatus.textContent = 'dry-run writes'; syncManagementDeleteButtons(); });
+  labPrompt.addEventListener('keydown', (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault();
+      runPromptLab();
+    }
+  });
+  labRun.addEventListener('click', () => { runPromptLab(); });
 
   async function refreshStatus() {
     try {
@@ -872,6 +1893,7 @@
   let statusPollTimer = null;
   let logPollTimer = null;
   let logPollingActive = false;
+  let managementPollTimer = null;
 
   async function pollLogs() {
     if (!logPollingActive) return;
@@ -883,6 +1905,13 @@
     logPollTimer = setTimeout(() => { logPollTimer = null; pollLogs(); }, 1000);
   }
 
+  async function pollManagement() {
+    if (!logPollingActive || activeTab !== 'management') return;
+    try { await refreshManagement(); } catch {}
+    if (!logPollingActive || activeTab !== 'management') return;
+    managementPollTimer = setTimeout(() => { managementPollTimer = null; pollManagement(); }, 1000);
+  }
+
   function startPolling() {
     refreshStatus();
     if (statusPollTimer === null) statusPollTimer = setInterval(refreshStatus, 1000);
@@ -890,6 +1919,7 @@
       logPollingActive = true;
       pollLogs();
     }
+    if (activeTab === 'management' && managementPollTimer === null) pollManagement();
   }
 
   function stopPolling() {
@@ -900,6 +1930,10 @@
     if (logPollTimer !== null) {
       clearTimeout(logPollTimer);
       logPollTimer = null;
+    }
+    if (managementPollTimer !== null) {
+      clearTimeout(managementPollTimer);
+      managementPollTimer = null;
     }
     logPollingActive = false;
   }
@@ -1029,7 +2063,16 @@
   });
 
   fetchFilters();
-  startPolling();
+  fetchManagementDirectory()
+    .then(() => {
+      loadManagementState();
+      return fetchManagementDirectory();
+    })
+    .catch(() => {})
+    .finally(() => {
+      setTab(activeTab);
+      startPolling();
+    });
 })();
 </script>
 </body>

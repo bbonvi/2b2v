@@ -1,4 +1,5 @@
 import { createLogger, RequestLog, type LogLevel, type Logger } from "./logger";
+import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { requestLogStore } from "./dashboard/store";
 import { parseDashboardPasswordlessCidrs, startDashboard } from "./dashboard/server";
 import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, validateTrimConfig, validateVpnConfig } from "./config/loader";
@@ -63,7 +64,8 @@ import { applyRuntimeToolPrompts, type ToolPromptVariables } from "./agent/runti
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { upsertThread, updateThreadActivity, markBotParticipating, markThreadArchived, listThreadsForContext, getThreadMetadata, getThread } from "./db/thread-repository";
 import { imageExtensionForMime, prepareImageBufferForContext, processAndStoreImage, storeImageBufferUnmodified, type ImageIngestDeps } from "./db/image-ingest";
-import { deleteExpiredMemories, countUserMemoriesByUser } from "./db/memory-repository";
+import { deleteExpiredMemories, countUserMemoriesByUser, deleteMemory, updateMemory, isMemoryKind } from "./db/memory-repository";
+import { deleteStoredManagementMessages, getManagementMemory, listManagementMemories, listManagementMessages, storedManagementDirectoryIds, updateStoredManagementMessageContent, type ManagementChannelLabel, type ManagementDirectory, type ManagementLabel, type ManagementMessageRow, type ManagementMemoryRow } from "./dashboard/management";
 import { listUpcomingForContext, createSchedule, deleteScheduleForGuild, listSchedules } from "./db/schedule-repository";
 import { registerSlashCommands } from "./commands/registry";
 import { createStatusHandler, statusCommandDefinition } from "./commands/status";
@@ -741,6 +743,162 @@ function dashboardTriggerLocation(guild: Guild, channel: unknown): { guildName: 
     guildName: guild.name,
     ...(channelName !== undefined ? { channelName } : {}),
   };
+}
+
+function sortLabels<T extends ManagementLabel>(labels: T[]): T[] {
+  return labels.sort((a, b) => {
+    const nameOrder = a.name.localeCompare(b.name);
+    return nameOrder !== 0 ? nameOrder : a.id.localeCompare(b.id);
+  });
+}
+
+function managementGuildName(guildId: string): string {
+  return client.guilds.cache.get(guildId)?.name ?? guildId;
+}
+
+function managementChannelName(channelId: string): { name: string; type: string } {
+  const channel = client.channels.cache.get(channelId);
+  if (channel !== undefined && "name" in channel && typeof channel.name === "string" && channel.name !== "") {
+    return {
+      name: channel.name,
+      type: "type" in channel && typeof channel.type === "number" ? channelTypeLabel(channel as GuildBasedChannel | ThreadChannel) : "channel",
+    };
+  }
+  return { name: channelId, type: "stored" };
+}
+
+function managementUserName(userId: string): string {
+  return client.users.cache.get(userId)?.username
+    ?? client.guilds.cache.find((guild) => guild.members.cache.has(userId))?.members.cache.get(userId)?.user.username
+    ?? userId;
+}
+
+function buildManagementDirectory(): ManagementDirectory {
+  const stored = storedManagementDirectoryIds(db);
+  const guilds = new Map<string, ManagementLabel>();
+  for (const guild of client.guilds.cache.values()) {
+    guilds.set(guild.id, { id: guild.id, name: guild.name });
+  }
+  for (const guildId of stored.guildIds) {
+    if (!guilds.has(guildId)) guilds.set(guildId, { id: guildId, name: managementGuildName(guildId) });
+  }
+
+  const channels = new Map<string, ManagementChannelLabel>();
+  for (const channel of client.channels.cache.values()) {
+    if (!isSendableGuildChannel(channel)) continue;
+    const label = managementChannelName(channel.id);
+    channels.set(`${channel.guildId}:${channel.id}`, {
+      id: channel.id,
+      guildId: channel.guildId,
+      name: label.name,
+      type: label.type,
+    });
+  }
+  for (const pair of stored.channelPairs) {
+    const key = `${pair.guildId}:${pair.id}`;
+    if (channels.has(key)) continue;
+    const label = managementChannelName(pair.id);
+    channels.set(key, {
+      id: pair.id,
+      guildId: pair.guildId,
+      name: label.name,
+      type: label.type,
+    });
+  }
+
+  const users = new Map<string, ManagementLabel>();
+  for (const user of client.users.cache.values()) {
+    users.set(user.id, { id: user.id, name: user.username });
+  }
+  for (const userId of stored.userIds) {
+    if (!users.has(userId)) users.set(userId, { id: userId, name: managementUserName(userId) });
+  }
+
+  return {
+    guilds: sortLabels([...guilds.values()]),
+    channels: sortLabels([...channels.values()]),
+    users: sortLabels([...users.values()]),
+  };
+}
+
+function decorateManagementMessage(row: ManagementMessageRow): ManagementMessageRow & {
+  guildName: string;
+  channelName: string;
+  channelType: string;
+  authorDisplayName: string;
+} {
+  const channel = managementChannelName(row.channelId);
+  return {
+    ...row,
+    guildName: managementGuildName(row.guildId),
+    channelName: channel.name,
+    channelType: channel.type,
+    authorDisplayName: managementUserName(row.userId),
+  };
+}
+
+function decorateManagementMemory(row: ManagementMemoryRow): ManagementMemoryRow & {
+  guildName?: string;
+  subjectUsername?: string;
+} {
+  return {
+    ...row,
+    ...(row.guildId !== null ? { guildName: managementGuildName(row.guildId) } : {}),
+    ...(row.subjectUserId !== null ? { subjectUsername: managementUserName(row.subjectUserId) } : {}),
+  };
+}
+
+interface DiscordManagementDeleteResult {
+  attempted: boolean;
+  deletedMessageIds: string[];
+  failures: Array<{ messageId: string; error: string }>;
+}
+
+function isDiscordMessageDeleteChannel(channel: unknown): channel is {
+  messages: { delete: (messageId: string) => Promise<unknown> };
+} {
+  if (channel === null || typeof channel !== "object" || !("messages" in channel)) return false;
+  const messages = (channel as { messages?: unknown }).messages;
+  return messages !== undefined
+    && messages !== null
+    && typeof messages === "object"
+    && "delete" in messages
+    && typeof (messages as { delete?: unknown }).delete === "function";
+}
+
+async function tryDeleteDiscordManagementMessages(input: {
+  guildId: string;
+  channelId: string;
+  messageIds: readonly string[];
+  enabled: boolean;
+}): Promise<DiscordManagementDeleteResult> {
+  if (!input.enabled) return { attempted: false, deletedMessageIds: [], failures: [] };
+  const channel = await client.channels.fetch(input.channelId).catch(() => null);
+  if (!isDiscordMessageDeleteChannel(channel)) {
+    return {
+      attempted: true,
+      deletedMessageIds: [],
+      failures: input.messageIds.map((messageId) => ({
+        messageId,
+        error: "Channel is unavailable or does not expose message deletion.",
+      })),
+    };
+  }
+
+  const deletedMessageIds: string[] = [];
+  const failures: Array<{ messageId: string; error: string }> = [];
+  for (const messageId of input.messageIds) {
+    try {
+      await channel.messages.delete(messageId);
+      deletedMessageIds.push(messageId);
+    } catch (err) {
+      failures.push({
+        messageId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return { attempted: true, deletedMessageIds, failures };
 }
 
 const DISCORD_CONTEXT_MAX_GUILDS = 12;
@@ -3948,12 +4106,503 @@ startupMessageProcessingReady = true;
 drainStartupMessageQueue();
 
 // --- Start dashboard ---
+async function deleteManagementMessageState(input: {
+  messageIds: string[];
+  guildId: string;
+  channelId: string;
+  deleteDiscord?: boolean;
+}): Promise<{ deletedMessageIds: string[]; deletedImages: number; discordDeletion: DiscordManagementDeleteResult }> {
+  const requestedIds = new Set(input.messageIds);
+  const validRows = listManagementMessages(db, {
+    guildId: input.guildId,
+    channelId: input.channelId,
+    limit: 200,
+  }).filter((row) => requestedIds.has(row.id));
+  const validMessageIds = validRows.map((row) => row.id);
+  const discordDeletion = await tryDeleteDiscordManagementMessages({
+    guildId: input.guildId,
+    channelId: input.channelId,
+    messageIds: validMessageIds,
+    enabled: input.deleteDiscord === true,
+  });
+  const deleted = deleteStoredManagementMessages(db, {
+    ids: validMessageIds,
+    guildId: input.guildId,
+    channelId: input.channelId,
+  });
+  await Promise.all(deleted.messageIds.map((messageId) => deleteMessagePointsByMessageId(qdrant, {
+    guildId: input.guildId,
+    messageId,
+  })));
+  return {
+    deletedMessageIds: deleted.messageIds,
+    deletedImages: deleted.imagePaths.length,
+    discordDeletion,
+  };
+}
+
+async function editManagementMessageState(input: {
+  messageId: string;
+  guildId: string;
+  channelId: string;
+  content: string;
+}): Promise<{ message: ReturnType<typeof decorateManagementMessage> }> {
+  const row = updateStoredManagementMessageContent(db, {
+    id: input.messageId,
+    guildId: input.guildId,
+    channelId: input.channelId,
+    content: input.content,
+  });
+  if (row === null) {
+    throw new Error("Stored message was not found for that exact guild/channel, or content was empty.");
+  }
+  await deleteMessagePointsByMessageId(qdrant, { guildId: row.guildId, messageId: row.id });
+  await embeddingQueue.enqueue({
+    id: row.id,
+    text: row.translatedContent,
+    target: "message",
+    metadata: {
+      guild_id: row.guildId,
+      channel_id: row.channelId,
+      user_id: row.userId,
+      created_at: row.createdAt,
+      is_bot: row.isBot,
+      source: "live",
+      embedding_kind: "single",
+    },
+  });
+  return { message: decorateManagementMessage(row) };
+}
+
+async function deleteLatestManagementMessages(input: {
+  guildId: string;
+  channelId: string;
+  count: number;
+  deleteDiscord?: boolean;
+}): Promise<{
+  deletedMessageIds: string[];
+  deletedImages: number;
+  discordDeletion: DiscordManagementDeleteResult;
+  scopedTo: { guildId: string; channelId: string };
+}> {
+  const count = Math.max(1, Math.min(20, Math.trunc(input.count)));
+  const rows = listManagementMessages(db, {
+    guildId: input.guildId,
+    channelId: input.channelId,
+    limit: count,
+  });
+  const deleted = await deleteManagementMessageState({
+    messageIds: rows.map((row) => row.id),
+    guildId: input.guildId,
+    channelId: input.channelId,
+    deleteDiscord: input.deleteDiscord,
+  });
+  return {
+    ...deleted,
+    scopedTo: { guildId: input.guildId, channelId: input.channelId },
+  };
+}
+
+function editManagementMemoryState(input: {
+  memoryId: number;
+  content?: string;
+  kind?: string;
+  confidence?: number;
+  expiresAt?: number | null;
+}): { memory: ReturnType<typeof decorateManagementMemory> } {
+  const existing = getManagementMemory(db, input.memoryId);
+  if (existing === null) throw new Error("Memory not found.");
+  if (existing.deletedAt !== null) throw new Error("Deleted memories cannot be edited.");
+  if (input.kind !== undefined && !isMemoryKind(input.kind)) {
+    throw new Error(`Invalid memory kind: ${input.kind}`);
+  }
+  const updated = updateMemory(db, input.memoryId, {
+    ...(input.content !== undefined ? { content: input.content } : {}),
+    ...(input.kind !== undefined && isMemoryKind(input.kind) ? { kind: input.kind } : {}),
+    ...(input.confidence !== undefined ? { confidence: input.confidence } : {}),
+    ...("expiresAt" in input ? { expiresAt: input.expiresAt ?? null } : {}),
+  });
+  if (!updated) throw new Error("Memory update did not change a row.");
+  const row = getManagementMemory(db, input.memoryId);
+  if (row === null) throw new Error("Memory disappeared after update.");
+  return { memory: decorateManagementMemory(row) };
+}
+
+function deleteManagementMemoryState(memoryId: number): { deleted: boolean; memoryId: number } {
+  return { deleted: deleteMemory(db, memoryId), memoryId };
+}
+
+const PROMPT_LAB_READ_TOOL_NAMES = new Set([
+  "search_messages",
+  "list_scheduled_messages",
+  "list_chat_users",
+  "list_channels",
+  "list_emojis",
+  "list_memories",
+  "chat_history",
+  "read_chat_images",
+  "read_user_avatar",
+  "fetch_images",
+  "fetch_url",
+  "summarize_video",
+  "web_search",
+  "load_skill",
+]);
+
+interface PromptLabDraftMessage {
+  id: string;
+  text: string;
+  reply: boolean;
+  channelId?: string;
+  replyToMessageId?: string;
+  attachments: string[];
+  voice: boolean;
+}
+
+interface PromptLabDryRun {
+  tool: string;
+  args: unknown;
+}
+
+interface PromptLabRunResult {
+  requestId: string;
+  triggered: boolean;
+  responseText?: string;
+  drafts: PromptLabDraftMessage[];
+  dryRuns: PromptLabDryRun[];
+  toolCount: number;
+  llmCallCount: number;
+  estimatedCostUsd: number | null;
+  totalDurationMs: number;
+  error?: string;
+}
+
+function promptLabSyntheticId(offset = 0): string {
+  const base = 15_000_000_000_000_000n;
+  const span = 899_999_999_999_999n;
+  const randomPart = BigInt(Math.floor(Math.random() * Number(span)));
+  return (base + randomPart + BigInt(offset)).toString();
+}
+
+function promptLabDryRunTools(tools: AgentTool[], dryRuns: PromptLabDryRun[]): AgentTool[] {
+  return tools.map((tool) => {
+    if (PROMPT_LAB_READ_TOOL_NAMES.has(tool.name)) return tool;
+    return {
+      ...tool,
+      execute: (_toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
+        dryRuns.push({ tool: tool.name, args: params });
+        return Promise.resolve({
+          content: [{
+            type: "text",
+            text: `Prompt Lab dry-run: would execute \`${tool.name}\`, but dashboard test runs do not mutate Discord, SQLite, schedules, memories, jobs, or files.`,
+          }],
+          details: {
+            dryRun: true,
+            tool: tool.name,
+            args: params,
+          },
+        });
+      },
+    };
+  });
+}
+
+function promptLabUserFromGuild(guild: Guild, userId: string): {
+  id: string;
+  username: string;
+  displayName?: string;
+  globalName?: string;
+} {
+  const member = guild.members.cache.get(userId);
+  const cachedUser = client.users.cache.get(userId);
+  return {
+    id: userId,
+    username: member?.user.username ?? cachedUser?.username ?? managementUserName(userId),
+    ...(member?.displayName !== undefined ? { displayName: member.displayName } : {}),
+    ...(member?.user.globalName !== null && member?.user.globalName !== undefined
+      ? { globalName: member.user.globalName }
+      : cachedUser?.globalName !== null && cachedUser?.globalName !== undefined
+        ? { globalName: cachedUser.globalName }
+        : {}),
+  };
+}
+
+function promptLabSummary(entry: ReturnType<RequestLog["toEntry"]>): {
+  toolCount: number;
+  llmCallCount: number;
+  estimatedCostUsd: number | null;
+  totalDurationMs: number;
+} {
+  const estimatedCostUsd = entry.llmCalls.reduce((sum, call) => sum + (call.estimatedCostUsd ?? 0), 0);
+  return {
+    toolCount: entry.tools.length,
+    llmCallCount: entry.llmCalls.length,
+    estimatedCostUsd: estimatedCostUsd > 0 ? estimatedCostUsd : null,
+    totalDurationMs: entry.totalDurationMs,
+  };
+}
+
+async function runPromptLab(input: {
+  guildId: string;
+  channelId: string;
+  userId: string;
+  content: string;
+  runToken?: string;
+}): Promise<PromptLabRunResult> {
+  const guild = await resolveClientGuild(input.guildId);
+  if (guild === null) throw new Error("Guild is unavailable.");
+  const channel = await fetchAccessibleGuildChannel(input.channelId);
+  if (channel === null || channel.guildId !== input.guildId) {
+    throw new Error("Channel is unavailable or does not belong to the selected guild.");
+  }
+  const botUserId = client.user?.id ?? "";
+  if (botUserId === "") throw new Error("Bot user is not ready.");
+
+  const guildConfig = getGuildConfig(input.guildId);
+  const labUser = promptLabUserFromGuild(guild, input.userId);
+  const content = input.content.trim();
+  const translatedContent = translateInbound(content, buildInboundResolvers(guild));
+  const now = Date.now();
+  const messageId = promptLabSyntheticId();
+  const latestUserMessage: HistoryMessage = {
+    id: messageId,
+    author: labUser.username,
+    authorDisplayName: labUser.displayName,
+    authorId: labUser.id,
+    content: translatedContent,
+    isBot: false,
+    timestamp: now,
+    replyToId: null,
+    imageIds: [],
+    captions: [],
+    hasEmbeds: false,
+    isSynthetic: false,
+    relatedThreadId: null,
+  };
+
+  const replyFallbackDeps: ReplyFallbackDeps = {
+    db,
+    guildId: input.guildId,
+    channelId: input.channelId,
+    fetchDiscordMessage: async (chId, msgId) => {
+      const target = await fetchAccessibleGuildChannel(chId);
+      if (target === null || !("messages" in target)) return null;
+      try {
+        const fetched = await target.messages.fetch(msgId);
+        return {
+          id: fetched.id,
+          authorId: fetched.author.id,
+          authorUsername: fetched.author.username,
+          authorDisplayName: authorDisplayName(fetched),
+          content: fetched.content,
+          timestamp: fetched.createdTimestamp,
+          isBot: fetched.author.bot,
+          replyToId: fetched.reference?.messageId ?? null,
+          attachments: [...fetched.attachments.values()].map((a) => ({
+            url: a.url,
+            contentType: a.contentType,
+          })),
+          embeds: fetched.embeds.map((embed) => ({
+            type: embed.data.type,
+            url: embed.url,
+            provider: embed.provider,
+            ...(embed.image?.url !== undefined ? { image: { url: embed.image.url } } : {}),
+            ...(embed.thumbnail?.url !== undefined ? { thumbnail: { url: embed.thumbnail.url } } : {}),
+          })),
+          stickers: [...fetched.stickers.values()].map((sticker) => ({
+            name: sticker.name,
+            url: sticker.url,
+            format: sticker.format,
+          })),
+        };
+      } catch {
+        return null;
+      }
+    },
+    enqueueEmbedding: async () => {},
+    processImage: async () => {},
+  };
+
+  const context = await buildContext(
+    input.guildId,
+    input.channelId,
+    guild,
+    guildConfig,
+    translatedContent,
+    latestUserMessage,
+    replyFallbackDeps,
+    channel.isThread(),
+    { timestamp: now, messageId },
+  );
+
+  const baseTools = buildAgentTools(
+    input.guildId,
+    input.channelId,
+    guildConfig,
+    guild,
+    context.contextMessageIds,
+    undefined,
+    {
+      requesterId: labUser.id,
+      requesterUsername: labUser.username,
+      sourceMessageId: messageId,
+      sourceQuote: shortQuote(translatedContent),
+    },
+    {},
+  );
+  const threadTools = applyRuntimeToolPrompts([
+    createStartThreadTool({
+      guildId: input.guildId,
+      createThread: (name: string) => Promise.resolve({
+        threadId: promptLabSyntheticId(1000),
+        threadName: name,
+        parentChannelId: input.channelId,
+        starterMessageId: messageId,
+      }),
+      persistThread: () => {},
+    }),
+    createCloseThreadTool({
+      currentGuildId: input.guildId,
+      currentChannelId: input.channelId,
+      currentIsThread: channel.isThread(),
+      lookupThread: (threadId) => {
+        const row = getThread(db, threadId);
+        if (row === null) return null;
+        return {
+          threadId: row.threadId,
+          guildId: row.guildId,
+          threadName: row.threadName,
+          parentChannelId: row.parentChatId,
+          createdByBot: row.createdByBot,
+        };
+      },
+      closeThread: (threadId) => Promise.resolve({
+        threadId,
+        threadName: threadId,
+        parentChannelId: input.channelId,
+      }),
+      persistArchived: () => {},
+    }),
+  ], promptBundle.runtime);
+  const dryRuns: PromptLabDryRun[] = [];
+  const drafts: PromptLabDraftMessage[] = [];
+  const requestLog = new RequestLog(input.guildId, input.channelId, requestLogStore);
+  requestLog.setAuthor(`prompt-lab:${labUser.username}`);
+  requestLog.setTrigger({
+    type: "prompt_lab",
+    mode: "mention",
+    ...(input.runToken !== undefined ? { runToken: input.runToken } : {}),
+  });
+  requestLog.setTriggerContext({
+    ...dashboardTriggerLocation(guild, channel),
+    messageId,
+    authorUsername: labUser.username,
+    content,
+  });
+  requestLog.setAgentRan(true);
+  requestLogStore.incrementActive();
+
+  const sender: MessageSender = (text, reply, destinationChannelId, voice, _signal, replyToMessageId, attachments) => {
+    const id = promptLabSyntheticId(drafts.length + 1);
+    drafts.push({
+      id,
+      text,
+      reply,
+      ...(destinationChannelId !== undefined ? { channelId: destinationChannelId } : {}),
+      ...(replyToMessageId !== undefined ? { replyToMessageId } : {}),
+      attachments: attachments?.map((attachment) => attachment.filename) ?? [],
+      voice: voice !== undefined,
+    });
+    return Promise.resolve({ sentMessageId: id });
+  };
+
+  try {
+    const result = await handleMessage(
+      {
+        content,
+        guildId: input.guildId,
+        guildName: guild.name,
+        channelId: input.channelId,
+        channelName: channelDisplayName(channel),
+        authorId: labUser.id,
+        authorUsername: labUser.username,
+        authorDisplayName: labUser.displayName,
+        authorGlobalName: labUser.globalName,
+        authorIsBot: false,
+        botUserId,
+        mentionedUserIds: [botUserId],
+        translatedContent,
+        messageId,
+      },
+      {
+        globalConfig,
+        guildConfig,
+        context,
+        currentChannelId: input.channelId,
+        personaPrompt: promptBundle.corePrompt,
+        runtimePrompts: promptBundle.runtime,
+        sender,
+        extraTools: promptLabDryRunTools([...baseTools, ...threadTools], dryRuns),
+        log: log.child({ guildId: input.guildId, channelId: input.channelId, requestId: requestLog.requestId, component: "prompt-lab" }),
+        requestLog,
+        triggerOverride: { reason: "mention" },
+        triggerInstructions: guildConfig.triggerInstructions,
+        liveMessageTypingHoldMs: 0,
+        modelImageInputSupport: getModelImageInputSupport(guildConfig),
+        consumeGeneratedAttachments: () => [],
+        resolveImageAttachments: () => Promise.resolve([]),
+      },
+    );
+    const entry = requestLog.toEntry();
+    const summary = promptLabSummary(entry);
+    return {
+      requestId: requestLog.requestId,
+      triggered: result.triggered,
+      ...(result.responseText !== undefined ? { responseText: result.responseText } : {}),
+      drafts,
+      dryRuns,
+      ...summary,
+    };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    requestLog.setError(error);
+    const entry = requestLog.toEntry();
+    const summary = promptLabSummary(entry);
+    return {
+      requestId: requestLog.requestId,
+      triggered: true,
+      drafts,
+      dryRuns,
+      ...summary,
+      error,
+    };
+  } finally {
+    requestLog.emit(log);
+    requestLogStore.decrementActive();
+  }
+}
+
 const dashboardPassword = process.env.DASHBOARD_PASSWORD;
 const bypassDashboardAuth = process.env.UNSAFELY_BYPASS_DASHBOARD_AUTH === "true";
 const dashboardPasswordlessCidrs = parseDashboardPasswordlessCidrs(process.env.DASHBOARD_PASSWORDLESS_CIDRS);
 const dashboardTrustedProxyCidrs = parseDashboardPasswordlessCidrs(process.env.DASHBOARD_TRUSTED_PROXY_CIDRS);
+const dashboardManagement = {
+  getDirectory: buildManagementDirectory,
+  listMessages: (filter: { guildId?: string; channelId?: string; limit?: number }) => ({
+    messages: listManagementMessages(db, filter).map(decorateManagementMessage),
+  }),
+  editMessage: editManagementMessageState,
+  deleteMessages: deleteManagementMessageState,
+  deleteLatestMessages: deleteLatestManagementMessages,
+  runPromptLab,
+  listMemories: (filter: { guildId?: string; scope?: "guild" | "user" | "self"; includeDeleted?: boolean; limit?: number }) => ({
+    memories: listManagementMemories(db, filter).map(decorateManagementMemory),
+  }),
+  editMemory: editManagementMemoryState,
+  deleteMemory: deleteManagementMemoryState,
+};
 if (bypassDashboardAuth) {
-  startDashboard({ port: 3000, password: "", bypassAuth: true, log });
+  startDashboard({ port: 3000, password: "", bypassAuth: true, management: dashboardManagement, log });
   log.warn("dashboard started with auth bypass — do not use in production");
 } else if (dashboardPassword !== undefined && dashboardPassword !== "") {
   startDashboard({
@@ -3961,6 +4610,7 @@ if (bypassDashboardAuth) {
     password: dashboardPassword,
     passwordlessCidrs: dashboardPasswordlessCidrs,
     trustedProxyCidrs: dashboardTrustedProxyCidrs,
+    management: dashboardManagement,
     log,
   });
 } else {

@@ -1,6 +1,7 @@
 import { requestLogStore } from "./store";
 import type { Logger } from "../logger";
 import dashboard from "./index.html";
+import type { ManagementDirectory } from "./management";
 
 const DASHBOARD_LOG_ENTRY_LIMIT = 100;
 
@@ -10,10 +11,32 @@ interface DashboardOptions {
   bypassAuth?: boolean;
   passwordlessCidrs?: string[];
   trustedProxyCidrs?: string[];
+  management?: DashboardManagementApi;
   log?: Logger;
 }
 
 const sessions = new Set<string>();
+
+type DashboardManagementResult = object;
+type AwaitableDashboardManagementResult = DashboardManagementResult | Promise<DashboardManagementResult>;
+
+interface DashboardManagementApi {
+  getDirectory: () => ManagementDirectory;
+  listMessages: (filter: { guildId?: string; channelId?: string; limit?: number }) => AwaitableDashboardManagementResult;
+  editMessage: (input: { messageId: string; guildId: string; channelId: string; content: string }) => AwaitableDashboardManagementResult;
+  deleteMessages: (input: { messageIds: string[]; guildId: string; channelId: string; deleteDiscord?: boolean }) => AwaitableDashboardManagementResult;
+  deleteLatestMessages: (input: { guildId: string; channelId: string; count: number; deleteDiscord?: boolean }) => AwaitableDashboardManagementResult;
+  runPromptLab: (input: { guildId: string; channelId: string; userId: string; content: string; runToken?: string }) => AwaitableDashboardManagementResult;
+  listMemories: (filter: { guildId?: string; scope?: "guild" | "user" | "self"; includeDeleted?: boolean; limit?: number }) => AwaitableDashboardManagementResult;
+  editMemory: (input: {
+    memoryId: number;
+    content?: string;
+    kind?: string;
+    confidence?: number;
+    expiresAt?: number | null;
+  }) => AwaitableDashboardManagementResult;
+  deleteMemory: (memoryId: number) => AwaitableDashboardManagementResult;
+}
 
 function generateToken(): string {
   return crypto.randomUUID() + crypto.randomUUID();
@@ -157,6 +180,37 @@ function json(data: unknown, status = 200, headers: Record<string, string> = {})
   });
 }
 
+async function readJsonObject(req: Request): Promise<Record<string, unknown>> {
+  const body: unknown = await req.json().catch((): null => null);
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    throw new Error("Request body must be a JSON object.");
+  }
+  return body as Record<string, unknown>;
+}
+
+function optionalStringParam(url: URL, name: string): string | undefined {
+  const value = url.searchParams.get(name);
+  return value !== null && value.trim() !== "" ? value.trim() : undefined;
+}
+
+function optionalNumberParam(url: URL, name: string): number | undefined {
+  const value = url.searchParams.get(name);
+  if (value === null || value.trim() === "") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function optionalBooleanParam(url: URL, name: string): boolean | undefined {
+  const value = url.searchParams.get(name);
+  if (value === null || value.trim() === "") return undefined;
+  return value === "true" || value === "1";
+}
+
+function optionalManagementScope(url: URL): "guild" | "user" | "self" | undefined {
+  const value = optionalStringParam(url, "scope");
+  return value === "guild" || value === "user" || value === "self" ? value : undefined;
+}
+
 function requestLogFilters(req: Request): { guildId?: string; channelId?: string; authorUsername?: string } {
   const url = new URL(req.url);
   const filters: { guildId?: string; channelId?: string; authorUsername?: string } = {};
@@ -170,7 +224,7 @@ function requestLogFilters(req: Request): { guildId?: string; channelId?: string
 }
 
 export function startDashboard(opts: DashboardOptions): void {
-  const { port, password, bypassAuth = false, passwordlessCidrs = [], trustedProxyCidrs = [], log } = opts;
+  const { port, password, bypassAuth = false, passwordlessCidrs = [], trustedProxyCidrs = [], management, log } = opts;
 
   function requestSocketAddress(req: Request): string | undefined {
     return server.requestIP(req)?.address;
@@ -239,6 +293,192 @@ export function startDashboard(opts: DashboardOptions): void {
         const denied = requireAuth(req);
         if (denied !== null) return denied;
         return json({ activeRequests: requestLogStore.getActiveCount() });
+      },
+
+      "/api/management/directory": (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+        return json(management.getDirectory());
+      },
+
+      "/api/management/messages": async (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+        const url = new URL(req.url);
+        return json(await management.listMessages({
+          guildId: optionalStringParam(url, "guildId"),
+          channelId: optionalStringParam(url, "channelId"),
+          limit: optionalNumberParam(url, "limit"),
+        }));
+      },
+
+      "/api/management/messages/:messageId": {
+        PATCH: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          try {
+            const body = await readJsonObject(req);
+            const guildId = typeof body.guildId === "string" ? body.guildId.trim() : "";
+            const channelId = typeof body.channelId === "string" ? body.channelId.trim() : "";
+            const content = typeof body.content === "string" ? body.content : "";
+            if (guildId === "" || channelId === "" || content.trim() === "") {
+              return json({ error: "messageId, guildId, channelId, and non-empty content are required." }, 400);
+            }
+            return json(await management.editMessage({
+              messageId: req.params.messageId,
+              guildId,
+              channelId,
+              content,
+            }));
+          } catch (err) {
+            return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+          }
+        },
+        DELETE: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          const url = new URL(req.url);
+          const guildId = optionalStringParam(url, "guildId");
+          const channelId = optionalStringParam(url, "channelId");
+          if (guildId === undefined || channelId === undefined) {
+            return json({ error: "guildId and channelId are required." }, 400);
+          }
+          return json(await management.deleteMessages({
+            messageIds: [req.params.messageId],
+            guildId,
+            channelId,
+            deleteDiscord: optionalBooleanParam(url, "deleteDiscord") === true,
+          }));
+        },
+      },
+
+      "/api/management/messages/delete-latest": {
+        POST: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          try {
+            const body = await readJsonObject(req);
+            const guildId = typeof body.guildId === "string" ? body.guildId.trim() : "";
+            const channelId = typeof body.channelId === "string" ? body.channelId.trim() : "";
+            const count = typeof body.count === "number" ? body.count : Number(body.count);
+            if (guildId === "" || channelId === "" || !Number.isFinite(count)) {
+              return json({ error: "guildId, channelId, and count are required." }, 400);
+            }
+            return json(await management.deleteLatestMessages({
+              guildId,
+              channelId,
+              count,
+              deleteDiscord: body.deleteDiscord === true,
+            }));
+          } catch (err) {
+            return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+          }
+        },
+      },
+
+      "/api/management/messages/delete-selected": {
+        POST: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          try {
+            const body = await readJsonObject(req);
+            const guildId = typeof body.guildId === "string" ? body.guildId.trim() : "";
+            const channelId = typeof body.channelId === "string" ? body.channelId.trim() : "";
+            const messageIds = Array.isArray(body.messageIds)
+              ? body.messageIds.filter((id): id is string => typeof id === "string" && id.trim() !== "")
+              : [];
+            if (guildId === "" || channelId === "" || messageIds.length === 0) {
+              return json({ error: "guildId, channelId, and messageIds are required." }, 400);
+            }
+            return json(await management.deleteMessages({
+              guildId,
+              channelId,
+              messageIds,
+              deleteDiscord: body.deleteDiscord === true,
+            }));
+          } catch (err) {
+            return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+          }
+        },
+      },
+
+      "/api/management/prompt-lab/run": {
+        POST: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          try {
+            const body = await readJsonObject(req);
+            const guildId = typeof body.guildId === "string" ? body.guildId.trim() : "";
+            const channelId = typeof body.channelId === "string" ? body.channelId.trim() : "";
+            const userId = typeof body.userId === "string" ? body.userId.trim() : "";
+            const content = typeof body.content === "string" ? body.content.trim() : "";
+            const runToken = typeof body.runToken === "string" ? body.runToken.trim() : "";
+            if (guildId === "" || channelId === "" || userId === "" || content === "") {
+              return json({ error: "guildId, channelId, userId, and non-empty content are required." }, 400);
+            }
+            return json(await management.runPromptLab({
+              guildId,
+              channelId,
+              userId,
+              content,
+              ...(runToken !== "" ? { runToken } : {}),
+            }));
+          } catch (err) {
+            return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+          }
+        },
+      },
+
+      "/api/management/memories": async (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+        const url = new URL(req.url);
+        return json(await management.listMemories({
+          guildId: optionalStringParam(url, "guildId"),
+          scope: optionalManagementScope(url),
+          includeDeleted: optionalBooleanParam(url, "includeDeleted"),
+          limit: optionalNumberParam(url, "limit"),
+        }));
+      },
+
+      "/api/management/memories/:memoryId": {
+        PATCH: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          try {
+            const memoryId = Number(req.params.memoryId);
+            if (!Number.isInteger(memoryId) || memoryId <= 0) return json({ error: "Valid memoryId is required." }, 400);
+            const body = await readJsonObject(req);
+            return json(await management.editMemory({
+              memoryId,
+              ...(typeof body.content === "string" ? { content: body.content } : {}),
+              ...(typeof body.kind === "string" ? { kind: body.kind } : {}),
+              ...(typeof body.confidence === "number" ? { confidence: body.confidence } : {}),
+              ...("expiresAt" in body && (typeof body.expiresAt === "number" || body.expiresAt === null)
+                ? { expiresAt: body.expiresAt }
+                : {}),
+            }));
+          } catch (err) {
+            return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+          }
+        },
+        DELETE: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          const memoryId = Number(req.params.memoryId);
+          if (!Number.isInteger(memoryId) || memoryId <= 0) return json({ error: "Valid memoryId is required." }, 400);
+          return json(await management.deleteMemory(memoryId));
+        },
       },
 
       "/": {

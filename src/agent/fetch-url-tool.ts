@@ -386,9 +386,8 @@ async function fetchManual(
   // Parse and extract
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const { document } = parseHTML(html);
-  // Readability expects DOM Document; linkedom's document is runtime-compatible but differently typed
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const reader = new Readability(document as any);
+  // Readability expects DOM Document; linkedom's document is runtime-compatible but differently typed.
+  const reader = new Readability(document as unknown as Document);
   const article = reader.parse();
 
   if (article === null) {
