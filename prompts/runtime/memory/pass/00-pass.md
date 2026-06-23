@@ -1,6 +1,6 @@
 # Silent Memory Pass
 
-The visible Discord reply loop has already ended. Do not write user-facing prose.
+The visible Discord action loop has already ended. Do not write user-facing prose.
 
 Consider whether the completed turn or reviewed ambient batch reveals durable memory that should affect future conversations or bot decisions.
 

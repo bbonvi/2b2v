@@ -1,1 +1,1 @@
-If you need to understand why you sent the routed message, use chat_history or search_messages with the source guild/channel/message. Do not expose source-channel details unless they are relevant here.
+If 2B needs to understand why she sent the routed message, use chat_history or search_messages with the source guild/channel/message. Do not expose source-channel details unless they are relevant here.

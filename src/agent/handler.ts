@@ -660,7 +660,7 @@ function hasProgressWorthyToolCall(calls: OpenRouterToolCall[]): boolean {
 function buildRuntimeInstruction(runtimePrompts: RuntimePromptBundle | undefined): string {
   const external = runtimePrompts?.reply.trim() ?? "";
   if (external !== "") return external;
-  return "## Runtime\nSpeak directly in Discord as the persona and use tools only when useful.";
+  return "## Runtime\n2B is present in this Discord room. Given the room state and new event, produce 2B's next action and use tools only when useful.";
 }
 
 function buildSkillsInstruction(runtimePrompts: RuntimePromptBundle | undefined): string {
@@ -816,7 +816,7 @@ function buildCurrentMessageMetadata(msg: IncomingMessage, runtimePrompts?: Runt
     lines.push(`Trigger ReplyToMsgID: ${msg.replyToMessageId}`);
   }
   if (msg.repliedToBotRouteSource !== undefined) {
-    lines.push("Reply Context: The user is replying to a message you previously sent here from another channel.");
+    lines.push("Reply Context: The current event replies to a message 2B previously sent here from another channel.");
     lines.push(`Source GuildID: ${msg.repliedToBotRouteSource.sourceGuildId}`);
     lines.push(`Source ChannelID: ${msg.repliedToBotRouteSource.sourceChannelId}`);
     lines.push(`Source MsgID: ${msg.repliedToBotRouteSource.sourceMessageId}`);
@@ -828,7 +828,7 @@ function buildCurrentMessageMetadata(msg: IncomingMessage, runtimePrompts?: Runt
         sourceChannelId: msg.repliedToBotRouteSource.sourceChannelId,
         sourceMessageId: msg.repliedToBotRouteSource.sourceMessageId,
       },
-      "Use chat history/search if source context is needed; do not expose source-channel details unless relevant.",
+      "Use chat history/search if source context is needed for 2B's next action; do not expose source-channel details unless relevant.",
     ));
   }
   return lines.join("\n");
@@ -876,7 +876,7 @@ function buildInitialMessages(
   const text = [
       currentMessageMetadata,
       imageMetadata !== "" ? `## Current Turn Images\n${imageMetadata}` : "",
-      "## Current User Message",
+      "## Current Discord Event",
       userContent,
   ].filter((part) => part !== "").join("\n\n");
   const images = imagePartsFromCurrentTurn(msg);
@@ -2138,10 +2138,10 @@ function buildMemoryPassRuntimeInstruction(
     return [
       passPrompt !== "" ? passPrompt : "## Silent Memory Pass",
       passKind === "ambient"
-        ? "This is an automatic ambient memory pass over ordinary channel chatter, without a visible Discord reply loop."
-        : "This is a post-reply memory pass over one completed visible Discord turn.",
+        ? "This is an automatic ambient memory pass over ordinary channel chatter, without a visible Discord action loop."
+        : "This is a post-action memory pass over one completed visible Discord turn.",
       passKind === "ambient"
-        ? "Be stricter than a post-reply pass because nobody asked the bot to remember this chatter."
+        ? "Be stricter than a post-action pass because nobody asked 2B to remember this chatter."
         : "",
       memoryPolicy,
     ].filter((line) => line !== "").join("\n");
@@ -2179,8 +2179,8 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
         "Review ambient chat history for durable memory.",
       )
       : input.visibleReplySent
-        ? `Visible bot reply already sent:\n${input.assistantReply !== "" ? input.assistantReply : "(empty)"}`
-        : "No visible bot reply was sent for this turn.",
+        ? `Visible 2B action already sent:\n${input.assistantReply !== "" ? input.assistantReply : "(empty)"}`
+        : "No visible 2B action was sent for this turn.",
     "",
     runtimeContextTemplate(
       input.runtimePrompts,

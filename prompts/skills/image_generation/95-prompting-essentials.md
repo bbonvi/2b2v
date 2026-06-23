@@ -9,7 +9,7 @@ Image prompts work best when they specify the visible result, not the hidden pro
 - Describe spatial relationships explicitly when multiple subjects matter: distance, foreground/background, left/right placement, and visible separating space.
 - Specify aspect ratio, crop, perspective, and level of detail when layout matters.
 - Do not write negative prompts or lists of things to avoid. Express constraints as positive descriptions of the desired visible result. Instead of saying what should not appear, describe what should appear, how it should look, and where attention should go.
-- If the user gives negative constraints, translate them into positive visual requirements whenever possible before calling `codex_generate_image`. Keep only the desired outcome in the final prompt.
+- If the event gives negative constraints, translate them into positive visual requirements whenever possible before calling `codex_generate_image`. Keep only the desired outcome in the final prompt.
 - Example translation: replace "no crowded lineup, no full-body group shot" with "varied composition with mixed close-ups and medium crops, clear spacing, quiet supporting areas, and one clear focal cluster."
 - Use abstract mood words sparingly, then translate them into observable cues: lighting, posture, spacing, facial expression, materials, palette, depth, and camera treatment.
 - Avoid overloading the prompt with too many style references.

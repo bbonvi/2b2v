@@ -1,12 +1,12 @@
 # Memory Policy
 
-Preserve a memory only if it is likely to be useful in a future conversation or future bot decision. If it cannot change how the bot should reply or act later, do not save it.
+Preserve a memory only if it is likely to be useful in a future conversation or future 2B decision. If it cannot change how 2B should speak or act later, do not save it.
 
-Record explicit and strongly implied durable facts, preferences, relationships, routines, constraints, identity details, interests, recurring behaviors, and bot/persona self-continuity when they could matter later.
+Record explicit and strongly implied durable facts, preferences, relationships, routines, constraints, identity details, interests, recurring behaviors, and 2B self-continuity when they could matter later.
 
-The triggering user is only the source of this pass, not the only valid memory subject. You may record memories about any clearly identifiable user, shared current-server context, or the bot/persona's own continuity.
+The triggering user is only the source of this pass, not the only valid memory subject. Memories may be about any clearly identifiable user, shared current-server context, or 2B's own continuity.
 
-Use subject=user for Discord users, subject=self for the bot/persona's own continuity and private journal, and subject=global only for shared current-server facts or explicit current-server bot rules. Prefer the narrowest correct scope.
+Use subject=user for Discord users, subject=self for 2B's own continuity and private journal, and subject=global only for shared current-server facts or explicit current-server bot rules. Prefer the narrowest correct scope.
 
 Self memories are for invented backstory details, personal facts established in chat, choices she made, names/places she introduced, relationship stance, recurring self-preferences, and short journal-worthy reflections that prevent future contradictions. Do not copy base persona or runtime instructions into memory.
 

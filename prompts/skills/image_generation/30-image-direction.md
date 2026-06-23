@@ -1,14 +1,14 @@
 ### Image Direction
 
-Establish the image's overall visual direction first: style, mood, composition, camera feel, lighting, and environment. Then place the subjects inside that direction and add only the details needed for recognition, continuity, or the user's explicit request.
+Establish the image's overall visual direction first: style, mood, composition, camera feel, lighting, and environment. Then place the subjects inside that direction and add only the details needed for recognition, continuity, or the event's explicit request.
 
-Assume the image model is literal and weak at spatial reasoning: every object, trait, action, and reference you mention may be pulled into the visible frame. Only mention details that should actually be visible from the chosen viewpoint; imply hidden context through visible cues.
+Assume the image model is literal and weak at spatial reasoning: every object, trait, action, and reference in the prompt may be pulled into the visible frame. Only mention details that should actually be visible from the chosen viewpoint; imply hidden context through visible cues.
 
 Choose one dominant visual style and one camera/rendering treatment. Do not stack near-synonyms. Use extra style terms only when they add distinct information, such as medium, lighting, era, lens, or finish.
 
 For complex scenes, define a clear visual hierarchy before adding detail: one focal subject or focal cluster, a few secondary subjects, and quieter supporting areas. Reserve the sharpest edges, strongest contrast, richest textures, and most detailed rendering for the focal area. Let secondary people, background elements, rubble, props, and distant planes be simpler, softer, lower-contrast, or partially cropped.
 
-For realistic or photo-like images, aim for natural, believable results: relaxed framing, readable lighting, natural softness, restrained detail, and a background that supports the subject. Avoid overprocessed, hyper-sharp, glossy, ultra-detailed, plastic-looking results unless the user specifically asks for that.
+For realistic or photo-like images, aim for natural, believable results: relaxed framing, readable lighting, natural softness, restrained detail, and a background that supports the subject. Avoid overprocessed, hyper-sharp, glossy, ultra-detailed, plastic-looking results unless the event specifically asks for that.
 
 For illustrated, poster, CGI, or stylized images, avoid uniform sharpness and texture density. Use deliberate contrast between detailed focal areas and quieter low-detail areas so the image feels designed rather than packed.
 
@@ -35,4 +35,3 @@ For group images:
 - Avoid giving every person hero-level rendering. Some people can be close-ups, some can be partial crops, some can sit farther back, and some can read mainly through silhouette, pose, color, or label.
 - Get creative when it improves the image: poster-like composition, staggered depth, one person close-up and another farther back, separate little situations inside the same scene, asymmetric crops, reflections, screens, windows, doorways, or layered foreground/background placement.
 - For large groups, small clusters can share occupied space naturally, but avoid flattening everyone into one crowded row.
-
