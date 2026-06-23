@@ -18,7 +18,7 @@ import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine"
 import { handleMessage, runSilentMemoryAgentPass, type ImageAttachmentResolver, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
 import { shouldRespond, type TriggerResult } from "./agent/triggers";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
-import { createChannelDispatcher, selectDispatchMessageForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
+import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
 import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, deleteRecentMessages, upsertMessageReaction, deleteMessageReactions, deleteMessageEmojiReaction, upsertBotMessageContent, deleteBotMessageState, getRoutedMessageSource, getLatestMessageActivityBefore, type MessageActivity, type RoutedMessageSource } from "./db/message-repository";
@@ -2026,17 +2026,27 @@ function elapsedLine(label: string, activity: MessageActivity | null, now: numbe
   return `${label}: ${formatElapsedDuration(activity.createdAt, now)}`;
 }
 
+interface CurrentTurnBoundary {
+  timestamp: number;
+  messageId: string;
+}
+
 function buildTemporalContext(input: {
   guildId: string;
   channelId: string;
   timezone: string;
   latestUserMessage: HistoryMessage;
+  currentTurnBoundary?: CurrentTurnBoundary;
 }): string {
   const now = Date.now();
   const botUserId = client.user?.id;
+  const currentTurnBoundary = input.currentTurnBoundary ?? {
+    timestamp: input.latestUserMessage.timestamp,
+    messageId: input.latestUserMessage.id,
+  };
   const before = {
-    beforeCreatedAt: input.latestUserMessage.timestamp,
-    beforeMessageId: input.latestUserMessage.id,
+    beforeCreatedAt: currentTurnBoundary.timestamp,
+    beforeMessageId: currentTurnBoundary.messageId,
   };
   const previousChannelMessage = getLatestMessageActivityBefore(db, {
     ...before,
@@ -2091,6 +2101,7 @@ async function buildContext(
   latestUserMessage: HistoryMessage,
   replyFallbackDeps: ReplyFallbackDeps,
   isThread: boolean,
+  currentTurnBoundary?: CurrentTurnBoundary,
 ): Promise<AssembledContext> {
   // Chat history via the full processing pipeline
   const visibleJobs = agentJobs.listVisible(guildId, channelId);
@@ -2180,6 +2191,7 @@ async function buildContext(
     channelId,
     timezone: guildConfig.timezone,
     latestUserMessage,
+    currentTurnBoundary,
   });
 
   if (liveChannel !== null && isSendableGuildChannel(liveChannel) && liveChannel.isThread()) {
@@ -3047,7 +3059,9 @@ function getOrCreateDispatcher(guildId: string): ChannelDispatcher {
       if (trigger === null) return { coveredMessageIds: [] };
       const selected = selectDispatchMessageForTrigger(batch, trigger);
       if (selected === undefined) return { coveredMessageIds: [] };
-      return processTriggeredMessage(selected.message as Message, trigger.result);
+      const currentTurnMessages = selectDispatchMessagesForTrigger(batch, trigger)
+        .map((pending) => pending.message as Message);
+      return processTriggeredMessage(selected.message as Message, trigger.result, currentTurnMessages);
     },
   });
   dispatchers.set(guildId, dispatcher);
@@ -3077,6 +3091,7 @@ function sendTypingForMessage(message: Message): void {
 async function processTriggeredMessage(
   message: Message,
   triggerOverride?: NonNullable<TriggerResult>,
+  currentTurnMessages: readonly Message[] = [message],
 ): Promise<DispatchOutcome> {
   if (message.guild === null || message.guildId === null) return { coveredMessageIds: [] };
   const guild = message.guild;
@@ -3115,7 +3130,18 @@ async function processTriggeredMessage(
     });
 
     const ingestedImages = getImagesByMessageId(db, message.id);
-    const now = Date.now();
+    const currentTurnBoundary = currentTurnMessages.reduce<CurrentTurnBoundary>(
+      (earliest, current) => {
+        if (
+          current.createdTimestamp < earliest.timestamp ||
+          (current.createdTimestamp === earliest.timestamp && current.id < earliest.messageId)
+        ) {
+          return { timestamp: current.createdTimestamp, messageId: current.id };
+        }
+        return earliest;
+      },
+      { timestamp: message.createdTimestamp, messageId: message.id },
+    );
     const repliedToBotRouteSource = message.reference?.messageId !== undefined
       ? getRoutedMessageSource(db, {
           messageId: message.reference.messageId,
@@ -3130,7 +3156,7 @@ async function processTriggeredMessage(
       authorId: message.author.id,
       content: translatedContent,
       isBot: false,
-      timestamp: now,
+      timestamp: message.createdTimestamp,
       replyToId: message.reference?.messageId ?? null,
       imageIds: ingestedImages.map((img) => img.id),
       captions: ingestedImages.map((img) => img.caption ?? ""),
@@ -3192,7 +3218,17 @@ async function processTriggeredMessage(
     };
 
     const isThread = message.channel.isThread();
-    const context = await buildContext(guildId, channelId, guild, guildConfig, translatedContent, latestUserMessage, replyFallbackDeps, isThread);
+    const context = await buildContext(
+      guildId,
+      channelId,
+      guild,
+      guildConfig,
+      translatedContent,
+      latestUserMessage,
+      replyFallbackDeps,
+      isThread,
+      currentTurnBoundary,
+    );
 
     const startThreadTool = createStartThreadTool({
       guildId,
@@ -3639,14 +3675,16 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
       message.stickers.values(),
     );
 
-    // Store message in SQLite
+    // Store message in SQLite using Discord time so prompt-history lookups can
+    // exclude the current turn precisely.
+    const messageCreatedAt = message.createdTimestamp;
     const now = Date.now();
     db.raw
       .prepare(
         `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(message.id, guildId, channelId, message.author.id, message.author.username, message.content, translatedContent, 0, now, message.reference?.messageId ?? null);
+      .run(message.id, guildId, channelId, message.author.id, message.author.username, message.content, translatedContent, 0, messageCreatedAt, message.reference?.messageId ?? null);
 
     // Enqueue for embedding
     void embeddingQueue.enqueue({
@@ -3657,7 +3695,7 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
         guild_id: guildId,
         channel_id: channelId,
         user_id: message.author.id,
-        created_at: now,
+        created_at: messageCreatedAt,
         is_bot: false,
         source: "live",
         embedding_kind: "single",
@@ -3672,7 +3710,7 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
     // Update thread activity if message is in a thread
     if (message.channel.isThread()) {
       const updated = updateThreadActivity(db, channelId, {
-        lastActivityAt: now,
+        lastActivityAt: messageCreatedAt,
         lastMessageId: message.id,
         archivedAt: message.channel.archived === true ? now : null,
       });
@@ -3684,7 +3722,7 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
           starterMessageId: channelId,
           threadName: message.channel.name,
           createdAt: message.channel.createdTimestamp ?? now,
-          lastActivityAt: now,
+          lastActivityAt: messageCreatedAt,
           lastMessageId: message.id,
           messageCount: message.channel.messageCount ?? 1,
           createdByBot: message.channel.ownerId === client.user?.id,

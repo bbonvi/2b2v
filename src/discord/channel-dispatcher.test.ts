@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { createChannelDispatcher, selectDispatchMessageForTrigger, type PendingMessage, type DispatchHandler, type ChannelDispatcher } from "./channel-dispatcher";
+import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type PendingMessage, type DispatchHandler, type ChannelDispatcher } from "./channel-dispatcher";
 import type { TriggerResult } from "../agent/triggers.ts";
 import type { DispatcherConfig, TriggerConfig } from "../config/types";
 
@@ -79,6 +79,18 @@ describe("createChannelDispatcher", () => {
     );
 
     expect(selected?.id).toBe("m-followup");
+  });
+
+  test("selects the current same-author debounce group for mention follow-up turns", () => {
+    const before = makePending("m-before", "user-2", null, 999);
+    const mentioned = makePending("m-mentioned", "user-1", { reason: "mention" }, 1000);
+    const followup = makePending("m-followup", "user-1", null, 1001);
+    const selected = selectDispatchMessagesForTrigger(
+      [before, mentioned, followup],
+      { result: { reason: "mention" }, message: mentioned },
+    );
+
+    expect(selected.map((message) => message.id)).toEqual(["m-mentioned", "m-followup"]);
   });
 
   test("selects the randomly triggered message instead of latest batch message", () => {

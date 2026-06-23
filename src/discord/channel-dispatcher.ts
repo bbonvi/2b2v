@@ -110,6 +110,28 @@ export function selectDispatchMessageForTrigger(
   return trigger.message;
 }
 
+/**
+ * Return the messages that belong to the current agent turn for a selected
+ * trigger. Mention/keyword turns include same-author followups that were held
+ * by the debounce window; random turns stay pinned to the triggering message.
+ */
+export function selectDispatchMessagesForTrigger(
+  batch: readonly PendingMessage[],
+  trigger: SelectedDispatchTrigger,
+): PendingMessage[] {
+  const selected = selectDispatchMessageForTrigger(batch, trigger);
+  if (selected === undefined) return [];
+  if (!allowsSameAuthorFollowup(trigger.result)) return [trigger.message];
+
+  const triggerIndex = batch.findIndex((message) => message.id === trigger.message.id);
+  const selectedIndex = batch.findIndex((message) => message.id === selected.id);
+  if (triggerIndex === -1 || selectedIndex === -1) return [selected];
+
+  return batch
+    .slice(Math.min(triggerIndex, selectedIndex), Math.max(triggerIndex, selectedIndex) + 1)
+    .filter((message) => message.authorId === trigger.message.authorId);
+}
+
 function takeNextDispatchBatch(state: ChannelState): {
   batch: PendingMessage[];
   trigger: SelectedDispatchTrigger | null;
