@@ -17,6 +17,14 @@ import type {
   DispatcherConfig,
   AgentJobsConfig,
   PromptCachingConfig,
+  PromptTransportConfig,
+  PromptTransportConfigYaml,
+  ProviderPromptTransportConfigYaml,
+  CodexPromptTransportMode,
+  PromptTransportRole,
+  PromptTransportSectionConfig,
+  PromptTransportSectionId,
+  PromptTransportTarget,
   BackgroundLlmConfig,
   BackgroundLlmDefaults,
   ImageReadingConfig,
@@ -190,11 +198,161 @@ const DEFAULT_REPLY_LOOP: ReplyLoopConfig = {
   llmOutputTimeoutMs: 12_000,
 };
 
+const PROMPT_TRANSPORT_SECTION_IDS: readonly PromptTransportSectionId[] = [
+  "core",
+  "skills",
+  "runtime",
+  "stableContext",
+  "olderHistory",
+  "serverMembers",
+  "threadsInChannel",
+  "discordContext",
+  "upcomingSchedules",
+  "memories",
+  "recentHistory",
+  "currentContext",
+  "responseInstruction",
+  "currentTurn",
+] as const;
+
+const DEFAULT_PROMPT_TRANSPORT: PromptTransportConfig = {
+  openaiCodex: {
+    mode: "split-input",
+    sections: {
+      core: { role: "developer", target: "input", cacheGroup: "core" },
+      skills: { role: "developer", target: "input", cacheGroup: "runtime" },
+      runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
+      stableContext: { role: "user", target: "input", cacheGroup: "stable-context" },
+      olderHistory: { role: "user", target: "input", cacheGroup: "older-history" },
+      serverMembers: { role: "user", target: "input" },
+      threadsInChannel: { role: "user", target: "input" },
+      discordContext: { role: "user", target: "input" },
+      upcomingSchedules: { role: "user", target: "input" },
+      memories: { role: "user", target: "input" },
+      recentHistory: { role: "user", target: "input" },
+      currentContext: { role: "user", target: "input" },
+      responseInstruction: { role: "developer", target: "input" },
+      currentTurn: { role: "user", target: "input" },
+    },
+  },
+  openrouter: {
+    mode: "split-input",
+    sections: {
+      core: { role: "developer", target: "input", cacheGroup: "core" },
+      skills: { role: "developer", target: "input", cacheGroup: "runtime" },
+      runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
+      stableContext: { role: "user", target: "input", cacheGroup: "stable-context" },
+      olderHistory: { role: "user", target: "input", cacheGroup: "older-history" },
+      serverMembers: { role: "user", target: "input" },
+      threadsInChannel: { role: "user", target: "input" },
+      discordContext: { role: "user", target: "input" },
+      upcomingSchedules: { role: "user", target: "input" },
+      memories: { role: "user", target: "input" },
+      recentHistory: { role: "user", target: "input" },
+      currentContext: { role: "user", target: "input" },
+      responseInstruction: { role: "developer", target: "input" },
+      currentTurn: { role: "user", target: "input" },
+    },
+  },
+};
+
 function resolveGlobalPromptCaching(
   partial: MainConfigYaml["promptCaching"] | undefined
 ): PromptCachingConfig {
   return {
     enabled: partial?.enabled ?? DEFAULT_PROMPT_CACHING.enabled,
+  };
+}
+
+function clonePromptTransport(config: PromptTransportConfig): PromptTransportConfig {
+  return {
+    openaiCodex: {
+      mode: config.openaiCodex.mode,
+      sections: Object.fromEntries(
+        PROMPT_TRANSPORT_SECTION_IDS.map((id) => [id, { ...config.openaiCodex.sections[id] }]),
+      ) as Record<PromptTransportSectionId, PromptTransportSectionConfig>,
+    },
+    openrouter: {
+      mode: config.openrouter.mode,
+      sections: Object.fromEntries(
+        PROMPT_TRANSPORT_SECTION_IDS.map((id) => [id, { ...config.openrouter.sections[id] }]),
+      ) as Record<PromptTransportSectionId, PromptTransportSectionConfig>,
+    },
+  };
+}
+
+function parsePromptTransportRole(value: unknown, key: string): PromptTransportRole | undefined {
+  if (value === undefined) return undefined;
+  if (value === "system" || value === "developer" || value === "user") return value;
+  throw new Error(`${key} must be "system", "developer", or "user"`);
+}
+
+function parsePromptTransportTarget(value: unknown, key: string): PromptTransportTarget | undefined {
+  if (value === undefined) return undefined;
+  if (value === "instructions" || value === "input") return value;
+  throw new Error(`${key} must be "instructions" or "input"`);
+}
+
+function parseCodexPromptTransportMode(value: unknown, key: string): CodexPromptTransportMode | undefined {
+  if (value === undefined) return undefined;
+  if (value === "legacy-instructions" || value === "split-input") return value;
+  throw new Error(`${key}.mode must be "legacy-instructions" or "split-input"`);
+}
+
+function validatePromptTransportSectionKeys(
+  sections: ProviderPromptTransportConfigYaml["sections"] | undefined,
+  key: string,
+): void {
+  if (sections === undefined) return;
+  const allowed = new Set<string>(PROMPT_TRANSPORT_SECTION_IDS);
+  for (const sectionId of Object.keys(sections)) {
+    if (!allowed.has(sectionId)) {
+      throw new Error(`${key}.sections.${sectionId} is not a known prompt transport section`);
+    }
+  }
+}
+
+function resolveProviderPromptTransport(
+  base: PromptTransportConfig["openaiCodex"],
+  partial: ProviderPromptTransportConfigYaml | undefined,
+  key: string,
+): PromptTransportConfig["openaiCodex"] {
+  validatePromptTransportSectionKeys(partial?.sections, key);
+  const sections = Object.fromEntries(
+    PROMPT_TRANSPORT_SECTION_IDS.map((id) => {
+      const baseSection = base.sections[id];
+      const partialSection = partial?.sections?.[id];
+      return [id, {
+        role: parsePromptTransportRole(partialSection?.role, `${key}.sections.${id}.role`) ?? baseSection.role,
+        target: parsePromptTransportTarget(partialSection?.target, `${key}.sections.${id}.target`) ?? baseSection.target,
+        cacheGroup: partialSection?.cacheGroup ?? baseSection.cacheGroup,
+      }];
+    }),
+  ) as Record<PromptTransportSectionId, PromptTransportSectionConfig>;
+
+  return {
+    mode: parseCodexPromptTransportMode(partial?.mode, key) ?? base.mode,
+    sections,
+  };
+}
+
+function resolveGlobalPromptTransport(
+  partial: PromptTransportConfigYaml | undefined,
+): PromptTransportConfig {
+  const defaults = clonePromptTransport(DEFAULT_PROMPT_TRANSPORT);
+  return {
+    openaiCodex: resolveProviderPromptTransport(defaults.openaiCodex, partial?.openaiCodex, "promptTransport.openaiCodex"),
+    openrouter: resolveProviderPromptTransport(defaults.openrouter, partial?.openrouter, "promptTransport.openrouter"),
+  };
+}
+
+function resolveGuildPromptTransport(
+  global: PromptTransportConfig,
+  partial: PromptTransportConfigYaml | undefined,
+): PromptTransportConfig {
+  return {
+    openaiCodex: resolveProviderPromptTransport(global.openaiCodex, partial?.openaiCodex, "promptTransport.openaiCodex"),
+    openrouter: resolveProviderPromptTransport(global.openrouter, partial?.openrouter, "promptTransport.openrouter"),
   };
 }
 
@@ -603,6 +761,7 @@ export function loadGlobalConfig(
     },
     defaultAgentJobs: resolveGlobalAgentJobs(yaml.agentJobs),
     defaultPromptCaching: resolveGlobalPromptCaching(yaml.promptCaching),
+    defaultPromptTransport: resolveGlobalPromptTransport(yaml.promptTransport),
     defaultBackgroundLlm: resolveGlobalBackgroundLlm(yaml.backgroundLlm),
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
     defaultMemoryExtraction: resolveGlobalMemoryExtraction(yaml.memoryExtraction),
@@ -693,6 +852,7 @@ export function resolveGuildConfig(
     },
     agentJobs: resolveGuildAgentJobs(global.defaultAgentJobs, partial.agentJobs),
     promptCaching,
+    promptTransport: resolveGuildPromptTransport(global.defaultPromptTransport, partial.promptTransport),
     backgroundLlm: resolveGuildBackgroundLlm(global, partial, promptCaching),
     replyLoop: resolveGuildReplyLoop(global.defaultReplyLoop, partial.replyLoop),
     memoryExtraction: resolveGuildMemoryExtraction(global.defaultMemoryExtraction, partial.memoryExtraction),
@@ -774,6 +934,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     members: config.members,
     dispatcher: config.dispatcher,
     promptCaching: config.promptCaching,
+    promptTransport: config.promptTransport,
     backgroundLlm: config.backgroundLlm,
     replyLoop: config.replyLoop,
     memoryExtraction: config.memoryExtraction,

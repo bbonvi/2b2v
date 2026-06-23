@@ -49,6 +49,51 @@ export interface PromptCachingConfig {
   enabled: boolean;
 }
 
+/** Prompt transport sections whose provider role/target can be tuned. */
+export type PromptTransportSectionId =
+  | "core"
+  | "skills"
+  | "runtime"
+  | "stableContext"
+  | "olderHistory"
+  | "serverMembers"
+  | "threadsInChannel"
+  | "discordContext"
+  | "upcomingSchedules"
+  | "memories"
+  | "recentHistory"
+  | "currentContext"
+  | "responseInstruction"
+  | "currentTurn";
+
+/** LLM message roles supported by provider prompt transport. */
+export type PromptTransportRole = "system" | "developer" | "user";
+
+/** Where a stable Codex section is placed. OpenRouter always uses messages. */
+export type PromptTransportTarget = "instructions" | "input";
+
+/** Codex prompt transport mode. */
+export type CodexPromptTransportMode = "legacy-instructions" | "split-input";
+
+/** Placement policy for one logical prompt section. */
+export interface PromptTransportSectionConfig {
+  role: PromptTransportRole;
+  target: PromptTransportTarget;
+  cacheGroup?: string;
+}
+
+/** Provider-specific prompt transport policy. */
+export interface ProviderPromptTransportConfig {
+  mode: CodexPromptTransportMode;
+  sections: Record<PromptTransportSectionId, PromptTransportSectionConfig>;
+}
+
+/** Prompt transport policy for all LLM providers. */
+export interface PromptTransportConfig {
+  openaiCodex: ProviderPromptTransportConfig;
+  openrouter: ProviderPromptTransportConfig;
+}
+
 /** Supported hosted LLM backends. */
 export type LlmProvider = "openrouter" | "openai-codex";
 
@@ -196,6 +241,8 @@ export interface GuildConfig {
   agentJobs: AgentJobsConfig;
   /** Prompt caching controls for supported provider requests. */
   promptCaching: PromptCachingConfig;
+  /** Provider role/target placement for logical prompt sections. */
+  promptTransport: PromptTransportConfig;
   /** Dedicated background LLM configuration. */
   backgroundLlm: BackgroundLlmConfig;
   /** Native reply/tool loop runtime limits. */
@@ -248,6 +295,8 @@ export interface GlobalConfig {
   defaultAgentJobs: AgentJobsConfig;
   /** Default prompt caching controls. */
   defaultPromptCaching: PromptCachingConfig;
+  /** Default provider role/target placement for logical prompt sections. */
+  defaultPromptTransport: PromptTransportConfig;
   /** Default background LLM overrides. Missing fields inherit main model settings per guild. */
   defaultBackgroundLlm: BackgroundLlmDefaults;
   /** Default native reply/tool loop runtime limits. */
@@ -316,6 +365,7 @@ export interface GuildConfigYaml {
   promptCaching?: {
     enabled?: boolean;
   };
+  promptTransport?: PromptTransportConfigYaml;
   backgroundLlm?: {
     provider?: LlmProvider;
     model?: string;
@@ -403,6 +453,7 @@ export interface MainConfigYaml {
   promptCaching?: {
     enabled?: boolean;
   };
+  promptTransport?: PromptTransportConfigYaml;
   backgroundLlm?: {
     provider?: LlmProvider;
     model?: string;
@@ -427,4 +478,15 @@ export interface MainConfigYaml {
       minIntervalSeconds?: number;
     };
   };
+}
+
+/** Raw prompt transport YAML shape. */
+export interface PromptTransportConfigYaml {
+  openaiCodex?: ProviderPromptTransportConfigYaml;
+  openrouter?: ProviderPromptTransportConfigYaml;
+}
+
+export interface ProviderPromptTransportConfigYaml {
+  mode?: CodexPromptTransportMode;
+  sections?: Partial<Record<PromptTransportSectionId, Partial<PromptTransportSectionConfig>>>;
 }

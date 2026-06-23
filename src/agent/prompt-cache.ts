@@ -1,10 +1,11 @@
-import type { PromptCachingConfig } from "../config/types.ts";
+import type { PromptCachingConfig, PromptTransportRole, PromptTransportTarget } from "../config/types.ts";
 import type { AssembledContext } from "./context-assembly.ts";
 
 export interface StablePromptSection {
-  role: "system" | "developer";
+  role: PromptTransportRole;
   text: string;
   cacheGroup?: string;
+  target?: PromptTransportTarget;
 }
 
 interface PromptTextPart {
@@ -77,6 +78,29 @@ function buildStableMessages(
   }));
 }
 
+function stableInputItems(stableSections: StablePromptSection[]): Array<Record<string, unknown>> {
+  const groups = stableSectionGroups(stableSections.filter((section) => (section.target ?? "input") === "input"));
+  return groups.map((sections) => ({
+    type: "message",
+    role: sections[0]?.role ?? "developer",
+    content: sections.map((section) => section.text).join("\n\n"),
+  }));
+}
+
+function stableInstructions(stableSections: StablePromptSection[]): string {
+  return stableSections
+    .filter((section) => section.target === "instructions")
+    .map((section) => section.text)
+    .join("\n\n");
+}
+
+function mergeInstructionText(prefix: string, existing: unknown): string {
+  const existingText = typeof existing === "string" ? existing.trim() : "";
+  if (prefix === "") return existingText;
+  if (existingText === "") return prefix;
+  return `${prefix}\n\n${existingText}`;
+}
+
 function buildCacheAnchorMessages(promptCaching: PromptCachingConfig): Array<Record<string, unknown>> {
   if (!promptCaching.enabled) return [];
   return [
@@ -91,14 +115,22 @@ function buildCacheAnchorMessages(promptCaching: PromptCachingConfig): Array<Rec
   ];
 }
 
-export function getStablePromptSections(context: AssembledContext): StablePromptSection[] {
+export function getStablePromptSections(
+  context: AssembledContext,
+  stableContextPlacement: Pick<StablePromptSection, "role" | "target" | "cacheGroup">,
+  olderHistoryPlacement: Pick<StablePromptSection, "role" | "target" | "cacheGroup">,
+): StablePromptSection[] {
   return context.sections
     .filter((section) => section.cached)
-    .map((section) => ({
-      role: section.role,
-      text: section.text,
-      cacheGroup: section.label === "Chat History — Older" ? "older-history" : "stable-context",
-    }));
+    .map((section) => {
+      const placement = section.label === "Chat History — Older" ? olderHistoryPlacement : stableContextPlacement;
+      return {
+        role: placement.role,
+        text: section.text,
+        target: placement.target,
+        cacheGroup: placement.cacheGroup,
+      };
+    });
 }
 
 /**
@@ -125,5 +157,40 @@ export function prependStableSectionsToPayload(
   ];
   if (toInsert.length > 0) {
     messages.unshift(...toInsert);
+  }
+}
+
+function applyInputRoleOverrides(input: unknown[], roles: readonly PromptTransportRole[]): void {
+  if (roles.length === 0) return;
+  let roleIndex = 0;
+  for (const item of input) {
+    if (roleIndex >= roles.length) return;
+    if (!isRecord(item)) continue;
+    const type = item.type;
+    if (type !== undefined && type !== "message") continue;
+    if (item.role !== "user" && item.role !== "developer" && item.role !== "system") continue;
+    item.role = roles[roleIndex];
+    roleIndex += 1;
+  }
+}
+
+/** Mutate a Codex Responses payload by prepending stable input messages. */
+export function prependStableSectionsToCodexPayload(
+  payload: unknown,
+  stableSections: StablePromptSection[],
+  currentInputRoles: readonly PromptTransportRole[],
+): void {
+  if (!isRecord(payload)) return;
+  const input = payload.input;
+  if (!Array.isArray(input)) return;
+
+  applyInputRoleOverrides(input, currentInputRoles);
+
+  const instructionPrefix = stableInstructions(stableSections);
+  payload.instructions = mergeInstructionText(instructionPrefix, payload.instructions);
+
+  const toInsert = stableInputItems(stableSections);
+  if (toInsert.length > 0) {
+    input.unshift(...toInsert);
   }
 }

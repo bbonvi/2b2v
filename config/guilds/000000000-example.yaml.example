@@ -92,6 +92,16 @@ members:
 promptCaching:
   enabled: true
 
+# Prompt transport override (inherits global when omitted). Use sparingly for
+# provider-role experiments; default currentTurn role is user.
+# promptTransport:
+#   openaiCodex:
+#     sections:
+#       currentTurn:
+#         role: developer
+#       core:
+#         target: instructions
+
 # Background LLM override for memory extraction (inherits effective main model when omitted)
 # backgroundLlm:
 #   provider: openrouter # or openai-codex; omitted inherits the main provider

@@ -104,9 +104,47 @@ agentJobs:
   maxImageReplacements: 2      # Max replacement cancellations per original image request (default: 2)
 
 # Prompt caching control.
-# OpenRouter uses cache_control breakpoints; Codex uses stable system prompt/session routing.
+# OpenRouter uses cache_control breakpoints; Codex uses split stable input messages/session routing.
 promptCaching:
   enabled: true
+
+# Prompt transport controls where logical prompt sections land. Defaults shown here
+# are cache-friendly: stable sections first, volatile/current turn last.
+# Roles: system | developer | user. Targets: input | instructions (Codex only).
+# promptTransport:
+#   openaiCodex:
+#     mode: split-input # split-input | legacy-instructions
+#     sections:
+#       core:          { role: developer, target: input, cacheGroup: core }
+#       skills:        { role: developer, target: input, cacheGroup: runtime }
+#       runtime:       { role: developer, target: input, cacheGroup: runtime }
+#       stableContext: { role: user,      target: input, cacheGroup: stable-context }
+#       olderHistory:  { role: user,      target: input, cacheGroup: older-history }
+#       serverMembers:     { role: user,  target: input }
+#       threadsInChannel:  { role: user,  target: input }
+#       discordContext:   { role: user,   target: input }
+#       upcomingSchedules: { role: user,  target: input }
+#       memories:         { role: user,   target: input }
+#       recentHistory:    { role: user,   target: input }
+#       currentContext:   { role: user,   target: input }
+#       responseInstruction: { role: developer, target: input }
+#       currentTurn:     { role: user,    target: input }
+#   openrouter:
+#     sections:
+#       core:          { role: developer, target: input, cacheGroup: core }
+#       skills:        { role: developer, target: input, cacheGroup: runtime }
+#       runtime:       { role: developer, target: input, cacheGroup: runtime }
+#       stableContext: { role: user,      target: input, cacheGroup: stable-context }
+#       olderHistory:  { role: user,      target: input, cacheGroup: older-history }
+#       serverMembers:     { role: user,  target: input }
+#       threadsInChannel:  { role: user,  target: input }
+#       discordContext:   { role: user,   target: input }
+#       upcomingSchedules: { role: user,  target: input }
+#       memories:         { role: user,   target: input }
+#       recentHistory:    { role: user,   target: input }
+#       currentContext:   { role: user,   target: input }
+#       responseInstruction: { role: developer, target: input }
+#       currentTurn:     { role: user,    target: input }
 
 # Background LLM defaults for memory extraction. Omitted fields inherit the main
 # effective model config. serviceTier is optional; omit it to send no service_tier.

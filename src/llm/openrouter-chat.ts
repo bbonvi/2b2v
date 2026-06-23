@@ -39,7 +39,7 @@ export type ProviderNativeAssistantContent =
   | ProviderNativeToolCallPart;
 
 export interface OpenRouterMessage {
-  role: "system" | "user" | "assistant" | "tool";
+  role: "system" | "developer" | "user" | "assistant" | "tool";
   content: OpenRouterMessageContent;
   tool_call_id?: string;
   name?: string;

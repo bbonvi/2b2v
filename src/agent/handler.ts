@@ -2,9 +2,17 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { validateToolArguments, type ToolCall } from "@mariozechner/pi-ai";
 import { createHash } from "node:crypto";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
-import { contextToSplitPrompts, type AssembledContext, type ContextSection } from "./context-assembly.ts";
+import { type AssembledContext, type ContextSection } from "./context-assembly.ts";
 import { wrapToolsWithTiming, type TimingState } from "./tool-timing.ts";
-import type { LlmProvider, TriggerInstructions } from "../config/types.ts";
+import type {
+  LlmProvider,
+  PromptTransportConfig,
+  PromptTransportRole,
+  PromptTransportSectionConfig,
+  PromptTransportSectionId,
+  ProviderPromptTransportConfig,
+  TriggerInstructions,
+} from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
 import { resolveGuildModel, buildStreamOptions, buildBackgroundStreamOptions, buildImageReadingStreamOptions, type ModelImageInputSupport } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
@@ -21,6 +29,7 @@ import {
 } from "../llm/openrouter-chat.ts";
 import {
   getStablePromptSections,
+  prependStableSectionsToCodexPayload,
   prependStableSectionsToPayload,
   type StablePromptSection,
 } from "./prompt-cache.ts";
@@ -658,19 +667,52 @@ function buildSkillsInstruction(runtimePrompts: RuntimePromptBundle | undefined)
   return runtimePrompts?.skills.indexPrompt.trim() ?? "";
 }
 
+function promptTransportForProvider(
+  config: PromptTransportConfig,
+  provider: LlmProvider,
+): ProviderPromptTransportConfig {
+  return provider === "openai-codex" ? config.openaiCodex : config.openrouter;
+}
+
+function sectionPlacement(
+  transport: ProviderPromptTransportConfig,
+  sectionId: PromptTransportSectionId,
+): PromptTransportSectionConfig {
+  return transport.sections[sectionId];
+}
+
+function stableSection(
+  sectionId: PromptTransportSectionId,
+  text: string,
+  transport: ProviderPromptTransportConfig,
+): StablePromptSection {
+  const placement = sectionPlacement(transport, sectionId);
+  return {
+    role: placement.role,
+    text,
+    target: placement.target,
+    cacheGroup: placement.cacheGroup,
+  };
+}
+
 function sectionsForStablePrompt(
   personaPrompt: string,
   stylePrompt: string,
   context: AssembledContext,
   skillsInstruction: string,
   runtimeInstruction: string,
+  transport: ProviderPromptTransportConfig,
 ): StablePromptSection[] {
   const stable: StablePromptSection[] = [];
-  if (personaPrompt !== "") stable.push({ role: "system", text: personaPrompt, cacheGroup: "core" });
-  if (stylePrompt !== "") stable.push({ role: "system", text: stylePrompt, cacheGroup: "core" });
-  if (skillsInstruction !== "") stable.push({ role: "system", text: skillsInstruction, cacheGroup: "runtime" });
-  if (runtimeInstruction !== "") stable.push({ role: "system", text: runtimeInstruction, cacheGroup: "runtime" });
-  stable.push(...getStablePromptSections(context));
+  if (personaPrompt !== "") stable.push(stableSection("core", personaPrompt, transport));
+  if (stylePrompt !== "") stable.push(stableSection("core", stylePrompt, transport));
+  if (skillsInstruction !== "") stable.push(stableSection("skills", skillsInstruction, transport));
+  if (runtimeInstruction !== "") stable.push(stableSection("runtime", runtimeInstruction, transport));
+  stable.push(...getStablePromptSections(
+    context,
+    sectionPlacement(transport, "stableContext"),
+    sectionPlacement(transport, "olderHistory"),
+  ));
   return stable;
 }
 
@@ -682,9 +724,76 @@ function buildPromptCacheSessionId(requestLog: RequestLog | undefined, modelId: 
   return `2b2v:${createHash("sha256").update(sessionId).digest("hex").slice(0, 58)}`;
 }
 
-function buildVolatileTurnContext(context: AssembledContext): string {
-  const split = contextToSplitPrompts(context);
-  return split.developer;
+interface VolatilePromptMessage {
+  sectionId: PromptTransportSectionId;
+  text: string;
+}
+
+const VOLATILE_SECTION_IDS_BY_LABEL: Readonly<Record<string, PromptTransportSectionId>> = {
+  "Discord Context": "discordContext",
+  "Upcoming Schedules": "upcomingSchedules",
+  "Memories": "memories",
+  "Chat History — Newer": "recentHistory",
+  "Server Members": "serverMembers",
+  "Threads In This Channel": "threadsInChannel",
+  "Current Context": "currentContext",
+  "Response Instruction": "responseInstruction",
+};
+
+const VOLATILE_SECTION_ORDER: readonly PromptTransportSectionId[] = [
+  "discordContext",
+  "upcomingSchedules",
+  "memories",
+  "recentHistory",
+  "serverMembers",
+  "threadsInChannel",
+  "currentContext",
+  "responseInstruction",
+];
+
+function buildVolatileTurnMessages(context: AssembledContext): VolatilePromptMessage[] {
+  const bySection = new Map<PromptTransportSectionId, string[]>();
+  for (const section of context.sections) {
+    if (section.cached) continue;
+    const sectionId = VOLATILE_SECTION_IDS_BY_LABEL[section.label] ?? "currentContext";
+    const bucket = bySection.get(sectionId);
+    if (bucket === undefined) {
+      bySection.set(sectionId, [section.text]);
+    } else {
+      bucket.push(section.text);
+    }
+  }
+
+  const messages: VolatilePromptMessage[] = [];
+  for (const sectionId of VOLATILE_SECTION_ORDER) {
+    const texts = bySection.get(sectionId);
+    if (texts === undefined || texts.length === 0) continue;
+    messages.push({ sectionId, text: texts.join("\n\n") });
+  }
+  return messages;
+}
+
+function initialMessageRoles(
+  transport: ProviderPromptTransportConfig,
+  volatileMessages: readonly VolatilePromptMessage[],
+): PromptTransportRole[] {
+  return [
+    ...volatileMessages.map((message) => sectionPlacement(transport, message.sectionId).role),
+    sectionPlacement(transport, "currentTurn").role,
+  ];
+}
+
+function codexSystemPromptForStableSections(
+  stableSections: StablePromptSection[],
+  transport: ProviderPromptTransportConfig,
+): string {
+  if (transport.mode === "legacy-instructions") {
+    return stableSections.map((section) => section.text).join("\n\n");
+  }
+  return stableSections
+    .filter((section) => section.target === "instructions")
+    .map((section) => section.text)
+    .join("\n\n");
 }
 
 function buildCurrentMessageMetadata(msg: IncomingMessage, runtimePrompts?: RuntimePromptBundle): string {
@@ -741,10 +850,12 @@ function textPart(text: string): OpenRouterTextPart {
 
 function buildInitialMessages(
   userContent: string,
-  volatileTurnContext: string,
+  volatileMessages: readonly VolatilePromptMessage[],
   msg: IncomingMessage,
   runtimePrompts?: RuntimePromptBundle,
+  roles: readonly PromptTransportRole[] = ["user"],
 ): OpenRouterMessage[] {
+  const roleAt = (index: number): PromptTransportRole => roles[index] ?? "user";
   const currentMessageMetadata = [
     "## Current Message Metadata",
     buildCurrentMessageMetadata(msg, runtimePrompts),
@@ -757,34 +868,26 @@ function buildInitialMessages(
     )
     .join("\n");
 
-  if (volatileTurnContext.trim() === "") {
-    const text = [
-        currentMessageMetadata,
-        imageMetadata !== "" ? `## Current Turn Images\n${imageMetadata}` : "",
-        "## Current User Message",
-        userContent,
-    ].filter((part) => part !== "").join("\n\n");
-    const images = imagePartsFromCurrentTurn(msg);
-    return [{
-      role: "user",
-      content: images.length > 0 ? [textPart(text), ...images] : text,
-    }];
+  const messages: OpenRouterMessage[] = [];
+  for (const [index, message] of volatileMessages.entries()) {
+    messages.push({
+      role: roleAt(index),
+      content: message.text,
+    });
   }
 
   const text = [
-      "## Current Discord Turn Context",
-      "The following runtime context is for this Discord turn, not the user's message.",
-      volatileTurnContext,
       currentMessageMetadata,
       imageMetadata !== "" ? `## Current Turn Images\n${imageMetadata}` : "",
       "## Current User Message",
       userContent,
   ].filter((part) => part !== "").join("\n\n");
   const images = imagePartsFromCurrentTurn(msg);
-  return [{
-    role: "user",
+  messages.push({
+    role: roleAt(volatileMessages.length),
     content: images.length > 0 ? [textPart(text), ...images] : text,
-  }];
+  });
+  return messages;
 }
 
 function assistantMessageFromResult(result: OpenRouterChatResult): OpenRouterMessage {
@@ -2111,6 +2214,7 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
 
   const complete = input.completeChat ?? completeLlmChat;
   const provider = backgroundProvider(input);
+  const transport = promptTransportForProvider(input.guildConfig.promptTransport, provider);
   const streamOptions = buildBackgroundStreamOptions(input.globalConfig, input.guildConfig);
   const providerParams: Record<string, unknown> = { ...streamOptions };
   delete providerParams.apiKey;
@@ -2123,14 +2227,18 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
     input.context,
     "",
     buildMemoryPassRuntimeInstruction(input.passKind ?? "post_reply", input.runtimePrompts),
+    transport,
   );
   const sessionId = buildPromptCacheSessionId(input.requestLog, `${provider}:${input.guildConfig.backgroundLlm.model}`);
   const currentMessageWithoutImages: IncomingMessage = { ...input.incomingMessage, imageInputs: undefined };
+  const volatileMessages = buildVolatileTurnMessages(input.context);
+  const initialRoles = initialMessageRoles(transport, volatileMessages);
   const messages = buildInitialMessages(
     input.userContent,
-    buildVolatileTurnContext(input.context),
+    volatileMessages,
     currentMessageWithoutImages,
     input.runtimePrompts,
+    provider === "openai-codex" ? [] : initialRoles,
   );
   messages.push({ role: "user", content: memoryPassControlMessage(input) });
 
@@ -2143,9 +2251,7 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
         provider,
         apiKey: streamOptions.apiKey,
         model: input.guildConfig.backgroundLlm.model,
-        systemPrompt: provider === "openai-codex"
-          ? stableSections.map((section) => section.text).join("\n\n")
-          : "",
+        systemPrompt: provider === "openai-codex" ? codexSystemPromptForStableSections(stableSections, transport) : "",
         providerParams,
         sessionId,
         onPayload: (payload: unknown) => {
@@ -2156,6 +2262,8 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
               input.guildConfig.backgroundLlm.promptCaching,
               input.guildConfig.backgroundLlm.model,
             );
+          } else if (transport.mode === "split-input") {
+            prependStableSectionsToCodexPayload(payload, stableSections, initialRoles);
           }
           input.requestLog?.recordLLMRequest(payload);
           input.log?.debug("memory_llm_request_payload", { payload });
@@ -2246,15 +2354,18 @@ export async function handleMessage(
   const { tools: timedTools, state: timingState } = wrapToolsWithTiming(tools);
   const complete = deps.completeChat ?? completeLlmChat;
   const runtimeInstruction = buildRuntimeInstruction(deps.runtimePrompts);
+  const transport = promptTransportForProvider(deps.guildConfig.promptTransport, model.llmProvider);
   const stableSections = sectionsForStablePrompt(
     deps.personaPrompt ?? "",
     "",
     context,
     buildSkillsInstruction(deps.runtimePrompts),
     runtimeInstruction,
+    transport,
   );
   const userContent = context.userMessage !== "" ? context.userMessage : msg.translatedContent;
-  const volatileTurnContext = buildVolatileTurnContext(context);
+  const volatileMessages = buildVolatileTurnMessages(context);
+  const initialRoles = initialMessageRoles(transport, volatileMessages);
   const reqLog = deps.requestLog;
   const sessionId = buildPromptCacheSessionId(reqLog, `${model.llmProvider}:${model.id}`);
   const startedAt = Date.now();
@@ -2353,19 +2464,27 @@ export async function handleMessage(
           apiKey: baseStreamOptions.apiKey,
           model: model.id,
           systemPrompt: model.llmProvider === "openai-codex"
-            ? stableSections.map((section) => section.text).join("\n\n")
+            ? codexSystemPromptForStableSections(stableSections, transport)
             : "",
           providerParams,
           sessionId,
           onPayload: (payload: unknown) => {
             if (model.llmProvider === "openrouter") {
               prependStableSectionsToPayload(payload, stableSections, deps.guildConfig.promptCaching, model.id);
+            } else if (transport.mode === "split-input") {
+              prependStableSectionsToCodexPayload(payload, stableSections, initialRoles);
             }
             reqLog?.recordLLMRequest(payload);
             deps.log?.debug("llm_request_payload", { payload });
           },
         },
-        messages: buildInitialMessages(userContent, volatileTurnContext, msg, deps.runtimePrompts),
+        messages: buildInitialMessages(
+          userContent,
+          volatileMessages,
+          msg,
+          deps.runtimePrompts,
+          model.llmProvider === "openai-codex" ? [] : initialRoles,
+        ),
         tools: timedTools,
         maxToolCalls: deps.guildConfig.replyLoop.maxToolCalls,
         maxToolRounds: deps.guildConfig.replyLoop.maxToolCalls,

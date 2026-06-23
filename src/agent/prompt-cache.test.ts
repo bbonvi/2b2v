@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { prependStableSectionsToPayload, type StablePromptSection } from "./prompt-cache";
+import { prependStableSectionsToCodexPayload, prependStableSectionsToPayload, type StablePromptSection } from "./prompt-cache";
 
 function payload(): { messages: unknown[] } {
   return {
@@ -114,5 +114,59 @@ describe("prependStableSectionsToPayload", () => {
         expect((content as Array<{ cache_control?: unknown }>)[0]?.cache_control).toBeUndefined();
       }
     }
+  });
+});
+
+describe("prependStableSectionsToCodexPayload", () => {
+  test("prepends split stable sections and retags current input messages", () => {
+    const body: { instructions: string; input: Array<Record<string, unknown>> } = {
+      instructions: "",
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "volatile" }] },
+        { type: "message", role: "user", content: [{ type: "input_text", text: "current" }] },
+        { type: "function_call", call_id: "call-1", name: "lookup", arguments: "{}" },
+      ],
+    };
+    const sections: StablePromptSection[] = [
+      { role: "developer", text: "persona", target: "input", cacheGroup: "core" },
+      { role: "developer", text: "runtime", target: "input", cacheGroup: "runtime" },
+      { role: "user", text: "older history", target: "input", cacheGroup: "older-history" },
+    ];
+
+    prependStableSectionsToCodexPayload(body, sections, ["developer", "user"]);
+
+    expect(body.instructions).toBe("");
+    expect(body.input.slice(0, 3)).toEqual([
+      { type: "message", role: "developer", content: "persona" },
+      { type: "message", role: "developer", content: "runtime" },
+      { type: "message", role: "user", content: "older history" },
+    ]);
+    expect(body.input[3]).toEqual({
+      type: "message",
+      role: "developer",
+      content: [{ type: "input_text", text: "volatile" }],
+    });
+    expect(body.input[4]).toEqual({
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text: "current" }],
+    });
+    expect(body.input[5]).toEqual({ type: "function_call", call_id: "call-1", name: "lookup", arguments: "{}" });
+  });
+
+  test("keeps configured top-level instruction sections in instructions", () => {
+    const body: { instructions: string; input: Array<Record<string, unknown>> } = {
+      instructions: "response format",
+      input: [],
+    };
+    const sections: StablePromptSection[] = [
+      { role: "developer", text: "critical core", target: "instructions", cacheGroup: "core" },
+      { role: "developer", text: "runtime", target: "input", cacheGroup: "runtime" },
+    ];
+
+    prependStableSectionsToCodexPayload(body, sections, []);
+
+    expect(body.instructions).toBe("critical core\n\nresponse format");
+    expect(body.input).toEqual([{ type: "message", role: "developer", content: "runtime" }]);
   });
 });

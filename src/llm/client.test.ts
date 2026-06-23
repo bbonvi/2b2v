@@ -9,7 +9,48 @@ import {
   fetchOpenRouterModelMetadata,
   imageInputSupportFromMetadata,
 } from "./client.ts";
-import type { GlobalConfig, GuildConfig } from "../config/types.ts";
+import type { GlobalConfig, GuildConfig, PromptTransportConfig } from "../config/types.ts";
+
+const PROMPT_TRANSPORT: PromptTransportConfig = {
+  openaiCodex: {
+    mode: "split-input",
+    sections: {
+      core: { role: "developer", target: "input", cacheGroup: "core" },
+      skills: { role: "developer", target: "input", cacheGroup: "runtime" },
+      runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
+      stableContext: { role: "user", target: "input", cacheGroup: "stable-context" },
+      olderHistory: { role: "user", target: "input", cacheGroup: "older-history" },
+      serverMembers: { role: "user", target: "input" },
+      threadsInChannel: { role: "user", target: "input" },
+      discordContext: { role: "user", target: "input" },
+      upcomingSchedules: { role: "user", target: "input" },
+      memories: { role: "user", target: "input" },
+      recentHistory: { role: "user", target: "input" },
+      currentContext: { role: "user", target: "input" },
+      responseInstruction: { role: "developer", target: "input" },
+      currentTurn: { role: "user", target: "input" },
+    },
+  },
+  openrouter: {
+    mode: "split-input",
+    sections: {
+      core: { role: "developer", target: "input", cacheGroup: "core" },
+      skills: { role: "developer", target: "input", cacheGroup: "runtime" },
+      runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
+      stableContext: { role: "user", target: "input", cacheGroup: "stable-context" },
+      olderHistory: { role: "user", target: "input", cacheGroup: "older-history" },
+      serverMembers: { role: "user", target: "input" },
+      threadsInChannel: { role: "user", target: "input" },
+      discordContext: { role: "user", target: "input" },
+      upcomingSchedules: { role: "user", target: "input" },
+      memories: { role: "user", target: "input" },
+      recentHistory: { role: "user", target: "input" },
+      currentContext: { role: "user", target: "input" },
+      responseInstruction: { role: "developer", target: "input" },
+      currentTurn: { role: "user", target: "input" },
+    },
+  },
+};
 
 const GLOBAL: GlobalConfig = {
   discordToken: "t",
@@ -40,6 +81,7 @@ const GLOBAL: GlobalConfig = {
   defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
   defaultAgentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
   defaultPromptCaching: { enabled: true },
+  defaultPromptTransport: PROMPT_TRANSPORT,
   defaultBackgroundLlm: { modelParams: {} },
   defaultReplyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
   defaultMemoryExtraction: {
@@ -69,6 +111,7 @@ const GUILD: GuildConfig = {
   dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
   agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
   promptCaching: { enabled: true },
+  promptTransport: PROMPT_TRANSPORT,
   backgroundLlm: {
     model: "moonshotai/kimi-k2.5",
     modelParams: {},

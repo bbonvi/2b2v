@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { join } from "path";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
-import type { GuildConfig, GuildConfigYaml } from "./types.ts";
+import type { GuildConfig, GuildConfigYaml, PromptTransportConfig } from "./types.ts";
 import { loadGlobalConfig, loadGuildConfigs, loadGuildConfigFile, loadMainConfig, resolveGuildConfig, resolveInstructions, saveGuildConfig, validateTrimConfig, validateVpnConfig } from "./loader.ts";
 
 const TEST_DIR = join(import.meta.dir, "../../.test-config");
@@ -24,6 +24,49 @@ function defaultTriggerConfig(overrides: Partial<GuildConfig["triggers"]> = {}):
     typingIdleMs: 10000,
     typingMaxWaitMs: 15000,
     ...overrides,
+  };
+}
+
+function defaultPromptTransportConfig(): PromptTransportConfig {
+  return {
+    openaiCodex: {
+      mode: "split-input",
+      sections: {
+        core: { role: "developer", target: "input", cacheGroup: "core" },
+        skills: { role: "developer", target: "input", cacheGroup: "runtime" },
+        runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
+        stableContext: { role: "user", target: "input", cacheGroup: "stable-context" },
+        olderHistory: { role: "user", target: "input", cacheGroup: "older-history" },
+        serverMembers: { role: "user", target: "input" },
+        threadsInChannel: { role: "user", target: "input" },
+        discordContext: { role: "user", target: "input" },
+        upcomingSchedules: { role: "user", target: "input" },
+        memories: { role: "user", target: "input" },
+        recentHistory: { role: "user", target: "input" },
+        currentContext: { role: "user", target: "input" },
+        responseInstruction: { role: "developer", target: "input" },
+        currentTurn: { role: "user", target: "input" },
+      },
+    },
+    openrouter: {
+      mode: "split-input",
+      sections: {
+        core: { role: "developer", target: "input", cacheGroup: "core" },
+        skills: { role: "developer", target: "input", cacheGroup: "runtime" },
+        runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
+        stableContext: { role: "user", target: "input", cacheGroup: "stable-context" },
+        olderHistory: { role: "user", target: "input", cacheGroup: "older-history" },
+        serverMembers: { role: "user", target: "input" },
+        threadsInChannel: { role: "user", target: "input" },
+        discordContext: { role: "user", target: "input" },
+        upcomingSchedules: { role: "user", target: "input" },
+        memories: { role: "user", target: "input" },
+        recentHistory: { role: "user", target: "input" },
+        currentContext: { role: "user", target: "input" },
+        responseInstruction: { role: "developer", target: "input" },
+        currentTurn: { role: "user", target: "input" },
+      },
+    },
   };
 }
 
@@ -341,6 +384,36 @@ describe("loadGlobalConfig", () => {
     expect((cfg as unknown as { defaultPromptCaching?: unknown }).defaultPromptCaching).toEqual({
       enabled: true,
     });
+  });
+
+  test("parses global promptTransport overrides", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, [
+      "promptTransport:",
+      "  openaiCodex:",
+      "    mode: legacy-instructions",
+      "    sections:",
+      "      core:",
+      "        target: instructions",
+      "      currentTurn:",
+      "        role: developer",
+      "",
+    ].join("\n"));
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultPromptTransport.openaiCodex.mode).toBe("legacy-instructions");
+    expect(cfg.defaultPromptTransport.openaiCodex.sections.core).toMatchObject({
+      role: "developer",
+      target: "instructions",
+      cacheGroup: "core",
+    });
+    expect(cfg.defaultPromptTransport.openaiCodex.sections.currentTurn.role).toBe("developer");
+    expect(cfg.defaultPromptTransport.openrouter.sections.currentTurn.role).toBe("user");
+  });
+
+  test("rejects unknown promptTransport section ids", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "promptTransport:\n  openaiCodex:\n    sections:\n      mystery:\n        role: user\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow("promptTransport.openaiCodex.sections.mystery");
   });
 
   test("uses replyLoop defaults when not configured", () => {
@@ -801,6 +874,29 @@ describe("resolveGuildConfig", () => {
     });
   });
 
+  test("guild promptTransport overrides global defaults", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "promptTransport:\n  openaiCodex:\n    sections:\n      currentTurn:\n        role: developer\n");
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "112",
+      slug: "prompt-transport-override",
+      promptTransport: {
+        openaiCodex: {
+          sections: {
+            currentTurn: { role: "user" },
+            core: { target: "instructions" },
+          },
+        },
+      },
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.promptTransport.openaiCodex.sections.currentTurn.role).toBe("user");
+    expect(resolved.promptTransport.openaiCodex.sections.core.target).toBe("instructions");
+    expect(resolved.promptTransport.openaiCodex.sections.runtime.role).toBe("developer");
+  });
+
   test("ignores extra guild promptCaching fields", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
@@ -1067,6 +1163,7 @@ describe("saveGuildConfig", () => {
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
+      promptTransport: defaultPromptTransportConfig(),
       backgroundLlm: { model: "custom/m", modelParams: {}, promptCaching: { enabled: true } },
       memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };
@@ -1108,6 +1205,7 @@ describe("saveGuildConfig", () => {
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
+      promptTransport: defaultPromptTransportConfig(),
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
       memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };
@@ -1439,6 +1537,7 @@ describe("saveGuildConfig emotes", () => {
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
+      promptTransport: defaultPromptTransportConfig(),
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
       memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };
@@ -1483,6 +1582,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
+      promptTransport: defaultPromptTransportConfig(),
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
       memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };
@@ -1520,6 +1620,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
+      promptTransport: defaultPromptTransportConfig(),
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
       memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };

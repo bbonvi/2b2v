@@ -3,7 +3,7 @@ import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { handleMessage, injectTriggerInstruction, runSilentMemoryAgentPass, type ChatCompleteFn, type HandlerDeps, type IncomingMessage, type MessageSender, type VoiceAttachment } from "./handler.ts";
 import type { AssembledContext, ContextSection } from "./context-assembly.ts";
-import type { GlobalConfig, GuildConfig } from "../config/types.ts";
+import type { GlobalConfig, GuildConfig, PromptTransportConfig } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
 import { RequestLog, type Logger } from "../logger.ts";
 import { loadPromptBundle } from "../config/prompt-bundle.ts";
@@ -18,6 +18,49 @@ const TEST_LOGGER: Logger = {
 };
 
 const TEST_RUNTIME_PROMPTS = loadPromptBundle("prompts", TEST_LOGGER).runtime;
+
+function makePromptTransportConfig(): PromptTransportConfig {
+  return {
+    openaiCodex: {
+      mode: "split-input",
+      sections: {
+        core: { role: "developer", target: "input", cacheGroup: "core" },
+        skills: { role: "developer", target: "input", cacheGroup: "runtime" },
+        runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
+        stableContext: { role: "user", target: "input", cacheGroup: "stable-context" },
+        olderHistory: { role: "user", target: "input", cacheGroup: "older-history" },
+        serverMembers: { role: "user", target: "input" },
+        threadsInChannel: { role: "user", target: "input" },
+        discordContext: { role: "user", target: "input" },
+        upcomingSchedules: { role: "user", target: "input" },
+        memories: { role: "user", target: "input" },
+        recentHistory: { role: "user", target: "input" },
+        currentContext: { role: "user", target: "input" },
+        responseInstruction: { role: "developer", target: "input" },
+        currentTurn: { role: "user", target: "input" },
+      },
+    },
+    openrouter: {
+      mode: "split-input",
+      sections: {
+        core: { role: "developer", target: "input", cacheGroup: "core" },
+        skills: { role: "developer", target: "input", cacheGroup: "runtime" },
+        runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
+        stableContext: { role: "user", target: "input", cacheGroup: "stable-context" },
+        olderHistory: { role: "user", target: "input", cacheGroup: "older-history" },
+        serverMembers: { role: "user", target: "input" },
+        threadsInChannel: { role: "user", target: "input" },
+        discordContext: { role: "user", target: "input" },
+        upcomingSchedules: { role: "user", target: "input" },
+        memories: { role: "user", target: "input" },
+        recentHistory: { role: "user", target: "input" },
+        currentContext: { role: "user", target: "input" },
+        responseInstruction: { role: "developer", target: "input" },
+        currentTurn: { role: "user", target: "input" },
+      },
+    },
+  };
+}
 
 function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
   return {
@@ -49,6 +92,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
     defaultAgentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
     defaultPromptCaching: { enabled: true },
+    defaultPromptTransport: makePromptTransportConfig(),
     defaultBackgroundLlm: { modelParams: {} },
     defaultReplyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
     defaultMemoryExtraction: {
@@ -81,6 +125,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
     agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
     promptCaching: { enabled: true },
+    promptTransport: makePromptTransportConfig(),
     backgroundLlm: {
       model: "moonshotai/kimi-k2.5",
       modelParams: {},
@@ -179,6 +224,10 @@ function contentText(content: unknown): string {
     .filter(isRecord)
     .map((part) => typeof part.text === "string" ? part.text : "")
     .join("");
+}
+
+function findMessageContent(messages: Array<{ content?: unknown }>, needle: string): string | undefined {
+  return messages.map((message) => contentText(message.content)).find((content) => content.includes(needle));
 }
 
 function makeModelTimeoutError(timeoutMs = 12_000): Error {
@@ -451,10 +500,10 @@ describe("handleMessage", () => {
       request.onPayload?.(payload);
 
       const messages = payload.messages as Array<{ role?: string; content?: unknown }>;
-      expect(messages[0]?.role).toBe("system");
+      expect(messages[0]?.role).toBe("developer");
       expect(contentText(messages[0]?.content)).toContain("You are a test bot.");
       expect(contentText(messages[0]?.content)).not.toContain("Reserved response directives");
-      expect(messages[1]?.role).toBe("system");
+      expect(messages[1]?.role).toBe("developer");
       expect(contentText(messages[1]?.content)).toContain("## Skills");
       expect(contentText(messages[1]?.content)).toContain("image_generation");
       expect(contentText(messages[1]?.content)).toContain("Reserved response directives");
@@ -463,23 +512,23 @@ describe("handleMessage", () => {
         content: "Stable context is loaded; wait for the current Discord turn.",
       });
       expect(messages[3]).toEqual({ role: "assistant", content: "Ready." });
-      expect(messages[4]?.role).toBe("user");
-      expect(messages[4]?.content).toContain("## Current Discord Turn Context");
-      expect(messages[4]?.content).toContain("## Memory");
-      expect(messages[4]?.content).toContain("## Current Message Metadata");
-      expect(messages[4]?.content).toContain("Trigger MsgID: msg-1");
-      expect(messages[4]?.content).toContain("Trigger Author: @testuser");
-      expect(messages[4]?.content).toContain("Trigger AuthorID: user-1");
-      expect(messages[4]?.content).toContain("Trigger DisplayName: Test Nick");
-      expect(messages[4]?.content).toContain("Trigger GlobalName: Test Global");
-      expect(messages[4]?.content).toContain("Trigger AuthorIsBot: false");
-      expect(messages[4]?.content).toContain("Trigger ReplyToMsgID: parent-msg");
-      expect(messages[4]?.content).toContain("Reply Context: The user is replying to a message you previously sent here from another channel.");
-      expect(messages[4]?.content).toContain("Source GuildID: source-guild");
-      expect(messages[4]?.content).toContain("Source ChannelID: source-channel");
-      expect(messages[4]?.content).toContain("Source MsgID: source-msg");
-      expect(messages[4]?.content).toContain("## Current User Message");
-      expect(messages[4]?.content).toContain("hello bot");
+      expect(findMessageContent(messages, "## Memory")).toContain("- 1 [@user] [preference] concise");
+      expect(findMessageContent(messages, "## Server Members")).toContain("@user");
+      expect(findMessageContent(messages, "Guild: g1")).toBe("Guild: g1");
+      const currentTurn = findMessageContent(messages, "## Current User Message");
+      expect(currentTurn).toContain("## Current Message Metadata");
+      expect(currentTurn).toContain("Trigger MsgID: msg-1");
+      expect(currentTurn).toContain("Trigger Author: @testuser");
+      expect(currentTurn).toContain("Trigger AuthorID: user-1");
+      expect(currentTurn).toContain("Trigger DisplayName: Test Nick");
+      expect(currentTurn).toContain("Trigger GlobalName: Test Global");
+      expect(currentTurn).toContain("Trigger AuthorIsBot: false");
+      expect(currentTurn).toContain("Trigger ReplyToMsgID: parent-msg");
+      expect(currentTurn).toContain("Reply Context: The user is replying to a message you previously sent here from another channel.");
+      expect(currentTurn).toContain("Source GuildID: source-guild");
+      expect(currentTurn).toContain("Source ChannelID: source-channel");
+      expect(currentTurn).toContain("Source MsgID: source-msg");
+      expect(currentTurn).toContain("hello bot");
 
       return Promise.resolve({
         text: "done",
@@ -506,6 +555,47 @@ describe("handleMessage", () => {
     );
   });
 
+  test("splits Codex stable prompt into input messages", async () => {
+    const completeChat: ChatCompleteFn = (request) => {
+      const payload = {
+        instructions: request.systemPrompt,
+        input: request.messages.map((message) => ({
+          type: "message",
+          role: message.role,
+          content: contentText(message.content),
+        })),
+      };
+      request.onPayload?.(payload);
+
+      expect(payload.instructions).toBe("");
+      expect(payload.input[0]).toMatchObject({ type: "message", role: "developer" });
+      expect(contentText((payload.input[0] as { content?: unknown }).content)).toContain("You are a test bot.");
+      expect(payload.input[1]).toMatchObject({ type: "message", role: "developer" });
+      expect(contentText((payload.input[1] as { content?: unknown }).content)).toContain("Reserved response directives");
+      expect(payload.input.some((item) =>
+        item.type === "message" && item.role === "user" && item.content.includes("## Memory")
+      )).toBe(true);
+      expect(payload.input.some((item) =>
+        item.type === "message" && item.role === "user" && item.content.includes("## Current User Message")
+      )).toBe(true);
+
+      return Promise.resolve({
+        text: "done",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        guildConfig: makeGuildConfig({ llmProvider: "openai-codex", model: "gpt-5.5" }),
+      }),
+    );
+  });
+
   test("keeps older chat history in the stable prompt instead of volatile turn context", async () => {
     const completeChat: ChatCompleteFn = (request) => {
       const payload = { messages: [...request.messages] };
@@ -513,11 +603,11 @@ describe("handleMessage", () => {
 
       const messages = payload.messages as Array<{ role?: string; content?: unknown }>;
       const olderHistory = contentText(messages[2]?.content);
-      const currentTurn = contentText(messages[5]?.content);
+      const recentHistory = findMessageContent(messages, "## Chat History\n[@new]: volatile recent");
       expect(olderHistory).toContain("## Chat History — Older");
       expect(olderHistory).toContain("[@old]: cached chunk");
-      expect(currentTurn).toContain("## Chat History\n[@new]: volatile recent");
-      expect(currentTurn).not.toContain("[@old]: cached chunk");
+      expect(recentHistory).toContain("## Chat History\n[@new]: volatile recent");
+      expect(recentHistory).not.toContain("[@old]: cached chunk");
 
       return Promise.resolve({
         text: "done",
@@ -1800,14 +1890,14 @@ describe("handleMessage", () => {
     let sawImageInput = false;
     let sawNormalTurnText = false;
     const completeChat: ChatCompleteFn = (request) => {
-      const firstMessage = request.messages[0];
-      const content = firstMessage?.content;
+      const currentTurnMessage = request.messages.find((message) => contentText(message.content).includes("## Current User Message"));
+      const content = currentTurnMessage?.content;
       if (Array.isArray(content)) {
         sawImageInput = content.some((part) => part.type === "image_url");
         sawNormalTurnText = content.some((part) =>
           part.type === "text"
           && part.text.includes("[Async Image Job Ready]")
-          && part.text.includes("## Current Discord Turn Context")
+          && part.text.includes("## Current User Message")
         );
       }
       return Promise.resolve({
@@ -2609,7 +2699,7 @@ describe("handleMessage", () => {
       )).toBe(false);
       const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_chat_images");
       expect(toolMessage?.content).toContain("current LLM endpoint cannot read image input");
-      expect(request.messages.filter((m) => m.role === "user")).toHaveLength(1);
+      expect(request.messages.some((m) => m.role === "user" && contentText(m.content).includes("## Current User Message"))).toBe(true);
 
       return Promise.resolve({
         text: "cannot inspect image",
@@ -2682,7 +2772,7 @@ describe("handleMessage", () => {
       const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_chat_images");
       expect(toolMessage?.content).toContain("Native image reading was unavailable");
       expect(toolMessage?.content).toContain("Fallback saw a small square test image.");
-      expect(request.messages.filter((m) => m.role === "user")).toHaveLength(1);
+      expect(request.messages.some((m) => m.role === "user" && contentText(m.content).includes("## Current User Message"))).toBe(true);
 
       return Promise.resolve({
         text: "described image answer",
@@ -2901,12 +2991,14 @@ describe("handleMessage", () => {
     };
     let calls = 0;
     const exposedTools: string[][] = [];
-    const systemPrompts: string[] = [];
+    const payloads: Array<{ instructions?: unknown; input?: unknown }> = [];
     const controlMessages: string[] = [];
     const completeChat: ChatCompleteFn = (request) => {
       calls += 1;
       exposedTools.push(request.tools?.map((tool) => tool.function.name) ?? []);
-      systemPrompts.push(request.systemPrompt);
+      const payload = { instructions: request.systemPrompt, input: [] as unknown[] };
+      request.onPayload?.(payload);
+      payloads.push(payload);
       const lastMessage = request.messages[request.messages.length - 1];
       controlMessages.push(typeof lastMessage?.content === "string" ? lastMessage.content : "");
       expect(request.signal).toBeInstanceOf(AbortSignal);
@@ -2943,12 +3035,13 @@ describe("handleMessage", () => {
     expect(toolCalls).toEqual([{ actions: [{ action: "none" }] }]);
     expect(calls).toBe(1);
     expect(exposedTools).toEqual([["record_memory"]]);
-    expect(systemPrompts[0]).toContain("Silent Memory Pass");
-    expect(systemPrompts[0]).toContain("strongly implied durable facts");
-    expect(systemPrompts[0]).toContain("Before creating a new memory");
-    expect(systemPrompts[0]).toContain("expiresIn");
-    expect(systemPrompts[0]).not.toContain("expiresAt");
-    expect(systemPrompts[0]).not.toContain("Other fact.");
+    const promptText = JSON.stringify(payloads[0]);
+    expect(promptText).toContain("Silent Memory Pass");
+    expect(promptText).toContain("strongly implied durable facts");
+    expect(promptText).toContain("Before creating a new memory");
+    expect(promptText).toContain("expiresIn");
+    expect(promptText).not.toContain("expiresAt");
+    expect(promptText).not.toContain("Other fact.");
     expect(controlMessages[0]).toStartWith("## Existing Memories For Other Visible Users");
     expect(controlMessages[0]).toContain("Other fact.\n\n## Post-Reply Memory Consideration");
     expect(controlMessages[0]).toContain("Current time for expiresIn decisions:");
