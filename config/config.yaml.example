@@ -129,6 +129,7 @@ promptCaching:
 #       currentContext:   { role: user,   target: input }
 #       responseInstruction: { role: developer, target: input }
 #       currentTurn:     { role: user,    target: input }
+#       finalActionInstruction: { role: user, target: input }
 #   openrouter:
 #     sections:
 #       core:          { role: developer, target: input, cacheGroup: core }
@@ -145,6 +146,7 @@ promptCaching:
 #       currentContext:   { role: user,   target: input }
 #       responseInstruction: { role: developer, target: input }
 #       currentTurn:     { role: user,    target: input }
+#       finalActionInstruction: { role: user, target: input }
 
 # Background LLM defaults for memory extraction. Omitted fields inherit the main
 # effective model config. serviceTier is optional; omit it to send no service_tier.

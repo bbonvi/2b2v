@@ -213,6 +213,7 @@ const PROMPT_TRANSPORT_SECTION_IDS: readonly PromptTransportSectionId[] = [
   "currentContext",
   "responseInstruction",
   "currentTurn",
+  "finalActionInstruction",
 ] as const;
 
 const DEFAULT_PROMPT_TRANSPORT: PromptTransportConfig = {
@@ -233,6 +234,7 @@ const DEFAULT_PROMPT_TRANSPORT: PromptTransportConfig = {
       currentContext: { role: "user", target: "input" },
       responseInstruction: { role: "developer", target: "input" },
       currentTurn: { role: "user", target: "input" },
+      finalActionInstruction: { role: "user", target: "input" },
     },
   },
   openrouter: {
@@ -252,6 +254,7 @@ const DEFAULT_PROMPT_TRANSPORT: PromptTransportConfig = {
       currentContext: { role: "user", target: "input" },
       responseInstruction: { role: "developer", target: "input" },
       currentTurn: { role: "user", target: "input" },
+      finalActionInstruction: { role: "user", target: "input" },
     },
   },
 };

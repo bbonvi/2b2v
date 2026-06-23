@@ -667,6 +667,16 @@ function buildSkillsInstruction(runtimePrompts: RuntimePromptBundle | undefined)
   return runtimePrompts?.skills.indexPrompt.trim() ?? "";
 }
 
+function buildFinalActionInstruction(runtimePrompts: RuntimePromptBundle | undefined, triggerInstruction?: string): string {
+  const base = runtimePrompts?.finalActionInstruction.trim() ?? "";
+  const instruction = base !== ""
+    ? base
+    : "## Final Action Instruction\nContinue the Discord room as 2B. Emit only her next runtime action: visible speech, silence, voice, or private action. Do not explain the choice.";
+  const trigger = triggerInstruction?.trim() ?? "";
+  if (trigger === "") return instruction;
+  return `${instruction}\n\n## Trigger Context\n${trigger}`;
+}
+
 function promptTransportForProvider(
   config: PromptTransportConfig,
   provider: LlmProvider,
@@ -776,10 +786,12 @@ function buildVolatileTurnMessages(context: AssembledContext): VolatilePromptMes
 function initialMessageRoles(
   transport: ProviderPromptTransportConfig,
   volatileMessages: readonly VolatilePromptMessage[],
+  includeFinalActionInstruction = false,
 ): PromptTransportRole[] {
   return [
     ...volatileMessages.map((message) => sectionPlacement(transport, message.sectionId).role),
     sectionPlacement(transport, "currentTurn").role,
+    ...(includeFinalActionInstruction ? [sectionPlacement(transport, "finalActionInstruction").role] : []),
   ];
 }
 
@@ -851,6 +863,7 @@ function buildInitialMessages(
   msg: IncomingMessage,
   runtimePrompts?: RuntimePromptBundle,
   roles: readonly PromptTransportRole[] = ["user"],
+  finalActionInstruction = "",
 ): OpenRouterMessage[] {
   const roleAt = (index: number): PromptTransportRole => roles[index] ?? "user";
   const currentMessageMetadata = [
@@ -884,6 +897,12 @@ function buildInitialMessages(
     role: roleAt(volatileMessages.length),
     content: images.length > 0 ? [textPart(text), ...images] : text,
   });
+  if (finalActionInstruction !== "") {
+    messages.push({
+      role: roleAt(volatileMessages.length + 1),
+      content: finalActionInstruction,
+    });
+  }
   return messages;
 }
 
@@ -2362,7 +2381,8 @@ export async function handleMessage(
   );
   const userContent = context.userMessage !== "" ? context.userMessage : msg.translatedContent;
   const volatileMessages = buildVolatileTurnMessages(context);
-  const initialRoles = initialMessageRoles(transport, volatileMessages);
+  const finalActionInstruction = buildFinalActionInstruction(deps.runtimePrompts, triggerInstruction);
+  const initialRoles = initialMessageRoles(transport, volatileMessages, finalActionInstruction !== "");
   const reqLog = deps.requestLog;
   const sessionId = buildPromptCacheSessionId(reqLog, `${model.llmProvider}:${model.id}`);
   const startedAt = Date.now();
@@ -2481,6 +2501,7 @@ export async function handleMessage(
           msg,
           deps.runtimePrompts,
           model.llmProvider === "openai-codex" ? [] : initialRoles,
+          finalActionInstruction,
         ),
         tools: timedTools,
         maxToolCalls: deps.guildConfig.replyLoop.maxToolCalls,

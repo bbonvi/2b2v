@@ -46,6 +46,7 @@ function defaultPromptTransportConfig(): PromptTransportConfig {
         currentContext: { role: "user", target: "input" },
         responseInstruction: { role: "developer", target: "input" },
         currentTurn: { role: "user", target: "input" },
+        finalActionInstruction: { role: "user", target: "input" },
       },
     },
     openrouter: {
@@ -65,6 +66,7 @@ function defaultPromptTransportConfig(): PromptTransportConfig {
         currentContext: { role: "user", target: "input" },
         responseInstruction: { role: "developer", target: "input" },
         currentTurn: { role: "user", target: "input" },
+        finalActionInstruction: { role: "user", target: "input" },
       },
     },
   };

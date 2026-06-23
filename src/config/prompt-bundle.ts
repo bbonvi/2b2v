@@ -41,6 +41,8 @@ export interface PromptSkillBundle {
 export interface RuntimePromptBundle {
   /** Normal visible reply loop runtime instructions. */
   reply: string;
+  /** Final per-turn instruction placed after the current Discord event. */
+  finalActionInstruction: string;
   /** Silent memory pass control instructions. */
   memoryPass: string;
   /** Shared memory-selection policy for memory passes and record_memory. */
@@ -326,6 +328,7 @@ export function loadPromptBundle(promptDir: string, log: Logger): PromptBundle {
     corePrompt: coreDocuments.map((doc) => doc.text).join("\n\n"),
     runtime: {
       reply: runtimeReplyDocuments.map((doc) => doc.text).join("\n\n"),
+      finalActionInstruction: loadRuntimeDocuments(promptDir, "final-action-instruction", log, "runtime.final-action-instruction"),
       memoryPass: loadRuntimeDocuments(promptDir, "memory/pass", log, "runtime.memory.pass"),
       memoryPolicy: loadRuntimeDocuments(promptDir, "memory/policy", log, "runtime.memory.policy"),
       toolDescriptions: loadRuntimeTextMap(promptDir, "tools", log, "runtime.tools"),

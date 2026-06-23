@@ -11,7 +11,8 @@ services:
     volumes:
       - bot-data:/app/data
       - model-cache:/app/model-cache
-      - ./config:/app/config:ro
+      - ./config/config.prod.yaml:/app/config/config.yaml:ro
+      - ./config/guilds:/app/config/guilds:ro
       # - ./prompts:/app/prompts:ro
       - ./prompts-prod:/app/prompts:ro
     ports:

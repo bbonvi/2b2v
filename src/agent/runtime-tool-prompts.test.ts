@@ -7,6 +7,7 @@ import type { RuntimePromptBundle } from "../config/prompt-bundle.ts";
 function runtimePrompts(): RuntimePromptBundle {
   return {
     reply: "",
+    finalActionInstruction: "",
     memoryPass: "",
     memoryPolicy: "",
     toolDescriptions: {

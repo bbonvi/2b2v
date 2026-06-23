@@ -38,6 +38,7 @@ function makePromptTransportConfig(): PromptTransportConfig {
         currentContext: { role: "user", target: "input" },
         responseInstruction: { role: "developer", target: "input" },
         currentTurn: { role: "user", target: "input" },
+        finalActionInstruction: { role: "user", target: "input" },
       },
     },
     openrouter: {
@@ -57,6 +58,7 @@ function makePromptTransportConfig(): PromptTransportConfig {
         currentContext: { role: "user", target: "input" },
         responseInstruction: { role: "developer", target: "input" },
         currentTurn: { role: "user", target: "input" },
+        finalActionInstruction: { role: "user", target: "input" },
       },
     },
   };
@@ -529,6 +531,10 @@ describe("handleMessage", () => {
       expect(currentTurn).toContain("Source ChannelID: source-channel");
       expect(currentTurn).toContain("Source MsgID: source-msg");
       expect(currentTurn).toContain("hello bot");
+      const currentTurnIndex = messages.findIndex((message) => contentText(message.content).includes("## New Discord Event"));
+      expect(messages[currentTurnIndex + 1]?.role).toBe("user");
+      expect(contentText(messages[currentTurnIndex + 1]?.content)).toContain("## Final Action Instruction");
+      expect(contentText(messages[currentTurnIndex + 1]?.content)).toContain("Emit only her next runtime action");
 
       return Promise.resolve({
         text: "done",
@@ -578,6 +584,14 @@ describe("handleMessage", () => {
       expect(payload.input.some((item) =>
         item.type === "message" && item.role === "user" && item.content.includes("## New Discord Event")
       )).toBe(true);
+      const currentTurnIndex = payload.input.findIndex((item) =>
+        item.type === "message" && item.content.includes("## New Discord Event")
+      );
+      expect(payload.input[currentTurnIndex + 1]).toMatchObject({
+        type: "message",
+        role: "user",
+      });
+      expect(payload.input[currentTurnIndex + 1]?.content).toContain("## Final Action Instruction");
 
       return Promise.resolve({
         text: "done",

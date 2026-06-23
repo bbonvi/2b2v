@@ -64,7 +64,8 @@ export type PromptTransportSectionId =
   | "recentHistory"
   | "currentContext"
   | "responseInstruction"
-  | "currentTurn";
+  | "currentTurn"
+  | "finalActionInstruction";
 
 /** LLM message roles supported by provider prompt transport. */
 export type PromptTransportRole = "system" | "developer" | "user";
