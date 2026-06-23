@@ -64,6 +64,15 @@ function formatMemory(row: MemoryRow): string {
   return `- ${row.id} [${scope}] [${formatConfidence(row.confidence)}] [${row.kind}] ${row.content}`;
 }
 
+function formatUserMemory(row: MemoryRow): string {
+  return `- ${row.id} [${formatConfidence(row.confidence)}] [${row.kind}] ${row.content}`;
+}
+
+function formatUserHeaderLabel(label: string, userId: string): string {
+  const resolvedLabel = label.startsWith("@") || label === userId ? label : `@${label}`;
+  return `${resolvedLabel} (user:${userId})`;
+}
+
 /** Create a read-only tool for retrieving guild or user memories. */
 export function createMemoryListTool(deps: MemoryListToolDeps): AgentTool {
   const { db, currentGuildId, resolveUsername } = deps;
@@ -158,16 +167,16 @@ export function createMemoryListTool(deps: MemoryListToolDeps): AgentTool {
 
       const total = countMemories(db, { guildId, subjectUserId: userId });
       const rows = listMemories(db, { guildId, subjectUserId: userId, limit }).filter((row) => row.content.trim() !== "");
-      const resolvedLabel = label.startsWith("@") || label === userId ? label : `@${label}`;
+      const headerLabel = formatUserHeaderLabel(label, userId);
       if (rows.length === 0) {
         return {
-          content: [{ type: "text", text: `No portable user memories found for ${resolvedLabel}; current-guild memories are separate, so use target=guild for shared server facts.` }],
+          content: [{ type: "text", text: `No portable user memories found for ${headerLabel}; current-guild memories are separate, so use target=guild for shared server facts.` }],
           details: { target, userId, count: 0, total },
         };
       }
 
       return {
-        content: [{ type: "text", text: `Portable user memories for ${resolvedLabel} (${rows.length}/${total} shown):\n${rows.map(formatMemory).join("\n")}` }],
+        content: [{ type: "text", text: `Portable user memories for ${headerLabel} (${rows.length}/${total} shown):\n${rows.map(formatUserMemory).join("\n")}` }],
         details: { target, userId, count: rows.length, total },
       };
     },

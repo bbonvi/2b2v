@@ -44,9 +44,10 @@ describe("createMemoryListTool", () => {
     const result = await tool.execute("tc1", { target: "user", username: "@Alice" }, AbortSignal.timeout(5000));
     const text = textOf(result);
 
-    expect(text).toContain("Portable user memories for @Alice (2/2 shown):");
+    expect(text).toContain("Portable user memories for @Alice (user:u1) (2/2 shown):");
     expect(text).toContain("[preference] Likes concise answers");
     expect(text).toContain("[fact] Other guild fact");
+    expect(text).not.toContain("[user:u1]");
     expect(text).not.toContain("Global note");
     expect(text).not.toContain("Other user fact");
     expect(result.details).toEqual({ target: "user", userId: "u1", count: 2, total: 2 });
@@ -66,7 +67,7 @@ describe("createMemoryListTool", () => {
 
     expect(text).toContain("Second memory");
     expect(text).not.toContain("First memory");
-    expect(text).toContain("Portable user memories for @alice (1/2 shown):");
+    expect(text).toContain("Portable user memories for @alice (user:u1) (1/2 shown):");
     expect(result.details).toEqual({ target: "user", userId: "u1", count: 1, total: 2 });
   });
 
@@ -83,7 +84,7 @@ describe("createMemoryListTool", () => {
     const result = await tool.execute("tc1", { target: "user", username: "alice" }, AbortSignal.timeout(5000));
     const text = textOf(result);
 
-    expect(text).toContain("Portable user memories for @alice (30/31 shown):");
+    expect(text).toContain("Portable user memories for @alice (user:u1) (30/31 shown):");
     expect(text).toContain("Memory 31");
     expect(text).not.toContain("[fact] Memory 1\n");
     expect(result.details).toEqual({ target: "user", userId: "u1", count: 30, total: 31 });
@@ -100,10 +101,28 @@ describe("createMemoryListTool", () => {
     const result = await tool.execute("tc1", { target: "user", username: "alice" }, AbortSignal.timeout(5000));
     const text = textOf(result);
 
-    expect(text).toContain("No portable user memories found for @alice");
+    expect(text).toContain("No portable user memories found for @alice (user:u1)");
     expect(text).toContain("target=guild");
     expect(text).not.toContain("Global note");
     expect(result.details).toEqual({ target: "user", userId: "u1", count: 0, total: 0 });
+  });
+
+  test("shows raw user id only in the user memories header", async () => {
+    createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Portable user note" });
+
+    const tool = createMemoryListTool({
+      db,
+      currentGuildId: "g1",
+      resolveUsername: () => Promise.resolve(undefined),
+      isUserInGuild: () => Promise.resolve(true),
+    });
+    const result = await tool.execute("tc1", { target: "user", user_id: "u1" }, AbortSignal.timeout(5000));
+    const text = textOf(result);
+
+    expect(text).toContain("Portable user memories for u1 (user:u1) (1/1 shown):");
+    expect(text).toContain("- 1 [0.7] [fact] Portable user note");
+    expect(text).not.toContain("[user:u1]");
+    expect(result.details).toEqual({ target: "user", userId: "u1", count: 1, total: 1 });
   });
 
   test("retrieves guild memories by guild id", async () => {
