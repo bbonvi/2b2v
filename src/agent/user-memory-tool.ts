@@ -69,6 +69,7 @@ function formatUserMemory(row: MemoryRow): string {
 }
 
 function formatUserHeaderLabel(label: string, userId: string): string {
+  if (label === userId) return `user:${userId}`;
   const resolvedLabel = label.startsWith("@") || label === userId ? label : `@${label}`;
   return `${resolvedLabel} (user:${userId})`;
 }

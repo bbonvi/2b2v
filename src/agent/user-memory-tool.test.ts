@@ -119,7 +119,7 @@ describe("createMemoryListTool", () => {
     const result = await tool.execute("tc1", { target: "user", user_id: "u1" }, AbortSignal.timeout(5000));
     const text = textOf(result);
 
-    expect(text).toContain("Portable user memories for u1 (user:u1) (1/1 shown):");
+    expect(text).toContain("Portable user memories for user:u1 (1/1 shown):");
     expect(text).toContain("- 1 [0.7] [fact] Portable user note");
     expect(text).not.toContain("[user:u1]");
     expect(result.details).toEqual({ target: "user", userId: "u1", count: 1, total: 1 });

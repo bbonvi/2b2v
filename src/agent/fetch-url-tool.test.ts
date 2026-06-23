@@ -44,11 +44,12 @@ describe("createFetchUrlTool", () => {
       <body><article><p>Direct content.</p></article></body></html>
     `;
     const tool = createFetchUrlTool({
+      timeoutMs: 1000,
       fetchFn: async (url) => {
         const target = url.toString();
         calls.push(target.includes("r.jina.ai") ? "jina" : "manual");
         if (target.includes("r.jina.ai")) {
-          await new Promise((resolve) => setTimeout(resolve, 30));
+          await new Promise<never>(() => undefined);
           return new Response("# Slow Jina\n\nSlow content.", {
             headers: { "content-type": "text/markdown" },
           });
