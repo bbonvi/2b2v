@@ -131,8 +131,7 @@ describe("processHistory", () => {
 
     expect(result.olderText).toStartWith("## Chat History \u2014 Older\n");
     expect(result.olderText).toContain(OLDER_LEGEND);
-    // Date stamps use [DATE ...] format
-    expect(result.olderText).toContain("[DATE");
+    expect(result.olderText).toContain("[1970-01-01");
     expect(result.newerText).toStartWith("## Chat History\n");
   });
 
@@ -310,23 +309,34 @@ describe("processHistory", () => {
     const result = await processHistory([m1, m2], latest, defaultConfig, deps);
 
     // Should have date stamps in newer slice (>= 5 min gaps)
-    expect(result.newerText).toContain("[DATE");
+    expect(result.newerText).toContain("[1970-01-01");
     // Count date stamps - should be 3 (one for each message with >= 5 min gap)
-    const dateMatches = result.newerText.match(/\[DATE/g);
+    const dateMatches = result.newerText.match(/\[1970-01-01/g);
     expect(dateMatches?.length).toBe(3);
   });
 
-  test("newer slice has single date stamp when messages are close together", async () => {
-    // Messages within 5 minutes should share a date stamp
+  test("newer slice stamps minute-scale temporal gaps", async () => {
+    // Recent history is uncached, so it can afford more frequent time markers.
     const m1 = msg({ id: "1", content: "first", timestamp: 1000 });
-    const m2 = msg({ id: "2", content: "second", timestamp: 1000 + 2 * 60_000 }); // 2 min later
-    const latest = msg({ id: "100", content: "last", timestamp: 1000 + 4 * 60_000 }); // 4 min later
+    const m2 = msg({ id: "2", content: "second", timestamp: 1000 + 3 * 60_000 }); // 3 min later
+    const latest = msg({ id: "100", content: "last", timestamp: 1000 + 6 * 60_000 }); // 6 min later
 
     const result = await processHistory([m1, m2], latest, defaultConfig, deps);
 
-    // Should have only one date stamp (all within 5 min of first)
-    expect(result.newerText).toContain("[DATE");
-    const dateMatches = result.newerText.match(/\[DATE/g);
-    expect(dateMatches?.length).toBe(1);
+    // Should have one date stamp per message because each gap is >= 1 min.
+    expect(result.newerText).toContain("[1970-01-01");
+    const dateMatches = result.newerText.match(/\[1970-01-01/g);
+    expect(dateMatches?.length).toBe(3);
+  });
+
+  test("newer slice date stamps include relative age", async () => {
+    const base = Date.UTC(2026, 0, 1, 12, 0, 0);
+    const m1 = msg({ id: "1", content: "first", timestamp: base });
+    const latest = msg({ id: "100", content: "last", timestamp: base + 10 * 60 * 60_000 });
+
+    const result = await processHistory([m1], latest, defaultConfig, deps, latest.timestamp);
+
+    expect(result.newerText).toContain("[2026-01-01 12:00, 10h ago]");
+    expect(result.newerText).toContain("[2026-01-01 22:00, <1m ago]");
   });
 });

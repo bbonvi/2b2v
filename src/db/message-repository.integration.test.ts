@@ -3,7 +3,7 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "./database";
 import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
-import { searchMessages, getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, upsertMessageReaction, deleteMessageEmojiReaction, deleteMessageReactions } from "./message-repository";
+import { searchMessages, getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, upsertMessageReaction, deleteMessageEmojiReaction, deleteMessageReactions } from "./message-repository";
 import { createMockPipeline } from "../embeddings/test-utils";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
@@ -95,6 +95,44 @@ beforeEach(async () => {
 
 afterAll(async () => {
   try { await qdrant.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
+});
+
+describe("getLatestMessageActivityBefore", () => {
+  test("finds latest visible activity with optional scope filters", () => {
+    const base = Date.UTC(2026, 0, 1, 12, 0, 0);
+    insertMessage("current", { guildId: "g1", channelId: "c1", userId: "u1", createdAt: base });
+    insertMessage("older-channel", { guildId: "g1", channelId: "c1", userId: "u2", createdAt: base - hour });
+    insertMessage("older-user-anywhere", { guildId: "g2", channelId: "c9", userId: "u1", createdAt: base - 2 * hour });
+    insertMessage("newer-after-current", { guildId: "g1", channelId: "c1", userId: "u3", createdAt: base + hour });
+
+    expect(getLatestMessageActivityBefore(db, {
+      beforeCreatedAt: base,
+      beforeMessageId: "current",
+      guildId: "g1",
+      channelId: "c1",
+    })?.id).toBe("older-channel");
+
+    expect(getLatestMessageActivityBefore(db, {
+      beforeCreatedAt: base,
+      beforeMessageId: "current",
+      userId: "u1",
+      isBot: false,
+    })?.id).toBe("older-user-anywhere");
+  });
+
+  test("ignores synthetic and prompt-only rows", () => {
+    const base = Date.UTC(2026, 0, 1, 12, 0, 0);
+    insertMessage("current", { guildId: "g1", channelId: "c1", createdAt: base });
+    insertMessage("prompt-only", { guildId: "g1", channelId: "c1", createdAt: base - 10, isPromptOnly: true });
+    insertMessage("synthetic", { guildId: "g1", channelId: "c1", createdAt: base - 20, isSynthetic: true });
+
+    expect(getLatestMessageActivityBefore(db, {
+      beforeCreatedAt: base,
+      beforeMessageId: "current",
+      guildId: "g1",
+      channelId: "c1",
+    })).toBeNull();
+  });
 });
 
 describe("searchMessages", () => {

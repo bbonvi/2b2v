@@ -80,6 +80,16 @@ export interface MessageSearchResult {
   source?: string;
 }
 
+export interface MessageActivity {
+  id: string;
+  guildId: string;
+  channelId: string;
+  userId: string;
+  authorUsername: string;
+  createdAt: number;
+  isBot: boolean;
+}
+
 interface MessageSearchRow {
   id: string;
   channel_id: string;
@@ -515,6 +525,76 @@ function toMessageSearchResult(row: MessageSearchRow, score = 1.0): MessageSearc
     createdAt: row.created_at,
     replyToId: row.reply_to_id,
     score,
+  };
+}
+
+/** Return the latest visible message activity before a known message/time. */
+export function getLatestMessageActivityBefore(
+  db: Database,
+  filter: {
+    beforeCreatedAt: number;
+    beforeMessageId?: string;
+    guildId?: string;
+    channelId?: string;
+    userId?: string;
+    isBot?: boolean;
+  },
+): MessageActivity | null {
+  const conditions = [
+    "is_synthetic = 0",
+    "is_prompt_only = 0",
+    "(created_at < ? OR (created_at = ? AND id < ?))",
+  ];
+  const params: Array<string | number> = [
+    filter.beforeCreatedAt,
+    filter.beforeCreatedAt,
+    filter.beforeMessageId ?? "",
+  ];
+
+  if (filter.guildId !== undefined) {
+    conditions.push("guild_id = ?");
+    params.push(filter.guildId);
+  }
+  if (filter.channelId !== undefined) {
+    conditions.push("channel_id = ?");
+    params.push(filter.channelId);
+  }
+  if (filter.userId !== undefined) {
+    conditions.push("user_id = ?");
+    params.push(filter.userId);
+  }
+  if (filter.isBot !== undefined) {
+    conditions.push("is_bot = ?");
+    params.push(filter.isBot ? 1 : 0);
+  }
+
+  const row = db.raw
+    .prepare(
+      `SELECT id, guild_id, channel_id, user_id, author_username, created_at, is_bot
+       FROM messages
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`
+    )
+    .get(...params) as {
+      id: string;
+      guild_id: string;
+      channel_id: string;
+      user_id: string;
+      author_username: string;
+      created_at: number;
+      is_bot: number;
+    } | null;
+
+  if (row === null) return null;
+  return {
+    id: row.id,
+    guildId: row.guild_id,
+    channelId: row.channel_id,
+    userId: row.user_id,
+    authorUsername: row.author_username,
+    createdAt: row.created_at,
+    isBot: row.is_bot === 1,
   };
 }
 

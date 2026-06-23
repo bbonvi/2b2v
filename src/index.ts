@@ -21,7 +21,7 @@ import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
-import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, deleteRecentMessages, upsertMessageReaction, deleteMessageReactions, deleteMessageEmojiReaction, upsertBotMessageContent, deleteBotMessageState, getRoutedMessageSource, type RoutedMessageSource } from "./db/message-repository";
+import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, deleteRecentMessages, upsertMessageReaction, deleteMessageReactions, deleteMessageEmojiReaction, upsertBotMessageContent, deleteBotMessageState, getRoutedMessageSource, getLatestMessageActivityBefore, type MessageActivity, type RoutedMessageSource } from "./db/message-repository";
 import {
   countMessagesSinceMemoryExtraction,
   getMemoryExtractionCheckpoint,
@@ -34,7 +34,7 @@ import { trimMessages } from "./agent/history-trimming";
 import { formatMessageLine, OLDER_LEGEND } from "./agent/history-formatting";
 import { insertDateStamps } from "./agent/history-dates";
 import { formatRelativeAgo } from "./agent/history-dates";
-import { currentLocalContext } from "./time/agent-time";
+import { currentLocalContext, formatElapsedDuration } from "./time/agent-time";
 import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
@@ -2021,6 +2021,67 @@ async function fetchEmojiCache(guild: Guild): Promise<EmojiEntry[]> {
 }
 
 // --- 19. Build assembled context for a guild+channel ---
+function elapsedLine(label: string, activity: MessageActivity | null, now: number): string {
+  if (activity === null) return `${label}: none known`;
+  return `${label}: ${formatElapsedDuration(activity.createdAt, now)}`;
+}
+
+function buildTemporalContext(input: {
+  guildId: string;
+  channelId: string;
+  timezone: string;
+  latestUserMessage: HistoryMessage;
+}): string {
+  const now = Date.now();
+  const botUserId = client.user?.id;
+  const before = {
+    beforeCreatedAt: input.latestUserMessage.timestamp,
+    beforeMessageId: input.latestUserMessage.id,
+  };
+  const previousChannelMessage = getLatestMessageActivityBefore(db, {
+    ...before,
+    guildId: input.guildId,
+    channelId: input.channelId,
+  });
+  const previousUserChannelMessage = getLatestMessageActivityBefore(db, {
+    ...before,
+    guildId: input.guildId,
+    channelId: input.channelId,
+    userId: input.latestUserMessage.authorId,
+    isBot: false,
+  });
+  const previousUserAnyMessage = getLatestMessageActivityBefore(db, {
+    ...before,
+    userId: input.latestUserMessage.authorId,
+    isBot: false,
+  });
+  const previousBotChannelMessage = botUserId !== undefined
+    ? getLatestMessageActivityBefore(db, {
+      ...before,
+      guildId: input.guildId,
+      channelId: input.channelId,
+      userId: botUserId,
+      isBot: true,
+    })
+    : null;
+  const previousBotAnyMessage = botUserId !== undefined
+    ? getLatestMessageActivityBefore(db, {
+      ...before,
+      userId: botUserId,
+      isBot: true,
+    })
+    : null;
+
+  return [
+    currentLocalContext(input.timezone, now),
+    elapsedLine("Elapsed since previous visible message in this channel", previousChannelMessage, now),
+    elapsedLine("Elapsed since this user's previous message in this channel", previousUserChannelMessage, now),
+    elapsedLine("Elapsed since this user's previous message in any guild/channel", previousUserAnyMessage, now),
+    elapsedLine("Elapsed since your previous visible message in this channel", previousBotChannelMessage, now),
+    elapsedLine("Elapsed since your previous visible message in any guild/channel", previousBotAnyMessage, now),
+  ].join("\n");
+}
+
 async function buildContext(
   guildId: string,
   channelId: string,
@@ -2113,8 +2174,13 @@ async function buildContext(
     displayNameContext = buildDisplayNameContext(members, memoryCounts);
   }
 
-  // Current context metadata — local wall-clock time, no ISO Z strings
-  const currentContext = currentLocalContext(guildConfig.timezone);
+  // Current context metadata — local wall-clock time plus compact elapsed activity facts.
+  const currentContext = buildTemporalContext({
+    guildId,
+    channelId,
+    timezone: guildConfig.timezone,
+    latestUserMessage,
+  });
 
   if (liveChannel !== null && isSendableGuildChannel(liveChannel) && liveChannel.isThread()) {
     const existing = getThread(db, liveChannel.id);

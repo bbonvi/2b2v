@@ -1,6 +1,7 @@
 import type { HistoryMessage } from "./history-types.ts";
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
+const ONE_MINUTE_MS = 60 * 1000;
 
 // Time unit thresholds in milliseconds
 const MINUTE_MS = 60 * 1000;
@@ -29,11 +30,15 @@ export function formatRelativeAgo(timestampMs: number, nowMs?: number): string {
 }
 
 /**
- * Format a timestamp as a deterministic date stamp: `[DATE YYYY-MM-DD HH:mm]`
+ * Format a timestamp as a deterministic time marker: `[YYYY-MM-DD HH:mm]`
  * Uses the guild timezone with UTC fallback if invalid. No offset suffix,
  * timezone is communicated once via the Current Context block.
  */
-export function formatDateStamp(timestampMs: number, timezone: string): string {
+export function formatDateStamp(
+  timestampMs: number,
+  timezone: string,
+  options: { nowMs?: number; includeRelativeAgo?: boolean } = {},
+): string {
   const tz = isValidTimezone(timezone) ? timezone : "UTC";
   const date = new Date(timestampMs);
 
@@ -57,7 +62,10 @@ export function formatDateStamp(timestampMs: number, timezone: string): string {
   const hh = get("hour");
   const min = get("minute");
 
-  return `[DATE ${yyyy}-${mm}-${dd} ${hh}:${min}]`;
+  const relative = options.includeRelativeAgo === true && options.nowMs !== undefined
+    ? `, ${formatRelativeAgo(timestampMs, options.nowMs)}`
+    : "";
+  return `[${yyyy}-${mm}-${dd} ${hh}:${min}${relative}]`;
 }
 
 /**
@@ -81,19 +89,21 @@ function isValidTimezone(tz: string): boolean {
 export function insertDateStamps(
   messages: HistoryMessage[],
   timezone: string,
+  options: { minGapMs?: number; nowMs?: number; includeRelativeAgo?: boolean } = {},
 ): Array<{ type: "date"; text: string } | { type: "index"; index: number }> {
   if (messages.length === 0) return [];
 
   const result: Array<{ type: "date"; text: string } | { type: "index"; index: number }> = [];
   let lastDateTs = -Infinity;
+  const minGapMs = options.minGapMs ?? FIVE_MINUTES_MS;
 
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
     if (m === undefined) continue;
     const elapsed = m.timestamp - lastDateTs;
 
-    if (i === 0 || elapsed >= FIVE_MINUTES_MS) {
-      result.push({ type: "date", text: formatDateStamp(m.timestamp, timezone) });
+    if (i === 0 || elapsed >= minGapMs) {
+      result.push({ type: "date", text: formatDateStamp(m.timestamp, timezone, options) });
       lastDateTs = m.timestamp;
     }
 
@@ -102,3 +112,5 @@ export function insertDateStamps(
 
   return result;
 }
+
+export const RECENT_HISTORY_DATE_STAMP_GAP_MS = ONE_MINUTE_MS;

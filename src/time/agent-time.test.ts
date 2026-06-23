@@ -2,6 +2,7 @@ import { test, expect, describe } from "bun:test";
 import {
   formatLocalWallClock,
   currentLocalContext,
+  formatElapsedDuration,
   parseLocalDateTimeToEpoch,
 } from "./agent-time.ts";
 
@@ -59,6 +60,17 @@ describe("currentLocalContext", () => {
     const result = currentLocalContext("Invalid/Zone", nowMs);
     expect(result).toContain("Timezone: UTC");
     expect(result).toContain("Local Date/Time: 2026-02-06 12:00");
+  });
+});
+
+describe("formatElapsedDuration", () => {
+  test("formats compact elapsed durations", () => {
+    const base = Date.UTC(2026, 0, 1, 12, 0, 0);
+    expect(formatElapsedDuration(base, base + 30_000)).toBe("<1m");
+    expect(formatElapsedDuration(base, base + 5 * 60_000)).toBe("5m");
+    expect(formatElapsedDuration(base, base + 2 * 60 * 60_000)).toBe("2h");
+    expect(formatElapsedDuration(base, base + 10 * 60 * 60_000 + 13 * 60_000)).toBe("10h 13m");
+    expect(formatElapsedDuration(base, base + 2 * 24 * 60 * 60_000 + 3 * 60 * 60_000)).toBe("2d 3h");
   });
 });
 

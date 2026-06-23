@@ -33,6 +33,28 @@ export function currentLocalContext(timezone: string, nowMs?: number): string {
   return `Timezone: ${tz}\nLocal Date/Time: ${local}`;
 }
 
+/** Format elapsed wall time compactly for prompt metadata, e.g. `10h 13m`. */
+export function formatElapsedDuration(fromMs: number, toMs: number): string {
+  const elapsedMs = Math.max(0, toMs - fromMs);
+  const minuteMs = 60 * 1000;
+  const hourMs = 60 * minuteMs;
+  const dayMs = 24 * hourMs;
+
+  if (elapsedMs < minuteMs) return "<1m";
+
+  const days = Math.floor(elapsedMs / dayMs);
+  const hours = Math.floor((elapsedMs % dayMs) / hourMs);
+  const minutes = Math.floor((elapsedMs % hourMs) / minuteMs);
+
+  if (days > 0) {
+    return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  }
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  return `${minutes}m`;
+}
+
 /** Result of parsing a local datetime string. */
 export type ParseResult =
   | { ok: true; epochMs: number }

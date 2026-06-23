@@ -24,20 +24,20 @@ describe("formatDateStamp", () => {
     // 2026-02-02 14:05 UTC
     const ts = Date.UTC(2026, 1, 2, 14, 5, 0);
     const result = formatDateStamp(ts, "UTC");
-    expect(result).toBe("[DATE 2026-02-02 14:05]");
+    expect(result).toBe("[2026-02-02 14:05]");
   });
 
   test("formats with timezone offset", () => {
     // 2026-02-02 14:05 UTC → 2026-02-02 23:05 in Asia/Tokyo (+09:00)
     const ts = Date.UTC(2026, 1, 2, 14, 5, 0);
     const result = formatDateStamp(ts, "Asia/Tokyo");
-    expect(result).toBe("[DATE 2026-02-02 23:05]");
+    expect(result).toBe("[2026-02-02 23:05]");
   });
 
   test("falls back to UTC for invalid timezone", () => {
     const ts = Date.UTC(2026, 1, 2, 14, 5, 0);
     const result = formatDateStamp(ts, "Invalid/Zone");
-    expect(result).toBe("[DATE 2026-02-02 14:05]");
+    expect(result).toBe("[2026-02-02 14:05]");
   });
 
   test("deterministic for identical inputs", () => {
@@ -51,7 +51,14 @@ describe("formatDateStamp", () => {
     const ts = Date.UTC(2026, 1, 2, 14, 5, 0);
     const result = formatDateStamp(ts, "America/New_York");
     // Feb in NYC is EST = -05:00, but offset is no longer shown
-    expect(result).toBe("[DATE 2026-02-02 09:05]");
+    expect(result).toBe("[2026-02-02 09:05]");
+  });
+
+  test("can include relative age when requested", () => {
+    const ts = Date.UTC(2026, 1, 2, 14, 5, 0);
+    const nowMs = ts + 2 * 60 * 60_000;
+    const result = formatDateStamp(ts, "UTC", { nowMs, includeRelativeAgo: true });
+    expect(result).toBe("[2026-02-02 14:05, 2h ago]");
   });
 });
 
@@ -90,6 +97,18 @@ describe("insertDateStamps", () => {
     const result = insertDateStamps(msgs, "UTC");
     const dateCount = result.filter((r) => r.type === "date").length;
     expect(dateCount).toBe(2);
+  });
+
+  test("custom gap can stamp recent history more often", () => {
+    const base = Date.UTC(2026, 0, 1, 12, 0, 0);
+    const msgs = [
+      msg("1", base),
+      msg("2", base + 2 * 60_000),
+      msg("3", base + 4 * 60_000),
+    ];
+    const result = insertDateStamps(msgs, "UTC", { minGapMs: 60_000 });
+    const dateCount = result.filter((r) => r.type === "date").length;
+    expect(dateCount).toBe(3);
   });
 
   test("date stamp inserted before the triggering message", () => {

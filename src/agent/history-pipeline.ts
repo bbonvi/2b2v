@@ -3,7 +3,7 @@ import type { ReplyFallbackDeps } from "./reply-target-fallback.ts";
 import { sortMessages, sliceHistory } from "./history-slicing.ts";
 import { mergeConsecutiveMessages } from "./history-merge.ts";
 import { trimMessages } from "./history-trimming.ts";
-import { insertDateStamps } from "./history-dates.ts";
+import { insertDateStamps, RECENT_HISTORY_DATE_STAMP_GAP_MS } from "./history-dates.ts";
 import { formatMessageLine, NEWER_LEGEND, OLDER_LEGEND } from "./history-formatting.ts";
 import { resolveReplies } from "./history-replies.ts";
 import { fetchMissingReplyTargets } from "./reply-target-fallback.ts";
@@ -27,6 +27,7 @@ export async function processHistory(
   latestUserMessage: HistoryMessage,
   config: HistoryProcessingConfig & { replyQuoteChars: number },
   replyFallbackDeps: ReplyFallbackDeps,
+  nowMs = Date.now(),
 ): Promise<ProcessedHistory> {
   // 1. Sort deterministically
   const sorted = sortMessages(applyDisplayNames(messages, config.displayNamesByUserId));
@@ -97,7 +98,11 @@ export async function processHistory(
   let newerText = "";
   const newerMessages = [...newerTrimmed, latestWithDisplayName];
   if (newerMessages.length > 0) {
-    const newerDateEntries = insertDateStamps(newerMessages, config.timezone);
+    const newerDateEntries = insertDateStamps(newerMessages, config.timezone, {
+      minGapMs: RECENT_HISTORY_DATE_STAMP_GAP_MS,
+      nowMs,
+      includeRelativeAgo: true,
+    });
     const lines: string[] = [NEWER_LEGEND];
     for (const entry of newerDateEntries) {
       if (entry.type === "date") {
