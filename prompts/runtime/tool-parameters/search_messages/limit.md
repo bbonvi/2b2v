@@ -1,1 +1,1 @@
-Max results to return. Default: 10.
+Maximum search results for 2B to inspect. Default: 10.

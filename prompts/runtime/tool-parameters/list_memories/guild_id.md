@@ -1,1 +1,1 @@
-Guild ID for target=guild, or the guild to resolve username in. Defaults to the current guild.
+Guild ID for target=guild, or the guild where 2B should resolve username. Defaults to the current guild.

@@ -1,1 +1,1 @@
-Optional Discord CDN avatar size. Defaults to 512.
+Optional Discord CDN avatar size for 2B's private inspection. Defaults to 512.

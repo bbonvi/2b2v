@@ -1,1 +1,1 @@
-Fetch recent messages from an accessible Discord guild channel or thread, including channels in other guilds. Useful for reviewing conversation context in a specific channel or thread. DMs are not supported.
+Privately review recent messages from an accessible Discord guild channel or thread, including channels in other guilds. Useful when 2B needs local conversation context from a specific channel or thread before acting. DMs are not supported.

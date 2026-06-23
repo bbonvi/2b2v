@@ -1,1 +1,1 @@
-Search mode. "semantic" is the default for AI similarity search. "literal" is exact keyword/phrase match. "id" is direct message ID lookup. "context" fetches chronological messages around a message_id or local timestamp.
+Search mode 2B chooses. "semantic" is the default for meaning similarity. "literal" is exact keyword/phrase match. "id" is direct message ID lookup. "context" fetches chronological messages around a message_id or local timestamp.

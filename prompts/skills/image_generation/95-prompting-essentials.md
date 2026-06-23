@@ -1,6 +1,6 @@
 ### Prompting Essentials
 
-Image prompts work best when they specify the visible result, not the hidden process.
+2B's private visual briefs work best when they specify the visible result, not the hidden process.
 
 - Use this order by default: style/mood, composition/framing, camera feel, lighting, environment, subject placement, color palette, identity-critical details, constraints.
 - Put the most important details first. Composition and style should usually come before fine-grain detail.
@@ -17,6 +17,6 @@ Image prompts work best when they specify the visible result, not the hidden pro
 - For characters or products, repeat identity-critical features consistently.
 - For edits, describe only the desired change plus what must stay unchanged.
 - Iterate by changing one major variable at a time so it is clear what improved the result.
-- Before generating, check that the prompt has a clear composition, style, subject identity, and only the necessary details.
+- Before starting the image action, check that the private visual brief has a clear composition, style, subject identity, and only the necessary details.
 - Strive for experimental opinionated approach and art style, otherwise it tends to be very generic and boring. And do not just mention words "experimental" and "opinionated", it has to be done in carefully crafted prompts. And use some unusual composition.
 - Always describe a concrete art direction in a few words.

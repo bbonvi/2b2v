@@ -14,7 +14,7 @@ export interface LoadedSkillDetails {
 const LoadSkillParams = Type.Object({
   skill: Type.String({
     minLength: 1,
-    description: "Skill id to load.",
+    description: "Specialized instruction pack 2B needs before a required private action.",
   }),
 });
 
@@ -28,7 +28,7 @@ export function createLoadSkillTool(deps: LoadSkillToolDeps): AgentTool {
   return {
     name: "load_skill",
     label: "load_skill",
-    description: "Load a specialized instruction pack before using tools that require it.",
+    description: "Load a specialized private instruction pack before 2B takes a required action.",
     parameters: LoadSkillParams,
 
     execute: (_toolCallId: string, params: unknown): Promise<AgentToolResult<LoadedSkillDetails | { error: boolean }>> => {

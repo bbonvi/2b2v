@@ -1,1 +1,1 @@
-Search a specific guild channel or thread. Defaults to the current channel. DMs are not supported.
+Specific guild channel or thread 2B is searching. Defaults to the current channel. DMs are not supported.

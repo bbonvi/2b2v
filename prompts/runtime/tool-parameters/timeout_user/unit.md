@@ -1,1 +1,1 @@
-Duration unit. Only seconds and minutes are supported.
+Duration unit 2B is applying. Only seconds and minutes are supported.

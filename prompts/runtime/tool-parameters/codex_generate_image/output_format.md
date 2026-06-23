@@ -1,1 +1,1 @@
-Output image format. Defaults to webp.
+Image format for 2B's finished image. Defaults to webp.

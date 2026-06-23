@@ -1,1 +1,1 @@
-Fetch a webpage URL and extract its readable content as markdown. Use this to read articles, documentation, or any web page. Returns the page title and main content. Might take 10+ seconds.
+Privately fetch a webpage URL and extract its readable content as markdown before 2B speaks or acts. Use this to read articles, documentation, or any web page. Returns the page title and main content. Might take 10+ seconds.

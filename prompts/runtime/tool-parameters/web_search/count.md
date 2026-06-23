@@ -1,1 +1,1 @@
-Number of results to return. Default: 5, max: 20.
+Number of web results for 2B to inspect. Default: 5, max: 20.

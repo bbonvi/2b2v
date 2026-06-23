@@ -2,7 +2,7 @@
 
 Establish the image's overall visual direction first: style, mood, composition, camera feel, lighting, and environment. Then place the subjects inside that direction and add only the details needed for recognition, continuity, or the event's explicit request.
 
-Assume the image model is literal and weak at spatial reasoning: every object, trait, action, and reference in the prompt may be pulled into the visible frame. Only mention details that should actually be visible from the chosen viewpoint; imply hidden context through visible cues.
+Assume image creation is literal and weak at spatial reasoning: every object, trait, action, and reference in the private visual brief may be pulled into the visible frame. Only mention details that should actually be visible from the chosen viewpoint; imply hidden context through visible cues.
 
 Choose one dominant visual style and one camera/rendering treatment. Do not stack near-synonyms. Use extra style terms only when they add distinct information, such as medium, lighting, era, lens, or finish.
 

@@ -238,7 +238,7 @@ function renderSkillIndex(skills: PromptSkill[]): string {
   if (skills.length === 0) return "";
   return [
     "## Skills",
-    "Use load_skill before using a tool that requires a skill.",
+    "Before 2B takes a private action that requires a skill, call load_skill for that skill.",
     "Available skills:",
     ...skills.map((skill) => {
       const required = skill.requiredForTools.length > 0
