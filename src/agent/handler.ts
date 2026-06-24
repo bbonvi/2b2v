@@ -485,7 +485,8 @@ async function replaceUnsupportedImageMessages(
     if (source !== undefined && setToolResultContent(messages, source.toolCallId, replacement)) {
       removeImageFollowUp(messages, i);
     } else {
-      message.content = replacement;
+      const originalText = textFromMessageParts(message);
+      message.content = [originalText, replacement].filter((part) => part !== "").join("\n\n");
     }
     replaced = true;
   }
@@ -496,7 +497,9 @@ function isImageInputUnsupportedError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("No endpoints found that support image input")
     || message.includes("does not support image input")
-    || message.includes("cannot read image input");
+    || message.includes("cannot read image input")
+    || message.includes("Invalid value: 'input_image'. Supported values are: 'input_text'.")
+    || message.includes('Invalid value: "input_image". Supported values are: "input_text".');
 }
 
 function appendImageUnsupportedToolText(text: string, imageCount: number): string {
@@ -571,10 +574,12 @@ function isProviderTransientErrorMessage(message: string): boolean {
     || normalized.includes("bad gateway")
     || normalized.includes("cloudflare")
     || normalized.includes("service unavailable")
+    || normalized.includes("server_error")
     || normalized.includes("gateway timeout")
     || normalized.includes("rate limit")
     || normalized.includes("overloaded")
     || normalized.includes("temporarily unavailable")
+    || normalized.includes("you can retry your request")
     || /\b(408|409|425|429|500|502|503|504)\b/.test(normalized);
 }
 

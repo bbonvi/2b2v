@@ -2,7 +2,7 @@ QDRANT_CONTAINER := qdrant-test
 QDRANT_IMAGE := qdrant/qdrant:latest
 QDRANT_URL := http://localhost:6333
 
-.PHONY: test test-unit qdrant-up qdrant-down qdrant-ensure check lint
+.PHONY: test test-unit qdrant-up qdrant-down qdrant-ensure check lint sync-prod-config
 
 # Run all tests (starts Qdrant if needed)
 # Supports: make test, make test src/agent/, make test src/agent/foo.test.ts
@@ -26,6 +26,10 @@ check:
 
 lint:
 	bun run lint
+
+# Back up current prod prompts/config into .dev/, then mirror dev prompts/config to prod.
+sync-prod-config:
+	bash scripts/sync-prod-config.sh
 
 # Start Qdrant test container if not running
 qdrant-ensure:
