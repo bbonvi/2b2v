@@ -441,7 +441,7 @@ describe("handleMessage", () => {
     expect(senderCalls).toEqual([{ text: "hello user", reply: true, channelId: undefined }]);
   });
 
-  test("instructs model to cite web and URL sources inline", async () => {
+  test("includes loaded runtime prompts before volatile turn context", async () => {
     const completeChat: ChatCompleteFn = (request) => {
       const payload = {
         messages: [
@@ -451,32 +451,10 @@ describe("handleMessage", () => {
       };
       request.onPayload?.(payload);
       const text = payloadText(payload);
-      expect(text).toContain("For ambiguous irreversible, user-visible, or state-changing actions");
-      expect(text).toContain("ask one short clarifying question");
-      expect(text).toContain("Cite factual claims from web/URL/media actions with concise inline markdown links near the claim");
-      expect(text).toContain("Prefer English search queries");
-      expect(text).toContain("Fetch the most relevant result when snippets are not enough");
-      expect(text).toContain("include one brief visible status line");
-      expect(text).toContain("To ping, write @username exactly");
-      expect(text).toContain("the exact Discord username is not already visible in context");
-      expect(text).toContain("check the current guild users first instead of guessing");
-      expect(text).toContain("Use the scheduling private action when the event asks 2B to remind, schedule, recur, or follow up later");
-      expect(text).toContain("Try several targeted searches");
-      expect(text).toContain("If 2B's next action depends on missing or old chat context");
-      expect(text).toContain("Search enough to reconstruct the likely context");
-      expect(text).toContain("Use as many private action calls as the task actually needs");
-      expect(text).toContain("action loop has been running for more than about 30 seconds");
-      expect(text).toContain("Async ready/failed events include their own turn instructions");
-      expect(text).toContain("load image_generation before building that revised prompt");
-      expect(text.indexOf("Reserved action directives")).toBeGreaterThan(-1);
-      expect(text).toContain("Treat events asking 2B to sing, scream, shout, whisper, read aloud");
-      expect(text).toContain("most paragraphs should be separate chat messages");
-      expect(text).toContain("first outgoing message in the current channel replies to the trigger/callout message");
-      expect(text).toContain("Later <message> envelopes default to reply=\"false\"");
-      expect(text).toContain("keep_typing=\"true\"");
-      expect(text).toContain("Keep Discord-only text outside <voice>/<audio>");
-      expect(text.indexOf("## Memory")).toBeGreaterThan(-1);
-      expect(text.indexOf("Reserved action directives")).toBeLessThan(text.indexOf("## Memory"));
+      expect(text).toContain(TEST_RUNTIME_PROMPTS.skills.indexPrompt.trim());
+      expect(text).toContain(TEST_RUNTIME_PROMPTS.reply.trim());
+      expect(text).toContain(TEST_RUNTIME_PROMPTS.finalActionInstruction.trim());
+      expect(text.indexOf(TEST_RUNTIME_PROMPTS.reply.trim())).toBeLessThan(text.indexOf("## Memory"));
       return Promise.resolve({
         text: "done",
         toolCalls: [],
@@ -504,11 +482,11 @@ describe("handleMessage", () => {
       const messages = payload.messages as Array<{ role?: string; content?: unknown }>;
       expect(messages[0]?.role).toBe("developer");
       expect(contentText(messages[0]?.content)).toContain("You are a test bot.");
-      expect(contentText(messages[0]?.content)).not.toContain("Reserved action directives");
+      expect(contentText(messages[0]?.content)).not.toContain(TEST_RUNTIME_PROMPTS.reply.trim());
       expect(messages[1]?.role).toBe("developer");
-      expect(contentText(messages[1]?.content)).toContain("## Skills");
+      expect(contentText(messages[1]?.content)).toContain(TEST_RUNTIME_PROMPTS.skills.indexPrompt.trim());
       expect(contentText(messages[1]?.content)).toContain("image_generation");
-      expect(contentText(messages[1]?.content)).toContain("Reserved action directives");
+      expect(contentText(messages[1]?.content)).toContain(TEST_RUNTIME_PROMPTS.reply.trim());
       expect(messages[2]).toEqual({
         role: "user",
         content: "Stable context is loaded; wait for the current Discord turn.",
@@ -533,8 +511,7 @@ describe("handleMessage", () => {
       expect(currentTurn).toContain("hello bot");
       const currentTurnIndex = messages.findIndex((message) => contentText(message.content).includes("## New Discord Event"));
       expect(messages[currentTurnIndex + 1]?.role).toBe("user");
-      expect(contentText(messages[currentTurnIndex + 1]?.content)).toContain("## Final Action Instruction");
-      expect(contentText(messages[currentTurnIndex + 1]?.content)).toContain("Emit only what happens next");
+      expect(contentText(messages[currentTurnIndex + 1]?.content)).toBe(TEST_RUNTIME_PROMPTS.finalActionInstruction.trim());
 
       return Promise.resolve({
         text: "done",

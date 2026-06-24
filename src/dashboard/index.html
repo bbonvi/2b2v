@@ -1592,6 +1592,11 @@
     return mDiscordDelete.checked === true;
   }
 
+  function managementSelectFocused() {
+    return document.activeElement instanceof HTMLSelectElement
+      && managementView.contains(document.activeElement);
+  }
+
   function setTab(tab) {
     activeTab = tab;
     tabLogs.classList.toggle('active', tab === 'logs');
@@ -1721,11 +1726,13 @@
       + renderPromptLabLive(detail);
   }
 
-  async function fetchManagementDirectory() {
+  async function fetchManagementDirectory(forceDomUpdate) {
     const r = await fetch('/api/management/directory');
     if (r.status === 401) { location.href = '/login'; return; }
     if (!r.ok) throw new Error('Unable to load management directory');
-    managementDirectory = await r.json();
+    const directory = await r.json();
+    if (forceDomUpdate !== true && managementSelectFocused()) return false;
+    managementDirectory = directory;
     const gv = mGuild.value, cv = mChannel.value;
     mGuild.innerHTML = '<option value="">All guilds</option>'
       + managementDirectory.guilds.map(g => optionHtml(g.id, g.name)).join('');
@@ -1737,6 +1744,7 @@
     mGuild.value = gv;
     if (visibleChannels.some(c => c.id === cv)) mChannel.value = cv; else mChannel.value = '';
     syncManagementDeleteButtons();
+    return true;
   }
 
   function managementParams() {
@@ -1849,7 +1857,7 @@
     syncManagementDeleteButtons();
   }
 
-  async function fetchManagementData() {
+  async function fetchManagementData(forceDomUpdate) {
     const messageQuery = managementParams().toString();
     const memoryQuery = memoryParams().toString();
     const [messagesRes, memoriesRes] = await Promise.all([
@@ -1861,6 +1869,7 @@
     const messageData = await messagesRes.json();
     const memoryData = await memoriesRes.json();
     if (managementParams().toString() !== messageQuery || memoryParams().toString() !== memoryQuery) return;
+    if (forceDomUpdate !== true && managementSelectFocused()) return;
     managementMessages = messageData.messages || [];
     managementMemories = memoryData.memories || [];
     for (const id of Array.from(selectedManagementMessages)) {
@@ -1870,10 +1879,12 @@
     renderManagement();
   }
 
-  async function refreshManagement() {
+  async function refreshManagement(forceDomUpdate) {
     if (activeTab !== 'management') return;
-    await fetchManagementDirectory();
-    await fetchManagementData();
+    if (forceDomUpdate !== true && managementSelectFocused()) return;
+    const directoryUpdated = await fetchManagementDirectory(forceDomUpdate);
+    if (directoryUpdated === false) return;
+    await fetchManagementData(forceDomUpdate);
   }
 
   async function mutateManagement(request) {
@@ -2128,14 +2139,14 @@
   fUser.addEventListener('change', () => { refreshLogs(); });
   tabLogs.addEventListener('click', () => { setTab('logs'); });
   tabManagement.addEventListener('click', () => { setTab('management'); });
-  mRefresh.addEventListener('click', () => { refreshManagement(); });
+  mRefresh.addEventListener('click', () => { refreshManagement(true); });
   mDeleteSelected.addEventListener('click', () => { deleteSelectedManagementMessages(); });
   mDeleteLast.addEventListener('click', () => { deleteLatestManagementMessages(); });
   mGuild.addEventListener('change', () => {
     saveManagementState();
     selectedManagementMessages.clear();
     renderPromptLabReport(null);
-    fetchManagementDirectory().then(fetchManagementData).catch(() => {});
+    refreshManagement(true).catch(() => {});
   });
   mChannel.addEventListener('change', () => {
     const opt = mChannel.selectedOptions[0];
@@ -2144,9 +2155,9 @@
     saveManagementState();
     selectedManagementMessages.clear();
     renderPromptLabReport(null);
-    refreshManagement();
+    refreshManagement(true);
   });
-  mScope.addEventListener('change', () => { saveManagementState(); refreshManagement(); });
+  mScope.addEventListener('change', () => { saveManagementState(); refreshManagement(true); });
   mLastCount.addEventListener('change', () => { saveManagementState(); syncManagementDeleteButtons(); });
   mDiscordDelete.addEventListener('change', () => { syncDiscordDeleteToggle(); saveManagementState(); });
   labUser.addEventListener('change', () => { savePromptLabSender(); syncManagementDeleteButtons(); });
@@ -2191,7 +2202,9 @@
 
   async function pollManagement() {
     if (!logPollingActive || activeTab !== 'management') return;
-    try { await refreshManagement(); } catch {}
+    if (!managementSelectFocused()) {
+      try { await refreshManagement(); } catch {}
+    }
     if (!logPollingActive || activeTab !== 'management') return;
     managementPollTimer = setTimeout(() => { managementPollTimer = null; pollManagement(); }, 1000);
   }
