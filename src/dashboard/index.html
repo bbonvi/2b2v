@@ -158,45 +158,68 @@
   .entry.no-agent { opacity: .5 }
 
   .entry-header {
-    display: flex;
+    display: grid;
+    grid-template-columns: 68px 152px minmax(78px, 130px) minmax(150px, 260px) minmax(180px, 1fr) auto;
     align-items: center;
-    gap: .75rem;
+    gap: .65rem;
     padding: .5rem .75rem;
     font-size: .72rem;
     cursor: pointer;
+    min-height: 40px;
   }
-  .entry-context {
-    color: var(--text);
-    font-size: .68rem;
-    padding: 0 .75rem .55rem 10.4rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .entry-context .context-author { color: var(--text-dim) }
   .entry-time {
     color: var(--text-dim);
     font-size: .65rem;
-    min-width: 65px;
+    white-space: nowrap;
   }
   .entry-user {
     color: var(--accent);
     font-weight: 500;
-    min-width: 80px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .entry-trigger {
+  .entry-location,
+  .entry-message {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .entry-location {
     color: var(--text-dim);
+    font-size: .64rem;
+  }
+  .entry-message {
+    color: var(--text);
+    font-size: .68rem;
+  }
+  .event-label {
+    display: block;
     font-size: .65rem;
-    background: var(--surface-2);
-    padding: .1rem .4rem;
-    border-radius: 2px;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .event-none { color: var(--text-dim); }
+  .event-mention { color: #60a5fa; }
+  .event-keyword { color: #f59e0b; }
+  .event-random { color: #a78bfa; }
+  .event-background-memory-extraction { color: #34d399; }
+  .event-async-image-generation { color: #fb7185; }
+  .event-prompt-lab { color: #c084fc; }
+  .event-custom { color: #e5e7eb; }
+  .event-detail {
+    color: var(--text-dim);
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
   }
   .entry-stats {
     display: flex; gap: .75rem;
-    margin-left: auto;
     font-size: .65rem;
     color: var(--text-dim);
   }
@@ -219,12 +242,60 @@
   .entry-detail {
     display: none;
     border-top: 1px solid var(--border);
-    padding: .75rem;
+    padding: .9rem;
+    background: #0a0b0c;
   }
   .entry.expanded .entry-detail { display: block }
 
+  .detail-flow {
+    display: grid;
+    gap: .85rem;
+  }
+  .detail-block {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border-active);
+    background: #0e0f11;
+  }
+  .detail-input { border-left-color: var(--accent); }
+  .detail-model { border-left-color: #8b5cf6; }
+  .detail-actions { border-left-color: var(--green); }
+  .detail-error { border-left-color: var(--red); }
+  .detail-block-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: .85rem;
+    align-items: center;
+    padding: .6rem .7rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .detail-kicker {
+    display: block;
+    color: var(--text-dim);
+    font-family: var(--sans);
+    font-size: .58rem;
+    font-weight: 700;
+    letter-spacing: .15em;
+    text-transform: uppercase;
+    margin-bottom: .12rem;
+  }
+  .detail-title {
+    color: var(--text-bright);
+    font-size: .78rem;
+    font-weight: 700;
+  }
+  .detail-subtitle {
+    color: var(--text-dim);
+    font-size: .62rem;
+    margin-top: .12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .detail-body {
+    padding: .65rem .7rem;
+  }
   .detail-section {
-    margin-bottom: .75rem;
+    margin-bottom: .95rem;
   }
   .detail-section:last-child { margin-bottom: 0 }
   .detail-label {
@@ -238,15 +309,15 @@
   }
   .model-request {
     border-top: 1px solid var(--border);
-    padding: .65rem 0;
+    padding: .75rem 0;
   }
   .model-request:first-child { border-top: none; padding-top: 0 }
   .model-head {
     display: grid;
-    grid-template-columns: minmax(160px, 1fr) auto;
-    gap: .5rem;
-    align-items: start;
-    margin-bottom: .45rem;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    gap: .75rem;
+    align-items: center;
+    margin-bottom: .55rem;
   }
   .model-title {
     color: var(--text-bright);
@@ -275,7 +346,39 @@
     font-size: .6rem;
     text-transform: uppercase;
     letter-spacing: .08em;
-    margin: .5rem 0 .15rem;
+    margin: .55rem 0 .3rem;
+  }
+  .metric-grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: .35rem;
+  }
+  .metric {
+    min-width: 66px;
+    background: #090a0b;
+    border: 1px solid var(--border);
+    padding: .22rem .4rem;
+  }
+  .metric-label {
+    display: block;
+    color: var(--text-dim);
+    font-size: .54rem;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+  .metric-value {
+    color: var(--text);
+    font-size: .65rem;
+    white-space: nowrap;
+  }
+  .payload-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: .35rem;
+    margin-top: .35rem;
   }
   .entry.active { border-left: 2px solid var(--amber) }
   .entry-status {
@@ -291,6 +394,14 @@
     border-collapse: collapse;
     font-size: .68rem;
   }
+  .detail-table.tool-table {
+    table-layout: fixed;
+  }
+  .tool-table th:nth-child(1), .tool-table td:nth-child(1) { width: 30%; }
+  .tool-table th:nth-child(2), .tool-table td:nth-child(2) { width: 13%; }
+  .tool-table th:nth-child(3), .tool-table td:nth-child(3) { width: 11%; }
+  .tool-table th:nth-child(4), .tool-table td:nth-child(4) { width: 23%; }
+  .tool-table th:nth-child(5), .tool-table td:nth-child(5) { width: 23%; }
   .detail-table th {
     text-align: left;
     font-weight: 500;
@@ -322,6 +433,79 @@
     white-space: pre-wrap;
     word-break: break-word;
   }
+  .inline-snippet {
+    display: block;
+    color: var(--text-dim);
+    font-size: .62rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: .18rem;
+  }
+  .output-block {
+    color: var(--text);
+    background: #0b0c0d;
+    border-left: 2px solid var(--border-active);
+    padding: .45rem .55rem;
+    margin-bottom: .45rem;
+    font-size: .68rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .message-block {
+    color: var(--text-bright);
+    background: #090a0b;
+    border: 1px solid #111417;
+    padding: .55rem .65rem;
+    font-size: .73rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .message-meta {
+    color: var(--text-dim);
+    font-size: .62rem;
+    margin-bottom: .35rem;
+  }
+  .action-list {
+    display: grid;
+    gap: .35rem;
+  }
+  .action-row {
+    display: grid;
+    grid-template-columns: minmax(130px, .65fr) minmax(110px, .5fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: .65rem;
+    align-items: center;
+    background: #0b0c0d;
+    border: 1px solid #111417;
+    padding: .48rem .55rem;
+  }
+  .action-row.tool-error {
+    border-color: var(--red-dim);
+    background: rgba(239,68,68,.055);
+  }
+  .action-name {
+    color: var(--text-bright);
+    font-size: .7rem;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .action-id {
+    color: var(--text-dim);
+    font-size: .56rem;
+    margin-top: .1rem;
+  }
+  .action-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .45rem;
+    color: var(--text-dim);
+    font-size: .62rem;
+  }
+  .action-payload {
+    min-width: 0;
+  }
   .error-text {
     color: var(--red);
     background: var(--red-dim);
@@ -352,6 +536,20 @@
   }
 
   .btn-sm { font-size: .6rem; padding: .15rem .4rem; }
+
+  @media (max-width: 1050px) {
+    .entry-header {
+      grid-template-columns: 62px 126px minmax(70px, 110px) minmax(90px, 170px) minmax(120px, 1fr) auto;
+    }
+    .detail-block-head,
+    .action-row {
+      grid-template-columns: 1fr;
+    }
+    .metric-grid,
+    .payload-actions {
+      justify-content: flex-start;
+    }
+  }
 
   .management-toolbar {
     display: grid;
@@ -884,10 +1082,42 @@
   }
 
   function fmtTrigger(t) {
+    const kind = triggerKind(t);
+    if (kind === 'background_memory_extraction') return 'memory extraction';
+    if (kind === 'async_image_generation') return 'async image';
+    if (kind === 'prompt_lab') return 'prompt lab';
+    if (kind === 'keyword') return 'keyword';
+    return kind;
+  }
+
+  function triggerKind(t) {
     if (t == null) return 'none';
     if (typeof t === 'string') return t;
-    if (t.type) return t.type + (t.keyword ? ': ' + t.keyword : '');
-    return JSON.stringify(t);
+    if (typeof t === 'object') {
+      if (typeof t.reason === 'string' && t.reason !== '') return t.reason;
+      if (typeof t.type === 'string' && t.type !== '') return t.type;
+    }
+    return 'custom';
+  }
+
+  function triggerDetail(t) {
+    if (t == null || typeof t !== 'object') return '';
+    if (typeof t.keyword === 'string' && t.keyword !== '') return t.keyword;
+    if (typeof t.mode === 'string' && t.mode !== '') return t.mode;
+    if (typeof t.source === 'string' && t.source !== '') return t.source;
+    if (typeof t.jobId === 'string' && t.jobId !== '') return shortId(t.jobId);
+    return '';
+  }
+
+  function triggerClass(t) {
+    return 'event-' + triggerKind(t).replace(/_/g, '-').replace(/[^a-zA-Z0-9-]/g, '').toLowerCase();
+  }
+
+  function renderEventLabel(t) {
+    const detail = triggerDetail(t);
+    return '<span class="event-label ' + esc(triggerClass(t)) + '">' + esc(fmtTrigger(t))
+      + (detail !== '' ? ' <span class="event-detail">' + esc(detail) + '</span>' : '')
+      + '</span>';
   }
 
   function triggerContextText(ctx) {
@@ -905,6 +1135,17 @@
     if (ctx.authorUsername) parts.push('@' + ctx.authorUsername);
     if (includeIds === true && ctx.messageId) parts.push('msg ' + shortId(ctx.messageId));
     if (includeIds === true && ctx.sourceMessageId && ctx.sourceMessageId !== ctx.messageId) parts.push('source ' + shortId(ctx.sourceMessageId));
+    return parts.join(' | ');
+  }
+
+  function triggerLocationText(ctx, entry) {
+    const parts = [];
+    const guildLabel = ctx && ctx.guildName ? ctx.guildName : (entry && entry.guildId) || '';
+    const channelLabel = ctx && ctx.channelName ? '#' + ctx.channelName : (entry && entry.channelId) || '';
+    if (guildLabel !== '') parts.push(guildLabel);
+    if (channelLabel !== '') parts.push(channelLabel);
+    if (ctx && ctx.messageId) parts.push('msg ' + shortId(ctx.messageId));
+    if (ctx && ctx.sourceMessageId && ctx.sourceMessageId !== ctx.messageId) parts.push('src ' + shortId(ctx.sourceMessageId));
     return parts.join(' | ');
   }
 
@@ -1015,17 +1256,50 @@
   // Store payloads by key for modal lookup (avoids inline JSON escaping issues)
   const payloadStore = new Map();
 
-  function payloadButton(e, li, kind, payload) {
+  function modalButton(key, title, label, payload) {
     if (payload == null) return '-';
-    const pkey = e.requestId + ':' + li;
-    const key = kind + ':' + pkey;
     payloadStore.set(key, payload);
-    const label = kind === 'req' ? 'request' : 'response';
-    const title = kind === 'req' ? 'Request' : 'Response';
-    return '<button class="btn btn-sm" onclick="event.stopPropagation(); window.__showPayload(\'' + esc(key) + '\', \'' + title + '\')">' + label + '</button>';
+    return '<button class="btn btn-sm payload-btn" data-payload-key="' + esc(key) + '" data-payload-title="' + esc(title) + '">' + esc(label) + '</button>';
   }
 
-  function renderToolRowsForModel(modelCall, toolsById) {
+  function payloadButton(e, li, kind, payload) {
+    const pkey = e.requestId + ':' + li;
+    const label = kind === 'req' ? 'request' : 'response';
+    const title = kind === 'req' ? 'LLM Request' : 'LLM Response';
+    return modalButton(kind + ':' + pkey, title, label, payload);
+  }
+
+  function payloadSummary(value, emptyText) {
+    if (value == null || value === '') return emptyText || '-';
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed === '') return emptyText || '-';
+      try {
+        return payloadSummary(JSON.parse(trimmed), emptyText);
+      } catch {}
+      return trimmed.length + ' chars text';
+    }
+    if (Array.isArray(value)) return value.length + ' item' + (value.length === 1 ? '' : 's');
+    if (typeof value === 'object') {
+      const keys = Object.keys(value);
+      if (keys.length === 0) return 'empty object';
+      const preview = keys.slice(0, 4).join(', ');
+      return keys.length + ' key' + (keys.length === 1 ? '' : 's') + ': ' + preview + (keys.length > 4 ? ', ...' : '');
+    }
+    return String(value);
+  }
+
+  function runtimeActionCount(entry) {
+    if (typeof entry.runtimeActionCount === 'number') return entry.runtimeActionCount;
+    if (!Array.isArray(entry.tools)) return 0;
+    return entry.tools.filter(t => t && t.modelRequestId == null).length;
+  }
+
+  function metric(label, value, className) {
+    return '<div class="metric"><span class="metric-label">' + esc(label) + '</span><span class="metric-value ' + (className || '') + '">' + esc(value) + '</span></div>';
+  }
+
+  function renderToolRowsForModel(modelCall, toolsById, requestId) {
     const emitted = modelCall.emittedToolCalls || [];
     if (emitted.length === 0) return '';
 
@@ -1047,22 +1321,22 @@
     for (const batch of batches) {
       const kind = batch.kind === 'parallel' ? 'parallel batch' : batch.kind === 'sequential' ? 'ordered call' : batch.kind;
       html += '<div class="batch-label">' + esc(kind) + (batch.id !== 'unbatched' ? ' ' + esc(batch.id) : '') + '</div>';
-      html += '<table class="detail-table"><tr><th>Tool</th><th>Args</th><th>Duration</th><th>Status</th><th>Result</th></tr>';
+      html += '<div class="action-list">';
       for (const row of batch.calls) {
         const t = row.execution;
         const emittedCall = row.emitted;
         const status = fmtStatus(t && t.status, t && t.isError);
         const args = t && t.args ? t.args : emittedCall.args;
         const result = t && t.result != null ? fmtResult(t.result) : (emittedCall.skippedReason || '');
-        html += '<tr' + (status === 'error' ? ' class="tool-error"' : '') + '>'
-          + '<td>' + esc(emittedCall.name) + '<div class="model-meta">' + esc(shortId(emittedCall.id)) + '</div></td>'
-          + '<td class="tool-result">' + esc(JSON.stringify(args, null, 2)) + '</td>'
-          + '<td>' + (t && t.durationMs != null ? fmtDuration(t.durationMs) : '-') + '</td>'
-          + '<td class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</td>'
-          + '<td class="tool-result">' + (result !== '' ? esc(result) : '<span style="color:var(--text-dim);font-style:italic">pending</span>') + '</td>'
-          + '</tr>';
+        const baseKey = 'tool:' + requestId + ':' + emittedCall.id;
+        html += '<div class="action-row' + (status === 'error' ? ' tool-error' : '') + '">'
+          + '<div><div class="action-name">' + esc(emittedCall.name) + '</div><div class="action-id">' + esc(shortId(emittedCall.id)) + '</div></div>'
+          + '<div class="action-meta"><span class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</span><span>' + (t && t.durationMs != null ? fmtDuration(t.durationMs) : '-') + '</span></div>'
+          + '<div class="action-payload">' + modalButton(baseKey + ':args', 'Tool Args', 'args', args) + '<span class="inline-snippet">' + esc(payloadSummary(args, 'no args')) + '</span></div>'
+          + '<div class="action-payload">' + (result !== '' ? modalButton(baseKey + ':result', 'Tool Result', 'result', result) + '<span class="inline-snippet">' + esc(payloadSummary(result, '')) + '</span>' : '<span style="color:var(--text-dim);font-style:italic">pending</span>') + '</div>'
+          + '</div>';
       }
-      html += '</table>';
+      html += '</div>';
     }
     return html;
   }
@@ -1071,19 +1345,21 @@
     const runtimeTools = (e.tools || []).filter(t => !t.modelRequestId);
     if (runtimeTools.length === 0) return '';
     let rows = '';
-    for (const t of runtimeTools) {
+    for (let i = 0; i < runtimeTools.length; i++) {
+      const t = runtimeTools[i];
       const status = fmtStatus(t.status, t.isError);
-      rows += '<tr' + (status === 'error' ? ' class="tool-error"' : '') + '>'
-        + '<td>' + esc(t.tool) + '</td>'
-        + '<td class="tool-result">' + esc(JSON.stringify(t.args, null, 2)) + '</td>'
-        + '<td>' + (t.durationMs != null ? fmtDuration(t.durationMs) : '-') + '</td>'
-        + '<td class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</td>'
-        + '<td class="tool-result">' + esc(fmtResult(t.result)) + '</td>'
-        + '</tr>';
+      const baseKey = 'runtime:' + e.requestId + ':' + (t.id || t.tool) + ':' + i;
+      rows += '<div class="action-row' + (status === 'error' ? ' tool-error' : '') + '">'
+        + '<div><div class="action-name">' + esc(t.tool) + '</div><div class="action-id">' + esc(t.id != null ? shortId(t.id) : 'runtime') + '</div></div>'
+        + '<div class="action-meta"><span class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</span><span>' + (t.durationMs != null ? fmtDuration(t.durationMs) : '-') + '</span></div>'
+        + '<div class="action-payload">' + modalButton(baseKey + ':args', 'Runtime Args', 'args', t.args) + '<span class="inline-snippet">' + esc(payloadSummary(t.args, 'no args')) + '</span></div>'
+        + '<div class="action-payload">' + (t.result != null ? modalButton(baseKey + ':result', 'Runtime Result', 'result', fmtResult(t.result)) + '<span class="inline-snippet">' + esc(payloadSummary(t.result, '')) + '</span>' : '-') + '</div>'
+        + '</div>';
     }
-    return '<div class="detail-section"><div class="detail-label">Runtime Actions</div>'
-      + '<table class="detail-table"><tr><th>Action</th><th>Args</th><th>Duration</th><th>Status</th><th>Result</th></tr>'
-      + rows + '</table></div>';
+    return '<div class="detail-block detail-actions">'
+      + '<div class="detail-block-head"><div><span class="detail-kicker">Actions after model</span><div class="detail-title">Runtime actions</div><div class="detail-subtitle">' + runtimeTools.length + ' action' + (runtimeTools.length === 1 ? '' : 's') + '</div></div></div>'
+      + '<div class="detail-body"><div class="action-list">' + rows + '</div></div>'
+      + '</div>';
   }
 
   function renderEntryDetail(e) {
@@ -1098,37 +1374,40 @@
       const status = fmtStatus(l.status, l.isError);
       const cost = l.estimatedCostUsd != null ? '$' + l.estimatedCostUsd.toFixed(4) : '-';
       const duration = l.durationMs != null ? fmtDuration(l.durationMs) : (status === 'running' ? 'running' : '-');
-      modelSections += '<div class="model-request">'
-        + '<div class="model-head">'
-          + '<div>'
-            + '<div class="model-title">Model Request #' + (li + 1) + ' <span class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</span></div>'
-            + '<div class="model-meta">' + esc(l.model) + ' | stop ' + esc(l.stopReason) + ' | ' + esc(l.contentTypes.join(', ') || 'no content yet') + '</div>'
-          + '</div>'
-          + '<div class="model-stats">'
-            + '<span>' + esc(duration) + '</span>'
-            + '<span>tokens <span class="stat-val">' + l.promptTokens + ' / ' + l.completionTokens + '</span></span>'
-            + '<span>cache <span class="stat-val">' + esc(fmtCache(l)) + '</span></span>'
-            + '<span class="entry-cost">' + esc(cost) + '</span>'
-            + '<span>' + payloadButton(e, li, 'req', l.requestPayload) + '</span>'
-            + '<span>' + payloadButton(e, li, 'res', l.responsePayload) + '</span>'
-          + '</div>'
+      modelSections += '<div class="detail-block detail-model">'
+        + '<div class="detail-block-head">'
+          + '<div><span class="detail-kicker">Model request</span><div class="detail-title">#' + (li + 1) + ' <span class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</span></div><div class="detail-subtitle">' + esc(l.model) + ' | stop ' + esc(l.stopReason) + ' | ' + esc(l.contentTypes.join(', ') || 'no content yet') + '</div></div>'
+          + '<div><div class="metric-grid">'
+            + metric('duration', duration)
+            + metric('tokens', l.promptTokens + ' / ' + l.completionTokens)
+            + metric('cache', fmtCache(l))
+            + metric('cost', cost, 'entry-cost')
+          + '</div><div class="payload-actions">' + payloadButton(e, li, 'req', l.requestPayload) + payloadButton(e, li, 'res', l.responsePayload) + '</div></div>'
         + '</div>'
-        + (l.error != null ? '<div class="error-text">' + esc(l.error) + '</div>' : '')
-        + (l.outputText != null ? '<div class="tool-result">' + esc(l.outputText) + '</div>' : '')
-        + renderToolRowsForModel(l, toolsById)
+        + '<div class="detail-body">'
+          + (l.error != null ? '<div class="error-text">' + esc(l.error) + '</div>' : '')
+          + (l.outputText != null ? '<div class="output-block">' + esc(l.outputText) + '</div>' : '')
+          + renderToolRowsForModel(l, toolsById, e.requestId)
+        + '</div>'
       + '</div>';
     }
 
     const contextText = triggerContextText(e.triggerContext);
     const contextMeta = triggerContextMeta(e.triggerContext, e, true);
-    return (contextText !== '' || contextMeta !== '' ? '<div class="detail-section"><div class="detail-label">Trigger Context</div><div class="trigger-context">'
-        + (contextMeta !== '' ? '<div class="model-meta">' + esc(contextMeta) + '</div>' : '')
-        + (contextText !== '' ? esc(contextText) : '<span style="color:var(--text-dim);font-style:italic">no trigger text</span>')
-      + '</div></div>' : '')
-      + (e.error != null ? '<div class="detail-section"><div class="detail-label">Error</div><div class="error-text">' + esc(e.error) + '</div></div>' : '')
-      + (e.llmCalls.length > 0 ? '<div class="detail-section"><div class="detail-label">Model Requests</div>' + modelSections + '</div>' : '')
+    const inputBlock = '<div class="detail-block detail-input">'
+      + '<div class="detail-block-head"><div><span class="detail-kicker">Input</span><div class="detail-title">Trigger context</div><div class="detail-subtitle">' + esc(contextMeta || 'no location metadata') + '</div></div>' + renderEventLabel(e.trigger) + '</div>'
+      + '<div class="detail-body"><div class="message-block">' + (contextText !== '' ? esc(contextText) : '<span style="color:var(--text-dim);font-style:italic">no trigger text</span>') + '</div></div>'
+      + '</div>';
+    const errorBlock = e.error != null
+      ? '<div class="detail-block detail-error"><div class="detail-block-head"><div><span class="detail-kicker">Failure</span><div class="detail-title">Request error</div></div></div><div class="detail-body"><div class="error-text">' + esc(e.error) + '</div></div></div>'
+      : '';
+    return '<div class="detail-flow">'
+      + inputBlock
+      + errorBlock
+      + modelSections
       + renderRuntimeTools(e)
-      + (e.error == null && e.tools.length === 0 && e.llmCalls.length === 0 ? '<div class="detail-state">No tool or LLM detail for this entry.</div>' : '');
+      + (e.error == null && e.tools.length === 0 && e.llmCalls.length === 0 ? '<div class="detail-state">No tool or LLM detail for this entry.</div>' : '')
+      + '</div>';
   }
 
   function detailStateHtml(requestId) {
@@ -1178,22 +1457,24 @@
 
     const rid = esc(e.requestId);
     const contextText = triggerContextText(e.triggerContext);
-    const contextMeta = triggerContextMeta(e.triggerContext, e, false);
+    const locationText = triggerLocationText(e.triggerContext, e);
     return '<div class="' + cls.join(' ') + '" data-rid="' + rid + '">'
       + '<div class="entry-header" onclick="window.__toggleExpand(\'' + rid + '\')">'
         + '<span class="entry-time">' + fmtTime(e.timestamp) + '</span>'
+        + renderEventLabel(e.trigger)
         + '<span class="entry-user">' + esc(e.authorUsername) + '</span>'
-        + '<span class="entry-trigger">' + esc(fmtTrigger(e.trigger)) + '</span>'
-        + (isActive ? '<span class="entry-status">running</span>' : '')
-        + (hasErr ? '<span class="entry-error-badge">error</span>' : '')
+        + '<span class="entry-location">' + esc(locationText) + '</span>'
+        + '<span class="entry-message">' + (contextText !== '' ? esc(contextText) : '<span style="color:var(--text-dim);font-style:italic">no trigger text</span>') + '</span>'
         + '<div class="entry-stats">'
+          + (isActive ? '<span class="entry-status">running</span>' : '')
+          + (hasErr ? '<span class="entry-error-badge">error</span>' : '')
           + '<span>' + fmtDuration(e.totalDurationMs) + '</span>'
+          + '<span>A:<span class="stat-val">' + runtimeActionCount(e) + '</span></span>'
           + '<span>T:<span class="stat-val">' + e.toolCount + '</span></span>'
           + '<span>L:<span class="stat-val">' + e.llmCallCount + '</span></span>'
           + (cost ? '<span class="entry-cost">' + cost + '</span>' : '')
         + '</div>'
       + '</div>'
-      + (contextText !== '' ? '<div class="entry-context"><span class="context-author">' + esc(contextMeta) + '</span>' + (contextMeta !== '' ? ' ' : '') + esc(contextText) + '</div>' : '')
       + '<div class="entry-detail" data-detail-rid="' + rid + '">' + (expandedIds.has(e.requestId) ? detailStateHtml(e.requestId) : '') + '</div>'
     + '</div>';
   }
@@ -1425,6 +1706,7 @@
       + '<div class="prompt-lab-summary">'
         + '<span>' + esc(fmtDuration(result.totalDurationMs || 0)) + '</span>'
         + '<span>L:<span class="stat-val">' + esc(String(result.llmCallCount || 0)) + '</span></span>'
+        + '<span>A:<span class="stat-val">' + esc(String(result.runtimeActionCount || 0)) + '</span></span>'
         + '<span>T:<span class="stat-val">' + esc(String(result.toolCount || 0)) + '</span></span>'
         + '<span>dry:<span class="stat-val">' + esc(String(dryRuns.length)) + '</span></span>'
         + '<span class="entry-cost">' + esc(cost) + '</span>'
@@ -1636,6 +1918,7 @@
           drafts: [],
           dryRuns: [],
           toolCount: (detail.tools || []).length,
+          runtimeActionCount: runtimeActionCount(detail),
           llmCallCount: (detail.llmCalls || []).length,
           estimatedCostUsd: estimatedCostUsd > 0 ? estimatedCostUsd : null,
           totalDurationMs: detail.totalDurationMs || 0,
@@ -1667,6 +1950,7 @@
       drafts: [],
       dryRuns: [],
       toolCount: 0,
+      runtimeActionCount: 0,
       llmCallCount: 0,
       estimatedCostUsd: null,
       totalDurationMs: 0
@@ -2049,10 +2333,21 @@
   window.__showPayload = function(key, title) {
     const payload = payloadStore.get(key);
     if (payload == null) return;
-    modalTitle.textContent = 'LLM ' + (title || 'Payload');
+    modalTitle.textContent = title || 'Payload';
     modalBody.textContent = formatPayload(payload);
     modalOverlay.style.display = 'flex';
   };
+
+  document.addEventListener('click', function(e) {
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const button = target.closest('.payload-btn');
+    if (button == null) return;
+    e.stopPropagation();
+    const key = button.getAttribute('data-payload-key');
+    if (key == null) return;
+    window.__showPayload(key, button.getAttribute('data-payload-title') || 'Payload');
+  });
 
   modalClose.addEventListener('click', function() { modalOverlay.style.display = 'none'; });
   modalOverlay.addEventListener('click', function(e) {

@@ -126,6 +126,7 @@ describe("RequestLogStore", () => {
       trigger: { type: "mention" },
       agentRan: true,
       toolCount: 1,
+      runtimeActionCount: 1,
       llmCallCount: 1,
       estimatedCostUsd: 0.25,
       totalDurationMs: 100,

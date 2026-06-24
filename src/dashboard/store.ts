@@ -27,6 +27,7 @@ export interface RequestLogSummary {
   triggerContext?: RequestTriggerContext;
   agentRan: boolean;
   toolCount: number;
+  runtimeActionCount: number;
   llmCallCount: number;
   estimatedCostUsd: number | null;
   totalDurationMs: number;
@@ -325,6 +326,7 @@ function toSummary(entry: RequestLogEntry): RequestLogSummary {
     triggerContext: entry.triggerContext,
     agentRan: entry.agentRan,
     toolCount: entry.tools.length,
+    runtimeActionCount: entry.tools.filter((tool) => tool.modelRequestId === undefined).length,
     llmCallCount: entry.llmCalls.length,
     estimatedCostUsd: estimatedCostUsd > 0 ? estimatedCostUsd : null,
     totalDurationMs: entry.totalDurationMs,
