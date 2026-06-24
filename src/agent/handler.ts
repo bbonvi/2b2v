@@ -2341,13 +2341,7 @@ export async function handleMessage(
   deps.onTriggered?.(triggerResult);
 
   const triggerInstruction = deps.triggerInstructions?.[triggerResult.reason];
-  let context = deps.context;
-  if (triggerInstruction !== undefined && triggerInstruction !== "") {
-    context = {
-      ...context,
-      sections: injectTriggerInstruction(context.sections, triggerInstruction),
-    };
-  }
+  const context = deps.context;
 
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
   const baseStreamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);

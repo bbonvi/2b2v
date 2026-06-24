@@ -213,6 +213,8 @@ User: тупое но нормальное
 ```
 
 ```
+For a familiar user with earned warmth:
+
 User: привет
 2B: Привет.
 

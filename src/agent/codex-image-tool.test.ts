@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildCodexDirectImageEditRequestBody,
   buildCodexDirectImageRequestBody,
@@ -20,6 +23,25 @@ function sseResponse(events: unknown[]): Response {
   return new Response(body, {
     headers: { "content-type": "text/event-stream" },
   });
+}
+
+function fakeCodexAuthPath(): string {
+  const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({
+    "https://api.openai.com/auth": { chatgpt_account_id: "account-1" },
+  })).toString("base64url");
+  const token = `${header}.${payload}.signature`;
+  const authPath = join(mkdtempSync(join(tmpdir(), "2b2v-codex-auth-")), "auth.json");
+  writeFileSync(authPath, JSON.stringify({
+    "openai-codex": {
+      type: "oauth",
+      access: token,
+      refresh: "refresh-token",
+      expires: Date.now() + 60_000,
+      accountId: "account-1",
+    },
+  }));
+  return authPath;
 }
 
 describe("parseCodexImageSse", () => {
@@ -198,8 +220,8 @@ describe("buildCodexImageRequestBody", () => {
     }]);
   });
 
-  test("includes chat reference images as Responses image inputs", () => {
-    const body = buildCodexImageRequestBody({
+  test("rejects chat reference images because the Responses image route is text-only", () => {
+    expect(() => buildCodexImageRequestBody({
       model: "gpt-5.5",
       prompt: "turn this into a rainy noir poster",
       outputFormat: "webp",
@@ -210,34 +232,7 @@ describe("buildCodexImageRequestBody", () => {
         width: 800,
         height: 600,
       }],
-    });
-
-    expect(body.tools).toEqual([{
-      type: "image_generation",
-      model: "gpt-image-2",
-      action: "auto",
-      output_format: "webp",
-      moderation: "low",
-      quality: "auto",
-      size: "auto",
-    }]);
-    const input = body.input as Array<{ content: Array<Record<string, unknown>> }>;
-    expect(input[0]?.content).toEqual([
-      {
-        type: "input_text",
-        text: [
-          "turn this into a rainy noir poster",
-          "",
-          "Reference images from chat are attached below:",
-          "Reference 1: Chat ImageID 42, 800x600, image/jpeg.",
-        ].join("\n"),
-      },
-      {
-        type: "input_image",
-        detail: "auto",
-        image_url: "data:image/jpeg;base64,aW1hZ2UtZGF0YQ==",
-      },
-    ]);
+    })).toThrow("Codex Responses image requests do not support reference image inputs");
   });
 });
 
@@ -400,6 +395,63 @@ describe("createCodexGenerateImageTool", () => {
     await tool.execute("call-1", { prompt: "a blue house", "4k": true });
 
     expect(observed).toEqual({ outputFormat: "webp", is4k: true });
+  });
+
+  test("uses the direct edit route for reference-image jobs", async () => {
+    let requestedUrl = "";
+    let requestedBody: unknown;
+    let generatedTransport: string | undefined;
+    const fetchFn = Object.assign(
+      (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        requestedUrl = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
+        requestedBody = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as unknown;
+        return Promise.resolve(Response.json({
+          data: [{ b64_json: "Z2VuZXJhdGVkLWltYWdl" }],
+        }));
+      },
+      { preconnect: fetch.preconnect },
+    );
+    const tool = createCodexGenerateImageTool({
+      codexAuthPath: fakeCodexAuthPath(),
+      model: "gpt-5.5",
+      imageReadMaxPerCall: 2,
+      imageGenerationQuality: "medium",
+      getImageById: (id) => id === 7
+        ? {
+          id: 7,
+          mime: "image/webp",
+          width: 1200,
+          height: 800,
+          path: "image-7.webp",
+        }
+        : null,
+      readFile: (path) => path === "image-7.webp" ? Buffer.from("reference-image") : null,
+      onGeneratedImage: (attachment) => {
+        generatedTransport = attachment.transport;
+      },
+      fetchFn,
+    });
+
+    const result = await tool.execute("call-1", {
+      prompt: "turn this into a rainy noir poster",
+      image_ids: [7],
+    });
+
+    expect(requestedUrl).toContain("/images/edits");
+    expect(requestedUrl).not.toContain("/responses");
+    expect(requestedBody).toMatchObject({
+      prompt: "turn this into a rainy noir poster",
+      model: "gpt-image-2",
+      quality: "medium",
+      size: "auto",
+      output_format: "webp",
+      images: [{ image_url: "data:image/webp;base64,cmVmZXJlbmNlLWltYWdl" }],
+    });
+    expect(generatedTransport).toBe("direct-edits");
+    expect(result.details).toMatchObject({
+      transport: "direct-edits",
+      referenceImageIds: [7],
+    });
   });
 });
 

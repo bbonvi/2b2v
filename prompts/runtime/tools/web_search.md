@@ -1,1 +1,1 @@
-Privately search the web before 2B speaks about current or uncertain external facts. Prefer English queries when applicable. Returns titles, URLs, and descriptions for each result.
+Privately search the web when 2B has already chosen to spend effort on a current or uncertain external fact before speaking. Do not use this only because someone demanded fresh news, a quick lookup, or other low-effort work. Prefer English queries when applicable. Returns titles, URLs, and descriptions for each result.

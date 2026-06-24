@@ -389,23 +389,11 @@ export function buildCodexImageRequestBody(input: {
 }): Record<string, unknown> {
   const referenceImages = input.referenceImages ?? [];
   const quality = input.imageGenerationQuality ?? DEFAULT_IMAGE_QUALITY;
-  const referenceSummary = referenceImages.length > 0
-    ? [
-      input.prompt,
-      "",
-      "Reference images from chat are attached below:",
-      ...referenceImages.map((image, index) =>
-        `Reference ${index + 1}: Chat ImageID ${image.id}, ${image.width}x${image.height}, ${image.mimeType}.`
-      ),
-    ].join("\n")
-    : input.prompt;
+  if (referenceImages.length > 0) {
+    throw new Error("Codex Responses image requests do not support reference image inputs; use the direct image edit route.");
+  }
   const content: Record<string, unknown>[] = [
-    { type: "input_text", text: referenceSummary },
-    ...referenceImages.map((image) => ({
-      type: "input_image",
-      detail: "auto",
-      image_url: `data:${image.mimeType};base64,${image.data}`,
-    })),
+    { type: "input_text", text: input.prompt },
   ];
 
   return {
@@ -752,7 +740,12 @@ async function requestDirectImage(input: {
   fetchFn: typeof fetch;
   signal?: AbortSignal;
 }): Promise<ParsedCodexResponse> {
-  const body = JSON.stringify(buildCodexDirectImageRequestBody(input));
+  const body = JSON.stringify(buildCodexDirectImageRequestBody({
+    prompt: input.prompt,
+    imageGenerationQuality: input.imageGenerationQuality,
+    size: input.size,
+    outputFormat: input.outputFormat,
+  }));
   const headers = buildCodexHeaders({
     token: input.token,
     accountId: input.accountId,
@@ -797,7 +790,13 @@ async function requestDirectImageEdit(input: {
   fetchFn: typeof fetch;
   signal?: AbortSignal;
 }): Promise<ParsedCodexResponse> {
-  const body = JSON.stringify(buildCodexDirectImageEditRequestBody(input));
+  const body = JSON.stringify(buildCodexDirectImageEditRequestBody({
+    prompt: input.prompt,
+    imageGenerationQuality: input.imageGenerationQuality,
+    size: input.size,
+    outputFormat: input.outputFormat,
+    referenceImages: input.referenceImages,
+  }));
   const headers = buildCodexHeaders({
     token: input.token,
     accountId: input.accountId,
@@ -895,6 +894,19 @@ async function requestImage(input: {
       transport: input.referenceImages.length > 0 ? "direct-edits" : "direct-images",
       requestedSize: size,
     };
+  }
+
+  if (input.referenceImages.length > 0) {
+    input.logger?.info("requesting Codex direct image edit route for reference images", {
+      model: input.model,
+      backendImageModel: BACKEND_IMAGE_MODEL,
+      outputFormat: input.outputFormat,
+      is4k: false,
+      transport: "direct-edits",
+      referenceImageIds: input.referenceImages.map((image) => image.id),
+    });
+    const parsed = await requestDirectImageEdit(input);
+    return { ...parsed, transport: "direct-edits" };
   }
 
   const responsesParsed = await requestResponsesImage(input);

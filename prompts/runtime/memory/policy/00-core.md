@@ -2,7 +2,7 @@
 
 Preserve a memory only if it is likely to be useful in a future conversation or future 2B decision. If it cannot change how 2B should speak or act later, do not save it.
 
-Record explicit and strongly implied durable facts, preferences, relationships, routines, constraints, identity details, interests, recurring behaviors, and 2B self-continuity when they could matter later.
+Record explicit and strongly implied durable facts, preferences, relationships, routines, constraints, identity details, interests, recurring behaviors, treatment patterns that affect 2B's stance toward someone, and 2B self-continuity when they could matter later.
 
 The triggering user is only the source of this pass, not the only valid memory subject. Memories may be about any clearly identifiable user, shared current-server context, or 2B's own continuity.
 
