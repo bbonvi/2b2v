@@ -18,7 +18,7 @@ function loadDashboardScript(): string {
 
 function loadPayloadTreeHelpers(): PayloadTreeHelpers {
   const html = readFileSync("src/dashboard/index.html", "utf8");
-  const helperStart = html.indexOf("function payloadType(value) {");
+  const helperStart = html.indexOf("const payloadAutoExpandMaxChars =");
   const helperEnd = html.indexOf("  const modalTitle", helperStart);
   if (helperStart < 0 || helperEnd < 0) {
     throw new Error("payload tree helper block not found in dashboard HTML");
@@ -75,5 +75,43 @@ describe("dashboard payload formatter", () => {
 
     expect(rendered).toContain('"literal \\n marker"');
     expect(rendered).not.toContain('"literal \n marker"');
+  });
+
+  test("auto-expands nested payload objects unless the node is large", () => {
+    const helpers = loadPayloadTreeHelpers();
+
+    const rendered = helpers.renderPayloadTree({
+      request: {
+        messages: [
+          { role: "system", content: "policy" },
+          { role: "user", content: "hello" },
+        ],
+      },
+    }, 0);
+
+    expect(rendered).toContain('<details class="payload-collapsible" open>');
+    expect(rendered).not.toContain('payload-collapsible payload-large');
+  });
+
+  test("keeps very large payload objects collapsed", () => {
+    const helpers = loadPayloadTreeHelpers();
+    const largePayload = Object.fromEntries(
+      Array.from({ length: 141 }, (_, index) => [`key_${index}`, index]),
+    );
+
+    const rendered = helpers.renderPayloadTree(largePayload, 0);
+
+    expect(rendered).toContain('<details class="payload-collapsible payload-large">');
+    expect(rendered).toContain('<summary>{141 keys}</summary>');
+  });
+
+  test("renders long strings as one expandable value component", () => {
+    const helpers = loadPayloadTreeHelpers();
+
+    const rendered = helpers.renderPayloadTree("x".repeat(501), 0);
+
+    expect(rendered).toContain('class="payload-large-string"');
+    expect(rendered).toContain('class="payload-expand-btn"');
+    expect(rendered).not.toContain('payload-collapsible payload-large');
   });
 });

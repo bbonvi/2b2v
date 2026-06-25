@@ -1045,9 +1045,28 @@
     cursor: pointer;
     white-space: pre-wrap;
   }
-  .payload-large summary {
+  .payload-collapsible.payload-large > summary {
     color: var(--amber);
   }
+  .payload-large-string {
+    display: inline;
+    color: var(--green);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .payload-expand-btn {
+    background: transparent;
+    border: 0;
+    color: var(--amber);
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: .65rem;
+    padding: 0;
+    margin-left: .35rem;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .payload-expand-btn:hover { color: var(--text-bright); }
 
   /* Scrollbar */
   ::-webkit-scrollbar { width: 6px }
@@ -2544,11 +2563,34 @@
   const modalOverlay = document.getElementById('modal-overlay');
   const modalBody = document.getElementById('modal-body');
   const modalClose = document.getElementById('modal-close');
+  const payloadAutoExpandMaxChars = 60000;
+  const payloadAutoExpandMaxItems = 140;
+  const payloadLargeStringPreviewChars = 500;
 
   function payloadType(value) {
     if (value === null) return 'null';
     if (Array.isArray(value)) return 'array';
     return typeof value;
+  }
+
+  function payloadApproxSize(value, limit, seen) {
+    if (value == null) return 4;
+    if (typeof value === 'string') return value.length;
+    if (typeof value !== 'object') return String(value).length;
+    if (seen.has(value)) return 10;
+    seen.add(value);
+    const entries = Array.isArray(value) ? value.map((item, index) => [String(index), item]) : Object.entries(value);
+    let total = 2;
+    for (const [key, item] of entries) {
+      total += String(key).length + 2 + payloadApproxSize(item, limit - total, seen);
+      if (total > limit) return total;
+    }
+    return total;
+  }
+
+  function shouldAutoExpandPayload(value, entries) {
+    if (entries.length > payloadAutoExpandMaxItems) return false;
+    return payloadApproxSize(value, payloadAutoExpandMaxChars + 1, new WeakSet()) <= payloadAutoExpandMaxChars;
   }
 
   function renderPayloadPrimitive(value) {
@@ -2558,12 +2600,11 @@
   }
 
   function renderLargePayloadString(value) {
-    const preview = value.slice(0, 500);
-    const rest = value.slice(500);
-    return '<details class="payload-collapsible payload-large">'
-      + '<summary>"' + esc(preview) + '…" · show value (' + esc(String(value.length)) + ' chars)</summary>'
-      + '<div class="payload-node payload-primitive payload-string">"' + esc(preview + rest) + '"</div>'
-      + '</details>';
+    const preview = value.slice(0, payloadLargeStringPreviewChars);
+    return '<span class="payload-large-string" data-full="' + esc(value) + '">'
+      + '"<span class="payload-large-preview">' + esc(preview) + '…</span>"'
+      + '<button type="button" class="payload-expand-btn">show value (' + esc(String(value.length)) + ' chars)</button>'
+      + '</span>';
   }
 
   function renderPayloadTree(value, depth) {
@@ -2575,12 +2616,13 @@
 
     const isArray = Array.isArray(value);
     const entries = isArray ? value.map((item, index) => [String(index), item]) : Object.entries(value || {});
-    const open = depth < 2 ? ' open' : '';
+    const open = shouldAutoExpandPayload(value, entries) ? ' open' : '';
     const summary = isArray
       ? '[' + entries.length + ' item' + (entries.length === 1 ? '' : 's') + ']'
       : '{' + entries.length + ' key' + (entries.length === 1 ? '' : 's') + '}';
+    const large = open === '' ? ' payload-large' : '';
     if (entries.length === 0) return '<span class="payload-primitive">' + (isArray ? '[]' : '{}') + '</span>';
-    return '<details class="payload-collapsible"' + open + '>'
+    return '<details class="payload-collapsible' + large + '"' + open + '>'
       + '<summary>' + esc(summary) + '</summary>'
       + '<div class="payload-node">'
         + entries.map(([key, item]) => '<div class="payload-row">'
@@ -2621,6 +2663,18 @@
     const key = button.getAttribute('data-payload-key');
     if (key == null) return;
     window.__showPayload(key, button.getAttribute('data-payload-title') || 'Payload');
+  });
+
+  document.addEventListener('click', function(e) {
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const button = target.closest('.payload-expand-btn');
+    if (button == null) return;
+    e.stopPropagation();
+    const holder = button.closest('.payload-large-string');
+    const full = holder instanceof HTMLElement ? holder.getAttribute('data-full') : null;
+    if (holder == null || full == null) return;
+    holder.innerHTML = '<span class="payload-primitive payload-string">"' + esc(full) + '"</span>';
   });
 
   modalClose.addEventListener('click', function() { modalOverlay.style.display = 'none'; });
