@@ -63,6 +63,10 @@ export interface RuntimePromptBundle {
 
 /** Full prompt bundle used by the Discord agent. */
 export interface PromptBundle {
+  /** Markdown files from prompts/system/**, ordered deterministically by relative path. */
+  systemDocuments: PromptDocument[];
+  /** Concatenated highest-level stable behavior policy. */
+  systemPrompt: string;
   /** Markdown files from prompts/core/**, ordered deterministically by relative path. */
   coreDocuments: PromptDocument[];
   /** Concatenated stable persona/style/additional instructions. */
@@ -312,6 +316,11 @@ function loadPromptSkills(promptDir: string, log: Logger): PromptSkillBundle {
 
 /** Load all prompt markdown deterministically from the prompt directory. */
 export function loadPromptBundle(promptDir: string, log: Logger): PromptBundle {
+  const systemDocuments = loadDocuments(
+    recursiveMarkdownFiles(join(promptDir, "system")),
+    log,
+    "system",
+  );
   const coreDocuments = loadDocuments(
     recursiveMarkdownFiles(join(promptDir, "core")),
     log,
@@ -324,6 +333,8 @@ export function loadPromptBundle(promptDir: string, log: Logger): PromptBundle {
   );
   const skills = loadPromptSkills(promptDir, log);
   return {
+    systemDocuments,
+    systemPrompt: systemDocuments.map((doc) => doc.text).join("\n\n"),
     coreDocuments,
     corePrompt: coreDocuments.map((doc) => doc.text).join("\n\n"),
     runtime: {

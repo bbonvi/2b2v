@@ -32,6 +32,7 @@ function defaultPromptTransportConfig(): PromptTransportConfig {
     openaiCodex: {
       mode: "split-input",
       sections: {
+        system: { role: "developer", target: "input", cacheGroup: "core" },
         core: { role: "developer", target: "input", cacheGroup: "core" },
         skills: { role: "developer", target: "input", cacheGroup: "runtime" },
         runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
@@ -52,6 +53,7 @@ function defaultPromptTransportConfig(): PromptTransportConfig {
     openrouter: {
       mode: "split-input",
       sections: {
+        system: { role: "developer", target: "input", cacheGroup: "core" },
         core: { role: "developer", target: "input", cacheGroup: "core" },
         skills: { role: "developer", target: "input", cacheGroup: "runtime" },
         runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
@@ -895,8 +897,16 @@ describe("resolveGuildConfig", () => {
     };
     const resolved = resolveGuildConfig(global, partial);
     expect(resolved.promptTransport.openaiCodex.sections.currentTurn.role).toBe("user");
+    expect(resolved.promptTransport.openaiCodex.sections.system.target).toBe("instructions");
     expect(resolved.promptTransport.openaiCodex.sections.core.target).toBe("instructions");
     expect(resolved.promptTransport.openaiCodex.sections.runtime.role).toBe("developer");
+  });
+
+  test("rejects Codex system-role input messages", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, "promptTransport:\n  openaiCodex:\n    sections:\n      core:\n        role: system\n        target: input\n");
+    expect(() => loadGlobalConfig(BASE_ENV, cfgFile)).toThrow("Codex input messages do not allow system roles");
   });
 
   test("ignores extra guild promptCaching fields", () => {

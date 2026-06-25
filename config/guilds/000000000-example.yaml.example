@@ -99,6 +99,8 @@ promptCaching:
 #     sections:
 #       currentTurn:
 #         role: developer
+#       system:
+#         target: instructions
 #       core:
 #         target: instructions
 

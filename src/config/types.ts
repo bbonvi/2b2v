@@ -51,6 +51,7 @@ export interface PromptCachingConfig {
 
 /** Prompt transport sections whose provider role/target can be tuned. */
 export type PromptTransportSectionId =
+  | "system"
   | "core"
   | "skills"
   | "runtime"

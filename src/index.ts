@@ -420,6 +420,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       guildConfig: deliveryGuildConfig,
       context,
       currentChannelId: job.deliveryChannelId,
+      systemPrompt: promptBundle.systemPrompt,
       personaPrompt: promptBundle.corePrompt,
       runtimePrompts: promptBundle.runtime,
       sender: completionSender,
@@ -1576,7 +1577,7 @@ function getModelImageInputSupport(guildConfig: GuildConfig): ModelImageInputSup
 
 await refreshModelImageInputSupport(globalConfig, guildConfigs, "startup");
 
-// --- 8. Load prompt bundle. prompts/core/** are stable core instructions; runtime prompts are scoped.
+// --- 8. Load prompt bundle. prompts/system/** and prompts/core/** are stable instructions; runtime prompts are scoped.
 let promptBundle: PromptBundle = loadPromptBundle("prompts", log);
 
 function runtimeToolDescription(
@@ -1771,6 +1772,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         guildConfig,
         context,
         currentChannelId: channelId,
+        systemPrompt: promptBundle.systemPrompt,
         personaPrompt: promptBundle.corePrompt,
         runtimePrompts: promptBundle.runtime,
         sender,
@@ -1848,6 +1850,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
               globalConfig,
               guildConfig,
               context: memoryRequest.context,
+              systemPrompt: promptBundle.systemPrompt,
               personaPrompt: promptBundle.corePrompt,
               runtimePrompts: promptBundle.runtime,
               incomingMessage: memoryRequest.incomingMessage,
@@ -2627,6 +2630,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
         globalConfig,
         guildConfig,
         context,
+        systemPrompt: promptBundle.systemPrompt,
         personaPrompt: promptBundle.corePrompt,
         runtimePrompts: promptBundle.runtime,
         incomingMessage: incoming,
@@ -3510,6 +3514,7 @@ async function processTriggeredMessage(
       guildConfig,
       context,
       currentChannelId: channelId,
+      systemPrompt: promptBundle.systemPrompt,
       personaPrompt: promptBundle.corePrompt,
       runtimePrompts: promptBundle.runtime,
       sender,
@@ -3589,6 +3594,7 @@ async function processTriggeredMessage(
             globalConfig,
             guildConfig,
             context: memoryRequest.context,
+            systemPrompt: promptBundle.systemPrompt,
             personaPrompt: promptBundle.corePrompt,
             runtimePrompts: promptBundle.runtime,
             incomingMessage: memoryRequest.incomingMessage,
@@ -4526,6 +4532,7 @@ async function runPromptLab(input: {
         guildConfig,
         context,
         currentChannelId: input.channelId,
+        systemPrompt: promptBundle.systemPrompt,
         personaPrompt: promptBundle.corePrompt,
         runtimePrompts: promptBundle.runtime,
         sender,

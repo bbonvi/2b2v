@@ -24,6 +24,7 @@ function makePromptTransportConfig(): PromptTransportConfig {
     openaiCodex: {
       mode: "split-input",
       sections: {
+        system: { role: "developer", target: "input", cacheGroup: "core" },
         core: { role: "developer", target: "input", cacheGroup: "core" },
         skills: { role: "developer", target: "input", cacheGroup: "runtime" },
         runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
@@ -44,6 +45,7 @@ function makePromptTransportConfig(): PromptTransportConfig {
     openrouter: {
       mode: "split-input",
       sections: {
+        system: { role: "developer", target: "input", cacheGroup: "core" },
         core: { role: "developer", target: "input", cacheGroup: "core" },
         skills: { role: "developer", target: "input", cacheGroup: "runtime" },
         runtime: { role: "developer", target: "input", cacheGroup: "runtime" },

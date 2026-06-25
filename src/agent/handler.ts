@@ -93,6 +93,7 @@ export interface SilentMemoryAgentInput {
   globalConfig: GlobalConfig;
   guildConfig: GuildConfig;
   context: AssembledContext;
+  systemPrompt?: string;
   personaPrompt?: string;
   runtimePrompts?: RuntimePromptBundle;
   incomingMessage: IncomingMessage;
@@ -158,6 +159,7 @@ export interface HandlerDeps {
   context: AssembledContext;
   /** Discord channel/thread that initiated this reply loop. */
   currentChannelId?: string;
+  systemPrompt?: string;
   personaPrompt?: string;
   runtimePrompts?: RuntimePromptBundle;
   sender: MessageSender;
@@ -711,6 +713,7 @@ function stableSection(
 }
 
 function sectionsForStablePrompt(
+  systemPrompt: string,
   personaPrompt: string,
   stylePrompt: string,
   context: AssembledContext,
@@ -719,6 +722,7 @@ function sectionsForStablePrompt(
   transport: ProviderPromptTransportConfig,
 ): StablePromptSection[] {
   const stable: StablePromptSection[] = [];
+  if (systemPrompt !== "") stable.push(stableSection("system", systemPrompt, transport));
   if (personaPrompt !== "") stable.push(stableSection("core", personaPrompt, transport));
   if (stylePrompt !== "") stable.push(stableSection("core", stylePrompt, transport));
   if (skillsInstruction !== "") stable.push(stableSection("skills", skillsInstruction, transport));
@@ -2243,6 +2247,7 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
   delete providerParams.onPayload;
 
   const stableSections = sectionsForStablePrompt(
+    input.systemPrompt ?? "",
     input.personaPrompt ?? "",
     "",
     input.context,
@@ -2371,6 +2376,7 @@ export async function handleMessage(
   const runtimeInstruction = buildRuntimeInstruction(deps.runtimePrompts);
   const transport = promptTransportForProvider(deps.guildConfig.promptTransport, model.llmProvider);
   const stableSections = sectionsForStablePrompt(
+    deps.systemPrompt ?? "",
     deps.personaPrompt ?? "",
     "",
     context,

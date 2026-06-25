@@ -199,6 +199,7 @@ const DEFAULT_REPLY_LOOP: ReplyLoopConfig = {
 };
 
 const PROMPT_TRANSPORT_SECTION_IDS: readonly PromptTransportSectionId[] = [
+  "system",
   "core",
   "skills",
   "runtime",
@@ -220,6 +221,7 @@ const DEFAULT_PROMPT_TRANSPORT: PromptTransportConfig = {
   openaiCodex: {
     mode: "split-input",
     sections: {
+      system: { role: "developer", target: "instructions", cacheGroup: "core" },
       core: { role: "developer", target: "input", cacheGroup: "core" },
       skills: { role: "developer", target: "input", cacheGroup: "runtime" },
       runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
@@ -240,6 +242,7 @@ const DEFAULT_PROMPT_TRANSPORT: PromptTransportConfig = {
   openrouter: {
     mode: "split-input",
     sections: {
+      system: { role: "developer", target: "input", cacheGroup: "core" },
       core: { role: "developer", target: "input", cacheGroup: "core" },
       skills: { role: "developer", target: "input", cacheGroup: "runtime" },
       runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
@@ -339,12 +342,23 @@ function resolveProviderPromptTransport(
   };
 }
 
+function validateOpenAiCodexPromptTransport(config: PromptTransportConfig["openaiCodex"]): void {
+  for (const sectionId of PROMPT_TRANSPORT_SECTION_IDS) {
+    const section = config.sections[sectionId];
+    if (section.role === "system" && section.target === "input") {
+      throw new Error(`promptTransport.openaiCodex.sections.${sectionId} cannot use role "system" with target "input"; Codex input messages do not allow system roles`);
+    }
+  }
+}
+
 function resolveGlobalPromptTransport(
   partial: PromptTransportConfigYaml | undefined,
 ): PromptTransportConfig {
   const defaults = clonePromptTransport(DEFAULT_PROMPT_TRANSPORT);
+  const openaiCodex = resolveProviderPromptTransport(defaults.openaiCodex, partial?.openaiCodex, "promptTransport.openaiCodex");
+  validateOpenAiCodexPromptTransport(openaiCodex);
   return {
-    openaiCodex: resolveProviderPromptTransport(defaults.openaiCodex, partial?.openaiCodex, "promptTransport.openaiCodex"),
+    openaiCodex,
     openrouter: resolveProviderPromptTransport(defaults.openrouter, partial?.openrouter, "promptTransport.openrouter"),
   };
 }
@@ -353,8 +367,10 @@ function resolveGuildPromptTransport(
   global: PromptTransportConfig,
   partial: PromptTransportConfigYaml | undefined,
 ): PromptTransportConfig {
+  const openaiCodex = resolveProviderPromptTransport(global.openaiCodex, partial?.openaiCodex, "promptTransport.openaiCodex");
+  validateOpenAiCodexPromptTransport(openaiCodex);
   return {
-    openaiCodex: resolveProviderPromptTransport(global.openaiCodex, partial?.openaiCodex, "promptTransport.openaiCodex"),
+    openaiCodex,
     openrouter: resolveProviderPromptTransport(global.openrouter, partial?.openrouter, "promptTransport.openrouter"),
   };
 }

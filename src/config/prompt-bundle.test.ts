@@ -8,6 +8,7 @@ import type { Logger } from "../logger.ts";
 const TEST_DIR = join(import.meta.dir, "../../.test-prompt-bundle");
 
 function setup(): void {
+  mkdirSync(join(TEST_DIR, "system"), { recursive: true });
   mkdirSync(join(TEST_DIR, "core", "nested"), { recursive: true });
   mkdirSync(join(TEST_DIR, "runtime", "reply", "tools"), { recursive: true });
   mkdirSync(join(TEST_DIR, "runtime", "memory", "pass"), { recursive: true });
@@ -40,6 +41,7 @@ describe("loadPromptBundle", () => {
   afterEach(teardown);
 
   test("loads core prompt markdown deterministically before runtime prompts", () => {
+    writeFileSync(join(TEST_DIR, "system", "00-top-level.md"), "# Top Level\ntop");
     writeFileSync(join(TEST_DIR, "core", "10-style.md"), "# Style\nstyle");
     writeFileSync(join(TEST_DIR, "core", "nested", "05-additional-instructions.md"), "extra");
     writeFileSync(join(TEST_DIR, "core", "00-persona.md"), "# Persona\npersona");
@@ -71,6 +73,8 @@ describe("loadPromptBundle", () => {
 
     const bundle = loadPromptBundle(TEST_DIR, makeLogger());
 
+    expect(bundle.systemDocuments.map((doc) => doc.source.endsWith("00-top-level.md"))).toEqual([true]);
+    expect(bundle.systemPrompt).toContain("# Top Level\ntop");
     const sourceNames = bundle.coreDocuments.map((doc) => {
       if (doc.source.endsWith("00-persona.md")) return "persona";
       if (doc.source.endsWith("10-style.md")) return "style";
@@ -82,6 +86,7 @@ describe("loadPromptBundle", () => {
       "additional",
     ]);
     expect(bundle.corePrompt).not.toContain("prompt-source");
+    expect(bundle.corePrompt).not.toContain("# Top Level");
     expect(bundle.corePrompt).toContain("# Persona\npersona");
     expect(bundle.corePrompt).toContain("# Additional Instructions\n\nextra");
     expect(bundle.corePrompt).not.toContain("# Ignored");
