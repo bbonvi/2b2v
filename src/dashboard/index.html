@@ -831,6 +831,17 @@
     font-size: .6rem;
     margin-top: .12rem;
   }
+  .lab-live-output {
+    margin-top: .35rem;
+    border-left: 3px solid var(--green);
+    background: rgba(34,197,94,.055);
+    color: var(--text-bright);
+    padding: .45rem .55rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: .72rem;
+    line-height: 1.5;
+  }
   .dry-run-row {
     color: var(--amber);
     font-size: .65rem;
@@ -1984,10 +1995,13 @@
       const status = labStatusText(call.status, call.isError);
       const cost = call.estimatedCostUsd != null ? ' · $' + Number(call.estimatedCostUsd).toFixed(4) : '';
       const duration = call.durationMs != null ? fmtDuration(call.durationMs) : status;
+      const output = modelResponseText(call);
       return '<div class="lab-live-row">'
         + '<div class="lab-live-kind">Model</div>'
         + '<div><div class="lab-live-title">#' + (index + 1) + ' ' + esc(call.model || 'model') + '</div>'
-          + '<div class="lab-live-meta">tokens ' + esc(String(call.promptTokens || 0)) + ' / ' + esc(String(call.completionTokens || 0)) + cost + '</div></div>'
+          + '<div class="lab-live-meta">tokens ' + esc(String(call.promptTokens || 0)) + ' / ' + esc(String(call.completionTokens || 0)) + cost + '</div>'
+          + (output !== '' ? '<div class="lab-live-output">' + esc(output) + '</div>' : '')
+        + '</div>'
         + '<div class="' + esc(statusClass(status, false)) + '">' + esc(duration) + '</div>'
       + '</div>';
     }).join('');
