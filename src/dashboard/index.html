@@ -249,7 +249,7 @@
 
   .detail-flow {
     display: grid;
-    gap: .85rem;
+    gap: .45rem;
   }
   .detail-block {
     border: 1px solid var(--border);
@@ -293,6 +293,129 @@
   }
   .detail-body {
     padding: .65rem .7rem;
+  }
+  .stage-block {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border-active);
+    background: #0d0e10;
+  }
+  .stage-block.stage-input { border-left-color: var(--accent); }
+  .stage-block.stage-model { border-left-color: #8b5cf6; }
+  .stage-block.stage-runtime { border-left-color: var(--green); }
+  .stage-block.stage-error { border-left-color: var(--red); }
+  .stage-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: .75rem;
+    align-items: start;
+    padding: .52rem .62rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .stage-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem .65rem;
+    align-items: baseline;
+  }
+  .stage-title {
+    color: var(--text-bright);
+    font-size: .76rem;
+    font-weight: 700;
+  }
+  .stage-kind {
+    color: var(--text-dim);
+    font-family: var(--sans);
+    font-size: .56rem;
+    font-weight: 700;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+  }
+  .stage-meta {
+    color: var(--text-dim);
+    font-size: .6rem;
+    margin-top: .12rem;
+  }
+  .stage-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: .35rem;
+  }
+  .stage-body {
+    padding: .55rem .62rem;
+    display: grid;
+    gap: .5rem;
+  }
+  .stage-output {
+    background: #08090a;
+    border: 1px solid #121518;
+    border-left: 2px solid var(--border-active);
+    padding: .48rem .55rem;
+    color: var(--text);
+    font-size: .68rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .stage-output.empty {
+    color: var(--text-dim);
+    font-style: italic;
+  }
+  .stage-more {
+    margin-top: .28rem;
+  }
+  .stage-more summary {
+    color: var(--accent);
+    cursor: pointer;
+    font-size: .6rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .stage-more span {
+    display: block;
+    margin-top: .28rem;
+  }
+  .stage-output-label {
+    display: block;
+    color: var(--text-dim);
+    font-family: var(--sans);
+    font-size: .54rem;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    margin-bottom: .22rem;
+  }
+  .stage-subtitle {
+    color: var(--text-dim);
+    font-size: .6rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .stage-tool-list {
+    display: grid;
+    gap: .38rem;
+  }
+  .stage-tool {
+    display: grid;
+    grid-template-columns: minmax(140px, .42fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: .5rem;
+    border-top: 1px solid var(--border);
+    padding-top: .45rem;
+  }
+  .stage-tool:first-child {
+    border-top: none;
+    padding-top: 0;
+  }
+  .stage-tool-name {
+    color: var(--text-bright);
+    font-size: .68rem;
+    font-weight: 700;
+  }
+  .stage-tool-meta {
+    color: var(--text-dim);
+    font-size: .58rem;
+    margin-top: .12rem;
   }
   .detail-section {
     margin-bottom: .95rem;
@@ -542,11 +665,14 @@
       grid-template-columns: 62px 126px minmax(70px, 110px) minmax(90px, 170px) minmax(120px, 1fr) auto;
     }
     .detail-block-head,
-    .action-row {
+    .action-row,
+    .stage-head,
+    .stage-tool {
       grid-template-columns: 1fr;
     }
     .metric-grid,
-    .payload-actions {
+    .payload-actions,
+    .stage-actions {
       justify-content: flex-start;
     }
   }
@@ -884,9 +1010,43 @@
     font-size: .65rem;
     line-height: 1.6;
     color: var(--text);
-    white-space: pre-wrap;
     word-break: break-word;
     margin: 0;
+  }
+  .payload-tree {
+    font-family: var(--mono);
+    white-space: normal;
+  }
+  .payload-node {
+    margin-left: 1rem;
+  }
+  .payload-row {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: .45rem;
+    align-items: start;
+  }
+  .payload-key {
+    color: var(--accent);
+  }
+  .payload-primitive {
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .payload-string {
+    color: var(--green);
+  }
+  .payload-null {
+    color: var(--text-dim);
+  }
+  .payload-collapsible summary {
+    color: var(--text-bright);
+    cursor: pointer;
+    white-space: pre-wrap;
+  }
+  .payload-large summary {
+    color: var(--amber);
   }
 
   /* Scrollbar */
@@ -977,7 +1137,7 @@
       <span class="modal-title">LLM Request Payload</span>
       <button class="modal-close" id="modal-close">&times;</button>
     </div>
-    <pre class="modal-body" id="modal-body"></pre>
+    <div class="modal-body payload-tree" id="modal-body"></div>
   </div>
 </div>
 
@@ -1155,16 +1315,6 @@
     return s.length > 120 ? s.slice(0, 120) + '...' : s;
   }
 
-  function fmtResult(text) {
-    if (text == null) return '-';
-    // Try to detect and pretty-print JSON
-    const trimmed = text.trim();
-    if ((trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('"')) ) {
-      try { return JSON.stringify(JSON.parse(trimmed), null, 2); } catch {}
-    }
-    return text;
-  }
-
   function fmtStatus(status, isError) {
     if (isError) return 'error';
     return status || 'completed';
@@ -1184,6 +1334,7 @@
   const detailCache = new Map();
   const detailErrors = new Map();
   const detailRequests = new Map();
+  const detailRenderedHtml = new Map();
   const rowNodes = new Map();
 
   function htmlToElement(html) {
@@ -1214,6 +1365,7 @@
 
     if (current.nodeType !== Node.ELEMENT_NODE) return current;
     syncAttributes(current, next);
+    if (current.classList.contains('entry-detail')) return current;
 
     let currentChild = current.firstChild;
     let nextChild = next.firstChild;
@@ -1262,33 +1414,6 @@
     return '<button class="btn btn-sm payload-btn" data-payload-key="' + esc(key) + '" data-payload-title="' + esc(title) + '">' + esc(label) + '</button>';
   }
 
-  function payloadButton(e, li, kind, payload) {
-    const pkey = e.requestId + ':' + li;
-    const label = kind === 'req' ? 'request' : 'response';
-    const title = kind === 'req' ? 'LLM Request' : 'LLM Response';
-    return modalButton(kind + ':' + pkey, title, label, payload);
-  }
-
-  function payloadSummary(value, emptyText) {
-    if (value == null || value === '') return emptyText || '-';
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (trimmed === '') return emptyText || '-';
-      try {
-        return payloadSummary(JSON.parse(trimmed), emptyText);
-      } catch {}
-      return trimmed.length + ' chars text';
-    }
-    if (Array.isArray(value)) return value.length + ' item' + (value.length === 1 ? '' : 's');
-    if (typeof value === 'object') {
-      const keys = Object.keys(value);
-      if (keys.length === 0) return 'empty object';
-      const preview = keys.slice(0, 4).join(', ');
-      return keys.length + ' key' + (keys.length === 1 ? '' : 's') + ': ' + preview + (keys.length > 4 ? ', ...' : '');
-    }
-    return String(value);
-  }
-
   function runtimeActionCount(entry) {
     if (typeof entry.runtimeActionCount === 'number') return entry.runtimeActionCount;
     if (!Array.isArray(entry.tools)) return 0;
@@ -1299,66 +1424,200 @@
     return '<div class="metric"><span class="metric-label">' + esc(label) + '</span><span class="metric-value ' + (className || '') + '">' + esc(value) + '</span></div>';
   }
 
-  function renderToolRowsForModel(modelCall, toolsById, requestId) {
+  function rawPayloadButton(key, title, payload) {
+    return payload == null || payload === '' ? '' : modalButton(key, title, 'raw', payload);
+  }
+
+  function compactStageText(text) {
+    const max = 12000;
+    if (text.length <= max) return text;
+    return text.slice(0, max);
+  }
+
+  function formatStageValue(value, emptyText) {
+    if (value == null || value === '') return { text: emptyText || '-', empty: true };
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed === '') return { text: emptyText || '-', empty: true };
+      try {
+        return { text: compactStageText(JSON.stringify(JSON.parse(trimmed), null, 2)), empty: false };
+      } catch {}
+      return { text: compactStageText(trimmed), empty: false };
+    }
+    return { text: compactStageText(JSON.stringify(value, null, 2)), empty: false };
+  }
+
+  function stageOutput(label, value, emptyText) {
+    const formatted = formatStageValue(value, emptyText);
+    const rawText = formatted.text;
+    const hasMore = !formatted.empty && typeof rawText === 'string' && rawText.length >= 500;
+    const head = hasMore ? rawText.slice(0, 500) : rawText;
+    const tail = hasMore ? rawText.slice(500) : '';
+    return '<div class="stage-output' + (formatted.empty ? ' empty' : '') + '">'
+      + '<span class="stage-output-label">' + esc(label) + '</span>'
+      + esc(head)
+      + (hasMore ? '<details class="stage-more"><summary>show more</summary><span>' + esc(tail) + '</span></details>' : '')
+      + '</div>';
+  }
+
+  function modelResponseText(call) {
+    if (call.outputText != null && String(call.outputText).trim() !== '') return call.outputText;
+    const payload = call.responsePayload;
+    if (payload == null || typeof payload !== 'object') return '';
+    if (typeof payload.content === 'string') return payload.content;
+    if (Array.isArray(payload.content)) {
+      return payload.content
+        .filter(part => part && typeof part === 'object' && typeof part.text === 'string')
+        .map(part => part.text)
+        .join('\n');
+    }
+    if (typeof payload.output_text === 'string') return payload.output_text;
+    const choice = Array.isArray(payload.choices) ? payload.choices[0] : null;
+    const message = choice && typeof choice === 'object' ? choice.message : null;
+    if (message && typeof message.content === 'string') return message.content;
+    if (message && Array.isArray(message.content)) {
+      return message.content
+        .filter(part => part && typeof part === 'object' && typeof part.text === 'string')
+        .map(part => part.text)
+        .join('\n');
+    }
+    return '';
+  }
+
+  function toolResultPayload(tool, fallback) {
+    if (tool && tool.resultPayload != null) return tool.resultPayload;
+    if (tool && tool.result != null) return tool.result;
+    return fallback || '';
+  }
+
+  function renderToolOutputPayload(payload) {
+    if (payload == null || payload === '') return '';
+    if (typeof payload !== 'object') return payload;
+    const parts = [];
+    if (Array.isArray(payload.content)) {
+      const contentText = payload.content
+        .filter(part => part && typeof part === 'object' && typeof part.text === 'string')
+        .map(part => part.text)
+        .join('\n');
+      if (contentText !== '') parts.push(contentText);
+    }
+    if (payload.details != null) parts.push(JSON.stringify(payload.details, null, 2));
+    if (parts.length > 0) return parts.join('\n');
+    return payload;
+  }
+
+  function renderStageTool(row, requestId, parentKey) {
+    const t = row.execution;
+    const emittedCall = row.emitted;
+    const toolId = (emittedCall && emittedCall.id) || (t && t.id) || parentKey;
+    const name = (emittedCall && emittedCall.name) || (t && t.tool) || 'tool';
+    const rawStatus = t ? t.status : (emittedCall && emittedCall.status);
+    const status = fmtStatus(rawStatus, t && t.isError);
+    const args = t && t.args ? t.args : (emittedCall ? emittedCall.args : {});
+    const resultPayload = toolResultPayload(t, emittedCall && emittedCall.skippedReason);
+    const renderedResult = renderToolOutputPayload(resultPayload);
+    const baseKey = 'tool:' + requestId + ':' + toolId + ':' + parentKey;
+    return '<div class="stage-tool' + (status === 'error' ? ' tool-error' : '') + '">'
+      + '<div>'
+        + '<div class="stage-tool-name">' + esc(name) + '</div>'
+        + '<div class="stage-tool-meta">' + esc(shortId(toolId)) + ' · <span class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</span> · ' + esc(t && t.durationMs != null ? fmtDuration(t.durationMs) : '-') + '</div>'
+      + '</div>'
+      + '<div>' + stageOutput('args', args, 'no args') + '<div class="payload-actions">' + rawPayloadButton(baseKey + ':args', 'Tool Args', args) + '</div></div>'
+      + '<div>' + stageOutput('result', renderedResult, status === 'running' || status === 'queued' ? 'pending' : 'no result') + '<div class="payload-actions">' + rawPayloadButton(baseKey + ':result', 'Tool Result', resultPayload) + '</div></div>'
+      + '</div>';
+  }
+
+  function renderToolGroup(title, rows, requestId, parentKey) {
+    if (rows.length === 0) return '';
+    return '<div><div class="stage-subtitle">' + esc(title) + '</div><div class="stage-tool-list">'
+      + rows.map((row, index) => renderStageTool(row, requestId, parentKey + ':' + index)).join('')
+      + '</div></div>';
+  }
+
+  function renderToolsForModel(modelCall, toolsById, requestId, modelKey) {
     const emitted = modelCall.emittedToolCalls || [];
     if (emitted.length === 0) return '';
 
-    const batches = [];
-    const batchIndex = new Map();
+    const rows = [];
     for (const emittedCall of emitted) {
-      const execution = toolsById.get(emittedCall.id);
-      const batchId = execution && execution.batchId ? execution.batchId : (emittedCall.batchId || 'unbatched');
-      const batchKind = execution && execution.batchKind ? execution.batchKind : (emittedCall.batchKind || 'queued');
-      const key = batchId + ':' + batchKind;
-      if (!batchIndex.has(key)) {
-        batchIndex.set(key, batches.length);
-        batches.push({ id: batchId, kind: batchKind, calls: [] });
-      }
-      batches[batchIndex.get(key)].calls.push({ emitted: emittedCall, execution });
+      rows.push({ emitted: emittedCall, execution: toolsById.get(emittedCall.id) });
     }
 
-    let html = '';
-    for (const batch of batches) {
-      const kind = batch.kind === 'parallel' ? 'parallel batch' : batch.kind === 'sequential' ? 'ordered call' : batch.kind;
-      html += '<div class="batch-label">' + esc(kind) + (batch.id !== 'unbatched' ? ' ' + esc(batch.id) : '') + '</div>';
-      html += '<div class="action-list">';
-      for (const row of batch.calls) {
-        const t = row.execution;
-        const emittedCall = row.emitted;
-        const status = fmtStatus(t && t.status, t && t.isError);
-        const args = t && t.args ? t.args : emittedCall.args;
-        const result = t && t.result != null ? fmtResult(t.result) : (emittedCall.skippedReason || '');
-        const baseKey = 'tool:' + requestId + ':' + emittedCall.id;
-        html += '<div class="action-row' + (status === 'error' ? ' tool-error' : '') + '">'
-          + '<div><div class="action-name">' + esc(emittedCall.name) + '</div><div class="action-id">' + esc(shortId(emittedCall.id)) + '</div></div>'
-          + '<div class="action-meta"><span class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</span><span>' + (t && t.durationMs != null ? fmtDuration(t.durationMs) : '-') + '</span></div>'
-          + '<div class="action-payload">' + modalButton(baseKey + ':args', 'Tool Args', 'args', args) + '<span class="inline-snippet">' + esc(payloadSummary(args, 'no args')) + '</span></div>'
-          + '<div class="action-payload">' + (result !== '' ? modalButton(baseKey + ':result', 'Tool Result', 'result', result) + '<span class="inline-snippet">' + esc(payloadSummary(result, '')) + '</span>' : '<span style="color:var(--text-dim);font-style:italic">pending</span>') + '</div>'
-          + '</div>';
-      }
-      html += '</div>';
-    }
-    return html;
+    return renderToolGroup('Tools emitted by this model request', rows, requestId, modelKey + ':emitted');
   }
 
-  function renderRuntimeTools(e) {
-    const runtimeTools = (e.tools || []).filter(t => !t.modelRequestId);
-    if (runtimeTools.length === 0) return '';
-    let rows = '';
-    for (let i = 0; i < runtimeTools.length; i++) {
-      const t = runtimeTools[i];
-      const status = fmtStatus(t.status, t.isError);
-      const baseKey = 'runtime:' + e.requestId + ':' + (t.id || t.tool) + ':' + i;
-      rows += '<div class="action-row' + (status === 'error' ? ' tool-error' : '') + '">'
-        + '<div><div class="action-name">' + esc(t.tool) + '</div><div class="action-id">' + esc(t.id != null ? shortId(t.id) : 'runtime') + '</div></div>'
-        + '<div class="action-meta"><span class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</span><span>' + (t.durationMs != null ? fmtDuration(t.durationMs) : '-') + '</span></div>'
-        + '<div class="action-payload">' + modalButton(baseKey + ':args', 'Runtime Args', 'args', t.args) + '<span class="inline-snippet">' + esc(payloadSummary(t.args, 'no args')) + '</span></div>'
-        + '<div class="action-payload">' + (t.result != null ? modalButton(baseKey + ':result', 'Runtime Result', 'result', fmtResult(t.result)) + '<span class="inline-snippet">' + esc(payloadSummary(t.result, '')) + '</span>' : '-') + '</div>'
-        + '</div>';
-    }
-    return '<div class="detail-block detail-actions">'
-      + '<div class="detail-block-head"><div><span class="detail-kicker">Actions after model</span><div class="detail-title">Runtime actions</div><div class="detail-subtitle">' + runtimeTools.length + ' action' + (runtimeTools.length === 1 ? '' : 's') + '</div></div></div>'
-      + '<div class="detail-body"><div class="action-list">' + rows + '</div></div>'
+  function renderActionsAfterModel(tools, requestId, modelKey) {
+    const rows = tools.map(tool => ({ execution: tool, emitted: null }));
+    return renderToolGroup('Outputs/actions after this model', rows, requestId, modelKey + ':after');
+  }
+
+  function stageTime(value) {
+    const parsed = Date.parse(value || '');
+    return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+  }
+
+  function renderInputStage(e) {
+    const contextText = triggerContextText(e.triggerContext);
+    const contextMeta = triggerContextMeta(e.triggerContext, e, true);
+    return '<div class="stage-block stage-input">'
+      + '<div class="stage-head"><div><div class="stage-title-row"><span class="stage-kind">Input</span><span class="stage-title">Trigger context</span></div><div class="stage-meta">' + esc(contextMeta || 'no location metadata') + '</div></div>' + renderEventLabel(e.trigger) + '</div>'
+      + '<div class="stage-body">' + stageOutput('message', contextText, 'no trigger text') + '</div>'
+      + '</div>';
+  }
+
+  function renderErrorStage(errorText) {
+    return '<div class="stage-block stage-error">'
+      + '<div class="stage-head"><div><div class="stage-title-row"><span class="stage-kind">Failure</span><span class="stage-title">Request error</span></div></div></div>'
+      + '<div class="stage-body">' + stageOutput('error', errorText, 'error unavailable') + '</div>'
+      + '</div>';
+  }
+
+  function renderModelStage(e, call, index, toolsById, attachedTools) {
+    const status = fmtStatus(call.status, call.isError);
+    const cost = call.estimatedCostUsd != null ? '$' + call.estimatedCostUsd.toFixed(4) : '-';
+    const duration = call.durationMs != null ? fmtDuration(call.durationMs) : (status === 'running' ? 'running' : '-');
+    const output = modelResponseText(call);
+    const modelKey = (call.id || ('model-' + index));
+    return '<div class="stage-block stage-model">'
+      + '<div class="stage-head">'
+        + '<div><div class="stage-title-row"><span class="stage-kind">Model</span><span class="stage-title">#' + (index + 1) + ' <span class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</span></span></div><div class="stage-meta">' + esc(call.model) + ' · stop ' + esc(call.stopReason) + ' · ' + esc(call.contentTypes.join(', ') || 'no content yet') + '</div></div>'
+        + '<div><div class="metric-grid">'
+          + metric('duration', duration)
+          + metric('tokens', call.promptTokens + ' / ' + call.completionTokens)
+          + metric('cache', fmtCache(call))
+          + metric('cost', cost, 'entry-cost')
+        + '</div><div class="stage-actions">'
+          + rawPayloadButton('model:req:' + e.requestId + ':' + modelKey, 'Model Request', call.requestPayload)
+          + rawPayloadButton('model:res:' + e.requestId + ':' + modelKey, 'Model Response', call.responsePayload)
+        + '</div></div>'
+      + '</div>'
+      + '<div class="stage-body">'
+        + (call.error != null ? stageOutput('error', call.error, 'error unavailable') : '')
+        + stageOutput('response', output, status === 'running' ? 'waiting for response' : 'no response text captured')
+        + renderToolsForModel(call, toolsById, e.requestId, modelKey)
+        + renderActionsAfterModel(attachedTools || [], e.requestId, modelKey)
+      + '</div>'
+      + '</div>';
+  }
+
+  function renderRuntimeStage(e, tool, index) {
+    const status = fmtStatus(tool.status, tool.isError);
+    const duration = tool.durationMs != null ? fmtDuration(tool.durationMs) : (status === 'running' ? 'running' : '-');
+    const resultPayload = toolResultPayload(tool, '');
+    const renderedResult = renderToolOutputPayload(resultPayload);
+    const runtimeKey = (tool.id || tool.tool || 'runtime') + ':' + index;
+    return '<div class="stage-block stage-runtime">'
+      + '<div class="stage-head">'
+        + '<div><div class="stage-title-row"><span class="stage-kind">Runtime</span><span class="stage-title">' + esc(tool.tool || 'runtime action') + ' <span class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</span></span></div><div class="stage-meta">' + esc(tool.id != null ? shortId(tool.id) : 'handler-owned') + ' · ' + esc(duration) + '</div></div>'
+        + '<div class="stage-actions">'
+          + rawPayloadButton('runtime:args:' + e.requestId + ':' + runtimeKey, 'Runtime Args', tool.args)
+          + rawPayloadButton('runtime:result:' + e.requestId + ':' + runtimeKey, 'Runtime Result', resultPayload)
+        + '</div>'
+      + '</div>'
+      + '<div class="stage-body">'
+        + stageOutput('args', tool.args, 'no args')
+        + stageOutput('result', renderedResult, status === 'running' ? 'pending' : 'no result')
+      + '</div>'
       + '</div>';
   }
 
@@ -1368,44 +1627,48 @@
       if (t.id) toolsById.set(t.id, t);
     }
 
-    let modelSections = '';
-    for (let li = 0; li < e.llmCalls.length; li++) {
-      const l = e.llmCalls[li];
-      const status = fmtStatus(l.status, l.isError);
-      const cost = l.estimatedCostUsd != null ? '$' + l.estimatedCostUsd.toFixed(4) : '-';
-      const duration = l.durationMs != null ? fmtDuration(l.durationMs) : (status === 'running' ? 'running' : '-');
-      modelSections += '<div class="detail-block detail-model">'
-        + '<div class="detail-block-head">'
-          + '<div><span class="detail-kicker">Model request</span><div class="detail-title">#' + (li + 1) + ' <span class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</span></div><div class="detail-subtitle">' + esc(l.model) + ' | stop ' + esc(l.stopReason) + ' | ' + esc(l.contentTypes.join(', ') || 'no content yet') + '</div></div>'
-          + '<div><div class="metric-grid">'
-            + metric('duration', duration)
-            + metric('tokens', l.promptTokens + ' / ' + l.completionTokens)
-            + metric('cache', fmtCache(l))
-            + metric('cost', cost, 'entry-cost')
-          + '</div><div class="payload-actions">' + payloadButton(e, li, 'req', l.requestPayload) + payloadButton(e, li, 'res', l.responsePayload) + '</div></div>'
-        + '</div>'
-        + '<div class="detail-body">'
-          + (l.error != null ? '<div class="error-text">' + esc(l.error) + '</div>' : '')
-          + (l.outputText != null ? '<div class="output-block">' + esc(l.outputText) + '</div>' : '')
-          + renderToolRowsForModel(l, toolsById, e.requestId)
-        + '</div>'
-      + '</div>';
+    const modelCalls = e.llmCalls || [];
+    const runtimeTools = (e.tools || []).filter(t => !t.modelRequestId);
+    const runtimeToolsByModelIndex = new Map();
+    const standaloneRuntimeTools = [];
+    for (const tool of runtimeTools) {
+      if (modelCalls.length === 0) {
+        standaloneRuntimeTools.push(tool);
+        continue;
+      }
+      const toolAt = stageTime(tool.startedAt || tool.completedAt);
+      let targetIndex = -1;
+      for (let i = 0; i < modelCalls.length; i++) {
+        const modelAt = stageTime(modelCalls[i].startedAt || modelCalls[i].completedAt);
+        if (modelAt <= toolAt) targetIndex = i;
+      }
+      if (targetIndex < 0) targetIndex = modelCalls.length - 1;
+      const existing = runtimeToolsByModelIndex.get(targetIndex) || [];
+      existing.push(tool);
+      runtimeToolsByModelIndex.set(targetIndex, existing);
     }
 
-    const contextText = triggerContextText(e.triggerContext);
-    const contextMeta = triggerContextMeta(e.triggerContext, e, true);
-    const inputBlock = '<div class="detail-block detail-input">'
-      + '<div class="detail-block-head"><div><span class="detail-kicker">Input</span><div class="detail-title">Trigger context</div><div class="detail-subtitle">' + esc(contextMeta || 'no location metadata') + '</div></div>' + renderEventLabel(e.trigger) + '</div>'
-      + '<div class="detail-body"><div class="message-block">' + (contextText !== '' ? esc(contextText) : '<span style="color:var(--text-dim);font-style:italic">no trigger text</span>') + '</div></div>'
-      + '</div>';
-    const errorBlock = e.error != null
-      ? '<div class="detail-block detail-error"><div class="detail-block-head"><div><span class="detail-kicker">Failure</span><div class="detail-title">Request error</div></div></div><div class="detail-body"><div class="error-text">' + esc(e.error) + '</div></div></div>'
-      : '';
+    const timeline = [];
+    for (let li = 0; li < modelCalls.length; li++) {
+      const call = modelCalls[li];
+      timeline.push({
+        at: stageTime(call.startedAt || call.completedAt),
+        html: renderModelStage(e, call, li, toolsById, runtimeToolsByModelIndex.get(li) || [])
+      });
+    }
+    for (let i = 0; i < standaloneRuntimeTools.length; i++) {
+      const tool = standaloneRuntimeTools[i];
+      timeline.push({
+        at: stageTime(tool.startedAt || tool.completedAt),
+        html: renderRuntimeStage(e, tool, i)
+      });
+    }
+    timeline.sort((a, b) => a.at - b.at);
+
     return '<div class="detail-flow">'
-      + inputBlock
-      + errorBlock
-      + modelSections
-      + renderRuntimeTools(e)
+      + renderInputStage(e)
+      + (e.error != null ? renderErrorStage(e.error) : '')
+      + timeline.map(item => item.html).join('')
       + (e.error == null && e.tools.length === 0 && e.llmCalls.length === 0 ? '<div class="detail-state">No tool or LLM detail for this entry.</div>' : '')
       + '</div>';
   }
@@ -1420,7 +1683,31 @@
 
   function renderDetailState(requestId) {
     const detail = document.querySelector('[data-detail-rid="' + requestId + '"]');
-    if (detail != null) detail.innerHTML = detailStateHtml(requestId);
+    if (detail == null) return;
+    const html = detailStateHtml(requestId);
+    if (detailRenderedHtml.get(requestId) === html) return;
+    const openDetails = new Set();
+    Array.from(detail.querySelectorAll('details')).forEach((node, index) => {
+      if (node.open) openDetails.add(index);
+    });
+    const next = htmlToElement(html);
+    if (next == null) {
+      detail.replaceChildren();
+    } else if (detail.firstElementChild == null) {
+      detail.replaceChildren(next);
+    } else {
+      patchNode(detail.firstElementChild, next);
+      let extra = detail.firstElementChild.nextElementSibling;
+      while (extra != null) {
+        const following = extra.nextElementSibling;
+        extra.remove();
+        extra = following;
+      }
+    }
+    Array.from(detail.querySelectorAll('details')).forEach((node, index) => {
+      if (openDetails.has(index)) node.open = true;
+    });
+    detailRenderedHtml.set(requestId, html);
   }
 
   async function loadEntryDetail(requestId) {
@@ -1499,6 +1786,7 @@
     logCount.textContent = data.length + ' entries';
     if (data.length === 0) {
       rowNodes.clear();
+      detailRenderedHtml.clear();
       if (logList.children.length !== 1 || !logList.firstElementChild.classList.contains('empty-state')) {
         logList.replaceChildren(htmlToElement('<div class="empty-state">No log entries yet. Trigger some bot messages.</div>'));
       }
@@ -1519,6 +1807,7 @@
       for (const [requestId, node] of Array.from(rowNodes.entries())) {
         if (seen.has(requestId)) continue;
         rowNodes.delete(requestId);
+        detailRenderedHtml.delete(requestId);
         node.remove();
       }
     }
@@ -2256,89 +2545,61 @@
   const modalBody = document.getElementById('modal-body');
   const modalClose = document.getElementById('modal-close');
 
-  // Format payload for display: pretty-print multiline strings, truncate base64 images
-  function formatPayload(obj) {
-    var json = JSON.stringify(obj, function(key, value) {
-      // Truncate base64 image data (covers "data" field and data-URI in "url")
-      if (typeof value === 'string') {
-        if (key === 'data' && value.length > 200) {
-          return '[base64 ' + Math.round(value.length / 1024) + 'KB]';
-        }
-        var dataUriMatch = key === 'url' && value.match(/^data:([^;]+);base64,/);
-        if (dataUriMatch) {
-          var b64 = value.substring(dataUriMatch[0].length);
-          return 'data:' + dataUriMatch[1] + ';base64,[' + Math.round(b64.length / 1024) + 'KB truncated]';
-        }
-      }
-      return value;
-    }, 2);
+  function payloadType(value) {
+    if (value === null) return 'null';
+    if (Array.isArray(value)) return 'array';
+    return typeof value;
+  }
 
-    // Unescape \n/\t/\r in JSON string *values* so long prompts stay readable.
-    var out = '';
-    for (var i = 0; i < json.length; i++) {
-      if (json[i] !== '"') {
-        out += json[i];
-        continue;
-      }
+  function renderPayloadPrimitive(value) {
+    if (value === null) return '<span class="payload-primitive payload-null">null</span>';
+    if (typeof value === 'string') return '<span class="payload-primitive payload-string">"' + esc(value) + '"</span>';
+    return '<span class="payload-primitive">' + esc(String(value)) + '</span>';
+  }
 
-      var j = i + 1;
-      var escaped = false;
-      var token = '';
-      while (j < json.length) {
-        var ch = json[j];
-        if (escaped) {
-          token += ch;
-          escaped = false;
-        } else if (ch === '\\') {
-          token += ch;
-          escaped = true;
-        } else if (ch === '"') {
-          break;
-        } else {
-          token += ch;
-        }
-        j += 1;
-      }
+  function renderLargePayloadString(value) {
+    const preview = value.slice(0, 500);
+    const rest = value.slice(500);
+    return '<details class="payload-collapsible payload-large">'
+      + '<summary>"' + esc(preview) + '…" · show value (' + esc(String(value.length)) + ' chars)</summary>'
+      + '<div class="payload-node payload-primitive payload-string">"' + esc(preview + rest) + '"</div>'
+      + '</details>';
+  }
 
-      if (j >= json.length) {
-        out += json.slice(i);
-        break;
-      }
-
-      var k = j + 1;
-      while (k < json.length && /\s/.test(json[k])) k += 1;
-      var isKey = k < json.length && json[k] === ':';
-
-      if (isKey || token.indexOf('\\') === -1) {
-        out += '"' + token + '"';
-      } else {
-        var expanded = '';
-        for (var t = 0; t < token.length; t++) {
-          var cur = token[t];
-          var next = t + 1 < token.length ? token[t + 1] : '';
-          if (cur === '\\' && next === 'n') {
-            expanded += '\n';
-            t += 1;
-          } else if (cur === '\\' && next === 't') {
-            expanded += '\t';
-            t += 1;
-          } else if (cur === '\\' && next === 'r') {
-            expanded += '\r';
-            t += 1;
-          } else if (cur === '\\' && next !== '') {
-            expanded += cur + next;
-            t += 1;
-          } else {
-            expanded += cur;
-          }
-        }
-        out += '"' + expanded + '"';
-      }
-
-      i = j;
+  function renderPayloadTree(value, depth) {
+    const type = payloadType(value);
+    if (type === 'string') {
+      return value.length > 500 ? renderLargePayloadString(value) : renderPayloadPrimitive(value);
     }
+    if (type !== 'object' && type !== 'array') return renderPayloadPrimitive(value);
 
-    return out;
+    const isArray = Array.isArray(value);
+    const entries = isArray ? value.map((item, index) => [String(index), item]) : Object.entries(value || {});
+    const open = depth < 2 ? ' open' : '';
+    const summary = isArray
+      ? '[' + entries.length + ' item' + (entries.length === 1 ? '' : 's') + ']'
+      : '{' + entries.length + ' key' + (entries.length === 1 ? '' : 's') + '}';
+    if (entries.length === 0) return '<span class="payload-primitive">' + (isArray ? '[]' : '{}') + '</span>';
+    return '<details class="payload-collapsible"' + open + '>'
+      + '<summary>' + esc(summary) + '</summary>'
+      + '<div class="payload-node">'
+        + entries.map(([key, item]) => '<div class="payload-row">'
+          + '<span class="payload-key">' + esc(key) + '</span>'
+          + '<span>' + renderPayloadTree(item, depth + 1) + '</span>'
+        + '</div>').join('')
+      + '</div>'
+      + '</details>';
+  }
+
+  function normalizePayloadForTree(payload) {
+    if (typeof payload !== 'string') return payload;
+    const trimmed = payload.trim();
+    if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) return payload;
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return payload;
+    }
   }
 
   const modalTitle = document.querySelector('.modal-title');
@@ -2347,7 +2608,7 @@
     const payload = payloadStore.get(key);
     if (payload == null) return;
     modalTitle.textContent = title || 'Payload';
-    modalBody.textContent = formatPayload(payload);
+    modalBody.innerHTML = renderPayloadTree(normalizePayloadForTree(payload), 0);
     modalOverlay.style.display = 'flex';
   };
 

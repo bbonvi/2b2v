@@ -8,6 +8,10 @@ export const LOG_LEVELS = {
   error: 3,
 } as const;
 
+const RAW_PAYLOAD_BASE64_MIN_LENGTH = 1_024;
+const RAW_PAYLOAD_BASE64_SAMPLE_LENGTH = 4_096;
+const RAW_PAYLOAD_BASE64_FIELD_NAMES = new Set(["base64", "b64json", "b64_json", "data", "image", "imageurl", "image_url"]);
+
 export type LogLevel = keyof typeof LOG_LEVELS;
 
 export interface TokenUsage {
@@ -95,6 +99,7 @@ export interface RequestToolCall {
   completedAt?: string;
   durationMs?: number;
   result?: string;
+  resultPayload?: unknown;
 }
 
 export interface RequestEmittedToolCall {
@@ -321,6 +326,7 @@ export class RequestLog {
       completedAt,
       durationMs: Date.now() - pending.startTime,
       result: resultText,
+      resultPayload: sanitizeResultPayloadForDashboard(rawResult),
     };
     this.tools.push(toolEntry);
     this.updateEmittedToolCall(toolCallId, {
@@ -431,7 +437,12 @@ export class RequestLog {
     const content = message.content;
     const contentTypes: string[] = [];
     const textParts: string[] = [];
-    if (Array.isArray(content)) {
+    if (typeof content === "string") {
+      if (content !== "") {
+        contentTypes.push("text");
+        textParts.push(content);
+      }
+    } else if (Array.isArray(content)) {
       for (const block of content) {
         const b = block as Record<string, unknown>;
         const t = b.type;
@@ -524,6 +535,7 @@ export class RequestLog {
         ...t,
         args: truncateArgs(t.args) as Record<string, unknown>,
         result: truncStr(t.result, 500),
+        resultPayload: undefined,
       })),
       llmCalls: entry.llmCalls.map((l) => ({
         ...l,
@@ -551,4 +563,54 @@ export class RequestLog {
       }
     }
   }
+}
+
+function sanitizeResultPayloadForDashboard(value: unknown, key = "", seen = new WeakSet<object>()): unknown {
+  if (value === undefined) return undefined;
+  if (typeof value === "string") return sanitizePayloadString(value, key);
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[circular]";
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeResultPayloadForDashboard(item, key, seen));
+  }
+  const result: Record<string, unknown> = {};
+  for (const [childKey, item] of Object.entries(value)) {
+    result[childKey] = sanitizeResultPayloadForDashboard(item, childKey, seen);
+  }
+  return result;
+}
+
+function sanitizePayloadString(value: string, key: string): string {
+  const dataUri = dataUriBase64PayloadOffset(value);
+  if (dataUri !== null) {
+    return `${value.slice(0, dataUri)}[${formatApproxKb(value.length - dataUri)} base64 truncated]`;
+  }
+
+  if (isLikelyBase64PayloadField(key, value)) {
+    return `[${formatApproxKb(value.length)} base64 truncated]`;
+  }
+
+  return value;
+}
+
+function dataUriBase64PayloadOffset(value: string): number | null {
+  if (!value.startsWith("data:")) return null;
+  const comma = value.indexOf(",");
+  if (comma === -1 || comma > 256) return null;
+  const header = value.slice(5, comma).toLowerCase();
+  if (!header.split(";").includes("base64")) return null;
+  return comma + 1;
+}
+
+function isLikelyBase64PayloadField(key: string, value: string): boolean {
+  if (value.length < RAW_PAYLOAD_BASE64_MIN_LENGTH) return false;
+  const normalizedKey = key.toLowerCase().replaceAll("_", "").replaceAll("-", "");
+  if (!RAW_PAYLOAD_BASE64_FIELD_NAMES.has(normalizedKey)) return false;
+  const sample = value.slice(0, RAW_PAYLOAD_BASE64_SAMPLE_LENGTH);
+  return /^[A-Za-z0-9+/=_-]+$/.test(sample);
+}
+
+function formatApproxKb(length: number): string {
+  return `${Math.max(1, Math.round(length / 1024))}KB`;
 }

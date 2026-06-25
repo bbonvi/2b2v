@@ -242,6 +242,7 @@ function sanitizeDashboardLogEntry(entry: RequestLogEntry): RequestLogEntry {
       ...tool,
       args: sanitizeDashboardRecord(tool.args),
       result: tool.result !== undefined ? sanitizeDashboardString(tool.result, "result") : undefined,
+      resultPayload: sanitizeDashboardValue(tool.resultPayload, "resultPayload"),
     })),
     llmCalls: entry.llmCalls.map((call) => ({
       ...call,

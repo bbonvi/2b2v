@@ -476,6 +476,22 @@ describe("RequestLog", () => {
     expect(entry.llmCalls[0]?.responsePayload).toEqual(message);
   });
 
+  test("recordLLMCompletion captures plain string content as output text", () => {
+    const rl = new RequestLog("g1", "c1");
+    rl.recordLLMRequest({ model: "model" });
+    rl.recordLLMCompletion({
+      role: "assistant",
+      model: "model",
+      content: "plain text answer",
+      usage: { input: 10, output: 3, totalTokens: 13 },
+      stopReason: "stop",
+    });
+
+    const entry = rl.toEntry();
+    expect(entry.llmCalls[0]?.outputText).toBe("plain text answer");
+    expect(entry.llmCalls[0]?.contentTypes).toEqual(["text"]);
+  });
+
   test("emit excludes responsePayload from console log", () => {
     const logger = createLogger({ level: "info" });
     const rl = new RequestLog("g1", "c1");
@@ -549,5 +565,38 @@ describe("RequestLog", () => {
     const consoleTools = consoleEntry.tools as Array<Record<string, unknown>>;
     expect((consoleTools[0]?.result as string).length).toBe(501); // 500 + "…"
     expect((consoleTools[0]?.result as string).endsWith("…")).toBe(true);
+  });
+
+  test("records raw tool result payload for dashboard detail", () => {
+    const rl = new RequestLog("g1", "c1");
+    const payload = {
+      content: [{ type: "text", text: "Message sent." }],
+      details: { sentMessageId: "m1" },
+    };
+
+    rl.recordToolStart("send-1", "send_text", { text: "ok" });
+    rl.recordToolEnd("send-1", false, payload);
+
+    const tool = rl.toEntry().tools[0];
+    expect(tool?.result).toBe("Message sent.");
+    expect(tool?.resultPayload).toEqual(payload);
+  });
+
+  test("redacts base64-like fields before retaining raw tool result payloads", () => {
+    const rl = new RequestLog("g1", "c1");
+    const rawImage = "A".repeat(5_000);
+
+    rl.recordToolStart("image-1", "image_tool", {});
+    rl.recordToolEnd("image-1", false, {
+      content: [{ type: "image", data: rawImage }],
+      details: { url: `data:image/png;base64,${rawImage}` },
+    });
+
+    const payload = rl.toEntry().tools[0]?.resultPayload as {
+      content: Array<{ data: string }>;
+      details: { url: string };
+    };
+    expect(payload.content[0]?.data).toBe("[5KB base64 truncated]");
+    expect(payload.details.url).toBe("data:image/png;base64,[5KB base64 truncated]");
   });
 });
