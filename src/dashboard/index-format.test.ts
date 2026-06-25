@@ -4,7 +4,7 @@ import { runInNewContext, Script } from "node:vm";
 
 interface PayloadTreeHelpers {
   normalizePayloadForTree(payload: unknown): unknown;
-  renderPayloadTree(value: unknown, depth: number): string;
+  renderPayloadTree(value: unknown, depth: number, keyName?: string): string;
   payloadExpansionStore: Map<string, string>;
 }
 
@@ -92,6 +92,21 @@ describe("dashboard payload formatter", () => {
 
     expect(rendered).toContain('<details class="payload-collapsible" open>');
     expect(rendered).not.toContain('payload-collapsible payload-large');
+  });
+
+  test("collapses tools keys by default", () => {
+    const helpers = loadPayloadTreeHelpers();
+
+    const rendered = helpers.renderPayloadTree({
+      model: "gpt",
+      tools: [
+        { name: "search", description: "long enough to distract" },
+      ],
+    }, 0);
+
+    expect(rendered).toContain('<span class="payload-key">tools</span>');
+    expect(rendered).toContain('<details class="payload-collapsible payload-large">');
+    expect(rendered).toContain('<summary>[1 item]</summary>');
   });
 
   test("opens the top-level payload object even when it is large", () => {

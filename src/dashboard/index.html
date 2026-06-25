@@ -2594,8 +2594,9 @@
     return total;
   }
 
-  function shouldAutoExpandPayload(value, entries, depth) {
+  function shouldAutoExpandPayload(value, entries, depth, keyName) {
     if (depth === 0) return true;
+    if (keyName === 'tools') return false;
     if (entries.length > payloadAutoExpandMaxItems) return false;
     return payloadApproxSize(value, payloadAutoExpandMaxChars + 1, new WeakSet()) <= payloadAutoExpandMaxChars;
   }
@@ -2616,7 +2617,7 @@
       + '</span>';
   }
 
-  function renderPayloadTree(value, depth) {
+  function renderPayloadTree(value, depth, keyName) {
     const type = payloadType(value);
     if (type === 'string') {
       return value.length > payloadLargeStringPreviewChars ? renderLargePayloadString(value) : renderPayloadPrimitive(value);
@@ -2625,7 +2626,7 @@
 
     const isArray = Array.isArray(value);
     const entries = isArray ? value.map((item, index) => [String(index), item]) : Object.entries(value || {});
-    const open = shouldAutoExpandPayload(value, entries, depth) ? ' open' : '';
+    const open = shouldAutoExpandPayload(value, entries, depth, keyName) ? ' open' : '';
     const summary = isArray
       ? '[' + entries.length + ' item' + (entries.length === 1 ? '' : 's') + ']'
       : '{' + entries.length + ' key' + (entries.length === 1 ? '' : 's') + '}';
@@ -2636,7 +2637,7 @@
       + '<div class="payload-node">'
         + entries.map(([key, item]) => '<div class="payload-row">'
           + '<span class="payload-key">' + esc(key) + '</span>'
-          + '<span>' + renderPayloadTree(item, depth + 1) + '</span>'
+          + '<span>' + renderPayloadTree(item, depth + 1, key) + '</span>'
         + '</div>').join('')
       + '</div>'
       + '</details>';
