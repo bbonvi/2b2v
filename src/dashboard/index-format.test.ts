@@ -5,6 +5,7 @@ import { runInNewContext, Script } from "node:vm";
 interface PayloadTreeHelpers {
   normalizePayloadForTree(payload: unknown): unknown;
   renderPayloadTree(value: unknown, depth: number): string;
+  payloadExpansionStore: Map<string, string>;
 }
 
 function loadDashboardScript(): string {
@@ -35,7 +36,7 @@ function loadPayloadTreeHelpers(): PayloadTreeHelpers {
   ].join("\n");
   const context: { extracted?: PayloadTreeHelpers } = {};
   runInNewContext(
-    `${helperCode}; extracted = { normalizePayloadForTree, renderPayloadTree };`,
+    `${helperCode}; extracted = { normalizePayloadForTree, renderPayloadTree, payloadExpansionStore };`,
     context,
   );
 
@@ -93,7 +94,7 @@ describe("dashboard payload formatter", () => {
     expect(rendered).not.toContain('payload-collapsible payload-large');
   });
 
-  test("keeps very large payload objects collapsed", () => {
+  test("opens the top-level payload object even when it is large", () => {
     const helpers = loadPayloadTreeHelpers();
     const largePayload = Object.fromEntries(
       Array.from({ length: 141 }, (_, index) => [`key_${index}`, index]),
@@ -101,17 +102,53 @@ describe("dashboard payload formatter", () => {
 
     const rendered = helpers.renderPayloadTree(largePayload, 0);
 
+    expect(rendered).toContain('<details class="payload-collapsible" open>');
+    expect(rendered).toContain('<summary>{141 keys}</summary>');
+  });
+
+  test("keeps very large nested payload objects collapsed", () => {
+    const helpers = loadPayloadTreeHelpers();
+    const largePayload = {
+      request: Object.fromEntries(
+        Array.from({ length: 141 }, (_, index) => [`key_${index}`, index]),
+      ),
+    };
+
+    const rendered = helpers.renderPayloadTree(largePayload, 0);
+
+    expect(rendered).toContain('<span class="payload-key">request</span>');
     expect(rendered).toContain('<details class="payload-collapsible payload-large">');
     expect(rendered).toContain('<summary>{141 keys}</summary>');
   });
 
-  test("renders long strings as one expandable value component", () => {
+  test("renders strings up to the preview threshold inline", () => {
     const helpers = loadPayloadTreeHelpers();
 
-    const rendered = helpers.renderPayloadTree("x".repeat(501), 0);
+    const rendered = helpers.renderPayloadTree("x".repeat(2000), 0);
+
+    expect(rendered).toContain('class="payload-primitive payload-string"');
+    expect(rendered).not.toContain('class="payload-expand-btn"');
+  });
+
+  test("renders strings past the preview threshold as one expandable value component", () => {
+    const helpers = loadPayloadTreeHelpers();
+
+    const rendered = helpers.renderPayloadTree("x".repeat(2001), 0);
 
     expect(rendered).toContain('class="payload-large-string"');
     expect(rendered).toContain('class="payload-expand-btn"');
     expect(rendered).not.toContain('payload-collapsible payload-large');
+  });
+
+  test("keeps full long string values out of HTML attributes", () => {
+    const helpers = loadPayloadTreeHelpers();
+    const full = "\"quoted\"\n" + "x".repeat(2001);
+
+    const rendered = helpers.renderPayloadTree(full, 0);
+    const key = rendered.match(/data-payload-expand-key="([^"]+)"/)?.[1];
+
+    expect(rendered).not.toContain("data-full=");
+    expect(key).toBeDefined();
+    expect(helpers.payloadExpansionStore.get(key ?? "")).toBe(full);
   });
 });

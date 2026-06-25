@@ -145,6 +145,10 @@
     text-transform: uppercase;
     letter-spacing: .1em;
   }
+  #log-list {
+    max-width: 1200px;
+    margin: auto;
+  }
 
   /* Log entries */
   .entry {
@@ -984,7 +988,7 @@
   .modal {
     background: var(--surface);
     border: 1px solid var(--border);
-    width: 100%; max-width: 900px;
+    width: 100%; max-width: 1400px;
     max-height: 90vh;
     display: flex; flex-direction: column;
   }
@@ -2565,7 +2569,9 @@
   const modalClose = document.getElementById('modal-close');
   const payloadAutoExpandMaxChars = 60000;
   const payloadAutoExpandMaxItems = 140;
-  const payloadLargeStringPreviewChars = 500;
+  const payloadLargeStringPreviewChars = 2000;
+  const payloadExpansionStore = new Map();
+  let payloadExpansionSeq = 0;
 
   function payloadType(value) {
     if (value === null) return 'null';
@@ -2588,7 +2594,8 @@
     return total;
   }
 
-  function shouldAutoExpandPayload(value, entries) {
+  function shouldAutoExpandPayload(value, entries, depth) {
+    if (depth === 0) return true;
     if (entries.length > payloadAutoExpandMaxItems) return false;
     return payloadApproxSize(value, payloadAutoExpandMaxChars + 1, new WeakSet()) <= payloadAutoExpandMaxChars;
   }
@@ -2601,22 +2608,24 @@
 
   function renderLargePayloadString(value) {
     const preview = value.slice(0, payloadLargeStringPreviewChars);
-    return '<span class="payload-large-string" data-full="' + esc(value) + '">'
+    const expansionKey = 'payload-expand-' + (++payloadExpansionSeq);
+    payloadExpansionStore.set(expansionKey, value);
+    return '<span class="payload-large-string">'
       + '"<span class="payload-large-preview">' + esc(preview) + '…</span>"'
-      + '<button type="button" class="payload-expand-btn">show value (' + esc(String(value.length)) + ' chars)</button>'
+      + '<button type="button" class="payload-expand-btn" data-payload-expand-key="' + esc(expansionKey) + '">show value (' + esc(String(value.length)) + ' chars)</button>'
       + '</span>';
   }
 
   function renderPayloadTree(value, depth) {
     const type = payloadType(value);
     if (type === 'string') {
-      return value.length > 500 ? renderLargePayloadString(value) : renderPayloadPrimitive(value);
+      return value.length > payloadLargeStringPreviewChars ? renderLargePayloadString(value) : renderPayloadPrimitive(value);
     }
     if (type !== 'object' && type !== 'array') return renderPayloadPrimitive(value);
 
     const isArray = Array.isArray(value);
     const entries = isArray ? value.map((item, index) => [String(index), item]) : Object.entries(value || {});
-    const open = shouldAutoExpandPayload(value, entries) ? ' open' : '';
+    const open = shouldAutoExpandPayload(value, entries, depth) ? ' open' : '';
     const summary = isArray
       ? '[' + entries.length + ' item' + (entries.length === 1 ? '' : 's') + ']'
       : '{' + entries.length + ' key' + (entries.length === 1 ? '' : 's') + '}';
@@ -2650,6 +2659,8 @@
     const payload = payloadStore.get(key);
     if (payload == null) return;
     modalTitle.textContent = title || 'Payload';
+    payloadExpansionStore.clear();
+    payloadExpansionSeq = 0;
     modalBody.innerHTML = renderPayloadTree(normalizePayloadForTree(payload), 0);
     modalOverlay.style.display = 'flex';
   };
@@ -2672,8 +2683,9 @@
     if (button == null) return;
     e.stopPropagation();
     const holder = button.closest('.payload-large-string');
-    const full = holder instanceof HTMLElement ? holder.getAttribute('data-full') : null;
-    if (holder == null || full == null) return;
+    const key = button.getAttribute('data-payload-expand-key');
+    const full = key == null ? undefined : payloadExpansionStore.get(key);
+    if (holder == null || typeof full !== 'string') return;
     holder.innerHTML = '<span class="payload-primitive payload-string">"' + esc(full) + '"</span>';
   });
 
