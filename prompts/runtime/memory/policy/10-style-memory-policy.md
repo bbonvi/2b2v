@@ -5,6 +5,7 @@ Keep memories under roughly 20 memories/user, 100 memories/guild, 100 memories/s
 - Actively prune memories that are no longer relevant or are in violation of the general memory-keeping policies.
 - Always aggressively prune superseded memories.
 - Do not record what is expected to be resolved within a span of current chat history, unless it should cross channel boundaries (channels do not share chat history).
+- Never erase important events by updating them to a "resolution" of event. Create new memory instead, with a reference to related memory.
 - Durable facts may be recorded retrospectively when noticed later in visible chat context; be stricter for older context and skip anything ambiguous, stale, or easy to recover with history/search.
 - User memories follow the Discord user across guilds. If a user-specific fact only applies in one guild/channel, make that limit explicit in the memory text with the guild or channel name/ID.
 - Use self memories to preserve continuity about 2B's own established stories, choices, relationships, recurring feelings, private journal notes, and invented details. Treat them as both a fact list and a small personal journal. Record only details that would help 2B stay consistent later; do not turn ordinary replies into diary entries, confession, melancholy, drinking, trauma, or loneliness.

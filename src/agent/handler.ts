@@ -654,16 +654,6 @@ function intermediateStatusText(text: string): string {
     .trim();
 }
 
-function hasProgressWorthyToolCall(calls: OpenRouterToolCall[]): boolean {
-  return calls.some((call) =>
-    call.function.name === "web_search"
-    || call.function.name === "codex_generate_image"
-    || call.function.name === "fetch_url"
-    || call.function.name === "summarize_video"
-    || call.function.name === "search_messages"
-  );
-}
-
 function buildRuntimeInstruction(runtimePrompts: RuntimePromptBundle | undefined): string {
   const external = runtimePrompts?.reply.trim() ?? "";
   if (external !== "") return external;
@@ -1399,10 +1389,10 @@ async function runNativeToolLoop(input: {
       return { text };
     }
 
-    if (!sentIntermediateStatus && !streamingState.visibleText && hasProgressWorthyToolCall(result.toolCalls)) {
+    if (!sentIntermediateStatus && !streamingState.visibleText) {
       const statusText = intermediateStatusText(result.text);
       if (statusText !== "" && input.sendIntermediateText !== undefined) {
-        const sent = await input.sendIntermediateText(statusText, undefined);
+        const sent = await input.sendIntermediateText(result.text, undefined);
         if (sent) {
           sentIntermediateStatus = true;
           await input.onStillWorking?.(undefined);
@@ -1870,6 +1860,7 @@ async function sendResponseSegments(input: {
   onSegmentSent?: (sent: { segment: DispatchSegment; hasMoreSegments: boolean }) => void | Promise<void>;
   currentChannelOutputAlreadySent?: boolean;
   onCurrentChannelOutput?: () => void;
+  sendIdPrefix?: string;
   typingHoldMs?: number;
   signal?: AbortSignal;
   pendingAttachments?: OutboundAttachment[];
@@ -1896,7 +1887,7 @@ async function sendResponseSegments(input: {
       ...(pendingAttachments ?? []),
       ...referencedAttachments,
     ];
-    const sendId = `final-send-${sent}`;
+    const sendId = `${input.sendIdPrefix ?? "final-send"}-${sent}`;
     const onSent = async (): Promise<void> => {
       input.onVisibleOutput?.();
       if (currentChannelDestination && !currentChannelOutputSent) {
@@ -2451,23 +2442,26 @@ export async function handleMessage(
       return dispatcher;
     };
     const sendIntermediateStatus = async (text: string, destinationChannelId: string | undefined): Promise<boolean> => {
-      const statusText = intermediateStatusText(text);
-      if (statusText === "") return false;
+      const parsed = parseResponseDirectives(text);
+      if (parsed.ignored || parsed.segments.length === 0) return false;
       intermediateStatus.sendCount += 1;
       try {
-        await sendOneSegment({
+        intermediateStatus.sendCount = await sendResponseSegments({
           sender: deps.sender,
           generateSpeech: deps.generateSpeech,
           ttsEnabled: deps.ttsEnabled ?? false,
-          segment: { kind: "text", text: statusText },
-          sendId: `tool-status-${intermediateStatus.sendCount}`,
-          reply: !intermediateStatus.sent && chooseReplyMode(triggerResult),
+          segments: parsed.segments,
+          replyFirst: !intermediateStatus.sent && chooseReplyMode(triggerResult),
+          sentOffset: intermediateStatus.sendCount - 1,
           destinationChannelId,
           currentChannelId: deps.currentChannelId,
           requestLog: reqLog,
+          log: deps.log,
+          onVisibleOutput: deps.onVisibleOutput,
+          sendIdPrefix: "tool-status",
+          typingHoldMs: liveMessageTypingHoldMs,
           signal: wallController.signal,
         });
-        deps.onVisibleOutput?.();
         intermediateStatus.sent = true;
         return true;
       } catch (error) {

@@ -645,7 +645,7 @@ function instrumentalImplication(stats: UserContactStats): string {
 function memoryImplication(stats: UserContactStats): string {
   if (stats.memoryCount <= 0) return "";
   if (stats.memoryRank !== null && stats.memoryRank <= 5) {
-    return "2B has unusually much stored context about them; use it for continuity, not automatic warmth.";
+    return "2B has unusually much stored context about them; use it for continuity.";
   }
   if (stats.memoryRank !== null && stats.memoryRank <= 15) {
     return "2B has a few stored notes about them; enough for continuity, not closeness.";

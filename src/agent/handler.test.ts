@@ -1756,6 +1756,52 @@ describe("handleMessage", () => {
     expect(calls).toBe(2);
   });
 
+  test("sends visible text attached to a load_skill tool turn", async () => {
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      if (calls === 1) {
+        const text = [
+          "<scene perspective=\"outside_character_editor\">",
+          "room read: playful image request",
+          "</scene>",
+          "<message reply=\"true\">Ладно. Обычное селфи.</message>",
+          "<message reply=\"false\">Без твоей подологии.</message>",
+        ].join("\n");
+        return Promise.resolve({
+          text,
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "load_skill", arguments: "{\"skill\":\"image_generation\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text }] },
+        });
+      }
+      return Promise.resolve({
+        text: "<ignore>already sent</ignore>",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "<ignore>already sent</ignore>" }] },
+      });
+    };
+
+    const sender = mock<MessageSender>(() => Promise.resolve({ sentMessageId: "sent-1" }));
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender }),
+    );
+
+    expect(calls).toBe(2);
+    expect(sender).toHaveBeenCalledTimes(2);
+    expect(sender.mock.calls[0]?.[0]).toBe("Ладно. Обычное селфи.");
+    expect(sender.mock.calls[0]?.[1]).toBe(true);
+    expect(sender.mock.calls[1]?.[0]).toBe("Без твоей подологии.");
+    expect(sender.mock.calls[1]?.[1]).toBe(false);
+  });
+
   test("attaches generated image tool output to the final reply", async () => {
     const tool: AgentTool = {
       name: "codex_generate_image",
