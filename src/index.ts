@@ -17,6 +17,7 @@ import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-
 import { appendStickerTags, guessImageMimeFromUrl, imageKindForAttachment, imageKindForEmbed, stickerImagePreview } from "./discord/message-media";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { handleMessage, runSilentMemoryAgentPass, type ImageAttachmentResolver, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
+import { buildComputedContactContextForUser } from "./agent/contact-context";
 import { shouldRespond, type TriggerResult } from "./agent/triggers";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
@@ -2229,14 +2230,29 @@ function buildTemporalContext(input: {
       isBot: true,
     })
     : null;
+  const contactContext = botUserId !== undefined
+    ? buildComputedContactContextForUser({
+      db,
+      botUserId,
+      userId: input.latestUserMessage.authorId,
+      currentChannelId: input.channelId,
+      beforeCreatedAt: currentTurnBoundary.timestamp,
+      beforeMessageId: currentTurnBoundary.messageId,
+      now,
+    })
+    : null;
 
   return [
     currentLocalContext(input.timezone, now),
     elapsedLine("Elapsed since previous visible message in this channel", previousChannelMessage, now),
     elapsedLine("Elapsed since this user's previous message in this channel", previousUserChannelMessage, now),
     elapsedLine("Elapsed since this user's previous message in any guild/channel", previousUserAnyMessage, now),
+    contactContext?.lastContactAt !== null && contactContext?.lastContactAt !== undefined
+      ? `Elapsed since this user last communicated with 2B: ${formatElapsedDuration(contactContext.lastContactAt, now)}`
+      : "Elapsed since this user last communicated with 2B: none known",
     elapsedLine("Elapsed since your previous visible message in this channel", previousBotChannelMessage, now),
     elapsedLine("Elapsed since your previous visible message in any guild/channel", previousBotAnyMessage, now),
+    contactContext?.rendered ?? "Computed contact context: no prior direct contact.",
   ].join("\n");
 }
 
