@@ -575,7 +575,7 @@ function renderContactContext(stats: UserContactStats, now: number, includeLocal
     [memoryImplication(stats), breadthImplication(stats), instrumentalImplication(stats), staleImplication(stats, now), rankClause(stats), includeLocality ? localityImplication(stats) : ""].filter((part) => part !== "").join(" "),
   ].filter((sentence) => sentence !== "");
 
-  return `Computed contact context: ${sentences.map(trimSentencePunctuation).join(". ")}.`;
+  return `Known contact: observed history with this user; familiarity, not intimacy. ${sentences.map(trimSentencePunctuation).join(". ")}.`;
 }
 
 function trimSentencePunctuation(text: string): string {

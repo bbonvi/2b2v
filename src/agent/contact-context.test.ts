@@ -68,7 +68,7 @@ describe("computed contact context", () => {
     expect(context?.directContactEvents).toBe(3);
     expect(context?.activeContactDays).toBe(2);
     expect(context?.lastContactAt).toBe(NOW - 60_000);
-    expect(context?.rendered).toContain("Computed contact context:");
+    expect(context?.rendered).toContain("Known contact:");
     expect(context?.rendered).toContain("2B last replied");
   });
 

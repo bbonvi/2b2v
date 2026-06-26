@@ -54,7 +54,7 @@ Recent uncached history may show current Discord display names next to usernames
 
 Discord reaction counts are durable SQLite message metadata, but prompt formatting exposes them only in recent uncached history so normal feedback is visible without invalidating older cached context.
 
-Current context also includes deterministic contact context for the triggering user. It is computed globally by Discord user ID from visible chat history: direct user↔bot contact, active contact days, dialogue runs, general chatter share, recent salience, and local/channel shape. The prompt receives compact prose buckets rather than raw counts, so familiarity is grounded without inferring friendship or emotional status.
+Current context also includes `Known contact` for the triggering user. It is computed globally by Discord user ID from visible chat history: direct user↔bot contact, active contact days, dialogue runs, general chatter share, recent salience, and local/channel shape. The prompt receives compact prose buckets rather than raw counts, so familiarity is grounded without inferring friendship or emotional status.
 
 `ReplyMsgID` is resolved internally for quote and image context, but is intentionally hidden from normal prompt history until direct replies are explicitly supported.
 

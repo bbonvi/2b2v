@@ -2252,7 +2252,7 @@ function buildTemporalContext(input: {
       : "Elapsed since this user last communicated with 2B: none known",
     elapsedLine("Elapsed since your previous visible message in this channel", previousBotChannelMessage, now),
     elapsedLine("Elapsed since your previous visible message in any guild/channel", previousBotAnyMessage, now),
-    contactContext?.rendered ?? "Computed contact context: no prior direct contact.",
+    contactContext?.rendered ?? "Known contact: no prior direct contact.",
   ].join("\n");
 }
 
