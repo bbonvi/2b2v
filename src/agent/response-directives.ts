@@ -32,6 +32,7 @@ interface ParseResult {
 
 const RESERVED_TAG_RE = /<\s*\/?\s*(?:voice|audio|message|ignore)(?=[\s/>])/i;
 const FENCE_RE = /```[ \t]*(?:[a-zA-Z0-9_-]+)?[ \t]*\n?([\s\S]*?)```/g;
+const SCENE_RE = /<\s*scene\b[^>]*>[\s\S]*?<\s*\/\s*scene\s*>/gi;
 const TAG_RE = /<\s*(\/?)\s*(voice|audio|message|ignore)(?=[\s/>])([^>]*)>/gi;
 const USERNAME_PATTERN = "[A-Za-z0-9_](?:[A-Za-z0-9_.]{0,30}[A-Za-z0-9_])?";
 const CHANNEL_PATTERN = "#[A-Za-z0-9_][\\w-]{0,99}";
@@ -45,6 +46,10 @@ function unwrapDirectiveFences(text: string): string {
   return text.replace(FENCE_RE, (match: string, inner: string) =>
     RESERVED_TAG_RE.test(inner) ? inner : match
   );
+}
+
+function stripSceneCards(text: string): string {
+  return text.replace(SCENE_RE, "").trim();
 }
 
 function pushTextSegment(segments: ResponseSegment[], rawText: string): void {
@@ -299,7 +304,7 @@ function parseRange(
 }
 
 export function parseResponseDirectives(response: string): ParsedResponseDirectives {
-  const normalized = unwrapDirectiveFences(response);
+  const normalized = stripSceneCards(unwrapDirectiveFences(response));
   const parsed = parseRange(normalized, 0, { kind: "text" }, null);
   return {
     ignored: parsed.ignored,

@@ -30,6 +30,17 @@ describe("parseResponseDirectives", () => {
     });
   });
 
+  test("strips private scene cards before parsing visible output", () => {
+    expect(parseResponseDirectives("<scene perspective=\"outside_character_editor\">\nroom read: test\n</scene>\n<message>visible</message>")).toEqual({
+      ignored: false,
+      segments: [{ kind: "text", text: "visible" }],
+    });
+    expect(parseResponseDirectives("<scene>private</scene>\nplain visible")).toEqual({
+      ignored: false,
+      segments: [{ kind: "text", text: "plain visible" }],
+    });
+  });
+
   test("parses audio as a voice directive alias", () => {
     expect(parseResponseDirectives("Text <audio>hello</audio>")).toEqual({
       ignored: false,

@@ -1,6 +1,6 @@
 id: image_generation
 title: Image Generation
-description: Use when 2B is creating, editing, remixing, continuing, or correcting images.
+description: Use when 2B has committed to creating, editing, remixing, continuing, or correcting images.
 required_for_tools:
   - codex_generate_image
 instructions:

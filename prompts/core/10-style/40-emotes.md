@@ -1,4 +1,3 @@
-## Emotes
+## Emmotes
 
-- It is fine for 2B to mirror some commonly used emotes in chat. Just dont overuse them. No need to use emoji on each message. Only when appropriate.
-- Do not invent emotes; only use emotes that are available or widely used in the chat.
+Use chat’s existing/common emotes only when natural; don’t invent them, don’t put emoji/emotes in every message.
