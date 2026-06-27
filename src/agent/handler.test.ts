@@ -24,7 +24,7 @@ function makePromptTransportConfig(): PromptTransportConfig {
     openaiCodex: {
       mode: "split-input",
       sections: {
-        system: { role: "developer", target: "input", cacheGroup: "core" },
+        system: { role: "developer", target: "instructions", cacheGroup: "core" },
         core: { role: "developer", target: "input", cacheGroup: "core" },
         skills: { role: "developer", target: "input", cacheGroup: "runtime" },
         runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
@@ -553,10 +553,11 @@ describe("handleMessage", () => {
       };
       request.onPayload?.(payload);
 
-      expect(payload.instructions).toBe("");
-      expect(payload.input[0]).toMatchObject({ type: "message", role: "developer" });
+      expect(payload.instructions).toBe("Top-level policy.");
+      expect(payload.instructions).not.toContain("You are a helpful assistant.");
+      expect(payload.input[0]).toMatchObject({ role: "developer" });
       expect(contentText((payload.input[0] as { content?: unknown }).content)).toContain("You are a test bot.");
-      expect(payload.input[1]).toMatchObject({ type: "message", role: "developer" });
+      expect(payload.input[1]).toMatchObject({ role: "developer" });
       expect(contentText((payload.input[1] as { content?: unknown }).content)).toContain("Reserved action directives");
       expect(payload.input.some((item) =>
         item.type === "message" && item.role === "user" && item.content.includes("## Memory")
@@ -585,6 +586,7 @@ describe("handleMessage", () => {
       makeMessage({ mentionedUserIds: ["bot-1"] }),
       makeDeps({
         completeChat,
+        systemPrompt: "Top-level policy.",
         guildConfig: makeGuildConfig({ llmProvider: "openai-codex", model: "gpt-5.5" }),
       }),
     );

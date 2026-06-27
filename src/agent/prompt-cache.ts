@@ -81,24 +81,12 @@ function buildStableMessages(
 function stableInputItems(stableSections: StablePromptSection[]): Array<Record<string, unknown>> {
   const groups = stableSectionGroups(stableSections.filter((section) => (section.target ?? "input") === "input"));
   return groups.map((sections) => ({
-    type: "message",
     role: sections[0]?.role ?? "developer",
-    content: sections.map((section) => section.text).join("\n\n"),
+    content: [{
+      type: "input_text",
+      text: sections.map((section) => section.text).join("\n\n"),
+    }],
   }));
-}
-
-function stableInstructions(stableSections: StablePromptSection[]): string {
-  return stableSections
-    .filter((section) => section.target === "instructions")
-    .map((section) => section.text)
-    .join("\n\n");
-}
-
-function mergeInstructionText(prefix: string, existing: unknown): string {
-  const existingText = typeof existing === "string" ? existing.trim() : "";
-  if (prefix === "") return existingText;
-  if (existingText === "") return prefix;
-  return `${prefix}\n\n${existingText}`;
 }
 
 function buildCacheAnchorMessages(promptCaching: PromptCachingConfig): Array<Record<string, unknown>> {
@@ -185,9 +173,6 @@ export function prependStableSectionsToCodexPayload(
   if (!Array.isArray(input)) return;
 
   applyInputRoleOverrides(input, currentInputRoles);
-
-  const instructionPrefix = stableInstructions(stableSections);
-  payload.instructions = mergeInstructionText(instructionPrefix, payload.instructions);
 
   const toInsert = stableInputItems(stableSections);
   if (toInsert.length > 0) {

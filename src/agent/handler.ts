@@ -794,6 +794,7 @@ function initialMessageRoles(
   ];
 }
 
+/** Return the stable sections that Codex should receive through top-level Responses instructions. */
 function codexSystemPromptForStableSections(
   stableSections: StablePromptSection[],
   transport: ProviderPromptTransportConfig,
@@ -801,7 +802,10 @@ function codexSystemPromptForStableSections(
   if (transport.mode === "legacy-instructions") {
     return stableSections.map((section) => section.text).join("\n\n");
   }
-  return "";
+  return stableSections
+    .filter((section) => section.target === "instructions")
+    .map((section) => section.text)
+    .join("\n\n");
 }
 
 function buildCurrentMessageMetadata(msg: IncomingMessage, runtimePrompts?: RuntimePromptBundle): string {

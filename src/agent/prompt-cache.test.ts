@@ -137,9 +137,9 @@ describe("prependStableSectionsToCodexPayload", () => {
 
     expect(body.instructions).toBe("");
     expect(body.input.slice(0, 3)).toEqual([
-      { type: "message", role: "developer", content: "persona" },
-      { type: "message", role: "developer", content: "runtime" },
-      { type: "message", role: "user", content: "older history" },
+      { role: "developer", content: [{ type: "input_text", text: "persona" }] },
+      { role: "developer", content: [{ type: "input_text", text: "runtime" }] },
+      { role: "user", content: [{ type: "input_text", text: "older history" }] },
     ]);
     expect(body.input[3]).toEqual({
       type: "message",
@@ -154,7 +154,7 @@ describe("prependStableSectionsToCodexPayload", () => {
     expect(body.input[5]).toEqual({ type: "function_call", call_id: "call-1", name: "lookup", arguments: "{}" });
   });
 
-  test("keeps configured top-level instruction sections in instructions", () => {
+  test("leaves top-level instructions untouched and only prepends input sections", () => {
     const body: { instructions: string; input: Array<Record<string, unknown>> } = {
       instructions: "response format",
       input: [],
@@ -166,7 +166,7 @@ describe("prependStableSectionsToCodexPayload", () => {
 
     prependStableSectionsToCodexPayload(body, sections, []);
 
-    expect(body.instructions).toBe("critical core\n\nresponse format");
-    expect(body.input).toEqual([{ type: "message", role: "developer", content: "runtime" }]);
+    expect(body.instructions).toBe("response format");
+    expect(body.input).toEqual([{ role: "developer", content: [{ type: "input_text", text: "runtime" }] }]);
   });
 });
