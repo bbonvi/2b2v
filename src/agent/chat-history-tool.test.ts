@@ -4,7 +4,7 @@ import {
   type ChatHistoryToolDeps,
   type ChatHistoryMessage,
 } from "./chat-history-tool";
-import type { TextContent } from "@mariozechner/pi-ai";
+import type { TextContent } from "@earendil-works/pi-ai";
 
 function makeDeps(messages: ChatHistoryMessage[]): ChatHistoryToolDeps {
   return {

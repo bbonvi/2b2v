@@ -1,6 +1,6 @@
-import { Type } from "@sinclair/typebox";
-import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
-import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
+import { Type } from "typebox";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { prepareImageBufferForContext } from "../db/image-ingest.ts";
 
 /** Minimal fetch-like function signature for testability. */

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { TextContent } from "@mariozechner/pi-ai";
+import type { TextContent } from "@earendil-works/pi-ai";
 import { createDatabase, type Database } from "../db/database";
 import { createMemory } from "../db/memory-repository";
 import { createMemoryListTool } from "./user-memory-tool";

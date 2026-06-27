@@ -32,6 +32,8 @@ model: moonshotai/kimi-k2.5
 # Valid values: "minimal" | "low" | "medium" | "high" | "xhigh"
 # thinkingLevel: medium
 
+# Codex transport is global-only; set codexTransport in config/config.yaml.
+
 # Guild timezone — used for all agent-facing timestamps, scheduling, and date stamps.
 # One-off schedules always use this timezone. Cron schedules default to it unless overridden.
 timezone: UTC

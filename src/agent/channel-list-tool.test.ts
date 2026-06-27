@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { TextContent } from "@mariozechner/pi-ai";
+import type { TextContent } from "@earendil-works/pi-ai";
 import { createChannelListTool, type ChannelInfo, type ChannelListToolDeps } from "./channel-list-tool";
 
 function makeDeps(channels: ChannelInfo[]): ChannelListToolDeps {

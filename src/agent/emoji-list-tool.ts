@@ -1,5 +1,5 @@
-import { Type } from "@sinclair/typebox";
-import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import { Type } from "typebox";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { EmojiEntry } from "../discord/emoji-cache.ts";
 
 export interface EmojiListToolDeps {

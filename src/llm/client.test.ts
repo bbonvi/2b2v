@@ -60,6 +60,7 @@ const GLOBAL: GlobalConfig = {
   discordToken: "t",
   openrouterApiKey: "or_key_123",
   codexAuthPath: "data/codex-auth.json",
+  codexTransport: "websocket-cached",
   defaultLlmProvider: "openrouter",
   defaultModel: "moonshotai/kimi-k2.5",
   defaultModelParams: {},
@@ -279,6 +280,7 @@ describe("buildBackgroundStreamOptions", () => {
     });
     expect(opts.apiKey).toBe("");
     expect(opts.codexAuthPath).toBe("data/codex-auth.json");
+    expect(opts.transport).toBe("websocket-cached");
     expect(opts.serviceTier).toBe("priority");
     expect(opts.service_tier).toBeUndefined();
   });
@@ -312,6 +314,7 @@ describe("buildImageReadingStreamOptions", () => {
     });
     expect(opts.apiKey).toBe("");
     expect(opts.codexAuthPath).toBe("data/codex-auth.json");
+    expect(opts.transport).toBe("websocket-cached");
     expect(opts.temperature).toBe(0);
   });
 });
@@ -378,7 +381,29 @@ describe("buildStreamOptions", () => {
     });
     expect(opts.apiKey).toBe("");
     expect(opts.codexAuthPath).toBe("data/codex-auth.json");
+    expect(opts.transport).toBe("websocket-cached");
     expect(opts.reasoningEffort).toBe("high");
+  });
+
+  test("uses configured Codex transport", () => {
+    const opts = buildStreamOptions(
+      { ...GLOBAL, codexTransport: "sse" },
+      { ...GUILD, llmProvider: "openai-codex", model: "gpt-5.5" },
+    );
+    expect(opts.transport).toBe("sse");
+  });
+
+  test("does not let modelParams override configured Codex transport", () => {
+    const opts = buildStreamOptions(
+      { ...GLOBAL, codexTransport: "websocket" },
+      {
+        ...GUILD,
+        llmProvider: "openai-codex",
+        model: "gpt-5.5",
+        modelParams: { transport: "sse" },
+      },
+    );
+    expect(opts.transport).toBe("websocket");
   });
 
   test("maps thinkingLevel to Codex reasoning effort", () => {

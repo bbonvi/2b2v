@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
-import { Type } from "@sinclair/typebox";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import { Type } from "typebox";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { handleMessage, injectTriggerInstruction, runSilentMemoryAgentPass, type ChatCompleteFn, type HandlerDeps, type IncomingMessage, type MessageSender, type VoiceAttachment } from "./handler.ts";
 import type { AssembledContext, ContextSection } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig, PromptTransportConfig } from "../config/types.ts";
@@ -71,6 +71,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     discordToken: "test-token",
     openrouterApiKey: "test-key",
     codexAuthPath: "data/codex-auth.json",
+    codexTransport: "websocket-cached",
     defaultLlmProvider: "openrouter",
     defaultModel: "moonshotai/kimi-k2.5",
     defaultModelParams: {},

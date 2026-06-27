@@ -1,5 +1,5 @@
-import { Type, type Static } from "@sinclair/typebox";
-import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import { Type, type Static } from "typebox";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 
 const EditOwnMessageParams = Type.Object({
   message_id: Type.String({ description: "Discord message ID to edit." }),

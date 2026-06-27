@@ -1,4 +1,4 @@
-import { complete, stream } from "@mariozechner/pi-ai";
+import { complete, stream } from "@earendil-works/pi-ai/compat";
 import type {
   AssistantMessage,
   Context,
@@ -10,7 +10,7 @@ import type {
   ToolCall as PiToolCall,
   ToolResultMessage,
   Usage,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 import { getCodexApiKey } from "./codex-auth.ts";
 import { resolveModel } from "./client.ts";
 import type {
@@ -289,6 +289,7 @@ export async function completeCodexChat(request: OpenRouterChatRequest): Promise
   const options = {
     apiKey,
     sessionId: request.sessionId,
+    transport: "websocket-cached" as const,
     signal: request.signal,
     onPayload: request.onPayload,
     ...providerParamsWithoutInternalFields(request.providerParams),

@@ -6,7 +6,7 @@ import {
   type StartThreadToolDeps,
   type StartThreadDetails,
 } from "./start-thread-tool";
-import type { TextContent } from "@mariozechner/pi-ai";
+import type { TextContent } from "@earendil-works/pi-ai";
 
 interface PersistedThread {
   threadId: string;

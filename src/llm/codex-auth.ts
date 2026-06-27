@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname } from "path";
-import { getOAuthApiKey, type OAuthCredentials } from "@mariozechner/pi-ai";
+import { getOAuthApiKey, type OAuthCredentials } from "@earendil-works/pi-ai/oauth";
 
 const CODEX_PROVIDER_ID = "openai-codex";
 

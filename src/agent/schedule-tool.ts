@@ -1,5 +1,5 @@
-import { Type } from "@sinclair/typebox";
-import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import { Type } from "typebox";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { CronPattern } from "croner";
 import type { Database } from "../db/database";
 import {

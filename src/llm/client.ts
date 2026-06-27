@@ -1,4 +1,5 @@
-import { getModel, type Model } from "@mariozechner/pi-ai";
+import type { Model } from "@earendil-works/pi-ai";
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import type { GlobalConfig, GuildConfig, LlmProvider, ThinkingLevel } from "../config/types.ts";
 
 /** Shape of a pi-ai Model object used by this bot. */
@@ -48,8 +49,7 @@ function withLlmProvider(model: LlmModel, provider: LlmProvider): LlmModel {
 }
 
 function resolveOpenRouterModel(modelId: string): LlmModel {
-  // getModel's type says it always returns Model, but at runtime it may return undefined for unknown IDs
-  const registered = getModel("openrouter", modelId as Parameters<typeof getModel>[1]) as unknown as LlmModel | undefined;
+  const registered = getBuiltinModels("openrouter").find((model) => model.id === modelId) as LlmModel | undefined;
   if (registered !== undefined) return withLlmProvider(registered, "openrouter");
 
   return {
@@ -68,7 +68,7 @@ function resolveOpenRouterModel(modelId: string): LlmModel {
 }
 
 function resolveCodexModel(modelId: string): LlmModel {
-  const registered = getModel("openai-codex", modelId as Parameters<typeof getModel>[1]) as unknown as LlmModel | undefined;
+  const registered = getBuiltinModels("openai-codex").find((model) => model.id === modelId) as LlmModel | undefined;
   if (registered !== undefined) return withLlmProvider(registered, "openai-codex");
 
   return {
@@ -204,6 +204,7 @@ export function buildStreamOptions(
       apiKey: "",
       codexAuthPath: global.codexAuthPath,
       ...params,
+      transport: global.codexTransport,
     };
   }
   if (global.openrouterApiKey === undefined || global.openrouterApiKey === "") {
@@ -227,6 +228,7 @@ export function buildBackgroundStreamOptions(
       apiKey: "",
       codexAuthPath: global.codexAuthPath,
       ...params,
+      transport: global.codexTransport,
       ...(guild.backgroundLlm.serviceTier !== undefined ? { serviceTier: guild.backgroundLlm.serviceTier } : {}),
     };
   }
@@ -251,6 +253,7 @@ export function buildImageReadingStreamOptions(
       apiKey: "",
       codexAuthPath: global.codexAuthPath,
       ...guild.imageReading.fallbackModelParams,
+      transport: global.codexTransport,
     };
   }
   if (global.openrouterApiKey === undefined || global.openrouterApiKey === "") {

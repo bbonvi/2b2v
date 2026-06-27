@@ -1,6 +1,6 @@
-import { Type } from "@sinclair/typebox";
-import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
-import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
+import { Type } from "typebox";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 
 const AVATAR_SIZE_VALUES = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096] as const;
 export type AvatarSize = typeof AVATAR_SIZE_VALUES[number];

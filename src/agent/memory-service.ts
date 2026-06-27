@@ -1,6 +1,6 @@
-import { Type } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
-import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Database } from "../db/database";
 import {
   countMemories,

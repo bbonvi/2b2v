@@ -8,7 +8,7 @@ import {
   createScheduleTools,
   type ScheduleToolDeps,
 } from "./schedule-tool";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 
 const FUTURE_LOCAL_DATE_TIME = "2099-06-15 10:00";
 const FUTURE_LOCAL_EPOCH_MS = Date.UTC(2099, 5, 15, 14, 0, 0);

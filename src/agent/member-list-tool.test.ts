@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import { createChatUserListTool, type MemberListToolDeps, type MemberInfo } from "./member-list-tool";
-import type { TextContent } from "@mariozechner/pi-ai";
+import type { TextContent } from "@earendil-works/pi-ai";
 
 function makeDeps(members: MemberInfo[], memoryCounts?: Map<string, number>, adminUserIds: string[] = []): MemberListToolDeps {
   return {

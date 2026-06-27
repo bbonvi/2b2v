@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createReadChatImagesTool, type ReadChatImagesToolDeps } from "./read-chat-images-tool.ts";
 
 // Fake image records keyed by ID

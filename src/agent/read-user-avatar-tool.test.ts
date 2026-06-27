@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { createReadUserAvatarTool, type ReadUserAvatarToolDeps, type ResolvedUserAvatar } from "./read-user-avatar-tool";
 
 function response(buffer: Buffer, contentType = "image/png"): Awaited<ReturnType<ReadUserAvatarToolDeps["fetchFn"]>> {

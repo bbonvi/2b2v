@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
   createTimeoutUserTool,
   MAX_TIMEOUT_SECONDS,

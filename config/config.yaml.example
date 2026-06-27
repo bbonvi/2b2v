@@ -19,6 +19,10 @@ model: moonshotai/kimi-k2.5
 # Valid values: "minimal" | "low" | "medium" | "high" | "xhigh"
 # thinkingLevel: medium
 
+# Codex transport. Applies only when provider is openai-codex.
+# Valid values: "websocket-cached" | "websocket" | "sse" | "auto"
+codexTransport: websocket-cached
+
 # Default timezone for guilds that don't override.
 # All agent-facing timestamps use local wall-clock time in this timezone.
 timezone: UTC

@@ -34,6 +34,7 @@ import type {
   MemoryExtractionConfig,
   ServiceTier,
   LlmProvider,
+  CodexTransport,
 } from "./types.ts";
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
 
@@ -455,6 +456,14 @@ function parseThinkingLevel(value: unknown, key: string): ThinkingLevel | undefi
   throw new Error(`${key} must be "minimal", "low", "medium", "high", or "xhigh"`);
 }
 
+function parseCodexTransport(value: unknown, key: string): CodexTransport | undefined {
+  if (value === undefined) return undefined;
+  if (value === "sse" || value === "websocket" || value === "websocket-cached" || value === "auto") {
+    return value;
+  }
+  throw new Error(`${key} must be "sse", "websocket", "websocket-cached", or "auto"`);
+}
+
 function parseServiceTier(value: unknown, keyPrefix: string): ServiceTier | undefined {
   if (value === undefined) return undefined;
   if (value === "flex" || value === "priority") return value;
@@ -724,6 +733,7 @@ export function loadGlobalConfig(
     discordToken,
     ...(openrouterApiKey !== undefined && openrouterApiKey !== "" ? { openrouterApiKey } : {}),
     codexAuthPath: env.CODEX_AUTH_PATH ?? `${dataDir}/codex-auth.json`,
+    codexTransport: parseCodexTransport(yaml.codexTransport, "codexTransport") ?? "websocket-cached",
     braveApiKey: env.BRAVE_API_KEY,
     defaultLlmProvider,
     defaultModel: yaml.model ?? "moonshotai/kimi-k2.5",

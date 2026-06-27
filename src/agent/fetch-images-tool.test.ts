@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createFetchImagesTool, type FetchImagesToolDeps } from "./fetch-images-tool.ts";
 
 // Real 1x1 JPEG for testing (smallest valid JPEG)

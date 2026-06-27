@@ -357,6 +357,22 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultModel).toBe("gpt-5.5");
     expect(cfg.openrouterApiKey).toBeUndefined();
     expect(cfg.codexAuthPath).toBe("/tmp/codex-auth.json");
+    expect(cfg.codexTransport).toBe("websocket-cached");
+  });
+
+  test("parses Codex transport", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "codexTransport: sse\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.codexTransport).toBe("sse");
+  });
+
+  test("rejects invalid Codex transport", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "codexTransport: invalid\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
+      'codexTransport must be "sse", "websocket", "websocket-cached", or "auto"',
+    );
   });
 
   test("rejects invalid LLM provider", () => {

@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, writeFileSync } from "fs";
 import { dirname } from "path";
 import { createInterface } from "readline/promises";
 import { stdin as input, stdout as output } from "process";
-import { loginOpenAICodex } from "@mariozechner/pi-ai";
+import { loginOpenAICodex } from "@earendil-works/pi-ai/oauth";
 
 function argValue(name: string): string | undefined {
   const idx = process.argv.indexOf(name);

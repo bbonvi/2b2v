@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { TextContent } from "@mariozechner/pi-ai";
+import type { TextContent } from "@earendil-works/pi-ai";
 import { buildEmojiListOutput, createEmojiListTool, type EmojiListToolDeps } from "./emoji-list-tool.ts";
 import type { EmojiEntry } from "../discord/emoji-cache.ts";
 

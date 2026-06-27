@@ -4,7 +4,7 @@ import {
   type BraveSearchToolDeps,
   type BraveSearchResult,
 } from "./brave-search-tool";
-import type { TextContent } from "@mariozechner/pi-ai";
+import type { TextContent } from "@earendil-works/pi-ai";
 
 function makeDeps(results: BraveSearchResult[]): BraveSearchToolDeps {
   return {

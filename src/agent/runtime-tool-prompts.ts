@@ -1,4 +1,4 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { RuntimePromptBundle } from "../config/prompt-bundle.ts";
 import { renderPromptTemplate, type PromptTemplateVariables } from "../config/prompt-template.ts";
 

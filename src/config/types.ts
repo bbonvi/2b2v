@@ -105,6 +105,9 @@ export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh";
 /** Service tier override for providers that support it. */
 export type ServiceTier = "flex" | "priority";
 
+/** OpenAI Codex Responses transport. */
+export type CodexTransport = "sse" | "websocket" | "websocket-cached" | "auto";
+
 /** Dedicated background LLM configuration. */
 export interface BackgroundLlmConfig {
   /** Provider used for background LLM work. */
@@ -258,6 +261,8 @@ export interface GlobalConfig {
   discordToken: string;
   openrouterApiKey?: string;
   codexAuthPath: string;
+  /** Default OpenAI Codex transport. */
+  codexTransport: CodexTransport;
   braveApiKey?: string;
   defaultLlmProvider: LlmProvider;
   defaultModel: string;
@@ -400,6 +405,7 @@ export interface MainConfigYaml {
   model?: string;
   modelParams?: Record<string, unknown>;
   thinkingLevel?: ThinkingLevel;
+  codexTransport?: CodexTransport;
   timezone?: string;
   trim?: Partial<TrimConfig>;
   triggers?: Partial<TriggerConfig>;

@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { wrapToolsWithTiming, formatTiming, type TimingState } from "./tool-timing.ts";
-import { Type } from "@sinclair/typebox";
-import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import { Type } from "typebox";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 
 function createMockTool(name: string, delayMs = 0): AgentTool {
   return {

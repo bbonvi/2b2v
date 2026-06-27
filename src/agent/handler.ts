@@ -1,5 +1,5 @@
-import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
-import { validateToolArguments, type ToolCall } from "@mariozechner/pi-ai";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import { validateToolArguments, type ToolCall } from "@earendil-works/pi-ai";
 import { createHash } from "node:crypto";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
 import { type AssembledContext, type ContextSection } from "./context-assembly.ts";
