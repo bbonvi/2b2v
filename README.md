@@ -81,6 +81,8 @@ Prompt assembly is file-based: `prompts/core/**/*.md` files are loaded into the 
 
 `memoryExtraction.postReply` controls the silent memory pass after visible bot replies. `memoryExtraction.ambient` can periodically review non-triggered human chatter; `everyMessages` counts from the last successful memory pass in that channel, including post-reply passes, and `minIntervalSeconds` prevents bursty background spend.
 
+`typingSimulation` can make typing feel paced without delaying model work: input reading WPM postpones the typing indicator after dispatch, while output typing WPM controls the hold before each outgoing `<message>` segment. All delays are capped and cancelled when a reply is sent, ignored, or fails.
+
 Guild memories are shared server facts. User memories are keyed by Discord user ID and follow that user across guilds; memory text should avoid raw guild IDs and use natural local context only when it is essential. Self memories are the bot/persona's own portable continuity and private journal.
 
 ### Persona

@@ -233,6 +233,16 @@ describe("processHistory", () => {
     expect(result.newerText).not.toContain("ReplyMsgID");
   });
 
+  test("bot reply metadata is shown when stored replyToId points to a user message", async () => {
+    const user = msg({ id: "1", author: "bbonvi", authorId: "uid-bbonvi", content: "we won", timestamp: 1000 });
+    const bot = msg({ id: "2", author: "2B", authorId: "bot-id", isBot: true, content: "On whom?", timestamp: 2000, replyToId: "1" });
+    const latest = msg({ id: "100", content: "support", timestamp: 9000 });
+
+    const result = await processHistory([user, bot], latest, defaultConfig, deps);
+
+    expect(result.newerText).toContain("[@2B to @bbonvi (MsgID: 2)]: On whom?");
+  });
+
   test("latest user reply resolves when target is second message in merged bot row", async () => {
     const m1 = msg({ id: "bot-1", author: "bot", authorId: "bot-id", isBot: true, content: "first bot chunk", timestamp: 1000 });
     const m2 = msg({ id: "bot-2", author: "bot", authorId: "bot-id", isBot: true, content: "second bot chunk", timestamp: 2000 });

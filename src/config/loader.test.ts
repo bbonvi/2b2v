@@ -176,6 +176,15 @@ describe("loadGlobalConfig", () => {
     expect((cfg as unknown as { defaultPromptCaching?: unknown }).defaultPromptCaching).toEqual({
       enabled: true,
     });
+    expect(cfg.defaultTypingSimulation).toEqual({
+      enabled: false,
+      inputReadingWpm: 450,
+      inputMinDelayMs: 300,
+      inputMaxDelayMs: 3500,
+      outputTypingWpm: 180,
+      outputMinHoldMs: 700,
+      outputMaxHoldMs: 3500,
+    });
     expect(cfg.logLevel).toBe("info");
   });
 
@@ -863,6 +872,33 @@ describe("resolveGuildConfig", () => {
     expect(resolved.triggers.mention).toBe(true); // default
   });
 
+  test("inherits typing simulation from global config YAML", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, [
+      "typingSimulation:",
+      "  enabled: true",
+      "  inputReadingWpm: 11",
+      "  inputMinDelayMs: 12",
+      "  inputMaxDelayMs: 13",
+      "  outputTypingWpm: 14",
+      "  outputMinHoldMs: 15",
+      "  outputMaxHoldMs: 16",
+    ].join("\n"));
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const resolved = resolveGuildConfig(global, { guildId: "61", slug: "typing-simulation" });
+
+    expect(resolved.typingSimulation).toEqual({
+      enabled: true,
+      inputReadingWpm: 11,
+      inputMinDelayMs: 12,
+      inputMaxDelayMs: 13,
+      outputTypingWpm: 14,
+      outputMinHoldMs: 15,
+      outputMaxHoldMs: 16,
+    });
+  });
+
   test("inherits promptCaching from global", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
@@ -1189,6 +1225,7 @@ describe("saveGuildConfig", () => {
       members: { include: true },
       replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+      typingSimulation: { enabled: false, inputReadingWpm: 450, inputMinDelayMs: 300, inputMaxDelayMs: 3500, outputTypingWpm: 180, outputMinHoldMs: 700, outputMaxHoldMs: 3500 },
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       promptTransport: defaultPromptTransportConfig(),
@@ -1231,6 +1268,7 @@ describe("saveGuildConfig", () => {
       members: { include: true },
       replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+      typingSimulation: { enabled: false, inputReadingWpm: 450, inputMinDelayMs: 300, inputMaxDelayMs: 3500, outputTypingWpm: 180, outputMinHoldMs: 700, outputMaxHoldMs: 3500 },
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       promptTransport: defaultPromptTransportConfig(),
@@ -1269,6 +1307,7 @@ describe("saveGuildConfig", () => {
       members: { include: true },
       replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+      typingSimulation: { enabled: false, inputReadingWpm: 450, inputMinDelayMs: 300, inputMaxDelayMs: 3500, outputTypingWpm: 180, outputMinHoldMs: 700, outputMaxHoldMs: 3500 },
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: false },
     } as unknown as GuildConfig;
@@ -1563,6 +1602,7 @@ describe("saveGuildConfig emotes", () => {
       members: { include: true },
       replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+      typingSimulation: { enabled: false, inputReadingWpm: 450, inputMinDelayMs: 300, inputMaxDelayMs: 3500, outputTypingWpm: 180, outputMinHoldMs: 700, outputMaxHoldMs: 3500 },
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       promptTransport: defaultPromptTransportConfig(),
@@ -1608,6 +1648,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       members: { include: true },
       replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+      typingSimulation: { enabled: false, inputReadingWpm: 450, inputMinDelayMs: 300, inputMaxDelayMs: 3500, outputTypingWpm: 180, outputMinHoldMs: 700, outputMaxHoldMs: 3500 },
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       promptTransport: defaultPromptTransportConfig(),
@@ -1646,6 +1687,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       members: { include: true },
       replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
       dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+      typingSimulation: { enabled: false, inputReadingWpm: 450, inputMinDelayMs: 300, inputMaxDelayMs: 3500, outputTypingWpm: 180, outputMinHoldMs: 700, outputMaxHoldMs: 3500 },
       agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
       promptCaching: { enabled: true },
       promptTransport: defaultPromptTransportConfig(),

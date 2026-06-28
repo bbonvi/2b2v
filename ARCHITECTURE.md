@@ -26,7 +26,11 @@ Tool-budget exhaustion is recoverable. Pending tool calls get synthetic results,
 
 Typing is runtime-owned. The model has no typing tool.
 
+Typing simulation must never delay agent work. Trigger debounce and typing-idle waits happen before the agent starts; after dispatch, optional word-scaled input delay only delays the typing indicator, and optional word-scaled output holds apply per outgoing `<message>` segment before send. Pending delayed typing must be cancelled on visible output, ignore, error, or agent end so typing cannot appear after a reply.
+
 Channel dispatch batches preserve the causal reply target and run triggering messages in chronological dispatch units. Mention and keyword triggers may process same-author follow-up text until the next triggering message; random triggers process the actual triggering message. Unrelated later chatter must not inherit another message's trigger reason, and later triggers in the same accumulated batch must remain pending for their own run.
+
+The volatile `## New Discord Event` prompt section must show the full selected dispatch unit, joined with `[msg-break]`, while trigger metadata can continue to point at the concrete reply target. This keeps the model's immediate event view aligned with debounced follow-up text.
 
 When a long-running handler finishes, queued messages and still-pending debounce messages must be merged into the next batch; promotion must not replace one bucket with the other.
 

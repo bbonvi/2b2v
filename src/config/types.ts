@@ -32,6 +32,24 @@ export interface DispatcherConfig {
   defaultDebounceMs: number;
 }
 
+/** Human-paced typing indicator delays for visible Discord replies. */
+export interface TypingSimulationConfig {
+  /** Whether word-scaled typing simulation is enabled. Default false. */
+  enabled: boolean;
+  /** Reading speed used for hidden delay before the typing indicator appears after the agent starts. */
+  inputReadingWpm: number;
+  /** Minimum hidden typing-indicator delay for non-empty input. */
+  inputMinDelayMs: number;
+  /** Maximum hidden typing-indicator delay. */
+  inputMaxDelayMs: number;
+  /** Typing speed used for visible typing time before each message segment sends. */
+  outputTypingWpm: number;
+  /** Minimum visible typing time before each non-empty outgoing message segment sends. */
+  outputMinHoldMs: number;
+  /** Maximum visible typing hold before each outgoing message segment sends. */
+  outputMaxHoldMs: number;
+}
+
 /** Async agent job configuration. Currently only image generation uses it. */
 export interface AgentJobsConfig {
   /** Maximum runtime for one async image generation job. Default 300000. */
@@ -242,6 +260,8 @@ export interface GuildConfig {
   members: MembersConfig;
   /** Channel dispatcher configuration. */
   dispatcher: DispatcherConfig;
+  /** Human-paced typing indicator delays. */
+  typingSimulation: TypingSimulationConfig;
   /** Async agent job configuration. */
   agentJobs: AgentJobsConfig;
   /** Prompt caching controls for supported provider requests. */
@@ -298,6 +318,8 @@ export interface GlobalConfig {
   defaultMembers: MembersConfig;
   /** Default dispatcher configuration. */
   defaultDispatcher: DispatcherConfig;
+  /** Default human-paced typing indicator delays. */
+  defaultTypingSimulation: TypingSimulationConfig;
   /** Default async agent job configuration. */
   defaultAgentJobs: AgentJobsConfig;
   /** Default prompt caching controls. */
@@ -363,6 +385,7 @@ export interface GuildConfigYaml {
     mentionDebounceMs?: number;
     defaultDebounceMs?: number;
   };
+  typingSimulation?: Partial<TypingSimulationConfig>;
   agentJobs?: {
     imageTimeoutMs?: number;
     imageCancelGraceMs?: number;
@@ -452,6 +475,7 @@ export interface MainConfigYaml {
     mentionDebounceMs?: number;
     defaultDebounceMs?: number;
   };
+  typingSimulation?: Partial<TypingSimulationConfig>;
   agentJobs?: {
     imageTimeoutMs?: number;
     imageCancelGraceMs?: number;

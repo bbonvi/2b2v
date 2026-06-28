@@ -44,6 +44,7 @@ import { buildMemoryPolicyInstructions } from "./memory-service.ts";
 import type { RuntimePromptBundle } from "../config/prompt-bundle.ts";
 import { renderPromptTemplate } from "../config/prompt-template.ts";
 import { createLoadSkillTool } from "./load-skill-tool.ts";
+import { typingSimulationDelayMs } from "./typing-simulation.ts";
 
 /** Minimal abstraction over a Discord message for the handler. */
 export interface IncomingMessage {
@@ -60,6 +61,8 @@ export interface IncomingMessage {
   botUserId: string;
   mentionedUserIds: string[];
   translatedContent: string;
+  /** Full visible current-turn event text, including debounced same-author followups. */
+  eventContent?: string;
   messageId?: string;
   replyToMessageId?: string;
   repliedToBotRouteSource?: {
@@ -169,6 +172,8 @@ export interface HandlerDeps {
   onTriggered?: (result: NonNullable<TriggerResult>) => void;
   /** Called when work continues after a user-visible message so typing can be sent before later output. */
   onStillWorking?: (channelId: string | undefined) => void | Promise<void>;
+  /** Timestamp when the current typing indicator loop started, or 0 when inactive. */
+  getTypingStartedAt?: () => number;
   /** Called after user-visible output starts so continuous background typing can stop. */
   onVisibleOutput?: () => void;
   /** Minimum visible typing time before a buffered streamed follow-up message is sent. */
@@ -893,7 +898,7 @@ function buildInitialMessages(
       currentMessageMetadata,
       imageMetadata !== "" ? `## Event Images\n${imageMetadata}` : "",
       "## New Discord Event",
-      userContent,
+      msg.eventContent ?? userContent,
   ].filter((part) => part !== "").join("\n\n");
   const images = imagePartsFromCurrentTurn(msg);
   messages.push({
@@ -1860,12 +1865,14 @@ async function sendResponseSegments(input: {
   requestLog?: RequestLog;
   log?: Logger;
   onStillWorking?: (channelId: string | undefined) => void | Promise<void>;
+  getTypingStartedAt?: () => number;
   onVisibleOutput?: () => void;
   onSegmentSent?: (sent: { segment: DispatchSegment; hasMoreSegments: boolean }) => void | Promise<void>;
   currentChannelOutputAlreadySent?: boolean;
   onCurrentChannelOutput?: () => void;
   sendIdPrefix?: string;
   typingHoldMs?: number;
+  typingHoldMsForSegment?: (segment: DispatchSegment) => number;
   signal?: AbortSignal;
   pendingAttachments?: OutboundAttachment[];
   resolveImageAttachments?: ImageAttachmentResolver;
@@ -1892,6 +1899,17 @@ async function sendResponseSegments(input: {
       ...referencedAttachments,
     ];
     const sendId = `${input.sendIdPrefix ?? "final-send"}-${sent}`;
+    const ensureTypingHoldBeforeSend = async (): Promise<void> => {
+      const typingHoldMs = input.typingHoldMsForSegment?.(segment) ?? 0;
+      if (typingHoldMs <= 0) return;
+      let typingStartedAt = input.getTypingStartedAt?.() ?? 0;
+      if (typingStartedAt <= 0) {
+        await input.onStillWorking?.(segmentDestinationChannelId);
+        typingStartedAt = input.getTypingStartedAt?.() ?? 0;
+      }
+      const elapsedTypingMs = typingStartedAt > 0 ? Date.now() - typingStartedAt : 0;
+      await sleepMs(typingHoldMs - Math.max(0, elapsedTypingMs), input.signal);
+    };
     const onSent = async (): Promise<void> => {
       input.onVisibleOutput?.();
       if (currentChannelDestination && !currentChannelOutputSent) {
@@ -1899,12 +1917,17 @@ async function sendResponseSegments(input: {
         input.onCurrentChannelOutput?.();
       }
       await input.onSegmentSent?.({ segment, hasMoreSegments });
-      if (segment.delivery?.keepTyping === true && hasMoreSegments) {
+      if (
+        segment.delivery?.keepTyping === true
+        && hasMoreSegments
+        && input.typingHoldMsForSegment === undefined
+      ) {
         await input.onStillWorking?.(segmentDestinationChannelId);
         await sleepMs(input.typingHoldMs ?? 0, input.signal);
       }
     };
     if (segment.kind === "text") {
+      await ensureTypingHoldBeforeSend();
       await sendOneSegment({
         sender: input.sender,
         generateSpeech: input.generateSpeech,
@@ -1923,6 +1946,7 @@ async function sendResponseSegments(input: {
     }
 
     try {
+      await ensureTypingHoldBeforeSend();
       await sendOneSegment({
         sender: input.sender,
         generateSpeech: input.generateSpeech,
@@ -1941,6 +1965,7 @@ async function sendResponseSegments(input: {
       input.log?.warn("voice directive failed; falling back to text", {
         error: makeToolErrorText(error),
       });
+      await ensureTypingHoldBeforeSend();
       await sendOneSegment({
         sender: input.sender,
         generateSpeech: input.generateSpeech,
@@ -1970,8 +1995,10 @@ interface LiveMessageDispatchDeps {
   requestLog?: RequestLog;
   log?: Logger;
   onStillWorking?: (channelId: string | undefined) => void | Promise<void>;
+  getTypingStartedAt?: () => number;
   onVisibleOutput?: () => void;
   typingHoldMs: number;
+  typingHoldMsForSegment?: (segment: DispatchSegment) => number;
   signal?: AbortSignal;
   pendingAttachments?: OutboundAttachment[];
   resolveImageAttachments?: ImageAttachmentResolver;
@@ -2025,7 +2052,7 @@ class LiveMessageDispatcher {
           replyFirst: this.deps.replyFirst,
           currentChannelOutputAlreadySent: this.currentChannelOutputSent,
           onCurrentChannelOutput: () => { this.currentChannelOutputSent = true; },
-          onStillWorking: undefined,
+          onStillWorking: this.deps.typingHoldMsForSegment === undefined ? undefined : this.deps.onStillWorking,
         });
       }
       return this.sent;
@@ -2043,7 +2070,7 @@ class LiveMessageDispatcher {
           replyFirst: this.deps.replyFirst,
           currentChannelOutputAlreadySent: this.currentChannelOutputSent,
           onCurrentChannelOutput: () => { this.currentChannelOutputSent = true; },
-          onStillWorking: undefined,
+          onStillWorking: this.deps.typingHoldMsForSegment === undefined ? undefined : this.deps.onStillWorking,
         });
       }
       this.consumedUntil = this.buffer.length;
@@ -2083,7 +2110,7 @@ class LiveMessageDispatcher {
       const rawEnvelope = this.buffer.slice(cursor, closeEnd);
       const parsed = parseResponseDirectives(rawEnvelope);
       if (!parsed.ignored && parsed.segments.length > 0) {
-        await this.waitForGapTypingHold();
+        if (this.deps.typingHoldMsForSegment === undefined) await this.waitForGapTypingHold();
         this.clearGapTyping();
         const typeAfterMessage = input.notifyTyping
           && (messageWantsTyping(parsed.segments) || this.nextMessageHasStarted(closeEnd));
@@ -2094,7 +2121,7 @@ class LiveMessageDispatcher {
           replyFirst: this.deps.replyFirst,
           currentChannelOutputAlreadySent: this.currentChannelOutputSent,
           onCurrentChannelOutput: () => { this.currentChannelOutputSent = true; },
-          onStillWorking: undefined,
+          onStillWorking: this.deps.typingHoldMsForSegment === undefined ? undefined : this.deps.onStillWorking,
           onSegmentSent: async ({ hasMoreSegments }) => {
             if (!hasMoreSegments && typeAfterMessage) await this.notifyTypingForGap();
           },
@@ -2421,6 +2448,13 @@ export async function handleMessage(
     const pendingAttachments: OutboundAttachment[] = [...(deps.initialPendingAttachments ?? [])];
     const intermediateStatus = { sent: false, sendCount: 0 };
     const liveMessageTypingHoldMs = deps.liveMessageTypingHoldMs ?? DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS;
+    const typingHoldMsForSegment = deps.guildConfig.typingSimulation.enabled
+      ? (segment: DispatchSegment): number => typingSimulationDelayMs(
+        deps.guildConfig.typingSimulation,
+        "output",
+        segment.kind === "voice" ? segment.historyText : segment.text,
+      )
+      : undefined;
     const liveDispatchers = new Map<string, LiveMessageDispatcher>();
     const liveDispatcherFor = (destinationChannelId: string | undefined): LiveMessageDispatcher => {
       const key = destinationChannelId ?? "";
@@ -2436,8 +2470,10 @@ export async function handleMessage(
         requestLog: reqLog,
         log: deps.log,
         onStillWorking: deps.onStillWorking,
+        getTypingStartedAt: deps.getTypingStartedAt,
         onVisibleOutput: deps.onVisibleOutput,
         typingHoldMs: liveMessageTypingHoldMs,
+        typingHoldMsForSegment,
         signal: wallController.signal,
         pendingAttachments,
         resolveImageAttachments: deps.resolveImageAttachments,
@@ -2461,9 +2497,12 @@ export async function handleMessage(
           currentChannelId: deps.currentChannelId,
           requestLog: reqLog,
           log: deps.log,
+          onStillWorking: deps.onStillWorking,
+          getTypingStartedAt: deps.getTypingStartedAt,
           onVisibleOutput: deps.onVisibleOutput,
           sendIdPrefix: "tool-status",
           typingHoldMs: liveMessageTypingHoldMs,
+          typingHoldMsForSegment,
           signal: wallController.signal,
         });
         intermediateStatus.sent = true;
@@ -2590,8 +2629,10 @@ export async function handleMessage(
         requestLog: reqLog,
         log: deps.log,
         onStillWorking: deps.onStillWorking,
+        getTypingStartedAt: deps.getTypingStartedAt,
         onVisibleOutput: deps.onVisibleOutput,
         typingHoldMs: liveMessageTypingHoldMs,
+        typingHoldMsForSegment,
         signal: wallController.signal.aborted ? undefined : wallController.signal,
         pendingAttachments,
         resolveImageAttachments: deps.resolveImageAttachments,

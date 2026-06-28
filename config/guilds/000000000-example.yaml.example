@@ -129,6 +129,16 @@ promptCaching:
 #   mentionDebounceMs: 500 # Used for mentions when typing-aware waits are disabled
 #   defaultDebounceMs: 2000
 
+# Typing simulation override. Agent work starts before delayed typing appears.
+# typingSimulation:
+#   enabled: false
+#   inputReadingWpm: 450
+#   inputMinDelayMs: 300
+#   inputMaxDelayMs: 3500
+#   outputTypingWpm: 180
+#   outputMinHoldMs: 700
+#   outputMaxHoldMs: 3500
+
 # Async agent job overrides (currently image generation)
 # agentJobs:
 #   imageTimeoutMs: 300000

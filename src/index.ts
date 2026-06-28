@@ -20,6 +20,7 @@ import { handleMessage, runSilentMemoryAgentPass, type ImageAttachmentResolver, 
 import { buildComputedContactContextForUser } from "./agent/contact-context";
 import { shouldRespond, type TriggerResult } from "./agent/triggers";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
+import { typingSimulationDelayMs } from "./agent/typing-simulation";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
@@ -440,6 +441,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       modelImageInputSupport: getModelImageInputSupport(deliveryGuildConfig),
       onTriggered: () => { completionTyping.startLoop(); },
       onStillWorking: (destinationChannelId) => { completionTyping.startLoop(destinationChannelId); },
+      getTypingStartedAt: completionTyping.getTypingStartedAt,
       onVisibleOutput: completionTyping.stopLoop,
       onAgentEnd: completionTyping.stopLoop,
       onIgnoredReply: ({ channelId: destinationChannelId, historyText }) => {
@@ -613,8 +615,8 @@ function createBotMessageStore(input: {
   botUsername: string;
   logger: Logger;
   routedFrom?: RoutedMessageSource;
-}): (sentId: string, targetGuildId: string, targetChannelId: string, rawContent: string, plainContent: string) => void {
-  return (sentId, targetGuildId, targetChannelId, rawContent, plainContent) => {
+}): (sentId: string, targetGuildId: string, targetChannelId: string, rawContent: string, plainContent: string, replyToId: string | null) => void {
+  return (sentId, targetGuildId, targetChannelId, rawContent, plainContent, replyToId) => {
     const ts = Date.now();
     const routedFrom = input.routedFrom !== undefined
       && (input.routedFrom.routedFromGuildId !== targetGuildId || input.routedFrom.routedFromChannelId !== targetChannelId)
@@ -637,7 +639,7 @@ function createBotMessageStore(input: {
         plainContent,
         1,
         ts,
-        null,
+        replyToId,
         routedFrom?.routedFromGuildId ?? null,
         routedFrom?.routedFromChannelId ?? null,
         routedFrom?.routedFromMessageId ?? null,
@@ -1021,12 +1023,16 @@ function createTypingController(input: {
   resolveTargetChannel: ResolveTargetChannel;
 }): {
   getLastTypingAt: () => number;
+  getTypingStartedAt: () => number;
   sendNow: (channelId?: string) => Promise<void>;
   startLoop: (channelId?: string) => void;
+  scheduleStartLoop: (delayMs: number, channelId?: string) => void;
   stopLoop: () => void;
 } {
   let lastTypingAt = 0;
+  let typingStartedAt = 0;
   let typingTimer: ReturnType<typeof setInterval> | null = null;
+  let scheduledStartTimer: ReturnType<typeof setTimeout> | null = null;
   let typingChannelId: string | undefined;
 
   const sendNow = async (channelId?: string): Promise<void> => {
@@ -1042,24 +1048,50 @@ function createTypingController(input: {
     await targetChannel.sendTyping().catch(() => {});
   };
 
+  const clearScheduledStart = (): void => {
+    if (scheduledStartTimer === null) return;
+    clearTimeout(scheduledStartTimer);
+    scheduledStartTimer = null;
+  };
+
   const startLoop = (channelId?: string): void => {
+    clearScheduledStart();
+    const wasRunning = typingTimer !== null;
+    const channelChanged = typingChannelId !== channelId;
     typingChannelId = channelId;
-    void sendNow(typingChannelId).catch(() => {});
-    if (typingTimer !== null) return;
+    if (!wasRunning) typingStartedAt = Date.now();
+    if (!wasRunning || channelChanged) void sendNow(typingChannelId).catch(() => {});
+    if (wasRunning) return;
     typingTimer = setInterval(() => { void sendNow(typingChannelId).catch(() => {}); }, TYPING_INTERVAL_MS);
   };
 
+  const scheduleStartLoop = (delayMs: number, channelId?: string): void => {
+    clearScheduledStart();
+    if (delayMs <= 0) {
+      startLoop(channelId);
+      return;
+    }
+    scheduledStartTimer = setTimeout(() => {
+      scheduledStartTimer = null;
+      startLoop(channelId);
+    }, delayMs);
+  };
+
   const stopLoop = (): void => {
+    clearScheduledStart();
     if (typingTimer !== null) {
       clearInterval(typingTimer);
       typingTimer = null;
     }
+    typingStartedAt = 0;
   };
 
   return {
     getLastTypingAt: () => lastTypingAt,
+    getTypingStartedAt: () => typingStartedAt,
     sendNow,
     startLoop,
+    scheduleStartLoop,
     stopLoop,
   };
 }
@@ -1131,6 +1163,7 @@ function createDiscordMessageSender(input: {
     const targetGuildId = targetChannel.guildId;
     const targetChannelId = targetChannel.id;
     const outboundResolvers = buildOutboundResolvers(targetChannel.guild);
+    type SentDelivery = { message: Message; replyToId: string | null };
 
     await waitAfterRecentTyping();
 
@@ -1146,7 +1179,7 @@ function createDiscordMessageSender(input: {
         : await message.reply(content);
     };
 
-    const replyToSpecific = async (content: string | AttachmentSendPayload): Promise<Message> => {
+    const replyToSpecific = async (content: string | AttachmentSendPayload): Promise<SentDelivery> => {
       if (replyToMessageId !== undefined) {
         let targetMsg: Message;
         try {
@@ -1157,12 +1190,12 @@ function createDiscordMessageSender(input: {
             channelId: targetChannel.id,
             error: err instanceof Error ? err.message : String(err),
           });
-          return await sendToTargetChannel(content);
+          return { message: await sendToTargetChannel(content), replyToId: null };
         }
 
-        return await sendWithUnknownMessageReferenceFallback(
-          () => replyWithMessage(targetMsg, content),
-          () => sendToTargetChannel(content),
+        return await sendWithUnknownMessageReferenceFallback<SentDelivery>(
+          async () => ({ message: await replyWithMessage(targetMsg, content), replyToId: targetMsg.id }),
+          async () => ({ message: await sendToTargetChannel(content), replyToId: null }),
           (err) => {
             input.logger.warn("reply_to_message_id target disappeared, falling back to send", {
               replyToMessageId,
@@ -1172,17 +1205,17 @@ function createDiscordMessageSender(input: {
           },
         );
       }
-      return await sendToTargetChannel(content);
+      return { message: await sendToTargetChannel(content), replyToId: null };
     };
 
-    const replyToSource = async (content: string | AttachmentSendPayload): Promise<Message> => {
+    const replyToSource = async (content: string | AttachmentSendPayload): Promise<SentDelivery> => {
       const sourceMessage = input.replySourceMessage;
-      if (sourceMessage === undefined) return await sendToTargetChannel(content);
-      if (sourceMessage.channelId !== targetChannel.id) return await sendToTargetChannel(content);
+      if (sourceMessage === undefined) return { message: await sendToTargetChannel(content), replyToId: null };
+      if (sourceMessage.channelId !== targetChannel.id) return { message: await sendToTargetChannel(content), replyToId: null };
 
-      return await sendWithUnknownMessageReferenceFallback(
-        () => replyWithMessage(sourceMessage, content),
-        () => sendToTargetChannel(content),
+      return await sendWithUnknownMessageReferenceFallback<SentDelivery>(
+        async () => ({ message: await replyWithMessage(sourceMessage, content), replyToId: sourceMessage.id }),
+        async () => ({ message: await sendToTargetChannel(content), replyToId: null }),
         (err) => {
           input.logger.warn("reply source message disappeared, falling back to send", {
             replySourceMessageId: sourceMessage.id,
@@ -1206,14 +1239,20 @@ function createDiscordMessageSender(input: {
         discordMessageNonce(dedupeKey, "voice-0"),
       );
       let sent: Message;
+      let sentReplyToId: string | null;
       if (replyToMessageId !== undefined) {
-        sent = await replyToSpecific(payload);
+        const delivered = await replyToSpecific(payload);
+        sent = delivered.message;
+        sentReplyToId = delivered.replyToId;
       } else if (reply) {
-        sent = await replyToSource(payload);
+        const delivered = await replyToSource(payload);
+        sent = delivered.message;
+        sentReplyToId = delivered.replyToId;
       } else {
         sent = await sendToTargetChannel(payload);
+        sentReplyToId = null;
       }
-      storeBotMessage(sent.id, targetGuildId, targetChannelId, voiceRawContent(firstChunk), voice.historyText ?? text);
+      storeBotMessage(sent.id, targetGuildId, targetChannelId, voiceRawContent(firstChunk), voice.historyText ?? text, sentReplyToId);
       await storeBotImageAttachments(sent.id, targetGuildId, targetChannelId, attachments);
       for (let i = 1; i < chunks.length; i++) {
         const chunk = chunks[i] as string;
@@ -1222,7 +1261,7 @@ function createDiscordMessageSender(input: {
           [],
           discordMessageNonce(dedupeKey, `voice-${i}`),
         ));
-        storeBotMessage(followup.id, targetGuildId, targetChannelId, chunk, chunk);
+        storeBotMessage(followup.id, targetGuildId, targetChannelId, chunk, chunk, null);
       }
       if (targetChannel.isThread()) {
         const activityAt = Date.now();
@@ -1265,15 +1304,21 @@ function createDiscordMessageSender(input: {
         discordMessageNonce(dedupeKey, `text-${i}`),
       );
       let sent: Message;
+      let sentReplyToId: string | null;
       if (replyToMessageId !== undefined && i === 0) {
-        sent = await replyToSpecific(payload);
+        const delivered = await replyToSpecific(payload);
+        sent = delivered.message;
+        sentReplyToId = delivered.replyToId;
       } else if (reply && i === 0) {
-        sent = await replyToSource(payload);
+        const delivered = await replyToSource(payload);
+        sent = delivered.message;
+        sentReplyToId = delivered.replyToId;
       } else {
         sent = await sendToTargetChannel(payload);
+        sentReplyToId = null;
       }
       if (i === 0) firstId = sent.id;
-      storeBotMessage(sent.id, targetGuildId, targetChannelId, chunk, i === 0 ? text : chunk);
+      storeBotMessage(sent.id, targetGuildId, targetChannelId, chunk, i === 0 ? text : chunk, sentReplyToId);
       if (i === 0) await storeBotImageAttachments(sent.id, targetGuildId, targetChannelId, attachments);
     }
     if (targetChannel.isThread()) {
@@ -1789,6 +1834,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         }),
         onTriggered: () => { typing.startLoop(); },
         onStillWorking: (destinationChannelId) => { typing.startLoop(destinationChannelId); },
+        getTypingStartedAt: typing.getTypingStartedAt,
         onVisibleOutput: typing.stopLoop,
         onAgentEnd: typing.stopLoop,
         onIgnoredReply: ({ channelId: destinationChannelId, historyText }) => {
@@ -3245,13 +3291,6 @@ function evaluateMessageTrigger(message: Message, guildConfig: GuildConfig): Tri
   );
 }
 
-function sendTypingForMessage(message: Message): void {
-  const channel = message.channel;
-  if ("sendTyping" in channel && typeof channel.sendTyping === "function") {
-    void channel.sendTyping().catch(() => {});
-  }
-}
-
 /** Process a triggered message through the full handler pipeline. */
 async function processTriggeredMessage(
   message: Message,
@@ -3265,6 +3304,7 @@ async function processTriggeredMessage(
   const channelId = message.channelId;
   requestLogStore.incrementActive();
   const guildConfig = getGuildConfig(guildId);
+  let activeTyping: ReturnType<typeof createTypingController> | null = null;
 
   try {
     const inboundResolvers = buildInboundResolvers(guild);
@@ -3272,12 +3312,26 @@ async function processTriggeredMessage(
       translateInbound(message.content, inboundResolvers),
       message.stickers.values(),
     );
+    const currentTurnEventContent = currentTurnMessages
+      .map((current) => appendStickerTags(
+        translateInbound(current.content, inboundResolvers),
+        current.stickers.values(),
+      ))
+      .filter((content) => content !== "")
+      .join(" [msg-break] ");
     const currentChannelObj = message.channel as SendableGuildChannel;
     const resolveTargetChannel = createTargetChannelResolver(client, currentChannelObj);
     const typing = createTypingController({
       defaultChannel: currentChannelObj,
       resolveTargetChannel,
     });
+    activeTyping = typing;
+    const typingStartDelayMs = typingSimulationDelayMs(guildConfig.typingSimulation, "input", currentTurnEventContent);
+    if (guildConfig.typingSimulation.enabled) {
+      typing.scheduleStartLoop(typingStartDelayMs);
+    } else {
+      typing.startLoop();
+    }
     const sender = createDiscordMessageSender({
       defaultChannel: currentChannelObj,
       resolveTargetChannel,
@@ -3500,6 +3554,7 @@ async function processTriggeredMessage(
       botUserId: client.user?.id ?? "",
       mentionedUserIds: [...message.mentions.users.keys()],
       translatedContent,
+      eventContent: currentTurnEventContent !== "" ? currentTurnEventContent : translatedContent,
       messageId: message.id,
       replyToMessageId: message.reference?.messageId,
       ...(repliedToBotRouteSource !== null
@@ -3536,8 +3591,11 @@ async function processTriggeredMessage(
       sender,
       extraTools,
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
-      onTriggered: () => { typing.startLoop(); },
+      onTriggered: () => {
+        if (!guildConfig.typingSimulation.enabled) typing.startLoop();
+      },
       onStillWorking: (destinationChannelId) => { typing.startLoop(destinationChannelId); },
+      getTypingStartedAt: typing.getTypingStartedAt,
       onVisibleOutput: typing.stopLoop,
       onAgentEnd: typing.stopLoop,
       requestLog,
@@ -3682,6 +3740,7 @@ async function processTriggeredMessage(
     }
     return { coveredMessageIds: [] };
   } finally {
+    activeTyping?.stopLoop();
     if (!message.author.bot) {
       requestLogStore.decrementActive();
     }
@@ -3981,7 +4040,6 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
 
     // Dispatch to handler: use channel dispatcher if enabled, otherwise call directly
     if (guildConfig.dispatcher.enabled) {
-      if (triggerResult?.reason === "keyword" || triggerResult?.reason === "mention") sendTypingForMessage(message);
       getOrCreateDispatcher(guildId).enqueue(message, {
         authorId: message.author.id,
         triggerResult,

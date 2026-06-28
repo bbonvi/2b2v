@@ -95,6 +95,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultEmotes: { include: false },
     defaultMembers: { include: true },
     defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+    defaultTypingSimulation: { enabled: false, inputReadingWpm: 450, inputMinDelayMs: 300, inputMaxDelayMs: 3500, outputTypingWpm: 180, outputMinHoldMs: 700, outputMaxHoldMs: 3500 },
     defaultAgentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
     defaultPromptCaching: { enabled: true },
     defaultPromptTransport: makePromptTransportConfig(),
@@ -128,6 +129,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     emotes: { include: false },
     members: { include: true },
     dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
+    typingSimulation: { enabled: false, inputReadingWpm: 450, inputMinDelayMs: 300, inputMaxDelayMs: 3500, outputTypingWpm: 180, outputMinHoldMs: 700, outputMaxHoldMs: 3500 },
     agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
     promptCaching: { enabled: true },
     promptTransport: makePromptTransportConfig(),
@@ -539,6 +541,31 @@ describe("handleMessage", () => {
       }),
       makeDeps({ completeChat }),
     );
+  });
+
+  test("uses full debounced current-turn event content when provided", async () => {
+    let currentTurn = "";
+    const completeChat: ChatCompleteFn = (request) => {
+      currentTurn = findMessageContent(request.messages, "## New Discord Event") ?? "";
+      return Promise.resolve({
+        text: "ok",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({
+        translatedContent: "latest followup",
+        eventContent: "first trigger [msg-break] latest followup",
+        mentionedUserIds: ["bot-1"],
+      }),
+      makeDeps({ completeChat }),
+    );
+
+    expect(currentTurn).toContain("Trigger MsgID: msg-1");
+    expect(currentTurn).toContain("first trigger [msg-break] latest followup");
   });
 
   test("splits Codex stable prompt into input messages", async () => {
@@ -1156,6 +1183,103 @@ describe("handleMessage", () => {
     expect(events).toEqual(["sent:first", "typing", "sent:second"]);
     expect((sentAt[1] ?? 0) - (sentAt[0] ?? 0)).toBeGreaterThanOrEqual(15);
     expect(onStillWorking).toHaveBeenCalledTimes(1);
+  });
+
+  test("holds visible typing before each message when typing simulation is enabled", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<message>first reply</message><message>second reply</message>",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    });
+    const events: string[] = [];
+    let typingStartedAt = 0;
+    const sender: MessageSender = (text) => {
+      events.push(`sent:${text}`);
+      return Promise.resolve({ sentMessageId: `sent-${events.length}` });
+    };
+    const onStillWorking = mock(() => {
+      typingStartedAt = Date.now();
+      events.push("typing");
+    });
+    const onVisibleOutput = mock(() => {
+      typingStartedAt = 0;
+    });
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        sender,
+        onStillWorking,
+        onVisibleOutput,
+        getTypingStartedAt: () => typingStartedAt,
+        guildConfig: makeGuildConfig({
+          typingSimulation: {
+            enabled: true,
+            inputReadingWpm: 0,
+            inputMinDelayMs: 0,
+            inputMaxDelayMs: 0,
+            outputTypingWpm: 10,
+            outputMinHoldMs: 10,
+            outputMaxHoldMs: 10,
+          },
+        }),
+      }),
+    );
+
+    expect(events).toEqual(["typing", "sent:first reply", "typing", "sent:second reply"]);
+    expect(onStillWorking).toHaveBeenCalledTimes(2);
+  });
+
+  test("holds visible typing before each streamed message when typing simulation is enabled", async () => {
+    const completeChat: ChatCompleteFn = async (request) => {
+      await request.onTextDelta?.("<message>first reply</message><message>second reply</message>");
+      return {
+        text: "<message>first reply</message><message>second reply</message>",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      };
+    };
+    const events: string[] = [];
+    let typingStartedAt = 0;
+    const sender: MessageSender = (text) => {
+      events.push(`sent:${text}`);
+      return Promise.resolve({ sentMessageId: `sent-${events.length}` });
+    };
+    const onStillWorking = mock(() => {
+      typingStartedAt = Date.now();
+      events.push("typing");
+    });
+    const onVisibleOutput = mock(() => {
+      typingStartedAt = 0;
+    });
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        sender,
+        onStillWorking,
+        onVisibleOutput,
+        getTypingStartedAt: () => typingStartedAt,
+        guildConfig: makeGuildConfig({
+          typingSimulation: {
+            enabled: true,
+            inputReadingWpm: 0,
+            inputMinDelayMs: 0,
+            inputMaxDelayMs: 0,
+            outputTypingWpm: 10,
+            outputMinHoldMs: 10,
+            outputMaxHoldMs: 10,
+          },
+        }),
+      }),
+    );
+
+    expect(events).toEqual(["typing", "sent:first reply", "typing", "sent:second reply"]);
+    expect(onStillWorking).toHaveBeenCalledTimes(2);
   });
 
   test("does not emit typing while flushing leftover streamed messages after completion", async () => {

@@ -100,6 +100,16 @@ dispatcher:
   mentionDebounceMs: 500    # Debounce ms for mentions when typing-aware waits are disabled (default: 500)
   defaultDebounceMs: 2000   # Debounce ms for non-mention triggers (default: 2000)
 
+# Human-paced typing indicator simulation. Agent work starts before delayed typing appears.
+typingSimulation:
+  enabled: false
+  inputReadingWpm: 450     # Reading speed for hidden delay before typing appears
+  inputMinDelayMs: 300
+  inputMaxDelayMs: 3500
+  outputTypingWpm: 180     # Typing speed for visible hold before each message
+  outputMinHoldMs: 700
+  outputMaxHoldMs: 3500
+
 # Async agent jobs — generic runtime, currently used for image generation.
 agentJobs:
   imageTimeoutMs: 300000       # Cancel image jobs after this many ms (default: 300000)

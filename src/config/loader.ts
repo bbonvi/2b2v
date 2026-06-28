@@ -15,6 +15,7 @@ import type {
   EmotesConfig,
   MembersConfig,
   DispatcherConfig,
+  TypingSimulationConfig,
   AgentJobsConfig,
   PromptCachingConfig,
   PromptTransportConfig,
@@ -167,6 +168,16 @@ const DEFAULT_DISPATCHER: DispatcherConfig = {
   enabled: true,
   mentionDebounceMs: 500,
   defaultDebounceMs: 2000,
+};
+
+const DEFAULT_TYPING_SIMULATION: TypingSimulationConfig = {
+  enabled: false,
+  inputReadingWpm: 450,
+  inputMinDelayMs: 300,
+  inputMaxDelayMs: 3500,
+  outputTypingWpm: 180,
+  outputMinHoldMs: 700,
+  outputMaxHoldMs: 3500,
 };
 
 const DEFAULT_AGENT_JOBS: AgentJobsConfig = {
@@ -603,6 +614,21 @@ function validateMemoryExtractionConfig(config: MemoryExtractionConfig, keyPrefi
   }
 }
 
+function resolveTypingSimulationConfig(
+  defaults: TypingSimulationConfig,
+  partial: Partial<TypingSimulationConfig> | undefined,
+): TypingSimulationConfig {
+  return {
+    enabled: partial?.enabled ?? defaults.enabled,
+    inputReadingWpm: partial?.inputReadingWpm ?? defaults.inputReadingWpm,
+    inputMinDelayMs: partial?.inputMinDelayMs ?? defaults.inputMinDelayMs,
+    inputMaxDelayMs: partial?.inputMaxDelayMs ?? defaults.inputMaxDelayMs,
+    outputTypingWpm: partial?.outputTypingWpm ?? defaults.outputTypingWpm,
+    outputMinHoldMs: partial?.outputMinHoldMs ?? defaults.outputMinHoldMs,
+    outputMaxHoldMs: partial?.outputMaxHoldMs ?? defaults.outputMaxHoldMs,
+  };
+}
+
 function resolveGlobalAgentJobs(
   partial: MainConfigYaml["agentJobs"] | undefined,
 ): AgentJobsConfig {
@@ -788,6 +814,7 @@ export function loadGlobalConfig(
       mentionDebounceMs: yaml.dispatcher?.mentionDebounceMs ?? DEFAULT_DISPATCHER.mentionDebounceMs,
       defaultDebounceMs: yaml.dispatcher?.defaultDebounceMs ?? DEFAULT_DISPATCHER.defaultDebounceMs,
     },
+    defaultTypingSimulation: resolveTypingSimulationConfig(DEFAULT_TYPING_SIMULATION, yaml.typingSimulation),
     defaultAgentJobs: resolveGlobalAgentJobs(yaml.agentJobs),
     defaultPromptCaching: resolveGlobalPromptCaching(yaml.promptCaching),
     defaultPromptTransport: resolveGlobalPromptTransport(yaml.promptTransport),
@@ -879,6 +906,7 @@ export function resolveGuildConfig(
       mentionDebounceMs: partial.dispatcher?.mentionDebounceMs ?? global.defaultDispatcher.mentionDebounceMs,
       defaultDebounceMs: partial.dispatcher?.defaultDebounceMs ?? global.defaultDispatcher.defaultDebounceMs,
     },
+    typingSimulation: resolveTypingSimulationConfig(global.defaultTypingSimulation, partial.typingSimulation),
     agentJobs: resolveGuildAgentJobs(global.defaultAgentJobs, partial.agentJobs),
     promptCaching,
     promptTransport: resolveGuildPromptTransport(global.defaultPromptTransport, partial.promptTransport),
@@ -962,6 +990,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     emotes: config.emotes,
     members: config.members,
     dispatcher: config.dispatcher,
+    typingSimulation: config.typingSimulation,
     promptCaching: config.promptCaching,
     promptTransport: config.promptTransport,
     backgroundLlm: config.backgroundLlm,
