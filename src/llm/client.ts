@@ -242,6 +242,36 @@ export function buildBackgroundStreamOptions(
   };
 }
 
+/** Build provider options for ambient attention evaluator calls. */
+export function buildAmbientAttentionStreamOptions(
+  global: GlobalConfig,
+  guild: GuildConfig,
+): Record<string, unknown> & { apiKey: string } {
+  const ambient = guild.ambientAttention;
+  if (ambient === undefined) {
+    throw new Error("ambientAttention is not configured for this guild");
+  }
+  const provider = ambient.evaluator.provider ?? resolveGuildLlmProvider(global, guild);
+  const params = withThinkingLevelParams(provider, ambient.evaluator.modelParams, ambient.evaluator.thinkingLevel);
+  if (provider === "openai-codex") {
+    return {
+      apiKey: "",
+      codexAuthPath: global.codexAuthPath,
+      ...params,
+      transport: global.codexTransport,
+      ...(ambient.evaluator.serviceTier !== undefined ? { serviceTier: ambient.evaluator.serviceTier } : {}),
+    };
+  }
+  if (global.openrouterApiKey === undefined || global.openrouterApiKey === "") {
+    throw new Error("OPENROUTER_API_KEY is required for OpenRouter ambient attention requests");
+  }
+  return {
+    apiKey: global.openrouterApiKey,
+    ...params,
+    ...(ambient.evaluator.serviceTier !== undefined ? { service_tier: ambient.evaluator.serviceTier } : {}),
+  };
+}
+
 /** Build OpenRouter options for fallback image-description calls. */
 export function buildImageReadingStreamOptions(
   global: GlobalConfig,

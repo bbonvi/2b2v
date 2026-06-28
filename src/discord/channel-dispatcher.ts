@@ -391,6 +391,9 @@ function triggerPriority(trigger: DispatchTrigger): number {
     case "mention": return 3;
     case "keyword": return 2;
     case "random": return 1;
+    case "ambient_pickup": return 0;
+    case "lingering_attention": return 0;
+    case "follow_up": return 0;
   }
 }
 

@@ -55,6 +55,16 @@ trim:
 #     maxBatchMessages: 300
 #     minIntervalSeconds: 600
 
+# Optional per-guild ambient attention override
+# ambientAttention:
+#   enabled: false
+#   ambientPickup:
+#     enabled: false
+#   lingering:
+#     enabled: true
+#   followUp:
+#     enabled: false
+
 # Discord user IDs with admin access to bot commands
 adminUserIds: []
 

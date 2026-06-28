@@ -1032,6 +1032,63 @@ describe("resolveGuildConfig", () => {
     });
   });
 
+  test("ambientAttention inherits global config and applies guild overrides", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, [
+      "ambientAttention:",
+      "  enabled: true",
+      "  evaluator:",
+      "    provider: openai-codex",
+      "    model: gpt-5.3-codex-spark",
+      "    thinkingLevel: minimal",
+      "    llmOutputTimeoutMs: 8000",
+      "    modelParams:",
+      "      textVerbosity: low",
+      "  ambientPickup:",
+      "    enabled: true",
+      "    probabilityThreshold: 0.8",
+      "  followUp:",
+      "    enabled: false",
+    ].join("\n"));
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const partial: GuildConfigYaml & { guildId: string; slug: string } = {
+      guildId: "112d",
+      slug: "ambient",
+      ambientAttention: {
+        evaluator: { llmOutputTimeoutMs: 9000 },
+        ambientPickup: { probabilityThreshold: 0.7 },
+        followUp: { enabled: true, maxPerExchange: 1 },
+      },
+    };
+    const resolved = resolveGuildConfig(global, partial);
+    expect(resolved.ambientAttention?.enabled).toBe(true);
+    expect(resolved.ambientAttention?.evaluator).toEqual({
+      provider: "openai-codex",
+      model: "gpt-5.3-codex-spark",
+      modelParams: { textVerbosity: "low" },
+      thinkingLevel: "minimal",
+      serviceTier: undefined,
+      llmOutputTimeoutMs: 9000,
+    });
+    expect(resolved.ambientAttention?.ambientPickup.enabled).toBe(true);
+    expect(resolved.ambientAttention?.ambientPickup.probabilityThreshold).toBe(0.7);
+    expect(resolved.ambientAttention?.followUp.enabled).toBe(true);
+    expect(resolved.ambientAttention?.followUp.maxPerExchange).toBe(1);
+  });
+
+  test("rejects invalid ambientAttention thresholds", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, [
+      "ambientAttention:",
+      "  enabled: true",
+      "  ambientPickup:",
+      "    probabilityThreshold: 1.5",
+    ].join("\n"));
+    expect(() => loadGlobalConfig(BASE_ENV, cfgFile)).toThrow("ambientAttention.ambientPickup.probabilityThreshold must be between 0 and 1");
+  });
+
   test("inherits replyLoop from global defaults", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");

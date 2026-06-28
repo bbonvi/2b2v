@@ -152,6 +152,75 @@ export interface BackgroundLlmDefaults {
   promptCaching?: PromptCachingConfig;
 }
 
+export type AmbientAttentionKind = "ambient_pickup" | "lingering_attention" | "follow_up";
+
+/** Shared evaluator model used by ambient attention candidate checks. */
+export interface AmbientAttentionEvaluatorConfig {
+  provider?: LlmProvider;
+  model: string;
+  modelParams: Record<string, unknown>;
+  thinkingLevel?: ThinkingLevel;
+  serviceTier?: ServiceTier;
+  llmOutputTimeoutMs: number;
+}
+
+/** Per-mode ambient attention thresholds and timing. */
+export interface AmbientAttentionModeConfig {
+  enabled: boolean;
+  minDelayMs: number;
+  maxDelayMs: number;
+  probabilityThreshold: number;
+  confidenceThreshold: number;
+  cooldownMs: number;
+  randomJitter: number;
+  defaultReply: boolean;
+}
+
+/** Ambient attention behavior for quiet pickup, lingering attention, and follow-ups. */
+export interface AmbientAttentionConfig {
+  enabled: boolean;
+  evaluator: AmbientAttentionEvaluatorConfig;
+  historyLimit: number;
+  typingActiveMs: number;
+  busyWindowMs: number;
+  busyMessageLimit: number;
+  staleAfterMs: number;
+  maxNewMessagesBeforeDrop: number;
+  maxRepliesPerUserPerHour: number;
+  maxRepliesPerChannelPerHour: number;
+  ambientPickup: AmbientAttentionModeConfig & {
+    minQuietMs: number;
+  };
+  lingering: AmbientAttentionModeConfig & {
+    strongWindowMs: number;
+    weakWindowMs: number;
+    typingExtensionMs: number;
+    maxTypingExtensions: number;
+  };
+  followUp: AmbientAttentionModeConfig & {
+    silenceMs: number;
+    maxPerExchange: number;
+  };
+}
+
+export type AmbientAttentionConfigYaml = Partial<Omit<
+  AmbientAttentionConfig,
+  "evaluator" | "ambientPickup" | "lingering" | "followUp"
+>> & {
+  evaluator?: Partial<AmbientAttentionEvaluatorConfig>;
+  ambientPickup?: Partial<AmbientAttentionModeConfig & { minQuietMs: number }>;
+  lingering?: Partial<AmbientAttentionModeConfig & {
+    strongWindowMs: number;
+    weakWindowMs: number;
+    typingExtensionMs: number;
+    maxTypingExtensions: number;
+  }>;
+  followUp?: Partial<AmbientAttentionModeConfig & {
+    silenceMs: number;
+    maxPerExchange: number;
+  }>;
+};
+
 /** Dedicated image-reading fallback configuration. */
 export interface ImageReadingConfig {
   /** Whether to describe images with a separate vision model when the main model cannot read them. */
@@ -202,6 +271,9 @@ export interface TriggerInstructions {
   keyword?: string;
   random?: string;
   scheduled?: string;
+  ambient_pickup?: string;
+  lingering_attention?: string;
+  follow_up?: string;
 }
 
 /** Context window trimming thresholds (message count). */
@@ -270,6 +342,8 @@ export interface GuildConfig {
   promptTransport: PromptTransportConfig;
   /** Dedicated background LLM configuration. */
   backgroundLlm: BackgroundLlmConfig;
+  /** Optional ambient attention engine configuration. */
+  ambientAttention?: AmbientAttentionConfig;
   /** Native reply/tool loop runtime limits. */
   replyLoop: ReplyLoopConfig;
   /** Background memory extraction behavior. */
@@ -328,6 +402,8 @@ export interface GlobalConfig {
   defaultPromptTransport: PromptTransportConfig;
   /** Default background LLM overrides. Missing fields inherit main model settings per guild. */
   defaultBackgroundLlm: BackgroundLlmDefaults;
+  /** Default ambient attention behavior. */
+  defaultAmbientAttention?: AmbientAttentionConfig;
   /** Default native reply/tool loop runtime limits. */
   defaultReplyLoop: ReplyLoopConfig;
   /** Default background memory extraction behavior. */
@@ -406,6 +482,7 @@ export interface GuildConfigYaml {
       enabled?: boolean;
     };
   };
+  ambientAttention?: AmbientAttentionConfigYaml;
   replyLoop?: {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;
@@ -496,6 +573,7 @@ export interface MainConfigYaml {
       enabled?: boolean;
     };
   };
+  ambientAttention?: AmbientAttentionConfigYaml;
   replyLoop?: {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;

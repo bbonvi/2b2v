@@ -18,6 +18,7 @@ function setup(): void {
   mkdirSync(join(TEST_DIR, "runtime", "tool-parameters", "web_search"), { recursive: true });
   mkdirSync(join(TEST_DIR, "runtime", "context"), { recursive: true });
   mkdirSync(join(TEST_DIR, "runtime", "image-reading", "fallback-system"), { recursive: true });
+  mkdirSync(join(TEST_DIR, "runtime", "ambient-attention", "evaluator"), { recursive: true });
   mkdirSync(join(TEST_DIR, "skills", "image_generation"), { recursive: true });
 }
 
@@ -57,6 +58,7 @@ describe("loadPromptBundle", () => {
     writeFileSync(join(TEST_DIR, "runtime", "tool-parameters", "web_search", "query.md"), "Query for {{provider}}.");
     writeFileSync(join(TEST_DIR, "runtime", "context", "active-image-jobs.md"), "Active jobs.");
     writeFileSync(join(TEST_DIR, "runtime", "image-reading", "fallback-system", "00-system.md"), "Describe images.");
+    writeFileSync(join(TEST_DIR, "runtime", "ambient-attention", "evaluator", "00-policy.md"), "Ambient attention policy.");
     writeFileSync(join(TEST_DIR, "skills", "image_generation", "skill.yaml"), [
       "id: image_generation",
       "title: Image Generation",
@@ -100,6 +102,7 @@ describe("loadPromptBundle", () => {
     expect(bundle.runtime.toolParameterDescriptions["web_search/query"]).toBe("Query for {{provider}}.");
     expect(bundle.runtime.contextTemplates["active-image-jobs"]).toBe("Active jobs.");
     expect(bundle.runtime.imageDescriptionSystemPrompt).toContain("Describe images.");
+    expect(bundle.runtime.ambientAttentionEvaluator).toContain("Ambient attention policy.");
     expect(bundle.runtime.skills.indexPrompt).toContain("## Skills");
     expect(bundle.runtime.skills.indexPrompt).toContain("- image_generation: Use for creating generated images. Required before: codex_generate_image.");
     expect(bundle.runtime.skills.requiredByTool.codex_generate_image).toBe("image_generation");

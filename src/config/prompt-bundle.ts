@@ -57,6 +57,8 @@ export interface RuntimePromptBundle {
   memoryContextTemplates: Record<string, string>;
   /** System prompt for fallback image description when the main model cannot read images. */
   imageDescriptionSystemPrompt: string;
+  /** Compact persona/social policy for ambient attention evaluator decisions. */
+  ambientAttentionEvaluator: string;
   /** On-demand prompt skills. */
   skills: PromptSkillBundle;
 }
@@ -347,6 +349,7 @@ export function loadPromptBundle(promptDir: string, log: Logger): PromptBundle {
       contextTemplates: loadRuntimeTextMap(promptDir, "context", log, "runtime.context"),
       memoryContextTemplates: loadRuntimeTextMap(promptDir, "memory/context", log, "runtime.memory.context"),
       imageDescriptionSystemPrompt: loadRuntimeDocuments(promptDir, "image-reading/fallback-system", log, "runtime.image-reading"),
+      ambientAttentionEvaluator: loadRuntimeDocuments(promptDir, "ambient-attention/evaluator", log, "runtime.ambient-attention.evaluator"),
       skills,
     },
   };

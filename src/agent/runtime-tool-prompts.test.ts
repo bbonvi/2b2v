@@ -19,6 +19,7 @@ function runtimePrompts(): RuntimePromptBundle {
     contextTemplates: {},
     memoryContextTemplates: {},
     imageDescriptionSystemPrompt: "",
+    ambientAttentionEvaluator: "",
     skills: { byId: {}, indexPrompt: "", requiredByTool: {} },
   };
 }

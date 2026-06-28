@@ -44,6 +44,59 @@ memoryExtraction:
     maxBatchMessages: 300 # Max chronological messages reviewed per ambient pass
     minIntervalSeconds: 600 # Minimum seconds between ambient passes per channel
 
+# Ambient attention can create delayed reply candidates outside direct triggers.
+ambientAttention:
+  enabled: false
+  evaluator:
+    provider: openai-codex # or openrouter; default uses Codex spark
+    model: gpt-5.3-codex-spark
+    thinkingLevel: minimal
+    llmOutputTimeoutMs: 8000
+    modelParams:
+      textVerbosity: low
+  historyLimit: 40
+  typingActiveMs: 8000
+  busyWindowMs: 60000
+  busyMessageLimit: 8
+  staleAfterMs: 180000
+  maxNewMessagesBeforeDrop: 4
+  maxRepliesPerUserPerHour: 4
+  maxRepliesPerChannelPerHour: 8
+  ambientPickup:
+    enabled: false
+    minDelayMs: 8000
+    maxDelayMs: 25000
+    probabilityThreshold: 0.8
+    confidenceThreshold: 0.6
+    cooldownMs: 180000
+    randomJitter: 0.04
+    defaultReply: false
+    minQuietMs: 12000
+  lingering:
+    enabled: true
+    minDelayMs: 1500
+    maxDelayMs: 7000
+    probabilityThreshold: 0.58
+    confidenceThreshold: 0.45
+    cooldownMs: 30000
+    randomJitter: 0.04
+    defaultReply: true
+    strongWindowMs: 45000
+    weakWindowMs: 180000
+    typingExtensionMs: 30000
+    maxTypingExtensions: 4
+  followUp:
+    enabled: false
+    minDelayMs: 12000
+    maxDelayMs: 45000
+    probabilityThreshold: 0.88
+    confidenceThreshold: 0.7
+    cooldownMs: 300000
+    randomJitter: 0.03
+    defaultReply: false
+    silenceMs: 12000
+    maxPerExchange: 1
+
 # Default trigger settings (guilds can override)
 triggers:
   mention: true          # Respond when @mentioned
@@ -60,6 +113,9 @@ triggers:
 #   keyword: "Triggered by keyword match. Keep response relevant."
 #   random: "You're replying unprompted. Make a brief remark without hijacking conversation."
 #   scheduled: "This is a scheduled task. Follow the task instructions closely."
+#   ambient_pickup: "2B noticed quiet unaddressed chatter. Normal channel message by default."
+#   lingering_attention: "2B is still lightly attentive after a recent exchange."
+#   follow_up: "Only add a follow-up after silence when there is a concrete natural intent."
 
 # Max canonical stored image dimension (larger user images resized to fit)
 imageMaxDimension: 4096

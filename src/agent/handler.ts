@@ -197,6 +197,12 @@ export interface HandlerDeps {
   initialPendingAttachments?: OutboundAttachment[];
   /** Resolves image_ids on <message> envelopes into outgoing Discord attachments. */
   resolveImageAttachments?: ImageAttachmentResolver;
+  /** Disable streamed Discord sends so callers can re-check state before final delivery. */
+  disableLiveOutput?: boolean;
+  /** Override default first-message Discord reply anchoring. */
+  replyFirstOverride?: boolean;
+  /** Called immediately before final visible sends; false drops the reply as stale. */
+  preSendCheck?: () => boolean | Promise<boolean>;
 }
 
 export interface HandleResult {
@@ -1617,7 +1623,7 @@ function parseToolArgumentsSafe(call: OpenRouterToolCall): Record<string, unknow
 }
 
 function chooseReplyMode(trigger: NonNullable<TriggerResult>): boolean {
-  return trigger.reason === "mention" || trigger.reason === "keyword";
+  return trigger.reason === "mention" || trigger.reason === "keyword" || trigger.reason === "lingering_attention";
 }
 
 function assertSentMessageId(result: { sentMessageId: string }): void {
@@ -2447,6 +2453,7 @@ export async function handleMessage(
     let finalText = "";
     const pendingAttachments: OutboundAttachment[] = [...(deps.initialPendingAttachments ?? [])];
     const intermediateStatus = { sent: false, sendCount: 0 };
+    const replyFirst = deps.replyFirstOverride ?? chooseReplyMode(triggerResult);
     const liveMessageTypingHoldMs = deps.liveMessageTypingHoldMs ?? DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS;
     const typingHoldMsForSegment = deps.guildConfig.typingSimulation.enabled
       ? (segment: DispatchSegment): number => typingSimulationDelayMs(
@@ -2464,7 +2471,7 @@ export async function handleMessage(
         sender: deps.sender,
         generateSpeech: deps.generateSpeech,
         ttsEnabled: deps.ttsEnabled ?? false,
-        replyFirst: !intermediateStatus.sent && chooseReplyMode(triggerResult),
+        replyFirst: !intermediateStatus.sent && replyFirst,
         destinationChannelId,
         currentChannelId: deps.currentChannelId,
         requestLog: reqLog,
@@ -2491,7 +2498,7 @@ export async function handleMessage(
           generateSpeech: deps.generateSpeech,
           ttsEnabled: deps.ttsEnabled ?? false,
           segments: parsed.segments,
-          replyFirst: !intermediateStatus.sent && chooseReplyMode(triggerResult),
+          replyFirst: !intermediateStatus.sent && replyFirst,
           sentOffset: intermediateStatus.sendCount - 1,
           destinationChannelId,
           currentChannelId: deps.currentChannelId,
@@ -2551,15 +2558,17 @@ export async function handleMessage(
         agentTimeBudgetMs: deps.guildConfig.replyLoop.wallClockTimeoutMs,
         llmOutputTimeoutMs: deps.guildConfig.replyLoop.llmOutputTimeoutMs,
         requestLog: reqLog,
-        sendIntermediateText: sendIntermediateStatus,
-        streamFinalText: async (delta, destinationChannelId) => {
-          const dispatcher = liveDispatcherFor(destinationChannelId);
-          const before = dispatcher.sentCount();
-          await dispatcher.push(delta);
-          const sent = dispatcher.sentCount() > before;
-          if (sent) intermediateStatus.sent = true;
-          return sent;
-        },
+        sendIntermediateText: deps.disableLiveOutput === true ? undefined : sendIntermediateStatus,
+        streamFinalText: deps.disableLiveOutput === true
+          ? undefined
+          : async (delta, destinationChannelId) => {
+            const dispatcher = liveDispatcherFor(destinationChannelId);
+            const before = dispatcher.sentCount();
+            await dispatcher.push(delta);
+            const sent = dispatcher.sentCount() > before;
+            if (sent) intermediateStatus.sent = true;
+            return sent;
+          },
         onModelTurnStart: (destinationChannelId) => {
           liveDispatchers.get(destinationChannelId ?? "")?.startModelTurn();
         },
@@ -2616,6 +2625,11 @@ export async function handleMessage(
       deps.log?.debug("native_reply_empty_after_directives", { durationMs: Date.now() - startedAt });
       return { triggered: true, triggerResult, agentRan: true };
     }
+    if (deps.preSendCheck !== undefined && !await deps.preSendCheck()) {
+      scheduleMemoryPass("", false);
+      deps.log?.debug("native_reply_dropped_before_send", { durationMs: Date.now() - startedAt });
+      return { triggered: true, triggerResult, agentRan: true };
+    }
 
     const liveSent = await (liveDispatchers.get("")?.finish(finalText) ?? Promise.resolve(0));
     if (liveSent === 0) {
@@ -2624,7 +2638,7 @@ export async function handleMessage(
         generateSpeech: deps.generateSpeech,
         ttsEnabled: deps.ttsEnabled ?? false,
         segments: parsedResponse.segments,
-        replyFirst: !intermediateStatus.sent && chooseReplyMode(triggerResult),
+        replyFirst: !intermediateStatus.sent && replyFirst,
         currentChannelId: deps.currentChannelId,
         requestLog: reqLog,
         log: deps.log,

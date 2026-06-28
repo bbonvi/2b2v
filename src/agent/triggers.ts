@@ -13,6 +13,9 @@ export type TriggerResult =
   | { reason: "keyword"; keyword: string }
   | { reason: "random" }
   | { reason: "scheduled" }
+  | { reason: "ambient_pickup" }
+  | { reason: "lingering_attention" }
+  | { reason: "follow_up" }
   | null;
 
 /**

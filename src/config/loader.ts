@@ -36,6 +36,10 @@ import type {
   ServiceTier,
   LlmProvider,
   CodexTransport,
+  AmbientAttentionConfig,
+  AmbientAttentionModeConfig,
+  AmbientAttentionEvaluatorConfig,
+  AmbientAttentionConfigYaml,
 } from "./types.ts";
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
 
@@ -63,6 +67,69 @@ const DEFAULT_MEMORY_EXTRACTION: MemoryExtractionConfig = {
     everyMessages: 300,
     maxBatchMessages: 300,
     minIntervalSeconds: 600,
+  },
+};
+
+const DEFAULT_AMBIENT_ATTENTION_MODE: AmbientAttentionModeConfig = {
+  enabled: false,
+  minDelayMs: 3_000,
+  maxDelayMs: 12_000,
+  probabilityThreshold: 0.75,
+  confidenceThreshold: 0.55,
+  cooldownMs: 120_000,
+  randomJitter: 0.04,
+  defaultReply: false,
+};
+
+const DEFAULT_AMBIENT_ATTENTION: AmbientAttentionConfig = {
+  enabled: false,
+  evaluator: {
+    provider: "openai-codex",
+    model: "gpt-5.3-codex-spark",
+    modelParams: { textVerbosity: "low" },
+    thinkingLevel: "minimal",
+    llmOutputTimeoutMs: 8_000,
+  },
+  historyLimit: 40,
+  typingActiveMs: 8_000,
+  busyWindowMs: 60_000,
+  busyMessageLimit: 8,
+  staleAfterMs: 180_000,
+  maxNewMessagesBeforeDrop: 4,
+  maxRepliesPerUserPerHour: 4,
+  maxRepliesPerChannelPerHour: 8,
+  ambientPickup: {
+    ...DEFAULT_AMBIENT_ATTENTION_MODE,
+    minDelayMs: 8_000,
+    maxDelayMs: 25_000,
+    probabilityThreshold: 0.8,
+    confidenceThreshold: 0.6,
+    cooldownMs: 180_000,
+    minQuietMs: 12_000,
+  },
+  lingering: {
+    ...DEFAULT_AMBIENT_ATTENTION_MODE,
+    enabled: true,
+    minDelayMs: 1_500,
+    maxDelayMs: 7_000,
+    probabilityThreshold: 0.58,
+    confidenceThreshold: 0.45,
+    cooldownMs: 30_000,
+    defaultReply: true,
+    strongWindowMs: 45_000,
+    weakWindowMs: 180_000,
+    typingExtensionMs: 30_000,
+    maxTypingExtensions: 4,
+  },
+  followUp: {
+    ...DEFAULT_AMBIENT_ATTENTION_MODE,
+    minDelayMs: 12_000,
+    maxDelayMs: 45_000,
+    probabilityThreshold: 0.88,
+    confidenceThreshold: 0.7,
+    cooldownMs: 300_000,
+    silenceMs: 12_000,
+    maxPerExchange: 1,
   },
 };
 
@@ -532,6 +599,113 @@ function resolveGuildBackgroundLlm(
   };
 }
 
+function clampProbabilityConfig(value: number, key: string): void {
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`${key} must be between 0 and 1`);
+  }
+}
+
+function resolveAmbientEvaluatorConfig(
+  defaults: AmbientAttentionEvaluatorConfig,
+  partial: Partial<AmbientAttentionEvaluatorConfig> | undefined,
+): AmbientAttentionEvaluatorConfig {
+  const resolved = {
+    provider: parseLlmProvider(partial?.provider, "ambientAttention.evaluator.provider") ?? defaults.provider,
+    model: partial?.model ?? defaults.model,
+    modelParams: { ...defaults.modelParams, ...partial?.modelParams },
+    thinkingLevel: parseThinkingLevel(partial?.thinkingLevel, "ambientAttention.evaluator.thinkingLevel") ?? defaults.thinkingLevel,
+    serviceTier: parseServiceTier(partial?.serviceTier, "ambientAttention.evaluator") ?? defaults.serviceTier,
+    llmOutputTimeoutMs: partial?.llmOutputTimeoutMs ?? defaults.llmOutputTimeoutMs,
+  };
+  if (resolved.model === "") throw new Error("ambientAttention.evaluator.model must not be empty");
+  if (!Number.isFinite(resolved.llmOutputTimeoutMs) || resolved.llmOutputTimeoutMs < 1000) {
+    throw new Error("ambientAttention.evaluator.llmOutputTimeoutMs must be >= 1000");
+  }
+  return resolved;
+}
+
+function resolveAmbientModeConfig<T extends AmbientAttentionModeConfig>(
+  defaults: T,
+  partial: Partial<T> | undefined,
+  keyPrefix: string,
+): T {
+  const resolved = {
+    ...defaults,
+    ...partial,
+  };
+  validateAmbientModeConfig(resolved, keyPrefix);
+  return resolved;
+}
+
+function resolveAmbientAttentionConfig(
+  defaults: AmbientAttentionConfig | undefined,
+  partial: AmbientAttentionConfigYaml | undefined,
+): AmbientAttentionConfig | undefined {
+  const base = defaults ?? DEFAULT_AMBIENT_ATTENTION;
+  if (partial === undefined && defaults === undefined) return undefined;
+  const resolved: AmbientAttentionConfig = {
+    ...base,
+    ...partial,
+    evaluator: resolveAmbientEvaluatorConfig(base.evaluator, partial?.evaluator),
+    ambientPickup: resolveAmbientModeConfig(base.ambientPickup, partial?.ambientPickup, "ambientAttention.ambientPickup"),
+    lingering: resolveAmbientModeConfig(base.lingering, partial?.lingering, "ambientAttention.lingering"),
+    followUp: resolveAmbientModeConfig(base.followUp, partial?.followUp, "ambientAttention.followUp"),
+  };
+  validateAmbientAttentionConfig(resolved, "ambientAttention");
+  return resolved;
+}
+
+function validateAmbientModeConfig(config: AmbientAttentionModeConfig, keyPrefix: string): void {
+  if (!Number.isFinite(config.minDelayMs) || config.minDelayMs < 0) throw new Error(`${keyPrefix}.minDelayMs must be >= 0`);
+  if (!Number.isFinite(config.maxDelayMs) || config.maxDelayMs < config.minDelayMs) {
+    throw new Error(`${keyPrefix}.maxDelayMs must be >= minDelayMs`);
+  }
+  clampProbabilityConfig(config.probabilityThreshold, `${keyPrefix}.probabilityThreshold`);
+  clampProbabilityConfig(config.confidenceThreshold, `${keyPrefix}.confidenceThreshold`);
+  if (!Number.isFinite(config.cooldownMs) || config.cooldownMs < 0) throw new Error(`${keyPrefix}.cooldownMs must be >= 0`);
+  if (!Number.isFinite(config.randomJitter) || config.randomJitter < 0 || config.randomJitter > 1) {
+    throw new Error(`${keyPrefix}.randomJitter must be between 0 and 1`);
+  }
+}
+
+function validateAmbientAttentionConfig(config: AmbientAttentionConfig, keyPrefix: string): void {
+  if (!Number.isInteger(config.historyLimit) || config.historyLimit < 5) throw new Error(`${keyPrefix}.historyLimit must be >= 5`);
+  if (!Number.isFinite(config.typingActiveMs) || config.typingActiveMs < 0) throw new Error(`${keyPrefix}.typingActiveMs must be >= 0`);
+  if (!Number.isFinite(config.busyWindowMs) || config.busyWindowMs < 0) throw new Error(`${keyPrefix}.busyWindowMs must be >= 0`);
+  if (!Number.isInteger(config.busyMessageLimit) || config.busyMessageLimit < 1) throw new Error(`${keyPrefix}.busyMessageLimit must be >= 1`);
+  if (!Number.isFinite(config.staleAfterMs) || config.staleAfterMs < 1000) throw new Error(`${keyPrefix}.staleAfterMs must be >= 1000`);
+  if (!Number.isInteger(config.maxNewMessagesBeforeDrop) || config.maxNewMessagesBeforeDrop < 0) {
+    throw new Error(`${keyPrefix}.maxNewMessagesBeforeDrop must be >= 0`);
+  }
+  if (!Number.isInteger(config.maxRepliesPerUserPerHour) || config.maxRepliesPerUserPerHour < 0) {
+    throw new Error(`${keyPrefix}.maxRepliesPerUserPerHour must be >= 0`);
+  }
+  if (!Number.isInteger(config.maxRepliesPerChannelPerHour) || config.maxRepliesPerChannelPerHour < 0) {
+    throw new Error(`${keyPrefix}.maxRepliesPerChannelPerHour must be >= 0`);
+  }
+  if (!Number.isFinite(config.ambientPickup.minQuietMs) || config.ambientPickup.minQuietMs < 0) {
+    throw new Error(`${keyPrefix}.ambientPickup.minQuietMs must be >= 0`);
+  }
+  if (!Number.isFinite(config.lingering.strongWindowMs) || config.lingering.strongWindowMs < 0) {
+    throw new Error(`${keyPrefix}.lingering.strongWindowMs must be >= 0`);
+  }
+  if (!Number.isFinite(config.lingering.weakWindowMs) || config.lingering.weakWindowMs < config.lingering.strongWindowMs) {
+    throw new Error(`${keyPrefix}.lingering.weakWindowMs must be >= strongWindowMs`);
+  }
+  if (!Number.isFinite(config.lingering.typingExtensionMs) || config.lingering.typingExtensionMs < 0) {
+    throw new Error(`${keyPrefix}.lingering.typingExtensionMs must be >= 0`);
+  }
+  if (!Number.isInteger(config.lingering.maxTypingExtensions) || config.lingering.maxTypingExtensions < 0) {
+    throw new Error(`${keyPrefix}.lingering.maxTypingExtensions must be >= 0`);
+  }
+  if (!Number.isFinite(config.followUp.silenceMs) || config.followUp.silenceMs < 0) {
+    throw new Error(`${keyPrefix}.followUp.silenceMs must be >= 0`);
+  }
+  if (!Number.isInteger(config.followUp.maxPerExchange) || config.followUp.maxPerExchange < 0) {
+    throw new Error(`${keyPrefix}.followUp.maxPerExchange must be >= 0`);
+  }
+}
+
 function resolveGlobalReplyLoop(
   partial: MainConfigYaml["replyLoop"] | undefined
 ): ReplyLoopConfig {
@@ -745,10 +919,12 @@ export function loadGlobalConfig(
   const defaultLlmProvider = parseLlmProvider(yaml.llmProvider, "llmProvider") ?? DEFAULT_LLM_PROVIDER;
   const defaultImageReading = resolveGlobalImageReading(yaml.imageReading);
   const defaultImageGeneration = resolveGlobalImageGeneration(yaml.imageGeneration);
+  const defaultAmbientAttention = resolveAmbientAttentionConfig(undefined, yaml.ambientAttention);
   const openrouterApiKey = env.OPENROUTER_API_KEY;
   const usesOpenRouter = defaultLlmProvider === "openrouter"
     || yaml.backgroundLlm?.provider === "openrouter"
-    || (defaultImageReading.fallbackEnabled && defaultImageReading.fallbackProvider === "openrouter");
+    || (defaultImageReading.fallbackEnabled && defaultImageReading.fallbackProvider === "openrouter")
+    || (defaultAmbientAttention?.enabled === true && defaultAmbientAttention.evaluator.provider === "openrouter");
   if (usesOpenRouter && (openrouterApiKey === undefined || openrouterApiKey === "")) {
     throw new Error("OPENROUTER_API_KEY is required when any OpenRouter LLM backend is enabled");
   }
@@ -786,6 +962,9 @@ export function loadGlobalConfig(
       keyword: yaml.triggerInstructions?.keyword,
       random: yaml.triggerInstructions?.random,
       scheduled: yaml.triggerInstructions?.scheduled,
+      ambient_pickup: yaml.triggerInstructions?.ambient_pickup,
+      lingering_attention: yaml.triggerInstructions?.lingering_attention,
+      follow_up: yaml.triggerInstructions?.follow_up,
     },
     defaultImageMaxDimension: yaml.imageMaxDimension ?? 4096,
     defaultMergeMessageGapSeconds: yaml.mergeMessageGapSeconds ?? 120,
@@ -819,6 +998,7 @@ export function loadGlobalConfig(
     defaultPromptCaching: resolveGlobalPromptCaching(yaml.promptCaching),
     defaultPromptTransport: resolveGlobalPromptTransport(yaml.promptTransport),
     defaultBackgroundLlm: resolveGlobalBackgroundLlm(yaml.backgroundLlm),
+    defaultAmbientAttention,
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
     defaultMemoryExtraction: resolveGlobalMemoryExtraction(yaml.memoryExtraction),
   };
@@ -872,6 +1052,9 @@ export function resolveGuildConfig(
       keyword: partial.triggerInstructions?.keyword ?? global.defaultTriggerInstructions.keyword,
       random: partial.triggerInstructions?.random ?? global.defaultTriggerInstructions.random,
       scheduled: partial.triggerInstructions?.scheduled ?? global.defaultTriggerInstructions.scheduled,
+      ambient_pickup: partial.triggerInstructions?.ambient_pickup ?? global.defaultTriggerInstructions.ambient_pickup,
+      lingering_attention: partial.triggerInstructions?.lingering_attention ?? global.defaultTriggerInstructions.lingering_attention,
+      follow_up: partial.triggerInstructions?.follow_up ?? global.defaultTriggerInstructions.follow_up,
     },
     llmProvider: parseLlmProvider(partial.llmProvider, "llmProvider") ?? global.defaultLlmProvider,
     model: partial.model,
@@ -911,6 +1094,7 @@ export function resolveGuildConfig(
     promptCaching,
     promptTransport: resolveGuildPromptTransport(global.defaultPromptTransport, partial.promptTransport),
     backgroundLlm: resolveGuildBackgroundLlm(global, partial, promptCaching),
+    ambientAttention: resolveAmbientAttentionConfig(global.defaultAmbientAttention, partial.ambientAttention),
     replyLoop: resolveGuildReplyLoop(global.defaultReplyLoop, partial.replyLoop),
     memoryExtraction: resolveGuildMemoryExtraction(global.defaultMemoryExtraction, partial.memoryExtraction),
   };
@@ -932,7 +1116,8 @@ export function validateTrimConfig(trim: TrimConfig): void {
 function validateGuildLlmCredentials(global: GlobalConfig, guild: GuildConfig): void {
   const usesOpenRouter = guild.llmProvider === "openrouter"
     || guild.backgroundLlm.provider === "openrouter"
-    || (guild.imageReading.fallbackEnabled && guild.imageReading.fallbackProvider === "openrouter");
+    || (guild.imageReading.fallbackEnabled && guild.imageReading.fallbackProvider === "openrouter")
+    || (guild.ambientAttention?.enabled === true && guild.ambientAttention.evaluator.provider === "openrouter");
   if (!usesOpenRouter) return;
   if (global.openrouterApiKey === undefined || global.openrouterApiKey === "") {
     throw new Error(`OPENROUTER_API_KEY is required by guild ${guild.guildId} OpenRouter LLM configuration`);
@@ -962,7 +1147,10 @@ function hasTriggerInstructions(ti: TriggerInstructions): boolean {
   return (ti.mention !== undefined && ti.mention !== "") ||
     (ti.keyword !== undefined && ti.keyword !== "") ||
     (ti.random !== undefined && ti.random !== "") ||
-    (ti.scheduled !== undefined && ti.scheduled !== "");
+    (ti.scheduled !== undefined && ti.scheduled !== "") ||
+    (ti.ambient_pickup !== undefined && ti.ambient_pickup !== "") ||
+    (ti.lingering_attention !== undefined && ti.lingering_attention !== "") ||
+    (ti.follow_up !== undefined && ti.follow_up !== "");
 }
 
 /** Persist a resolved guild config back to its YAML file (source of truth). */
@@ -994,6 +1182,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     promptCaching: config.promptCaching,
     promptTransport: config.promptTransport,
     backgroundLlm: config.backgroundLlm,
+    ambientAttention: config.ambientAttention,
     replyLoop: config.replyLoop,
     memoryExtraction: config.memoryExtraction,
   };
