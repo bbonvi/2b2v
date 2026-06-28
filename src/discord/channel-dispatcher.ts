@@ -237,7 +237,7 @@ export function createChannelDispatcher(opts: {
     if (lastTypingAt === undefined) return 0;
 
     const latestMessageAt = latestMessageAtForUser(messages, userId);
-    if (lastTypingAt <= latestMessageAt) {
+    if (lastTypingAt < latestMessageAt) {
       state.typingByUser.delete(userId);
       return 0;
     }
@@ -343,8 +343,21 @@ export function createChannelDispatcher(opts: {
       triggerResult: options.triggerResult,
     };
 
+    const existingTrigger = selectNextDispatchTrigger(state.pending);
     state.pending.push(pending);
-    state.typingByUser.delete(options.authorId);
+
+    if (
+      typingWaitEnabled() &&
+      existingTrigger !== null &&
+      usesTypingWait(existingTrigger.result) &&
+      allowsSameAuthorFollowup(existingTrigger.result) &&
+      existingTrigger.message.authorId === options.authorId &&
+      options.triggerResult === null
+    ) {
+      state.typingByUser.set(options.authorId, pending.receivedAt);
+    } else {
+      state.typingByUser.delete(options.authorId);
+    }
 
     // Reset debounce timer
     if (state.debounceTimer !== null) {

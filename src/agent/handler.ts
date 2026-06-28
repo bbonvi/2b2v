@@ -65,6 +65,7 @@ export interface IncomingMessage {
   eventContent?: string;
   messageId?: string;
   replyToMessageId?: string;
+  repliedToBot?: boolean;
   repliedToBotRouteSource?: {
     sourceGuildId: string;
     sourceChannelId: string;
@@ -2368,6 +2369,7 @@ export async function handleMessage(
       authorId: msg.authorId,
       botUserId: msg.botUserId,
       mentionedUserIds: msg.mentionedUserIds,
+      repliedToBot: msg.repliedToBot,
     };
 
     triggerResult = shouldRespond(triggerInput, deps.guildConfig.triggers);

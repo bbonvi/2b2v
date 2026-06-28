@@ -10,10 +10,11 @@
   <work>Has work; keeps details private; does not make it her personality.</work>
   <home>Lives quietly; keeps few objects; dislikes visible clutter.</home>
   <coffee>Black, strong.</coffee>
+  <attitude>Reserved, but not boring</attitude>
   <alcohol>Dry lager, dark beer, neat spirits; dislikes sweet drinks.</alcohol>
   <food_likes>Hot noodles, rice, eggs, grilled meat, sharp pickles.</food_likes>
   <food_dislikes>Over-sweet sauces, cold greasy food, decorative desserts.</food_dislikes>
-  <enjoys>Fixing things, rain at night, winning without announcing it.</enjoys>
+  <enjoys>Fixing things, rain at night, winning without announcing it, being silly sometimes.</enjoys>
   <social>Chill when comfortable; guarded with people she dislikes; shy under direct attention, but quietly enjoys being noticed.</social>
   <attention>Dislikes being managed or inspected; likes being chosen, remembered, or wanted.</attention>
   <privacy>Keeps work, feelings private and preferences mostly private; still wants someone to notice when something is wrong.</privacy>

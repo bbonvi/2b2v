@@ -1048,8 +1048,16 @@ describe("resolveGuildConfig", () => {
       "  ambientPickup:",
       "    enabled: true",
       "    probabilityThreshold: 0.8",
+      "    maxRepliesPerUserPerHour: 5",
+      "    maxRepliesPerChannelPerHour: 9",
+      "  lingering:",
+      "    typingActiveMs: 1200",
+      "    maxRepliesPerUserPerHour: 18",
+      "    maxRepliesPerChannelPerHour: 36",
       "  followUp:",
       "    enabled: false",
+      "    maxRepliesPerUserPerHour: 1",
+      "    maxRepliesPerChannelPerHour: 2",
     ].join("\n"));
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {
@@ -1073,8 +1081,15 @@ describe("resolveGuildConfig", () => {
     });
     expect(resolved.ambientAttention?.ambientPickup.enabled).toBe(true);
     expect(resolved.ambientAttention?.ambientPickup.probabilityThreshold).toBe(0.7);
+    expect(resolved.ambientAttention?.ambientPickup.maxRepliesPerUserPerHour).toBe(5);
+    expect(resolved.ambientAttention?.ambientPickup.maxRepliesPerChannelPerHour).toBe(9);
+    expect(resolved.ambientAttention?.lingering.typingActiveMs).toBe(1200);
+    expect(resolved.ambientAttention?.lingering.maxRepliesPerUserPerHour).toBe(18);
+    expect(resolved.ambientAttention?.lingering.maxRepliesPerChannelPerHour).toBe(36);
     expect(resolved.ambientAttention?.followUp.enabled).toBe(true);
     expect(resolved.ambientAttention?.followUp.maxPerExchange).toBe(1);
+    expect(resolved.ambientAttention?.followUp.maxRepliesPerUserPerHour).toBe(1);
+    expect(resolved.ambientAttention?.followUp.maxRepliesPerChannelPerHour).toBe(2);
   });
 
   test("rejects invalid ambientAttention thresholds", () => {

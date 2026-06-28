@@ -55,13 +55,10 @@ ambientAttention:
     modelParams:
       textVerbosity: low
   historyLimit: 40
-  typingActiveMs: 8000
   busyWindowMs: 60000
   busyMessageLimit: 8
   staleAfterMs: 180000
   maxNewMessagesBeforeDrop: 4
-  maxRepliesPerUserPerHour: 4
-  maxRepliesPerChannelPerHour: 8
   ambientPickup:
     enabled: false
     minDelayMs: 8000
@@ -69,6 +66,9 @@ ambientAttention:
     probabilityThreshold: 0.8
     confidenceThreshold: 0.6
     cooldownMs: 180000
+    typingActiveMs: 8000
+    maxRepliesPerUserPerHour: 4
+    maxRepliesPerChannelPerHour: 8
     randomJitter: 0.04
     defaultReply: false
     minQuietMs: 12000
@@ -78,13 +78,16 @@ ambientAttention:
     maxDelayMs: 7000
     probabilityThreshold: 0.58
     confidenceThreshold: 0.45
-    cooldownMs: 30000
+    cooldownMs: 0
     randomJitter: 0.04
     defaultReply: true
     strongWindowMs: 45000
     weakWindowMs: 180000
+    typingActiveMs: 1000
     typingExtensionMs: 30000
     maxTypingExtensions: 4
+    maxRepliesPerUserPerHour: 24
+    maxRepliesPerChannelPerHour: 48
   followUp:
     enabled: false
     minDelayMs: 12000
@@ -92,6 +95,9 @@ ambientAttention:
     probabilityThreshold: 0.88
     confidenceThreshold: 0.7
     cooldownMs: 300000
+    typingActiveMs: 8000
+    maxRepliesPerUserPerHour: 2
+    maxRepliesPerChannelPerHour: 4
     randomJitter: 0.03
     defaultReply: false
     silenceMs: 12000

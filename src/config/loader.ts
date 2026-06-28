@@ -77,6 +77,9 @@ const DEFAULT_AMBIENT_ATTENTION_MODE: AmbientAttentionModeConfig = {
   probabilityThreshold: 0.75,
   confidenceThreshold: 0.55,
   cooldownMs: 120_000,
+  typingActiveMs: 8_000,
+  maxRepliesPerUserPerHour: 4,
+  maxRepliesPerChannelPerHour: 8,
   randomJitter: 0.04,
   defaultReply: false,
 };
@@ -91,13 +94,10 @@ const DEFAULT_AMBIENT_ATTENTION: AmbientAttentionConfig = {
     llmOutputTimeoutMs: 8_000,
   },
   historyLimit: 40,
-  typingActiveMs: 8_000,
   busyWindowMs: 60_000,
   busyMessageLimit: 8,
   staleAfterMs: 180_000,
   maxNewMessagesBeforeDrop: 4,
-  maxRepliesPerUserPerHour: 4,
-  maxRepliesPerChannelPerHour: 8,
   ambientPickup: {
     ...DEFAULT_AMBIENT_ATTENTION_MODE,
     minDelayMs: 8_000,
@@ -114,7 +114,10 @@ const DEFAULT_AMBIENT_ATTENTION: AmbientAttentionConfig = {
     maxDelayMs: 7_000,
     probabilityThreshold: 0.58,
     confidenceThreshold: 0.45,
-    cooldownMs: 30_000,
+    cooldownMs: 0,
+    typingActiveMs: 1_000,
+    maxRepliesPerUserPerHour: 24,
+    maxRepliesPerChannelPerHour: 48,
     defaultReply: true,
     strongWindowMs: 45_000,
     weakWindowMs: 180_000,
@@ -128,6 +131,9 @@ const DEFAULT_AMBIENT_ATTENTION: AmbientAttentionConfig = {
     probabilityThreshold: 0.88,
     confidenceThreshold: 0.7,
     cooldownMs: 300_000,
+    typingActiveMs: 8_000,
+    maxRepliesPerUserPerHour: 2,
+    maxRepliesPerChannelPerHour: 4,
     silenceMs: 12_000,
     maxPerExchange: 1,
   },
@@ -663,6 +669,13 @@ function validateAmbientModeConfig(config: AmbientAttentionModeConfig, keyPrefix
   clampProbabilityConfig(config.probabilityThreshold, `${keyPrefix}.probabilityThreshold`);
   clampProbabilityConfig(config.confidenceThreshold, `${keyPrefix}.confidenceThreshold`);
   if (!Number.isFinite(config.cooldownMs) || config.cooldownMs < 0) throw new Error(`${keyPrefix}.cooldownMs must be >= 0`);
+  if (!Number.isFinite(config.typingActiveMs) || config.typingActiveMs < 0) throw new Error(`${keyPrefix}.typingActiveMs must be >= 0`);
+  if (!Number.isInteger(config.maxRepliesPerUserPerHour) || config.maxRepliesPerUserPerHour < 0) {
+    throw new Error(`${keyPrefix}.maxRepliesPerUserPerHour must be >= 0`);
+  }
+  if (!Number.isInteger(config.maxRepliesPerChannelPerHour) || config.maxRepliesPerChannelPerHour < 0) {
+    throw new Error(`${keyPrefix}.maxRepliesPerChannelPerHour must be >= 0`);
+  }
   if (!Number.isFinite(config.randomJitter) || config.randomJitter < 0 || config.randomJitter > 1) {
     throw new Error(`${keyPrefix}.randomJitter must be between 0 and 1`);
   }
@@ -670,18 +683,11 @@ function validateAmbientModeConfig(config: AmbientAttentionModeConfig, keyPrefix
 
 function validateAmbientAttentionConfig(config: AmbientAttentionConfig, keyPrefix: string): void {
   if (!Number.isInteger(config.historyLimit) || config.historyLimit < 5) throw new Error(`${keyPrefix}.historyLimit must be >= 5`);
-  if (!Number.isFinite(config.typingActiveMs) || config.typingActiveMs < 0) throw new Error(`${keyPrefix}.typingActiveMs must be >= 0`);
   if (!Number.isFinite(config.busyWindowMs) || config.busyWindowMs < 0) throw new Error(`${keyPrefix}.busyWindowMs must be >= 0`);
   if (!Number.isInteger(config.busyMessageLimit) || config.busyMessageLimit < 1) throw new Error(`${keyPrefix}.busyMessageLimit must be >= 1`);
   if (!Number.isFinite(config.staleAfterMs) || config.staleAfterMs < 1000) throw new Error(`${keyPrefix}.staleAfterMs must be >= 1000`);
   if (!Number.isInteger(config.maxNewMessagesBeforeDrop) || config.maxNewMessagesBeforeDrop < 0) {
     throw new Error(`${keyPrefix}.maxNewMessagesBeforeDrop must be >= 0`);
-  }
-  if (!Number.isInteger(config.maxRepliesPerUserPerHour) || config.maxRepliesPerUserPerHour < 0) {
-    throw new Error(`${keyPrefix}.maxRepliesPerUserPerHour must be >= 0`);
-  }
-  if (!Number.isInteger(config.maxRepliesPerChannelPerHour) || config.maxRepliesPerChannelPerHour < 0) {
-    throw new Error(`${keyPrefix}.maxRepliesPerChannelPerHour must be >= 0`);
   }
   if (!Number.isFinite(config.ambientPickup.minQuietMs) || config.ambientPickup.minQuietMs < 0) {
     throw new Error(`${keyPrefix}.ambientPickup.minQuietMs must be >= 0`);

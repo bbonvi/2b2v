@@ -6,6 +6,8 @@ export interface TriggerInput {
   authorId: string;
   botUserId: string;
   mentionedUserIds: string[];
+  /** Whether this Discord message directly replies to one of the bot's visible messages. */
+  repliedToBot?: boolean;
 }
 
 export type TriggerResult =
@@ -35,7 +37,7 @@ export function shouldRespond(
   if (input.authorId === input.botUserId) return null;
 
   // 1. Mention
-  if (triggers.mention && input.mentionedUserIds.includes(input.botUserId)) {
+  if (triggers.mention && (input.mentionedUserIds.includes(input.botUserId) || input.repliedToBot === true)) {
     return { reason: "mention" };
   }
 

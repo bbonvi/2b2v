@@ -57,8 +57,13 @@ export interface RuntimePromptBundle {
   memoryContextTemplates: Record<string, string>;
   /** System prompt for fallback image description when the main model cannot read images. */
   imageDescriptionSystemPrompt: string;
-  /** Compact persona/social policy for ambient attention evaluator decisions. */
-  ambientAttentionEvaluator: string;
+  /** Compact persona/social policies for ambient attention evaluator decisions. */
+  ambientAttentionEvaluator: {
+    shared: string;
+    ambientPickup: string;
+    lingeringAttention: string;
+    followUp: string;
+  };
   /** On-demand prompt skills. */
   skills: PromptSkillBundle;
 }
@@ -349,7 +354,12 @@ export function loadPromptBundle(promptDir: string, log: Logger): PromptBundle {
       contextTemplates: loadRuntimeTextMap(promptDir, "context", log, "runtime.context"),
       memoryContextTemplates: loadRuntimeTextMap(promptDir, "memory/context", log, "runtime.memory.context"),
       imageDescriptionSystemPrompt: loadRuntimeDocuments(promptDir, "image-reading/fallback-system", log, "runtime.image-reading"),
-      ambientAttentionEvaluator: loadRuntimeDocuments(promptDir, "ambient-attention/evaluator", log, "runtime.ambient-attention.evaluator"),
+      ambientAttentionEvaluator: {
+        shared: loadRuntimeDocuments(promptDir, "ambient-attention/evaluator/shared", log, "runtime.ambient-attention.evaluator.shared"),
+        ambientPickup: loadRuntimeDocuments(promptDir, "ambient-attention/evaluator/ambient-pickup", log, "runtime.ambient-attention.evaluator.ambient-pickup"),
+        lingeringAttention: loadRuntimeDocuments(promptDir, "ambient-attention/evaluator/lingering-attention", log, "runtime.ambient-attention.evaluator.lingering-attention"),
+        followUp: loadRuntimeDocuments(promptDir, "ambient-attention/evaluator/follow-up", log, "runtime.ambient-attention.evaluator.follow-up"),
+      },
       skills,
     },
   };

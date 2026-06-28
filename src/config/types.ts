@@ -172,6 +172,9 @@ export interface AmbientAttentionModeConfig {
   probabilityThreshold: number;
   confidenceThreshold: number;
   cooldownMs: number;
+  typingActiveMs: number;
+  maxRepliesPerUserPerHour: number;
+  maxRepliesPerChannelPerHour: number;
   randomJitter: number;
   defaultReply: boolean;
 }
@@ -181,13 +184,10 @@ export interface AmbientAttentionConfig {
   enabled: boolean;
   evaluator: AmbientAttentionEvaluatorConfig;
   historyLimit: number;
-  typingActiveMs: number;
   busyWindowMs: number;
   busyMessageLimit: number;
   staleAfterMs: number;
   maxNewMessagesBeforeDrop: number;
-  maxRepliesPerUserPerHour: number;
-  maxRepliesPerChannelPerHour: number;
   ambientPickup: AmbientAttentionModeConfig & {
     minQuietMs: number;
   };

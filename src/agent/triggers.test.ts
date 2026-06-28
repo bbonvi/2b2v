@@ -41,9 +41,25 @@ describe("shouldRespond", () => {
     expect(result).toEqual({ reason: "mention" });
   });
 
+  test("returns 'mention' when message replies to the bot and mention trigger enabled", () => {
+    const result = shouldRespond(
+      makeInput({ repliedToBot: true }),
+      makeTriggers({ mention: true })
+    );
+    expect(result).toEqual({ reason: "mention" });
+  });
+
   test("returns null when bot is mentioned but mention trigger disabled", () => {
     const result = shouldRespond(
       makeInput({ mentionedUserIds: ["bot-1"] }),
+      makeTriggers({ mention: false })
+    );
+    expect(result).toBeNull();
+  });
+
+  test("returns null when message replies to the bot but mention trigger disabled", () => {
+    const result = shouldRespond(
+      makeInput({ repliedToBot: true }),
       makeTriggers({ mention: false })
     );
     expect(result).toBeNull();

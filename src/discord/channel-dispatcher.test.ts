@@ -313,7 +313,7 @@ describe("createChannelDispatcher", () => {
     dispatcher.dispose();
   });
 
-  test("message from triggering user clears typing wait until typing starts again", async () => {
+  test("same-author keyword follow-up extends typing wait", async () => {
     let callCount = 0;
     const handler: DispatchHandler = () => {
       callCount++;
@@ -331,6 +331,9 @@ describe("createChannelDispatcher", () => {
     enqueue(dispatcher, makeMessage("ch-1", "m-followup"), null, "user-1");
 
     await delay(50);
+    expect(callCount).toBe(0);
+
+    await delay(70);
     expect(callCount).toBe(1);
 
     dispatcher.dispose();
@@ -381,7 +384,7 @@ describe("createChannelDispatcher", () => {
     dispatcher.dispose();
   });
 
-  test("message from mention triggering user clears typing wait", async () => {
+  test("same-author mention follow-up extends typing wait", async () => {
     const calls: Array<{ ids: string[]; trigger: TriggerResult }> = [];
     const handler: DispatchHandler = (msgs, trigger) => {
       calls.push({ ids: msgs.map((m) => m.id), trigger: trigger?.result ?? null });
@@ -399,6 +402,9 @@ describe("createChannelDispatcher", () => {
     enqueue(dispatcher, makeMessage("ch-1", "m-followup"), null, "user-1");
 
     await delay(50);
+    expect(calls).toEqual([]);
+
+    await delay(70);
     expect(calls).toEqual([
       { ids: ["m-mention", "m-followup"], trigger: { reason: "mention" } },
     ]);

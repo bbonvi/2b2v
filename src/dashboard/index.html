@@ -212,6 +212,7 @@
   .event-mention { color: #60a5fa; }
   .event-keyword { color: #f59e0b; }
   .event-random { color: #a78bfa; }
+  .event-ambient-attention-evaluator { color: #38bdf8; }
   .event-background-memory-extraction { color: #34d399; }
   .event-async-image-generation { color: #fb7185; }
   .event-prompt-lab { color: #c084fc; }
@@ -305,6 +306,7 @@
   }
   .stage-block.stage-input { border-left-color: var(--accent); }
   .stage-block.stage-model { border-left-color: #8b5cf6; }
+  .stage-block.stage-evaluator { border-left-color: #38bdf8; }
   .stage-block.stage-runtime { border-left-color: var(--green); }
   .stage-block.stage-error { border-left-color: var(--red); }
   .stage-head {
@@ -1280,6 +1282,7 @@
     if (kind === 'background_memory_extraction') return 'memory extraction';
     if (kind === 'async_image_generation') return 'async image';
     if (kind === 'prompt_lab') return 'prompt lab';
+    if (kind === 'ambient_attention_evaluator') return 'ambient eval';
     if (kind === 'keyword') return 'keyword';
     return kind;
   }
@@ -1297,6 +1300,9 @@
   function triggerDetail(t) {
     if (t == null || typeof t !== 'object') return '';
     if (typeof t.keyword === 'string' && t.keyword !== '') return t.keyword;
+    if (typeof t.kind === 'string' && t.kind !== '') {
+      return typeof t.status === 'string' && t.status !== '' ? t.kind + ' / ' + t.status : t.kind;
+    }
     if (typeof t.mode === 'string' && t.mode !== '') return t.mode;
     if (typeof t.source === 'string' && t.source !== '') return t.source;
     if (typeof t.jobId === 'string' && t.jobId !== '') return shortId(t.jobId);
@@ -1612,9 +1618,10 @@
     const duration = call.durationMs != null ? fmtDuration(call.durationMs) : (status === 'running' ? 'running' : '-');
     const output = modelResponseText(call);
     const modelKey = (call.id || ('model-' + index));
-    return '<div class="stage-block stage-model">'
+    const isEvaluator = triggerKind(e.trigger) === 'ambient_attention_evaluator';
+    return '<div class="stage-block ' + (isEvaluator ? 'stage-evaluator' : 'stage-model') + '">'
       + '<div class="stage-head">'
-        + '<div><div class="stage-title-row"><span class="stage-kind">Model</span><span class="stage-title">#' + (index + 1) + ' <span class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</span></span></div><div class="stage-meta">' + esc(call.model) + ' · stop ' + esc(call.stopReason) + ' · ' + esc(call.contentTypes.join(', ') || 'no content yet') + '</div></div>'
+        + '<div><div class="stage-title-row"><span class="stage-kind">' + (isEvaluator ? 'Evaluator' : 'Model') + '</span><span class="stage-title">#' + (index + 1) + ' <span class="' + esc(statusClass(status, false)) + '">' + esc(status) + '</span></span></div><div class="stage-meta">' + esc(call.model) + ' · stop ' + esc(call.stopReason) + ' · ' + esc(call.contentTypes.join(', ') || 'no content yet') + '</div></div>'
         + '<div><div class="metric-grid">'
           + metric('duration', duration)
           + metric('tokens', call.promptTokens + ' / ' + call.completionTokens)

@@ -1696,6 +1696,8 @@ type AmbientCandidate = {
   defaultReply: boolean;
   syntheticContent?: string;
   syntheticTimestamp?: number;
+  burstStartedAt?: number;
+  burstMessageCount?: number;
 };
 
 type AmbientLease = {
@@ -1721,12 +1723,31 @@ type AmbientDecision = {
   reason: string;
 };
 
+type AmbientDecisionVerdict = {
+  passed: boolean;
+  probabilityThreshold: number;
+  confidenceThreshold: number;
+  adjustedProbability: number;
+  jitter: number;
+  weakLingering: boolean;
+  decidingParameter: "should_reply" | "reply_probability" | "confidence" | "passed";
+  explanation: string;
+};
+
+type AmbientPendingCandidate = {
+  candidate: AmbientCandidate;
+  timer: ReturnType<typeof setTimeout>;
+};
+
 const ambientCandidateTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const ambientLeases = new Map<string, AmbientLease>();
+const ambientPendingCandidates = new Map<string, AmbientPendingCandidate>();
 const ambientTypingByChannelUser = new Map<string, number>();
 const ambientReplyTimesByUser = new Map<string, number[]>();
 const ambientReplyTimesByChannel = new Map<string, number[]>();
 const ambientCooldowns = new Map<string, number>();
+const ambientPickupChannelCooldowns = new Map<string, number>();
+const ambientNormalTriggerUsers = new Set<string>();
 
 function ambientLeaseKey(guildId: string, channelId: string, userId: string): string {
   return `${guildId}:${channelId}:${userId}`;
@@ -1736,8 +1757,16 @@ function ambientChannelUserKey(guildId: string, channelId: string, userId: strin
   return `${guildId}:${channelId}:${userId}`;
 }
 
+function ambientNormalTriggerUserKey(guildId: string, channelId: string, userId: string): string {
+  return `${guildId}:${channelId}:${userId}`;
+}
+
 function ambientCooldownKey(kind: AmbientAttentionKind, guildId: string, channelId: string, userId: string): string {
   return `${kind}:${guildId}:${channelId}:${userId}`;
+}
+
+function ambientPickupChannelCooldownKey(guildId: string, channelId: string): string {
+  return `${guildId}:${channelId}`;
 }
 
 function ambientModeConfig(config: AmbientAttentionConfig, kind: AmbientAttentionKind): AmbientAttentionModeConfig {
@@ -1766,7 +1795,8 @@ function ambientBudgetAvailable(
   const channelTimes = pruneRecentTimes(ambientReplyTimesByChannel.get(channelKey) ?? [], now);
   ambientReplyTimesByUser.set(userKey, userTimes);
   ambientReplyTimesByChannel.set(channelKey, channelTimes);
-  return userTimes.length < config.maxRepliesPerUserPerHour && channelTimes.length < config.maxRepliesPerChannelPerHour;
+  const mode = ambientModeConfig(config, candidate.kind);
+  return userTimes.length < mode.maxRepliesPerUserPerHour && channelTimes.length < mode.maxRepliesPerChannelPerHour;
 }
 
 function recordAmbientReply(candidate: AmbientCandidate, now = Date.now()): void {
@@ -1786,14 +1816,32 @@ function ambientCooldownReady(candidate: AmbientCandidate, now = Date.now()): bo
   return (ambientCooldowns.get(ambientCooldownKey(candidate.kind, candidate.guildId, candidate.channelId, candidate.userId)) ?? 0) <= now;
 }
 
-function activeTypingInChannel(guildId: string, channelId: string, config: AmbientAttentionConfig, now = Date.now()): boolean {
-  if (config.typingActiveMs <= 0) return false;
+function markAmbientPickupChannelCooldown(config: AmbientAttentionConfig | undefined, guildId: string, channelId: string, now = Date.now()): void {
+  if (config === undefined || !config.enabled || !config.ambientPickup.enabled || config.ambientPickup.cooldownMs <= 0) return;
+  ambientPickupChannelCooldowns.set(ambientPickupChannelCooldownKey(guildId, channelId), now + config.ambientPickup.cooldownMs);
+}
+
+function ambientPickupChannelCooldownReady(candidate: AmbientCandidate, now = Date.now()): boolean {
+  if (candidate.kind !== "ambient_pickup") return true;
+  return (ambientPickupChannelCooldowns.get(ambientPickupChannelCooldownKey(candidate.guildId, candidate.channelId)) ?? 0) <= now;
+}
+
+function ambientPickupChannelReady(guildId: string, channelId: string, now = Date.now()): boolean {
+  return (ambientPickupChannelCooldowns.get(ambientPickupChannelCooldownKey(guildId, channelId)) ?? 0) <= now;
+}
+
+function activeTypingInChannel(guildId: string, channelId: string, activeMs: number, now = Date.now()): boolean {
+  if (activeMs <= 0) return false;
   const prefix = `${guildId}:${channelId}:`;
   for (const [key, lastTypingAt] of ambientTypingByChannelUser) {
     if (!key.startsWith(prefix)) continue;
-    if (now - lastTypingAt <= config.typingActiveMs) return true;
+    if (now - lastTypingAt <= activeMs) return true;
   }
   return false;
+}
+
+function ambientTypingActiveMs(config: AmbientAttentionConfig, kind: AmbientAttentionKind): number {
+  return ambientModeConfig(config, kind).typingActiveMs;
 }
 
 function renderAmbientHistory(history: HistoryMessage[], triggerMessageId: string): string {
@@ -1803,6 +1851,44 @@ function renderAmbientHistory(history: HistoryMessage[], triggerMessageId: strin
     const reply = message.replyToId !== null ? ` reply_to=${message.replyToId}` : "";
     return `[${new Date(message.timestamp).toISOString()}] ${who} (${message.authorId})${reply}${marker}: ${message.content}`;
   }).join("\n");
+}
+
+function rawStoredMessageContent(messageId: string, guildId: string): string | null {
+  const row = db.raw
+    .prepare("SELECT raw_content FROM messages WHERE id = ? AND guild_id = ? AND is_prompt_only = 0")
+    .get(messageId, guildId) as { raw_content: string } | null;
+  return row?.raw_content ?? null;
+}
+
+function contentMentionsBot(content: string, botUserId: string): boolean {
+  if (botUserId === "") return false;
+  return new RegExp(`<@!?${botUserId}>`).test(content);
+}
+
+function storedMessageRepliesToOwnBot(message: HistoryMessage, guildId: string): boolean {
+  if (message.replyToId === null) return false;
+  const botUserId = client.user?.id ?? "";
+  if (botUserId === "") return false;
+  const row = db.raw
+    .prepare("SELECT user_id, is_bot FROM messages WHERE id = ? AND guild_id = ? AND is_prompt_only = 0")
+    .get(message.replyToId, guildId) as { user_id: string; is_bot: number } | null;
+  return row !== null && row.user_id === botUserId && row.is_bot === 1;
+}
+
+function deterministicHistoryTrigger(message: HistoryMessage, guildConfig: GuildConfig): TriggerResult {
+  const botUserId = client.user?.id ?? "";
+  const rawContent = rawStoredMessageContent(message.id, guildConfig.guildId) ?? message.content;
+  if (contentMentionsBot(rawContent, botUserId)) return { reason: "mention" };
+  if (storedMessageRepliesToOwnBot(message, guildConfig.guildId)) return { reason: "mention" };
+  return shouldRespond(
+    {
+      content: message.content,
+      authorId: message.authorId,
+      botUserId,
+      mentionedUserIds: [],
+    },
+    { ...guildConfig.triggers, randomChance: 0 },
+  );
 }
 
 function memoryCountBucket(memoryCount: number): string {
@@ -1907,6 +1993,174 @@ function renderAmbientRelationshipSignals(candidate: AmbientCandidate, history: 
   ].join("\n");
 }
 
+function ambientCandidateTriggerContext(candidate: AmbientCandidate): {
+  guildName?: string;
+  channelName?: string;
+  authorUsername?: string;
+  messageId: string;
+  content: string;
+  translatedContent: string;
+} {
+  const guild = candidate.message.guild;
+  const translatedContent = candidate.syntheticContent ?? (guild !== null
+    ? translateInbound(candidate.message.content, buildInboundResolvers(guild))
+    : candidate.message.content);
+  return {
+    ...(guild !== null ? { guildName: guild.name } : {}),
+    channelName: channelDisplayName(candidate.message.channel),
+    authorUsername: candidate.message.author.username,
+    messageId: candidate.triggerMessageId,
+    content: candidate.message.content,
+    translatedContent,
+  };
+}
+
+function createAmbientRequestLog(candidate: AmbientCandidate, status: string): RequestLog {
+  const requestLog = new RequestLog(candidate.guildId, candidate.channelId, requestLogStore);
+  requestLog.setAuthor(candidate.message.author.username);
+  requestLog.setTrigger({
+    type: "ambient_attention_evaluator",
+    kind: candidate.kind,
+    status,
+    triggerMessageId: candidate.triggerMessageId,
+    userId: candidate.userId,
+  });
+  requestLog.setTriggerContext(ambientCandidateTriggerContext(candidate));
+  requestLog.setAgentRan(true);
+  return requestLog;
+}
+
+function emitAmbientRequestLog(requestLog: RequestLog): void {
+  requestLog.emit(log);
+  requestLogStore.decrementActive();
+}
+
+function recordAmbientRuntimeAction(
+  requestLog: RequestLog,
+  id: string,
+  tool: string,
+  args: Record<string, unknown>,
+  result: Record<string, unknown>,
+  isError = false,
+): void {
+  requestLog.recordToolStart(id, tool, args);
+  requestLog.recordToolEnd(id, isError, {
+    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    structuredContent: result,
+  });
+}
+
+function logAmbientScheduled(candidate: AmbientCandidate, delayMs: number): void {
+  const requestLog = createAmbientRequestLog(candidate, "scheduled");
+  requestLogStore.incrementActive();
+  recordAmbientRuntimeAction(
+    requestLog,
+    `ambient-scheduled:${candidate.id}`,
+    "ambient_attention_scheduled",
+    {
+      kind: candidate.kind,
+      delayMs,
+      defaultReply: candidate.defaultReply,
+      triggerMessageId: candidate.triggerMessageId,
+      ...(candidate.burstMessageCount !== undefined ? { burstMessageCount: candidate.burstMessageCount } : {}),
+      ...(candidate.burstStartedAt !== undefined ? { burstDurationMs: Date.now() - candidate.burstStartedAt } : {}),
+    },
+    {
+      status: "scheduled",
+      summary: candidate.burstMessageCount !== undefined && candidate.burstMessageCount > 1
+        ? `${candidate.kind} burst of ${candidate.burstMessageCount} messages queued for evaluation in ${delayMs}ms.`
+        : `${candidate.kind} queued for evaluation in ${delayMs}ms.`,
+    },
+  );
+  emitAmbientRequestLog(requestLog);
+}
+
+function ambientPendingKey(kind: AmbientAttentionKind, guildId: string, channelId: string, userId: string): string {
+  return `${kind}:${guildId}:${channelId}:${userId}`;
+}
+
+function clearPendingCandidate(key: string): void {
+  const pending = ambientPendingCandidates.get(key);
+  if (pending === undefined) return;
+  clearTimeout(pending.timer);
+  ambientCandidateTimers.delete(pending.candidate.id);
+  ambientPendingCandidates.delete(key);
+}
+
+function clearPendingAmbientKindInChannel(kind: "ambient_pickup" | "lingering_attention", guildId: string, channelId: string): void {
+  for (const [key, pending] of ambientPendingCandidates) {
+    if (pending.candidate.kind === kind && pending.candidate.guildId === guildId && pending.candidate.channelId === channelId) {
+      clearPendingCandidate(key);
+    }
+  }
+}
+
+function markAmbientNormalTriggerInFlight(guildId: string, channelId: string, userId: string): void {
+  ambientNormalTriggerUsers.add(ambientNormalTriggerUserKey(guildId, channelId, userId));
+}
+
+function clearAmbientNormalTriggerInFlight(guildId: string, channelId: string, userId: string): void {
+  ambientNormalTriggerUsers.delete(ambientNormalTriggerUserKey(guildId, channelId, userId));
+}
+
+function ambientNormalTriggerInFlight(guildId: string, channelId: string, userId: string): boolean {
+  return ambientNormalTriggerUsers.has(ambientNormalTriggerUserKey(guildId, channelId, userId));
+}
+
+function clearPendingForCandidate(candidate: AmbientCandidate): void {
+  if (candidate.kind === "follow_up") return;
+  const key = ambientPendingKey(candidate.kind, candidate.guildId, candidate.channelId, candidate.userId);
+  const pending = ambientPendingCandidates.get(key);
+  if (pending?.candidate.id === candidate.id) clearPendingCandidate(key);
+}
+
+function armPendingCandidate(key: string, candidate: AmbientCandidate, delayMs: number): void {
+  clearPendingCandidate(key);
+  logAmbientScheduled(candidate, delayMs);
+  const timer = setTimeout(() => {
+    void runAmbientCandidate(candidate);
+  }, delayMs);
+  ambientPendingCandidates.set(key, { candidate, timer });
+  ambientCandidateTimers.set(candidate.id, timer);
+}
+
+function schedulePendingBurstFromMessage(
+  message: Message,
+  base: Omit<AmbientCandidate, "id" | "kind" | "defaultReply">,
+  config: AmbientAttentionConfig,
+  kind: "ambient_pickup" | "lingering_attention",
+): void {
+  const key = ambientPendingKey(kind, base.guildId, base.channelId, base.userId);
+  const mode = ambientModeConfig(config, kind);
+  const existing = ambientPendingCandidates.get(key);
+  const burstStartedAt = existing?.candidate.burstStartedAt ?? message.createdTimestamp;
+  const burstMessageCount = (existing?.candidate.burstMessageCount ?? 0) + 1;
+  const candidate: AmbientCandidate = {
+    ...base,
+    id: crypto.randomUUID(),
+    kind,
+    defaultReply: mode.defaultReply,
+    burstStartedAt,
+    burstMessageCount,
+  };
+  armPendingCandidate(key, candidate, randomBetween(mode.minDelayMs, mode.maxDelayMs));
+}
+
+function reschedulePendingBurstForTyping(
+  kind: "ambient_pickup" | "lingering_attention",
+  guildId: string,
+  channelId: string,
+  userId: string,
+  config: AmbientAttentionConfig,
+): void {
+  const key = ambientPendingKey(kind, guildId, channelId, userId);
+  const pending = ambientPendingCandidates.get(key);
+  if (pending === undefined) return;
+  const mode = ambientModeConfig(config, kind);
+  const delayMs = ambientTypingActiveMs(config, kind) + randomBetween(mode.minDelayMs, mode.maxDelayMs);
+  armPendingCandidate(key, pending.candidate, delayMs);
+}
+
 function ambientHardGate(
   config: AmbientAttentionConfig,
   candidate: AmbientCandidate,
@@ -1918,8 +2172,11 @@ function ambientHardGate(
   const now = Date.now();
   if (now - candidate.createdAt > config.staleAfterMs) return { ok: false, reason: "candidate stale" };
   if (!ambientBudgetAvailable(config, candidate, now)) return { ok: false, reason: "ambient budget exhausted" };
-  if (!ambientCooldownReady(candidate, now)) return { ok: false, reason: "ambient cooldown active" };
-  if (activeTypingInChannel(candidate.guildId, candidate.channelId, config, now)) return { ok: false, reason: "user typing active" };
+  if (phase === "evaluate" && !ambientCooldownReady(candidate, now)) return { ok: false, reason: "ambient cooldown active" };
+  if (!ambientPickupChannelCooldownReady(candidate, now)) return { ok: false, reason: "ambient pickup channel cooldown active" };
+  if (activeTypingInChannel(candidate.guildId, candidate.channelId, ambientTypingActiveMs(config, candidate.kind), now)) {
+    return { ok: false, reason: "user typing active" };
+  }
 
   const trigger = getMessageById(db, candidate.triggerMessageId, candidate.guildId);
   if (trigger === null || trigger.channelId !== candidate.channelId) return { ok: false, reason: "trigger message missing" };
@@ -1931,9 +2188,24 @@ function ambientHardGate(
     (message.timestamp === candidate.triggerCreatedAt && message.id > candidate.triggerMessageId)
   );
   const newHumanMessages = afterTrigger.filter((message) => !message.isBot);
+  if (candidate.kind === "ambient_pickup") {
+    const guildConfig = getGuildConfig(candidate.guildId);
+    if (newHumanMessages.some((message) => deterministicHistoryTrigger(message, guildConfig) !== null)) {
+      return { ok: false, reason: "newer normal trigger exists" };
+    }
+    if (afterTrigger.some((message) => message.isBot && message.isPromptOnly !== true)) {
+      return { ok: false, reason: "2b spoke after trigger" };
+    }
+  }
   if (newHumanMessages.length > config.maxNewMessagesBeforeDrop) return { ok: false, reason: "too many newer human messages" };
   if (afterTrigger.some((message) => !message.isBot && message.replyToId === candidate.triggerMessageId && message.authorId !== candidate.userId)) {
     return { ok: false, reason: "another human replied to trigger" };
+  }
+
+  if (candidate.kind === "lingering_attention") {
+    const lease = ambientLeases.get(ambientLeaseKey(candidate.guildId, candidate.channelId, candidate.userId));
+    if (lease === undefined) return { ok: false, reason: "lingering lease missing" };
+    if (lease.expiresAt <= now) return { ok: false, reason: "lingering lease expired" };
   }
 
   if (candidate.kind === "follow_up") {
@@ -1968,6 +2240,7 @@ async function evaluateAmbientCandidate(
   config: AmbientAttentionConfig,
   candidate: AmbientCandidate,
   history: HistoryMessage[],
+  requestLog?: RequestLog,
 ): Promise<AmbientDecision | null> {
   const streamOptions = buildAmbientAttentionStreamOptions(globalConfig, getGuildConfig(candidate.guildId));
   const providerParams: Record<string, unknown> = { ...streamOptions };
@@ -1975,7 +2248,7 @@ async function evaluateAmbientCandidate(
   const provider = config.evaluator.provider ?? resolveGuildLlmProvider(globalConfig, getGuildConfig(candidate.guildId));
   const mode = ambientModeConfig(config, candidate.kind);
   const system = [
-    promptBundle.runtime.ambientAttentionEvaluator,
+    ambientEvaluatorPolicyForKind(candidate.kind),
     "You decide whether 2B should naturally speak in Discord ambient attention.",
     "Usually choose silence. Do not write the reply text.",
     "Return only compact JSON with should_reply, reply_probability, confidence, intent, default_reply, reason.",
@@ -1986,6 +2259,12 @@ async function evaluateAmbientCandidate(
     `default_reply: ${mode.defaultReply}`,
     `trigger_message_id: ${candidate.triggerMessageId}`,
     `trigger_user_id: ${candidate.userId}`,
+    ...(candidate.burstMessageCount !== undefined
+      ? [
+          `burst_message_count: ${candidate.burstMessageCount}`,
+          `burst_duration_ms: ${Date.now() - (candidate.burstStartedAt ?? candidate.triggerCreatedAt)}`,
+        ]
+      : []),
     `now: ${new Date().toISOString()}`,
     "",
     "Compact relationship signals:",
@@ -1995,6 +2274,7 @@ async function evaluateAmbientCandidate(
     renderAmbientHistory(history, candidate.triggerMessageId),
   ].join("\n");
   const messages: OpenRouterMessage[] = [{ role: "user", content: user }];
+  let llmCompleted = false;
   try {
     const result = await completeLlmChat({
       provider,
@@ -2003,6 +2283,9 @@ async function evaluateAmbientCandidate(
       systemPrompt: system,
       messages,
       providerParams,
+      onPayload: (payload) => {
+        requestLog?.recordLLMRequest(payload);
+      },
       responseFormat: {
         type: "json_schema",
         json_schema: {
@@ -2027,6 +2310,8 @@ async function evaluateAmbientCandidate(
       parallelToolCalls: false,
       signal: AbortSignal.timeout(config.evaluator.llmOutputTimeoutMs),
     });
+    requestLog?.recordLLMCompletion(result.messageForLogs);
+    llmCompleted = true;
     const parsed = JSON.parse(result.text) as unknown;
     if (parsed === null || typeof parsed !== "object") return null;
     const record = parsed as Record<string, unknown>;
@@ -2039,6 +2324,7 @@ async function evaluateAmbientCandidate(
       reason: typeof record.reason === "string" ? record.reason : "",
     };
   } catch (error) {
+    if (!llmCompleted) requestLog?.recordLLMError(error);
     log.warn("ambient attention evaluation failed", {
       kind: candidate.kind,
       messageId: candidate.triggerMessageId,
@@ -2048,11 +2334,11 @@ async function evaluateAmbientCandidate(
   }
 }
 
-function decisionPasses(
+function ambientDecisionVerdict(
   config: AmbientAttentionConfig,
   candidate: AmbientCandidate,
   decision: AmbientDecision,
-): boolean {
+): AmbientDecisionVerdict {
   const mode = ambientModeConfig(config, candidate.kind);
   const lease = candidate.kind === "lingering_attention"
     ? ambientLeases.get(ambientLeaseKey(candidate.guildId, candidate.channelId, candidate.userId))
@@ -2065,9 +2351,53 @@ function decisionPasses(
     ? Math.min(1, Math.max(mode.confidenceThreshold + 0.1, config.ambientPickup.confidenceThreshold))
     : mode.confidenceThreshold;
   const jitter = mode.randomJitter > 0 ? (Math.random() * 2 - 1) * mode.randomJitter : 0;
-  return decision.should_reply &&
-    decision.reply_probability + jitter >= probabilityThreshold &&
-    decision.confidence >= confidenceThreshold;
+  const adjustedProbability = Math.max(0, Math.min(1, decision.reply_probability + jitter));
+  if (!decision.should_reply) {
+    return {
+      passed: false,
+      probabilityThreshold,
+      confidenceThreshold,
+      adjustedProbability,
+      jitter,
+      weakLingering,
+      decidingParameter: "should_reply",
+      explanation: "Evaluator explicitly chose silence.",
+    };
+  }
+  if (adjustedProbability < probabilityThreshold) {
+    return {
+      passed: false,
+      probabilityThreshold,
+      confidenceThreshold,
+      adjustedProbability,
+      jitter,
+      weakLingering,
+      decidingParameter: "reply_probability",
+      explanation: `Adjusted reply probability ${adjustedProbability.toFixed(2)} was below threshold ${probabilityThreshold.toFixed(2)}.`,
+    };
+  }
+  if (decision.confidence < confidenceThreshold) {
+    return {
+      passed: false,
+      probabilityThreshold,
+      confidenceThreshold,
+      adjustedProbability,
+      jitter,
+      weakLingering,
+      decidingParameter: "confidence",
+      explanation: `Confidence ${decision.confidence.toFixed(2)} was below threshold ${confidenceThreshold.toFixed(2)}.`,
+    };
+  }
+  return {
+    passed: true,
+    probabilityThreshold,
+    confidenceThreshold,
+    adjustedProbability,
+    jitter,
+    weakLingering,
+    decidingParameter: "passed",
+    explanation: "Evaluator decision cleared probability and confidence thresholds.",
+  };
 }
 
 function ambientTriggerInstruction(kind: AmbientAttentionKind, decision: AmbientDecision): string {
@@ -2086,6 +2416,16 @@ function ambientTriggerInstruction(kind: AmbientAttentionKind, decision: Ambient
   ].join(" ");
 }
 
+function ambientEvaluatorPolicyForKind(kind: AmbientAttentionKind): string {
+  const policies = promptBundle.runtime.ambientAttentionEvaluator;
+  const kindPolicy = kind === "ambient_pickup"
+    ? policies.ambientPickup
+    : kind === "lingering_attention"
+      ? policies.lingeringAttention
+      : policies.followUp;
+  return [policies.shared, kindPolicy].filter((part) => part.trim() !== "").join("\n\n");
+}
+
 function scheduleAmbientCandidate(candidate: AmbientCandidate): void {
   const guildConfig = getGuildConfig(candidate.guildId);
   const config = guildConfig.ambientAttention;
@@ -2093,6 +2433,7 @@ function scheduleAmbientCandidate(candidate: AmbientCandidate): void {
   const mode = ambientModeConfig(config, candidate.kind);
   if (!mode.enabled) return;
   const delayMs = randomBetween(mode.minDelayMs, mode.maxDelayMs);
+  logAmbientScheduled(candidate, delayMs);
   const timer = setTimeout(() => {
     ambientCandidateTimers.delete(candidate.id);
     void runAmbientCandidate(candidate);
@@ -2104,25 +2445,114 @@ function clearAmbientAttentionState(): void {
   for (const timer of ambientCandidateTimers.values()) clearTimeout(timer);
   ambientCandidateTimers.clear();
   ambientLeases.clear();
+  ambientPendingCandidates.clear();
   ambientTypingByChannelUser.clear();
   ambientReplyTimesByUser.clear();
   ambientReplyTimesByChannel.clear();
   ambientCooldowns.clear();
+  ambientPickupChannelCooldowns.clear();
+  ambientNormalTriggerUsers.clear();
 }
 
 async function runAmbientCandidate(candidate: AmbientCandidate): Promise<void> {
   const guildConfig = getGuildConfig(candidate.guildId);
   const config = guildConfig.ambientAttention;
   if (config === undefined) return;
+  const requestLog = createAmbientRequestLog(candidate, "evaluating");
+  requestLogStore.incrementActive();
   const gate = ambientHardGate(config, candidate, "evaluate");
+  recordAmbientRuntimeAction(
+    requestLog,
+    `ambient-hard-gate:${candidate.id}:evaluate`,
+    "ambient_hard_gate",
+    {
+      phase: "evaluate",
+      kind: candidate.kind,
+      triggerMessageId: candidate.triggerMessageId,
+    },
+    gate.ok
+      ? {
+          status: "passed",
+          historyCount: gate.history.length,
+          summary: "Hard gates passed; evaluator LLM will run.",
+        }
+      : {
+          status: "dropped",
+          reason: gate.reason,
+          decidingParameter: `hard_gate.${gate.reason.replaceAll(" ", "_")}`,
+          summary: `Dropped before evaluator: ${gate.reason}.`,
+        },
+  );
   if (!gate.ok) {
     log.debug("ambient candidate dropped", { kind: candidate.kind, messageId: candidate.triggerMessageId, reason: gate.reason });
+    if ((candidate.kind === "ambient_pickup" || candidate.kind === "lingering_attention") && gate.reason === "user typing active") {
+      reschedulePendingBurstForTyping(candidate.kind, candidate.guildId, candidate.channelId, candidate.userId, config);
+    } else {
+      clearPendingForCandidate(candidate);
+    }
+    emitAmbientRequestLog(requestLog);
     return;
   }
-  const decision = await evaluateAmbientCandidate(config, candidate, gate.history);
-  if (decision === null || !decisionPasses(config, candidate, decision)) return;
+
+  const decision = await evaluateAmbientCandidate(config, candidate, gate.history, requestLog);
+  if (decision === null) {
+    recordAmbientRuntimeAction(
+      requestLog,
+      `ambient-decision:${candidate.id}`,
+      "ambient_decision",
+      { kind: candidate.kind },
+      {
+        status: "dropped",
+        decidingParameter: "evaluator_error",
+        summary: "Evaluator did not return a usable decision.",
+      },
+      true,
+    );
+    clearPendingForCandidate(candidate);
+    emitAmbientRequestLog(requestLog);
+    return;
+  }
+
+  const verdict = ambientDecisionVerdict(config, candidate, decision);
+  recordAmbientRuntimeAction(
+    requestLog,
+    `ambient-decision:${candidate.id}`,
+    "ambient_decision",
+    {
+      kind: candidate.kind,
+      decision,
+      thresholds: {
+        replyProbability: verdict.probabilityThreshold,
+        confidence: verdict.confidenceThreshold,
+      },
+      adjustedProbability: verdict.adjustedProbability,
+      randomJitter: verdict.jitter,
+      weakLingering: verdict.weakLingering,
+    },
+    {
+      status: verdict.passed ? "selected" : "dropped",
+      decidingParameter: verdict.decidingParameter,
+      explanation: verdict.explanation,
+      shouldReply: decision.should_reply,
+      replyProbability: decision.reply_probability,
+      adjustedProbability: verdict.adjustedProbability,
+      probabilityThreshold: verdict.probabilityThreshold,
+      confidence: decision.confidence,
+      confidenceThreshold: verdict.confidenceThreshold,
+      reason: decision.reason,
+      intent: decision.intent ?? "",
+      defaultReply: decision.default_reply ?? candidate.defaultReply,
+    },
+  );
+  emitAmbientRequestLog(requestLog);
+  if (!verdict.passed) {
+    clearPendingForCandidate(candidate);
+    return;
+  }
+
   candidate.defaultReply = decision.default_reply ?? candidate.defaultReply;
   markAmbientCooldown(config, candidate);
+  clearPendingForCandidate(candidate);
   await processTriggeredMessage(
     candidate.message,
     { reason: candidate.kind },
@@ -2141,6 +2571,25 @@ async function runAmbientCandidate(candidate: AmbientCandidate): Promise<void> {
       preSendCheck: () => {
         const preSendGate = ambientHardGate(config, candidate, "pre_send");
         if (!preSendGate.ok) {
+          const preSendLog = createAmbientRequestLog(candidate, "pre_send_dropped");
+          requestLogStore.incrementActive();
+          recordAmbientRuntimeAction(
+            preSendLog,
+            `ambient-hard-gate:${candidate.id}:pre-send`,
+            "ambient_hard_gate",
+            {
+              phase: "pre_send",
+              kind: candidate.kind,
+              triggerMessageId: candidate.triggerMessageId,
+            },
+            {
+              status: "dropped",
+              reason: preSendGate.reason,
+              decidingParameter: `hard_gate.${preSendGate.reason.replaceAll(" ", "_")}`,
+              summary: `Dropped before Discord send: ${preSendGate.reason}.`,
+            },
+          );
+          emitAmbientRequestLog(preSendLog);
           log.debug("ambient reply dropped before send", { kind: candidate.kind, messageId: candidate.triggerMessageId, reason: preSendGate.reason });
           return false;
         }
@@ -2156,10 +2605,18 @@ async function runAmbientCandidate(candidate: AmbientCandidate): Promise<void> {
 }
 
 function maybeScheduleAmbientAttention(message: Message, triggerResult: TriggerResult): void {
-  if (triggerResult !== null || message.guildId === null || message.guild === null) return;
+  if (message.guildId === null || message.guild === null) return;
   const guildConfig = getGuildConfig(message.guildId);
   const config = guildConfig.ambientAttention;
   if (config === undefined || !config.enabled) return;
+  if (triggerResult !== null) {
+    markAmbientNormalTriggerInFlight(message.guildId, message.channelId, message.author.id);
+    markAmbientPickupChannelCooldown(config, message.guildId, message.channelId);
+    clearPendingAmbientKindInChannel("ambient_pickup", message.guildId, message.channelId);
+    clearPendingCandidate(ambientPendingKey("lingering_attention", message.guildId, message.channelId, message.author.id));
+    return;
+  }
+  if (ambientNormalTriggerInFlight(message.guildId, message.channelId, message.author.id)) return;
   const translatedContent = translateInbound(message.content, buildInboundResolvers(message.guild));
   if (translatedContent.trim() === "" && message.stickers.size === 0) return;
   const base = {
@@ -2172,24 +2629,17 @@ function maybeScheduleAmbientAttention(message: Message, triggerResult: TriggerR
     guildId: message.guildId,
   };
 
-  const lease = ambientLeases.get(ambientLeaseKey(message.guildId, message.channelId, message.author.id));
+  let lease = ambientLeases.get(ambientLeaseKey(message.guildId, message.channelId, message.author.id));
+  if (lease === undefined && config.lingering.enabled) {
+    lease = recoverAmbientLeaseForMessage(message, config);
+  }
   if (lease !== undefined && lease.expiresAt > Date.now() && config.lingering.enabled) {
-    scheduleAmbientCandidate({
-      ...base,
-      id: crypto.randomUUID(),
-      kind: "lingering_attention",
-      defaultReply: config.lingering.defaultReply,
-    });
+    schedulePendingBurstFromMessage(message, base, config, "lingering_attention");
     return;
   }
 
-  if (config.ambientPickup.enabled) {
-    scheduleAmbientCandidate({
-      ...base,
-      id: crypto.randomUUID(),
-      kind: "ambient_pickup",
-      defaultReply: config.ambientPickup.defaultReply,
-    });
+  if (config.ambientPickup.enabled && ambientPickupChannelReady(message.guildId, message.channelId)) {
+    schedulePendingBurstFromMessage(message, base, config, "ambient_pickup");
   }
 }
 
@@ -2199,8 +2649,10 @@ function noteAmbientTyping(typing: Typing): void {
   if (config === undefined || !config.enabled) return;
   const now = Date.now();
   ambientTypingByChannelUser.set(ambientChannelUserKey(typing.guild.id, typing.channel.id, typing.user.id), now);
+  reschedulePendingBurstForTyping("ambient_pickup", typing.guild.id, typing.channel.id, typing.user.id, config);
   const lease = ambientLeases.get(ambientLeaseKey(typing.guild.id, typing.channel.id, typing.user.id));
   if (lease === undefined || lease.expiresAt <= now) return;
+  reschedulePendingBurstForTyping("lingering_attention", typing.guild.id, typing.channel.id, typing.user.id, config);
   if (lease.typingExtensions >= config.lingering.maxTypingExtensions) return;
   lease.typingExtensions += 1;
   lease.expiresAt = Math.max(lease.expiresAt, now + config.lingering.typingExtensionMs);
@@ -2208,6 +2660,64 @@ function noteAmbientTyping(typing: Typing): void {
 
 function clearAmbientLeaseForUser(guildId: string, channelId: string, userId: string): void {
   ambientLeases.delete(ambientLeaseKey(guildId, channelId, userId));
+  clearPendingCandidate(ambientPendingKey("lingering_attention", guildId, channelId, userId));
+}
+
+function recoverAmbientLeaseForMessage(message: Message, config: AmbientAttentionConfig): AmbientLease | undefined {
+  if (message.guildId === null || client.user?.id === undefined) return undefined;
+  const now = Date.now();
+  const key = ambientLeaseKey(message.guildId, message.channelId, message.author.id);
+  const existing = ambientLeases.get(key);
+  if (existing !== undefined && existing.expiresAt > now) return existing;
+
+  const history = getHistoryMessages(db, message.channelId, Math.max(config.historyLimit, 20));
+  const beforeCurrent = history.filter((item) =>
+    item.timestamp < message.createdTimestamp ||
+    (item.timestamp === message.createdTimestamp && item.id < message.id)
+  );
+  const botMessage = [...beforeCurrent].reverse().find((item) =>
+    item.isBot &&
+    item.authorId === client.user?.id &&
+    item.isPromptOnly !== true &&
+    !item.isSynthetic
+  );
+  if (botMessage === undefined) return undefined;
+  if (message.createdTimestamp - botMessage.timestamp > config.lingering.weakWindowMs) return undefined;
+
+  let sourceMessage = botMessage.replyToId !== null
+    ? beforeCurrent.find((item) => item.id === botMessage.replyToId && item.authorId === message.author.id && !item.isBot)
+    : undefined;
+  if (sourceMessage === undefined) {
+    sourceMessage = [...beforeCurrent]
+      .filter((item) => item.timestamp <= botMessage.timestamp && !item.isBot && !item.isSynthetic)
+      .at(-1);
+    if (sourceMessage?.authorId !== message.author.id) return undefined;
+    if (botMessage.timestamp - sourceMessage.timestamp > 10 * 60 * 1000) return undefined;
+  }
+
+  const lease: AmbientLease = {
+    guildId: message.guildId,
+    channelId: message.channelId,
+    userId: message.author.id,
+    exchangeId: crypto.randomUUID(),
+    sourceMessageId: sourceMessage.id,
+    botMessageId: botMessage.id,
+    botRepliedAt: botMessage.timestamp,
+    strongUntil: botMessage.timestamp + config.lingering.strongWindowMs,
+    expiresAt: botMessage.timestamp + config.lingering.weakWindowMs,
+    typingExtensions: 0,
+    followUpsSent: 0,
+  };
+  if (lease.expiresAt <= now) return undefined;
+  ambientLeases.set(key, lease);
+  log.debug("ambient lingering lease recovered", {
+    guildId: message.guildId,
+    channelId: message.channelId,
+    userId: message.author.id,
+    botMessageId: botMessage.id,
+    sourceMessageId: sourceMessage.id,
+  });
+  return lease;
 }
 
 function noteAmbientBotReply(input: {
@@ -2227,6 +2737,7 @@ function noteAmbientBotReply(input: {
   const botMessage = getMessageById(db, input.botMessageId, input.guildId);
   const botMessageCreatedAt = botMessage?.createdAt ?? now;
   const key = ambientLeaseKey(input.guildId, input.channelId, input.userId);
+  clearPendingCandidate(ambientPendingKey("lingering_attention", input.guildId, input.channelId, input.userId));
   const lease: AmbientLease = {
     guildId: input.guildId,
     channelId: input.channelId,
@@ -3856,6 +4367,16 @@ function getOrCreateDispatcher(guildId: string): ChannelDispatcher {
   return dispatcher;
 }
 
+function messageRepliesToOwnBot(message: Message): boolean {
+  if (message.guildId === null || message.reference?.messageId === undefined) return false;
+  const botUserId = client.user?.id ?? "";
+  if (botUserId === "") return false;
+  const row = db.raw
+    .prepare("SELECT user_id, is_bot FROM messages WHERE id = ? AND guild_id = ? AND is_prompt_only = 0")
+    .get(message.reference.messageId, message.guildId) as { user_id: string; is_bot: number } | null;
+  return row !== null && row.user_id === botUserId && row.is_bot === 1;
+}
+
 function evaluateMessageTrigger(message: Message, guildConfig: GuildConfig): TriggerResult {
   return shouldRespond(
     {
@@ -3863,6 +4384,7 @@ function evaluateMessageTrigger(message: Message, guildConfig: GuildConfig): Tri
       authorId: message.author.id,
       botUserId: client.user?.id ?? "",
       mentionedUserIds: [...message.mentions.users.keys()],
+      repliedToBot: messageRepliesToOwnBot(message),
     },
     guildConfig.triggers,
   );
@@ -3938,7 +4460,12 @@ async function processTriggeredMessage(
     const sentBotMessageIds: string[] = [];
     const sender: MessageSender = async (...args) => {
       const result = await baseSender(...args);
-      if (result.sentMessageId !== "") sentBotMessageIds.push(result.sentMessageId);
+      if (result.sentMessageId !== "") {
+        sentBotMessageIds.push(result.sentMessageId);
+        const destinationChannelId = args[2] ?? channelId;
+        markAmbientPickupChannelCooldown(guildConfig.ambientAttention, guildId, destinationChannelId);
+        clearPendingAmbientKindInChannel("ambient_pickup", guildId, destinationChannelId);
+      }
       return result;
     };
 
@@ -4153,6 +4680,7 @@ async function processTriggeredMessage(
       eventContent: currentTurnEventContent !== "" ? currentTurnEventContent : translatedContent,
       messageId: options.currentTurnOverride?.messageId ?? message.id,
       replyToMessageId: message.reference?.messageId,
+      repliedToBot: messageRepliesToOwnBot(message),
       ...(repliedToBotRouteSource !== null
         ? {
             repliedToBotRouteSource: {
@@ -4332,6 +4860,14 @@ async function processTriggeredMessage(
         requestLog.setAgentRan(result.agentRan);
       }
       requestLog.emit(log);
+      const completedTrigger = result?.triggerResult ?? triggerOverride;
+      if (
+        completedTrigger?.reason === "mention" ||
+        completedTrigger?.reason === "keyword" ||
+        completedTrigger?.reason === "random"
+      ) {
+        clearAmbientNormalTriggerInFlight(guildId, channelId, message.author.id);
+      }
     }
     return {
       coveredMessageIds: [message.id],
