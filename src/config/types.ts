@@ -153,6 +153,7 @@ export interface BackgroundLlmDefaults {
 }
 
 export type AmbientAttentionKind = "ambient_pickup" | "lingering_attention" | "follow_up";
+export type AmbientInitiativeKind = "self_expression" | "targeted_checkin";
 
 /** Shared evaluator model used by ambient attention candidate checks. */
 export interface AmbientAttentionEvaluatorConfig {
@@ -221,6 +222,73 @@ export type AmbientAttentionConfigYaml = Partial<Omit<
   }>;
 };
 
+/** Shared evaluator model used by ambient initiative opportunity checks. */
+export interface AmbientInitiativeEvaluatorConfig {
+  provider?: LlmProvider;
+  model: string;
+  modelParams: Record<string, unknown>;
+  thinkingLevel?: ThinkingLevel;
+  serviceTier?: ServiceTier;
+  llmOutputTimeoutMs: number;
+}
+
+/** Active local-time window where proactive speech may happen naturally. */
+export interface AmbientInitiativeActiveHoursConfig {
+  timezone?: string;
+  start: string;
+  end: string;
+}
+
+/** Per-kind proactive initiative pressure, budget, and timing controls. */
+export interface AmbientInitiativeKindConfig {
+  enabled: boolean;
+  basePressure: number;
+  pressureThreshold: number;
+  probabilityThreshold: number;
+  confidenceThreshold: number;
+  cooldownMs: number;
+  maxPerDay: number;
+}
+
+/** Ambient initiative behavior for proactive self-expression and check-ins. */
+export interface AmbientInitiativeConfig {
+  enabled: boolean;
+  shadowMode: boolean;
+  mainChannelId?: string;
+  checkIntervalMinMs: number;
+  checkIntervalMaxMs: number;
+  activeHours: AmbientInitiativeActiveHoursConfig;
+  historyLimit: number;
+  recentActivityMinMs: number;
+  recentActivityMaxMs: number;
+  quietWindowMs: number;
+  typingActiveMs: number;
+  botCooldownMs: number;
+  fatigueAfterAnyMs: number;
+  maxPerDay: number;
+  minMainChannelHumanMessages: number;
+  mainChannelLookbackDays: number;
+  evaluator: AmbientInitiativeEvaluatorConfig;
+  selfExpression: AmbientInitiativeKindConfig;
+  targetedCheckin: AmbientInitiativeKindConfig & {
+    maxPerUserPerDay: number;
+    openLoopMaxAgeMs: number;
+  };
+}
+
+export type AmbientInitiativeConfigYaml = Partial<Omit<
+  AmbientInitiativeConfig,
+  "evaluator" | "activeHours" | "selfExpression" | "targetedCheckin"
+>> & {
+  activeHours?: Partial<AmbientInitiativeActiveHoursConfig>;
+  evaluator?: Partial<AmbientInitiativeEvaluatorConfig>;
+  selfExpression?: Partial<AmbientInitiativeKindConfig>;
+  targetedCheckin?: Partial<AmbientInitiativeKindConfig & {
+    maxPerUserPerDay: number;
+    openLoopMaxAgeMs: number;
+  }>;
+};
+
 /** Dedicated image-reading fallback configuration. */
 export interface ImageReadingConfig {
   /** Whether to describe images with a separate vision model when the main model cannot read them. */
@@ -274,6 +342,7 @@ export interface TriggerInstructions {
   ambient_pickup?: string;
   lingering_attention?: string;
   follow_up?: string;
+  ambient_initiative?: string;
 }
 
 /** Context window trimming thresholds (message count). */
@@ -344,6 +413,8 @@ export interface GuildConfig {
   backgroundLlm: BackgroundLlmConfig;
   /** Optional ambient attention engine configuration. */
   ambientAttention?: AmbientAttentionConfig;
+  /** Optional ambient initiative engine configuration. */
+  ambientInitiative?: AmbientInitiativeConfig;
   /** Native reply/tool loop runtime limits. */
   replyLoop: ReplyLoopConfig;
   /** Background memory extraction behavior. */
@@ -404,6 +475,8 @@ export interface GlobalConfig {
   defaultBackgroundLlm: BackgroundLlmDefaults;
   /** Default ambient attention behavior. */
   defaultAmbientAttention?: AmbientAttentionConfig;
+  /** Default ambient initiative behavior. */
+  defaultAmbientInitiative?: AmbientInitiativeConfig;
   /** Default native reply/tool loop runtime limits. */
   defaultReplyLoop: ReplyLoopConfig;
   /** Default background memory extraction behavior. */
@@ -483,6 +556,7 @@ export interface GuildConfigYaml {
     };
   };
   ambientAttention?: AmbientAttentionConfigYaml;
+  ambientInitiative?: AmbientInitiativeConfigYaml;
   replyLoop?: {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;
@@ -574,6 +648,7 @@ export interface MainConfigYaml {
     };
   };
   ambientAttention?: AmbientAttentionConfigYaml;
+  ambientInitiative?: AmbientInitiativeConfigYaml;
   replyLoop?: {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;

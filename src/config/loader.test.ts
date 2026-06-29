@@ -1092,6 +1092,49 @@ describe("resolveGuildConfig", () => {
     expect(resolved.ambientAttention?.followUp.maxRepliesPerChannelPerHour).toBe(2);
   });
 
+  test("ambientInitiative inherits global config and applies guild overrides", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, [
+      "ambientInitiative:",
+      "  enabled: true",
+      "  shadowMode: true",
+      "  checkIntervalMinMs: 1000",
+      "  checkIntervalMaxMs: 2000",
+      "  activeHours:",
+      "    timezone: Europe/Moscow",
+      "    start: \"10:00\"",
+      "    end: \"01:00\"",
+      "  evaluator:",
+      "    provider: openai-codex",
+      "    model: gpt-5.3-codex-spark",
+      "    thinkingLevel: minimal",
+      "    llmOutputTimeoutMs: 8000",
+      "  selfExpression:",
+      "    enabled: true",
+      "    maxPerDay: 3",
+      "  targetedCheckin:",
+      "    maxPerUserPerDay: 2",
+    ].join("\n"));
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const resolved = resolveGuildConfig(global, {
+      guildId: "113d",
+      slug: "initiative",
+      ambientInitiative: {
+        shadowMode: false,
+        selfExpression: { maxPerDay: 4 },
+        targetedCheckin: { maxPerUserPerDay: 1 },
+      },
+    });
+
+    expect(resolved.ambientInitiative?.enabled).toBe(true);
+    expect(resolved.ambientInitiative?.shadowMode).toBe(false);
+    expect(resolved.ambientInitiative?.activeHours.timezone).toBe("Europe/Moscow");
+    expect(resolved.ambientInitiative?.selfExpression.maxPerDay).toBe(4);
+    expect(resolved.ambientInitiative?.targetedCheckin.maxPerUserPerDay).toBe(1);
+    expect(resolved.ambientInitiative?.targetedCheckin.openLoopMaxAgeMs).toBe(172800000);
+  });
+
   test("rejects invalid ambientAttention thresholds", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");

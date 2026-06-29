@@ -40,6 +40,10 @@ import type {
   AmbientAttentionModeConfig,
   AmbientAttentionEvaluatorConfig,
   AmbientAttentionConfigYaml,
+  AmbientInitiativeConfig,
+  AmbientInitiativeEvaluatorConfig,
+  AmbientInitiativeKindConfig,
+  AmbientInitiativeConfigYaml,
 } from "./types.ts";
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
 
@@ -136,6 +140,60 @@ const DEFAULT_AMBIENT_ATTENTION: AmbientAttentionConfig = {
     maxRepliesPerChannelPerHour: 4,
     silenceMs: 12_000,
     maxPerExchange: 1,
+  },
+};
+
+const DEFAULT_AMBIENT_INITIATIVE_KIND: AmbientInitiativeKindConfig = {
+  enabled: false,
+  basePressure: 0.12,
+  pressureThreshold: 0.72,
+  probabilityThreshold: 0.72,
+  confidenceThreshold: 0.6,
+  cooldownMs: 2 * 60 * 60 * 1000,
+  maxPerDay: 2,
+};
+
+const DEFAULT_AMBIENT_INITIATIVE: AmbientInitiativeConfig = {
+  enabled: false,
+  shadowMode: false,
+  checkIntervalMinMs: 12 * 60 * 1000,
+  checkIntervalMaxMs: 45 * 60 * 1000,
+  activeHours: {
+    start: "10:00",
+    end: "01:00",
+  },
+  historyLimit: 60,
+  recentActivityMinMs: 5 * 60 * 1000,
+  recentActivityMaxMs: 3 * 60 * 60 * 1000,
+  quietWindowMs: 6 * 60 * 1000,
+  typingActiveMs: 10_000,
+  botCooldownMs: 45 * 60 * 1000,
+  fatigueAfterAnyMs: 60 * 60 * 1000,
+  maxPerDay: 5,
+  minMainChannelHumanMessages: 20,
+  mainChannelLookbackDays: 7,
+  evaluator: {
+    provider: "openai-codex",
+    model: "gpt-5.3-codex-spark",
+    modelParams: { textVerbosity: "low" },
+    thinkingLevel: "minimal",
+    llmOutputTimeoutMs: 8_000,
+  },
+  selfExpression: {
+    ...DEFAULT_AMBIENT_INITIATIVE_KIND,
+    enabled: true,
+    basePressure: 0.18,
+    maxPerDay: 3,
+    cooldownMs: 3 * 60 * 60 * 1000,
+  },
+  targetedCheckin: {
+    ...DEFAULT_AMBIENT_INITIATIVE_KIND,
+    enabled: true,
+    basePressure: 0.16,
+    maxPerDay: 3,
+    cooldownMs: 2 * 60 * 60 * 1000,
+    maxPerUserPerDay: 1,
+    openLoopMaxAgeMs: 48 * 60 * 60 * 1000,
   },
 };
 
@@ -630,6 +688,25 @@ function resolveAmbientEvaluatorConfig(
   return resolved;
 }
 
+function resolveAmbientInitiativeEvaluatorConfig(
+  defaults: AmbientInitiativeEvaluatorConfig,
+  partial: Partial<AmbientInitiativeEvaluatorConfig> | undefined,
+): AmbientInitiativeEvaluatorConfig {
+  const resolved: AmbientInitiativeEvaluatorConfig = {
+    provider: parseLlmProvider(partial?.provider, "ambientInitiative.evaluator.provider") ?? defaults.provider,
+    model: partial?.model ?? defaults.model,
+    modelParams: { ...defaults.modelParams, ...partial?.modelParams },
+    thinkingLevel: parseThinkingLevel(partial?.thinkingLevel, "ambientInitiative.evaluator.thinkingLevel") ?? defaults.thinkingLevel,
+    serviceTier: parseServiceTier(partial?.serviceTier, "ambientInitiative.evaluator") ?? defaults.serviceTier,
+    llmOutputTimeoutMs: partial?.llmOutputTimeoutMs ?? defaults.llmOutputTimeoutMs,
+  };
+  if (resolved.model === "") throw new Error("ambientInitiative.evaluator.model must not be empty");
+  if (!Number.isFinite(resolved.llmOutputTimeoutMs) || resolved.llmOutputTimeoutMs < 1000) {
+    throw new Error("ambientInitiative.evaluator.llmOutputTimeoutMs must be >= 1000");
+  }
+  return resolved;
+}
+
 function resolveAmbientModeConfig<T extends AmbientAttentionModeConfig>(
   defaults: T,
   partial: Partial<T> | undefined,
@@ -658,6 +735,40 @@ function resolveAmbientAttentionConfig(
     followUp: resolveAmbientModeConfig(base.followUp, partial?.followUp, "ambientAttention.followUp"),
   };
   validateAmbientAttentionConfig(resolved, "ambientAttention");
+  return resolved;
+}
+
+function resolveAmbientInitiativeKindConfig<T extends AmbientInitiativeKindConfig>(
+  defaults: T,
+  partial: Partial<T> | undefined,
+  keyPrefix: string,
+): T {
+  const resolved = {
+    ...defaults,
+    ...partial,
+  };
+  validateAmbientInitiativeKindConfig(resolved, keyPrefix);
+  return resolved;
+}
+
+function resolveAmbientInitiativeConfig(
+  defaults: AmbientInitiativeConfig | undefined,
+  partial: AmbientInitiativeConfigYaml | undefined,
+): AmbientInitiativeConfig | undefined {
+  const base = defaults ?? DEFAULT_AMBIENT_INITIATIVE;
+  if (partial === undefined && defaults === undefined) return undefined;
+  const resolved: AmbientInitiativeConfig = {
+    ...base,
+    ...partial,
+    activeHours: {
+      ...base.activeHours,
+      ...partial?.activeHours,
+    },
+    evaluator: resolveAmbientInitiativeEvaluatorConfig(base.evaluator, partial?.evaluator),
+    selfExpression: resolveAmbientInitiativeKindConfig(base.selfExpression, partial?.selfExpression, "ambientInitiative.selfExpression"),
+    targetedCheckin: resolveAmbientInitiativeKindConfig(base.targetedCheckin, partial?.targetedCheckin, "ambientInitiative.targetedCheckin"),
+  };
+  validateAmbientInitiativeConfig(resolved, "ambientInitiative");
   return resolved;
 }
 
@@ -709,6 +820,58 @@ function validateAmbientAttentionConfig(config: AmbientAttentionConfig, keyPrefi
   }
   if (!Number.isInteger(config.followUp.maxPerExchange) || config.followUp.maxPerExchange < 0) {
     throw new Error(`${keyPrefix}.followUp.maxPerExchange must be >= 0`);
+  }
+}
+
+function validateAmbientInitiativeKindConfig(config: AmbientInitiativeKindConfig, keyPrefix: string): void {
+  clampProbabilityConfig(config.basePressure, `${keyPrefix}.basePressure`);
+  clampProbabilityConfig(config.pressureThreshold, `${keyPrefix}.pressureThreshold`);
+  clampProbabilityConfig(config.probabilityThreshold, `${keyPrefix}.probabilityThreshold`);
+  clampProbabilityConfig(config.confidenceThreshold, `${keyPrefix}.confidenceThreshold`);
+  if (!Number.isFinite(config.cooldownMs) || config.cooldownMs < 0) throw new Error(`${keyPrefix}.cooldownMs must be >= 0`);
+  if (!Number.isInteger(config.maxPerDay) || config.maxPerDay < 0) throw new Error(`${keyPrefix}.maxPerDay must be >= 0`);
+}
+
+function validateClockTime(value: string, keyPrefix: string): void {
+  if (!/^\d{2}:\d{2}$/.test(value)) throw new Error(`${keyPrefix} must use HH:mm`);
+  const [hhRaw, mmRaw] = value.split(":");
+  const hh = Number(hhRaw);
+  const mm = Number(mmRaw);
+  if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+    throw new Error(`${keyPrefix} must use HH:mm`);
+  }
+}
+
+function validateAmbientInitiativeConfig(config: AmbientInitiativeConfig, keyPrefix: string): void {
+  if (!Number.isFinite(config.checkIntervalMinMs) || config.checkIntervalMinMs < 1000) {
+    throw new Error(`${keyPrefix}.checkIntervalMinMs must be >= 1000`);
+  }
+  if (!Number.isFinite(config.checkIntervalMaxMs) || config.checkIntervalMaxMs < config.checkIntervalMinMs) {
+    throw new Error(`${keyPrefix}.checkIntervalMaxMs must be >= checkIntervalMinMs`);
+  }
+  validateClockTime(config.activeHours.start, `${keyPrefix}.activeHours.start`);
+  validateClockTime(config.activeHours.end, `${keyPrefix}.activeHours.end`);
+  if (!Number.isInteger(config.historyLimit) || config.historyLimit < 5) throw new Error(`${keyPrefix}.historyLimit must be >= 5`);
+  if (!Number.isFinite(config.recentActivityMinMs) || config.recentActivityMinMs < 0) throw new Error(`${keyPrefix}.recentActivityMinMs must be >= 0`);
+  if (!Number.isFinite(config.recentActivityMaxMs) || config.recentActivityMaxMs < config.recentActivityMinMs) {
+    throw new Error(`${keyPrefix}.recentActivityMaxMs must be >= recentActivityMinMs`);
+  }
+  if (!Number.isFinite(config.quietWindowMs) || config.quietWindowMs < 0) throw new Error(`${keyPrefix}.quietWindowMs must be >= 0`);
+  if (!Number.isFinite(config.typingActiveMs) || config.typingActiveMs < 0) throw new Error(`${keyPrefix}.typingActiveMs must be >= 0`);
+  if (!Number.isFinite(config.botCooldownMs) || config.botCooldownMs < 0) throw new Error(`${keyPrefix}.botCooldownMs must be >= 0`);
+  if (!Number.isFinite(config.fatigueAfterAnyMs) || config.fatigueAfterAnyMs < 0) throw new Error(`${keyPrefix}.fatigueAfterAnyMs must be >= 0`);
+  if (!Number.isInteger(config.maxPerDay) || config.maxPerDay < 0) throw new Error(`${keyPrefix}.maxPerDay must be >= 0`);
+  if (!Number.isInteger(config.minMainChannelHumanMessages) || config.minMainChannelHumanMessages < 0) {
+    throw new Error(`${keyPrefix}.minMainChannelHumanMessages must be >= 0`);
+  }
+  if (!Number.isFinite(config.mainChannelLookbackDays) || config.mainChannelLookbackDays <= 0) {
+    throw new Error(`${keyPrefix}.mainChannelLookbackDays must be > 0`);
+  }
+  if (!Number.isInteger(config.targetedCheckin.maxPerUserPerDay) || config.targetedCheckin.maxPerUserPerDay < 0) {
+    throw new Error(`${keyPrefix}.targetedCheckin.maxPerUserPerDay must be >= 0`);
+  }
+  if (!Number.isFinite(config.targetedCheckin.openLoopMaxAgeMs) || config.targetedCheckin.openLoopMaxAgeMs < 0) {
+    throw new Error(`${keyPrefix}.targetedCheckin.openLoopMaxAgeMs must be >= 0`);
   }
 }
 
@@ -926,11 +1089,13 @@ export function loadGlobalConfig(
   const defaultImageReading = resolveGlobalImageReading(yaml.imageReading);
   const defaultImageGeneration = resolveGlobalImageGeneration(yaml.imageGeneration);
   const defaultAmbientAttention = resolveAmbientAttentionConfig(undefined, yaml.ambientAttention);
+  const defaultAmbientInitiative = resolveAmbientInitiativeConfig(undefined, yaml.ambientInitiative);
   const openrouterApiKey = env.OPENROUTER_API_KEY;
   const usesOpenRouter = defaultLlmProvider === "openrouter"
     || yaml.backgroundLlm?.provider === "openrouter"
     || (defaultImageReading.fallbackEnabled && defaultImageReading.fallbackProvider === "openrouter")
-    || (defaultAmbientAttention?.enabled === true && defaultAmbientAttention.evaluator.provider === "openrouter");
+    || (defaultAmbientAttention?.enabled === true && defaultAmbientAttention.evaluator.provider === "openrouter")
+    || (defaultAmbientInitiative?.enabled === true && defaultAmbientInitiative.evaluator.provider === "openrouter");
   if (usesOpenRouter && (openrouterApiKey === undefined || openrouterApiKey === "")) {
     throw new Error("OPENROUTER_API_KEY is required when any OpenRouter LLM backend is enabled");
   }
@@ -971,6 +1136,7 @@ export function loadGlobalConfig(
       ambient_pickup: yaml.triggerInstructions?.ambient_pickup,
       lingering_attention: yaml.triggerInstructions?.lingering_attention,
       follow_up: yaml.triggerInstructions?.follow_up,
+      ambient_initiative: yaml.triggerInstructions?.ambient_initiative,
     },
     defaultImageMaxDimension: yaml.imageMaxDimension ?? 4096,
     defaultMergeMessageGapSeconds: yaml.mergeMessageGapSeconds ?? 120,
@@ -1005,6 +1171,7 @@ export function loadGlobalConfig(
     defaultPromptTransport: resolveGlobalPromptTransport(yaml.promptTransport),
     defaultBackgroundLlm: resolveGlobalBackgroundLlm(yaml.backgroundLlm),
     defaultAmbientAttention,
+    defaultAmbientInitiative,
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
     defaultMemoryExtraction: resolveGlobalMemoryExtraction(yaml.memoryExtraction),
   };
@@ -1061,6 +1228,7 @@ export function resolveGuildConfig(
       ambient_pickup: partial.triggerInstructions?.ambient_pickup ?? global.defaultTriggerInstructions.ambient_pickup,
       lingering_attention: partial.triggerInstructions?.lingering_attention ?? global.defaultTriggerInstructions.lingering_attention,
       follow_up: partial.triggerInstructions?.follow_up ?? global.defaultTriggerInstructions.follow_up,
+      ambient_initiative: partial.triggerInstructions?.ambient_initiative ?? global.defaultTriggerInstructions.ambient_initiative,
     },
     llmProvider: parseLlmProvider(partial.llmProvider, "llmProvider") ?? global.defaultLlmProvider,
     model: partial.model,
@@ -1101,6 +1269,7 @@ export function resolveGuildConfig(
     promptTransport: resolveGuildPromptTransport(global.defaultPromptTransport, partial.promptTransport),
     backgroundLlm: resolveGuildBackgroundLlm(global, partial, promptCaching),
     ambientAttention: resolveAmbientAttentionConfig(global.defaultAmbientAttention, partial.ambientAttention),
+    ambientInitiative: resolveAmbientInitiativeConfig(global.defaultAmbientInitiative, partial.ambientInitiative),
     replyLoop: resolveGuildReplyLoop(global.defaultReplyLoop, partial.replyLoop),
     memoryExtraction: resolveGuildMemoryExtraction(global.defaultMemoryExtraction, partial.memoryExtraction),
   };

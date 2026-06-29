@@ -103,6 +103,52 @@ ambientAttention:
     silenceMs: 12000
     maxPerExchange: 1
 
+# Ambient initiative can proactively speak in the main channel when room/context creates an opening.
+ambientInitiative:
+  enabled: false
+  shadowMode: false
+  mainChannelId: ""       # Empty uses most active human channel over mainChannelLookbackDays
+  checkIntervalMinMs: 720000
+  checkIntervalMaxMs: 2700000
+  activeHours:
+    start: "10:00"
+    end: "01:00"
+  historyLimit: 60
+  recentActivityMinMs: 300000
+  recentActivityMaxMs: 10800000
+  quietWindowMs: 360000
+  typingActiveMs: 10000
+  botCooldownMs: 2700000
+  fatigueAfterAnyMs: 3600000
+  maxPerDay: 5
+  minMainChannelHumanMessages: 20
+  mainChannelLookbackDays: 7
+  evaluator:
+    provider: openai-codex
+    model: gpt-5.3-codex-spark
+    thinkingLevel: minimal
+    llmOutputTimeoutMs: 8000
+    modelParams:
+      textVerbosity: low
+  selfExpression:
+    enabled: true
+    basePressure: 0.18
+    pressureThreshold: 0.72
+    probabilityThreshold: 0.72
+    confidenceThreshold: 0.6
+    cooldownMs: 10800000
+    maxPerDay: 3
+  targetedCheckin:
+    enabled: true
+    basePressure: 0.16
+    pressureThreshold: 0.72
+    probabilityThreshold: 0.72
+    confidenceThreshold: 0.6
+    cooldownMs: 7200000
+    maxPerDay: 3
+    maxPerUserPerDay: 1
+    openLoopMaxAgeMs: 172800000
+
 # Default trigger settings (guilds can override)
 triggers:
   mention: true          # Respond when @mentioned
@@ -122,6 +168,7 @@ triggers:
 #   ambient_pickup: "2B noticed quiet unaddressed chatter. Normal channel message by default."
 #   lingering_attention: "2B is still lightly attentive after a recent exchange."
 #   follow_up: "Only add a follow-up after silence when there is a concrete natural intent."
+#   ambient_initiative: "Proactive initiative; silence is valid if it feels forced."
 
 # Max canonical stored image dimension (larger user images resized to fit)
 imageMaxDimension: 4096

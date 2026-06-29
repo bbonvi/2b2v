@@ -3,7 +3,7 @@ import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { requestLogStore } from "./dashboard/store";
 import { parseDashboardPasswordlessCidrs, startDashboard } from "./dashboard/server";
 import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, validateTrimConfig, validateVpnConfig } from "./config/loader";
-import type { AmbientAttentionConfig, AmbientAttentionKind, AmbientAttentionModeConfig, GuildConfig } from "./config/types";
+import type { AmbientAttentionConfig, AmbientAttentionKind, AmbientAttentionModeConfig, AmbientInitiativeConfig, AmbientInitiativeKind, AmbientInitiativeKindConfig, GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
 import { createQdrantClient, ensureCollection, healthCheck } from "./qdrant/client";
 import { deleteMessagePointsByMessageId } from "./qdrant/adapter";
@@ -64,11 +64,11 @@ import { createCloseThreadTool, createStartThreadTool } from "./agent/start-thre
 import { createReactToMessageTool } from "./agent/react-to-message-tool";
 import { applyRuntimeToolPrompts, type ToolPromptVariables } from "./agent/runtime-tool-prompts";
 import { completeLlmChat, type OpenRouterMessage } from "./llm/openrouter-chat";
-import { buildAmbientAttentionStreamOptions, resolveGuildLlmProvider } from "./llm/client";
+import { buildAmbientAttentionStreamOptions, buildAmbientInitiativeStreamOptions, resolveGuildLlmProvider } from "./llm/client";
 import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { upsertThread, updateThreadActivity, markBotParticipating, markThreadArchived, listThreadsForContext, getThreadMetadata, getThread } from "./db/thread-repository";
 import { imageExtensionForMime, prepareImageBufferForContext, processAndStoreImage, storeImageBufferUnmodified, type ImageIngestDeps } from "./db/image-ingest";
-import { deleteExpiredMemories, countUserMemoriesByUser, deleteMemory, updateMemory, isMemoryKind } from "./db/memory-repository";
+import { deleteExpiredMemories, countUserMemoriesByUser, deleteMemory, updateMemory, isMemoryKind, listMemories } from "./db/memory-repository";
 import { deleteStoredManagementMessages, getManagementMemory, listManagementMemories, listManagementMessages, storedManagementDirectoryIds, updateStoredManagementMessageContent, type ManagementChannelLabel, type ManagementDirectory, type ManagementLabel, type ManagementMessageRow, type ManagementMemoryRow } from "./dashboard/management";
 import { listUpcomingForContext, createSchedule, deleteScheduleForGuild, listSchedules } from "./db/schedule-repository";
 import { registerSlashCommands } from "./commands/registry";
@@ -2452,6 +2452,1183 @@ function clearAmbientAttentionState(): void {
   ambientCooldowns.clear();
   ambientPickupChannelCooldowns.clear();
   ambientNormalTriggerUsers.clear();
+}
+
+type AmbientInitiativeDecision = {
+  should_initiate: boolean;
+  initiate_probability: number;
+  kind: AmbientInitiativeKind;
+  target_user_id: string | null;
+  source: string;
+  anchor: string;
+  required_shape: string;
+  avoid: string[];
+  confidence: number;
+  reason: string;
+};
+
+type AmbientInitiativeRunMode = "automatic" | "draft" | "shadow";
+
+type AmbientInitiativeCandidate = {
+  id: string;
+  guildId: string;
+  channelId: string;
+  kind: AmbientInitiativeKind;
+  createdAt: number;
+  mode: AmbientInitiativeRunMode;
+  forced: boolean;
+  forceDecision: boolean;
+  runToken?: string;
+};
+
+type AmbientInitiativeSignals = {
+  now: number;
+  inActiveHours: boolean;
+  quietMs: number | null;
+  lastHumanAt: number | null;
+  lastBotAt: number | null;
+  recentHumanCount: number;
+  recentBotCount: number;
+  activeTyping: boolean;
+  pendingAmbientCandidates: number;
+  activeImageJobs: number;
+  familiarOnlineCount: number;
+  openLoops: AmbientInitiativeOpenLoop[];
+  recentInitiatives: AmbientInitiativeRecord[];
+};
+
+type AmbientInitiativeOpenLoop = {
+  memoryId: number;
+  userId: string | null;
+  kind: string;
+  content: string;
+  ageMs: number;
+};
+
+type AmbientInitiativeRecord = {
+  id: string;
+  guildId: string;
+  channelId: string;
+  kind: AmbientInitiativeKind;
+  targetUserId: string | null;
+  summary: string;
+  text: string;
+  sent: boolean;
+  ignored: boolean;
+  createdAt: number;
+};
+
+type AmbientInitiativePressure = {
+  kind: AmbientInitiativeKind;
+  pressure: number;
+  threshold: number;
+  roll: number;
+  passed: boolean;
+  inputs: Record<string, number | boolean | string | null>;
+};
+
+const ambientInitiativeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const ambientInitiativeRunning = new Set<string>();
+const ambientInitiativeLastByKind = new Map<string, number>();
+const ambientInitiativeRecords: AmbientInitiativeRecord[] = [];
+const AMBIENT_INITIATIVE_RECORD_LIMIT = 300;
+
+function ambientInitiativeLockKey(guildId: string, channelId: string): string {
+  return `${guildId}:${channelId}`;
+}
+
+function ambientInitiativeKindKey(kind: AmbientInitiativeKind, guildId: string, channelId: string): string {
+  return `${kind}:${guildId}:${channelId}`;
+}
+
+function ambientInitiativeKindConfig(config: AmbientInitiativeConfig, kind: AmbientInitiativeKind): AmbientInitiativeKindConfig {
+  if (kind === "self_expression") return config.selfExpression;
+  return config.targetedCheckin;
+}
+
+function clearAmbientInitiativeState(): void {
+  for (const timer of ambientInitiativeTimers.values()) clearTimeout(timer);
+  ambientInitiativeTimers.clear();
+  ambientInitiativeRunning.clear();
+  ambientInitiativeLastByKind.clear();
+}
+
+function recordAmbientInitiativeEvent(record: AmbientInitiativeRecord): void {
+  ambientInitiativeRecords.push(record);
+  while (ambientInitiativeRecords.length > AMBIENT_INITIATIVE_RECORD_LIMIT) ambientInitiativeRecords.shift();
+}
+
+function recentAmbientInitiatives(guildId: string, channelId: string, now = Date.now()): AmbientInitiativeRecord[] {
+  return ambientInitiativeRecords
+    .filter((record) => record.guildId === guildId && record.channelId === channelId && now - record.createdAt <= 24 * 60 * 60 * 1000)
+    .slice(-20);
+}
+
+function parseClockMinutes(value: string): number {
+  const [hhRaw = "0", mmRaw = "0"] = value.split(":");
+  return Number(hhRaw) * 60 + Number(mmRaw);
+}
+
+function localClockMinutes(timezone: string, now: number): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(now));
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0");
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? "0");
+  return hour * 60 + minute;
+}
+
+function ambientInitiativeInActiveHours(config: AmbientInitiativeConfig, guildConfig: GuildConfig, now = Date.now()): boolean {
+  const timezone = config.activeHours.timezone ?? guildConfig.timezone;
+  const current = localClockMinutes(timezone, now);
+  const start = parseClockMinutes(config.activeHours.start);
+  const end = parseClockMinutes(config.activeHours.end);
+  if (start === end) return true;
+  if (start < end) return current >= start && current <= end;
+  return current >= start || current <= end;
+}
+
+function ambientInitiativeDailyCount(input: {
+  guildId: string;
+  channelId: string;
+  kind?: AmbientInitiativeKind;
+  targetUserId?: string | null;
+  now?: number;
+}): number {
+  const now = input.now ?? Date.now();
+  return ambientInitiativeRecords.filter((record) =>
+    record.guildId === input.guildId &&
+    record.channelId === input.channelId &&
+    now - record.createdAt <= 24 * 60 * 60 * 1000 &&
+    (input.kind === undefined || record.kind === input.kind) &&
+    (input.targetUserId === undefined || record.targetUserId === input.targetUserId) &&
+    record.sent
+  ).length;
+}
+
+function resolveAmbientInitiativeMainChannel(guild: Guild, config: AmbientInitiativeConfig): SendableGuildChannel | null {
+  if (config.mainChannelId !== undefined && config.mainChannelId !== "") {
+    const configured = client.channels.cache.get(config.mainChannelId);
+    return configured !== undefined && isSendableGuildChannel(configured) && configured.guildId === guild.id
+      ? configured
+      : null;
+  }
+
+  const after = Date.now() - config.mainChannelLookbackDays * 24 * 60 * 60 * 1000;
+  const rows = db.raw
+    .prepare(
+      `SELECT channel_id, COUNT(*) AS count
+       FROM messages
+       WHERE guild_id = ? AND is_bot = 0 AND is_synthetic = 0 AND is_prompt_only = 0 AND created_at >= ?
+       GROUP BY channel_id
+       ORDER BY count DESC`
+    )
+    .all(guild.id, after) as Array<{ channel_id: string; count: number }>;
+
+  for (const row of rows) {
+    if (row.count < config.minMainChannelHumanMessages) continue;
+    const channel = client.channels.cache.get(row.channel_id);
+    if (channel === undefined || !isSendableGuildChannel(channel) || channel.guildId !== guild.id) continue;
+    if (!botChannelPermissions(channel).canSend) continue;
+    return channel;
+  }
+
+  return null;
+}
+
+function activeImageJobsInChannel(guildId: string, channelId: string): number {
+  return agentJobs.listVisible(guildId, channelId).filter((job) => isActiveJobStatus(job.status)).length;
+}
+
+function pendingAmbientCandidatesInChannel(guildId: string, channelId: string): number {
+  let count = 0;
+  for (const pending of ambientPendingCandidates.values()) {
+    if (pending.candidate.guildId === guildId && pending.candidate.channelId === channelId) count += 1;
+  }
+  return count;
+}
+
+function ambientInitiativeOpenLoops(guild: Guild, channelId: string, config: AmbientInitiativeConfig, now = Date.now()): AmbientInitiativeOpenLoop[] {
+  const maxAgeMs = config.targetedCheckin.openLoopMaxAgeMs;
+  const rows = db.raw
+    .prepare(
+      `SELECT memories.id, memories.scope, memories.subject_user_id, memories.kind, memories.content, memories.updated_at,
+              messages.guild_id AS source_guild_id, messages.channel_id AS source_channel_id
+       FROM memories
+       LEFT JOIN messages ON messages.id = memories.source_message_id
+       WHERE memories.deleted_at IS NULL
+         AND (memories.expires_at IS NULL OR memories.expires_at > ?)
+         AND memories.updated_at >= ?
+         AND (
+           (scope = 'user' AND subject_user_id IS NOT NULL)
+           OR (scope = 'guild' AND memories.guild_id = ?)
+         )
+       ORDER BY memories.updated_at DESC, memories.id DESC
+       LIMIT 20`
+    )
+    .all(now, now - maxAgeMs, guild.id) as Array<{
+      id: number;
+      scope: string;
+      subject_user_id: string | null;
+      kind: string;
+      content: string;
+      updated_at: number;
+      source_guild_id: string | null;
+      source_channel_id: string | null;
+    }>;
+
+  return rows
+    .filter((row) => {
+      if (row.scope === "user") {
+        if (row.subject_user_id === null || !guild.members.cache.has(row.subject_user_id)) return false;
+        if (row.source_guild_id !== null && row.source_guild_id !== guild.id) return false;
+      }
+      if (row.scope === "guild" && row.source_channel_id !== null && row.source_channel_id !== channelId) return false;
+      const content = row.content.toLowerCase();
+      return row.kind === "scratchpad" || content.includes("check") || content.includes("later") || content.includes("собира");
+    })
+    .map((row) => ({
+      memoryId: row.id,
+      userId: row.subject_user_id,
+      kind: row.kind,
+      content: row.content,
+      ageMs: now - row.updated_at,
+    }));
+}
+
+function familiarOnlineCount(guild: Guild, guildId: string): number {
+  const memoryCounts = countUserMemoriesByUser(db, guildId);
+  let count = 0;
+  for (const [userId, memoryCount] of memoryCounts) {
+    if (memoryCount <= 0) continue;
+    const member = guild.members.cache.get(userId);
+    const status = member?.presence?.status;
+    if (status === "online" || status === "idle" || status === "dnd") count += 1;
+  }
+  return count;
+}
+
+function latestMessageStats(guildId: string, channelId: string, config: AmbientInitiativeConfig, now: number): {
+  lastHumanAt: number | null;
+  lastBotAt: number | null;
+  recentHumanCount: number;
+  recentBotCount: number;
+} {
+  const after = now - config.recentActivityMaxMs;
+  const rows = db.raw
+    .prepare(
+      `SELECT is_bot, created_at
+       FROM messages
+       WHERE guild_id = ? AND channel_id = ? AND is_synthetic = 0 AND is_prompt_only = 0 AND created_at >= ?
+       ORDER BY created_at DESC, id DESC
+       LIMIT 200`
+    )
+    .all(guildId, channelId, after) as Array<{ is_bot: number; created_at: number }>;
+  let lastHumanAt: number | null = null;
+  let lastBotAt: number | null = null;
+  let recentHumanCount = 0;
+  let recentBotCount = 0;
+  for (const row of rows) {
+    if (row.is_bot === 1) {
+      recentBotCount += 1;
+      lastBotAt ??= row.created_at;
+    } else {
+      recentHumanCount += 1;
+      lastHumanAt ??= row.created_at;
+    }
+  }
+  return { lastHumanAt, lastBotAt, recentHumanCount, recentBotCount };
+}
+
+function buildAmbientInitiativeSignals(guild: Guild, channelId: string, guildConfig: GuildConfig, config: AmbientInitiativeConfig): AmbientInitiativeSignals {
+  const now = Date.now();
+  const stats = latestMessageStats(guild.id, channelId, config, now);
+  return {
+    now,
+    inActiveHours: ambientInitiativeInActiveHours(config, guildConfig, now),
+    quietMs: stats.lastHumanAt !== null ? now - stats.lastHumanAt : null,
+    ...stats,
+    activeTyping: activeTypingInChannel(guild.id, channelId, config.typingActiveMs, now),
+    pendingAmbientCandidates: pendingAmbientCandidatesInChannel(guild.id, channelId),
+    activeImageJobs: activeImageJobsInChannel(guild.id, channelId),
+    familiarOnlineCount: familiarOnlineCount(guild, guild.id),
+    openLoops: ambientInitiativeOpenLoops(guild, channelId, config, now),
+    recentInitiatives: recentAmbientInitiatives(guild.id, channelId, now),
+  };
+}
+
+function ambientInitiativeHardGate(input: {
+  guildId: string;
+  channelId: string;
+  kind?: AmbientInitiativeKind;
+  config: AmbientInitiativeConfig;
+  signals: AmbientInitiativeSignals;
+  forced: boolean;
+  phase: "opportunity" | "pre_send";
+}): { ok: true } | { ok: false; reason: string } {
+  if (!input.config.enabled && !input.forced) return { ok: false, reason: "ambient initiative disabled" };
+  if (input.phase === "pre_send" && input.signals.activeTyping) return { ok: false, reason: "user typing active" };
+  if (input.signals.activeImageJobs > 0) return { ok: false, reason: "active image job visible" };
+  if (input.signals.pendingAmbientCandidates > 0) return { ok: false, reason: "ambient attention pending" };
+  if (!input.forced && !input.signals.inActiveHours) return { ok: false, reason: "outside active hours" };
+  if (!input.forced && input.signals.activeTyping) return { ok: false, reason: "user typing active" };
+  if (!input.forced && input.signals.lastBotAt !== null && input.signals.now - input.signals.lastBotAt < input.config.botCooldownMs) {
+    return { ok: false, reason: "recent 2b output" };
+  }
+  if (!input.forced && input.signals.quietMs !== null && input.signals.quietMs < input.config.quietWindowMs) {
+    return { ok: false, reason: "quiet window too short" };
+  }
+  if (!input.forced && input.signals.lastHumanAt === null) return { ok: false, reason: "no recent human activity" };
+  if (!input.forced && input.signals.lastHumanAt !== null && input.signals.now - input.signals.lastHumanAt < input.config.recentActivityMinMs) {
+    return { ok: false, reason: "human activity too fresh" };
+  }
+  if (!input.forced && input.signals.lastHumanAt !== null && input.signals.now - input.signals.lastHumanAt > input.config.recentActivityMaxMs) {
+    return { ok: false, reason: "room too dead" };
+  }
+  if (!input.forced && ambientInitiativeDailyCount({ guildId: input.guildId, channelId: input.channelId, now: input.signals.now }) >= input.config.maxPerDay) {
+    return { ok: false, reason: "daily initiative budget exhausted" };
+  }
+  if (input.kind !== undefined) {
+    const kindConfig = ambientInitiativeKindConfig(input.config, input.kind);
+    if (!kindConfig.enabled && !input.forced) return { ok: false, reason: `${input.kind} disabled` };
+    if (!input.forced && ambientInitiativeDailyCount({ guildId: input.guildId, channelId: input.channelId, kind: input.kind, now: input.signals.now }) >= kindConfig.maxPerDay) {
+      return { ok: false, reason: `${input.kind} daily budget exhausted` };
+    }
+    const lastKind = ambientInitiativeLastByKind.get(ambientInitiativeKindKey(input.kind, input.guildId, input.channelId)) ?? 0;
+    if (!input.forced && input.signals.now - lastKind < kindConfig.cooldownMs) return { ok: false, reason: `${input.kind} cooldown active` };
+  }
+  return { ok: true };
+}
+
+function ambientInitiativePressureForKind(
+  config: AmbientInitiativeConfig,
+  kind: AmbientInitiativeKind,
+  signals: AmbientInitiativeSignals,
+): AmbientInitiativePressure {
+  const kindConfig = ambientInitiativeKindConfig(config, kind);
+  let pressure = kindConfig.basePressure;
+  const quietMs = signals.quietMs ?? 0;
+  if (signals.inActiveHours) pressure += 0.12;
+  if (signals.lastHumanAt !== null && quietMs >= config.quietWindowMs) pressure += 0.18;
+  if (signals.lastHumanAt !== null && quietMs <= config.recentActivityMaxMs) pressure += 0.08;
+  if (signals.familiarOnlineCount > 0) pressure += Math.min(0.16, signals.familiarOnlineCount * 0.04);
+  if (signals.openLoops.length > 0 && kind === "targeted_checkin") pressure += 0.24;
+  if (signals.lastBotAt !== null) pressure -= Math.max(0, 0.25 - Math.min(0.25, (signals.now - signals.lastBotAt) / Math.max(1, config.fatigueAfterAnyMs) * 0.25));
+  if (signals.recentInitiatives.length > 0) pressure -= 0.12;
+  if (!signals.inActiveHours) pressure -= 0.35;
+  if (signals.lastHumanAt === null) pressure -= 0.25;
+  const finalPressure = Math.max(0, Math.min(1, pressure));
+  const roll = Math.random();
+  return {
+    kind,
+    pressure: finalPressure,
+    threshold: kindConfig.pressureThreshold,
+    roll,
+    passed: finalPressure >= kindConfig.pressureThreshold && roll <= finalPressure,
+    inputs: {
+      inActiveHours: signals.inActiveHours,
+      quietMs,
+      familiarOnlineCount: signals.familiarOnlineCount,
+      openLoops: signals.openLoops.length,
+      recentInitiatives: signals.recentInitiatives.length,
+      lastBotAgeMs: signals.lastBotAt !== null ? signals.now - signals.lastBotAt : null,
+    },
+  };
+}
+
+function initiativeEvaluatorPolicyForKind(kind: AmbientInitiativeKind): string {
+  const policies = promptBundle.runtime.ambientInitiative.evaluator;
+  const kindPolicy = kind === "self_expression"
+    ? policies.selfExpression
+    : policies.targetedCheckin;
+  return [policies.shared, kindPolicy].filter((part) => part.trim() !== "").join("\n\n");
+}
+
+function initiativeGenerationPolicyForKind(kind: AmbientInitiativeKind): string {
+  const policies = promptBundle.runtime.ambientInitiative.generation;
+  const kindPolicy = kind === "self_expression"
+    ? policies.selfExpression
+    : policies.targetedCheckin;
+  return [policies.shared, kindPolicy].filter((part) => part.trim() !== "").join("\n\n");
+}
+
+function renderAmbientInitiativeSignals(signals: AmbientInitiativeSignals): string {
+  return [
+    `active_hours: ${signals.inActiveHours}`,
+    `quiet_ms: ${signals.quietMs ?? "none"}`,
+    `recent_human_count: ${signals.recentHumanCount}`,
+    `recent_bot_count: ${signals.recentBotCount}`,
+    `active_typing: ${signals.activeTyping}`,
+    `pending_ambient_candidates: ${signals.pendingAmbientCandidates}`,
+    `active_image_jobs: ${signals.activeImageJobs}`,
+    `familiar_online_count: ${signals.familiarOnlineCount}`,
+  ].join("\n");
+}
+
+function renderAmbientInitiativeOpenLoops(openLoops: AmbientInitiativeOpenLoop[]): string {
+  if (openLoops.length === 0) return "none";
+  return openLoops.slice(0, 8).map((loop) =>
+    `- memory_id=${loop.memoryId} user_id=${loop.userId ?? "none"} kind=${loop.kind} age_ms=${loop.ageMs}: ${loop.content}`
+  ).join("\n");
+}
+
+function renderAmbientInitiativeRecent(records: AmbientInitiativeRecord[]): string {
+  if (records.length === 0) return "none";
+  return records.slice(-8).map((record) =>
+    `- ${new Date(record.createdAt).toISOString()} kind=${record.kind} target=${record.targetUserId ?? "none"} sent=${record.sent} ignored=${record.ignored}: ${record.summary}`
+  ).join("\n");
+}
+
+function forcedAmbientInitiativeDecision(kind: AmbientInitiativeKind, signals: AmbientInitiativeSignals, history: HistoryMessage[]): AmbientInitiativeDecision | null {
+  const loop = signals.openLoops.find((item) => item.userId !== null);
+  const latestHuman = [...history].reverse().find((message) => !message.isBot);
+  const targetUserId = kind === "targeted_checkin" ? loop?.userId ?? latestHuman?.authorId ?? null : null;
+  if (kind === "targeted_checkin" && targetUserId === null) return null;
+  return {
+    should_initiate: true,
+    initiate_probability: 1,
+    kind,
+    target_user_id: targetUserId,
+    source: "prompt_lab_force",
+    anchor: loop?.content ?? latestHuman?.content ?? "Prompt Lab forced initiative draft.",
+    required_shape: kind === "self_expression" ? "concrete_incomplete_disposable" : "brief_anchored_followup",
+    avoid: ["forced", "performative", "creepy", "polished"],
+    confidence: 1,
+    reason: "Prompt Lab force bypassed evaluator.",
+  };
+}
+
+function createAmbientInitiativeRequestLog(input: {
+  guild: Guild;
+  channel: SendableGuildChannel;
+  candidate: AmbientInitiativeCandidate;
+  status: string;
+}): RequestLog {
+  const requestLog = new RequestLog(input.candidate.guildId, input.candidate.channelId, requestLogStore);
+  requestLog.setAuthor(input.candidate.mode === "draft" ? "prompt-lab:ambient-initiative" : "ambient-initiative");
+  requestLog.setTrigger({
+    type: "ambient_initiative_evaluator",
+    kind: input.candidate.kind,
+    status: input.status,
+    mode: input.candidate.mode,
+    ...(input.candidate.runToken !== undefined ? { runToken: input.candidate.runToken } : {}),
+  });
+  requestLog.setTriggerContext({
+    ...dashboardTriggerLocation(input.guild, input.channel),
+    messageId: input.candidate.id,
+    authorUsername: "ambient-initiative",
+    content: `${input.candidate.kind} opportunity`,
+    translatedContent: `${input.candidate.kind} opportunity`,
+  });
+  requestLog.setAgentRan(true);
+  return requestLog;
+}
+
+async function evaluateAmbientInitiativeCandidate(input: {
+  config: AmbientInitiativeConfig;
+  guildConfig: GuildConfig;
+  candidate: AmbientInitiativeCandidate;
+  signals: AmbientInitiativeSignals;
+  pressure: AmbientInitiativePressure;
+  history: HistoryMessage[];
+  requestLog: RequestLog;
+}): Promise<AmbientInitiativeDecision | null> {
+  const streamOptions = buildAmbientInitiativeStreamOptions(globalConfig, input.guildConfig);
+  const providerParams: Record<string, unknown> = { ...streamOptions };
+  delete providerParams.apiKey;
+  const provider = input.config.evaluator.provider ?? resolveGuildLlmProvider(globalConfig, input.guildConfig);
+  const system = [
+    initiativeEvaluatorPolicyForKind(input.candidate.kind),
+    "Return only compact JSON with should_initiate, initiate_probability, kind, target_user_id, source, anchor, required_shape, avoid, confidence, reason.",
+    "initiate_probability and confidence must be 0..1. avoid must be a short string array.",
+  ].filter((part) => part.trim() !== "").join("\n\n");
+  const user = [
+    `forced_draft: ${input.candidate.forced}`,
+    `candidate_kind: ${input.candidate.kind}`,
+    `now: ${new Date(input.signals.now).toISOString()}`,
+    "",
+    "Signals:",
+    renderAmbientInitiativeSignals(input.signals),
+    "",
+    "Pressure:",
+    JSON.stringify(input.pressure, null, 2),
+    "",
+    "Open loops / memory anchors:",
+    renderAmbientInitiativeOpenLoops(input.signals.openLoops),
+    "",
+    "Recent initiatives to avoid repeating:",
+    renderAmbientInitiativeRecent(input.signals.recentInitiatives),
+    "",
+    "Recent channel history:",
+    renderAmbientHistory(input.history, ""),
+  ].join("\n");
+  try {
+    const result = await completeLlmChat({
+      provider,
+      apiKey: streamOptions.apiKey,
+      model: input.config.evaluator.model,
+      systemPrompt: system,
+      messages: [{ role: "user", content: user }],
+      providerParams,
+      onPayload: (payload) => input.requestLog.recordLLMRequest(payload),
+      responseFormat: {
+        type: "json_schema",
+        json_schema: {
+          name: "ambient_initiative_decision",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["should_initiate", "initiate_probability", "kind", "target_user_id", "source", "anchor", "required_shape", "avoid", "confidence", "reason"],
+            properties: {
+              should_initiate: { type: "boolean" },
+              initiate_probability: { type: "number", minimum: 0, maximum: 1 },
+              kind: { type: "string", enum: ["self_expression", "targeted_checkin"] },
+              target_user_id: { type: ["string", "null"] },
+              source: { type: "string" },
+              anchor: { type: "string" },
+              required_shape: { type: "string" },
+              avoid: { type: "array", items: { type: "string" } },
+              confidence: { type: "number", minimum: 0, maximum: 1 },
+              reason: { type: "string" },
+            },
+          },
+        },
+      },
+      toolChoice: "none",
+      parallelToolCalls: false,
+      signal: AbortSignal.timeout(input.config.evaluator.llmOutputTimeoutMs),
+    });
+    input.requestLog.recordLLMCompletion(result.messageForLogs);
+    const parsed = JSON.parse(result.text) as Record<string, unknown>;
+    const kind = parsed.kind === "targeted_checkin" ? "targeted_checkin" : "self_expression";
+    return {
+      should_initiate: parsed.should_initiate === true,
+      initiate_probability: typeof parsed.initiate_probability === "number" ? Math.max(0, Math.min(1, parsed.initiate_probability)) : 0,
+      kind,
+      target_user_id: typeof parsed.target_user_id === "string" && parsed.target_user_id !== "" ? parsed.target_user_id : null,
+      source: typeof parsed.source === "string" ? parsed.source : "",
+      anchor: typeof parsed.anchor === "string" ? parsed.anchor : "",
+      required_shape: typeof parsed.required_shape === "string" ? parsed.required_shape : "",
+      avoid: Array.isArray(parsed.avoid) ? parsed.avoid.filter((item): item is string => typeof item === "string") : [],
+      confidence: typeof parsed.confidence === "number" ? Math.max(0, Math.min(1, parsed.confidence)) : 0,
+      reason: typeof parsed.reason === "string" ? parsed.reason : "",
+    };
+  } catch (error) {
+    input.requestLog.recordLLMError(error);
+    log.warn("ambient initiative evaluation failed", {
+      kind: input.candidate.kind,
+      guildId: input.candidate.guildId,
+      channelId: input.candidate.channelId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+function ambientInitiativeDecisionPassed(input: {
+  config: AmbientInitiativeConfig;
+  candidate: AmbientInitiativeCandidate;
+  decision: AmbientInitiativeDecision;
+}): { passed: boolean; explanation: string; probabilityThreshold: number; confidenceThreshold: number } {
+  const kindConfig = ambientInitiativeKindConfig(input.config, input.candidate.kind);
+  if (!input.decision.should_initiate) {
+    return {
+      passed: false,
+      explanation: "Evaluator explicitly chose silence.",
+      probabilityThreshold: kindConfig.probabilityThreshold,
+      confidenceThreshold: kindConfig.confidenceThreshold,
+    };
+  }
+  if (input.decision.kind !== input.candidate.kind) {
+    return {
+      passed: false,
+      explanation: `Evaluator returned ${input.decision.kind} for a ${input.candidate.kind} candidate.`,
+      probabilityThreshold: kindConfig.probabilityThreshold,
+      confidenceThreshold: kindConfig.confidenceThreshold,
+    };
+  }
+  if (input.decision.initiate_probability < kindConfig.probabilityThreshold) {
+    return {
+      passed: false,
+      explanation: `Initiate probability ${input.decision.initiate_probability.toFixed(2)} was below threshold ${kindConfig.probabilityThreshold.toFixed(2)}.`,
+      probabilityThreshold: kindConfig.probabilityThreshold,
+      confidenceThreshold: kindConfig.confidenceThreshold,
+    };
+  }
+  if (input.candidate.kind === "self_expression" && input.decision.target_user_id !== null) {
+    return {
+      passed: false,
+      explanation: "Self-expression must not target a specific user.",
+      probabilityThreshold: kindConfig.probabilityThreshold,
+      confidenceThreshold: kindConfig.confidenceThreshold,
+    };
+  }
+  if (input.candidate.kind === "targeted_checkin") {
+    if (input.decision.target_user_id === null) {
+      return {
+        passed: false,
+        explanation: "Targeted follow-up must name a target user.",
+        probabilityThreshold: kindConfig.probabilityThreshold,
+        confidenceThreshold: kindConfig.confidenceThreshold,
+      };
+    }
+    if (!input.candidate.forced && ambientInitiativeDailyCount({
+      guildId: input.candidate.guildId,
+      channelId: input.candidate.channelId,
+      kind: input.candidate.kind,
+      targetUserId: input.decision.target_user_id,
+    }) >= input.config.targetedCheckin.maxPerUserPerDay) {
+      return {
+        passed: false,
+        explanation: `Target user already reached daily cap ${input.config.targetedCheckin.maxPerUserPerDay}.`,
+        probabilityThreshold: kindConfig.probabilityThreshold,
+        confidenceThreshold: kindConfig.confidenceThreshold,
+      };
+    }
+  }
+  if (input.decision.confidence < kindConfig.confidenceThreshold) {
+    return {
+      passed: false,
+      explanation: `Confidence ${input.decision.confidence.toFixed(2)} was below threshold ${kindConfig.confidenceThreshold.toFixed(2)}.`,
+      probabilityThreshold: kindConfig.probabilityThreshold,
+      confidenceThreshold: kindConfig.confidenceThreshold,
+    };
+  }
+  return {
+    passed: true,
+    explanation: "Evaluator decision cleared kind and confidence thresholds.",
+    probabilityThreshold: kindConfig.probabilityThreshold,
+    confidenceThreshold: kindConfig.confidenceThreshold,
+  };
+}
+
+function ambientInitiativeGenerationInstruction(decision: AmbientInitiativeDecision): string {
+  const target = decision.target_user_id !== null ? `target_user_id: ${decision.target_user_id}` : "target_user_id: none";
+  return [
+    "Ambient Initiative selected this proactive turn.",
+    initiativeGenerationPolicyForKind(decision.kind),
+    "",
+    "Evaluator handoff:",
+    `kind: ${decision.kind}`,
+    target,
+    `source: ${decision.source}`,
+    `anchor: ${decision.anchor}`,
+    `required_shape: ${decision.required_shape}`,
+    `avoid: ${decision.avoid.length > 0 ? decision.avoid.join(", ") : "none"}`,
+    `reason: ${decision.reason}`,
+    "",
+    "You may still output <ignore> if the initiative no longer fits. Default visible message delivery is reply=false.",
+  ].join("\n");
+}
+
+function selfContinuityConstraintText(guildId: string): string {
+  const self = listMemories(db, {
+    guildId,
+    scope: "self",
+    limit: 12,
+  });
+  if (self.length === 0) return "Self continuity constraints: none.";
+  return [
+    "Self continuity constraints, for contradiction avoidance only:",
+    ...self.map((memory) => `- [${memory.kind}] ${memory.content}`),
+  ].join("\n");
+}
+
+function initiativeTargetUser(guild: Guild, decision: AmbientInitiativeDecision): {
+  id: string;
+  username: string;
+  displayName?: string;
+  globalName?: string;
+} {
+  if (decision.target_user_id !== null) return promptLabUserFromGuild(guild, decision.target_user_id);
+  return {
+    id: "ambient-initiative",
+    username: "ambient-initiative",
+  };
+}
+
+async function runAmbientInitiativeGeneration(input: {
+  guild: Guild;
+  channel: SendableGuildChannel;
+  guildConfig: GuildConfig;
+  config: AmbientInitiativeConfig;
+  candidate: AmbientInitiativeCandidate;
+  decision: AmbientInitiativeDecision;
+  requestLog: RequestLog;
+  draft?: {
+    drafts: PromptLabDraftMessage[];
+    dryRuns: PromptLabDryRun[];
+  };
+}): Promise<{ responseText?: string; sent: boolean; ignored: boolean }> {
+  const botUserId = client.user?.id ?? "";
+  const botUsername = client.user?.username ?? "bot";
+  const now = Date.now();
+  const syntheticContent = [
+    ambientInitiativeGenerationInstruction(input.decision),
+    "",
+    selfContinuityConstraintText(input.candidate.guildId),
+  ].join("\n");
+  const actor = initiativeTargetUser(input.guild, input.decision);
+  const syntheticLatestMessage: HistoryMessage = {
+    id: input.candidate.id,
+    author: actor.username,
+    authorDisplayName: actor.displayName,
+    authorId: actor.id,
+    content: syntheticContent,
+    isBot: false,
+    timestamp: now,
+    replyToId: null,
+    imageIds: [],
+    captions: [],
+    hasEmbeds: false,
+    isSynthetic: true,
+    relatedThreadId: null,
+  };
+
+  const replyFallbackDeps: ReplyFallbackDeps = {
+    db,
+    guildId: input.candidate.guildId,
+    channelId: input.candidate.channelId,
+    fetchDiscordMessage: () => Promise.resolve(null),
+    enqueueEmbedding: async () => {},
+    processImage: async () => {},
+  };
+  const context = await buildContext(
+    input.candidate.guildId,
+    input.candidate.channelId,
+    input.guild,
+    input.guildConfig,
+    syntheticContent,
+    syntheticLatestMessage,
+    replyFallbackDeps,
+    input.channel.isThread(),
+    { timestamp: now, messageId: input.candidate.id },
+  );
+
+  const generatedImages = createGeneratedImageRuntime();
+  const baseTools = buildAgentTools(
+    input.candidate.guildId,
+    input.candidate.channelId,
+    input.guildConfig,
+    input.guild,
+    context.contextMessageIds,
+    generatedImages.onGeneratedImage,
+    {
+      requesterId: actor.id,
+      requesterUsername: actor.username,
+      sourceMessageId: input.candidate.id,
+      sourceQuote: shortQuote(syntheticContent),
+    },
+  );
+  const tools = input.draft !== undefined ? promptLabDryRunTools(baseTools, input.draft.dryRuns) : baseTools;
+
+  const resolveTargetChannel = createTargetChannelResolver(client, input.channel);
+  const baseSender = createDiscordMessageSender({
+    defaultChannel: input.channel,
+    resolveTargetChannel,
+    botUserId,
+    botUsername,
+    logger: log.child({ component: "ambient-initiative-send", guildId: input.candidate.guildId, channelId: input.candidate.channelId }),
+    getAttachmentsDir: (targetGuildId) => getGuildConfig(targetGuildId).attachmentsDir,
+  });
+  const draftSender: MessageSender = (text, reply, destinationChannelId, voice, _signal, replyToMessageId, attachments) => {
+    if (input.draft === undefined) return baseSender(text, reply, destinationChannelId, voice, _signal, replyToMessageId, attachments);
+    const id = promptLabSyntheticId(input.draft.drafts.length + 1);
+    input.draft.drafts.push({
+      id,
+      text,
+      reply,
+      ...(destinationChannelId !== undefined ? { channelId: destinationChannelId } : {}),
+      ...(replyToMessageId !== undefined ? { replyToMessageId } : {}),
+      attachments: attachments?.map((attachment) => attachment.filename) ?? [],
+      voice: voice !== undefined,
+    });
+    return Promise.resolve({ sentMessageId: id });
+  };
+
+  const preSendCheck = (): boolean => {
+    const signals = buildAmbientInitiativeSignals(input.guild, input.candidate.channelId, input.guildConfig, input.config);
+    const gate = ambientInitiativeHardGate({
+      guildId: input.candidate.guildId,
+      channelId: input.candidate.channelId,
+      kind: input.candidate.kind,
+      config: input.config,
+      signals,
+      forced: input.candidate.forced,
+      phase: "pre_send",
+    });
+    recordAmbientRuntimeAction(
+      input.requestLog,
+      `ambient-initiative-pre-send:${input.candidate.id}`,
+      "ambient_initiative_pre_send_gate",
+      { kind: input.candidate.kind, mode: input.candidate.mode },
+      gate.ok
+        ? { status: "passed", summary: "Pre-send gates passed." }
+        : { status: "dropped", reason: gate.reason, decidingParameter: `hard_gate.${gate.reason.replaceAll(" ", "_")}` },
+    );
+    return gate.ok;
+  };
+
+  const result = await handleMessage(
+    {
+      content: syntheticContent,
+      guildId: input.candidate.guildId,
+      guildName: input.guild.name,
+      channelId: input.candidate.channelId,
+      channelName: channelDisplayName(input.channel),
+      authorId: actor.id,
+      authorUsername: actor.username,
+      authorDisplayName: actor.displayName,
+      authorGlobalName: actor.globalName,
+      authorIsBot: false,
+      botUserId,
+      mentionedUserIds: [],
+      translatedContent: syntheticContent,
+      messageId: input.candidate.id,
+    },
+    {
+      globalConfig,
+      guildConfig: input.guildConfig,
+      context,
+      currentChannelId: input.candidate.channelId,
+      systemPrompt: promptBundle.systemPrompt,
+      personaPrompt: promptBundle.corePrompt,
+      runtimePrompts: promptBundle.runtime,
+      sender: draftSender,
+      extraTools: tools,
+      log: log.child({ guildId: input.candidate.guildId, channelId: input.candidate.channelId, requestId: input.requestLog.requestId, component: "ambient-initiative" }),
+      requestLog: input.requestLog,
+      triggerOverride: { reason: "ambient_initiative" },
+      triggerInstructions: {
+        ...input.guildConfig.triggerInstructions,
+        ambient_initiative: ambientInitiativeGenerationInstruction(input.decision),
+      },
+      liveMessageTypingHoldMs: 0,
+      modelImageInputSupport: getModelImageInputSupport(input.guildConfig),
+      disableLiveOutput: true,
+      replyFirstOverride: false,
+      preSendCheck,
+      consumeGeneratedAttachments: generatedImages.consumeGeneratedAttachments,
+      resolveImageAttachments: createStoredImageAttachmentResolver({
+        guildId: input.candidate.guildId,
+        logger: log.child({ component: "stored-image-attachments", guildId: input.candidate.guildId, channelId: input.candidate.channelId, requestId: input.requestLog.requestId }),
+      }),
+    },
+  );
+
+  return {
+    ...(result.responseText !== undefined ? { responseText: result.responseText } : {}),
+    sent: result.responseText !== undefined && result.responseText !== "",
+    ignored: result.responseText === undefined || result.responseText === "",
+  };
+}
+
+async function runAmbientInitiativeCandidate(input: {
+  guild: Guild;
+  channel: SendableGuildChannel;
+  candidate: AmbientInitiativeCandidate;
+  draft?: {
+    drafts: PromptLabDraftMessage[];
+    dryRuns: PromptLabDryRun[];
+  };
+}): Promise<{ requestId: string; drafts?: PromptLabDraftMessage[]; responseText?: string; sent: boolean; ignored: boolean; error?: string }> {
+  const guildConfig = getGuildConfig(input.candidate.guildId);
+  const config = guildConfig.ambientInitiative;
+  if (config === undefined) throw new Error("Ambient initiative is not configured for this guild.");
+  const lockKey = ambientInitiativeLockKey(input.candidate.guildId, input.candidate.channelId);
+  const requestLog = createAmbientInitiativeRequestLog({
+    guild: input.guild,
+    channel: input.channel,
+    candidate: input.candidate,
+    status: "evaluating",
+  });
+  requestLogStore.incrementActive();
+  if (ambientInitiativeRunning.has(lockKey)) {
+    recordAmbientRuntimeAction(
+      requestLog,
+      `ambient-initiative-lock:${input.candidate.id}`,
+      "ambient_initiative_lock",
+      { kind: input.candidate.kind, mode: input.candidate.mode },
+      { status: "dropped", reason: "initiative already running", decidingParameter: "lock.initiative_already_running" },
+    );
+    requestLog.emit(log);
+    requestLogStore.decrementActive();
+    return { requestId: requestLog.requestId, drafts: input.draft?.drafts, sent: false, ignored: true };
+  }
+  ambientInitiativeRunning.add(lockKey);
+  let sent = false;
+  let ignored = false;
+  let responseText: string | undefined;
+
+  try {
+    const signals = buildAmbientInitiativeSignals(input.guild, input.candidate.channelId, guildConfig, config);
+    const gate = ambientInitiativeHardGate({
+      guildId: input.candidate.guildId,
+      channelId: input.candidate.channelId,
+      kind: input.candidate.kind,
+      config,
+      signals,
+      forced: input.candidate.forced,
+      phase: "opportunity",
+    });
+    recordAmbientRuntimeAction(
+      requestLog,
+      `ambient-initiative-hard-gate:${input.candidate.id}`,
+      "ambient_initiative_hard_gate",
+      { kind: input.candidate.kind, mode: input.candidate.mode, forced: input.candidate.forced },
+      gate.ok
+        ? { status: "passed", signals, summary: "Hard gates passed." }
+        : { status: "dropped", reason: gate.reason, signals, decidingParameter: `hard_gate.${gate.reason.replaceAll(" ", "_")}` },
+    );
+    if (!gate.ok) {
+      ignored = true;
+      return { requestId: requestLog.requestId, drafts: input.draft?.drafts, sent, ignored };
+    }
+
+    const pressure = input.candidate.forced
+      ? {
+          kind: input.candidate.kind,
+          pressure: 1,
+          threshold: 0,
+          roll: 0,
+          passed: true,
+          inputs: { forced: true },
+        } satisfies AmbientInitiativePressure
+      : ambientInitiativePressureForKind(config, input.candidate.kind, signals);
+    recordAmbientRuntimeAction(
+      requestLog,
+      `ambient-initiative-pressure:${input.candidate.id}`,
+      "ambient_initiative_pressure",
+      { kind: input.candidate.kind },
+      {
+        status: pressure.passed ? "passed" : "dropped",
+        ...pressure,
+        decidingParameter: pressure.passed ? "pressure.passed" : "pressure.roll_or_threshold",
+      },
+    );
+    if (!pressure.passed) {
+      ignored = true;
+      return { requestId: requestLog.requestId, drafts: input.draft?.drafts, sent, ignored };
+    }
+
+    const history = getHistoryMessages(db, input.candidate.channelId, config.historyLimit);
+    const decision = input.candidate.forceDecision
+      ? forcedAmbientInitiativeDecision(input.candidate.kind, signals, history)
+      : await evaluateAmbientInitiativeCandidate({
+          config,
+          guildConfig,
+          candidate: input.candidate,
+          signals,
+          pressure,
+          history,
+          requestLog,
+        });
+    if (decision === null) {
+      recordAmbientRuntimeAction(
+        requestLog,
+        `ambient-initiative-decision:${input.candidate.id}`,
+        "ambient_initiative_decision",
+        { kind: input.candidate.kind },
+        input.candidate.forceDecision
+          ? { status: "dropped", decidingParameter: "force.no_target", summary: "Forced targeted draft had no target user." }
+          : { status: "dropped", decidingParameter: "evaluator_error", summary: "Evaluator did not return a usable decision." },
+        true,
+      );
+      ignored = true;
+      return { requestId: requestLog.requestId, drafts: input.draft?.drafts, sent, ignored };
+    }
+
+    const verdict = ambientInitiativeDecisionPassed({ config, candidate: input.candidate, decision });
+    recordAmbientRuntimeAction(
+      requestLog,
+      `ambient-initiative-decision:${input.candidate.id}`,
+      "ambient_initiative_decision",
+      {
+        kind: input.candidate.kind,
+        decision,
+        thresholds: {
+          confidence: verdict.confidenceThreshold,
+          probability: verdict.probabilityThreshold,
+        },
+      },
+      {
+        status: verdict.passed ? "selected" : "dropped",
+        explanation: verdict.explanation,
+        shouldInitiate: decision.should_initiate,
+        confidence: decision.confidence,
+        initiateProbability: decision.initiate_probability,
+        probabilityThreshold: verdict.probabilityThreshold,
+        confidenceThreshold: verdict.confidenceThreshold,
+        reason: decision.reason,
+        source: decision.source,
+        anchor: decision.anchor,
+        requiredShape: decision.required_shape,
+        avoid: decision.avoid,
+      },
+    );
+    if (!verdict.passed) {
+      ignored = true;
+      return { requestId: requestLog.requestId, drafts: input.draft?.drafts, sent, ignored };
+    }
+
+    const generation = await runAmbientInitiativeGeneration({
+      guild: input.guild,
+      channel: input.channel,
+      guildConfig,
+      config,
+      candidate: input.candidate,
+      decision,
+      requestLog,
+      draft: input.draft,
+    });
+    const producedVisibleDraftOrMessage = generation.sent && (input.draft === undefined || input.draft.drafts.length > 0);
+    sent = producedVisibleDraftOrMessage && input.candidate.mode === "automatic";
+    ignored = generation.ignored || !producedVisibleDraftOrMessage;
+    responseText = generation.responseText;
+    if (producedVisibleDraftOrMessage) {
+      if (sent) {
+        ambientInitiativeLastByKind.set(ambientInitiativeKindKey(input.candidate.kind, input.candidate.guildId, input.candidate.channelId), Date.now());
+      }
+      recordAmbientInitiativeEvent({
+        id: input.candidate.id,
+        guildId: input.candidate.guildId,
+        channelId: input.candidate.channelId,
+        kind: input.candidate.kind,
+        targetUserId: decision.target_user_id,
+        summary: decision.reason,
+        text: responseText ?? "",
+        sent,
+        ignored,
+        createdAt: Date.now(),
+      });
+    } else {
+      recordAmbientInitiativeEvent({
+        id: input.candidate.id,
+        guildId: input.candidate.guildId,
+        channelId: input.candidate.channelId,
+        kind: input.candidate.kind,
+        targetUserId: decision.target_user_id,
+        summary: decision.reason,
+        text: responseText ?? "",
+        sent: false,
+        ignored: true,
+        createdAt: Date.now(),
+      });
+    }
+    return { requestId: requestLog.requestId, drafts: input.draft?.drafts, responseText, sent, ignored };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    requestLog.setError(message);
+    return { requestId: requestLog.requestId, drafts: input.draft?.drafts, sent, ignored: true, error: message };
+  } finally {
+    ambientInitiativeRunning.delete(lockKey);
+    requestLog.emit(log);
+    requestLogStore.decrementActive();
+  }
+}
+
+async function runAmbientInitiativeOpportunity(guildId: string, forcedKind?: AmbientInitiativeKind, mode: AmbientInitiativeRunMode = "automatic", runToken?: string): Promise<{ requestId?: string; error?: string }> {
+  const guild = await resolveClientGuild(guildId);
+  if (guild === null) return { error: "Guild is unavailable." };
+  const guildConfig = getGuildConfig(guildId);
+  const config = guildConfig.ambientInitiative;
+  if (config === undefined || (!config.enabled && mode !== "draft")) return { error: "Ambient initiative is disabled." };
+  const channel = resolveAmbientInitiativeMainChannel(guild, config);
+  if (channel === null) return { error: "No ambient initiative main channel is available." };
+  const eligibleKinds = (["self_expression", "targeted_checkin"] as AmbientInitiativeKind[])
+    .filter((candidateKind) => ambientInitiativeKindConfig(config, candidateKind).enabled);
+  const kind = forcedKind ?? eligibleKinds
+    .map((candidateKind) => ambientInitiativePressureForKind(config, candidateKind, buildAmbientInitiativeSignals(guild, channel.id, guildConfig, config)))
+    .sort((a, b) => b.pressure - a.pressure)[0]?.kind ?? "self_expression";
+  const runMode: AmbientInitiativeRunMode = mode === "automatic" && config.shadowMode ? "shadow" : mode;
+  const draft = runMode === "shadow" ? { drafts: [] as PromptLabDraftMessage[], dryRuns: [] as PromptLabDryRun[] } : undefined;
+  const candidate: AmbientInitiativeCandidate = {
+    id: `ambient-initiative:${crypto.randomUUID()}`,
+    guildId,
+    channelId: channel.id,
+    kind,
+    createdAt: Date.now(),
+    mode: runMode,
+    forced: runMode === "draft",
+    forceDecision: false,
+    ...(runToken !== undefined ? { runToken } : {}),
+  };
+  const result = await runAmbientInitiativeCandidate({ guild, channel, candidate, ...(draft !== undefined ? { draft } : {}) });
+  return { requestId: result.requestId, ...(result.error !== undefined ? { error: result.error } : {}) };
+}
+
+function scheduleAmbientInitiativeGuild(guildId: string): void {
+  const guildConfig = getGuildConfig(guildId);
+  const config = guildConfig.ambientInitiative;
+  if (config === undefined || !config.enabled) return;
+  const existing = ambientInitiativeTimers.get(guildId);
+  if (existing !== undefined) clearTimeout(existing);
+  const delayMs = randomBetween(config.checkIntervalMinMs, config.checkIntervalMaxMs);
+  const timer = setTimeout(() => {
+    ambientInitiativeTimers.delete(guildId);
+    void runAmbientInitiativeOpportunity(guildId).finally(() => scheduleAmbientInitiativeGuild(guildId));
+  }, delayMs);
+  timer.unref();
+  ambientInitiativeTimers.set(guildId, timer);
+}
+
+function startAmbientInitiativeLoops(): void {
+  for (const guild of client.guilds.cache.values()) {
+    scheduleAmbientInitiativeGuild(guild.id);
+  }
+}
+
+async function runPromptLabAmbientInitiative(input: {
+  guildId: string;
+  channelId: string;
+  kind: AmbientInitiativeKind;
+  force?: boolean;
+  runToken?: string;
+}): Promise<PromptLabRunResult> {
+  const guild = await resolveClientGuild(input.guildId);
+  if (guild === null) throw new Error("Guild is unavailable.");
+  const channel = await fetchAccessibleGuildChannel(input.channelId);
+  if (channel === null || channel.guildId !== input.guildId) {
+    throw new Error("Channel is unavailable or does not belong to the selected guild.");
+  }
+  const guildConfig = getGuildConfig(input.guildId);
+  if (guildConfig.ambientInitiative === undefined) throw new Error("Ambient initiative is not configured for this guild.");
+  const drafts: PromptLabDraftMessage[] = [];
+  const dryRuns: PromptLabDryRun[] = [];
+  const candidate: AmbientInitiativeCandidate = {
+    id: `prompt-lab:ambient-initiative:${crypto.randomUUID()}`,
+    guildId: input.guildId,
+    channelId: input.channelId,
+    kind: input.kind,
+    createdAt: Date.now(),
+    mode: "draft",
+    forced: true,
+    forceDecision: input.force === true,
+    ...(input.runToken !== undefined ? { runToken: input.runToken } : {}),
+  };
+  const result = await runAmbientInitiativeCandidate({
+    guild,
+    channel,
+    candidate,
+    draft: { drafts, dryRuns },
+  });
+  const entry = requestLogStore.getByRequestId(result.requestId);
+  const summary = entry !== null
+    ? promptLabSummary(entry)
+    : { toolCount: 0, llmCallCount: 0, estimatedCostUsd: null, totalDurationMs: 0 };
+  return {
+    requestId: result.requestId,
+    triggered: true,
+    ...(result.responseText !== undefined ? { responseText: result.responseText } : {}),
+    drafts,
+    dryRuns,
+    ...summary,
+    ...(result.error !== undefined ? { error: result.error } : {}),
+  };
 }
 
 async function runAmbientCandidate(candidate: AmbientCandidate): Promise<void> {
@@ -5289,6 +6466,8 @@ async function reloadConfigs(): Promise<void> {
     for (const d of dispatchers.values()) d.dispose();
     dispatchers.clear();
     clearAmbientAttentionState();
+    clearAmbientInitiativeState();
+    startAmbientInitiativeLoops();
 
     log.info("config hot-reloaded", { model: globalConfig.defaultModel, guilds: guildConfigs.size });
   } catch (err) {
@@ -5327,6 +6506,7 @@ log.info("health check passed — all systems ready", {
 });
 startupMessageProcessingReady = true;
 drainStartupMessageQueue();
+startAmbientInitiativeLoops();
 
 // --- Start dashboard ---
 async function deleteManagementMessageState(input: {
@@ -5552,6 +6732,7 @@ function promptLabUserFromGuild(guild: Guild, userId: string): {
 
 function promptLabSummary(entry: ReturnType<RequestLog["toEntry"]>): {
   toolCount: number;
+  runtimeActionCount: number;
   llmCallCount: number;
   estimatedCostUsd: number | null;
   totalDurationMs: number;
@@ -5559,6 +6740,7 @@ function promptLabSummary(entry: ReturnType<RequestLog["toEntry"]>): {
   const estimatedCostUsd = entry.llmCalls.reduce((sum, call) => sum + (call.estimatedCostUsd ?? 0), 0);
   return {
     toolCount: entry.tools.length,
+    runtimeActionCount: entry.tools.filter((tool) => tool.modelRequestId === undefined).length,
     llmCallCount: entry.llmCalls.length,
     estimatedCostUsd: estimatedCostUsd > 0 ? estimatedCostUsd : null,
     totalDurationMs: entry.totalDurationMs,
@@ -5819,6 +7001,7 @@ const dashboardManagement = {
   deleteMessages: deleteManagementMessageState,
   deleteLatestMessages: deleteLatestManagementMessages,
   runPromptLab,
+  runPromptLabAmbientInitiative,
   listMemories: (filter: { guildId?: string; scope?: "guild" | "user" | "self"; includeDeleted?: boolean; limit?: number }) => ({
     memories: listManagementMemories(db, filter).map(decorateManagementMemory),
   }),
@@ -5851,6 +7034,7 @@ async function shutdown(signal: string): Promise<void> {
   for (const d of dispatchers.values()) d.dispose();
   dispatchers.clear();
   clearAmbientAttentionState();
+  clearAmbientInitiativeState();
   scheduler.stop();
   await client.destroy();
   await embeddingQueue.shutdown();

@@ -18,6 +18,7 @@ export type TriggerResult =
   | { reason: "ambient_pickup" }
   | { reason: "lingering_attention" }
   | { reason: "follow_up" }
+  | { reason: "ambient_initiative" }
   | null;
 
 /**

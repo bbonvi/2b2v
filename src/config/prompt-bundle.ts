@@ -64,6 +64,19 @@ export interface RuntimePromptBundle {
     lingeringAttention: string;
     followUp: string;
   };
+  /** Compact evaluator policies and final generation policies for ambient initiative. */
+  ambientInitiative: {
+    evaluator: {
+      shared: string;
+      selfExpression: string;
+      targetedCheckin: string;
+    };
+    generation: {
+      shared: string;
+      selfExpression: string;
+      targetedCheckin: string;
+    };
+  };
   /** On-demand prompt skills. */
   skills: PromptSkillBundle;
 }
@@ -359,6 +372,18 @@ export function loadPromptBundle(promptDir: string, log: Logger): PromptBundle {
         ambientPickup: loadRuntimeDocuments(promptDir, "ambient-attention/evaluator/ambient-pickup", log, "runtime.ambient-attention.evaluator.ambient-pickup"),
         lingeringAttention: loadRuntimeDocuments(promptDir, "ambient-attention/evaluator/lingering-attention", log, "runtime.ambient-attention.evaluator.lingering-attention"),
         followUp: loadRuntimeDocuments(promptDir, "ambient-attention/evaluator/follow-up", log, "runtime.ambient-attention.evaluator.follow-up"),
+      },
+      ambientInitiative: {
+        evaluator: {
+          shared: loadRuntimeDocuments(promptDir, "ambient-initiative/evaluator/shared", log, "runtime.ambient-initiative.evaluator.shared"),
+          selfExpression: loadRuntimeDocuments(promptDir, "ambient-initiative/evaluator/self-expression", log, "runtime.ambient-initiative.evaluator.self-expression"),
+          targetedCheckin: loadRuntimeDocuments(promptDir, "ambient-initiative/evaluator/targeted-checkin", log, "runtime.ambient-initiative.evaluator.targeted-checkin"),
+        },
+        generation: {
+          shared: loadRuntimeDocuments(promptDir, "ambient-initiative/generation/shared", log, "runtime.ambient-initiative.generation.shared"),
+          selfExpression: loadRuntimeDocuments(promptDir, "ambient-initiative/generation/self-expression", log, "runtime.ambient-initiative.generation.self-expression"),
+          targetedCheckin: loadRuntimeDocuments(promptDir, "ambient-initiative/generation/targeted-checkin", log, "runtime.ambient-initiative.generation.targeted-checkin"),
+        },
       },
       skills,
     },

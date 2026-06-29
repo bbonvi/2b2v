@@ -25,6 +25,18 @@ function runtimePrompts(): RuntimePromptBundle {
       lingeringAttention: "",
       followUp: "",
     },
+    ambientInitiative: {
+      evaluator: {
+        shared: "",
+        selfExpression: "",
+        targetedCheckin: "",
+      },
+      generation: {
+        shared: "",
+        selfExpression: "",
+        targetedCheckin: "",
+      },
+    },
     skills: { byId: {}, indexPrompt: "", requiredByTool: {} },
   };
 }

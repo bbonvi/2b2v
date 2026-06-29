@@ -407,6 +407,7 @@ function triggerPriority(trigger: DispatchTrigger): number {
     case "ambient_pickup": return 0;
     case "lingering_attention": return 0;
     case "follow_up": return 0;
+    case "ambient_initiative": return 0;
   }
 }
 

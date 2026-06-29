@@ -27,6 +27,7 @@ interface DashboardManagementApi {
   deleteMessages: (input: { messageIds: string[]; guildId: string; channelId: string; deleteDiscord?: boolean }) => AwaitableDashboardManagementResult;
   deleteLatestMessages: (input: { guildId: string; channelId: string; count: number; deleteDiscord?: boolean }) => AwaitableDashboardManagementResult;
   runPromptLab: (input: { guildId: string; channelId: string; userId: string; content: string; runToken?: string }) => AwaitableDashboardManagementResult;
+  runPromptLabAmbientInitiative: (input: { guildId: string; channelId: string; kind: "self_expression" | "targeted_checkin"; force?: boolean; runToken?: string }) => AwaitableDashboardManagementResult;
   listMemories: (filter: { guildId?: string; scope?: "guild" | "user" | "self"; includeDeleted?: boolean; limit?: number }) => AwaitableDashboardManagementResult;
   editMemory: (input: {
     memoryId: number;
@@ -428,6 +429,34 @@ export function startDashboard(opts: DashboardOptions): void {
               channelId,
               userId,
               content,
+              ...(runToken !== "" ? { runToken } : {}),
+            }));
+          } catch (err) {
+            return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+          }
+        },
+      },
+
+      "/api/management/prompt-lab/ambient-initiative": {
+        POST: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          try {
+            const body = await readJsonObject(req);
+            const guildId = typeof body.guildId === "string" ? body.guildId.trim() : "";
+            const channelId = typeof body.channelId === "string" ? body.channelId.trim() : "";
+            const kind = typeof body.kind === "string" ? body.kind.trim() : "";
+            const force = body.force === true;
+            const runToken = typeof body.runToken === "string" ? body.runToken.trim() : "";
+            if (guildId === "" || channelId === "" || (kind !== "self_expression" && kind !== "targeted_checkin")) {
+              return json({ error: "guildId, channelId, and valid initiative kind are required." }, 400);
+            }
+            return json(await management.runPromptLabAmbientInitiative({
+              guildId,
+              channelId,
+              kind,
+              force,
               ...(runToken !== "" ? { runToken } : {}),
             }));
           } catch (err) {

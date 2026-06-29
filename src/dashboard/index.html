@@ -213,6 +213,7 @@
   .event-keyword { color: #f59e0b; }
   .event-random { color: #a78bfa; }
   .event-ambient-attention-evaluator { color: #38bdf8; }
+  .event-ambient-initiative-evaluator { color: #2dd4bf; }
   .event-background-memory-extraction { color: #34d399; }
   .event-async-image-generation { color: #fb7185; }
   .event-prompt-lab { color: #c084fc; }
@@ -754,6 +755,17 @@
     gap: .4rem;
     justify-items: end;
   }
+  .prompt-lab-initiative {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: .3rem;
+    width: 100%;
+  }
+  .prompt-lab-initiative .btn {
+    width: 100%;
+    font-size: .62rem;
+    padding: .38rem .45rem;
+  }
   .prompt-lab-status {
     color: var(--text-dim);
     font-size: .62rem;
@@ -1145,6 +1157,11 @@
     <textarea id="lab-prompt" placeholder="Test prompt as a virtual mention..."></textarea>
     <div class="prompt-lab-run">
       <button class="btn primary" id="lab-run">Run as mention</button>
+      <div class="prompt-lab-initiative">
+        <button class="btn" data-initiative-kind="self_expression">Draft self-expression</button>
+        <button class="btn" data-initiative-kind="targeted_checkin">Draft targeted follow-up</button>
+        <label><input type="checkbox" id="lab-initiative-force"> force</label>
+      </div>
       <div class="prompt-lab-status" id="lab-status">dry-run writes</div>
     </div>
   </div>
@@ -1209,6 +1226,8 @@
   const labUser = document.getElementById('lab-user');
   const labPrompt = document.getElementById('lab-prompt');
   const labRun = document.getElementById('lab-run');
+  const labInitiativeButtons = Array.from(document.querySelectorAll('[data-initiative-kind]'));
+  const labInitiativeForce = document.getElementById('lab-initiative-force');
   const labStatus = document.getElementById('lab-status');
   const labReport = document.getElementById('lab-report');
   const managementStateKey = '2b2v.dashboard.management.v1';
@@ -1283,6 +1302,7 @@
     if (kind === 'async_image_generation') return 'async image';
     if (kind === 'prompt_lab') return 'prompt lab';
     if (kind === 'ambient_attention_evaluator') return 'ambient eval';
+    if (kind === 'ambient_initiative_evaluator') return 'initiative eval';
     if (kind === 'keyword') return 'keyword';
     return kind;
   }
@@ -1967,6 +1987,7 @@
       : 'Delete selected (' + selectedManagementMessages.size + ')';
     promptLab.classList.toggle('active', hasExactChannel);
     labRun.disabled = !hasExactChannel || labUser.value === '' || labPrompt.value.trim() === '';
+    labInitiativeButtons.forEach(btn => { btn.disabled = !hasExactChannel; });
   }
 
   function renderPromptLabUsers() {
@@ -2243,7 +2264,7 @@
     if (summariesRes.status === 401) { location.href = '/login'; return null; }
     if (!summariesRes.ok) return null;
     const summaries = await summariesRes.json();
-    const entry = summaries.find(e => e.trigger && e.trigger.type === 'prompt_lab' && e.trigger.runToken === runToken);
+    const entry = summaries.find(e => e.trigger && e.trigger.runToken === runToken);
     if (!entry || !entry.requestId) return null;
     const detailRes = await fetch('/api/logs/' + encodeURIComponent(entry.requestId));
     if (!detailRes.ok) return null;
@@ -2326,6 +2347,63 @@
       promptLabPollSeq += 1;
       labStatus.classList.add('error');
       alert(err instanceof Error ? err.message : 'Prompt Lab run failed');
+    } finally {
+      labStatus.classList.remove('running');
+      syncManagementDeleteButtons();
+      if (labStatus.textContent === 'RUNNING') labStatus.textContent = 'dry-run writes';
+    }
+  }
+
+  async function runPromptLabAmbientInitiative(kind) {
+    const guildId = mGuild.value;
+    const channelId = mChannel.value;
+    if (guildId === '' || channelId === '') return;
+    const runToken = crypto.randomUUID();
+    promptLabPollSeq += 1;
+    const pollSeq = promptLabPollSeq;
+    labRun.disabled = true;
+    labInitiativeButtons.forEach(btn => { btn.disabled = true; });
+    labStatus.textContent = 'RUNNING';
+    labStatus.classList.add('running');
+    labStatus.classList.remove('error');
+    renderPromptLabReport({
+      requestId: runToken,
+      running: true,
+      drafts: [],
+      dryRuns: [],
+      toolCount: 0,
+      runtimeActionCount: 0,
+      llmCallCount: 0,
+      estimatedCostUsd: null,
+      totalDurationMs: 0
+    }, null);
+    pollPromptLabRun(runToken, pollSeq);
+    try {
+      const r = await fetch('/api/management/prompt-lab/ambient-initiative', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ guildId, channelId, kind, force: labInitiativeForce.checked, runToken })
+      });
+      promptLabPollSeq += 1;
+      if (r.status === 401) { location.href = '/login'; return; }
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        labStatus.classList.add('error');
+        alert(body.error || 'Ambient initiative draft failed');
+        return;
+      }
+      const finalDetail = body.requestId ? await fetch('/api/logs/' + encodeURIComponent(body.requestId)).then(res => res.ok ? res.json() : null).catch(() => null) : null;
+      renderPromptLabReport(body, finalDetail);
+      if (body.error) {
+        labStatus.classList.add('error');
+        labStatus.textContent = 'completed with error';
+      } else {
+        labStatus.textContent = 'complete';
+      }
+    } catch (err) {
+      promptLabPollSeq += 1;
+      labStatus.classList.add('error');
+      alert(err instanceof Error ? err.message : 'Ambient initiative draft failed');
     } finally {
       labStatus.classList.remove('running');
       syncManagementDeleteButtons();
@@ -2502,6 +2580,12 @@
     }
   });
   labRun.addEventListener('click', () => { runPromptLab(); });
+  labInitiativeButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const kind = btn.getAttribute('data-initiative-kind');
+      if (kind) runPromptLabAmbientInitiative(kind);
+    });
+  });
 
   async function refreshStatus() {
     try {

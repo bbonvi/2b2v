@@ -4,6 +4,7 @@ import {
   resolveGuildModel,
   resolveGuildModelKey,
   buildBackgroundStreamOptions,
+  buildAmbientInitiativeStreamOptions,
   buildImageReadingStreamOptions,
   buildStreamOptions,
   fetchOpenRouterModelMetadata,
@@ -285,6 +286,66 @@ describe("buildBackgroundStreamOptions", () => {
     expect(opts.transport).toBe("websocket-cached");
     expect(opts.serviceTier).toBe("priority");
     expect(opts.service_tier).toBeUndefined();
+  });
+});
+
+describe("buildAmbientInitiativeStreamOptions", () => {
+  test("uses initiative evaluator config without requiring ambient attention", () => {
+    const opts = buildAmbientInitiativeStreamOptions(GLOBAL, {
+      ...GUILD,
+      ambientInitiative: {
+        enabled: true,
+        shadowMode: false,
+        checkIntervalMinMs: 1000,
+        checkIntervalMaxMs: 2000,
+        activeHours: { start: "10:00", end: "01:00" },
+        historyLimit: 60,
+        recentActivityMinMs: 300_000,
+        recentActivityMaxMs: 10_800_000,
+        quietWindowMs: 360_000,
+        typingActiveMs: 10_000,
+        botCooldownMs: 2_700_000,
+        fatigueAfterAnyMs: 3_600_000,
+        maxPerDay: 5,
+        minMainChannelHumanMessages: 20,
+        mainChannelLookbackDays: 7,
+        evaluator: {
+          provider: "openai-codex",
+          model: "gpt-5.3-codex-spark",
+          modelParams: { textVerbosity: "low" },
+          thinkingLevel: "minimal",
+          serviceTier: "priority",
+          llmOutputTimeoutMs: 8000,
+        },
+        selfExpression: {
+          enabled: true,
+          basePressure: 0.18,
+          pressureThreshold: 0.72,
+          probabilityThreshold: 0.72,
+          confidenceThreshold: 0.6,
+          cooldownMs: 10_800_000,
+          maxPerDay: 3,
+        },
+        targetedCheckin: {
+          enabled: true,
+          basePressure: 0.16,
+          pressureThreshold: 0.72,
+          probabilityThreshold: 0.72,
+          confidenceThreshold: 0.6,
+          cooldownMs: 7_200_000,
+          maxPerDay: 3,
+          maxPerUserPerDay: 1,
+          openLoopMaxAgeMs: 172_800_000,
+        },
+      },
+    });
+
+    expect(opts.apiKey).toBe("");
+    expect(opts.codexAuthPath).toBe("data/codex-auth.json");
+    expect(opts.transport).toBe("websocket-cached");
+    expect(opts.textVerbosity).toBe("low");
+    expect(opts.reasoningEffort).toBe("minimal");
+    expect(opts.serviceTier).toBe("priority");
   });
 });
 

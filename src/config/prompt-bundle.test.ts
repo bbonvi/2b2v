@@ -22,6 +22,11 @@ function setup(): void {
   mkdirSync(join(TEST_DIR, "runtime", "ambient-attention", "evaluator", "ambient-pickup"), { recursive: true });
   mkdirSync(join(TEST_DIR, "runtime", "ambient-attention", "evaluator", "lingering-attention"), { recursive: true });
   mkdirSync(join(TEST_DIR, "runtime", "ambient-attention", "evaluator", "follow-up"), { recursive: true });
+  for (const phase of ["evaluator", "generation"]) {
+    mkdirSync(join(TEST_DIR, "runtime", "ambient-initiative", phase, "shared"), { recursive: true });
+    mkdirSync(join(TEST_DIR, "runtime", "ambient-initiative", phase, "self-expression"), { recursive: true });
+    mkdirSync(join(TEST_DIR, "runtime", "ambient-initiative", phase, "targeted-checkin"), { recursive: true });
+  }
   mkdirSync(join(TEST_DIR, "skills", "image_generation"), { recursive: true });
 }
 
@@ -65,6 +70,12 @@ describe("loadPromptBundle", () => {
     writeFileSync(join(TEST_DIR, "runtime", "ambient-attention", "evaluator", "ambient-pickup", "00-policy.md"), "Ambient pickup policy.");
     writeFileSync(join(TEST_DIR, "runtime", "ambient-attention", "evaluator", "lingering-attention", "00-policy.md"), "Lingering attention policy.");
     writeFileSync(join(TEST_DIR, "runtime", "ambient-attention", "evaluator", "follow-up", "00-policy.md"), "Follow-up policy.");
+    writeFileSync(join(TEST_DIR, "runtime", "ambient-initiative", "evaluator", "shared", "00-policy.md"), "Initiative evaluator shared.");
+    writeFileSync(join(TEST_DIR, "runtime", "ambient-initiative", "evaluator", "self-expression", "00-policy.md"), "Initiative evaluator self.");
+    writeFileSync(join(TEST_DIR, "runtime", "ambient-initiative", "evaluator", "targeted-checkin", "00-policy.md"), "Initiative evaluator checkin.");
+    writeFileSync(join(TEST_DIR, "runtime", "ambient-initiative", "generation", "shared", "00-policy.md"), "Initiative generation shared.");
+    writeFileSync(join(TEST_DIR, "runtime", "ambient-initiative", "generation", "self-expression", "00-policy.md"), "Initiative generation self.");
+    writeFileSync(join(TEST_DIR, "runtime", "ambient-initiative", "generation", "targeted-checkin", "00-policy.md"), "Initiative generation checkin.");
     writeFileSync(join(TEST_DIR, "skills", "image_generation", "skill.yaml"), [
       "id: image_generation",
       "title: Image Generation",
@@ -112,6 +123,12 @@ describe("loadPromptBundle", () => {
     expect(bundle.runtime.ambientAttentionEvaluator.ambientPickup).toContain("Ambient pickup policy.");
     expect(bundle.runtime.ambientAttentionEvaluator.lingeringAttention).toContain("Lingering attention policy.");
     expect(bundle.runtime.ambientAttentionEvaluator.followUp).toContain("Follow-up policy.");
+    expect(bundle.runtime.ambientInitiative.evaluator.shared).toContain("Initiative evaluator shared.");
+    expect(bundle.runtime.ambientInitiative.evaluator.selfExpression).toContain("Initiative evaluator self.");
+    expect(bundle.runtime.ambientInitiative.evaluator.targetedCheckin).toContain("Initiative evaluator checkin.");
+    expect(bundle.runtime.ambientInitiative.generation.shared).toContain("Initiative generation shared.");
+    expect(bundle.runtime.ambientInitiative.generation.selfExpression).toContain("Initiative generation self.");
+    expect(bundle.runtime.ambientInitiative.generation.targetedCheckin).toContain("Initiative generation checkin.");
     expect(bundle.runtime.skills.indexPrompt).toContain("## Skills");
     expect(bundle.runtime.skills.indexPrompt).toContain("- image_generation: Use for creating generated images. Required before: codex_generate_image.");
     expect(bundle.runtime.skills.requiredByTool.codex_generate_image).toBe("image_generation");
