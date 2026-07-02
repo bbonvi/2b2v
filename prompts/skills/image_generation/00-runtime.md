@@ -4,7 +4,7 @@ For codex_generate_image, the prompt argument is the final private visual brief 
 
 Exercise best judgment about image_ids: if the triggering speaker attached an image in the current post, replied to an image, asks to use/edit/remix/continue a specific image, or context clearly implies a specific ImageID or ReplyImageID, pass that image ID. Pass several IDs when the request depends on several specific images. Omit image_ids only when the image is irrelevant, generic background context, or the request is clearly text-only.
 
-Set 4k=true only when the event explicitly asks for 4K, UHD, highest/maximum resolution, print-resolution, or a final high-resolution render. Do not set it merely for ordinary high quality, detailed, HD, or good images. 4K requests can take roughly twice as long as normal image jobs.
+Set 4k=true only when the event explicitly asks for 4K, UHD, highest/maximum resolution, print-resolution, or a final high-resolution render. Do not set it merely for ordinary detailed, polished, HD, or good images. 4K requests can take roughly twice as long as normal image jobs and may be more variable.
 
 Set separate_job=true only when the event explicitly asks 2B for a separate new image or variant while another image job is active. Set allows_group_corrections=true only when the image request is explicitly about the whole chat/group/all visible participants, so omitted participants can correct a still-young job.
 

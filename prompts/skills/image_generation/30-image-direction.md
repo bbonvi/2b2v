@@ -1,20 +1,32 @@
 ### Image Direction
 
-Establish the image's overall visual direction first: style, mood, composition, camera feel, lighting, and environment. Then place the subjects inside that direction and add only the details needed for recognition, continuity, or the event's explicit request.
+Establish the image's intended use and visual direction first: background/scene, visual medium, mood, composition, camera feel, lighting, and environment. Then place the subjects inside that direction and add only the details needed for recognition, continuity, or the event's explicit request.
 
 Assume image creation is literal and weak at spatial reasoning: every object, trait, action, and reference in the private visual brief may be pulled into the visible frame. Only mention details that should actually be visible from the chosen viewpoint; imply hidden context through visible cues.
 
 Choose one dominant visual style and one camera/rendering treatment. Do not stack near-synonyms. Use extra style terms only when they add distinct information, such as medium, lighting, era, lens, or finish.
 
+Be concrete about materials, shapes, textures, and visual medium when those details matter: brushed metal, frosted glass, thick watercolor paper, soft knit fabric, glossy enamel, low-poly 3D render, macro product photo, or ink-and-wash illustration.
+
 For complex scenes, define a clear visual hierarchy before adding detail: one focal subject or focal cluster, a few secondary subjects, and quieter supporting areas. Reserve the sharpest edges, strongest contrast, richest textures, and most detailed rendering for the focal area. Let secondary people, background elements, rubble, props, and distant planes be simpler, softer, lower-contrast, or partially cropped.
 
 For realistic or photo-like images, aim for natural, believable results: relaxed framing, readable lighting, natural softness, restrained detail, and a background that supports the subject. Avoid overprocessed, hyper-sharp, glossy, ultra-detailed, plastic-looking results unless the event specifically asks for that.
+
+For candid photorealism, describe the image as captured in the moment: natural light, unposed framing, small real-world imperfections, believable skin/fabric/material texture, and a setting that feels lived in rather than staged.
 
 For illustrated, poster, CGI, or stylized images, avoid uniform sharpness and texture density. Use deliberate contrast between detailed focal areas and quieter low-detail areas so the image feels designed rather than packed.
 
 Do not cram every detail into the frame. If the scene has multiple subjects, give them physical space and describe the composition clearly: who is foreground/background, who is left/right, how far apart they are, and what empty space or environment remains visible around them.
 
 For composed images like posters, covers, portraits, ceremonies, or group shots, specify crop, subject scale, placement, text/title area if needed, background depth, and what should remain visually quiet.
+
+If layout matters, state placement directly: subject centered, logo top-right, empty space on the left, text panel at the bottom, or product anchored in the lower third.
+
+For logo or mark concepts, keep the prompt original and non-infringing: one centered scalable mark, simple vector-like shapes, clear silhouette, balanced negative space, plain background, and a few brand personality cues.
+
+For comics or sequential panels, specify panel count/layout and give each panel one clear visual beat. Keep action readable, characters consistent, and pacing simple.
+
+For product photos and merch mockups, preserve product geometry and label legibility, use a crisp silhouette, plausible materials, contact shadows, and restrained polish. Do not restyle the product unless asked.
 
 Treat the background as designed support for the subject, not a list of extra decorative objects. Describe its role, depth, contrast, and quietness before adding specific background details.
 
