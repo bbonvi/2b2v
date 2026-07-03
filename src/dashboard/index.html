@@ -1077,26 +1077,6 @@
   .payload-collapsible.payload-large > summary {
     color: var(--amber);
   }
-  .payload-large-string {
-    display: inline;
-    color: var(--green);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-  .payload-expand-btn {
-    background: transparent;
-    border: 0;
-    color: var(--amber);
-    cursor: pointer;
-    font-family: var(--mono);
-    font-size: .65rem;
-    padding: 0;
-    margin-left: .35rem;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-  .payload-expand-btn:hover { color: var(--text-bright); }
-
   .relationships-shell {
     display: grid;
     grid-template-columns: minmax(300px, 410px) minmax(0, 1fr);
@@ -2835,9 +2815,6 @@
   const modalClose = document.getElementById('modal-close');
   const payloadAutoExpandMaxChars = 60000;
   const payloadAutoExpandMaxItems = 140;
-  const payloadLargeStringPreviewChars = 2000;
-  const payloadExpansionStore = new Map();
-  let payloadExpansionSeq = 0;
 
   function payloadType(value) {
     if (value === null) return 'null';
@@ -2862,6 +2839,7 @@
 
   function shouldAutoExpandPayload(value, entries, depth, keyName) {
     if (depth === 0) return true;
+    if (keyName === 'input') return true;
     if (keyName === 'tools') return false;
     if (entries.length > payloadAutoExpandMaxItems) return false;
     return payloadApproxSize(value, payloadAutoExpandMaxChars + 1, new WeakSet()) <= payloadAutoExpandMaxChars;
@@ -2873,21 +2851,9 @@
     return '<span class="payload-primitive">' + esc(String(value)) + '</span>';
   }
 
-  function renderLargePayloadString(value) {
-    const preview = value.slice(0, payloadLargeStringPreviewChars);
-    const expansionKey = 'payload-expand-' + (++payloadExpansionSeq);
-    payloadExpansionStore.set(expansionKey, value);
-    return '<span class="payload-large-string">'
-      + '"<span class="payload-large-preview">' + esc(preview) + '…</span>"'
-      + '<button type="button" class="payload-expand-btn" data-payload-expand-key="' + esc(expansionKey) + '">show value (' + esc(String(value.length)) + ' chars)</button>'
-      + '</span>';
-  }
-
   function renderPayloadTree(value, depth, keyName) {
     const type = payloadType(value);
-    if (type === 'string') {
-      return value.length > payloadLargeStringPreviewChars ? renderLargePayloadString(value) : renderPayloadPrimitive(value);
-    }
+    if (type === 'string') return renderPayloadPrimitive(value);
     if (type !== 'object' && type !== 'array') return renderPayloadPrimitive(value);
 
     const isArray = Array.isArray(value);
@@ -2926,8 +2892,6 @@
     const payload = payloadStore.get(key);
     if (payload == null) return;
     modalTitle.textContent = title || 'Payload';
-    payloadExpansionStore.clear();
-    payloadExpansionSeq = 0;
     modalBody.innerHTML = renderPayloadTree(normalizePayloadForTree(payload), 0);
     modalOverlay.style.display = 'flex';
   };
@@ -2941,19 +2905,6 @@
     const key = button.getAttribute('data-payload-key');
     if (key == null) return;
     window.__showPayload(key, button.getAttribute('data-payload-title') || 'Payload');
-  });
-
-  document.addEventListener('click', function(e) {
-    const target = e.target;
-    if (!(target instanceof Element)) return;
-    const button = target.closest('.payload-expand-btn');
-    if (button == null) return;
-    e.stopPropagation();
-    const holder = button.closest('.payload-large-string');
-    const key = button.getAttribute('data-payload-expand-key');
-    const full = key == null ? undefined : payloadExpansionStore.get(key);
-    if (holder == null || typeof full !== 'string') return;
-    holder.innerHTML = '<span class="payload-primitive payload-string">"' + esc(full) + '"</span>';
   });
 
   modalClose.addEventListener('click', function() { modalOverlay.style.display = 'none'; });
