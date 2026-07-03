@@ -187,6 +187,7 @@ describe("loadGlobalConfig", () => {
     });
     expect(cfg.defaultRelationships?.enabled).toBe(true);
     expect(cfg.defaultRelationships?.maxAxisDeltaPerSignal).toBe(4);
+    expect(cfg.defaultRelationships?.maxToolCalls).toBe(5);
     expect(cfg.logLevel).toBe("info");
   });
 
@@ -472,6 +473,7 @@ describe("loadGlobalConfig", () => {
     writeFileSync(file, [
       "memoryExtraction:",
       "  postReply: false",
+      "  maxToolCalls: 4",
       "  ambient:",
       "    enabled: true",
       "    everyMessages: 120",
@@ -481,6 +483,7 @@ describe("loadGlobalConfig", () => {
     const cfg = loadGlobalConfig(BASE_ENV, file);
     expect(cfg.defaultMemoryExtraction).toEqual({
       postReply: false,
+      maxToolCalls: 4,
       ambient: {
         enabled: true,
         everyMessages: 120,
@@ -494,6 +497,8 @@ describe("loadGlobalConfig", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, "memoryExtraction:\n  ambient:\n    everyMessages: 0\n");
     expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow("memoryExtraction.ambient.everyMessages must be >= 1");
+    writeFileSync(file, "memoryExtraction:\n  maxToolCalls: 0\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow("memoryExtraction.maxToolCalls must be >= 1");
   });
 
   test("rejects deprecated global actionLoop key", () => {
@@ -1143,6 +1148,7 @@ describe("resolveGuildConfig", () => {
     writeFileSync(cfgFile, [
       "relationships:",
       "  maxAxisDeltaPerSignal: 2",
+      "  maxToolCalls: 4",
     ].join("\n"));
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
     const resolved = resolveGuildConfig(global, {
@@ -1150,11 +1156,20 @@ describe("resolveGuildConfig", () => {
       slug: "relationships",
       relationships: {
         maxAxisDeltaPerSignal: 3,
+        maxToolCalls: 6,
       },
     });
 
     expect(global.defaultRelationships?.maxAxisDeltaPerSignal).toBe(2);
+    expect(global.defaultRelationships?.maxToolCalls).toBe(4);
     expect(resolved.relationships?.maxAxisDeltaPerSignal).toBe(3);
+    expect(resolved.relationships?.maxToolCalls).toBe(6);
+  });
+
+  test("rejects invalid relationships maxToolCalls", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "relationships:\n  maxToolCalls: 0\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow("relationships.maxToolCalls must be >= 1");
   });
 
   test("rejects invalid ambientAttention thresholds", () => {
@@ -1210,6 +1225,7 @@ describe("resolveGuildConfig", () => {
     writeFileSync(cfgFile, [
       "memoryExtraction:",
       "  postReply: true",
+      "  maxToolCalls: 3",
       "  ambient:",
       "    enabled: false",
       "    everyMessages: 300",
@@ -1222,12 +1238,14 @@ describe("resolveGuildConfig", () => {
       slug: "memory-extraction-override",
       memoryExtraction: {
         postReply: false,
+        maxToolCalls: 7,
         ambient: { enabled: true, everyMessages: 40, minIntervalSeconds: 5 },
       },
     };
     const resolved = resolveGuildConfig(global, partial);
     expect(resolved.memoryExtraction).toEqual({
       postReply: false,
+      maxToolCalls: 7,
       ambient: {
         enabled: true,
         everyMessages: 40,
@@ -1367,7 +1385,7 @@ describe("saveGuildConfig", () => {
       promptCaching: { enabled: true },
       promptTransport: defaultPromptTransportConfig(),
       backgroundLlm: { model: "custom/m", modelParams: {}, promptCaching: { enabled: true } },
-      memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
+      memoryExtraction: { postReply: true, maxToolCalls: 5, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };
 
     saveGuildConfig(file, resolved);
@@ -1410,7 +1428,7 @@ describe("saveGuildConfig", () => {
       promptCaching: { enabled: true },
       promptTransport: defaultPromptTransportConfig(),
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
-      memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
+      memoryExtraction: { postReply: true, maxToolCalls: 5, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };
 
     saveGuildConfig(file, resolved);
@@ -1744,7 +1762,7 @@ describe("saveGuildConfig emotes", () => {
       promptCaching: { enabled: true },
       promptTransport: defaultPromptTransportConfig(),
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
-      memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
+      memoryExtraction: { postReply: true, maxToolCalls: 5, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };
 
     saveGuildConfig(file, resolved);
@@ -1790,7 +1808,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       promptCaching: { enabled: true },
       promptTransport: defaultPromptTransportConfig(),
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
-      memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
+      memoryExtraction: { postReply: true, maxToolCalls: 5, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };
 
     saveGuildConfig(file, resolved);
@@ -1829,7 +1847,7 @@ describe("saveGuildConfig triggerInstructions", () => {
       promptCaching: { enabled: true },
       promptTransport: defaultPromptTransportConfig(),
       backgroundLlm: { model: "moonshotai/kimi-k2.5", modelParams: {}, promptCaching: { enabled: true } },
-      memoryExtraction: { postReply: true, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
+      memoryExtraction: { postReply: true, maxToolCalls: 5, ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 } },
     };
 
     saveGuildConfig(file, resolved);

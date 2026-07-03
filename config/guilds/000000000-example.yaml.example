@@ -49,6 +49,7 @@ trim:
 # Optional per-guild memory extraction override
 # memoryExtraction:
 #   postReply: true
+#   maxToolCalls: 5
 #   ambient:
 #     enabled: false
 #     everyMessages: 300
@@ -59,6 +60,7 @@ trim:
 # relationships:
 #   promptInjection: true
 #   maxAxisDeltaPerSignal: 4
+#   maxToolCalls: 5
 
 # Optional per-guild ambient attention override
 # ambientAttention:

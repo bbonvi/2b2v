@@ -4858,6 +4858,7 @@ async function runRelationshipPostReplyExtraction(input: {
       controlMessage: [
         "## Execution Mode: Relationship Maintenance",
         "Private relationships maintenance is active. Other tool calls are not available in this mode.",
+        `You may call record_relationship up to ${config.maxToolCalls} times; make one focused relationship update per call and stop when no useful relationship work remains.`,
         "",
         "## Post-Reply Relationship Consideration",
         "Current time:",
@@ -4870,9 +4871,9 @@ async function runRelationshipPostReplyExtraction(input: {
         ),
       ].join("\n"),
       modelMode: "main",
+      maxToolCalls: config.maxToolCalls,
       transcript: input.memoryRequest.maintenanceTranscript,
       promptContext: input.memoryRequest.promptContext,
-      terminateAfterSuccessfulToolNames: ["record_relationship"],
       requestLog: relationshipsLog,
       log: log.child({ guildId, channelId, requestId: relationshipsLog.requestId, component: "relationships-pass" }),
     });

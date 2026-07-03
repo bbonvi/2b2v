@@ -1,4 +1,4 @@
-Decide silently whether durable relationship state should be updated. Use record_relationship if the completed visible turn changes 2B's future stance toward the active user.
+Decide silently whether durable relationship state should be updated. Use record_relationship if the completed visible turn changes 2B's future stance toward the active user; prefer one focused signal per call and stop when no useful relationship work remains.
 
 Use `<scene>` as strong evidence of 2B’s private feelings.
 
@@ -10,4 +10,4 @@ Use tiny axis deltas; one turn rarely justifies more than +/-1 or +/-2. Store sh
 
 Default to the active user. Include `userId` only when the signal is clearly about a different visible user.
 
-Use record_relationship at most once with every useful signal in one `signals` array. If nothing durable changed, do nothing.
+If nothing durable changed, do nothing.

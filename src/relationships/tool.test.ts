@@ -3,7 +3,7 @@ import { createDatabase } from "../db/database";
 import { createRecordRelationshipTool, getRelationshipProfile, listRelationshipEvents, type RelationshipConfig, type RelationshipMutationResult } from "./index";
 
 function config(): RelationshipConfig {
-  return { enabled: true, promptInjection: true, maxAxisDeltaPerSignal: 4 };
+  return { enabled: true, promptInjection: true, maxAxisDeltaPerSignal: 4, maxToolCalls: 5 };
 }
 
 describe("record_relationship tool", () => {

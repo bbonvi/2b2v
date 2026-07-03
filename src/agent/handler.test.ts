@@ -104,6 +104,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultReplyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
     defaultMemoryExtraction: {
       postReply: true,
+      maxToolCalls: 5,
       ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
     },
     ...overrides,
@@ -142,6 +143,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
     memoryExtraction: {
       postReply: true,
+      maxToolCalls: 5,
       ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
     },
     ...overrides,
@@ -3238,6 +3240,14 @@ describe("handleMessage", () => {
       const lastMessage = request.messages[request.messages.length - 1];
       controlMessages.push(typeof lastMessage?.content === "string" ? lastMessage.content : "");
       expect(request.signal).toBeInstanceOf(AbortSignal);
+      if (calls > 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
       return Promise.resolve({
         text: "",
         toolCalls: [{ id: "call-1", type: "function", function: { name: "record_memory", arguments: "{\"actions\":[{\"action\":\"none\"}]}" } }],
@@ -3269,14 +3279,15 @@ describe("handleMessage", () => {
     });
 
     expect(toolCalls).toEqual([{ actions: [{ action: "none" }] }]);
-    expect(calls).toBe(1);
-    expect(exposedTools).toEqual([["record_memory"]]);
+    expect(calls).toBe(2);
+    expect(exposedTools).toEqual([["record_memory"], ["record_memory"]]);
     const promptText = JSON.stringify(payloads[0]);
     expect(promptText).toContain("Runtime Core");
     expect(promptText).not.toContain("Silent Memory Pass");
     expect(promptText).not.toContain("Other fact.");
     expect(controlMessages[0]).toStartWith("## Existing Memories For Other Visible Users");
     expect(controlMessages[0]).toContain("## Execution Mode: Memory Maintenance");
+    expect(controlMessages[0]).toContain("You may call record_memory up to 5 times");
     expect(controlMessages[0]).toContain("## Post-Reply Memory Consideration");
     expect(controlMessages[0]).toContain("strongly implied durable facts");
     expect(controlMessages[0]).toContain("Before adding, check existing memories");
@@ -3326,6 +3337,53 @@ describe("handleMessage", () => {
     });
 
     expect(calls).toBe(1);
+  });
+
+  test("silent memory pass honors configured maintenance tool-call cap", async () => {
+    const toolCalls: unknown[] = [];
+    const recordMemoryTool: AgentTool = {
+      name: "record_memory",
+      label: "record_memory",
+      description: "Record memory",
+      parameters: Type.Object({ actions: Type.Array(Type.Object({ action: Type.Literal("none") })) }),
+      execute: (_id, params) => {
+        toolCalls.push(params);
+        return Promise.resolve({
+          content: [{ type: "text", text: "Memory update complete." }],
+          details: { applied: 0, requested: 1 },
+        });
+      },
+    };
+    const completeChat: ChatCompleteFn = (request) => Promise.resolve({
+      text: "",
+      toolCalls: request.tools?.length === 0
+        ? []
+        : [{ id: `call-${toolCalls.length + 1}`, type: "function", function: { name: "record_memory", arguments: "{\"actions\":[{\"action\":\"none\"}]}" } }],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    });
+
+    await runSilentMemoryAgentPass({
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({
+        memoryExtraction: {
+          postReply: true,
+          maxToolCalls: 2,
+          ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
+        },
+      }),
+      context: makeContext(),
+      personaPrompt: "You are a test bot.",
+      runtimePrompts: TEST_RUNTIME_PROMPTS,
+      incomingMessage: makeMessage(),
+      userContent: "remember I like concise answers",
+      assistantReply: "got it",
+      visibleReplySent: true,
+      tools: [recordMemoryTool],
+      completeChat,
+    });
+
+    expect(toolCalls).toHaveLength(2);
   });
 
   test("calls background memory extraction after send", async () => {

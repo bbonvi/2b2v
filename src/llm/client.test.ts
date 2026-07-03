@@ -93,6 +93,7 @@ const GLOBAL: GlobalConfig = {
   defaultReplyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
   defaultMemoryExtraction: {
     postReply: true,
+    maxToolCalls: 5,
     ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
   },
 };
@@ -128,6 +129,7 @@ const GUILD: GuildConfig = {
   replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
   memoryExtraction: {
     postReply: true,
+    maxToolCalls: 5,
     ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
   },
 };

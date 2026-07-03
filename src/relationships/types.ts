@@ -68,6 +68,7 @@ export interface RelationshipConfig {
   enabled: boolean;
   promptInjection: boolean;
   maxAxisDeltaPerSignal: number;
+  maxToolCalls: number;
 }
 
 export type RelationshipConfigYaml = Partial<RelationshipConfig>;

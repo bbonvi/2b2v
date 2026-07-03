@@ -3,7 +3,7 @@ import { createDatabase } from "../db/database";
 import { applyRelationshipSignals, getRelationshipProfile, listRelationshipEvents, resetRelationships, type RelationshipConfig } from "./index";
 
 function config(): RelationshipConfig {
-  return { enabled: true, promptInjection: true, maxAxisDeltaPerSignal: 4 };
+  return { enabled: true, promptInjection: true, maxAxisDeltaPerSignal: 4, maxToolCalls: 5 };
 }
 
 describe("relationship engine", () => {

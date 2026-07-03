@@ -38,6 +38,7 @@ trim:
 # Background memory extraction
 memoryExtraction:
   postReply: true         # Run a silent memory pass after visible bot replies
+  maxToolCalls: 5         # Max record_memory calls per maintenance pass
   ambient:
     enabled: false        # Also review non-triggered chatter periodically
     everyMessages: 300    # Human messages since the last successful memory pass
@@ -49,6 +50,7 @@ relationships:
   enabled: true
   promptInjection: true
   maxAxisDeltaPerSignal: 4
+  maxToolCalls: 5
 
 # Ambient attention can create delayed reply candidates outside direct triggers.
 ambientAttention:

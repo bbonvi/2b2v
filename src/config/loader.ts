@@ -68,6 +68,7 @@ const DEFAULT_TRIM: TrimConfig = {
 
 const DEFAULT_MEMORY_EXTRACTION: MemoryExtractionConfig = {
   postReply: true,
+  maxToolCalls: 5,
   ambient: {
     enabled: false,
     everyMessages: 300,
@@ -80,6 +81,7 @@ const DEFAULT_RELATIONSHIPS: RelationshipConfig = {
   enabled: true,
   promptInjection: true,
   maxAxisDeltaPerSignal: 4,
+  maxToolCalls: 5,
 };
 
 const DEFAULT_AMBIENT_ATTENTION_MODE: AmbientAttentionModeConfig = {
@@ -925,6 +927,7 @@ function resolveGlobalMemoryExtraction(
 ): MemoryExtractionConfig {
   const resolved = {
     postReply: partial?.postReply ?? DEFAULT_MEMORY_EXTRACTION.postReply,
+    maxToolCalls: partial?.maxToolCalls ?? DEFAULT_MEMORY_EXTRACTION.maxToolCalls,
     ambient: {
       enabled: partial?.ambient?.enabled ?? DEFAULT_MEMORY_EXTRACTION.ambient.enabled,
       everyMessages: partial?.ambient?.everyMessages ?? DEFAULT_MEMORY_EXTRACTION.ambient.everyMessages,
@@ -942,6 +945,7 @@ function resolveGuildMemoryExtraction(
 ): MemoryExtractionConfig {
   const resolved = {
     postReply: partial?.postReply ?? global.postReply,
+    maxToolCalls: partial?.maxToolCalls ?? global.maxToolCalls,
     ambient: {
       enabled: partial?.ambient?.enabled ?? global.ambient.enabled,
       everyMessages: partial?.ambient?.everyMessages ?? global.ambient.everyMessages,
@@ -954,6 +958,9 @@ function resolveGuildMemoryExtraction(
 }
 
 function validateMemoryExtractionConfig(config: MemoryExtractionConfig, keyPrefix: string): void {
+  if (!Number.isInteger(config.maxToolCalls) || config.maxToolCalls < 1) {
+    throw new Error(`${keyPrefix}.maxToolCalls must be >= 1`);
+  }
   if (!Number.isInteger(config.ambient.everyMessages) || config.ambient.everyMessages < 1) {
     throw new Error(`${keyPrefix}.ambient.everyMessages must be >= 1`);
   }
@@ -974,9 +981,13 @@ function resolveRelationshipConfig(
     enabled: partial?.enabled ?? base.enabled,
     promptInjection: partial?.promptInjection ?? base.promptInjection,
     maxAxisDeltaPerSignal: partial?.maxAxisDeltaPerSignal ?? base.maxAxisDeltaPerSignal,
+    maxToolCalls: partial?.maxToolCalls ?? base.maxToolCalls,
   };
   if (!Number.isFinite(resolved.maxAxisDeltaPerSignal) || resolved.maxAxisDeltaPerSignal < 0) {
     throw new Error("relationships.maxAxisDeltaPerSignal must be >= 0");
+  }
+  if (!Number.isInteger(resolved.maxToolCalls) || resolved.maxToolCalls < 1) {
+    throw new Error("relationships.maxToolCalls must be >= 1");
   }
   return resolved;
 }

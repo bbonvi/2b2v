@@ -144,6 +144,7 @@ export interface SilentToolAgentInput {
   runtimeInstruction: string;
   controlMessage: string;
   modelMode?: "main" | "background";
+  maxToolCalls?: number;
   terminateAfterSuccessfulToolNames?: readonly string[];
   transcript?: OpenRouterMessage[];
   promptContext?: MaintenancePromptContext;
@@ -2262,12 +2263,14 @@ function silentToolPromptCaching(input: SilentToolAgentInput) {
 function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
   const now = Date.now();
   const passKind = input.passKind ?? "post_reply";
+  const maxToolCalls = input.guildConfig.memoryExtraction.maxToolCalls;
   return [
     ...(input.visibleUserMemoryContext !== undefined && input.visibleUserMemoryContext.trim() !== ""
       ? [input.visibleUserMemoryContext.trim(), ""]
       : []),
     "## Execution Mode: Memory Maintenance",
     "Private memory maintenance is active. Other tool calls are not available in this mode.",
+    `You may call record_memory up to ${maxToolCalls} times; make one focused change per call and stop when no useful memory work remains.`,
     "",
     passKind === "ambient" ? "## Ambient Memory Consideration" : "## Post-Reply Memory Consideration",
     "Current time for expiresIn decisions:",
@@ -2346,6 +2349,7 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
   messages.push({ role: "user", content: input.controlMessage });
 
   const { tools: timedTools, state: timingState } = wrapToolsWithTiming(input.tools);
+  const maxToolCalls = Math.max(1, input.maxToolCalls ?? input.tools.length);
   timingState.resetAgentLoopStart();
   try {
     await runNativeToolLoop({
@@ -2374,8 +2378,10 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
       },
       messages,
       tools: timedTools,
-      maxToolCalls: Math.max(1, input.tools.length),
-      maxToolRounds: Math.min(input.guildConfig.replyLoop.maxToolCalls, 3),
+      maxToolCalls,
+      maxToolRounds: input.maxToolCalls !== undefined
+        ? maxToolCalls
+        : Math.min(input.guildConfig.replyLoop.maxToolCalls, 3),
       agentTimeBudgetMs: input.guildConfig.replyLoop.wallClockTimeoutMs,
       llmOutputTimeoutMs: input.guildConfig.replyLoop.llmOutputTimeoutMs,
       requestLog: input.requestLog,
@@ -2404,7 +2410,7 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
     runtimeInstruction: buildRuntimeInstruction(input.runtimePrompts),
     controlMessage: memoryPassControlMessage(input),
     modelMode: "background",
-    terminateAfterSuccessfulToolNames: ["record_memory"],
+    maxToolCalls: input.guildConfig.memoryExtraction.maxToolCalls,
   });
 }
 

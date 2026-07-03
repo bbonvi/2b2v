@@ -66,7 +66,7 @@ Current context also includes `Known contact` for the triggering user. It is com
 
 Relationship state is direct per-user truth in SQLite. `relationship_profiles` stores one profile per Discord user with small social axes, notes, boundaries, open loops, and recent moments. `relationship_events` is an audit log with guild/channel/user/source/visibility scope.
 
-Relationship extraction runs after generated bot replies, after the memory pass, in the preserved agent transcript. The main model may call `record_relationship` once with durable signals; low-confidence or missing-user signals are dropped.
+Relationship extraction runs after generated bot replies, after the memory pass, in the preserved agent transcript. The main model may call `record_relationship` in a bounded maintenance loop capped by `relationships.maxToolCalls`; low-confidence or missing-user signals are dropped.
 
 Relationship prompt injection is compact. Normal replies receive only the active speaker relationship slice. Relationships never posts directly and does not feed a proactive initiative queue.
 
@@ -92,7 +92,7 @@ Memory is direct SQLite data by default. Rows have `scope` `guild`, `user`, or `
 
 Memory writes can happen after the visible reply loop has ended. The runtime starts a silent second native agent loop with the same assembled context style and only the `record_memory` tool available; it sends no Discord output and does not keep typing active. For duplicate avoidance, that memory pass also receives a volatile, bounded appendix of active memories for other human users visible in rendered chat history: newest visible users first, up to 10 users, 10 memories per user, and 100 rows total.
 
-Ambient memory extraction is separate from reply triggering. When enabled, non-triggered human chatter is reviewed after `memoryExtraction.ambient.everyMessages` messages since the last successful memory pass in that channel, subject to `minIntervalSeconds` and `maxBatchMessages`. Successful post-reply memory passes reset the same channel checkpoint, so active bot conversations back off ambient extraction instead of double-paying for the same recent window.
+Ambient memory extraction is separate from reply triggering. When enabled, non-triggered human chatter is reviewed after `memoryExtraction.ambient.everyMessages` messages since the last successful memory pass in that channel, subject to `minIntervalSeconds`, `maxBatchMessages`, and the shared `memoryExtraction.maxToolCalls` maintenance-loop cap. Successful post-reply memory passes reset the same channel checkpoint, so active bot conversations back off ambient extraction instead of double-paying for the same recent window.
 
 ## Schedules
 

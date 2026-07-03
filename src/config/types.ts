@@ -358,6 +358,8 @@ export interface TrimConfig {
 export interface MemoryExtractionConfig {
   /** Run the existing silent memory pass after visible replies. */
   postReply: boolean;
+  /** Maximum record_memory calls per silent maintenance pass. */
+  maxToolCalls: number;
   /** Ambient extraction for non-triggered channel chatter. */
   ambient: {
     enabled: boolean;
@@ -375,6 +377,8 @@ export interface RelationshipConfig {
   enabled: boolean;
   promptInjection: boolean;
   maxAxisDeltaPerSignal: number;
+  /** Maximum record_relationship calls per silent maintenance pass. */
+  maxToolCalls: number;
 }
 
 export type RelationshipConfigYaml = Partial<RelationshipConfig>;
@@ -578,6 +582,7 @@ export interface GuildConfigYaml {
   };
   memoryExtraction?: {
     postReply?: boolean;
+    maxToolCalls?: number;
     ambient?: {
       enabled?: boolean;
       everyMessages?: number;
@@ -671,6 +676,7 @@ export interface MainConfigYaml {
   };
   memoryExtraction?: {
     postReply?: boolean;
+    maxToolCalls?: number;
     ambient?: {
       enabled?: boolean;
       everyMessages?: number;
