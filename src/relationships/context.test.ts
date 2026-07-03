@@ -5,7 +5,9 @@ import { renderRelationshipPromptContext } from "./context";
 describe("renderRelationshipPromptContext", () => {
   test("names 2B relationship subject explicitly and keeps other users compact", () => {
     const current = emptyRelationshipProfile("u1", 1);
-    current.axes.warmth = 6;
+    current.axes.warmth = 15;
+    current.axes.trust = 14;
+    current.axes.intimacy = 10;
     current.notes.push("comfortable with casual check-ins");
     const other = emptyRelationshipProfile("u2", 1);
     other.axes.trust = 12;
@@ -21,7 +23,10 @@ describe("renderRelationshipPromptContext", () => {
     expect(rendered).toContain("This is 2B's stored relationship stance toward this user.");
     expect(rendered).toContain("Computed contact: observed history with this user; familiarity, not intimacy.");
     expect(rendered).toContain("Subject: @alice / u1.");
-    expect(rendered).toContain("- @bob / u2: trust +12");
+    expect(rendered).toContain("Relationship stance: 2B feels warm toward them, trusts them, and is slightly more personally open with them.");
+    expect(rendered).toContain("- @bob / u2: 2B trusts them.");
+    expect(rendered).not.toContain("Axes:");
+    expect(rendered).not.toContain("trust +12");
     expect(rendered).not.toContain("Active speaker");
   });
 });
