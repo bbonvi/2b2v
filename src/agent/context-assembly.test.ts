@@ -366,7 +366,7 @@ describe("contextToSystemPrompt", () => {
     const prompt = contextToSystemPrompt(ctx);
     expect(prompt).toBe(
       "## Tool Guidance\nUse tools only when useful.\n\n" +
-      "Guild: g1 | Channel: c1\nDate/Time: 2026-01-01T00:00:00Z"
+      "## Current Context\nGuild: g1 | Channel: c1\nDate/Time: 2026-01-01T00:00:00Z"
     );
   });
 
@@ -391,7 +391,7 @@ describe("contextToSystemPrompt", () => {
     const prompt = contextToSystemPrompt(ctx);
     // Tool instructions (stable) must appear before Current Context (unstable)
     const personaIdx = prompt.indexOf("## Tool Guidance");
-    const contextIdx = prompt.indexOf("Guild: g1 | Channel: c1");
+    const contextIdx = prompt.indexOf("## Current Context");
     expect(personaIdx).toBeLessThan(contextIdx);
   });
 

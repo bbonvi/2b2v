@@ -69,9 +69,7 @@ export interface RecordMemoryToolDeps {
   currentUserId: string;
   currentUsername?: string;
   sourceMessageId: string;
-  /** Externalized memory-selection policy from prompts/runtime/memory/policy/**. */
-  memoryPolicy?: string;
-  /** Externalized record_memory tool description with memory policy already rendered. */
+  /** Externalized record_memory tool description. */
   recordMemoryDescription?: string;
   /** Resolve a Discord username, with or without @, to a guild-scoped user ID. */
   resolveUsername?: (username: string) => Promise<string | undefined>;
@@ -615,6 +613,12 @@ async function applyMemoryActions(input: MemoryMutationInput, extraction: Memory
       kind: action.kind,
       content: action.content.trim(),
       sourceMessageId: input.sourceMessageId,
+      provenance: {
+        sourceMessageIds: [input.sourceMessageId],
+        guildId: input.guildId,
+        userId: input.currentUserId,
+        capturedAt: Date.now(),
+      },
       confidence: action.confidence,
       ...(expiresAt !== undefined ? { expiresAt } : {}),
     };
@@ -641,17 +645,13 @@ async function applyMemoryActions(input: MemoryMutationInput, extraction: Memory
 
 /** Create the state-changing tool used by the silent post-reply memory pass. */
 export function createRecordMemoryTool(deps: RecordMemoryToolDeps): AgentTool {
-  const externalPolicy = deps.memoryPolicy?.trim();
-  const policy = externalPolicy !== undefined && externalPolicy !== ""
-    ? externalPolicy
-    : buildMemoryPolicyInstructions().join(" ");
   const description = deps.recordMemoryDescription?.trim();
   return {
     name: "record_memory",
     label: "record_memory",
     description: description !== undefined && description !== ""
       ? description
-      : `Record memory updates after a Discord turn. ${policy}`,
+      : "Record memory updates after a Discord turn.",
     parameters: MemoryExtractionSchema,
 
     async execute(_toolCallId: string, params: unknown): Promise<RecordMemoryToolResult> {
@@ -678,7 +678,7 @@ export async function extractAndApplyMemories(input: MemoryExtractionInput): Pro
   const complete = input.completeChat ?? completeLlmChat;
   const stable: StablePromptSection[] = [{
     role: "system",
-    text: "You are a memory extraction routine; return only JSON matching the schema.",
+    text: "You are a memory extraction task; return only JSON matching the schema.",
   }];
   const result = await complete({
     provider: input.provider,

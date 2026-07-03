@@ -11,8 +11,6 @@ function setup(): void {
   mkdirSync(join(TEST_DIR, "system"), { recursive: true });
   mkdirSync(join(TEST_DIR, "core", "nested"), { recursive: true });
   mkdirSync(join(TEST_DIR, "runtime", "reply", "tools"), { recursive: true });
-  mkdirSync(join(TEST_DIR, "runtime", "memory", "pass"), { recursive: true });
-  mkdirSync(join(TEST_DIR, "runtime", "memory", "policy"), { recursive: true });
   mkdirSync(join(TEST_DIR, "runtime", "memory", "context"), { recursive: true });
   mkdirSync(join(TEST_DIR, "runtime", "tools"), { recursive: true });
   mkdirSync(join(TEST_DIR, "runtime", "tool-parameters", "web_search"), { recursive: true });
@@ -58,13 +56,11 @@ describe("loadPromptBundle", () => {
     writeFileSync(join(TEST_DIR, "runtime", "reply", "20-image.md"), "# Image Runtime\nimage");
     writeFileSync(join(TEST_DIR, "runtime", "reply", "10-core.md"), "# Core Runtime\ncore");
     writeFileSync(join(TEST_DIR, "runtime", "reply", "tools", "search.md"), "# Search Runtime\nsearch");
-    writeFileSync(join(TEST_DIR, "runtime", "memory", "pass", "00-pass.md"), "# Memory Pass\npass");
-    writeFileSync(join(TEST_DIR, "runtime", "memory", "policy", "00-core.md"), "# Memory Policy\npolicy");
-    writeFileSync(join(TEST_DIR, "runtime", "memory", "policy", "10-extra.md"), "# Extra Policy\nextra");
     writeFileSync(join(TEST_DIR, "runtime", "memory", "context", "current.md"), "Memory context.");
     writeFileSync(join(TEST_DIR, "runtime", "tools", "web_search.md"), "Search with {{provider}}.");
     writeFileSync(join(TEST_DIR, "runtime", "tool-parameters", "web_search", "query.md"), "Query for {{provider}}.");
     writeFileSync(join(TEST_DIR, "runtime", "context", "active-image-jobs.md"), "Active jobs.");
+    writeFileSync(join(TEST_DIR, "runtime", "context", "relationship-pass-decision.md"), "Relationship decision.");
     writeFileSync(join(TEST_DIR, "runtime", "image-reading", "fallback-system", "00-system.md"), "Describe images.");
     writeFileSync(join(TEST_DIR, "runtime", "ambient-attention", "evaluator", "shared", "00-policy.md"), "Ambient attention shared policy.");
     writeFileSync(join(TEST_DIR, "runtime", "ambient-attention", "evaluator", "ambient-pickup", "00-policy.md"), "Ambient pickup policy.");
@@ -111,13 +107,11 @@ describe("loadPromptBundle", () => {
     expect(bundle.corePrompt).not.toContain("# Ignored");
     expect(bundle.runtime.reply.indexOf("# Core Runtime")).toBeLessThan(bundle.runtime.reply.indexOf("# Image Runtime"));
     expect(bundle.runtime.reply.indexOf("# Image Runtime")).toBeLessThan(bundle.runtime.reply.indexOf("# Search Runtime"));
-    expect(bundle.runtime.memoryPass).toContain("# Memory Pass");
-    expect(bundle.runtime.memoryPolicy).toContain("# Memory Policy");
-    expect(bundle.runtime.memoryPolicy.indexOf("# Memory Policy")).toBeLessThan(bundle.runtime.memoryPolicy.indexOf("# Extra Policy"));
     expect(bundle.runtime.memoryContextTemplates.current).toBe("Memory context.");
     expect(bundle.runtime.toolDescriptions.web_search).toBe("Search with {{provider}}.");
     expect(bundle.runtime.toolParameterDescriptions["web_search/query"]).toBe("Query for {{provider}}.");
     expect(bundle.runtime.contextTemplates["active-image-jobs"]).toBe("Active jobs.");
+    expect(bundle.runtime.contextTemplates["relationship-pass-decision"]).toBe("Relationship decision.");
     expect(bundle.runtime.imageDescriptionSystemPrompt).toContain("Describe images.");
     expect(bundle.runtime.ambientAttentionEvaluator.shared).toContain("Ambient attention shared policy.");
     expect(bundle.runtime.ambientAttentionEvaluator.ambientPickup).toContain("Ambient pickup policy.");

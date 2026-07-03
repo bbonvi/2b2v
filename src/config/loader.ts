@@ -44,6 +44,8 @@ import type {
   AmbientInitiativeEvaluatorConfig,
   AmbientInitiativeKindConfig,
   AmbientInitiativeConfigYaml,
+  RelationshipConfig,
+  RelationshipConfigYaml,
 } from "./types.ts";
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
 
@@ -72,6 +74,12 @@ const DEFAULT_MEMORY_EXTRACTION: MemoryExtractionConfig = {
     maxBatchMessages: 300,
     minIntervalSeconds: 600,
   },
+};
+
+const DEFAULT_RELATIONSHIPS: RelationshipConfig = {
+  enabled: true,
+  promptInjection: true,
+  maxAxisDeltaPerSignal: 4,
 };
 
 const DEFAULT_AMBIENT_ATTENTION_MODE: AmbientAttentionModeConfig = {
@@ -957,6 +965,22 @@ function validateMemoryExtractionConfig(config: MemoryExtractionConfig, keyPrefi
   }
 }
 
+function resolveRelationshipConfig(
+  defaults: RelationshipConfig | undefined,
+  partial: RelationshipConfigYaml | undefined,
+): RelationshipConfig {
+  const base = defaults ?? DEFAULT_RELATIONSHIPS;
+  const resolved: RelationshipConfig = {
+    enabled: partial?.enabled ?? base.enabled,
+    promptInjection: partial?.promptInjection ?? base.promptInjection,
+    maxAxisDeltaPerSignal: partial?.maxAxisDeltaPerSignal ?? base.maxAxisDeltaPerSignal,
+  };
+  if (!Number.isFinite(resolved.maxAxisDeltaPerSignal) || resolved.maxAxisDeltaPerSignal < 0) {
+    throw new Error("relationships.maxAxisDeltaPerSignal must be >= 0");
+  }
+  return resolved;
+}
+
 function resolveTypingSimulationConfig(
   defaults: TypingSimulationConfig,
   partial: Partial<TypingSimulationConfig> | undefined,
@@ -1090,6 +1114,7 @@ export function loadGlobalConfig(
   const defaultImageGeneration = resolveGlobalImageGeneration(yaml.imageGeneration);
   const defaultAmbientAttention = resolveAmbientAttentionConfig(undefined, yaml.ambientAttention);
   const defaultAmbientInitiative = resolveAmbientInitiativeConfig(undefined, yaml.ambientInitiative);
+  const defaultRelationships = resolveRelationshipConfig(undefined, yaml.relationships);
   const openrouterApiKey = env.OPENROUTER_API_KEY;
   const usesOpenRouter = defaultLlmProvider === "openrouter"
     || yaml.backgroundLlm?.provider === "openrouter"
@@ -1174,6 +1199,7 @@ export function loadGlobalConfig(
     defaultAmbientInitiative,
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
     defaultMemoryExtraction: resolveGlobalMemoryExtraction(yaml.memoryExtraction),
+    defaultRelationships,
   };
 }
 
@@ -1272,6 +1298,7 @@ export function resolveGuildConfig(
     ambientInitiative: resolveAmbientInitiativeConfig(global.defaultAmbientInitiative, partial.ambientInitiative),
     replyLoop: resolveGuildReplyLoop(global.defaultReplyLoop, partial.replyLoop),
     memoryExtraction: resolveGuildMemoryExtraction(global.defaultMemoryExtraction, partial.memoryExtraction),
+    relationships: resolveRelationshipConfig(global.defaultRelationships, partial.relationships),
   };
 }
 
@@ -1358,6 +1385,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     promptTransport: config.promptTransport,
     backgroundLlm: config.backgroundLlm,
     ambientAttention: config.ambientAttention,
+    relationships: config.relationships,
     replyLoop: config.replyLoop,
     memoryExtraction: config.memoryExtraction,
   };

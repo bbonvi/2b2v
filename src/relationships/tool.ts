@@ -1,0 +1,68 @@
+import { Type } from "typebox";
+import { Value } from "typebox/value";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { Database } from "../db/database";
+import { applyRelationshipSignals, type RelationshipMutationResult } from "./engine";
+import type { RelationshipConfig, RelationshipScope, RelationshipSignalInput } from "./types";
+import { RELATIONSHIP_AXES, RELATIONSHIP_VISIBILITIES } from "./state";
+
+const AxesSchema = Type.Object(Object.fromEntries(
+  RELATIONSHIP_AXES.map((axis) => [axis, Type.Optional(Type.Number({ minimum: -10, maximum: 10 }))]),
+), { additionalProperties: false });
+
+const SignalSchema = Type.Object({
+  userId: Type.Optional(Type.String({ minLength: 1 })),
+  summary: Type.String({ minLength: 1 }),
+  confidence: Type.Number({ minimum: 0, maximum: 1 }),
+  visibility: Type.Optional(Type.String({ enum: [...RELATIONSHIP_VISIBILITIES] })),
+  axes: Type.Optional(AxesSchema),
+  note: Type.Optional(Type.String({ minLength: 1 })),
+  boundary: Type.Optional(Type.String({ minLength: 1 })),
+  openLoop: Type.Optional(Type.String({ minLength: 1 })),
+}, { additionalProperties: false });
+
+const RecordRelationshipSchema = Type.Object({
+  signals: Type.Array(SignalSchema, { maxItems: 6 }),
+}, { additionalProperties: false });
+
+type RecordRelationshipToolResult = AgentToolResult<RelationshipMutationResult | { error: true }>;
+
+export interface RecordRelationshipToolDeps {
+  db: Database;
+  config: RelationshipConfig;
+  scope?: RelationshipScope;
+  dryRun?: boolean;
+  description?: string;
+  onResult?: (result: RelationshipMutationResult, signals: RelationshipSignalInput[]) => void;
+}
+
+export function createRecordRelationshipTool(deps: RecordRelationshipToolDeps): AgentTool {
+  return {
+    name: "record_relationship",
+    label: "record_relationship",
+    description: deps.description?.trim() !== ""
+      ? deps.description ?? "Record durable relationship state after a Discord turn."
+      : "Record durable relationship state after a Discord turn.",
+    parameters: RecordRelationshipSchema,
+    execute: (_toolCallId: string, params: unknown): Promise<RecordRelationshipToolResult> => {
+      if (!Value.Check(RecordRelationshipSchema, params)) {
+        return Promise.resolve({
+          content: [{ type: "text", text: "Relationship update rejected: arguments did not match the schema." }],
+          details: { error: true },
+        });
+      }
+      const signals = (params as { signals: RelationshipSignalInput[] }).signals;
+      const result = applyRelationshipSignals(deps.db, deps.config, {
+        signals,
+        source: "llm",
+        scope: deps.scope,
+        dryRun: deps.dryRun,
+      });
+      deps.onResult?.(result, signals);
+      return Promise.resolve({
+        content: [{ type: "text", text: `Relationship update complete; accepted ${result.accepted.length} of ${signals.length} signal(s).` }],
+        details: result,
+      });
+    },
+  };
+}

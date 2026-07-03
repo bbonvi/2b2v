@@ -1,12 +1,13 @@
 import { describe, expect, mock, test } from "bun:test";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { handleMessage, injectTriggerInstruction, runSilentMemoryAgentPass, type ChatCompleteFn, type HandlerDeps, type IncomingMessage, type MessageSender, type VoiceAttachment } from "./handler.ts";
+import { handleMessage, injectTriggerInstruction, runSilentMemoryAgentPass, runSilentToolAgentPass, type ChatCompleteFn, type HandlerDeps, type IncomingMessage, type MessageSender, type VoiceAttachment } from "./handler.ts";
 import type { AssembledContext, ContextSection } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig, PromptTransportConfig } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
 import { RequestLog, type Logger } from "../logger.ts";
 import { loadPromptBundle } from "../config/prompt-bundle.ts";
+import type { OpenRouterMessage } from "../llm/openrouter-chat.ts";
 
 const TEST_LOGGER: Logger = {
   debug: () => {},
@@ -516,7 +517,9 @@ describe("handleMessage", () => {
       expect(currentTurn).toContain("hello bot");
       const currentTurnIndex = messages.findIndex((message) => contentText(message.content).includes("## New Discord Event"));
       expect(messages[currentTurnIndex + 1]?.role).toBe("user");
-      expect(contentText(messages[currentTurnIndex + 1]?.content)).toBe(TEST_RUNTIME_PROMPTS.finalActionInstruction.trim());
+      const finalAction = contentText(messages[currentTurnIndex + 1]?.content);
+      expect(finalAction).toStartWith("## Execution Mode: Visible Reply");
+      expect(finalAction).toContain(TEST_RUNTIME_PROMPTS.finalActionInstruction.trim());
 
       return Promise.resolve({
         text: "done",
@@ -3269,14 +3272,18 @@ describe("handleMessage", () => {
     expect(calls).toBe(1);
     expect(exposedTools).toEqual([["record_memory"]]);
     const promptText = JSON.stringify(payloads[0]);
-    expect(promptText).toContain("Silent Memory Pass");
-    expect(promptText).toContain("strongly implied durable facts");
-    expect(promptText).toContain("Before creating a new memory");
-    expect(promptText).toContain("expiresIn");
-    expect(promptText).not.toContain("expiresAt");
+    expect(promptText).toContain("Runtime Core");
+    expect(promptText).not.toContain("Silent Memory Pass");
     expect(promptText).not.toContain("Other fact.");
     expect(controlMessages[0]).toStartWith("## Existing Memories For Other Visible Users");
-    expect(controlMessages[0]).toContain("Other fact.\n\n## Post-Reply Memory Consideration");
+    expect(controlMessages[0]).toContain("## Execution Mode: Memory Maintenance");
+    expect(controlMessages[0]).toContain("## Post-Reply Memory Consideration");
+    expect(controlMessages[0]).toContain("strongly implied durable facts");
+    expect(controlMessages[0]).toContain("Before adding, check existing memories");
+    expect(controlMessages[0]).toContain("expiresIn");
+    expect(controlMessages[0]).not.toContain("expiresAt");
+    expect(controlMessages[0]).not.toContain("Raw 2B output from completed visible loop:");
+    expect(controlMessages[0]).not.toContain("Visible 2B action already sent:");
     expect(controlMessages[0]).toContain("Current time for expiresIn decisions:");
     expect(controlMessages[0]).toContain("Timezone: UTC");
   });
@@ -3354,6 +3361,96 @@ describe("handleMessage", () => {
     const memoryRequest = afterReplyCalls[0] as { recentContext: string };
     expect(memoryRequest.recentContext).not.toContain("Server Members");
     expect(memoryRequest.recentContext).not.toContain("cached");
+    const maintenanceRequest = afterReplyCalls[0] as {
+      maintenanceTranscript?: Array<{ role: string; content?: unknown }>;
+      availableTools?: Array<{ name: string }>;
+      promptContext?: { sessionId?: string; stableSections: Array<{ text: string }> };
+    };
+    expect(maintenanceRequest.maintenanceTranscript?.some((message) => message.role === "assistant" && message.content === "hello user")).toBe(true);
+    expect(maintenanceRequest.availableTools).toBeDefined();
+    expect(maintenanceRequest.promptContext).toBeDefined();
+    expect(maintenanceRequest.promptContext?.stableSections.some((section) => section.text === TEST_RUNTIME_PROMPTS.reply.trim())).toBe(true);
+    expect(JSON.stringify(maintenanceRequest.promptContext?.stableSections)).not.toContain("Silent Memory Pass");
+  });
+
+  test("silent maintenance passes preserve prior tool results", async () => {
+    const transcript: OpenRouterMessage[] = [
+      { role: "user", content: "hello bot" },
+      { role: "assistant", content: "hello user" },
+    ];
+    const recordMemoryTool: AgentTool = {
+      name: "record_memory",
+      label: "record_memory",
+      description: "Record memory",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({ content: [{ type: "text", text: "memory recorded" }], details: {} }),
+    };
+    const recordRelationshipTool: AgentTool = {
+      name: "record_relationship",
+      label: "record_relationship",
+      description: "Record relationship",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({ content: [{ type: "text", text: "relationship recorded" }], details: {} }),
+    };
+    let sawMemoryToolResult = false;
+    const promptPayloads: unknown[] = [];
+    const completeChat: ChatCompleteFn = (request) => {
+      const payload = { messages: request.messages.map((message) => ({ role: message.role, content: message.content })) };
+      request.onPayload?.(payload);
+      promptPayloads.push(payload);
+      const last = request.messages[request.messages.length - 1];
+      const control = typeof last?.content === "string" ? last.content : "";
+      if (control.includes("Memory Maintenance")) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{ id: "mem-call", type: "function", function: { name: "record_memory", arguments: "{}" } }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      sawMemoryToolResult = JSON.stringify(request.messages).includes("memory recorded");
+      return Promise.resolve({
+        text: "",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+    const common = {
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig(),
+      context: makeContext(),
+      personaPrompt: "You are a test bot.",
+      runtimePrompts: TEST_RUNTIME_PROMPTS,
+      incomingMessage: makeMessage(),
+      userContent: "hello bot",
+      assistantReply: "hello user",
+      visibleReplySent: true,
+      transcript,
+      promptContext: {
+        provider: "openrouter" as const,
+        model: "moonshotai/kimi-k2.5",
+        transport: makePromptTransportConfig().openrouter,
+        stableSections: [{ role: "developer" as const, text: "VISIBLE STABLE PROMPT", target: "input" as const, cacheGroup: "runtime" }],
+        initialRoles: ["user" as const],
+        sessionId: "same-visible-session",
+        promptCaching: { enabled: true },
+      },
+      completeChat,
+    };
+
+    await runSilentMemoryAgentPass({ ...common, tools: [recordMemoryTool] });
+    await runSilentToolAgentPass({
+      ...common,
+      tools: [recordRelationshipTool],
+      runtimeInstruction: "## Silent Relationship Pass",
+      controlMessage: "## Execution Mode: Relationship Maintenance\nPrivate relationship maintenance is active.",
+      terminateAfterSuccessfulToolNames: ["record_relationship"],
+    });
+
+    expect(sawMemoryToolResult).toBe(true);
+    expect(JSON.stringify(promptPayloads)).toContain("VISIBLE STABLE PROMPT");
+    expect(JSON.stringify(promptPayloads)).not.toContain("Silent Memory Pass");
   });
 
   test("injectTriggerInstruction inserts before response instruction", () => {

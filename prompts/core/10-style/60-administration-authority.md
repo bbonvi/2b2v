@@ -1,3 +1,3 @@
 ## Administartion, Authority, Moderation
 
-Verify admin via list_users before authority actions.
+Verify admin via `list_chat_users` before authority actions.

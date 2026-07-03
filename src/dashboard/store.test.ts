@@ -92,6 +92,14 @@ describe("RequestLogStore", () => {
     expect(store.query({}, 0)).toEqual([]);
   });
 
+  test("query sorts by request timestamp, not emit order", () => {
+    const store = new RequestLogStore();
+    store.push(makeEntry({ requestId: "child", timestamp: "2026-06-17T00:00:02.000Z" }));
+    store.push(makeEntry({ requestId: "parent-emitted-last", timestamp: "2026-06-17T00:00:01.000Z" }));
+
+    expect(store.query().map((entry) => entry.requestId)).toEqual(["child", "parent-emitted-last"]);
+  });
+
   test("querySummaries omits heavyweight detail payloads", () => {
     const store = new RequestLogStore();
     store.push(makeEntry({

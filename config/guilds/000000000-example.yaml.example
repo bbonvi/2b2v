@@ -55,6 +55,11 @@ trim:
 #     maxBatchMessages: 300
 #     minIntervalSeconds: 600
 
+# Optional per-guild relationships override
+# relationships:
+#   promptInjection: true
+#   maxAxisDeltaPerSignal: 4
+
 # Optional per-guild ambient attention override
 # ambientAttention:
 #   enabled: false

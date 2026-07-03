@@ -26,7 +26,13 @@ interface DashboardManagementApi {
   editMessage: (input: { messageId: string; guildId: string; channelId: string; content: string }) => AwaitableDashboardManagementResult;
   deleteMessages: (input: { messageIds: string[]; guildId: string; channelId: string; deleteDiscord?: boolean }) => AwaitableDashboardManagementResult;
   deleteLatestMessages: (input: { guildId: string; channelId: string; count: number; deleteDiscord?: boolean }) => AwaitableDashboardManagementResult;
-  runPromptLab: (input: { guildId: string; channelId: string; userId: string; content: string; runToken?: string }) => AwaitableDashboardManagementResult;
+  runPromptLab: (input: {
+    guildId: string;
+    channelId: string;
+    userId: string;
+    content: string;
+    runToken?: string;
+  }) => AwaitableDashboardManagementResult;
   runPromptLabAmbientInitiative: (input: { guildId: string; channelId: string; kind: "self_expression" | "targeted_checkin"; force?: boolean; runToken?: string }) => AwaitableDashboardManagementResult;
   listMemories: (filter: { guildId?: string; scope?: "guild" | "user" | "self"; includeDeleted?: boolean; limit?: number }) => AwaitableDashboardManagementResult;
   editMemory: (input: {
@@ -37,6 +43,10 @@ interface DashboardManagementApi {
     expiresAt?: number | null;
   }) => AwaitableDashboardManagementResult;
   deleteMemory: (memoryId: number) => AwaitableDashboardManagementResult;
+  relationships: {
+    getOverview: () => AwaitableDashboardManagementResult;
+    reset: () => AwaitableDashboardManagementResult;
+  };
 }
 
 function generateToken(): string {
@@ -222,6 +232,29 @@ function requestLogFilters(req: Request): { guildId?: string; channelId?: string
   if (channelId !== null && channelId !== "") filters.channelId = channelId;
   if (authorUsername !== null && authorUsername !== "") filters.authorUsername = authorUsername;
   return filters;
+}
+
+let relationshipsLabBundle: { body: string; headers: Record<string, string> } | null = null;
+
+async function relationshipsLabAssetResponse(): Promise<Response> {
+  if (relationshipsLabBundle === null) {
+    const result = await Bun.build({
+      entrypoints: [new URL("./relationships-lab.tsx", import.meta.url).pathname],
+      target: "browser",
+      format: "esm",
+      sourcemap: "none",
+    });
+    if (!result.success) {
+      return json({ error: "Relationship Lab bundle failed", logs: result.logs.map((entry) => entry.message) }, 500);
+    }
+    const output = result.outputs[0];
+    if (output === undefined) return json({ error: "Relationship Lab bundle was empty" }, 500);
+    relationshipsLabBundle = {
+      body: await output.text(),
+      headers: { "content-type": "text/javascript; charset=utf-8" },
+    };
+  }
+  return new Response(relationshipsLabBundle.body, { headers: relationshipsLabBundle.headers });
 }
 
 export function startDashboard(opts: DashboardOptions): void {
@@ -508,6 +541,28 @@ export function startDashboard(opts: DashboardOptions): void {
           if (!Number.isInteger(memoryId) || memoryId <= 0) return json({ error: "Valid memoryId is required." }, 400);
           return json(await management.deleteMemory(memoryId));
         },
+      },
+
+      "/api/relationships": (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+        return json(management.relationships.getOverview());
+      },
+
+      "/api/relationships/reset": {
+        POST: (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          return json(management.relationships.reset());
+        },
+      },
+
+      "/assets/relationships-lab.js": async (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        return relationshipsLabAssetResponse();
       },
 
       "/": {

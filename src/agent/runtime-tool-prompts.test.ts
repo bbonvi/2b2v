@@ -8,8 +8,6 @@ function runtimePrompts(): RuntimePromptBundle {
   return {
     reply: "",
     finalActionInstruction: "",
-    memoryPass: "",
-    memoryPolicy: "",
     toolDescriptions: {
       demo_tool: "External description for {{name}}.",
     },
@@ -36,6 +34,9 @@ function runtimePrompts(): RuntimePromptBundle {
         selfExpression: "",
         targetedCheckin: "",
       },
+    },
+    relationships: {
+      context: "",
     },
     skills: { byId: {}, indexPrompt: "", requiredByTool: {} },
   };

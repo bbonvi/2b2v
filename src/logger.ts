@@ -508,7 +508,7 @@ export class RequestLog {
       llmCalls: this.llmCalls,
       totalDurationMs: Date.now() - this.startTime,
       startedAt: new Date(this.startTime).toISOString(),
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(this.startTime).toISOString(),
     };
     if (status !== undefined) {
       entry.status = status;

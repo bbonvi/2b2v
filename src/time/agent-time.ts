@@ -14,6 +14,10 @@ export function formatLocalWallClock(epochMs: number, timezone: string): string 
   const tz = safeTimezone(timezone);
   const instant = Temporal.Instant.fromEpochMilliseconds(epochMs);
   const zdt = instant.toZonedDateTimeISO(tz);
+  return formatZonedDateTime(zdt);
+}
+
+function formatZonedDateTime(zdt: Temporal.ZonedDateTime): string {
   const y = String(zdt.year).padStart(4, "0");
   const mo = String(zdt.month).padStart(2, "0");
   const d = String(zdt.day).padStart(2, "0");
@@ -22,15 +26,37 @@ export function formatLocalWallClock(epochMs: number, timezone: string): string 
   return `${y}-${mo}-${d} ${h}:${mi}`;
 }
 
+function weekdayName(dayOfWeek: number): string {
+  switch (dayOfWeek) {
+    case 1: return "Monday";
+    case 2: return "Tuesday";
+    case 3: return "Wednesday";
+    case 4: return "Thursday";
+    case 5: return "Friday";
+    case 6: return "Saturday";
+    case 7: return "Sunday";
+    default: return "Unknown";
+  }
+}
+
+function daypart(hour: number): string {
+  if (hour >= 5 && hour < 12) return "morning";
+  if (hour >= 12 && hour < 17) return "afternoon";
+  if (hour >= 17 && hour < 22) return "evening";
+  return "night";
+}
+
 /**
  * Build the "Current Context" metadata block for agent system prompt.
- * Returns lines with timezone and local date/time.
+ * Returns lines with timezone, local date/time, and local daypart.
  */
 export function currentLocalContext(timezone: string, nowMs?: number): string {
   const tz = safeTimezone(timezone);
   const now = nowMs ?? Date.now();
-  const local = formatLocalWallClock(now, tz);
-  return `Timezone: ${tz}\nLocal Date/Time: ${local}`;
+  const zdt = Temporal.Instant.fromEpochMilliseconds(now).toZonedDateTimeISO(tz);
+  const weekday = weekdayName(zdt.dayOfWeek);
+  const dayType = zdt.dayOfWeek >= 6 ? "weekend" : "weekday";
+  return `Timezone: ${tz}\nLocal Date/Time: ${weekday}, ${formatZonedDateTime(zdt)}\nLocal Daypart: ${dayType} ${daypart(zdt.hour)}`;
 }
 
 /** Format elapsed wall time compactly for prompt metadata, e.g. `10h 13m`. */

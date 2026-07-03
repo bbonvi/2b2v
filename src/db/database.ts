@@ -20,6 +20,7 @@ function memoriesTableSql(tableName: string, ifNotExists = false): string {
     kind              TEXT NOT NULL CHECK(kind IN (${MEMORY_KIND_SQL_VALUES})),
     content           TEXT NOT NULL CHECK(length(trim(content)) > 0),
     source_message_id TEXT,
+    provenance_json   TEXT,
     confidence        REAL NOT NULL DEFAULT 0.7 CHECK(confidence >= 0 AND confidence <= 1),
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
@@ -120,6 +121,36 @@ const SCHEMA_SQL = `
     PRIMARY KEY (guild_id, channel_id)
   );
 
+  CREATE TABLE IF NOT EXISTS relationship_profiles (
+    user_id          TEXT PRIMARY KEY,
+    axes_json        TEXT NOT NULL,
+    notes_json       TEXT NOT NULL,
+    boundaries_json  TEXT NOT NULL,
+    open_loops_json  TEXT NOT NULL,
+    recent_json      TEXT NOT NULL,
+    updated_at       INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS relationship_events (
+    id            TEXT PRIMARY KEY,
+    type          TEXT NOT NULL CHECK(type = 'relationship_signal'),
+    at_ms         INTEGER NOT NULL,
+    source        TEXT NOT NULL CHECK(source IN ('system', 'llm', 'admin')),
+    visibility    TEXT NOT NULL CHECK(visibility IN ('source-bound', 'relationship-private', 'private-internal')),
+    guild_id      TEXT,
+    channel_id    TEXT,
+    user_id       TEXT,
+    summary       TEXT NOT NULL,
+    payload_json  TEXT NOT NULL,
+    created_at    INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_relationship_profiles_updated
+    ON relationship_profiles(updated_at);
+
+  CREATE INDEX IF NOT EXISTS idx_relationship_events_scope
+    ON relationship_events(guild_id, channel_id, user_id, at_ms);
+
   CREATE TABLE IF NOT EXISTS schedules (
     id                TEXT PRIMARY KEY,
     guild_id          TEXT NOT NULL,
@@ -181,6 +212,7 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_threads_guild
     ON threads(guild_id);
+
 `;
 
 export function createDatabase(dbPath: string): Database {
@@ -212,6 +244,7 @@ export function createDatabase(dbPath: string): Database {
 
   // Idempotent migration: add optional expiry to memories before shape migrations can copy it.
   try { raw.run("ALTER TABLE memories ADD COLUMN expires_at INTEGER"); } catch { /* already exists */ }
+  try { raw.run("ALTER TABLE memories ADD COLUMN provenance_json TEXT"); } catch { /* already exists */ }
 
   // Migration: legacy memory rows -> structured memories.
   const memoryColumns = raw.prepare("PRAGMA table_info(memories)").all() as { name: string; type: string }[];
@@ -223,7 +256,7 @@ export function createDatabase(dbPath: string): Database {
     raw.run("BEGIN TRANSACTION");
     try {
       raw.run(memoriesTableSql("memories_new"));
-      raw.run(`INSERT INTO memories_new (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
+      raw.run(`INSERT INTO memories_new (scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, created_at, updated_at, expires_at, deleted_at)
         SELECT
           CASE WHEN scope = 'user' THEN 'user' ELSE 'guild' END,
           CASE WHEN scope = 'user' THEN NULL ELSE COALESCE(guild_id, '') END,
@@ -240,6 +273,7 @@ export function createDatabase(dbPath: string): Database {
             ELSE short_description || ': ' || long_description
           END,
           source_message_id,
+          NULL,
           0.7,
           created_at,
           updated_at,
@@ -263,6 +297,7 @@ export function createDatabase(dbPath: string): Database {
     .get() as { sql: string } | undefined;
   if (hasStructuredMemorySchema && !memorySchemaHasCurrentChecks(memorySchema?.sql)) {
     const hasScopeColumn = memoryColumns.some((c) => c.name === "scope");
+    const provenanceExpression = memoryColumns.some((c) => c.name === "provenance_json") ? "provenance_json" : "NULL";
     const scopeExpression = hasScopeColumn
       ? "CASE WHEN scope IN ('guild', 'user', 'self') THEN scope WHEN subject_user_id IS NOT NULL THEN 'user' ELSE 'guild' END"
       : "CASE WHEN subject_user_id IS NOT NULL THEN 'user' ELSE 'guild' END";
@@ -270,7 +305,7 @@ export function createDatabase(dbPath: string): Database {
     raw.run("BEGIN TRANSACTION");
     try {
       raw.run(memoriesTableSql("memories_new"));
-      raw.run(`INSERT INTO memories_new (id, scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
+      raw.run(`INSERT INTO memories_new (id, scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, created_at, updated_at, expires_at, deleted_at)
         SELECT
           id,
           ${scopeExpression},
@@ -283,6 +318,7 @@ export function createDatabase(dbPath: string): Database {
           ${kindExpression},
           TRIM(content),
           source_message_id,
+          ${provenanceExpression},
           CASE
             WHEN confidence < 0 THEN 0
             WHEN confidence > 1 THEN 1

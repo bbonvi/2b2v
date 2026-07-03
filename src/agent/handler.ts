@@ -6,6 +6,7 @@ import { type AssembledContext, type ContextSection } from "./context-assembly.t
 import { wrapToolsWithTiming, type TimingState } from "./tool-timing.ts";
 import type {
   LlmProvider,
+  PromptCachingConfig,
   PromptTransportConfig,
   PromptTransportRole,
   PromptTransportSectionConfig,
@@ -14,7 +15,7 @@ import type {
   TriggerInstructions,
 } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
-import { resolveGuildModel, buildStreamOptions, buildBackgroundStreamOptions, buildImageReadingStreamOptions, type ModelImageInputSupport } from "../llm/client.ts";
+import { resolveGuildLlmProvider, resolveGuildModel, resolveGuildModelId, buildStreamOptions, buildBackgroundStreamOptions, buildImageReadingStreamOptions, type ModelImageInputSupport } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { Logger, RequestLog } from "../logger.ts";
 import {
@@ -40,7 +41,6 @@ import {
   type ResponseSegment,
 } from "./response-directives.ts";
 import { currentLocalContext } from "../time/agent-time.ts";
-import { buildMemoryPolicyInstructions } from "./memory-service.ts";
 import type { RuntimePromptBundle } from "../config/prompt-bundle.ts";
 import { renderPromptTemplate } from "../config/prompt-template.ts";
 import { createLoadSkillTool } from "./load-skill-tool.ts";
@@ -76,6 +76,16 @@ export interface IncomingMessage {
 
 export type ChatCompleteFn = (request: OpenRouterChatRequest) => Promise<OpenRouterChatResult>;
 
+export interface MaintenancePromptContext {
+  provider: LlmProvider;
+  model: string;
+  transport: ProviderPromptTransportConfig;
+  stableSections: StablePromptSection[];
+  initialRoles: PromptTransportRole[];
+  sessionId?: string;
+  promptCaching: PromptCachingConfig;
+}
+
 export interface MemoryExtractionRequest {
   sourceMessageId?: string;
   userMessage: string;
@@ -84,6 +94,9 @@ export interface MemoryExtractionRequest {
   context: AssembledContext;
   incomingMessage: IncomingMessage;
   visibleReplySent: boolean;
+  maintenanceTranscript?: OpenRouterMessage[];
+  availableTools?: AgentTool[];
+  promptContext?: MaintenancePromptContext;
 }
 
 export interface IgnoredReplyRequest {
@@ -107,6 +120,33 @@ export interface SilentMemoryAgentInput {
   passKind?: "post_reply" | "ambient";
   visibleUserMemoryContext?: string;
   tools: AgentTool[];
+  transcript?: OpenRouterMessage[];
+  promptContext?: MaintenancePromptContext;
+  log?: Logger;
+  requestLog?: RequestLog;
+  completeChat?: ChatCompleteFn;
+  signal?: AbortSignal;
+}
+
+export interface SilentToolAgentInput {
+  globalConfig: GlobalConfig;
+  guildConfig: GuildConfig;
+  context: AssembledContext;
+  systemPrompt?: string;
+  personaPrompt?: string;
+  runtimePrompts?: RuntimePromptBundle;
+  incomingMessage: IncomingMessage;
+  userContent: string;
+  assistantReply: string;
+  visibleReplySent: boolean;
+  visibleUserMemoryContext?: string;
+  tools: AgentTool[];
+  runtimeInstruction: string;
+  controlMessage: string;
+  modelMode?: "main" | "background";
+  terminateAfterSuccessfulToolNames?: readonly string[];
+  transcript?: OpenRouterMessage[];
+  promptContext?: MaintenancePromptContext;
   log?: Logger;
   requestLog?: RequestLog;
   completeChat?: ChatCompleteFn;
@@ -211,6 +251,9 @@ export interface HandleResult {
   triggerResult: TriggerResult;
   agentRan: boolean;
   responseText?: string;
+  maintenanceTranscript?: OpenRouterMessage[];
+  availableTools?: AgentTool[];
+  promptContext?: MaintenancePromptContext;
 }
 
 type DispatchSegment =
@@ -682,8 +725,13 @@ function buildFinalActionInstruction(runtimePrompts: RuntimePromptBundle | undef
     ? base
     : "## Final Action Instruction\nContinue the Discord room as 2B. Emit only her next runtime action: visible speech, silence, voice, or private action. Do not explain the choice.";
   const trigger = triggerInstruction?.trim() ?? "";
-  if (trigger === "") return instruction;
-  return `${instruction}\n\n## Trigger Context\n${trigger}`;
+  const mode = [
+    "## Execution Mode: Visible Reply",
+    "Produce 2B's visible Discord action. Use other tools when necessary, but do not call record_memory or record_relationship in this mode.",
+  ].join("\n");
+  const withMode = `${mode}\n\n${instruction}`;
+  if (trigger === "") return withMode;
+  return `${withMode}\n\n## Trigger Context\n${trigger}`;
 }
 
 function promptTransportForProvider(
@@ -1314,6 +1362,7 @@ async function runNativeToolLoop(input: {
       });
       input.requestLog?.recordLLMCompletion(result.messageForLogs);
       const text = result.text.trim();
+      input.messages.push(assistantMessageFromResult({ ...result, text }));
       return { text };
     } catch (error) {
       if (recoverAgentTimeBudget && isAgentTimeBudgetExceededError(error)) {
@@ -1402,6 +1451,7 @@ async function runNativeToolLoop(input: {
 
     if (result.toolCalls.length === 0) {
       const text = result.text.trim();
+      input.messages.push(assistantMessageFromResult({ ...result, text }));
       return { text };
     }
 
@@ -2185,36 +2235,28 @@ function messageWantsTyping(segments: ResponseSegment[]): boolean {
   return false;
 }
 
-function buildMemoryPassRuntimeInstruction(
-  passKind: "post_reply" | "ambient" = "post_reply",
-  runtimePrompts: RuntimePromptBundle | undefined,
-): string {
-  const passPrompt = runtimePrompts?.memoryPass.trim() ?? "";
-  const memoryPolicy = runtimePrompts?.memoryPolicy.trim() ?? "";
-  if (passPrompt !== "" || memoryPolicy !== "") {
-    return [
-      passPrompt !== "" ? passPrompt : "## Silent Memory Pass",
-      passKind === "ambient"
-        ? "This is an automatic ambient memory pass over ordinary channel chatter, without a visible Discord action loop."
-        : "This is a post-action memory pass over one completed visible Discord turn.",
-      passKind === "ambient"
-        ? "Be stricter than a post-action pass because nobody asked 2B to remember this chatter."
-        : "",
-      memoryPolicy,
-    ].filter((line) => line !== "").join("\n");
-  }
-
-  return [
-    "## Silent Memory Pass",
-    "Use only the memory tool for hidden durable-memory maintenance.",
-    ...buildMemoryPolicyInstructions(),
-  ].join("\n");
+function silentToolProvider(input: SilentToolAgentInput): LlmProvider {
+  return input.modelMode === "main"
+    ? resolveGuildLlmProvider(input.globalConfig, input.guildConfig)
+    : input.guildConfig.backgroundLlm.provider ?? resolveGuildLlmProvider(input.globalConfig, input.guildConfig);
 }
 
-function backgroundProvider(input: SilentMemoryAgentInput): LlmProvider {
-  return input.guildConfig.backgroundLlm.provider
-    ?? input.guildConfig.llmProvider
-    ?? input.globalConfig.defaultLlmProvider;
+function silentToolModel(input: SilentToolAgentInput): string {
+  return input.modelMode === "main"
+    ? resolveGuildModelId(input.globalConfig, input.guildConfig)
+    : input.guildConfig.backgroundLlm.model;
+}
+
+function silentToolStreamOptions(input: SilentToolAgentInput): Record<string, unknown> & { apiKey: string } {
+  return input.modelMode === "main"
+    ? buildStreamOptions(input.globalConfig, input.guildConfig)
+    : buildBackgroundStreamOptions(input.globalConfig, input.guildConfig);
+}
+
+function silentToolPromptCaching(input: SilentToolAgentInput) {
+  return input.modelMode === "main"
+    ? input.guildConfig.promptCaching
+    : input.guildConfig.backgroundLlm.promptCaching;
 }
 
 function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
@@ -2224,6 +2266,9 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
     ...(input.visibleUserMemoryContext !== undefined && input.visibleUserMemoryContext.trim() !== ""
       ? [input.visibleUserMemoryContext.trim(), ""]
       : []),
+    "## Execution Mode: Memory Maintenance",
+    "Private memory maintenance is active. Other tool calls are not available in this mode.",
+    "",
     passKind === "ambient" ? "## Ambient Memory Consideration" : "## Post-Reply Memory Consideration",
     "Current time for expiresIn decisions:",
     currentLocalContext(input.guildConfig.timezone, now),
@@ -2235,9 +2280,7 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
         {},
         "Review ambient chat history for durable memory.",
       )
-      : input.visibleReplySent
-        ? `Visible 2B action already sent:\n${input.assistantReply !== "" ? input.assistantReply : "(empty)"}`
-        : "No visible 2B action was sent for this turn.",
+      : "",
     "",
     runtimeContextTemplate(
       input.runtimePrompts,
@@ -2248,8 +2291,8 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
   ].join("\n");
 }
 
-/** Run the post-reply memory maintenance loop with only memory tools and no Discord output hooks. */
-export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): Promise<void> {
+/** Run a hidden post-reply maintenance loop with private tools and no Discord output hooks. */
+export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promise<void> {
   if (input.tools.length === 0) return;
 
   const wallController = new AbortController();
@@ -2267,35 +2310,40 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
   }, input.guildConfig.replyLoop.wallClockTimeoutMs);
 
   const complete = input.completeChat ?? completeLlmChat;
-  const provider = backgroundProvider(input);
-  const transport = promptTransportForProvider(input.guildConfig.promptTransport, provider);
-  const streamOptions = buildBackgroundStreamOptions(input.globalConfig, input.guildConfig);
+  const inheritedPrompt = input.promptContext;
+  const provider = inheritedPrompt?.provider ?? silentToolProvider(input);
+  const transport = inheritedPrompt?.transport ?? promptTransportForProvider(input.guildConfig.promptTransport, provider);
+  const streamOptions = inheritedPrompt !== undefined
+    ? buildStreamOptions(input.globalConfig, input.guildConfig)
+    : silentToolStreamOptions(input);
   const providerParams: Record<string, unknown> = { ...streamOptions };
   delete providerParams.apiKey;
   delete providerParams.signal;
   delete providerParams.onPayload;
+  const model = inheritedPrompt?.model ?? silentToolModel(input);
+  const promptCaching = inheritedPrompt?.promptCaching ?? silentToolPromptCaching(input);
 
-  const stableSections = sectionsForStablePrompt(
+  const stableSections = inheritedPrompt?.stableSections ?? sectionsForStablePrompt(
     input.systemPrompt ?? "",
     input.personaPrompt ?? "",
     "",
     input.context,
     "",
-    buildMemoryPassRuntimeInstruction(input.passKind ?? "post_reply", input.runtimePrompts),
+    input.runtimeInstruction,
     transport,
   );
-  const sessionId = buildPromptCacheSessionId(input.requestLog, `${provider}:${input.guildConfig.backgroundLlm.model}`);
+  const sessionId = inheritedPrompt?.sessionId ?? buildPromptCacheSessionId(input.requestLog, `${provider}:${model}`);
   const currentMessageWithoutImages: IncomingMessage = { ...input.incomingMessage, imageInputs: undefined };
   const volatileMessages = buildVolatileTurnMessages(input.context);
-  const initialRoles = initialMessageRoles(transport, volatileMessages);
-  const messages = buildInitialMessages(
+  const initialRoles = inheritedPrompt?.initialRoles ?? initialMessageRoles(transport, volatileMessages);
+  const messages = input.transcript ?? buildInitialMessages(
     input.userContent,
     volatileMessages,
     currentMessageWithoutImages,
     input.runtimePrompts,
     provider === "openai-codex" ? [] : initialRoles,
   );
-  messages.push({ role: "user", content: memoryPassControlMessage(input) });
+  messages.push({ role: "user", content: input.controlMessage });
 
   const { tools: timedTools, state: timingState } = wrapToolsWithTiming(input.tools);
   timingState.resetAgentLoopStart();
@@ -2305,7 +2353,7 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
       requestBase: {
         provider,
         apiKey: streamOptions.apiKey,
-        model: input.guildConfig.backgroundLlm.model,
+        model,
         systemPrompt: provider === "openai-codex" ? codexSystemPromptForStableSections(stableSections, transport) : "",
         providerParams,
         sessionId,
@@ -2314,8 +2362,8 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
             prependStableSectionsToPayload(
               payload,
               stableSections,
-              input.guildConfig.backgroundLlm.promptCaching,
-              input.guildConfig.backgroundLlm.model,
+              promptCaching,
+              model,
             );
           } else if (transport.mode === "split-input") {
             prependStableSectionsToCodexPayload(payload, stableSections, initialRoles);
@@ -2326,7 +2374,7 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
       },
       messages,
       tools: timedTools,
-      maxToolCalls: 1,
+      maxToolCalls: Math.max(1, input.tools.length),
       maxToolRounds: Math.min(input.guildConfig.replyLoop.maxToolCalls, 3),
       agentTimeBudgetMs: input.guildConfig.replyLoop.wallClockTimeoutMs,
       llmOutputTimeoutMs: input.guildConfig.replyLoop.llmOutputTimeoutMs,
@@ -2339,7 +2387,7 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
       signal: wallController.signal,
       allowEmptyFinalResponse: true,
       stopOnAgentTimeBudget: true,
-      terminateAfterSuccessfulToolNames: ["record_memory"],
+      terminateAfterSuccessfulToolNames: input.terminateAfterSuccessfulToolNames,
     });
   } finally {
     clearTimeout(wallTimeout);
@@ -2347,6 +2395,17 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
       parent.removeEventListener("abort", onParentAbort);
     }
   }
+}
+
+/** Run the post-reply memory maintenance loop with only memory tools and no Discord output hooks. */
+export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): Promise<void> {
+  await runSilentToolAgentPass({
+    ...input,
+    runtimeInstruction: buildRuntimeInstruction(input.runtimePrompts),
+    controlMessage: memoryPassControlMessage(input),
+    modelMode: "background",
+    terminateAfterSuccessfulToolNames: ["record_memory"],
+  });
 }
 
 /**
@@ -2420,7 +2479,18 @@ export async function handleMessage(
   const initialRoles = initialMessageRoles(transport, volatileMessages, finalActionInstruction !== "");
   const reqLog = deps.requestLog;
   const sessionId = buildPromptCacheSessionId(reqLog, `${model.llmProvider}:${model.id}`);
+  const maintenancePromptContext: MaintenancePromptContext = {
+    provider: model.llmProvider,
+    model: model.id,
+    transport,
+    stableSections,
+    initialRoles,
+    ...(sessionId !== undefined ? { sessionId } : {}),
+    promptCaching: deps.guildConfig.promptCaching,
+  };
   const startedAt = Date.now();
+  let maintenanceTranscript: OpenRouterMessage[] | undefined;
+  let finalText = "";
   const scheduleMemoryPass = (assistantReply: string, visibleReplySent: boolean): void => {
     void deps.afterReply?.({
       sourceMessageId: msg.messageId,
@@ -2430,6 +2500,9 @@ export async function handleMessage(
       context,
       incomingMessage: msg,
       visibleReplySent,
+      maintenanceTranscript,
+      availableTools: tools,
+      promptContext: maintenancePromptContext,
     }).catch((error: unknown) => {
       deps.log?.warn("memory extraction failed", {
         error: error instanceof Error ? error.message : String(error),
@@ -2452,7 +2525,6 @@ export async function handleMessage(
       wallController.abort(new AgentTimeBudgetExceededError(deps.guildConfig.replyLoop.wallClockTimeoutMs));
     }, deps.guildConfig.replyLoop.wallClockTimeoutMs);
 
-    let finalText = "";
     const pendingAttachments: OutboundAttachment[] = [...(deps.initialPendingAttachments ?? [])];
     const intermediateStatus = { sent: false, sendCount: 0 };
     const replyFirst = deps.replyFirstOverride ?? chooseReplyMode(triggerResult);
@@ -2525,6 +2597,15 @@ export async function handleMessage(
     };
     try {
       timingState.resetAgentLoopStart();
+      const mainMessages = buildInitialMessages(
+        userContent,
+        volatileMessages,
+        msg,
+        deps.runtimePrompts,
+        model.llmProvider === "openai-codex" ? [] : initialRoles,
+        finalActionInstruction,
+      );
+      maintenanceTranscript = mainMessages;
       const result = await runNativeToolLoop({
         complete,
         requestBase: {
@@ -2546,14 +2627,7 @@ export async function handleMessage(
             deps.log?.debug("llm_request_payload", { payload });
           },
         },
-        messages: buildInitialMessages(
-          userContent,
-          volatileMessages,
-          msg,
-          deps.runtimePrompts,
-          model.llmProvider === "openai-codex" ? [] : initialRoles,
-          finalActionInstruction,
-        ),
+        messages: mainMessages,
         tools: timedTools,
         maxToolCalls: deps.guildConfig.replyLoop.maxToolCalls,
         maxToolRounds: deps.guildConfig.replyLoop.maxToolCalls,
@@ -2620,17 +2694,17 @@ export async function handleMessage(
       }
       scheduleMemoryPass("", false);
       deps.log?.debug("native_reply_ignored", { durationMs: Date.now() - startedAt });
-      return { triggered: true, triggerResult, agentRan: true };
+      return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
     }
     if (parsedResponse.segments.length === 0) {
       scheduleMemoryPass("", false);
       deps.log?.debug("native_reply_empty_after_directives", { durationMs: Date.now() - startedAt });
-      return { triggered: true, triggerResult, agentRan: true };
+      return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
     }
     if (deps.preSendCheck !== undefined && !await deps.preSendCheck()) {
       scheduleMemoryPass("", false);
       deps.log?.debug("native_reply_dropped_before_send", { durationMs: Date.now() - startedAt });
-      return { triggered: true, triggerResult, agentRan: true };
+      return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
     }
 
     const liveSent = await (liveDispatchers.get("")?.finish(finalText) ?? Promise.resolve(0));
@@ -2662,7 +2736,7 @@ export async function handleMessage(
       durationMs: Date.now() - startedAt,
       outputLength: memoryReply.length,
     });
-    return { triggered: true, triggerResult, agentRan: true, responseText: memoryReply };
+    return { triggered: true, triggerResult, agentRan: true, responseText: memoryReply, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
   } finally {
     deps.onAgentEnd?.();
   }

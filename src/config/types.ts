@@ -370,6 +370,15 @@ export interface MemoryExtractionConfig {
   };
 }
 
+/** Durable relationship-profile controls. */
+export interface RelationshipConfig {
+  enabled: boolean;
+  promptInjection: boolean;
+  maxAxisDeltaPerSignal: number;
+}
+
+export type RelationshipConfigYaml = Partial<RelationshipConfig>;
+
 /** Per-guild configuration. Source of truth is the YAML file. */
 export interface GuildConfig {
   guildId: string;
@@ -419,6 +428,8 @@ export interface GuildConfig {
   replyLoop: ReplyLoopConfig;
   /** Background memory extraction behavior. */
   memoryExtraction: MemoryExtractionConfig;
+  /** Durable relationship-profile behavior. */
+  relationships?: RelationshipConfig;
 }
 
 /** Global configuration loaded from file + env. */
@@ -481,6 +492,8 @@ export interface GlobalConfig {
   defaultReplyLoop: ReplyLoopConfig;
   /** Default background memory extraction behavior. */
   defaultMemoryExtraction: MemoryExtractionConfig;
+  /** Default durable relationship-profile behavior. */
+  defaultRelationships?: RelationshipConfig;
 }
 
 /** Full resolved app config. */
@@ -557,6 +570,7 @@ export interface GuildConfigYaml {
   };
   ambientAttention?: AmbientAttentionConfigYaml;
   ambientInitiative?: AmbientInitiativeConfigYaml;
+  relationships?: RelationshipConfigYaml;
   replyLoop?: {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;
@@ -649,6 +663,7 @@ export interface MainConfigYaml {
   };
   ambientAttention?: AmbientAttentionConfigYaml;
   ambientInitiative?: AmbientInitiativeConfigYaml;
+  relationships?: RelationshipConfigYaml;
   replyLoop?: {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;

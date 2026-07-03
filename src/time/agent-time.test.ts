@@ -52,14 +52,16 @@ describe("currentLocalContext", () => {
     const nowMs = Date.UTC(2026, 1, 6, 12, 30, 0);
     const result = currentLocalContext("Europe/Berlin", nowMs);
     expect(result).toContain("Timezone: Europe/Berlin");
-    expect(result).toContain("Local Date/Time: 2026-02-06 13:30");
+    expect(result).toContain("Local Date/Time: Friday, 2026-02-06 13:30");
+    expect(result).toContain("Local Daypart: weekday afternoon");
   });
 
   test("uses UTC for invalid timezone with warning", () => {
     const nowMs = Date.UTC(2026, 1, 6, 12, 0, 0);
     const result = currentLocalContext("Invalid/Zone", nowMs);
     expect(result).toContain("Timezone: UTC");
-    expect(result).toContain("Local Date/Time: 2026-02-06 12:00");
+    expect(result).toContain("Local Date/Time: Friday, 2026-02-06 12:00");
+    expect(result).toContain("Local Daypart: weekday afternoon");
   });
 });
 

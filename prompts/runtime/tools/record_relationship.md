@@ -1,0 +1,1 @@
+Record private relationship updates after a Discord turn has already completed. Use this action at most once per pass; put every useful update in the single `signals` array. Use tiny grounded axis deltas and short notes/open loops/boundaries only when they should affect future replies. Prefer no action over speculative analysis.

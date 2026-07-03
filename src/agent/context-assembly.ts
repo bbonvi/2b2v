@@ -108,7 +108,7 @@ export const SECTION_DEFS: readonly SectionDef[] = [
   { label: "Upcoming Schedules",   role: "developer", cached: false, source: { kind: "field", inputKey: "upcomingSchedules", header: "## Upcoming Schedules" } },
   { label: "Memories",             role: "developer", cached: false, source: { kind: "field", inputKey: "memories", header: "## Memory" } },
   { label: "Chat History — Newer", role: "developer", cached: false, source: { kind: "field", inputKey: "newerHistory" } },
-  { label: "Current Context",      role: "developer", cached: false, source: { kind: "field", inputKey: "currentContext" } },
+  { label: "Current Context",      role: "developer", cached: false, source: { kind: "field", inputKey: "currentContext", header: "## Current Context" } },
   { label: "Response Instruction", role: "developer", cached: false, source: { kind: "field", inputKey: "responseInstruction" } },
 ];
 

@@ -44,6 +44,12 @@ memoryExtraction:
     maxBatchMessages: 300 # Max chronological messages reviewed per ambient pass
     minIntervalSeconds: 600 # Minimum seconds between ambient passes per channel
 
+# Durable per-user relationship profiles.
+relationships:
+  enabled: true
+  promptInjection: true
+  maxAxisDeltaPerSignal: 4
+
 # Ambient attention can create delayed reply candidates outside direct triggers.
 ambientAttention:
   enabled: false

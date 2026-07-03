@@ -120,11 +120,19 @@ export class RequestLogStore {
       result.push(withLiveActiveDurations(entry));
       if (limit !== undefined && result.length >= limit) return result;
     }
+    const completed: Array<{ entry: RequestLogEntry; order: number }> = [];
     for (let i = 0; i < this.count; i++) {
       const idx = (this.head - 1 - i + this.maxEntries) % this.maxEntries;
       const entry = this.entries[idx] as RequestLogEntry;
       if (!entryMatchesFilters(entry, filters)) continue;
-      result.push(entry);
+      completed.push({ entry, order: this.count - i });
+    }
+    completed.sort((a, b) => {
+      const byTime = b.entry.timestamp.localeCompare(a.entry.timestamp);
+      return byTime !== 0 ? byTime : b.order - a.order;
+    });
+    for (const item of completed) {
+      result.push(item.entry);
       if (limit !== undefined && result.length >= limit) break;
     }
     return result;

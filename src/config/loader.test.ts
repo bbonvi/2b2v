@@ -185,6 +185,8 @@ describe("loadGlobalConfig", () => {
       outputMinHoldMs: 700,
       outputMaxHoldMs: 3500,
     });
+    expect(cfg.defaultRelationships?.enabled).toBe(true);
+    expect(cfg.defaultRelationships?.maxAxisDeltaPerSignal).toBe(4);
     expect(cfg.logLevel).toBe("info");
   });
 
@@ -1133,6 +1135,26 @@ describe("resolveGuildConfig", () => {
     expect(resolved.ambientInitiative?.selfExpression.maxPerDay).toBe(4);
     expect(resolved.ambientInitiative?.targetedCheckin.maxPerUserPerDay).toBe(1);
     expect(resolved.ambientInitiative?.targetedCheckin.openLoopMaxAgeMs).toBe(172800000);
+  });
+
+  test("relationships config inherits global config and applies guild overrides", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, [
+      "relationships:",
+      "  maxAxisDeltaPerSignal: 2",
+    ].join("\n"));
+    const global = loadGlobalConfig(BASE_ENV, cfgFile);
+    const resolved = resolveGuildConfig(global, {
+      guildId: "114",
+      slug: "relationships",
+      relationships: {
+        maxAxisDeltaPerSignal: 3,
+      },
+    });
+
+    expect(global.defaultRelationships?.maxAxisDeltaPerSignal).toBe(2);
+    expect(resolved.relationships?.maxAxisDeltaPerSignal).toBe(3);
   });
 
   test("rejects invalid ambientAttention thresholds", () => {

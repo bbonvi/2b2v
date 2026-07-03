@@ -13,6 +13,7 @@ export interface MemoryRow {
   kind: MemoryKind;
   content: string;
   sourceMessageId: string | null;
+  provenance: Record<string, unknown> | null;
   confidence: number;
   createdAt: number;
   updatedAt: number;
@@ -27,6 +28,7 @@ export interface CreateMemoryInput {
   kind: MemoryKind;
   content: string;
   sourceMessageId?: string | null;
+  provenance?: Record<string, unknown> | null;
   confidence?: number;
   expiresAt?: number | null;
 }
@@ -38,6 +40,7 @@ export interface UpdateMemoryInput {
   kind?: MemoryKind;
   content?: string;
   sourceMessageId?: string | null;
+  provenance?: Record<string, unknown> | null;
   confidence?: number;
   expiresAt?: number | null;
   deletedAt?: number | null;
@@ -183,8 +186,8 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
   }
   const result = db.raw
     .prepare(
-      `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+      `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, created_at, updated_at, expires_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
     )
     .run(
       scope,
@@ -193,6 +196,7 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
       input.kind,
       content,
       input.sourceMessageId ?? null,
+      input.provenance !== undefined && input.provenance !== null ? JSON.stringify(input.provenance) : null,
       clampConfidence(input.confidence),
       now,
       now,
@@ -239,6 +243,10 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
   if ("sourceMessageId" in input) {
     sets.push("source_message_id = ?");
     params.push(input.sourceMessageId ?? null);
+  }
+  if ("provenance" in input) {
+    sets.push("provenance_json = ?");
+    params.push(input.provenance !== undefined && input.provenance !== null ? JSON.stringify(input.provenance) : null);
   }
   if (input.confidence !== undefined) {
     sets.push("confidence = ?");
@@ -324,6 +332,14 @@ export function countUserMemoriesByUser(db: Database, _guildId: string): Map<str
 }
 
 function mapRow(row: Record<string, unknown>): MemoryRow {
+  const provenanceRaw = row.provenance_json;
+  let provenance: Record<string, unknown> | null = null;
+  if (typeof provenanceRaw === "string" && provenanceRaw.trim() !== "") {
+    const parsed: unknown = JSON.parse(provenanceRaw);
+    provenance = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  }
   return {
     id: Number(row.id),
     scope: row.scope as MemoryScope,
@@ -332,6 +348,7 @@ function mapRow(row: Record<string, unknown>): MemoryRow {
     kind: row.kind as MemoryKind,
     content: sanitizeMemoryContent(row.content as string),
     sourceMessageId: row.source_message_id as string | null,
+    provenance,
     confidence: Number(row.confidence),
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,

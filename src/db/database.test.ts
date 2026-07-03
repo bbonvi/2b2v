@@ -60,6 +60,13 @@ describe("database initialization", () => {
     expect(info?.name).toBe("memory_extraction_checkpoints");
   });
 
+  test("creates relationship tables", () => {
+    const tables = db.raw
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('relationship_profiles', 'relationship_events')")
+      .all() as Array<{ name: string }>;
+    expect(tables.map((row) => row.name).sort()).toEqual(["relationship_events", "relationship_profiles"]);
+  });
+
 });
 
 describe("memories table", () => {

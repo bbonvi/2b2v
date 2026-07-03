@@ -16,7 +16,7 @@ import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
 import { appendStickerTags, guessImageMimeFromUrl, imageKindForAttachment, imageKindForEmbed, stickerImagePreview } from "./discord/message-media";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
-import { handleMessage, runSilentMemoryAgentPass, type ImageAttachmentResolver, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
+import { handleMessage, runSilentMemoryAgentPass, runSilentToolAgentPass, type ImageAttachmentResolver, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
 import { buildComputedContactContextForUser } from "./agent/contact-context";
 import { shouldRespond, type TriggerResult } from "./agent/triggers";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
@@ -70,6 +70,16 @@ import { upsertThread, updateThreadActivity, markBotParticipating, markThreadArc
 import { imageExtensionForMime, prepareImageBufferForContext, processAndStoreImage, storeImageBufferUnmodified, type ImageIngestDeps } from "./db/image-ingest";
 import { deleteExpiredMemories, countUserMemoriesByUser, deleteMemory, updateMemory, isMemoryKind, listMemories } from "./db/memory-repository";
 import { deleteStoredManagementMessages, getManagementMemory, listManagementMemories, listManagementMessages, storedManagementDirectoryIds, updateStoredManagementMessageContent, type ManagementChannelLabel, type ManagementDirectory, type ManagementLabel, type ManagementMessageRow, type ManagementMemoryRow } from "./dashboard/management";
+import { createRelationshipsManagementApi } from "./dashboard/relationships-management";
+import {
+  createRecordRelationshipTool,
+  getRelationshipProfile,
+  listRelationshipProfiles,
+  renderRelationshipPromptContext,
+  type RelationshipContextProfile,
+  type RelationshipConfig,
+  type RelationshipMutationResult,
+} from "./relationships";
 import { listUpcomingForContext, createSchedule, deleteScheduleForGuild, listSchedules } from "./db/schedule-repository";
 import { registerSlashCommands } from "./commands/registry";
 import { createStatusHandler, statusCommandDefinition } from "./commands/status";
@@ -1683,6 +1693,12 @@ function getGuildConfig(guildId: string): GuildConfig {
   return resolveGuildConfig(globalConfig, { guildId, slug: "" });
 }
 
+function getRelationshipConfig(guildConfig: GuildConfig): RelationshipConfig {
+  const config = guildConfig.relationships ?? globalConfig.defaultRelationships;
+  if (config === undefined) throw new Error("relationships is not configured");
+  return config;
+}
+
 type AmbientCandidate = {
   id: string;
   kind: AmbientAttentionKind;
@@ -3125,15 +3141,15 @@ function ambientInitiativeGenerationInstruction(decision: AmbientInitiativeDecis
   ].join("\n");
 }
 
-function selfContinuityConstraintText(guildId: string): string {
+function selfMemoryConstraintText(guildId: string): string {
   const self = listMemories(db, {
     guildId,
     scope: "self",
     limit: 12,
   });
-  if (self.length === 0) return "Self continuity constraints: none.";
+  if (self.length === 0) return "Self memory constraints: none.";
   return [
-    "Self continuity constraints, for contradiction avoidance only:",
+    "Self memory constraints, for contradiction avoidance only:",
     ...self.map((memory) => `- [${memory.kind}] ${memory.content}`),
   ].join("\n");
 }
@@ -3170,8 +3186,8 @@ async function runAmbientInitiativeGeneration(input: {
   const syntheticContent = [
     ambientInitiativeGenerationInstruction(input.decision),
     "",
-    selfContinuityConstraintText(input.candidate.guildId),
-  ].join("\n");
+    selfMemoryConstraintText(input.candidate.guildId),
+  ].filter((part) => part !== "").join("\n");
   const actor = initiativeTargetUser(input.guild, input.decision);
   const syntheticLatestMessage: HistoryMessage = {
     id: input.candidate.id,
@@ -3207,6 +3223,7 @@ async function runAmbientInitiativeGeneration(input: {
     replyFallbackDeps,
     input.channel.isThread(),
     { timestamp: now, messageId: input.candidate.id },
+    "virtual",
   );
 
   const generatedImages = createGeneratedImageRuntime();
@@ -4063,6 +4080,22 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         messageId: syntheticLatestMessage.id,
         replyToMessageId: syntheticLatestMessage.replyToId ?? undefined,
       };
+      const visibleMaintenanceTools = blockToolsExcept(createPostReplyMaintenanceTools({
+        guild,
+        guildConfig,
+        memoryRequest: {
+          sourceMessageId: syntheticLatestMessage.id,
+          userMessage: schedule.messageContent,
+          assistantReply: "",
+          recentContext: "",
+          context,
+          incomingMessage: incoming,
+          visibleReplySent: false,
+        },
+        currentUserId: "scheduler",
+        currentUsername: "scheduler",
+        sourceMessageId: syntheticLatestMessage.id,
+      }), "", "visible reply mode");
 
       // Build request log
       const requestLog = new RequestLog(guildId, channelId, requestLogStore);
@@ -4087,7 +4120,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         personaPrompt: promptBundle.corePrompt,
         runtimePrompts: promptBundle.runtime,
         sender,
-        extraTools,
+        extraTools: [...extraTools, ...visibleMaintenanceTools],
         log: scheduleLog,
         requestLog,
         ttsEnabled,
@@ -4116,77 +4149,26 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
         forceTrigger: true,
         triggerInstructions: guildConfig.triggerInstructions,
         afterReply: async (memoryRequest) => {
-          if (!guildConfig.memoryExtraction.postReply) return;
-          const memoryLog = new RequestLog(guildId, channelId, requestLogStore);
-          memoryLog.setAuthor("scheduler");
-          memoryLog.setTriggerContext({
-            ...dashboardTriggerLocation(guild, textChannel),
-            messageId: memoryRequest.sourceMessageId ?? syntheticLatestMessage.id,
-            authorUsername: "scheduler",
-            content: memoryRequest.userMessage,
-            translatedContent: memoryRequest.userMessage,
-          });
-          memoryLog.setTrigger({ type: "background_memory_extraction", sourceRequestId: requestLog.requestId, source: "scheduled" });
-          memoryLog.setAgentRan(true);
-          requestLogStore.incrementActive();
-          const recordMemoryTool = createRecordMemoryTool({
-            db,
-            guildId,
+          await runMemoryPostReplyExtraction({
+            guildConfig,
+            memoryRequest,
+            guild,
+            channel: textChannel,
+            sourceRequestId: requestLog.requestId,
+            source: "scheduled",
             currentUserId: "scheduler",
-            sourceMessageId: memoryRequest.sourceMessageId ?? syntheticLatestMessage.id,
-            memoryPolicy: promptBundle.runtime.memoryPolicy,
-            recordMemoryDescription: runtimeToolDescription("record_memory", {
-              memoryPolicy: promptBundle.runtime.memoryPolicy,
-            }),
-            resolveUsername: async (username) => {
-              const cached = resolveGuildUsername(guild, username);
-              if (cached !== undefined) return cached;
-              try {
-                await guild.members.fetch();
-              } catch {
-                // Cache-only fallback below handles missing permissions.
-              }
-              return resolveGuildUsername(guild, username);
-            },
+            currentUsername: "scheduler",
           });
-          const visibleUserMemoryContext = buildVisibleUserMemoryContext({
-            db,
-            guildId,
+          await runRelationshipPostReplyExtraction({
+            guildConfig,
+            memoryRequest,
+            guild,
+            channel: textChannel,
+            sourceRequestId: requestLog.requestId,
+            source: "scheduled",
             currentUserId: "scheduler",
-            visibleUserIds: memoryRequest.context.visibleUserIds ?? [],
-            resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
-            contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
+            currentUsername: "scheduler",
           });
-          try {
-            await runSilentMemoryAgentPass({
-              globalConfig,
-              guildConfig,
-              context: memoryRequest.context,
-              systemPrompt: promptBundle.systemPrompt,
-              personaPrompt: promptBundle.corePrompt,
-              runtimePrompts: promptBundle.runtime,
-              incomingMessage: memoryRequest.incomingMessage,
-              userContent: memoryRequest.userMessage,
-              assistantReply: memoryRequest.assistantReply,
-              visibleReplySent: memoryRequest.visibleReplySent,
-              visibleUserMemoryContext,
-              tools: [recordMemoryTool],
-              requestLog: memoryLog,
-              log: scheduleLog.child({ guildId, channelId, requestId: memoryLog.requestId }),
-            });
-            markMemoryExtractionCheckpointFromContext({
-              guildId,
-              channelId,
-              contextMessageIds: memoryRequest.context.contextMessageIds,
-              fallbackMessageId: memoryRequest.sourceMessageId,
-            });
-          } catch (err) {
-            memoryLog.setError(err instanceof Error ? err.message : String(err));
-            throw err;
-          } finally {
-            memoryLog.emit(log);
-            requestLogStore.decrementActive();
-          }
         },
       };
 
@@ -4541,30 +4523,368 @@ function buildTemporalContext(input: {
       isBot: true,
     })
     : null;
-  const contactContext = botUserId !== undefined
-    ? buildComputedContactContextForUser({
-      db,
-      botUserId,
-      userId: input.latestUserMessage.authorId,
-      currentChannelId: input.channelId,
-      beforeCreatedAt: currentTurnBoundary.timestamp,
-      beforeMessageId: currentTurnBoundary.messageId,
-      now,
-    })
-    : null;
 
   return [
     currentLocalContext(input.timezone, now),
     elapsedLine("Elapsed since previous visible message in this channel", previousChannelMessage, now),
     elapsedLine("Elapsed since this user's previous message in this channel", previousUserChannelMessage, now),
     elapsedLine("Elapsed since this user's previous message in any guild/channel", previousUserAnyMessage, now),
-    contactContext?.lastContactAt !== null && contactContext?.lastContactAt !== undefined
-      ? `Elapsed since this user last communicated with 2B: ${formatElapsedDuration(contactContext.lastContactAt, now)}`
-      : "Elapsed since this user last communicated with 2B: none known",
     elapsedLine("Elapsed since your previous visible message in this channel", previousBotChannelMessage, now),
     elapsedLine("Elapsed since your previous visible message in any guild/channel", previousBotAnyMessage, now),
-    contactContext?.rendered ?? "Known contact: no prior direct contact.",
   ].join("\n");
+}
+
+type RelationshipContextRunMode = "live" | "virtual";
+
+function buildRelationshipPromptContext(input: {
+  guildConfig: GuildConfig;
+  latestUserMessage: HistoryMessage;
+  visibleUserIds: string[];
+  resolveUserLabel: (userId: string) => string;
+  contactContext?: string;
+  mode: RelationshipContextRunMode;
+}): string {
+  const config = getRelationshipConfig(input.guildConfig);
+  if (!config.enabled || !config.promptInjection) return "";
+  void input.mode;
+  const currentUserId = input.latestUserMessage.authorId;
+  const visible = input.visibleUserIds
+    .filter((userId) => userId !== currentUserId)
+    .slice(0, 3)
+    .map((userId): RelationshipContextProfile => ({
+      profile: getRelationshipProfile(db, userId),
+      label: input.resolveUserLabel(userId),
+      reason: "recent-chat",
+    }))
+    .filter((entry) => Object.values(entry.profile.axes).some((value) => value !== 0) || entry.profile.notes.length > 0 || entry.profile.openLoops.length > 0);
+  const used = new Set([currentUserId, ...visible.map((entry) => entry.profile.userId)]);
+  const highScore = listRelationshipProfiles(db, 50)
+    .filter((profile) => !used.has(profile.userId))
+    .map((profile) => ({
+      profile,
+      score: Math.max(...Object.values(profile.axes).map((value) => Math.abs(value))),
+    }))
+    .filter((entry) => entry.score >= 10)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map((entry): RelationshipContextProfile => ({
+      profile: entry.profile,
+      label: input.resolveUserLabel(entry.profile.userId),
+      reason: "high-score",
+    }));
+  return renderRelationshipPromptContext({
+    current: getRelationshipProfile(db, currentUserId),
+    currentLabel: input.resolveUserLabel(currentUserId),
+    computedContact: input.contactContext,
+    others: [...visible, ...highScore].slice(0, 5),
+    template: promptBundle.runtime.relationships.context,
+  });
+}
+
+function blockToolsExcept(tools: AgentTool[], allowedName: string, passLabel: string): AgentTool[] {
+  return tools.map((tool) => tool.name === allowedName
+    ? tool
+    : {
+        ...tool,
+        execute: (_toolCallId: string, _params: unknown): Promise<AgentToolResult<unknown>> => Promise.resolve({
+          content: [{
+            type: "text",
+            text: allowedName === ""
+              ? `Blocked: ${passLabel} cannot use ${tool.name}. record_memory and record_relationship are not available in this mode.`
+              : `Blocked: ${passLabel} may only use ${allowedName}. Do not call ${tool.name} in this pass.`,
+          }],
+          details: { blocked: true, pass: passLabel, allowedTool: allowedName, tool: tool.name },
+        }),
+	      });
+}
+
+const maintenanceToolNames = new Set(["record_memory", "record_relationship"]);
+
+function toolsForMaintenancePass(
+  visibleTools: AgentTool[] | undefined,
+  maintenanceTools: AgentTool[],
+  allowedName: "record_memory" | "record_relationship",
+  passLabel: string,
+): AgentTool[] {
+  const byName = new Map<string, AgentTool>();
+  for (const tool of visibleTools ?? []) {
+    if (!maintenanceToolNames.has(tool.name)) byName.set(tool.name, tool);
+  }
+  for (const tool of maintenanceTools) byName.set(tool.name, tool);
+  return blockToolsExcept([...byName.values()], allowedName, passLabel);
+}
+
+function promptLabMemoryDryRunTool(tool: AgentTool, dryRuns: Array<{ tool: string; args: unknown }> | undefined): AgentTool {
+  if (dryRuns === undefined || tool.name !== "record_memory") return tool;
+  return {
+    ...tool,
+    execute: (_toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
+      dryRuns.push({ tool: tool.name, args: params });
+      return Promise.resolve({
+        content: [{
+          type: "text",
+          text: "Prompt Lab dry-run: would execute `record_memory`, but dashboard test runs do not mutate memories.",
+        }],
+        details: { dryRun: true, tool: tool.name, args: params },
+      });
+    },
+  };
+}
+
+function createPostReplyMaintenanceTools(input: {
+  guild: Guild;
+  guildConfig: GuildConfig;
+  memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0];
+  currentUserId: string;
+  currentUsername?: string;
+  sourceMessageId: string;
+  dryRun?: boolean;
+  dryRuns?: Array<{ tool: string; args: unknown }>;
+  onRelationshipResult?: (result: RelationshipMutationResult, candidates: unknown[]) => void;
+}): AgentTool[] {
+  const recordMemoryTool = createRecordMemoryTool({
+    db,
+    guildId: input.guild.id,
+    currentUserId: input.currentUserId,
+    currentUsername: input.currentUsername,
+    sourceMessageId: input.sourceMessageId,
+    recordMemoryDescription: runtimeToolDescription("record_memory", {}),
+    resolveUsername: async (username) => {
+      const cached = resolveGuildUsername(input.guild, username);
+      if (cached !== undefined) return cached;
+      try {
+        await input.guild.members.fetch();
+      } catch {
+        // Cache-only fallback below handles missing permissions.
+      }
+      return resolveGuildUsername(input.guild, username);
+    },
+  });
+  const relationshipsConfig = getRelationshipConfig(input.guildConfig);
+  const recordRelationshipTool = createRecordRelationshipTool({
+    db,
+    config: relationshipsConfig,
+    dryRun: input.dryRun,
+    description: runtimeToolDescription("record_relationship", {}),
+    scope: {
+      guildId: input.memoryRequest.incomingMessage.guildId,
+      channelId: input.memoryRequest.incomingMessage.channelId,
+      userId: input.memoryRequest.incomingMessage.authorId,
+      sourceMessageId: input.memoryRequest.sourceMessageId,
+    },
+    onResult: (result, candidates) => input.onRelationshipResult?.(result, candidates),
+  });
+  return [
+    promptLabMemoryDryRunTool(recordMemoryTool, input.dryRuns),
+    recordRelationshipTool,
+  ];
+}
+
+async function runMemoryPostReplyExtraction(input: {
+  guildConfig: GuildConfig;
+  memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0];
+  guild: Guild;
+  channel: unknown;
+  sourceRequestId: string;
+  source?: string;
+  currentUserId: string;
+  currentUsername?: string;
+  dryRun?: boolean;
+  dryRuns?: Array<{ tool: string; args: unknown }>;
+}): Promise<{ requestId?: string; enabled: boolean; ran: boolean; error?: string }> {
+  if (!input.guildConfig.memoryExtraction.postReply || input.memoryRequest.assistantReply.trim() === "") {
+    return { enabled: input.guildConfig.memoryExtraction.postReply, ran: false };
+  }
+  const guildId = input.memoryRequest.incomingMessage.guildId ?? input.guild.id;
+  const channelId = input.memoryRequest.incomingMessage.channelId ?? "";
+  const sourceMessageId = input.memoryRequest.sourceMessageId ?? promptLabSyntheticId();
+  const memoryLog = new RequestLog(guildId, channelId, requestLogStore);
+  memoryLog.setAuthor(input.memoryRequest.incomingMessage.authorUsername);
+  memoryLog.setTriggerContext({
+    ...dashboardTriggerLocation(input.guild, input.channel),
+    messageId: sourceMessageId,
+    authorUsername: input.memoryRequest.incomingMessage.authorUsername,
+    content: input.memoryRequest.userMessage,
+    translatedContent: input.memoryRequest.userMessage,
+  });
+  memoryLog.setTrigger({
+    type: "background_memory_extraction",
+    sourceRequestId: input.sourceRequestId,
+    ...(input.source !== undefined ? { source: input.source } : {}),
+    ...(input.dryRun === true ? { dryRun: true } : {}),
+  });
+  memoryLog.setAgentRan(true);
+  requestLogStore.incrementActive();
+  const maintenanceTools = createPostReplyMaintenanceTools({
+    guild: input.guild,
+    guildConfig: input.guildConfig,
+    memoryRequest: input.memoryRequest,
+    currentUserId: input.currentUserId,
+    currentUsername: input.currentUsername,
+    sourceMessageId,
+    dryRun: input.dryRun,
+    dryRuns: input.dryRuns,
+  });
+  const visibleUserMemoryContext = buildVisibleUserMemoryContext({
+    db,
+    guildId,
+    currentUserId: input.currentUserId,
+    visibleUserIds: input.memoryRequest.context.visibleUserIds ?? [],
+    resolveUserId: (userId) => input.guild.members.cache.get(userId)?.user.username,
+    contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
+  });
+  try {
+    await runSilentMemoryAgentPass({
+      globalConfig,
+      guildConfig: input.guildConfig,
+      context: input.memoryRequest.context,
+      systemPrompt: promptBundle.systemPrompt,
+      personaPrompt: promptBundle.corePrompt,
+      runtimePrompts: promptBundle.runtime,
+      incomingMessage: input.memoryRequest.incomingMessage,
+      userContent: input.memoryRequest.userMessage,
+      assistantReply: input.memoryRequest.assistantReply,
+      visibleReplySent: input.memoryRequest.visibleReplySent,
+      visibleUserMemoryContext,
+      tools: toolsForMaintenancePass(input.memoryRequest.availableTools, maintenanceTools, "record_memory", "silent memory pass"),
+      transcript: input.memoryRequest.maintenanceTranscript,
+      promptContext: input.memoryRequest.promptContext,
+      requestLog: memoryLog,
+      log: log.child({ guildId, channelId, requestId: memoryLog.requestId, component: "memory-pass" }),
+    });
+    if (input.dryRun !== true) {
+      const checkpointMarked = markMemoryExtractionCheckpointAtMessage(db, {
+        guildId,
+        channelId,
+        messageId: sourceMessageId,
+      });
+      if (!checkpointMarked) {
+        markMemoryExtractionCheckpointFromContext({
+          guildId,
+          channelId,
+          contextMessageIds: input.memoryRequest.context.contextMessageIds,
+          fallbackMessageId: input.memoryRequest.sourceMessageId,
+        });
+      }
+    }
+    return { requestId: memoryLog.requestId, enabled: true, ran: true };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    memoryLog.setError(error);
+    if (input.dryRun === true) return { requestId: memoryLog.requestId, enabled: true, ran: true, error };
+    throw err;
+  } finally {
+    memoryLog.emit(log);
+    requestLogStore.decrementActive();
+  }
+}
+
+async function runRelationshipPostReplyExtraction(input: {
+  guildConfig: GuildConfig;
+  memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0];
+  requestLog?: RequestLog;
+  guild?: Guild;
+  channel?: unknown;
+  source?: string;
+  sourceRequestId?: string;
+  dryRun?: boolean;
+  currentUserId: string;
+  currentUsername?: string;
+  dryRuns?: Array<{ tool: string; args: unknown }>;
+  onResult?: (result: RelationshipMutationResult, candidates: unknown[]) => void;
+}): Promise<void> {
+  const config = getRelationshipConfig(input.guildConfig);
+  if (!config.enabled || input.memoryRequest.assistantReply.trim() === "") return;
+  const guildId = input.memoryRequest.incomingMessage.guildId ?? "";
+  const channelId = input.memoryRequest.incomingMessage.channelId ?? "";
+  const relationshipsLog = input.requestLog ?? new RequestLog(guildId, channelId, requestLogStore);
+  if (input.requestLog === undefined) {
+    relationshipsLog.setAuthor(input.memoryRequest.incomingMessage.authorUsername);
+    relationshipsLog.setTrigger({
+      type: "relationships_extraction",
+      source: input.source ?? "post_reply",
+      ...(input.sourceRequestId !== undefined ? { sourceRequestId: input.sourceRequestId } : {}),
+      ...(input.dryRun === true ? { dryRun: true } : {}),
+    });
+    relationshipsLog.setTriggerContext({
+      ...(input.guild !== undefined && input.channel !== undefined ? dashboardTriggerLocation(input.guild, input.channel) : {}),
+      messageId: input.memoryRequest.sourceMessageId,
+      authorUsername: input.memoryRequest.incomingMessage.authorUsername,
+      content: input.memoryRequest.userMessage,
+      translatedContent: input.memoryRequest.userMessage,
+    });
+    relationshipsLog.setAgentRan(true);
+    requestLogStore.incrementActive();
+  }
+  const maintenanceTools = input.guild === undefined
+    ? [createRecordRelationshipTool({
+        db,
+        config,
+        dryRun: input.dryRun,
+        description: runtimeToolDescription("record_relationship", {}),
+        scope: {
+          guildId: input.memoryRequest.incomingMessage.guildId,
+          channelId: input.memoryRequest.incomingMessage.channelId,
+          userId: input.memoryRequest.incomingMessage.authorId,
+          sourceMessageId: input.memoryRequest.sourceMessageId,
+        },
+        onResult: (result, candidates) => input.onResult?.(result, candidates),
+      })]
+    : createPostReplyMaintenanceTools({
+        guild: input.guild,
+        guildConfig: input.guildConfig,
+        memoryRequest: input.memoryRequest,
+        currentUserId: input.currentUserId,
+        currentUsername: input.currentUsername,
+        sourceMessageId: input.memoryRequest.sourceMessageId ?? promptLabSyntheticId(),
+        dryRun: input.dryRun,
+        dryRuns: input.dryRuns,
+        onRelationshipResult: input.onResult,
+      });
+  try {
+    await runSilentToolAgentPass({
+      globalConfig,
+      guildConfig: input.guildConfig,
+      context: input.memoryRequest.context,
+      systemPrompt: promptBundle.systemPrompt,
+      personaPrompt: promptBundle.corePrompt,
+      runtimePrompts: promptBundle.runtime,
+      incomingMessage: input.memoryRequest.incomingMessage,
+      userContent: input.memoryRequest.userMessage,
+      assistantReply: input.memoryRequest.assistantReply,
+      visibleReplySent: input.memoryRequest.visibleReplySent,
+      tools: toolsForMaintenancePass(input.memoryRequest.availableTools, maintenanceTools, "record_relationship", "silent relationships pass"),
+      runtimeInstruction: promptBundle.runtime.reply,
+      controlMessage: [
+        "## Execution Mode: Relationship Maintenance",
+        "Private relationships maintenance is active. Other tool calls are not available in this mode.",
+        "",
+        "## Post-Reply Relationship Consideration",
+        "Current time:",
+        currentLocalContext(input.guildConfig.timezone),
+        "",
+        runtimeContextTemplate(
+          "relationship-pass-decision",
+          {},
+          "Decide silently whether relationships should be updated. Use record_relationship only if an update is useful.",
+        ),
+      ].join("\n"),
+      modelMode: "main",
+      transcript: input.memoryRequest.maintenanceTranscript,
+      promptContext: input.memoryRequest.promptContext,
+      terminateAfterSuccessfulToolNames: ["record_relationship"],
+      requestLog: relationshipsLog,
+      log: log.child({ guildId, channelId, requestId: relationshipsLog.requestId, component: "relationships-pass" }),
+    });
+  } catch (err) {
+    relationshipsLog.setError(err instanceof Error ? err.message : String(err));
+    throw err;
+  } finally {
+    if (input.requestLog === undefined) {
+      relationshipsLog.emit(log);
+      requestLogStore.decrementActive();
+    }
+  }
 }
 
 async function buildContext(
@@ -4577,6 +4897,7 @@ async function buildContext(
   replyFallbackDeps: ReplyFallbackDeps,
   isThread: boolean,
   currentTurnBoundary?: CurrentTurnBoundary,
+  relationshipsMode: RelationshipContextRunMode = "live",
 ): Promise<AssembledContext> {
   // Chat history via the full processing pipeline
   const visibleJobs = agentJobs.listVisible(guildId, channelId);
@@ -4667,6 +4988,31 @@ async function buildContext(
     timezone: guildConfig.timezone,
     latestUserMessage,
     currentTurnBoundary,
+  });
+  const contactContext = client.user?.id !== undefined
+    ? buildComputedContactContextForUser({
+      db,
+      botUserId: client.user.id,
+      userId: latestUserMessage.authorId,
+      currentChannelId: channelId,
+      beforeCreatedAt: (currentTurnBoundary ?? { timestamp: latestUserMessage.timestamp }).timestamp,
+      beforeMessageId: (currentTurnBoundary ?? { messageId: latestUserMessage.id }).messageId,
+    })?.rendered.replace(/^Known contact:\s*/u, "")
+    : undefined;
+  const relationshipsContext = buildRelationshipPromptContext({
+    guildConfig,
+    latestUserMessage,
+    visibleUserIds,
+    resolveUserLabel: (userId) => {
+      const member = guild.members.cache.get(userId);
+      const username = member?.user.username ?? userId;
+      const displayName = member?.displayName;
+      return displayName !== undefined && displayName !== username
+        ? `@${username} (${displayName}) / ${userId}`
+        : `@${username} / ${userId}`;
+    },
+    contactContext,
+    mode: relationshipsMode,
   });
 
   if (liveChannel !== null && isSendableGuildChannel(liveChannel) && liveChannel.isThread()) {
@@ -4781,7 +5127,7 @@ async function buildContext(
       parentPreContext,
       olderHistory: olderText,
       newerHistory: newerText,
-      currentContext,
+      currentContext: [currentContext, relationshipsContext].filter((part) => part !== "").join("\n\n"),
       responseInstruction: "",
       userMessage,
     });
@@ -4921,10 +5267,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       currentUserId: lastMessage.authorId,
       currentUsername: lastMessage.author,
       sourceMessageId: lastMessage.id,
-      memoryPolicy: promptBundle.runtime.memoryPolicy,
-      recordMemoryDescription: runtimeToolDescription("record_memory", {
-        memoryPolicy: promptBundle.runtime.memoryPolicy,
-      }),
+      recordMemoryDescription: runtimeToolDescription("record_memory", {}),
       resolveUsername: async (username) => {
         const cached = resolveGuildUsername(guild, username);
         if (cached !== undefined) return cached;
@@ -5868,6 +6211,22 @@ async function processTriggeredMessage(
           }
         : {}),
     };
+    const visibleMaintenanceTools = blockToolsExcept(createPostReplyMaintenanceTools({
+      guild,
+      guildConfig,
+      memoryRequest: {
+        sourceMessageId: options.currentTurnOverride?.messageId ?? message.id,
+        userMessage: options.currentTurnOverride?.content ?? translatedContent,
+        assistantReply: "",
+        recentContext: "",
+        context,
+        incomingMessage: incoming,
+        visibleReplySent: false,
+      },
+      currentUserId: message.author.id,
+      currentUsername: message.author.username,
+      sourceMessageId: options.currentTurnOverride?.messageId ?? message.id,
+    }), "", "visible reply mode");
 
     const requestLog = new RequestLog(guildId, channelId, requestLogStore);
     requestLog.setAuthor(message.author.username);
@@ -5890,7 +6249,7 @@ async function processTriggeredMessage(
       personaPrompt: promptBundle.corePrompt,
       runtimePrompts: promptBundle.runtime,
       sender,
-      extraTools,
+      extraTools: [...extraTools, ...visibleMaintenanceTools],
       log: log.child({ guildId, channelId, requestId: requestLog.requestId }),
       onTriggered: () => {
         if (!guildConfig.typingSimulation.enabled) typing.startLoop();
@@ -5928,84 +6287,25 @@ async function processTriggeredMessage(
         clearAmbientLeaseForUser(guildId, destinationChannelId ?? channelId, message.author.id);
       },
       afterReply: async (memoryRequest) => {
-        if (!guildConfig.memoryExtraction.postReply) return;
-        const memoryLog = new RequestLog(guildId, channelId, requestLogStore);
-        memoryLog.setAuthor(message.author.username);
-        memoryLog.setTriggerContext({
-          ...dashboardTriggerLocation(guild, message.channel),
-          messageId: memoryRequest.sourceMessageId ?? message.id,
-          authorUsername: message.author.username,
-          content: memoryRequest.userMessage,
-          translatedContent: memoryRequest.userMessage,
-        });
-        memoryLog.setTrigger({ type: "background_memory_extraction", sourceRequestId: requestLog.requestId });
-        memoryLog.setAgentRan(true);
-        requestLogStore.incrementActive();
-        const recordMemoryTool = createRecordMemoryTool({
-          db,
-          guildId,
+        await runMemoryPostReplyExtraction({
+          guildConfig,
+          memoryRequest,
+          guild,
+          channel: message.channel,
+          sourceRequestId: requestLog.requestId,
           currentUserId: message.author.id,
           currentUsername: message.author.username,
-          sourceMessageId: memoryRequest.sourceMessageId ?? message.id,
-          memoryPolicy: promptBundle.runtime.memoryPolicy,
-          recordMemoryDescription: runtimeToolDescription("record_memory", {
-            memoryPolicy: promptBundle.runtime.memoryPolicy,
-          }),
-          resolveUsername: async (username) => {
-            const cached = resolveGuildUsername(guild, username);
-            if (cached !== undefined) return cached;
-            try {
-              await guild.members.fetch();
-            } catch {
-              // Cache-only fallback below handles missing permissions.
-            }
-            return resolveGuildUsername(guild, username);
-          },
         });
-        const visibleUserMemoryContext = buildVisibleUserMemoryContext({
-          db,
-          guildId,
+        await runRelationshipPostReplyExtraction({
+          guildConfig,
+          memoryRequest,
+          guild,
+          channel: message.channel,
+          sourceRequestId: requestLog.requestId,
+          source: "post_reply",
           currentUserId: message.author.id,
-          visibleUserIds: memoryRequest.context.visibleUserIds ?? [],
-          resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
-          contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
+          currentUsername: message.author.username,
         });
-        try {
-          await runSilentMemoryAgentPass({
-            globalConfig,
-            guildConfig,
-            context: memoryRequest.context,
-            systemPrompt: promptBundle.systemPrompt,
-            personaPrompt: promptBundle.corePrompt,
-            runtimePrompts: promptBundle.runtime,
-            incomingMessage: memoryRequest.incomingMessage,
-            userContent: memoryRequest.userMessage,
-            assistantReply: memoryRequest.assistantReply,
-            visibleReplySent: memoryRequest.visibleReplySent,
-            visibleUserMemoryContext,
-            tools: [recordMemoryTool],
-            requestLog: memoryLog,
-            log: log.child({ guildId, channelId, requestId: memoryLog.requestId }),
-          });
-          const checkpointMarked = markMemoryExtractionCheckpointAtMessage(db, {
-            guildId,
-            channelId,
-            messageId: memoryRequest.sourceMessageId ?? message.id,
-          });
-          if (!checkpointMarked) {
-            markMemoryExtractionCheckpointFromContext({
-              guildId,
-              channelId,
-              contextMessageIds: memoryRequest.context.contextMessageIds,
-            });
-          }
-        } catch (err) {
-          memoryLog.setError(err instanceof Error ? err.message : String(err));
-          throw err;
-        } finally {
-          memoryLog.emit(log);
-          requestLogStore.decrementActive();
-        }
       },
     };
 
@@ -6667,12 +6967,29 @@ interface PromptLabDryRun {
   args: unknown;
 }
 
+interface PromptLabRelationshipDryRun {
+  requestId: string;
+  signals: unknown[];
+  accepted: unknown[];
+  rejected: unknown[];
+}
+
+interface PromptLabMemoryDryRun {
+  requestId?: string;
+  enabled: boolean;
+  ran: boolean;
+  error?: string;
+}
+
 interface PromptLabRunResult {
   requestId: string;
   triggered: boolean;
   responseText?: string;
   drafts: PromptLabDraftMessage[];
   dryRuns: PromptLabDryRun[];
+  relationshipsContext?: string;
+  relationshipsExtraction?: PromptLabRelationshipDryRun;
+  memoryExtraction?: PromptLabMemoryDryRun;
   toolCount: number;
   llmCallCount: number;
   estimatedCostUsd: number | null;
@@ -6707,6 +7024,122 @@ function promptLabDryRunTools(tools: AgentTool[], dryRuns: PromptLabDryRun[]): A
         });
       },
     };
+  });
+}
+
+function promptLabRelationshipContext(guildConfig: GuildConfig, userId: string): string | undefined {
+  const config = getRelationshipConfig(guildConfig);
+  if (!config.enabled || !config.promptInjection) return undefined;
+  return renderRelationshipPromptContext({
+    current: getRelationshipProfile(db, userId),
+    currentLabel: userId,
+    template: promptBundle.runtime.relationships.context,
+  });
+}
+
+async function runPromptLabRelationshipExtractionDryRun(input: {
+  sourceRequestId: string;
+  guild: Guild;
+  channel: unknown;
+  guildConfig: GuildConfig;
+  context: AssembledContext;
+  incomingMessage: IncomingMessage;
+  userMessage: string;
+  assistantReply: string;
+  maintenanceTranscript?: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]["maintenanceTranscript"];
+  availableTools?: AgentTool[];
+  promptContext?: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]["promptContext"];
+}): Promise<PromptLabRelationshipDryRun | undefined> {
+  const config = getRelationshipConfig(input.guildConfig);
+  if (!config.enabled || input.assistantReply.trim() === "") return undefined;
+  const channelId = input.incomingMessage.channelId ?? "";
+  const extractionLog = new RequestLog(input.incomingMessage.guildId ?? "", channelId, requestLogStore);
+  extractionLog.setAuthor(`prompt-lab:${input.incomingMessage.authorUsername}`);
+  extractionLog.setTrigger({ type: "relationships_extraction", sourceRequestId: input.sourceRequestId, source: "prompt_lab", dryRun: true });
+  extractionLog.setTriggerContext({
+    ...dashboardTriggerLocation(input.guild, input.channel),
+    messageId: input.incomingMessage.messageId,
+    authorUsername: input.incomingMessage.authorUsername,
+    content: input.userMessage,
+    translatedContent: input.userMessage,
+  });
+  extractionLog.setAgentRan(true);
+  requestLogStore.incrementActive();
+  let signals: unknown[] = [];
+  let accepted: unknown[] = [];
+  let rejected: unknown[] = [];
+  try {
+    await runRelationshipPostReplyExtraction({
+      guildConfig: input.guildConfig,
+      guild: input.guild,
+      channel: input.channel,
+      sourceRequestId: input.sourceRequestId,
+      source: "prompt_lab",
+      dryRun: true,
+      requestLog: extractionLog,
+      currentUserId: input.incomingMessage.authorId,
+      currentUsername: input.incomingMessage.authorUsername,
+      memoryRequest: {
+        sourceMessageId: input.incomingMessage.messageId,
+        userMessage: input.userMessage,
+        assistantReply: input.assistantReply,
+        recentContext: input.context.sections.map((section) => section.text).join("\n\n"),
+        context: input.context,
+        incomingMessage: input.incomingMessage,
+        visibleReplySent: true,
+        maintenanceTranscript: input.maintenanceTranscript,
+        availableTools: input.availableTools,
+        promptContext: input.promptContext,
+      },
+      onResult: (result, toolSignals) => {
+        signals = toolSignals;
+        accepted = result.accepted;
+        rejected = result.rejected;
+      },
+    });
+    return { requestId: extractionLog.requestId, signals, accepted, rejected };
+  } finally {
+    extractionLog.emit(log);
+    requestLogStore.decrementActive();
+  }
+}
+
+async function runPromptLabMemoryExtractionDryRun(input: {
+  sourceRequestId: string;
+  guild: Guild;
+  channel: unknown;
+  guildConfig: GuildConfig;
+  context: AssembledContext;
+  incomingMessage: IncomingMessage;
+  userMessage: string;
+  assistantReply: string;
+  dryRuns: PromptLabDryRun[];
+  maintenanceTranscript?: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]["maintenanceTranscript"];
+  availableTools?: AgentTool[];
+  promptContext?: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]["promptContext"];
+}): Promise<PromptLabMemoryDryRun> {
+  return await runMemoryPostReplyExtraction({
+    guildConfig: input.guildConfig,
+    guild: input.guild,
+    channel: input.channel,
+    sourceRequestId: input.sourceRequestId,
+    source: "prompt_lab",
+    currentUserId: input.incomingMessage.authorId,
+    currentUsername: input.incomingMessage.authorUsername,
+    dryRun: true,
+    dryRuns: input.dryRuns,
+    memoryRequest: {
+      sourceMessageId: input.incomingMessage.messageId,
+      userMessage: input.userMessage,
+      assistantReply: input.assistantReply,
+      recentContext: input.context.sections.map((section) => section.text).join("\n\n"),
+      context: input.context,
+      incomingMessage: input.incomingMessage,
+      visibleReplySent: true,
+      maintenanceTranscript: input.maintenanceTranscript,
+      availableTools: input.availableTools,
+      promptContext: input.promptContext,
+    },
   });
 }
 
@@ -6838,6 +7271,7 @@ async function runPromptLab(input: {
     replyFallbackDeps,
     channel.isThread(),
     { timestamp: now, messageId },
+    "virtual",
   );
 
   const baseTools = buildAgentTools(
@@ -6920,25 +7354,44 @@ async function runPromptLab(input: {
     });
     return Promise.resolve({ sentMessageId: id });
   };
+  const incomingMessage: IncomingMessage = {
+    content,
+    guildId: input.guildId,
+    guildName: guild.name,
+    channelId: input.channelId,
+    channelName: channelDisplayName(channel),
+    authorId: labUser.id,
+    authorUsername: labUser.username,
+    authorDisplayName: labUser.displayName,
+    authorGlobalName: labUser.globalName,
+    authorIsBot: false,
+    botUserId,
+    mentionedUserIds: [botUserId],
+    translatedContent,
+    messageId,
+  };
+  const visibleMaintenanceTools = blockToolsExcept(createPostReplyMaintenanceTools({
+    guild,
+    guildConfig,
+    memoryRequest: {
+      sourceMessageId: messageId,
+      userMessage: translatedContent,
+      assistantReply: "",
+      recentContext: "",
+      context,
+      incomingMessage,
+      visibleReplySent: false,
+    },
+    currentUserId: labUser.id,
+    currentUsername: labUser.username,
+    sourceMessageId: messageId,
+    dryRun: true,
+  }), "", "visible reply mode");
+  const visibleTools = [...promptLabDryRunTools([...baseTools, ...threadTools], dryRuns), ...visibleMaintenanceTools];
 
   try {
     const result = await handleMessage(
-      {
-        content,
-        guildId: input.guildId,
-        guildName: guild.name,
-        channelId: input.channelId,
-        channelName: channelDisplayName(channel),
-        authorId: labUser.id,
-        authorUsername: labUser.username,
-        authorDisplayName: labUser.displayName,
-        authorGlobalName: labUser.globalName,
-        authorIsBot: false,
-        botUserId,
-        mentionedUserIds: [botUserId],
-        translatedContent,
-        messageId,
-      },
+      incomingMessage,
       {
         globalConfig,
         guildConfig,
@@ -6948,7 +7401,7 @@ async function runPromptLab(input: {
         personaPrompt: promptBundle.corePrompt,
         runtimePrompts: promptBundle.runtime,
         sender,
-        extraTools: promptLabDryRunTools([...baseTools, ...threadTools], dryRuns),
+        extraTools: visibleTools,
         log: log.child({ guildId: input.guildId, channelId: input.channelId, requestId: requestLog.requestId, component: "prompt-lab" }),
         requestLog,
         triggerOverride: { reason: "mention" },
@@ -6959,6 +7412,36 @@ async function runPromptLab(input: {
         resolveImageAttachments: () => Promise.resolve([]),
       },
     );
+    const assistantReply = (result.responseText ?? drafts.map((draft) => draft.text).join("\n\n")).trim();
+    const maintenanceVisibleTools = result.availableTools ?? visibleTools;
+    const memoryExtraction = await runPromptLabMemoryExtractionDryRun({
+      sourceRequestId: requestLog.requestId,
+      guild,
+      channel,
+      guildConfig,
+      context,
+      incomingMessage,
+      userMessage: translatedContent,
+      assistantReply,
+      dryRuns,
+      maintenanceTranscript: result.maintenanceTranscript,
+      availableTools: maintenanceVisibleTools,
+      promptContext: result.promptContext,
+    });
+    const relationshipsExtraction = await runPromptLabRelationshipExtractionDryRun({
+      sourceRequestId: requestLog.requestId,
+      guild,
+      channel,
+      guildConfig,
+      context,
+      incomingMessage,
+      userMessage: translatedContent,
+      assistantReply,
+      maintenanceTranscript: result.maintenanceTranscript,
+      availableTools: maintenanceVisibleTools,
+      promptContext: result.promptContext,
+    });
+    const relationshipsContext = promptLabRelationshipContext(guildConfig, labUser.id);
     const entry = requestLog.toEntry();
     const summary = promptLabSummary(entry);
     return {
@@ -6967,6 +7450,9 @@ async function runPromptLab(input: {
       ...(result.responseText !== undefined ? { responseText: result.responseText } : {}),
       drafts,
       dryRuns,
+      ...(relationshipsContext !== undefined ? { relationshipsContext } : {}),
+      ...(relationshipsExtraction !== undefined ? { relationshipsExtraction } : {}),
+      memoryExtraction,
       ...summary,
     };
   } catch (err) {
@@ -7007,6 +7493,11 @@ const dashboardManagement = {
   }),
   editMemory: editManagementMemoryState,
   deleteMemory: deleteManagementMemoryState,
+  relationships: createRelationshipsManagementApi({
+    db,
+    getGlobalConfig: () => globalConfig,
+    getGuildConfig: () => resolveGuildConfig(globalConfig, { guildId: "dashboard", slug: "dashboard" }),
+  }),
 };
 if (bypassDashboardAuth) {
   startDashboard({ port: 3000, password: "", bypassAuth: true, management: dashboardManagement, log });

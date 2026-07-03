@@ -43,10 +43,6 @@ export interface RuntimePromptBundle {
   reply: string;
   /** Final per-turn instruction placed after the current Discord event. */
   finalActionInstruction: string;
-  /** Silent memory pass control instructions. */
-  memoryPass: string;
-  /** Shared memory-selection policy for memory passes and record_memory. */
-  memoryPolicy: string;
   /** Tool descriptions keyed by AgentTool.name. */
   toolDescriptions: Record<string, string>;
   /** Tool parameter descriptions keyed by `${AgentTool.name}/${parameterName}`. */
@@ -76,6 +72,10 @@ export interface RuntimePromptBundle {
       selfExpression: string;
       targetedCheckin: string;
     };
+  };
+  /** Relationship engine prompt policies. */
+  relationships: {
+    context: string;
   };
   /** On-demand prompt skills. */
   skills: PromptSkillBundle;
@@ -360,8 +360,6 @@ export function loadPromptBundle(promptDir: string, log: Logger): PromptBundle {
     runtime: {
       reply: runtimeReplyDocuments.map((doc) => doc.text).join("\n\n"),
       finalActionInstruction: loadRuntimeDocuments(promptDir, "final-action-instruction", log, "runtime.final-action-instruction"),
-      memoryPass: loadRuntimeDocuments(promptDir, "memory/pass", log, "runtime.memory.pass"),
-      memoryPolicy: loadRuntimeDocuments(promptDir, "memory/policy", log, "runtime.memory.policy"),
       toolDescriptions: loadRuntimeTextMap(promptDir, "tools", log, "runtime.tools"),
       toolParameterDescriptions: loadRuntimeTextMap(promptDir, "tool-parameters", log, "runtime.tool-parameters"),
       contextTemplates: loadRuntimeTextMap(promptDir, "context", log, "runtime.context"),
@@ -384,6 +382,9 @@ export function loadPromptBundle(promptDir: string, log: Logger): PromptBundle {
           selfExpression: loadRuntimeDocuments(promptDir, "ambient-initiative/generation/self-expression", log, "runtime.ambient-initiative.generation.self-expression"),
           targetedCheckin: loadRuntimeDocuments(promptDir, "ambient-initiative/generation/targeted-checkin", log, "runtime.ambient-initiative.generation.targeted-checkin"),
         },
+      },
+      relationships: {
+        context: loadRuntimeDocuments(promptDir, "relationships/context", log, "runtime.relationships.context"),
       },
       skills,
     },

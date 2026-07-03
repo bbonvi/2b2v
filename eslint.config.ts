@@ -13,7 +13,7 @@ export default tseslint.config(
 
   // TypeScript source files
   {
-    files: ["src/**/*.ts"],
+    files: ["src/**/*.{ts,tsx}"],
     languageOptions: {
       parserOptions: {
         projectService: true,
