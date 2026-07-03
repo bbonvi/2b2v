@@ -19,15 +19,16 @@ function makeTriggers(overrides: Partial<TriggerConfig> = {}): TriggerConfig {
     randomChance: 0,
     keywordDebounceMs: 80,
     typingIdleMs: 50,
+    typingResumeGraceMs: 30,
     typingMaxWaitMs: 500,
     ...overrides,
   };
 }
 
 let messageCounter = 0;
-function makeMessage(channelId: string, id?: string): unknown {
+function makeMessage(channelId: string, id?: string, createdTimestamp?: number): unknown {
   messageCounter += 1;
-  return { channelId, id: id ?? `m-${messageCounter}` };
+  return { channelId, id: id ?? `m-${messageCounter}`, ...(createdTimestamp !== undefined ? { createdTimestamp } : {}) };
 }
 
 function makePending(
@@ -313,7 +314,31 @@ describe("createChannelDispatcher", () => {
     dispatcher.dispose();
   });
 
-  test("same-author keyword follow-up extends typing wait", async () => {
+  test("typing just before enqueue still delays a newer trigger message", async () => {
+    let callCount = 0;
+    const handler: DispatchHandler = () => {
+      callCount++;
+      return Promise.resolve(undefined);
+    };
+
+    const config = makeConfig({ defaultDebounceMs: 200 });
+    const triggers = makeTriggers({ keywordDebounceMs: 20, typingIdleMs: 80, typingMaxWaitMs: 300 });
+    const dispatcher = createChannelDispatcher({ config, triggers, handler });
+
+    dispatcher.recordTyping("ch-1", "user-1");
+    await delay(5);
+    enqueue(dispatcher, makeMessage("ch-1", "m-key", Date.now() - 20), { reason: "keyword", keyword: "туби" }, "user-1");
+
+    await delay(50);
+    expect(callCount).toBe(0);
+
+    await delay(60);
+    expect(callCount).toBe(1);
+
+    dispatcher.dispose();
+  });
+
+  test("same-author keyword follow-up does not extend wait without typing", async () => {
     let callCount = 0;
     const handler: DispatchHandler = () => {
       callCount++;
@@ -326,14 +351,35 @@ describe("createChannelDispatcher", () => {
 
     enqueue(dispatcher, makeMessage("ch-1", "m-key"), { reason: "keyword", keyword: "туби" }, "user-1");
     await delay(5);
+    enqueue(dispatcher, makeMessage("ch-1", "m-followup"), null, "user-1");
+
+    await delay(50);
+    expect(callCount).toBe(1);
+
+    dispatcher.dispose();
+  });
+
+  test("recent typing before same-author follow-up gets resume grace", async () => {
+    let callCount = 0;
+    const handler: DispatchHandler = () => {
+      callCount++;
+      return Promise.resolve(undefined);
+    };
+
+    const config = makeConfig({ defaultDebounceMs: 200 });
+    const triggers = makeTriggers({ keywordDebounceMs: 20, typingIdleMs: 80, typingResumeGraceMs: 60, typingMaxWaitMs: 300 });
+    const dispatcher = createChannelDispatcher({ config, triggers, handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-key"), { reason: "keyword", keyword: "туби" }, "user-1");
+    await delay(5);
     dispatcher.recordTyping("ch-1", "user-1");
     await delay(5);
     enqueue(dispatcher, makeMessage("ch-1", "m-followup"), null, "user-1");
 
-    await delay(50);
+    await delay(45);
     expect(callCount).toBe(0);
 
-    await delay(70);
+    await delay(40);
     expect(callCount).toBe(1);
 
     dispatcher.dispose();
@@ -384,7 +430,7 @@ describe("createChannelDispatcher", () => {
     dispatcher.dispose();
   });
 
-  test("same-author mention follow-up extends typing wait", async () => {
+  test("same-author mention follow-up does not extend wait without typing", async () => {
     const calls: Array<{ ids: string[]; trigger: TriggerResult }> = [];
     const handler: DispatchHandler = (msgs, trigger) => {
       calls.push({ ids: msgs.map((m) => m.id), trigger: trigger?.result ?? null });
@@ -397,17 +443,66 @@ describe("createChannelDispatcher", () => {
 
     enqueue(dispatcher, makeMessage("ch-1", "m-mention"), { reason: "mention" }, "user-1");
     await delay(5);
-    dispatcher.recordTyping("ch-1", "user-1");
-    await delay(5);
     enqueue(dispatcher, makeMessage("ch-1", "m-followup"), null, "user-1");
 
     await delay(50);
-    expect(calls).toEqual([]);
-
-    await delay(70);
     expect(calls).toEqual([
       { ids: ["m-mention", "m-followup"], trigger: { reason: "mention" } },
     ]);
+
+    dispatcher.dispose();
+  });
+
+  test("real typing after same-author follow-up still extends wait", async () => {
+    let callCount = 0;
+    const handler: DispatchHandler = () => {
+      callCount++;
+      return Promise.resolve(undefined);
+    };
+
+    const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 200 });
+    const triggers = makeTriggers({ keywordDebounceMs: 20, typingIdleMs: 80, typingMaxWaitMs: 300 });
+    const dispatcher = createChannelDispatcher({ config, triggers, handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-mention"), { reason: "mention" }, "user-1");
+    await delay(5);
+    enqueue(dispatcher, makeMessage("ch-1", "m-followup"), null, "user-1");
+    await delay(5);
+    dispatcher.recordTyping("ch-1", "user-1");
+
+    await delay(50);
+    expect(callCount).toBe(0);
+
+    await delay(70);
+    expect(callCount).toBe(1);
+
+    dispatcher.dispose();
+  });
+
+  test("typing max wait is capped from latest same-author follow-up", async () => {
+    let callCount = 0;
+    const handler: DispatchHandler = () => {
+      callCount++;
+      return Promise.resolve(undefined);
+    };
+
+    const config = makeConfig({ mentionDebounceMs: 20, defaultDebounceMs: 200 });
+    const triggers = makeTriggers({ keywordDebounceMs: 20, typingIdleMs: 120, typingResumeGraceMs: 60, typingMaxWaitMs: 70 });
+    const dispatcher = createChannelDispatcher({ config, triggers, handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-mention"), { reason: "mention" }, "user-1");
+    await delay(5);
+    dispatcher.recordTyping("ch-1", "user-1");
+    await delay(45);
+    enqueue(dispatcher, makeMessage("ch-1", "m-followup"), null, "user-1");
+    await delay(10);
+    dispatcher.recordTyping("ch-1", "user-1");
+
+    await delay(35);
+    expect(callCount).toBe(0);
+
+    await delay(50);
+    expect(callCount).toBe(1);
 
     dispatcher.dispose();
   });

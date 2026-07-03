@@ -41,6 +41,15 @@ export interface EnqueueOptions {
   triggerResult: TriggerResult;
 }
 
+type DispatcherDebugEvent =
+  | "dispatcher_enqueue"
+  | "dispatcher_typing"
+  | "dispatcher_debounce_wait"
+  | "dispatcher_debounce_dispatch"
+  | "dispatcher_debounce_queue";
+
+type DispatcherDebug = (event: DispatcherDebugEvent, fields: Record<string, unknown>) => void;
+
 const MAX_SUPPRESSED_IDS = 1000;
 
 interface ChannelState {
@@ -51,6 +60,7 @@ interface ChannelState {
   suppressedIds: Set<string>;
   suppressedOrder: string[];
   typingByUser: Map<string, number>;
+  typingResumeGraceUntilByUser: Map<string, number>;
 }
 
 export interface ChannelDispatcher {
@@ -173,8 +183,9 @@ export function createChannelDispatcher(opts: {
   config: DispatcherConfig;
   triggers: TriggerConfig;
   handler: DispatchHandler;
+  debug?: DispatcherDebug;
 }): ChannelDispatcher {
-  const { config, triggers, handler } = opts;
+  const { config, triggers, handler, debug } = opts;
   const channels = new Map<string, ChannelState>();
 
   function getChannelId(message: unknown): string {
@@ -198,6 +209,7 @@ export function createChannelDispatcher(opts: {
         suppressedIds: new Set<string>(),
         suppressedOrder: [],
         typingByUser: new Map<string, number>(),
+        typingResumeGraceUntilByUser: new Map<string, number>(),
       };
       channels.set(channelId, state);
     }
@@ -216,10 +228,15 @@ export function createChannelDispatcher(opts: {
     return triggers.typingIdleMs > 0 && triggers.typingMaxWaitMs > 0;
   }
 
+  function messageTimestamp(message: PendingMessage): number {
+    const createdTimestamp = (message.message as { createdTimestamp?: unknown }).createdTimestamp;
+    return typeof createdTimestamp === "number" ? createdTimestamp : message.receivedAt;
+  }
+
   function latestMessageAtForUser(messages: readonly PendingMessage[], userId: string): number {
     let latest = 0;
     for (const message of messages) {
-      if (message.authorId === userId) latest = Math.max(latest, message.receivedAt);
+      if (message.authorId === userId) latest = Math.max(latest, messageTimestamp(message));
     }
     return latest;
   }
@@ -234,17 +251,33 @@ export function createChannelDispatcher(opts: {
 
     const userId = trigger.message.authorId;
     const lastTypingAt = state.typingByUser.get(userId);
-    if (lastTypingAt === undefined) return 0;
+    const now = Date.now();
+    if (lastTypingAt === undefined) {
+      const graceUntil = state.typingResumeGraceUntilByUser.get(userId);
+      if (graceUntil === undefined) return 0;
+      if (graceUntil <= now) {
+        state.typingResumeGraceUntilByUser.delete(userId);
+        return 0;
+      }
+      return graceUntil - now;
+    }
 
     const latestMessageAt = latestMessageAtForUser(messages, userId);
     if (lastTypingAt < latestMessageAt) {
       state.typingByUser.delete(userId);
-      return 0;
+      const graceUntil = state.typingResumeGraceUntilByUser.get(userId);
+      if (graceUntil === undefined || graceUntil <= now) return 0;
+      return graceUntil - now;
     }
 
-    const now = Date.now();
+    let latestReceivedAt = trigger.message.receivedAt;
+    for (const message of messages) {
+      if (message.authorId === userId) latestReceivedAt = Math.max(latestReceivedAt, message.receivedAt);
+    }
     const idleReadyAt = lastTypingAt + triggers.typingIdleMs;
-    const maxReadyAt = trigger.message.receivedAt + triggers.typingMaxWaitMs;
+    // Same-author follow-ups mean the user is still composing this turn; cap
+    // the wait from the latest chunk, not the original trigger.
+    const maxReadyAt = latestReceivedAt + triggers.typingMaxWaitMs;
     const waitUntil = Math.min(idleReadyAt, maxReadyAt);
     return Math.max(0, waitUntil - now);
   }
@@ -284,6 +317,11 @@ export function createChannelDispatcher(opts: {
     state.debounceTimer = null;
 
     if (state.running) {
+      debug?.("dispatcher_debounce_queue", {
+        channelId,
+        pendingCount: state.pending.length,
+        queuedCount: state.queued.length,
+      });
       // Handler already running, move pending to queued
       state.queued.push(...state.pending);
       state.pending = [];
@@ -292,6 +330,16 @@ export function createChannelDispatcher(opts: {
 
     const trigger = selectNextDispatchTrigger(state.pending);
     const typingWaitMs = getTypingWaitMs(state, state.pending, trigger);
+    debug?.("dispatcher_debounce_wait", {
+      channelId,
+      pendingCount: state.pending.length,
+      triggerReason: trigger?.result.reason ?? null,
+      triggerMessageId: trigger?.message.id ?? null,
+      triggerAuthorId: trigger?.message.authorId ?? null,
+      lastTypingAt: trigger !== null ? state.typingByUser.get(trigger.message.authorId) ?? null : null,
+      latestMessageAt: trigger !== null ? latestMessageAtForUser(state.pending, trigger.message.authorId) : null,
+      typingWaitMs,
+    });
     if (typingWaitMs > 0) {
       state.debounceTimer = setTimeout(() => fireDebounce(channelId), typingWaitMs);
       return;
@@ -301,6 +349,13 @@ export function createChannelDispatcher(opts: {
     const { batch, trigger: dispatchTrigger } = takeNextDispatchBatch(state);
     if (batch.length === 0) return;
     state.running = true;
+    debug?.("dispatcher_debounce_dispatch", {
+      channelId,
+      batchIds: batch.map((message) => message.id),
+      triggerReason: dispatchTrigger?.result.reason ?? null,
+      triggerMessageId: dispatchTrigger?.message.id ?? null,
+      triggerAuthorId: dispatchTrigger?.message.authorId ?? null,
+    });
 
     let coveredMessageIds: string[] = [];
     void handler(batch, dispatchTrigger)
@@ -345,19 +400,41 @@ export function createChannelDispatcher(opts: {
 
     const existingTrigger = selectNextDispatchTrigger(state.pending);
     state.pending.push(pending);
+    let typingAction = "unchanged";
 
-    if (
-      typingWaitEnabled() &&
-      existingTrigger !== null &&
-      usesTypingWait(existingTrigger.result) &&
-      allowsSameAuthorFollowup(existingTrigger.result) &&
-      existingTrigger.message.authorId === options.authorId &&
-      options.triggerResult === null
-    ) {
-      state.typingByUser.set(options.authorId, pending.receivedAt);
-    } else {
+    const lastTypingAt = state.typingByUser.get(options.authorId);
+    if (lastTypingAt !== undefined && lastTypingAt < messageTimestamp(pending)) {
       state.typingByUser.delete(options.authorId);
+      typingAction = "cleared_stale";
+      if (
+        typingWaitEnabled() &&
+        existingTrigger !== null &&
+        usesTypingWait(existingTrigger.result) &&
+        existingTrigger.message.authorId === options.authorId &&
+        options.triggerResult === null &&
+        messageTimestamp(pending) - lastTypingAt <= triggers.typingIdleMs &&
+        triggers.typingResumeGraceMs > 0
+      ) {
+        state.typingResumeGraceUntilByUser.set(options.authorId, pending.receivedAt + triggers.typingResumeGraceMs);
+        typingAction = "resume_grace";
+      } else {
+        state.typingResumeGraceUntilByUser.delete(options.authorId);
+      }
     }
+    debug?.("dispatcher_enqueue", {
+      channelId,
+      messageId,
+      authorId: options.authorId,
+      triggerReason: options.triggerResult?.reason ?? null,
+      pendingCount: state.pending.length,
+      messageTimestamp: messageTimestamp(pending),
+      receivedAt: pending.receivedAt,
+      existingTriggerReason: existingTrigger?.result.reason ?? null,
+      existingTriggerMessageId: existingTrigger?.message.id ?? null,
+      typingAction,
+      lastTypingAt: state.typingByUser.get(options.authorId) ?? null,
+      typingResumeGraceUntil: state.typingResumeGraceUntilByUser.get(options.authorId) ?? null,
+    });
 
     // Reset debounce timer
     if (state.debounceTimer !== null) {
@@ -372,17 +449,11 @@ export function createChannelDispatcher(opts: {
   }
 
   function recordTyping(channelId: string, userId: string): void {
-    const state = channels.get(channelId);
-    if (state === undefined) return;
-    const messages = [...state.queued, ...state.pending];
-    const trigger = selectNextDispatchTrigger(messages);
-    if (trigger === null || !usesTypingWait(trigger.result)) return;
-    if (trigger.message.authorId !== userId) return;
-
     const observedAt = Date.now();
-    const latestMessageAt = latestMessageAtForUser(messages, userId);
-    if (observedAt <= latestMessageAt) return;
+    const state = getOrCreateState(channelId);
     state.typingByUser.set(userId, observedAt);
+    state.typingResumeGraceUntilByUser.delete(userId);
+    debug?.("dispatcher_typing", { channelId, userId, observedAt });
   }
 
   function dispose(): void {

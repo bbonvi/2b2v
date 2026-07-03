@@ -22,6 +22,7 @@ function defaultTriggerConfig(overrides: Partial<GuildConfig["triggers"]> = {}):
     randomChance: 0,
     keywordDebounceMs: 2500,
     typingIdleMs: 10000,
+    typingResumeGraceMs: 3000,
     typingMaxWaitMs: 15000,
     ...overrides,
   };
@@ -102,13 +103,14 @@ describe("loadMainConfig", () => {
 
   test("parses triggers config", () => {
     const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "triggers:\n  mention: false\n  keywords: [hello]\n  randomChance: 0.1\n  keywordDebounceMs: 3000\n  typingIdleMs: 2000\n  typingMaxWaitMs: 12000\n");
+    writeFileSync(file, "triggers:\n  mention: false\n  keywords: [hello]\n  randomChance: 0.1\n  keywordDebounceMs: 3000\n  typingIdleMs: 2000\n  typingResumeGraceMs: 3500\n  typingMaxWaitMs: 12000\n");
     const cfg = loadMainConfig(file);
     expect(cfg.triggers?.mention).toBe(false);
     expect(cfg.triggers?.keywords).toEqual(["hello"]);
     expect(cfg.triggers?.randomChance).toBe(0.1);
     expect(cfg.triggers?.keywordDebounceMs).toBe(3000);
     expect(cfg.triggers?.typingIdleMs).toBe(2000);
+    expect(cfg.triggers?.typingResumeGraceMs).toBe(3500);
     expect(cfg.triggers?.typingMaxWaitMs).toBe(12000);
   });
 
@@ -864,7 +866,7 @@ describe("resolveGuildConfig", () => {
   test("inherits trigger defaults from global config YAML", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
-    writeFileSync(cfgFile, "triggers:\n  keywords: [hey, bot]\n  randomChance: 0.03\n  keywordDebounceMs: 3200\n  typingIdleMs: 2100\n  typingMaxWaitMs: 13000\n");
+    writeFileSync(cfgFile, "triggers:\n  keywords: [hey, bot]\n  randomChance: 0.03\n  keywordDebounceMs: 3200\n  typingIdleMs: 2100\n  typingResumeGraceMs: 3600\n  typingMaxWaitMs: 13000\n");
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {
       guildId: "60",
@@ -875,6 +877,7 @@ describe("resolveGuildConfig", () => {
     expect(resolved.triggers.randomChance).toBe(0.03);
     expect(resolved.triggers.keywordDebounceMs).toBe(3200);
     expect(resolved.triggers.typingIdleMs).toBe(2100);
+    expect(resolved.triggers.typingResumeGraceMs).toBe(3600);
     expect(resolved.triggers.typingMaxWaitMs).toBe(13000);
     expect(resolved.triggers.mention).toBe(true); // default
   });

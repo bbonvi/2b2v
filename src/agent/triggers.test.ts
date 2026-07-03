@@ -9,6 +9,7 @@ function makeTriggers(overrides: Partial<TriggerConfig> = {}): TriggerConfig {
     randomChance: 0,
     keywordDebounceMs: 2500,
     typingIdleMs: 10000,
+    typingResumeGraceMs: 3000,
     typingMaxWaitMs: 15000,
     ...overrides,
   };

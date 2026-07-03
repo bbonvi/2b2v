@@ -1848,10 +1848,11 @@ function ambientPickupChannelReady(guildId: string, channelId: string, now = Dat
 
 function activeTypingInChannel(guildId: string, channelId: string, activeMs: number, now = Date.now()): boolean {
   if (activeMs <= 0) return false;
+  const effectiveActiveMs = Math.max(activeMs, TYPING_INTERVAL_MS);
   const prefix = `${guildId}:${channelId}:`;
   for (const [key, lastTypingAt] of ambientTypingByChannelUser) {
     if (!key.startsWith(prefix)) continue;
-    if (now - lastTypingAt <= activeMs) return true;
+    if (now - lastTypingAt <= effectiveActiveMs) return true;
   }
   return false;
 }
@@ -2124,7 +2125,6 @@ function ambientNormalTriggerInFlight(guildId: string, channelId: string, userId
 }
 
 function clearPendingForCandidate(candidate: AmbientCandidate): void {
-  if (candidate.kind === "follow_up") return;
   const key = ambientPendingKey(candidate.kind, candidate.guildId, candidate.channelId, candidate.userId);
   const pending = ambientPendingCandidates.get(key);
   if (pending?.candidate.id === candidate.id) clearPendingCandidate(key);
@@ -2134,6 +2134,9 @@ function armPendingCandidate(key: string, candidate: AmbientCandidate, delayMs: 
   clearPendingCandidate(key);
   logAmbientScheduled(candidate, delayMs);
   const timer = setTimeout(() => {
+    const pending = ambientPendingCandidates.get(key);
+    if (pending?.candidate.id === candidate.id) ambientPendingCandidates.delete(key);
+    ambientCandidateTimers.delete(candidate.id);
     void runAmbientCandidate(candidate);
   }, delayMs);
   ambientPendingCandidates.set(key, { candidate, timer });
@@ -2187,6 +2190,9 @@ function ambientHardGate(
   if (!mode.enabled) return { ok: false, reason: `${candidate.kind} disabled` };
   const now = Date.now();
   if (now - candidate.createdAt > config.staleAfterMs) return { ok: false, reason: "candidate stale" };
+  if (ambientNormalTriggerInFlight(candidate.guildId, candidate.channelId, candidate.userId)) {
+    return { ok: false, reason: "normal trigger in flight" };
+  }
   if (!ambientBudgetAvailable(config, candidate, now)) return { ok: false, reason: "ambient budget exhausted" };
   if (phase === "evaluate" && !ambientCooldownReady(candidate, now)) return { ok: false, reason: "ambient cooldown active" };
   if (!ambientPickupChannelCooldownReady(candidate, now)) return { ok: false, reason: "ambient pickup channel cooldown active" };
@@ -2222,6 +2228,7 @@ function ambientHardGate(
     const lease = ambientLeases.get(ambientLeaseKey(candidate.guildId, candidate.channelId, candidate.userId));
     if (lease === undefined) return { ok: false, reason: "lingering lease missing" };
     if (lease.expiresAt <= now) return { ok: false, reason: "lingering lease expired" };
+    if (newHumanMessages.length > 0) return { ok: false, reason: "newer human message exists" };
   }
 
   if (candidate.kind === "follow_up") {
@@ -2449,12 +2456,7 @@ function scheduleAmbientCandidate(candidate: AmbientCandidate): void {
   const mode = ambientModeConfig(config, candidate.kind);
   if (!mode.enabled) return;
   const delayMs = randomBetween(mode.minDelayMs, mode.maxDelayMs);
-  logAmbientScheduled(candidate, delayMs);
-  const timer = setTimeout(() => {
-    ambientCandidateTimers.delete(candidate.id);
-    void runAmbientCandidate(candidate);
-  }, delayMs);
-  ambientCandidateTimers.set(candidate.id, timer);
+  armPendingCandidate(ambientPendingKey(candidate.kind, candidate.guildId, candidate.channelId, candidate.userId), candidate, delayMs);
 }
 
 function clearAmbientAttentionState(): void {
@@ -3808,6 +3810,7 @@ function maybeScheduleAmbientAttention(message: Message, triggerResult: TriggerR
     markAmbientPickupChannelCooldown(config, message.guildId, message.channelId);
     clearPendingAmbientKindInChannel("ambient_pickup", message.guildId, message.channelId);
     clearPendingCandidate(ambientPendingKey("lingering_attention", message.guildId, message.channelId, message.author.id));
+    clearPendingCandidate(ambientPendingKey("follow_up", message.guildId, message.channelId, message.author.id));
     return;
   }
   if (ambientNormalTriggerInFlight(message.guildId, message.channelId, message.author.id)) return;
@@ -3843,6 +3846,7 @@ function noteAmbientTyping(typing: Typing): void {
   if (config === undefined || !config.enabled) return;
   const now = Date.now();
   ambientTypingByChannelUser.set(ambientChannelUserKey(typing.guild.id, typing.channel.id, typing.user.id), now);
+  clearPendingCandidate(ambientPendingKey("follow_up", typing.guild.id, typing.channel.id, typing.user.id));
   reschedulePendingBurstForTyping("ambient_pickup", typing.guild.id, typing.channel.id, typing.user.id, config);
   const lease = ambientLeases.get(ambientLeaseKey(typing.guild.id, typing.channel.id, typing.user.id));
   if (lease === undefined || lease.expiresAt <= now) return;
@@ -5875,6 +5879,7 @@ function getOrCreateDispatcher(guildId: string): ChannelDispatcher {
   dispatcher = createChannelDispatcher({
     config: config.dispatcher,
     triggers: config.triggers,
+    debug: (event, fields) => log.debug(event, { guildId, ...fields }),
     handler: async (batch, trigger): Promise<DispatchOutcome> => {
       if (trigger === null) return { coveredMessageIds: [] };
       const selected = selectDispatchMessageForTrigger(batch, trigger);
@@ -6525,6 +6530,10 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
     const guildId = message.guildId;
     const channelId = message.channelId;
     const guildConfig = getGuildConfig(guildId);
+    // A delivered message consumes the user's previous typing indicator. Keep
+    // ambient gates in sync with dispatcher typing, otherwise stale typing can
+    // drop lingering/pickup/initiative candidates after the message arrived.
+    ambientTypingByChannelUser.delete(ambientChannelUserKey(guildId, channelId, message.author.id));
 
     // Build inbound resolvers and translate
     const inboundResolvers = buildInboundResolvers(guild);

@@ -55,6 +55,7 @@ const DEFAULT_TRIGGER: TriggerConfig = {
   randomChance: 0,
   keywordDebounceMs: 2500,
   typingIdleMs: 10000,
+  typingResumeGraceMs: 3000,
   typingMaxWaitMs: 15000,
 };
 
@@ -1162,6 +1163,7 @@ export function loadGlobalConfig(
       randomChance: yaml.triggers?.randomChance ?? DEFAULT_TRIGGER.randomChance,
       keywordDebounceMs: yaml.triggers?.keywordDebounceMs ?? DEFAULT_TRIGGER.keywordDebounceMs,
       typingIdleMs: yaml.triggers?.typingIdleMs ?? DEFAULT_TRIGGER.typingIdleMs,
+      typingResumeGraceMs: yaml.triggers?.typingResumeGraceMs ?? DEFAULT_TRIGGER.typingResumeGraceMs,
       typingMaxWaitMs: yaml.triggers?.typingMaxWaitMs ?? DEFAULT_TRIGGER.typingMaxWaitMs,
     },
     defaultTriggerInstructions: {
@@ -1255,6 +1257,7 @@ export function resolveGuildConfig(
       randomChance: partial.triggers?.randomChance ?? global.defaultTriggers.randomChance,
       keywordDebounceMs: partial.triggers?.keywordDebounceMs ?? global.defaultTriggers.keywordDebounceMs,
       typingIdleMs: partial.triggers?.typingIdleMs ?? global.defaultTriggers.typingIdleMs,
+      typingResumeGraceMs: partial.triggers?.typingResumeGraceMs ?? global.defaultTriggers.typingResumeGraceMs,
       typingMaxWaitMs: partial.triggers?.typingMaxWaitMs ?? global.defaultTriggers.typingMaxWaitMs,
     },
     triggerInstructions: {

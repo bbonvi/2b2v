@@ -329,6 +329,8 @@ export interface TriggerConfig {
   keywordDebounceMs: number;
   /** Treat typingStart from the keyword/mention-triggering user as active for this long. */
   typingIdleMs: number;
+  /** Briefly wait after a same-author message clears recent typing, so continued typing can refresh. */
+  typingResumeGraceMs: number;
   /** Maximum extra wait after a keyword/mention trigger, even if typing keeps refreshing. */
   typingMaxWaitMs: number;
 }

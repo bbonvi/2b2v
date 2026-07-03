@@ -78,7 +78,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultModelParams: {},
     defaultTimezone: "UTC",
     defaultTrim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
-    defaultTriggers: { mention: true, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingMaxWaitMs: 15000 },
+    defaultTriggers: { mention: true, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingResumeGraceMs: 3000, typingMaxWaitMs: 15000 },
     defaultTriggerInstructions: {},
     defaultImageMaxDimension: 768,
     defaultMergeMessageGapSeconds: 120,
@@ -115,7 +115,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
   return {
     guildId: "guild-1",
     slug: "test",
-    triggers: { mention: true, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingMaxWaitMs: 15000 },
+    triggers: { mention: true, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingResumeGraceMs: 3000, typingMaxWaitMs: 15000 },
     triggerInstructions: {},
     timezone: "UTC",
     trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
@@ -255,7 +255,7 @@ describe("handleMessage", () => {
       messageForLogs: {},
     }));
     const result = await handleMessage(makeMessage(), makeDeps({
-      guildConfig: makeGuildConfig({ triggers: { mention: false, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingMaxWaitMs: 15000 } }),
+      guildConfig: makeGuildConfig({ triggers: { mention: false, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingResumeGraceMs: 3000, typingMaxWaitMs: 15000 } }),
       completeChat: completeChat as unknown as ChatCompleteFn,
     }));
 
@@ -273,7 +273,7 @@ describe("handleMessage", () => {
     }));
 
     const result = await handleMessage(makeMessage({ content: "followup", translatedContent: "followup" }), makeDeps({
-      guildConfig: makeGuildConfig({ triggers: { mention: false, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingMaxWaitMs: 15000 } }),
+      guildConfig: makeGuildConfig({ triggers: { mention: false, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingResumeGraceMs: 3000, typingMaxWaitMs: 15000 } }),
       triggerOverride: { reason: "keyword", keyword: "туби" },
       completeChat: completeChat as unknown as ChatCompleteFn,
     }));
@@ -440,7 +440,7 @@ describe("handleMessage", () => {
       makeMessage({ content: "hello bot", translatedContent: "hello bot" }),
       makeDeps({
         guildConfig: makeGuildConfig({
-          triggers: { mention: false, keywords: ["bot"], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingMaxWaitMs: 15000 },
+          triggers: { mention: false, keywords: ["bot"], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingResumeGraceMs: 3000, typingMaxWaitMs: 15000 },
         }),
         sender,
       }),
