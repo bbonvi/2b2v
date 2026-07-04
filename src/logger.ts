@@ -391,7 +391,7 @@ export class RequestLog {
     this.touchActive();
   }
 
-  recordLLMError(error: unknown): void {
+  recordLLMError(error: unknown, responsePayload?: unknown): void {
     const payload = this.pendingPayload;
     const payloadRecord = isRecord(payload) ? payload : null;
     const model = typeof payloadRecord?.model === "string" && payloadRecord.model !== ""
@@ -418,6 +418,7 @@ export class RequestLog {
       isError: true,
       error: message,
       requestPayload: payload ?? undefined,
+      responsePayload,
       emittedToolCalls: target?.emittedToolCalls ?? [],
     };
     if (target !== undefined) {

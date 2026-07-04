@@ -1113,7 +1113,18 @@ async function completeModelTurnWithRetries(input: {
       input.onAttemptStart?.();
       const result = await completeWithTimeout(input.complete, input.request, input.timeoutMs);
       const validationError = input.validateResult?.(result);
-      if (validationError !== undefined) throw validationError;
+      if (validationError !== undefined) {
+        const normalizedError = normalizeModelTurnError(validationError, input.request);
+        const shouldRetry = attempt < maxAttempts && isRetriableModelTurnError(normalizedError);
+        input.requestLog?.recordLLMError(normalizedError, result.messageForLogs);
+        if (!shouldRetry) throw normalizedError;
+        input.log?.warn("retrying LLM turn", {
+          attempt,
+          maxAttempts,
+          error: makeToolErrorText(normalizedError),
+        });
+        continue;
+      }
       return result;
     } catch (error) {
       const normalizedError = normalizeModelTurnError(error, input.request);

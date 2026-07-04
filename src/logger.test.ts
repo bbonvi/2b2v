@@ -429,6 +429,22 @@ describe("RequestLog", () => {
     expect(entry.llmCalls[0]?.requestPayload).toEqual(payload);
   });
 
+  test("recordLLMError can attach failed response payload for dashboard detail", () => {
+    const rl = new RequestLog("g1", "c1");
+    const response = {
+      role: "assistant",
+      model: "test-model",
+      content: [],
+      usage: { input: 10, output: 0, totalTokens: 10 },
+      stopReason: "stop",
+      rawResponse: { content: [{ type: "thinking" }] },
+    };
+    rl.recordLLMRequest({ model: "test-model" });
+    rl.recordLLMError(new Error("Model produced an empty response."), response);
+
+    expect(rl.toEntry().llmCalls[0]?.responsePayload).toEqual(response);
+  });
+
   test("requestPayload resets after consumption", () => {
     const rl = new RequestLog("g1", "c1");
     rl.recordLLMRequest({ msg: "first" });
