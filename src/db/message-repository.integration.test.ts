@@ -1,12 +1,13 @@
 import { test, expect, beforeAll, beforeEach, afterAll, describe } from "bun:test";
 import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "./database";
-import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
+import { createQdrantClient, ensureCollection, qdrantCollectionName } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
-import { searchMessages, getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, upsertMessageReaction, deleteMessageEmojiReaction, deleteMessageReactions } from "./message-repository";
+import { searchMessages, getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory } from "./message-repository";
 import { createMockPipeline } from "../embeddings/test-utils";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
+const TEST_COLLECTION = `embeddings_message_repo_${String(process.pid)}`;
 const mockPipeline = createMockPipeline();
 
 async function embedOne(text: string): Promise<Float32Array> {
@@ -23,8 +24,8 @@ const now = Date.now();
 const hour = 60 * 60 * 1000;
 
 beforeAll(async () => {
-  qdrant = createQdrantClient({ url: QDRANT_URL });
-  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
+  qdrant = createQdrantClient({ url: QDRANT_URL, collectionName: TEST_COLLECTION });
+  try { await qdrant.deleteCollection(qdrantCollectionName(qdrant)); } catch { /* expected */ }
   await ensureCollection(qdrant);
 });
 
@@ -90,11 +91,11 @@ async function insertWithEmbedding(id: string, text: string, opts: Parameters<ty
 
 beforeEach(async () => {
   db = createDatabase(":memory:");
-  try { await qdrant.delete(COLLECTION_NAME, { wait: true, filter: {} }); } catch { /* expected */ }
+  try { await qdrant.delete(qdrantCollectionName(qdrant), { wait: true, filter: {} }); } catch { /* expected */ }
 });
 
 afterAll(async () => {
-  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
+  try { await qdrant.deleteCollection(qdrantCollectionName(qdrant)); } catch { /* expected */ }
 });
 
 describe("getLatestMessageActivityBefore", () => {
@@ -876,88 +877,6 @@ describe("getContextHistoryMessages", () => {
     ]);
   });
 
-  test("hydrates durable reaction summaries for known messages", () => {
-    insertMessage("m1", { channelId: "c1", translatedContent: "hello", createdAt: now });
-
-    expect(upsertMessageReaction(db, {
-      messageId: "m1",
-      guildId: "g1",
-      channelId: "c1",
-      emojiKey: "unicode:👍",
-      emojiLabel: "👍",
-      count: 3,
-      updatedAt: now + 1,
-    })).toBe(true);
-    expect(upsertMessageReaction(db, {
-      messageId: "m1",
-      guildId: "g1",
-      channelId: "c1",
-      emojiKey: "custom:123",
-      emojiLabel: ":party:",
-      count: 1,
-      updatedAt: now + 2,
-    })).toBe(true);
-
-    const rows = getContextHistoryMessages(db, "c1", trim);
-    expect(rows[0]?.reactions).toBe("👍:3 :party::1");
-  });
-
-  test("reaction upserts ignore unknown messages and removals clear counts", () => {
-    insertMessage("m1", { channelId: "c1", translatedContent: "hello", createdAt: now });
-
-    expect(upsertMessageReaction(db, {
-      messageId: "missing",
-      guildId: "g1",
-      channelId: "c1",
-      emojiKey: "unicode:👍",
-      emojiLabel: "👍",
-      count: 2,
-    })).toBe(false);
-    expect(upsertMessageReaction(db, {
-      messageId: "m1",
-      guildId: "g1",
-      channelId: "c1",
-      emojiKey: "unicode:👍",
-      emojiLabel: "👍",
-      count: 2,
-    })).toBe(true);
-    expect(upsertMessageReaction(db, {
-      messageId: "m1",
-      guildId: "g1",
-      channelId: "c1",
-      emojiKey: "unicode:👍",
-      emojiLabel: "👍",
-      count: 0,
-    })).toBe(true);
-
-    expect(getContextHistoryMessages(db, "c1", trim)[0]?.reactions).toBeUndefined();
-  });
-
-  test("can delete one emoji reaction or all reactions for a message", () => {
-    insertMessage("m1", { channelId: "c1", translatedContent: "hello", createdAt: now });
-    upsertMessageReaction(db, {
-      messageId: "m1",
-      guildId: "g1",
-      channelId: "c1",
-      emojiKey: "unicode:👍",
-      emojiLabel: "👍",
-      count: 2,
-    });
-    upsertMessageReaction(db, {
-      messageId: "m1",
-      guildId: "g1",
-      channelId: "c1",
-      emojiKey: "custom:123",
-      emojiLabel: ":party:",
-      count: 1,
-    });
-
-    deleteMessageEmojiReaction(db, "m1", "custom:123", "g1");
-    expect(getContextHistoryMessages(db, "c1", trim)[0]?.reactions).toBe("👍:2");
-
-    deleteMessageReactions(db, "m1", "g1");
-    expect(getContextHistoryMessages(db, "c1", trim)[0]?.reactions).toBeUndefined();
-  });
 });
 
 describe("getParentPreContext", () => {

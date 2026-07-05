@@ -15,7 +15,8 @@ import {
   type MemoryRow,
   type MemoryScope,
 } from "../db/memory-repository";
-import { completeLlmChat, type OpenRouterChatRequest } from "../llm/openrouter-chat";
+import { completeLlmChat } from "../llm/chat";
+import type { OpenRouterChatRequest } from "../llm/types";
 import type { LlmProvider, PromptCachingConfig } from "../config/types";
 import { prependStableSectionsToPayload, type StablePromptSection } from "./prompt-cache";
 import { currentLocalContext } from "../time/agent-time";

@@ -1,11 +1,12 @@
 import { test, expect, describe, beforeAll, beforeEach, afterAll } from "bun:test";
 import type { QdrantClient } from "@qdrant/js-client-rest";
-import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "./client";
+import { createQdrantClient, ensureCollection, qdrantCollectionName } from "./client";
 import {
   upsertPoint,
   upsertPoints,
   deletePoint,
   deleteMessagePointsByMessageId,
+  deleteMessagePointsByGuildId,
   pointExists,
   searchPoints,
   toPointId,
@@ -14,6 +15,7 @@ import {
 import { createMockPipeline } from "../embeddings/test-utils";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
+const TEST_COLLECTION = `embeddings_adapter_${String(process.pid)}`;
 const pipeline = createMockPipeline();
 
 let client: QdrantClient;
@@ -41,20 +43,20 @@ async function embedMany(...texts: string[]): Promise<Float32Array[]> {
 }
 
 beforeAll(async () => {
-  client = createQdrantClient({ url: QDRANT_URL });
-  try { await client.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
+  client = createQdrantClient({ url: QDRANT_URL, collectionName: TEST_COLLECTION });
+  try { await client.deleteCollection(qdrantCollectionName(client)); } catch { /* expected */ }
   await ensureCollection(client);
 });
 
 beforeEach(async () => {
   // Clear all points between tests
   try {
-    await client.delete(COLLECTION_NAME, { wait: true, filter: {} });
+    await client.delete(qdrantCollectionName(client), { wait: true, filter: {} });
   } catch { /* expected */ }
 });
 
 afterAll(async () => {
-  try { await client.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
+  try { await client.deleteCollection(qdrantCollectionName(client)); } catch { /* expected */ }
 });
 
 describe("toPointId", () => {
@@ -194,6 +196,43 @@ describe("deleteMessagePointsByMessageId", () => {
     expect(await pointExists(client, "m1")).toBe(false);
     expect(await pointExists(client, "msgblock:m1:m2")).toBe(false);
     expect(await pointExists(client, "m-user")).toBe(true);
+  });
+});
+
+describe("deleteMessagePointsByGuildId", () => {
+  test("removes all message vectors for one guild without deleting memories or other guilds", async () => {
+    const [messageVec, memoryVec] = await embedMany("guild message", "guild memory");
+    assertDefined(messageVec);
+    assertDefined(memoryVec);
+    await upsertPoints(client, [
+      {
+        id: "g1-message",
+        vector: vecToArray(messageVec),
+        payload: { type: "message", entity_id: "g1-message", guild_id: "g1", message_id: "g1-message" },
+      },
+      {
+        id: "g1-block",
+        vector: vecToArray(messageVec),
+        payload: { type: "message", entity_id: "g1-block", guild_id: "g1", message_ids: ["g1-message", "g1-other"] },
+      },
+      {
+        id: "g2-message",
+        vector: vecToArray(messageVec),
+        payload: { type: "message", entity_id: "g2-message", guild_id: "g2", message_id: "g2-message" },
+      },
+      {
+        id: "g1-memory",
+        vector: vecToArray(memoryVec),
+        payload: { type: "memory", entity_id: "g1-memory", guild_id: "g1" },
+      },
+    ]);
+
+    await deleteMessagePointsByGuildId(client, "g1");
+
+    expect(await pointExists(client, "g1-message")).toBe(false);
+    expect(await pointExists(client, "g1-block")).toBe(false);
+    expect(await pointExists(client, "g2-message")).toBe(true);
+    expect(await pointExists(client, "g1-memory")).toBe(true);
   });
 });
 

@@ -3,27 +3,28 @@ import { wrapToolsWithTiming, formatTiming, type TimingState } from "./tool-timi
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 
+let nowMs = 0;
+
 function createMockTool(name: string, delayMs = 0): AgentTool {
   return {
     name,
     label: name,
     description: `Mock tool ${name}`,
     parameters: Type.Object({}),
-    execute: async (): Promise<AgentToolResult<Record<string, never>>> => {
-      if (delayMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
-      return {
+    execute: (): Promise<AgentToolResult<Record<string, never>>> => {
+      nowMs += delayMs;
+      return Promise.resolve({
         content: [{ type: "text", text: `${name} executed` }],
         details: {},
-      };
+      });
     },
   };
 }
 
 /** Helper to get wrapped tools and state. */
 function getWrapped(tools: AgentTool[]): { tools: AgentTool[]; state: TimingState } {
-  return wrapToolsWithTiming(tools);
+  nowMs = 0;
+  return wrapToolsWithTiming(tools, () => nowMs);
 }
 
 /** Get tool at index with assertion. */
@@ -92,16 +93,14 @@ describe("wrapToolsWithTiming", () => {
 
     const result = await wrapped.execute("call-1", {}, undefined);
 
-    // Should include ~100ms execution time
     const elapsed = extractTimingMs(result, "tool execution");
-    expect(elapsed).toBeGreaterThanOrEqual(100);
-    expect(elapsed).toBeLessThan(200); // reasonable upper bound
+    expect(elapsed).toBe(100);
   });
 
   test("parallel tools measure from same reference point", async () => {
     const toolA = createMockTool("tool_a", 200);
     const toolB = createMockTool("tool_b", 50);
-    const { tools, state } = wrapToolsWithTiming([toolA, toolB]);
+    const { tools, state } = getWrapped([toolA, toolB]);
     const wA = getTool(tools, 0);
     const wB = getTool(tools, 1);
     state.setReferenceTime();
@@ -115,10 +114,8 @@ describe("wrapToolsWithTiming", () => {
     const elapsedA = extractTimingMs(resultA, "tool execution");
     const elapsedB = extractTimingMs(resultB, "tool execution");
 
-    // Both should be >= their execution time
     expect(elapsedA).toBeGreaterThanOrEqual(200);
-    expect(elapsedB).toBeGreaterThanOrEqual(50);
-    // A should be longer than B (200ms vs 50ms)
+    expect(elapsedB).toBe(50);
     expect(elapsedA).toBeGreaterThan(elapsedB);
   });
 
@@ -129,7 +126,7 @@ describe("wrapToolsWithTiming", () => {
 
     // Simulate: LLM starts, spends 100ms generating a tool call, then tool runs.
     state.markModelTurnStart();
-    await new Promise((r) => setTimeout(r, 100));
+    nowMs += 100;
     state.markToolCallsReady();
 
     const result = await wrapped.execute("call-1", {}, undefined);
@@ -137,11 +134,9 @@ describe("wrapToolsWithTiming", () => {
     const execution = extractTimingMs(result, "tool execution");
     const turnElapsed = extractTimingMs(result, "current tool turn");
 
-    expect(generation).toBeGreaterThanOrEqual(100);
-    expect(generation).toBeLessThan(200);
-    expect(execution).toBeGreaterThanOrEqual(50);
-    expect(turnElapsed).toBeGreaterThanOrEqual(150);
-    expect(turnElapsed).toBeLessThan(300);
+    expect(generation).toBe(100);
+    expect(execution).toBe(50);
+    expect(turnElapsed).toBe(150);
   });
 
   test("markModelTurnStart resets timing for new tool turn", async () => {
@@ -155,7 +150,7 @@ describe("wrapToolsWithTiming", () => {
     await wrapped.execute("call-1", {}, undefined);
 
     // Wait 100ms (simulating LLM response time)
-    await new Promise((r) => setTimeout(r, 100));
+    nowMs += 100;
 
     // Second batch — markModelTurnStart called, should NOT include prior idle wait.
     state.markModelTurnStart();
@@ -164,8 +159,7 @@ describe("wrapToolsWithTiming", () => {
     const elapsed = extractTimingMs(result, "current tool turn");
 
     // Should be ~50ms (tool execution), not ~150ms
-    expect(elapsed).toBeGreaterThanOrEqual(50);
-    expect(elapsed).toBeLessThan(120);
+    expect(elapsed).toBe(50);
   });
 
   test("preserves original tool properties", () => {

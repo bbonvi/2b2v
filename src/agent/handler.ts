@@ -18,16 +18,16 @@ import type { TtsResult } from "../tts/types.ts";
 import { resolveGuildLlmProvider, resolveGuildModel, resolveGuildModelId, buildStreamOptions, buildBackgroundStreamOptions, buildImageReadingStreamOptions, type ModelImageInputSupport } from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { Logger, RequestLog } from "../logger.ts";
-import {
-  completeLlmChat,
-  type OpenRouterChatRequest,
-  type OpenRouterChatResult,
-  type OpenRouterImageUrlPart,
-  type OpenRouterMessage,
-  type OpenRouterTextPart,
-  type OpenRouterToolCall,
-  type OpenRouterToolDefinition,
-} from "../llm/openrouter-chat.ts";
+import { completeLlmChat } from "../llm/chat.ts";
+import type {
+  OpenRouterChatRequest,
+  OpenRouterChatResult,
+  OpenRouterImageUrlPart,
+  OpenRouterMessage,
+  OpenRouterTextPart,
+  OpenRouterToolCall,
+  OpenRouterToolDefinition,
+} from "../llm/types.ts";
 import {
   getStablePromptSections,
   prependStableSectionsToCodexPayload,

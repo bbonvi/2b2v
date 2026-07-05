@@ -5,20 +5,60 @@ import { handleMessage, injectTriggerInstruction, runSilentMemoryAgentPass, runS
 import type { AssembledContext, ContextSection } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig, PromptTransportConfig } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
-import { RequestLog, type Logger } from "../logger.ts";
-import { loadPromptBundle } from "../config/prompt-bundle.ts";
-import type { OpenRouterMessage } from "../llm/openrouter-chat.ts";
+import { RequestLog } from "../logger.ts";
+import type { RuntimePromptBundle } from "../config/prompt-bundle.ts";
+import type { OpenRouterMessage } from "../llm/types.ts";
 
-const TEST_LOGGER: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-  logTokenUsage: () => {},
-  child: () => TEST_LOGGER,
-};
-
-const TEST_RUNTIME_PROMPTS = loadPromptBundle("prompts", TEST_LOGGER).runtime;
+const TEST_RUNTIME_PROMPTS = {
+  reply: "# Runtime Core\nReserved action directives.",
+  finalActionInstruction: "## Final Action Instruction\nSend visible output or intentionally stay silent.",
+  toolDescriptions: {},
+  toolParameterDescriptions: {},
+  contextTemplates: {
+    "agent-time-budget-exhausted": "Native turn time budget exhausted after {{timeoutMs}}ms; stop tool use.",
+    "memory-pass-decision": "Review only strongly implied durable facts. Before adding, check existing memories. Prefer expiresIn for relative expiry.",
+  },
+  memoryContextTemplates: {},
+  imageDescriptionSystemPrompt: [
+    "Describe images for another Discord chat model.",
+    "Mention visible race/ethnicity/skin tone only when relevant.",
+    "Use normal words like woman when useful.",
+    "Call out whether this looks like a selfie, movie/TV/anime/game frame, actor, or vibe.",
+  ].join("\n"),
+  ambientAttentionEvaluator: {
+    shared: "Ambient shared.",
+    ambientPickup: "Ambient pickup.",
+    lingeringAttention: "Lingering attention.",
+    followUp: "Follow up.",
+  },
+  ambientInitiative: {
+    evaluator: {
+      shared: "Initiative evaluator shared.",
+      selfExpression: "Initiative evaluator self.",
+      targetedCheckin: "Initiative evaluator checkin.",
+    },
+    generation: {
+      shared: "Initiative generation shared.",
+      selfExpression: "Initiative generation self.",
+      targetedCheckin: "Initiative generation checkin.",
+    },
+  },
+  relationships: { context: "Relationship context." },
+  skills: {
+    byId: {
+      image_generation: {
+        id: "image_generation",
+        title: "Image Generation",
+        description: "Use for generated images.",
+        requiredForTools: ["codex_generate_image"],
+        instructionDocuments: [],
+        content: "# Skill: Image Generation\nUse the image tool.",
+      },
+    },
+    indexPrompt: "## Skills\n- image_generation: Use for generated images. Required before: codex_generate_image.",
+    requiredByTool: { codex_generate_image: "image_generation" },
+  },
+} satisfies RuntimePromptBundle;
 
 function makePromptTransportConfig(): PromptTransportConfig {
   return {

@@ -36,30 +36,30 @@ export interface TimingState {
  * - Parallel tools: all share the same tool-call generation duration
  * - LLM generation time: measured from model-turn start to tool-call readiness
  */
-export function wrapToolsWithTiming(tools: AgentTool[]): { tools: AgentTool[]; state: TimingState } {
-  let agentLoopStartedAt = Date.now();
+export function wrapToolsWithTiming(tools: AgentTool[], now: () => number = () => Date.now()): { tools: AgentTool[]; state: TimingState } {
+  let agentLoopStartedAt = now();
   let modelTurnStartedAt = agentLoopStartedAt;
   let toolCallsReadyAt = agentLoopStartedAt;
 
   const state: TimingState = {
     resetAgentLoopStart() {
-      const now = Date.now();
-      agentLoopStartedAt = now;
-      modelTurnStartedAt = now;
-      toolCallsReadyAt = now;
+      const current = now();
+      agentLoopStartedAt = current;
+      modelTurnStartedAt = current;
+      toolCallsReadyAt = current;
     },
     markModelTurnStart() {
-      const now = Date.now();
-      modelTurnStartedAt = now;
-      toolCallsReadyAt = now;
+      const current = now();
+      modelTurnStartedAt = current;
+      toolCallsReadyAt = current;
     },
     markToolCallsReady() {
-      toolCallsReadyAt = Date.now();
+      toolCallsReadyAt = now();
     },
     setReferenceTime() {
-      const now = Date.now();
-      modelTurnStartedAt = now;
-      toolCallsReadyAt = now;
+      const current = now();
+      modelTurnStartedAt = current;
+      toolCallsReadyAt = current;
     },
   };
 
@@ -70,10 +70,10 @@ export function wrapToolsWithTiming(tools: AgentTool[]): { tools: AgentTool[]; s
       params: unknown,
       signal: AbortSignal | undefined
     ): Promise<AgentToolResult<unknown>> => {
-      const toolStartedAt = Date.now();
+      const toolStartedAt = now();
       const result = await tool.execute(toolCallId, params, signal);
       if (tool.name === "load_skill") return result;
-      const completedAt = Date.now();
+      const completedAt = now();
       const toolCallGenerationMs = Math.max(0, toolCallsReadyAt - modelTurnStartedAt);
       const toolExecutionMs = completedAt - toolStartedAt;
       const toolTurnElapsedMs = completedAt - modelTurnStartedAt;

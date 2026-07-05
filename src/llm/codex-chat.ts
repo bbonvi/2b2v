@@ -21,7 +21,7 @@ import type {
   ProviderNativeAssistantContent,
   OpenRouterTextPart,
   OpenRouterToolCall,
-} from "./openrouter-chat.ts";
+} from "./types.ts";
 
 const DEFAULT_CODEX_AUTH_PATH = "data/codex-auth.json";
 

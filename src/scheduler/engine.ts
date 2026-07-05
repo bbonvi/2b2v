@@ -19,6 +19,8 @@ export interface SchedulerEngineOptions {
   pollIntervalMs?: number;
   /** Test hook for exercising long one-off timers without waiting days. */
   maxOneOffTimerDelayMs?: number;
+  timers?: SchedulerTimerApi;
+  createCron?: CreateCron;
 }
 
 /** Minimal logging interface to avoid hard dependency on logger module. */
@@ -26,9 +28,27 @@ export interface SchedulerLogger {
   error(msg: string, fields?: Record<string, unknown>): void;
 }
 
+export interface SchedulerTimerApi {
+  now(): number;
+  setTimeout(callback: () => void, ms: number): SchedulerTimer;
+  clearTimeout(timer: SchedulerTimer): void;
+}
+
+export type SchedulerTimer = object | number;
+
+export interface CronHandle {
+  stop(): void;
+}
+
+export type CreateCron = (
+  expression: string,
+  options: { timezone: string; catch: (err: unknown) => void },
+  callback: () => void,
+) => CronHandle;
+
 interface ActiveJob {
-  cron?: Cron;
-  timer?: ReturnType<typeof setTimeout>;
+  cron?: CronHandle;
+  timer?: SchedulerTimer;
   scheduleId: string;
 }
 
@@ -47,6 +67,13 @@ export function createSchedulerEngine(
   options: SchedulerEngineOptions
 ): SchedulerEngine {
   const { db, onFire, log } = options;
+  const timers = options.timers ?? {
+    now: () => Date.now(),
+    setTimeout: (callback: () => void, ms: number) => setTimeout(callback, ms),
+    clearTimeout: (timer: SchedulerTimer) => { clearTimeout(timer as ReturnType<typeof setTimeout>); },
+  };
+  const createCron = options.createCron ?? ((expression, cronOptions, callback) =>
+    new Cron(expression, cronOptions, callback));
   const maxOneOffTimerDelayMs = Math.min(
     options.maxOneOffTimerDelayMs ?? MAX_ONE_OFF_TIMER_DELAY_MS,
     MAX_ONE_OFF_TIMER_DELAY_MS,
@@ -81,7 +108,7 @@ export function createSchedulerEngine(
 
     if (schedule.type === "cron" && schedule.cronExpression !== null && schedule.cronExpression !== "") {
       try {
-        const cron = new Cron(schedule.cronExpression, {
+        const cron = createCron(schedule.cronExpression, {
           timezone: schedule.timezone,
           catch: (err) => {
             logger.error("cron execution error", {
@@ -108,7 +135,7 @@ export function createSchedulerEngine(
   function scheduleOneOff(schedule: ScheduleRow, fireWhenDue: boolean): void {
     if (schedule.runAt === null) return;
 
-    const delayMs = schedule.runAt - Date.now();
+    const delayMs = schedule.runAt - timers.now();
     if (delayMs <= 0) {
       if (fireWhenDue) {
         fire(schedule.id);
@@ -120,7 +147,7 @@ export function createSchedulerEngine(
     }
 
     const timerDelayMs = Math.min(delayMs, maxOneOffTimerDelayMs);
-    const timer = setTimeout(() => {
+    const timer = timers.setTimeout(() => {
       jobs.delete(schedule.id);
       const latest = getSchedule(db, schedule.id);
       if (!latest || !latest.enabled || latest.type !== "one_off") return;
@@ -144,9 +171,9 @@ export function createSchedulerEngine(
 
   function clearJob(id: string): void {
     const job = jobs.get(id);
-    if (!job) return;
-    if (job.cron) job.cron.stop();
-    if (job.timer) clearTimeout(job.timer);
+    if (job === undefined) return;
+    if (job.cron !== undefined) job.cron.stop();
+    if (job.timer !== undefined) timers.clearTimeout(job.timer);
     jobs.delete(id);
   }
 

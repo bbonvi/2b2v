@@ -1,5 +1,5 @@
 import type { QdrantClient } from "@qdrant/js-client-rest";
-import { COLLECTION_NAME } from "./client";
+import { qdrantCollectionName } from "./client";
 
 /** Payload stored alongside each vector point in Qdrant. */
 export interface PointPayload {
@@ -70,7 +70,7 @@ export async function upsertPoint(
   vector: number[],
   payload: PointPayload,
 ): Promise<void> {
-  await client.upsert(COLLECTION_NAME, {
+  await client.upsert(qdrantCollectionName(client), {
     wait: true,
     points: [{ id: toPointId(entityId), vector, payload: { ...payload, entity_id: entityId } }],
   });
@@ -84,7 +84,7 @@ export async function upsertPoints(
   points: Array<{ id: string; vector: number[]; payload: PointPayload }>,
 ): Promise<void> {
   if (points.length === 0) return;
-  await client.upsert(COLLECTION_NAME, {
+  await client.upsert(qdrantCollectionName(client), {
     wait: true,
     points: points.map((p) => ({
       id: toPointId(p.id),
@@ -101,7 +101,7 @@ export async function deletePoint(
   client: QdrantClient,
   entityId: string,
 ): Promise<void> {
-  await client.delete(COLLECTION_NAME, {
+  await client.delete(qdrantCollectionName(client), {
     wait: true,
     points: [toPointId(entityId)],
   });
@@ -116,7 +116,7 @@ export async function deletePoints(
   entityIds: string[],
 ): Promise<void> {
   if (entityIds.length === 0) return;
-  await client.delete(COLLECTION_NAME, {
+  await client.delete(qdrantCollectionName(client), {
     wait: true,
     points: entityIds.map(toPointId),
   });
@@ -134,7 +134,7 @@ export async function deleteMessagePointsByMessageId(
     { key: "guild_id", match: { value: input.guildId } },
     { key: "type", match: { value: "message" } },
   ];
-  await client.delete(COLLECTION_NAME, {
+  await client.delete(qdrantCollectionName(client), {
     wait: true,
     filter: {
       must: [
@@ -143,12 +143,28 @@ export async function deleteMessagePointsByMessageId(
       ],
     },
   });
-  await client.delete(COLLECTION_NAME, {
+  await client.delete(qdrantCollectionName(client), {
     wait: true,
     filter: {
       must: [
         ...baseMust,
         { key: "message_ids", match: { value: input.messageId } },
+      ],
+    },
+  });
+}
+
+/** Delete all message vectors in one guild, including merged history blocks. */
+export async function deleteMessagePointsByGuildId(
+  client: QdrantClient,
+  guildId: string,
+): Promise<void> {
+  await client.delete(qdrantCollectionName(client), {
+    wait: true,
+    filter: {
+      must: [
+        { key: "guild_id", match: { value: guildId } },
+        { key: "type", match: { value: "message" } },
       ],
     },
   });
@@ -161,7 +177,7 @@ export async function pointExists(
   client: QdrantClient,
   entityId: string,
 ): Promise<boolean> {
-  const results = await client.retrieve(COLLECTION_NAME, {
+  const results = await client.retrieve(qdrantCollectionName(client), {
     ids: [toPointId(entityId)],
     with_payload: false,
     with_vector: false,
@@ -210,7 +226,7 @@ export async function searchPoints(
     must.push({ key: "created_at", range: { lt: filter.before } });
   }
 
-  const results = await client.search(COLLECTION_NAME, {
+  const results = await client.search(qdrantCollectionName(client), {
     vector,
     filter: { must },
     limit,

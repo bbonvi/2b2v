@@ -1,7 +1,64 @@
 import { describe, test, expect } from "bun:test";
-import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type PendingMessage, type DispatchHandler, type ChannelDispatcher } from "./channel-dispatcher";
+import { createChannelDispatcher as createRawChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type PendingMessage, type DispatchHandler, type ChannelDispatcher, type DispatcherTimerApi } from "./channel-dispatcher";
 import type { TriggerResult } from "../agent/triggers.ts";
 import type { DispatcherConfig, TriggerConfig } from "../config/types";
+
+class FakeTimers {
+  nowMs = 0;
+  private nextId = 1;
+  private readonly timers = new Map<number, { at: number; callback: () => void }>();
+
+  readonly api: DispatcherTimerApi = {
+    now: () => this.nowMs,
+    setTimeout: (callback, ms) => {
+      const id = this.nextId;
+      this.nextId += 1;
+      this.timers.set(id, { at: this.nowMs + Math.max(0, ms), callback });
+      return id;
+    },
+    clearTimeout: (timer) => {
+      if (typeof timer === "number") this.timers.delete(timer);
+    },
+  };
+
+  sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      this.api.setTimeout(resolve, ms);
+    });
+  }
+
+  private async flushMicrotasks(): Promise<void> {
+    for (let i = 0; i < 8; i++) {
+      await Promise.resolve();
+    }
+  }
+
+  async advance(ms: number): Promise<void> {
+    const end = this.nowMs + ms;
+    for (;;) {
+      let next: { id: number; at: number; callback: () => void } | null = null;
+      for (const [id, timer] of this.timers) {
+        if (timer.at <= end && (next === null || timer.at < next.at)) {
+          next = { id, ...timer };
+        }
+      }
+      if (next === null) break;
+      this.nowMs = next.at;
+      this.timers.delete(next.id);
+      next.callback();
+      await this.flushMicrotasks();
+    }
+    this.nowMs = end;
+    await this.flushMicrotasks();
+  }
+}
+
+let activeTimers = new FakeTimers();
+
+function createChannelDispatcher(opts: Omit<Parameters<typeof createRawChannelDispatcher>[0], "timers">): ChannelDispatcher {
+  activeTimers = new FakeTimers();
+  return createRawChannelDispatcher({ ...opts, timers: activeTimers.api });
+}
 
 function makeConfig(overrides: Partial<DispatcherConfig> = {}): DispatcherConfig {
   return {
@@ -35,7 +92,7 @@ function makePending(
   id: string,
   authorId: string,
   triggerResult: TriggerResult = null,
-  receivedAt = Date.now(),
+  receivedAt = 0,
 ): PendingMessage {
   return {
     id,
@@ -56,7 +113,11 @@ function enqueue(
 }
 
 function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return activeTimers.advance(ms);
+}
+
+function sleep(ms: number): Promise<void> {
+  return activeTimers.sleep(ms);
 }
 
 describe("createChannelDispatcher", () => {
@@ -111,7 +172,7 @@ describe("createChannelDispatcher", () => {
       callCount++;
       const currentId = (msgs[0] as PendingMessage).id;
       if (callCount === 1) {
-        await delay(60);
+        await sleep(60);
         return { coveredMessageIds: [currentId, "m-2"] };
       }
       return { coveredMessageIds: [currentId] };
@@ -327,7 +388,7 @@ describe("createChannelDispatcher", () => {
 
     dispatcher.recordTyping("ch-1", "user-1");
     await delay(5);
-    enqueue(dispatcher, makeMessage("ch-1", "m-key", Date.now() - 20), { reason: "keyword", keyword: "туби" }, "user-1");
+    enqueue(dispatcher, makeMessage("ch-1", "m-key", activeTimers.nowMs - 20), { reason: "keyword", keyword: "туби" }, "user-1");
 
     await delay(50);
     expect(callCount).toBe(0);
@@ -536,7 +597,7 @@ describe("createChannelDispatcher", () => {
       concurrentCount++;
       maxConcurrent = Math.max(maxConcurrent, concurrentCount);
       batches.push([...msgs]);
-      await delay(80);
+      await sleep(80);
       concurrentCount--;
       return undefined;
     };
@@ -595,7 +656,7 @@ describe("createChannelDispatcher", () => {
 
     const handler: DispatchHandler = async (msgs): Promise<undefined> => {
       batches.push([...msgs]);
-      await delay(60);
+      await sleep(60);
       return undefined;
     };
 
@@ -627,7 +688,7 @@ describe("createChannelDispatcher", () => {
 
     const handler: DispatchHandler = async (msgs): Promise<undefined> => {
       batches.push([...msgs]);
-      if (batches.length === 1) await delay(100);
+      if (batches.length === 1) await sleep(100);
       return undefined;
     };
 

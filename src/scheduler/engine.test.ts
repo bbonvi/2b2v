@@ -8,16 +8,81 @@ import {
   createSchedulerEngine,
   type SchedulerEngine,
   type ScheduleFireEvent,
+  type CreateCron,
+  type SchedulerTimerApi,
 } from "./engine";
+
+class FakeTimers {
+  nowMs = 1_000;
+  private nextId = 1;
+  private readonly timers = new Map<number, { at: number; callback: () => void }>();
+
+  readonly api: SchedulerTimerApi = {
+    now: () => this.nowMs,
+    setTimeout: (callback, ms) => {
+      const id = this.nextId;
+      this.nextId += 1;
+      this.timers.set(id, { at: this.nowMs + Math.max(0, ms), callback });
+      return id;
+    },
+    clearTimeout: (timer) => {
+      if (typeof timer === "number") this.timers.delete(timer);
+    },
+  };
+
+  async advance(ms: number): Promise<void> {
+    const end = this.nowMs + ms;
+    for (;;) {
+      let next: { id: number; at: number; callback: () => void } | null = null;
+      for (const [id, timer] of this.timers) {
+        if (timer.at <= end && (next === null || timer.at < next.at)) {
+          next = { id, ...timer };
+        }
+      }
+      if (next === null) break;
+      this.nowMs = next.at;
+      this.timers.delete(next.id);
+      next.callback();
+      await Promise.resolve();
+    }
+    this.nowMs = end;
+  }
+}
+
+class FakeCrons {
+  callbacks: Array<() => void> = [];
+
+  readonly create: CreateCron = (expression, _options, callback) => {
+    if (expression === "not a cron") throw new Error("invalid cron");
+    this.callbacks.push(callback);
+    let stopped = false;
+    return {
+      stop: () => {
+        stopped = true;
+      },
+      get stopped() {
+        return stopped;
+      },
+    };
+  };
+
+  fire(index = 0): void {
+    this.callbacks[index]?.();
+  }
+}
 
 describe("SchedulerEngine", () => {
   let db: Database;
   let engine: SchedulerEngine | undefined;
   let fired: ScheduleFireEvent[];
+  let timers: FakeTimers;
+  let crons: FakeCrons;
 
   beforeEach(() => {
     db = createDatabase(":memory:");
     fired = [];
+    timers = new FakeTimers();
+    crons = new FakeCrons();
   });
 
   afterEach(() => {
@@ -32,6 +97,8 @@ describe("SchedulerEngine", () => {
       },
       pollIntervalMs: opts?.pollIntervalMs,
       maxOneOffTimerDelayMs: opts?.maxOneOffTimerDelayMs,
+      timers: timers.api,
+      createCron: crons.create,
     });
     return engine;
   }
@@ -76,12 +143,11 @@ describe("SchedulerEngine", () => {
     e.stop();
   });
 
-  test("fires a cron schedule callback", async () => {
+  test("fires a cron schedule callback", () => {
     addCronSchedule("* * * * * *"); // every second
     const e = makeEngine();
     e.start();
-    // Wait up to 2.5 seconds for at least one fire
-    await waitFor(() => fired.length > 0, 2500);
+    crons.fire();
     expect(fired.length).toBeGreaterThanOrEqual(1);
     const first = fired[0];
     if (first === undefined) throw new Error("unreachable");
@@ -91,12 +157,12 @@ describe("SchedulerEngine", () => {
   });
 
   test("fires a one-off schedule and auto-disables it", async () => {
-    const runAt = Date.now() + 500; // 500ms from now
+    const runAt = timers.nowMs + 500;
     const id = addOneOffSchedule(runAt, "reminder");
     const e = makeEngine();
     e.start();
 
-    await waitFor(() => fired.length > 0, 2000);
+    await timers.advance(500);
     expect(fired.length).toBe(1);
     const oneOff = fired[0];
     if (oneOff === undefined) throw new Error("unreachable");
@@ -110,16 +176,16 @@ describe("SchedulerEngine", () => {
   });
 
   test("re-arms long one-off schedules instead of firing at the first timer chunk", async () => {
-    const id = addOneOffSchedule(Date.now() + 180, "long reminder");
+    const id = addOneOffSchedule(timers.nowMs + 180, "long reminder");
     const e = makeEngine({ maxOneOffTimerDelayMs: 50 });
     e.start();
 
-    await sleep(80);
+    await timers.advance(80);
     expect(fired).toHaveLength(0);
     expect(e.activeCount()).toBe(1);
     expect(getSchedule(db, id)?.enabled).toBe(true);
 
-    await waitFor(() => fired.length > 0, 1000);
+    await timers.advance(100);
     expect(fired).toHaveLength(1);
     expect(fired[0]?.schedule.messageContent).toBe("long reminder");
     expect(getSchedule(db, id)?.enabled).toBe(false);
@@ -144,7 +210,7 @@ describe("SchedulerEngine", () => {
   });
 
   test("skips one-off schedules whose run_at is in the past", () => {
-    addOneOffSchedule(Date.now() - 60_000, "past");
+    addOneOffSchedule(timers.nowMs - 60_000, "past");
     const e = makeEngine();
     e.start();
     // Past one-offs should be auto-disabled, not scheduled
@@ -158,7 +224,7 @@ describe("SchedulerEngine", () => {
     e.stop();
   });
 
-  test("addSchedule registers a new schedule at runtime", async () => {
+  test("addSchedule registers a new schedule at runtime", () => {
     const e = makeEngine();
     e.start();
     expect(e.activeCount()).toBe(0);
@@ -167,7 +233,7 @@ describe("SchedulerEngine", () => {
     e.addSchedule(id);
     expect(e.activeCount()).toBe(1);
 
-    await waitFor(() => fired.length > 0, 2500);
+    crons.fire();
     expect(fired.length).toBeGreaterThanOrEqual(1);
     e.stop();
   });
@@ -221,12 +287,12 @@ describe("SchedulerEngine", () => {
     e.stop();
   });
 
-  test("onFire callback receives full schedule row", async () => {
+  test("onFire callback receives full schedule row", () => {
     addCronSchedule("* * * * * *", "UTC", "test-msg");
     const e = makeEngine();
     e.start();
 
-    await waitFor(() => fired.length > 0, 2500);
+    crons.fire();
     const event = fired[0];
     if (event === undefined) throw new Error("unreachable");
     expect(event.schedule.guildId).toBe("guild-1");
@@ -237,20 +303,3 @@ describe("SchedulerEngine", () => {
     e.stop();
   });
 });
-
-function waitFor(fn: () => boolean, timeoutMs: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const check = () => {
-      if (fn()) return resolve();
-      if (Date.now() - start > timeoutMs)
-        return reject(new Error("waitFor timeout"));
-      setTimeout(check, 50);
-    };
-    check();
-  });
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}

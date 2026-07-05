@@ -52,9 +52,17 @@ type DispatcherDebug = (event: DispatcherDebugEvent, fields: Record<string, unkn
 
 const MAX_SUPPRESSED_IDS = 1000;
 
+export type DispatcherTimer = object | number;
+
+export interface DispatcherTimerApi {
+  now(): number;
+  setTimeout(callback: () => void, ms: number): DispatcherTimer;
+  clearTimeout(timer: DispatcherTimer): void;
+}
+
 interface ChannelState {
   pending: PendingMessage[];
-  debounceTimer: ReturnType<typeof setTimeout> | null;
+  debounceTimer: DispatcherTimer | null;
   running: boolean;
   queued: PendingMessage[];
   suppressedIds: Set<string>;
@@ -184,8 +192,14 @@ export function createChannelDispatcher(opts: {
   triggers: TriggerConfig;
   handler: DispatchHandler;
   debug?: DispatcherDebug;
+  timers?: DispatcherTimerApi;
 }): ChannelDispatcher {
   const { config, triggers, handler, debug } = opts;
+  const timers = opts.timers ?? {
+    now: () => Date.now(),
+    setTimeout: (callback: () => void, ms: number) => setTimeout(callback, ms),
+    clearTimeout: (timer: DispatcherTimer) => { clearTimeout(timer as ReturnType<typeof setTimeout>); },
+  };
   const channels = new Map<string, ChannelState>();
 
   function getChannelId(message: unknown): string {
@@ -251,7 +265,7 @@ export function createChannelDispatcher(opts: {
 
     const userId = trigger.message.authorId;
     const lastTypingAt = state.typingByUser.get(userId);
-    const now = Date.now();
+    const now = timers.now();
     if (lastTypingAt === undefined) {
       const graceUntil = state.typingResumeGraceUntilByUser.get(userId);
       if (graceUntil === undefined) return 0;
@@ -304,7 +318,7 @@ export function createChannelDispatcher(opts: {
   function ensurePendingDebounce(channelId: string, state: ChannelState): void {
     if (state.pending.length === 0 || state.debounceTimer !== null) return;
     const trigger = selectDispatchTrigger(state.pending);
-    state.debounceTimer = setTimeout(
+    state.debounceTimer = timers.setTimeout(
       () => fireDebounce(channelId),
       getDebounceMs(trigger),
     );
@@ -341,7 +355,7 @@ export function createChannelDispatcher(opts: {
       typingWaitMs,
     });
     if (typingWaitMs > 0) {
-      state.debounceTimer = setTimeout(() => fireDebounce(channelId), typingWaitMs);
+      state.debounceTimer = timers.setTimeout(() => fireDebounce(channelId), typingWaitMs);
       return;
     }
 
@@ -372,7 +386,7 @@ export function createChannelDispatcher(opts: {
         if (state.queued.length > 0) {
           // Messages arrived during handler execution, start new debounce cycle
           if (state.debounceTimer !== null) {
-            clearTimeout(state.debounceTimer);
+            timers.clearTimeout(state.debounceTimer);
             state.debounceTimer = null;
           }
           state.pending = [...state.queued, ...state.pending];
@@ -393,7 +407,7 @@ export function createChannelDispatcher(opts: {
     const pending: PendingMessage = {
       id: messageId,
       message,
-      receivedAt: Date.now(),
+      receivedAt: timers.now(),
       authorId: options.authorId,
       triggerResult: options.triggerResult,
     };
@@ -438,18 +452,18 @@ export function createChannelDispatcher(opts: {
 
     // Reset debounce timer
     if (state.debounceTimer !== null) {
-      clearTimeout(state.debounceTimer);
+      timers.clearTimeout(state.debounceTimer);
     }
 
     const trigger = selectDispatchTrigger(state.pending);
-    state.debounceTimer = setTimeout(
+    state.debounceTimer = timers.setTimeout(
       () => fireDebounce(channelId),
       getDebounceMs(trigger),
     );
   }
 
   function recordTyping(channelId: string, userId: string): void {
-    const observedAt = Date.now();
+    const observedAt = timers.now();
     const state = getOrCreateState(channelId);
     state.typingByUser.set(userId, observedAt);
     state.typingResumeGraceUntilByUser.delete(userId);
@@ -459,7 +473,7 @@ export function createChannelDispatcher(opts: {
   function dispose(): void {
     for (const [, state] of channels) {
       if (state.debounceTimer !== null) {
-        clearTimeout(state.debounceTimer);
+        timers.clearTimeout(state.debounceTimer);
         state.debounceTimer = null;
       }
     }

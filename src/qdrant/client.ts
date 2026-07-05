@@ -2,22 +2,32 @@ import { QdrantClient } from "@qdrant/js-client-rest";
 import { EMBEDDING_DIMENSIONS } from "../embeddings/pipeline";
 
 export const COLLECTION_NAME = "embeddings";
+const COLLECTION_NAME_PROP = "__2b2vCollectionName";
 
 export interface QdrantConfig {
   url: string;
+  collectionName?: string;
 }
+
+type QdrantClientWithCollection = QdrantClient & { [COLLECTION_NAME_PROP]?: string };
 
 /**
  * Create a Qdrant client instance.
  * Does not verify connectivity — call ensureCollection or healthCheck for that.
  */
 export function createQdrantClient(config: QdrantConfig): QdrantClient {
-  return new QdrantClient({ url: config.url, checkCompatibility: false });
+  const client = new QdrantClient({ url: config.url, checkCompatibility: false });
+  (client as QdrantClientWithCollection)[COLLECTION_NAME_PROP] = config.collectionName ?? COLLECTION_NAME;
+  return client;
+}
+
+export function qdrantCollectionName(client: QdrantClient): string {
+  return (client as QdrantClientWithCollection)[COLLECTION_NAME_PROP] ?? COLLECTION_NAME;
 }
 
 async function ensurePayloadIndex(client: QdrantClient, fieldName: string, fieldSchema: "keyword" | "integer" | "bool"): Promise<void> {
   try {
-    await client.createPayloadIndex(COLLECTION_NAME, {
+    await client.createPayloadIndex(qdrantCollectionName(client), {
       field_name: fieldName,
       field_schema: fieldSchema,
       wait: true,
@@ -32,10 +42,11 @@ async function ensurePayloadIndex(client: QdrantClient, fieldName: string, field
  * Creates collection + payload indexes if missing; no-ops if already present.
  */
 export async function ensureCollection(client: QdrantClient): Promise<void> {
-  const { exists } = await client.collectionExists(COLLECTION_NAME);
+  const collectionName = qdrantCollectionName(client);
+  const { exists } = await client.collectionExists(collectionName);
 
   if (!exists) {
-    await client.createCollection(COLLECTION_NAME, {
+    await client.createCollection(collectionName, {
       vectors: {
         size: EMBEDDING_DIMENSIONS,
         distance: "Cosine",

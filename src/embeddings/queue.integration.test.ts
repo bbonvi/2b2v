@@ -1,27 +1,28 @@
 import { test, expect, describe, beforeAll, beforeEach, afterAll, afterEach } from "bun:test";
 import type { QdrantClient } from "@qdrant/js-client-rest";
-import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
+import { createQdrantClient, ensureCollection, qdrantCollectionName } from "../qdrant/client";
 import { pointExists, searchPoints } from "../qdrant/adapter";
 import { createEmbeddingQueue, type EmbeddingQueue } from "./queue";
 import { createMockPipeline } from "./test-utils";
 import type { EmbeddingPipeline } from "./pipeline";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
+const TEST_COLLECTION = `embeddings_queue_${String(process.pid)}`;
 
 let qdrant: QdrantClient;
 let pipe: EmbeddingPipeline;
 let queue: EmbeddingQueue;
 
 beforeAll(async () => {
-  qdrant = createQdrantClient({ url: QDRANT_URL });
-  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
+  qdrant = createQdrantClient({ url: QDRANT_URL, collectionName: TEST_COLLECTION });
+  try { await qdrant.deleteCollection(qdrantCollectionName(qdrant)); } catch { /* expected */ }
   await ensureCollection(qdrant);
 });
 
 beforeEach(async () => {
   pipe = createMockPipeline();
   queue = createEmbeddingQueue(pipe, qdrant, { batchSize: 3, flushDelayMs: 10 });
-  try { await qdrant.delete(COLLECTION_NAME, { wait: true, filter: {} }); } catch { /* expected */ }
+  try { await qdrant.delete(qdrantCollectionName(qdrant), { wait: true, filter: {} }); } catch { /* expected */ }
 });
 
 afterEach(async () => {
@@ -29,7 +30,7 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
+  try { await qdrant.deleteCollection(qdrantCollectionName(qdrant)); } catch { /* expected */ }
 });
 
 describe("enqueue and store", () => {

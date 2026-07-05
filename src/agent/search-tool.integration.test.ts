@@ -1,7 +1,7 @@
 import { test, expect, beforeAll, beforeEach, afterAll, describe } from "bun:test";
 import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "../db/database";
-import { createQdrantClient, ensureCollection, COLLECTION_NAME } from "../qdrant/client";
+import { createQdrantClient, ensureCollection, qdrantCollectionName } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
 import { createSearchTool } from "./search-tool";
 import { createMockPipeline } from "../embeddings/test-utils";
@@ -18,6 +18,7 @@ function getResultText(result: SearchResult): string {
 }
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
+const TEST_COLLECTION = `embeddings_search_tool_${String(process.pid)}`;
 
 let db: Database;
 let qdrant: QdrantClient;
@@ -34,8 +35,8 @@ function createTestSearchTool(deps: Omit<Parameters<typeof createSearchTool>[0],
 }
 
 beforeAll(async () => {
-  qdrant = createQdrantClient({ url: QDRANT_URL });
-  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
+  qdrant = createQdrantClient({ url: QDRANT_URL, collectionName: TEST_COLLECTION });
+  try { await qdrant.deleteCollection(qdrantCollectionName(qdrant)); } catch { /* expected */ }
   await ensureCollection(qdrant);
 });
 
@@ -81,11 +82,11 @@ async function insertWithEmbedding(id: string, text: string, opts: NonNullable<P
 beforeEach(async () => {
   db = createDatabase(":memory:");
   pipeline = createMockPipeline();
-  try { await qdrant.delete(COLLECTION_NAME, { wait: true, filter: {} }); } catch { /* expected */ }
+  try { await qdrant.delete(qdrantCollectionName(qdrant), { wait: true, filter: {} }); } catch { /* expected */ }
 });
 
 afterAll(async () => {
-  try { await qdrant.deleteCollection(COLLECTION_NAME); } catch { /* expected */ }
+  try { await qdrant.deleteCollection(qdrantCollectionName(qdrant)); } catch { /* expected */ }
 });
 
 describe("createSearchTool", () => {
