@@ -1994,6 +1994,38 @@ describe("handleMessage", () => {
     });
   });
 
+  test("does not use Codex native reasoning continuation for ambient runs", async () => {
+    const load = mock(() => [{
+      type: "thinking" as const,
+      thinking: "",
+      thinkingSignature: "{\"type\":\"reasoning\",\"id\":\"rs_old\",\"encrypted_content\":\"old\"}",
+    }]);
+    const save = mock(() => {});
+    const completeChat: ChatCompleteFn = (request) => {
+      expect(request.messages.some((message) => message.role === "assistant" && message.providerNativeContent !== undefined)).toBe(false);
+      return Promise.resolve({
+        text: "ambient reply",
+        toolCalls: [],
+        providerNativeContent: [{ type: "text", text: "ambient reply", textSignature: "msg_new" }],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "ambient reply" }] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({ guildId: "guild-1", channelId: "channel-1" }),
+      makeDeps({
+        completeChat,
+        guildConfig: makeGuildConfig({ llmProvider: "openai-codex", model: "gpt-5.5" }),
+        triggerOverride: { reason: "ambient_initiative" },
+        nativeReasoningContinuation: { load, save },
+      }),
+    );
+
+    expect(load).toHaveBeenCalledTimes(0);
+    expect(save).toHaveBeenCalledTimes(0);
+  });
+
   test("sends visible text attached to a load_skill tool turn", async () => {
     let calls = 0;
     const completeChat: ChatCompleteFn = () => {

@@ -1728,6 +1728,10 @@ function chooseReplyMode(trigger: NonNullable<TriggerResult>): boolean {
   return trigger.reason === "mention" || trigger.reason === "keyword" || trigger.reason === "lingering_attention";
 }
 
+function allowsReasoningContinuation(trigger: NonNullable<TriggerResult>): boolean {
+  return trigger.reason === "mention" || trigger.reason === "keyword" || trigger.reason === "random";
+}
+
 function assertSentMessageId(result: { sentMessageId: string }): void {
   if (result.sentMessageId === "") {
     throw new Error("Failed to send final Discord message: no sent message ID returned.");
@@ -2535,6 +2539,9 @@ export async function handleMessage(
   const initialRoles = initialMessageRoles(transport, volatileMessages, finalActionInstruction !== "");
   const reqLog = deps.requestLog;
   const sessionId = buildPromptCacheSessionId(reqLog, `${model.llmProvider}:${model.id}`);
+  const reasoningContinuationEnabled = model.llmProvider === "openai-codex"
+    && deps.guildConfig.reasoningContinuation.enabled
+    && allowsReasoningContinuation(triggerResult);
   const continuationKey: NativeReasoningContinuationKey = {
     guildId: msg.guildId ?? deps.guildConfig.guildId,
     channelId: msg.channelId ?? deps.currentChannelId ?? "",
@@ -2671,8 +2678,7 @@ export async function handleMessage(
         finalActionInstruction,
       );
       if (
-        model.llmProvider === "openai-codex"
-        && deps.guildConfig.reasoningContinuation.enabled
+        reasoningContinuationEnabled
         && continuationKey.channelId !== ""
       ) {
         const providerNativeContent = deps.nativeReasoningContinuation?.load({
@@ -2810,8 +2816,7 @@ export async function handleMessage(
 
     const memoryReply = renderSegmentsForMemory(parsedResponse.segments);
     if (
-      model.llmProvider === "openai-codex"
-      && deps.guildConfig.reasoningContinuation.enabled
+      reasoningContinuationEnabled
       && continuationKey.channelId !== ""
       && mainReplyProviderNativeContent !== undefined
       && mainReplyProviderNativeContent.length > 0
