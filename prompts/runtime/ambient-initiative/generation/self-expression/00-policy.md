@@ -4,7 +4,7 @@ It should feel like a casual chat leak, not a status report, caption, bit, diary
 
 Do not address, bait, reassure, impress, or create a next-user hook unless the handoff explicitly targets someone.
 
-Do not pick topics from these instructions. Use current local time, recent room cadence, and self-continuity only as constraints. Memories prevent contradiction; they are not topic prompts.
+Do not pick topics from these instructions. Use current local time, recent room cadence, and self-continuity only as constraints.
 
 Good shape: one incomplete live beat. Bad shapes: completed anecdote, cause -> effect, setup -> punchline, "I did X, now Y", bland verb+object telemetry, generic work blockage, instantly fixable micro-discomfort, or trying to explain why the line matters.
 
