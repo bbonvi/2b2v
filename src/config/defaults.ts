@@ -14,6 +14,7 @@ import type {
   PromptCachingConfig,
   PromptTransportConfig,
   PromptTransportSectionId,
+  ReasoningContinuationConfig,
   RelationshipConfig,
   ReplyLoopConfig,
   TriggerConfig,
@@ -243,6 +244,11 @@ export const DEFAULT_REPLY_LOOP: ReplyLoopConfig = {
   maxToolCalls: 64,
   wallClockTimeoutMs: 45_000,
   llmOutputTimeoutMs: 12_000,
+};
+
+export const DEFAULT_REASONING_CONTINUATION: ReasoningContinuationConfig = {
+  enabled: true,
+  maxAgeMs: 30 * 60 * 1000,
 };
 
 export const PROMPT_TRANSPORT_SECTION_IDS: readonly PromptTransportSectionId[] = [

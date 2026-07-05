@@ -142,6 +142,7 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultPromptTransport: makePromptTransportConfig(),
     defaultBackgroundLlm: { modelParams: {} },
     defaultReplyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+    defaultReasoningContinuation: { enabled: true, maxAgeMs: 30 * 60 * 1000 },
     defaultMemoryExtraction: {
       postReply: true,
       maxToolCalls: 5,
@@ -181,6 +182,7 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
       promptCaching: { enabled: true },
     },
     replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+    reasoningContinuation: { enabled: true, maxAgeMs: 30 * 60 * 1000 },
     memoryExtraction: {
       postReply: true,
       maxToolCalls: 5,
@@ -1926,6 +1928,70 @@ describe("handleMessage", () => {
 
     expect(result.responseText).toBe("answer is 42");
     expect(calls).toBe(2);
+  });
+
+  test("replays and saves Codex native reasoning continuation across runs", async () => {
+    const priorProviderNativeContent = [{
+      type: "thinking" as const,
+      thinking: "",
+      thinkingSignature: "{\"type\":\"reasoning\",\"id\":\"rs_old\",\"encrypted_content\":\"old\"}",
+    }];
+    const finalProviderNativeContent = [{
+      type: "thinking" as const,
+      thinking: "",
+      thinkingSignature: "{\"type\":\"reasoning\",\"id\":\"rs_new\",\"encrypted_content\":\"new\"}",
+    }, {
+      type: "text" as const,
+      text: "hello user",
+      textSignature: "msg_new",
+    }];
+    const saved: unknown[] = [];
+    const completeChat: ChatCompleteFn = (request) => {
+      const replayed = request.messages.find((message) =>
+        message.role === "assistant" && message.providerNativeContent === priorProviderNativeContent
+      );
+      expect(replayed).toBeDefined();
+      return Promise.resolve({
+        text: "hello user",
+        toolCalls: [],
+        providerNativeContent: finalProviderNativeContent,
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "hello user" }] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({ guildId: "guild-1", channelId: "channel-1", mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        guildConfig: makeGuildConfig({ llmProvider: "openai-codex", model: "gpt-5.5" }),
+        nativeReasoningContinuation: {
+          load: (input) => {
+            expect(input).toMatchObject({
+              guildId: "guild-1",
+              channelId: "channel-1",
+              userId: "user-1",
+              provider: "openai-codex",
+              model: "gpt-5.5",
+              maxAgeMs: 30 * 60 * 1000,
+            });
+            return priorProviderNativeContent;
+          },
+          save: (input) => { saved.push(input); },
+        },
+      }),
+    );
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      userId: "user-1",
+      provider: "openai-codex",
+      model: "gpt-5.5",
+      sourceMessageId: "msg-1",
+      providerNativeContent: finalProviderNativeContent,
+    });
   });
 
   test("sends visible text attached to a load_skill tool turn", async () => {

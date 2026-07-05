@@ -299,6 +299,10 @@ replyLoop:
   wallClockTimeoutMs: 240000 # Stop tool gathering and force a final no-tools reply after this many milliseconds
   llmOutputTimeoutMs: 60000  # Timeout for a single LLM turn (milliseconds); retried up to 3 total attempts
 
+reasoningContinuation:
+  enabled: true
+  maxAgeMs: 1800000          # Replay latest encrypted Codex native continuation for same guild/channel/user within 30 minutes
+
 # ElevenLabs text-to-speech configuration (requires ELEVENLABS_API_KEY env var)
 # When enabled, the bot can send voice messages as audio attachments
 tts:

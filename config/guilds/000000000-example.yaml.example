@@ -140,6 +140,10 @@ promptCaching:
 #   wallClockTimeoutMs: 240000
 #   llmOutputTimeoutMs: 60000 # retried up to 3 total attempts
 
+# reasoningContinuation:
+#   enabled: true
+#   maxAgeMs: 1800000 # latest encrypted Codex continuation for same guild/channel/user
+
 # Channel dispatcher (overrides global defaults)
 # dispatcher:
 #   enabled: true

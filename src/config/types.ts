@@ -320,6 +320,14 @@ export interface ReplyLoopConfig {
   llmOutputTimeoutMs: number;
 }
 
+/** Opaque Codex Responses continuation carried across nearby Discord turns. */
+export interface ReasoningContinuationConfig {
+  /** Whether to replay the latest encrypted Codex native continuation for the same user/channel. */
+  enabled: boolean;
+  /** Maximum age for a saved continuation before it is ignored. */
+  maxAgeMs: number;
+}
+
 /** Trigger configuration per guild. All independently toggleable. */
 export interface TriggerConfig {
   mention: boolean;
@@ -432,6 +440,8 @@ export interface GuildConfig {
   ambientInitiative?: AmbientInitiativeConfig;
   /** Native reply/tool loop runtime limits. */
   replyLoop: ReplyLoopConfig;
+  /** Opaque Codex reasoning continuation across nearby user turns. */
+  reasoningContinuation: ReasoningContinuationConfig;
   /** Background memory extraction behavior. */
   memoryExtraction: MemoryExtractionConfig;
   /** Durable relationship-profile behavior. */
@@ -496,6 +506,8 @@ export interface GlobalConfig {
   defaultAmbientInitiative?: AmbientInitiativeConfig;
   /** Default native reply/tool loop runtime limits. */
   defaultReplyLoop: ReplyLoopConfig;
+  /** Default opaque Codex reasoning continuation behavior. */
+  defaultReasoningContinuation: ReasoningContinuationConfig;
   /** Default background memory extraction behavior. */
   defaultMemoryExtraction: MemoryExtractionConfig;
   /** Default durable relationship-profile behavior. */
@@ -581,6 +593,10 @@ export interface GuildConfigYaml {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;
     llmOutputTimeoutMs?: number;
+  };
+  reasoningContinuation?: {
+    enabled?: boolean;
+    maxAgeMs?: number;
   };
   memoryExtraction?: {
     postReply?: boolean;
@@ -675,6 +691,10 @@ export interface MainConfigYaml {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;
     llmOutputTimeoutMs?: number;
+  };
+  reasoningContinuation?: {
+    enabled?: boolean;
+    maxAgeMs?: number;
   };
   memoryExtraction?: {
     postReply?: boolean;

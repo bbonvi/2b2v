@@ -27,6 +27,7 @@ import type {
   OpenRouterTextPart,
   OpenRouterToolCall,
   OpenRouterToolDefinition,
+  ProviderNativeAssistantContent,
 } from "../llm/types.ts";
 import {
   getStablePromptSections,
@@ -84,6 +85,23 @@ export interface MaintenancePromptContext {
   initialRoles: PromptTransportRole[];
   sessionId?: string;
   promptCaching: PromptCachingConfig;
+}
+
+export interface NativeReasoningContinuationKey {
+  guildId: string;
+  channelId: string;
+  userId: string;
+  provider: LlmProvider;
+  model: string;
+  sessionId?: string;
+}
+
+export interface NativeReasoningContinuationStore {
+  load(input: NativeReasoningContinuationKey & { maxAgeMs: number }): ProviderNativeAssistantContent[] | undefined;
+  save(input: NativeReasoningContinuationKey & {
+    sourceMessageId?: string;
+    providerNativeContent: ProviderNativeAssistantContent[];
+  }): void;
 }
 
 export interface MemoryExtractionRequest {
@@ -245,6 +263,8 @@ export interface HandlerDeps {
   replyFirstOverride?: boolean;
   /** Called immediately before final visible sends; false drops the reply as stale. */
   preSendCheck?: () => boolean | Promise<boolean>;
+  /** Opaque Codex native continuation storage for cross-run reasoning replay. */
+  nativeReasoningContinuation?: NativeReasoningContinuationStore;
 }
 
 export interface HandleResult {
@@ -979,6 +999,25 @@ function assistantMessageFromResult(result: OpenRouterChatResult): OpenRouterMes
       ? { providerNativeContent: result.providerNativeContent }
       : {}),
   };
+}
+
+function assistantMessageFromNativeContinuation(providerNativeContent: ProviderNativeAssistantContent[]): OpenRouterMessage {
+  return {
+    role: "assistant",
+    content: null,
+    providerNativeContent,
+  };
+}
+
+function latestProviderNativeContent(messages: readonly OpenRouterMessage[]): ProviderNativeAssistantContent[] | undefined {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role !== "assistant") continue;
+    if (message.providerNativeContent !== undefined && message.providerNativeContent.length > 0) {
+      return message.providerNativeContent;
+    }
+  }
+  return undefined;
 }
 
 function toolMessage(call: OpenRouterToolCall, content: string): OpenRouterMessage {
@@ -2496,6 +2535,14 @@ export async function handleMessage(
   const initialRoles = initialMessageRoles(transport, volatileMessages, finalActionInstruction !== "");
   const reqLog = deps.requestLog;
   const sessionId = buildPromptCacheSessionId(reqLog, `${model.llmProvider}:${model.id}`);
+  const continuationKey: NativeReasoningContinuationKey = {
+    guildId: msg.guildId ?? deps.guildConfig.guildId,
+    channelId: msg.channelId ?? deps.currentChannelId ?? "",
+    userId: msg.authorId,
+    provider: model.llmProvider,
+    model: model.id,
+    ...(sessionId !== undefined ? { sessionId } : {}),
+  };
   const maintenancePromptContext: MaintenancePromptContext = {
     provider: model.llmProvider,
     model: model.id,
@@ -2508,6 +2555,7 @@ export async function handleMessage(
   const startedAt = Date.now();
   let maintenanceTranscript: OpenRouterMessage[] | undefined;
   let finalText = "";
+  let mainReplyProviderNativeContent: ProviderNativeAssistantContent[] | undefined;
   const scheduleMemoryPass = (assistantReply: string, visibleReplySent: boolean): void => {
     void deps.afterReply?.({
       sourceMessageId: msg.messageId,
@@ -2622,6 +2670,19 @@ export async function handleMessage(
         model.llmProvider === "openai-codex" ? [] : initialRoles,
         finalActionInstruction,
       );
+      if (
+        model.llmProvider === "openai-codex"
+        && deps.guildConfig.reasoningContinuation.enabled
+        && continuationKey.channelId !== ""
+      ) {
+        const providerNativeContent = deps.nativeReasoningContinuation?.load({
+          ...continuationKey,
+          maxAgeMs: deps.guildConfig.reasoningContinuation.maxAgeMs,
+        });
+        if (providerNativeContent !== undefined && providerNativeContent.length > 0) {
+          mainMessages.splice(volatileMessages.length, 0, assistantMessageFromNativeContinuation(providerNativeContent));
+        }
+      }
       maintenanceTranscript = mainMessages;
       const result = await runNativeToolLoop({
         complete,
@@ -2689,6 +2750,7 @@ export async function handleMessage(
         signal: wallController.signal,
       });
       finalText = result.text;
+      mainReplyProviderNativeContent = latestProviderNativeContent(mainMessages);
     } finally {
       clearTimeout(wallTimeout);
     }
@@ -2747,6 +2809,19 @@ export async function handleMessage(
     }
 
     const memoryReply = renderSegmentsForMemory(parsedResponse.segments);
+    if (
+      model.llmProvider === "openai-codex"
+      && deps.guildConfig.reasoningContinuation.enabled
+      && continuationKey.channelId !== ""
+      && mainReplyProviderNativeContent !== undefined
+      && mainReplyProviderNativeContent.length > 0
+    ) {
+      deps.nativeReasoningContinuation?.save({
+        ...continuationKey,
+        sourceMessageId: msg.messageId,
+        providerNativeContent: mainReplyProviderNativeContent,
+      });
+    }
     scheduleMemoryPass(memoryReply, true);
 
     deps.log?.debug("native_reply_loop_end", {

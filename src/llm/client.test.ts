@@ -91,6 +91,7 @@ const GLOBAL: GlobalConfig = {
   defaultPromptTransport: PROMPT_TRANSPORT,
   defaultBackgroundLlm: { modelParams: {} },
   defaultReplyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+  defaultReasoningContinuation: { enabled: true, maxAgeMs: 30 * 60 * 1000 },
   defaultMemoryExtraction: {
     postReply: true,
     maxToolCalls: 5,
@@ -127,6 +128,7 @@ const GUILD: GuildConfig = {
     promptCaching: { enabled: true },
   },
   replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
+  reasoningContinuation: { enabled: true, maxAgeMs: 30 * 60 * 1000 },
   memoryExtraction: {
     postReply: true,
     maxToolCalls: 5,

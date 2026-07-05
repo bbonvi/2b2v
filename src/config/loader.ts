@@ -14,6 +14,7 @@ import {
   DEFAULT_MEMORY_EXTRACTION,
   DEFAULT_PROMPT_CACHING,
   DEFAULT_PROMPT_TRANSPORT,
+  DEFAULT_REASONING_CONTINUATION,
   DEFAULT_RELATIONSHIPS,
   DEFAULT_REPLY_LOOP,
   DEFAULT_TRIGGER,
@@ -49,6 +50,7 @@ import type {
   ImageGenerationConfig,
   ImageGenerationQuality,
   ReplyLoopConfig,
+  ReasoningContinuationConfig,
   MemoryExtractionConfig,
   ServiceTier,
   LlmProvider,
@@ -652,6 +654,35 @@ function validateReplyLoopConfig(config: ReplyLoopConfig, keyPrefix: string): vo
   }
 }
 
+function resolveGlobalReasoningContinuation(
+  partial: MainConfigYaml["reasoningContinuation"] | undefined,
+): ReasoningContinuationConfig {
+  const resolved = {
+    enabled: partial?.enabled ?? DEFAULT_REASONING_CONTINUATION.enabled,
+    maxAgeMs: partial?.maxAgeMs ?? DEFAULT_REASONING_CONTINUATION.maxAgeMs,
+  };
+  validateReasoningContinuationConfig(resolved, "reasoningContinuation");
+  return resolved;
+}
+
+function resolveGuildReasoningContinuation(
+  global: ReasoningContinuationConfig,
+  partial: GuildConfigYaml["reasoningContinuation"] | undefined,
+): ReasoningContinuationConfig {
+  const resolved = {
+    enabled: partial?.enabled ?? global.enabled,
+    maxAgeMs: partial?.maxAgeMs ?? global.maxAgeMs,
+  };
+  validateReasoningContinuationConfig(resolved, "reasoningContinuation");
+  return resolved;
+}
+
+function validateReasoningContinuationConfig(config: ReasoningContinuationConfig, keyPrefix: string): void {
+  if (!Number.isFinite(config.maxAgeMs) || config.maxAgeMs < 0) {
+    throw new Error(`${keyPrefix}.maxAgeMs must be >= 0`);
+  }
+}
+
 function resolveGlobalMemoryExtraction(
   partial: MainConfigYaml["memoryExtraction"] | undefined,
 ): MemoryExtractionConfig {
@@ -940,6 +971,7 @@ export function loadGlobalConfig(
     defaultAmbientAttention,
     defaultAmbientInitiative,
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
+    defaultReasoningContinuation: resolveGlobalReasoningContinuation(yaml.reasoningContinuation),
     defaultMemoryExtraction: resolveGlobalMemoryExtraction(yaml.memoryExtraction),
     defaultRelationships,
   };
@@ -1040,6 +1072,7 @@ export function resolveGuildConfig(
     ambientAttention: resolveAmbientAttentionConfig(global.defaultAmbientAttention, partial.ambientAttention),
     ambientInitiative: resolveAmbientInitiativeConfig(global.defaultAmbientInitiative, partial.ambientInitiative),
     replyLoop: resolveGuildReplyLoop(global.defaultReplyLoop, partial.replyLoop),
+    reasoningContinuation: resolveGuildReasoningContinuation(global.defaultReasoningContinuation, partial.reasoningContinuation),
     memoryExtraction: resolveGuildMemoryExtraction(global.defaultMemoryExtraction, partial.memoryExtraction),
     relationships: resolveRelationshipConfig(global.defaultRelationships, partial.relationships),
   };
@@ -1130,6 +1163,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     ambientAttention: config.ambientAttention,
     relationships: config.relationships,
     replyLoop: config.replyLoop,
+    reasoningContinuation: config.reasoningContinuation,
     memoryExtraction: config.memoryExtraction,
   };
 

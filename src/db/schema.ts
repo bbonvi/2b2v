@@ -81,6 +81,22 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_message_reactions_message
     ON message_reactions(message_id);
 
+  CREATE TABLE IF NOT EXISTS codex_reasoning_continuations (
+    guild_id          TEXT NOT NULL,
+    channel_id        TEXT NOT NULL,
+    user_id           TEXT NOT NULL,
+    provider          TEXT NOT NULL,
+    model             TEXT NOT NULL,
+    session_id        TEXT NOT NULL,
+    source_message_id TEXT,
+    payload_json      TEXT NOT NULL,
+    created_at        INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, channel_id, user_id, provider, model, session_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_codex_reasoning_continuations_created
+    ON codex_reasoning_continuations(created_at);
+
   CREATE TABLE IF NOT EXISTS memory_extraction_checkpoints (
     guild_id                 TEXT NOT NULL,
     channel_id               TEXT NOT NULL,

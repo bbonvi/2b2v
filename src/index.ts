@@ -75,6 +75,7 @@ import { getImageById, getImagesByMessageId } from "./db/image-repository";
 import { upsertThread, updateThreadActivity, markThreadArchived, listThreadsForContext, getThreadMetadata, getThread } from "./db/thread-repository";
 import { prepareImageBufferForContext, processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
 import { deleteExpiredMemories, countUserMemoriesByUser } from "./db/memory-repository";
+import { deleteExpiredCodexReasoningContinuations, getCodexReasoningContinuation, upsertCodexReasoningContinuation } from "./db/codex-reasoning-continuation-repository";
 import { createRelationshipsManagementApi } from "./dashboard/relationships-management";
 import { createDashboardManagementRuntime, dashboardTriggerLocation } from "./dashboard/management-runtime";
 import { createPromptLabRunner, promptLabDryRunTools, promptLabSummary, promptLabSyntheticId } from "./dashboard/prompt-lab-runtime";
@@ -570,6 +571,27 @@ function createHandlerDeps(input: {
       ? { consumeGeneratedAttachments: input.generatedImages.consumeGeneratedAttachments }
       : {}),
     ...(input.resolveImageAttachments !== undefined ? { resolveImageAttachments: input.resolveImageAttachments } : {}),
+    nativeReasoningContinuation: {
+      load: (continuationInput) => {
+        try {
+          return getCodexReasoningContinuation(db, continuationInput)?.providerNativeContent;
+        } catch (error) {
+          input.log.warn("codex reasoning continuation load failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return undefined;
+        }
+      },
+      save: (continuationInput) => {
+        try {
+          upsertCodexReasoningContinuation(db, continuationInput);
+        } catch (error) {
+          input.log.warn("codex reasoning continuation save failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+    },
     ...input.overrides,
   };
 }
@@ -763,6 +785,14 @@ const memoryCleanupTimer = setInterval(() => {
   const deleted = deleteExpiredMemories(db);
   if (deleted > 0) {
     log.info("expired memories cleaned", { deleted });
+  }
+  const continuationTtl = Math.max(
+    globalConfig.defaultReasoningContinuation.maxAgeMs,
+    ...[...guildConfigs.values()].map((guildConfig) => guildConfig.reasoningContinuation.maxAgeMs),
+  );
+  const deletedContinuations = deleteExpiredCodexReasoningContinuations(db, continuationTtl);
+  if (deletedContinuations > 0) {
+    log.info("expired codex reasoning continuations cleaned", { deleted: deletedContinuations });
   }
 }, MEMORY_CLEANUP_INTERVAL_MS);
 
