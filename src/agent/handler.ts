@@ -2792,7 +2792,6 @@ export async function handleMessage(
       return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
     }
     if (deps.preSendCheck !== undefined && !await deps.preSendCheck()) {
-      scheduleMemoryPass("", false);
       deps.log?.debug("native_reply_dropped_before_send", { durationMs: Date.now() - startedAt });
       return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
     }

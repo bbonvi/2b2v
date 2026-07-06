@@ -8,6 +8,7 @@ import type { HistoryMessage } from "../agent/history-types";
 import type { TriggerResult } from "../agent/triggers";
 import type { AssembledContext } from "../agent/context-assembly";
 import { handleMessage, type HandlerDeps, type MessageSender } from "../agent/handler";
+import { readOnlyToolsForDiscardableTurn } from "../agent/tool-access";
 import { isActiveJobStatus, type AgentJobStore } from "../agent/job-runtime";
 import type { PromptBundle } from "../config/prompt-bundle";
 import type { GlobalConfig } from "../config/types";
@@ -1641,7 +1642,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     );
 
     const generatedImages = createGeneratedImageRuntime();
-    const baseTools = buildAgentTools(
+    const baseTools = readOnlyToolsForDiscardableTurn(buildAgentTools(
       input.candidate.guildId,
       input.candidate.channelId,
       input.guildConfig,
@@ -1654,7 +1655,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         sourceMessageId: input.candidate.id,
         sourceQuote: shortQuote(syntheticContent),
       },
-    );
+    ));
     const tools = input.draft !== undefined ? promptLabDryRunTools(baseTools, input.draft.dryRuns) : baseTools;
 
     const resolveTargetChannel = createTargetChannelResolver(client, input.channel);

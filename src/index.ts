@@ -20,6 +20,7 @@ import { registerReactionSyncRuntime } from "./discord/reaction-sync-runtime";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { createScheduledTaskRunner } from "./scheduler/scheduled-task-runtime";
 import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type HandleResult, type ImageAttachmentResolver, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
+import { readOnlyToolsForDiscardableTurn } from "./agent/tool-access";
 import { buildComputedContactContextForUser } from "./agent/contact-context";
 import { shouldRespond, type TriggerResult } from "./agent/triggers";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
@@ -2634,6 +2635,7 @@ async function processTriggeredMessage(
       },
     });
     const generatedImages = createGeneratedImageRuntime();
+    const discardableBeforeSend = options.disableLiveOutput === true && options.preSendCheck !== undefined;
     const agentTools = buildAgentTools(
       guildId,
       channelId,
@@ -2650,7 +2652,9 @@ async function processTriggeredMessage(
       {},
     );
     const threadTools = applyRuntimeToolPrompts([startThreadTool, closeThreadTool], promptBundle.runtime);
-    const extraTools = [...agentTools, ...threadTools];
+    const extraTools = discardableBeforeSend
+      ? readOnlyToolsForDiscardableTurn([...agentTools, ...threadTools])
+      : [...agentTools, ...threadTools];
 
     const incoming: IncomingMessage = {
       content: options.currentTurnOverride?.content ?? message.content,
@@ -2680,7 +2684,7 @@ async function processTriggeredMessage(
           }
         : {}),
     };
-    const visibleMaintenanceTools = blockToolsExcept(createPostReplyMaintenanceTools({
+    const visibleMaintenanceTools = discardableBeforeSend ? [] : blockToolsExcept(createPostReplyMaintenanceTools({
       guild,
       guildConfig,
       memoryRequest: {

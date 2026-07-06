@@ -24,6 +24,8 @@ Message edit/delete tools must authorize against the live Discord message before
 
 Ambient attention and initiative must re-check current chat state immediately before spending evaluator/generation work and again before visible send, so stale proactive replies can be dropped.
 
+Stale-droppable proactive turns must receive only read-only tools. If a pre-send gate drops the reply, do not run post-reply memory or relationship maintenance for that discarded generation.
+
 ## Prompt Cache
 
 Stable prompt content must stay before volatile context. Dynamic sections such as time, current channel state, schedules, memories, recent history, current messages, and trigger instructions must stay after the stable prefix/anchor.

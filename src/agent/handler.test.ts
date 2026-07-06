@@ -1577,6 +1577,27 @@ describe("handleMessage", () => {
     });
   });
 
+  test("pre-send discard skips silent memory pass", async () => {
+    const afterReply = mock(() => Promise.resolve());
+    const sender = mock(() => Promise.resolve({ sentMessageId: "sent-1" }));
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "stale reply",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    });
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, afterReply, preSendCheck: () => false }),
+    );
+
+    expect(result.agentRan).toBe(true);
+    expect(result.responseText).toBeUndefined();
+    expect(sender).toHaveBeenCalledTimes(0);
+    expect(afterReply).toHaveBeenCalledTimes(0);
+  });
+
   test("throws and skips memory extraction when the final Discord send fails", async () => {
     const afterReply = mock(() => Promise.resolve());
     const sender: MessageSender = () => Promise.resolve({ sentMessageId: "" });
