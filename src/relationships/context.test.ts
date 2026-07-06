@@ -9,6 +9,7 @@ describe("renderRelationshipPromptContext", () => {
     current.axes.trust = 14;
     current.axes.intimacy = 10;
     current.notes.push("comfortable with casual check-ins");
+    current.boundaries.push("does not treat identity slurs from this user as banter");
     const other = emptyRelationshipProfile("u2", 1);
     other.axes.trust = 12;
 
@@ -24,6 +25,7 @@ describe("renderRelationshipPromptContext", () => {
     expect(rendered).toContain("Computed contact: observed history with this user; familiarity.");
     expect(rendered).toContain("Subject: @alice / u1.");
     expect(rendered).toContain("Relationship stance: 2B feels warm toward them, trusts them, and is slightly more personally open with them.");
+    expect(rendered).toContain("Boundaries: does not treat identity slurs from this user as banter.");
     expect(rendered).toContain("- @bob / u2: 2B trusts them.");
     expect(rendered).not.toContain("Axes:");
     expect(rendered).not.toContain("trust +12");

@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { handleMessage, injectTriggerInstruction, runSilentMemoryAgentPass, runSilentToolAgentPass, type ChatCompleteFn, type HandlerDeps, type IncomingMessage, type MessageSender, type VoiceAttachment } from "./handler.ts";
+import { handleMessage, hasMaintenanceMaterial, injectTriggerInstruction, runSilentMemoryAgentPass, runSilentToolAgentPass, type ChatCompleteFn, type HandlerDeps, type IncomingMessage, type MessageSender, type VoiceAttachment } from "./handler.ts";
 import type { AssembledContext, ContextSection } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig, PromptTransportConfig } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
@@ -1572,7 +1572,7 @@ describe("handleMessage", () => {
     });
     expect(afterReply).toHaveBeenCalledTimes(1);
     expect(afterReplyCalls[0]).toMatchObject({
-      assistantReply: "",
+      assistantReply: "<ignore>not worth answering</ignore>",
       visibleReplySent: false,
     });
   });
@@ -3567,6 +3567,12 @@ describe("handleMessage", () => {
     expect(maintenanceRequest.promptContext).toBeDefined();
     expect(maintenanceRequest.promptContext?.stableSections.some((section) => section.text === TEST_RUNTIME_PROMPTS.reply.trim())).toBe(true);
     expect(JSON.stringify(maintenanceRequest.promptContext?.stableSections)).not.toContain("Silent Memory Pass");
+  });
+
+  test("maintenance material includes silent user-only turns", () => {
+    expect(hasMaintenanceMaterial({ userMessage: "clanker", assistantReply: "" })).toBe(true);
+    expect(hasMaintenanceMaterial({ userMessage: "", assistantReply: "<ignore>not dignifying that</ignore>" })).toBe(true);
+    expect(hasMaintenanceMaterial({ userMessage: "", assistantReply: "" })).toBe(false);
   });
 
   test("silent maintenance passes preserve prior tool results", async () => {

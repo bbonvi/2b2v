@@ -19,7 +19,7 @@ import { botChannelPermissions, channelDisplayName, channelTypeLabel, createDisc
 import { registerReactionSyncRuntime } from "./discord/reaction-sync-runtime";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { createScheduledTaskRunner } from "./scheduler/scheduled-task-runtime";
-import { handleMessage, runSilentMemoryAgentPass, runSilentToolAgentPass, type HandleResult, type ImageAttachmentResolver, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
+import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type HandleResult, type ImageAttachmentResolver, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
 import { buildComputedContactContextForUser } from "./agent/contact-context";
 import { shouldRespond, type TriggerResult } from "./agent/triggers";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
@@ -1165,7 +1165,7 @@ async function runMemoryPostReplyExtraction(input: {
   dryRun?: boolean;
   dryRuns?: Array<{ tool: string; args: unknown }>;
 }): Promise<{ requestId?: string; enabled: boolean; ran: boolean; error?: string }> {
-  if (!input.guildConfig.memoryExtraction.postReply || input.memoryRequest.assistantReply.trim() === "") {
+  if (!input.guildConfig.memoryExtraction.postReply || !hasMaintenanceMaterial(input.memoryRequest)) {
     return { enabled: input.guildConfig.memoryExtraction.postReply, ran: false };
   }
   const guildId = input.memoryRequest.incomingMessage.guildId ?? input.guild.id;
@@ -1267,7 +1267,7 @@ async function runRelationshipPostReplyExtraction(input: {
   onResult?: (result: RelationshipMutationResult, candidates: unknown[]) => void;
 }): Promise<void> {
   const config = getRelationshipConfig(input.guildConfig);
-  if (!config.enabled || input.memoryRequest.assistantReply.trim() === "") return;
+  if (!config.enabled || !hasMaintenanceMaterial(input.memoryRequest)) return;
   const guildId = input.memoryRequest.incomingMessage.guildId ?? "";
   const channelId = input.memoryRequest.incomingMessage.channelId ?? "";
   const relationshipsLog = input.requestLog ?? new RequestLog(guildId, channelId, requestLogStore);

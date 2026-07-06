@@ -46,6 +46,39 @@ describe("relationship engine", () => {
     db.close();
   });
 
+  test("refreshes repeated boundaries to the prompt tail", () => {
+    const db = createDatabase(":memory:");
+
+    applyRelationshipSignals(db, config(), {
+      source: "llm",
+      scope: { userId: "u1" },
+      signals: [{ summary: "Boundary set.", confidence: 0.9, boundary: "do not treat slurs as banter" }],
+      now: 1,
+    });
+    applyRelationshipSignals(db, config(), {
+      source: "llm",
+      scope: { userId: "u1" },
+      signals: Array.from({ length: 20 }, (_, index) => ({
+        summary: `Other boundary ${index}.`,
+        confidence: 0.9,
+        boundary: `other boundary ${index}`,
+      })),
+      now: 2,
+    });
+    applyRelationshipSignals(db, config(), {
+      source: "llm",
+      scope: { userId: "u1" },
+      signals: [{ summary: "Boundary repeated.", confidence: 0.9, boundary: "do not treat slurs as banter" }],
+      now: 3,
+    });
+
+    const profile = getRelationshipProfile(db, "u1");
+    expect(profile.boundaries).toHaveLength(20);
+    expect(profile.boundaries.at(-1)).toBe("do not treat slurs as banter");
+    expect(profile.boundaries.filter((boundary) => boundary === "do not treat slurs as banter")).toHaveLength(1);
+    db.close();
+  });
+
   test("reset clears profiles and audit events", () => {
     const db = createDatabase(":memory:");
 

@@ -113,6 +113,7 @@ export function renderRelationshipPromptContext(input: {
     ].filter((line) => line !== "").join("\n");
   }
   const notes = current.notes.slice(-4).join("; ");
+  const boundaries = current.boundaries.slice(-3).join("; ");
   const loops = current.openLoops.slice(-3).join("; ");
   const recent = current.recent.slice(-3).map((item) => item.summary).join("; ");
   return [
@@ -123,6 +124,7 @@ export function renderRelationshipPromptContext(input: {
     input.computedContact !== undefined ? `Computed contact: ${input.computedContact}` : "",
     `Relationship stance: ${relationshipStance(current)}`,
     notes !== "" ? `Notes: ${notes}.` : "",
+    boundaries !== "" ? `Boundaries: ${boundaries}.` : "",
     loops !== "" ? `Open loops: ${loops}.` : "",
     recent !== "" ? `Recent signals: ${recent}.` : "",
     input.others !== undefined && input.others.length > 0

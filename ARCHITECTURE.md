@@ -66,7 +66,7 @@ Current context also includes `Known contact` for the triggering user. It is com
 
 Relationship state is direct per-user truth in SQLite. `relationship_profiles` stores one profile per Discord user with small social axes, notes, boundaries, open loops, and recent moments. `relationship_events` is an audit log with guild/channel/user/source/visibility scope.
 
-Relationship extraction runs after generated bot replies, after the memory pass, in the preserved agent transcript. The main model may call `record_relationship` in a bounded maintenance loop capped by `relationships.maxToolCalls`; low-confidence or missing-user signals are dropped.
+Relationship extraction runs after generated bot replies and ignored/silent turns, after the memory pass, in the preserved agent transcript. The main model may call `record_relationship` in a bounded maintenance loop capped by `relationships.maxToolCalls`; low-confidence or missing-user signals are dropped.
 
 Relationship prompt injection is compact. Normal replies receive only the active speaker relationship slice. Relationships never posts directly and does not feed a proactive initiative queue.
 

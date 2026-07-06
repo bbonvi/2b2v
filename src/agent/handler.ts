@@ -124,6 +124,11 @@ export interface IgnoredReplyRequest {
   rawResponse: string;
 }
 
+/** Return true when a completed turn has enough material for maintenance passes. */
+export function hasMaintenanceMaterial(input: Pick<MemoryExtractionRequest, "userMessage" | "assistantReply">): boolean {
+  return input.userMessage.trim() !== "" || input.assistantReply.trim() !== "";
+}
+
 export interface SilentMemoryAgentInput {
   globalConfig: GlobalConfig;
   guildConfig: GuildConfig;
@@ -2777,7 +2782,7 @@ export async function handleMessage(
           });
         }
       }
-      scheduleMemoryPass("", false);
+      scheduleMemoryPass(parsedResponse.ignoredText ?? finalText, false);
       deps.log?.debug("native_reply_ignored", { durationMs: Date.now() - startedAt });
       return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
     }

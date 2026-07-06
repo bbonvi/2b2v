@@ -20,7 +20,7 @@ function cleanText(value: string | undefined): string | undefined {
 
 function withUniqueTail(values: string[], value: string | undefined, max: number): string[] {
   if (value === undefined) return values;
-  return [...new Set([...values, value])].slice(-max);
+  return [...values.filter((existing) => existing !== value), value].slice(-max);
 }
 
 export function applyRelationshipSignals(
