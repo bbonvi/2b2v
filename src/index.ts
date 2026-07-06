@@ -1368,12 +1368,13 @@ async function buildContext(
   isThread: boolean,
   currentTurnBoundary?: CurrentTurnBoundary,
   relationshipsMode: RelationshipContextRunMode = "live",
+  excludeMessageIds?: readonly string[],
 ): Promise<AssembledContext> {
   // Chat history via the full processing pipeline
   const visibleJobs = agentJobs.listVisible(guildId, channelId);
   const displayNamesByUserId = buildCurrentDisplayNameMap(guild);
   const historyWithoutLatest = annotateHistoryJobs(
-    getContextHistoryMessages(db, channelId, guildConfig.trim, latestUserMessage.id),
+    getContextHistoryMessages(db, channelId, guildConfig.trim, excludeMessageIds ?? latestUserMessage.id),
     guildId,
     channelId,
     agentJobs.annotationForMessage.bind(agentJobs),
@@ -2516,6 +2517,9 @@ async function processTriggeredMessage(
         },
         { timestamp: message.createdTimestamp, messageId: message.id },
       );
+    const currentTurnMessageIds = options.currentTurnOverride !== undefined
+      ? [options.currentTurnOverride.messageId]
+      : [...new Set(currentTurnMessages.map((current) => current.id))];
     const repliedToBotRouteSource = message.reference?.messageId !== undefined
       ? getRoutedMessageSource(db, {
           messageId: message.reference.messageId,
@@ -2561,6 +2565,8 @@ async function processTriggeredMessage(
       replyFallbackDeps,
       isThread,
       currentTurnBoundary,
+      "live",
+      currentTurnMessageIds,
     );
 
     const startThreadTool = createStartThreadTool({
@@ -2814,7 +2820,7 @@ async function processTriggeredMessage(
       },
     });
     return {
-      coveredMessageIds: [message.id],
+      coveredMessageIds: currentTurnMessageIds,
     };
   } catch (err) {
     log.error("messageCreate handler error", {

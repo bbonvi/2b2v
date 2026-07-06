@@ -155,6 +155,29 @@ describe("createChannelDispatcher", () => {
     expect(selected.map((message) => message.id)).toEqual(["m-mentioned", "m-followup"]);
   });
 
+  test("includes same-author queued context before a bare mention", () => {
+    const before = makePending("m-before", "user-1", null, 999);
+    const mentioned = makePending("m-mentioned", "user-1", { reason: "mention" }, 1000);
+    const selected = selectDispatchMessagesForTrigger(
+      [before, mentioned],
+      { result: { reason: "mention" }, message: mentioned },
+    );
+
+    expect(selected.map((message) => message.id)).toEqual(["m-before", "m-mentioned"]);
+  });
+
+  test("does not include an earlier handled trigger as queued context", () => {
+    const previousTrigger = makePending("m-previous", "user-1", { reason: "mention" }, 998);
+    const before = makePending("m-before", "user-1", null, 999);
+    const mentioned = makePending("m-mentioned", "user-1", { reason: "mention" }, 1000);
+    const selected = selectDispatchMessagesForTrigger(
+      [previousTrigger, before, mentioned],
+      { result: { reason: "mention" }, message: mentioned },
+    );
+
+    expect(selected.map((message) => message.id)).toEqual(["m-before", "m-mentioned"]);
+  });
+
   test("selects the randomly triggered message instead of latest batch message", () => {
     const random = makePending("m-random", "user-1", { reason: "random" }, 1000);
     const later = makePending("m-later", "user-2", null, 1001);

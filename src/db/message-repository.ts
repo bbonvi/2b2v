@@ -878,10 +878,13 @@ export function getContextHistoryMessages(
   db: Database,
   channelId: string,
   trim: TrimConfig,
-  excludeMessageId?: string,
+  excludeMessageIds?: string | readonly string[],
 ): HistoryMessage[] {
-  const excludeClause = excludeMessageId !== undefined ? " AND id != ?" : "";
-  const params = excludeMessageId !== undefined ? [channelId, excludeMessageId] : [channelId];
+  const excludedIds = typeof excludeMessageIds === "string"
+    ? [excludeMessageIds]
+    : [...(excludeMessageIds ?? [])];
+  const excludeClause = excludedIds.length > 0 ? ` AND id NOT IN (${excludedIds.map(() => "?").join(",")})` : "";
+  const params = [channelId, ...excludedIds];
   const countRow = db.raw
     .prepare(`SELECT COUNT(*) AS count FROM messages WHERE channel_id = ?${excludeClause}`)
     .get(...params) as { count: number } | null;

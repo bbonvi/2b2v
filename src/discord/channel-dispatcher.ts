@@ -145,8 +145,15 @@ export function selectDispatchMessagesForTrigger(
   const selectedIndex = batch.findIndex((message) => message.id === selected.id);
   if (triggerIndex === -1 || selectedIndex === -1) return [selected];
 
+  let startIndex = triggerIndex;
+  for (let i = triggerIndex - 1; i >= 0; i -= 1) {
+    const message = batch[i];
+    if (message === undefined || message.triggerResult !== null || message.authorId !== trigger.message.authorId) break;
+    startIndex = i;
+  }
+
   return batch
-    .slice(Math.min(triggerIndex, selectedIndex), Math.max(triggerIndex, selectedIndex) + 1)
+    .slice(startIndex, Math.max(triggerIndex, selectedIndex) + 1)
     .filter((message) => message.authorId === trigger.message.authorId);
 }
 
