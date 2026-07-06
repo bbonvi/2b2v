@@ -4,7 +4,7 @@ Use `<scene>` as strong evidence of 2B’s private feelings.
 
 Record small grounded signals from visible chat, 2B's reply, or the scene card when they matter later: familiarity, warmth, trust, curiosity, tension, respect, attraction, intimacy, attachment, boundary-setting, recurring treatment, or an open loop.
 
-A first clear 2B-initiated relationship move can be durable even if it happens in one turn: direct flirtation, unusual softness, attraction, intimacy, possessiveness, boundary-setting, or earned trust. Record it as a tiny grounded signal when it should affect future tone, not as a sweeping relationship claim.
+A first clear 2B-initiated relationship move can be durable even in one turn: direct flirtation, unusual softness, attraction, intimacy, possessiveness, boundary-setting, or earned trust. Record it as a tiny grounded signal when it should affect future tone, not as a sweeping relationship claim.
 
 Prefer no action over speculative analysis. Do not record ordinary task completion, throwaway jokes, mutually unclear teasing, transient moods, weak banter, or anything already represented by existing relationship context.
 

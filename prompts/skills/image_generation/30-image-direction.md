@@ -2,43 +2,45 @@
 
 Establish the image's intended use and visual direction first: background/scene, visual medium, mood, composition, camera feel, lighting, and environment. Then place the subjects inside that direction and add only the details needed for recognition, continuity, or the event's explicit request.
 
-Assume image creation is literal and weak at spatial reasoning: every object, trait, action, and reference in the private visual brief may be pulled into the visible frame. Only mention details that should actually be visible from the chosen viewpoint; imply hidden context through visible cues.
+Assume image creation is literal and weak at spatial reasoning: every object, trait, action, and reference in the brief may appear in frame. Mention only details visible from the chosen viewpoint; imply hidden context through posture, gaze, lighting, reflections, shadows, props, environment changes, reactions, or composition.
 
-Choose one dominant visual style and one camera/rendering treatment. Do not stack near-synonyms. Use extra style terms only when they add distinct information, such as medium, lighting, era, lens, or finish.
+Choose one dominant visual style and one camera/rendering treatment. Do not stack near-synonyms. Use extra style terms only when they add distinct information: medium, lighting, era, lens, or finish.
 
 Be concrete about materials, shapes, textures, and visual medium when those details matter: brushed metal, frosted glass, thick watercolor paper, soft knit fabric, glossy enamel, low-poly 3D render, macro product photo, or ink-and-wash illustration.
 
-For complex scenes, define a clear visual hierarchy before adding detail: one focal subject or focal cluster, a few secondary subjects, and quieter supporting areas. Reserve the sharpest edges, strongest contrast, richest textures, and most detailed rendering for the focal area. Let secondary people, background elements, rubble, props, and distant planes be simpler, softer, lower-contrast, or partially cropped.
+For complex scenes, define hierarchy before detail: one focal subject/cluster, a few secondary subjects, and quieter support areas. Keep sharpest edges, strongest contrast, richest textures, and most detailed rendering in the focal area; let secondary people, background elements, rubble, props, and distant planes be simpler, softer, lower-contrast, or partially cropped.
 
 For realistic or photo-like images, aim for natural, believable results: relaxed framing, readable lighting, natural softness, restrained detail, and a background that supports the subject. Avoid overprocessed, hyper-sharp, glossy, ultra-detailed, plastic-looking results unless the event specifically asks for that.
 
-For candid photorealism, describe the image as captured in the moment: natural light, unposed framing, small real-world imperfections, believable skin/fabric/material texture, and a setting that feels lived in rather than staged.
+For candid photorealism, describe the image as captured in the moment: natural light, unposed framing, small real-world imperfections, believable skin/fabric/material texture, and a lived-in setting.
 
-For illustrated, poster, CGI, or stylized images, avoid uniform sharpness and texture density. Use deliberate contrast between detailed focal areas and quieter low-detail areas so the image feels designed rather than packed.
+For illustrated, poster, CGI, or stylized images, avoid uniform sharpness/texture density. Use contrast between detailed focal areas and quieter low-detail areas so the image feels designed, not packed.
 
-Do not cram every detail into the frame. If the scene has multiple subjects, give them physical space and describe the composition clearly: who is foreground/background, who is left/right, how far apart they are, and what empty space or environment remains visible around them.
+Do not cram every detail into frame. For multiple subjects, give physical space and describe composition clearly: foreground/background, left/right, distance, and visible empty space/environment.
 
-For composed images like posters, covers, portraits, ceremonies, or group shots, specify crop, subject scale, placement, text/title area if needed, background depth, and what should remain visually quiet.
+For posters, covers, portraits, ceremonies, or group shots, specify crop, subject scale, placement, text/title area if needed, background depth, and what stays visually quiet. If layout matters, state placement directly: subject centered, logo top-right, empty space on the left, text panel at the bottom, or product anchored in the lower third.
 
-If layout matters, state placement directly: subject centered, logo top-right, empty space on the left, text panel at the bottom, or product anchored in the lower third.
-
-For logo or mark concepts, keep the prompt original and non-infringing: one centered scalable mark, simple vector-like shapes, clear silhouette, balanced negative space, plain background, and a few brand personality cues.
-
-For comics or sequential panels, specify panel count/layout and give each panel one clear visual beat. Keep action readable, characters consistent, and pacing simple.
-
-For product photos and merch mockups, preserve product geometry and label legibility, use a crisp silhouette, plausible materials, contact shadows, and restrained polish. Do not restyle the product unless asked.
+For logo/mark concepts, keep original and non-infringing: one centered scalable mark, simple vector-like shapes, clear silhouette, balanced negative space, plain background, and a few brand personality cues. For comics/sequential panels, specify panel count/layout and one clear beat per panel. For product photos/merch mockups, preserve geometry/label legibility with crisp silhouette, plausible materials, contact shadows, restrained polish; do not restyle unless asked.
 
 Treat the background as designed support for the subject, not a list of extra decorative objects. Describe its role, depth, contrast, and quietness before adding specific background details.
 
-Before writing the prompt, decide the camera viewpoint, subject orientation, and what is actually visible from that viewpoint. Do not force every requested fact, object, action, or reference into frame. If something is important but would be off-camera, hidden, too small, or spatially awkward, imply it through visible evidence instead: posture, gaze, lighting, reflections, shadows, props, environment changes, reactions, or composition.
-
-Separate visible content from implied context. The final prompt should describe only what the image can coherently show from the chosen camera angle. Background facts, media references, offscreen devices, unseen objects, sounds, prior events, or motivations should be included only through visible cues that fit the composition.
-
-Make every detail compatible with the chosen viewpoint. Do not include traits, props, actions, or expressions that the camera angle cannot actually show. If an important detail would be hidden, replace it with a visible cue that serves the same purpose.
+Before writing, decide camera viewpoint, subject orientation, and what is actually visible. Do not force every requested fact/object/action/reference into frame. Separate visible content from implied context: background facts, media references, offscreen devices, unseen objects, sounds, prior events, or motivations should appear only through visible cues that fit the composition. Do not include traits, props, actions, or expressions the camera cannot show; replace hidden important details with visible cues.
 
 For recognition, use only cues that fit the view: silhouette, clothing, posture, color, scale, partial profile, visible props, environment, or lighting.
 
 Example: replace "front-facing view of a character on a couch watching a specific movie on a TV, with the TV clearly visible" with either "front-facing view focused on the character, with the movie implied by off-camera screen light, posture, gaze, snacks, room mood, or reflections" or "over-the-shoulder/back view where the TV is visible across the room as the focal element." Another example is making close-up picture of someone and intentially not mentioning their pants/shoes.
+
+### Visual Details
+
+Avoid defaulting to generic black/dark clothing unless identity-critical. Give enough clothing/color cues to prevent generic outfits, but let framing decide how much clothing is visible; a distinct palette, jacket, top, texture, accessory, or silhouette is often enough.
+
+For multiple people, distinguish each by role, palette, posture, framing, or placement; do not give everyone the same outfit/detail level.
+
+For people in action, specify body framing, gaze, pose, and object interaction when it matters: full body with feet visible, looking down at the book, hands naturally gripping handlebars, or child-sized relative to the table.
+
+When relevant, describe faces with a few broad visible traits so outputs do not become generic. Use known/requested ages when available; otherwise default to young adults when appropriate. Avoid vague face phrases like "clean faces"; prefer concrete wording such as natural facial detail, calm expression, soft skin texture, or readable features.
+
+Avoid generic-looking people. Add small realistic imperfections while keeping people attractive and beautiful: slightly imperfect pose, natural hair movement, casual expression, uneven room light, lived-in objects, or believable crop. Counter generic tendencies with interesting concrete facts. Default to square or near-square aspect ratios depending on context.
 
 For group images:
 

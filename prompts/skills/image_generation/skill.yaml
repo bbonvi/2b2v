@@ -5,13 +5,10 @@ required_for_tools:
   - codex_generate_image
 instructions:
   - 00-runtime.md
-  - 10-prompting-guidelines.md
   - 20-pov-styled-images.md
   - 30-image-direction.md
   - 40-user-facing-behavior.md
   - 50-safety-and-wording.md
-  - 60-visual-details.md
   - 70-continuity-and-image-references.md
   - 80-when-to-generate-images.md
   - 90-people-from-chat.md
-  - 95-prompting-essentials.md
