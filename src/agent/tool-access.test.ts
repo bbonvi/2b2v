@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { readOnlyToolsForDiscardableTurn } from "./tool-access";
+import { isWriteToolName, trackWriteToolStarts } from "./tool-access";
 
 function tool(name: string): AgentTool {
   return {
@@ -13,19 +13,27 @@ function tool(name: string): AgentTool {
   };
 }
 
-describe("readOnlyToolsForDiscardableTurn", () => {
-  test("removes state-changing tools from stale-droppable turns", () => {
-    const names = readOnlyToolsForDiscardableTurn([
+describe("tool access", () => {
+  test("classifies visible write tools", () => {
+    expect(isWriteToolName("schedule_message")).toBe(true);
+    expect(isWriteToolName("codex_generate_image")).toBe(true);
+    expect(isWriteToolName("search_messages")).toBe(false);
+    expect(isWriteToolName("record_memory")).toBe(false);
+  });
+
+  test("tracks write tool starts without blocking execution", async () => {
+    const started: string[] = [];
+    const tools = trackWriteToolStarts([
       tool("search_messages"),
       tool("schedule_message"),
-      tool("list_memories"),
-      tool("codex_generate_image"),
-      tool("react_to_message"),
       tool("fetch_url"),
-      tool("record_memory"),
-      tool("start_thread"),
-    ]).map((item) => item.name);
+    ], (name) => started.push(name));
 
-    expect(names).toEqual(["search_messages", "list_memories", "fetch_url"]);
+    await tools[0]?.execute("read-1", {}, undefined);
+    await tools[1]?.execute("write-1", {}, undefined);
+    await tools[2]?.execute("read-2", {}, undefined);
+
+    expect(tools.map((item) => item.name)).toEqual(["search_messages", "schedule_message", "fetch_url"]);
+    expect(started).toEqual(["schedule_message"]);
   });
 });

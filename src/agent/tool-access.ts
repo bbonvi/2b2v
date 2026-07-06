@@ -1,6 +1,6 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 
-const DISCARDABLE_TURN_WRITE_TOOLS = new Set([
+const WRITE_TOOL_NAMES = new Set([
   "cancel_agent_job",
   "close_thread",
   "codex_generate_image",
@@ -8,14 +8,24 @@ const DISCARDABLE_TURN_WRITE_TOOLS = new Set([
   "delete_scheduled_message",
   "edit_own_message",
   "react_to_message",
-  "record_memory",
-  "record_relationship",
   "schedule_message",
   "start_thread",
   "timeout_user",
 ]);
 
-/** Remove state-changing tools from turns that may be abandoned before send. */
-export function readOnlyToolsForDiscardableTurn(tools: AgentTool[]): AgentTool[] {
-  return tools.filter((tool) => !DISCARDABLE_TURN_WRITE_TOOLS.has(tool.name));
+export function isWriteToolName(name: string): boolean {
+  return WRITE_TOOL_NAMES.has(name);
+}
+
+/** Mark a stale-droppable turn as committed as soon as a state-changing tool starts. */
+export function trackWriteToolStarts(tools: AgentTool[], onWriteToolStart: (toolName: string) => void): AgentTool[] {
+  return tools.map((tool) => !isWriteToolName(tool.name)
+    ? tool
+    : {
+        ...tool,
+        execute: (toolCallId, params, signal) => {
+          onWriteToolStart(tool.name);
+          return tool.execute(toolCallId, params, signal);
+        },
+      });
 }

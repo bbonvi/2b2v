@@ -20,7 +20,7 @@ import { registerReactionSyncRuntime } from "./discord/reaction-sync-runtime";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { createScheduledTaskRunner } from "./scheduler/scheduled-task-runtime";
 import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type HandleResult, type ImageAttachmentResolver, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
-import { readOnlyToolsForDiscardableTurn } from "./agent/tool-access";
+import { trackWriteToolStarts } from "./agent/tool-access";
 import { buildComputedContactContextForUser } from "./agent/contact-context";
 import { shouldRespond, type TriggerResult } from "./agent/triggers";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
@@ -2436,6 +2436,7 @@ async function processTriggeredMessage(
       content: string;
     };
     preSendCheck?: () => boolean | Promise<boolean>;
+    onWriteToolStart?: (toolName: string) => void;
   } = {},
 ): Promise<DispatchOutcome> {
   if (message.guild === null || message.guildId === null) return { coveredMessageIds: [] };
@@ -2635,7 +2636,6 @@ async function processTriggeredMessage(
       },
     });
     const generatedImages = createGeneratedImageRuntime();
-    const discardableBeforeSend = options.disableLiveOutput === true && options.preSendCheck !== undefined;
     const agentTools = buildAgentTools(
       guildId,
       channelId,
@@ -2652,9 +2652,10 @@ async function processTriggeredMessage(
       {},
     );
     const threadTools = applyRuntimeToolPrompts([startThreadTool, closeThreadTool], promptBundle.runtime);
-    const extraTools = discardableBeforeSend
-      ? readOnlyToolsForDiscardableTurn([...agentTools, ...threadTools])
-      : [...agentTools, ...threadTools];
+    const baseExtraTools = [...agentTools, ...threadTools];
+    const extraTools = options.onWriteToolStart !== undefined
+      ? trackWriteToolStarts(baseExtraTools, options.onWriteToolStart)
+      : baseExtraTools;
 
     const incoming: IncomingMessage = {
       content: options.currentTurnOverride?.content ?? message.content,
@@ -2684,7 +2685,7 @@ async function processTriggeredMessage(
           }
         : {}),
     };
-    const visibleMaintenanceTools = discardableBeforeSend ? [] : blockToolsExcept(createPostReplyMaintenanceTools({
+    const visibleMaintenanceTools = blockToolsExcept(createPostReplyMaintenanceTools({
       guild,
       guildConfig,
       memoryRequest: {

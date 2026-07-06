@@ -8,7 +8,7 @@ import type { HistoryMessage } from "../agent/history-types";
 import type { TriggerResult } from "../agent/triggers";
 import type { AssembledContext } from "../agent/context-assembly";
 import { handleMessage, type HandlerDeps, type MessageSender } from "../agent/handler";
-import { readOnlyToolsForDiscardableTurn } from "../agent/tool-access";
+import { trackWriteToolStarts } from "../agent/tool-access";
 import { isActiveJobStatus, type AgentJobStore } from "../agent/job-runtime";
 import type { PromptBundle } from "../config/prompt-bundle";
 import type { GlobalConfig } from "../config/types";
@@ -91,7 +91,7 @@ export type AmbientRuntimeDeps = {
     getAttachmentsDir: (targetGuildId: string) => string;
   }) => MessageSender;
   createHandlerDeps: (input: CreateHandlerDepsInput) => HandlerDeps;
-  processTriggeredMessage: (message: Message, triggerResult?: NonNullable<TriggerResult>, currentTurnMessages?: readonly Message[], options?: { disableLiveOutput?: boolean; defaultReply?: boolean; triggerInstruction?: string; currentTurnOverride?: { messageId: string; timestamp: number; content: string }; preSendCheck?: () => boolean }) => Promise<unknown>;
+  processTriggeredMessage: (message: Message, triggerResult?: NonNullable<TriggerResult>, currentTurnMessages?: readonly Message[], options?: { disableLiveOutput?: boolean; defaultReply?: boolean; triggerInstruction?: string; currentTurnOverride?: { messageId: string; timestamp: number; content: string }; preSendCheck?: () => boolean; onWriteToolStart?: (toolName: string) => void }) => Promise<unknown>;
 };
 
 export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime {
@@ -525,6 +525,12 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         clearPendingCandidate(key);
       }
     }
+  }
+
+  function clearPendingAmbientForUser(guildId: string, channelId: string, userId: string): void {
+    clearPendingCandidate(ambientPendingKey("ambient_pickup", guildId, channelId, userId));
+    clearPendingCandidate(ambientPendingKey("lingering_attention", guildId, channelId, userId));
+    clearPendingCandidate(ambientPendingKey("follow_up", guildId, channelId, userId));
   }
 
   function markAmbientNormalTriggerInFlight(guildId: string, channelId: string, userId: string): void {
@@ -1642,7 +1648,12 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     );
 
     const generatedImages = createGeneratedImageRuntime();
-    const baseTools = readOnlyToolsForDiscardableTurn(buildAgentTools(
+    const writeState: { used: boolean; firstToolName?: string } = { used: false };
+    const markWriteToolStarted = (toolName: string): void => {
+      writeState.used = true;
+      writeState.firstToolName ??= toolName;
+    };
+    const baseTools = trackWriteToolStarts(buildAgentTools(
       input.candidate.guildId,
       input.candidate.channelId,
       input.guildConfig,
@@ -1655,7 +1666,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         sourceMessageId: input.candidate.id,
         sourceQuote: shortQuote(syntheticContent),
       },
-    ));
+    ), markWriteToolStarted);
     const tools = input.draft !== undefined ? promptLabDryRunTools(baseTools, input.draft.dryRuns) : baseTools;
 
     const resolveTargetChannel = createTargetChannelResolver(client, input.channel);
@@ -1693,6 +1704,18 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         forced: input.candidate.forced,
         phase: "pre_send",
       });
+      if (writeState.used) {
+        recordAmbientRuntimeAction(
+          input.requestLog,
+          `ambient-initiative-pre-send:${input.candidate.id}:committed`,
+          "ambient_initiative_pre_send_gate",
+          { kind: input.candidate.kind, mode: input.candidate.mode, firstWriteToolName: writeState.firstToolName },
+          gate.ok
+            ? { status: "passed", summary: "Pre-send gates passed after write tool." }
+            : { status: "selected", reason: gate.reason, decidingParameter: "write_tool_committed", summary: `Pre-send gate bypassed after write tool: ${gate.reason}.` },
+        );
+        return true;
+      }
       recordAmbientRuntimeAction(
         input.requestLog,
         `ambient-initiative-pre-send:${input.candidate.id}`,
@@ -2160,55 +2183,97 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     candidate.defaultReply = decision.default_reply ?? candidate.defaultReply;
     markAmbientCooldown(config, candidate);
     clearPendingForCandidate(candidate);
-    await processTriggeredMessage(
-      candidate.message,
-      { reason: candidate.kind },
-      [candidate.message],
-      {
-        disableLiveOutput: true,
-        defaultReply: candidate.defaultReply,
-        triggerInstruction: ambientTriggerInstruction(candidate.kind, decision),
-        currentTurnOverride: candidate.syntheticContent !== undefined && candidate.syntheticTimestamp !== undefined
-          ? {
-              messageId: candidate.triggerMessageId,
-              timestamp: candidate.syntheticTimestamp,
-              content: candidate.syntheticContent,
+    const writeState: { used: boolean; firstToolName?: string } = { used: false };
+    const markWriteToolStarted = (toolName: string): void => {
+      writeState.used = true;
+      writeState.firstToolName ??= toolName;
+      markAmbientNormalTriggerInFlight(candidate.guildId, candidate.channelId, candidate.userId);
+      clearPendingAmbientForUser(candidate.guildId, candidate.channelId, candidate.userId);
+    };
+    try {
+      await processTriggeredMessage(
+        candidate.message,
+        { reason: candidate.kind },
+        [candidate.message],
+        {
+          disableLiveOutput: true,
+          defaultReply: candidate.defaultReply,
+          triggerInstruction: ambientTriggerInstruction(candidate.kind, decision),
+          currentTurnOverride: candidate.syntheticContent !== undefined && candidate.syntheticTimestamp !== undefined
+            ? {
+                messageId: candidate.triggerMessageId,
+                timestamp: candidate.syntheticTimestamp,
+                content: candidate.syntheticContent,
+              }
+            : undefined,
+          onWriteToolStart: markWriteToolStarted,
+          preSendCheck: () => {
+            const preSendGate = ambientHardGate(config, candidate, "pre_send");
+            if (writeState.used) {
+              if (!preSendGate.ok) {
+                const preSendLog = createAmbientRequestLog(candidate, "pre_send_committed");
+                requestLogStore.incrementActive();
+                recordAmbientRuntimeAction(
+                  preSendLog,
+                  `ambient-hard-gate:${candidate.id}:pre-send`,
+                  "ambient_hard_gate",
+                  {
+                    phase: "pre_send",
+                    kind: candidate.kind,
+                    triggerMessageId: candidate.triggerMessageId,
+                    firstWriteToolName: writeState.firstToolName,
+                  },
+                  {
+                    status: "selected",
+                    reason: preSendGate.reason,
+                    decidingParameter: "write_tool_committed",
+                    summary: `Pre-send gate bypassed after write tool: ${preSendGate.reason}.`,
+                  },
+                );
+                emitAmbientRequestLog(preSendLog);
+              }
+              if (candidate.kind === "follow_up") {
+                const lease = ambientLeases.get(ambientLeaseKey(candidate.guildId, candidate.channelId, candidate.userId));
+                if (lease !== undefined && lease.botMessageId === candidate.triggerMessageId) lease.followUpsSent += 1;
+              }
+              recordAmbientReply(candidate);
+              return true;
             }
-          : undefined,
-        preSendCheck: () => {
-          const preSendGate = ambientHardGate(config, candidate, "pre_send");
-          if (!preSendGate.ok) {
-            const preSendLog = createAmbientRequestLog(candidate, "pre_send_dropped");
-            requestLogStore.incrementActive();
-            recordAmbientRuntimeAction(
-              preSendLog,
-              `ambient-hard-gate:${candidate.id}:pre-send`,
-              "ambient_hard_gate",
-              {
-                phase: "pre_send",
-                kind: candidate.kind,
-                triggerMessageId: candidate.triggerMessageId,
-              },
-              {
-                status: "dropped",
-                reason: preSendGate.reason,
-                decidingParameter: `hard_gate.${preSendGate.reason.replaceAll(" ", "_")}`,
-                summary: `Dropped before Discord send: ${preSendGate.reason}.`,
-              },
-            );
-            emitAmbientRequestLog(preSendLog);
-            log.debug("ambient reply dropped before send", { kind: candidate.kind, messageId: candidate.triggerMessageId, reason: preSendGate.reason });
-            return false;
-          }
-          if (candidate.kind === "follow_up") {
-            const lease = ambientLeases.get(ambientLeaseKey(candidate.guildId, candidate.channelId, candidate.userId));
-            if (lease !== undefined && lease.botMessageId === candidate.triggerMessageId) lease.followUpsSent += 1;
-          }
-          recordAmbientReply(candidate);
-          return true;
+            if (!preSendGate.ok) {
+              const preSendLog = createAmbientRequestLog(candidate, "pre_send_dropped");
+              requestLogStore.incrementActive();
+              recordAmbientRuntimeAction(
+                preSendLog,
+                `ambient-hard-gate:${candidate.id}:pre-send`,
+                "ambient_hard_gate",
+                {
+                  phase: "pre_send",
+                  kind: candidate.kind,
+                  triggerMessageId: candidate.triggerMessageId,
+                },
+                {
+                  status: "dropped",
+                  reason: preSendGate.reason,
+                  decidingParameter: `hard_gate.${preSendGate.reason.replaceAll(" ", "_")}`,
+                  summary: `Dropped before Discord send: ${preSendGate.reason}.`,
+                },
+              );
+              emitAmbientRequestLog(preSendLog);
+              log.debug("ambient reply dropped before send", { kind: candidate.kind, messageId: candidate.triggerMessageId, reason: preSendGate.reason });
+              return false;
+            }
+            if (candidate.kind === "follow_up") {
+              const lease = ambientLeases.get(ambientLeaseKey(candidate.guildId, candidate.channelId, candidate.userId));
+              if (lease !== undefined && lease.botMessageId === candidate.triggerMessageId) lease.followUpsSent += 1;
+            }
+            recordAmbientReply(candidate);
+            return true;
+          },
         },
-      },
-    );
+      );
+    } finally {
+      if (writeState.used) clearAmbientNormalTriggerInFlight(candidate.guildId, candidate.channelId, candidate.userId);
+    }
   }
 
   function maybeScheduleAmbientAttention(message: Message, triggerResult: TriggerResult): void {
