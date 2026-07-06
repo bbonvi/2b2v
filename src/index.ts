@@ -1091,15 +1091,9 @@ function promptLabMemoryDryRunTool(tool: AgentTool, dryRuns: Array<{ tool: strin
   if (dryRuns === undefined || tool.name !== "record_memory") return tool;
   return {
     ...tool,
-    execute: (_toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
+    execute: (toolCallId: string, params: unknown, signal?: AbortSignal): Promise<AgentToolResult<unknown>> => {
       dryRuns.push({ tool: tool.name, args: params });
-      return Promise.resolve({
-        content: [{
-          type: "text",
-          text: "Prompt Lab dry-run: would execute `record_memory`, but dashboard test runs do not mutate memories.",
-        }],
-        details: { dryRun: true, tool: tool.name, args: params },
-      });
+      return tool.execute(toolCallId, params, signal);
     },
   };
 }
@@ -1121,6 +1115,7 @@ function createPostReplyMaintenanceTools(input: {
     currentUserId: input.currentUserId,
     currentUsername: input.currentUsername,
     sourceMessageId: input.sourceMessageId,
+    dryRun: input.dryRun,
     recordMemoryDescription: runtimeToolDescription("record_memory", {}),
     resolveUsername: async (username) => {
       const cached = resolveGuildUsername(input.guild, username);

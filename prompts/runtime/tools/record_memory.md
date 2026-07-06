@@ -1,1 +1,1 @@
-Record durable memory updates or short-lived scratchpad updates as 2B's private memory action after a Discord turn has already completed. Prefer one focused add, update, expiry change, or delete per call; maintenance passes have a small call limit and should stop when no useful memory work remains.
+Record durable memory updates or short-lived scratchpad updates after a Discord turn. Use focused batches: add, update/merge, expire/delete, or pair user+self memories when both matter. Stop when remaining edits are low-value.

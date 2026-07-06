@@ -72,6 +72,8 @@ export interface RecordMemoryToolDeps {
   sourceMessageId: string;
   /** Externalized record_memory tool description. */
   recordMemoryDescription?: string;
+  /** Run validation and result counting without persisting changes. */
+  dryRun?: boolean;
   /** Resolve a Discord username, with or without @, to a guild-scoped user ID. */
   resolveUsername?: (username: string) => Promise<string | undefined>;
 }
@@ -657,6 +659,25 @@ async function applyMemoryActions(input: MemoryMutationInput, extraction: Memory
   return applied;
 }
 
+async function applyMemoryActionsDryRun(input: MemoryMutationInput, extraction: MemoryExtraction): Promise<number> {
+  const savepoint = `memory_dry_run_${crypto.randomUUID().replaceAll("-", "")}`;
+  input.db.raw.run(`SAVEPOINT ${savepoint}`);
+  try {
+    const applied = await applyMemoryActions(input, extraction);
+    input.db.raw.run(`ROLLBACK TO ${savepoint}`);
+    input.db.raw.run(`RELEASE ${savepoint}`);
+    return applied;
+  } catch (error) {
+    try {
+      input.db.raw.run(`ROLLBACK TO ${savepoint}`);
+      input.db.raw.run(`RELEASE ${savepoint}`);
+    } catch {
+      // Preserve the original tool failure if rollback cleanup itself fails.
+    }
+    throw error;
+  }
+}
+
 /** Create the state-changing tool used by the silent post-reply memory pass. */
 export function createRecordMemoryTool(deps: RecordMemoryToolDeps): AgentTool {
   const description = deps.recordMemoryDescription?.trim();
@@ -678,7 +699,9 @@ export function createRecordMemoryTool(deps: RecordMemoryToolDeps): AgentTool {
       }
 
       const extraction = normalized as MemoryExtraction;
-      const applied = await applyMemoryActions(deps, extraction);
+      const applied = deps.dryRun === true
+        ? await applyMemoryActionsDryRun(deps, extraction)
+        : await applyMemoryActions(deps, extraction);
       return {
         content: [{ type: "text", text: `Memory update complete; applied ${applied} of ${extraction.actions.length} requested action(s).` }],
         details: { applied, requested: extraction.actions.length },
