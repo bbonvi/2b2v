@@ -235,7 +235,7 @@ export function listManagementMemories(
               created_at, updated_at, expires_at, deleted_at
        FROM memories
        ${where}
-       ORDER BY updated_at DESC, id DESC
+       ORDER BY priority DESC, updated_at DESC, id DESC
        LIMIT ?`
     )
     .all(...params, clampLimit(filter.limit, 200, 1000)) as Array<{

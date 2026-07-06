@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "../db/database";
 import {
   deleteStoredManagementMessages,
+  listManagementMemories,
   listManagementMessages,
   updateStoredManagementMessageContent,
 } from "./management";
@@ -77,5 +78,23 @@ describe("dashboard local message management", () => {
     expect(deleted.messageIds).toEqual(["m1"]);
     expect(listManagementMessages(db, { guildId: "g1" }).map((row) => row.id).sort())
       .toEqual(["m2", "m3"]);
+  });
+});
+
+describe("dashboard memory management", () => {
+  test("lists important memories first, then newest first", () => {
+    db.raw
+      .prepare(
+        `INSERT INTO memories
+           (scope, guild_id, kind, content, confidence, priority, created_at, updated_at)
+         VALUES
+           ('guild', 'g1', 'fact', 'ordinary newer', 0.7, 0, 40, 40),
+           ('guild', 'g1', 'fact', 'important older', 0.7, 1, 20, 20),
+           ('guild', 'g1', 'fact', 'important newer', 0.7, 1, 30, 30)`
+      )
+      .run();
+
+    expect(listManagementMemories(db, { guildId: "g1" }).map((row) => row.content))
+      .toEqual(["important newer", "important older", "ordinary newer"]);
   });
 });
