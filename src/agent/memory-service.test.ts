@@ -101,6 +101,34 @@ describe("buildMemoryContext", () => {
     expect(context).not.toContain("Older memory.");
   });
 
+  test("keeps important capped memories and renders them at the bottom", () => {
+    const important = createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      kind: "fact",
+      content: "Old important memory.",
+      priority: 1,
+    });
+    const fresh = createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Fresh normal memory." });
+    const newest = createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Newest normal memory." });
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, important);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, fresh);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(300, newest);
+
+    const context = buildMemoryContext({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      limit: 2,
+    });
+
+    expect(context).toContain("Showing 2/3 memories.");
+    expect(context).toContain("Newest normal memory.");
+    expect(context).toContain("[IMPORTANT] Old important memory.");
+    expect(context.indexOf("Newest normal memory.")).toBeLessThan(context.indexOf("[IMPORTANT] Old important memory."));
+    expect(context).not.toContain("Fresh normal memory.");
+  });
+
   test("keeps self memories inside the total memory cap", () => {
     createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "User memory one." });
     createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "User memory two." });
@@ -259,6 +287,45 @@ describe("extractAndApplyMemories", () => {
     });
 
     expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(1);
+  });
+
+  test("upgrades duplicate memory priority when important is set", async () => {
+    const existing = createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      kind: "fact",
+      content: "2B is still angry about the slur.",
+    });
+
+    await extractAndApplyMemories({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      currentUsername: "alice",
+      sourceMessageId: "m2",
+      userMessage: "sorry",
+      assistantReply: "<ignore>not enough</ignore>",
+      recentContext: "",
+      apiKey: "key",
+      model: "model",
+      promptCaching: { enabled: false },
+      completeChat: () => Promise.resolve({
+        text: JSON.stringify({
+          actions: [{
+            action: "upsert",
+            subject: "user",
+            username: "@alice",
+            kind: "fact",
+            content: "2B is still angry about the slur.",
+            important: true,
+          }],
+        }),
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      }),
+    });
+
+    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(1);
+    expect(getMemory(db, existing)?.priority).toBe(1);
   });
 
   test("applies upsert and delete actions", async () => {
@@ -569,6 +636,7 @@ describe("createRecordMemoryTool", () => {
         username: "@alice",
         kind: "preference",
         content: "Prefers concise answers.",
+        important: true,
         expiresIn: { amount: 90, unit: "minutes" },
       }],
     });
@@ -577,6 +645,7 @@ describe("createRecordMemoryTool", () => {
     const after = Date.now();
     expect(memories).toHaveLength(1);
     expect(memories[0]?.content).toBe("Prefers concise answers.");
+    expect(memories[0]?.priority).toBe(1);
     expect(memories[0]?.expiresAt).toBeGreaterThanOrEqual(before + 90 * 60 * 1000);
     expect(memories[0]?.expiresAt).toBeLessThanOrEqual(after + 90 * 60 * 1000);
   });

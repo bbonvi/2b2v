@@ -3,6 +3,7 @@ import { MEMORY_KIND_SQL_VALUES, MEMORY_KINDS } from "./memory-kinds";
 export const SCRATCHPAD_EXPIRY_CHECK_SQL = "CHECK(kind <> 'scratchpad' OR expires_at IS NOT NULL)";
 export const JOURNAL_SCOPE_CHECK_SQL = "CHECK(kind <> 'journal' OR scope = 'self')";
 export const MEMORY_SCOPE_CHECK_SQL = "CHECK((scope = 'guild' AND subject_user_id IS NULL AND guild_id IS NOT NULL) OR (scope = 'user' AND subject_user_id IS NOT NULL AND guild_id IS NULL) OR (scope = 'self' AND subject_user_id IS NULL AND guild_id IS NULL))";
+export const MEMORY_PRIORITY_CHECK_SQL = "CHECK(priority >= 0)";
 
 /** Build the current memories table shape for fresh schema creation and table-copy migrations. */
 export function memoriesTableSql(tableName: string, ifNotExists = false): string {
@@ -16,13 +17,15 @@ export function memoriesTableSql(tableName: string, ifNotExists = false): string
     source_message_id TEXT,
     provenance_json   TEXT,
     confidence        REAL NOT NULL DEFAULT 0.7 CHECK(confidence >= 0 AND confidence <= 1),
+    priority          INTEGER NOT NULL DEFAULT 0,
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
     expires_at        INTEGER,
     deleted_at        INTEGER,
     ${SCRATCHPAD_EXPIRY_CHECK_SQL},
     ${JOURNAL_SCOPE_CHECK_SQL},
-    ${MEMORY_SCOPE_CHECK_SQL}
+    ${MEMORY_SCOPE_CHECK_SQL},
+    ${MEMORY_PRIORITY_CHECK_SQL}
   )`;
 }
 
@@ -36,6 +39,7 @@ export function memorySchemaHasCurrentChecks(sql: string | undefined): boolean {
     && sql.includes(SCRATCHPAD_EXPIRY_CHECK_SQL)
     && sql.includes(JOURNAL_SCOPE_CHECK_SQL)
     && sql.includes(MEMORY_SCOPE_CHECK_SQL)
+    && sql.includes(MEMORY_PRIORITY_CHECK_SQL)
     && sql.includes("CHECK(length(trim(content)) > 0)");
 }
 

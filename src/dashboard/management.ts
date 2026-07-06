@@ -40,6 +40,7 @@ export interface ManagementMemoryRow {
   content: string;
   sourceMessageId: string | null;
   confidence: number;
+  priority: number;
   createdAt: number;
   updatedAt: number;
   expiresAt: number | null;
@@ -230,7 +231,7 @@ export function listManagementMemories(
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const rows = db.raw
     .prepare(
-      `SELECT id, scope, guild_id, subject_user_id, kind, content, source_message_id, confidence,
+      `SELECT id, scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, priority,
               created_at, updated_at, expires_at, deleted_at
        FROM memories
        ${where}
@@ -246,6 +247,7 @@ export function listManagementMemories(
       content: string;
       source_message_id: string | null;
       confidence: number;
+      priority: number;
       created_at: number;
       updated_at: number;
       expires_at: number | null;
@@ -261,6 +263,7 @@ export function listManagementMemories(
     content: sanitizeMemoryContent(row.content),
     sourceMessageId: row.source_message_id,
     confidence: row.confidence,
+    priority: row.priority,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     expiresAt: row.expires_at,

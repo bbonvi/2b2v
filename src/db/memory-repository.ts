@@ -15,6 +15,7 @@ export interface MemoryRow {
   sourceMessageId: string | null;
   provenance: Record<string, unknown> | null;
   confidence: number;
+  priority: number;
   createdAt: number;
   updatedAt: number;
   expiresAt: number | null;
@@ -30,6 +31,7 @@ export interface CreateMemoryInput {
   sourceMessageId?: string | null;
   provenance?: Record<string, unknown> | null;
   confidence?: number;
+  priority?: number;
   expiresAt?: number | null;
 }
 
@@ -42,6 +44,7 @@ export interface UpdateMemoryInput {
   sourceMessageId?: string | null;
   provenance?: Record<string, unknown> | null;
   confidence?: number;
+  priority?: number;
   expiresAt?: number | null;
   deletedAt?: number | null;
 }
@@ -61,6 +64,11 @@ export type CountMemoriesFilter = Omit<ListMemoriesFilter, "limit">;
 function clampConfidence(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value)) return 0.7;
   return Math.max(0, Math.min(1, value));
+}
+
+function clampPriority(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.trunc(value));
 }
 
 function scopeForSubject(subjectUserId: string | null | undefined): MemoryScope {
@@ -186,8 +194,8 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
   }
   const result = db.raw
     .prepare(
-      `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, created_at, updated_at, expires_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+      `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, priority, created_at, updated_at, expires_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
     )
     .run(
       scope,
@@ -198,6 +206,7 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
       input.sourceMessageId ?? null,
       input.provenance !== undefined && input.provenance !== null ? JSON.stringify(input.provenance) : null,
       clampConfidence(input.confidence),
+      clampPriority(input.priority),
       now,
       now,
       input.expiresAt ?? null,
@@ -252,6 +261,10 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
     sets.push("confidence = ?");
     params.push(clampConfidence(input.confidence));
   }
+  if (input.priority !== undefined) {
+    sets.push("priority = ?");
+    params.push(clampPriority(input.priority));
+  }
   if ("expiresAt" in input) {
     sets.push("expires_at = ?");
     params.push(input.expiresAt ?? null);
@@ -295,7 +308,7 @@ export function getMemory(db: Database, id: number): MemoryRow | null {
 export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRow[] {
   const { conditions, params } = memoryFilterConditions(filter);
 
-  let sql = `SELECT * FROM memories WHERE ${conditions.join(" AND ")} ORDER BY updated_at DESC, id DESC`;
+  let sql = `SELECT * FROM memories WHERE ${conditions.join(" AND ")} ORDER BY priority DESC, updated_at DESC, id DESC`;
   if (filter.limit !== undefined && filter.limit > 0) {
     sql += " LIMIT ?";
     params.push(filter.limit);
@@ -350,6 +363,7 @@ function mapRow(row: Record<string, unknown>): MemoryRow {
     sourceMessageId: row.source_message_id as string | null,
     provenance,
     confidence: Number(row.confidence),
+    priority: Number(row.priority ?? 0),
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
     expiresAt: row.expires_at as number | null,

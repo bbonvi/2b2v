@@ -40,6 +40,7 @@ interface DashboardManagementApi {
     content?: string;
     kind?: string;
     confidence?: number;
+    priority?: number;
     expiresAt?: number | null;
   }) => AwaitableDashboardManagementResult;
   deleteMemory: (memoryId: number) => AwaitableDashboardManagementResult;
@@ -525,6 +526,7 @@ export function startDashboard(opts: DashboardOptions): void {
               ...(typeof body.content === "string" ? { content: body.content } : {}),
               ...(typeof body.kind === "string" ? { kind: body.kind } : {}),
               ...(typeof body.confidence === "number" ? { confidence: body.confidence } : {}),
+              ...(typeof body.priority === "number" ? { priority: body.priority } : {}),
               ...("expiresAt" in body && (typeof body.expiresAt === "number" || body.expiresAt === null)
                 ? { expiresAt: body.expiresAt }
                 : {}),

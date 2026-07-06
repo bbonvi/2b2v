@@ -40,7 +40,20 @@ describe("createMemory", () => {
     expect(row?.content).toBe("User likes concise answers.");
     expect(row?.sourceMessageId).toBe("m1");
     expect(row?.confidence).toBe(0.9);
+    expect(row?.priority).toBe(0);
     expect(row?.expiresAt).toBeNull();
+  });
+
+  test("stores important memory priority", () => {
+    const id = createMemory(db, {
+      guildId: "g1",
+      scope: "self",
+      kind: "journal",
+      content: "Important self continuity.",
+      priority: 1,
+    });
+
+    expect(getMemory(db, id)?.priority).toBe(1);
   });
 
   test("clamps confidence", () => {
@@ -117,6 +130,17 @@ describe("updateMemory", () => {
     expect(getMemory(db, id)?.expiresAt).toBe(expiresAt);
     expect(updateMemory(db, id, { expiresAt: null })).toBe(true);
     expect(getMemory(db, id)?.expiresAt).toBeNull();
+  });
+
+  test("updates memory priority", () => {
+    const id = createMemory(db, {
+      guildId: "g1",
+      kind: "global_note",
+      content: "Normal priority.",
+    });
+
+    expect(updateMemory(db, id, { priority: 1 })).toBe(true);
+    expect(getMemory(db, id)?.priority).toBe(1);
   });
 
   test("updates scope only with required ownership fields", () => {
@@ -234,6 +258,27 @@ describe("listMemories", () => {
 
     const rows = listMemories(db, { guildId: "g1", subjectUserId: "u1", limit: 2 });
     expect(rows.map((row) => row.content)).toEqual(["Newest", "Middle"]);
+  });
+
+  test("returns important memories before newer normal memories", () => {
+    const oldImportant = createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      kind: "fact",
+      content: "Old important",
+      priority: 1,
+    });
+    const freshNormal = createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      kind: "fact",
+      content: "Fresh normal",
+    });
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, oldImportant);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, freshNormal);
+
+    const rows = listMemories(db, { guildId: "g1", subjectUserId: "u1", limit: 1 });
+    expect(rows.map((row) => row.content)).toEqual(["Old important"]);
   });
 
   test("excludes expired memories from active reads and counts", () => {

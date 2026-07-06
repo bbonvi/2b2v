@@ -127,6 +127,7 @@ const MemoryActionSchema = Type.Union([
     kind: Type.String({ enum: [...MEMORY_KINDS] }),
     content: Type.String({ minLength: 1 }),
     confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+    important: Type.Optional(Type.Boolean()),
     expiresIn: Type.Optional(Type.Union([ExpiresInSchema, Type.Null()], {
       description: "Relative duration for clearly temporary memories; null clears an existing expiry.",
     })),
@@ -152,6 +153,7 @@ type MemoryExtraction = {
       kind: MemoryKind;
       content: string;
       confidence?: number;
+      important?: boolean;
       expiresIn?: ExpiresIn | null;
     }
     | { action: "delete"; id: number }
@@ -199,6 +201,7 @@ function memoryClockContext(timezone: string | undefined, now = Date.now()): str
 export function buildMemoryPolicyInstructions(): string[] {
   return [
     "Preserve only durable, future-useful memory, prefer updating existing rows over duplicates, and use the narrowest correct scope.",
+    "Set important true only for durable memories that must reliably shape behavior across weeks/months.",
   ];
 }
 
@@ -232,6 +235,8 @@ export function buildMemoryContext(input: MemoryContextInput): string {
   const total = conversationalTotal + selfTotal;
   const rows = [...conversationalRows, ...selfRows]
     .sort((a, b) => {
+      const priorityDiff = a.priority - b.priority;
+      if (priorityDiff !== 0) return priorityDiff;
       const updatedDiff = a.updatedAt - b.updatedAt;
       return updatedDiff !== 0 ? updatedDiff : a.id - b.id;
     });
@@ -241,7 +246,7 @@ export function buildMemoryContext(input: MemoryContextInput): string {
   const lines = rows.map((row) => {
     const label = scopeLabel(row, input.guildId, input.resolveUserId);
     const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
-    return `- ${row.id} [${label}] [${formatConfidence(row.confidence)}] [${row.kind}]${expiry} ${row.content}`;
+    return `- ${row.id} [${label}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${expiry} ${row.content}`;
   });
   const showingLine = selfTotal > 0
     ? `Showing ${rows.length}/${total} memories (${conversationalRows.length}/${conversationalTotal} guild/user, ${selfRows.length}/${selfTotal} self).`
@@ -297,7 +302,7 @@ export function buildVisibleUserMemoryContext(input: VisibleUserMemoryContextInp
     lines.push(`### ${label}`);
     for (const row of [...group.rows].reverse()) {
       const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
-      lines.push(`- ${row.id} [${formatConfidence(row.confidence)}] [${row.kind}]${expiry} ${row.content}`);
+      lines.push(`- ${row.id} [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${expiry} ${row.content}`);
     }
   }
   return lines.join("\n");
@@ -400,6 +405,7 @@ function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][
       kind,
       content,
       ...(confidence !== undefined ? { confidence } : {}),
+      ...(typeof value.important === "boolean" ? { important: value.important } : {}),
       ...(expiresIn !== undefined ? { expiresIn } : {}),
     };
   }
@@ -468,6 +474,7 @@ function memoryExtractionResponseFormat(): Record<string, unknown> {
                     kind: { type: "string", enum: [...MEMORY_KINDS] },
                     content: { type: "string", minLength: 1 },
                     confidence: { type: "number", minimum: 0, maximum: 1 },
+                    important: { type: "boolean" },
                     expiresIn: {
                       anyOf: [
                         {
@@ -621,6 +628,7 @@ async function applyMemoryActions(input: MemoryMutationInput, extraction: Memory
         capturedAt: Date.now(),
       },
       confidence: action.confidence,
+      ...(action.important !== undefined ? { priority: action.important ? 1 : 0 } : {}),
       ...(expiresAt !== undefined ? { expiresAt } : {}),
     };
     if (payload.content === "") continue;
@@ -631,7 +639,12 @@ async function applyMemoryActions(input: MemoryMutationInput, extraction: Memory
       continue;
     }
 
-    if (duplicateMemory(input, target.scope, target.subjectUserId, action.kind, payload.content) !== null) {
+    const duplicate = duplicateMemory(input, target.scope, target.subjectUserId, action.kind, payload.content);
+    if (duplicate !== null) {
+      if (action.important === true && duplicate.priority < 1) {
+        updateMemory(input.db, duplicate.id, { priority: 1 });
+        applied += 1;
+      }
       continue;
     }
 

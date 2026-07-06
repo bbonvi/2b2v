@@ -1,1 +1,1 @@
-The memory changes 2B is making in this private tool call. Prefer one focused add, update, expiry change, delete, or "none" action here.
+The memory changes 2B is making in this private tool call. Prefer one focused add, update, expiry change, delete, or "none" action here. Set `important: true` only for durable memories that must reliably shape behavior across weeks/months.

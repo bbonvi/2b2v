@@ -59,6 +59,7 @@ export type DashboardManagementRuntime = {
     content?: string;
     kind?: string;
     confidence?: number;
+    priority?: number;
     expiresAt?: number | null;
   }) => { memory: DecoratedManagementMemory };
   deleteMemory: (memoryId: number) => { deleted: boolean; memoryId: number };
@@ -323,6 +324,7 @@ export function createDashboardManagementRuntime(input: {
     content?: string;
     kind?: string;
     confidence?: number;
+    priority?: number;
     expiresAt?: number | null;
   }): { memory: DecoratedManagementMemory } => {
     const existing = getManagementMemory(input.db, memoryInput.memoryId);
@@ -335,6 +337,7 @@ export function createDashboardManagementRuntime(input: {
       ...(memoryInput.content !== undefined ? { content: memoryInput.content } : {}),
       ...(memoryInput.kind !== undefined && isMemoryKind(memoryInput.kind) ? { kind: memoryInput.kind } : {}),
       ...(memoryInput.confidence !== undefined ? { confidence: memoryInput.confidence } : {}),
+      ...(memoryInput.priority !== undefined ? { priority: memoryInput.priority } : {}),
       ...("expiresAt" in memoryInput ? { expiresAt: memoryInput.expiresAt ?? null } : {}),
     });
     if (!updated) throw new Error("Memory update did not change a row.");

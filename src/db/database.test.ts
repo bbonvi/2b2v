@@ -39,6 +39,11 @@ describe("database initialization", () => {
     expect(columns.some((column) => column.name === "expires_at")).toBe(true);
   });
 
+  test("creates memory priority column", () => {
+    const columns = db.raw.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string }>;
+    expect(columns.some((column) => column.name === "priority")).toBe(true);
+  });
+
   test("creates messages table", () => {
     const info = db.raw
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='messages'")

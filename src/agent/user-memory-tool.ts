@@ -61,11 +61,11 @@ function formatMemory(row: MemoryRow): string {
     : row.subjectUserId === null
     ? "guild"
     : `user:${row.subjectUserId}`;
-  return `- ${row.id} [${scope}] [${formatConfidence(row.confidence)}] [${row.kind}] ${row.content}`;
+  return `- ${row.id} [${scope}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""} ${row.content}`;
 }
 
 function formatUserMemory(row: MemoryRow): string {
-  return `- ${row.id} [${formatConfidence(row.confidence)}] [${row.kind}] ${row.content}`;
+  return `- ${row.id} [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""} ${row.content}`;
 }
 
 function formatUserHeaderLabel(label: string, userId: string): string {

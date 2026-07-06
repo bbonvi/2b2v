@@ -62,7 +62,7 @@ function migrateLegacyMemoryRows(raw: BunDatabase, memoryColumns: readonly Table
 
   runInTransaction(raw, () => {
     raw.run(memoriesTableSql("memories_new"));
-    raw.run(`INSERT INTO memories_new (scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, created_at, updated_at, expires_at, deleted_at)
+    raw.run(`INSERT INTO memories_new (scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, priority, created_at, updated_at, expires_at, deleted_at)
       SELECT
         CASE WHEN scope = 'user' THEN 'user' ELSE 'guild' END,
         CASE WHEN scope = 'user' THEN NULL ELSE COALESCE(guild_id, '') END,
@@ -81,6 +81,7 @@ function migrateLegacyMemoryRows(raw: BunDatabase, memoryColumns: readonly Table
         source_message_id,
         NULL,
         0.7,
+        0,
         created_at,
         updated_at,
         CASE WHEN expires_at IS NOT NULL AND expires_at > (strftime('%s','now') * 1000) THEN expires_at ELSE NULL END,
@@ -102,6 +103,9 @@ function migrateStructuredMemoryChecks(raw: BunDatabase, memoryColumns: readonly
 
   const hasScopeColumn = hasColumn(memoryColumns, "scope");
   const provenanceExpression = hasColumn(memoryColumns, "provenance_json") ? "provenance_json" : "NULL";
+  const priorityExpression = hasColumn(memoryColumns, "priority")
+    ? "CASE WHEN priority < 0 THEN 0 ELSE COALESCE(priority, 0) END"
+    : "0";
   const scopeExpression = hasScopeColumn
     ? "CASE WHEN scope IN ('guild', 'user', 'self') THEN scope WHEN subject_user_id IS NOT NULL THEN 'user' ELSE 'guild' END"
     : "CASE WHEN subject_user_id IS NOT NULL THEN 'user' ELSE 'guild' END";
@@ -109,7 +113,7 @@ function migrateStructuredMemoryChecks(raw: BunDatabase, memoryColumns: readonly
 
   runInTransaction(raw, () => {
     raw.run(memoriesTableSql("memories_new"));
-    raw.run(`INSERT INTO memories_new (id, scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, created_at, updated_at, expires_at, deleted_at)
+    raw.run(`INSERT INTO memories_new (id, scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, priority, created_at, updated_at, expires_at, deleted_at)
       SELECT
         id,
         ${scopeExpression},
@@ -128,6 +132,7 @@ function migrateStructuredMemoryChecks(raw: BunDatabase, memoryColumns: readonly
           WHEN confidence > 1 THEN 1
           ELSE COALESCE(confidence, 0.7)
         END,
+        ${priorityExpression},
         created_at,
         updated_at,
         expires_at,
@@ -162,6 +167,7 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
     "ALTER TABLE threads ADD COLUMN archived_at INTEGER",
     "ALTER TABLE memories ADD COLUMN expires_at INTEGER",
     "ALTER TABLE memories ADD COLUMN provenance_json TEXT",
+    "ALTER TABLE memories ADD COLUMN priority INTEGER NOT NULL DEFAULT 0 CHECK(priority >= 0)",
   ]) {
     ignoreExistingColumn(raw, sql);
   }
@@ -172,5 +178,6 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
 
   createMemoryIndexes(raw);
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_scope_active ON memories(scope, deleted_at, updated_at)");
+  raw.run("CREATE INDEX IF NOT EXISTS idx_memories_priority_active ON memories(priority, deleted_at, updated_at)");
   sanitizeExistingMemoryRows(raw);
 }
