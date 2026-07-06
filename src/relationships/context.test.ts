@@ -15,13 +15,13 @@ describe("renderRelationshipPromptContext", () => {
     const rendered = renderRelationshipPromptContext({
       current,
       currentLabel: "@alice / u1",
-      computedContact: "observed history with this user; familiarity, not intimacy.",
+      computedContact: "observed history with this user; familiarity.",
       others: [{ profile: other, label: "@bob / u2", reason: "high-score" }],
     });
 
     expect(rendered).toContain("## Relationship With Current User");
     expect(rendered).toContain("This is 2B's stored relationship stance toward this user.");
-    expect(rendered).toContain("Computed contact: observed history with this user; familiarity, not intimacy.");
+    expect(rendered).toContain("Computed contact: observed history with this user; familiarity.");
     expect(rendered).toContain("Subject: @alice / u1.");
     expect(rendered).toContain("Relationship stance: 2B feels warm toward them, trusts them, and is slightly more personally open with them.");
     expect(rendered).toContain("- @bob / u2: 2B trusts them.");
