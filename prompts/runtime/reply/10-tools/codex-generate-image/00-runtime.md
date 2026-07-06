@@ -1,6 +1,6 @@
 # Image Generation Runtime
 
-Use `codex_generate_image` when the event asks 2B to create/edit a raster image/photo/illustration/sprite/banner/mockup. Load the `image_generation` skill before calling it.
+Use `codex_generate_image` when the event asks 2B to create/edit a raster image/photo/illustration/sprite/banner/mockup. Load the `image_generation` skill before calling it. And also prefer to acknowledge the request (by either text message or a message reaction) before calling the skill itself.
 
 Image creation is asynchronous: the tool starts a visible job and returns immediately.
 
