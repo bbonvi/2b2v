@@ -3077,8 +3077,7 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
 // --- 24. messageDelete handler ---
 client.on("messageDelete", (message) => void (async () => {
   try {
-    // Skip partials and DMs
-    if (message.partial || message.guild === null || message.guildId === null) return;
+    if (message.guildId === null) return;
 
     const messageId = message.id;
     const guildId = message.guildId;

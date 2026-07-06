@@ -46,6 +46,8 @@ Normal replies receive only the active speaker relationship slice. Relationships
 
 SQLite is the readable source of truth. Qdrant is only a semantic index; search results must join back to SQLite rows.
 
+Discord-deleted messages are tombstoned as `[deleted]` in SQLite, not removed from prompt history; local media, reactions, and vector points are still removed.
+
 Merged history rows must preserve all component Discord message IDs. Reply resolution and prompt-visible search exclusions must treat aliases as present.
 
 `search_messages` must exclude messages already visible in prompt history and overfetch before that filtering.

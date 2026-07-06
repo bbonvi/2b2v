@@ -3,7 +3,7 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "./database";
 import { createQdrantClient, ensureCollection, qdrantCollectionName } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
-import { searchMessages, getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory } from "./message-repository";
+import { searchMessages, getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, markDiscordMessageDeleted } from "./message-repository";
 import { createMockPipeline } from "../embeddings/test-utils";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
@@ -330,6 +330,17 @@ describe("searchMessages", () => {
     await insertWithEmbedding("prompt-only-msg", "private ignore reason visible topic", { isPromptOnly: true });
 
     const queryVec = await embedOne("private ignore reason");
+    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
+
+    expect(results.map((r) => r.id)).toEqual(["real-msg"]);
+  });
+
+  test("excludes deleted messages from semantic search", async () => {
+    await insertWithEmbedding("real-msg", "deleted topic visible");
+    await insertWithEmbedding("deleted-msg", "deleted topic visible");
+    markDiscordMessageDeleted(db, { id: "deleted-msg", guildId: "g1", channelId: "c1" });
+
+    const queryVec = await embedOne("deleted topic");
     const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
 
     expect(results.map((r) => r.id)).toEqual(["real-msg"]);
@@ -676,6 +687,14 @@ describe("searchMessagesLiteral", () => {
     const results = searchMessagesLiteral(db, "ignore reason topic", { guildId: "g1", limit: 10 });
     expect(results.map((r) => r.id)).toEqual(["real-msg"]);
   });
+
+  test("excludes deleted messages from literal search", () => {
+    insertMessage("real-msg", { guildId: "g1", translatedContent: "delete reason topic" });
+    insertMessage("deleted-msg", { guildId: "g1", translatedContent: "delete reason topic" });
+    markDiscordMessageDeleted(db, { id: "deleted-msg", guildId: "g1", channelId: "c1" });
+    const results = searchMessagesLiteral(db, "delete reason topic", { guildId: "g1", limit: 10 });
+    expect(results.map((r) => r.id)).toEqual(["real-msg"]);
+  });
 });
 
 describe("getHistoryMessages", () => {
@@ -741,6 +760,7 @@ describe("getHistoryMessages", () => {
       hasEmbeds: false,
       isSynthetic: false,
       isPromptOnly: false,
+      isDeleted: false,
       relatedThreadId: null,
     });
   });
@@ -877,6 +897,16 @@ describe("getContextHistoryMessages", () => {
     ]);
   });
 
+  test("includes deleted tombstones in context history", () => {
+    insertMessage("deleted-msg", { channelId: "c1", translatedContent: "remove me", createdAt: now });
+    markDiscordMessageDeleted(db, { id: "deleted-msg", guildId: "g1", channelId: "c1" });
+
+    const rows = getContextHistoryMessages(db, "c1", trim);
+    expect(rows.map((m) => [m.id, m.content, m.isDeleted])).toEqual([
+      ["deleted-msg", "[deleted]", true],
+    ]);
+  });
+
 });
 
 describe("getParentPreContext", () => {
@@ -999,7 +1029,9 @@ describe("getParentPreContext", () => {
       hasEmbeds: false,
       isSynthetic: false,
       isPromptOnly: false,
+      isDeleted: false,
       relatedThreadId: null,
+      reactions: undefined,
     });
   });
 

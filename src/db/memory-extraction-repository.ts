@@ -141,6 +141,7 @@ export function countMessagesSinceMemoryExtraction(
          AND channel_id = ?
          AND is_bot = 0
          AND is_synthetic = 0
+         AND deleted_at IS NULL
          AND TRIM(translated_content) <> ''
          ${checkpointFilter(input.checkpoint)}`,
     )
@@ -168,6 +169,7 @@ export function getMessagesSinceMemoryExtraction(
          AND channel_id = ?
          AND is_bot = 0
          AND is_synthetic = 0
+         AND deleted_at IS NULL
          AND TRIM(translated_content) <> ''
          ${checkpointFilter(input.checkpoint)}
        ORDER BY created_at ASC, id ASC

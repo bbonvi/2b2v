@@ -84,7 +84,7 @@ describe("message cleanup", () => {
     db.close();
   });
 
-  test("deletes a stored bot message with images and vector points", async () => {
+  test("marks a stored bot message deleted with images and vector points removed", async () => {
     const db = createDatabase(":memory:");
     const vectors = vectorSpy();
     insertMessage(db, "bot-message", { isBot: true, userId: "bot-1" });
@@ -111,12 +111,13 @@ describe("message cleanup", () => {
 
     expect(result).toEqual({ messagesDeleted: 1, imagesDeleted: 1 });
     expect(vectors.calls).toEqual(["g1:bot-message"]);
-    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM messages").get()).toEqual({ count: 0 });
+    expect(db.raw.prepare("SELECT translated_content, deleted_at FROM messages WHERE id = 'bot-message'").get())
+      .toMatchObject({ translated_content: "[deleted]" });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images").get()).toEqual({ count: 0 });
     db.close();
   });
 
-  test("deletes a Discord message with images, reactions, and vector points", async () => {
+  test("marks a Discord message deleted with images, reactions, and vector points removed", async () => {
     const db = createDatabase(":memory:");
     const vectors = vectorSpy();
     insertMessage(db, "m1");
@@ -144,7 +145,8 @@ describe("message cleanup", () => {
 
     expect(result).toEqual({ messagesDeleted: 1, imagesDeleted: 1 });
     expect(vectors.calls).toEqual(["g1:m1"]);
-    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM messages").get()).toEqual({ count: 0 });
+    expect(db.raw.prepare("SELECT translated_content, deleted_at FROM messages WHERE id = 'm1'").get())
+      .toMatchObject({ translated_content: "[deleted]" });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images").get()).toEqual({ count: 0 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_reactions").get()).toEqual({ count: 0 });
     db.close();

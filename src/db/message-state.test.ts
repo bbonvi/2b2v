@@ -134,7 +134,7 @@ describe("bot message state helpers", () => {
     })).toThrow("Refusing");
   });
 
-  test("deleteBotMessageState deletes only the bot message and its own image metadata", () => {
+  test("deleteBotMessageState marks only the bot message deleted and removes its own image metadata", () => {
     insertMessage({ id: "bot-msg", userId: "bot-1", isBot: true });
     insertMessage({ id: "user-msg", userId: "user-1", isBot: false });
     insertImage(db, {
@@ -184,7 +184,8 @@ describe("bot message state helpers", () => {
     });
 
     expect(result).toEqual({ deleted: true, imageCount: 1, imagePaths: ["/tmp/bot.webp"] });
-    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = 'bot-msg'").get()).toEqual({ count: 0 });
+    expect(db.raw.prepare("SELECT translated_content, deleted_at FROM messages WHERE id = 'bot-msg'").get())
+      .toMatchObject({ translated_content: "[deleted]" });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = 'user-msg'").get()).toEqual({ count: 1 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images WHERE message_id = 'bot-msg'").get()).toEqual({ count: 0 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images WHERE message_id = 'user-msg'").get()).toEqual({ count: 1 });

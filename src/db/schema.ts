@@ -62,7 +62,8 @@ export const SCHEMA_SQL = `
     related_thread_id   TEXT,
     routed_from_guild_id   TEXT,
     routed_from_channel_id TEXT,
-    routed_from_message_id TEXT
+    routed_from_message_id TEXT,
+    deleted_at          INTEGER
   );
 
   CREATE INDEX IF NOT EXISTS idx_messages_guild_channel_time

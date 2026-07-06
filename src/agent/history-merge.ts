@@ -9,6 +9,7 @@ function isPlain(m: HistoryMessage): boolean {
     && (m.jobAnnotations?.length ?? 0) === 0
     && (m.reactions === undefined || m.reactions === "")
     && !m.hasEmbeds
+    && m.isDeleted !== true
     && m.isPromptOnly !== true
     && !m.isSynthetic;
 }

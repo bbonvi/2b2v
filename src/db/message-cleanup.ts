@@ -1,12 +1,11 @@
 import { unlinkSync } from "fs";
 import type { QdrantClient } from "@qdrant/js-client-rest";
 import type { Database } from "./database.ts";
-import { getImagesByMessageId } from "./image-repository.ts";
 import {
   deleteBotMessageState,
   deleteRecentMessages,
+  markDiscordMessageDeleted,
 } from "./message-repository.ts";
-import { deleteMessageReactions } from "./message-reactions.ts";
 import { deleteMessagePointsByGuildId, deleteMessagePointsByMessageId } from "../qdrant/adapter.ts";
 
 export interface CleanupResult {
@@ -77,20 +76,15 @@ export async function cleanupDeletedDiscordMessage(input: {
   messageId: string;
   deleteMessagePoints?: DeleteMessagePoints;
 }): Promise<CleanupResult> {
-  const images = getImagesByMessageId(input.db, input.messageId);
-  if (images.length > 0) {
-    input.db.raw.prepare("DELETE FROM images WHERE message_id = ?").run(input.messageId);
-  }
-  deleteMessageReactions(input.db, input.messageId, input.guildId);
-
-  const result = input.db.raw
-    .prepare("DELETE FROM messages WHERE id = ? AND guild_id = ?")
-    .run(input.messageId, input.guildId) as { changes: number };
-  if (result.changes === 0) return { messagesDeleted: 0, imagesDeleted: 0 };
+  const deleted = markDiscordMessageDeleted(input.db, {
+    id: input.messageId,
+    guildId: input.guildId,
+  });
+  if (!deleted.deleted) return { messagesDeleted: 0, imagesDeleted: 0 };
 
   await (input.deleteMessagePoints ?? qdrantDeleter(input.qdrant))(input.guildId, input.messageId);
-  deleteImageFiles(images.map((image) => image.path));
-  return { messagesDeleted: result.changes, imagesDeleted: images.length };
+  deleteImageFiles(deleted.imagePaths);
+  return { messagesDeleted: 1, imagesDeleted: deleted.imageCount };
 }
 
 export async function cleanupRecentMessages(input: {

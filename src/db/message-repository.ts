@@ -46,6 +46,8 @@ export interface DeleteBotMessageStateResult {
   imagePaths: string[];
 }
 
+export const DELETED_MESSAGE_CONTENT = "[deleted]";
+
 export interface MessageSearchFilter {
   guildId: string;
   userId?: string;
@@ -110,6 +112,7 @@ interface HistoryRow {
   reply_to_id: string | null;
   is_synthetic: number;
   is_prompt_only: number;
+  deleted_at: number | null;
   related_thread_id: string | null;
 }
 
@@ -183,6 +186,7 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
       hasEmbeds: false,
       isSynthetic: r.is_synthetic === 1,
       isPromptOnly: r.is_prompt_only === 1,
+      isDeleted: r.deleted_at !== null,
       relatedThreadId: r.related_thread_id,
       reactions: reactionMap.get(r.id)?.join(" "),
     };
@@ -353,39 +357,66 @@ export function getRoutedMessageSource(
   };
 }
 
+/** Mark a stored Discord message as deleted while dropping local media/reaction metadata. */
+export function markDiscordMessageDeleted(
+  db: Database,
+  input: { id: string; guildId: string; channelId?: string; botUserId?: string },
+): DeleteBotMessageStateResult {
+  const channelCondition = input.channelId !== undefined ? " AND channel_id = ?" : "";
+  const botCondition = input.botUserId !== undefined ? " AND user_id = ? AND is_bot = 1" : "";
+  const params = [
+    input.id,
+    input.guildId,
+    ...(input.channelId !== undefined ? [input.channelId] : []),
+    ...(input.botUserId !== undefined ? [input.botUserId] : []),
+  ];
+  const existing = db.raw
+    .prepare(
+      `SELECT id FROM messages
+       WHERE id = ? AND guild_id = ?${channelCondition}${botCondition}
+         AND is_synthetic = 0 AND is_prompt_only = 0`
+    )
+    .get(...params) as { id: string } | null;
+  if (existing === null) {
+    return { deleted: false, imageCount: 0, imagePaths: [] };
+  }
+
+  const imageScope = input.channelId !== undefined
+    ? "message_id = ? AND guild_id = ? AND channel_id = ?"
+    : "message_id = ? AND guild_id = ?";
+  const imageParams = input.channelId !== undefined
+    ? [input.id, input.guildId, input.channelId]
+    : [input.id, input.guildId];
+  const imageRows = db.raw
+    .prepare(`SELECT path FROM images WHERE ${imageScope}`)
+    .all(...imageParams) as Array<{ path: string }>;
+  const imageResult = db.raw
+    .prepare(`DELETE FROM images WHERE ${imageScope}`)
+    .run(...imageParams) as { changes: number };
+  db.raw
+    .prepare(`DELETE FROM message_reactions WHERE ${imageScope}`)
+    .run(...imageParams);
+  db.raw
+    .prepare(
+      `UPDATE messages
+       SET raw_content = ?, translated_content = ?, deleted_at = COALESCE(deleted_at, ?)
+       WHERE id = ? AND guild_id = ?${channelCondition}${botCondition}
+         AND is_synthetic = 0 AND is_prompt_only = 0`
+    )
+    .run(DELETED_MESSAGE_CONTENT, DELETED_MESSAGE_CONTENT, Date.now(), ...params);
+
+  return { deleted: true, imageCount: imageResult.changes, imagePaths: imageRows.map((row) => row.path) };
+}
+
 /**
- * Delete a real bot-authored message row and only image metadata attached to it.
+ * Mark a real bot-authored message row as deleted.
  * The caller is responsible for deleting corresponding Qdrant points.
  */
 export function deleteBotMessageState(
   db: Database,
   input: { id: string; guildId: string; channelId: string; botUserId: string },
 ): DeleteBotMessageStateResult {
-  const existing = db.raw
-    .prepare(
-      `SELECT id FROM messages
-       WHERE id = ? AND guild_id = ? AND channel_id = ? AND user_id = ? AND is_bot = 1
-         AND is_synthetic = 0 AND is_prompt_only = 0`
-    )
-    .get(input.id, input.guildId, input.channelId, input.botUserId) as { id: string } | null;
-  if (existing === null) {
-    return { deleted: false, imageCount: 0, imagePaths: [] };
-  }
-
-  const imageRows = db.raw
-    .prepare("SELECT path FROM images WHERE message_id = ? AND guild_id = ? AND channel_id = ?")
-    .all(input.id, input.guildId, input.channelId) as Array<{ path: string }>;
-  const imageResult = db.raw
-    .prepare("DELETE FROM images WHERE message_id = ? AND guild_id = ? AND channel_id = ?")
-    .run(input.id, input.guildId, input.channelId) as { changes: number };
-  db.raw
-    .prepare("DELETE FROM message_reactions WHERE message_id = ? AND guild_id = ? AND channel_id = ?")
-    .run(input.id, input.guildId, input.channelId);
-  db.raw
-    .prepare("DELETE FROM messages WHERE id = ? AND guild_id = ? AND channel_id = ? AND user_id = ? AND is_bot = 1")
-    .run(input.id, input.guildId, input.channelId, input.botUserId);
-
-  return { deleted: true, imageCount: imageResult.changes, imagePaths: imageRows.map((row) => row.path) };
+  return markDiscordMessageDeleted(db, input);
 }
 
 /**
@@ -438,6 +469,7 @@ export async function searchMessages(
     "guild_id = ?",
     "is_synthetic = 0",
     "is_prompt_only = 0",
+    "deleted_at IS NULL",
     "TRIM(translated_content) <> ''",
   ];
   const rowParams: Array<string | number> = [...ids, filter.guildId];
@@ -813,7 +845,7 @@ export function getHistoryMessages(
 ): HistoryMessage[] {
   const rows = db.raw
     .prepare(
-      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, is_prompt_only, related_thread_id
+      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
        FROM messages
        WHERE channel_id = ?
        ORDER BY created_at DESC
@@ -859,7 +891,7 @@ export function getContextHistoryMessages(
 
   const rows = db.raw
     .prepare(
-      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, is_prompt_only, related_thread_id
+      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
        FROM messages
        WHERE channel_id = ?${excludeClause}
        ORDER BY created_at DESC
@@ -894,6 +926,7 @@ export function searchMessagesLiteral(
   // Exclude synthetic messages (thread creation events, etc.)
   conditions.push("is_synthetic = 0");
   conditions.push("is_prompt_only = 0");
+  conditions.push("deleted_at IS NULL");
   conditions.push("TRIM(translated_content) <> ''");
 
   conditions.push("translated_content LIKE ? ESCAPE '\\'");
@@ -964,7 +997,7 @@ export function getParentPreContext(
 ): HistoryMessage[] {
   const rows = db.raw
     .prepare(
-      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, is_prompt_only, related_thread_id
+      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
        FROM messages
        WHERE channel_id = ? AND created_at < ? AND is_synthetic = 0
        ORDER BY created_at DESC
@@ -980,6 +1013,7 @@ export function getParentPreContext(
       reply_to_id: string | null;
       is_synthetic: number;
       is_prompt_only: number;
+      deleted_at: number | null;
       related_thread_id: string | null;
     }>;
 

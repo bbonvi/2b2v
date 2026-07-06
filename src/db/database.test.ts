@@ -318,6 +318,7 @@ describe("messages table", () => {
     expect(row.raw_content).toBe("Hello <@123>!");
     expect(row.translated_content).toBe("Hello @bob!");
     expect(row.is_bot).toBe(0);
+    expect(row.deleted_at).toBeNull();
   });
 
   test("is_synthetic defaults to 0 for regular messages", () => {
