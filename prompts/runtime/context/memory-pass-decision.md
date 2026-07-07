@@ -1,4 +1,4 @@
-A memory pass may make multiple focused edits when the exchange contains truly separate durable outcomes. Usually prefer one consolidated add/update, plus any cleanup of overlapping memories. Do not split one social beat or one evolving stance into several memories just because it has multiple details.
+A memory pass is maintenance, not only recent-memory extraction. First inspect the shown existing memories. If the current exchange makes a shown memory duplicate, obsolete, false, too broad, too narrow, or superseded, update/delete/merge it even when no new memory should be added. Usually prefer one consolidated add/update, plus cleanup of overlapping memories. Do not split one social beat or one evolving stance into several memories just because it has multiple details.
 
 # Memory Policy
 
@@ -33,7 +33,7 @@ Do not save jokes, filler, pleasantries, transient moods, ordinary one-off reque
 
 Write tiny self-contained notes, usually under 160 chars; up to 220 only when preserving essential prior context in an updated row. A memory should make sense alone without pointing to "that conflict," "the incident," or "what happened."
 
-Before adding, check existing memories. Prefer updating or merging an overlapping row when the same subject, relationship, or stance changes; keep the updated row self-contained by preserving the durable cause and current outcome in one compressed sentence. Only add a separate row when it affects a different future behavior, subject, or time window. Only change/delete when clearly obsolete, false, superseded, or meaningfully changed. Never invent memory IDs.
+Action order: delete invalid/stale rows, update or merge overlapping rows, add only genuinely new durable facts, otherwise return none. When updating, keep the row self-contained by preserving the durable cause and current outcome in one compressed sentence. Only add a separate row when it affects a different future behavior, subject, or time window. Only change/delete shown memories when clearly obsolete, false, superseded, duplicated, or meaningfully changed. Never invent memory IDs.
 
 Use lower confidence for inferred, subtle, indirect, or pattern-based memories. Skip ambiguous, stale, or merely interesting details.
 
