@@ -360,7 +360,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     if (humanMessages.length === 0) return "no_recent_human_chatter";
     if (uniqueHumans.size <= 1 && userMessages > 0 && botMessages > 0) return "mostly_user_and_2b";
     if (uniqueHumans.size <= 1) return "mostly_one_user";
-    if (uniqueHumans.size <= 3 && humanMessages.length <= 8) return "small_mixed_chat";
+    if (uniqueHumans.size <= 4 && humanMessages.length <= 12) return "small_mixed_chat";
     return "busy_group_chat";
   }
 
