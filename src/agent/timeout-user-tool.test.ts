@@ -1,14 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
-  createTimeoutUserTool,
-  MAX_TIMEOUT_SECONDS,
+  createDiscordRemoveUserTimeoutTool,
+  createDiscordSetUserTimeoutTool,
+  MAX_DISCORD_TIMEOUT_SECONDS,
   type TimeoutMember,
   type TimeoutUserToolDeps,
 } from "./timeout-user-tool";
 
 interface TimeoutCall {
-  durationMs: number;
+  durationMs: number | null;
   reason?: string;
 }
 
@@ -37,7 +38,7 @@ function makeMember(overrides: Partial<MockMember> = {}): MockMember {
 }
 
 function makeTool(member: TimeoutMember | null, overrides: Partial<TimeoutUserToolDeps> = {}): AgentTool {
-  return createTimeoutUserTool({
+  return createDiscordSetUserTimeoutTool({
     guildId: "guild-1",
     botUserId: "bot-1",
     guildOwnerId: "owner-1",
@@ -52,10 +53,10 @@ function text(result: Awaited<ReturnType<AgentTool["execute"]>>): string {
   return first?.text ?? "";
 }
 
-describe("createTimeoutUserTool", () => {
+describe("createDiscordSetUserTimeoutTool", () => {
   test("exposes constrained moderation instructions", () => {
     const tool = makeTool(makeMember());
-    expect(tool.name).toBe("timeout_user");
+    expect(tool.name).toBe("discord_set_user_timeout");
     expect(tool.description).toBe("Temporarily time out one Discord guild member.");
   });
 
@@ -82,30 +83,38 @@ describe("createTimeoutUserTool", () => {
   test("rejects non-positive durations", async () => {
     const member = makeMember();
     const tool = makeTool(member);
-    const result = await tool.execute("call-1", { target: "alice", duration: 0, unit: "seconds" });
+    const result = await tool.execute("call-1", { target: "alice", duration: 0, unit: "minutes" });
     expect(text(result)).toContain("positive");
     expect(member.calls).toHaveLength(0);
   });
 
-  test("rejects durations above ten minutes", async () => {
+  test("rejects durations above Discord's twenty-eight-day maximum", async () => {
     const member = makeMember();
     const tool = makeTool(member);
-    const result = await tool.execute("call-1", { target: "alice", duration: 11, unit: "minutes" });
-    expect(text(result)).toContain("10 minutes");
+    const result = await tool.execute("call-1", { target: "alice", duration: 29, unit: "days" });
+    expect(text(result)).toContain("28 days");
     expect(member.calls).toHaveLength(0);
   });
 
-  test("allows exactly ten minutes and passes Discord timeout milliseconds", async () => {
+  test("allows exactly twenty-eight days and passes Discord timeout milliseconds", async () => {
     const member = makeMember();
     const tool = makeTool(member);
     const result = await tool.execute("call-1", {
       target: "@alice",
-      duration: 10,
-      unit: "minutes",
+      duration: 28,
+      unit: "days",
       reason: "admin asked",
     });
     expect(text(result)).toContain("Timed out @alice");
-    expect(member.calls).toEqual([{ durationMs: MAX_TIMEOUT_SECONDS * 1_000, reason: "admin asked" }]);
+    expect(member.calls).toEqual([{ durationMs: MAX_DISCORD_TIMEOUT_SECONDS * 1_000, reason: "admin asked" }]);
+  });
+
+  test("supports hour durations", async () => {
+    const member = makeMember();
+    const tool = makeTool(member);
+    const result = await tool.execute("call-1", { target: "@alice", duration: 2, unit: "hours" });
+    expect(text(result)).toContain("2 hours");
+    expect(member.calls).toEqual([{ durationMs: 2 * 60 * 60 * 1_000 }]);
   });
 
   test("rejects missing target resolution", async () => {
@@ -115,7 +124,7 @@ describe("createTimeoutUserTool", () => {
   });
 
   test("reports ambiguous target resolution", async () => {
-    const tool = createTimeoutUserTool({
+    const tool = createDiscordSetUserTimeoutTool({
       guildId: "guild-1",
       botUserId: "bot-1",
       guildOwnerId: "owner-1",
@@ -139,8 +148,8 @@ describe("createTimeoutUserTool", () => {
       { target: "owner", duration: 1, unit: "minutes" },
     );
 
-    expect(text(botResult)).toContain("bot itself");
-    expect(text(ownerResult)).toContain("guild owner");
+    expect(text(botResult)).toContain("bot's own timeout");
+    expect(text(ownerResult)).toContain("guild owner's timeout");
   });
 
   test("reports bot permission or hierarchy failures gracefully", async () => {
@@ -155,5 +164,23 @@ describe("createTimeoutUserTool", () => {
 
     expect(text(unmoderatable)).toContain("lack Timeout Members permission");
     expect(text(rejected)).toContain("Failed to time out");
+  });
+});
+
+describe("createDiscordRemoveUserTimeoutTool", () => {
+  test("removes timeout by clearing Discord timeout milliseconds", async () => {
+    const member = makeMember();
+    const tool = createDiscordRemoveUserTimeoutTool({
+      guildId: "guild-1",
+      botUserId: "bot-1",
+      guildOwnerId: "owner-1",
+      isRequesterAdmin: () => Promise.resolve(true),
+      resolveMember: () => Promise.resolve(member),
+    });
+    const result = await tool.execute("call-1", { target: "@alice", reason: "served" });
+
+    expect(tool.name).toBe("discord_remove_user_timeout");
+    expect(text(result)).toContain("Removed timeout from @alice");
+    expect(member.calls).toEqual([{ durationMs: null, reason: "served" }]);
   });
 });

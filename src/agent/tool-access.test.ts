@@ -17,6 +17,8 @@ describe("tool access", () => {
   test("classifies visible write tools", () => {
     expect(isWriteToolName("schedule_message")).toBe(true);
     expect(isWriteToolName("codex_generate_image")).toBe(true);
+    expect(isWriteToolName("discord_set_user_timeout")).toBe(true);
+    expect(isWriteToolName("discord_remove_user_timeout")).toBe(true);
     expect(isWriteToolName("search_channel_messages")).toBe(false);
     expect(isWriteToolName("record_memory")).toBe(false);
   });

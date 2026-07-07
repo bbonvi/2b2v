@@ -64,7 +64,7 @@ Ambient memory extraction is separate from reply triggering. Successful post-rep
 
 ## Safety Boundaries
 
-`timeout_user` is intentionally narrow: rare, admin-requested Discord member timeouts only. Runtime validation must continue rejecting DMs, bot self-timeouts, known guild-owner targets, non-positive durations, and durations above ten minutes.
+`discord_set_user_timeout` and `discord_remove_user_timeout` are intentionally narrow: rare, admin-requested Discord member timeout changes only. Runtime validation must continue rejecting DMs, bot self-timeouts, known guild-owner targets, non-positive durations, and set durations above Discord's 28 day maximum.
 
 Agent schedule tools are current-guild and current-channel scoped. One-off timers longer than JavaScript's maximum timeout must be chunked and re-armed.
 

@@ -65,7 +65,9 @@ export { createChannelListTool, type ChannelListToolDeps, type ChannelInfo } fro
 export { createEmojiListTool, buildEmojiListOutput, type EmojiListToolDeps } from "./emoji-list-tool.ts";
 
 export {
-  createTimeoutUserTool,
+  createDiscordRemoveUserTimeoutTool,
+  createDiscordSetUserTimeoutTool,
+  createDiscordTimeoutTools,
   type TimeoutMember,
   type TimeoutUserToolDeps,
 } from "./timeout-user-tool.ts";

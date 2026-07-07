@@ -53,7 +53,7 @@ import { createScheduleTools } from "./agent/schedule-tool";
 import { createChatUserListTool, type MemberInfo } from "./agent/member-list-tool";
 import { createChannelListTool, type ChannelInfo } from "./agent/channel-list-tool";
 import { createEmojiListTool } from "./agent/emoji-list-tool";
-import { createTimeoutUserTool, MAX_TIMEOUT_SECONDS, type TimeoutMember, type TimeoutMemberResolution } from "./agent/timeout-user-tool";
+import { createDiscordTimeoutTools, MAX_DISCORD_TIMEOUT_SECONDS, type TimeoutMember, type TimeoutMemberResolution } from "./agent/timeout-user-tool";
 import { createMemoryListTool } from "./agent/user-memory-tool";
 import { createListChannelMessagesTool } from "./agent/list-channel-messages-tool";
 import { createOwnMessageTools } from "./agent/own-message-tool";
@@ -2005,7 +2005,7 @@ function buildAgentTools(
     refreshEmojis: async () => fetchEmojiCache(guild),
   });
 
-  const timeoutUserTool = createTimeoutUserTool({
+  const discordTimeoutTools = createDiscordTimeoutTools({
     guildId,
     botUserId: client.user?.id ?? "",
     guildOwnerId: guild.ownerId,
@@ -2255,7 +2255,7 @@ function buildAgentTools(
     },
   });
 
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, timeoutUserTool, memoryListTool, listChannelMessagesTool, ...ownMessageTools, readChatImagesTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memoryListTool, listChannelMessagesTool, ...ownMessageTools, readChatImagesTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (includeImageGenerationTools) {
     const codexImageModel = guildConfig.llmProvider === "openai-codex"
       ? guildConfig.model ?? globalConfig.defaultModel
@@ -2343,8 +2343,8 @@ function buildAgentTools(
     schedule_message: {
       timezone: guildConfig.timezone,
     },
-    timeout_user: {
-      maxTimeoutMinutes: MAX_TIMEOUT_SECONDS / 60,
+    discord_set_user_timeout: {
+      maxTimeoutDays: MAX_DISCORD_TIMEOUT_SECONDS / 86_400,
     },
   };
 
