@@ -52,6 +52,8 @@ export async function processHistory(
   // 5. Trim older slice only (newer messages kept intact for recency)
   const olderTrimmed = trimMessages(older, config.trim.messageCharLimit);
   const newerTrimmed = newer;
+  const newerMessages = [...newerTrimmed, latestWithDisplayName];
+  const oldestVisibleMessageId = [...olderTrimmed, ...newerTrimmed].find((m) => m.isPromptOnly !== true)?.id;
 
   // 6. Fetch missing reply targets from Discord
   const allForFallback = [...olderTrimmed, ...newerTrimmed, latestWithDisplayName];
@@ -96,14 +98,16 @@ export async function processHistory(
 
   // 10. Format newer slice with date stamps
   let newerText = "";
-  const newerMessages = [...newerTrimmed, latestWithDisplayName];
   if (newerMessages.length > 0) {
     const newerDateEntries = insertDateStamps(newerMessages, config.timezone, {
       minGapMs: RECENT_HISTORY_DATE_STAMP_GAP_MS,
       nowMs,
       includeRelativeAgo: true,
     });
-    const lines: string[] = [NEWER_LEGEND];
+    const lines: string[] = [
+      NEWER_LEGEND,
+      ...(oldestVisibleMessageId !== undefined ? [`History cursor: oldest_visible_message_id=${oldestVisibleMessageId}`] : []),
+    ];
     for (const entry of newerDateEntries) {
       if (entry.type === "date") {
         lines.push(entry.text);

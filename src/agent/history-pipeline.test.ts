@@ -64,6 +64,7 @@ describe("processHistory", () => {
     expect(result.olderText).toBe("");
     expect(result.newerText).toStartWith("## Chat History\n");
     expect(result.newerText).toContain("[@alice (MsgID: 100)]: hi");
+    expect(result.newerText).not.toContain("oldest_visible_message_id");
   });
 
   test("single message goes to newer slice", async () => {
@@ -73,6 +74,7 @@ describe("processHistory", () => {
 
     expect(result.olderText).toBe("");
     expect(result.newerText).toStartWith("## Chat History\n");
+    expect(result.newerText).toContain("History cursor: oldest_visible_message_id=1");
     expect(result.newerText).toContain("[@alice (MsgID: 1)]: first");
     expect(result.newerText).toContain("[@alice (MsgID: 100)]: latest");
   });
@@ -133,6 +135,7 @@ describe("processHistory", () => {
     expect(result.olderText).toContain(OLDER_LEGEND);
     expect(result.olderText).toContain("[1970-01-01");
     expect(result.newerText).toStartWith("## Chat History\n");
+    expect(result.newerText).toContain("History cursor: oldest_visible_message_id=1");
   });
 
   test("older cached text remains stable while recent history grows inside a chunk", async () => {
