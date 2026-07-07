@@ -1,1 +1,1 @@
-Record durable memory updates or short-lived scratchpad updates after a Discord turn. Use focused batches: add, update/merge, expire/delete, or pair user+self memories when both matter. Stop when remaining edits are low-value.
+Record durable memory updates or short-lived scratchpad updates after a Discord turn. Use focused batches only when the pass contains separate durable outcomes or cleanup/merge work. Prefer one consolidated update for one social beat.
