@@ -162,5 +162,5 @@ export const NEWER_LEGEND = [
 /** The legend block prepended to the older slice. */
 export const OLDER_LEGEND = [
   "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyGIFImageIDs/ReplyStickerImageIDs/ReplyCaptions/ReplyCaptionByImageID/ImageIDs/GIFImageIDs/StickerImageIDs/Captions/CaptionByImageID/ImageJob)]: content",
-  "Legend: Older history date stamps appear at the first visible message and after roughly 5+ minute gaps; time markers use [...]. Newer history exposes MsgID for reply_to; merged messages use history-only [msg-break], quotes are excerpts for search_messages(id), and images/GIF first frames/sticker previews use read_chat_images([id]).",
+  "Legend: Older history date stamps appear at the first visible message and after roughly 5+ minute gaps; time markers use [...]. Newer history exposes MsgID for reply_to; merged messages use history-only [msg-break], quotes are excerpts for search_channel_messages(id), and images/GIF first frames/sticker previews use read_chat_images([id]).",
 ].join("\n");

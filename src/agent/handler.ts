@@ -1191,7 +1191,7 @@ async function completeModelTurnWithRetries(input: {
 }
 
 const PARALLEL_SAFE_READ_ONLY_TOOLS = new Set([
-  "chat_history",
+  "list_channel_messages",
   "fetch_images",
   "fetch_url",
   "list_memories",
@@ -1201,7 +1201,7 @@ const PARALLEL_SAFE_READ_ONLY_TOOLS = new Set([
   "list_channels",
   "read_chat_images",
   "read_user_avatar",
-  "search_messages",
+  "search_channel_messages",
   "summarize_video",
   "web_search",
 ]);

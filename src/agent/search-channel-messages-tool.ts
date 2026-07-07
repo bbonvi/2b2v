@@ -21,7 +21,7 @@ interface AttachmentInfo {
   size: number;
 }
 
-export interface SearchToolDeps {
+export interface SearchChannelMessagesToolDeps {
   db: Database;
   qdrant: QdrantClient;
   guildId: string;
@@ -34,12 +34,12 @@ export interface SearchToolDeps {
   resolveUsernameInGuild?: (username: string, guildId: string) => Promise<string | undefined>;
   resolveChannel?: (channelId: string) => Promise<{ guildId: string; channelId: string } | null>;
   canAccessGuild?: (guildId: string) => Promise<boolean>;
-  /** Message IDs already visible in prompt context; search should not repeat them. */
+  /** Message IDs already visible in prompt context; semantic/literal search should not repeat them. */
   excludedMessageIds?: Iterable<string>;
   fetchMessage?: (channelId: string, messageId: string) => Promise<{ attachments: AttachmentInfo[] } | null>;
 }
 
-const SearchParams = Type.Object({
+const SearchChannelMessagesParams = Type.Object({
   mode: Type.Optional(Type.Union([
     Type.Literal("semantic"),
     Type.Literal("literal"),
@@ -78,14 +78,14 @@ export function normalizeUsername(raw: string): string {
  * Create a semantic search agent tool bound to a guild context.
  * Embeds the query, runs Qdrant search + SQLite metadata lookup, returns formatted excerpts.
  */
-export function createSearchTool(deps: SearchToolDeps): AgentTool {
+export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolDeps): AgentTool {
   const { db, qdrant, guildId, currentChannelId, timezone, embed, resolveUsername } = deps;
 
   return {
-    name: "search_messages",
-    label: "Search Messages",
+    name: "search_channel_messages",
+    label: "Search Channel Messages",
     description: "Search Discord message history.",
-    parameters: SearchParams,
+    parameters: SearchChannelMessagesParams,
     execute: async (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as {
         mode?: "semantic" | "literal" | "id" | "context";
@@ -145,18 +145,18 @@ export function createSearchTool(deps: SearchToolDeps): AgentTool {
       let results: MessageSearchResult[];
 
       if (mode === "id") {
-        if (p.query === undefined || p.query.trim() === "") {
+        const messageId = p.message_id !== undefined && p.message_id.trim() !== ""
+          ? p.message_id.trim()
+          : p.query?.trim();
+        if (messageId === undefined || messageId === "") {
           return { content: [{ type: "text", text: "Message ID is required for id lookup." }], details: undefined };
         }
-        const result = getMessageById(db, p.query, targetGuildId);
+        const result = getMessageById(db, messageId, targetGuildId);
         if (result === null) {
           return { content: [{ type: "text", text: "Message not found." }], details: undefined };
         }
         if (scopedChannelId !== undefined && result.channelId !== scopedChannelId) {
           return { content: [{ type: "text", text: "Message not found in that channel." }], details: undefined };
-        }
-        if (excludedMessageIds.includes(result.id)) {
-          return { content: [{ type: "text", text: "Message is already present in the current prompt context." }], details: { count: 0 } };
         }
         results = [result];
       } else if (mode === "context") {

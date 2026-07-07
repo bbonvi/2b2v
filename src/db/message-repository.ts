@@ -1026,43 +1026,87 @@ export function getParentPreContext(
   return hydrateHistoryRows(db, rows);
 }
 
-export interface ChatHistoryRow {
+export interface ChannelMessageRow {
   id: string;
   authorUsername: string;
   content: string;
   createdAt: number;
 }
 
+export interface ListChannelMessagesOptions {
+  limit: number;
+  beforeMessageId?: string;
+  afterMessageId?: string;
+}
+
 /**
- * Fetch channel history for the chat_history tool.
+ * Fetch channel history for the list_channel_messages tool.
  * Returns chronological order (oldest first).
  *
  * Note: Includes synthetic events (thread creation, etc.) but excludes
  * prompt-only assistant traces that should be visible only in assembled context.
  */
-export function getChatHistory(
+export function listChannelMessages(
   db: Database,
   guildId: string,
   channelId: string,
-  limit: number,
-): ChatHistoryRow[] {
-  const rows = db.raw
-    .prepare(
-      `SELECT id, author_username, translated_content, created_at
-       FROM messages
-       WHERE guild_id = ? AND channel_id = ? AND is_prompt_only = 0
-       ORDER BY created_at DESC
-       LIMIT ?`
-    )
-    .all(guildId, channelId, limit) as Array<{
-      id: string;
-      author_username: string;
-      translated_content: string;
-      created_at: number;
-    }>;
+  options: ListChannelMessagesOptions,
+): ChannelMessageRow[] | null {
+  const limit = Math.max(1, options.limit);
+  const cursorId = options.beforeMessageId ?? options.afterMessageId;
+  const anchor = cursorId === undefined
+    ? null
+    : db.raw
+      .prepare(
+        `SELECT id, created_at
+         FROM messages
+         WHERE id = ? AND guild_id = ? AND channel_id = ? AND is_prompt_only = 0`
+      )
+      .get(cursorId, guildId, channelId) as { id: string; created_at: number } | null;
+  if (cursorId !== undefined && anchor === null) return null;
 
-  // Reverse to chronological order (oldest first)
-  rows.reverse();
+  const rows = (() => {
+    if (options.beforeMessageId !== undefined && anchor !== null) {
+      return db.raw
+        .prepare(
+          `SELECT id, author_username, translated_content, created_at
+           FROM messages
+           WHERE guild_id = ? AND channel_id = ? AND is_prompt_only = 0
+             AND (created_at < ? OR (created_at = ? AND id < ?))
+           ORDER BY created_at DESC, id DESC
+           LIMIT ?`
+        )
+        .all(guildId, channelId, anchor.created_at, anchor.created_at, anchor.id, limit);
+    }
+    if (options.afterMessageId !== undefined && anchor !== null) {
+      return db.raw
+        .prepare(
+          `SELECT id, author_username, translated_content, created_at
+           FROM messages
+           WHERE guild_id = ? AND channel_id = ? AND is_prompt_only = 0
+             AND (created_at > ? OR (created_at = ? AND id > ?))
+           ORDER BY created_at ASC, id ASC
+           LIMIT ?`
+        )
+        .all(guildId, channelId, anchor.created_at, anchor.created_at, anchor.id, limit);
+    }
+    return db.raw
+      .prepare(
+        `SELECT id, author_username, translated_content, created_at
+         FROM messages
+         WHERE guild_id = ? AND channel_id = ? AND is_prompt_only = 0
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?`
+      )
+      .all(guildId, channelId, limit);
+  })() as Array<{
+    id: string;
+    author_username: string;
+    translated_content: string;
+    created_at: number;
+  }>;
+
+  if (options.afterMessageId === undefined) rows.reverse();
 
   return rows.map((r) => ({
     id: r.id,

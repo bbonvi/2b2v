@@ -1020,7 +1020,7 @@ describe("handleMessage", () => {
 
   test("streams final message envelopes as they close", async () => {
     const lookupTool: AgentTool = {
-      name: "search_messages",
+      name: "search_channel_messages",
       label: "Search",
       description: "Search",
       parameters: Type.Object({ query: Type.String() }),
@@ -1037,12 +1037,12 @@ describe("handleMessage", () => {
             {
               id: "call-search",
               type: "function",
-              function: { name: "search_messages", arguments: "{\"query\":\"x\"}" },
+              function: { name: "search_channel_messages", arguments: "{\"query\":\"x\"}" },
             },
             {
               id: "call-search-skipped",
               type: "function",
-              function: { name: "search_messages", arguments: "{\"query\":\"y\"}" },
+              function: { name: "search_channel_messages", arguments: "{\"query\":\"y\"}" },
             },
           ],
           rawResponse: {},
@@ -1093,7 +1093,7 @@ describe("handleMessage", () => {
 
   test("streams ordinary first-turn answers even when tools are available", async () => {
     const lookupTool: AgentTool = {
-      name: "search_messages",
+      name: "search_channel_messages",
       label: "Search",
       description: "Search",
       parameters: Type.Object({ query: Type.String() }),

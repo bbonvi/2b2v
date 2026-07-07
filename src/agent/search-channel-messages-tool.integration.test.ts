@@ -3,7 +3,7 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "../db/database";
 import { createQdrantClient, ensureCollection, qdrantCollectionName } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
-import { createSearchTool } from "./search-tool";
+import { createSearchChannelMessagesTool } from "./search-channel-messages-tool";
 import { createMockPipeline } from "../embeddings/test-utils";
 import type { EmbeddingPipeline } from "../embeddings/pipeline";
 interface SearchResult {
@@ -30,8 +30,8 @@ const _hour = 60 * 60 * 1000;
 // Mock username → userId resolver (identity for tests)
 const mockResolveUsername = (username: string): string | undefined => username;
 
-function createTestSearchTool(deps: Omit<Parameters<typeof createSearchTool>[0], "currentChannelId"> & { currentChannelId?: string }) {
-  return createSearchTool({ currentChannelId: "c1", ...deps });
+function createTestSearchTool(deps: Omit<Parameters<typeof createSearchChannelMessagesTool>[0], "currentChannelId"> & { currentChannelId?: string }) {
+  return createSearchChannelMessagesTool({ currentChannelId: "c1", ...deps });
 }
 
 beforeAll(async () => {
@@ -89,10 +89,10 @@ afterAll(async () => {
   try { await qdrant.deleteCollection(qdrantCollectionName(qdrant)); } catch { /* expected */ }
 });
 
-describe("createSearchTool", () => {
-  test("returns search_messages AgentTool with correct metadata", () => {
+describe("createSearchChannelMessagesTool", () => {
+  test("returns search_channel_messages AgentTool with correct metadata", () => {
     const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
-    expect(tool.name).toBe("search_messages");
+    expect(tool.name).toBe("search_channel_messages");
     expect(tool.label).toBeDefined();
     expect(tool.description).toBeDefined();
     expect(tool.parameters).toBeDefined();
@@ -267,7 +267,7 @@ describe("reply-to display", () => {
   });
 });
 
-describe("createSearchTool attachment support", () => {
+describe("createSearchChannelMessagesTool attachment support", () => {
   test("does not fetch attachment info by default", async () => {
     await insertWithEmbedding("m1", "check this diagram");
     let called = false;
@@ -413,6 +413,34 @@ describe("search mode: id", () => {
     const result = await tool.execute("tc1", { query: "m1", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
     const text = getResultText(result);
     expect(text).toContain("target content");
+    expect(result.details.count).toBe(1);
+  });
+
+  test("ID lookup can expand a message already visible in prompt context", async () => {
+    insertMessage("m1", "full target content that was trimmed in context");
+    const tool = createTestSearchTool({
+      db,
+      qdrant,
+      guildId: "g1",
+      timezone: "UTC",
+      embed: pipeline,
+      resolveUsername: mockResolveUsername,
+      excludedMessageIds: ["m1"],
+    });
+    const result = await tool.execute("tc1", { query: "m1", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+
+    expect(text).toContain("full target content");
+    expect(result.details.count).toBe(1);
+  });
+
+  test("ID lookup accepts message_id", async () => {
+    insertMessage("m1", "target content via message_id");
+    const tool = createTestSearchTool({ db, qdrant, guildId: "g1", timezone: "UTC", embed: pipeline, resolveUsername: mockResolveUsername });
+    const result = await tool.execute("tc1", { message_id: "m1", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
+    const text = getResultText(result);
+
+    expect(text).toContain("target content via message_id");
     expect(result.details.count).toBe(1);
   });
 

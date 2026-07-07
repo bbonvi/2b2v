@@ -50,7 +50,7 @@ Discord-deleted messages are tombstoned as `[deleted]` in SQLite, not removed fr
 
 Merged history rows must preserve all component Discord message IDs. Reply resolution and prompt-visible search exclusions must treat aliases as present.
 
-`search_messages` must exclude messages already visible in prompt history and overfetch before that filtering.
+`search_channel_messages` semantic/literal modes must exclude messages already visible in prompt history and overfetch before that filtering; id lookup may return visible messages so trimmed content can be expanded.
 
 Memory scopes have product meaning: guild memories are server-local, user memories follow the Discord user across guilds, and self memories are the bot/persona's portable private context. Scratchpad memories must expire.
 

@@ -48,7 +48,7 @@ export {
   type RecordMemoryToolDeps,
 } from "./memory-service.ts";
 
-export { createSearchTool, type SearchToolDeps } from "./search-tool.ts";
+export { createSearchChannelMessagesTool, type SearchChannelMessagesToolDeps } from "./search-channel-messages-tool.ts";
 
 export {
   createScheduleTool,
@@ -72,7 +72,13 @@ export {
 
 export { createMemoryListTool, createUserMemoryTool, type MemoryListToolDeps, type UserMemoryToolDeps } from "./user-memory-tool.ts";
 
-export { createChatHistoryTool, type ChatHistoryToolDeps, type ChatHistoryMessage } from "./chat-history-tool.ts";
+export {
+  createListChannelMessagesTool,
+  type ListChannelMessagesToolDeps,
+  type ListChannelMessage,
+  type ListChannelMessagesInput,
+  type ListChannelMessagesPage,
+} from "./list-channel-messages-tool.ts";
 
 export { createOwnMessageTools, type OwnMessageToolsDeps } from "./own-message-tool.ts";
 

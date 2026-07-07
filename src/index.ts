@@ -28,7 +28,7 @@ import { typingSimulationDelayMs } from "./agent/typing-simulation";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
-import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, getRoutedMessageSource, getLatestMessageActivityBefore, type MessageActivity } from "./db/message-repository";
+import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listChannelMessages, getRoutedMessageSource, getLatestMessageActivityBefore, type MessageActivity } from "./db/message-repository";
 import { cleanupDeletedDiscordMessage } from "./db/message-cleanup";
 import {
   countMessagesSinceMemoryExtraction,
@@ -48,14 +48,14 @@ import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
 import type { TtsResult } from "./tts/types";
 import { buildMemoryContext, buildVisibleUserMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
-import { createSearchTool } from "./agent/search-tool";
+import { createSearchChannelMessagesTool } from "./agent/search-channel-messages-tool";
 import { createScheduleTools } from "./agent/schedule-tool";
 import { createChatUserListTool, type MemberInfo } from "./agent/member-list-tool";
 import { createChannelListTool, type ChannelInfo } from "./agent/channel-list-tool";
 import { createEmojiListTool } from "./agent/emoji-list-tool";
 import { createTimeoutUserTool, MAX_TIMEOUT_SECONDS, type TimeoutMember, type TimeoutMemberResolution } from "./agent/timeout-user-tool";
 import { createMemoryListTool } from "./agent/user-memory-tool";
-import { createChatHistoryTool } from "./agent/chat-history-tool";
+import { createListChannelMessagesTool } from "./agent/list-channel-messages-tool";
 import { createOwnMessageTools } from "./agent/own-message-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
 import { createReadChatImagesTool } from "./agent/read-chat-images-tool";
@@ -1878,7 +1878,7 @@ function buildAgentTools(
     return resolveGuildUsername(targetGuild, username);
   };
 
-  const searchTool = createSearchTool({
+  const searchTool = createSearchChannelMessagesTool({
     db,
     qdrant,
     guildId,
@@ -2107,13 +2107,18 @@ function buildAgentTools(
     },
   });
 
-  const chatHistoryTool = createChatHistoryTool({
+  const listChannelMessagesTool = createListChannelMessagesTool({
     guildId,
     timezone: guildConfig.timezone,
-    fetchMessages: async (historyChannelId, limit) => {
-      const channel = await fetchAccessibleGuildChannel(historyChannelId);
-      if (channel === null || !("messages" in channel)) return [];
-      return getChatHistory(db, channel.guildId, channel.id, limit);
+    fetchMessages: async (input) => {
+      const channel = await fetchAccessibleGuildChannel(input.channelId);
+      if (channel === null || !("messages" in channel)) return null;
+      const messages = listChannelMessages(db, channel.guildId, channel.id, {
+        limit: input.limit,
+        ...(input.beforeMessageId !== undefined ? { beforeMessageId: input.beforeMessageId } : {}),
+        ...(input.afterMessageId !== undefined ? { afterMessageId: input.afterMessageId } : {}),
+      });
+      return messages === null ? null : { messages };
     },
   });
 
@@ -2250,7 +2255,7 @@ function buildAgentTools(
     },
   });
 
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, timeoutUserTool, memoryListTool, chatHistoryTool, ...ownMessageTools, readChatImagesTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, timeoutUserTool, memoryListTool, listChannelMessagesTool, ...ownMessageTools, readChatImagesTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (includeImageGenerationTools) {
     const codexImageModel = guildConfig.llmProvider === "openai-codex"
       ? guildConfig.model ?? globalConfig.defaultModel

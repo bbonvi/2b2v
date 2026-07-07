@@ -28,13 +28,13 @@ import { getRelationshipProfile, renderRelationshipPromptContext } from "../rela
 import type { RequestLogStore } from "./store";
 
 const PROMPT_LAB_READ_TOOL_NAMES = new Set([
-  "search_messages",
+  "search_channel_messages",
   "list_scheduled_messages",
   "list_chat_users",
   "list_channels",
   "list_emojis",
   "list_memories",
-  "chat_history",
+  "list_channel_messages",
   "read_chat_images",
   "read_user_avatar",
   "fetch_images",

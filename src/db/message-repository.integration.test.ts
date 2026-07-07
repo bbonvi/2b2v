@@ -3,7 +3,7 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createDatabase, type Database } from "./database";
 import { createQdrantClient, ensureCollection, qdrantCollectionName } from "../qdrant/client";
 import { upsertPoint } from "../qdrant/adapter";
-import { searchMessages, getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, getChatHistory, markDiscordMessageDeleted } from "./message-repository";
+import { searchMessages, getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listChannelMessages, markDiscordMessageDeleted } from "./message-repository";
 import { createMockPipeline } from "../embeddings/test-utils";
 
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
@@ -1134,14 +1134,14 @@ describe("insertSyntheticEvent", () => {
   });
 });
 
-describe("getChatHistory", () => {
+describe("listChannelMessages", () => {
   test("returns messages in chronological order (oldest first)", () => {
     const now = Date.now();
     insertMessage("older", { guildId: "g1", channelId: "c1", createdAt: now - 2000 });
     insertMessage("newer", { guildId: "g1", channelId: "c1", createdAt: now - 1000 });
     insertMessage("newest", { guildId: "g1", channelId: "c1", createdAt: now });
 
-    const results = getChatHistory(db, "g1", "c1", 10);
+    const results = listChannelMessages(db, "g1", "c1", { limit: 10 }) ?? [];
     expect(results.length).toBe(3);
     expect(results[0]?.id).toBe("older");
     expect(results[1]?.id).toBe("newer");
@@ -1153,7 +1153,7 @@ describe("getChatHistory", () => {
     insertMessage("m2", { guildId: "g1", channelId: "c2" });
     insertMessage("m3", { guildId: "g2", channelId: "c1" });
 
-    const results = getChatHistory(db, "g1", "c1", 10);
+    const results = listChannelMessages(db, "g1", "c1", { limit: 10 }) ?? [];
     expect(results.length).toBe(1);
     expect(results[0]?.id).toBe("m1");
   });
@@ -1163,11 +1163,41 @@ describe("getChatHistory", () => {
     insertMessage("m2", { guildId: "g1", channelId: "c1", createdAt: Date.now() - 2000 });
     insertMessage("m3", { guildId: "g1", channelId: "c1", createdAt: Date.now() - 1000 });
 
-    const results = getChatHistory(db, "g1", "c1", 2);
+    const results = listChannelMessages(db, "g1", "c1", { limit: 2 }) ?? [];
     expect(results.length).toBe(2);
     // Limit takes most recent 2, then reverses to chronological
     expect(results[0]?.id).toBe("m2");
     expect(results[1]?.id).toBe("m3");
+  });
+
+  test("pages older messages before a cursor", () => {
+    const now = Date.now();
+    insertMessage("m1", { guildId: "g1", channelId: "c1", createdAt: now - 4000 });
+    insertMessage("m2", { guildId: "g1", channelId: "c1", createdAt: now - 3000 });
+    insertMessage("m3", { guildId: "g1", channelId: "c1", createdAt: now - 2000 });
+    insertMessage("m4", { guildId: "g1", channelId: "c1", createdAt: now - 1000 });
+
+    const results = listChannelMessages(db, "g1", "c1", { limit: 2, beforeMessageId: "m4" }) ?? [];
+
+    expect(results.map((r) => r.id)).toEqual(["m2", "m3"]);
+  });
+
+  test("pages newer messages after a cursor", () => {
+    const now = Date.now();
+    insertMessage("m1", { guildId: "g1", channelId: "c1", createdAt: now - 4000 });
+    insertMessage("m2", { guildId: "g1", channelId: "c1", createdAt: now - 3000 });
+    insertMessage("m3", { guildId: "g1", channelId: "c1", createdAt: now - 2000 });
+    insertMessage("m4", { guildId: "g1", channelId: "c1", createdAt: now - 1000 });
+
+    const results = listChannelMessages(db, "g1", "c1", { limit: 2, afterMessageId: "m1" }) ?? [];
+
+    expect(results.map((r) => r.id)).toEqual(["m2", "m3"]);
+  });
+
+  test("returns null for missing cursor", () => {
+    const results = listChannelMessages(db, "g1", "c1", { limit: 2, beforeMessageId: "missing" });
+
+    expect(results).toBeNull();
   });
 
   test("includes synthetic events", () => {
@@ -1182,7 +1212,7 @@ describe("getChatHistory", () => {
       threadName: "Discussion Thread",
     });
 
-    const results = getChatHistory(db, "g1", "c1", 10);
+    const results = listChannelMessages(db, "g1", "c1", { limit: 10 }) ?? [];
     expect(results.length).toBe(2);
     // Synthetic event should be included and formatted
     const syntheticResult = results.find((r) => r.id === "syn-event");
@@ -1202,14 +1232,14 @@ describe("getChatHistory", () => {
       replyToId: "real-msg",
     });
 
-    const results = getChatHistory(db, "g1", "c1", 10);
+    const results = listChannelMessages(db, "g1", "c1", { limit: 10 }) ?? [];
     expect(results.map((r) => r.id)).toEqual(["real-msg"]);
   });
 
-  test("returns correct ChatHistoryRow structure", () => {
+  test("returns correct ChannelMessageRow structure", () => {
     insertMessage("m1", { guildId: "g1", channelId: "c1", authorUsername: "alice", translatedContent: "Hello world" });
 
-    const results = getChatHistory(db, "g1", "c1", 10);
+    const results = listChannelMessages(db, "g1", "c1", { limit: 10 }) ?? [];
     expect(results.length).toBe(1);
     const row = results[0];
     expect(row?.id).toBe("m1");

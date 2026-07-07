@@ -254,14 +254,14 @@ describe("RequestLog", () => {
   test("recordToolStart + recordToolEnd tracks tool with duration", () => {
     const logger = createLogger({ level: "info" });
     const rl = new RequestLog("g1", "c1");
-    rl.recordToolStart("tc1", "search_messages", { query: "test", limit: 10 });
+    rl.recordToolStart("tc1", "search_channel_messages", { query: "test", limit: 10 });
     rl.recordToolEnd("tc1", false);
     rl.emit(logger);
 
     const entry = lastLog();
     const tools = entry.tools as Array<Record<string, unknown>>;
     expect(tools.length).toBe(1);
-    expect(tools[0]?.tool).toBe("search_messages");
+    expect(tools[0]?.tool).toBe("search_channel_messages");
     expect(tools[0]?.args).toEqual({ query: "test", limit: 10 });
     expect(typeof tools[0]?.durationMs).toBe("number");
   });
