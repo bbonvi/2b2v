@@ -734,8 +734,9 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       if (afterTrigger.some((message) => message.isBot && message.isPromptOnly !== true)) {
         return { ok: false, reason: "2b spoke after trigger" };
       }
+      if (newHumanMessages.length > 0) return { ok: false, reason: "newer human message exists" };
     }
-    if (newHumanMessages.length > config.maxNewMessagesBeforeDrop) return { ok: false, reason: "too many newer human messages" };
+    if (candidate.kind !== "ambient_pickup" && newHumanMessages.length > config.maxNewMessagesBeforeDrop) return { ok: false, reason: "too many newer human messages" };
     if (afterTrigger.some((message) => !message.isBot && message.replyToId === candidate.triggerMessageId && message.authorId !== candidate.userId)) {
       return { ok: false, reason: "another human replied to trigger" };
     }
