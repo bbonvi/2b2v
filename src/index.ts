@@ -102,7 +102,7 @@ import { renderPromptTemplate } from "./config/prompt-template";
 import { resolveReactionEmojiInput } from "./discord/reaction-emoji";
 import { createDiscordReplyFallbackDeps, createSyntheticReplyFallbackDeps, syncDeletedOwnBotMessage, syncEditedOwnBotMessage } from "./discord/reply-fallback-runtime";
 import { join } from "path";
-import { mkdirSync, existsSync, readFileSync, watch } from "fs";
+import { mkdirSync, existsSync, readFileSync, readdirSync, statSync, watch } from "fs";
 import type { Database } from "./db/database";
 import { ChannelType, PermissionFlagsBits, type Client, type Guild, type GuildBasedChannel, type GuildMember, type Message, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
 
@@ -3134,7 +3134,32 @@ client.on("messageDelete", (message) => void (async () => {
 
 // --- Hot-reload config watcher ---
 const CONFIG_RELOAD_DEBOUNCE_MS = 500;
+const CONFIG_RELOAD_POLL_MS = 5000;
 let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+let configReloadPollTimer: ReturnType<typeof setInterval> | null = null;
+let lastConfigFingerprint = configReloadFingerprint();
+
+function scheduleConfigReload(): void {
+  if (reloadTimer !== null) clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => void reloadConfigs(), CONFIG_RELOAD_DEBOUNCE_MS);
+}
+
+function configReloadFingerprint(): string {
+  const paths = ["config/config.yaml", "config/guilds"];
+  const parts: string[] = [];
+  for (const path of paths) {
+    if (!existsSync(path)) continue;
+    const stat = statSync(path);
+    parts.push(`${path}:${stat.mtimeMs}:${stat.size}`);
+    if (!stat.isDirectory()) continue;
+    for (const entry of readdirSync(path).filter((name) => name.endsWith(".yaml") || name.endsWith(".yml")).sort()) {
+      const filePath = `${path}/${entry}`;
+      const fileStat = statSync(filePath);
+      if (fileStat.isFile()) parts.push(`${filePath}:${fileStat.mtimeMs}:${fileStat.size}`);
+    }
+  }
+  return parts.join("|");
+}
 
 async function reloadConfigs(): Promise<void> {
   try {
@@ -3172,19 +3197,27 @@ async function reloadConfigs(): Promise<void> {
 
 if (existsSync("config")) {
   const watcher = watch("config", { recursive: true }, (_event, _filename) => {
-    if (reloadTimer !== null) clearTimeout(reloadTimer);
-    reloadTimer = setTimeout(() => void reloadConfigs(), CONFIG_RELOAD_DEBOUNCE_MS);
+    lastConfigFingerprint = configReloadFingerprint();
+    scheduleConfigReload();
   });
 
   // Prevent watcher from keeping the process alive during shutdown
   watcher.unref();
   log.info("config hot-reload watcher started");
+
+  configReloadPollTimer = setInterval(() => {
+    const fingerprint = configReloadFingerprint();
+    if (fingerprint === lastConfigFingerprint) return;
+    lastConfigFingerprint = fingerprint;
+    scheduleConfigReload();
+  }, CONFIG_RELOAD_POLL_MS);
+  configReloadPollTimer.unref();
+  log.info("config hot-reload poller started", { intervalMs: CONFIG_RELOAD_POLL_MS });
 }
 
 if (existsSync("prompts")) {
   const watcher = watch("prompts", { recursive: true }, (_event, _filename) => {
-    if (reloadTimer !== null) clearTimeout(reloadTimer);
-    reloadTimer = setTimeout(() => void reloadConfigs(), CONFIG_RELOAD_DEBOUNCE_MS);
+    scheduleConfigReload();
   });
 
   watcher.unref();
@@ -3289,6 +3322,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(memoryCleanupTimer);
   clearInterval(vpnSessionCleanupTimer);
   clearInterval(agentJobCleanupTimer);
+  if (configReloadPollTimer !== null) clearInterval(configReloadPollTimer);
   for (const d of dispatchers.values()) d.dispose();
   dispatchers.clear();
   ambientRuntime.clearAmbientAttentionState();
