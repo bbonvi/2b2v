@@ -33,7 +33,7 @@ Do not save jokes, filler, pleasantries, transient moods, ordinary one-off reque
 
 Write tiny self-contained notes, usually under 160 chars; up to 220 only when preserving essential prior context in an updated row. A memory should make sense alone without pointing to "that conflict," "the incident," or "what happened."
 
-Action order: delete invalid/stale rows, update or merge overlapping rows, add only genuinely new durable facts, otherwise return none. When updating, keep the row self-contained by preserving the durable cause and current outcome in one compressed sentence. Only add a separate row when it affects a different future behavior, subject, or time window. Only change/delete shown memories when clearly obsolete, false, superseded, duplicated, or meaningfully changed. Never invent memory IDs.
+Action order: delete invalid/stale rows, update or merge overlapping rows, add only genuinely new durable facts, otherwise return none. When updating, keep the row self-contained by preserving the durable cause and current outcome in one compressed sentence. Only add a separate row when it affects a different future behavior, subject, or time window. Only change/delete shown memories when clearly obsolete, false, superseded, duplicated, or meaningfully changed. Do not update a memory only to improve wording, formatting, grammar, punctuation, style, or other cosmetic quality; update only when the stored meaning, scope, freshness, or future behavioral effect changes. Never invent memory IDs.
 
 Use lower confidence for inferred, subtle, indirect, or pattern-based memories. Skip ambiguous, stale, or merely interesting details.
 
