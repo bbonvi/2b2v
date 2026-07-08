@@ -39,6 +39,8 @@ export interface HistoryMessage {
   relatedThreadId: string | null;
   /** Runtime-only prompt annotations, e.g. async jobs triggered by this message. */
   jobAnnotations?: string[];
+  /** Runtime-only prompt markers, e.g. the message that caused this turn. */
+  historyAnnotations?: string[];
   /** Durable reaction summary shown only in volatile recent history. */
   reactions?: string;
 }

@@ -85,6 +85,9 @@ export function formatMessageLine(input: FormatInput): string {
   if (message.jobAnnotations !== undefined && message.jobAnnotations.length > 0) {
     metaParts.push(...message.jobAnnotations);
   }
+  if (message.historyAnnotations !== undefined && message.historyAnnotations.length > 0) {
+    metaParts.push(...message.historyAnnotations);
+  }
   if (includeMessageIds === true && message.reactions !== undefined && message.reactions !== "") {
     metaParts.push(`Reactions: ${message.reactions}`);
   }
@@ -154,7 +157,7 @@ function formatDisplayNameSuffix(
 
 /** The legend block prepended to the newer slice. */
 export const NEWER_LEGEND = [
-  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyGIFImageIDs/ReplyStickerImageIDs/ReplyCaptions/ReplyCaptionByImageID/ImageIDs/GIFImageIDs/StickerImageIDs/Captions/CaptionByImageID/ImageJob/Reactions)]: content",
+  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyGIFImageIDs/ReplyStickerImageIDs/ReplyCaptions/ReplyCaptionByImageID/ImageIDs/GIFImageIDs/StickerImageIDs/Captions/CaptionByImageID/ImageJob/Reactions/<trigger>)]: content",
   "Legend: Recent history date stamps appear at the first visible message and after roughly 1+ minute gaps; stamps include local time and relative age.",
   "Legend: Parenthesized names are current Discord display names, not stable identity, and may contain jokes, moods, or temporary labels; use @username for exact pings.",
 ].join("\n");

@@ -28,6 +28,26 @@ import { countUserMemoriesByUser, listMemories } from "../db/memory-repository";
 import { channelDisplayName, createTargetChannelResolver } from "../discord/message-sender";
 import { createStoredImageAttachmentResolver } from "../agent/stored-image-attachments";
 import { createGeneratedImageRuntime, shortQuote } from "../agent/generated-image-runtime";
+import { formatLocalWallClock } from "../time/agent-time";
+
+export function renderAmbientHistory(input: {
+  history: HistoryMessage[];
+  timezone: string;
+  triggerMessageIds?: readonly string[];
+  followUpAnchorMessageId?: string;
+}): string {
+  const triggerIds = new Set(input.triggerMessageIds ?? []);
+  return input.history.map((message) => {
+    const who = message.isBot ? "2B" : message.author;
+    const marker = message.id === input.followUpAnchorMessageId
+      ? " <follow_up_anchor>"
+      : triggerIds.has(message.id)
+        ? " <trigger>"
+        : "";
+    const reply = message.replyToId !== null ? ` reply_to=${message.replyToId}` : "";
+    return `[${formatLocalWallClock(message.timestamp, input.timezone)}] ${who} (${message.authorId})${reply}${marker}: ${message.content}`;
+  }).join("\n");
+}
 
 export type AmbientRuntime = {
   runAmbientInitiativeOpportunity: (guildId: string, forcedKind?: AmbientInitiativeKind, mode?: "automatic" | "draft" | "shadow", runToken?: string) => Promise<{ requestId?: string; error?: string }>;
@@ -121,6 +141,8 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     createdAt: number;
     triggerCreatedAt: number;
     triggerMessageId: string;
+    triggerMessageIds: string[];
+    triggerMessages: Message[];
     userId: string;
     channelId: string;
     guildId: string;
@@ -274,15 +296,6 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
 
   function ambientTypingActiveMs(config: AmbientAttentionConfig, kind: AmbientAttentionKind): number {
     return ambientModeConfig(config, kind).typingActiveMs;
-  }
-
-  function renderAmbientHistory(history: HistoryMessage[], triggerMessageId: string): string {
-    return history.map((message) => {
-      const who = message.isBot ? "2B" : message.author;
-      const marker = message.id === triggerMessageId ? " <trigger>" : "";
-      const reply = message.replyToId !== null ? ` reply_to=${message.replyToId}` : "";
-      return `[${new Date(message.timestamp).toISOString()}] ${who} (${message.authorId})${reply}${marker}: ${message.content}`;
-    }).join("\n");
   }
 
   function rawStoredMessageContent(messageId: string, guildId: string): string | null {
@@ -575,11 +588,18 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     const existing = ambientPendingCandidates.get(key);
     const burstStartedAt = existing?.candidate.burstStartedAt ?? message.createdTimestamp;
     const burstMessageCount = (existing?.candidate.burstMessageCount ?? 0) + 1;
+    const triggerMessageIds = [...new Set([...(existing?.candidate.triggerMessageIds ?? []), message.id])];
+    const triggerMessages = [
+      ...(existing?.candidate.triggerMessages ?? []),
+      message,
+    ].filter((item, index, items) => items.findIndex((candidateMessage) => candidateMessage.id === item.id) === index);
     const candidate: AmbientCandidate = {
       ...base,
       id: crypto.randomUUID(),
       kind,
       defaultReply: mode.defaultReply,
+      triggerMessageIds,
+      triggerMessages,
       burstStartedAt,
       burstMessageCount,
     };
@@ -715,7 +735,13 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       renderAmbientRelationshipSignals(candidate, history),
       "",
       "Recent channel history:",
-      renderAmbientHistory(history, candidate.triggerMessageId),
+      renderAmbientHistory({
+        history,
+        timezone: getGuildConfig(candidate.guildId).timezone,
+        ...(candidate.kind === "follow_up"
+          ? { followUpAnchorMessageId: candidate.triggerMessageId }
+          : { triggerMessageIds: candidate.triggerMessageIds }),
+      }),
     ].join("\n");
     const messages: OpenRouterMessage[] = [{ role: "user", content: user }];
     let llmCompleted = false;
@@ -1402,7 +1428,10 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       renderAmbientInitiativeRecent(input.signals.recentInitiatives),
       "",
       "Recent channel history:",
-      renderAmbientHistory(input.history, ""),
+      renderAmbientHistory({
+        history: input.history,
+        timezone: input.guildConfig.timezone,
+      }),
     ].join("\n");
     try {
       const result = await completeLlmChat({
@@ -2194,7 +2223,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       await processTriggeredMessage(
         candidate.message,
         { reason: candidate.kind },
-        [candidate.message],
+        candidate.kind === "follow_up" ? [candidate.message] : candidate.triggerMessages,
         {
           disableLiveOutput: true,
           defaultReply: candidate.defaultReply,
@@ -2297,6 +2326,8 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       createdAt: Date.now(),
       triggerCreatedAt: message.createdTimestamp,
       triggerMessageId: message.id,
+      triggerMessageIds: [message.id],
+      triggerMessages: [message],
       userId: message.author.id,
       channelId: message.channelId,
       guildId: message.guildId,
@@ -2434,6 +2465,8 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       createdAt: now,
       triggerCreatedAt: botMessageCreatedAt,
       triggerMessageId: input.botMessageId,
+      triggerMessageIds: [input.botMessageId],
+      triggerMessages: [input.message],
       userId: input.userId,
       channelId: input.channelId,
       guildId: input.guildId,

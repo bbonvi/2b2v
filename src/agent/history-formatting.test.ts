@@ -32,6 +32,16 @@ describe("formatMessageLine", () => {
     expect(formatMessageLine(input)).toBe("[@alice (MsgID: 123)]: hello");
   });
 
+  test("includes trigger marker metadata", () => {
+    const input: FormatInput = {
+      message: msg({ id: "123", historyAnnotations: ["<trigger>"] }),
+      reply: null,
+      captioningEnabled: false,
+      includeMessageIds: true,
+    };
+    expect(formatMessageLine(input)).toBe("[@alice (MsgID: 123; <trigger>)]: hello");
+  });
+
   test("omits message id metadata for prompt-only rows", () => {
     const input: FormatInput = {
       message: msg({ id: "prompt-only:ignore:123", content: "<ignore>no</ignore>", isBot: true, isPromptOnly: true }),

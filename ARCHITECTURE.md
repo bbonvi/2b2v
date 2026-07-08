@@ -16,6 +16,8 @@ Typing is runtime-owned. Model work must not wait on typing simulation; pending 
 
 Dispatch batches preserve the causal reply target. Debounced same-author follow-up text may join the current dispatch unit, but unrelated chatter and later triggers must not inherit another message's trigger reason.
 
+Prompt history remains chronological at run time. The current Discord event pins the causal target; real trigger messages already stored in chat history should be marked, not re-appended as the newest line.
+
 Thread tools manage thread state only. Later sends still require explicit `<message channel_id="...">` routing.
 
 Cross-channel and cross-guild reads/sends must go through accessible Discord channels. DMs stay out of scope. Cross-guild bot sends store output under the target guild/channel while preserving source request metadata.

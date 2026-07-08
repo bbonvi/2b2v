@@ -1378,12 +1378,27 @@ async function buildContext(
   currentTurnBoundary?: CurrentTurnBoundary,
   relationshipsMode: RelationshipContextRunMode = "live",
   excludeMessageIds?: readonly string[],
+  historyOptions: {
+    appendLatestToHistory?: boolean;
+    triggerMessageIds?: readonly string[];
+  } = {},
 ): Promise<AssembledContext> {
   // Chat history via the full processing pipeline
   const visibleJobs = agentJobs.listVisible(guildId, channelId);
   const displayNamesByUserId = buildCurrentDisplayNameMap(guild);
+  const appendLatestToHistory = historyOptions.appendLatestToHistory ?? true;
+  const triggerMessageIds = new Set(historyOptions.triggerMessageIds ?? []);
+  const historyMessages = getContextHistoryMessages(
+    db,
+    channelId,
+    guildConfig.trim,
+    appendLatestToHistory ? (excludeMessageIds ?? latestUserMessage.id) : excludeMessageIds,
+  ).map((message) => triggerMessageIds.has(message.id)
+    ? { ...message, historyAnnotations: [...(message.historyAnnotations ?? []), "<trigger>"] }
+    : message
+  );
   const historyWithoutLatest = annotateHistoryJobs(
-    getContextHistoryMessages(db, channelId, guildConfig.trim, excludeMessageIds ?? latestUserMessage.id),
+    historyMessages,
     guildId,
     channelId,
     agentJobs.annotationForMessage.bind(agentJobs),
@@ -1397,7 +1412,7 @@ async function buildContext(
   };
   const { olderText, newerText, visibleUserIds } = await processHistory(
     historyWithoutLatest,
-    annotatedLatestUserMessage,
+    appendLatestToHistory ? annotatedLatestUserMessage : null,
     {
       trim: guildConfig.trim,
       mergeMessageGapSeconds: guildConfig.mergeMessageGapSeconds,
@@ -1594,7 +1609,7 @@ async function buildContext(
   }
   const contextMessageIds = Array.from(new Set([
     ...historyWithoutLatest.map((m) => m.id),
-    annotatedLatestUserMessage.id,
+    ...(appendLatestToHistory ? [annotatedLatestUserMessage.id] : []),
   ]));
 
   const assembled = assembleContext({
@@ -2580,7 +2595,11 @@ async function processTriggeredMessage(
       isThread,
       currentTurnBoundary,
       "live",
-      currentTurnMessageIds,
+      options.currentTurnOverride !== undefined ? currentTurnMessageIds : undefined,
+      {
+        appendLatestToHistory: options.currentTurnOverride !== undefined,
+        triggerMessageIds: currentTurnMessageIds,
+      },
     );
 
     const startThreadTool = createStartThreadTool({

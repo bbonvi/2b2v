@@ -79,6 +79,19 @@ describe("processHistory", () => {
     expect(result.newerText).toContain("[@alice (MsgID: 100)]: latest");
   });
 
+  test("can render current chronological history without appending a synthetic latest message", async () => {
+    const messages = [
+      msg({ id: "a", author: "alice", authorId: "uid-alice", content: "first ping", timestamp: 1000 }),
+      msg({ id: "b", author: "bob", authorId: "uid-bob", content: "second ping", timestamp: 2000, historyAnnotations: ["<trigger>"] }),
+      msg({ id: "bot-a", author: "2b", authorId: "bot-1", content: "reply to first", isBot: true, timestamp: 3000, replyToId: "a" }),
+    ];
+    const result = await processHistory(messages, null, defaultConfig, deps);
+
+    expect(result.newerText.indexOf("MsgID: a")).toBeLessThan(result.newerText.indexOf("MsgID: b"));
+    expect(result.newerText.indexOf("MsgID: b")).toBeLessThan(result.newerText.indexOf("MsgID: bot-a"));
+    expect(result.newerText).toContain("[@bob (MsgID: b; <trigger>)]: second ping");
+  });
+
   test("newer slice includes current display names for authors and reply targets", async () => {
     const m1 = msg({ id: "1", author: "alice", authorId: "uid-alice", content: "first", timestamp: 1000 });
     const latest = msg({

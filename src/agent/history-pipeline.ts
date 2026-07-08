@@ -24,14 +24,16 @@ export interface ProcessedHistory {
  */
 export async function processHistory(
   messages: HistoryMessage[],
-  latestUserMessage: HistoryMessage,
+  latestUserMessage: HistoryMessage | null,
   config: HistoryProcessingConfig & { replyQuoteChars: number },
   replyFallbackDeps: ReplyFallbackDeps,
   nowMs = Date.now(),
 ): Promise<ProcessedHistory> {
   // 1. Sort deterministically
   const sorted = sortMessages(applyDisplayNames(messages, config.displayNamesByUserId));
-  const latestWithDisplayName = applyDisplayName(latestUserMessage, config.displayNamesByUserId);
+  const latestWithDisplayName = latestUserMessage !== null
+    ? applyDisplayName(latestUserMessage, config.displayNamesByUserId)
+    : null;
 
   // 2. Merge consecutive plain messages by same author
   const merged = mergeConsecutiveMessages(sorted, config.mergeMessageGapSeconds);
@@ -44,7 +46,9 @@ export async function processHistory(
       normalizedContentMap.set(id, m.content);
     }
   }
-  normalizedContentMap.set(latestWithDisplayName.id, latestWithDisplayName.content);
+  if (latestWithDisplayName !== null) {
+    normalizedContentMap.set(latestWithDisplayName.id, latestWithDisplayName.content);
+  }
 
   // 4. Slice into older/newer
   const { older, newer } = sliceHistory(merged, config.trim);
@@ -52,11 +56,15 @@ export async function processHistory(
   // 5. Trim older slice only (newer messages kept intact for recency)
   const olderTrimmed = trimMessages(older, config.trim.messageCharLimit);
   const newerTrimmed = newer;
-  const newerMessages = [...newerTrimmed, latestWithDisplayName];
+  const newerMessages = latestWithDisplayName !== null
+    ? [...newerTrimmed, latestWithDisplayName]
+    : newerTrimmed;
   const oldestVisibleMessageId = [...olderTrimmed, ...newerTrimmed].find((m) => m.isPromptOnly !== true)?.id;
 
   // 6. Fetch missing reply targets from Discord
-  const allForFallback = [...olderTrimmed, ...newerTrimmed, latestWithDisplayName];
+  const allForFallback = latestWithDisplayName !== null
+    ? [...olderTrimmed, ...newerTrimmed, latestWithDisplayName]
+    : [...olderTrimmed, ...newerTrimmed];
   const fetched = applyDisplayNames(await fetchMissingReplyTargets(replyFallbackDeps, allForFallback), config.displayNamesByUserId);
 
   // 7. Add fetched messages to normalized content map
@@ -115,7 +123,7 @@ export async function processHistory(
         const m = newerMessages[entry.index];
         if (m === undefined) continue;
         let reply = replyResult.newer.get(m.id) ?? null;
-        if (m.id === latestUserMessage.id && reply === null) {
+        if (latestUserMessage !== null && m.id === latestUserMessage.id && reply === null) {
           reply = replyResult.latestUser;
         }
         lines.push(formatMessageLine({
