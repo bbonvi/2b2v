@@ -92,6 +92,11 @@ export interface MessageActivity {
   isBot: boolean;
 }
 
+export interface ChannelActivityBucket {
+  bucketIndex: number;
+  messageCount: number;
+}
+
 interface MessageSearchRow {
   id: string;
   channel_id: string;
@@ -857,6 +862,33 @@ export function getHistoryMessages(
   rows.reverse();
 
   return hydrateHistoryRows(db, rows);
+}
+
+/** Count human channel messages by fixed time bucket for ambient activity baselines. */
+export function getChannelHumanActivityBuckets(
+  db: Database,
+  guildId: string,
+  channelId: string,
+  after: number,
+  before: number,
+  bucketMs: number,
+): ChannelActivityBucket[] {
+  if (before <= after || bucketMs <= 0) return [];
+  return db.raw
+    .prepare(
+      `SELECT CAST((created_at - ?) / ? AS INTEGER) AS bucketIndex, COUNT(*) AS messageCount
+       FROM messages
+       WHERE guild_id = ?
+         AND channel_id = ?
+         AND is_bot = 0
+         AND is_synthetic = 0
+         AND is_prompt_only = 0
+         AND created_at >= ?
+         AND created_at < ?
+       GROUP BY bucketIndex
+       ORDER BY bucketIndex ASC`
+    )
+    .all(after, bucketMs, guildId, channelId, after, before) as ChannelActivityBucket[];
 }
 
 function chunkedHistoryTakeCount(totalMessages: number, trim: TrimConfig): number {

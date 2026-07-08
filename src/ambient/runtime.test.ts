@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { HistoryMessage } from "../agent/history-types.ts";
-import { renderAmbientHistory } from "./runtime.ts";
+import { DEFAULT_AMBIENT_ATTENTION } from "../config/defaults.ts";
+import { createDatabase, type Database } from "../db/database.ts";
+import { renderAmbientHistory, resolveLocalChannelShape } from "./runtime.ts";
 
 function msg(overrides: Partial<HistoryMessage> = {}): HistoryMessage {
   return {
@@ -18,6 +20,58 @@ function msg(overrides: Partial<HistoryMessage> = {}): HistoryMessage {
     relatedThreadId: null,
     ...overrides,
   };
+}
+
+function insertStoredMessage(
+  db: Database,
+  id: string,
+  opts: {
+    guildId?: string;
+    channelId?: string;
+    userId?: string;
+    isBot?: boolean;
+    createdAt: number;
+  },
+): void {
+  db.raw
+    .prepare(
+      `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      id,
+      opts.guildId ?? "g1",
+      opts.channelId ?? "c1",
+      opts.userId ?? "u1",
+      `user-${opts.userId ?? "u1"}`,
+      id,
+      id,
+      opts.isBot === true ? 1 : 0,
+      opts.createdAt,
+    );
+}
+
+function groupHistory(now: number, count: number): HistoryMessage[] {
+  return Array.from({ length: count }, (_, index) => msg({
+    id: `h-${index}`,
+    authorId: `u${index % 5}`,
+    timestamp: now - index * 1000,
+  }));
+}
+
+function insertBurst(db: Database, prefix: string, count: number, createdAt: number): void {
+  for (let item = 0; item < count; item += 1) {
+    insertStoredMessage(db, `${prefix}-${item}`, {
+      userId: `u${item % 5}`,
+      createdAt: createdAt - item,
+    });
+  }
+}
+
+function insertHourlyBaseline(db: Database, now: number): void {
+  for (let bucket = 1; bucket <= 10; bucket += 1) {
+    insertBurst(db, `old-${bucket}`, 20, now - bucket * 2 * 60 * 60 * 1000);
+  }
 }
 
 describe("renderAmbientHistory", () => {
@@ -48,5 +102,73 @@ describe("renderAmbientHistory", () => {
 
     expect(text).toContain("2B (bot-1) reply_to=u1 <follow_up_anchor>: previous reply");
     expect(text).not.toContain("<trigger>");
+  });
+});
+
+describe("resolveLocalChannelShape", () => {
+  test("keeps active group chat below its own recent peak out of busy bucket", () => {
+    const db = createDatabase(":memory:");
+    const now = Date.UTC(2026, 6, 8, 12, 0, 0);
+    const config = { ...DEFAULT_AMBIENT_ATTENTION, busyWindowMs: 60 * 60 * 1000, busyMessageLimit: 8 };
+    try {
+      insertHourlyBaseline(db, now);
+      insertBurst(db, "current", 13, now);
+
+      expect(resolveLocalChannelShape({
+        db,
+        guildId: "g1",
+        channelId: "c1",
+        config,
+        history: groupHistory(now, 13),
+        userId: "u0",
+        now,
+      })).toBe("group_chat_not_busy");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("marks busy group chat when current activity reaches channel baseline", () => {
+    const db = createDatabase(":memory:");
+    const now = Date.UTC(2026, 6, 8, 12, 0, 0);
+    const config = { ...DEFAULT_AMBIENT_ATTENTION, busyWindowMs: 60 * 60 * 1000, busyMessageLimit: 8 };
+    try {
+      insertHourlyBaseline(db, now);
+      insertBurst(db, "current", 17, now);
+
+      expect(resolveLocalChannelShape({
+        db,
+        guildId: "g1",
+        channelId: "c1",
+        config,
+        history: groupHistory(now, 17),
+        userId: "u0",
+        now,
+      })).toBe("busy_group_chat");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not let one rare historical burst hide current busy activity", () => {
+    const db = createDatabase(":memory:");
+    const now = Date.UTC(2026, 6, 8, 12, 0, 0);
+    const config = { ...DEFAULT_AMBIENT_ATTENTION, busyWindowMs: 60_000, busyMessageLimit: 8 };
+    try {
+      insertBurst(db, "old", 20, now - 24 * 60 * 60 * 1000);
+      insertBurst(db, "current", 13, now);
+
+      expect(resolveLocalChannelShape({
+        db,
+        guildId: "g1",
+        channelId: "c1",
+        config,
+        history: groupHistory(now, 13),
+        userId: "u0",
+        now,
+      })).toBe("busy_group_chat");
+    } finally {
+      db.close();
+    }
   });
 });

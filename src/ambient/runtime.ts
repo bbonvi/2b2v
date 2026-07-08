@@ -23,7 +23,7 @@ import { translateInbound } from "../discord/translation";
 import { buildAmbientAttentionStreamOptions, buildAmbientInitiativeStreamOptions, resolveGuildLlmProvider } from "../llm/client";
 import { completeLlmChat } from "../llm/chat";
 import type { OpenRouterMessage } from "../llm/types";
-import { getHistoryMessages, getMessageById } from "../db/message-repository";
+import { getChannelHumanActivityBuckets, getHistoryMessages, getMessageById } from "../db/message-repository";
 import { countUserMemoriesByUser, listMemories } from "../db/memory-repository";
 import { channelDisplayName, createTargetChannelResolver } from "../discord/message-sender";
 import { createStoredImageAttachmentResolver } from "../agent/stored-image-attachments";
@@ -47,6 +47,86 @@ export function renderAmbientHistory(input: {
     const reply = message.replyToId !== null ? ` reply_to=${message.replyToId}` : "";
     return `[${formatLocalWallClock(message.timestamp, input.timezone)}] ${who} (${message.authorId})${reply}${marker}: ${message.content}`;
   }).join("\n");
+}
+
+const CHANNEL_ACTIVITY_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+const MIN_ACTIVITY_BUCKET_MS = 60_000;
+const BUSY_ACTIVITY_RATIO = 0.8;
+
+function percentileBucketCount(counts: readonly number[], percentile: number): number {
+  if (counts.length === 0) return 0;
+  const sorted = [...counts].sort((a, b) => a - b);
+  const index = Math.floor((sorted.length - 1) * percentile);
+  return sorted[index] ?? 0;
+}
+
+function channelHumanBucketCounts(input: {
+  db: Database;
+  guildId: string;
+  channelId: string;
+  after: number;
+  before: number;
+  bucketMs: number;
+}): number[] {
+  const bucketCount = Math.max(1, Math.ceil((input.before - input.after) / input.bucketMs));
+  const counts = Array<number>(bucketCount).fill(0);
+  for (const bucket of getChannelHumanActivityBuckets(
+    input.db,
+    input.guildId,
+    input.channelId,
+    input.after,
+    input.before,
+    input.bucketMs,
+  )) {
+    if (bucket.bucketIndex >= 0 && bucket.bucketIndex < counts.length) counts[bucket.bucketIndex] = bucket.messageCount;
+  }
+  return counts;
+}
+
+function isChannelBusy(input: {
+  db: Database;
+  guildId: string;
+  channelId: string;
+  config: AmbientAttentionConfig;
+  now: number;
+}): boolean {
+  if (input.config.busyWindowMs <= 0) return false;
+  const bucketMs = Math.max(input.config.busyWindowMs, MIN_ACTIVITY_BUCKET_MS);
+  const currentAfter = input.now - bucketMs;
+  const currentHumanMessages = channelHumanBucketCounts({ ...input, after: currentAfter, before: input.now, bucketMs })
+    .reduce((total, count) => total + count, 0);
+  if (currentHumanMessages <= input.config.busyMessageLimit) return false;
+
+  const historicalCounts = channelHumanBucketCounts({
+    ...input,
+    after: input.now - CHANNEL_ACTIVITY_LOOKBACK_MS,
+    before: currentAfter,
+    bucketMs,
+  });
+  const baseline = Math.max(input.config.busyMessageLimit, percentileBucketCount(historicalCounts, 0.95));
+  return currentHumanMessages / baseline >= BUSY_ACTIVITY_RATIO;
+}
+
+/** Classify recent local channel shape for ambient attention prompts. */
+export function resolveLocalChannelShape(input: {
+  db: Database;
+  guildId: string;
+  channelId: string;
+  config: AmbientAttentionConfig;
+  history: readonly HistoryMessage[];
+  userId: string;
+  now: number;
+}): string {
+  const recent = input.history.slice(-30).filter((message) => !message.isSynthetic);
+  const humanMessages = recent.filter((message) => !message.isBot);
+  const uniqueHumans = new Set(humanMessages.map((message) => message.authorId));
+  const userMessages = humanMessages.filter((message) => message.authorId === input.userId).length;
+  const botMessages = recent.filter((message) => message.isBot && message.isPromptOnly !== true).length;
+  if (humanMessages.length === 0) return "no_recent_human_chatter";
+  if (uniqueHumans.size <= 1 && userMessages > 0 && botMessages > 0) return "mostly_user_and_2b";
+  if (uniqueHumans.size <= 1) return "mostly_one_user";
+  if (uniqueHumans.size <= 4 && humanMessages.length <= 12) return "small_mixed_chat";
+  return isChannelBusy(input) ? "busy_group_chat" : "group_chat_not_busy";
 }
 
 export type AmbientRuntime = {
@@ -364,19 +444,6 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     return "old";
   }
 
-  function localChannelShape(history: readonly HistoryMessage[], userId: string): string {
-    const recent = history.slice(-30).filter((message) => !message.isSynthetic);
-    const humanMessages = recent.filter((message) => !message.isBot);
-    const uniqueHumans = new Set(humanMessages.map((message) => message.authorId));
-    const userMessages = humanMessages.filter((message) => message.authorId === userId).length;
-    const botMessages = recent.filter((message) => message.isBot && message.isPromptOnly !== true).length;
-    if (humanMessages.length === 0) return "no_recent_human_chatter";
-    if (uniqueHumans.size <= 1 && userMessages > 0 && botMessages > 0) return "mostly_user_and_2b";
-    if (uniqueHumans.size <= 1) return "mostly_one_user";
-    if (uniqueHumans.size <= 4 && humanMessages.length <= 12) return "small_mixed_chat";
-    return "busy_group_chat";
-  }
-
   function isPromptOnlyIgnore(message: HistoryMessage): boolean {
     return message.isBot && message.isPromptOnly === true && message.content.trim().toLowerCase().startsWith("<ignore");
   }
@@ -410,7 +477,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     return "none_recent";
   }
 
-  function renderAmbientRelationshipSignals(candidate: AmbientCandidate, history: HistoryMessage[]): string {
+  function renderAmbientRelationshipSignals(candidate: AmbientCandidate, history: HistoryMessage[], config: AmbientAttentionConfig): string {
     const now = Date.now();
     const contact = buildComputedContactContextForUser({
       db,
@@ -433,7 +500,15 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       `last_user_to_2b: ${recencyBucket(contact?.lastUserToBotAt ?? null, now)}`,
       `last_2b_to_user: ${recencyBucket(contact?.lastBotToUserAt ?? null, now)}`,
       `memory_count_bucket: ${memoryBucket}`,
-      `local_channel_shape: ${localChannelShape(history, candidate.userId)}`,
+      `local_channel_shape: ${resolveLocalChannelShape({
+        db,
+        guildId: candidate.guildId,
+        channelId: candidate.channelId,
+        config,
+        history,
+        userId: candidate.userId,
+        now,
+      })}`,
       `recent_2b_involvement: ${recentBotInvolvement(history, candidate.userId, now)}`,
     ].join("\n");
   }
@@ -683,10 +758,13 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       if (newer.length > 0) return { ok: false, reason: "follow-up silence broken" };
       if (now - candidate.triggerCreatedAt < config.followUp.silenceMs) return { ok: false, reason: "follow-up silence too short" };
     } else {
-      const recentHumans = history.filter((message) =>
-        !message.isBot && now - message.timestamp <= config.busyWindowMs
-      );
-      if (recentHumans.length > config.busyMessageLimit) return { ok: false, reason: "channel busy" };
+      if (isChannelBusy({
+        db,
+        guildId: candidate.guildId,
+        channelId: candidate.channelId,
+        config,
+        now,
+      })) return { ok: false, reason: "channel busy" };
       if (
         candidate.kind === "ambient_pickup" &&
         phase === "evaluate" &&
@@ -732,7 +810,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       `now: ${new Date().toISOString()}`,
       "",
       "Compact relationship signals:",
-      renderAmbientRelationshipSignals(candidate, history),
+      renderAmbientRelationshipSignals(candidate, history, config),
       "",
       "Recent channel history:",
       renderAmbientHistory({
