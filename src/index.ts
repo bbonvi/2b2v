@@ -405,6 +405,15 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     if (sentMessageId === undefined) {
       throw new Error("Async image completion did not send a Discord message.");
     }
+    ambientRuntime.noteAmbientBotReply({
+      guildId: job.deliveryGuildId,
+      channelId: job.deliveryChannelId,
+      userId: job.requesterId,
+      sourceMessageId: job.sourceMessageId,
+      botMessageId: sentMessageId,
+      allowLease: true,
+      allowFollowUp: false,
+    });
     agentJobs.markSent(job.id, sentMessageId, {
       attachmentId: outboundAttachment.id,
       filename: outboundAttachment.filename,

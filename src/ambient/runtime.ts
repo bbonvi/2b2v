@@ -41,7 +41,7 @@ export type AmbientRuntime = {
   clearAmbientNormalTriggerInFlight: (guildId: string, channelId: string, userId: string) => void;
   clearAmbientTyping: (guildId: string, channelId: string, userId: string) => void;
   clearAmbientLeaseForUser: (guildId: string, channelId: string, userId: string) => void;
-  noteAmbientBotReply: (input: { guildId: string; channelId: string; userId: string; sourceMessageId: string; botMessageId: string; message: Message; allowLease: boolean; allowFollowUp: boolean }) => void;
+  noteAmbientBotReply: (input: { guildId: string; channelId: string; userId: string; sourceMessageId: string; botMessageId: string; message?: Message; allowLease: boolean; allowFollowUp: boolean }) => void;
   clearAmbientAttentionState: () => void;
   clearAmbientInitiativeState: () => void;
 };
@@ -2400,7 +2400,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     userId: string;
     sourceMessageId: string;
     botMessageId: string;
-    message: Message;
+    message?: Message;
     allowLease: boolean;
     allowFollowUp: boolean;
   }): void {
@@ -2426,7 +2426,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       followUpsSent: 0,
     };
     ambientLeases.set(key, lease);
-    if (!input.allowFollowUp || !config.followUp.enabled || config.followUp.maxPerExchange <= 0) return;
+    if (!input.allowFollowUp || input.message === undefined || !config.followUp.enabled || config.followUp.maxPerExchange <= 0) return;
     scheduleAmbientCandidate({
       id: crypto.randomUUID(),
       kind: "follow_up",
