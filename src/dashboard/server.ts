@@ -45,8 +45,8 @@ interface DashboardManagementApi {
   }) => AwaitableDashboardManagementResult;
   deleteMemory: (memoryId: number) => AwaitableDashboardManagementResult;
   relationships: {
-    getOverview: () => AwaitableDashboardManagementResult;
-    reset: () => AwaitableDashboardManagementResult;
+    getOverview: (input?: { userId?: string }) => AwaitableDashboardManagementResult;
+    reset: (input?: { userId?: string }) => AwaitableDashboardManagementResult;
   };
 }
 
@@ -549,7 +549,8 @@ export function startDashboard(opts: DashboardOptions): void {
         const denied = requireAuth(req);
         if (denied !== null) return denied;
         if (management === undefined) return json({ error: "Management API is disabled" }, 404);
-        return json(management.relationships.getOverview());
+        const url = new URL(req.url);
+        return json(management.relationships.getOverview({ userId: optionalStringParam(url, "userId") }));
       },
 
       "/api/relationships/reset": {
@@ -557,7 +558,8 @@ export function startDashboard(opts: DashboardOptions): void {
           const denied = requireAuth(req);
           if (denied !== null) return denied;
           if (management === undefined) return json({ error: "Management API is disabled" }, 404);
-          return json(management.relationships.reset());
+          const url = new URL(req.url);
+          return json(management.relationships.reset({ userId: optionalStringParam(url, "userId") }));
         },
       },
 

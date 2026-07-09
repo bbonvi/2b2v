@@ -15,12 +15,13 @@ function configFor(guildConfig: GuildConfig, globalConfig: GlobalConfig): Relati
 }
 
 export interface RelationshipsManagementApi {
-  getOverview: () => RelationshipsOverview;
-  reset: () => RelationshipsOverview;
+  getOverview: (input?: { userId?: string }) => RelationshipsOverview;
+  reset: (input?: { userId?: string }) => RelationshipsOverview;
 }
 
 export interface RelationshipsOverview {
   profiles: RelationshipProfile[];
+  selectedProfile: RelationshipProfile | null;
   events: ReturnType<typeof listRelationshipEvents>;
   promptPreview: string;
   config: {
@@ -30,14 +31,18 @@ export interface RelationshipsOverview {
   };
 }
 
-function overview(db: Database, config: RelationshipConfig): RelationshipsOverview {
+function overview(db: Database, config: RelationshipConfig, selectedUserId?: string): RelationshipsOverview {
   const profiles = listRelationshipProfiles(db, 100);
+  const selectedProfile = selectedUserId !== undefined
+    ? profiles.find((profile) => profile.userId === selectedUserId) ?? null
+    : profiles[0] ?? null;
   return {
     profiles,
-    events: listRelationshipEvents(db, { limit: 120 }),
+    selectedProfile,
+    events: listRelationshipEvents(db, { limit: 120, ...(selectedUserId !== undefined ? { userId: selectedUserId } : {}) }),
     promptPreview: renderRelationshipPromptContext({
-      current: profiles[0],
-      currentLabel: profiles[0]?.userId ?? "no user selected",
+      current: selectedProfile ?? undefined,
+      currentLabel: selectedUserId ?? selectedProfile?.userId ?? "no user selected",
     }),
     config: {
       enabled: config.enabled,
@@ -53,10 +58,10 @@ export function createRelationshipsManagementApi(input: {
   getGuildConfig: () => GuildConfig;
 }): RelationshipsManagementApi {
   return {
-    getOverview: () => overview(input.db, configFor(input.getGuildConfig(), input.getGlobalConfig())),
-    reset: () => {
+    getOverview: (params) => overview(input.db, configFor(input.getGuildConfig(), input.getGlobalConfig()), params?.userId),
+    reset: (params) => {
       resetRelationships(input.db);
-      return overview(input.db, configFor(input.getGuildConfig(), input.getGlobalConfig()));
+      return overview(input.db, configFor(input.getGuildConfig(), input.getGlobalConfig()), params?.userId);
     },
   };
 }

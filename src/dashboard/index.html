@@ -1150,6 +1150,7 @@
   }
   .relationships-actions select,
   .relationships-actions input,
+  .relationships-row select,
   .relationships-row input {
     background: var(--bg);
     border: 1px solid var(--border);
@@ -1194,6 +1195,36 @@
     padding: .75rem;
     font-size: .7rem;
     line-height: 1.55;
+  }
+  .relationships-axis-list {
+    border: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .relationships-axis-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 56px;
+    gap: .75rem;
+    padding: .45rem .65rem;
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+    font-family: var(--mono);
+    font-size: .7rem;
+  }
+  .relationships-axis-row:last-child { border-bottom: 0; }
+  .relationships-axis-row span { color: var(--text-dim); }
+  .relationships-axis-row code {
+    color: var(--text-bright);
+    text-align: right;
+  }
+  .relationships-user-link {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
   }
   .relationships-error { color: var(--red); margin-bottom: .6rem; }
   .management-editor-textarea {
