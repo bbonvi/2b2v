@@ -112,10 +112,7 @@ const ExpiresInSchema = Type.Object({
   ]),
 }, { additionalProperties: false });
 
-const MemoryActionSchema = Type.Union([
-  Type.Object({
-    action: Type.Literal("none"),
-  }, { additionalProperties: false }),
+const MemoryWriteActionSchema = Type.Union([
   Type.Object({
     action: Type.Literal("upsert"),
     id: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -140,8 +137,19 @@ const MemoryActionSchema = Type.Union([
   }, { additionalProperties: false }),
 ]);
 
+const MemoryActionSchema = Type.Union([
+  Type.Object({
+    action: Type.Literal("none"),
+  }, { additionalProperties: false }),
+  MemoryWriteActionSchema,
+]);
+
 const MemoryExtractionSchema = Type.Object({
   actions: Type.Array(MemoryActionSchema, { maxItems: 5 }),
+}, { additionalProperties: false });
+
+const RecordMemoryToolSchema = Type.Object({
+  actions: Type.Array(MemoryWriteActionSchema, { minItems: 1, maxItems: 5 }),
 }, { additionalProperties: false });
 
 type MemoryExtraction = {
@@ -687,11 +695,11 @@ export function createRecordMemoryTool(deps: RecordMemoryToolDeps): AgentTool {
     description: description !== undefined && description !== ""
       ? description
       : "Record memory updates after a Discord turn.",
-    parameters: MemoryExtractionSchema,
+    parameters: RecordMemoryToolSchema,
 
     async execute(_toolCallId: string, params: unknown): Promise<RecordMemoryToolResult> {
       const normalized = normalizeExtractionShape(params);
-      if (!Value.Check(MemoryExtractionSchema, normalized)) {
+      if (!Value.Check(RecordMemoryToolSchema, normalized)) {
         return {
           content: [{ type: "text", text: "Memory update rejected: arguments did not match the schema." }],
           details: { error: true },

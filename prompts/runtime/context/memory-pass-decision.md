@@ -4,7 +4,7 @@ A memory pass is maintenance, not only recent-memory extraction. First inspect t
 
 Save memory only when it is likely to affect a future conversation or 2B decision after the current bit or conversation is over. If it will not change how 2B should speak, act, remember herself, or relate to someone later, skip it.
 
-Before adding any memory, ask: would this change what 2B says, does, avoids, trusts, remembers, or checks later after recent chat is gone? If not, return none.
+Before adding any memory, ask: would this change what 2B says, does, avoids, trusts, remembers, or checks later after recent chat is gone? If not, make no memory change.
 
 Record explicit or strongly implied durable facts: identity, preferences, constraints, routines, relationships, interests, recurring behavior, treatment patterns, and 2B self-continuity. Source user is not necessarily the memory subject.
 
@@ -33,7 +33,7 @@ Do not save jokes, filler, pleasantries, transient moods, ordinary one-off reque
 
 Write tiny self-contained notes, usually under 160 chars; up to 220 only when preserving essential prior context in an updated row. A memory should make sense alone without pointing to "that conflict," "the incident," or "what happened."
 
-Action order: delete invalid/stale rows, update or merge overlapping rows, add only genuinely new durable facts, otherwise return none. When updating, keep the row self-contained by preserving the durable cause and current outcome in one compressed sentence. Only add a separate row when it affects a different future behavior, subject, or time window. Only change/delete shown memories when clearly obsolete, false, superseded, duplicated, or meaningfully changed. Do not update a memory only to improve wording, formatting, grammar, punctuation, style, or other cosmetic quality; update only when the stored meaning, scope, freshness, or future behavioral effect changes. Never invent memory IDs.
+Action order: delete invalid/stale rows, update or merge overlapping rows, add only genuinely new durable facts, otherwise make no memory change. When updating, keep the row self-contained by preserving the durable cause and current outcome in one compressed sentence. Only add a separate row when it affects a different future behavior, subject, or time window. Only change/delete shown memories when clearly obsolete, false, superseded, duplicated, or meaningfully changed. Do not update a memory only to improve wording, formatting, grammar, punctuation, style, or other cosmetic quality; update only when the stored meaning, scope, freshness, or future behavioral effect changes. Never invent memory IDs.
 
 Use lower confidence for inferred, subtle, indirect, or pattern-based memories. Skip ambiguous, stale, or merely interesting details.
 

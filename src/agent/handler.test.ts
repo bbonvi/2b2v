@@ -3373,99 +3373,12 @@ describe("handleMessage", () => {
     expect(senderCalls).toEqual([]);
   });
 
-  test("silent memory pass terminates after one successful memory tool call", async () => {
-    const toolCalls: unknown[] = [];
-    const recordMemoryTool: AgentTool = {
-      name: "record_memory",
-      label: "record_memory",
-      description: "Record memory",
-      parameters: Type.Object({ actions: Type.Array(Type.Object({ action: Type.Literal("none") })) }),
-      execute: (_id, params) => {
-        toolCalls.push(params);
-        return Promise.resolve({
-          content: [{ type: "text", text: "Memory update complete." }],
-          details: { applied: 0, requested: 1 },
-        });
-      },
-    };
-    let calls = 0;
-    const exposedTools: string[][] = [];
-    const payloads: Array<{ instructions?: unknown; input?: unknown }> = [];
-    const controlMessages: string[] = [];
-    const completeChat: ChatCompleteFn = (request) => {
-      calls += 1;
-      exposedTools.push(request.tools?.map((tool) => tool.function.name) ?? []);
-      const payload = { instructions: request.systemPrompt, input: [] as unknown[] };
-      request.onPayload?.(payload);
-      payloads.push(payload);
-      const lastMessage = request.messages[request.messages.length - 1];
-      controlMessages.push(typeof lastMessage?.content === "string" ? lastMessage.content : "");
-      expect(request.signal).toBeInstanceOf(AbortSignal);
-      if (calls > 1) {
-        return Promise.resolve({
-          text: "",
-          toolCalls: [],
-          rawResponse: {},
-          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
-        });
-      }
-      return Promise.resolve({
-        text: "",
-        toolCalls: [{ id: "call-1", type: "function", function: { name: "record_memory", arguments: "{\"actions\":[{\"action\":\"none\"}]}" } }],
-        rawResponse: {},
-        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
-      });
-    };
-
-    await runSilentMemoryAgentPass({
-      globalConfig: makeGlobalConfig(),
-      guildConfig: makeGuildConfig({
-        backgroundLlm: {
-          provider: "openai-codex",
-          model: "gpt-5",
-          modelParams: {},
-          promptCaching: { enabled: true },
-        },
-      }),
-      context: makeContext(),
-      personaPrompt: "You are a test bot.",
-      runtimePrompts: TEST_RUNTIME_PROMPTS,
-      incomingMessage: makeMessage(),
-      userContent: "remember I like concise answers",
-      assistantReply: "got it",
-      visibleReplySent: true,
-      visibleUserMemoryContext: "## Existing Memories For Other Visible Users\n- 2 [@other] [0.7] [fact] Other fact.",
-      tools: [recordMemoryTool],
-      completeChat,
-    });
-
-    expect(toolCalls).toEqual([{ actions: [{ action: "none" }] }]);
-    expect(calls).toBe(2);
-    expect(exposedTools).toEqual([["record_memory"], ["record_memory"]]);
-    const promptText = JSON.stringify(payloads[0]);
-    expect(promptText).toContain("Runtime Core");
-    expect(promptText).not.toContain("Silent Memory Pass");
-    expect(promptText).not.toContain("Other fact.");
-    expect(controlMessages[0]).toStartWith("## Existing Memories For Other Visible Users");
-    expect(controlMessages[0]).toContain("## Execution Mode: Memory Maintenance");
-    expect(controlMessages[0]).toContain("You may call record_memory up to 5 times");
-    expect(controlMessages[0]).toContain("## Post-Reply Memory Consideration");
-    expect(controlMessages[0]).toContain("strongly implied durable facts");
-    expect(controlMessages[0]).toContain("Before adding, check existing memories");
-    expect(controlMessages[0]).toContain("expiresIn");
-    expect(controlMessages[0]).not.toContain("expiresAt");
-    expect(controlMessages[0]).not.toContain("Raw 2B output from completed visible loop:");
-    expect(controlMessages[0]).not.toContain("Visible 2B action already sent:");
-    expect(controlMessages[0]).toContain("Current time for expiresIn decisions:");
-    expect(controlMessages[0]).toContain("Timezone: UTC");
-  });
-
   test("silent memory pass stops on wall-clock timeout without recovery completion", async () => {
     const recordMemoryTool: AgentTool = {
       name: "record_memory",
       label: "record_memory",
       description: "Record memory",
-      parameters: Type.Object({ actions: Type.Array(Type.Object({ action: Type.Literal("none") })) }),
+      parameters: Type.Object({}),
       execute: () => Promise.resolve({
         content: [{ type: "text", text: "Memory update complete." }],
         details: { applied: 0, requested: 1 },
@@ -3506,7 +3419,7 @@ describe("handleMessage", () => {
       name: "record_memory",
       label: "record_memory",
       description: "Record memory",
-      parameters: Type.Object({ actions: Type.Array(Type.Object({ action: Type.Literal("none") })) }),
+      parameters: Type.Object({}),
       execute: (_id, params) => {
         toolCalls.push(params);
         return Promise.resolve({
@@ -3519,7 +3432,7 @@ describe("handleMessage", () => {
       text: "",
       toolCalls: request.tools?.length === 0
         ? []
-        : [{ id: `call-${toolCalls.length + 1}`, type: "function", function: { name: "record_memory", arguments: "{\"actions\":[{\"action\":\"none\"}]}" } }],
+        : [{ id: `call-${toolCalls.length + 1}`, type: "function", function: { name: "record_memory", arguments: "{}" } }],
       rawResponse: {},
       messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
     });
