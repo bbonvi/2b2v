@@ -112,7 +112,7 @@ describe("message cleanup", () => {
     expect(result).toEqual({ messagesDeleted: 1, imagesDeleted: 1 });
     expect(vectors.calls).toEqual(["g1:bot-message"]);
     expect(db.raw.prepare("SELECT translated_content, deleted_at FROM messages WHERE id = 'bot-message'").get())
-      .toMatchObject({ translated_content: "[deleted]" });
+      .toMatchObject({ translated_content: "text" });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images").get()).toEqual({ count: 0 });
     db.close();
   });
@@ -146,7 +146,7 @@ describe("message cleanup", () => {
     expect(result).toEqual({ messagesDeleted: 1, imagesDeleted: 1 });
     expect(vectors.calls).toEqual(["g1:m1"]);
     expect(db.raw.prepare("SELECT translated_content, deleted_at FROM messages WHERE id = 'm1'").get())
-      .toMatchObject({ translated_content: "[deleted]" });
+      .toMatchObject({ translated_content: "text" });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images").get()).toEqual({ count: 0 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_reactions").get()).toEqual({ count: 0 });
     db.close();

@@ -46,8 +46,6 @@ export interface DeleteBotMessageStateResult {
   imagePaths: string[];
 }
 
-export const DELETED_MESSAGE_CONTENT = "[deleted]";
-
 export interface MessageSearchFilter {
   guildId: string;
   userId?: string;
@@ -404,11 +402,11 @@ export function markDiscordMessageDeleted(
   db.raw
     .prepare(
       `UPDATE messages
-       SET raw_content = ?, translated_content = ?, deleted_at = COALESCE(deleted_at, ?)
+       SET deleted_at = COALESCE(deleted_at, ?)
        WHERE id = ? AND guild_id = ?${channelCondition}${botCondition}
          AND is_synthetic = 0 AND is_prompt_only = 0`
     )
-    .run(DELETED_MESSAGE_CONTENT, DELETED_MESSAGE_CONTENT, Date.now(), ...params);
+    .run(Date.now(), ...params);
 
   return { deleted: true, imageCount: imageResult.changes, imagePaths: imageRows.map((row) => row.path) };
 }

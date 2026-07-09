@@ -33,7 +33,7 @@ export interface HistoryMessage {
   isSynthetic: boolean;
   /** Whether this row is prompt-visible only and must never be searchable or tool-retrievable. */
   isPromptOnly?: boolean;
-  /** Whether Discord has deleted this message; content is rendered as a tombstone. */
+  /** Whether Discord has deleted this message; rendered history appends a deletion marker. */
   isDeleted?: boolean;
   /** Thread ID this synthetic event references, or null. */
   relatedThreadId: string | null;

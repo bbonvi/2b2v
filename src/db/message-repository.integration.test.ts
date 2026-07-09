@@ -906,13 +906,13 @@ describe("getContextHistoryMessages", () => {
     ]);
   });
 
-  test("includes deleted tombstones in context history", () => {
+  test("keeps deleted message content in context history", () => {
     insertMessage("deleted-msg", { channelId: "c1", translatedContent: "remove me", createdAt: now });
     markDiscordMessageDeleted(db, { id: "deleted-msg", guildId: "g1", channelId: "c1" });
 
     const rows = getContextHistoryMessages(db, "c1", trim);
     expect(rows.map((m) => [m.id, m.content, m.isDeleted])).toEqual([
-      ["deleted-msg", "[deleted]", true],
+      ["deleted-msg", "remove me", true],
     ]);
   });
 

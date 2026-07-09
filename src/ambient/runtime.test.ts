@@ -103,6 +103,15 @@ describe("renderAmbientHistory", () => {
     expect(text).toContain("2B (bot-1) reply_to=u1 <follow_up_anchor>: previous reply");
     expect(text).not.toContain("<trigger>");
   });
+
+  test("appends deleted marker without hiding message content", () => {
+    const text = renderAmbientHistory({
+      history: [msg({ isDeleted: true, content: "removed text" })],
+      timezone: "UTC",
+    });
+
+    expect(text).toContain("removed text [deleted]");
+  });
 });
 
 describe("resolveLocalChannelShape", () => {

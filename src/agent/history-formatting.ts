@@ -1,6 +1,14 @@
 import type { HistoryMessage } from "./history-types.ts";
 import type { ImageSourceKind } from "../db/image-repository.ts";
 
+const DELETED_MESSAGE_MARKER = "[deleted]";
+
+export function formatHistoryContent(message: Pick<HistoryMessage, "content" | "isDeleted">): string {
+  return message.isDeleted === true
+    ? `${message.content} ${DELETED_MESSAGE_MARKER}`
+    : message.content;
+}
+
 /** Reply context resolved for formatting. */
 export interface ReplyContext {
   targetAuthor: string;
@@ -97,8 +105,9 @@ export function formatMessageLine(input: FormatInput): string {
     ? ` to @${reply.targetAuthor}${formatDisplayNameSuffix(reply.targetAuthor, reply.targetDisplayName, includeDisplayNames)}`
     : "";
   const metaPart = metaParts.length > 0 ? ` (${metaParts.join("; ")})` : "";
+  const content = formatHistoryContent(message);
 
-  return `[${authorPart}${targetPart}${metaPart}]: ${message.content}`;
+  return `[${authorPart}${targetPart}${metaPart}]: ${content}`;
 }
 
 function formatImageIdMeta(prefix: "Reply" | "", imageIds: number[], sourceKinds: ImageSourceKind[] | undefined): string[] {

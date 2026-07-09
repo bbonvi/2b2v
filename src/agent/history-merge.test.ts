@@ -110,9 +110,9 @@ describe("mergeConsecutiveMessages", () => {
     expect(result).toHaveLength(2);
   });
 
-  test("does not merge deleted-message tombstones", () => {
+  test("does not merge deleted messages", () => {
     const msgs = [
-      msg("1", 1000, { isDeleted: true, content: "[deleted]" }),
+      msg("1", 1000, { isDeleted: true, content: "removed" }),
       msg("2", 1000 + 30_000),
     ];
     const result = mergeConsecutiveMessages(msgs, GAP);

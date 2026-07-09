@@ -8,6 +8,7 @@ import type { HistoryMessage } from "../agent/history-types";
 import type { TriggerResult } from "../agent/triggers";
 import type { AssembledContext } from "../agent/context-assembly";
 import { handleMessage, type HandlerDeps, type MessageSender } from "../agent/handler";
+import { formatHistoryContent } from "../agent/history-formatting";
 import { trackWriteToolStarts } from "../agent/tool-access";
 import { isActiveJobStatus, type AgentJobStore } from "../agent/job-runtime";
 import type { PromptBundle } from "../config/prompt-bundle";
@@ -45,7 +46,7 @@ export function renderAmbientHistory(input: {
         ? " <trigger>"
         : "";
     const reply = message.replyToId !== null ? ` reply_to=${message.replyToId}` : "";
-    return `[${formatLocalWallClock(message.timestamp, input.timezone)}] ${who} (${message.authorId})${reply}${marker}: ${message.content}`;
+    return `[${formatLocalWallClock(message.timestamp, input.timezone)}] ${who} (${message.authorId})${reply}${marker}: ${formatHistoryContent(message)}`;
   }).join("\n");
 }
 

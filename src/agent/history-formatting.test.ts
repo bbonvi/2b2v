@@ -27,6 +27,11 @@ describe("formatMessageLine", () => {
     expect(formatMessageLine(input)).toBe("[@alice]: hello");
   });
 
+  test("appends deleted marker without hiding message content", () => {
+    const input: FormatInput = { message: msg({ isDeleted: true }), reply: null, captioningEnabled: false };
+    expect(formatMessageLine(input)).toBe("[@alice]: hello [deleted]");
+  });
+
   test("includes message id metadata when requested", () => {
     const input: FormatInput = { message: msg({ id: "123" }), reply: null, captioningEnabled: false, includeMessageIds: true };
     expect(formatMessageLine(input)).toBe("[@alice (MsgID: 123)]: hello");
