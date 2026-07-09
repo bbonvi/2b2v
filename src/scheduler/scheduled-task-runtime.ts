@@ -84,7 +84,6 @@ export function createScheduledTaskRunner(input: {
     resolveImageAttachments?: ImageAttachmentResolver;
     overrides?: Partial<HandlerDeps>;
   }) => HandlerDeps;
-  persistIgnoredBotReply: (input: { guildId: string; channelId: string; destinationChannelId?: string; botUserId: string; botUsername: string; sourceMessageId: string; historyText: string }) => void;
   runLoggedAgentTurn: (input: { incoming: IncomingMessage; deps: HandlerDeps; requestLog: RequestLog; logger: Logger; afterSuccess?: (result: HandleResult) => void | Promise<void>; onFinally?: (result: HandleResult | undefined) => void }) => Promise<HandleResult>;
   runMemoryPostReplyExtraction: (input: { guildConfig: GuildConfig; memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]; guild: Guild; channel: unknown; sourceRequestId: string; source?: string; currentUserId: string; currentUsername?: string }) => Promise<unknown>;
   runRelationshipPostReplyExtraction: (input: { guildConfig: GuildConfig; memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]; guild?: Guild; channel?: unknown; source?: string; sourceRequestId?: string; currentUserId: string; currentUsername?: string }) => Promise<void>;
@@ -242,17 +241,6 @@ export function createScheduledTaskRunner(input: {
           getTypingStartedAt: typing.getTypingStartedAt,
           onVisibleOutput: typing.stopLoop,
           onAgentEnd: typing.stopLoop,
-          onIgnoredReply: ({ channelId: destinationChannelId, historyText }) => {
-            input.persistIgnoredBotReply({
-              guildId,
-              channelId,
-              destinationChannelId,
-              botUserId,
-              botUsername,
-              sourceMessageId: syntheticLatestMessage.id,
-              historyText,
-            });
-          },
           forceTrigger: true,
           triggerInstructions: guildConfig.triggerInstructions,
           disableLiveOutput: true,

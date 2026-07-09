@@ -802,7 +802,6 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
     createBotDiscordMessageSender,
     createTtsGenerator,
     createHandlerDeps,
-    persistIgnoredBotReply,
     runLoggedAgentTurn,
     runMemoryPostReplyExtraction,
     runRelationshipPostReplyExtraction,
@@ -2512,10 +2511,13 @@ async function processTriggeredMessage(
   const guildId = message.guildId;
   const channelId = message.channelId;
   requestLogStore.incrementActive();
-  const guildConfig = getGuildConfig(guildId);
+  const requestLog = new RequestLog(guildId, channelId, requestLogStore);
+  requestLog.setAuthor(message.author.username);
+  let requestLogEmitted = false;
   let activeTyping: ReturnType<typeof createTypingController> | null = null;
 
   try {
+    const guildConfig = getGuildConfig(guildId);
     const inboundResolvers = buildInboundResolvers(guild);
     const translatedContent = appendStickerTags(
       translateInbound(message.content, inboundResolvers),
@@ -2528,6 +2530,13 @@ async function processTriggeredMessage(
       ))
       .filter((content) => content !== "")
       .join(" [msg-break] ");
+    requestLog.setTriggerContext({
+      ...dashboardTriggerLocation(guild, message.channel),
+      messageId: options.currentTurnOverride?.messageId ?? message.id,
+      authorUsername: message.author.username,
+      content: options.currentTurnOverride?.content ?? message.content,
+      translatedContent: options.currentTurnOverride?.content ?? translatedContent,
+    });
     const currentChannelObj = message.channel as SendableGuildChannel;
     const resolveTargetChannel = createTargetChannelResolver(client, currentChannelObj);
     const typing = createTypingController({
@@ -2778,16 +2787,6 @@ async function processTriggeredMessage(
       sourceMessageId: options.currentTurnOverride?.messageId ?? message.id,
     }), "", "visible reply mode");
 
-    const requestLog = new RequestLog(guildId, channelId, requestLogStore);
-    requestLog.setAuthor(message.author.username);
-    requestLog.setTriggerContext({
-      ...dashboardTriggerLocation(guild, message.channel),
-      messageId: options.currentTurnOverride?.messageId ?? message.id,
-      authorUsername: message.author.username,
-      content: options.currentTurnOverride?.content ?? message.content,
-      translatedContent: options.currentTurnOverride?.content ?? translatedContent,
-    });
-
     const tts = createTtsGenerator(guildConfig);
 
     const deps = createHandlerDeps({
@@ -2856,43 +2855,52 @@ async function processTriggeredMessage(
       },
     });
 
-    await runLoggedAgentTurn({
-      incoming,
-      deps,
-      requestLog,
-      logger: log,
-      afterSuccess: (completed) => {
-        if (completed.responseText === undefined || completed.responseText === "" || sentBotMessageIds[0] === undefined) return;
-        ambientRuntime.noteAmbientBotReply({
-          guildId,
-          channelId,
-          userId: message.author.id,
-          sourceMessageId: message.id,
-          botMessageId: sentBotMessageIds[0],
-          message,
-          allowLease: triggerOverride?.reason === "mention" ||
-            triggerOverride?.reason === "keyword" ||
-            triggerOverride?.reason === "ambient_pickup" ||
-            triggerOverride?.reason === "lingering_attention",
-          allowFollowUp: triggerOverride?.reason === "mention" || triggerOverride?.reason === "keyword",
-        });
-      },
-      onFinally: (completed) => {
-        typing.stopLoop();
-        const completedTrigger = completed?.triggerResult ?? triggerOverride;
-        if (
-          completedTrigger?.reason === "mention" ||
-          completedTrigger?.reason === "keyword" ||
-          completedTrigger?.reason === "random"
-        ) {
-          ambientRuntime.clearAmbientNormalTriggerInFlight(guildId, channelId, message.author.id);
-        }
-      },
-    });
+    try {
+      await runLoggedAgentTurn({
+        incoming,
+        deps,
+        requestLog,
+        logger: log,
+        afterSuccess: (completed) => {
+          if (completed.responseText === undefined || completed.responseText === "" || sentBotMessageIds[0] === undefined) return;
+          ambientRuntime.noteAmbientBotReply({
+            guildId,
+            channelId,
+            userId: message.author.id,
+            sourceMessageId: message.id,
+            botMessageId: sentBotMessageIds[0],
+            message,
+            allowLease: triggerOverride?.reason === "mention" ||
+              triggerOverride?.reason === "keyword" ||
+              triggerOverride?.reason === "ambient_pickup" ||
+              triggerOverride?.reason === "lingering_attention",
+            allowFollowUp: triggerOverride?.reason === "mention" || triggerOverride?.reason === "keyword",
+          });
+        },
+        onFinally: (completed) => {
+          typing.stopLoop();
+          const completedTrigger = completed?.triggerResult ?? triggerOverride;
+          if (
+            completedTrigger?.reason === "mention" ||
+            completedTrigger?.reason === "keyword" ||
+            completedTrigger?.reason === "random"
+          ) {
+            ambientRuntime.clearAmbientNormalTriggerInFlight(guildId, channelId, message.author.id);
+          }
+        },
+      });
+    } finally {
+      requestLogEmitted = true;
+    }
     return {
       coveredMessageIds: currentTurnMessageIds,
     };
   } catch (err) {
+    if (!requestLogEmitted) {
+      requestLog.setError(err instanceof Error ? err.message : String(err));
+      requestLog.emit(log);
+      requestLogEmitted = true;
+    }
     log.error("messageCreate handler error", {
       messageId: message.id,
       guildId: message.guildId,

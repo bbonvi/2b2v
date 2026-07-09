@@ -164,7 +164,7 @@ export async function fetchMissingReplyTargets(
   const missingIdList = [...missingIds];
   const fetched = loadStoredMessages(deps, missingIdList);
   const foundInDb = new Set(fetched.map((m) => m.id));
-  const toFetch = missingIdList.filter((id) => !foundInDb.has(id));
+  const toFetch = missingIdList.filter((id) => !foundInDb.has(id) && /^\d{17,20}$/u.test(id));
 
   // Fetch from Discord (sequential to avoid rate limits)
   for (const msgId of toFetch) {

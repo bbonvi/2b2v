@@ -9,6 +9,9 @@ import type { IncomingMessage } from "./handler.ts";
 
 const GUILD_ID = "g-integ";
 const CHANNEL_ID = "ch-integ";
+const TARGET_ID = "100000000000000099";
+const FIRST_TARGET_ID = "100000000000000101";
+const SECOND_TARGET_ID = "100000000000000102";
 
 let db: Database;
 
@@ -151,7 +154,7 @@ describe("Discord fallback → read_chat_images integration", () => {
     const processedImages: Array<{ url: string; messageId: string }> = [];
 
     const fetched: FetchedDiscordMessage = {
-      id: "target-99",
+      id: TARGET_ID,
       authorId: "u-remote",
       authorUsername: "remoteuser",
       content: "check this photo",
@@ -167,7 +170,7 @@ describe("Discord fallback → read_chat_images integration", () => {
       db,
       guildId: GUILD_ID,
       channelId: CHANNEL_ID,
-      fetchDiscordMessage: (_ch, id) => id === "target-99" ? Promise.resolve(fetched) : Promise.resolve(null),
+      fetchDiscordMessage: (_ch, id) => id === TARGET_ID ? Promise.resolve(fetched) : Promise.resolve(null),
       enqueueEmbedding: () => Promise.resolve(),
       processImage: (url, _ct, msgId) => {
         processedImages.push({ url, messageId: msgId });
@@ -175,16 +178,16 @@ describe("Discord fallback → read_chat_images integration", () => {
       },
     };
 
-    const messages = [makeMsg({ id: "msg-1", replyToId: "target-99" })];
+    const messages = [makeMsg({ id: "msg-1", replyToId: TARGET_ID })];
     const result = await fetchMissingReplyTargets(deps, messages);
 
     // Fetched message returned
     expect(result).toHaveLength(1);
-    expect(result[0]?.id).toBe("target-99");
+    expect(result[0]?.id).toBe(TARGET_ID);
     expect(result[0]?.content).toBe("check this photo");
 
     // Persisted in DB
-    const row = db.raw.prepare("SELECT * FROM messages WHERE id = ?").get("target-99") as Record<string, unknown>;
+    const row = db.raw.prepare("SELECT * FROM messages WHERE id = ?").get(TARGET_ID) as Record<string, unknown>;
     expect(row).not.toBeNull();
     expect(row.guild_id).toBe(GUILD_ID);
     expect(row.channel_id).toBe(CHANNEL_ID);
@@ -193,17 +196,17 @@ describe("Discord fallback → read_chat_images integration", () => {
     // Image attachment processed
     expect(processedImages).toHaveLength(1);
     expect(processedImages[0]?.url).toBe("https://cdn.example.com/photo.jpg");
-    expect(processedImages[0]?.messageId).toBe("target-99");
+    expect(processedImages[0]?.messageId).toBe(TARGET_ID);
   });
 
   test("multiple missing targets fetched and all persisted", async () => {
     const remoteMessages = new Map<string, FetchedDiscordMessage>([
-      ["t-1", {
-        id: "t-1", authorId: "u1", authorUsername: "alice",
+      [FIRST_TARGET_ID, {
+        id: FIRST_TARGET_ID, authorId: "u1", authorUsername: "alice",
         content: "first", timestamp: 100, isBot: false, replyToId: null, attachments: [],
       }],
-      ["t-2", {
-        id: "t-2", authorId: "u2", authorUsername: "bob",
+      [SECOND_TARGET_ID, {
+        id: SECOND_TARGET_ID, authorId: "u2", authorUsername: "bob",
         content: "second", timestamp: 200, isBot: false, replyToId: null, attachments: [],
       }],
     ]);
@@ -218,16 +221,16 @@ describe("Discord fallback → read_chat_images integration", () => {
     };
 
     const messages = [
-      makeMsg({ id: "m1", replyToId: "t-1" }),
-      makeMsg({ id: "m2", replyToId: "t-2" }),
+      makeMsg({ id: "m1", replyToId: FIRST_TARGET_ID }),
+      makeMsg({ id: "m2", replyToId: SECOND_TARGET_ID }),
     ];
 
     const result = await fetchMissingReplyTargets(deps, messages);
     expect(result).toHaveLength(2);
 
     // Both persisted
-    const r1 = db.raw.prepare("SELECT id FROM messages WHERE id = ?").get("t-1") as { id: string } | null;
-    const r2 = db.raw.prepare("SELECT id FROM messages WHERE id = ?").get("t-2") as { id: string } | null;
+    const r1 = db.raw.prepare("SELECT id FROM messages WHERE id = ?").get(FIRST_TARGET_ID) as { id: string } | null;
+    const r2 = db.raw.prepare("SELECT id FROM messages WHERE id = ?").get(SECOND_TARGET_ID) as { id: string } | null;
     expect(r1).not.toBeNull();
     expect(r2).not.toBeNull();
   });
