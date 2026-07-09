@@ -3,8 +3,11 @@
 import type { JSX } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { RelationshipEvent, RelationshipProfile } from "../relationships/types";
+import type { CSSProperties } from "react";
+import type { RelationshipAxis, RelationshipEvent, RelationshipProfile } from "../relationships/types";
 import { RELATIONSHIP_AXES } from "../relationships/state";
+
+const INVERTED_AXES = new Set<RelationshipAxis>(["tension"]);
 
 interface DirectoryUser {
   id: string;
@@ -165,12 +168,24 @@ function RelationshipsLab(): JSX.Element {
             <div className="relationships-title"><span>Raw Axes</span><span>{selectedProfile?.userId ?? "none"}</span></div>
             {selectedProfile !== null
               ? <div className="relationships-axis-list">
-                  {RELATIONSHIP_AXES.map((axis) => (
-                    <div className="relationships-axis-row" key={axis}>
-                      <span>{axis}</span>
-                      <code>{selectedProfile.axes[axis]}</code>
-                    </div>
-                  ))}
+                  {RELATIONSHIP_AXES.map((axis) => {
+                    const value = selectedProfile.axes[axis];
+                    const bounded = Math.max(-100, Math.min(100, value));
+                    const magnitude = Math.abs(bounded);
+                    const health = INVERTED_AXES.has(axis) ? -bounded : bounded;
+                    const style = {
+                      "--axis-fill-left": `${bounded < 0 ? 50 - (magnitude / 2) : 50}%`,
+                      "--axis-fill-width": `${magnitude / 2}%`,
+                      "--axis-fill-color": health >= 0 ? "34,197,94" : "239,68,68",
+                      "--axis-fill-alpha": String(Math.min(0.28, 0.055 + magnitude / 360)),
+                    } as CSSProperties;
+                    return (
+                      <div className="relationships-axis-row" key={axis} style={style}>
+                        <span>{axis}</span>
+                        <code>{value.toFixed(1)}</code>
+                      </div>
+                    );
+                  })}
                 </div>
               : <div className="detail-state">No axes recorded.</div>}
           </div>

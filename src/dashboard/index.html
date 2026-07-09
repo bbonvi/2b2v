@@ -1201,6 +1201,7 @@
     background: var(--surface);
   }
   .relationships-axis-row {
+    position: relative;
     display: grid;
     grid-template-columns: minmax(0, 1fr) 56px;
     gap: .75rem;
@@ -1209,10 +1210,32 @@
     align-items: center;
     font-family: var(--mono);
     font-size: .7rem;
+    overflow: hidden;
+  }
+  .relationships-axis-row::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 var(--axis-fill-left, 50%);
+    width: var(--axis-fill-width, 0);
+    background: rgba(var(--axis-fill-color, 34,197,94), var(--axis-fill-alpha, .1));
+  }
+  .relationships-axis-row::after {
+    content: "";
+    position: absolute;
+    top: .45rem;
+    bottom: .45rem;
+    left: 50%;
+    border-left: 1px solid rgba(148, 163, 184, .12);
   }
   .relationships-axis-row:last-child { border-bottom: 0; }
-  .relationships-axis-row span { color: var(--text-dim); }
+  .relationships-axis-row span {
+    position: relative;
+    z-index: 1;
+    color: var(--text-dim);
+  }
   .relationships-axis-row code {
+    position: relative;
+    z-index: 1;
     color: var(--text-bright);
     text-align: right;
   }
