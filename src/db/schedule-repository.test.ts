@@ -2,6 +2,7 @@ import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import { createDatabase, type Database } from "./database";
 import {
   createSchedule,
+  incrementScheduleFireCount,
   updateSchedule,
   deleteSchedule,
   deleteScheduleForGuild,
@@ -50,6 +51,31 @@ describe("createSchedule", () => {
     expect(row?.enabled).toBe(true);
     expect(row?.createdAt).toBeNumber();
     expect(row?.updatedAt).toBeNumber();
+  });
+
+  test("creates schedule metadata", () => {
+    const id = createSchedule(db, {
+      guildId: "guild-1",
+      channelId: "ch-1",
+      source: "tool",
+      type: "cron",
+      cronExpression: "*/5 * * * *",
+      timezone: "UTC",
+      messageContent: "check quietly",
+      createdByUserId: "user-1",
+      createdByUsername: "alice",
+      handoffNote: "checking item",
+      maxFireCount: 3,
+      expiresAt: Date.now() + 60_000,
+    });
+
+    const row = getSchedule(db, id);
+    expect(row?.createdByUserId).toBe("user-1");
+    expect(row?.createdByUsername).toBe("alice");
+    expect(row?.handoffNote).toBe("checking item");
+    expect(row?.fireCount).toBe(0);
+    expect(row?.maxFireCount).toBe(3);
+    expect(row?.expiresAt).toBeNumber();
   });
 
   test("creates a one-off schedule with run_at timestamp", () => {
@@ -181,6 +207,23 @@ describe("updateSchedule", () => {
 
     updateSchedule(db, id, { enabled: true });
     expect(getSchedule(db, id)?.enabled).toBe(true);
+  });
+
+  test("updates handoff and increments fire count", () => {
+    const id = createSchedule(db, {
+      guildId: "g1",
+      channelId: "c1",
+      source: "tool",
+      type: "cron",
+      cronExpression: "0 9 * * *",
+      timezone: "UTC",
+      messageContent: "test",
+    });
+
+    updateSchedule(db, id, { handoffNote: "full current note" });
+    const row = incrementScheduleFireCount(db, id);
+    expect(row?.handoffNote).toBe("full current note");
+    expect(row?.fireCount).toBe(1);
   });
 
   test("updates cron expression and timezone", () => {

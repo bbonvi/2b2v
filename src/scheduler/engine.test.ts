@@ -153,6 +153,8 @@ describe("SchedulerEngine", () => {
     if (first === undefined) throw new Error("unreachable");
     expect(first.schedule.messageContent).toBe("hello");
     expect(first.schedule.guildId).toBe("guild-1");
+    expect(first.schedule.fireCount).toBe(1);
+    expect(first.isFinalRun).toBe(false);
     e.stop();
   });
 
@@ -300,6 +302,30 @@ describe("SchedulerEngine", () => {
     expect(event.schedule.messageContent).toBe("test-msg");
     expect(event.schedule.type).toBe("cron");
     expect(event.schedule.timezone).toBe("UTC");
+    e.stop();
+  });
+
+  test("marks final run and disables recurring schedules at max fire count", async () => {
+    const id = createSchedule(db, {
+      guildId: "guild-1",
+      channelId: "ch-1",
+      source: "tool",
+      type: "cron",
+      cronExpression: "* * * * * *",
+      timezone: "UTC",
+      messageContent: "bounded",
+      maxFireCount: 1,
+    });
+    const e = makeEngine();
+    e.start();
+
+    crons.fire();
+    await Promise.resolve();
+
+    expect(fired).toHaveLength(1);
+    expect(fired[0]?.isFinalRun).toBe(true);
+    expect(getSchedule(db, id)?.enabled).toBe(false);
+    expect(e.activeCount()).toBe(0);
     e.stop();
   });
 });

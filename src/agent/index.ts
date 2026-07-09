@@ -51,10 +51,10 @@ export {
 export { createSearchChannelMessagesTool, type SearchChannelMessagesToolDeps } from "./search-channel-messages-tool.ts";
 
 export {
-  createScheduleTool,
+  createScheduleTaskTool,
   createScheduleTools,
-  createListScheduledMessagesTool,
-  createDeleteScheduledMessageTool,
+  createListScheduledTasksTool,
+  createDeleteScheduledTaskTool,
   type ScheduleToolDeps,
 } from "./schedule-tool.ts";
 

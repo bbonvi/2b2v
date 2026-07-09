@@ -87,6 +87,7 @@ const GLOBAL: GlobalConfig = {
   defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
   defaultTypingSimulation: { enabled: false, inputReadingWpm: 450, inputMinDelayMs: 300, inputMaxDelayMs: 3500, outputTypingWpm: 180, outputMinHoldMs: 700, outputMaxHoldMs: 3500 },
   defaultAgentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
+    defaultSchedulePressure: { maxRequesterRunsPerHour: 120, maxRequesterRunsPerDay: 500, maxGuildRunsPerHour: 600, maxGuildRunsPerDay: 3000 },
   defaultPromptCaching: { enabled: true },
   defaultPromptTransport: PROMPT_TRANSPORT,
   defaultBackgroundLlm: { modelParams: {} },
@@ -120,6 +121,7 @@ const GUILD: GuildConfig = {
   dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
   typingSimulation: { enabled: false, inputReadingWpm: 450, inputMinDelayMs: 300, inputMaxDelayMs: 3500, outputTypingWpm: 180, outputMinHoldMs: 700, outputMaxHoldMs: 3500 },
   agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
+    schedulePressure: { maxRequesterRunsPerHour: 120, maxRequesterRunsPerDay: 500, maxGuildRunsPerHour: 600, maxGuildRunsPerDay: 3000 },
   promptCaching: { enabled: true },
   promptTransport: PROMPT_TRANSPORT,
   backgroundLlm: {

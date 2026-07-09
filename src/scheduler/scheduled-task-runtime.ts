@@ -15,6 +15,7 @@ import { dashboardTriggerLocation } from "../dashboard/management-runtime";
 import { RequestLog, type Logger } from "../logger";
 import type { ScheduleFireEvent } from "./engine";
 import type { TtsResult } from "../tts/types";
+import { createUpdateCurrentScheduledTaskTool } from "./current-task-tool";
 
 type TtsGenerator = {
   ttsEnabled: boolean;
@@ -29,6 +30,25 @@ type VisibleMaintenanceInput = {
   currentUsername?: string;
   sourceMessageId: string;
 };
+
+function scheduledTaskInstruction(event: ScheduleFireEvent): string {
+  const { schedule } = event;
+  return [
+    "## Scheduled Task Execution",
+    "Run this private scheduled task now. Default to silence when there is nothing useful to say.",
+    "Do not report misses like \"nothing yet\" unless the task explicitly asks for visible repeated updates.",
+    "If stopping a user-visible recurring task, close the loop naturally without mentioning schedules, task IDs, cron, or tooling.",
+    "Use update_current_scheduled_task when recurring state should carry forward or this recurring task should stop.",
+    "The handoff note must be the full current handoff for next run, not just a delta; preserve prior context that still matters.",
+    event.isFinalRun ? "This is the final recurring run because a ceiling is reached; complete any final check and close the loop if useful." : "",
+    "",
+    `Requester: ${schedule.createdByUsername ?? "unknown"}${schedule.createdByUserId !== null ? ` (${schedule.createdByUserId})` : ""}.`,
+    `Fire count including this run: ${schedule.fireCount}.`,
+    `Previous handoff note: ${schedule.handoffNote.trim() !== "" ? schedule.handoffNote.trim() : "(none)"}`,
+    "",
+    `Task instructions: ${schedule.messageContent}`,
+  ].filter((line) => line !== "").join("\n");
+}
 
 export function createScheduledTaskRunner(input: {
   client: Client;
@@ -68,13 +88,15 @@ export function createScheduledTaskRunner(input: {
   runLoggedAgentTurn: (input: { incoming: IncomingMessage; deps: HandlerDeps; requestLog: RequestLog; logger: Logger; afterSuccess?: (result: HandleResult) => void | Promise<void>; onFinally?: (result: HandleResult | undefined) => void }) => Promise<HandleResult>;
   runMemoryPostReplyExtraction: (input: { guildConfig: GuildConfig; memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]; guild: Guild; channel: unknown; sourceRequestId: string; source?: string; currentUserId: string; currentUsername?: string }) => Promise<unknown>;
   runRelationshipPostReplyExtraction: (input: { guildConfig: GuildConfig; memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]; guild?: Guild; channel?: unknown; source?: string; sourceRequestId?: string; currentUserId: string; currentUsername?: string }) => Promise<void>;
-}): (event: ScheduleFireEvent) => void {
-  return (event) => {
+  onScheduleCompleted?: (scheduleId: string) => void;
+  markScheduledAttentionBusy?: (guildId: string, channelId: string) => () => void;
+}): (event: ScheduleFireEvent) => Promise<void> {
+  return async (event) => {
     const { schedule } = event;
     const scheduleLog = input.log.child({ component: "scheduler", scheduleId: schedule.id });
     scheduleLog.info("schedule fired", { guildId: schedule.guildId, channelId: schedule.channelId });
 
-    void (async () => {
+    try {
       const guild = input.client.guilds.cache.get(schedule.guildId);
       if (guild === undefined) {
         scheduleLog.warn("guild not found, skipping scheduled task");
@@ -90,6 +112,8 @@ export function createScheduledTaskRunner(input: {
       const textChannel = channel as TextChannel;
       const guildId = schedule.guildId;
       const channelId = schedule.channelId;
+      const releaseScheduledAttention = input.markScheduledAttentionBusy?.(guildId, channelId);
+      try {
       const guildConfig = input.getGuildConfig(guildId);
       const botUserId = input.client.user?.id ?? "";
       const botUsername = input.client.user?.username ?? "bot";
@@ -126,12 +150,13 @@ export function createScheduledTaskRunner(input: {
         guildId,
         channelId,
       });
+      const scheduledInstruction = scheduledTaskInstruction(event);
       const context = await input.buildContext(
         guildId,
         channelId,
         guild,
         guildConfig,
-        `[Scheduled Task Instructions] ${schedule.messageContent}`,
+        scheduledInstruction,
         syntheticLatestMessage,
         replyFallbackDeps,
         textChannel.isThread(),
@@ -152,6 +177,11 @@ export function createScheduledTaskRunner(input: {
           sourceQuote: shortQuote(schedule.messageContent),
         },
       );
+      const updateCurrentTaskTool = createUpdateCurrentScheduledTaskTool({
+        db: input.db,
+        scheduleId: schedule.id,
+        onCompleted: input.onScheduleCompleted,
+      });
       const incoming: IncomingMessage = {
         content: schedule.messageContent,
         guildId,
@@ -197,7 +227,7 @@ export function createScheduledTaskRunner(input: {
         context,
         currentChannelId: channelId,
         sender,
-        extraTools: [...extraTools, ...visibleMaintenanceTools],
+        extraTools: [...extraTools, updateCurrentTaskTool, ...visibleMaintenanceTools],
         log: scheduleLog,
         requestLog,
         tts: input.createTtsGenerator(guildConfig),
@@ -208,7 +238,6 @@ export function createScheduledTaskRunner(input: {
           logger: scheduleLog.child({ component: "stored-image-attachments", guildId, channelId }),
         }),
         overrides: {
-          onTriggered: () => { typing.startLoop(); },
           onStillWorking: (destinationChannelId) => { typing.startLoop(destinationChannelId); },
           getTypingStartedAt: typing.getTypingStartedAt,
           onVisibleOutput: typing.stopLoop,
@@ -226,6 +255,8 @@ export function createScheduledTaskRunner(input: {
           },
           forceTrigger: true,
           triggerInstructions: guildConfig.triggerInstructions,
+          disableLiveOutput: true,
+          scheduledTaskRun: true,
           afterReply: async (memoryRequest) => {
             await input.runMemoryPostReplyExtraction({
               guildConfig,
@@ -259,11 +290,14 @@ export function createScheduledTaskRunner(input: {
         onFinally: typing.stopLoop,
       });
       scheduleLog.info("scheduled task completed", { agentRan: result.agentRan });
-    })().catch((err: unknown) => {
+      } finally {
+        releaseScheduledAttention?.();
+      }
+    } catch (err: unknown) {
       input.log.error("scheduled task failed", {
         scheduleId: schedule.id,
         error: err instanceof Error ? err.message : String(err),
       });
-    });
+    }
   };
 }

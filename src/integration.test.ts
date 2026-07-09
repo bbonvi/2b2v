@@ -10,7 +10,7 @@ import {
 import { createDatabase, type Database } from "./db/database.ts";
 import { createMemory, getMemory, listMemories } from "./db/memory-repository.ts";
 import { createSchedule, getSchedule, listSchedules } from "./db/schedule-repository.ts";
-import { createScheduleTool } from "./agent/schedule-tool.ts";
+import { createScheduleTaskTool } from "./agent/schedule-tool.ts";
 import { trimChatHistory } from "./agent/context-trimming.ts";
 import type { ChatMessage } from "./agent/prompt.ts";
 import type { TrimConfig } from "./config/types.ts";
@@ -119,9 +119,9 @@ describe("memory repository → DB roundtrip", () => {
 });
 
 describe("schedule tool → DB roundtrip", () => {
-  test("schedule_message creates one-off schedule and notifies callback", async () => {
+  test("schedule_task creates one-off schedule and notifies callback", async () => {
     const createdIds: string[] = [];
-    const tool = createScheduleTool({
+    const tool = createScheduleTaskTool({
       db,
       guildId: GUILD_ID,
       channelId: CHANNEL_ID,
@@ -140,8 +140,8 @@ describe("schedule tool → DB roundtrip", () => {
     expect(getSchedule(db, details.scheduleId)?.source).toBe("tool");
   });
 
-  test("schedule_message rejects non-positive amount", async () => {
-    const tool = createScheduleTool({
+  test("schedule_task rejects non-positive amount", async () => {
+    const tool = createScheduleTaskTool({
       db,
       guildId: GUILD_ID,
       channelId: CHANNEL_ID,

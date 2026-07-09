@@ -15,7 +15,7 @@ function tool(name: string): AgentTool {
 
 describe("tool access", () => {
   test("classifies visible write tools", () => {
-    expect(isWriteToolName("schedule_message")).toBe(true);
+    expect(isWriteToolName("schedule_task")).toBe(true);
     expect(isWriteToolName("codex_generate_image")).toBe(true);
     expect(isWriteToolName("discord_set_user_timeout")).toBe(true);
     expect(isWriteToolName("discord_remove_user_timeout")).toBe(true);
@@ -27,7 +27,7 @@ describe("tool access", () => {
     const started: string[] = [];
     const tools = trackWriteToolStarts([
       tool("search_channel_messages"),
-      tool("schedule_message"),
+      tool("schedule_task"),
       tool("fetch_url"),
     ], (name) => started.push(name));
 
@@ -35,7 +35,7 @@ describe("tool access", () => {
     await tools[1]?.execute("write-1", {}, undefined);
     await tools[2]?.execute("read-2", {}, undefined);
 
-    expect(tools.map((item) => item.name)).toEqual(["search_channel_messages", "schedule_message", "fetch_url"]);
-    expect(started).toEqual(["schedule_message"]);
+    expect(tools.map((item) => item.name)).toEqual(["search_channel_messages", "schedule_task", "fetch_url"]);
+    expect(started).toEqual(["schedule_task"]);
   });
 });

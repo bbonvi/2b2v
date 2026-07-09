@@ -17,6 +17,7 @@ import type {
   ReasoningContinuationConfig,
   RelationshipConfig,
   ReplyLoopConfig,
+  SchedulePressureConfig,
   TriggerConfig,
   TrimConfig,
   TypingSimulationConfig,
@@ -221,6 +222,13 @@ export const DEFAULT_AGENT_JOBS: AgentJobsConfig = {
   imageCancelGraceMs: 60_000,
   terminalVisibleMs: 600_000,
   maxImageReplacements: 2,
+};
+
+export const DEFAULT_SCHEDULE_PRESSURE: SchedulePressureConfig = {
+  maxRequesterRunsPerHour: 120,
+  maxRequesterRunsPerDay: 500,
+  maxGuildRunsPerHour: 600,
+  maxGuildRunsPerDay: 3_000,
 };
 
 export const DEFAULT_PROMPT_CACHING: PromptCachingConfig = {

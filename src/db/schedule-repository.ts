@@ -13,6 +13,12 @@ export interface ScheduleRow {
   runAt: number | null;
   timezone: string;
   messageContent: string;
+  createdByUserId: string | null;
+  createdByUsername: string | null;
+  handoffNote: string;
+  fireCount: number;
+  expiresAt: number | null;
+  maxFireCount: number | null;
   enabled: boolean;
   createdAt: number;
   updatedAt: number;
@@ -27,6 +33,12 @@ export interface CreateScheduleInput {
   runAt?: number;
   timezone: string;
   messageContent: string;
+  createdByUserId?: string;
+  createdByUsername?: string;
+  handoffNote?: string;
+  fireCount?: number;
+  expiresAt?: number;
+  maxFireCount?: number;
   enabled?: boolean;
 }
 
@@ -35,6 +47,10 @@ export interface UpdateScheduleInput {
   runAt?: number;
   timezone?: string;
   messageContent?: string;
+  handoffNote?: string;
+  fireCount?: number;
+  expiresAt?: number | null;
+  maxFireCount?: number | null;
   enabled?: boolean;
   channelId?: string;
 }
@@ -44,11 +60,13 @@ export interface ListSchedulesFilter {
   source?: ScheduleSource;
   enabled?: boolean;
   channelId?: string;
+  createdByUserId?: string;
 }
 
 export interface PendingSchedulesFilter {
   guildId: string;
   channelId?: string;
+  createdByUserId?: string;
 }
 
 export function createSchedule(db: Database, input: CreateScheduleInput): string {
@@ -58,8 +76,8 @@ export function createSchedule(db: Database, input: CreateScheduleInput): string
 
   db.raw
     .prepare(
-      `INSERT INTO schedules (id, guild_id, channel_id, source, type, cron_expression, run_at, timezone, message_content, enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO schedules (id, guild_id, channel_id, source, type, cron_expression, run_at, timezone, message_content, created_by_user_id, created_by_username, handoff_note, fire_count, expires_at, max_fire_count, enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -71,6 +89,12 @@ export function createSchedule(db: Database, input: CreateScheduleInput): string
       input.runAt ?? null,
       input.timezone,
       input.messageContent,
+      input.createdByUserId ?? null,
+      input.createdByUsername ?? null,
+      input.handoffNote ?? "",
+      input.fireCount ?? 0,
+      input.expiresAt ?? null,
+      input.maxFireCount ?? null,
       enabled ? 1 : 0,
       now,
       now
@@ -105,6 +129,22 @@ export function updateSchedule(db: Database, id: string, input: UpdateScheduleIn
     sets.push("message_content = ?");
     params.push(input.messageContent);
   }
+  if (input.handoffNote !== undefined) {
+    sets.push("handoff_note = ?");
+    params.push(input.handoffNote);
+  }
+  if (input.fireCount !== undefined) {
+    sets.push("fire_count = ?");
+    params.push(input.fireCount);
+  }
+  if (input.expiresAt !== undefined) {
+    sets.push("expires_at = ?");
+    params.push(input.expiresAt);
+  }
+  if (input.maxFireCount !== undefined) {
+    sets.push("max_fire_count = ?");
+    params.push(input.maxFireCount);
+  }
   if (input.enabled !== undefined) {
     sets.push("enabled = ?");
     params.push(input.enabled ? 1 : 0);
@@ -122,6 +162,11 @@ export function updateSchedule(db: Database, id: string, input: UpdateScheduleIn
 
   const result = db.raw.prepare(`UPDATE schedules SET ${sets.join(", ")} WHERE id = ?`).run(...params);
   return result.changes > 0;
+}
+
+export function incrementScheduleFireCount(db: Database, id: string): ScheduleRow | null {
+  db.raw.prepare("UPDATE schedules SET fire_count = fire_count + 1, updated_at = ? WHERE id = ?").run(Date.now(), id);
+  return getSchedule(db, id);
 }
 
 export function deleteSchedule(db: Database, id: string): boolean {
@@ -142,12 +187,19 @@ export function deletePendingSchedule(db: Database, id: string, filter: PendingS
     "guild_id = ?",
     "enabled = 1",
     "(type = 'cron' OR (type = 'one_off' AND run_at IS NOT NULL AND run_at > ?))",
+    "(expires_at IS NULL OR expires_at > ?)",
+    "(max_fire_count IS NULL OR fire_count < max_fire_count)",
   ];
-  const params: (string | number)[] = [id, filter.guildId, Date.now()];
+  const now = Date.now();
+  const params: (string | number)[] = [id, filter.guildId, now, now];
 
   if (filter.channelId !== undefined) {
     conditions.push("channel_id = ?");
     params.push(filter.channelId);
+  }
+  if (filter.createdByUserId !== undefined) {
+    conditions.push("created_by_user_id = ?");
+    params.push(filter.createdByUserId);
   }
 
   const result = db.raw
@@ -184,8 +236,11 @@ export function listPendingSchedules(db: Database, filter: PendingSchedulesFilte
     "guild_id = ?",
     "enabled = 1",
     "(type = 'cron' OR (type = 'one_off' AND run_at IS NOT NULL AND run_at > ?))",
+    "(expires_at IS NULL OR expires_at > ?)",
+    "(max_fire_count IS NULL OR fire_count < max_fire_count)",
   ];
-  const params: (string | number)[] = [filter.guildId, Date.now()];
+  const now = Date.now();
+  const params: (string | number)[] = [filter.guildId, now, now];
 
   if (filter.channelId !== undefined) {
     conditions.push("channel_id = ?");
@@ -221,6 +276,12 @@ function mapRow(row: Record<string, unknown>): ScheduleRow {
     runAt: row.run_at as number | null,
     timezone: row.timezone as string,
     messageContent: row.message_content as string,
+    createdByUserId: row.created_by_user_id as string | null,
+    createdByUsername: row.created_by_username as string | null,
+    handoffNote: (row.handoff_note as string | null) ?? "",
+    fireCount: (row.fire_count as number | null) ?? 0,
+    expiresAt: row.expires_at as number | null,
+    maxFireCount: row.max_fire_count as number | null,
     enabled: (row.enabled as number) === 1,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,

@@ -26,6 +26,7 @@ export {
   deleteSchedule,
   deleteScheduleForGuild,
   deletePendingSchedule,
+  incrementScheduleFireCount,
   getSchedule,
   listSchedules,
   listPendingSchedules,

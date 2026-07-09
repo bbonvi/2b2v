@@ -3,17 +3,19 @@ import type { Database } from "../db/database";
 import {
   listSchedules,
   getSchedule,
+  incrementScheduleFireCount,
   updateSchedule,
   type ScheduleRow,
 } from "../db/schedule-repository";
 
 export interface ScheduleFireEvent {
   schedule: ScheduleRow;
+  isFinalRun: boolean;
 }
 
 export interface SchedulerEngineOptions {
   db: Database;
-  onFire: (event: ScheduleFireEvent) => void;
+  onFire: (event: ScheduleFireEvent) => void | Promise<void>;
   log?: SchedulerLogger;
   /** Not currently used; reserved for future polling. */
   pollIntervalMs?: number;
@@ -105,6 +107,14 @@ export function createSchedulerEngine(
   function scheduleJob(schedule: ScheduleRow): void {
     // Skip if already tracked
     if (jobs.has(schedule.id)) return;
+    if (schedule.expiresAt !== null && schedule.expiresAt <= timers.now()) {
+      updateSchedule(db, schedule.id, { enabled: false });
+      return;
+    }
+    if (schedule.maxFireCount !== null && schedule.fireCount >= schedule.maxFireCount) {
+      updateSchedule(db, schedule.id, { enabled: false });
+      return;
+    }
 
     if (schedule.type === "cron" && schedule.cronExpression !== null && schedule.cronExpression !== "") {
       try {
@@ -117,7 +127,7 @@ export function createSchedulerEngine(
             });
           },
         }, () => {
-          fire(schedule.id);
+          void fire(schedule.id);
         });
         jobs.set(schedule.id, { cron, scheduleId: schedule.id });
       } catch (err) {
@@ -138,7 +148,7 @@ export function createSchedulerEngine(
     const delayMs = schedule.runAt - timers.now();
     if (delayMs <= 0) {
       if (fireWhenDue) {
-        fire(schedule.id);
+        void fire(schedule.id);
       } else {
         // Past one-offs found during startup should not fire unexpectedly.
         updateSchedule(db, schedule.id, { enabled: false });
@@ -156,8 +166,30 @@ export function createSchedulerEngine(
     jobs.set(schedule.id, { timer, scheduleId: schedule.id });
   }
 
-  function fire(scheduleId: string): void {
-    const schedule = getSchedule(db, scheduleId);
+  function isFinalCronRun(schedule: ScheduleRow, now: number): boolean {
+    if (schedule.type !== "cron") return true;
+    if (schedule.maxFireCount !== null && schedule.fireCount >= schedule.maxFireCount) return true;
+    if (schedule.expiresAt !== null && schedule.cronExpression !== null) {
+      const nextRun = new Cron(schedule.cronExpression, { timezone: schedule.timezone, paused: true }).nextRun(new Date(now));
+      if (nextRun === null || nextRun.getTime() >= schedule.expiresAt) return true;
+    }
+    return false;
+  }
+
+  async function fire(scheduleId: string): Promise<void> {
+    const existing = getSchedule(db, scheduleId);
+    if (!existing || !existing.enabled) return;
+    if (existing.expiresAt !== null && existing.expiresAt <= timers.now()) {
+      updateSchedule(db, scheduleId, { enabled: false });
+      clearJob(scheduleId);
+      return;
+    }
+    if (existing.maxFireCount !== null && existing.fireCount >= existing.maxFireCount) {
+      updateSchedule(db, scheduleId, { enabled: false });
+      clearJob(scheduleId);
+      return;
+    }
+    const schedule = incrementScheduleFireCount(db, scheduleId);
     if (!schedule || !schedule.enabled) return;
 
     // For one-offs, auto-disable after firing
@@ -166,7 +198,13 @@ export function createSchedulerEngine(
       jobs.delete(scheduleId);
     }
 
-    onFire({ schedule });
+    const isFinalRun = isFinalCronRun(schedule, timers.now());
+    await onFire({ schedule, isFinalRun });
+    if (schedule.type === "cron" && isFinalRun) {
+      const latest = getSchedule(db, scheduleId);
+      if (latest?.enabled === true) updateSchedule(db, scheduleId, { enabled: false });
+      clearJob(scheduleId);
+    }
   }
 
   function clearJob(id: string): void {

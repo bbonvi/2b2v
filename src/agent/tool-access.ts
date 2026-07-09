@@ -5,12 +5,13 @@ const WRITE_TOOL_NAMES = new Set([
   "close_thread",
   "codex_generate_image",
   "delete_own_message",
-  "delete_scheduled_message",
+  "delete_scheduled_task",
   "discord_remove_user_timeout",
   "discord_set_user_timeout",
   "edit_own_message",
   "react_to_message",
-  "schedule_message",
+  "schedule_task",
+  "update_current_scheduled_task",
   "start_thread",
 ]);
 

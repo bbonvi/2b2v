@@ -26,7 +26,7 @@ export interface ScheduleCommandDeps {
 
 export const scheduleCommandDefinition = new SlashCommandBuilder()
   .setName("schedule")
-  .setDescription("Manage scheduled messages (admin only)")
+  .setDescription("Manage scheduled tasks (admin only)")
   .addSubcommand((sub) =>
     sub.setName("list").setDescription("List all schedules for this guild")
   )
@@ -52,8 +52,8 @@ export const scheduleCommandDefinition = new SlashCommandBuilder()
       )
       .addStringOption((opt) =>
         opt
-          .setName("message")
-          .setDescription("Message content to send")
+          .setName("instructions")
+          .setDescription("Task instructions")
           .setRequired(true)
       )
       .addStringOption((opt) =>
@@ -188,14 +188,14 @@ export function createScheduleHandler(deps: ScheduleCommandDeps) {
     if (subcommand === "add") {
       const type = interaction.options.getString("type");
       const channelId = interaction.options.getString("channel");
-      const message = interaction.options.getString("message");
+      const message = interaction.options.getString("instructions");
       const cronExpr = interaction.options.getString("cron");
       const runAtStr = interaction.options.getString("run-at");
       const timezoneOpt = interaction.options.getString("timezone");
 
       if (message === null || message === "") {
         await interaction.reply({
-          content: "A message is required.",
+          content: "Task instructions are required.",
           flags: MessageFlags.Ephemeral,
         });
         return;

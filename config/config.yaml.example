@@ -45,6 +45,13 @@ memoryExtraction:
     maxBatchMessages: 300 # Max chronological messages reviewed per ambient pass
     minIntervalSeconds: 600 # Minimum seconds between ambient passes per channel
 
+# Non-admin recurring scheduled-task pressure caps.
+schedulePressure:
+  maxRequesterRunsPerHour: 120
+  maxRequesterRunsPerDay: 500
+  maxGuildRunsPerHour: 600
+  maxGuildRunsPerDay: 3000
+
 # Durable per-user relationship profiles.
 relationships:
   enabled: true

@@ -29,7 +29,7 @@ import type { RequestLogStore } from "./store";
 
 const PROMPT_LAB_READ_TOOL_NAMES = new Set([
   "search_channel_messages",
-  "list_scheduled_messages",
+  "list_scheduled_tasks",
   "list_chat_users",
   "list_channels",
   "list_emojis",

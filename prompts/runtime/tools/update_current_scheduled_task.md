@@ -1,0 +1,1 @@
+Update the current scheduled task's handoff note or complete the current recurring task. Available only during scheduled task execution. Use complete when the stop condition is met or a recurring task should not run again.

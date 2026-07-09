@@ -169,6 +169,12 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
     "ALTER TABLE memories ADD COLUMN expires_at INTEGER",
     "ALTER TABLE memories ADD COLUMN provenance_json TEXT",
     "ALTER TABLE memories ADD COLUMN priority INTEGER NOT NULL DEFAULT 0 CHECK(priority >= 0)",
+    "ALTER TABLE schedules ADD COLUMN created_by_user_id TEXT",
+    "ALTER TABLE schedules ADD COLUMN created_by_username TEXT",
+    "ALTER TABLE schedules ADD COLUMN handoff_note TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE schedules ADD COLUMN fire_count INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE schedules ADD COLUMN expires_at INTEGER",
+    "ALTER TABLE schedules ADD COLUMN max_fire_count INTEGER",
   ]) {
     ignoreExistingColumn(raw, sql);
   }

@@ -68,7 +68,7 @@ Ambient memory extraction is separate from reply triggering. Successful post-rep
 
 `discord_set_user_timeout` and `discord_remove_user_timeout` are intentionally narrow: rare, admin-requested Discord member timeout changes only. Runtime validation must continue rejecting DMs, bot self-timeouts, known guild-owner targets, non-positive durations, and set durations above Discord's 28 day maximum.
 
-Agent schedule tools are current-guild and current-channel scoped. One-off timers longer than JavaScript's maximum timeout must be chunked and re-armed.
+Agent schedule tools are current-guild and current-channel scoped. Scheduled tasks are private by default, carry requester metadata plus a concise handoff note/fire count, and may self-complete recurring work. Non-admin recurring task pressure caps are configured by `schedulePressure`. One-off timers longer than JavaScript's maximum timeout must be chunked and re-armed.
 
 Stored images are canonical sources. Runtime model reads may use temporary compressed copies, but must not replace the canonical attachment.
 

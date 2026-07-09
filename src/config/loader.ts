@@ -17,6 +17,7 @@ import {
   DEFAULT_REASONING_CONTINUATION,
   DEFAULT_RELATIONSHIPS,
   DEFAULT_REPLY_LOOP,
+  DEFAULT_SCHEDULE_PRESSURE,
   DEFAULT_TRIGGER,
   DEFAULT_TRIM,
   DEFAULT_TYPING_SIMULATION,
@@ -65,6 +66,8 @@ import type {
   AmbientInitiativeConfigYaml,
   RelationshipConfig,
   RelationshipConfigYaml,
+  SchedulePressureConfig,
+  SchedulePressureConfigYaml,
 } from "./types.ts";
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
 
@@ -810,6 +813,29 @@ function validateAgentJobsConfig(config: AgentJobsConfig, keyPrefix: string): vo
   }
 }
 
+function resolveSchedulePressure(
+  defaults: SchedulePressureConfig,
+  partial: SchedulePressureConfigYaml | undefined,
+  keyPrefix: string,
+): SchedulePressureConfig {
+  const resolved = {
+    maxRequesterRunsPerHour: partial?.maxRequesterRunsPerHour ?? defaults.maxRequesterRunsPerHour,
+    maxRequesterRunsPerDay: partial?.maxRequesterRunsPerDay ?? defaults.maxRequesterRunsPerDay,
+    maxGuildRunsPerHour: partial?.maxGuildRunsPerHour ?? defaults.maxGuildRunsPerHour,
+    maxGuildRunsPerDay: partial?.maxGuildRunsPerDay ?? defaults.maxGuildRunsPerDay,
+  };
+  validateSchedulePressureConfig(resolved, keyPrefix);
+  return resolved;
+}
+
+function validateSchedulePressureConfig(config: SchedulePressureConfig, keyPrefix: string): void {
+  for (const [key, value] of Object.entries(config)) {
+    if (!Number.isInteger(value) || value < 1) {
+      throw new Error(`${keyPrefix}.${key} must be a positive integer`);
+    }
+  }
+}
+
 /**
  * Load and parse the main config YAML file.
  * Returns an empty object if the file does not exist.
@@ -965,6 +991,7 @@ export function loadGlobalConfig(
     },
     defaultTypingSimulation: resolveTypingSimulationConfig(DEFAULT_TYPING_SIMULATION, yaml.typingSimulation),
     defaultAgentJobs: resolveGlobalAgentJobs(yaml.agentJobs),
+    defaultSchedulePressure: resolveSchedulePressure(DEFAULT_SCHEDULE_PRESSURE, yaml.schedulePressure, "schedulePressure"),
     defaultPromptCaching: resolveGlobalPromptCaching(yaml.promptCaching),
     defaultPromptTransport: resolveGlobalPromptTransport(yaml.promptTransport),
     defaultBackgroundLlm: resolveGlobalBackgroundLlm(yaml.backgroundLlm),
@@ -1066,6 +1093,7 @@ export function resolveGuildConfig(
     },
     typingSimulation: resolveTypingSimulationConfig(global.defaultTypingSimulation, partial.typingSimulation),
     agentJobs: resolveGuildAgentJobs(global.defaultAgentJobs, partial.agentJobs),
+    schedulePressure: resolveSchedulePressure(global.defaultSchedulePressure, partial.schedulePressure, "schedulePressure"),
     promptCaching,
     promptTransport: resolveGuildPromptTransport(global.defaultPromptTransport, partial.promptTransport),
     backgroundLlm: resolveGuildBackgroundLlm(global, partial, promptCaching),

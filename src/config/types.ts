@@ -62,6 +62,16 @@ export interface AgentJobsConfig {
   maxImageReplacements: number;
 }
 
+/** Hard caps for non-admin recurring scheduled-task pressure. */
+export interface SchedulePressureConfig {
+  maxRequesterRunsPerHour: number;
+  maxRequesterRunsPerDay: number;
+  maxGuildRunsPerHour: number;
+  maxGuildRunsPerDay: number;
+}
+
+export type SchedulePressureConfigYaml = Partial<SchedulePressureConfig>;
+
 /** Prompt caching controls. */
 export interface PromptCachingConfig {
   enabled: boolean;
@@ -428,6 +438,8 @@ export interface GuildConfig {
   typingSimulation: TypingSimulationConfig;
   /** Async agent job configuration. */
   agentJobs: AgentJobsConfig;
+  /** Non-admin recurring scheduled-task pressure caps. */
+  schedulePressure: SchedulePressureConfig;
   /** Prompt caching controls for supported provider requests. */
   promptCaching: PromptCachingConfig;
   /** Provider role/target placement for logical prompt sections. */
@@ -494,6 +506,8 @@ export interface GlobalConfig {
   defaultTypingSimulation: TypingSimulationConfig;
   /** Default async agent job configuration. */
   defaultAgentJobs: AgentJobsConfig;
+  /** Default non-admin recurring scheduled-task pressure caps. */
+  defaultSchedulePressure: SchedulePressureConfig;
   /** Default prompt caching controls. */
   defaultPromptCaching: PromptCachingConfig;
   /** Default provider role/target placement for logical prompt sections. */
@@ -572,6 +586,7 @@ export interface GuildConfigYaml {
     terminalVisibleMs?: number;
     maxImageReplacements?: number;
   };
+  schedulePressure?: SchedulePressureConfigYaml;
   promptCaching?: {
     enabled?: boolean;
   };
@@ -670,6 +685,7 @@ export interface MainConfigYaml {
     terminalVisibleMs?: number;
     maxImageReplacements?: number;
   };
+  schedulePressure?: SchedulePressureConfigYaml;
   promptCaching?: {
     enabled?: boolean;
   };

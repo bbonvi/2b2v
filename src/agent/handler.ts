@@ -270,6 +270,7 @@ export interface HandlerDeps {
   preSendCheck?: () => boolean | Promise<boolean>;
   /** Opaque Codex native continuation storage for cross-run reasoning replay. */
   nativeReasoningContinuation?: NativeReasoningContinuationStore;
+  scheduledTaskRun?: boolean;
 }
 
 export interface HandleResult {
@@ -745,16 +746,21 @@ function buildSkillsInstruction(runtimePrompts: RuntimePromptBundle | undefined)
   return runtimePrompts?.skills.indexPrompt.trim() ?? "";
 }
 
-function buildFinalActionInstruction(runtimePrompts: RuntimePromptBundle | undefined, triggerInstruction?: string): string {
+function buildFinalActionInstruction(runtimePrompts: RuntimePromptBundle | undefined, triggerInstruction?: string, scheduledTaskRun = false): string {
   const base = runtimePrompts?.finalActionInstruction.trim() ?? "";
   const instruction = base !== ""
     ? base
     : "## Final Action Instruction\nContinue the Discord room as 2B. Emit only her next runtime action: visible speech, silence, voice, or private action. Do not explain the choice.";
   const trigger = triggerInstruction?.trim() ?? "";
-  const mode = [
-    "## Execution Mode: Visible Reply",
-    "Produce 2B's visible Discord action. Use other tools when necessary, but do not call record_memory or record_relationship in this mode.",
-  ].join("\n");
+  const mode = scheduledTaskRun
+    ? [
+        "## Scheduled Task Context",
+        "Run the scheduled task privately. Use tools when useful, and produce visible Discord output only when the task instructions call for it, something useful changed, or a user-facing stop/closure is needed. Otherwise output <ignore>. Do not call record_memory or record_relationship here.",
+      ].join("\n")
+    : [
+        "## Execution Mode: Visible Reply",
+        "Produce 2B's visible Discord action. Use other tools when necessary, but do not call record_memory or record_relationship in this mode.",
+      ].join("\n");
   const withMode = `${mode}\n\n${instruction}`;
   if (trigger === "") return withMode;
   return `${withMode}\n\n## Trigger Context\n${trigger}`;
@@ -1196,7 +1202,7 @@ const PARALLEL_SAFE_READ_ONLY_TOOLS = new Set([
   "fetch_url",
   "list_memories",
   "list_emojis",
-  "list_scheduled_messages",
+  "list_scheduled_tasks",
   "list_chat_users",
   "list_channels",
   "read_chat_images",
@@ -2540,7 +2546,7 @@ export async function handleMessage(
   );
   const userContent = context.userMessage !== "" ? context.userMessage : msg.translatedContent;
   const volatileMessages = buildVolatileTurnMessages(context);
-  const finalActionInstruction = buildFinalActionInstruction(deps.runtimePrompts, triggerInstruction);
+  const finalActionInstruction = buildFinalActionInstruction(deps.runtimePrompts, triggerInstruction, deps.scheduledTaskRun === true);
   const initialRoles = initialMessageRoles(transport, volatileMessages, finalActionInstruction !== "");
   const reqLog = deps.requestLog;
   const sessionId = buildPromptCacheSessionId(reqLog, `${model.llmProvider}:${model.id}`);

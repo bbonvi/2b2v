@@ -151,6 +151,12 @@ export const SCHEMA_SQL = `
     run_at            INTEGER,
     timezone          TEXT NOT NULL DEFAULT 'UTC',
     message_content   TEXT NOT NULL,
+    created_by_user_id TEXT,
+    created_by_username TEXT,
+    handoff_note      TEXT NOT NULL DEFAULT '',
+    fire_count        INTEGER NOT NULL DEFAULT 0,
+    expires_at        INTEGER,
+    max_fire_count    INTEGER,
     enabled           INTEGER NOT NULL DEFAULT 1,
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL

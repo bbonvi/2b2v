@@ -192,6 +192,7 @@ export type AmbientRuntimeDeps = {
   }) => MessageSender;
   createHandlerDeps: (input: CreateHandlerDepsInput) => HandlerDeps;
   processTriggeredMessage: (message: Message, triggerResult?: NonNullable<TriggerResult>, currentTurnMessages?: readonly Message[], options?: { disableLiveOutput?: boolean; defaultReply?: boolean; triggerInstruction?: string; currentTurnOverride?: { messageId: string; timestamp: number; content: string }; preSendCheck?: () => boolean; onWriteToolStart?: (toolName: string) => void }) => Promise<unknown>;
+  isAutonomousAttentionBusy?: (guildId: string, channelId: string) => boolean;
 };
 
 export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime {
@@ -214,6 +215,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
   const createBotDiscordMessageSender = input.createBotDiscordMessageSender;
   const createHandlerDeps = input.createHandlerDeps;
   const processTriggeredMessage = input.processTriggeredMessage;
+  const isAutonomousAttentionBusy = input.isAutonomousAttentionBusy ?? (() => false);
   type AmbientCandidate = {
     id: string;
     kind: AmbientAttentionKind;
@@ -712,6 +714,9 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     if (!ambientBudgetAvailable(config, candidate, now)) return { ok: false, reason: "ambient budget exhausted" };
     if (phase === "evaluate" && !ambientCooldownReady(candidate, now)) return { ok: false, reason: "ambient cooldown active" };
     if (!ambientPickupChannelCooldownReady(candidate, now)) return { ok: false, reason: "ambient pickup channel cooldown active" };
+    if (isAutonomousAttentionBusy(candidate.guildId, candidate.channelId)) {
+      return { ok: false, reason: "scheduled task active" };
+    }
     if (activeTypingInChannel(candidate.guildId, candidate.channelId, ambientTypingActiveMs(config, candidate.kind), now)) {
       return { ok: false, reason: "user typing active" };
     }
@@ -1314,6 +1319,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     phase: "opportunity" | "pre_send";
   }): { ok: true } | { ok: false; reason: string } {
     if (!input.config.enabled && !input.forced) return { ok: false, reason: "ambient initiative disabled" };
+    if (!input.forced && isAutonomousAttentionBusy(input.guildId, input.channelId)) return { ok: false, reason: "scheduled task active" };
     if (input.phase === "pre_send" && input.signals.activeTyping) return { ok: false, reason: "user typing active" };
     if (input.signals.activeImageJobs > 0) return { ok: false, reason: "active image job visible" };
     if (input.signals.pendingAmbientCandidates > 0) return { ok: false, reason: "ambient attention pending" };

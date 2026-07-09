@@ -758,6 +758,29 @@ function getRelationshipConfig(guildConfig: GuildConfig): RelationshipConfig {
   return config;
 }
 
+const SCHEDULED_ATTENTION_COOLDOWN_MS = 30_000;
+const scheduledAttentionBusy = new Map<string, number>();
+
+function scheduledAttentionKey(guildId: string, channelId: string): string {
+  return `${guildId}:${channelId}`;
+}
+
+function markScheduledAttentionBusy(guildId: string, channelId: string): () => void {
+  const key = scheduledAttentionKey(guildId, channelId);
+  scheduledAttentionBusy.set(key, Number.POSITIVE_INFINITY);
+  return () => {
+    scheduledAttentionBusy.set(key, Date.now() + SCHEDULED_ATTENTION_COOLDOWN_MS);
+  };
+}
+
+function isScheduledAttentionBusy(guildId: string, channelId: string): boolean {
+  const until = scheduledAttentionBusy.get(scheduledAttentionKey(guildId, channelId));
+  if (until === undefined) return false;
+  if (until === Number.POSITIVE_INFINITY || until > Date.now()) return true;
+  scheduledAttentionBusy.delete(scheduledAttentionKey(guildId, channelId));
+  return false;
+}
+
 // --- 12. Init scheduler ---
 const scheduler: SchedulerEngine = createSchedulerEngine({
   db,
@@ -783,6 +806,8 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
     runLoggedAgentTurn,
     runMemoryPostReplyExtraction,
     runRelationshipPostReplyExtraction,
+    onScheduleCompleted: (id) => scheduler.removeSchedule(id),
+    markScheduledAttentionBusy,
   }),
   log,
 });
@@ -1940,6 +1965,17 @@ function buildAgentTools(
     guildId,
     channelId,
     timezone: guildConfig.timezone,
+    ...(effectiveCurrentRequest !== undefined
+      ? {
+          currentRequest: {
+            requesterId: effectiveCurrentRequest.requesterId,
+            requesterUsername: effectiveCurrentRequest.requesterUsername,
+          },
+        }
+      : {}),
+    isRequesterAdmin: effectiveCurrentRequest?.requesterId !== undefined
+      && effectiveCurrentRequest.requesterId !== "scheduler"
+      && guildConfig.adminUserIds.includes(effectiveCurrentRequest.requesterId),
     onScheduleCreated: (id) => scheduler.addSchedule(id),
     onScheduleDeleted: (id) => scheduler.removeSchedule(id),
   });
@@ -2364,7 +2400,7 @@ function buildAgentTools(
       imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
       imageGenerationQuality: guildConfig.imageGeneration.quality,
     },
-    schedule_message: {
+    schedule_task: {
       timezone: guildConfig.timezone,
     },
     discord_set_user_timeout: {
@@ -2400,6 +2436,7 @@ const ambientRuntime = createAmbientRuntime({
   createBotDiscordMessageSender,
   createHandlerDeps,
   processTriggeredMessage,
+  isAutonomousAttentionBusy: isScheduledAttentionBusy,
 });
 
 // --- 21. Channel dispatcher ---

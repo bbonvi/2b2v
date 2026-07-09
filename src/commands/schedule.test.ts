@@ -67,6 +67,12 @@ function makeScheduleRow(overrides?: Partial<ScheduleRow>): ScheduleRow {
     runAt: null,
     timezone: "UTC",
     messageContent: "Good morning!",
+    createdByUserId: null,
+    createdByUsername: null,
+    handoffNote: "",
+    fireCount: 0,
+    expiresAt: null,
+    maxFireCount: null,
     enabled: true,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -232,7 +238,7 @@ describe("createScheduleHandler", () => {
     const schedules = Array.from({ length: 30 }, (_, i) =>
       makeScheduleRow({
         id: `sched-${i}`,
-        messageContent: `Scheduled message content number ${i} with some extra padding text`,
+        messageContent: `Scheduled task content number ${i} with some extra padding text`,
       })
     );
     const deps = makeDeps({ listSchedules: mock(() => schedules) });
@@ -270,7 +276,7 @@ describe("createScheduleHandler", () => {
         type: "cron",
         cron: "0 9 * * *",
         channel: "ch-99",
-        message: "Hello!",
+        instructions: "Hello!",
         timezone: "Europe/London",
       },
     });
@@ -303,7 +309,7 @@ describe("createScheduleHandler", () => {
         type: "cron",
         cron: "0 9 * * *",
         channel: "ch-99",
-        message: "Guten Morgen!",
+        instructions: "Guten Morgen!",
       },
     });
     await handler(interaction as never);
@@ -325,7 +331,7 @@ describe("createScheduleHandler", () => {
         type: "one_off",
         "run-at": FUTURE_LOCAL_DATE_TIME,
         channel: "ch-99",
-        message: "Reminder!",
+        instructions: "Reminder!",
       },
     });
     await handler(interaction as never);
@@ -348,7 +354,7 @@ describe("createScheduleHandler", () => {
         type: "one_off",
         "run-at": "2026-06-15T10:00:00Z",
         channel: "ch-1",
-        message: "bad",
+        instructions: "bad",
       },
     });
     await handler(interaction as never);
@@ -365,7 +371,7 @@ describe("createScheduleHandler", () => {
         type: "one_off",
         "run-at": "2026-06-15T10:00:00+05:00",
         channel: "ch-1",
-        message: "bad",
+        instructions: "bad",
       },
     });
     await handler(interaction as never);
@@ -386,7 +392,7 @@ describe("createScheduleHandler", () => {
         type: "one_off",
         "run-at": "2099-06-15 10:00",
         channel: "ch-1",
-        message: "test",
+        instructions: "test",
         timezone: "Europe/London", // should be ignored for one_off
       },
     });
@@ -401,7 +407,7 @@ describe("createScheduleHandler", () => {
     const handler = createScheduleHandler(deps);
     const interaction = makeInteraction({
       subcommand: "add",
-      options: { type: "cron", channel: "ch-1", message: "Hello!" },
+      options: { type: "cron", channel: "ch-1", instructions: "Hello!" },
     });
     await handler(interaction as never);
     expect(replyText(interaction)).toContain("cron");
@@ -412,13 +418,13 @@ describe("createScheduleHandler", () => {
     const handler = createScheduleHandler(deps);
     const interaction = makeInteraction({
       subcommand: "add",
-      options: { type: "one_off", channel: "ch-1", message: "Hello!" },
+      options: { type: "one_off", channel: "ch-1", instructions: "Hello!" },
     });
     await handler(interaction as never);
     expect(replyText(interaction)).toContain("run-at");
   });
 
-  test("add rejects missing message", async () => {
+  test("add rejects missing instructions", async () => {
     const deps = makeDeps();
     const handler = createScheduleHandler(deps);
     const interaction = makeInteraction({
@@ -426,7 +432,7 @@ describe("createScheduleHandler", () => {
       options: { type: "cron", cron: "0 9 * * *", channel: "ch-1" },
     });
     await handler(interaction as never);
-    expect(replyText(interaction).toLowerCase()).toContain("message");
+    expect(replyText(interaction).toLowerCase()).toContain("instructions");
   });
 
   test("remove deletes schedule and notifies engine", async () => {

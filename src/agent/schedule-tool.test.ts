@@ -2,9 +2,9 @@ import { test, expect, describe, beforeEach } from "bun:test";
 import { createDatabase, type Database } from "../db/database";
 import { createSchedule, getSchedule, listSchedules } from "../db/schedule-repository";
 import {
-  createDeleteScheduledMessageTool,
-  createListScheduledMessagesTool,
-  createScheduleTool,
+  createDeleteScheduledTaskTool,
+  createListScheduledTasksTool,
+  createScheduleTaskTool,
   createScheduleTools,
   type ScheduleToolDeps,
 } from "./schedule-tool";
@@ -13,7 +13,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 const FUTURE_LOCAL_DATE_TIME = "2099-06-15 10:00";
 const FUTURE_LOCAL_EPOCH_MS = Date.UTC(2099, 5, 15, 14, 0, 0);
 
-describe("createScheduleTool (schedule_message)", () => {
+describe("createScheduleTaskTool (schedule_task)", () => {
   let db: Database;
   let tool: AgentTool;
   let registeredIds: string[];
@@ -29,11 +29,11 @@ describe("createScheduleTool (schedule_message)", () => {
       timezone: "America/New_York",
       onScheduleCreated: (id) => registeredIds.push(id),
     };
-    tool = createScheduleTool(deps);
+    tool = createScheduleTaskTool(deps);
   });
 
   test("has correct label", () => {
-    expect(tool.label).toBe("schedule_message");
+    expect(tool.label).toBe("schedule_task");
   });
 
   test("createScheduleTools exposes create, list, and delete tools", () => {
@@ -44,9 +44,9 @@ describe("createScheduleTool (schedule_message)", () => {
       timezone: "America/New_York",
     });
     expect(tools.map((t) => t.name)).toEqual([
-      "schedule_message",
-      "list_scheduled_messages",
-      "delete_scheduled_message",
+      "schedule_task",
+      "list_scheduled_tasks",
+      "delete_scheduled_task",
     ]);
   });
 
@@ -255,6 +255,78 @@ describe("createScheduleTool (schedule_message)", () => {
     expect(text).toContain("America/New_York");
   });
 
+  test("persists requester metadata and recurring ceilings", async () => {
+    const toolWithRequester = createScheduleTaskTool({
+      db,
+      guildId: "guild-1",
+      channelId: "ch-1",
+      timezone: "America/New_York",
+      currentRequest: { requesterId: "user-1", requesterUsername: "alice" },
+    });
+
+    await toolWithRequester.execute(
+      "c-cron-owner",
+      {
+        mode: "cron",
+        cronExpression: "*/5 * * * *",
+        instructions: "Check item and stay silent unless it changes",
+        expiresAtLocalDateTime: FUTURE_LOCAL_DATE_TIME,
+        maxFireCount: 4,
+      },
+      new AbortController().signal,
+      () => {}
+    );
+
+    const s = listSchedules(db, { guildId: "guild-1" })[0];
+    if (s === undefined) throw new Error("unreachable");
+    expect(s.createdByUserId).toBe("user-1");
+    expect(s.createdByUsername).toBe("alice");
+    expect(s.expiresAt).toBe(FUTURE_LOCAL_EPOCH_MS);
+    expect(s.maxFireCount).toBe(4);
+  });
+
+  test("allows bounded frequent recurring task but rejects excessive unbounded pressure", async () => {
+    const limited = await tool.execute(
+      "c-cron-limited",
+      { mode: "cron", cronExpression: "* * * * * *", instructions: "brief spam", maxFireCount: 5 },
+      new AbortController().signal,
+      () => {}
+    );
+    expect((limited.content[0] as { text: string }).text).toContain("Scheduled recurring task");
+
+    const excessive = await tool.execute(
+      "c-cron-excessive",
+      { mode: "cron", cronExpression: "* * * * * *", instructions: "forever spam" },
+      new AbortController().signal,
+      () => {}
+    );
+    expect((excessive.content[0] as { text: string }).text).toContain("too many recurring task runs");
+  });
+
+  test("uses configured recurring pressure limits", async () => {
+    const strictTool = createScheduleTaskTool({
+      db,
+      guildId: "guild-1",
+      channelId: "ch-1",
+      timezone: "America/New_York",
+      schedulePressure: {
+        maxRequesterRunsPerHour: 2,
+        maxRequesterRunsPerDay: 10,
+        maxGuildRunsPerHour: 2,
+        maxGuildRunsPerDay: 10,
+      },
+    });
+
+    const result = await strictTool.execute(
+      "c-cron-strict",
+      { mode: "cron", cronExpression: "*/10 * * * *", instructions: "too much for strict config" },
+      new AbortController().signal,
+      () => {}
+    );
+
+    expect((result.content[0] as { text: string }).text).toContain("too many recurring task runs");
+  });
+
   test("mode: cron rejects missing cronExpression", async () => {
     const result = await tool.execute(
       "c-cron-missing",
@@ -295,7 +367,7 @@ describe("schedule list/delete tools", () => {
     };
   });
 
-  test("list_scheduled_messages lists only pending schedules in the current channel and guild", async () => {
+  test("list_scheduled_tasks lists only pending schedules in the current channel and guild", async () => {
     const currentId = createSchedule(db, {
       guildId: "guild-1",
       channelId: "ch-1",
@@ -333,7 +405,7 @@ describe("schedule list/delete tools", () => {
       messageContent: "past reminder",
     });
 
-    const listTool = createListScheduledMessagesTool(deps);
+    const listTool = createListScheduledTasksTool(deps);
     const result = await listTool.execute("list-1", {}, new AbortController().signal, () => {});
     const text = (result.content[0] as { text: string }).text;
 
@@ -344,7 +416,7 @@ describe("schedule list/delete tools", () => {
     expect(text).not.toContain("past reminder");
   });
 
-  test("list_scheduled_messages does not show deleted schedules", async () => {
+  test("list_scheduled_tasks does not show deleted schedules", async () => {
     const id = createSchedule(db, {
       guildId: "guild-1",
       channelId: "ch-1",
@@ -354,10 +426,10 @@ describe("schedule list/delete tools", () => {
       timezone: "UTC",
       messageContent: "to delete",
     });
-    const deleteTool = createDeleteScheduledMessageTool(deps);
+    const deleteTool = createDeleteScheduledTaskTool(deps);
     await deleteTool.execute("delete-1", { scheduleId: id }, new AbortController().signal, () => {});
 
-    const listTool = createListScheduledMessagesTool(deps);
+    const listTool = createListScheduledTasksTool(deps);
     const result = await listTool.execute("list-1", {}, new AbortController().signal, () => {});
     const text = (result.content[0] as { text: string }).text;
 
@@ -365,7 +437,7 @@ describe("schedule list/delete tools", () => {
     expect(text).not.toContain(id);
   });
 
-  test("delete_scheduled_message deletes only pending schedules in current channel and guild", async () => {
+  test("delete_scheduled_task deletes only pending schedules in current channel and guild", async () => {
     const id = createSchedule(db, {
       guildId: "guild-1",
       channelId: "ch-1",
@@ -385,7 +457,7 @@ describe("schedule list/delete tools", () => {
       messageContent: "do not delete",
     });
 
-    const deleteTool = createDeleteScheduledMessageTool(deps);
+    const deleteTool = createDeleteScheduledTaskTool(deps);
     const miss = await deleteTool.execute("delete-miss", { scheduleId: otherChannelId }, new AbortController().signal, () => {});
     expect((miss.content[0] as { text: string }).text).toContain("No pending");
     expect(getSchedule(db, otherChannelId)).not.toBeNull();
