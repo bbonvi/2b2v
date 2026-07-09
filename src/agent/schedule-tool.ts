@@ -252,7 +252,7 @@ function formatScheduleForTool(schedule: ScheduleRow, timezone: string): string 
   const content = truncate(schedule.messageContent.replaceAll("\n", " "), 220);
   const owner = schedule.createdByUsername !== null ? ` owner=${schedule.createdByUsername}` : "";
   const count = schedule.fireCount > 0 ? ` fired=${schedule.fireCount}` : "";
-  const handoff = schedule.handoffNote.trim() !== "" ? ` handoff=${truncate(schedule.handoffNote.replaceAll("\n", " "), 120)}` : "";
+  const handoff = schedule.handoffNote.trim() !== "" ? ` handoff=${truncate(schedule.handoffNote.replaceAll("\n", " "), 500)}` : "";
   if (schedule.type === "cron") {
     const expires = schedule.expiresAt !== null ? ` expires=${formatLocalWallClock(schedule.expiresAt, schedule.timezone)}` : "";
     const max = schedule.maxFireCount !== null ? ` max=${schedule.maxFireCount}` : "";
