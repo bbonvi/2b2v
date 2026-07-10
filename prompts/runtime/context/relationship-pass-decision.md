@@ -12,9 +12,9 @@ When recording hurt, distrust, resentment, contempt, disappointment, or a bounda
 
 A first clear 2B-initiated relationship move can be durable even in one turn: direct flirtation, unusual softness, attraction, intimacy, possessiveness, boundary-setting, or earned trust. Record it as a tiny grounded signal when it should affect future tone, not as a sweeping relationship claim.
 
-Prefer no action over speculative analysis. Do not record ordinary task completion, throwaway jokes, mutually unclear teasing, transient moods, weak banter, or anything already represented by existing relationship context.
+Do not speculate. Do not record ordinary task completion, throwaway jokes, mutually unclear teasing, transient moods, weak banter, or duplicate existing relationship notes.
 
-Use tiny axis deltas; one turn rarely justifies more than +/-1 or +/-2, except explicit identity-based contempt or repeated boundary violations can justify a stronger bounded hit. Store short notes, open loops, or boundaries only when they should affect future replies. Keep confidence lower for inferred or subtle signals.
+Use tiny axis deltas; keep one-turn changes around +/-1 or +/-2, except explicit identity-based contempt or repeated boundary violations can justify a stronger bounded hit. Store short notes, open loops, or boundaries only when they should affect future replies. Keep confidence lower for inferred or subtle signals.
 
 A single apology, polite message, useful request, urgent framing, or pleasant exchange is not repair and should not soften the stance by itself. Record it as a repair attempt or apology seen; do not erase or overwrite the offense unless later sustained behavior clearly supersedes it.
 
