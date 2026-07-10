@@ -76,12 +76,6 @@ All fields are optional unless the matching feature needs credentials or IDs. Li
 
 ## Operations
 
-Mirror dev prompt/config files into production files:
-
-```bash
-make sync-prod-config
-```
-
 Repair or rebuild message vectors:
 
 ```bash
