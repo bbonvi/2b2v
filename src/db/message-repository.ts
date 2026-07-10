@@ -1,7 +1,5 @@
 import type { Database } from "./database";
 import type { ImageSourceKind } from "./image-repository.ts";
-import type { QdrantClient } from "@qdrant/js-client-rest";
-import { searchPoints, type SearchResult } from "../qdrant/adapter";
 import type { HistoryMessage } from "../agent/history-types";
 import type { TrimConfig } from "../config/types";
 
@@ -50,18 +48,14 @@ export interface MessageSearchFilter {
   guildId: string;
   userId?: string;
   channelId?: string;
+  /** Restrict search to channels already authorized by the caller. */
+  channelIds?: readonly string[];
   /** Epoch ms — only messages after this timestamp. */
   after?: number;
   /** Epoch ms — only messages before this timestamp. */
   before?: number;
   /** Message IDs already present in the prompt context and therefore not useful to return. */
   excludeIds?: readonly string[];
-  /** Filter bot-authored or human-authored vectors when semantic search can use payloads. */
-  isBot?: boolean;
-  /** Filter vector source such as live, backfill, or reindex. */
-  source?: string;
-  /** Filter vector granularity. Merged blocks usually improve semantic recall for chat. */
-  embeddingKind?: "single" | "merged";
   limit: number;
 }
 
@@ -73,11 +67,6 @@ export interface MessageSearchResult {
   translatedContent: string;
   createdAt: number;
   replyToId: string | null;
-  score: number;
-  matchedMessageIds?: string[];
-  messageCount?: number;
-  embeddingKind?: string;
-  source?: string;
 }
 
 export interface MessageActivity {
@@ -194,13 +183,6 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
       reactions: reactionMap.get(r.id)?.join(" "),
     };
   });
-}
-
-function messageIdsFromPayload(result: SearchResult): string[] {
-  const payload = result.payload;
-  if (Array.isArray(payload.message_ids)) return payload.message_ids.filter((id) => id !== "");
-  if (payload.message_id !== undefined && payload.message_id !== "") return [payload.message_id];
-  return [result.id];
 }
 
 function storedBotMessageFromRow(row: {
@@ -411,10 +393,7 @@ export function markDiscordMessageDeleted(
   return { deleted: true, imageCount: imageResult.changes, imagePaths: imageRows.map((row) => row.path) };
 }
 
-/**
- * Mark a real bot-authored message row as deleted.
- * The caller is responsible for deleting corresponding Qdrant points.
- */
+/** Mark a real bot-authored message row as deleted. */
 export function deleteBotMessageState(
   db: Database,
   input: { id: string; guildId: string; channelId: string; botUserId: string },
@@ -422,125 +401,7 @@ export function deleteBotMessageState(
   return markDiscordMessageDeleted(db, input);
 }
 
-/**
- * Semantic search over messages using Qdrant for vector search
- * and SQLite for message metadata retrieval.
- *
- * Qdrant handles KNN + metadata filtering (guild, channel, user, time range).
- * SQLite provides translatedContent and authorUsername for display.
- */
-export async function searchMessages(
-  db: Database,
-  qdrant: QdrantClient,
-  queryVec: Float32Array,
-  filter: MessageSearchFilter,
-): Promise<MessageSearchResult[]> {
-  const excludeIds = new Set(filter.excludeIds ?? []);
-  const qdrantLimit = Math.min(
-    500,
-    Math.max(filter.limit * 10, filter.limit + excludeIds.size),
-  );
-  const qdrantResults = await searchPoints(
-    qdrant,
-    Array.from(queryVec),
-    {
-      guild_id: filter.guildId,
-      channel_id: filter.channelId,
-      user_id: filter.userId,
-      after: filter.after,
-      before: filter.before,
-      is_bot: filter.isBot,
-      source: filter.source,
-      embedding_kind: filter.embeddingKind,
-    },
-    { type: "message", limit: qdrantLimit },
-  );
-
-  if (qdrantResults.length === 0) return [];
-
-  // Fetch message details from SQLite, excluding synthetic messages (defense-in-depth).
-  // Overfetch before filtering so a small search limit does not become empty
-  // just because top hits are already visible in the prompt context.
-  const candidates = qdrantResults
-    .filter((r) => !messageIdsFromPayload(r).some((id) => excludeIds.has(id)));
-  if (candidates.length === 0) return [];
-
-  const ids = [...new Set(candidates.flatMap(messageIdsFromPayload))];
-  const placeholders = ids.map(() => "?").join(",");
-  const rowConditions = [
-    `id IN (${placeholders})`,
-    "guild_id = ?",
-    "is_synthetic = 0",
-    "is_prompt_only = 0",
-    "deleted_at IS NULL",
-    "TRIM(translated_content) <> ''",
-  ];
-  const rowParams: Array<string | number> = [...ids, filter.guildId];
-  if (filter.channelId !== undefined) {
-    rowConditions.push("channel_id = ?");
-    rowParams.push(filter.channelId);
-  }
-  if (filter.userId !== undefined) {
-    rowConditions.push("user_id = ?");
-    rowParams.push(filter.userId);
-  }
-  if (filter.after !== undefined) {
-    rowConditions.push("created_at > ?");
-    rowParams.push(filter.after);
-  }
-  if (filter.before !== undefined) {
-    rowConditions.push("created_at < ?");
-    rowParams.push(filter.before);
-  }
-  const rows = db.raw
-    .prepare(
-      `SELECT id, channel_id, user_id, author_username, translated_content, created_at, reply_to_id
-       FROM messages
-       WHERE ${rowConditions.join(" AND ")}`
-    )
-    .all(...rowParams) as Array<{
-      id: string;
-      channel_id: string;
-      user_id: string;
-      author_username: string;
-      translated_content: string;
-      created_at: number;
-      reply_to_id: string | null;
-    }>;
-
-  const rowMap = new Map(rows.map((r) => [r.id, r]));
-
-  const results: MessageSearchResult[] = [];
-  for (const qr of candidates) {
-    const messageIds = messageIdsFromPayload(qr);
-    const matchedRows = messageIds
-      .map((id) => rowMap.get(id))
-      .filter((row): row is NonNullable<typeof row> => row !== undefined);
-    if (matchedRows.length === 0) continue; // orphaned Qdrant point — skip
-    const row = matchedRows[0];
-    if (row === undefined) continue;
-    const content = matchedRows.map((r) => r.translated_content).join("\n");
-    results.push({
-      id: row.id,
-      channelId: row.channel_id,
-      userId: row.user_id,
-      authorUsername: row.author_username,
-      translatedContent: content,
-      createdAt: row.created_at,
-      replyToId: row.reply_to_id,
-      score: qr.score,
-      matchedMessageIds: matchedRows.map((r) => r.id),
-      messageCount: qr.payload.message_count ?? matchedRows.length,
-      embeddingKind: qr.payload.embedding_kind,
-      source: qr.payload.source,
-    });
-    if (results.length >= filter.limit) break;
-  }
-
-  return results;
-}
-
-function toMessageSearchResult(row: MessageSearchRow, score = 1.0): MessageSearchResult {
+function toMessageSearchResult(row: MessageSearchRow): MessageSearchResult {
   return {
     id: row.id,
     channelId: row.channel_id,
@@ -549,7 +410,6 @@ function toMessageSearchResult(row: MessageSearchRow, score = 1.0): MessageSearc
     translatedContent: row.translated_content,
     createdAt: row.created_at,
     replyToId: row.reply_to_id,
-    score,
   };
 }
 
@@ -806,7 +666,7 @@ export function getMessagesAroundTimestamp(
 
 /**
  * Direct message lookup by ID within a guild.
- * No Qdrant or embedding needed — pure SQLite.
+ * Pure SQLite lookup.
  */
 export function getMessageById(
   db: Database,
@@ -938,7 +798,7 @@ export function getContextHistoryMessages(
 
 /**
  * Literal keyword/phrase search over messages using SQLite LIKE.
- * Case-insensitive substring match. No Qdrant or embedding needed.
+ * Case-insensitive substring match.
  * Results ordered by created_at ASC (chronological reading order).
  */
 export function searchMessagesLiteral(
@@ -946,6 +806,7 @@ export function searchMessagesLiteral(
   query: string,
   filter: MessageSearchFilter,
 ): MessageSearchResult[] {
+  if (filter.channelIds !== undefined && filter.channelIds.length === 0) return [];
   // Escape LIKE special characters, then wrap in % for substring match
   const escaped = query
     .replace(/\\/g, "\\\\")
@@ -968,6 +829,10 @@ export function searchMessagesLiteral(
   if (filter.channelId !== undefined) {
     conditions.push("channel_id = ?");
     params.push(filter.channelId);
+  }
+  if (filter.channelIds !== undefined) {
+    conditions.push(`channel_id IN (${filter.channelIds.map(() => "?").join(",")})`);
+    params.push(...filter.channelIds);
   }
   if (filter.userId !== undefined) {
     conditions.push("user_id = ?");
@@ -1012,7 +877,6 @@ export function searchMessagesLiteral(
     translatedContent: row.translated_content,
     createdAt: row.created_at,
     replyToId: row.reply_to_id,
-    score: 1.0,
   }));
 }
 
@@ -1179,7 +1043,7 @@ export interface InsertPromptOnlyBotMessageInput {
 /**
  * Insert a synthetic "Event" row for thread creation/handoff.
  * Stored in the parent channel with is_synthetic=1 and related_thread_id set.
- * Never embedded or included in search results.
+ * Excluded from search results.
  */
 export function insertSyntheticEvent(db: Database, input: InsertSyntheticEventInput): void {
   const now = Date.now();
@@ -1207,7 +1071,7 @@ export function insertSyntheticEvent(db: Database, input: InsertSyntheticEventIn
 
 /**
  * Insert a bot-authored row that is visible in prompt history only.
- * Prompt-only rows are never embedded and repository search/tool reads filter them out.
+ * Repository search/tool reads filter prompt-only rows out.
  */
 export function insertPromptOnlyBotMessage(db: Database, input: InsertPromptOnlyBotMessageInput): void {
   db.raw
@@ -1232,8 +1096,7 @@ export function insertPromptOnlyBotMessage(db: Database, input: InsertPromptOnly
 
 /**
  * Delete the N most recent messages from a channel.
- * Returns the deleted message IDs and their associated image file paths
- * for cleanup by the caller (Qdrant points, file system).
+ * Returns deleted message IDs and associated image file paths for cleanup.
  */
 export function deleteRecentMessages(
   db: Database,

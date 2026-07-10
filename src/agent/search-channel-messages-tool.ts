@@ -1,10 +1,7 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { QdrantClient } from "@qdrant/js-client-rest";
 import type { Database } from "../db/database";
-import type { EmbeddingPipeline } from "../embeddings/pipeline";
 import {
-  searchMessages,
   getMessageById,
   searchMessagesLiteral,
   getMessagesAroundMessage,
@@ -12,7 +9,6 @@ import {
   type MessageSearchResult,
 } from "../db/message-repository";
 import { formatLocalWallClock, parseLocalDateTimeToEpoch } from "../time/agent-time.ts";
-import { normalizeMessageForEmbedding } from "../embeddings/message-text.ts";
 
 
 interface AttachmentInfo {
@@ -23,25 +19,22 @@ interface AttachmentInfo {
 
 export interface SearchChannelMessagesToolDeps {
   db: Database;
-  qdrant: QdrantClient;
   guildId: string;
   /** Channel/thread/DM that initiated this agent turn; searches default here. */
   currentChannelId: string;
   timezone: string;
-  embed: EmbeddingPipeline;
   /** Resolve username to userId. Returns undefined if not found. */
   resolveUsername: (username: string) => string | undefined;
   resolveUsernameInGuild?: (username: string, guildId: string) => Promise<string | undefined>;
   resolveChannel?: (channelId: string) => Promise<{ guildId: string; channelId: string } | null>;
   canAccessGuild?: (guildId: string) => Promise<boolean>;
-  /** Message IDs already visible in prompt context; semantic/literal search should not repeat them. */
+  /** Message IDs already visible in prompt context; literal search should not repeat them. */
   excludedMessageIds?: Iterable<string>;
   fetchMessage?: (channelId: string, messageId: string) => Promise<{ attachments: AttachmentInfo[] } | null>;
 }
 
 const SearchChannelMessagesParams = Type.Object({
   mode: Type.Optional(Type.Union([
-    Type.Literal("semantic"),
     Type.Literal("literal"),
     Type.Literal("id"),
     Type.Literal("context"),
@@ -54,16 +47,6 @@ const SearchChannelMessagesParams = Type.Object({
   around: Type.Optional(Type.String({ description: "Local wall-clock timestamp for context mode." })),
   afterMs: Type.Optional(Type.Number({ description: "Only messages after this epoch ms timestamp." })),
   beforeMs: Type.Optional(Type.Number({ description: "Only messages before this epoch ms timestamp." })),
-  is_bot: Type.Optional(Type.Boolean({ description: "Semantic search only: true for bot-authored results, false for human-authored results." })),
-  source: Type.Optional(Type.Union([
-    Type.Literal("live"),
-    Type.Literal("backfill"),
-    Type.Literal("reindex"),
-  ], { description: "Semantic vector source filter." })),
-  embedding_kind: Type.Optional(Type.Union([
-    Type.Literal("single"),
-    Type.Literal("merged"),
-  ], { description: "Semantic vector granularity filter." })),
   include_attachments: Type.Optional(Type.Boolean({ description: "Fetch attachment metadata." })),
   limit: Type.Optional(Type.Number({ description: "Max results to return." })),
 });
@@ -75,11 +58,10 @@ export function normalizeUsername(raw: string): string {
 }
 
 /**
- * Create a semantic search agent tool bound to a guild context.
- * Embeds the query, runs Qdrant search + SQLite metadata lookup, returns formatted excerpts.
+ * Create a SQLite-backed message search tool bound to a guild context.
  */
 export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolDeps): AgentTool {
-  const { db, qdrant, guildId, currentChannelId, timezone, embed, resolveUsername } = deps;
+  const { db, guildId, currentChannelId, timezone, resolveUsername } = deps;
 
   return {
     name: "search_channel_messages",
@@ -88,7 +70,7 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
     parameters: SearchChannelMessagesParams,
     execute: async (_toolCallId, params): Promise<AgentToolResult<{ count: number } | undefined>> => {
       const p = params as {
-        mode?: "semantic" | "literal" | "id" | "context";
+        mode?: "literal" | "id" | "context";
         query?: string;
         message_id?: string;
         username?: string;
@@ -97,13 +79,10 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
         around?: string;
         afterMs?: number;
         beforeMs?: number;
-        is_bot?: boolean;
-        source?: "live" | "backfill" | "reindex";
-        embedding_kind?: "single" | "merged";
         include_attachments?: boolean;
         limit?: number;
       };
-      const mode = p.mode ?? "semantic";
+      const mode = p.mode ?? "literal";
       const limit = Math.max(1, Math.min(p.limit ?? 10, 50));
       const explicitGuildId = p.guild_id !== undefined && p.guild_id.trim() !== "";
       let targetGuildId = explicitGuildId ? p.guild_id?.trim() ?? guildId : guildId;
@@ -129,6 +108,7 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
       }
       const excludedMessageIds = [...new Set(deps.excludedMessageIds ?? [])];
       let contextIntro: string | undefined;
+      let literalAccessFiltered = false;
 
       // Resolve username to userId if provided (normalize to strip leading @)
       let userId: string | undefined;
@@ -190,55 +170,34 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
         } else {
           return { content: [{ type: "text", text: "mode='context' requires message_id or around." }], details: undefined };
         }
-      } else if (mode === "literal") {
+      } else {
         if (p.query === undefined || p.query.trim() === "") {
           return { content: [{ type: "text", text: "Query is required for literal search." }], details: undefined };
         }
         try {
+          let accessibleChannelIds: string[] | undefined;
+          if (scopedChannelId === undefined && deps.resolveChannel !== undefined) {
+            const resolveChannel = deps.resolveChannel;
+            const channelRows = db.raw
+              .prepare("SELECT DISTINCT channel_id FROM messages WHERE guild_id = ?")
+              .all(targetGuildId) as Array<{ channel_id: string }>;
+            const resolvedChannels = await Promise.all(channelRows.map(async ({ channel_id: channelId }) => ({
+              channelId,
+              channel: await resolveChannel(channelId).catch(() => null),
+            })));
+            accessibleChannelIds = resolvedChannels
+              .filter(({ channel }) => channel !== null && channel.guildId === targetGuildId)
+              .map(({ channelId }) => channelId);
+            literalAccessFiltered = true;
+          }
           results = searchMessagesLiteral(db, p.query, {
             guildId: targetGuildId,
             userId: userId,
             channelId: scopedChannelId,
+            channelIds: accessibleChannelIds,
             after: p.afterMs,
             before: p.beforeMs,
             excludeIds: excludedMessageIds,
-            limit,
-          });
-        } catch {
-          return { content: [{ type: "text", text: "Search is temporarily unavailable." }], details: undefined };
-        }
-      } else {
-        // semantic mode
-        if (p.query === undefined || p.query.trim() === "") {
-          return { content: [{ type: "text", text: "Query is required for semantic search." }], details: undefined };
-        }
-        let queryVec: Float32Array;
-        try {
-          const normalizedQuery = normalizeMessageForEmbedding(p.query);
-          if (normalizedQuery === "") {
-            return { content: [{ type: "text", text: "Query has no searchable text after normalization." }], details: undefined };
-          }
-          const embedResult = await embed.embed([normalizedQuery]);
-          const vec = embedResult[0];
-          if (vec === undefined) {
-            return { content: [{ type: "text", text: "Failed to generate embedding for query." }], details: undefined };
-          }
-          queryVec = vec;
-        } catch {
-          return { content: [{ type: "text", text: "Failed to generate embedding for query." }], details: undefined };
-        }
-
-        try {
-          results = await searchMessages(db, qdrant, queryVec, {
-            guildId: targetGuildId,
-            userId: userId,
-            channelId: scopedChannelId,
-            after: p.afterMs,
-            before: p.beforeMs,
-            excludeIds: excludedMessageIds,
-            isBot: p.is_bot,
-            source: p.source,
-            embeddingKind: p.embedding_kind,
             limit,
           });
         } catch {
@@ -253,7 +212,7 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
         return { content: [{ type: "text", text }], details: { count: 0 } };
       }
 
-      if (scopedChannelId === undefined && deps.resolveChannel !== undefined) {
+      if (scopedChannelId === undefined && deps.resolveChannel !== undefined && !literalAccessFiltered) {
         const visibleChannelIds = new Map<string, boolean>();
         const visibleResults: MessageSearchResult[] = [];
         for (const result of results) {
@@ -273,7 +232,7 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
 
       // Fetch attachments from Discord only when explicitly requested. Older
       // messages are usually uncached, so this path can cost one network call
-      // per result and dominate otherwise-fast SQLite/Qdrant searches.
+      // per result and dominate otherwise-fast SQLite searches.
       const attachmentMap = new Map<string, AttachmentInfo[]>();
       if (p.include_attachments === true && deps.fetchMessage !== undefined) {
         const fetchMsg = deps.fetchMessage;
@@ -299,7 +258,6 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
       const lines = [
         contextIntro ?? formatResultIntro(mode),
         ...results.map((r) => formatResult(r, timezone, {
-          includeScore: mode === "semantic",
           includeChannelId: scopedChannelId === undefined || scopedChannelId !== currentChannelId || targetGuildId !== guildId,
           attachments: attachmentMap.get(r.id),
         })),
@@ -312,8 +270,7 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
   };
 }
 
-function formatResultIntro(mode: "semantic" | "literal" | "id" | "context"): string {
-  if (mode === "semantic") return "Semantic search results are ranked by similarity; higher scores mean closer matches.";
+function formatResultIntro(mode: "literal" | "id" | "context"): string {
   if (mode === "literal") return "Literal search results are exact text matches ordered oldest to newest.";
   if (mode === "context") return "Surrounding chat context, ordered oldest to newest.";
   return "Direct message lookup result.";
@@ -322,16 +279,12 @@ function formatResultIntro(mode: "semantic" | "literal" | "id" | "context"): str
 function formatResult(
   r: MessageSearchResult,
   timezone: string,
-  options: { includeScore: boolean; includeChannelId: boolean; attachments?: AttachmentInfo[] },
+  options: { includeChannelId: boolean; attachments?: AttachmentInfo[] },
 ): string {
   const date = formatLocalWallClock(r.createdAt, timezone);
   const replyTag = r.replyToId !== null ? ` (reply to ${r.replyToId})` : "";
-  const scoreTag = options.includeScore ? `[score ${r.score.toFixed(3)}] ` : "";
   const channelTag = options.includeChannelId ? ` [channel_id ${r.channelId}]` : "";
-  const ids = r.matchedMessageIds !== undefined && r.matchedMessageIds.length > 1
-    ? ` [ids ${r.matchedMessageIds.join(",")}]`
-    : ` [id ${r.id}]`;
-  let line = `${scoreTag}[${date}]${channelTag}${ids} ${r.authorUsername}${replyTag}: ${r.translatedContent}`;
+  let line = `[${date}]${channelTag} [id ${r.id}] ${r.authorUsername}${replyTag}: ${r.translatedContent}`;
   if (options.attachments !== undefined && options.attachments.length > 0) {
     for (const a of options.attachments) {
       const sizeStr = formatFileSize(a.size);

@@ -3,7 +3,6 @@ import { AttachmentBuilder, ChannelType, PermissionFlagsBits, type Client, type 
 import { sendWithUnknownMessageReferenceFallback } from "./message-reference-retry";
 import { splitMessage } from "./split-message";
 import { translateOutbound, type OutboundResolvers } from "./translation";
-import type { EmbeddingQueue } from "../embeddings/queue";
 import type { MessageSender, OutboundAttachment } from "../agent/handler";
 import type { Logger } from "../logger";
 import type { Database } from "../db/database";
@@ -49,10 +48,8 @@ function unresolvedEmojiWarnings(warnings: string[]): string[] | undefined {
 
 function createBotMessageStore(input: {
   db: Database;
-  embeddingQueue: EmbeddingQueue;
   botUserId: string;
   botUsername: string;
-  logger: Logger;
   routedFrom?: RoutedMessageSource;
 }): (sentId: string, targetGuildId: string, targetChannelId: string, rawContent: string, plainContent: string, replyToId: string | null) => void {
   return (sentId, targetGuildId, targetChannelId, rawContent, plainContent, replyToId) => {
@@ -84,25 +81,6 @@ function createBotMessageStore(input: {
         routedFrom?.routedFromMessageId ?? null,
       );
 
-    void input.embeddingQueue.enqueue({
-      id: sentId,
-      text: plainContent,
-      target: "message",
-      metadata: {
-        guild_id: targetGuildId,
-        channel_id: targetChannelId,
-        user_id: input.botUserId,
-        created_at: ts,
-        is_bot: true,
-        source: "live",
-        embedding_kind: "single",
-      },
-    }).catch((err: unknown) => {
-      input.logger.error("bot message embedding enqueue failed", {
-        messageId: sentId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
   };
 }
 
@@ -273,7 +251,6 @@ export function createTypingController(input: {
 
 export function createDiscordMessageSender(input: {
   db: Database;
-  embeddingQueue: EmbeddingQueue;
   buildOutboundResolvers: (guild: SendableGuildChannel["guild"]) => OutboundResolvers;
   defaultChannel: SendableGuildChannel;
   resolveTargetChannel: ResolveTargetChannel;
@@ -287,10 +264,8 @@ export function createDiscordMessageSender(input: {
 }): MessageSender {
   const storeBotMessage = createBotMessageStore({
     db: input.db,
-    embeddingQueue: input.embeddingQueue,
     botUserId: input.botUserId,
     botUsername: input.botUsername,
-    logger: input.logger,
     routedFrom: input.routedFrom,
   });
 

@@ -35,16 +35,6 @@ export interface ReplyFallbackDeps {
   channelId: string;
   /** Fetch a single message from Discord by channel+message ID. Returns null on failure/not found. */
   fetchDiscordMessage: (channelId: string, messageId: string) => Promise<FetchedDiscordMessage | null>;
-  /** Enqueue a message for embedding (fire-and-forget semantics). */
-  enqueueEmbedding: (id: string, text: string, metadata: {
-    guild_id: string;
-    channel_id: string;
-    user_id: string;
-    created_at: number;
-    is_bot?: boolean;
-    source?: "live" | "backfill" | "reindex";
-    embedding_kind?: "single" | "merged";
-  }) => Promise<void>;
   /** Process and store an image attachment or preview (fire-and-forget semantics). */
   processImage: (url: string, contentType: string, messageId: string, sourceKind?: ImageSourceKind) => Promise<void>;
 }
@@ -134,7 +124,7 @@ function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMess
  * 3. Fetched from Discord when not yet stored
  *
  * For each missing target, fetches from Discord, persists to SQLite,
- * ingests image attachments, and enqueues for embedding.
+ * and ingests image attachments.
  *
  * Returns the fetched messages as HistoryMessage[] for inclusion in history.
  * On fetch failure, the message is silently skipped (resolveReplies handles missingTarget).
@@ -197,19 +187,6 @@ export async function fetchMissingReplyTargets(
         discordMsg.timestamp,
         discordMsg.replyToId,
       );
-
-    // Enqueue for embedding (fire-and-forget)
-    void deps.enqueueEmbedding(discordMsg.id, visibleContent, {
-      guild_id: deps.guildId,
-      channel_id: deps.channelId,
-      user_id: discordMsg.authorId,
-      created_at: discordMsg.timestamp,
-      is_bot: discordMsg.isBot,
-      source: "live",
-      embedding_kind: "single",
-    }).catch(() => {
-      // Embedding failure is non-fatal
-    });
 
     // Ingest image attachments (fire-and-forget)
     for (const att of discordMsg.attachments) {

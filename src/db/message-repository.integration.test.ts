@@ -1,33 +1,11 @@
-import { test, expect, beforeAll, beforeEach, afterAll, describe } from "bun:test";
-import type { QdrantClient } from "@qdrant/js-client-rest";
+import { test, expect, beforeEach, describe } from "bun:test";
 import { createDatabase, type Database } from "./database";
-import { createQdrantClient, ensureCollection, qdrantCollectionName } from "../qdrant/client";
-import { upsertPoint } from "../qdrant/adapter";
-import { searchMessages, getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listChannelMessages, markDiscordMessageDeleted } from "./message-repository";
-import { createMockPipeline } from "../embeddings/test-utils";
-
-const QDRANT_URL = process.env.QDRANT_URL ?? "http://qdrant-test.orb.local:6333";
-const TEST_COLLECTION = `embeddings_message_repo_${String(process.pid)}`;
-const mockPipeline = createMockPipeline();
-
-async function embedOne(text: string): Promise<Float32Array> {
-  const vecs = await mockPipeline.embed([text]);
-  const vec = vecs[0];
-  if (!vec) throw new Error("unreachable: embed returned empty");
-  return vec;
-}
+import { getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listChannelMessages, markDiscordMessageDeleted } from "./message-repository";
 
 let db: Database;
-let qdrant: QdrantClient;
 
 const now = Date.now();
 const hour = 60 * 60 * 1000;
-
-beforeAll(async () => {
-  qdrant = createQdrantClient({ url: QDRANT_URL, collectionName: TEST_COLLECTION });
-  try { await qdrant.deleteCollection(qdrantCollectionName(qdrant)); } catch { /* expected */ }
-  await ensureCollection(qdrant);
-});
 
 function insertMessage(
   id: string,
@@ -68,34 +46,8 @@ function insertMessage(
     );
 }
 
-async function insertWithEmbedding(id: string, text: string, opts: Parameters<typeof insertMessage>[1] = {}) {
-  insertMessage(id, { ...opts, translatedContent: text });
-  const vecs = await mockPipeline.embed([text]);
-  const vec = vecs[0];
-  if (!vec) throw new Error("unreachable: embed returned empty");
-  const guildId = opts.guildId ?? "g1";
-  const channelId = opts.channelId ?? "c1";
-  const userId = opts.userId ?? "u1";
-  const createdAt = opts.createdAt ?? now;
-  await upsertPoint(qdrant, id, Array.from(vec), {
-    type: "message",
-    entity_id: id,
-    guild_id: guildId,
-    channel_id: channelId,
-    user_id: userId,
-    message_id: id,
-    created_at: createdAt,
-    last_created_at: createdAt,
-  });
-}
-
-beforeEach(async () => {
+beforeEach(() => {
   db = createDatabase(":memory:");
-  try { await qdrant.delete(qdrantCollectionName(qdrant), { wait: true, filter: {} }); } catch { /* expected */ }
-});
-
-afterAll(async () => {
-  try { await qdrant.deleteCollection(qdrantCollectionName(qdrant)); } catch { /* expected */ }
 });
 
 describe("getLatestMessageActivityBefore", () => {
@@ -136,320 +88,6 @@ describe("getLatestMessageActivityBefore", () => {
   });
 });
 
-describe("searchMessages", () => {
-  test("returns results ordered by semantic similarity", async () => {
-    await insertWithEmbedding("m1", "cats and dogs playing together", { createdAt: now + hour });
-    await insertWithEmbedding("m2", "quantum physics lecture notes", { createdAt: now - hour });
-    await insertWithEmbedding("m3", "puppies and kittens having fun", { createdAt: now });
-
-    const queryVec = await embedOne("cats and dogs");
-    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
-
-    expect(results.length).toBe(3);
-    if (!results[0] || !results[1] || !results[2]) throw new Error("unreachable");
-    expect(results[0].id).toBe("m1");
-    expect(results[0].score).toBeGreaterThanOrEqual(results[1].score);
-    expect(results[1].score).toBeGreaterThanOrEqual(results[2].score);
-  });
-
-  test("filters by guild", async () => {
-    await insertWithEmbedding("m1", "hello world", { guildId: "g1" });
-    await insertWithEmbedding("m2", "hello world again", { guildId: "g2" });
-
-    const queryVec = await embedOne("hello");
-    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
-
-    expect(results.length).toBe(1);
-    if (!results[0]) throw new Error("unreachable");
-    expect(results[0].id).toBe("m1");
-  });
-
-  test("filters by user", async () => {
-    await insertWithEmbedding("m1", "programming tips", { userId: "u1" });
-    await insertWithEmbedding("m2", "programming advice", { userId: "u2" });
-
-    const queryVec = await embedOne("programming");
-    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", userId: "u1", limit: 10 });
-
-    expect(results.length).toBe(1);
-    if (!results[0]) throw new Error("unreachable");
-    expect(results[0].id).toBe("m1");
-  });
-
-  test("filters by channel", async () => {
-    await insertWithEmbedding("m1", "music discussion", { channelId: "c1" });
-    await insertWithEmbedding("m2", "music reviews", { channelId: "c2" });
-
-    const queryVec = await embedOne("music");
-    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", channelId: "c1", limit: 10 });
-
-    expect(results.length).toBe(1);
-    if (!results[0]) throw new Error("unreachable");
-    expect(results[0].id).toBe("m1");
-  });
-
-  test("filters by time range (after)", async () => {
-    await insertWithEmbedding("m1", "old message about food", { createdAt: now - 10 * hour });
-    await insertWithEmbedding("m2", "recent message about food", { createdAt: now - 1 * hour });
-
-    const queryVec = await embedOne("food");
-    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", after: now - 2 * hour, limit: 10 });
-
-    expect(results.length).toBe(1);
-    if (!results[0]) throw new Error("unreachable");
-    expect(results[0].id).toBe("m2");
-  });
-
-  test("filters by time range (before)", async () => {
-    await insertWithEmbedding("m1", "old message about food", { createdAt: now - 10 * hour });
-    await insertWithEmbedding("m2", "recent message about food", { createdAt: now - 1 * hour });
-
-    const queryVec = await embedOne("food");
-    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", before: now - 5 * hour, limit: 10 });
-
-    expect(results.length).toBe(1);
-    if (!results[0]) throw new Error("unreachable");
-    expect(results[0].id).toBe("m1");
-  });
-
-  test("filters by combined time range", async () => {
-    await insertWithEmbedding("m1", "early morning coffee", { createdAt: now - 10 * hour });
-    await insertWithEmbedding("m2", "afternoon coffee break", { createdAt: now - 5 * hour });
-    await insertWithEmbedding("m3", "evening coffee ritual", { createdAt: now - 1 * hour });
-
-    const queryVec = await embedOne("coffee");
-    const results = await searchMessages(db, qdrant, queryVec, {
-      guildId: "g1",
-      after: now - 8 * hour,
-      before: now - 2 * hour,
-      limit: 10,
-    });
-
-    expect(results.length).toBe(1);
-    if (!results[0]) throw new Error("unreachable");
-    expect(results[0].id).toBe("m2");
-  });
-
-  test("respects limit", async () => {
-    await insertWithEmbedding("m1", "alpha topic one");
-    await insertWithEmbedding("m2", "alpha topic two");
-    await insertWithEmbedding("m3", "alpha topic three");
-
-    const queryVec = await embedOne("alpha");
-    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 2 });
-
-    expect(results.length).toBe(2);
-  });
-
-  test("returns message metadata in results", async () => {
-    await insertWithEmbedding("m1", "detailed content here", {
-      channelId: "c5",
-      userId: "u7",
-      authorUsername: "bob",
-      createdAt: now - 3 * hour,
-    });
-
-    const queryVec = await embedOne("detailed content");
-    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
-
-    expect(results.length).toBe(1);
-    if (!results[0]) throw new Error("unreachable");
-    expect(results[0]).toMatchObject({
-      id: "m1",
-      channelId: "c5",
-      userId: "u7",
-      authorUsername: "bob",
-      translatedContent: "detailed content here",
-      createdAt: now - 3 * hour,
-    });
-    expect(typeof results[0].score).toBe("number");
-  });
-
-  test("returns empty array when no matches", async () => {
-    const queryVec = await embedOne("anything");
-    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
-
-    expect(results).toEqual([]);
-  });
-
-  test("combines all filters", async () => {
-    await insertWithEmbedding("target", "the answer is here", {
-      guildId: "g1", userId: "u1", channelId: "c1", createdAt: now - 3 * hour,
-    });
-    await insertWithEmbedding("wrong-guild", "the answer is here", {
-      guildId: "g2", userId: "u1", channelId: "c1", createdAt: now - 3 * hour,
-    });
-    await insertWithEmbedding("wrong-user", "the answer is here", {
-      guildId: "g1", userId: "u2", channelId: "c1", createdAt: now - 3 * hour,
-    });
-    await insertWithEmbedding("wrong-channel", "the answer is here", {
-      guildId: "g1", userId: "u1", channelId: "c2", createdAt: now - 3 * hour,
-    });
-    await insertWithEmbedding("wrong-time", "the answer is here", {
-      guildId: "g1", userId: "u1", channelId: "c1", createdAt: now - 20 * hour,
-    });
-
-    const queryVec = await embedOne("the answer");
-    const results = await searchMessages(db, qdrant, queryVec, {
-      guildId: "g1",
-      userId: "u1",
-      channelId: "c1",
-      after: now - 5 * hour,
-      before: now - 1 * hour,
-      limit: 10,
-    });
-
-    expect(results.length).toBe(1);
-    if (!results[0]) throw new Error("unreachable");
-    expect(results[0].id).toBe("target");
-  });
-
-  test("excludes synthetic messages from semantic search", async () => {
-    // Note: In production, synthetic messages are never embedded to Qdrant.
-    // This test verifies the SQLite-side exclusion as a defense-in-depth measure.
-    // We manually insert a synthetic row and verify it's excluded even if it
-    // hypothetically made it into Qdrant (which it shouldn't).
-    await insertWithEmbedding("real-msg", "important topic discussion");
-    // Insert synthetic row directly (bypassing embedding since we're testing SQLite filter)
-    insertMessage("synthetic-msg", {
-      guildId: "g1",
-      translatedContent: "important topic discussion",
-      isSynthetic: true,
-      relatedThreadId: "thread-1",
-    });
-
-    const queryVec = await embedOne("important topic");
-    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
-
-    expect(results.length).toBe(1);
-    expect(results[0]?.id).toBe("real-msg");
-  });
-
-  test("excludes prompt-only messages from semantic search", async () => {
-    await insertWithEmbedding("real-msg", "private ignore reason visible topic");
-    await insertWithEmbedding("prompt-only-msg", "private ignore reason visible topic", { isPromptOnly: true });
-
-    const queryVec = await embedOne("private ignore reason");
-    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
-
-    expect(results.map((r) => r.id)).toEqual(["real-msg"]);
-  });
-
-  test("excludes deleted messages from semantic search", async () => {
-    await insertWithEmbedding("real-msg", "deleted topic visible");
-    await insertWithEmbedding("deleted-msg", "deleted topic visible");
-    markDiscordMessageDeleted(db, { id: "deleted-msg", guildId: "g1", channelId: "c1" });
-
-    const queryVec = await embedOne("deleted topic");
-    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
-
-    expect(results.map((r) => r.id)).toEqual(["real-msg"]);
-  });
-
-  test("skips empty semantic hits and continues to real messages", async () => {
-    insertMessage("empty-hit", { guildId: "g1", translatedContent: "" });
-    const queryVec = await embedOne("important topic");
-    await upsertPoint(qdrant, "empty-hit", Array.from(queryVec), {
-      type: "message",
-      entity_id: "empty-hit",
-      guild_id: "g1",
-      channel_id: "c1",
-      user_id: "u1",
-      message_id: "empty-hit",
-      created_at: now,
-    });
-    await insertWithEmbedding("real-msg", "important topic discussion");
-
-    const results = await searchMessages(db, qdrant, queryVec, { guildId: "g1", limit: 10 });
-
-    expect(results.map((r) => r.id)).toEqual(["real-msg"]);
-  });
-
-  test("resolves merged vector payloads back to underlying messages", async () => {
-    insertMessage("m1", { translatedContent: "first half", createdAt: now - 1000 });
-    insertMessage("m2", { translatedContent: "second half", createdAt: now });
-    const vec = await embedOne("first half second half");
-    await upsertPoint(qdrant, "msgblock:m1:m2", Array.from(vec), {
-      type: "message",
-      entity_id: "msgblock:m1:m2",
-      guild_id: "g1",
-      channel_id: "c1",
-      user_id: "u1",
-      message_id: "m1",
-      message_ids: ["m1", "m2"],
-      first_message_id: "m1",
-      last_message_id: "m2",
-      message_count: 2,
-      created_at: now - 1000,
-      last_created_at: now,
-      embedding_kind: "merged",
-      source: "reindex",
-    });
-
-    const results = await searchMessages(db, qdrant, vec, { guildId: "g1", limit: 10 });
-
-    expect(results).toHaveLength(1);
-    expect(results[0]?.id).toBe("m1");
-    expect(results[0]?.translatedContent).toBe("first half\nsecond half");
-    expect(results[0]?.matchedMessageIds).toEqual(["m1", "m2"]);
-    expect(results[0]?.messageCount).toBe(2);
-    expect(results[0]?.embeddingKind).toBe("merged");
-  });
-
-  test("does not hydrate rows outside the requested guild from stale vector payloads", async () => {
-    insertMessage("foreign", { guildId: "g2", translatedContent: "private foreign text" });
-    const vec = await embedOne("private foreign text");
-    await upsertPoint(qdrant, "stale-block", Array.from(vec), {
-      type: "message",
-      entity_id: "stale-block",
-      guild_id: "g1",
-      channel_id: "c1",
-      user_id: "u1",
-      message_id: "foreign",
-      message_ids: ["foreign"],
-      created_at: now,
-      last_created_at: now,
-    });
-
-    const results = await searchMessages(db, qdrant, vec, { guildId: "g1", limit: 10 });
-
-    expect(results).toEqual([]);
-  });
-
-  test("uses merged-block overlap for semantic time filters and hydrates only matching rows", async () => {
-    insertMessage("old", { translatedContent: "old part", createdAt: now - 10 * hour });
-    insertMessage("new", { translatedContent: "new part", createdAt: now - hour });
-    const vec = await embedOne("old part new part");
-    await upsertPoint(qdrant, "msgblock:old:new", Array.from(vec), {
-      type: "message",
-      entity_id: "msgblock:old:new",
-      guild_id: "g1",
-      channel_id: "c1",
-      user_id: "u1",
-      message_id: "old",
-      message_ids: ["old", "new"],
-      first_message_id: "old",
-      last_message_id: "new",
-      message_count: 2,
-      created_at: now - 10 * hour,
-      last_created_at: now - hour,
-      embedding_kind: "merged",
-      source: "reindex",
-    });
-
-    const results = await searchMessages(db, qdrant, vec, {
-      guildId: "g1",
-      after: now - 2 * hour,
-      limit: 10,
-    });
-
-    expect(results).toHaveLength(1);
-    expect(results[0]?.id).toBe("new");
-    expect(results[0]?.translatedContent).toBe("new part");
-    expect(results[0]?.matchedMessageIds).toEqual(["new"]);
-  });
-});
-
 describe("getMessageById", () => {
   test("returns message when found in guild", () => {
     insertMessage("m1", { guildId: "g1", channelId: "c1", userId: "u1", authorUsername: "alice", translatedContent: "hello world", createdAt: now });
@@ -461,7 +99,6 @@ describe("getMessageById", () => {
     expect(result.authorUsername).toBe("alice");
     expect(result.translatedContent).toBe("hello world");
     expect(result.createdAt).toBe(now);
-    expect(result.score).toBe(1.0);
   });
 
   test("returns null for wrong guild", () => {
@@ -566,7 +203,6 @@ describe("searchMessagesLiteral", () => {
     expect(results.length).toBe(1);
     if (!results[0]) throw new Error("unreachable");
     expect(results[0].id).toBe("m1");
-    expect(results[0].score).toBe(1.0);
   });
 
   test("finds substring match", () => {

@@ -5,9 +5,6 @@ import { parseDashboardPasswordlessCidrs, startDashboard } from "./dashboard/ser
 import { loadGlobalConfig, loadGuildConfigs, resolveGuildConfig, validateTrimConfig, validateVpnConfig } from "./config/loader";
 import type { GuildConfig } from "./config/types";
 import { createDatabase } from "./db/database";
-import { createQdrantClient, ensureCollection, healthCheck } from "./qdrant/client";
-import { getEmbeddingPipeline, disposePipeline } from "./embeddings/pipeline";
-import { createEmbeddingQueue, type EmbeddingQueue } from "./embeddings/queue";
 import { createDiscordClient, loginDiscordClient } from "./discord/client";
 import { buildDiscordContext } from "./discord/context-renderer";
 import { registerInteractionRuntime } from "./discord/interaction-runtime";
@@ -194,7 +191,6 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
 
     const replyFallbackDeps = createDiscordReplyFallbackDeps({
       db,
-      embeddingQueue,
       clientChannelsFetch: (chId) => client.channels.fetch(chId),
       guild,
       guildId: job.deliveryGuildId,
@@ -492,11 +488,10 @@ function persistIgnoredBotReply(input: {
 }
 
 function createBotDiscordMessageSender(
-  input: Omit<Parameters<typeof createDiscordMessageSender>[0], "db" | "embeddingQueue" | "buildOutboundResolvers">,
+  input: Omit<Parameters<typeof createDiscordMessageSender>[0], "db" | "buildOutboundResolvers">,
 ): MessageSender {
   return createDiscordMessageSender({
     db,
-    embeddingQueue,
     buildOutboundResolvers,
     ...input,
   });
@@ -642,7 +637,7 @@ log.info("bot starting", {
 let globalConfig = loadGlobalConfig();
 validateTrimConfig(globalConfig.defaultTrim);
 validateVpnConfig(globalConfig.vpn);
-log.info("config loaded", { model: globalConfig.defaultModel, qdrant: globalConfig.qdrantUrl });
+log.info("config loaded", { model: globalConfig.defaultModel });
 
 const startupMessageQueue: Message[] = [];
 let startupMessageProcessingReady = false;
@@ -663,24 +658,7 @@ const dbPath = join(globalConfig.dataDir, "bot.db");
 const db: Database = createDatabase(dbPath);
 log.info("database ready", { path: dbPath });
 
-// --- 4. Init Qdrant ---
-const qdrant = createQdrantClient({ url: globalConfig.qdrantUrl });
-const qdrantHealthy = await healthCheck(qdrant);
-if (!qdrantHealthy) {
-  log.error("qdrant health check failed", { url: globalConfig.qdrantUrl });
-  process.exit(1);
-}
-await ensureCollection(qdrant);
-log.info("qdrant ready");
-
-// --- 5. Init embedding pipeline ---
-const embeddingPipeline = await getEmbeddingPipeline({ cacheDir: globalConfig.modelCacheDir });
-log.info("embedding pipeline ready");
-
-// --- 6. Init embedding queue ---
-const embeddingQueue: EmbeddingQueue = createEmbeddingQueue(embeddingPipeline, qdrant);
-
-// --- 7. Load guild configs ---
+// --- 4. Load guild configs ---
 const guildsDir = join("config", "guilds");
 const guildConfigs = loadGuildConfigs(guildsDir, globalConfig);
 log.info("guild configs loaded", { count: guildConfigs.size });
@@ -787,7 +765,6 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
   onFire: createScheduledTaskRunner({
     client,
     db,
-    embeddingQueue,
     requestLogStore,
     log,
     getGuildConfig,
@@ -858,7 +835,6 @@ if (botUser !== null) {
 registerInteractionRuntime({
   client,
   db,
-  qdrant,
   scheduler,
   getGlobalConfig: () => globalConfig,
   getGuildConfig,
@@ -1928,11 +1904,9 @@ function buildAgentTools(
 
   const searchTool = createSearchChannelMessagesTool({
     db,
-    qdrant,
     guildId,
     currentChannelId: channelId,
     timezone: guildConfig.timezone,
-    embed: embeddingPipeline,
     resolveUsername,
     resolveUsernameInGuild,
     resolveChannel: async (targetChannelId) => {
@@ -2224,13 +2198,10 @@ function buildAgentTools(
     },
     afterEdit: (input) => syncEditedOwnBotMessage({
       db,
-      qdrant,
-      embeddingQueue,
       ...input,
     }),
     afterDelete: (input) => syncDeletedOwnBotMessage({
       db,
-      qdrant,
       ...input,
       botUserId: client.user?.id ?? "",
     }),
@@ -2416,7 +2387,6 @@ const ambientRuntime = createAmbientRuntime({
   log,
   requestLogStore,
   agentJobs,
-  embeddingQueue,
   getPromptBundle: () => promptBundle,
   getGlobalConfig: () => globalConfig,
   typingIntervalMs: TYPING_INTERVAL_MS,
@@ -2621,7 +2591,6 @@ async function processTriggeredMessage(
 
     const replyFallbackDeps = createDiscordReplyFallbackDeps({
       db,
-      embeddingQueue,
       clientChannelsFetch: (chId) => client.channels.fetch(chId),
       guild,
       guildId,
@@ -3006,27 +2975,6 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
       )
       .run(message.id, guildId, channelId, message.author.id, message.author.username, message.content, translatedContent, 0, messageCreatedAt, message.reference?.messageId ?? null);
 
-    // Enqueue for embedding
-    void embeddingQueue.enqueue({
-      id: message.id,
-      text: translatedContent,
-      target: "message",
-      metadata: {
-        guild_id: guildId,
-        channel_id: channelId,
-        user_id: message.author.id,
-        created_at: messageCreatedAt,
-        is_bot: false,
-        source: "live",
-        embedding_kind: "single",
-      },
-    }).catch((err: unknown) => {
-      log.error("embedding enqueue failed", {
-        messageId: message.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-
     // Update thread activity if message is in a thread
     if (message.channel.isThread()) {
       const updated = updateThreadActivity(db, channelId, {
@@ -3159,13 +3107,13 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
 }
 
 // --- 24. messageDelete handler ---
-client.on("messageDelete", (message) => void (async () => {
+client.on("messageDelete", (message) => {
   try {
     if (message.guildId === null) return;
 
     const messageId = message.id;
     const guildId = message.guildId;
-    const result = await cleanupDeletedDiscordMessage({ db, qdrant, guildId, messageId });
+    const result = cleanupDeletedDiscordMessage({ db, guildId, messageId });
     if (result.messagesDeleted === 0) return;
 
     log.debug("message deleted from Discord", { messageId, guildId, images: result.imagesDeleted });
@@ -3175,7 +3123,7 @@ client.on("messageDelete", (message) => void (async () => {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-})());
+});
 
 // --- Hot-reload config watcher ---
 const CONFIG_RELOAD_DEBOUNCE_MS = 500;
@@ -3326,7 +3274,7 @@ const dashboardPassword = process.env.DASHBOARD_PASSWORD;
 const bypassDashboardAuth = process.env.UNSAFELY_BYPASS_DASHBOARD_AUTH === "true";
 const dashboardPasswordlessCidrs = parseDashboardPasswordlessCidrs(process.env.DASHBOARD_PASSWORDLESS_CIDRS);
 const dashboardTrustedProxyCidrs = parseDashboardPasswordlessCidrs(process.env.DASHBOARD_TRUSTED_PROXY_CIDRS);
-const dashboardManagementRuntime = createDashboardManagementRuntime({ client, db, qdrant, embeddingQueue });
+const dashboardManagementRuntime = createDashboardManagementRuntime({ client, db });
 const dashboardManagement = {
   getDirectory: dashboardManagementRuntime.getDirectory,
   listMessages: dashboardManagementRuntime.listMessages,
@@ -3374,8 +3322,6 @@ async function shutdown(signal: string): Promise<void> {
   ambientRuntime.clearAmbientInitiativeState();
   scheduler.stop();
   await client.destroy();
-  await embeddingQueue.shutdown();
-  await disposePipeline();
   db.close();
 
   log.info("shutdown complete");
@@ -3385,4 +3331,4 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-export { db, qdrant, embeddingQueue, guildConfigs, globalConfig, promptBundle, scheduler, client };
+export { db, guildConfigs, globalConfig, promptBundle, scheduler, client };

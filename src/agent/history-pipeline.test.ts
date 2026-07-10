@@ -43,7 +43,6 @@ function makeDeps(db: Database): ReplyFallbackDeps {
     guildId: "g1",
     channelId: "c1",
     fetchDiscordMessage: () => Promise.resolve(null),
-    enqueueEmbedding: () => Promise.resolve(),
     processImage: () => Promise.resolve(),
   };
 }

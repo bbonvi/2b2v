@@ -46,13 +46,13 @@ Normal replies receive only the active speaker relationship slice. Relationships
 
 ## History, Search, Memory
 
-SQLite is the readable source of truth. Qdrant is only a semantic index; search results must join back to SQLite rows.
+SQLite stores message history and backs literal text search, direct message lookup, and chronological context retrieval.
 
-Discord-deleted messages keep their stored text and are marked deleted in prompt history with `[deleted]`; local media, reactions, and vector points are still removed.
+Discord-deleted messages keep their stored text and are marked deleted in prompt history with `[deleted]`; local media and reactions are still removed.
 
 Merged history rows must preserve all component Discord message IDs. Reply resolution and prompt-visible search exclusions must treat aliases as present.
 
-`search_channel_messages` semantic/literal modes must exclude messages already visible in prompt history and overfetch before that filtering; id lookup may return visible messages so trimmed content can be expanded.
+`search_channel_messages` literal mode must exclude messages already visible in prompt history; id lookup may return visible messages so trimmed content can be expanded.
 
 Rendered chat history exposes `oldest_visible_message_id` when stored prior context exists, so `list_channel_messages(before_message_id=...)` can page before the prompt window.
 

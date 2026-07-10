@@ -14,11 +14,7 @@ export {
   type ListMemoriesFilter,
 } from "./memory-repository";
 
-export {
-  searchMessages,
-  type MessageSearchFilter,
-  type MessageSearchResult,
-} from "./message-repository";
+export { type MessageSearchFilter, type MessageSearchResult } from "./message-repository";
 
 export {
   createSchedule,

@@ -322,20 +322,6 @@ describe("loadGlobalConfig", () => {
     expect(() => loadGlobalConfig(BASE_ENV, file)).not.toThrow();
   });
 
-  test("QDRANT_URL env overrides YAML qdrantUrl", () => {
-    const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "qdrantUrl: http://yaml-qdrant:6333\n");
-    const cfg = loadGlobalConfig({ ...BASE_ENV, QDRANT_URL: "http://env-qdrant:6333" }, file);
-    expect(cfg.qdrantUrl).toBe("http://env-qdrant:6333");
-  });
-
-  test("falls back to YAML qdrantUrl when env not set", () => {
-    const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "qdrantUrl: http://yaml-qdrant:6333\n");
-    const cfg = loadGlobalConfig(BASE_ENV, file);
-    expect(cfg.qdrantUrl).toBe("http://yaml-qdrant:6333");
-  });
-
   test("reads triggers from YAML", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, "triggers:\n  mention: false\n  keywords: [bot]\n  randomChance: 0.05\n");

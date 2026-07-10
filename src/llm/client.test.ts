@@ -79,8 +79,6 @@ const GLOBAL: GlobalConfig = {
   defaultInstructions: "",
   logLevel: "info",
   dataDir: "data",
-  modelCacheDir: "model-cache",
-  qdrantUrl: "http://localhost:6333",
   uiLang: "en",
   defaultEmotes: { include: false },
   defaultMembers: { include: true },

@@ -5,7 +5,7 @@ Personal Discord bot.
 ## Requirements
 
 - [Bun](https://bun.sh) 1.3+
-- [Docker](https://www.docker.com/) for Qdrant and container runs
+- [Docker](https://www.docker.com/) for container runs
 - Discord bot token
 - Credentials for the configured LLM provider
 - Optional feature keys in `.env.example`
@@ -74,15 +74,6 @@ adminUserIds: []
 
 All fields are optional unless the matching feature needs credentials or IDs. Live config files are ignored by git except committed `.example` files.
 
-## Operations
-
-Repair or rebuild message vectors:
-
-```bash
-bun scripts/reindex-message-vectors.ts --guild <GUILD_ID> [--channel <CHANNEL_ID>]
-bun scripts/reindex-message-vectors.ts --guild <GUILD_ID> [--channel <CHANNEL_ID>] --apply
-```
-
 Verification:
 
 ```bash
@@ -90,4 +81,4 @@ make check
 make test
 ```
 
-`make test-unit` is only for targeted non-Qdrant loops.
+`make test-unit` skips integration tests for faster targeted loops.

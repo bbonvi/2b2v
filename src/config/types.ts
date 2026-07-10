@@ -488,8 +488,6 @@ export interface GlobalConfig {
   defaultInstructions: string;
   logLevel: string;
   dataDir: string;
-  modelCacheDir: string;
-  qdrantUrl: string;
   elevenLabsApiKey?: string;
   defaultTts?: TtsConfig;
   /** UI language for VPN panel. */
@@ -652,8 +650,6 @@ export interface MainConfigYaml {
   attachmentsDir?: string;
   logLevel?: string;
   dataDir?: string;
-  modelCacheDir?: string;
-  qdrantUrl?: string;
   tts?: Partial<TtsConfig> & {
     voices?: {
       normal?: Partial<VoicePreset>;

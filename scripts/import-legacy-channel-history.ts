@@ -4,13 +4,9 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { Database } from "../src/db/database.ts";
-import { buildMessageEmbeddingBlocks, type MessageEmbeddingSource } from "../src/embeddings/message-text.ts";
 
 const DISCORD_API_BASE = "https://discord.com/api/v10";
-const QDRANT_COLLECTION_NAME = "embeddings";
 const DEFAULT_PAGE_SIZE = 100;
-const EMBED_PROGRESS_CHUNK = 512;
-const MAX_EMBED_ATTEMPTS = 3;
 const abortController = new AbortController();
 
 interface Args {
@@ -21,19 +17,14 @@ interface Args {
   configPath: string;
   dbPath?: string;
   dataDir?: string;
-  qdrantUrl?: string;
-  modelCacheDir?: string;
   since?: number;
   maxMessages?: number;
   apply: boolean;
-  checkQdrant: boolean;
   quiet: boolean;
 }
 
 interface MinimalConfig {
   dataDir?: string;
-  qdrantUrl?: string;
-  modelCacheDir?: string;
 }
 
 interface DiscordUser {
@@ -89,13 +80,6 @@ interface OldestStoredMessage {
 
 interface RuntimePaths {
   dbPath: string;
-  qdrantUrl: string;
-  modelCacheDir: string;
-}
-
-interface StreamingImporter {
-  importRows(rows: ImportRow[]): Promise<void>;
-  close(): Promise<void>;
 }
 
 function usage(): never {
@@ -113,12 +97,9 @@ Options:
   --config <path>            Minimal config YAML path. Default: config/config.yaml.
   --db <path>                SQLite DB path. Default: <dataDir>/bot.db.
   --data-dir <path>          Data dir fallback if --db is omitted.
-  --qdrant-url <url>         Qdrant URL fallback. Default: env QDRANT_URL, config, then http://localhost:6333.
-  --model-cache-dir <path>   Embedding model cache dir fallback.
-  --check-qdrant             In dry-run, verify Qdrant health too.
   --quiet                    Suppress progress logs.
   --dry-run                  Fetch/validate/count only. Default.
-  --apply                    Insert missing rows and embed only inserted rows.`);
+  --apply                    Insert missing rows.`);
   process.exit(2);
 }
 
@@ -175,12 +156,9 @@ function parseArgs(argv: string[]): Args {
   let configPath = "config/config.yaml";
   let dbPath: string | undefined;
   let dataDir: string | undefined;
-  let qdrantUrl: string | undefined;
-  let modelCacheDir: string | undefined;
   let since: number | undefined;
   let maxMessages: number | undefined;
   let apply = false;
-  let checkQdrant = false;
   let quiet = false;
 
   for (let i = 0; i < argv.length; i++) {
@@ -215,14 +193,6 @@ function parseArgs(argv: string[]): Args {
         dataDir = readOption(argv, i, arg);
         i++;
         break;
-      case "--qdrant-url":
-        qdrantUrl = readOption(argv, i, arg);
-        i++;
-        break;
-      case "--model-cache-dir":
-        modelCacheDir = readOption(argv, i, arg);
-        i++;
-        break;
       case "--since":
         since = parseDateOption(readOption(argv, i, arg), arg);
         i++;
@@ -236,9 +206,6 @@ function parseArgs(argv: string[]): Args {
         break;
       case "--dry-run":
         apply = false;
-        break;
-      case "--check-qdrant":
-        checkQdrant = true;
         break;
       case "--quiet":
         quiet = true;
@@ -263,12 +230,9 @@ function parseArgs(argv: string[]): Args {
     configPath,
     dbPath,
     dataDir,
-    qdrantUrl,
-    modelCacheDir,
     since,
     maxMessages,
     apply,
-    checkQdrant,
     quiet,
   };
 }
@@ -280,8 +244,6 @@ function readMinimalConfig(configPath: string): MinimalConfig {
   const raw = parsed as Record<string, unknown>;
   return {
     dataDir: typeof raw.dataDir === "string" ? raw.dataDir : undefined,
-    qdrantUrl: typeof raw.qdrantUrl === "string" ? raw.qdrantUrl : undefined,
-    modelCacheDir: typeof raw.modelCacheDir === "string" ? raw.modelCacheDir : undefined,
   };
 }
 
@@ -348,8 +310,6 @@ function resolveRuntime(args: Args): RuntimePaths {
   const dataDir = args.dataDir ?? process.env.DATA_DIR ?? cfg.dataDir ?? "data";
   return {
     dbPath: args.dbPath ?? join(dataDir, "bot.db"),
-    qdrantUrl: args.qdrantUrl ?? process.env.QDRANT_URL ?? cfg.qdrantUrl ?? "http://localhost:6333",
-    modelCacheDir: args.modelCacheDir ?? process.env.MODEL_CACHE_DIR ?? cfg.modelCacheDir ?? "model-cache",
   };
 }
 
@@ -526,7 +486,6 @@ async function processHistory(input: {
   let db: Database | Pick<Database, "raw"> | undefined;
   let writeDb: Database | undefined;
   let closeDb: (() => void) | undefined;
-  let importer: StreamingImporter | undefined;
   if (args.apply) {
     const { createDatabase } = await import("../src/db/database.ts");
     const createdDb = createDatabase(runtime.dbPath);
@@ -618,15 +577,13 @@ async function processHistory(input: {
       changedRows += existing.missing.length;
       if (args.apply && existing.missing.length > 0) {
         if (writeDb === undefined) throw new Error("write database was not initialized");
-        importer ??= await createStreamingImporter(writeDb, runtime.qdrantUrl, runtime.modelCacheDir, args.quiet);
-        await importer.importRows(existing.missing);
+        insertRows(writeDb, existing.missing);
       }
 
       if (!args.quiet) {
         const action = args.apply ? "imported" : "would_import";
-        const qdrant = await qdrantTelemetry(runtime.qdrantUrl);
         console.log(
-          `Page ${pages}: messages=${fetched}, candidates=${candidateRows}, ${action}=${changedRows}, oldest=${formatDate(oldestInPage)} | ${runtimeTelemetry(runtime.dbPath)} | ${qdrant}`,
+          `Page ${pages}: messages=${fetched}, candidates=${candidateRows}, ${action}=${changedRows}, oldest=${formatDate(oldestInPage)} | ${runtimeTelemetry(runtime.dbPath)}`,
         );
       }
 
@@ -640,7 +597,6 @@ async function processHistory(input: {
       }
     }
   } finally {
-    await importer?.close();
     closeDb?.();
   }
 
@@ -699,94 +655,6 @@ function insertRows(db: Database, rows: ImportRow[]): void {
   insertMany(rows);
 }
 
-async function createStreamingImporter(
-  db: Database,
-  qdrantUrl: string,
-  modelCacheDir: string,
-  quiet: boolean,
-): Promise<StreamingImporter> {
-  const { getEmbeddingPipeline, disposePipeline } = await import("../src/embeddings/pipeline.ts");
-  const { createEmbeddingQueue } = await import("../src/embeddings/queue.ts");
-  const { createQdrantClient, ensureCollection, healthCheck } = await import("../src/qdrant/client.ts");
-  const qdrant = createQdrantClient({ url: qdrantUrl });
-  if (!(await healthCheck(qdrant))) {
-    throw new Error(`Qdrant is not reachable at ${qdrantUrl}`);
-  }
-  await ensureCollection(qdrant);
-
-  const pipeline = await getEmbeddingPipeline({ cacheDir: modelCacheDir });
-  const queue = createEmbeddingQueue(pipeline, qdrant);
-
-  let imported = 0;
-  return {
-    async importRows(rows: ImportRow[]): Promise<void> {
-      if (rows.length === 0) return;
-      const sources: MessageEmbeddingSource[] = rows.map((row) => ({
-        id: row.id,
-        guildId: row.guildId,
-        channelId: row.channelId,
-        userId: row.userId,
-        content: row.content,
-        createdAt: row.createdAt,
-        isBot: row.isBot,
-      }));
-      const blocks = buildMessageEmbeddingBlocks(sources);
-      for (let i = 0; i < blocks.length; i += EMBED_PROGRESS_CHUNK) {
-        const chunk = blocks.slice(i, i + EMBED_PROGRESS_CHUNK);
-        const messageIds = new Set(chunk.flatMap((block) => block.messageIds));
-        const rowsToInsert = rows.filter((row) => messageIds.has(row.id));
-        insertRows(db, rowsToInsert);
-        imported += rowsToInsert.length;
-        for (let attempt = 1; attempt <= MAX_EMBED_ATTEMPTS; attempt++) {
-          try {
-            await queue.enqueueBatch(chunk.map((block) => ({
-              id: block.id,
-              text: block.text,
-              target: "message",
-              metadata: {
-                guild_id: block.guildId,
-                channel_id: block.channelId,
-                user_id: block.userId,
-                message_id: block.firstMessageId,
-                message_ids: block.messageIds,
-                first_message_id: block.firstMessageId,
-                last_message_id: block.lastMessageId,
-                message_count: block.messageCount,
-                created_at: block.createdAt,
-                last_created_at: block.lastCreatedAt,
-                is_bot: block.isBot,
-                source: "backfill",
-                embedding_kind: block.messageCount > 1 ? "merged" : "single",
-              },
-            })));
-            await queue.flush();
-            break;
-          } catch (err) {
-            if (attempt >= MAX_EMBED_ATTEMPTS) {
-              const message = err instanceof Error ? err.message : String(err);
-              throw new Error(`Embedding failed after ${MAX_EMBED_ATTEMPTS} attempts: ${message}`);
-            }
-            if (!quiet) {
-              const message = err instanceof Error ? err.message : String(err);
-              console.warn(`Embedding chunk failed; retrying (${attempt}/${MAX_EMBED_ATTEMPTS}): ${message}`);
-            }
-            await sleep(1000 * attempt);
-          }
-        }
-        if (!quiet) console.log(`Imported rows: ${imported}`);
-      }
-    },
-
-    async close(): Promise<void> {
-      try {
-        await queue.shutdown();
-      } finally {
-        await disposePipeline();
-      }
-    },
-  };
-}
-
 function formatDate(ms: number | undefined): string {
   if (ms === undefined) return "(none)";
   return new Date(ms).toISOString();
@@ -800,7 +668,7 @@ function formatTopUsers(users: Map<string, number>): string {
     .join(", ");
 }
 
-async function dryRun(args: Args, runtime: { dbPath: string; qdrantUrl: string }, stats: FetchStats): Promise<void> {
+function dryRun(runtime: RuntimePaths, stats: FetchStats): void {
   console.log("Mode: dry-run");
   console.log(`Discord pages fetched: ${stats.pages}`);
   console.log(`Discord messages fetched: ${stats.fetched}`);
@@ -809,7 +677,7 @@ async function dryRun(args: Args, runtime: { dbPath: string; qdrantUrl: string }
   console.log(`Users: ${formatTopUsers(stats.users)}`);
   console.log(`Bot/self rows: ${stats.botMessages}`);
   console.log(`Existing rows: ${stats.existingRows}`);
-  console.log(`Would insert/embed: ${stats.changedRows}`);
+  console.log(`Would insert: ${stats.changedRows}`);
   console.log(`Skipped: empty=${stats.skippedEmpty}, invalid_date=${stats.skippedInvalidDate}, outside_range=${stats.skippedOutsideRange}, duplicate_ids=${stats.duplicateIds}`);
   console.log(`Stop reason: ${stats.stopReason}`);
 
@@ -817,10 +685,6 @@ async function dryRun(args: Args, runtime: { dbPath: string; qdrantUrl: string }
     console.log(`Database: missing at ${runtime.dbPath}; --apply would create/open it`);
   } else {
     console.log(`Database: ${runtime.dbPath}`);
-  }
-
-  if (args.checkQdrant) {
-    console.log(`Qdrant: ${(await qdrantHttpHealthCheck(runtime.qdrantUrl)) ? "reachable" : "unreachable"} at ${runtime.qdrantUrl}`);
   }
 }
 
@@ -834,44 +698,6 @@ function printApplySummary(stats: FetchStats): void {
   console.log(`Candidate date range: ${formatDate(stats.minDate)} .. ${formatDate(stats.maxDate)}`);
   console.log(`Skipped: empty=${stats.skippedEmpty}, invalid_date=${stats.skippedInvalidDate}, outside_range=${stats.skippedOutsideRange}, duplicate_ids=${stats.duplicateIds}`);
   console.log(`Stop reason: ${stats.stopReason}`);
-}
-
-async function qdrantHttpHealthCheck(qdrantUrl: string): Promise<boolean> {
-  try {
-    const response = await fetch(`${qdrantUrl.replace(/\/$/, "")}/healthz`, {
-      signal: AbortSignal.timeout(5_000),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function qdrantTelemetry(qdrantUrl: string): Promise<string> {
-  try {
-    const base = qdrantUrl.replace(/\/$/, "");
-    const response = await fetch(`${base}/collections/${QDRANT_COLLECTION_NAME}`, {
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!response.ok) return "qdrant=n/a";
-    const body = await response.json() as unknown;
-    if (!isRecord(body) || !isRecord(body.result)) return "qdrant=n/a";
-    const result = body.result;
-    const points = typeof result.points_count === "number" ? result.points_count : undefined;
-    const indexed = typeof result.indexed_vectors_count === "number" ? result.indexed_vectors_count : undefined;
-    const vectors = typeof result.vectors_count === "number" ? result.vectors_count : undefined;
-    const status = typeof result.status === "string" ? result.status : undefined;
-    const optimizer = typeof result.optimizer_status === "string" ? result.optimizer_status : undefined;
-    return [
-      `qdrant_points=${points ?? "n/a"}`,
-      `vectors=${vectors ?? "n/a"}`,
-      `indexed=${indexed ?? "n/a"}`,
-      `qdrant_status=${status ?? "n/a"}`,
-      `optimizer=${optimizer ?? "n/a"}`,
-    ].join(", ");
-  } catch {
-    return "qdrant=n/a";
-  }
 }
 
 async function main(): Promise<void> {
@@ -904,7 +730,7 @@ async function main(): Promise<void> {
   });
 
   if (effectiveArgs.apply) printApplySummary(stats);
-  else await dryRun(effectiveArgs, runtime, stats);
+  else dryRun(runtime, stats);
 }
 
 try {

@@ -6,9 +6,7 @@ services:
     command: ["bun", "run", "dev"]
     env_file: .env
     environment:
-      QDRANT_URL: http://qdrant:6333
       DATA_DIR: /app/data
-      MODEL_CACHE_DIR: /app/model-cache
       LOG_DIR: /tmp
       LOG_LEVEL: debug
       UNSAFELY_BYPASS_DASHBOARD_AUTH: "true"
@@ -19,24 +17,8 @@ services:
       - ./package.json:/app/package.json
       - ./tsconfig.json:/app/tsconfig.json
       - dev-data:/app/data
-      - dev-model-cache:/app/model-cache
     ports:
       - "127.0.0.1:${DASHBOARD_PORT:-31457}:3000"
-    depends_on:
-      qdrant:
-        condition: service_healthy
-
-  qdrant:
-    image: qdrant/qdrant:latest
-    volumes:
-      - dev-qdrant-data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333'"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
 
 volumes:
   dev-data:
-  dev-qdrant-data:
-  dev-model-cache:

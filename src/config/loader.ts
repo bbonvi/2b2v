@@ -972,8 +972,6 @@ export function loadGlobalConfig(
     defaultInstructions: "",
     logLevel: yaml.logLevel ?? "info",
     dataDir,
-    modelCacheDir: yaml.modelCacheDir ?? "model-cache",
-    qdrantUrl: env.QDRANT_URL ?? yaml.qdrantUrl ?? "http://localhost:6333",
     elevenLabsApiKey: env.ELEVENLABS_API_KEY,
     defaultTts: resolveTtsConfig(yaml.tts),
     uiLang: (yaml.uiLang === "ru" ? "ru" : "en") as UiLang,

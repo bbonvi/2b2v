@@ -1,10 +1,7 @@
-import type { QdrantClient } from "@qdrant/js-client-rest";
 import type { Client, Guild, GuildBasedChannel, ThreadChannel } from "discord.js";
 import type { Database } from "../db/database";
 import { deleteImageFiles } from "../db/message-cleanup";
 import { deleteMemory, isMemoryKind, updateMemory } from "../db/memory-repository";
-import { deleteMessagePointsByMessageId } from "../qdrant/adapter";
-import type { EmbeddingQueue } from "../embeddings/queue";
 import { channelTypeLabel, isSendableGuildChannel } from "../discord/message-sender";
 import {
   deleteStoredManagementMessages,
@@ -102,8 +99,6 @@ function isDiscordMessageDeleteChannel(channel: unknown): channel is {
 export function createDashboardManagementRuntime(input: {
   client: Client;
   db: Database;
-  qdrant: QdrantClient;
-  embeddingQueue: EmbeddingQueue;
 }): DashboardManagementRuntime {
   const managementGuildName = (guildId: string): string => input.client.guilds.cache.get(guildId)?.name ?? guildId;
 
@@ -245,10 +240,6 @@ export function createDashboardManagementRuntime(input: {
       guildId: deleteInput.guildId,
       channelId: deleteInput.channelId,
     });
-    await Promise.all(deleted.messageIds.map((messageId) => deleteMessagePointsByMessageId(input.qdrant, {
-      guildId: deleteInput.guildId,
-      messageId,
-    })));
     deleteImageFiles(deleted.imagePaths);
     return {
       deletedMessageIds: deleted.messageIds,
@@ -257,7 +248,7 @@ export function createDashboardManagementRuntime(input: {
     };
   };
 
-  const editManagementMessageState = async (editInput: {
+  const editManagementMessageState = (editInput: {
     messageId: string;
     guildId: string;
     channelId: string;
@@ -272,22 +263,7 @@ export function createDashboardManagementRuntime(input: {
     if (row === null) {
       throw new Error("Stored message was not found for that exact guild/channel, or content was empty.");
     }
-    await deleteMessagePointsByMessageId(input.qdrant, { guildId: row.guildId, messageId: row.id });
-    await input.embeddingQueue.enqueue({
-      id: row.id,
-      text: row.translatedContent,
-      target: "message",
-      metadata: {
-        guild_id: row.guildId,
-        channel_id: row.channelId,
-        user_id: row.userId,
-        created_at: row.createdAt,
-        is_bot: row.isBot,
-        source: "live",
-        embedding_kind: "single",
-      },
-    });
-    return { message: decorateManagementMessage(row) };
+    return Promise.resolve({ message: decorateManagementMessage(row) });
   };
 
   const deleteLatestManagementMessages = async (latestInput: {

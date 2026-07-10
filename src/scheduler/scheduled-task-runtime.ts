@@ -7,7 +7,6 @@ import { createStoredImageAttachmentResolver } from "../agent/stored-image-attac
 import type { HistoryMessage } from "../agent/history-types";
 import type { GuildConfig } from "../config/types";
 import type { Database } from "../db/database";
-import type { EmbeddingQueue } from "../embeddings/queue";
 import { channelDisplayName, createTargetChannelResolver, createTypingController, type ResolveTargetChannel, type SendableGuildChannel } from "../discord/message-sender";
 import type { ReplyFallbackDeps } from "../agent/reply-target-fallback";
 import type { RequestLogStore } from "../dashboard/store";
@@ -53,11 +52,10 @@ function scheduledTaskInstruction(event: ScheduleFireEvent): string {
 export function createScheduledTaskRunner(input: {
   client: Client;
   db: Database;
-  embeddingQueue: EmbeddingQueue;
   requestLogStore: RequestLogStore;
   log: Logger;
   getGuildConfig: (guildId: string) => GuildConfig;
-  createSyntheticReplyFallbackDeps: (input: { db: Database; embeddingQueue: EmbeddingQueue; guildId: string; channelId: string }) => ReplyFallbackDeps;
+  createSyntheticReplyFallbackDeps: (input: { db: Database; guildId: string; channelId: string }) => ReplyFallbackDeps;
   buildContext: (guildId: string, channelId: string, guild: Guild, guildConfig: GuildConfig, userMessage: string, latestUserMessage: HistoryMessage, replyFallbackDeps: ReplyFallbackDeps, isThread: boolean) => Promise<AssembledContext>;
   buildAgentTools: (guildId: string, channelId: string, guildConfig: GuildConfig, guild: Guild, contextMessageIds: string[], onGeneratedImage?: (attachment: Parameters<GeneratedImageRuntime["onGeneratedImage"]>[0]) => void, currentRequest?: { requesterId: string; requesterUsername: string; sourceMessageId: string; sourceQuote: string }) => AgentTool[];
   createVisibleMaintenanceTools: (input: VisibleMaintenanceInput) => AgentTool[];
@@ -145,7 +143,6 @@ export function createScheduledTaskRunner(input: {
       };
       const replyFallbackDeps = input.createSyntheticReplyFallbackDeps({
         db: input.db,
-        embeddingQueue: input.embeddingQueue,
         guildId,
         channelId,
       });

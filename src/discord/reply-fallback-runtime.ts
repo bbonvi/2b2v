@@ -1,12 +1,9 @@
-import type { QdrantClient } from "@qdrant/js-client-rest";
 import type { Guild, Message, TextChannel } from "discord.js";
 import type { GuildConfig } from "../config/types";
 import type { Database } from "../db/database";
 import { processAndStoreImage } from "../db/image-ingest";
 import { cleanupDeletedBotMessage } from "../db/message-cleanup";
 import { upsertBotMessageContent } from "../db/message-repository";
-import { deleteMessagePointsByMessageId } from "../qdrant/adapter";
-import type { EmbeddingQueue } from "../embeddings/queue";
 import type { ReplyFallbackDeps } from "../agent/reply-target-fallback";
 
 export function fetchedDiscordMessageToFallback(fetched: Message): Awaited<ReturnType<ReplyFallbackDeps["fetchDiscordMessage"]>> {
@@ -40,7 +37,6 @@ export function fetchedDiscordMessageToFallback(fetched: Message): Awaited<Retur
 
 export function createDiscordReplyFallbackDeps(input: {
   db: Database;
-  embeddingQueue: EmbeddingQueue;
   clientChannelsFetch: (channelId: string) => Promise<unknown>;
   guild: Guild;
   guildId: string;
@@ -63,9 +59,6 @@ export function createDiscordReplyFallbackDeps(input: {
         return null;
       }
     },
-    enqueueEmbedding: async (id, text, metadata) => {
-      await input.embeddingQueue.enqueue({ id, text, target: "message", metadata });
-    },
     processImage: async (url, contentType, messageId, sourceKind) => {
       await processAndStoreImage({
         db: input.db,
@@ -86,7 +79,6 @@ export function createDiscordReplyFallbackDeps(input: {
 
 export function createSyntheticReplyFallbackDeps(input: {
   db: Database;
-  embeddingQueue: EmbeddingQueue;
   guildId: string;
   channelId: string;
 }): ReplyFallbackDeps {
@@ -95,17 +87,12 @@ export function createSyntheticReplyFallbackDeps(input: {
     guildId: input.guildId,
     channelId: input.channelId,
     fetchDiscordMessage: () => Promise.resolve(null),
-    enqueueEmbedding: async (id, text, metadata) => {
-      await input.embeddingQueue.enqueue({ id, text, target: "message", metadata });
-    },
     processImage: async () => {},
   };
 }
 
-export async function syncEditedOwnBotMessage(input: {
+export function syncEditedOwnBotMessage(input: {
   db: Database;
-  qdrant: QdrantClient;
-  embeddingQueue: EmbeddingQueue;
   messageId: string;
   guildId: string;
   channelId: string;
@@ -116,7 +103,7 @@ export async function syncEditedOwnBotMessage(input: {
   createdAt: number;
   replyToId: string | null;
 }): Promise<void> {
-  const row = upsertBotMessageContent(input.db, {
+  upsertBotMessageContent(input.db, {
     id: input.messageId,
     guildId: input.guildId,
     channelId: input.channelId,
@@ -127,30 +114,16 @@ export async function syncEditedOwnBotMessage(input: {
     createdAt: input.createdAt,
     replyToId: input.replyToId,
   });
-  await deleteMessagePointsByMessageId(input.qdrant, { guildId: row.guildId, messageId: row.id });
-  await input.embeddingQueue.enqueue({
-    id: row.id,
-    text: row.translatedContent,
-    target: "message",
-    metadata: {
-      guild_id: row.guildId,
-      channel_id: row.channelId,
-      user_id: row.userId,
-      created_at: row.createdAt,
-      is_bot: true,
-      source: "live",
-      embedding_kind: "single",
-    },
-  });
+  return Promise.resolve();
 }
 
-export async function syncDeletedOwnBotMessage(input: {
+export function syncDeletedOwnBotMessage(input: {
   db: Database;
-  qdrant: QdrantClient;
   messageId: string;
   guildId: string;
   channelId: string;
   botUserId: string;
 }): Promise<void> {
-  await cleanupDeletedBotMessage(input);
+  cleanupDeletedBotMessage(input);
+  return Promise.resolve();
 }

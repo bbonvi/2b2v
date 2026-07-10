@@ -36,7 +36,6 @@ function baseDeps(overrides: Partial<ReplyFallbackDeps> = {}): ReplyFallbackDeps
     guildId: "g1",
     channelId: "ch1",
     fetchDiscordMessage: () => Promise.resolve(null),
-    enqueueEmbedding: () => Promise.resolve(),
     processImage: () => Promise.resolve(),
     ...overrides,
   };
@@ -85,15 +84,9 @@ describe("fetchMissingReplyTargets", () => {
       attachments: [],
     };
 
-    const enqueueCalls: Array<{ id: string; text: string }> = [];
-
     const deps = baseDeps({
       fetchDiscordMessage: (_chId, msgId) =>
         msgId === TARGET_ID ? Promise.resolve(fetched) : Promise.resolve(null),
-      enqueueEmbedding: (id, text) => {
-        enqueueCalls.push({ id, text });
-        return Promise.resolve();
-      },
     });
 
     const messages = [makeMsg({ id: "2", replyToId: TARGET_ID })];
@@ -114,9 +107,6 @@ describe("fetchMissingReplyTargets", () => {
     expect(row?.author_username).toBe("targetuser");
     expect(row?.guild_id).toBe("g1");
 
-    // Enqueued for embedding
-    expect(enqueueCalls).toHaveLength(1);
-    expect(enqueueCalls[0]?.id).toBe(TARGET_ID);
   });
 
   test("gracefully handles fetch failure (deleted/no perms)", async () => {
@@ -195,7 +185,6 @@ describe("fetchMissingReplyTargets", () => {
 
   test("adds sticker tags and processes sticker previews", async () => {
     const processImageCalls: Array<{ url: string; sourceKind: string | undefined }> = [];
-    const enqueueCalls: Array<{ id: string; text: string }> = [];
 
     const fetched: FetchedDiscordMessage = {
       id: TARGET_ID,
@@ -211,10 +200,6 @@ describe("fetchMissingReplyTargets", () => {
 
     const deps = baseDeps({
       fetchDiscordMessage: () => Promise.resolve(fetched),
-      enqueueEmbedding: (id, text) => {
-        enqueueCalls.push({ id, text });
-        return Promise.resolve();
-      },
       processImage: (url, _contentType, _messageId, sourceKind) => {
         processImageCalls.push({ url, sourceKind });
         return Promise.resolve();
@@ -224,7 +209,6 @@ describe("fetchMissingReplyTargets", () => {
     const result = await fetchMissingReplyTargets(deps, [makeMsg({ id: "2", replyToId: TARGET_ID })]);
 
     expect(result[0]?.content).toBe("<sticker>Blob Dance</sticker>");
-    expect(enqueueCalls[0]?.text).toBe("<sticker>Blob Dance</sticker>");
     expect(processImageCalls).toEqual([{ url: "https://cdn.example.com/blob.png", sourceKind: "sticker" }]);
   });
 
@@ -370,22 +354,4 @@ describe("fetchMissingReplyTargets", () => {
     expect(result[0]?.content).toBe("other content");
   });
 
-  test("embedding enqueue failure does not prevent return", async () => {
-    const fetched: FetchedDiscordMessage = {
-      id: TARGET_ID, authorId: "u1", authorUsername: "alice",
-      content: "msg", timestamp: 100, isBot: false, replyToId: null, attachments: [],
-    };
-
-    const deps = baseDeps({
-      fetchDiscordMessage: () => Promise.resolve(fetched),
-      enqueueEmbedding: () => Promise.reject(new Error("qdrant down")),
-    });
-
-    const messages = [makeMsg({ id: "2", replyToId: TARGET_ID })];
-    const result = await fetchMissingReplyTargets(deps, messages);
-
-    // Still returns the fetched message despite embedding failure
-    expect(result).toHaveLength(1);
-    expect(result[0]?.id).toBe(TARGET_ID);
-  });
 });

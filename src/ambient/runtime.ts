@@ -13,7 +13,6 @@ import { trackWriteToolStarts } from "../agent/tool-access";
 import { isActiveJobStatus, type AgentJobStore } from "../agent/job-runtime";
 import type { PromptBundle } from "../config/prompt-bundle";
 import type { GlobalConfig } from "../config/types";
-import type { EmbeddingQueue } from "../embeddings/queue";
 import type { GeneratedImageAttachment } from "../agent/codex-image-tool";
 import { botChannelPermissions, isSendableGuildChannel, type ResolveTargetChannel, type SendableGuildChannel } from "../discord/message-sender";
 import type { ReplyFallbackDeps } from "../agent/reply-target-fallback";
@@ -167,14 +166,13 @@ export type AmbientRuntimeDeps = {
   log: Logger;
   requestLogStore: RequestLogStore;
   agentJobs: AgentJobStore;
-  embeddingQueue: EmbeddingQueue;
   getPromptBundle: () => PromptBundle;
   getGlobalConfig: () => GlobalConfig;
   typingIntervalMs: number;
   getGuildConfig: (guildId: string) => GuildConfig;
   dashboardTriggerLocation: (guild: Guild, channel: unknown) => { guildName: string; channelName?: string };
   buildInboundResolvers: (guild: Guild) => Parameters<typeof translateInbound>[1];
-  createSyntheticReplyFallbackDeps: (input: { db: Database; embeddingQueue: EmbeddingQueue; guildId: string; channelId: string }) => ReplyFallbackDeps;
+  createSyntheticReplyFallbackDeps: (input: { db: Database; guildId: string; channelId: string }) => ReplyFallbackDeps;
   buildContext: (guildId: string, channelId: string, guild: Guild, guildConfig: GuildConfig, userMessage: string, latestUserMessage: HistoryMessage, replyFallbackDeps: ReplyFallbackDeps, isThread: boolean, currentTurnBoundary?: { timestamp: number; messageId: string }, relationshipsMode?: "live" | "virtual") => Promise<AssembledContext>;
   buildAgentTools: (guildId: string, channelId: string, guildConfig: GuildConfig, guild: Guild, contextMessageIds: string[], onGeneratedImage?: (attachment: GeneratedImageAttachment) => void, currentRequest?: { requesterId: string; requesterUsername: string; sourceMessageId: string; sourceQuote: string }, options?: Record<string, unknown>) => AgentTool[];
   promptLabDryRunTools: (tools: AgentTool[], dryRuns: PromptLabDryRun[]) => AgentTool[];
@@ -197,7 +195,7 @@ export type AmbientRuntimeDeps = {
 };
 
 export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime {
-  const { db, client, log, requestLogStore, agentJobs, embeddingQueue } = input;
+  const { db, client, log, requestLogStore, agentJobs } = input;
   const getPromptBundle = input.getPromptBundle;
   const getGlobalConfig = input.getGlobalConfig;
   const TYPING_INTERVAL_MS = input.typingIntervalMs;
@@ -1745,7 +1743,6 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
 
     const replyFallbackDeps = createSyntheticReplyFallbackDeps({
       db,
-      embeddingQueue,
       guildId: input.candidate.guildId,
       channelId: input.candidate.channelId,
     });

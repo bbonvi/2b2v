@@ -1,4 +1,3 @@
-import type { QdrantClient } from "@qdrant/js-client-rest";
 import { MessageFlags, type ChatInputCommandInteraction, type Client } from "discord.js";
 import { createMemoryWipeHandler } from "../commands/memory-wipe";
 import { createScheduleHandler } from "../commands/schedule";
@@ -19,7 +18,6 @@ type CommandHandler = (interaction: ChatInputCommandInteraction) => Promise<void
 export function registerInteractionRuntime(input: {
   client: Client;
   db: Database;
-  qdrant: QdrantClient;
   scheduler: SchedulerEngine;
   getGlobalConfig: () => GlobalConfig;
   getGuildConfig: (guildId: string) => GuildConfig;
@@ -68,10 +66,8 @@ export function registerInteractionRuntime(input: {
     }));
 
     commandHandlers.set("memory-wipe", createMemoryWipeHandler({
-      wipeGuild: (gId) => cleanupGuildData({ db: input.db, qdrant: input.qdrant, guildId: gId }),
-      wipeRecent: async (_gId, chId, count) => {
-        return await cleanupRecentMessages({ db: input.db, qdrant: input.qdrant, guildId: _gId, channelId: chId, count });
-      },
+      wipeGuild: (gId) => Promise.resolve(cleanupGuildData({ db: input.db, guildId: gId })),
+      wipeRecent: (_gId, chId, count) => Promise.resolve(cleanupRecentMessages({ db: input.db, channelId: chId, count })),
       adminUserIds: config.adminUserIds,
     }));
   }

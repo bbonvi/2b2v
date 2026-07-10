@@ -171,7 +171,6 @@ describe("Discord fallback → read_chat_images integration", () => {
       guildId: GUILD_ID,
       channelId: CHANNEL_ID,
       fetchDiscordMessage: (_ch, id) => id === TARGET_ID ? Promise.resolve(fetched) : Promise.resolve(null),
-      enqueueEmbedding: () => Promise.resolve(),
       processImage: (url, _ct, msgId) => {
         processedImages.push({ url, messageId: msgId });
         return Promise.resolve();
@@ -216,7 +215,6 @@ describe("Discord fallback → read_chat_images integration", () => {
       guildId: GUILD_ID,
       channelId: CHANNEL_ID,
       fetchDiscordMessage: (_ch, id) => Promise.resolve(remoteMessages.get(id) ?? null),
-      enqueueEmbedding: () => Promise.resolve(),
       processImage: () => Promise.resolve(),
     };
 

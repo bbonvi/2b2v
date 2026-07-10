@@ -5,7 +5,6 @@ import type { GlobalConfig, GuildConfig } from "../config/types";
 import type { Database } from "../db/database";
 import { createLogger } from "../logger";
 import type { SchedulerEngine } from "../scheduler/engine";
-import type { QdrantClient } from "@qdrant/js-client-rest";
 import { createSessionStore } from "../vpn/session";
 import { registerInteractionRuntime } from "./interaction-runtime";
 
@@ -23,7 +22,6 @@ describe("registerInteractionRuntime", () => {
     registerInteractionRuntime({
       client,
       db: {} as unknown as Database,
-      qdrant: {} as unknown as QdrantClient,
       scheduler: {} as unknown as SchedulerEngine,
       getGlobalConfig: () => globalConfig,
       getGuildConfig: () => ({ adminUserIds: [] }) as unknown as GuildConfig,

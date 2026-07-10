@@ -342,12 +342,6 @@ logLevel: info
 # Directory for SQLite database and attachments
 dataDir: data
 
-# Directory for caching embedding model files
-modelCacheDir: model-cache
-
-# Qdrant vector database URL (env var QDRANT_URL takes priority)
-qdrantUrl: http://localhost:6333
-
 # UI language for VPN panel ("en" or "ru")
 uiLang: en
 

@@ -1,11 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { QdrantClient } from "@qdrant/js-client-rest";
 import { existsSync, mkdtempSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createDatabase, type Database } from "../db/database";
 import { insertImage } from "../db/image-repository";
-import type { EmbeddingQueue } from "../embeddings/queue";
 import { createDashboardManagementRuntime } from "./management-runtime";
 
 let db: Database;
@@ -39,10 +37,6 @@ function managementRuntime(): ReturnType<typeof createDashboardManagementRuntime
       },
     } as never,
     db,
-    qdrant: {
-      delete: () => Promise.resolve({}),
-    } as unknown as QdrantClient,
-    embeddingQueue: {} as EmbeddingQueue,
   });
 }
 

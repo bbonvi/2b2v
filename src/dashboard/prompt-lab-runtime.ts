@@ -309,7 +309,6 @@ export function createPromptLabRunner(input: {
           return null;
         }
       },
-      enqueueEmbedding: async () => {},
       processImage: async () => {},
     };
 
