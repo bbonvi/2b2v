@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { HistoryMessage } from "../agent/history-types.ts";
 import { DEFAULT_AMBIENT_ATTENTION } from "../config/defaults.ts";
 import { createDatabase, type Database } from "../db/database.ts";
-import { renderAmbientHistory, resolveLocalChannelShape } from "./runtime.ts";
+import { renderAmbientHistory, resolveLocalChannelShape, shouldDeferAmbientCandidateForTyping } from "./runtime.ts";
 
 function msg(overrides: Partial<HistoryMessage> = {}): HistoryMessage {
   return {
@@ -111,6 +111,19 @@ describe("renderAmbientHistory", () => {
     });
 
     expect(text).toContain("removed text [deleted]");
+  });
+});
+
+describe("shouldDeferAmbientCandidateForTyping", () => {
+  test("keeps lingering attention through typing at either gate", () => {
+    expect(shouldDeferAmbientCandidateForTyping("lingering_attention", "evaluate", "user typing active")).toBe(true);
+    expect(shouldDeferAmbientCandidateForTyping("lingering_attention", "pre_send", "user typing active")).toBe(true);
+  });
+
+  test("does not revive unrelated drops or stale ambient pickup generation", () => {
+    expect(shouldDeferAmbientCandidateForTyping("lingering_attention", "pre_send", "candidate stale")).toBe(false);
+    expect(shouldDeferAmbientCandidateForTyping("ambient_pickup", "pre_send", "user typing active")).toBe(false);
+    expect(shouldDeferAmbientCandidateForTyping("follow_up", "evaluate", "user typing active")).toBe(false);
   });
 });
 

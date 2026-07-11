@@ -194,6 +194,16 @@ export type AmbientRuntimeDeps = {
   isAutonomousAttentionBusy?: (guildId: string, channelId: string) => boolean;
 };
 
+/** Decide whether typing should postpone an ambient candidate instead of consuming it. */
+export function shouldDeferAmbientCandidateForTyping(
+  kind: AmbientAttentionKind,
+  phase: "evaluate" | "pre_send",
+  reason: string,
+): boolean {
+  return reason === "user typing active"
+    && (kind === "lingering_attention" || (kind === "ambient_pickup" && phase === "evaluate"));
+}
+
 export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime {
   const { db, client, log, requestLogStore, agentJobs } = input;
   const getPromptBundle = input.getPromptBundle;
@@ -692,9 +702,19 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     const key = ambientPendingKey(kind, guildId, channelId, userId);
     const pending = ambientPendingCandidates.get(key);
     if (pending === undefined) return;
-    const mode = ambientModeConfig(config, kind);
-    const delayMs = ambientTypingActiveMs(config, kind) + randomBetween(mode.minDelayMs, mode.maxDelayMs);
-    armPendingCandidate(key, pending.candidate, delayMs);
+    deferAmbientCandidateForTyping(pending.candidate, config);
+  }
+
+  /** Keep an ambient candidate alive until Discord typing has gone idle. */
+  function deferAmbientCandidateForTyping(
+    candidate: AmbientCandidate,
+    config: AmbientAttentionConfig,
+  ): void {
+    const key = ambientPendingKey(candidate.kind, candidate.guildId, candidate.channelId, candidate.userId);
+    const mode = ambientModeConfig(config, candidate.kind);
+    const delayMs = Math.max(ambientTypingActiveMs(config, candidate.kind), TYPING_INTERVAL_MS)
+      + randomBetween(mode.minDelayMs, mode.maxDelayMs);
+    armPendingCandidate(key, candidate, delayMs);
   }
 
   function ambientHardGate(
@@ -2227,8 +2247,8 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     );
     if (!gate.ok) {
       log.debug("ambient candidate dropped", { kind: candidate.kind, messageId: candidate.triggerMessageId, reason: gate.reason });
-      if ((candidate.kind === "ambient_pickup" || candidate.kind === "lingering_attention") && gate.reason === "user typing active") {
-        reschedulePendingBurstForTyping(candidate.kind, candidate.guildId, candidate.channelId, candidate.userId, config);
+      if (shouldDeferAmbientCandidateForTyping(candidate.kind, "evaluate", gate.reason)) {
+        deferAmbientCandidateForTyping(candidate, config);
       } else {
         clearPendingForCandidate(candidate);
       }
@@ -2352,6 +2372,9 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
               return true;
             }
             if (!preSendGate.ok) {
+              if (shouldDeferAmbientCandidateForTyping(candidate.kind, "pre_send", preSendGate.reason)) {
+                deferAmbientCandidateForTyping(candidate, config);
+              }
               const preSendLog = createAmbientRequestLog(candidate, "pre_send_dropped");
               requestLogStore.incrementActive();
               recordAmbientRuntimeAction(
