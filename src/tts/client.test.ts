@@ -217,7 +217,7 @@ describe("createElevenLabsClient", () => {
       }
     });
 
-    test("uses default timeout of 30 seconds", async () => {
+    test("uses default timeout of 90 seconds", async () => {
       let capturedSignal: AbortSignal | undefined;
 
       const mockFetch: FetchFn = (_url, options) => {

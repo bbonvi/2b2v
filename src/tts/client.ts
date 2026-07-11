@@ -32,7 +32,7 @@ export interface ElevenLabsClient {
   generate: (params: GenerateSpeechParams) => Promise<TtsResult>;
 }
 
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 90_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
