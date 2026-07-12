@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { AssetIdSchema, parseAssetId } from "./asset-id.ts";
 import { loadAssetTextView, type ReadAssetToolDeps } from "./read-asset-tool.ts";
+import { runRipgrep as runRipgrepProcess } from "./ripgrep.ts";
 
 const SearchAssetParams = Type.Object({
   asset_id: AssetIdSchema,
@@ -57,9 +58,7 @@ async function runRipgrep(
   maxChars: number,
   signal: AbortSignal,
 ): Promise<string | null> {
-  signal.throwIfAborted();
-  const process = Bun.spawn([
-    "rg",
+  const stdout = await runRipgrepProcess([
     "--line-number",
     "--text",
     "--no-filename",
@@ -71,29 +70,10 @@ async function runRipgrep(
     "--max-columns-preview",
     "--regexp",
     pattern,
-    "-",
-  ], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
-  const onAbort = (): void => process.kill();
-  signal.addEventListener("abort", onAbort, { once: true });
-  try {
-    const exited = process.exited;
-    const stdoutText = new Response(process.stdout).text();
-    const stderrText = new Response(process.stderr).text();
-    await process.stdin.write(text);
-    await process.stdin.end();
-    const [exitCode, stdout, stderr] = await Promise.all([
-      exited,
-      stdoutText,
-      stderrText,
-    ]);
-    signal.throwIfAborted();
-    if (exitCode === 1) return null;
-    if (exitCode !== 0) throw new Error(`Invalid regex or search failure: ${stderr.trim().slice(0, 500)}`);
-    const clean = stdout.trim();
-    if (clean.length <= maxChars) return clean;
-    const cutoff = clean.lastIndexOf("\n", maxChars);
-    return `${clean.slice(0, cutoff > 0 ? cutoff : maxChars)}\n[Search output truncated; narrow the regex.]`;
-  } finally {
-    signal.removeEventListener("abort", onAbort);
-  }
+  ], text, signal);
+  if (stdout === null) return null;
+  const clean = stdout.trim();
+  if (clean.length <= maxChars) return clean;
+  const cutoff = clean.lastIndexOf("\n", maxChars);
+  return `${clean.slice(0, cutoff > 0 ? cutoff : maxChars)}\n[Search output truncated; narrow the regex.]`;
 }

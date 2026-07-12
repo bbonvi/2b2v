@@ -1,129 +1,64 @@
-import { test, expect, describe } from "bun:test";
-import {
-  createListChannelMessagesTool,
-  type ListChannelMessagesToolDeps,
-  type ListChannelMessage,
-} from "./list-channel-messages-tool";
+import { describe, expect, test } from "bun:test";
 import type { TextContent } from "@earendil-works/pi-ai";
+import { createListChannelMessagesTool, type ListChannelMessage, type ListChannelMessagesToolDeps } from "./list-channel-messages-tool.ts";
 
-function makeDeps(messages: ListChannelMessage[]): ListChannelMessagesToolDeps {
+function message(id: string, author: string, content: string, timestamp: number, assets?: ListChannelMessage["assets"]): ListChannelMessage {
   return {
-    guildId: "g1",
-    timezone: "UTC",
-    fetchMessages: () => Promise.resolve({ messages }),
+    id, author, authorId: `u-${author}`, content, isBot: false, timestamp, replyToId: null,
+    imageIds: [], captions: [], hasEmbeds: false, isSynthetic: false, relatedThreadId: null,
+    ...(assets === undefined ? {} : { assets }),
   };
 }
 
-const MESSAGES: ListChannelMessage[] = [
-  { id: "m1", authorUsername: "alice", content: "Hello world", createdAt: Date.now() - 60000 },
-  { id: "m2", authorUsername: "bob", content: "Hi alice!", createdAt: Date.now() - 30000 },
-  { id: "m3", authorUsername: "alice", content: "How are you?", createdAt: Date.now() },
+const messages = [
+  message("m1", "alice", "Hello world", Date.now() - 60_000),
+  message("m2", "bob", "Hi alice!", Date.now() - 30_000),
 ];
 
-describe("createListChannelMessagesTool", () => {
-  test("returns list_channel_messages AgentTool with correct metadata", () => {
-    const tool = createListChannelMessagesTool(makeDeps(MESSAGES));
-    expect(tool.label).toBe("list_channel_messages");
-    expect(tool.description).toBeDefined();
-    expect(tool.parameters).toBeDefined();
+function deps(fetchMessages: ListChannelMessagesToolDeps["fetchMessages"] = () => Promise.resolve({ messages })): ListChannelMessagesToolDeps {
+  return { guildId: "g1", timezone: "UTC", fetchMessages };
+}
+
+describe("list_channel_messages", () => {
+  test("formats normal history grammar with MsgIDs and typed assets", async () => {
+    const withAsset = message("m1", "alice", "file", Date.now(), [{
+      id: 7, kind: "text", sourceKind: "attachment", filename: "x.js", contentType: "text/javascript",
+      size: 100, width: null, height: null, durationSeconds: null,
+    }]);
+    const result = await createListChannelMessagesTool(deps(() => Promise.resolve({ messages: [withAsset] })))
+      .execute("tc", { channel_id: "c1" }, AbortSignal.timeout(5000));
+    const output = (result.content[0] as TextContent).text;
+    expect(output).toContain("[@alice (MsgID: m1; Text: #7 x.js (100B))]: file");
+    expect(output).toMatch(/\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]/);
   });
 
-  test("returns chat messages", async () => {
-    const tool = createListChannelMessagesTool(makeDeps(MESSAGES));
-    const result = await tool.execute("tc1", { channel_id: "c1" }, AbortSignal.timeout(5000));
-    const text = (result.content[0] as TextContent).text;
-    expect(text).toContain("alice");
-    expect(text).toContain("Hello world");
-    expect(text).toContain("bob");
-    expect((result.details as { count: number }).count).toBe(3);
+  test("passes pagination and around anchors through", async () => {
+    const seen: Array<{ beforeMessageId?: string; aroundMessageId?: string }> = [];
+    const tool = createListChannelMessagesTool(deps((input) => {
+      seen.push({
+        ...(input.beforeMessageId === undefined ? {} : { beforeMessageId: input.beforeMessageId }),
+        ...(input.aroundMessageId === undefined ? {} : { aroundMessageId: input.aroundMessageId }),
+      });
+      return Promise.resolve({ messages: messages.slice(0, 1) });
+    }));
+    await tool.execute("tc", { channel_id: "c1", before_message_id: "m2" }, AbortSignal.timeout(5000));
+    await tool.execute("tc", { channel_id: "c1", around_message_id: "m1" }, AbortSignal.timeout(5000));
+    expect(seen).toEqual([{ beforeMessageId: "m2" }, { aroundMessageId: "m1" }]);
   });
 
-  test("respects limit parameter", async () => {
-    let passedLimit: number | undefined;
-    const deps: ListChannelMessagesToolDeps = {
-      guildId: "g1",
-      timezone: "UTC",
-      fetchMessages: (input) => {
-        passedLimit = input.limit;
-        return Promise.resolve({ messages: MESSAGES.slice(0, input.limit) });
-      },
-    };
-    const tool = createListChannelMessagesTool(deps);
-    await tool.execute("tc1", { channel_id: "c1", limit: 2 }, AbortSignal.timeout(5000));
-    expect(passedLimit).toBe(2);
+  test("rejects combined anchors", async () => {
+    const result = await createListChannelMessagesTool(deps()).execute("tc", {
+      channel_id: "c1", before_message_id: "m1", around_message_id: "m2",
+    }, AbortSignal.timeout(5000));
+    expect((result.content[0] as TextContent).text).toContain("Use only one");
   });
 
-  test("defaults limit to 50", async () => {
-    let passedLimit: number | undefined;
-    const deps: ListChannelMessagesToolDeps = {
-      guildId: "g1",
-      timezone: "UTC",
-      fetchMessages: (input) => {
-        passedLimit = input.limit;
-        return Promise.resolve({ messages: MESSAGES });
-      },
-    };
-    const tool = createListChannelMessagesTool(deps);
-    await tool.execute("tc1", { channel_id: "c1" }, AbortSignal.timeout(5000));
-    expect(passedLimit).toBe(50);
-  });
-
-  test("handles empty results", async () => {
-    const tool = createListChannelMessagesTool(makeDeps([]));
-    const result = await tool.execute("tc1", { channel_id: "c1" }, AbortSignal.timeout(5000));
-    const text = (result.content[0] as TextContent).text;
-    expect(text).toContain("No messages");
-    expect((result.details as { count: number }).count).toBe(0);
-  });
-
-  test("degrades gracefully when fetchMessages throws", async () => {
-    const deps: ListChannelMessagesToolDeps = {
-      guildId: "g1",
-      timezone: "UTC",
-      fetchMessages: () => { throw new Error("Missing Access"); },
-    };
-    const tool = createListChannelMessagesTool(deps);
-    const result = await tool.execute("tc1", { channel_id: "c1" }, AbortSignal.timeout(5000));
-    const text = (result.content[0] as TextContent).text;
-    expect(text).toContain("Unable to fetch");
-  });
-
-  test("formats messages with local wall-clock timestamps", async () => {
-    const tool = createListChannelMessagesTool(makeDeps(MESSAGES));
-    const result = await tool.execute("tc1", { channel_id: "c1" }, AbortSignal.timeout(5000));
-    const text = (result.content[0] as TextContent).text;
-    // Local wall-clock format: [YYYY-MM-DD HH:mm], no "UTC" suffix
-    expect(text).toMatch(/\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]/);
-    expect(text).not.toContain("UTC");
-    expect(text).toContain("[id m1] alice: Hello world");
-  });
-
-  test("passes cursor parameters through", async () => {
-    let passed: { beforeMessageId?: string; afterMessageId?: string } | undefined;
-    const deps: ListChannelMessagesToolDeps = {
-      guildId: "g1",
-      timezone: "UTC",
-      fetchMessages: (input) => {
-        passed = {
-          ...(input.beforeMessageId !== undefined ? { beforeMessageId: input.beforeMessageId } : {}),
-          ...(input.afterMessageId !== undefined ? { afterMessageId: input.afterMessageId } : {}),
-        };
-        return Promise.resolve({ messages: MESSAGES.slice(0, 1) });
-      },
-    };
-    const tool = createListChannelMessagesTool(deps);
-    const result = await tool.execute("tc1", { channel_id: "c1", before_message_id: "m2", limit: 1 }, AbortSignal.timeout(5000));
-    const text = (result.content[0] as TextContent).text;
-
-    expect(passed).toEqual({ beforeMessageId: "m2" });
-    expect(text).toContain("oldest_message_id=m1");
-    expect((result.details as { oldest_message_id?: string }).oldest_message_id).toBe("m1");
-  });
-
-  test("rejects two cursors", async () => {
-    const tool = createListChannelMessagesTool(makeDeps(MESSAGES));
-    const result = await tool.execute("tc1", { channel_id: "c1", before_message_id: "m2", after_message_id: "m1" }, AbortSignal.timeout(5000));
-    const text = (result.content[0] as TextContent).text;
-    expect(text).toContain("either before_message_id or after_message_id");
+  test("handles empty and inaccessible results", async () => {
+    const empty = await createListChannelMessagesTool(deps(() => Promise.resolve({ messages: [] })))
+      .execute("tc", { channel_id: "c1" }, AbortSignal.timeout(5000));
+    expect((empty.content[0] as TextContent).text).toContain("No messages");
+    const missing = await createListChannelMessagesTool(deps(() => Promise.resolve(null)))
+      .execute("tc", { channel_id: "c1" }, AbortSignal.timeout(5000));
+    expect((missing.content[0] as TextContent).text).toContain("not found");
   });
 });

@@ -1920,7 +1920,6 @@ function buildAgentTools(
 ) {
   const includeImageGenerationTools = options.includeImageGenerationTools ?? true;
   const effectiveCurrentRequest = options.currentRequest ?? currentRequest;
-  const resolveUsername = (username: string): string | undefined => resolveGuildUsername(guild, username);
   const resolveUsernameInGuild = async (username: string, targetGuildId: string): Promise<string | undefined> => {
     const targetGuild = targetGuildId === guild.id ? guild : await resolveClientGuild(targetGuildId);
     if (targetGuild === null) return undefined;
@@ -1939,30 +1938,11 @@ function buildAgentTools(
     guildId,
     currentChannelId: channelId,
     timezone: guildConfig.timezone,
-    resolveUsername,
-    resolveUsernameInGuild,
     resolveChannel: async (targetChannelId) => {
       const channel = await fetchAccessibleGuildChannel(targetChannelId);
       return channel === null ? null : { guildId: channel.guildId, channelId: channel.id };
     },
     canAccessGuild: async (targetGuildId) => await resolveClientGuild(targetGuildId) !== null,
-    excludedMessageIds,
-    fetchMessage: async (chId, msgId) => {
-      const channel = await fetchAccessibleGuildChannel(chId);
-      if (channel === null || !("messages" in channel)) return null;
-      try {
-        const msg = await (channel as TextChannel).messages.fetch(msgId);
-        return {
-          attachments: [...msg.attachments.values()].map((a) => ({
-            name: a.name,
-            contentType: a.contentType,
-            size: a.size,
-          })),
-        };
-      } catch {
-        return null;
-      }
-    },
   });
 
   const scheduleTools = createScheduleTools({
@@ -2182,6 +2162,7 @@ function buildAgentTools(
         limit: input.limit,
         ...(input.beforeMessageId !== undefined ? { beforeMessageId: input.beforeMessageId } : {}),
         ...(input.afterMessageId !== undefined ? { afterMessageId: input.afterMessageId } : {}),
+        ...(input.aroundMessageId !== undefined ? { aroundMessageId: input.aroundMessageId } : {}),
       });
       return messages === null ? null : { messages };
     },

@@ -1,0 +1,1 @@
+Ripgrep regular expression searched across message text, MsgID, asset filenames, and MIME types. Matching is case-sensitive unless the regex includes `(?i)`; escape metacharacters when searching literal text.

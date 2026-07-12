@@ -830,6 +830,28 @@ describe("listChannelMessages", () => {
     expect(results.map((r) => r.id)).toEqual(["m2", "m3"]);
   });
 
+  test("returns chronological context around an anchor", () => {
+    const now = Date.now();
+    for (let i = 1; i <= 5; i++) {
+      insertMessage(`m${i}`, { guildId: "g1", channelId: "c1", createdAt: now + i });
+    }
+
+    const results = listChannelMessages(db, "g1", "c1", { limit: 3, aroundMessageId: "m3" }) ?? [];
+
+    expect(results.map((r) => r.id)).toEqual(["m2", "m3", "m4"]);
+  });
+
+  test("around context includes attachment-only anchors and synthetic neighbors", () => {
+    const now = Date.now();
+    insertMessage("before", { guildId: "g1", channelId: "c1", createdAt: now });
+    insertMessage("anchor", { guildId: "g1", channelId: "c1", translatedContent: "", createdAt: now + 1 });
+    insertMessage("event", { guildId: "g1", channelId: "c1", isSynthetic: true, createdAt: now + 2 });
+
+    const results = listChannelMessages(db, "g1", "c1", { limit: 3, aroundMessageId: "anchor" }) ?? [];
+
+    expect(results.map((r) => r.id)).toEqual(["before", "anchor", "event"]);
+  });
+
   test("returns null for missing cursor", () => {
     const results = listChannelMessages(db, "g1", "c1", { limit: 2, beforeMessageId: "missing" });
 
@@ -879,8 +901,8 @@ describe("listChannelMessages", () => {
     expect(results.length).toBe(1);
     const row = results[0];
     expect(row?.id).toBe("m1");
-    expect(row?.authorUsername).toBe("alice");
+    expect(row?.author).toBe("alice");
     expect(row?.content).toBe("Hello world");
-    expect(typeof row?.createdAt).toBe("number");
+    expect(typeof row?.timestamp).toBe("number");
   });
 });

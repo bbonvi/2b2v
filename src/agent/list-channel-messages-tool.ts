@@ -1,13 +1,11 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { formatLocalWallClock } from "../time/agent-time.ts";
+import type { HistoryMessage } from "./history-types.ts";
+import { formatMessageLine } from "./history-formatting.ts";
+import { resolveReplies } from "./history-replies.ts";
 
-export interface ListChannelMessage {
-  id: string;
-  authorUsername: string;
-  content: string;
-  createdAt: number;
-}
+export type ListChannelMessage = HistoryMessage;
 
 export interface ListChannelMessagesPage {
   messages: ListChannelMessage[];
@@ -18,6 +16,7 @@ export interface ListChannelMessagesInput {
   limit: number;
   beforeMessageId?: string;
   afterMessageId?: string;
+  aroundMessageId?: string;
 }
 
 export interface ListChannelMessagesToolDeps {
@@ -33,6 +32,7 @@ const ListChannelMessagesParams = Type.Object({
   ),
   before_message_id: Type.Optional(Type.String({ description: "Fetch messages older than this message ID." })),
   after_message_id: Type.Optional(Type.String({ description: "Fetch messages newer than this message ID." })),
+  around_message_id: Type.Optional(Type.String({ description: "Fetch messages surrounding and including this message ID." })),
 });
 
 export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps): AgentTool {
@@ -53,21 +53,25 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
         limit: rawLimit,
         before_message_id,
         after_message_id,
+        around_message_id,
       } = params as {
         channel_id: string;
         limit?: number;
         before_message_id?: string;
         after_message_id?: string;
+        around_message_id?: string;
       };
       const limit = Math.max(1, Math.min(rawLimit ?? 50, 100));
       const beforeMessageId = before_message_id?.trim();
       const afterMessageId = after_message_id?.trim();
+      const aroundMessageId = around_message_id?.trim();
       const hasBeforeCursor = beforeMessageId !== undefined && beforeMessageId !== "";
       const hasAfterCursor = afterMessageId !== undefined && afterMessageId !== "";
+      const hasAroundCursor = aroundMessageId !== undefined && aroundMessageId !== "";
 
-      if (hasBeforeCursor && hasAfterCursor) {
+      if (Number(hasBeforeCursor) + Number(hasAfterCursor) + Number(hasAroundCursor) > 1) {
         return {
-          content: [{ type: "text", text: "Use either before_message_id or after_message_id, not both." }],
+          content: [{ type: "text", text: "Use only one of before_message_id, after_message_id, or around_message_id." }],
           details: { error: true },
         };
       }
@@ -79,6 +83,7 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
           limit,
           ...(beforeMessageId !== undefined && beforeMessageId !== "" ? { beforeMessageId } : {}),
           ...(afterMessageId !== undefined && afterMessageId !== "" ? { afterMessageId } : {}),
+          ...(aroundMessageId !== undefined && aroundMessageId !== "" ? { aroundMessageId } : {}),
         });
       } catch {
         return {
@@ -101,12 +106,24 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
         };
       }
 
+      const replies = resolveReplies({
+        older: [],
+        newer: messages,
+        latestUserMessage: null,
+        replyQuoteChars: 200,
+        captioningEnabled: false,
+      }).newer;
       const oldestMessageId = messages[0]?.id;
       const newestMessageId = messages[messages.length - 1]?.id;
       const cursorLine = `Page cursors: oldest_message_id=${oldestMessageId ?? ""}; newest_message_id=${newestMessageId ?? ""}. Use before_message_id for older messages or after_message_id for newer messages.`;
       const lines = [
         "Channel messages, ordered oldest to newest.",
-        ...messages.map((m) => formatMessage(m, timezone)),
+        ...messages.map((message) => `[${formatLocalWallClock(message.timestamp, timezone)}]\n${formatMessageLine({
+          message,
+          reply: replies.get(message.id) ?? null,
+          captioningEnabled: false,
+          includeMessageIds: true,
+        })}`),
         cursorLine,
       ];
       return {
@@ -119,9 +136,4 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
       };
     },
   };
-}
-
-function formatMessage(m: ListChannelMessage, timezone: string): string {
-  const date = formatLocalWallClock(m.createdAt, timezone);
-  return `[${date}] [id ${m.id}] ${m.authorUsername}: ${m.content}`;
 }

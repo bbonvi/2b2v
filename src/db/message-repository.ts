@@ -70,6 +70,28 @@ export interface MessageSearchResult {
   replyToId: string | null;
 }
 
+export interface SearchMessageCandidate {
+  guildId: string;
+  channelId: string;
+  messageId: string;
+  content: string;
+  assetSearchText: string;
+}
+
+export interface SearchMessageCandidatesFilter {
+  guildId: string;
+  channelId?: string;
+  channelIds?: readonly string[];
+  username?: string;
+  userId?: string;
+  assetId?: number;
+  hasAssets?: boolean;
+  assetKind?: AssetKind;
+  after?: number;
+  before?: number;
+  limit?: number;
+}
+
 export interface MessageActivity {
   id: string;
   guildId: string;
@@ -174,6 +196,91 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
       reactions: reactionMap.get(r.id)?.join(" "),
     };
   });
+}
+
+/** Hydrate stored messages by ID while preserving caller order. */
+export function getHistoryMessagesByIds(db: Database, messageIds: readonly string[]): HistoryMessage[] {
+  if (messageIds.length === 0) return [];
+  const placeholders = messageIds.map(() => "?").join(",");
+  const rows = db.raw.prepare(`SELECT id, author_username, user_id, translated_content, is_bot, created_at,
+      reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
+    FROM messages WHERE id IN (${placeholders})`).all(...messageIds) as HistoryRow[];
+  const byId = new Map(hydrateHistoryRows(db, rows).map((message) => [message.id, message]));
+  return messageIds.flatMap((id) => {
+    const message = byId.get(id);
+    return message === undefined ? [] : [message];
+  });
+}
+
+/** Apply indexed message/asset filters before an optional application-level regex scan. */
+export function findMessageSearchCandidates(
+  db: Database,
+  filter: SearchMessageCandidatesFilter,
+): SearchMessageCandidate[] {
+  if (filter.channelIds !== undefined && filter.channelIds.length === 0) return [];
+  const conditions = [
+    "m.guild_id = ?",
+    "m.is_synthetic = 0",
+    "m.is_prompt_only = 0",
+    "m.deleted_at IS NULL",
+  ];
+  const params: Array<string | number> = [filter.guildId];
+  if (filter.channelId !== undefined) {
+    conditions.push("m.channel_id = ?");
+    params.push(filter.channelId);
+  }
+  if (filter.channelIds !== undefined) {
+    conditions.push(`m.channel_id IN (${filter.channelIds.map(() => "?").join(",")})`);
+    params.push(...filter.channelIds);
+  }
+  if (filter.username !== undefined) {
+    conditions.push("m.author_username = ? COLLATE NOCASE");
+    params.push(filter.username);
+  }
+  if (filter.userId !== undefined) {
+    conditions.push("m.user_id = ?");
+    params.push(filter.userId);
+  }
+  if (filter.after !== undefined) {
+    conditions.push("m.created_at > ?");
+    params.push(filter.after);
+  }
+  if (filter.before !== undefined) {
+    conditions.push("m.created_at < ?");
+    params.push(filter.before);
+  }
+  if (filter.assetId !== undefined) {
+    conditions.push("EXISTS (SELECT 1 FROM message_assets a WHERE a.message_id = m.id AND a.id = ?)");
+    params.push(filter.assetId);
+  }
+  if (filter.hasAssets !== undefined) {
+    conditions.push(`${filter.hasAssets ? "" : "NOT "}EXISTS (SELECT 1 FROM message_assets a WHERE a.message_id = m.id)`);
+  }
+  if (filter.assetKind !== undefined) {
+    conditions.push("EXISTS (SELECT 1 FROM message_assets a WHERE a.message_id = m.id AND a.kind = ?)");
+    params.push(filter.assetKind);
+  }
+  const limitClause = filter.limit === undefined ? "" : " LIMIT ?";
+  if (filter.limit !== undefined) params.push(filter.limit);
+  const rows = db.raw.prepare(`SELECT m.id, m.guild_id, m.channel_id, m.translated_content,
+      COALESCE((SELECT GROUP_CONCAT(COALESCE(a.filename, '') || CHAR(31) || COALESCE(a.content_type, ''), CHAR(30))
+        FROM message_assets a WHERE a.message_id = m.id), '') AS asset_search_text
+    FROM messages m
+    WHERE ${conditions.join(" AND ")}
+    ORDER BY m.created_at DESC, m.id DESC${limitClause}`).all(...params) as Array<{
+      id: string;
+      guild_id: string;
+      channel_id: string;
+      translated_content: string;
+      asset_search_text: string;
+    }>;
+  return rows.map((row) => ({
+    guildId: row.guild_id,
+    channelId: row.channel_id,
+    messageId: row.id,
+    content: row.translated_content,
+    assetSearchText: row.asset_search_text,
+  }));
 }
 
 function storedBotMessageFromRow(row: {
@@ -912,17 +1019,13 @@ export function getParentPreContext(
   return hydrateHistoryRows(db, rows);
 }
 
-export interface ChannelMessageRow {
-  id: string;
-  authorUsername: string;
-  content: string;
-  createdAt: number;
-}
+export type ChannelMessageRow = HistoryMessage;
 
 export interface ListChannelMessagesOptions {
   limit: number;
   beforeMessageId?: string;
   afterMessageId?: string;
+  aroundMessageId?: string;
 }
 
 /**
@@ -939,6 +1042,30 @@ export function listChannelMessages(
   options: ListChannelMessagesOptions,
 ): ChannelMessageRow[] | null {
   const limit = Math.max(1, options.limit);
+  if (options.aroundMessageId !== undefined) {
+    const anchor = db.raw.prepare(`SELECT id, created_at FROM messages
+      WHERE id = ? AND guild_id = ? AND channel_id = ? AND is_prompt_only = 0`)
+      .get(options.aroundMessageId, guildId, channelId) as { id: string; created_at: number } | null;
+    if (anchor === null) return null;
+    const sideLimit = limit - 1;
+    const before = db.raw.prepare(`SELECT id FROM messages
+      WHERE guild_id = ? AND channel_id = ? AND is_prompt_only = 0
+        AND (created_at < ? OR (created_at = ? AND id < ?))
+      ORDER BY created_at DESC, id DESC LIMIT ?`)
+      .all(guildId, channelId, anchor.created_at, anchor.created_at, anchor.id, sideLimit) as Array<{ id: string }>;
+    before.reverse();
+    const after = db.raw.prepare(`SELECT id FROM messages
+      WHERE guild_id = ? AND channel_id = ? AND is_prompt_only = 0
+        AND (created_at > ? OR (created_at = ? AND id > ?))
+      ORDER BY created_at ASC, id ASC LIMIT ?`)
+      .all(guildId, channelId, anchor.created_at, anchor.created_at, anchor.id, sideLimit) as Array<{ id: string }>;
+    const balanced = rebalanceContext(before, after, Math.floor(sideLimit / 2), sideLimit);
+    return getHistoryMessagesByIds(db, [
+      ...balanced.before.map((row) => row.id),
+      anchor.id,
+      ...balanced.after.map((row) => row.id),
+    ]);
+  }
   const cursorId = options.beforeMessageId ?? options.afterMessageId;
   const anchor = cursorId === undefined
     ? null
@@ -955,7 +1082,8 @@ export function listChannelMessages(
     if (options.beforeMessageId !== undefined && anchor !== null) {
       return db.raw
         .prepare(
-          `SELECT id, author_username, translated_content, created_at
+          `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id,
+              is_synthetic, is_prompt_only, deleted_at, related_thread_id
            FROM messages
            WHERE guild_id = ? AND channel_id = ? AND is_prompt_only = 0
              AND (created_at < ? OR (created_at = ? AND id < ?))
@@ -967,7 +1095,8 @@ export function listChannelMessages(
     if (options.afterMessageId !== undefined && anchor !== null) {
       return db.raw
         .prepare(
-          `SELECT id, author_username, translated_content, created_at
+          `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id,
+              is_synthetic, is_prompt_only, deleted_at, related_thread_id
            FROM messages
            WHERE guild_id = ? AND channel_id = ? AND is_prompt_only = 0
              AND (created_at > ? OR (created_at = ? AND id > ?))
@@ -978,28 +1107,19 @@ export function listChannelMessages(
     }
     return db.raw
       .prepare(
-        `SELECT id, author_username, translated_content, created_at
+        `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id,
+            is_synthetic, is_prompt_only, deleted_at, related_thread_id
          FROM messages
          WHERE guild_id = ? AND channel_id = ? AND is_prompt_only = 0
          ORDER BY created_at DESC, id DESC
          LIMIT ?`
       )
       .all(guildId, channelId, limit);
-  })() as Array<{
-    id: string;
-    author_username: string;
-    translated_content: string;
-    created_at: number;
-  }>;
+  })() as HistoryRow[];
 
   if (options.afterMessageId === undefined) rows.reverse();
 
-  return rows.map((r) => ({
-    id: r.id,
-    authorUsername: r.author_username,
-    content: r.translated_content,
-    createdAt: r.created_at,
-  }));
+  return hydrateHistoryRows(db, rows);
 }
 
 export interface InsertSyntheticEventInput {

@@ -1,1 +1,1 @@
-Privately list messages from an accessible Discord guild channel or thread, including channels in other guilds. Use `before_message_id` to page older and `after_message_id` to page newer after an initial recent fetch. DMs are not supported.
+Privately inspect messages from an accessible Discord guild channel or thread. Use `around_message_id` for conversation surrounding a search result, or `before_message_id` and `after_message_id` to page. DMs are not supported.

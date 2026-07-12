@@ -1,466 +1,182 @@
-import { test, expect, beforeEach, describe } from "bun:test";
-import { createDatabase, type Database } from "../db/database";
-import { createSearchChannelMessagesTool } from "./search-channel-messages-tool";
-interface SearchResult {
-  content: { type: string; text: string }[];
-  details: { count: number };
-}
-
-function getResultText(result: SearchResult): string {
-  const first = result.content[0];
-  if (first === undefined) return "";
-  return first.type === "text" ? first.text : "";
-}
+import { beforeEach, describe, expect, test } from "bun:test";
+import { createDatabase, type Database } from "../db/database.ts";
+import { syncMessageAssets } from "../db/asset-repository.ts";
+import { createSearchChannelMessagesTool } from "./search-channel-messages-tool.ts";
 
 let db: Database;
+const baseTime = Date.UTC(2026, 5, 1, 12);
 
-const now = Date.now();
-// Mock username → userId resolver (identity for tests)
-const mockResolveUsername = (username: string): string | undefined => username;
-
-function createTestSearchTool(deps: Omit<Parameters<typeof createSearchChannelMessagesTool>[0], "currentChannelId"> & { currentChannelId?: string }) {
-  return createSearchChannelMessagesTool({ currentChannelId: "c1", ...deps });
+function insertMessage(id: string, content: string, options: {
+  guildId?: string;
+  channelId?: string;
+  userId?: string;
+  username?: string;
+  createdAt?: number;
+  replyToId?: string | null;
+} = {}): void {
+  db.raw.prepare(`INSERT INTO messages
+    (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`).run(
+      id,
+      options.guildId ?? "g1",
+      options.channelId ?? "c1",
+      options.userId ?? "u1",
+      options.username ?? "alice",
+      content,
+      content,
+      options.createdAt ?? baseTime,
+      options.replyToId ?? null,
+    );
 }
 
-function insertMessage(
-  id: string,
-  text: string,
-  opts: { guildId?: string; channelId?: string; userId?: string; authorUsername?: string; createdAt?: number; replyToId?: string | null } = {}
-) {
-  db.raw
-    .prepare(
-      `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
-    )
-    .run(
-      id,
-      opts.guildId ?? "g1",
-      opts.channelId ?? "c1",
-      opts.userId ?? "u1",
-      opts.authorUsername ?? "alice",
-      `raw ${id}`,
-      text,
-      opts.createdAt ?? now,
-      opts.replyToId ?? null
-    );
+function addTextAsset(messageId: string, idSource: string, filename: string): number {
+  const [asset] = syncMessageAssets(db, { messageId, assets: [{
+    messageId,
+    guildId: "g1",
+    channelId: "c1",
+    sourceKind: "attachment",
+    sourceKey: idSource,
+    kind: "text",
+    filename,
+    contentType: "text/plain",
+    size: 2048,
+    width: null,
+    height: null,
+    durationSeconds: null,
+    createdAt: baseTime,
+  }] });
+  if (asset === undefined) throw new Error("asset missing");
+  return asset.id;
+}
+
+function tool(overrides: Partial<Parameters<typeof createSearchChannelMessagesTool>[0]> = {}) {
+  return createSearchChannelMessagesTool({
+    db,
+    guildId: "g1",
+    currentChannelId: "c1",
+    timezone: "UTC",
+    ...overrides,
+  });
+}
+
+function text(result: Awaited<ReturnType<ReturnType<typeof tool>["execute"]>>): string {
+  const first = result.content[0];
+  return first?.type === "text" ? first.text : "";
 }
 
 beforeEach(() => {
   db = createDatabase(":memory:");
 });
 
-describe("createSearchChannelMessagesTool", () => {
-  test("returns search_channel_messages AgentTool with correct metadata", () => {
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    expect(tool.name).toBe("search_channel_messages");
-    expect(tool.label).toBeDefined();
-    expect(tool.description).toBeDefined();
-    expect(tool.parameters).toBeDefined();
+describe("search_channel_messages", () => {
+  test("regex-searches message text and returns current history grammar", async () => {
+    insertMessage("m1", "the Quick brown fox", { username: "bob" });
+    const result = await tool().execute("tc", { pattern: "(?i)quick\\s+brown" }, AbortSignal.timeout(5000));
+    expect(text(result)).toContain("Search results for /(?i)quick\\s+brown/");
+    expect(text(result)).toContain("[@bob (MsgID: m1)]: the Quick brown fox");
+    expect(text(result)).not.toContain("ChannelID:");
   });
 
-  test("auto-injects guildId for isolation", async () => {
-    insertMessage("m1", "secret guild one data", { guildId: "g1" });
-    insertMessage("m2", "secret guild two data", { guildId: "g2" });
-
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "secret guild" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-
-    const text = getResultText(result);
-    expect(text).toContain("guild one");
-    expect(text).not.toContain("guild two");
+  test("defaults to the current guild and channel", async () => {
+    insertMessage("current", "needle current");
+    insertMessage("other-channel", "needle other channel", { channelId: "c2" });
+    insertMessage("other-guild", "needle other guild", { guildId: "g2" });
+    const result = await tool().execute("tc", { pattern: "needle" }, AbortSignal.timeout(5000));
+    expect(text(result)).toContain("needle current");
+    expect(text(result)).not.toContain("needle other channel");
+    expect(text(result)).not.toContain("needle other guild");
   });
 
-  test("rejects broad searches in inaccessible guilds", async () => {
-    insertMessage("m2", "secret guild two data", { guildId: "g2" });
-
-    const tool = createTestSearchTool({
-      db,
-      guildId: "g1",
-      timezone: "UTC",
-      resolveUsername: mockResolveUsername,
-      canAccessGuild: () => Promise.resolve(false),
-    });
-    const result = await tool.execute("tc1", { query: "secret data", guild_id: "g2" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-
-    const text = getResultText(result);
-    expect(text).toContain("not found or not accessible");
-    expect(text).not.toContain("secret guild two data");
+  test("finds attachment filenames and always renders typed asset IDs", async () => {
+    insertMessage("m1", "here");
+    const assetId = addTextAsset("m1", "a1", "fragment.txt");
+    const result = await tool().execute("tc", { pattern: "fragment\\.txt" }, AbortSignal.timeout(5000));
+    expect(text(result)).toContain(`Text: #${assetId} fragment.txt (2.0KB)`);
   });
 
-  test("filters broad guild searches to currently accessible channels", async () => {
-    insertMessage("m-open", "shared topic public", { guildId: "g2", channelId: "c-open" });
-    insertMessage("m-secret", "shared topic private", { guildId: "g2", channelId: "c-secret" });
+  test("accepts a hash-prefixed asset ID as an exact owner lookup", async () => {
+    insertMessage("m1", "asset owner");
+    const assetId = addTextAsset("m1", "a1", "notes.txt");
+    const result = await tool().execute("tc", { asset_id: `#${assetId}` }, AbortSignal.timeout(5000));
+    expect(text(result)).toContain("asset owner");
+  });
 
-    const tool = createTestSearchTool({
-      db,
-      guildId: "g1",
-      timezone: "UTC",
-      resolveUsername: mockResolveUsername,
+  test("uses stored historical usernames and structured filters", async () => {
+    insertMessage("old", "wanted", { username: "Departed", userId: "u-old", createdAt: baseTime });
+    insertMessage("other", "wanted", { username: "someone", userId: "u2", createdAt: baseTime + 1000 });
+    const result = await tool().execute("tc", {
+      pattern: "wanted",
+      username: "@departed",
+      after: "2026-06-01 11:00",
+      before: "2026-06-01 13:00",
+    }, AbortSignal.timeout(5000));
+    expect(text(result)).toContain("MsgID: old");
+    expect(text(result)).not.toContain("MsgID: other");
+  });
+
+  test("supports user and asset filters without a regex", async () => {
+    insertMessage("wanted", "file owner", { userId: "u1" });
+    insertMessage("other", "no file", { userId: "u2" });
+    addTextAsset("wanted", "a1", "notes.txt");
+    const result = await tool().execute("tc", {
+      user_id: "u1",
+      has_assets: true,
+      asset_kind: "text",
+    }, AbortSignal.timeout(5000));
+    expect(text(result)).toContain("MsgID: wanted");
+    expect(text(result)).not.toContain("MsgID: other");
+  });
+
+  test("chooses newest matches, then renders them chronologically", async () => {
+    insertMessage("old", "needle old", { createdAt: baseTime });
+    insertMessage("middle", "needle middle", { createdAt: baseTime + 1000 });
+    insertMessage("new", "needle new", { createdAt: baseTime + 2000 });
+    const result = await tool().execute("tc", { pattern: "needle", limit: 2 }, AbortSignal.timeout(5000));
+    const output = text(result);
+    expect(output).not.toContain("needle old");
+    expect(output.indexOf("needle middle")).toBeLessThan(output.indexOf("needle new"));
+  });
+
+  test("adds location metadata for a broader accessible search", async () => {
+    insertMessage("m2", "remote match", { guildId: "g2", channelId: "c2" });
+    const result = await tool({
       canAccessGuild: () => Promise.resolve(true),
-      resolveChannel: (channelId) => Promise.resolve(channelId === "c-open" ? { guildId: "g2", channelId } : null),
-    });
-    const result = await tool.execute("tc1", { query: "shared topic", mode: "literal", guild_id: "g2" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-
-    const text = getResultText(result);
-    expect(text).toContain("shared topic public");
-    expect(text).not.toContain("shared topic private");
-    expect(result.details.count).toBe(1);
+      resolveChannel: (channelId) => Promise.resolve(channelId === "c2" ? { guildId: "g2", channelId } : null),
+    }).execute("tc", { pattern: "remote", guild_id: "g2" }, AbortSignal.timeout(5000));
+    expect(text(result)).toContain("GuildID: g2; ChannelID: c2");
   });
 
-  test("applies broad-search limit after filtering inaccessible channels", async () => {
-    insertMessage("m-secret", "shared topic private", { guildId: "g2", channelId: "c-secret", createdAt: 1 });
-    insertMessage("m-open", "shared topic public", { guildId: "g2", channelId: "c-open", createdAt: 2 });
-
-    const tool = createTestSearchTool({
-      db,
-      guildId: "g1",
-      timezone: "UTC",
-      resolveUsername: mockResolveUsername,
-      canAccessGuild: () => Promise.resolve(true),
-      resolveChannel: (channelId) => Promise.resolve(channelId === "c-open" ? { guildId: "g2", channelId } : null),
-    });
-    const result = await tool.execute("tc1", {
-      query: "shared topic",
-      guild_id: "g2",
-      limit: 1,
-    }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-
-    const text = getResultText(result);
-    expect(text).toContain("shared topic public");
-    expect(text).not.toContain("shared topic private");
-    expect(result.details.count).toBe(1);
+  test("removes inaccessible channels from broad guild searches", async () => {
+    insertMessage("open", "needle open", { channelId: "open" });
+    insertMessage("private", "needle private", { channelId: "private" });
+    const result = await tool({
+      resolveChannel: (channelId) => Promise.resolve(channelId === "open" ? { guildId: "g1", channelId } : null),
+    }).execute("tc", { pattern: "needle", guild_id: "g1" }, AbortSignal.timeout(5000));
+    expect(text(result)).toContain("needle open");
+    expect(text(result)).not.toContain("needle private");
   });
 
-  test("passes optional filters through", async () => {
-    insertMessage("m1", "food topic", { authorUsername: "u1", channelId: "c1" });
-    insertMessage("m2", "food topic again", { userId: "u2", channelId: "c1" });
-
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "food", username: "u1" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-
-    const text = getResultText(result);
-    expect(text).toContain("food topic");
-    expect(text).not.toContain("food topic again");
+  test("rejects inaccessible guilds and invalid date ranges", async () => {
+    const inaccessible = await tool({ canAccessGuild: () => Promise.resolve(false) })
+      .execute("tc", { pattern: "x", guild_id: "g2" }, AbortSignal.timeout(5000));
+    expect(text(inaccessible)).toContain("not found or not accessible");
+    const dates = await tool().execute("tc", {
+      pattern: "x", after: "2026-06-02 00:00", before: "2026-06-01 00:00",
+    }, AbortSignal.timeout(5000));
+    expect(text(dates)).toContain("after must be earlier");
   });
 
-  test("returns informative message when no results found", async () => {
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "anything" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-
-    const text = getResultText(result);
-    expect(text).toContain("No messages found");
+  test("rejects an empty discovery call and invalid regex", async () => {
+    const empty = await tool().execute("tc", {}, AbortSignal.timeout(5000));
+    expect(text(empty)).toContain("Provide a regex pattern");
+    const invalid = await tool().execute("tc", { pattern: "[" }, AbortSignal.timeout(5000));
+    expect(text(invalid)).toContain("Invalid regex");
   });
 
-  test("includes metadata in results", async () => {
-    insertMessage("m1", "test content", { authorUsername: "bob", channelId: "c1" });
-
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "test content" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-
-    const text = getResultText(result);
-    expect(text).toContain("bob");
-    expect(text).toContain("[id m1]");
-    expect(text).not.toContain("[channel_id");
-    expect(result.details.count).toBe(1);
-  });
-
-  test("defaults searches to the current channel", async () => {
-    insertMessage("m1", "same phrase current channel", { channelId: "c1" });
-    insertMessage("m2", "same phrase other channel", { channelId: "c2" });
-
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "same phrase" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-
-    const text = getResultText(result);
-    expect(text).toContain("same phrase current channel");
-    expect(text).not.toContain("same phrase other channel");
-    expect(text).not.toContain("[channel_id");
-  });
-
-  test("filters out messages already present in prompt context without exhausting small limits", async () => {
-    insertMessage("current", "needle context current", { createdAt: now + 2_000 });
-    insertMessage("older", "needle context older", { createdAt: now + 1_000 });
-
-    const tool = createTestSearchTool({
-      db,
-      guildId: "g1",
-      timezone: "UTC",
-      resolveUsername: mockResolveUsername,
-      excludedMessageIds: ["current"],
-    });
-    const result = await tool.execute("tc1", { query: "needle context", limit: 1 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-
-    const text = getResultText(result);
-    expect(text).toContain("needle context older");
-    expect(text).not.toContain("needle context current");
-    expect(result.details.count).toBe(1);
-  });
-});
-
-describe("reply-to display", () => {
-  test("shows reply-to ID in formatted output", async () => {
-    insertMessage("m-parent", "parent message");
-    insertMessage("m-reply", "replying here", { replyToId: "m-parent" });
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "m-reply", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-    expect(text).toContain("(reply to m-parent)");
-    expect(text).toContain("replying here");
-  });
-
-  test("omits reply tag when not a reply", async () => {
-    insertMessage("m-solo", "standalone message");
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "m-solo", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-    expect(text).not.toContain("reply to");
-    expect(text).toContain("standalone message");
-  });
-});
-
-describe("createSearchChannelMessagesTool attachment support", () => {
-  test("does not fetch attachment info by default", async () => {
-    insertMessage("m1", "check this diagram");
-    let called = false;
-
-    const fetchMessage = (_chId: string, _msgId: string) => {
-      called = true;
-      return Promise.resolve({
-        attachments: [{ name: "architecture.png", contentType: "image/png" as string | null, size: 245000 }],
-      });
-    };
-
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername, fetchMessage });
-    const result = await tool.execute("tc1", { query: "diagram" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-
-    expect(text).toContain("check this diagram");
-    expect(text).not.toContain("📎");
-    expect(called).toBe(false);
-  });
-
-  test("includes attachment info when explicitly requested", async () => {
-    insertMessage("m1", "check this diagram");
-
-    const fetchMessage = (_chId: string, _msgId: string) => Promise.resolve({
-      attachments: [
-        { name: "architecture.png", contentType: "image/png" as string | null, size: 245000 },
-        { name: "notes.pdf", contentType: "application/pdf" as string | null, size: 1200000 },
-      ],
-    });
-
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername, fetchMessage });
-    const result = await tool.execute("tc1", { query: "diagram", include_attachments: true }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-
-    expect(text).toContain("check this diagram");
-    expect(text).toContain("📎 architecture.png (image/png, 239.3KB)");
-    expect(text).toContain("📎 notes.pdf (application/pdf, 1.1MB)");
-  });
-
-  test("gracefully handles fetchMessage failure", async () => {
-    insertMessage("m1", "some message");
-
-    const fetchMessage = (): Promise<{ attachments: Array<{ name: string; contentType: string | null; size: number }> } | null> => Promise.reject(new Error("Discord API error"));
-
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername, fetchMessage });
-    const result = await tool.execute("tc1", { query: "some message", include_attachments: true }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-
-    expect(text).toContain("some message");
-    expect(text).not.toContain("📎");
-  });
-
-  test("shows text only when fetchMessage returns null", async () => {
-    insertMessage("m1", "deleted msg content");
-
-    const fetchMessage = (): Promise<{ attachments: Array<{ name: string; contentType: string | null; size: number }> } | null> => Promise.resolve(null);
-
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername, fetchMessage });
-    const result = await tool.execute("tc1", { query: "deleted msg", include_attachments: true }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-
-    expect(text).toContain("deleted msg content");
-    expect(text).not.toContain("📎");
-  });
-
-  test("shows text only when no attachments", async () => {
-    insertMessage("m1", "plain text message");
-
-    const fetchMessage = (): Promise<{ attachments: Array<{ name: string; contentType: string | null; size: number }> } | null> => Promise.resolve({ attachments: [] });
-
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername, fetchMessage });
-    const result = await tool.execute("tc1", { query: "plain text", include_attachments: true }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-
-    expect(text).toContain("plain text message");
-    expect(text).not.toContain("📎");
-  });
-});
-
-describe("search mode: literal", () => {
-  test("finds literal keyword match", async () => {
-    insertMessage("m1", "the quick brown fox");
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "quick brown", mode: "literal" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-    expect(text).toContain("Literal search results are exact text matches ordered oldest to newest");
-    expect(text).not.toContain("[score ");
-    expect(text).toContain("the quick brown fox");
-    expect(result.details.count).toBe(1);
-  });
-
-  test("respects filters in literal mode", async () => {
-    insertMessage("m1", "topic here", { userId: "u1" });
-    insertMessage("m2", "topic here", { userId: "u2" });
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "topic", mode: "literal", username: "u1" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-    expect(text).toContain("topic here");
-    expect(result.details.count).toBe(1);
-  });
-
-  test("omits repeated channel_id when search is scoped to a channel", async () => {
-    insertMessage("m1", "topic here", { channelId: "c1" });
-    insertMessage("m2", "topic here", { channelId: "c2" });
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "topic", mode: "literal", channel_id: "c1" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-    expect(text).toContain("[id m1]");
-    expect(text).not.toContain("[channel_id");
-    expect(text).not.toContain("[id m2]");
-  });
-
-  test("returns no-match message for literal mode", async () => {
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "nonexistent", mode: "literal" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-    expect(text).toContain("No messages found");
-  });
-
-  test("literal mode filters out context messages", async () => {
-    insertMessage("current", "exact phrase current");
-    insertMessage("older", "exact phrase older");
-    const tool = createTestSearchTool({
-      db,
-      guildId: "g1",
-      timezone: "UTC",
-      resolveUsername: mockResolveUsername,
-      excludedMessageIds: ["current"],
-    });
-    const result = await tool.execute("tc1", { query: "exact phrase", mode: "literal" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-    expect(text).toContain("exact phrase older");
-    expect(text).not.toContain("exact phrase current");
-  });
-});
-
-describe("search mode: id", () => {
-  test("returns single message by ID", async () => {
-    insertMessage("m1", "target content");
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "m1", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-    expect(text).toContain("target content");
-    expect(result.details.count).toBe(1);
-  });
-
-  test("ID lookup can expand a message already visible in prompt context", async () => {
-    insertMessage("m1", "full target content that was trimmed in context");
-    const tool = createTestSearchTool({
-      db,
-      guildId: "g1",
-      timezone: "UTC",
-      resolveUsername: mockResolveUsername,
-      excludedMessageIds: ["m1"],
-    });
-    const result = await tool.execute("tc1", { query: "m1", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-
-    expect(text).toContain("full target content");
-    expect(result.details.count).toBe(1);
-  });
-
-  test("ID lookup accepts message_id", async () => {
-    insertMessage("m1", "target content via message_id");
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { message_id: "m1", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-
-    expect(text).toContain("target content via message_id");
-    expect(result.details.count).toBe(1);
-  });
-
-  test("returns not found for missing ID", async () => {
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "missing", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-    expect(text).toContain("not found");
-  });
-
-  test("enforces guild isolation for ID lookup", async () => {
-    insertMessage("m1", "secret content", { guildId: "g2" });
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "m1", mode: "id" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-    expect(text).toContain("not found");
-  });
-});
-
-describe("search mode: context", () => {
-  test("returns chronological context around a message id", async () => {
-    const anchorMs = Date.UTC(2026, 4, 28, 14, 12);
-    insertMessage("m1", "before context", { createdAt: anchorMs - 60_000 });
-    insertMessage("m2", "anchor context", { createdAt: anchorMs });
-    insertMessage("m3", "after context", { createdAt: anchorMs + 60_000 });
-
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { mode: "context", message_id: "m2", limit: 3 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-
-    expect(text).toContain("Surrounding channel context around message id m2 in channel c1");
-    expect(text.indexOf("[id m1]")).toBeLessThan(text.indexOf("[id m2]"));
-    expect(text.indexOf("[id m2]")).toBeLessThan(text.indexOf("[id m3]"));
-    expect(text).not.toContain("[channel_id");
-    expect(result.details.count).toBe(3);
-  });
-
-  test("returns chronological context around a timestamp", async () => {
-    const aroundMs = Date.UTC(2026, 4, 28, 14, 12);
-    insertMessage("m1", "before timestamp", { channelId: "c1", createdAt: aroundMs - 60_000 });
-    insertMessage("m2", "after timestamp", { channelId: "c1", createdAt: aroundMs + 60_000 });
-    insertMessage("m3", "wrong channel", { channelId: "c2", createdAt: aroundMs });
-
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { mode: "context", channel_id: "c1", around: "2026-05-28 14:12", limit: 2 }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-
-    expect(text).toContain("Surrounding channel context around 2026-05-28 14:12 in channel c1");
-    expect(text).toContain("[id m1]");
-    expect(text).toContain("[id m2]");
-    expect(text).not.toContain("[id m3]");
-  });
-
-  test("defaults timestamp context to current channel", async () => {
-    const aroundMs = Date.UTC(2026, 4, 28, 14, 12);
-    insertMessage("m1", "current channel timestamp", { channelId: "c1", createdAt: aroundMs });
-    insertMessage("m2", "other channel timestamp", { channelId: "c2", createdAt: aroundMs });
-
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { mode: "context", around: "2026-05-28 14:12" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-    expect(text).toContain("current channel timestamp");
-    expect(text).not.toContain("other channel timestamp");
-    expect(text).not.toContain("[channel_id");
-  });
-});
-
-describe("search mode: default", () => {
-  test("omitted mode defaults to literal search", async () => {
-    insertMessage("m1", "cats playing with yarn");
-    const tool = createTestSearchTool({ db, guildId: "g1", timezone: "UTC", resolveUsername: mockResolveUsername });
-    const result = await tool.execute("tc1", { query: "cats playing" }, AbortSignal.timeout(5000)) as unknown as SearchResult;
-    const text = getResultText(result);
-    expect(text).toContain("cats playing with yarn");
+  test("shows reply target and quote when available", async () => {
+    insertMessage("parent", "quoted parent text", { username: "bob", createdAt: baseTime });
+    insertMessage("reply", "needle reply", { username: "alice", createdAt: baseTime + 1000, replyToId: "parent" });
+    const result = await tool().execute("tc", { pattern: "needle" }, AbortSignal.timeout(5000));
+    expect(text(result)).toContain('[@alice to @bob (MsgID: reply; Quote: "quoted parent text")]');
   });
 });

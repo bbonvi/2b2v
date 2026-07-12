@@ -335,7 +335,7 @@ describe("OLDER_LEGEND", () => {
   test("mentions key concepts", () => {
     expect(OLDER_LEGEND).toContain("time markers use [...]");
     expect(OLDER_LEGEND).toContain("[msg-break]");
-    expect(OLDER_LEGEND).toContain("search_channel_messages mode=\"id\"");
+    expect(OLDER_LEGEND).toContain("search results expose MsgIDs");
     expect(OLDER_LEGEND).toContain("read_asset");
   });
 });

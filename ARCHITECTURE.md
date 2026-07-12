@@ -52,9 +52,9 @@ Discord-deleted messages keep their stored text and are marked deleted in prompt
 
 Merged history rows must preserve all component Discord message IDs. Reply resolution and prompt-visible search exclusions must treat aliases as present.
 
-`search_channel_messages` literal mode must exclude messages already visible in prompt history; id lookup may return visible messages so trimmed content can be expanded.
+`search_channel_messages` applies structured SQLite filters before an optional ripgrep regex over message text, MsgIDs, and indexed asset metadata. It returns newest matches in chronological history grammar with stable MsgIDs and asset IDs; broad regex scans should be narrowed by channel, author, asset, or local date range when possible.
 
-Rendered chat history exposes `oldest_visible_message_id` when stored prior context exists, so `list_channel_messages(before_message_id=...)` can page before the prompt window.
+Rendered chat history exposes `oldest_visible_message_id` when stored prior context exists, so `list_channel_messages(before_message_id=...)` can page before the prompt window; search result MsgIDs can anchor `around_message_id` context windows.
 
 Memory scopes have product meaning: guild memories are server-local, user memories follow the Discord user across guilds, and self memories are the bot/persona's portable private context. Scratchpad memories must expire.
 

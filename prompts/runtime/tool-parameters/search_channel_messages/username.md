@@ -1,1 +1,1 @@
-Discord username 2B is using to filter message results.
+Stored historical Discord username, matched case-insensitively without requiring the user to remain in the guild.
