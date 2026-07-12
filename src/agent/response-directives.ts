@@ -1,3 +1,5 @@
+import { parseAssetId } from "./asset-id.ts";
+
 export type ResponseSegment =
   | { kind: "text"; text: string }
   | { kind: "voice"; text: string }
@@ -164,8 +166,8 @@ function parseAssetIdsAttribute(attrs: string): number[] | undefined {
   if (!raw.startsWith("[") || !raw.endsWith("]")) return undefined;
   const inner = raw.slice(1, -1).trim();
   if (inner === "") return [];
-  const ids = inner.split(",").map((part) => Number(part.trim()));
-  return ids.every((id) => Number.isSafeInteger(id) && id > 0) ? ids : undefined;
+  const ids = inner.split(",").map((part) => parseAssetId(part.trim()));
+  return ids.every((id) => id !== null) ? ids : undefined;
 }
 
 function renderIgnoredText(rawText: string): string {

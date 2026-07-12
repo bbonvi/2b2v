@@ -117,7 +117,7 @@ describe("formatMessageLine", () => {
       reply: null,
       captioningEnabled: false,
     };
-    expect(formatMessageLine(input)).toBe('[@alice (ImgIDs: [21 "cat.png"]; AudioIDs: [22 "voice.ogg"]; FileIDs: [23 "notes.pdf"])]: hello');
+    expect(formatMessageLine(input)).toBe("[@alice (Images: #21 cat.png; Audio: #22 voice.ogg; Files: #23 notes.pdf)]: hello");
   });
 
   test("message with images and captions when captioning enabled", () => {

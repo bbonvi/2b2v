@@ -114,24 +114,25 @@ export function formatMessageLine(input: FormatInput): string {
   return `[${authorPart}${targetPart}${metaPart}]: ${content}`;
 }
 
-function formatAssetMeta(prefix: "Reply" | "", assets: readonly HistoryAsset[]): string[] {
+/** Format lazy assets consistently in history and current-event metadata. */
+export function formatAssetMeta(prefix: "Reply" | "", assets: readonly HistoryAsset[]): string[] {
   const labels = {
-    image: "ImgIDs",
-    gif: "GIFIDs",
-    audio: "AudioIDs",
-    video: "VideoIDs",
-    text: "TextIDs",
-    file: "FileIDs",
+    image: "Images",
+    gif: "GIFs",
+    audio: "Audio",
+    video: "Video",
+    text: "Text",
+    file: "Files",
   } as const;
   const parts: string[] = [];
   for (const kind of ["image", "gif", "audio", "video", "text", "file"] as const) {
     const matching = assets.filter((asset) => asset.kind === kind);
     if (matching.length === 0) continue;
     const values = matching.map((asset) => {
-      const name = asset.filename?.replace(/[\t\n\r;()[\]]+/g, " ").trim();
-      return name !== undefined && name !== "" ? `${asset.id} "${name.replace(/"/g, "'")}"` : String(asset.id);
+      const name = asset.filename?.replace(/[\t\n\r,;()[\]]+/g, " ").trim();
+      return `#${asset.id}${name !== undefined && name !== "" ? ` ${name}` : ""}`;
     });
-    parts.push(`${prefix}${labels[kind]}: [${values.join(", ")}]`);
+    parts.push(`${prefix}${labels[kind]}: ${values.join(", ")}`);
   }
   return parts;
 }
@@ -192,13 +193,13 @@ function formatDisplayNameSuffix(
 
 /** The legend block prepended to the newer slice. */
 export const NEWER_LEGEND = [
-  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImgIDs/ReplyGIFIDs/ReplyAudioIDs/ReplyVideoIDs/ReplyTextIDs/ReplyFileIDs/ImgIDs/GIFIDs/AudioIDs/VideoIDs/TextIDs/FileIDs/ImageJob/Reactions/<trigger>)]: content",
+  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImages/ReplyGIFs/ReplyAudio/ReplyVideo/ReplyText/ReplyFiles/Images/GIFs/Audio/Video/Text/Files/ImageJob/Reactions/<trigger>)]: content",
   "Legend: Recent history date stamps appear at the first visible message and after roughly 1+ minute gaps; stamps include local time and relative age.",
   "Legend: Parenthesized names are current Discord display names, not stable identity, and may contain jokes, moods, or temporary labels; use @username for exact pings.",
 ].join("\n");
 
 /** The legend block prepended to the older slice. */
 export const OLDER_LEGEND = [
-  "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImgIDs/ReplyGIFIDs/ReplyAudioIDs/ReplyVideoIDs/ReplyTextIDs/ReplyFileIDs/ImgIDs/GIFIDs/AudioIDs/VideoIDs/TextIDs/FileIDs/ImageJob)]: content",
+  "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImages/ReplyGIFs/ReplyAudio/ReplyVideo/ReplyText/ReplyFiles/Images/GIFs/Audio/Video/Text/Files/ImageJob)]: content",
   "Legend: Older history date stamps appear at the first visible message and after roughly 5+ minute gaps; time markers use [...]. Newer history exposes MsgID for reply_to; merged messages use history-only [msg-break], quotes are excerpts for search_channel_messages mode=\"id\", and typed asset IDs use read_asset.",
 ].join("\n");

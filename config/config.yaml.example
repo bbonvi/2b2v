@@ -203,6 +203,13 @@ assetReading:
   videoPreviewMaxBytes: 104857600
   videoPreviewTimesSeconds: [0, 1, 5]
   videoPreviewTimeoutSeconds: 30
+  timeoutSeconds:
+    image: 30
+    gif: 30
+    audio: 90
+    video: 180
+    text: 30
+    file: 30
 
 # Codex image generation request settings.
 imageGeneration:

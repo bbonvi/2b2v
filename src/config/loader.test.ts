@@ -182,6 +182,7 @@ describe("loadGlobalConfig", () => {
       videoPreviewMaxBytes: 104857600,
       videoPreviewTimesSeconds: [0, 1, 5],
       videoPreviewTimeoutSeconds: 30,
+      timeoutSeconds: { image: 30, gif: 30, audio: 90, video: 180, text: 30, file: 30 },
     });
     expect(cfg.defaultInstructions).toBe("");
     expect((cfg as unknown as { defaultPromptCaching?: unknown }).defaultPromptCaching).toEqual({
@@ -213,10 +214,12 @@ describe("loadGlobalConfig", () => {
 
   test("reads lazy asset limits", () => {
     const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "assetReading:\n  maxCharsPerRead: 50000\n  videoPreviewTimesSeconds: [0, 2]\n");
+    writeFileSync(file, "assetReading:\n  maxCharsPerRead: 50000\n  videoPreviewTimesSeconds: [0, 2]\n  timeoutSeconds:\n    audio: 120\n");
     const cfg = loadGlobalConfig(BASE_ENV, file);
     expect(cfg.defaultAssetReading?.maxCharsPerRead).toBe(50000);
     expect(cfg.defaultAssetReading?.videoPreviewTimesSeconds).toEqual([0, 2]);
+    expect(cfg.defaultAssetReading?.timeoutSeconds.audio).toBe(120);
+    expect(cfg.defaultAssetReading?.timeoutSeconds.image).toBe(30);
   });
 
   test("resolves ElevenLabs request parameters from TTS config", () => {

@@ -3,9 +3,10 @@ import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { AssetReadingConfig } from "../config/types.ts";
 import type { MessageAsset } from "../db/asset-repository.ts";
+import { AssetIdSchema, parseAssetId } from "./asset-id.ts";
 
 const ReadAssetParams = Type.Object({
-  asset_id: Type.Number({ description: "Short typed asset ID from chat history." }),
+  asset_id: AssetIdSchema,
   cursor: Type.Optional(Type.String({ description: "Opaque next cursor returned by an earlier read." })),
 });
 
@@ -23,7 +24,7 @@ export interface ReadAssetToolDeps {
   cacheExtraction: (id: number, text: string, provider: string) => void;
   prepareImage: (buffer: Buffer, mimeType: string) => Promise<{ data: Buffer; mime: string; width: number; height: number }>;
   fetchFn?: typeof fetch;
-  extractVideoFrame?: (url: string, seconds: number, timeoutSeconds: number) => Promise<Buffer | null>;
+  extractVideoFrame?: (url: string, seconds: number, timeoutSeconds: number, signal?: AbortSignal) => Promise<Buffer | null>;
 }
 
 /** Read one lazy message asset, paging large textual results with an opaque cursor. */
@@ -35,22 +36,35 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
     description: "Read an image, GIF, audio, video, text, or file referenced by a typed chat asset ID.",
     parameters: ReadAssetParams,
     async execute(_toolCallId, params, signal): Promise<AgentToolResult<{ assetId: number; nextCursor?: string }>> {
-      const input = params as { asset_id: number; cursor?: string };
-      if (!Number.isSafeInteger(input.asset_id) || input.asset_id <= 0) throw new Error("asset_id must be a positive integer");
-      const asset = deps.getAsset(input.asset_id);
-      if (asset === null) throw new Error(`Asset ${input.asset_id} was not found.`);
+      const input = params as { asset_id: unknown; cursor?: string };
+      const assetId = parseAssetId(input.asset_id);
+      if (assetId === null) throw new Error("asset_id must be a positive integer, optionally prefixed with #");
+      const asset = deps.getAsset(assetId);
+      if (asset === null) throw new Error(`Asset ${assetId} was not found.`);
+      const timeoutSignal = AbortSignal.timeout(deps.config.timeoutSeconds[asset.kind] * 1000);
+      const readSignal = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
       const source = await deps.resolveSource(asset);
-      if (source === null) throw new Error(`Asset ${input.asset_id} source is no longer available.`);
-      const metadata = JSON.stringify({
-        id: asset.id, kind: asset.kind, source_kind: asset.sourceKind,
-        filename: source.filename ?? asset.filename, content_type: source.contentType ?? asset.contentType,
-        size: asset.size, width: asset.width, height: asset.height, duration_seconds: asset.durationSeconds,
-      });
-      const content: Array<TextContent | ImageContent> = [{ type: "text", text: metadata }];
+      readSignal.throwIfAborted();
+      if (source === null) throw new Error(`Asset ${assetId} source is no longer available.`);
+      const filename = source.filename ?? asset.filename;
+      const contentType = source.contentType ?? asset.contentType;
+      const kindLabel = `${asset.kind[0]?.toUpperCase() ?? ""}${asset.kind.slice(1)}`;
+      const facts = [
+        contentType !== null ? `type: ${contentType}` : "",
+        asset.size !== null ? `size: ${asset.size.toLocaleString("en-US")} bytes` : "",
+        asset.width !== null && asset.height !== null ? `dimensions: ${asset.width}x${asset.height}` : "",
+        asset.durationSeconds !== null ? `duration: ${Math.round(asset.durationSeconds * 10) / 10}s` : "",
+        `source: ${asset.sourceKind}`,
+      ].filter((fact) => fact !== "");
+      const content: Array<TextContent | ImageContent> = [{
+        type: "text",
+        text: `Asset: ${kindLabel} #${asset.id}${filename !== null ? ` — ${filename}` : ""}\n${facts.join("; ")}`,
+      }];
 
       if (asset.kind === "image" || asset.kind === "gif") {
-        const buffer = await fetchAssetBuffer(fetchFn, source.url, deps.config.maxDownloadBytes, signal);
+        const buffer = await fetchAssetBuffer(fetchFn, source.url, deps.config.maxDownloadBytes, readSignal);
         const image = await deps.prepareImage(buffer, source.contentType ?? asset.contentType ?? "image/png");
+        readSignal.throwIfAborted();
         content.push({ type: "image", data: image.data.toString("base64"), mimeType: image.mime });
         return { content, details: { assetId: asset.id } };
       }
@@ -58,24 +72,28 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
       if (asset.kind === "text") {
         const page = asset.extractedText !== null
           ? pageCachedText(asset.extractedText, input.cursor, deps.config.maxCharsPerRead)
-          : await pageRemoteText(fetchFn, source.url, input.cursor, deps.config, signal);
-        content.push({ type: "text", text: page.text });
+          : await pageRemoteText(fetchFn, source.url, input.cursor, deps.config, readSignal);
+        readSignal.throwIfAborted();
+        content.push({ type: "text", text: `File contents:\n${page.text}` });
         if (page.nextCursor !== undefined) content.push({ type: "text", text: `next_cursor: ${page.nextCursor}` });
         return { content, details: { assetId: asset.id, ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}) } };
       }
 
       if (asset.kind === "audio" || asset.kind === "video") {
         let transcript = asset.extractedText;
+        let transcriptProvider = asset.extractionProvider;
         if (transcript === null) {
           if (asset.durationSeconds !== null && asset.durationSeconds > deps.config.maxTranscriptionDurationSeconds) {
             throw new Error(`Asset duration ${Math.round(asset.durationSeconds)}s exceeds transcription limit ${deps.config.maxTranscriptionDurationSeconds}s.`);
           }
           if (deps.elevenLabsApiKey === undefined || deps.elevenLabsApiKey === "") throw new Error("ElevenLabs speech-to-text is not configured.");
-          transcript = await transcribeElevenLabs(fetchFn, deps.elevenLabsApiKey, source.url, signal);
-          deps.cacheExtraction(asset.id, transcript, "elevenlabs-scribe-v2");
+          transcript = await transcribeElevenLabs(fetchFn, deps.elevenLabsApiKey, source.url, readSignal);
+          transcriptProvider = "elevenlabs-scribe-v2";
+          deps.cacheExtraction(asset.id, transcript, transcriptProvider);
         }
         const page = pageCachedText(transcript, input.cursor, deps.config.maxCharsPerRead);
-        content.push({ type: "text", text: page.text });
+        const providerLabel = transcriptProvider === "elevenlabs-scribe-v2" ? "ElevenLabs Scribe v2" : transcriptProvider;
+        content.push({ type: "text", text: `Transcript${providerLabel !== null ? ` (${providerLabel})` : ""}:\n${page.text}` });
         if (page.nextCursor !== undefined) content.push({ type: "text", text: `next_cursor: ${page.nextCursor}` });
         if (
           asset.kind === "video" && input.cursor === undefined
@@ -84,7 +102,7 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
         ) {
           for (const seconds of deps.config.videoPreviewTimesSeconds) {
             if (asset.durationSeconds !== null && seconds >= asset.durationSeconds) continue;
-            const frame = await deps.extractVideoFrame(source.url, seconds, deps.config.videoPreviewTimeoutSeconds);
+            const frame = await deps.extractVideoFrame(source.url, seconds, deps.config.videoPreviewTimeoutSeconds, readSignal);
             if (frame === null) continue;
             content.push({ type: "text", text: `Video frame at ${seconds}s` });
             content.push({ type: "image", data: frame.toString("base64"), mimeType: "image/jpeg" });
@@ -180,12 +198,20 @@ async function transcribeElevenLabs(fetchFn: typeof fetch, apiKey: string, url: 
 }
 
 /** Extract one JPEG frame from a remotely seekable video with FFmpeg. */
-export async function extractRemoteVideoFrame(url: string, seconds: number, timeoutSeconds: number): Promise<Buffer | null> {
+export async function extractRemoteVideoFrame(
+  url: string,
+  seconds: number,
+  timeoutSeconds: number,
+  signal?: AbortSignal,
+): Promise<Buffer | null> {
+  signal?.throwIfAborted();
   const process = Bun.spawn([
     "ffmpeg", "-hide_banner", "-loglevel", "error", "-protocol_whitelist", "https,tls,tcp",
     "-rw_timeout", String(timeoutSeconds * 1_000_000), "-ss", String(seconds), "-i", url,
     "-frames:v", "1", "-vf", "scale=1024:-2:force_original_aspect_ratio=decrease", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1",
   ], { stdout: "pipe", stderr: "pipe" });
+  const onAbort = (): void => process.kill();
+  signal?.addEventListener("abort", onAbort, { once: true });
   const timer = setTimeout(() => process.kill(), timeoutSeconds * 1000);
   try {
     const [exitCode, output] = await Promise.all([
@@ -193,8 +219,10 @@ export async function extractRemoteVideoFrame(url: string, seconds: number, time
       new Response(process.stdout).arrayBuffer(),
       new Response(process.stderr).arrayBuffer(),
     ]);
+    signal?.throwIfAborted();
     return exitCode === 0 && output.byteLength > 0 ? Buffer.from(output) : null;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
   }
 }

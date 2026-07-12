@@ -70,27 +70,36 @@ import type {
   SchedulePressureConfig,
   SchedulePressureConfigYaml,
   AssetReadingConfig,
+  AssetReadingConfigYaml,
 } from "./types.ts";
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
 
-function resolveAssetReadingConfig(input: Partial<AssetReadingConfig> | undefined): AssetReadingConfig {
+function resolveAssetReadingConfig(input: AssetReadingConfigYaml | undefined, fallback: AssetReadingConfig = DEFAULT_ASSET_READING): AssetReadingConfig {
   const positive = (value: number | undefined, fallback: number, name: string): number => {
     const resolved = value ?? fallback;
     if (!Number.isFinite(resolved) || resolved <= 0) throw new Error(`assetReading.${name} must be positive`);
     return resolved;
   };
-  const times = input?.videoPreviewTimesSeconds ?? [...DEFAULT_ASSET_READING.videoPreviewTimesSeconds];
+  const times = input?.videoPreviewTimesSeconds ?? [...fallback.videoPreviewTimesSeconds];
   if (times.length === 0 || times.length > 10 || times.some((time) => !Number.isFinite(time) || time < 0)) {
     throw new Error("assetReading.videoPreviewTimesSeconds must contain 1-10 non-negative numbers");
   }
   return {
-    maxCharsPerRead: positive(input?.maxCharsPerRead, DEFAULT_ASSET_READING.maxCharsPerRead, "maxCharsPerRead"),
-    textRangeBytes: positive(input?.textRangeBytes, DEFAULT_ASSET_READING.textRangeBytes, "textRangeBytes"),
-    maxDownloadBytes: positive(input?.maxDownloadBytes, DEFAULT_ASSET_READING.maxDownloadBytes, "maxDownloadBytes"),
-    maxTranscriptionDurationSeconds: positive(input?.maxTranscriptionDurationSeconds, DEFAULT_ASSET_READING.maxTranscriptionDurationSeconds, "maxTranscriptionDurationSeconds"),
-    videoPreviewMaxBytes: positive(input?.videoPreviewMaxBytes, DEFAULT_ASSET_READING.videoPreviewMaxBytes, "videoPreviewMaxBytes"),
+    maxCharsPerRead: positive(input?.maxCharsPerRead, fallback.maxCharsPerRead, "maxCharsPerRead"),
+    textRangeBytes: positive(input?.textRangeBytes, fallback.textRangeBytes, "textRangeBytes"),
+    maxDownloadBytes: positive(input?.maxDownloadBytes, fallback.maxDownloadBytes, "maxDownloadBytes"),
+    maxTranscriptionDurationSeconds: positive(input?.maxTranscriptionDurationSeconds, fallback.maxTranscriptionDurationSeconds, "maxTranscriptionDurationSeconds"),
+    videoPreviewMaxBytes: positive(input?.videoPreviewMaxBytes, fallback.videoPreviewMaxBytes, "videoPreviewMaxBytes"),
     videoPreviewTimesSeconds: times,
-    videoPreviewTimeoutSeconds: positive(input?.videoPreviewTimeoutSeconds, DEFAULT_ASSET_READING.videoPreviewTimeoutSeconds, "videoPreviewTimeoutSeconds"),
+    videoPreviewTimeoutSeconds: positive(input?.videoPreviewTimeoutSeconds, fallback.videoPreviewTimeoutSeconds, "videoPreviewTimeoutSeconds"),
+    timeoutSeconds: {
+      image: positive(input?.timeoutSeconds?.image, fallback.timeoutSeconds.image, "timeoutSeconds.image"),
+      gif: positive(input?.timeoutSeconds?.gif, fallback.timeoutSeconds.gif, "timeoutSeconds.gif"),
+      audio: positive(input?.timeoutSeconds?.audio, fallback.timeoutSeconds.audio, "timeoutSeconds.audio"),
+      video: positive(input?.timeoutSeconds?.video, fallback.timeoutSeconds.video, "timeoutSeconds.video"),
+      text: positive(input?.timeoutSeconds?.text, fallback.timeoutSeconds.text, "timeoutSeconds.text"),
+      file: positive(input?.timeoutSeconds?.file, fallback.timeoutSeconds.file, "timeoutSeconds.file"),
+    },
   };
 }
 
@@ -1100,7 +1109,7 @@ export function resolveGuildConfig(
     imageReading: resolveGuildImageReading(global.defaultImageReading, partial.imageReading),
     imageGeneration: resolveGuildImageGeneration(global.defaultImageGeneration, partial.imageGeneration),
     attachmentsDir: partial.attachmentsDir ?? global.defaultAttachmentsDir,
-    assetReading: resolveAssetReadingConfig(partial.assetReading ?? global.defaultAssetReading),
+    assetReading: resolveAssetReadingConfig(partial.assetReading, global.defaultAssetReading),
     instructions: instructions !== "" ? instructions : global.defaultInstructions,
     tts: resolveTtsConfig(partial.tts) ?? global.defaultTts,
     emotes: {

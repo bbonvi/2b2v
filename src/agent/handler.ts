@@ -46,6 +46,8 @@ import type { RuntimePromptBundle } from "../config/prompt-bundle.ts";
 import { renderPromptTemplate } from "../config/prompt-template.ts";
 import { createLoadSkillTool } from "./load-skill-tool.ts";
 import { typingSimulationDelayMs } from "./typing-simulation.ts";
+import { formatAssetMeta } from "./history-formatting.ts";
+import type { HistoryAsset } from "./history-types.ts";
 
 /** Minimal abstraction over a Discord message for the handler. */
 export interface IncomingMessage {
@@ -73,6 +75,8 @@ export interface IncomingMessage {
     sourceMessageId: string;
   };
   imageInputs?: CurrentTurnImageInput[];
+  /** Lazy assets attached to the current Discord event. */
+  assets?: HistoryAsset[];
 }
 
 export type ChatCompleteFn = (request: OpenRouterChatRequest) => Promise<OpenRouterChatResult>;
@@ -922,6 +926,7 @@ function buildCurrentMessageMetadata(msg: IncomingMessage, runtimePrompts?: Runt
   if (msg.replyToMessageId !== undefined) {
     lines.push(`Trigger ReplyToMsgID: ${msg.replyToMessageId}`);
   }
+  if (msg.assets !== undefined) lines.push(...formatAssetMeta("", msg.assets));
   if (msg.repliedToBotRouteSource !== undefined) {
     lines.push("Reply Context: The current event replies to a message 2B previously sent here from another channel.");
     lines.push(`Source GuildID: ${msg.repliedToBotRouteSource.sourceGuildId}`);

@@ -2582,7 +2582,9 @@ async function processTriggeredMessage(
       return result;
     };
 
-    const currentAssets = getAssetsByMessageId(db, message.id);
+    const currentAssets = options.currentTurnOverride === undefined
+      ? currentTurnMessages.flatMap((current) => getAssetsByMessageId(db, current.id))
+      : [];
     const currentTurnBoundary = options.currentTurnOverride !== undefined
       ? { timestamp: options.currentTurnOverride.timestamp, messageId: options.currentTurnOverride.messageId }
       : currentTurnMessages.reduce<CurrentTurnBoundary>(
@@ -2618,7 +2620,7 @@ async function processTriggeredMessage(
       replyToId: message.reference?.messageId ?? null,
       imageIds: [],
       captions: [],
-      assets: options.currentTurnOverride === undefined ? currentAssets.map((asset) => ({
+      assets: currentAssets.map((asset) => ({
         id: asset.id,
         kind: asset.kind,
         sourceKind: asset.sourceKind,
@@ -2628,7 +2630,7 @@ async function processTriggeredMessage(
         width: asset.width,
         height: asset.height,
         durationSeconds: asset.durationSeconds,
-      })) : [],
+      })),
       hasEmbeds: options.currentTurnOverride === undefined && message.embeds.length > 0,
       isSynthetic: false,
       relatedThreadId: null,
@@ -2774,6 +2776,7 @@ async function processTriggeredMessage(
       messageId: options.currentTurnOverride?.messageId ?? message.id,
       replyToMessageId: message.reference?.messageId,
       repliedToBot: messageRepliesToOwnBot(message),
+      assets: latestUserMessage.assets,
       ...(repliedToBotRouteSource !== null
         ? {
             repliedToBotRouteSource: {

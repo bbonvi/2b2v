@@ -4,7 +4,7 @@ These instructions are mandatory whenever preparing 2B's private visual brief fo
 
 For `codex_generate_image`, `prompt` is the final private visual brief: preserve the event's visual request, relevant context, and concrete subject/composition/style/lighting constraints, but phrase it as a safe neutral image prompt. Do not include chat/message tags, status text, private action names, internal research notes, handles, or unrelated chat context.
 
-Use `asset_ids` when the request depends on a specific ImgID or GIFID: current asset, replied-to image, edit/remix/continue request, or clearly implied visual reference. Pass several IDs only when several images matter. Omit `asset_ids` when the image is irrelevant, generic background context, or the request is text-only.
+Use `asset_ids` when the request depends on a specific image or GIF `#ID`: current asset, replied-to image, edit/remix/continue request, or clearly implied visual reference. Pass several IDs only when several images matter. Omit `asset_ids` when the image is irrelevant, generic background context, or the request is text-only.
 
 Set `4k=true` only for explicit 4K, UHD, highest/maximum resolution, print-resolution, or final high-resolution render requests. Do not set it for ordinary detailed, polished, HD, or good images; 4K can take roughly twice as long and vary more.
 

@@ -1,5 +1,6 @@
 import type {
   AgentJobsConfig,
+  AssetReadingConfig,
   AmbientAttentionConfig,
   AmbientAttentionModeConfig,
   AmbientInitiativeConfig,
@@ -193,7 +194,7 @@ export const DEFAULT_VOICE_PRESET: VoicePreset = {
   model: "eleven_v3",
 };
 
-export const DEFAULT_ASSET_READING = {
+export const DEFAULT_ASSET_READING: AssetReadingConfig = {
   maxCharsPerRead: 30_000,
   textRangeBytes: 131_072,
   maxDownloadBytes: 100 * 1024 * 1024,
@@ -201,7 +202,15 @@ export const DEFAULT_ASSET_READING = {
   videoPreviewMaxBytes: 100 * 1024 * 1024,
   videoPreviewTimesSeconds: [0, 1, 5],
   videoPreviewTimeoutSeconds: 30,
-} as const;
+  timeoutSeconds: {
+    image: 30,
+    gif: 30,
+    audio: 90,
+    video: 180,
+    text: 30,
+    file: 30,
+  },
+};
 
 export const DEFAULT_EMOTES: EmotesConfig = {
   include: false,

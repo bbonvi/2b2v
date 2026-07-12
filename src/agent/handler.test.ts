@@ -554,6 +554,7 @@ describe("handleMessage", () => {
       expect(currentTurn).toContain("Trigger GlobalName: Test Global");
       expect(currentTurn).toContain("Trigger AuthorIsBot: false");
       expect(currentTurn).toContain("Trigger ReplyToMsgID: parent-msg");
+      expect(currentTurn).toContain("Audio: #29 chunk_08.wav");
       expect(currentTurn).toContain("Reply Context: The current event replies to a message 2B previously sent here from another channel.");
       expect(currentTurn).toContain("Source GuildID: source-guild");
       expect(currentTurn).toContain("Source ChannelID: source-channel");
@@ -585,6 +586,17 @@ describe("handleMessage", () => {
           sourceChannelId: "source-channel",
           sourceMessageId: "source-msg",
         },
+        assets: [{
+          id: 29,
+          kind: "audio",
+          sourceKind: "attachment",
+          filename: "chunk_08.wav",
+          contentType: "audio/wav",
+          size: 5_030_816,
+          width: null,
+          height: null,
+          durationSeconds: 198.3,
+        }],
       }),
       makeDeps({ completeChat }),
     );

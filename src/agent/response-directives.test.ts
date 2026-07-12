@@ -82,7 +82,7 @@ describe("parseResponseDirectives", () => {
   });
 
   test("parses message asset_ids delivery attribute", () => {
-    expect(parseResponseDirectives("<message asset_ids=[12, 13]>again</message><message asset_ids=\"[14]\">quoted</message>")).toEqual({
+    expect(parseResponseDirectives("<message asset_ids=[#12, 13]>again</message><message asset_ids=\"[#14]\">quoted</message>")).toEqual({
       ignored: false,
       segments: [
         { kind: "messageBreak", delivery: { assetIds: [12, 13] } },

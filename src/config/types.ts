@@ -1,4 +1,5 @@
 import type { TtsConfig, VoicePreset } from "../tts/types.ts";
+import type { AssetKind } from "../db/asset-repository.ts";
 
 /** UI language for VPN panel. */
 export type UiLang = "en" | "ru";
@@ -412,7 +413,12 @@ export interface AssetReadingConfig {
   videoPreviewMaxBytes: number;
   videoPreviewTimesSeconds: number[];
   videoPreviewTimeoutSeconds: number;
+  timeoutSeconds: Record<AssetKind, number>;
 }
+
+export type AssetReadingConfigYaml = Omit<Partial<AssetReadingConfig>, "timeoutSeconds"> & {
+  timeoutSeconds?: Partial<Record<AssetKind, number>>;
+};
 
 /** Per-guild configuration. Source of truth is the YAML file. */
 export interface GuildConfig {
@@ -570,7 +576,7 @@ export interface GuildConfigYaml {
     quality?: ImageGenerationQuality;
   };
   attachmentsDir?: string;
-  assetReading?: Partial<AssetReadingConfig>;
+  assetReading?: AssetReadingConfigYaml;
   instructions?: string;
   instructionsPath?: string;
   tts?: Partial<TtsConfig> & {
@@ -662,7 +668,7 @@ export interface MainConfigYaml {
     quality?: ImageGenerationQuality;
   };
   attachmentsDir?: string;
-  assetReading?: Partial<AssetReadingConfig>;
+  assetReading?: AssetReadingConfigYaml;
   logLevel?: string;
   dataDir?: string;
   tts?: Partial<TtsConfig> & {

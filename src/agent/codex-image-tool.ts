@@ -9,6 +9,7 @@ import type { EnqueueImageJobResult } from "./job-runtime.ts";
 import type { ImageGenerationQuality } from "../config/types.ts";
 import { renderPromptTemplate, type PromptTemplateVariables } from "../config/prompt-template.ts";
 import { imageExtensionForMime, imageMimeFromBuffer } from "../db/image-ingest.ts";
+import { AssetIdSchema, parseAssetId } from "./asset-id.ts";
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_IMAGES_GENERATIONS_URL = "https://chatgpt.com/backend-api/codex/images/generations";
@@ -32,8 +33,8 @@ const CodexGenerateImageParams = Type.Object({
   prompt: Type.String({
     description: "The final visual brief sent to Codex image generation.",
   }),
-  asset_ids: Type.Optional(Type.Array(Type.Number(), {
-    description: "Visual ImgIDs or GIFIDs from chat history to use as reference inputs.",
+  asset_ids: Type.Optional(Type.Array(AssetIdSchema, {
+    description: "Visual image or GIF #IDs from chat history to use as reference inputs.",
   })),
   output_format: Type.Optional(Type.Union([
     Type.Literal("png"),
@@ -968,12 +969,11 @@ function parseAssetIds(value: unknown): number[] {
   const result: number[] = [];
   const seen = new Set<number>();
   for (const item of value) {
-    if (typeof item !== "number" || !Number.isInteger(item) || item <= 0) {
-      throw new Error("asset_ids must contain positive integer visual asset IDs.");
-    }
-    if (seen.has(item)) continue;
-    seen.add(item);
-    result.push(item);
+    const id = parseAssetId(item);
+    if (id === null) throw new Error("asset_ids must contain positive integer visual asset IDs, optionally prefixed with #.");
+    if (seen.has(id)) continue;
+    seen.add(id);
+    result.push(id);
   }
   return result;
 }

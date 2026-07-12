@@ -11,6 +11,7 @@ const config: AssetReadingConfig = {
   videoPreviewMaxBytes: 1024,
   videoPreviewTimesSeconds: [0, 1],
   videoPreviewTimeoutSeconds: 1,
+  timeoutSeconds: { image: 1, gif: 1, audio: 1, video: 1, text: 1, file: 1 },
 };
 
 function asset(kind: MessageAsset["kind"]): MessageAsset {
@@ -37,11 +38,11 @@ describe("read_asset", () => {
         return Promise.resolve(new Response(body, { status: 206, headers: { "content-range": `bytes ${start}-${start + body.length - 1}/${source.length}` } }));
       }) as unknown as typeof fetch,
     });
-    const first = await tool.execute("one", { asset_id: 1 });
-    expect(first.content.some((part) => part.type === "text" && part.text === "hello")).toBeTrue();
+    const first = await tool.execute("one", { asset_id: "#1" });
+    expect(first.content.some((part) => part.type === "text" && part.text === "File contents:\nhello")).toBeTrue();
     expect(first.details).toEqual({ assetId: 1, nextCursor: "b:5" });
     const second = await tool.execute("two", { asset_id: 1, cursor: "b:5" });
-    expect(second.content.some((part) => part.type === "text" && part.text === " worl")).toBeTrue();
+    expect(second.content.some((part) => part.type === "text" && part.text === "File contents:\n worl")).toBeTrue();
   });
 
   test("caches paid transcripts and paginates them", async () => {
@@ -64,8 +65,26 @@ describe("read_asset", () => {
     });
     const first = await tool.execute("one", { asset_id: 1 });
     expect(first.details).toEqual({ assetId: 1, nextCursor: "c:5" });
+    expect(first.content.some((part) => part.type === "text" && part.text === "Transcript (ElevenLabs Scribe v2):\nhello")).toBeTrue();
     await tool.execute("two", { asset_id: 1, cursor: "c:5" });
     expect(calls).toBe(1);
     expect(record.extractionProvider).toBe("elevenlabs-scribe-v2");
+  });
+
+  test("applies the asset-kind timeout", () => {
+    const tool = createReadAssetTool({
+      config: { ...config, timeoutSeconds: { ...config.timeoutSeconds, audio: 0.01 } },
+      elevenLabsApiKey: "key",
+      getAsset: () => asset("audio"),
+      resolveSource: () => Promise.resolve({ url: "https://cdn.test/audio", contentType: "audio/ogg", filename: "voice.ogg" }),
+      cacheExtraction: () => {},
+      prepareImage: () => Promise.reject(new Error("unused")),
+      fetchFn: ((_url: string | URL | Request, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new Error("asset read timed out"));
+        }, { once: true });
+      })) as unknown as typeof fetch,
+    });
+    return expect(Promise.resolve(tool.execute("timeout", { asset_id: 1 }))).rejects.toThrow("asset read timed out");
   });
 });
