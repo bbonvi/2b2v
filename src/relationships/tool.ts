@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Database } from "../db/database";
@@ -25,6 +25,8 @@ const RecordRelationshipSchema = Type.Object({
   signals: Type.Array(SignalSchema, { maxItems: 6 }),
 }, { additionalProperties: false });
 
+type RecordRelationshipParams = Static<typeof RecordRelationshipSchema>;
+
 type RecordRelationshipToolResult = AgentToolResult<RelationshipMutationResult | { error: true }>;
 
 export interface RecordRelationshipToolDeps {
@@ -44,6 +46,26 @@ export function createRecordRelationshipTool(deps: RecordRelationshipToolDeps): 
       ? deps.description ?? "Record durable relationship state after a Discord turn."
       : "Record durable relationship state after a Discord turn.",
     parameters: RecordRelationshipSchema,
+    prepareArguments: (params: unknown): RecordRelationshipParams => {
+      if (params !== null && typeof params === "object" && !Array.isArray(params)) {
+        const signals = (params as Record<string, unknown>).signals;
+        if (Array.isArray(signals)) {
+          const allowedAxes = new Set<string>(RELATIONSHIP_AXES);
+          for (const [index, signal] of signals.entries()) {
+            if (signal === null || typeof signal !== "object" || Array.isArray(signal)) continue;
+            const axes = (signal as Record<string, unknown>).axes;
+            if (axes === null || typeof axes !== "object" || Array.isArray(axes)) continue;
+            const unknownAxis = Object.keys(axes).find((axis) => !allowedAxes.has(axis));
+            if (unknownAxis !== undefined) {
+              throw new Error(
+                `signals[${index}].axes.${unknownAxis} is unknown; allowed axes: ${RELATIONSHIP_AXES.join(", ")}`,
+              );
+            }
+          }
+        }
+      }
+      return params as RecordRelationshipParams;
+    },
     execute: (_toolCallId: string, params: unknown): Promise<RecordRelationshipToolResult> => {
       if (!Value.Check(RecordRelationshipSchema, params)) {
         return Promise.resolve({

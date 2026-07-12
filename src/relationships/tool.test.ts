@@ -39,4 +39,20 @@ describe("record_relationship tool", () => {
     expect(listRelationshipEvents(db)).toHaveLength(0);
     db.close();
   });
+
+  test("names unknown relationship axes before schema validation", () => {
+    const db = createDatabase(":memory:");
+    const tool = createRecordRelationshipTool({ db, config: config() });
+
+    expect(() => tool.prepareArguments?.({
+      signals: [{
+        summary: "A relationship signal.",
+        confidence: 0.8,
+        axes: { friendship: 1 },
+      }],
+    })).toThrow(
+      "signals[0].axes.friendship is unknown; allowed axes: familiarity, trust, warmth, respect, tension, curiosity, attraction, intimacy, attachment",
+    );
+    db.close();
+  });
 });
