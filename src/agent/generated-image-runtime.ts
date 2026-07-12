@@ -1,5 +1,5 @@
 import type { HistoryMessage } from "./history-types";
-import { isActiveJobStatus, type AgentJob } from "./job-runtime";
+import { isActiveJobStatus, type AgentJob, type ImageGenerationJobInput } from "./job-runtime";
 import type { GeneratedImageAttachment } from "./codex-image-tool";
 import type { OutboundAttachment } from "./handler";
 
@@ -43,6 +43,20 @@ export function shortQuote(text: string, maxLength = 120): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+/** Renders the effective user-facing image tool input for async handoffs and history. */
+export function renderImageGenerationInput(input: ImageGenerationJobInput): string {
+  return JSON.stringify({
+    prompt: input.prompt,
+    asset_ids: input.imageIds,
+    reference_urls: input.referenceUrls ?? [],
+    output_format: input.outputFormat,
+    "4k": input.is4k,
+    separate_job: input.separateJob,
+    allows_group_corrections: input.allowsGroupCorrections,
+    ...(input.replacesJobId !== undefined ? { replaces_job_id: input.replacesJobId } : {}),
+  });
 }
 
 function formatJobErrorForContext(error: string): string {

@@ -63,7 +63,7 @@ import { createFetchImagesTool } from "./agent/fetch-images-tool";
 import { loadExternalImage } from "./agent/external-image";
 import { createCodexGenerateImageTool, type GeneratedImageAttachment, type ReferenceImageInput } from "./agent/codex-image-tool";
 import { AgentJobStore, createCancelAgentJobTool, isActiveJobStatus, type ImageGenerationJobResult } from "./agent/job-runtime";
-import { annotateHistoryJobs, createGeneratedImageRuntime, DEFAULT_CODEX_IMAGE_ROUTER_MODEL, renderAgentJobsContext, shortQuote, type GeneratedImageRuntime } from "./agent/generated-image-runtime";
+import { annotateHistoryJobs, createGeneratedImageRuntime, DEFAULT_CODEX_IMAGE_ROUTER_MODEL, renderAgentJobsContext, renderImageGenerationInput, shortQuote, type GeneratedImageRuntime } from "./agent/generated-image-runtime";
 import { createStoredAssetAttachmentResolver } from "./agent/stored-asset-attachments";
 import { loadAssetReferenceImage } from "./agent/asset-reference-image";
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
@@ -381,6 +381,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
 
     const latest = agentJobs.get(job.id);
     if (latest === undefined || !isActiveJobStatus(latest.status)) return;
+    const generationInput = renderImageGenerationInput(job.input);
     const outboundAttachment: OutboundAttachment = {
       ...attachment,
       historyText: [
@@ -390,7 +391,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
         details?.requestedSize !== undefined ? `Requested size: ${details.requestedSize}` : "",
         details?.actualSize !== undefined ? `Actual size: ${details.actualSize}` : "",
         `Original request from @${job.requesterUsername}, MsgID ${job.sourceMessageId}: "${job.sourceQuote}"`,
-        `Generation prompt: ${job.input.prompt}`,
+        `Generation input: ${generationInput}`,
         typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}` : "",
       ].filter((part) => part !== "").join("\n"),
     };
@@ -404,7 +405,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       actualSizeLine: details?.actualSize !== undefined ? `Actual size: ${details.actualSize}\n` : "",
       sourceMessageId: job.sourceMessageId,
       sourceQuote: job.sourceQuote,
-      generationPrompt: job.input.prompt,
+      generationInput,
       revisedPromptLine: typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}\n` : "",
     }, `[Async Image Job Ready] Job ${job.id} generated an image.`);
     const sentMessageId = await runAsyncImageStatusTurn({
@@ -459,7 +460,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
           requesterUsername: job.requesterUsername,
           sourceMessageId: job.sourceMessageId,
           sourceQuote: job.sourceQuote,
-          generationPrompt: job.input.prompt,
+          generationInput: renderImageGenerationInput(job.input),
           failureDetail: message,
         }, `[Async Image Job Failed] Job ${job.id} ${latest.status}.`);
         await runAsyncImageStatusTurn({
