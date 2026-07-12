@@ -39,10 +39,11 @@ describe("read_asset", () => {
       }) as unknown as typeof fetch,
     });
     const first = await tool.execute("one", { asset_id: "#1" });
-    expect(first.content.some((part) => part.type === "text" && part.text === "File contents:\nhello")).toBeTrue();
+    expect(first.content.some((part) => part.type === "text" && part.text === "File contents (11 bytes total):\nhello")).toBeTrue();
+    expect(first.content.some((part) => part.type === "text" && part.text === "[Partial content: more remains. Read through 5 of 11 bytes. Continue only if needed with cursor: b:5]")).toBeTrue();
     expect(first.details).toEqual({ assetId: 1, nextCursor: "b:5" });
     const second = await tool.execute("two", { asset_id: 1, cursor: "b:5" });
-    expect(second.content.some((part) => part.type === "text" && part.text === "File contents:\n worl")).toBeTrue();
+    expect(second.content.some((part) => part.type === "text" && part.text === "File contents (11 bytes total):\n worl")).toBeTrue();
   });
 
   test("caches paid transcripts and paginates them", async () => {
@@ -65,7 +66,8 @@ describe("read_asset", () => {
     });
     const first = await tool.execute("one", { asset_id: 1 });
     expect(first.details).toEqual({ assetId: 1, nextCursor: "c:5" });
-    expect(first.content.some((part) => part.type === "text" && part.text === "Transcript (ElevenLabs Scribe v2):\nhello")).toBeTrue();
+    expect(first.content.some((part) => part.type === "text" && part.text === "Transcript (ElevenLabs Scribe v2; 16 characters total):\nhello")).toBeTrue();
+    expect(first.content.some((part) => part.type === "text" && part.text === "[Partial content: more remains. Read through 5 of 16 characters. Continue only if needed with cursor: c:5]")).toBeTrue();
     await tool.execute("two", { asset_id: 1, cursor: "c:5" });
     expect(calls).toBe(1);
     expect(record.extractionProvider).toBe("elevenlabs-scribe-v2");

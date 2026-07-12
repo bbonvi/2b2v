@@ -74,8 +74,8 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
           ? pageCachedText(asset.extractedText, input.cursor, deps.config.maxCharsPerRead)
           : await pageRemoteText(fetchFn, source.url, input.cursor, deps.config, readSignal);
         readSignal.throwIfAborted();
-        content.push({ type: "text", text: `File contents:\n${page.text}` });
-        if (page.nextCursor !== undefined) content.push({ type: "text", text: `next_cursor: ${page.nextCursor}` });
+        content.push({ type: "text", text: `File contents${page.total !== null ? ` (${page.total.toLocaleString("en-US")} ${page.unit} total)` : ""}:\n${page.text}` });
+        if (page.nextCursor !== undefined) content.push({ type: "text", text: partialPageNotice(page) });
         return { content, details: { assetId: asset.id, ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}) } };
       }
 
@@ -93,8 +93,9 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
         }
         const page = pageCachedText(transcript, input.cursor, deps.config.maxCharsPerRead);
         const providerLabel = transcriptProvider === "elevenlabs-scribe-v2" ? "ElevenLabs Scribe v2" : transcriptProvider;
-        content.push({ type: "text", text: `Transcript${providerLabel !== null ? ` (${providerLabel})` : ""}:\n${page.text}` });
-        if (page.nextCursor !== undefined) content.push({ type: "text", text: `next_cursor: ${page.nextCursor}` });
+        const transcriptMeta = [providerLabel, `${transcript.length.toLocaleString("en-US")} characters total`].filter((value) => value !== null);
+        content.push({ type: "text", text: `Transcript (${transcriptMeta.join("; ")}):\n${page.text}` });
+        if (page.nextCursor !== undefined) content.push({ type: "text", text: partialPageNotice(page) });
         if (
           asset.kind === "video" && input.cursor === undefined
           && (asset.size === null || asset.size <= deps.config.videoPreviewMaxBytes)
@@ -124,11 +125,24 @@ function parseCursor(cursor: string | undefined, prefix: "c" | "b"): number {
   return Number(match[1]);
 }
 
-function pageCachedText(text: string, cursor: string | undefined, maxChars: number): { text: string; nextCursor?: string } {
+interface TextPage {
+  text: string;
+  nextCursor?: string;
+  end: number;
+  total: number | null;
+  unit: "bytes" | "characters";
+}
+
+function partialPageNotice(page: TextPage): string {
+  const progress = page.total !== null ? ` Read through ${page.end.toLocaleString("en-US")} of ${page.total.toLocaleString("en-US")} ${page.unit}.` : "";
+  return `[Partial content: more remains.${progress} Continue only if needed with cursor: ${page.nextCursor ?? ""}]`;
+}
+
+function pageCachedText(text: string, cursor: string | undefined, maxChars: number): TextPage {
   const offset = parseCursor(cursor, "c");
   if (offset > text.length) throw new Error("Cursor is past end of extracted text.");
   const end = Math.min(text.length, offset + maxChars);
-  return { text: text.slice(offset, end), ...(end < text.length ? { nextCursor: `c:${end}` } : {}) };
+  return { text: text.slice(offset, end), end, total: text.length, unit: "characters", ...(end < text.length ? { nextCursor: `c:${end}` } : {}) };
 }
 
 async function pageRemoteText(
@@ -137,7 +151,7 @@ async function pageRemoteText(
   cursor: string | undefined,
   config: AssetReadingConfig,
   signal: AbortSignal | undefined,
-): Promise<{ text: string; nextCursor?: string }> {
+): Promise<TextPage> {
   const offset = parseCursor(cursor, "b");
   const response = await fetchFn(url, {
     headers: { Range: `bytes=${offset}-${offset + config.textRangeBytes - 1}` },
@@ -149,10 +163,12 @@ async function pageRemoteText(
   if (decoded.endsWith("�")) decoded = decoded.slice(0, -1);
   const text = decoded.slice(0, config.maxCharsPerRead);
   const consumed = Buffer.byteLength(text, "utf8");
-  const total = response.headers.get("content-range")?.match(/\/(\d+)$/)?.[1];
+  const totalValue = response.headers.get("content-range")?.match(/\/(\d+)$/)?.[1]
+    ?? (response.status === 200 ? response.headers.get("content-length") : null);
+  const total = totalValue !== null && Number.isFinite(Number(totalValue)) ? Number(totalValue) : null;
   const nextOffset = offset + consumed;
-  const hasMore = consumed > 0 && (total !== undefined ? nextOffset < Number(total) : buffer.length >= config.textRangeBytes || text.length < decoded.length);
-  return { text, ...(hasMore ? { nextCursor: `b:${nextOffset}` } : {}) };
+  const hasMore = consumed > 0 && (total !== null ? nextOffset < total : buffer.length >= config.textRangeBytes || text.length < decoded.length);
+  return { text, end: nextOffset, total, unit: "bytes", ...(hasMore ? { nextCursor: `b:${nextOffset}` } : {}) };
 }
 
 export async function fetchAssetBuffer(fetchFn: typeof fetch, url: string, maxBytes: number, signal?: AbortSignal): Promise<Buffer> {
