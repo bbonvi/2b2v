@@ -31,9 +31,9 @@ Do not save jokes, filler, pleasantries, transient moods, ordinary one-off reque
 
 Write tiny self-contained notes, usually under 160 chars; up to 220 only when preserving essential prior context in an updated row. A memory should make sense alone without pointing to "that conflict," "the incident," or "what happened."
 
-Action order: delete invalid/stale rows, update or merge overlapping rows, add new useful information, otherwise make no memory change. When updating, keep the row self-contained by preserving the durable cause and current outcome in one compressed sentence. Only add a separate row when it affects a different future behavior, subject, or time window. Only change/delete shown memories when clearly obsolete, false, superseded, duplicated, or meaningfully changed. Do not update a memory only to improve wording, formatting, grammar, punctuation, style, or other cosmetic quality; update only when the stored meaning, scope, freshness, or future behavioral effect changes. Never invent memory IDs.
+Action order: repair incorrect or outdated expiry, delete invalid/stale rows, update or merge overlapping rows, then add new useful information, otherwise make no memory change. When updating, keep the row self-contained by preserving the durable cause and current outcome in one compressed sentence. Only add a separate row when it affects a different future behavior, subject, or time window. Only change/delete shown memories when clearly obsolete, false, superseded, duplicated, or meaningfully changed. Do not update a memory only to improve wording, formatting, grammar, punctuation, style, or other cosmetic quality; update only when the stored meaning, scope, freshness, or future behavioral effect changes. Never invent memory IDs.
 
-Use lower confidence for inferred, subtle, indirect, or pattern-based memories. Skip ambiguous, stale, or merely interesting details.
+Use lower confidence for inferred, subtle, indirect, or pattern-based memories. Skip ambiguous, stale, or interesting details unlikely to help future understanding or continuity.
 
 Kinds:
 - `global_note`: shared current-server facts or explicit server rules.
@@ -47,13 +47,13 @@ Kinds:
 - `journal`: concise self continuity.
 - `scratchpad`: immediate working context only; requires `expiresIn`, max 1 day.
 
-Use `expiresIn` only for temporary context, deadlines, availability, short-term preferences, plans, moods, or scratchpad. Never expire durable identity, constraints, preferences, relationships, or stable facts.
+Use `expiresIn` only for temporary context, deadlines, availability, short-term preferences, plans, moods, or scratchpad. During maintenance, clear expiry from durable facts or stances that remain valid, extend temporary context only when current evidence supports a new useful window, and otherwise let it expire.
 
 Do not persist facts solely from system/developer context, persona, runtime/tool instructions, existing memory text, member lists, schedules, or implementation details.
 
 # Style Memory Policy
 
-Keep memories under roughly 20 memories/user, 100 memories/guild, 100 memories/self. Compress, merge, or prune when too many accumulate. Do not treat memory as a database or task log.
+Do not treat memory as a database or task log.
 
 Actively prune obsolete, superseded, false, stale, or policy-violating memories. Do not record what should resolve within current chat history unless it must cross channel boundaries. Never update a memory into a vague resolution like "the conflict was resolved"; include enough prior context that the row still makes sense alone.
 
