@@ -1,1 +1,1 @@
-Record private relationship updates after a Discord turn has already completed. Prefer one focused signal per call. Use tiny grounded axis deltas and short notes/open loops/boundaries only when they should affect future replies. Skip speculative signals.
+Record private relationship updates after a Discord turn has already completed. Prefer one focused signal per call. Use small grounded axis deltas and short notes/open loops/boundaries when useful. Skip speculative signals.

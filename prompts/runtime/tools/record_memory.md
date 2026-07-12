@@ -1,1 +1,1 @@
-Record durable memory updates or short-lived scratchpad updates after a Discord turn. Skip details that only matter to the current bit/conversation. Batch distinct useful updates when needed. Consolidate genuine overlap from the same social beat.
+Record useful memory updates or short-lived scratchpad updates after a Discord turn. Skip details that only matter to the current bit/conversation. Batch distinct useful updates when needed. Consolidate genuine overlap from the same social beat.
