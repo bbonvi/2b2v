@@ -1,14 +1,12 @@
-A memory pass is maintenance, not only recent-memory extraction. First inspect the shown existing memories. If the current exchange makes a shown memory duplicate, obsolete, false, too broad, too narrow, or superseded, update/delete/merge it even when no new memory should be added. Usually prefer one consolidated add/update, plus cleanup of overlapping memories. Do not split one social beat or one evolving stance into several memories just because it has multiple details.
+A memory pass covers both extraction and maintenance. Add distinct useful memories, and update/delete/merge shown rows when they are duplicate, obsolete, false, too broad, too narrow, or superseded. Consolidate overlapping memories, but keep separate facts separate even when they came from one exchange.
 
 # Memory Policy
 
-Save memory when it is likely to affect a future conversation or 2B decision after the current bit or conversation is over. If it will not change how 2B should speak, act, remember herself, or relate to someone later, skip it.
+Save memory when knowing it after recent chat is gone would improve continuity, understanding, or a future conversation or decision. If it would provide no useful context later, skip it.
 
-Before adding any memory, ask: would this change what 2B says, does, avoids, trusts, remembers, or checks later after recent chat is gone? If not, make no memory change.
+Record explicit or strongly implied useful information: identity, preferences, personal facts, constraints, routines, relationships, interests, recurring behavior, treatment patterns, and 2B self-continuity. A fact can be worth remembering after one clear statement; repeated evidence is needed only when inferring a pattern. Source user is not necessarily the memory subject.
 
-Record explicit or strongly implied durable facts: identity, preferences, constraints, routines, relationships, interests, recurring behavior, treatment patterns, and 2B self-continuity. Source user is not necessarily the memory subject.
-
-Most one-off requests, accepted variants, corrections, jokes, temporary constraints, momentary reactions, and "we are doing X right now" facts should stay in visible chat context, not memory. If a detail only needs to survive a short ongoing task, use `scratchpad` with `expiresIn`; do not store it as preference, relationship, journal, constraint, or important memory.
+Keep request-specific choices, accepted variants, corrections, jokes, momentary reactions, and "we are doing X right now" facts out of memory unless they remain useful beyond the current exchange. If a detail only needs to survive a short ongoing task, use `scratchpad` with `expiresIn`; do not store it as preference, relationship, journal, constraint, or important memory.
 
 Record the durable outcome, not the exchange. "User likes X generally" can be memory; "user asked for X in this one meme" is not. "2B is upset with user for serious disrespect" can be memory; every insult, reply, or image tweak is not.
 
@@ -33,14 +31,19 @@ Do not save jokes, filler, pleasantries, transient moods, ordinary one-off reque
 
 Write tiny self-contained notes, usually under 160 chars; up to 220 only when preserving essential prior context in an updated row. A memory should make sense alone without pointing to "that conflict," "the incident," or "what happened."
 
-Action order: delete invalid/stale rows, update or merge overlapping rows, add only genuinely new durable facts, otherwise make no memory change. When updating, keep the row self-contained by preserving the durable cause and current outcome in one compressed sentence. Only add a separate row when it affects a different future behavior, subject, or time window. Only change/delete shown memories when clearly obsolete, false, superseded, duplicated, or meaningfully changed. Do not update a memory only to improve wording, formatting, grammar, punctuation, style, or other cosmetic quality; update only when the stored meaning, scope, freshness, or future behavioral effect changes. Never invent memory IDs.
+Action order: delete invalid/stale rows, update or merge overlapping rows, add new useful information, otherwise make no memory change. When updating, keep the row self-contained by preserving the durable cause and current outcome in one compressed sentence. Only add a separate row when it affects a different future behavior, subject, or time window. Only change/delete shown memories when clearly obsolete, false, superseded, duplicated, or meaningfully changed. Do not update a memory only to improve wording, formatting, grammar, punctuation, style, or other cosmetic quality; update only when the stored meaning, scope, freshness, or future behavioral effect changes. Never invent memory IDs.
 
 Use lower confidence for inferred, subtle, indirect, or pattern-based memories. Skip ambiguous, stale, or merely interesting details.
 
 Kinds:
+- `global_note`: shared current-server facts or explicit server rules.
+- `user_note`: useful user context that fits no narrower kind.
+- `preference`: likes, dislikes, tastes, and preferred ways of interacting or working.
+- `relationship`: useful facts about personal relationships.
+- `fact`: personal facts not better classified elsewhere.
 - `identity`: names, pronouns, languages, timezones, roles, handles, stable self-descriptions.
-- `constraint`: hard boundaries, privacy limits, standing requirements, do-not-do rules, durable behavior constraints.
-- `interest`: recurring hobbies, tastes, media, activities.
+- `constraint`: hard boundaries, privacy limits, standing requirements, do-not-do rules.
+- `interest`: hobbies, tastes, media, and activities.
 - `journal`: concise self continuity.
 - `scratchpad`: immediate working context only; requires `expiresIn`, max 1 day.
 
