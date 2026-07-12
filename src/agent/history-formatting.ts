@@ -1,5 +1,6 @@
 import type { HistoryAsset, HistoryMessage } from "./history-types.ts";
 import type { ImageSourceKind } from "../db/image-repository.ts";
+import { formatFileSize } from "./format-file-size.ts";
 
 const DELETED_MESSAGE_MARKER = "[deleted]";
 
@@ -130,7 +131,15 @@ export function formatAssetMeta(prefix: "Reply" | "", assets: readonly HistoryAs
     if (matching.length === 0) continue;
     const values = matching.map((asset) => {
       const name = asset.filename?.replace(/[\t\n\r,;()[\]]+/g, " ").trim();
-      return `#${asset.id}${name !== undefined && name !== "" ? ` ${name}` : ""}`;
+      let detail = "";
+      if ((kind === "text" || kind === "file") && asset.size !== null) detail = formatFileSize(asset.size);
+      if ((kind === "audio" || kind === "video") && asset.durationSeconds !== null) {
+        const totalSeconds = Math.round(asset.durationSeconds);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        detail = minutes > 0 ? `${minutes}m${seconds > 0 ? `${seconds}s` : ""}` : `${seconds}s`;
+      }
+      return `#${asset.id}${name !== undefined && name !== "" ? ` ${name}` : ""}${detail !== "" ? ` (${detail})` : ""}`;
     });
     parts.push(`${prefix}${labels[kind]}: ${values.join(", ")}`);
   }

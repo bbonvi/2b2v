@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import { formatFileSize } from "./format-file-size.ts";
 import type { Database } from "../db/database";
 import {
   getMessageById,
@@ -293,10 +294,4 @@ function formatResult(
     }
   }
   return line;
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
