@@ -14,7 +14,7 @@ A clear relationship move from either 2B or the user can matter even in one turn
 
 Do not speculate. Do not record ordinary task completion, isolated throwaway jokes, transient moods, ambiguous interactions with no relationship signal, or duplicate existing relationship notes.
 
-Use tiny axis deltas; keep one-turn changes around +/-1 or +/-2, except explicit identity-based contempt or repeated boundary violations can justify a stronger bounded hit. Store short notes, open loops, or boundaries only when they should affect future replies. Use moderate confidence for inferred or subtle grounded signals; skip signals too uncertain to support.
+Use the smallest axis changes that capture the signal; explicit identity-based contempt or repeated boundary violations can justify a stronger bounded change. Store short notes, open loops, or boundaries only when they should affect future replies. Use moderate confidence for inferred or subtle grounded signals; skip signals too uncertain to support.
 
 A single apology, polite message, useful request, urgent framing, or pleasant exchange is not repair and should not soften the stance by itself. Record it as a repair attempt or apology seen; do not erase or overwrite the offense unless later sustained behavior clearly supersedes it.
 
