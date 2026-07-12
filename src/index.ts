@@ -11,7 +11,8 @@ import { registerInteractionRuntime } from "./discord/interaction-runtime";
 import { translateInbound, translateOutbound, buildDisplayNameContext, type InboundResolvers, type OutboundResolvers } from "./discord/translation";
 import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
-import { appendStickerTags, guessImageMimeFromUrl, imageKindForAttachment, imageKindForEmbed, stickerImagePreview } from "./discord/message-media";
+import { appendStickerTags } from "./discord/message-media";
+import { assetsFromDiscordMessage } from "./discord/message-assets";
 import { botChannelPermissions, channelDisplayName, channelTypeLabel, createDiscordMessageSender, createTargetChannelResolver, createTypingController, fetchAccessibleGuildChannel as fetchAccessibleDiscordGuildChannel, isSendableGuildChannel, type SendableGuildChannel } from "./discord/message-sender";
 import { registerReactionSyncRuntime } from "./discord/reaction-sync-runtime";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
@@ -55,13 +56,14 @@ import { createMemoryListTool } from "./agent/user-memory-tool";
 import { createListChannelMessagesTool } from "./agent/list-channel-messages-tool";
 import { createOwnMessageTools } from "./agent/own-message-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
-import { createReadChatImagesTool } from "./agent/read-chat-images-tool";
+import { createReadAssetTool, extractRemoteVideoFrame } from "./agent/read-asset-tool";
 import { createReadUserAvatarTool, type AvatarSize } from "./agent/read-user-avatar-tool";
 import { createFetchImagesTool } from "./agent/fetch-images-tool";
 import { createCodexGenerateImageTool, type GeneratedImageAttachment } from "./agent/codex-image-tool";
 import { AgentJobStore, createCancelAgentJobTool, isActiveJobStatus, type ImageGenerationJobResult } from "./agent/job-runtime";
 import { annotateHistoryJobs, createGeneratedImageRuntime, DEFAULT_CODEX_IMAGE_ROUTER_MODEL, renderAgentJobsContext, shortQuote, type GeneratedImageRuntime } from "./agent/generated-image-runtime";
-import { createStoredImageAttachmentResolver } from "./agent/stored-image-attachments";
+import { createStoredAssetAttachmentResolver } from "./agent/stored-asset-attachments";
+import { loadAssetReferenceImage } from "./agent/asset-reference-image";
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createSummarizeVideoTool } from "./agent/summarize-video-tool";
 import { createCloseThreadTool, createStartThreadTool } from "./agent/start-thread-tool";
@@ -69,9 +71,9 @@ import { createReactToMessageTool } from "./agent/react-to-message-tool";
 import { applyRuntimeToolPrompts, type ToolPromptVariables } from "./agent/runtime-tool-prompts";
 import { createModelImageSupportStore } from "./llm/model-image-support";
 import { createAmbientRuntime } from "./ambient/runtime";
-import { getImageById, getImagesByMessageId } from "./db/image-repository";
+import { cacheAssetExtraction, getAssetById, getAssetsByMessageId, syncMessageAssets } from "./db/asset-repository";
 import { upsertThread, updateThreadActivity, markThreadArchived, listThreadsForContext, getThreadMetadata, getThread } from "./db/thread-repository";
-import { prepareImageBufferForContext, processAndStoreImage, type ImageIngestDeps } from "./db/image-ingest";
+import { prepareImageBufferForContext } from "./db/image-ingest";
 import { deleteExpiredMemories, countUserMemoriesByUser } from "./db/memory-repository";
 import { deleteExpiredCodexReasoningContinuations, getCodexReasoningContinuation, upsertCodexReasoningContinuation } from "./db/codex-reasoning-continuation-repository";
 import { createRelationshipsManagementApi } from "./dashboard/relationships-management";
@@ -98,8 +100,11 @@ import { loadPromptBundle, type PromptBundle } from "./config/prompt-bundle";
 import { renderPromptTemplate } from "./config/prompt-template";
 import { resolveReactionEmojiInput } from "./discord/reaction-emoji";
 import { createDiscordReplyFallbackDeps, createSyntheticReplyFallbackDeps, syncDeletedOwnBotMessage, syncEditedOwnBotMessage } from "./discord/reply-fallback-runtime";
+import { createDiscordAssetSourceResolver } from "./discord/asset-resolver";
+import { backfillMessageAssets } from "./discord/asset-backfill";
+import { DEFAULT_ASSET_READING } from "./config/defaults";
 import { join } from "path";
-import { mkdirSync, existsSync, readFileSync, readdirSync, statSync, watch } from "fs";
+import { mkdirSync, existsSync, readdirSync, statSync, watch } from "fs";
 import type { Database } from "./db/database";
 import { ChannelType, PermissionFlagsBits, type Client, type Guild, type GuildBasedChannel, type GuildMember, type Message, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
 
@@ -277,11 +282,8 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       log: log.child({ component: `async-image-${input.event}`, guildId: job.deliveryGuildId, channelId: job.deliveryChannelId, sourceGuildId: job.guildId, sourceChannelId: job.channelId, jobId: job.id, requestId: requestLog.requestId }),
       requestLog,
       tts,
-      resolveImageAttachments: createStoredImageAttachmentResolver({
-        db,
-        guildId: job.deliveryGuildId,
-        logger: log.child({ component: "stored-image-attachments", guildId: job.deliveryGuildId, channelId: job.deliveryChannelId, jobId: job.id }),
-      }),
+      resolveImageAttachments: createAssetAttachmentResolver(job.deliveryGuildId, deliveryGuildConfig,
+        log.child({ component: "stored-asset-attachments", guildId: job.deliveryGuildId, channelId: job.deliveryChannelId, jobId: job.id })),
       overrides: {
         ...(attachment !== undefined ? { initialPendingAttachments: [attachment] } : {}),
         forceTrigger: true,
@@ -309,6 +311,13 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
 
   try {
     const generated = createGeneratedImageRuntime();
+    const jobAssetSource = createDiscordAssetSourceResolver({
+      fetchMessage: async (targetChannelId, messageId) => {
+        const target = await fetchAccessibleGuildChannel(targetChannelId);
+        if (target === null || !("messages" in target)) return null;
+        try { return await (target as TextChannel | ThreadChannel).messages.fetch(messageId); } catch { return null; }
+      },
+    });
     const tool = createCodexGenerateImageTool({
       codexAuthPath: globalConfig.codexAuthPath,
       model: sourceGuildConfig.llmProvider === "openai-codex"
@@ -320,23 +329,23 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       imageGenerationQuality: sourceGuildConfig.imageGeneration.quality,
       asyncJobAlreadyActiveTemplate: promptBundle.runtime.contextTemplates["codex-image-job-existing"],
       asyncJobStartedTemplate: promptBundle.runtime.contextTemplates["codex-image-job-started"],
-      getImageById: (id: number) => {
-        const record = getImageById(db, id);
-        return record !== null && record.guildId === job.guildId ? record : null;
-      },
-      readFile: (path: string) => {
-        try {
-          return Buffer.from(readFileSync(path));
-        } catch {
-          return null;
-        }
+      resolveReferenceImage: async (id) => {
+        const asset = getAssetById(db, id);
+        if (asset === null || asset.guildId !== job.guildId) return null;
+        const source = await jobAssetSource(asset);
+        if (source === null) return null;
+        return await loadAssetReferenceImage({
+          asset,
+          source,
+          maxBytes: sourceGuildConfig.assetReading?.maxDownloadBytes ?? DEFAULT_ASSET_READING.maxDownloadBytes,
+        });
       },
       onGeneratedImage: generated.onGeneratedImage,
     });
     const imageToolArgs = {
       jobId: job.id,
       prompt: job.input.prompt,
-      image_ids: job.input.imageIds,
+      asset_ids: job.input.imageIds,
       output_format: job.input.outputFormat,
       "4k": job.input.is4k,
     };
@@ -344,7 +353,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     imageToolStarted = true;
     const result = await tool.execute(job.id, {
       prompt: job.input.prompt,
-      image_ids: job.input.imageIds,
+      asset_ids: job.input.imageIds,
       output_format: job.input.outputFormat,
       "4k": job.input.is4k,
     }, controller.signal);
@@ -601,6 +610,27 @@ function createHandlerDeps(input: {
   };
 }
 
+function createAssetAttachmentResolver(guildId: string, guildConfig: GuildConfig, logger: Logger): ImageAttachmentResolver {
+  const resolveSource = createDiscordAssetSourceResolver({
+    fetchMessage: async (channelId, messageId) => {
+      const channel = await fetchAccessibleGuildChannel(channelId);
+      if (channel === null || !("messages" in channel)) return null;
+      try {
+        return await (channel as TextChannel | ThreadChannel).messages.fetch(messageId);
+      } catch {
+        return null;
+      }
+    },
+  });
+  return createStoredAssetAttachmentResolver({
+    db,
+    guildId,
+    maxDownloadBytes: guildConfig.assetReading?.maxDownloadBytes ?? DEFAULT_ASSET_READING.maxDownloadBytes,
+    resolveSource,
+    logger,
+  });
+}
+
 async function runLoggedAgentTurn(input: {
   incoming: IncomingMessage;
   deps: HandlerDeps;
@@ -779,6 +809,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
     createBotDiscordMessageSender,
     createTtsGenerator,
     createHandlerDeps,
+    resolveAssetAttachments: createAssetAttachmentResolver,
     runLoggedAgentTurn,
     runMemoryPostReplyExtraction,
     runRelationshipPostReplyExtraction,
@@ -2207,21 +2238,28 @@ function buildAgentTools(
     }),
   });
 
-  const readChatImagesTool = createReadChatImagesTool({
-    imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
-    getImageById: (id: number) => {
-      const record = getImageById(db, id);
-      return record !== null && record.guildId === guildId ? record : null;
-    },
-    readFile: (path: string) => {
+  const resolveAssetSource = createDiscordAssetSourceResolver({
+    fetchMessage: async (targetChannelId, messageId) => {
+      const target = await fetchAccessibleGuildChannel(targetChannelId);
+      if (target === null || !("messages" in target)) return null;
       try {
-        return Buffer.from(readFileSync(path));
+        return await (target as TextChannel | ThreadChannel).messages.fetch(messageId);
       } catch {
         return null;
       }
     },
-    prepareImageForContext: (buffer, mimeType) =>
-      prepareImageBufferForContext(buffer, mimeType, CONTEXT_IMAGE_MAX_DIMENSION),
+  });
+  const readAssetTool = createReadAssetTool({
+    config: guildConfig.assetReading ?? { ...DEFAULT_ASSET_READING, videoPreviewTimesSeconds: [...DEFAULT_ASSET_READING.videoPreviewTimesSeconds] },
+    elevenLabsApiKey: globalConfig.elevenLabsApiKey,
+    getAsset: (id) => {
+      const asset = getAssetById(db, id);
+      return asset !== null && asset.guildId === guildId ? asset : null;
+    },
+    resolveSource: resolveAssetSource,
+    cacheExtraction: (id, text, provider) => cacheAssetExtraction(db, id, text, provider),
+    prepareImage: (buffer, mimeType) => prepareImageBufferForContext(buffer, mimeType, CONTEXT_IMAGE_MAX_DIMENSION),
+    extractVideoFrame: extractRemoteVideoFrame,
   });
 
   const readUserAvatarTool = createReadUserAvatarTool({
@@ -2285,7 +2323,7 @@ function buildAgentTools(
     },
   });
 
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memoryListTool, listChannelMessagesTool, ...ownMessageTools, readChatImagesTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memoryListTool, listChannelMessagesTool, ...ownMessageTools, readAssetTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (includeImageGenerationTools) {
     const codexImageModel = guildConfig.llmProvider === "openai-codex"
       ? guildConfig.model ?? globalConfig.defaultModel
@@ -2299,16 +2337,16 @@ function buildAgentTools(
       imageGenerationQuality: guildConfig.imageGeneration.quality,
       asyncJobAlreadyActiveTemplate: promptBundle.runtime.contextTemplates["codex-image-job-existing"],
       asyncJobStartedTemplate: promptBundle.runtime.contextTemplates["codex-image-job-started"],
-      getImageById: (id: number) => {
-        const record = getImageById(db, id);
-        return record !== null && record.guildId === guildId ? record : null;
-      },
-      readFile: (path: string) => {
-        try {
-          return Buffer.from(readFileSync(path));
-        } catch {
-          return null;
-        }
+      resolveReferenceImage: async (id) => {
+        const asset = getAssetById(db, id);
+        if (asset === null || asset.guildId !== guildId) return null;
+        const source = await resolveAssetSource(asset);
+        if (source === null) return null;
+        return await loadAssetReferenceImage({
+          asset,
+          source,
+          maxBytes: guildConfig.assetReading?.maxDownloadBytes ?? DEFAULT_ASSET_READING.maxDownloadBytes,
+        });
       },
       onGeneratedImage: onGeneratedImage ?? (() => {}),
       ...(effectiveCurrentRequest === undefined ? {} : { enqueueImageJob: (input) => {
@@ -2362,9 +2400,6 @@ function buildAgentTools(
     fetch_images: {
       maxImagesPerCall: 5,
       maxDimension: CONTEXT_IMAGE_MAX_DIMENSION,
-    },
-    read_chat_images: {
-      imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
     },
     codex_generate_image: {
       imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
@@ -2547,7 +2582,7 @@ async function processTriggeredMessage(
       return result;
     };
 
-    const ingestedImages = getImagesByMessageId(db, message.id);
+    const currentAssets = getAssetsByMessageId(db, message.id);
     const currentTurnBoundary = options.currentTurnOverride !== undefined
       ? { timestamp: options.currentTurnOverride.timestamp, messageId: options.currentTurnOverride.messageId }
       : currentTurnMessages.reduce<CurrentTurnBoundary>(
@@ -2581,9 +2616,19 @@ async function processTriggeredMessage(
       isBot: false,
       timestamp: options.currentTurnOverride?.timestamp ?? message.createdTimestamp,
       replyToId: message.reference?.messageId ?? null,
-      imageIds: options.currentTurnOverride === undefined ? ingestedImages.map((img) => img.id) : [],
-      captions: options.currentTurnOverride === undefined ? ingestedImages.map((img) => img.caption ?? "") : [],
-      imageSourceKinds: options.currentTurnOverride === undefined ? ingestedImages.map((img) => img.sourceKind) : [],
+      imageIds: [],
+      captions: [],
+      assets: options.currentTurnOverride === undefined ? currentAssets.map((asset) => ({
+        id: asset.id,
+        kind: asset.kind,
+        sourceKind: asset.sourceKind,
+        filename: asset.filename,
+        contentType: asset.contentType,
+        size: asset.size,
+        width: asset.width,
+        height: asset.height,
+        durationSeconds: asset.durationSeconds,
+      })) : [],
       hasEmbeds: options.currentTurnOverride === undefined && message.embeds.length > 0,
       isSynthetic: false,
       relatedThreadId: null,
@@ -2768,11 +2813,8 @@ async function processTriggeredMessage(
       requestLog,
       tts,
       generatedImages,
-      resolveImageAttachments: createStoredImageAttachmentResolver({
-        db,
-        guildId,
-        logger: log.child({ component: "stored-image-attachments", guildId, channelId, requestId: requestLog.requestId }),
-      }),
+      resolveImageAttachments: createAssetAttachmentResolver(guildId, guildConfig,
+        log.child({ component: "stored-asset-attachments", guildId, channelId, requestId: requestLog.requestId })),
       overrides: {
         onTriggered: () => {
           if (!guildConfig.typingSimulation.enabled) typing.startLoop();
@@ -2999,84 +3041,7 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
       }
     }
 
-    // Process and persist images (no inline payloads — LLM uses read_images tool)
-    const ingestDeps: ImageIngestDeps = {
-      db,
-      attachmentsDir: guildConfig.attachmentsDir,
-      maxDimension: guildConfig.imageMaxDimension,
-      fetchFn: fetch,
-    };
-    const imageIngestPromises: Promise<void>[] = [];
-    for (const attachment of message.attachments.values()) {
-      const contentType = attachment.contentType ?? "";
-      if (!contentType.startsWith("image/")) continue;
-      imageIngestPromises.push(
-        processAndStoreImage(
-          ingestDeps,
-          {
-            url: attachment.url,
-            mimeType: contentType,
-            messageId: message.id,
-            guildId,
-            channelId,
-            sourceKind: imageKindForAttachment(contentType, attachment.name),
-          },
-        ).then(() => undefined).catch((err: unknown) => {
-          log.warn("image ingest failed", {
-            attachmentId: attachment.id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }),
-      );
-    }
-
-    // Extract images from embeds (Tenor/Giphy GIFs appear here, not in attachments)
-    for (const embed of message.embeds) {
-      const embedUrl = embed.image?.url ?? embed.thumbnail?.url;
-      if (embedUrl === undefined) continue;
-
-      imageIngestPromises.push(
-        processAndStoreImage(ingestDeps, {
-          url: embedUrl,
-          mimeType: guessImageMimeFromUrl(embedUrl),
-          messageId: message.id,
-          guildId,
-          channelId,
-          sourceKind: imageKindForEmbed({ type: embed.data.type, url: embed.url, provider: embed.provider }, embedUrl),
-        }).then(() => undefined).catch((err: unknown) => {
-          log.warn("embed image ingest failed", {
-            embedUrl,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }),
-      );
-    }
-
-    for (const sticker of message.stickers.values()) {
-      const preview = stickerImagePreview({
-        name: sticker.name,
-        url: sticker.url,
-        format: sticker.format,
-      });
-      if (preview === null) continue;
-      imageIngestPromises.push(
-        processAndStoreImage(ingestDeps, {
-          url: preview.url,
-          mimeType: preview.mimeType,
-          messageId: message.id,
-          guildId,
-          channelId,
-          sourceKind: preview.sourceKind,
-        }).then(() => undefined).catch((err: unknown) => {
-          log.warn("sticker image ingest failed", {
-            stickerName: sticker.name,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }),
-      );
-    }
-
-    await Promise.allSettled(imageIngestPromises);
+    syncMessageAssets(db, { messageId: message.id, assets: assetsFromDiscordMessage(message) });
 
     const triggerResult = evaluateMessageTrigger(message, guildConfig);
     ambientRuntime.maybeScheduleAmbientAttention(message, triggerResult);
@@ -3105,6 +3070,17 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
     });
   }
 }
+
+client.on("messageUpdate", (_oldMessage, updatedMessage) => {
+  if (updatedMessage.guildId === null) return;
+  const stored = db.raw.prepare("SELECT 1 AS present FROM messages WHERE id = ?").get(updatedMessage.id) as { present: number } | null;
+  if (stored === null) return;
+  void updatedMessage.fetch().then((message) => {
+    syncMessageAssets(db, { messageId: message.id, assets: assetsFromDiscordMessage(message) });
+  }).catch((error: unknown) => {
+    log.warn("message asset update failed", { messageId: updatedMessage.id, error: error instanceof Error ? error.message : String(error) });
+  });
+});
 
 // --- 24. messageDelete handler ---
 client.on("messageDelete", (message) => {
@@ -3225,6 +3201,9 @@ log.info("health check passed — all systems ready", {
 });
 startupMessageProcessingReady = true;
 drainStartupMessageQueue();
+void backfillMessageAssets({ db, client, logger: log.child({ component: "asset-backfill" }) }).catch((error: unknown) => {
+  log.warn("asset history backfill stopped", { error: error instanceof Error ? error.message : String(error) });
+});
 ambientRuntime.startAmbientInitiativeLoops();
 
 // --- Start dashboard ---

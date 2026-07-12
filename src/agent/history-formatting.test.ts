@@ -107,6 +107,19 @@ describe("formatMessageLine", () => {
     expect(formatMessageLine(input)).toBe("[@alice (ImageIDs: [14]; GIFImageIDs: [12]; StickerImageIDs: [13])]: hello");
   });
 
+  test("groups lazy assets by typed short IDs", () => {
+    const input: FormatInput = {
+      message: msg({ assets: [
+        { id: 21, kind: "image", sourceKind: "attachment", filename: "cat.png", contentType: "image/png", size: 10, width: 20, height: 30, durationSeconds: null },
+        { id: 22, kind: "audio", sourceKind: "attachment", filename: "voice.ogg", contentType: "audio/ogg", size: 40, width: null, height: null, durationSeconds: 5 },
+        { id: 23, kind: "file", sourceKind: "attachment", filename: "notes.pdf", contentType: "application/pdf", size: 50, width: null, height: null, durationSeconds: null },
+      ] }),
+      reply: null,
+      captioningEnabled: false,
+    };
+    expect(formatMessageLine(input)).toBe('[@alice (ImgIDs: [21 "cat.png"]; AudioIDs: [22 "voice.ogg"]; FileIDs: [23 "notes.pdf"])]: hello');
+  });
+
   test("message with images and captions when captioning enabled", () => {
     const input: FormatInput = {
       message: msg({ imageIds: [12, 13], captions: ["red car", "street sign"] }),
@@ -323,7 +336,7 @@ describe("OLDER_LEGEND", () => {
     expect(OLDER_LEGEND).toContain("time markers use [...]");
     expect(OLDER_LEGEND).toContain("[msg-break]");
     expect(OLDER_LEGEND).toContain("search_channel_messages mode=\"id\"");
-    expect(OLDER_LEGEND).toContain("read_chat_images([id])");
+    expect(OLDER_LEGEND).toContain("read_asset");
   });
 });
 

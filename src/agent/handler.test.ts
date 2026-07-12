@@ -984,9 +984,9 @@ describe("handleMessage", () => {
     ]);
   });
 
-  test("attaches stored image_ids on the requested message only", async () => {
+  test("attaches stored asset_ids on the requested message only", async () => {
     const completeChat: ChatCompleteFn = () => Promise.resolve({
-      text: "<message image_ids=[12]>again</message><message image_ids=[13]></message><message>done</message>",
+      text: "<message asset_ids=[12]>again</message><message asset_ids=[13]></message><message>done</message>",
       toolCalls: [],
       rawResponse: {},
       messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },

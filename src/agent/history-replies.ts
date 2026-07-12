@@ -123,6 +123,7 @@ function buildReplyContext(
     replyImageIds: target.imageIds,
     replyImageSourceKinds: target.imageSourceKinds,
     replyCaptions: captioningEnabled ? target.captions : [],
+    ...(target.assets !== undefined && target.assets.length > 0 ? { replyAssets: target.assets } : {}),
   };
 }
 

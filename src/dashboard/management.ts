@@ -198,6 +198,9 @@ export function deleteStoredManagementMessages(
     .prepare(`DELETE FROM images WHERE message_id IN (${rowPlaceholders}) AND guild_id = ? AND channel_id = ?`)
     .run(...messageIds, input.guildId, input.channelId);
   db.raw
+    .prepare(`DELETE FROM message_assets WHERE message_id IN (${rowPlaceholders}) AND guild_id = ? AND channel_id = ?`)
+    .run(...messageIds, input.guildId, input.channelId);
+  db.raw
     .prepare(`DELETE FROM message_reactions WHERE message_id IN (${rowPlaceholders}) AND guild_id = ? AND channel_id = ?`)
     .run(...messageIds, input.guildId, input.channelId);
   db.raw

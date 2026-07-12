@@ -1,7 +1,8 @@
 import type { Database } from "./database";
-import type { ImageSourceKind } from "./image-repository.ts";
 import type { HistoryMessage } from "../agent/history-types";
 import type { TrimConfig } from "../config/types";
+import type { AssetKind, AssetSourceKind } from "./asset-repository.ts";
+import type { HistoryAsset } from "../agent/history-types.ts";
 
 export interface DeleteRecentResult {
   messageIds: string[];
@@ -119,28 +120,18 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
 
   const messageIds = rows.map((r) => r.id);
   const placeholders = messageIds.map(() => "?").join(",");
-  const imageRows = db.raw
-    .prepare(
-      `SELECT message_id, id, caption, source_kind
-       FROM images
-       WHERE message_id IN (${placeholders})
-       ORDER BY id ASC`
-    )
-    .all(...messageIds) as Array<{
-      message_id: string;
-      id: number;
-      caption: string | null;
-      source_kind: ImageSourceKind;
+  const assetRows = db.raw.prepare(`SELECT message_id, id, kind, source_kind, filename, content_type, size, width, height, duration_seconds
+    FROM message_assets WHERE message_id IN (${placeholders}) ORDER BY id ASC`).all(...messageIds) as Array<{
+      message_id: string; id: number; kind: AssetKind;
+      source_kind: AssetSourceKind; filename: string | null;
+      content_type: string | null; size: number | null; width: number | null; height: number | null; duration_seconds: number | null;
     }>;
-
-  const imageMap = new Map<string, Array<{ id: number; caption: string | null; sourceKind: ImageSourceKind }>>();
-  for (const img of imageRows) {
-    let arr = imageMap.get(img.message_id);
-    if (arr === undefined) {
-      arr = [];
-      imageMap.set(img.message_id, arr);
-    }
-    arr.push({ id: img.id, caption: img.caption, sourceKind: img.source_kind });
+  const assetMap = new Map<string, HistoryAsset[]>();
+  for (const asset of assetRows) {
+    const values = assetMap.get(asset.message_id) ?? [];
+    values.push({ id: asset.id, kind: asset.kind, sourceKind: asset.source_kind, filename: asset.filename,
+      contentType: asset.content_type, size: asset.size, width: asset.width, height: asset.height, durationSeconds: asset.duration_seconds });
+    assetMap.set(asset.message_id, values);
   }
 
   const reactionRows = db.raw
@@ -163,7 +154,7 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
   }
 
   return rows.map((r) => {
-    const images = imageMap.get(r.id) ?? [];
+    const assets = assetMap.get(r.id) ?? [];
     return {
       id: r.id,
       author: r.author_username,
@@ -172,9 +163,9 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
       isBot: r.is_bot === 1,
       timestamp: r.created_at,
       replyToId: r.reply_to_id,
-      imageIds: images.map((i) => i.id),
-      captions: images.map((i) => i.caption ?? ""),
-      ...(images.length > 0 ? { imageSourceKinds: images.map((i) => i.sourceKind) } : {}),
+      imageIds: [],
+      captions: [],
+      ...(assets.length > 0 ? { assets } : {}),
       hasEmbeds: false,
       isSynthetic: r.is_synthetic === 1,
       isPromptOnly: r.is_prompt_only === 1,
@@ -378,6 +369,7 @@ export function markDiscordMessageDeleted(
   const imageResult = db.raw
     .prepare(`DELETE FROM images WHERE ${imageScope}`)
     .run(...imageParams) as { changes: number };
+  db.raw.prepare(`DELETE FROM message_assets WHERE ${imageScope}`).run(...imageParams);
   db.raw
     .prepare(`DELETE FROM message_reactions WHERE ${imageScope}`)
     .run(...imageParams);
@@ -1124,6 +1116,7 @@ export function deleteRecentMessages(
 
   // Delete images then messages (foreign key order)
   db.raw.prepare(`DELETE FROM images WHERE message_id IN (${placeholders})`).run(...messageIds);
+  db.raw.prepare(`DELETE FROM message_assets WHERE message_id IN (${placeholders})`).run(...messageIds);
   db.raw.prepare(`DELETE FROM message_reactions WHERE message_id IN (${placeholders})`).run(...messageIds);
   db.raw.prepare(`DELETE FROM messages WHERE id IN (${placeholders})`).run(...messageIds);
 

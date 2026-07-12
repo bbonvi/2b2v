@@ -1,0 +1,1 @@
+Privately read one typed chat asset by ID. Images and GIFs return visual content; audio and video return a cached or newly generated transcript; videos may also return preview frames; text is paginated. Continue with `cursor` when `next_cursor` is returned.

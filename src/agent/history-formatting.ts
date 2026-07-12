@@ -1,4 +1,4 @@
-import type { HistoryMessage } from "./history-types.ts";
+import type { HistoryAsset, HistoryMessage } from "./history-types.ts";
 import type { ImageSourceKind } from "../db/image-repository.ts";
 
 const DELETED_MESSAGE_MARKER = "[deleted]";
@@ -31,6 +31,8 @@ export interface ReplyContext {
   replyImageSourceKinds?: ImageSourceKind[];
   /** Captions on the reply target. */
   replyCaptions: string[];
+  /** Lazy assets on the reply target. */
+  replyAssets?: HistoryAsset[];
 }
 
 /** Input for formatting a single message line. */
@@ -82,6 +84,7 @@ export function formatMessageLine(input: FormatInput): string {
     if (captioningEnabled && reply.replyCaptions.length > 0) {
       metaParts.push(formatCaptionsMeta("Reply", reply.replyImageIds, reply.replyCaptions, reply.replyImageSourceKinds));
     }
+    if (reply.replyAssets !== undefined) metaParts.push(...formatAssetMeta("Reply", reply.replyAssets));
   }
 
   if (message.imageIds.length > 0) {
@@ -90,6 +93,7 @@ export function formatMessageLine(input: FormatInput): string {
   if (captioningEnabled && message.captions.length > 0) {
     metaParts.push(formatCaptionsMeta("", message.imageIds, message.captions, message.imageSourceKinds));
   }
+  if (message.assets !== undefined) metaParts.push(...formatAssetMeta("", message.assets));
   if (message.jobAnnotations !== undefined && message.jobAnnotations.length > 0) {
     metaParts.push(...message.jobAnnotations);
   }
@@ -108,6 +112,28 @@ export function formatMessageLine(input: FormatInput): string {
   const content = formatHistoryContent(message);
 
   return `[${authorPart}${targetPart}${metaPart}]: ${content}`;
+}
+
+function formatAssetMeta(prefix: "Reply" | "", assets: readonly HistoryAsset[]): string[] {
+  const labels = {
+    image: "ImgIDs",
+    gif: "GIFIDs",
+    audio: "AudioIDs",
+    video: "VideoIDs",
+    text: "TextIDs",
+    file: "FileIDs",
+  } as const;
+  const parts: string[] = [];
+  for (const kind of ["image", "gif", "audio", "video", "text", "file"] as const) {
+    const matching = assets.filter((asset) => asset.kind === kind);
+    if (matching.length === 0) continue;
+    const values = matching.map((asset) => {
+      const name = asset.filename?.replace(/[\t\n\r;()[\]]+/g, " ").trim();
+      return name !== undefined && name !== "" ? `${asset.id} "${name.replace(/"/g, "'")}"` : String(asset.id);
+    });
+    parts.push(`${prefix}${labels[kind]}: [${values.join(", ")}]`);
+  }
+  return parts;
 }
 
 function formatImageIdMeta(prefix: "Reply" | "", imageIds: number[], sourceKinds: ImageSourceKind[] | undefined): string[] {
@@ -166,13 +192,13 @@ function formatDisplayNameSuffix(
 
 /** The legend block prepended to the newer slice. */
 export const NEWER_LEGEND = [
-  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyGIFImageIDs/ReplyStickerImageIDs/ReplyCaptions/ReplyCaptionByImageID/ImageIDs/GIFImageIDs/StickerImageIDs/Captions/CaptionByImageID/ImageJob/Reactions/<trigger>)]: content",
+  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImgIDs/ReplyGIFIDs/ReplyAudioIDs/ReplyVideoIDs/ReplyTextIDs/ReplyFileIDs/ImgIDs/GIFIDs/AudioIDs/VideoIDs/TextIDs/FileIDs/ImageJob/Reactions/<trigger>)]: content",
   "Legend: Recent history date stamps appear at the first visible message and after roughly 1+ minute gaps; stamps include local time and relative age.",
   "Legend: Parenthesized names are current Discord display names, not stable identity, and may contain jokes, moods, or temporary labels; use @username for exact pings.",
 ].join("\n");
 
 /** The legend block prepended to the older slice. */
 export const OLDER_LEGEND = [
-  "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImageIDs/ReplyGIFImageIDs/ReplyStickerImageIDs/ReplyCaptions/ReplyCaptionByImageID/ImageIDs/GIFImageIDs/StickerImageIDs/Captions/CaptionByImageID/ImageJob)]: content",
-  "Legend: Older history date stamps appear at the first visible message and after roughly 5+ minute gaps; time markers use [...]. Newer history exposes MsgID for reply_to; merged messages use history-only [msg-break], quotes are excerpts for search_channel_messages mode=\"id\", and images/GIF first frames/sticker previews use read_chat_images([id]).",
+  "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImgIDs/ReplyGIFIDs/ReplyAudioIDs/ReplyVideoIDs/ReplyTextIDs/ReplyFileIDs/ImgIDs/GIFIDs/AudioIDs/VideoIDs/TextIDs/FileIDs/ImageJob)]: content",
+  "Legend: Older history date stamps appear at the first visible message and after roughly 5+ minute gaps; time markers use [...]. Newer history exposes MsgID for reply_to; merged messages use history-only [msg-break], quotes are excerpts for search_channel_messages mode=\"id\", and typed asset IDs use read_asset.",
 ].join("\n");

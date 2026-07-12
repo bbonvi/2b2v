@@ -32,8 +32,8 @@ const CodexGenerateImageParams = Type.Object({
   prompt: Type.String({
     description: "The final visual brief sent to Codex image generation.",
   }),
-  image_ids: Type.Optional(Type.Array(Type.Number(), {
-    description: "Chat ImageIDs to pass as visual reference inputs.",
+  asset_ids: Type.Optional(Type.Array(Type.Number(), {
+    description: "Visual ImgIDs or GIFIDs from chat history to use as reference inputs.",
   })),
   output_format: Type.Optional(Type.Union([
     Type.Literal("png"),
@@ -98,8 +98,9 @@ export interface CodexGenerateImageToolDeps {
   logger?: Logger;
   imageReadMaxPerCall: number;
   imageGenerationQuality: ImageGenerationQuality;
-  getImageById: (id: number) => ReferenceImageRecord | null;
-  readFile: (path: string) => Buffer | null;
+  getImageById?: (id: number) => ReferenceImageRecord | null;
+  readFile?: (path: string) => Buffer | null;
+  resolveReferenceImage?: (id: number) => Promise<ReferenceImageInput | null>;
   onGeneratedImage: (attachment: GeneratedImageAttachment) => void;
   /** Tool-result template used when a related async image job is already active. */
   asyncJobAlreadyActiveTemplate?: string;
@@ -961,14 +962,14 @@ function outputFormat(value: unknown): OutputFormat {
   return value === "jpeg" || value === "webp" || value === "png" ? value : DEFAULT_OUTPUT_FORMAT;
 }
 
-function parseImageIds(value: unknown): number[] {
+function parseAssetIds(value: unknown): number[] {
   if (value === undefined) return [];
-  if (!Array.isArray(value)) throw new Error("image_ids must be an array of chat image IDs.");
+  if (!Array.isArray(value)) throw new Error("asset_ids must be an array of visual chat asset IDs.");
   const result: number[] = [];
   const seen = new Set<number>();
   for (const item of value) {
     if (typeof item !== "number" || !Number.isInteger(item) || item <= 0) {
-      throw new Error("image_ids must contain positive integer chat image IDs.");
+      throw new Error("asset_ids must contain positive integer visual asset IDs.");
     }
     if (seen.has(item)) continue;
     seen.add(item);
@@ -977,16 +978,22 @@ function parseImageIds(value: unknown): number[] {
   return result;
 }
 
-function loadReferenceImages(deps: CodexGenerateImageToolDeps, imageIds: number[]): ReferenceImageInput[] {
+async function loadReferenceImages(deps: CodexGenerateImageToolDeps, imageIds: number[]): Promise<ReferenceImageInput[]> {
   if (imageIds.length > deps.imageReadMaxPerCall) {
     throw new Error(`Too many reference image IDs requested (${imageIds.length}); maximum is ${deps.imageReadMaxPerCall} per call.`);
   }
 
   const images: ReferenceImageInput[] = [];
   for (const id of imageIds) {
-    const record = deps.getImageById(id);
+    if (deps.resolveReferenceImage !== undefined) {
+      const resolved = await deps.resolveReferenceImage(id);
+      if (resolved === null) throw new Error(`Reference asset ${id} was not found or is not visual.`);
+      images.push(resolved);
+      continue;
+    }
+    const record = deps.getImageById?.(id) ?? null;
     if (record === null) throw new Error(`Reference image ${id} was not found.`);
-    const buffer = deps.readFile(record.path);
+    const buffer = deps.readFile?.(record.path) ?? null;
     if (buffer === null) throw new Error(`Reference image ${id} could not be read from storage.`);
     images.push({
       id: record.id,
@@ -1024,7 +1031,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         prompt: string;
         output_format?: unknown;
         "4k"?: unknown;
-        image_ids?: unknown;
+        asset_ids?: unknown;
         separate_job?: unknown;
         allows_group_corrections?: unknown;
         replaces_job_id?: unknown;
@@ -1033,7 +1040,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
       if (prompt === "") throw new Error("Image prompt must not be empty.");
       const output = outputFormat(p.output_format);
       const is4k = p["4k"] === true;
-      const imageIds = parseImageIds(p.image_ids);
+      const imageIds = parseAssetIds(p.asset_ids);
       if (deps.enqueueImageJob !== undefined) {
         const replacesJobId = typeof p.replaces_job_id === "string" && p.replaces_job_id.trim() !== ""
           ? p.replaces_job_id.trim()
@@ -1093,7 +1100,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
           },
         };
       }
-      const referenceImages = loadReferenceImages(deps, imageIds);
+      const referenceImages = await loadReferenceImages(deps, imageIds);
       const token = await getCodexApiKey(deps.codexAuthPath);
       const accountId = extractChatGptAccountId(token);
       const parsed = await requestImage({
@@ -1167,7 +1174,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         parsed.requestedSize !== undefined ? `Requested size: ${parsed.requestedSize}.` : "",
         actualSize !== undefined ? `Actual size: ${actualSize}.` : "",
         `Attachment ID: ${attachmentId}.`,
-        referenceImages.length > 0 ? `Reference ImageIDs: [${referenceImages.map((image) => image.id).join(", ")}].` : "",
+        referenceImages.length > 0 ? `Reference asset IDs: [${referenceImages.map((image) => image.id).join(", ")}].` : "",
         `Status: ${parsed.image.status}.`,
         parsed.image.revisedPrompt !== undefined ? `Revised prompt: ${parsed.image.revisedPrompt}` : "",
         "The generated image is queued and will be attached to the final Discord reply.",

@@ -26,7 +26,9 @@ import type { OpenRouterMessage } from "../llm/types";
 import { getChannelHumanActivityBuckets, getHistoryMessages, getMessageById } from "../db/message-repository";
 import { countUserMemoriesByUser, listMemories } from "../db/memory-repository";
 import { channelDisplayName, createTargetChannelResolver } from "../discord/message-sender";
-import { createStoredImageAttachmentResolver } from "../agent/stored-image-attachments";
+import { createStoredAssetAttachmentResolver } from "../agent/stored-asset-attachments";
+import { createDiscordAssetSourceResolver } from "../discord/asset-resolver";
+import { DEFAULT_ASSET_READING } from "../config/defaults";
 import { createGeneratedImageRuntime, shortQuote } from "../agent/generated-image-runtime";
 import { formatLocalWallClock } from "../time/agent-time";
 
@@ -1886,10 +1888,18 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         log: log.child({ guildId: input.candidate.guildId, channelId: input.candidate.channelId, requestId: input.requestLog.requestId, component: "ambient-initiative" }),
         requestLog: input.requestLog,
         generatedImages,
-        resolveImageAttachments: createStoredImageAttachmentResolver({
+        resolveImageAttachments: createStoredAssetAttachmentResolver({
           db,
           guildId: input.candidate.guildId,
-          logger: log.child({ component: "stored-image-attachments", guildId: input.candidate.guildId, channelId: input.candidate.channelId, requestId: input.requestLog.requestId }),
+          maxDownloadBytes: input.guildConfig.assetReading?.maxDownloadBytes ?? DEFAULT_ASSET_READING.maxDownloadBytes,
+          resolveSource: createDiscordAssetSourceResolver({
+            fetchMessage: async (channelId, messageId) => {
+              const channel = await fetchAccessibleGuildChannel(channelId);
+              if (channel === null) return null;
+              try { return await channel.messages.fetch(messageId); } catch { return null; }
+            },
+          }),
+          logger: log.child({ component: "stored-asset-attachments", guildId: input.candidate.guildId, channelId: input.candidate.channelId, requestId: input.requestLog.requestId }),
         }),
         overrides: {
           triggerOverride: { reason: "ambient_initiative" },

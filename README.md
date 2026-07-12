@@ -74,6 +74,8 @@ adminUserIds: []
 
 All fields are optional unless the matching feature needs credentials or IDs. Live config files are ignored by git except committed `.example` files.
 
+Message uploads, embeds, and stickers appear in history as typed short IDs (`ImgIDs`, `GIFIDs`, `AudioIDs`, `VideoIDs`, `TextIDs`, `FileIDs`). Media is fetched lazily from Discord; `assetReading` in the global or guild YAML controls text/transcript page size, download limits, transcription duration, and video preview frames.
+
 Verification:
 
 ```bash

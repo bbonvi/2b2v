@@ -401,13 +401,13 @@ describe("getHistoryMessages", () => {
     });
   });
 
-  test("images grouped correctly per message (imageIds + captions parallel arrays)", () => {
+  test("legacy stored images are omitted after asset cutover", () => {
     insertMessage("m1", { channelId: "c1", createdAt: now - 2 * hour });
     insertMessage("m2", { channelId: "c1", createdAt: now - 1 * hour });
 
-    const imgId1 = insertImage("m1", { caption: "cat photo" });
-    const imgId2 = insertImage("m1", { caption: "dog photo" });
-    const imgId3 = insertImage("m2", { caption: "bird photo" });
+    insertImage("m1", { caption: "cat photo" });
+    insertImage("m1", { caption: "dog photo" });
+    insertImage("m2", { caption: "bird photo" });
 
     const results = getHistoryMessages(db, "c1", 10);
     expect(results.length).toBe(2);
@@ -415,15 +415,15 @@ describe("getHistoryMessages", () => {
     const msg1 = results[0];
     if (msg1 === undefined) throw new Error("unreachable");
     expect(msg1.id).toBe("m1");
-    expect(msg1.imageIds).toEqual([imgId1, imgId2]);
-    expect(msg1.captions).toEqual(["cat photo", "dog photo"]);
-    expect(msg1.imageSourceKinds).toEqual(["image", "image"]);
+    expect(msg1.imageIds).toEqual([]);
+    expect(msg1.captions).toEqual([]);
+    expect(msg1.imageSourceKinds).toBeUndefined();
 
     const msg2 = results[1];
     if (msg2 === undefined) throw new Error("unreachable");
     expect(msg2.id).toBe("m2");
-    expect(msg2.imageIds).toEqual([imgId3]);
-    expect(msg2.captions).toEqual(["bird photo"]);
+    expect(msg2.imageIds).toEqual([]);
+    expect(msg2.captions).toEqual([]);
   });
 
   test("messages without images have empty imageIds/captions", () => {
@@ -680,15 +680,15 @@ describe("getParentPreContext", () => {
     });
   });
 
-  test("includes images grouped by message", () => {
+  test("omits legacy stored images from parent context", () => {
     const threadCreatedAt = now;
 
     insertMessage("m1", { channelId: "parent-chan", createdAt: now - 2 * hour });
     insertMessage("m2", { channelId: "parent-chan", createdAt: now - 1 * hour });
 
-    const imgId1 = insertImage("m1", { caption: "first image" });
-    const imgId2 = insertImage("m1", { caption: "second image" });
-    const imgId3 = insertImage("m2", { caption: null });
+    insertImage("m1", { caption: "first image" });
+    insertImage("m1", { caption: "second image" });
+    insertImage("m2", { caption: null });
 
     const results = getParentPreContext(db, "parent-chan", threadCreatedAt, 20);
 
@@ -696,13 +696,13 @@ describe("getParentPreContext", () => {
 
     const msg1 = results[0];
     if (msg1 === undefined) throw new Error("unreachable");
-    expect(msg1.imageIds).toEqual([imgId1, imgId2]);
-    expect(msg1.captions).toEqual(["first image", "second image"]);
+    expect(msg1.imageIds).toEqual([]);
+    expect(msg1.captions).toEqual([]);
 
     const msg2 = results[1];
     if (msg2 === undefined) throw new Error("unreachable");
-    expect(msg2.imageIds).toEqual([imgId3]);
-    expect(msg2.captions).toEqual([""]);
+    expect(msg2.imageIds).toEqual([]);
+    expect(msg2.captions).toEqual([]);
   });
 
   test("returns empty array when no messages exist before timestamp", () => {

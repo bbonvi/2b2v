@@ -1,5 +1,18 @@
 import type { TrimConfig } from "../config/types.ts";
 import type { ImageSourceKind } from "../db/image-repository.ts";
+import type { AssetKind, AssetSourceKind } from "../db/asset-repository.ts";
+
+export interface HistoryAsset {
+  id: number;
+  kind: AssetKind;
+  sourceKind: AssetSourceKind;
+  filename: string | null;
+  contentType: string | null;
+  size: number | null;
+  width: number | null;
+  height: number | null;
+  durationSeconds: number | null;
+}
 
 /** A stored message with full metadata for history processing. */
 export interface HistoryMessage {
@@ -27,6 +40,8 @@ export interface HistoryMessage {
   captions: string[];
   /** Source media kinds (parallel to imageIds), used to mark GIF/sticker previews in history. */
   imageSourceKinds?: ImageSourceKind[];
+  /** Lazy message assets shown as typed short IDs. */
+  assets?: HistoryAsset[];
   /** Whether the message has embeds (prevents merging). */
   hasEmbeds: boolean;
   /** Whether this is a synthetic event (e.g., thread creation). Prevents merging. */

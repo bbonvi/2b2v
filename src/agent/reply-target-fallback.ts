@@ -1,7 +1,8 @@
 import type { Database } from "../db/database.ts";
+import { getAssetsByMessageId } from "../db/asset-repository.ts";
 import type { ImageSourceKind } from "../db/image-repository.ts";
 import type { HistoryMessage } from "./history-types.ts";
-import { appendStickerTags, guessImageMimeFromUrl, imageKindForAttachment, imageKindForEmbed, stickerImagePreview, type StickerLike } from "../discord/message-media.ts";
+import { appendStickerTags, type StickerLike } from "../discord/message-media.ts";
 
 /** A Discord message as returned by the fetch callback. */
 export interface FetchedDiscordMessage {
@@ -15,8 +16,14 @@ export interface FetchedDiscordMessage {
   isBot: boolean;
   replyToId: string | null;
   attachments: Array<{
+    id?: string;
+    name?: string;
     url: string;
     contentType: string | null;
+    size?: number;
+    width?: number | null;
+    height?: number | null;
+    durationSeconds?: number | null;
   }>;
   embeds?: Array<{
     type?: string | null;
@@ -36,7 +43,9 @@ export interface ReplyFallbackDeps {
   /** Fetch a single message from Discord by channel+message ID. Returns null on failure/not found. */
   fetchDiscordMessage: (channelId: string, messageId: string) => Promise<FetchedDiscordMessage | null>;
   /** Process and store an image attachment or preview (fire-and-forget semantics). */
-  processImage: (url: string, contentType: string, messageId: string, sourceKind?: ImageSourceKind) => Promise<void>;
+  processImage?: (url: string, contentType: string, messageId: string, sourceKind?: ImageSourceKind) => Promise<void>;
+  /** Persist generalized lazy asset metadata for a fetched reply target. */
+  syncAssets?: (message: FetchedDiscordMessage) => void;
 }
 
 function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMessage[] {
@@ -63,38 +72,12 @@ function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMess
 
   if (rows.length === 0) return [];
 
-  const messageIds = rows.map((row) => row.id);
-  const imagePlaceholders = messageIds.map(() => "?").join(",");
-  const imageRows = deps.db.raw
-    .prepare(
-      `SELECT message_id, id, caption, source_kind
-       FROM images
-       WHERE message_id IN (${imagePlaceholders})
-       ORDER BY id ASC`
-    )
-    .all(...messageIds) as Array<{
-      message_id: string;
-      id: number;
-      caption: string | null;
-      source_kind: ImageSourceKind;
-    }>;
-
-  const imageMap = new Map<string, Array<{ id: number; caption: string | null; sourceKind: ImageSourceKind }>>();
-  for (const image of imageRows) {
-    const existing = imageMap.get(image.message_id);
-    if (existing !== undefined) {
-      existing.push({ id: image.id, caption: image.caption, sourceKind: image.source_kind });
-    } else {
-      imageMap.set(image.message_id, [{ id: image.id, caption: image.caption, sourceKind: image.source_kind }]);
-    }
-  }
-
   const rowMap = new Map(rows.map((row) => [row.id, row]));
   const messages: HistoryMessage[] = [];
   for (const id of ids) {
     const row = rowMap.get(id);
     if (row === undefined) continue;
-    const images = imageMap.get(row.id) ?? [];
+    const assets = getAssetsByMessageId(deps.db, row.id);
     messages.push({
       id: row.id,
       author: row.author_username,
@@ -103,9 +86,13 @@ function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMess
       isBot: row.is_bot === 1,
       timestamp: row.created_at,
       replyToId: row.reply_to_id,
-      imageIds: images.map((image) => image.id),
-      captions: images.map((image) => image.caption ?? ""),
-      ...(images.length > 0 ? { imageSourceKinds: images.map((image) => image.sourceKind) } : {}),
+      imageIds: [],
+      captions: [],
+      ...(assets.length > 0 ? { assets: assets.map((asset) => ({
+        id: asset.id, kind: asset.kind, sourceKind: asset.sourceKind, filename: asset.filename,
+        contentType: asset.contentType, size: asset.size, width: asset.width, height: asset.height,
+        durationSeconds: asset.durationSeconds,
+      })) } : {}),
       hasEmbeds: false,
       isSynthetic: row.is_synthetic === 1,
       relatedThreadId: row.related_thread_id,
@@ -188,33 +175,9 @@ export async function fetchMissingReplyTargets(
         discordMsg.replyToId,
       );
 
-    // Ingest image attachments (fire-and-forget)
-    for (const att of discordMsg.attachments) {
-      const ct = att.contentType ?? "";
-      if (!ct.startsWith("image/")) continue;
-      void deps.processImage(att.url, ct, discordMsg.id, imageKindForAttachment(ct, att.url)).catch(() => {
-        // Image ingest failure is non-fatal
-      });
-    }
+    deps.syncAssets?.(discordMsg);
 
-    // Ingest embed images (Tenor/Giphy GIFs)
-    for (const embed of discordMsg.embeds ?? []) {
-      const embedUrl = embed.image?.url ?? embed.thumbnail?.url;
-      if (embedUrl === undefined) continue;
-
-      void deps.processImage(embedUrl, guessImageMimeFromUrl(embedUrl), discordMsg.id, imageKindForEmbed(embed, embedUrl)).catch(() => {
-        // Embed image ingest failure is non-fatal
-      });
-    }
-
-    for (const sticker of discordMsg.stickers ?? []) {
-      const preview = stickerImagePreview(sticker);
-      if (preview === null) continue;
-      void deps.processImage(preview.url, preview.mimeType, discordMsg.id, preview.sourceKind).catch(() => {
-        // Sticker ingest failure is non-fatal
-      });
-    }
-
+    const assets = getAssetsByMessageId(deps.db, discordMsg.id);
     fetched.push({
       id: discordMsg.id,
       author: discordMsg.authorUsername,
@@ -226,6 +189,11 @@ export async function fetchMissingReplyTargets(
       replyToId: discordMsg.replyToId,
       imageIds: [], // Images are ingested asynchronously; IDs not available yet
       captions: [],
+      ...(assets.length > 0 ? { assets: assets.map((asset) => ({
+        id: asset.id, kind: asset.kind, sourceKind: asset.sourceKind, filename: asset.filename,
+        contentType: asset.contentType, size: asset.size, width: asset.width, height: asset.height,
+        durationSeconds: asset.durationSeconds,
+      })) } : {}),
       hasEmbeds: false,
       isSynthetic: false, // Fetched messages are real user messages
       relatedThreadId: null,

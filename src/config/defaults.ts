@@ -193,6 +193,16 @@ export const DEFAULT_VOICE_PRESET: VoicePreset = {
   model: "eleven_v3",
 };
 
+export const DEFAULT_ASSET_READING = {
+  maxCharsPerRead: 30_000,
+  textRangeBytes: 131_072,
+  maxDownloadBytes: 100 * 1024 * 1024,
+  maxTranscriptionDurationSeconds: 7_200,
+  videoPreviewMaxBytes: 100 * 1024 * 1024,
+  videoPreviewTimesSeconds: [0, 1, 5],
+  videoPreviewTimeoutSeconds: 30,
+} as const;
+
 export const DEFAULT_EMOTES: EmotesConfig = {
   include: false,
 };

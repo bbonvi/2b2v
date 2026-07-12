@@ -260,7 +260,7 @@ export interface HandlerDeps {
   consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
   /** Attachments already produced before this reply loop; sent with the first visible message. */
   initialPendingAttachments?: OutboundAttachment[];
-  /** Resolves image_ids on <message> envelopes into outgoing Discord attachments. */
+  /** Resolves asset_ids on <message> envelopes into outgoing Discord attachments. */
   resolveImageAttachments?: ImageAttachmentResolver;
   /** Disable streamed Discord sends so callers can re-check state before final delivery. */
   disableLiveOutput?: boolean;
@@ -1205,7 +1205,7 @@ const PARALLEL_SAFE_READ_ONLY_TOOLS = new Set([
   "list_scheduled_tasks",
   "list_chat_users",
   "list_channels",
-  "read_chat_images",
+  "read_asset",
   "read_user_avatar",
   "search_channel_messages",
   "summarize_video",
@@ -2014,8 +2014,9 @@ async function sendResponseSegments(input: {
     const pendingAttachments = input.pendingAttachments !== undefined && input.pendingAttachments.length > 0
       ? input.pendingAttachments.splice(0)
       : undefined;
-    const referencedAttachments = segment.delivery?.imageIds !== undefined && segment.delivery.imageIds.length > 0
-      ? (await input.resolveImageAttachments?.(segment.delivery.imageIds)) ?? []
+    const referencedIds = segment.delivery?.assetIds;
+    const referencedAttachments = referencedIds !== undefined && referencedIds.length > 0
+      ? (await input.resolveImageAttachments?.(referencedIds)) ?? []
       : [];
     const attachments = [
       ...(pendingAttachments ?? []),

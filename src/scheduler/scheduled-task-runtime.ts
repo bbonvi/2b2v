@@ -3,7 +3,6 @@ import type { Client, Guild, TextChannel } from "discord.js";
 import type { AssembledContext } from "../agent/context-assembly";
 import { createGeneratedImageRuntime, type GeneratedImageRuntime, shortQuote } from "../agent/generated-image-runtime";
 import type { HandleResult, HandlerDeps, ImageAttachmentResolver, IncomingMessage, MessageSender } from "../agent/handler";
-import { createStoredImageAttachmentResolver } from "../agent/stored-image-attachments";
 import type { HistoryMessage } from "../agent/history-types";
 import type { GuildConfig } from "../config/types";
 import type { Database } from "../db/database";
@@ -82,6 +81,7 @@ export function createScheduledTaskRunner(input: {
     resolveImageAttachments?: ImageAttachmentResolver;
     overrides?: Partial<HandlerDeps>;
   }) => HandlerDeps;
+  resolveAssetAttachments: (guildId: string, guildConfig: GuildConfig, logger: Logger) => ImageAttachmentResolver;
   runLoggedAgentTurn: (input: { incoming: IncomingMessage; deps: HandlerDeps; requestLog: RequestLog; logger: Logger; afterSuccess?: (result: HandleResult) => void | Promise<void>; onFinally?: (result: HandleResult | undefined) => void }) => Promise<HandleResult>;
   runMemoryPostReplyExtraction: (input: { guildConfig: GuildConfig; memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]; guild: Guild; channel: unknown; sourceRequestId: string; source?: string; currentUserId: string; currentUsername?: string }) => Promise<unknown>;
   runRelationshipPostReplyExtraction: (input: { guildConfig: GuildConfig; memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]; guild?: Guild; channel?: unknown; source?: string; sourceRequestId?: string; currentUserId: string; currentUsername?: string }) => Promise<void>;
@@ -228,11 +228,8 @@ export function createScheduledTaskRunner(input: {
         requestLog,
         tts: input.createTtsGenerator(guildConfig),
         generatedImages,
-        resolveImageAttachments: createStoredImageAttachmentResolver({
-          db: input.db,
-          guildId,
-          logger: scheduleLog.child({ component: "stored-image-attachments", guildId, channelId }),
-        }),
+        resolveImageAttachments: input.resolveAssetAttachments(guildId, guildConfig,
+          scheduleLog.child({ component: "stored-asset-attachments", guildId, channelId })),
         overrides: {
           onStillWorking: (destinationChannelId) => { typing.startLoop(destinationChannelId); },
           getTypingStartedAt: typing.getTypingStartedAt,

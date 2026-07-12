@@ -6,7 +6,8 @@ import { translateOutbound, type OutboundResolvers } from "./translation";
 import type { MessageSender, OutboundAttachment } from "../agent/handler";
 import type { Logger } from "../logger";
 import type { Database } from "../db/database";
-import { storeImageBufferUnmodified } from "../db/image-ingest";
+import { syncMessageAssets } from "../db/asset-repository.ts";
+import { assetsFromDiscordMessage } from "./message-assets.ts";
 import { markBotParticipating, updateThreadActivity, upsertThread } from "../db/thread-repository";
 import type { RoutedMessageSource } from "../db/message-repository";
 
@@ -277,35 +278,8 @@ export function createDiscordMessageSender(input: {
     }
   }
 
-  async function storeBotImageAttachments(
-    messageId: string,
-    targetGuildId: string,
-    targetChannelId: string,
-    attachments: OutboundAttachment[] | undefined,
-  ): Promise<void> {
-    if (attachments === undefined || attachments.length === 0) return;
-    const results = await Promise.allSettled(attachments.map((attachment) =>
-      storeImageBufferUnmodified({
-        db: input.db,
-        attachmentsDir: input.getAttachmentsDir(targetGuildId),
-      }, {
-        buffer: attachment.buffer,
-        mimeType: attachment.contentType,
-        messageId,
-        guildId: targetGuildId,
-        channelId: targetChannelId,
-        caption: attachment.historyText,
-      })
-    ));
-    for (let i = 0; i < results.length; i += 1) {
-      const result = results[i];
-      if (result?.status !== "rejected") continue;
-      input.logger.warn("bot image attachment ingest failed", {
-        messageId,
-        filename: attachments[i]?.filename,
-        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
-      });
-    }
+  function storeBotAssets(message: Message): void {
+    syncMessageAssets(input.db, { messageId: message.id, assets: assetsFromDiscordMessage(message) });
   }
 
   function attachmentBuilders(attachments: OutboundAttachment[] | undefined): AttachmentBuilder[] {
@@ -434,7 +408,7 @@ export function createDiscordMessageSender(input: {
         sentReplyToId = null;
       }
       storeBotMessage(sent.id, targetGuildId, targetChannelId, voiceRawContent(firstChunk), voice.historyText ?? text, sentReplyToId);
-      await storeBotImageAttachments(sent.id, targetGuildId, targetChannelId, attachments);
+      storeBotAssets(sent);
       for (let i = 1; i < chunks.length; i++) {
         const chunk = chunks[i] as string;
         const followup = await sendToTargetChannel(buildAttachmentPayload(
@@ -443,6 +417,7 @@ export function createDiscordMessageSender(input: {
           discordMessageNonce(dedupeKey, `voice-${i}`),
         ));
         storeBotMessage(followup.id, targetGuildId, targetChannelId, chunk, chunk, null);
+        storeBotAssets(followup);
       }
       noteThreadActivity(sent.id);
       return { sentMessageId: sent.id, warnings: unresolvedEmojiWarnings(warnings) };
@@ -477,7 +452,7 @@ export function createDiscordMessageSender(input: {
       }
       if (i === 0) firstId = sent.id;
       storeBotMessage(sent.id, targetGuildId, targetChannelId, chunk, i === 0 ? text : chunk, sentReplyToId);
-      if (i === 0) await storeBotImageAttachments(sent.id, targetGuildId, targetChannelId, attachments);
+      storeBotAssets(sent);
     }
     noteThreadActivity(firstId);
     return { sentMessageId: firstId, warnings: unresolvedEmojiWarnings(warnings) };

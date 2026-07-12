@@ -63,6 +63,7 @@ export const SCHEMA_SQL = `
     routed_from_guild_id   TEXT,
     routed_from_channel_id TEXT,
     routed_from_message_id TEXT,
+    assets_indexed_at   INTEGER,
     deleted_at          INTEGER
   );
 
@@ -187,6 +188,41 @@ export const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_images_guild_channel
     ON images(guild_id, channel_id);
+
+  CREATE TABLE IF NOT EXISTS message_assets (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id            TEXT NOT NULL,
+    guild_id              TEXT NOT NULL,
+    channel_id            TEXT NOT NULL,
+    source_kind           TEXT NOT NULL CHECK(source_kind IN ('attachment', 'embed', 'sticker')),
+    source_key            TEXT NOT NULL,
+    kind                  TEXT NOT NULL CHECK(kind IN ('image', 'gif', 'audio', 'video', 'text', 'file')),
+    filename              TEXT,
+    content_type          TEXT,
+    size                  INTEGER,
+    width                 INTEGER,
+    height                INTEGER,
+    duration_seconds      REAL,
+    extracted_text        TEXT,
+    extraction_provider   TEXT,
+    extracted_at          INTEGER,
+    created_at            INTEGER NOT NULL,
+    UNIQUE(message_id, source_kind, source_key)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_message_assets_message
+    ON message_assets(message_id);
+
+  CREATE INDEX IF NOT EXISTS idx_message_assets_guild_channel
+    ON message_assets(guild_id, channel_id);
+
+  CREATE TABLE IF NOT EXISTS asset_backfill_checkpoints (
+    channel_id          TEXT PRIMARY KEY,
+    guild_id            TEXT NOT NULL,
+    before_message_id   TEXT,
+    completed_at        INTEGER,
+    updated_at          INTEGER NOT NULL
+  );
 
   CREATE TABLE IF NOT EXISTS threads (
     thread_id           TEXT PRIMARY KEY,

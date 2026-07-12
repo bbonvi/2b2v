@@ -1,10 +1,11 @@
 import type { Guild, Message, TextChannel } from "discord.js";
 import type { GuildConfig } from "../config/types";
 import type { Database } from "../db/database";
-import { processAndStoreImage } from "../db/image-ingest";
 import { cleanupDeletedBotMessage } from "../db/message-cleanup";
 import { upsertBotMessageContent } from "../db/message-repository";
 import type { ReplyFallbackDeps } from "../agent/reply-target-fallback";
+import { syncMessageAssets } from "../db/asset-repository.ts";
+import { assetsFromDiscordMessage } from "./message-assets.ts";
 
 export function fetchedDiscordMessageToFallback(fetched: Message): Awaited<ReturnType<ReplyFallbackDeps["fetchDiscordMessage"]>> {
   return {
@@ -17,8 +18,14 @@ export function fetchedDiscordMessageToFallback(fetched: Message): Awaited<Retur
     isBot: fetched.author.bot,
     replyToId: fetched.reference?.messageId ?? null,
     attachments: [...fetched.attachments.values()].map((attachment) => ({
+      id: attachment.id,
+      name: attachment.name,
       url: attachment.url,
       contentType: attachment.contentType,
+      size: attachment.size,
+      width: attachment.width,
+      height: attachment.height,
+      durationSeconds: attachment.duration,
     })),
     embeds: fetched.embeds.map((embed) => ({
       type: embed.data.type,
@@ -54,25 +61,12 @@ export function createDiscordReplyFallbackDeps(input: {
         : input.guild.channels.cache.get(chId) ?? null;
       if (channel === null || typeof channel !== "object" || !("messages" in channel)) return null;
       try {
-        return fetchedDiscordMessageToFallback(await (channel as TextChannel).messages.fetch(msgId));
+        const message = await (channel as TextChannel).messages.fetch(msgId);
+        syncMessageAssets(input.db, { messageId: message.id, assets: assetsFromDiscordMessage(message) });
+        return fetchedDiscordMessageToFallback(message);
       } catch {
         return null;
       }
-    },
-    processImage: async (url, contentType, messageId, sourceKind) => {
-      await processAndStoreImage({
-        db: input.db,
-        attachmentsDir: input.guildConfig.attachmentsDir,
-        maxDimension: input.guildConfig.imageMaxDimension,
-        fetchFn: fetch,
-      }, {
-        url,
-        mimeType: contentType,
-        messageId,
-        guildId: input.guildId,
-        channelId: input.channelId,
-        sourceKind,
-      });
     },
   };
 }
@@ -87,7 +81,6 @@ export function createSyntheticReplyFallbackDeps(input: {
     guildId: input.guildId,
     channelId: input.channelId,
     fetchDiscordMessage: () => Promise.resolve(null),
-    processImage: async () => {},
   };
 }
 

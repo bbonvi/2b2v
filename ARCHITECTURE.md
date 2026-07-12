@@ -70,7 +70,9 @@ Ambient memory extraction is separate from reply triggering. Successful post-rep
 
 Agent schedule tools are current-guild and current-channel scoped. Scheduled tasks are private by default, carry requester metadata plus a concise handoff note/fire count, and may self-complete recurring work. Non-admin recurring task pressure caps are configured by `schedulePressure`. One-off timers longer than JavaScript's maximum timeout must be chunked and re-armed.
 
-Stored images are canonical sources. Runtime model reads may use temporary compressed copies, but must not replace the canonical attachment.
+Discord uploads, embeds, and stickers are stored as metadata-only short asset references. Reads, reposts, and image-generation references resolve live sources lazily; signed Discord URLs are never persisted. Paid transcripts may be cached and paginated, while image/video bytes remain ephemeral.
+
+Asset history backfill pages each stored channel newest-first through Discord's 100-message endpoint. Per-channel cursors and `(message_id, source_kind, source_key)` uniqueness make page retries idempotent.
 
 Avatar reads are ephemeral and guild-scoped. They must not write avatar bytes into SQLite or the image attachment store.
 

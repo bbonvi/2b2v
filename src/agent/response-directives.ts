@@ -9,7 +9,7 @@ export interface MessageDelivery {
   reply?: boolean;
   replyTo?: string;
   keepTyping?: boolean;
-  imageIds?: number[];
+  assetIds?: number[];
 }
 
 export interface ParsedResponseDirectives {
@@ -146,33 +146,26 @@ function parseMessageDelivery(attrs: string): MessageDelivery | undefined {
       delivery.replyTo = value;
     }
   }
-  const imageIds = parseImageIdsAttribute(attrs);
-  if (imageIds !== undefined && imageIds.length > 0) delivery.imageIds = imageIds;
+  const assetIds = parseAssetIdsAttribute(attrs);
+  if (assetIds !== undefined && assetIds.length > 0) delivery.assetIds = assetIds;
   return delivery.channelId !== undefined
     || delivery.reply !== undefined
     || delivery.replyTo !== undefined
     || delivery.keepTyping !== undefined
-    || delivery.imageIds !== undefined
+    || delivery.assetIds !== undefined
     ? delivery
     : undefined;
 }
 
-function parseImageIdsAttribute(attrs: string): number[] | undefined {
-  const match = /\simage_ids\s*=\s*(?:"([^"]*)"|'([^']*)'|(\[[^\]]*\]))/i.exec(attrs);
+function parseAssetIdsAttribute(attrs: string): number[] | undefined {
+  const match = /\sasset_ids\s*=\s*(?:"([^"]*)"|'([^']*)'|(\[[^\]]*\]))/i.exec(attrs);
   if (match === null) return undefined;
   const raw = unescapeAttributeValue(match[1] ?? match[2] ?? match[3] ?? "").trim();
   if (!raw.startsWith("[") || !raw.endsWith("]")) return undefined;
   const inner = raw.slice(1, -1).trim();
   if (inner === "") return [];
-  const ids: number[] = [];
-  for (const part of inner.split(",")) {
-    const trimmed = part.trim();
-    if (!/^\d+$/.test(trimmed)) return undefined;
-    const id = Number(trimmed);
-    if (!Number.isSafeInteger(id) || id <= 0) return undefined;
-    ids.push(id);
-  }
-  return ids;
+  const ids = inner.split(",").map((part) => Number(part.trim()));
+  return ids.every((id) => Number.isSafeInteger(id) && id > 0) ? ids : undefined;
 }
 
 function renderIgnoredText(rawText: string): string {
@@ -194,8 +187,8 @@ function hasOutputSegment(segments: ResponseSegment[]): boolean {
   return segments.some((segment) => segment.kind !== "messageBreak");
 }
 
-function hasImageIds(delivery: MessageDelivery | undefined): delivery is MessageDelivery & { imageIds: number[] } {
-  return delivery?.imageIds !== undefined && delivery.imageIds.length > 0;
+function hasAttachmentIds(delivery: MessageDelivery | undefined): delivery is MessageDelivery {
+  return (delivery?.assetIds?.length ?? 0) > 0;
 }
 
 export function sanitizeVoiceText(text: string): string {
@@ -277,7 +270,7 @@ function parseRange(
         pushMessageBreak(segments, delivery);
         segments.push(...nested.segments);
         pushMessageBreak(segments);
-      } else if (hasImageIds(delivery)) {
+      } else if (hasAttachmentIds(delivery)) {
         pushEmptyMessage(segments, delivery);
       }
       cursor = nested.index;

@@ -403,6 +403,17 @@ export interface RelationshipConfig {
 
 export type RelationshipConfigYaml = Partial<RelationshipConfig>;
 
+/** Limits for lazy message-asset reading and extraction. */
+export interface AssetReadingConfig {
+  maxCharsPerRead: number;
+  textRangeBytes: number;
+  maxDownloadBytes: number;
+  maxTranscriptionDurationSeconds: number;
+  videoPreviewMaxBytes: number;
+  videoPreviewTimesSeconds: number[];
+  videoPreviewTimeoutSeconds: number;
+}
+
 /** Per-guild configuration. Source of truth is the YAML file. */
 export interface GuildConfig {
   guildId: string;
@@ -426,6 +437,7 @@ export interface GuildConfig {
   /** Dedicated image-generation request settings. */
   imageGeneration: ImageGenerationConfig;
   attachmentsDir: string;
+  assetReading?: AssetReadingConfig;
   instructions: string;
   tts?: TtsConfig;
   /** Emote/emoji context configuration. */
@@ -485,6 +497,7 @@ export interface GlobalConfig {
   /** Default image-generation request settings. */
   defaultImageGeneration: ImageGenerationConfig;
   defaultAttachmentsDir: string;
+  defaultAssetReading?: AssetReadingConfig;
   defaultInstructions: string;
   logLevel: string;
   dataDir: string;
@@ -557,6 +570,7 @@ export interface GuildConfigYaml {
     quality?: ImageGenerationQuality;
   };
   attachmentsDir?: string;
+  assetReading?: Partial<AssetReadingConfig>;
   instructions?: string;
   instructionsPath?: string;
   tts?: Partial<TtsConfig> & {
@@ -648,6 +662,7 @@ export interface MainConfigYaml {
     quality?: ImageGenerationQuality;
   };
   attachmentsDir?: string;
+  assetReading?: Partial<AssetReadingConfig>;
   logLevel?: string;
   dataDir?: string;
   tts?: Partial<TtsConfig> & {

@@ -434,7 +434,7 @@ describe("createCodexGenerateImageTool", () => {
 
     const result = await tool.execute("call-1", {
       prompt: "turn this into a rainy noir poster",
-      image_ids: [7],
+      asset_ids: [7],
     });
 
     expect(requestedUrl).toContain("/images/edits");

@@ -81,23 +81,40 @@ describe("parseResponseDirectives", () => {
     });
   });
 
-  test("parses message image_ids delivery attribute", () => {
-    expect(parseResponseDirectives("<message image_ids=[12, 13]>again</message><message image_ids=\"[14]\">quoted</message>")).toEqual({
+  test("parses message asset_ids delivery attribute", () => {
+    expect(parseResponseDirectives("<message asset_ids=[12, 13]>again</message><message asset_ids=\"[14]\">quoted</message>")).toEqual({
       ignored: false,
       segments: [
-        { kind: "messageBreak", delivery: { imageIds: [12, 13] } },
+        { kind: "messageBreak", delivery: { assetIds: [12, 13] } },
         { kind: "text", text: "again" },
-        { kind: "messageBreak", delivery: { imageIds: [14] } },
+        { kind: "messageBreak", delivery: { assetIds: [14] } },
         { kind: "text", text: "quoted" },
       ],
     });
   });
 
-  test("preserves image-only message directives", () => {
-    expect(parseResponseDirectives("<message image_ids=[12]></message><message>next</message>")).toEqual({
+  test("parses generalized asset_ids delivery attribute", () => {
+    expect(parseResponseDirectives("<message asset_ids=[12, 13]>again</message>")).toEqual({
       ignored: false,
       segments: [
-        { kind: "emptyMessage", delivery: { imageIds: [12] } },
+        { kind: "messageBreak", delivery: { assetIds: [12, 13] } },
+        { kind: "text", text: "again" },
+      ],
+    });
+  });
+
+  test("preserves asset-only message directives", () => {
+    expect(parseResponseDirectives("<message asset_ids=[12]></message>")).toEqual({
+      ignored: false,
+      segments: [{ kind: "emptyMessage", delivery: { assetIds: [12] } }],
+    });
+  });
+
+  test("preserves image-only message directives", () => {
+    expect(parseResponseDirectives("<message asset_ids=[12]></message><message>next</message>")).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "emptyMessage", delivery: { assetIds: [12] } },
         { kind: "text", text: "next" },
       ],
     });

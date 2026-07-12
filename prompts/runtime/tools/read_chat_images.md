@@ -1,1 +1,0 @@
-Privately retrieve stored chat images by their IDs so 2B can inspect them before acting. Returns image data with metadata. Use this to view images referenced by image_ids in chat history. Maximum image IDs per call: {{imageReadMaxPerCall}}.

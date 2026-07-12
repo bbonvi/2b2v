@@ -192,10 +192,8 @@ describe("Discord fallback → read_chat_images integration", () => {
     expect(row.channel_id).toBe(CHANNEL_ID);
     expect(row.author_username).toBe("remoteuser");
 
-    // Image attachment processed
-    expect(processedImages).toHaveLength(1);
-    expect(processedImages[0]?.url).toBe("https://cdn.example.com/photo.jpg");
-    expect(processedImages[0]?.messageId).toBe(TARGET_ID);
+    // Fallback no longer downloads media eagerly.
+    expect(processedImages).toHaveLength(0);
   });
 
   test("multiple missing targets fetched and all persisted", async () => {

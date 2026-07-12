@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, writeFileSync, existsSync } from "fs";
 import { join, basename } from "path";
 import {
   DEFAULT_AGENT_JOBS,
+  DEFAULT_ASSET_READING,
   DEFAULT_AMBIENT_ATTENTION,
   DEFAULT_AMBIENT_INITIATIVE,
   DEFAULT_DISPATCHER,
@@ -68,8 +69,30 @@ import type {
   RelationshipConfigYaml,
   SchedulePressureConfig,
   SchedulePressureConfigYaml,
+  AssetReadingConfig,
 } from "./types.ts";
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
+
+function resolveAssetReadingConfig(input: Partial<AssetReadingConfig> | undefined): AssetReadingConfig {
+  const positive = (value: number | undefined, fallback: number, name: string): number => {
+    const resolved = value ?? fallback;
+    if (!Number.isFinite(resolved) || resolved <= 0) throw new Error(`assetReading.${name} must be positive`);
+    return resolved;
+  };
+  const times = input?.videoPreviewTimesSeconds ?? [...DEFAULT_ASSET_READING.videoPreviewTimesSeconds];
+  if (times.length === 0 || times.length > 10 || times.some((time) => !Number.isFinite(time) || time < 0)) {
+    throw new Error("assetReading.videoPreviewTimesSeconds must contain 1-10 non-negative numbers");
+  }
+  return {
+    maxCharsPerRead: positive(input?.maxCharsPerRead, DEFAULT_ASSET_READING.maxCharsPerRead, "maxCharsPerRead"),
+    textRangeBytes: positive(input?.textRangeBytes, DEFAULT_ASSET_READING.textRangeBytes, "textRangeBytes"),
+    maxDownloadBytes: positive(input?.maxDownloadBytes, DEFAULT_ASSET_READING.maxDownloadBytes, "maxDownloadBytes"),
+    maxTranscriptionDurationSeconds: positive(input?.maxTranscriptionDurationSeconds, DEFAULT_ASSET_READING.maxTranscriptionDurationSeconds, "maxTranscriptionDurationSeconds"),
+    videoPreviewMaxBytes: positive(input?.videoPreviewMaxBytes, DEFAULT_ASSET_READING.videoPreviewMaxBytes, "videoPreviewMaxBytes"),
+    videoPreviewTimesSeconds: times,
+    videoPreviewTimeoutSeconds: positive(input?.videoPreviewTimeoutSeconds, DEFAULT_ASSET_READING.videoPreviewTimeoutSeconds, "videoPreviewTimeoutSeconds"),
+  };
+}
 
 function resolveTextNormalizationMode(
   value: unknown,
@@ -969,6 +992,7 @@ export function loadGlobalConfig(
     defaultImageReading,
     defaultImageGeneration,
     defaultAttachmentsDir,
+    defaultAssetReading: resolveAssetReadingConfig(yaml.assetReading),
     defaultInstructions: "",
     logLevel: yaml.logLevel ?? "info",
     dataDir,
@@ -1076,6 +1100,7 @@ export function resolveGuildConfig(
     imageReading: resolveGuildImageReading(global.defaultImageReading, partial.imageReading),
     imageGeneration: resolveGuildImageGeneration(global.defaultImageGeneration, partial.imageGeneration),
     attachmentsDir: partial.attachmentsDir ?? global.defaultAttachmentsDir,
+    assetReading: resolveAssetReadingConfig(partial.assetReading ?? global.defaultAssetReading),
     instructions: instructions !== "" ? instructions : global.defaultInstructions,
     tts: resolveTtsConfig(partial.tts) ?? global.defaultTts,
     emotes: {
@@ -1177,6 +1202,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     imageReading: config.imageReading,
     imageGeneration: config.imageGeneration,
     attachmentsDir: config.attachmentsDir,
+    assetReading: config.assetReading,
     instructions: config.instructions !== "" ? config.instructions : undefined,
     tts: config.tts,
     emotes: config.emotes,
