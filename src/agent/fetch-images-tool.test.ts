@@ -53,13 +53,14 @@ function createMockFetch(responses: Map<string, { ok: boolean; status?: number; 
         arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
       } as Response);
     }
-    return Promise.resolve({
-      ok: config.ok,
+    const body = config.body === undefined
+      ? null
+      : config.body.buffer.slice(config.body.byteOffset, config.body.byteOffset + config.body.byteLength) as ArrayBuffer;
+    return Promise.resolve(new Response(body, {
       status: config.status ?? (config.ok ? 200 : 500),
       statusText: config.statusText ?? (config.ok ? "OK" : "Internal Server Error"),
-      headers: new Headers({ "content-type": config.contentType ?? "image/jpeg" }),
-      arrayBuffer: () => Promise.resolve(config.body?.buffer ?? new ArrayBuffer(0)),
-    } as Response);
+      headers: { "content-type": config.contentType ?? "image/jpeg" },
+    }));
   };
 }
 
@@ -68,6 +69,7 @@ function makeDeps(overrides?: Partial<FetchImagesToolDeps>): FetchImagesToolDeps
     maxImagesPerCall: 5,
     maxDimension: 1024,
     timeoutMs: 15000,
+    resolveHostname: () => Promise.resolve(["93.184.216.34"]),
     ...overrides,
   };
 }
@@ -201,15 +203,12 @@ describe("createFetchImagesTool", () => {
   });
 
   test("handles timeout gracefully", async () => {
-    const abortingFetch: FetchImagesToolDeps["fetchFn"] = (_url, init) => {
-      // Simulate abort by checking signal and throwing AbortError
-      if (init?.signal !== undefined) {
-        const error = new Error("Aborted");
-        error.name = "AbortError";
-        return Promise.reject(error);
-      }
-      return Promise.resolve({ ok: false } as Response);
-    };
+    const abortingFetch: FetchImagesToolDeps["fetchFn"] = (_url, init) => new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      const reason = (): Error => signal?.reason instanceof Error ? signal.reason : new Error("Aborted");
+      if (signal?.aborted === true) reject(reason());
+      else signal?.addEventListener("abort", () => reject(reason()), { once: true });
+    });
 
     tool = createFetchImagesTool(makeDeps({ fetchFn: abortingFetch, timeoutMs: 100 }));
     const result = await tool.execute("call-9", { urls: ["https://slow.com/image.jpg"] });

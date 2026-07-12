@@ -8,6 +8,7 @@ import {
   DEFAULT_AMBIENT_INITIATIVE,
   DEFAULT_DISPATCHER,
   DEFAULT_EMOTES,
+  DEFAULT_EXTERNAL_IMAGES,
   DEFAULT_IMAGE_GENERATION,
   DEFAULT_IMAGE_READING,
   DEFAULT_LLM_PROVIDER,
@@ -71,6 +72,7 @@ import type {
   SchedulePressureConfigYaml,
   AssetReadingConfig,
   AssetReadingConfigYaml,
+  ExternalImagesConfig,
 } from "./types.ts";
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
 
@@ -99,6 +101,22 @@ function resolveAssetReadingConfig(input: AssetReadingConfigYaml | undefined, fa
       text: positive(input?.timeoutSeconds?.text, fallback.timeoutSeconds.text, "timeoutSeconds.text"),
       file: positive(input?.timeoutSeconds?.file, fallback.timeoutSeconds.file, "timeoutSeconds.file"),
     },
+  };
+}
+
+function resolveExternalImagesConfig(input: Partial<ExternalImagesConfig> | undefined): ExternalImagesConfig {
+  const value = (key: keyof ExternalImagesConfig): number => {
+    const resolved = input?.[key] ?? DEFAULT_EXTERNAL_IMAGES[key];
+    if (!Number.isSafeInteger(resolved) || resolved <= 0) throw new Error(`externalImages.${key} must be a positive integer`);
+    return resolved;
+  };
+  return {
+    maxImagesPerCall: value("maxImagesPerCall"),
+    maxBytes: value("maxBytes"),
+    timeoutMs: value("timeoutMs"),
+    maxRedirects: value("maxRedirects"),
+    maxDimension: value("maxDimension"),
+    maxPageImages: value("maxPageImages"),
   };
 }
 
@@ -962,6 +980,7 @@ export function loadGlobalConfig(
     codexAuthPath: env.CODEX_AUTH_PATH ?? `${dataDir}/codex-auth.json`,
     codexTransport: parseCodexTransport(yaml.codexTransport, "codexTransport") ?? "websocket-cached",
     braveApiKey: env.BRAVE_API_KEY,
+    externalImages: resolveExternalImagesConfig(yaml.externalImages),
     defaultLlmProvider,
     defaultModel: yaml.model ?? "moonshotai/kimi-k2.5",
     defaultModelParams: yaml.modelParams ?? {},

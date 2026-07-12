@@ -7,6 +7,7 @@ import type {
   AmbientInitiativeKindConfig,
   DispatcherConfig,
   EmotesConfig,
+  ExternalImagesConfig,
   ImageGenerationConfig,
   ImageReadingConfig,
   LlmProvider,
@@ -41,6 +42,15 @@ export const DEFAULT_TRIM: TrimConfig = {
   windowSize: 20,
   messageCharLimit: 200,
   replyQuoteChars: 50,
+};
+
+export const DEFAULT_EXTERNAL_IMAGES: ExternalImagesConfig = {
+  maxImagesPerCall: 5,
+  maxBytes: 20 * 1024 * 1024,
+  timeoutMs: 15_000,
+  maxRedirects: 5,
+  maxDimension: 1024,
+  maxPageImages: 10,
 };
 
 export const DEFAULT_MEMORY_EXTRACTION: MemoryExtractionConfig = {

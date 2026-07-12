@@ -41,6 +41,7 @@ const PROMPT_LAB_READ_TOOL_NAMES = new Set([
   "fetch_url",
   "summarize_video",
   "web_search",
+  "search_images",
   "load_skill",
 ]);
 

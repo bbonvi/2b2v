@@ -1,0 +1,1 @@
+Privately search Brave's image index for visual references. Returns original image URLs, Brave preview URLs, source pages, and dimensions without loading image bytes. Use a specific query, then inspect only promising `image_url` or `preview_url` values with `fetch_images`; GIF hints are unverified until fetched.

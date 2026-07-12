@@ -49,6 +49,12 @@ describe("AgentJobStore", () => {
     expect(second.job.id).not.toBe(first.job.id);
   });
 
+  test("retains external reference URLs for the worker", () => {
+    const store = new AgentJobStore(config);
+    const result = enqueue(store, { referenceUrls: ["https://example.com/reference.gif"] });
+    expect(result.job.input.referenceUrls).toEqual(["https://example.com/reference.gif"]);
+  });
+
   test("tracks source and delivery channels separately", () => {
     const store = new AgentJobStore(config);
     const result = enqueue(store, {

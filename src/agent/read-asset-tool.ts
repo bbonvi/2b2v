@@ -193,11 +193,16 @@ export async function fetchAssetBuffer(fetchFn: typeof fetch, url: string, maxBy
   if (!response.ok) throw new Error(`Asset fetch failed (${response.status}).`);
   const declared = Number(response.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) throw new Error(`Asset exceeds download limit ${maxBytes} bytes.`);
-  return await readLimitedBody(response, maxBytes);
+  return await readLimitedResponseBody(response, maxBytes);
 }
 
-async function readLimitedBody(response: Response, maxBytes: number): Promise<Buffer> {
-  if (response.body === null) return Buffer.alloc(0);
+/** Read a response body without buffering beyond the configured byte limit. */
+export async function readLimitedResponseBody(response: Response, maxBytes: number): Promise<Buffer> {
+  if (response.body === null) {
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > maxBytes) throw new Error(`Asset response exceeds limit ${maxBytes} bytes.`);
+    return buffer;
+  }
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;

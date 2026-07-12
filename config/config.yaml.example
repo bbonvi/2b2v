@@ -194,6 +194,15 @@ mergeMessageGapSeconds: 120
 # Max images the LLM can read in a single read_chat_images call
 imageReadMaxPerCall: 10
 
+# Untrusted web-image inspection and generation-reference limits
+externalImages:
+  maxImagesPerCall: 5
+  maxBytes: 20971520
+  timeoutMs: 15000
+  maxRedirects: 5
+  maxDimension: 1024
+  maxPageImages: 10
+
 # Lazy message-asset reading, transcription, and video preview limits
 assetReading:
   maxCharsPerRead: 30000

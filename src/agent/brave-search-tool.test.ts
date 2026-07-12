@@ -1,5 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import {
+  createBraveImageSearchTool,
   createBraveSearchTool,
   type BraveSearchToolDeps,
   type BraveSearchResult,
@@ -102,5 +103,28 @@ describe("createBraveSearchTool", () => {
     expect(text).toContain("Node.js");
     expect(text).toContain("https://nodejs.org");
     expect(text).toContain("JavaScript runtime built on V8");
+  });
+});
+
+describe("createBraveImageSearchTool", () => {
+  test("returns original, preview, source, dimensions, and GIF hints", async () => {
+    const tool = createBraveImageSearchTool({
+      apiKey: "test-key",
+      fetchResults: () => Promise.resolve([{
+        title: "Dancing robot",
+        imageUrl: "https://cdn.example.com/robot.gif",
+        previewUrl: "https://imgs.search.brave.com/robot.jpg",
+        sourceUrl: "https://example.com/robot",
+        width: 640,
+        height: 480,
+      }]),
+    });
+    const result = await tool.execute("tc", { query: "dancing robot GIF" }, AbortSignal.timeout(5000));
+    const text = (result.content[0] as TextContent).text;
+    expect(text).toContain("image_url: https://cdn.example.com/robot.gif");
+    expect(text).toContain("preview_url: https://imgs.search.brave.com/robot.jpg");
+    expect(text).toContain("source_url: https://example.com/robot");
+    expect(text).toContain("size: 640x480");
+    expect(text).toContain("kind_hint: gif");
   });
 });

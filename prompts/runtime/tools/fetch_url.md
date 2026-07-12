@@ -1,1 +1,1 @@
-Privately fetch a webpage URL and extract its readable content as markdown before 2B speaks or acts. Use this to read articles, documentation, or any web page. Returns the page title and main content. Might take 10+ seconds.
+Privately fetch a webpage URL and extract its readable content as markdown before 2B speaks or acts. Returns the page title, main content, and a bounded `Page images` list when the readable page exposes image URLs; inspect selected URLs with `fetch_images`. Might take 10+ seconds.

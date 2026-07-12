@@ -419,6 +419,16 @@ export type AssetReadingConfigYaml = Omit<Partial<AssetReadingConfig>, "timeoutS
   timeoutSeconds?: Partial<Record<AssetKind, number>>;
 };
 
+/** Limits for downloading untrusted web images. */
+export interface ExternalImagesConfig {
+  maxImagesPerCall: number;
+  maxBytes: number;
+  timeoutMs: number;
+  maxRedirects: number;
+  maxDimension: number;
+  maxPageImages: number;
+}
+
 /** Per-guild configuration. Source of truth is the YAML file. */
 export interface GuildConfig {
   guildId: string;
@@ -485,6 +495,7 @@ export interface GlobalConfig {
   /** Default OpenAI Codex transport. */
   codexTransport: CodexTransport;
   braveApiKey?: string;
+  externalImages?: ExternalImagesConfig;
   defaultLlmProvider: LlmProvider;
   defaultModel: string;
   defaultModelParams: Record<string, unknown>;
@@ -666,6 +677,7 @@ export interface MainConfigYaml {
   imageGeneration?: {
     quality?: ImageGenerationQuality;
   };
+  externalImages?: Partial<ExternalImagesConfig>;
   attachmentsDir?: string;
   assetReading?: AssetReadingConfigYaml;
   logLevel?: string;

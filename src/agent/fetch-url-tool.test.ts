@@ -6,6 +6,7 @@ interface FetchUrlDetails {
   title: string;
   contentLength: number;
   method: string;
+  images: Array<{ url: string; alt: string }>;
 }
 
 /** Extract text from first content block (for test assertions). */
@@ -240,6 +241,34 @@ describe("createFetchUrlTool", () => {
 
     const result = await tool.execute("test-id", { url: "https://example.com/article" });
     expect(getContentText(result)).toContain("Source: https://example.com/article");
+  });
+
+  test("preserves normalized lazy page images and Open Graph images", async () => {
+    const html = `<html><head><title>Pictures</title><meta property="og:image" content="/hero.jpg"></head>
+      <body><article><p>Body.</p><img alt="Example" data-src="images/example.png"></article></body></html>`;
+    const tool = createFetchUrlTool({
+      disableJina: true,
+      disableSummarize: true,
+      maxPageImages: 5,
+      fetchFn: () => Promise.resolve(new Response(html, { headers: { "content-type": "text/html" } })),
+    });
+    const result = await tool.execute("test-id", { url: "https://example.com/posts/page" });
+    const output = getContentText(result);
+    const details = result.details as FetchUrlDetails;
+    expect(output).toContain("## Page images");
+    expect(output).toContain("https://example.com/hero.jpg");
+    expect(output).toContain("https://example.com/posts/images/example.png");
+    expect(details.images).toHaveLength(2);
+  });
+
+  test("normalizes image links retained by Jina markdown", async () => {
+    const tool = createFetchUrlTool({
+      fetchFn: () => Promise.resolve(new Response("# Page\n\n![Chart](/img/chart.png)", {
+        headers: { "content-type": "text/markdown" },
+      })),
+    });
+    const result = await tool.execute("test-id", { url: "https://example.com/post" });
+    expect(getContentText(result)).toContain('"Chart" — https://example.com/img/chart.png');
   });
 
   test("rejects non-HTML content type in manual mode", async () => {

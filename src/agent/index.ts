@@ -85,7 +85,14 @@ export {
 
 export { createOwnMessageTools, type OwnMessageToolsDeps } from "./own-message-tool.ts";
 
-export { createBraveSearchTool, type BraveSearchToolDeps, type BraveSearchResult } from "./brave-search-tool.ts";
+export {
+  createBraveImageSearchTool,
+  createBraveSearchTool,
+  type BraveImageSearchResult,
+  type BraveImageSearchToolDeps,
+  type BraveSearchToolDeps,
+  type BraveSearchResult,
+} from "./brave-search-tool.ts";
 
 export { createReadChatImagesTool, type ReadChatImagesToolDeps } from "./read-chat-images-tool.ts";
 

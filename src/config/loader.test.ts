@@ -221,6 +221,18 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultAssetReading?.timeoutSeconds.image).toBe(30);
   });
 
+  test("reads external image safety limits", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "externalImages:\n  maxBytes: 123456\n  maxRedirects: 2\n  maxPageImages: 4\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.externalImages).toMatchObject({
+      maxBytes: 123456,
+      maxRedirects: 2,
+      maxPageImages: 4,
+      maxImagesPerCall: 5,
+    });
+  });
+
   test("resolves ElevenLabs request parameters from TTS config", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, [

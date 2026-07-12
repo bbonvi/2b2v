@@ -10,6 +10,7 @@ export interface ImageGenerationJobInput {
   prompt: string;
   promptHash: string;
   imageIds: number[];
+  referenceUrls?: string[];
   outputFormat: "png" | "jpeg" | "webp";
   is4k: boolean;
   separateJob: boolean;
@@ -75,6 +76,7 @@ export interface EnqueueImageJobInput {
   prompt: string;
   promptHash: string;
   imageIds: number[];
+  referenceUrls?: string[];
   outputFormat: "png" | "jpeg" | "webp";
   is4k: boolean;
   separateJob: boolean;
@@ -141,6 +143,7 @@ export class AgentJobStore {
         prompt: input.prompt,
         promptHash: input.promptHash,
         imageIds: input.imageIds,
+        referenceUrls: input.referenceUrls ?? [],
         outputFormat: input.outputFormat,
         is4k: input.is4k,
         separateJob: input.separateJob,

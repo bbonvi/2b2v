@@ -453,6 +453,91 @@ describe("createCodexGenerateImageTool", () => {
       referenceImageIds: [7],
     });
   });
+
+  test("uses inspected web URLs as static direct-edit references", async () => {
+    let requestedBody: unknown;
+    const fetchFn = Object.assign(
+      (_url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        requestedBody = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as unknown;
+        return Promise.resolve(Response.json({ data: [{ b64_json: "Z2VuZXJhdGVk" }] }));
+      },
+      { preconnect: fetch.preconnect },
+    );
+    const tool = createCodexGenerateImageTool({
+      codexAuthPath: fakeCodexAuthPath(),
+      model: "gpt-5.5",
+      imageReadMaxPerCall: 2,
+      imageGenerationQuality: "auto",
+      fetchFn,
+      resolveExternalReference: (url) => Promise.resolve({
+        id: url,
+        data: Buffer.from("first-frame").toString("base64"),
+        mimeType: "image/jpeg",
+        width: 500,
+        height: 300,
+      }),
+      onGeneratedImage: () => {},
+    });
+    const result = await tool.execute("call-web", {
+      prompt: "use this pose",
+      reference_urls: ["https://example.com/pose.gif"],
+    });
+    expect(requestedBody).toMatchObject({
+      images: [{ image_url: `data:image/jpeg;base64,${Buffer.from("first-frame").toString("base64")}` }],
+    });
+    expect(result.details).toMatchObject({
+      referenceImageIds: [],
+      referenceUrls: ["https://example.com/pose.gif"],
+      transport: "direct-edits",
+    });
+  });
+
+  test("stores reference URLs in async image jobs and enforces the combined limit", async () => {
+    let observed: string[] | undefined;
+    const tool = createCodexGenerateImageTool({
+      codexAuthPath: "unused",
+      model: "gpt-5.5",
+      imageReadMaxPerCall: 2,
+      imageGenerationQuality: "auto",
+      onGeneratedImage: () => {},
+      enqueueImageJob: (input) => {
+        observed = input.referenceUrls;
+        return {
+          created: true,
+          reason: "created",
+          job: {
+            id: "img-web",
+            kind: "image_generation",
+            guildId: "g1",
+            channelId: "c1",
+            deliveryGuildId: "g1",
+            deliveryChannelId: "c1",
+            requesterId: "u1",
+            requesterUsername: "alice",
+            sourceMessageId: "m1",
+            sourceQuote: "image",
+            status: "queued",
+            createdAt: 1,
+            input,
+            replacementCount: 0,
+          },
+        };
+      },
+    });
+    await tool.execute("call-web", { prompt: "reference", reference_urls: ["https://example.com/a.png"] });
+    expect(observed).toEqual(["https://example.com/a.png"]);
+    try {
+      await tool.execute("call-limit", {
+        prompt: "too many",
+        asset_ids: [1, 2],
+        reference_urls: ["https://example.com/a.png"],
+      });
+      expect.unreachable("combined reference limit should reject");
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(Error);
+      expect((cause as Error).message).toContain("maximum is 2");
+    }
+  });
 });
 
 describe("parseCodexDirectImageResponse", () => {

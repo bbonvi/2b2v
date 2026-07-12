@@ -1213,6 +1213,7 @@ const PARALLEL_SAFE_READ_ONLY_TOOLS = new Set([
   "read_asset",
   "read_user_avatar",
   "search_channel_messages",
+  "search_images",
   "summarize_video",
   "web_search",
 ]);

@@ -55,12 +55,13 @@ import { createDiscordTimeoutTools, MAX_DISCORD_TIMEOUT_SECONDS, type TimeoutMem
 import { createMemoryListTool } from "./agent/user-memory-tool";
 import { createListChannelMessagesTool } from "./agent/list-channel-messages-tool";
 import { createOwnMessageTools } from "./agent/own-message-tool";
-import { createBraveSearchTool } from "./agent/brave-search-tool";
+import { createBraveImageSearchTool, createBraveSearchTool } from "./agent/brave-search-tool";
 import { createReadAssetTool, extractRemoteVideoFrame, type ReadAssetToolDeps } from "./agent/read-asset-tool";
 import { createSearchAssetTool } from "./agent/search-asset-tool";
 import { createReadUserAvatarTool, type AvatarSize } from "./agent/read-user-avatar-tool";
 import { createFetchImagesTool } from "./agent/fetch-images-tool";
-import { createCodexGenerateImageTool, type GeneratedImageAttachment } from "./agent/codex-image-tool";
+import { loadExternalImage } from "./agent/external-image";
+import { createCodexGenerateImageTool, type GeneratedImageAttachment, type ReferenceImageInput } from "./agent/codex-image-tool";
 import { AgentJobStore, createCancelAgentJobTool, isActiveJobStatus, type ImageGenerationJobResult } from "./agent/job-runtime";
 import { annotateHistoryJobs, createGeneratedImageRuntime, DEFAULT_CODEX_IMAGE_ROUTER_MODEL, renderAgentJobsContext, shortQuote, type GeneratedImageRuntime } from "./agent/generated-image-runtime";
 import { createStoredAssetAttachmentResolver } from "./agent/stored-asset-attachments";
@@ -103,7 +104,7 @@ import { resolveReactionEmojiInput } from "./discord/reaction-emoji";
 import { createDiscordReplyFallbackDeps, createSyntheticReplyFallbackDeps, syncDeletedOwnBotMessage, syncEditedOwnBotMessage } from "./discord/reply-fallback-runtime";
 import { createDiscordAssetSourceResolver } from "./discord/asset-resolver";
 import { backfillMessageAssets } from "./discord/asset-backfill";
-import { DEFAULT_ASSET_READING } from "./config/defaults";
+import { DEFAULT_ASSET_READING, DEFAULT_EXTERNAL_IMAGES } from "./config/defaults";
 import { join } from "path";
 import { mkdirSync, existsSync, readdirSync, statSync, watch } from "fs";
 import type { Database } from "./db/database";
@@ -341,12 +342,14 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
           maxBytes: sourceGuildConfig.assetReading?.maxDownloadBytes ?? DEFAULT_ASSET_READING.maxDownloadBytes,
         });
       },
+      resolveExternalReference: loadExternalReference,
       onGeneratedImage: generated.onGeneratedImage,
     });
     const imageToolArgs = {
       jobId: job.id,
       prompt: job.input.prompt,
       asset_ids: job.input.imageIds,
+      reference_urls: job.input.referenceUrls ?? [],
       output_format: job.input.outputFormat,
       "4k": job.input.is4k,
     };
@@ -355,6 +358,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     const result = await tool.execute(job.id, {
       prompt: job.input.prompt,
       asset_ids: job.input.imageIds,
+      reference_urls: job.input.referenceUrls ?? [],
       output_format: job.input.outputFormat,
       "4k": job.input.is4k,
     }, controller.signal);
@@ -669,6 +673,17 @@ let globalConfig = loadGlobalConfig();
 validateTrimConfig(globalConfig.defaultTrim);
 validateVpnConfig(globalConfig.vpn);
 log.info("config loaded", { model: globalConfig.defaultModel });
+
+async function loadExternalReference(url: string, signal?: AbortSignal): Promise<ReferenceImageInput> {
+  const image = await loadExternalImage(url, globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES, {}, signal);
+  return {
+    id: image.finalUrl,
+    data: image.preview.toString("base64"),
+    mimeType: image.previewMimeType,
+    width: image.width,
+    height: image.height,
+  };
+}
 
 const startupMessageQueue: Message[] = [];
 let startupMessageProcessingReady = false;
@@ -2264,11 +2279,12 @@ function buildAgentTools(
   });
 
   const fetchImagesTool = createFetchImagesTool({
-    maxImagesPerCall: 5,
-    maxDimension: CONTEXT_IMAGE_MAX_DIMENSION,
+    ...(globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES),
   });
 
-  const fetchUrlTool = createFetchUrlTool();
+  const fetchUrlTool = createFetchUrlTool({
+    maxPageImages: (globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES).maxPageImages,
+  });
   const summarizeVideoTool = createSummarizeVideoTool();
   const reactToMessageTool = createReactToMessageTool({
     currentChannelId: channelId,
@@ -2332,6 +2348,7 @@ function buildAgentTools(
           maxBytes: guildConfig.assetReading?.maxDownloadBytes ?? DEFAULT_ASSET_READING.maxDownloadBytes,
         });
       },
+      resolveExternalReference: loadExternalReference,
       onGeneratedImage: onGeneratedImage ?? (() => {}),
       ...(effectiveCurrentRequest === undefined ? {} : { enqueueImageJob: (input) => {
         const deliveryChannelId = channelId;
@@ -2350,6 +2367,7 @@ function buildAgentTools(
           prompt: input.prompt,
           promptHash: input.promptHash,
           imageIds: input.imageIds,
+          referenceUrls: input.referenceUrls,
           outputFormat: input.outputFormat,
           is4k: input.is4k,
           separateJob: input.separateJob,
@@ -2378,12 +2396,13 @@ function buildAgentTools(
   // Brave search if API key configured
   if (globalConfig.braveApiKey !== undefined && globalConfig.braveApiKey !== "") {
     tools.push(createBraveSearchTool({ apiKey: globalConfig.braveApiKey }));
+    tools.push(createBraveImageSearchTool({ apiKey: globalConfig.braveApiKey }));
   }
 
   const toolPromptVariables: ToolPromptVariables = {
     fetch_images: {
-      maxImagesPerCall: 5,
-      maxDimension: CONTEXT_IMAGE_MAX_DIMENSION,
+      maxImagesPerCall: (globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES).maxImagesPerCall,
+      maxDimension: (globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES).maxDimension,
     },
     codex_generate_image: {
       imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,

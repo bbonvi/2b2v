@@ -46,7 +46,7 @@ Normal replies receive only the active speaker relationship slice. Relationships
 
 ## History, Search, Memory
 
-SQLite stores message history and backs literal text search, direct message lookup, and chronological context retrieval.
+SQLite stores message history and backs structured/regex discovery plus chronological context retrieval.
 
 Discord-deleted messages keep their stored text and are marked deleted in prompt history with `[deleted]`; local media and reactions are still removed.
 
@@ -76,7 +76,9 @@ Asset history backfill pages each stored channel newest-first through Discord's 
 
 Avatar reads are ephemeral and guild-scoped. They must not write avatar bytes into SQLite or the image attachment store.
 
-Image generation is state-changing async work. Foreground turns should start the job and acknowledge; workers handle typing, timeout, captioning, storage, and final delivery.
+External image URLs are ephemeral. Image search returns metadata only; page reads append normalized image references; visual inspection and generation references share one bounded downloader that rejects private-network targets and revalidates redirects. GIF and other animated web references are decoded as static first frames, matching Discord GIF generation references.
+
+Image generation is state-changing async work. Foreground turns should start the job and acknowledge; workers handle typing, timeout, chat-asset or inspected-web reference resolution, captioning, storage, and final delivery.
 
 Response directive parsing is deliberately narrow. Do not add broad XML parsing.
 

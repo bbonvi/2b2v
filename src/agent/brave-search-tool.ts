@@ -15,11 +15,31 @@ export interface BraveSearchToolDeps {
   fetchResults?: (query: string, count: number, signal?: AbortSignal) => Promise<BraveSearchResult[]>;
 }
 
+export interface BraveImageSearchResult {
+  title: string;
+  imageUrl: string;
+  previewUrl: string | null;
+  sourceUrl: string;
+  width: number | null;
+  height: number | null;
+}
+
+export interface BraveImageSearchToolDeps {
+  apiKey: string;
+  timeoutMs?: number;
+  fetchResults?: (query: string, count: number, signal?: AbortSignal) => Promise<BraveImageSearchResult[]>;
+}
+
 const WebSearchParams = Type.Object({
   query: Type.String({ description: "The search query to execute." }),
   count: Type.Optional(
     Type.Number({ description: "Number of results to return." })
   ),
+});
+
+const ImageSearchParams = Type.Object({
+  query: Type.String({ minLength: 1, maxLength: 400, description: "Image search query." }),
+  count: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Number of image results." })),
 });
 
 export function createBraveSearchTool(deps: BraveSearchToolDeps): AgentTool {
@@ -68,6 +88,39 @@ export function createBraveSearchTool(deps: BraveSearchToolDeps): AgentTool {
         content: [{ type: "text", text: lines.join("\n\n") }],
         details: { count: results.length },
       };
+    },
+  };
+}
+
+/** Create a Brave-backed image discovery tool that returns URLs without loading image bytes. */
+export function createBraveImageSearchTool(deps: BraveImageSearchToolDeps): AgentTool {
+  const timeoutMs = deps.timeoutMs ?? 15_000;
+  const fetchResults = deps.fetchResults ?? ((query: string, count: number, signal?: AbortSignal) =>
+    fetchBraveImageResults(deps.apiKey, query, count, signal));
+  return {
+    name: "search_images",
+    label: "search_images",
+    description: "Search the web for images using Brave Image Search.",
+    parameters: ImageSearchParams,
+    async execute(_toolCallId, params, signal): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {
+      const { query, count: requestedCount } = params as { query: string; count?: number };
+      const count = Math.max(1, Math.min(requestedCount ?? 5, 20));
+      const timeout = createToolTimeout(signal, timeoutMs, `search_images timed out after ${timeoutMs}ms`);
+      try {
+        const results = await abortable(fetchResults(query, count, timeout.signal), timeout.signal);
+        if (results.length === 0) return { content: [{ type: "text", text: "No image results found." }], details: { count: 0 } };
+        const text = results.map((result, index) => {
+          const size = result.width !== null && result.height !== null ? `\n   size: ${result.width}x${result.height}` : "";
+          const preview = result.previewUrl !== null ? `\n   preview_url: ${result.previewUrl}` : "";
+          const kind = /\.gif(?:$|[?#])/iu.test(result.imageUrl) ? "\n   kind_hint: gif" : "";
+          return `${index + 1}. **${result.title}**\n   image_url: ${result.imageUrl}${preview}\n   source_url: ${result.sourceUrl}${size}${kind}`;
+        }).join("\n\n");
+        return { content: [{ type: "text", text }], details: { count: results.length } };
+      } catch (error) {
+        return { content: [{ type: "text", text: normalizeToolError(error, "search_images") }], details: { error: true } };
+      } finally {
+        timeout.cleanup();
+      }
     },
   };
 }
@@ -143,6 +196,46 @@ interface BraveSearchResponse {
   web?: {
     results?: BraveWebResult[];
   };
+}
+
+interface BraveImageSearchResponse {
+  results?: Array<{
+    title?: string;
+    url?: string;
+    thumbnail?: { src?: string };
+    properties?: { url?: string; width?: number; height?: number };
+  }>;
+}
+
+async function fetchBraveImageResults(
+  apiKey: string,
+  query: string,
+  count: number,
+  signal?: AbortSignal,
+): Promise<BraveImageSearchResult[]> {
+  const url = new URL("https://api.search.brave.com/res/v1/images/search");
+  url.searchParams.set("q", query);
+  url.searchParams.set("count", String(count));
+  url.searchParams.set("safesearch", "strict");
+  const response = await fetch(url, {
+    signal,
+    headers: { Accept: "application/json", "X-Subscription-Token": apiKey },
+  });
+  if (!response.ok) throw new Error(`Brave Image Search returned HTTP ${response.status}`);
+  const payload = await response.json() as BraveImageSearchResponse;
+  return (payload.results ?? []).flatMap((result) => {
+    const imageUrl = result.properties?.url;
+    const sourceUrl = result.url;
+    if (imageUrl === undefined || sourceUrl === undefined) return [];
+    return [{
+      title: result.title ?? new URL(sourceUrl).hostname,
+      imageUrl,
+      previewUrl: result.thumbnail?.src ?? null,
+      sourceUrl,
+      width: result.properties?.width ?? null,
+      height: result.properties?.height ?? null,
+    }];
+  });
 }
 
 /** Default implementation that calls the Brave Search Web API. */

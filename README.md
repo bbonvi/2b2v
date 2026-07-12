@@ -76,6 +76,8 @@ All fields are optional unless the matching feature needs credentials or IDs. Li
 
 Message uploads, embeds, and stickers appear in history and current-event metadata as typed references such as `Images: #12 photo.png` and `Audio: #13 voice.ogg`. Media is fetched lazily from Discord. Text and timestamped transcripts support regex search plus bounded line reads; `assetReading` controls output/download limits, per-kind timeouts, transcription duration, and video preview frames. Docker images include FFmpeg and ripgrep for media preview and safe regex search.
 
+Web visuals use `search_images` for Brave image discovery, `fetch_url` for readable Markdown plus preserved page-image URLs, and `fetch_images` for ephemeral inspection. Inspected public image URLs can be supplied to image generation as `reference_urls`; animated images use a static first-frame reference. `externalImages` controls download, redirect, size, dimension, and page-image limits.
+
 Verification:
 
 ```bash
