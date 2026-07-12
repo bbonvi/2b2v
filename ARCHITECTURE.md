@@ -70,7 +70,7 @@ Ambient memory extraction is separate from reply triggering. Successful post-rep
 
 Agent schedule tools are current-guild and current-channel scoped. Scheduled tasks are private by default, carry requester metadata plus a concise handoff note/fire count, and may self-complete recurring work. Non-admin recurring task pressure caps are configured by `schedulePressure`. One-off timers longer than JavaScript's maximum timeout must be chunked and re-armed.
 
-Discord uploads, embeds, and stickers are stored as metadata-only short `#ID` asset references shown in history and current-event metadata. Reads, reposts, and image-generation references resolve live sources lazily; signed Discord URLs are never persisted. Per-kind read deadlines bound work below the reply-loop deadline; paid transcripts may be cached and paginated, while image/video bytes remain ephemeral.
+Discord uploads, embeds, and stickers are stored as metadata-only short `#ID` asset references shown in history and current-event metadata. Reads, reposts, and image-generation references resolve live sources lazily; signed Discord URLs are never persisted. Textual views use line-ranged reads and ripgrep regex search; ElevenLabs transcripts are cached as timestamped lines, while ordinary attachment bytes remain ephemeral. Per-kind deadlines bound work below the reply-loop deadline.
 
 Asset history backfill pages each stored channel newest-first through Discord's 100-message endpoint. Per-channel cursors and `(message_id, source_kind, source_key)` uniqueness make page retries idempotent.
 

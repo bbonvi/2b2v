@@ -3,7 +3,7 @@
 FROM oven/bun:1.3-debian AS base
 WORKDIR /app
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
 # Install standalone yt-dlp without pulling Python into the runtime image.

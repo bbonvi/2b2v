@@ -196,7 +196,6 @@ export const DEFAULT_VOICE_PRESET: VoicePreset = {
 
 export const DEFAULT_ASSET_READING: AssetReadingConfig = {
   maxCharsPerRead: 30_000,
-  textRangeBytes: 131_072,
   maxDownloadBytes: 100 * 1024 * 1024,
   maxTranscriptionDurationSeconds: 7_200,
   videoPreviewMaxBytes: 100 * 1024 * 1024,

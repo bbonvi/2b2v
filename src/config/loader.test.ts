@@ -176,7 +176,6 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultAttachmentsDir).toBe("data/attachments");
     expect(cfg.defaultAssetReading).toEqual({
       maxCharsPerRead: 30000,
-      textRangeBytes: 131072,
       maxDownloadBytes: 104857600,
       maxTranscriptionDurationSeconds: 7200,
       videoPreviewMaxBytes: 104857600,

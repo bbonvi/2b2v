@@ -197,7 +197,6 @@ imageReadMaxPerCall: 10
 # Lazy message-asset reading, transcription, and video preview limits
 assetReading:
   maxCharsPerRead: 30000
-  textRangeBytes: 131072
   maxDownloadBytes: 104857600
   maxTranscriptionDurationSeconds: 7200
   videoPreviewMaxBytes: 104857600

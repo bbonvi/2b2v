@@ -74,7 +74,7 @@ adminUserIds: []
 
 All fields are optional unless the matching feature needs credentials or IDs. Live config files are ignored by git except committed `.example` files.
 
-Message uploads, embeds, and stickers appear in history and current-event metadata as typed references such as `Images: #12 photo.png` and `Audio: #13 voice.ogg`. Media is fetched lazily from Discord; `assetReading` in the global or guild YAML controls per-kind timeouts, text/transcript page size, download limits, transcription duration, and video preview frames.
+Message uploads, embeds, and stickers appear in history and current-event metadata as typed references such as `Images: #12 photo.png` and `Audio: #13 voice.ogg`. Media is fetched lazily from Discord. Text and timestamped transcripts support regex search plus bounded line reads; `assetReading` controls output/download limits, per-kind timeouts, transcription duration, and video preview frames. Docker images include FFmpeg and ripgrep for media preview and safe regex search.
 
 Verification:
 

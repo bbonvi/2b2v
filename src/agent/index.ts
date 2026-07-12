@@ -49,6 +49,7 @@ export {
 } from "./memory-service.ts";
 
 export { createSearchChannelMessagesTool, type SearchChannelMessagesToolDeps } from "./search-channel-messages-tool.ts";
+export { createSearchAssetTool } from "./search-asset-tool.ts";
 
 export {
   createScheduleTaskTool,

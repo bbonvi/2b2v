@@ -4,8 +4,7 @@ import type { MessageAsset } from "../db/asset-repository.ts";
 import { createReadAssetTool } from "./read-asset-tool.ts";
 
 const config: AssetReadingConfig = {
-  maxCharsPerRead: 5,
-  textRangeBytes: 8,
+  maxCharsPerRead: 100,
   maxDownloadBytes: 1024,
   maxTranscriptionDurationSeconds: 100,
   videoPreviewMaxBytes: 1024,
@@ -24,36 +23,31 @@ function asset(kind: MessageAsset["kind"]): MessageAsset {
 }
 
 describe("read_asset", () => {
-  test("pages remote text with byte cursors", async () => {
-    const source = Buffer.from("hello world");
+  test("reads a numbered line range from remote text", async () => {
+    const source = Buffer.from("alpha\nbeta\ngamma");
     const tool = createReadAssetTool({
       config,
       getAsset: () => asset("text"),
       resolveSource: () => Promise.resolve({ url: "https://cdn.test/a", contentType: "text/plain", filename: "a.txt" }),
       cacheExtraction: () => {},
       prepareImage: () => Promise.reject(new Error("unused")),
-      fetchFn: ((_url: string | URL | Request, init?: RequestInit) => {
-        const start = Number(/bytes=(\d+)-/.exec(new Headers(init?.headers).get("range") ?? "")?.[1] ?? 0);
-        const body = source.subarray(start, Math.min(source.length, start + config.textRangeBytes));
-        return Promise.resolve(new Response(body, { status: 206, headers: { "content-range": `bytes ${start}-${start + body.length - 1}/${source.length}` } }));
-      }) as unknown as typeof fetch,
+      fetchFn: (() => Promise.resolve(new Response(source, { headers: { "content-length": String(source.length) } }))) as unknown as typeof fetch,
     });
-    const first = await tool.execute("one", { asset_id: "#1" });
-    expect(first.content.some((part) => part.type === "text" && part.text === "File contents (11 bytes total):\nhello")).toBeTrue();
-    expect(first.content.some((part) => part.type === "text" && part.text === "[Partial content: more remains. Read through 5 of 11 bytes. Continue only if needed with cursor: b:5]")).toBeTrue();
-    expect(first.details).toEqual({ assetId: 1, nextCursor: "b:5" });
-    const second = await tool.execute("two", { asset_id: 1, cursor: "b:5" });
-    expect(second.content.some((part) => part.type === "text" && part.text === "File contents (11 bytes total):\n worl")).toBeTrue();
+    const result = await tool.execute("one", { asset_id: "#1", start_line: 2, line_count: 2 });
+    expect(result.content.some((part) => part.type === "text" && part.text.includes("showing lines 2-3:\n2 | beta\n3 | gamma"))).toBeTrue();
+    expect(result.details).toEqual({ assetId: 1, startLine: 2, endLine: 3, totalLines: 3 });
   });
 
-  test("caches paid transcripts and paginates them", async () => {
+  test("caches timestamped transcripts as numbered lines", async () => {
     const record = asset("audio");
     let calls = 0;
     const tool = createReadAssetTool({
       config,
       elevenLabsApiKey: "key",
       getAsset: () => record,
-      resolveSource: () => Promise.resolve({ url: "https://cdn.test/audio", contentType: "audio/ogg", filename: "voice.ogg" }),
+      resolveSource: () => Promise.resolve(calls === 0
+        ? { url: "https://cdn.test/audio", contentType: "audio/ogg", filename: "voice.ogg" }
+        : null),
       cacheExtraction: (_id, text, provider) => {
         record.extractedText = text;
         record.extractionProvider = provider;
@@ -61,16 +55,22 @@ describe("read_asset", () => {
       prepareImage: () => Promise.reject(new Error("unused")),
       fetchFn: (() => {
         calls += 1;
-        return Promise.resolve(Response.json({ text: "hello transcript" }));
+        return Promise.resolve(Response.json({
+          text: "hello transcript",
+          words: [
+            { text: "hello", start: 0, end: 0.5, type: "word" },
+            { text: " ", start: 0.5, end: 0.5, type: "spacing" },
+            { text: "transcript", start: 0.5, end: 1.5, type: "word" },
+          ],
+        }));
       }) as unknown as typeof fetch,
     });
     const first = await tool.execute("one", { asset_id: 1 });
-    expect(first.details).toEqual({ assetId: 1, nextCursor: "c:5" });
-    expect(first.content.some((part) => part.type === "text" && part.text === "Transcript (ElevenLabs Scribe v2; 16 characters total):\nhello")).toBeTrue();
-    expect(first.content.some((part) => part.type === "text" && part.text === "[Partial content: more remains. Read through 5 of 16 characters. Continue only if needed with cursor: c:5]")).toBeTrue();
-    await tool.execute("two", { asset_id: 1, cursor: "c:5" });
+    expect(first.details).toEqual({ assetId: 1, startLine: 1, endLine: 1, totalLines: 1 });
+    expect(first.content.some((part) => part.type === "text" && part.text.includes("1 | [00:00–00:01] hello transcript"))).toBeTrue();
+    await tool.execute("two", { asset_id: 1, start_line: 1 });
     expect(calls).toBe(1);
-    expect(record.extractionProvider).toBe("elevenlabs-scribe-v2");
+    expect(record.extractionProvider).toBe("elevenlabs-scribe-v2-timestamped");
   });
 
   test("applies the asset-kind timeout", () => {

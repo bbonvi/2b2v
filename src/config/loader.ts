@@ -86,7 +86,6 @@ function resolveAssetReadingConfig(input: AssetReadingConfigYaml | undefined, fa
   }
   return {
     maxCharsPerRead: positive(input?.maxCharsPerRead, fallback.maxCharsPerRead, "maxCharsPerRead"),
-    textRangeBytes: positive(input?.textRangeBytes, fallback.textRangeBytes, "textRangeBytes"),
     maxDownloadBytes: positive(input?.maxDownloadBytes, fallback.maxDownloadBytes, "maxDownloadBytes"),
     maxTranscriptionDurationSeconds: positive(input?.maxTranscriptionDurationSeconds, fallback.maxTranscriptionDurationSeconds, "maxTranscriptionDurationSeconds"),
     videoPreviewMaxBytes: positive(input?.videoPreviewMaxBytes, fallback.videoPreviewMaxBytes, "videoPreviewMaxBytes"),

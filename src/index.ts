@@ -56,7 +56,8 @@ import { createMemoryListTool } from "./agent/user-memory-tool";
 import { createListChannelMessagesTool } from "./agent/list-channel-messages-tool";
 import { createOwnMessageTools } from "./agent/own-message-tool";
 import { createBraveSearchTool } from "./agent/brave-search-tool";
-import { createReadAssetTool, extractRemoteVideoFrame } from "./agent/read-asset-tool";
+import { createReadAssetTool, extractRemoteVideoFrame, type ReadAssetToolDeps } from "./agent/read-asset-tool";
+import { createSearchAssetTool } from "./agent/search-asset-tool";
 import { createReadUserAvatarTool, type AvatarSize } from "./agent/read-user-avatar-tool";
 import { createFetchImagesTool } from "./agent/fetch-images-tool";
 import { createCodexGenerateImageTool, type GeneratedImageAttachment } from "./agent/codex-image-tool";
@@ -307,7 +308,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       },
     }));
     return completionResult.agentRan ? sentMessageId : undefined;
-  };
+  }
 
   try {
     const generated = createGeneratedImageRuntime();
@@ -2249,7 +2250,7 @@ function buildAgentTools(
       }
     },
   });
-  const readAssetTool = createReadAssetTool({
+  const assetToolDeps = {
     config: guildConfig.assetReading ?? { ...DEFAULT_ASSET_READING, videoPreviewTimesSeconds: [...DEFAULT_ASSET_READING.videoPreviewTimesSeconds] },
     elevenLabsApiKey: globalConfig.elevenLabsApiKey,
     getAsset: (id) => {
@@ -2260,7 +2261,9 @@ function buildAgentTools(
     cacheExtraction: (id, text, provider) => cacheAssetExtraction(db, id, text, provider),
     prepareImage: (buffer, mimeType) => prepareImageBufferForContext(buffer, mimeType, CONTEXT_IMAGE_MAX_DIMENSION),
     extractVideoFrame: extractRemoteVideoFrame,
-  });
+  } satisfies ReadAssetToolDeps;
+  const readAssetTool = createReadAssetTool(assetToolDeps);
+  const searchAssetTool = createSearchAssetTool(assetToolDeps);
 
   const readUserAvatarTool = createReadUserAvatarTool({
     resolveUserAvatar: async (reference: string, size: AvatarSize) => {
@@ -2323,7 +2326,7 @@ function buildAgentTools(
     },
   });
 
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memoryListTool, listChannelMessagesTool, ...ownMessageTools, readAssetTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memoryListTool, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (includeImageGenerationTools) {
     const codexImageModel = guildConfig.llmProvider === "openai-codex"
       ? guildConfig.model ?? globalConfig.defaultModel

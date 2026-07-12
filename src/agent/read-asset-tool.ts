@@ -7,7 +7,8 @@ import { AssetIdSchema, parseAssetId } from "./asset-id.ts";
 
 const ReadAssetParams = Type.Object({
   asset_id: AssetIdSchema,
-  cursor: Type.Optional(Type.String({ description: "Opaque next cursor returned by an earlier read." })),
+  start_line: Type.Optional(Type.Integer({ minimum: 1, description: "First line to read from textual content." })),
+  line_count: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000, description: "Maximum lines to read." })),
 });
 
 export interface ResolvedAssetSource {
@@ -27,7 +28,13 @@ export interface ReadAssetToolDeps {
   extractVideoFrame?: (url: string, seconds: number, timeoutSeconds: number, signal?: AbortSignal) => Promise<Buffer | null>;
 }
 
-/** Read one lazy message asset, paging large textual results with an opaque cursor. */
+export interface AssetTextView {
+  text: string;
+  label: "File contents" | "Transcript";
+  providerLabel?: string;
+}
+
+/** Read one lazy message asset, using line ranges for textual content. */
 export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
   const fetchFn = deps.fetchFn ?? fetch;
   return {
@@ -35,8 +42,8 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
     label: "Read Asset",
     description: "Read an image, GIF, audio, video, text, or file referenced by a typed chat asset ID.",
     parameters: ReadAssetParams,
-    async execute(_toolCallId, params, signal): Promise<AgentToolResult<{ assetId: number; nextCursor?: string }>> {
-      const input = params as { asset_id: unknown; cursor?: string };
+    async execute(_toolCallId, params, signal): Promise<AgentToolResult<{ assetId: number; startLine?: number; endLine?: number; totalLines?: number }>> {
+      const input = params as { asset_id: unknown; start_line?: number; line_count?: number };
       const assetId = parseAssetId(input.asset_id);
       if (assetId === null) throw new Error("asset_id must be a positive integer, optionally prefixed with #");
       const asset = deps.getAsset(assetId);
@@ -45,9 +52,11 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
       const readSignal = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
       const source = await deps.resolveSource(asset);
       readSignal.throwIfAborted();
-      if (source === null) throw new Error(`Asset ${assetId} source is no longer available.`);
-      const filename = source.filename ?? asset.filename;
-      const contentType = source.contentType ?? asset.contentType;
+      const cachedTranscriptAvailable = (asset.kind === "audio" || asset.kind === "video") && asset.extractedText !== null;
+      if (source === null && !cachedTranscriptAvailable) throw new Error(`Asset ${assetId} source is no longer available.`);
+      const effectiveSource = source ?? { url: "", filename: asset.filename, contentType: asset.contentType };
+      const filename = effectiveSource.filename ?? asset.filename;
+      const contentType = effectiveSource.contentType ?? asset.contentType;
       const kindLabel = `${asset.kind[0]?.toUpperCase() ?? ""}${asset.kind.slice(1)}`;
       const facts = [
         contentType !== null ? `type: ${contentType}` : "",
@@ -62,42 +71,27 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
       }];
 
       if (asset.kind === "image" || asset.kind === "gif") {
-        const buffer = await fetchAssetBuffer(fetchFn, source.url, deps.config.maxDownloadBytes, readSignal);
-        const image = await deps.prepareImage(buffer, source.contentType ?? asset.contentType ?? "image/png");
+        const buffer = await fetchAssetBuffer(fetchFn, effectiveSource.url, deps.config.maxDownloadBytes, readSignal);
+        const image = await deps.prepareImage(buffer, effectiveSource.contentType ?? asset.contentType ?? "image/png");
         readSignal.throwIfAborted();
         content.push({ type: "image", data: image.data.toString("base64"), mimeType: image.mime });
         return { content, details: { assetId: asset.id } };
       }
 
-      if (asset.kind === "text") {
-        const page = asset.extractedText !== null
-          ? pageCachedText(asset.extractedText, input.cursor, deps.config.maxCharsPerRead)
-          : await pageRemoteText(fetchFn, source.url, input.cursor, deps.config, readSignal);
-        readSignal.throwIfAborted();
-        content.push({ type: "text", text: `File contents${page.total !== null ? ` (${page.total.toLocaleString("en-US")} ${page.unit} total)` : ""}:\n${page.text}` });
-        if (page.nextCursor !== undefined) content.push({ type: "text", text: partialPageNotice(page) });
-        return { content, details: { assetId: asset.id, ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}) } };
-      }
-
-      if (asset.kind === "audio" || asset.kind === "video") {
-        let transcript = asset.extractedText;
-        let transcriptProvider = asset.extractionProvider;
-        if (transcript === null) {
-          if (asset.durationSeconds !== null && asset.durationSeconds > deps.config.maxTranscriptionDurationSeconds) {
-            throw new Error(`Asset duration ${Math.round(asset.durationSeconds)}s exceeds transcription limit ${deps.config.maxTranscriptionDurationSeconds}s.`);
-          }
-          if (deps.elevenLabsApiKey === undefined || deps.elevenLabsApiKey === "") throw new Error("ElevenLabs speech-to-text is not configured.");
-          transcript = await transcribeElevenLabs(fetchFn, deps.elevenLabsApiKey, source.url, readSignal);
-          transcriptProvider = "elevenlabs-scribe-v2";
-          deps.cacheExtraction(asset.id, transcript, transcriptProvider);
-        }
-        const page = pageCachedText(transcript, input.cursor, deps.config.maxCharsPerRead);
-        const providerLabel = transcriptProvider === "elevenlabs-scribe-v2" ? "ElevenLabs Scribe v2" : transcriptProvider;
-        const transcriptMeta = [providerLabel, `${transcript.length.toLocaleString("en-US")} characters total`].filter((value) => value !== null);
-        content.push({ type: "text", text: `Transcript (${transcriptMeta.join("; ")}):\n${page.text}` });
-        if (page.nextCursor !== undefined) content.push({ type: "text", text: partialPageNotice(page) });
+      if (asset.kind === "text" || asset.kind === "audio" || asset.kind === "video") {
+        const view = await loadAssetTextView(deps, asset, effectiveSource, readSignal);
+        const range = renderLineRange(view.text, input.start_line ?? 1, input.line_count ?? 200, deps.config.maxCharsPerRead);
+        const viewMeta = [
+          view.providerLabel,
+          `${view.text.length.toLocaleString("en-US")} characters`,
+          `${range.totalLines.toLocaleString("en-US")} lines`,
+        ].filter((value) => value !== undefined);
+        content.push({ type: "text", text: `${view.label} (${viewMeta.join("; ")}) — showing lines ${range.startLine}-${range.endLine}:\n${range.text}` });
+        if (range.lineTruncated) content.push({ type: "text", text: `[A line exceeded maxCharsPerRead and was truncated; use search_asset to inspect it.]` });
+        else if (range.hasMore) content.push({ type: "text", text: `[More content exists. Request another line range only if needed.]` });
         if (
-          asset.kind === "video" && input.cursor === undefined
+          asset.kind === "video" && (input.start_line === undefined || input.start_line === 1)
+          && source !== null
           && (asset.size === null || asset.size <= deps.config.videoPreviewMaxBytes)
           && deps.extractVideoFrame !== undefined
         ) {
@@ -109,7 +103,7 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
             content.push({ type: "image", data: frame.toString("base64"), mimeType: "image/jpeg" });
           }
         }
-        return { content, details: { assetId: asset.id, ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}) } };
+        return { content, details: { assetId: asset.id, startLine: range.startLine, endLine: range.endLine, totalLines: range.totalLines } };
       }
 
       content.push({ type: "text", text: "Content reading is unsupported for this file type; metadata and reposting remain available." });
@@ -118,57 +112,72 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
   };
 }
 
-function parseCursor(cursor: string | undefined, prefix: "c" | "b"): number {
-  if (cursor === undefined) return 0;
-  const match = new RegExp(`^${prefix}:(\\d+)$`).exec(cursor);
-  if (match === null) throw new Error("Invalid cursor for this asset.");
-  return Number(match[1]);
+/** Materialize the searchable textual view of a text, audio, or video asset. */
+export async function loadAssetTextView(
+  deps: ReadAssetToolDeps,
+  asset: MessageAsset,
+  source: ResolvedAssetSource,
+  signal: AbortSignal,
+): Promise<AssetTextView> {
+  if (asset.kind === "text") {
+    // ponytail: buffer up to maxDownloadBytes; stream into rg if large-file memory pressure becomes real.
+    const buffer = await fetchAssetBuffer(deps.fetchFn ?? fetch, source.url, deps.config.maxDownloadBytes, signal);
+    return { text: buffer.toString("utf8"), label: "File contents" };
+  }
+  if (asset.kind !== "audio" && asset.kind !== "video") throw new Error(`Asset #${asset.id} has no searchable text.`);
+  if (asset.extractedText !== null) {
+    return {
+      text: normalizeCachedTranscript(asset.extractedText),
+      label: "Transcript",
+      providerLabel: asset.extractionProvider?.startsWith("elevenlabs-scribe-v2") === true ? "ElevenLabs Scribe v2" : asset.extractionProvider ?? undefined,
+    };
+  }
+  if (asset.durationSeconds !== null && asset.durationSeconds > deps.config.maxTranscriptionDurationSeconds) {
+    throw new Error(`Asset duration ${Math.round(asset.durationSeconds)}s exceeds transcription limit ${deps.config.maxTranscriptionDurationSeconds}s.`);
+  }
+  if (deps.elevenLabsApiKey === undefined || deps.elevenLabsApiKey === "") throw new Error("ElevenLabs speech-to-text is not configured.");
+  const transcript = await transcribeElevenLabs(deps.fetchFn ?? fetch, deps.elevenLabsApiKey, source.url, signal);
+  deps.cacheExtraction(asset.id, transcript, "elevenlabs-scribe-v2-timestamped");
+  return { text: transcript, label: "Transcript", providerLabel: "ElevenLabs Scribe v2" };
 }
 
-interface TextPage {
+interface LineRange {
   text: string;
-  nextCursor?: string;
-  end: number;
-  total: number | null;
-  unit: "bytes" | "characters";
+  startLine: number;
+  endLine: number;
+  totalLines: number;
+  hasMore: boolean;
+  lineTruncated: boolean;
 }
 
-function partialPageNotice(page: TextPage): string {
-  const progress = page.total !== null ? ` Read through ${page.end.toLocaleString("en-US")} of ${page.total.toLocaleString("en-US")} ${page.unit}.` : "";
-  return `[Partial content: more remains.${progress} Continue only if needed with cursor: ${page.nextCursor ?? ""}]`;
-}
-
-function pageCachedText(text: string, cursor: string | undefined, maxChars: number): TextPage {
-  const offset = parseCursor(cursor, "c");
-  if (offset > text.length) throw new Error("Cursor is past end of extracted text.");
-  const end = Math.min(text.length, offset + maxChars);
-  return { text: text.slice(offset, end), end, total: text.length, unit: "characters", ...(end < text.length ? { nextCursor: `c:${end}` } : {}) };
-}
-
-async function pageRemoteText(
-  fetchFn: typeof fetch,
-  url: string,
-  cursor: string | undefined,
-  config: AssetReadingConfig,
-  signal: AbortSignal | undefined,
-): Promise<TextPage> {
-  const offset = parseCursor(cursor, "b");
-  const response = await fetchFn(url, {
-    headers: { Range: `bytes=${offset}-${offset + config.textRangeBytes - 1}` },
-    signal,
-  });
-  if (!response.ok && response.status !== 206) throw new Error(`Text asset fetch failed (${response.status}).`);
-  const buffer = await readLimitedBody(response, config.textRangeBytes);
-  let decoded = buffer.toString("utf8");
-  if (decoded.endsWith("�")) decoded = decoded.slice(0, -1);
-  const text = decoded.slice(0, config.maxCharsPerRead);
-  const consumed = Buffer.byteLength(text, "utf8");
-  const totalValue = response.headers.get("content-range")?.match(/\/(\d+)$/)?.[1]
-    ?? (response.status === 200 ? response.headers.get("content-length") : null);
-  const total = totalValue !== null && Number.isFinite(Number(totalValue)) ? Number(totalValue) : null;
-  const nextOffset = offset + consumed;
-  const hasMore = consumed > 0 && (total !== null ? nextOffset < total : buffer.length >= config.textRangeBytes || text.length < decoded.length);
-  return { text, end: nextOffset, total, unit: "bytes", ...(hasMore ? { nextCursor: `b:${nextOffset}` } : {}) };
+function renderLineRange(text: string, requestedStart: number, requestedCount: number, maxChars: number): LineRange {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  if (requestedStart > lines.length) throw new Error(`start_line ${requestedStart} exceeds the ${lines.length} available lines.`);
+  const startLine = requestedStart;
+  const selected: string[] = [];
+  let endLine = startLine - 1;
+  let chars = 0;
+  let lineTruncated = false;
+  for (let index = startLine - 1; index < lines.length && selected.length < requestedCount; index += 1) {
+    const prefix = `${index + 1} | `;
+    const line = lines[index] ?? "";
+    const available = maxChars - chars - prefix.length - (selected.length > 0 ? 1 : 0);
+    if (available <= 0) break;
+    lineTruncated = line.length > available;
+    const rendered = lineTruncated ? `${prefix}${line.slice(0, Math.max(0, available - 18))}… [line truncated]` : `${prefix}${line}`;
+    selected.push(rendered);
+    chars += rendered.length + 1;
+    endLine = index + 1;
+    if (lineTruncated) break;
+  }
+  return {
+    text: selected.join("\n"),
+    startLine,
+    endLine: Math.max(startLine, endLine),
+    totalLines: lines.length,
+    hasMore: lineTruncated || endLine < lines.length,
+    lineTruncated,
+  };
 }
 
 export async function fetchAssetBuffer(fetchFn: typeof fetch, url: string, maxBytes: number, signal?: AbortSignal): Promise<Buffer> {
@@ -201,16 +210,85 @@ async function transcribeElevenLabs(fetchFn: typeof fetch, apiKey: string, url: 
   const form = new FormData();
   form.set("model_id", "scribe_v2");
   form.set("cloud_storage_url", url);
-  form.set("timestamps_granularity", "none");
+  form.set("timestamps_granularity", "word");
   form.set("tag_audio_events", "true");
   const response = await fetchFn("https://api.elevenlabs.io/v1/speech-to-text", {
     method: "POST", headers: { "xi-api-key": apiKey }, body: form, signal,
   });
-  const result = await response.json() as { text?: unknown; detail?: unknown };
+  const result = await response.json() as { text?: unknown; words?: unknown; detail?: unknown };
   if (!response.ok || typeof result.text !== "string") {
     throw new Error(`ElevenLabs transcription failed (${response.status}): ${JSON.stringify(result.detail ?? result).slice(0, 500)}`);
   }
-  return result.text;
+  return formatTimestampedTranscript(result.text, result.words);
+}
+
+interface TranscriptWord {
+  text: string;
+  start: number;
+  end: number;
+  type: string;
+}
+
+function formatTimestampedTranscript(text: string, words: unknown): string {
+  if (!Array.isArray(words)) return normalizeCachedTranscript(text);
+  const valid = words.filter((value): value is Record<string, unknown> => value !== null && typeof value === "object")
+    .map((value): TranscriptWord | null => typeof value.text === "string"
+      && typeof value.start === "number" && Number.isFinite(value.start)
+      && typeof value.end === "number" && Number.isFinite(value.end)
+      ? { text: value.text, start: value.start, end: value.end, type: typeof value.type === "string" ? value.type : "word" }
+      : null)
+    .filter((value): value is TranscriptWord => value !== null);
+  if (valid.length === 0) return normalizeCachedTranscript(text);
+
+  const segments: string[] = [];
+  let segmentText = "";
+  let segmentStart = valid[0]?.start ?? 0;
+  let segmentEnd = segmentStart;
+  const flush = (): void => {
+    const clean = segmentText.replace(/\s+/g, " ").trim();
+    if (clean !== "") segments.push(`[${formatTimestamp(segmentStart)}–${formatTimestamp(segmentEnd)}] ${clean}`);
+    segmentText = "";
+  };
+  for (const word of valid) {
+    if (segmentText === "") segmentStart = word.start;
+    if (word.type !== "spacing" && segmentText !== "" && !/\s$/u.test(segmentText) && !/^[,.;:!?…)}\]]/u.test(word.text)) {
+      segmentText += " ";
+    }
+    segmentText += word.text;
+    segmentEnd = word.end;
+    const duration = segmentEnd - segmentStart;
+    if ((duration >= 12 && /[.!?…]["')\]]?$/u.test(word.text)) || duration >= 20) flush();
+  }
+  flush();
+  return segments.join("\n");
+}
+
+function normalizeCachedTranscript(text: string): string {
+  const clean = text.replace(/\r\n?/g, "\n").trim();
+  if (clean.includes("\n") || clean.length <= 500) return clean;
+  const words = clean.split(/\s+/u);
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    if (line !== "" && line.length + word.length + 1 > 500) {
+      lines.push(line);
+      line = word;
+    } else {
+      line += `${line !== "" ? " " : ""}${word}`;
+    }
+  }
+  if (line !== "") lines.push(line);
+  return lines.join("\n");
+}
+
+function formatTimestamp(seconds: number): string {
+  const rounded = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(rounded / 3600);
+  const minutes = Math.floor((rounded % 3600) / 60);
+  const secs = rounded % 60;
+  return hours > 0
+    ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
 /** Extract one JPEG frame from a remotely seekable video with FFmpeg. */

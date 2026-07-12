@@ -1,0 +1,1 @@
+Regex-search one text attachment or audio/video transcript. Patterns use ripgrep syntax and are case-sensitive unless they include `(?i)`. Use this first for focused work with large assets, then call `read_asset` on a relevant line range only when the returned context is insufficient.

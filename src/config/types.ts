@@ -407,7 +407,6 @@ export type RelationshipConfigYaml = Partial<RelationshipConfig>;
 /** Limits for lazy message-asset reading and extraction. */
 export interface AssetReadingConfig {
   maxCharsPerRead: number;
-  textRangeBytes: number;
   maxDownloadBytes: number;
   maxTranscriptionDurationSeconds: number;
   videoPreviewMaxBytes: number;
