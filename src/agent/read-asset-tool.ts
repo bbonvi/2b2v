@@ -79,16 +79,22 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
       }
 
       if (asset.kind === "text" || asset.kind === "audio" || asset.kind === "video") {
-        const view = await loadAssetTextView(deps, asset, effectiveSource, readSignal);
-        const range = renderLineRange(view.text, input.start_line ?? 1, input.line_count ?? 200, deps.config.maxCharsPerRead);
-        const viewMeta = [
-          view.providerLabel,
-          `${view.text.length.toLocaleString("en-US")} characters`,
-          `${range.totalLines.toLocaleString("en-US")} lines`,
-        ].filter((value) => value !== undefined);
-        content.push({ type: "text", text: `${view.label} (${viewMeta.join("; ")}) — showing lines ${range.startLine}-${range.endLine}:\n${range.text}` });
-        if (range.lineTruncated) content.push({ type: "text", text: `[A line exceeded maxCharsPerRead and was truncated; use search_asset to inspect it.]` });
-        else if (range.hasMore) content.push({ type: "text", text: `[More content exists. Request another line range only if needed.]` });
+        let range: LineRange | null = null;
+        try {
+          const view = await loadAssetTextView(deps, asset, effectiveSource, readSignal);
+          range = renderLineRange(view.text, input.start_line ?? 1, input.line_count ?? 200, deps.config.maxCharsPerRead);
+          const viewMeta = [
+            view.providerLabel,
+            `${view.text.length.toLocaleString("en-US")} characters`,
+            `${range.totalLines.toLocaleString("en-US")} lines`,
+          ].filter((value) => value !== undefined);
+          content.push({ type: "text", text: `${view.label} (${viewMeta.join("; ")}) — showing lines ${range.startLine}-${range.endLine}:\n${range.text}` });
+          if (range.lineTruncated) content.push({ type: "text", text: `[A line exceeded maxCharsPerRead and was truncated; use search_asset to inspect it.]` });
+          else if (range.hasMore) content.push({ type: "text", text: `[More content exists. Request another line range only if needed.]` });
+        } catch (error) {
+          if (asset.kind === "text" || readSignal.aborted) throw error;
+          content.push({ type: "text", text: `Transcript unavailable: ${error instanceof Error ? error.message : String(error)}` });
+        }
         if (
           asset.kind === "video" && (input.start_line === undefined || input.start_line === 1)
           && source !== null
@@ -103,7 +109,9 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
             content.push({ type: "image", data: frame.toString("base64"), mimeType: "image/jpeg" });
           }
         }
-        return { content, details: { assetId: asset.id, startLine: range.startLine, endLine: range.endLine, totalLines: range.totalLines } };
+        return { content, details: range === null
+          ? { assetId: asset.id }
+          : { assetId: asset.id, startLine: range.startLine, endLine: range.endLine, totalLines: range.totalLines } };
       }
 
       content.push({ type: "text", text: "Content reading is unsupported for this file type; metadata and reposting remain available." });

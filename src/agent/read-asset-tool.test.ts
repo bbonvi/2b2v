@@ -89,4 +89,22 @@ describe("read_asset", () => {
     });
     return expect(Promise.resolve(tool.execute("timeout", { asset_id: 1 }))).rejects.toThrow("asset read timed out");
   });
+
+  test("returns video frames when transcription fails", async () => {
+    const tool = createReadAssetTool({
+      config,
+      elevenLabsApiKey: "key",
+      getAsset: () => asset("video"),
+      resolveSource: () => Promise.resolve({ url: "https://cdn.test/video", contentType: "video/mp4", filename: "clip.mp4" }),
+      cacheExtraction: () => {},
+      prepareImage: () => Promise.reject(new Error("unused")),
+      fetchFn: (() => Promise.resolve(Response.json({ detail: { message: "invalid audio" } }, { status: 400 }))) as unknown as typeof fetch,
+      extractVideoFrame: (_url, seconds) => Promise.resolve(seconds === 0 ? Buffer.from("jpeg") : null),
+    });
+    const result = await tool.execute("video", { asset_id: 1 });
+    expect(result.content.some((part) => part.type === "text" && part.text.includes("Transcript unavailable: ElevenLabs transcription failed (400)"))).toBeTrue();
+    expect(result.content.some((part) => part.type === "text" && part.text === "Video frame at 0s")).toBeTrue();
+    expect(result.content.some((part) => part.type === "image")).toBeTrue();
+    expect(result.details).toEqual({ assetId: 1 });
+  });
 });
