@@ -164,12 +164,13 @@ describe("resolveModel", () => {
   });
 
   test("resolves OpenAI Codex subscription models", () => {
-    const model = resolveModel("gpt-5.5", "openai-codex");
-    expect(model.id).toBe("gpt-5.5");
+    const model = resolveModel("gpt-5.6-luna", "openai-codex");
+    expect(model.id).toBe("gpt-5.6-luna");
     expect(model.api).toBe("openai-codex-responses");
     expect(model.provider).toBe("openai-codex");
     expect(model.llmProvider).toBe("openai-codex");
     expect(model.input).toContain("image");
+    expect(model.contextWindow).toBe(372_000);
   });
 
   test("uses provider-qualified guild model keys", () => {
@@ -477,10 +478,10 @@ describe("buildStreamOptions", () => {
     const opts = buildStreamOptions(GLOBAL, {
       ...GUILD,
       llmProvider: "openai-codex",
-      model: "gpt-5.5",
-      thinkingLevel: "xhigh",
+      model: "gpt-5.6-luna",
+      thinkingLevel: "max",
     });
-    expect(opts.reasoningEffort).toBe("xhigh");
+    expect(opts.reasoningEffort).toBe("max");
   });
 
   test("does not override explicit Codex reasoning effort", () => {

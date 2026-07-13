@@ -814,15 +814,15 @@ describe("resolveGuildConfig", () => {
   test("inherits thinkingLevel from global when guild does not specify", () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const cfgFile = join(TEST_DIR, "config.yaml");
-    writeFileSync(cfgFile, "thinkingLevel: high\n");
+    writeFileSync(cfgFile, "thinkingLevel: max\n");
     const global = loadGlobalConfig(BASE_ENV, cfgFile);
-    expect(global.defaultThinkingLevel).toBe("high");
+    expect(global.defaultThinkingLevel).toBe("max");
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {
       guildId: "80",
       slug: "thinking-inherit",
     };
     const resolved = resolveGuildConfig(global, partial);
-    expect(resolved.thinkingLevel).toBe("high");
+    expect(resolved.thinkingLevel).toBe("max");
   });
 
   test("guild thinkingLevel overrides global", () => {
@@ -844,7 +844,7 @@ describe("resolveGuildConfig", () => {
     const cfgFile = join(TEST_DIR, "config.yaml");
     writeFileSync(cfgFile, "thinkingLevel: enormous\n");
     expect(() => loadGlobalConfig(BASE_ENV, cfgFile)).toThrow(
-      'thinkingLevel must be "minimal", "low", "medium", "high", or "xhigh"',
+      'thinkingLevel must be "minimal", "low", "medium", "high", "xhigh", or "max"',
     );
   });
 
@@ -856,7 +856,7 @@ describe("resolveGuildConfig", () => {
       thinkingLevel: "enormous" as never,
     };
     expect(() => resolveGuildConfig(global, partial)).toThrow(
-      'thinkingLevel must be "minimal", "low", "medium", "high", or "xhigh"',
+      'thinkingLevel must be "minimal", "low", "medium", "high", "xhigh", or "max"',
     );
   });
 
@@ -865,7 +865,7 @@ describe("resolveGuildConfig", () => {
     const cfgFile = join(TEST_DIR, "config.yaml");
     writeFileSync(cfgFile, "backgroundLlm:\n  thinkingLevel: enormous\n");
     expect(() => loadGlobalConfig(BASE_ENV, cfgFile)).toThrow(
-      'backgroundLlm.thinkingLevel must be "minimal", "low", "medium", "high", or "xhigh"',
+      'backgroundLlm.thinkingLevel must be "minimal", "low", "medium", "high", "xhigh", or "max"',
     );
   });
 

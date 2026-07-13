@@ -129,7 +129,7 @@ export interface PromptTransportConfig {
 export type LlmProvider = "openrouter" | "openai-codex";
 
 /** Reasoning effort requested from providers that expose thinking controls. */
-export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 /** Service tier override for providers that support it. */
 export type ServiceTier = "flex" | "priority";

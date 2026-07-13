@@ -386,10 +386,11 @@ function parseThinkingLevel(value: unknown, key: string): ThinkingLevel | undefi
     || value === "medium"
     || value === "high"
     || value === "xhigh"
+    || value === "max"
   ) {
     return value;
   }
-  throw new Error(`${key} must be "minimal", "low", "medium", "high", or "xhigh"`);
+  throw new Error(`${key} must be "minimal", "low", "medium", "high", "xhigh", or "max"`);
 }
 
 function parseCodexTransport(value: unknown, key: string): CodexTransport | undefined {
