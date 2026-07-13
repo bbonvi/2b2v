@@ -23,9 +23,17 @@ function sentenceList(parts: string[]): string {
   return `${parts.slice(0, -1).join(", ")}, and ${parts.at(-1) ?? ""}`;
 }
 
+function joinPromptItems(items: string[]): string {
+  return items
+    .map((item) => item.trim().replace(/[.;。；]+$/u, ""))
+    .filter((item) => item !== "")
+    .join("; ");
+}
+
 function axisPhrase(axis: RelationshipAxis, value: number): string | undefined {
   const magnitude = Math.abs(value);
-  if (magnitude < 5) return undefined;
+  const minimumMagnitude = axis === "warmth" || axis === "curiosity" || axis === "attraction" ? 2 : 5;
+  if (magnitude < minimumMagnitude) return undefined;
   const level = magnitude >= 30 ? 2 : magnitude >= 12 ? 1 : 0;
   const positive = value > 0;
   const phrases: Record<RelationshipAxis, { positive: [string, string, string]; negative: [string, string, string] }> = {
@@ -84,8 +92,11 @@ function relationshipStance(profile: RelationshipProfile): string {
 function compactProfileLine(entry: RelationshipContextProfile): string {
   const notes = entry.profile.notes.at(-1);
   const loop = entry.profile.openLoops.at(-1);
-  const suffix = notes !== undefined ? `; ${notes}` : loop !== undefined ? `; open: ${loop}` : "";
-  return `- ${entry.label}: ${relationshipStance(entry.profile)}${suffix}`;
+  const detail = notes ?? (loop !== undefined ? `open: ${loop}` : undefined);
+  return `- ${entry.label}: ${joinPromptItems([
+    relationshipStance(entry.profile),
+    ...(detail !== undefined ? [detail] : []),
+  ])}.`;
 }
 
 export function renderRelationshipPromptContext(input: {
@@ -112,10 +123,10 @@ export function renderRelationshipPromptContext(input: {
         : "",
     ].filter((line) => line !== "").join("\n");
   }
-  const notes = current.notes.slice(-4).join("; ");
-  const boundaries = current.boundaries.slice(-3).join("; ");
-  const loops = current.openLoops.slice(-3).join("; ");
-  const recent = current.recent.slice(-3).map((item) => item.summary).join("; ");
+  const notes = joinPromptItems(current.notes.slice(-4));
+  const boundaries = joinPromptItems(current.boundaries.slice(-3));
+  const loops = joinPromptItems(current.openLoops.slice(-3));
+  const recent = joinPromptItems(current.recent.slice(-3).map((item) => item.summary));
   return [
     "## Relationship With Current User",
     policy,
