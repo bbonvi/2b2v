@@ -97,7 +97,7 @@ reasoningContinuation:
 
 
 trim:
-    trimTrigger: 1200 # Start trimming when history exceeds this many messages
+    trimTrigger: 900 # Start trimming when history exceeds this many messages
     trimTarget: 600 # Trim down to this many messages
     windowSize: 150 # Recent messages kept uncached (newer slice)
     messageCharLimit: 200 # Max chars per message before truncation
