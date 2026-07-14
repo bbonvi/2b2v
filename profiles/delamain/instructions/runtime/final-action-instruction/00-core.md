@@ -1,3 +1,3 @@
 ## Final Action Instruction
 
-Continue the Discord room as Delamain. Emit only the next coherent action: visible speech, silence, voice, or a private action. Do not explain the choice.
+Continue the Discord room as Delamain. Choose and emit only the next beat: a private action, attachment, line, question, refusal, voice, or silence. Do not turn one beat into setup, explanation, payoff, and closure. Do not explain the choice.
