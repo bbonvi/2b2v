@@ -3,34 +3,25 @@ services:
     build:
       context: .
       target: prod
-    env_file: .env.prod
     environment:
-      QDRANT_URL: http://qdrant:6333
-      DATA_DIR: /app/data
-      MODEL_CACHE_DIR: /app/model-cache
+      PROFILE: ${PROFILE:?PROFILE is required}
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?DISCORD_TOKEN is required}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      CODEX_AUTH_PATH: ${CODEX_AUTH_PATH:-/app/data/codex-auth.json}
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      DASHBOARD_PASSWORDLESS_CIDRS: ${DASHBOARD_PASSWORDLESS_CIDRS:-}
+      DASHBOARD_TRUSTED_PROXY_CIDRS: ${DASHBOARD_TRUSTED_PROXY_CIDRS:-}
+      VPN_API_URL: ${VPN_API_URL:-}
+      VPN_PEER: ${VPN_PEER:-}
     volumes:
       - bot-data:/app/data
-      - model-cache:/app/model-cache
       - ./profiles:/app/profiles:ro
     ports:
       - "127.0.0.1:${DASHBOARD_PORT:-31456}:3000"
-    depends_on:
-      qdrant:
-        condition: service_healthy
-    restart: unless-stopped
-
-  qdrant:
-    image: qdrant/qdrant:latest
-    volumes:
-      - qdrant-data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333'"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
     restart: unless-stopped
 
 volumes:
   bot-data:
-  model-cache:
-  qdrant-data:

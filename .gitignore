@@ -6,6 +6,8 @@ node_modules/
 *.db-shm
 .env
 .env.prod
+.env.prod.*
+!.env.prod.example
 data/codex-auth.json
 dist/
 *.tsbuildinfo

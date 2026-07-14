@@ -28,8 +28,8 @@ COPY --link --from=deps /app/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY src/ ./src/
 
-# Embedding model cache and data directories created at runtime via volumes
-RUN mkdir -p /app/data /app/model-cache
+# Persistent application data is mounted here at runtime.
+RUN mkdir -p /app/data
 
 ENV NODE_ENV=production
 EXPOSE 3000

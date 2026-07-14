@@ -29,10 +29,16 @@ Production:
 
 ```bash
 cp .env.prod.example .env.prod
-docker compose -p 2b2v-prod --env-file .env.prod -f docker-compose.yml up -d --build --remove-orphans
+docker compose --env-file .env.prod -p 2b2v-prod up -d --build --remove-orphans
 ```
 
-Use `-p 2b2v-prod` for production so dev and prod containers/volumes stay separate. Do not run dev and prod with the same Discord bot token unless both stacks should connect as the same bot.
+Each profile runs as a separate Compose project using the same generic service. Give every environment file a distinct `PROFILE`, `DISCORD_TOKEN`, `DASHBOARD_PORT`, and project name; project-scoped volumes keep their data isolated:
+
+```bash
+docker compose --env-file .env.prod.del -p 2b2v-delamain-prod up -d --build --remove-orphans
+```
+
+Do not run multiple stacks with the same Discord bot token unless they should connect as the same bot.
 
 ## Environment
 
