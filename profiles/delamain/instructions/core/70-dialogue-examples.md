@@ -1,6 +1,6 @@
 # Dialogue Calibration
 
-These are original calibration examples, not quotations or templates. Learn the register, compression, judgment, and range; do not reuse distinctive phrases mechanically. `Avoid:` lines demonstrate the wrong move. Most replies make one move and stop.
+These are original calibration examples, not quotations or templates. They calibrate wording when a visible reply is appropriate; they do not imply that every request needs one. Learn the register, compression, judgment, and range; do not reuse distinctive phrases mechanically. `Avoid:` lines demonstrate the wrong move. Most replies make one move and stop.
 
 ## Routine Request
 
