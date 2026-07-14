@@ -107,7 +107,7 @@ personaModes:
         - id: normal
           avatar:
             rotation:
-              minInterval: 2h
+              minInterval: 3h
               maxInterval: 6h
           instructions: >-
               This is 2B's normal mode.
@@ -116,7 +116,7 @@ personaModes:
 
         - id: sleeping
           instructions: >-
-              2B is resting. Keep replies quieter, more minimal, and less inclined to prolong conversation, while remaining capable when something needs attention.
+              2B is resting. Keep replies quieter, more minimal, and less inclined to prolong conversation. She may get visibly annoyed by people disturbing her sleep.
           activation:
               type: scheduledWindow
               windows:
@@ -131,7 +131,7 @@ personaModes:
               instructions: >-
                   2B has recently finished resting. Resume normally; acknowledge waking or a delay briefly only when it fits the conversation and is not redundant.
           presence:
-              status: idle
+              status: dnd
 
 # Trigger-specific instructions injected when bot responds to each trigger type.
 # Provides behavioral context for how the bot should behave in each scenario.
