@@ -104,7 +104,7 @@ function runtime(
 describe("persona mode runtime", () => {
   test("plans once, persists the opportunity, activates naturally, and ends on visible turns", () => {
     let now = Date.UTC(2026, 0, 1, 0, 0);
-    const config = modeConfig([episodeMode(), normalMode()]);
+    const config = modeConfig([normalMode(), episodeMode()]);
     const first = runtime(config, () => now, () => 0.5);
     const planned = first.value.getStatus().upcoming[0];
     expect(planned?.modeId).toBe("rogue");
@@ -127,8 +127,8 @@ describe("persona mode runtime", () => {
   test("does not apply cooldown before the first episode or after a missed opportunity", () => {
     let now = Date.UTC(2026, 0, 1, 0, 0);
     const config = modeConfig([
-      episodeMode({ minIntervalMs: 0, maxIntervalMs: 86_400_000, cooldownMs: 7 * 86_400_000, maxVisibleTurns: 1 }),
       normalMode(),
+      episodeMode({ minIntervalMs: 0, maxIntervalMs: 86_400_000, cooldownMs: 7 * 86_400_000, maxVisibleTurns: 1 }),
     ]);
     const instance = runtime(config, () => now, () => 0).value;
     expect(instance.getStatus().upcoming[0]?.startsAt).toBe(now);
@@ -146,20 +146,20 @@ describe("persona mode runtime", () => {
 
   test("keeps a pending plan for presentation edits and replans scheduling edits", () => {
     const now = Date.UTC(2026, 0, 1, 0, 0);
-    const original = modeConfig([episodeMode({ minIntervalMs: 86_400_000, maxIntervalMs: 3 * 86_400_000 }), normalMode()]);
+    const original = modeConfig([normalMode(), episodeMode({ minIntervalMs: 86_400_000, maxIntervalMs: 3 * 86_400_000 })]);
     const instance = runtime(original, () => now, () => 0.5).value;
     const firstPlan = instance.getStatus().upcoming[0]?.startsAt;
 
     const instructionsOnly = modeConfig([
-      { ...episodeMode({ minIntervalMs: 86_400_000, maxIntervalMs: 3 * 86_400_000 }), instructions: "Different wording." },
       normalMode(),
+      { ...episodeMode({ minIntervalMs: 86_400_000, maxIntervalMs: 3 * 86_400_000 }), instructions: "Different wording." },
     ]);
     instance.update(instructionsOnly, "UTC");
     expect(instance.getStatus().upcoming[0]?.startsAt).toBe(firstPlan);
 
     const schedulingEdit = modeConfig([
-      episodeMode({ minIntervalMs: 86_400_000, maxIntervalMs: 5 * 86_400_000 }),
       normalMode(),
+      episodeMode({ minIntervalMs: 86_400_000, maxIntervalMs: 5 * 86_400_000 }),
     ]);
     instance.update(schedulingEdit, "UTC");
     expect(instance.getStatus().upcoming[0]?.startsAt).not.toBe(firstPlan);
@@ -171,7 +171,7 @@ describe("persona mode runtime", () => {
     instance.getStatus();
 
     now += 10 * 86_400_000;
-    instance.update(modeConfig([episodeMode(), normalMode()]), "UTC");
+    instance.update(modeConfig([normalMode(), episodeMode()]), "UTC");
     expect(instance.getStatus().upcoming[0]?.startsAt).toBe(now + 86_400_000);
   });
 
@@ -208,7 +208,7 @@ describe("persona mode runtime", () => {
 
   test("tracks guild-scoped episodes independently", () => {
     let now = Date.UTC(2026, 0, 1, 0, 0);
-    const config = modeConfig([episodeMode({ scope: "guild", minIntervalMs: 0, maxIntervalMs: 0 }), normalMode()]);
+    const config = modeConfig([normalMode(), episodeMode({ scope: "guild", minIntervalMs: 0, maxIntervalMs: 0 })]);
     const instance = runtime(config, () => now, () => 0).value;
     const guildStatuses = instance.getStatus().guilds;
     expect(guildStatuses).toHaveLength(2);
@@ -225,6 +225,28 @@ describe("persona mode runtime", () => {
     expect(instance.activeModeId(GUILD_B)).toBe("rogue");
   });
 
+  test("lets later active modes override earlier modes without treating the default as an override", () => {
+    const now = Date.UTC(2026, 0, 1, 2, 0);
+    const lower: PersonaMode = {
+      id: "lower",
+      scope: "global",
+      instructions: "Lower precedence.",
+      avatars: [avatar("lower")],
+      activation: { type: "scheduledWindow", windows: [{ start: "00:00", end: "06:00" }] },
+    };
+    const higher: PersonaMode = {
+      id: "higher",
+      scope: "global",
+      instructions: "Higher precedence.",
+      avatars: [avatar("higher")],
+      activation: { type: "scheduledWindow", windows: [{ start: "00:00", end: "06:00" }] },
+    };
+    const instance = runtime(modeConfig([lower, higher, normalMode()]), () => now, () => 0).value;
+
+    expect(instance.activeModeId(GUILD_A)).toBe("higher");
+    expect(instance.renderPromptContext(GUILD_A)).toContain("Higher precedence.");
+  });
+
   test("renders scheduled lead-in and a bounded aftermath in local wall time", () => {
     let now = Date.UTC(2026, 0, 1, 0, 45);
     const sleeping: PersonaMode = {
@@ -237,7 +259,7 @@ describe("persona mode runtime", () => {
       aftermath: { maxAgeMs: 2 * 60 * 60_000, consumeOnVisibleTurn: true, instructions: "Recently woke." },
       presence: { status: "idle" },
     };
-    const instance = runtime(modeConfig([sleeping, normalMode()]), () => now, () => 0).value;
+    const instance = runtime(modeConfig([normalMode(), sleeping]), () => now, () => 0).value;
     expect(instance.renderPromptContext(GUILD_A)).toContain("2026-01-01 01:00 local time");
     expect(instance.renderPromptContext(GUILD_A)).toContain("Winding down soon.");
 
@@ -265,7 +287,7 @@ describe("persona mode runtime", () => {
     };
     const instance = createPersonaModeRuntime({
       db,
-      config: modeConfig([sleeping, normalMode()]),
+      config: modeConfig([normalMode(), sleeping]),
       timezone: "UTC",
       guildIds: () => [],
       now: () => now,

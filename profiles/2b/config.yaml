@@ -104,6 +104,16 @@ timezone: Europe/Moscow # (default wall-clock timezone for model context and sch
 personaModes:
     default: normal
     modes:
+        - id: normal
+          avatar:
+            rotation:
+              minInterval: 2h
+              maxInterval: 6h
+          instructions: >-
+              This is 2B's normal mode.
+          presence:
+              status: online
+
         - id: sleeping
           instructions: >-
               2B is resting. Keep replies quieter, more minimal, and less inclined to prolong conversation, while remaining capable when something needs attention.
@@ -122,12 +132,6 @@ personaModes:
                   2B has recently finished resting. Resume normally; acknowledge waking or a delay briefly only when it fits the conversation and is not redundant.
           presence:
               status: idle
-
-        - id: normal
-          instructions: >-
-              This is 2B's normal mode.
-          presence:
-              status: online
 
 # Trigger-specific instructions injected when bot responds to each trigger type.
 # Provides behavioral context for how the bot should behave in each scenario.

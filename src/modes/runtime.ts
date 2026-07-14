@@ -318,8 +318,11 @@ function createPersonaModeContextRuntime(options: PersonaModeContextRuntimeOptio
 
   function resolvedMode(now: number): PersonaMode | undefined {
     if (config === undefined) return undefined;
-    return config.modes.find((mode) => isIntrinsicallyActive(mode, now))
-      ?? modeById(config, config.defaultModeId);
+    for (let index = config.modes.length - 1; index >= 0; index -= 1) {
+      const mode = config.modes[index];
+      if (mode !== undefined && mode.id !== config.defaultModeId && isIntrinsicallyActive(mode, now)) return mode;
+    }
+    return modeById(config, config.defaultModeId);
   }
 
   function chooseAvatar(mode: PersonaMode, forceDifferent: boolean): PersonaModeAvatarCandidate {
@@ -942,7 +945,9 @@ export function createPersonaModeRuntime(options: PersonaModeRuntimeOptions): Pe
 
   function winningModeId(guildId: string, observedAt: number): string | undefined {
     if (config === undefined) return undefined;
-    for (const mode of config.modes) {
+    for (let index = config.modes.length - 1; index >= 0; index -= 1) {
+      const mode = config.modes[index];
+      if (mode === undefined || mode.id === config.defaultModeId) continue;
       if (runtimeForMode(mode, guildId).isModeActive(mode.id, observedAt)) return mode.id;
     }
     return config.defaultModeId;
@@ -953,7 +958,9 @@ export function createPersonaModeRuntime(options: PersonaModeRuntimeOptions): Pe
     const guildRuntime = ensureGuildRuntime(guildId);
     guildRuntime.reconcile(observedAt);
     if (config === undefined) return;
-    for (const mode of config.modes) {
+    for (let index = config.modes.length - 1; index >= 0; index -= 1) {
+      const mode = config.modes[index];
+      if (mode === undefined || mode.id === config.defaultModeId) continue;
       const runtime = runtimeForMode(mode, guildId);
       if (runtime.isModeActive(mode.id, observedAt)) return;
       if (mode.activation?.type === "triggeredEpisode" && runtime.activateEligibleMode(mode.id, observedAt)) return;

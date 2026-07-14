@@ -74,7 +74,7 @@ export interface PersonaMode {
   };
 }
 
-/** Resolved profile-level persona mode configuration. Earlier modes win precedence. */
+/** Resolved profile-level persona mode configuration. Later active modes win precedence. */
 export interface PersonaModesConfig {
   defaultModeId: string;
   modes: PersonaMode[];
