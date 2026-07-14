@@ -41,7 +41,7 @@ tts:
         normal:
             voiceId: 8EintQMk6LYynyFGHba1 # (ElevenLabs voice ID)
             # voiceId: g0QruJYStgk5oVbpq3Uv
-            stability: 0.75 # (higher is steadier, lower is more expressive)
+            stability: 0.90 # (higher is steadier, lower is more expressive)
             applyTextNormalization: "on" # (normalize numbers/symbols before speech)
             outputFormat: mp3_44100_128 # (audio codec/sample/bitrate)
             speed: 1.10 # (voice playback/speech speed)
