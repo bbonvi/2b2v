@@ -144,6 +144,21 @@ describe("persona mode runtime", () => {
     expect(instance.getStatus().upcoming[0]?.startsAt).toBeGreaterThanOrEqual(now + 7 * 86_400_000);
   });
 
+  test("randomizes the full interval after a post-episode cooldown", () => {
+    let now = Date.UTC(2026, 0, 1, 0, 0);
+    const instance = runtime(modeConfig([
+      normalMode(),
+      episodeMode({ minIntervalMs: 0, maxIntervalMs: 2 * 60 * 60_000, cooldownMs: 86_400_000, maxVisibleTurns: 1 }),
+    ]), () => now, () => 0.5).value;
+
+    expect(instance.getStatus().upcoming[0]?.startsAt).toBe(now + 60 * 60_000);
+    now += 60 * 60_000;
+    instance.prepareNaturalTurn(GUILD_A);
+    instance.noteVisibleTurn(GUILD_A);
+
+    expect(instance.getStatus().upcoming[0]?.startsAt).toBe(now + 86_400_000 + 60 * 60_000);
+  });
+
   test("keeps a pending plan for presentation edits and replans scheduling edits", () => {
     const now = Date.UTC(2026, 0, 1, 0, 0);
     const original = modeConfig([normalMode(), episodeMode({ minIntervalMs: 86_400_000, maxIntervalMs: 3 * 86_400_000 })]);

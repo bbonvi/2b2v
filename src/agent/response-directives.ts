@@ -189,10 +189,6 @@ function hasOutputSegment(segments: ResponseSegment[]): boolean {
   return segments.some((segment) => segment.kind !== "messageBreak");
 }
 
-function hasAttachmentIds(delivery: MessageDelivery | undefined): delivery is MessageDelivery {
-  return (delivery?.assetIds?.length ?? 0) > 0;
-}
-
 export function sanitizeVoiceText(text: string): string {
   return text
     .replace(/\s+/g, " ")
@@ -272,7 +268,7 @@ function parseRange(
         pushMessageBreak(segments, delivery);
         segments.push(...nested.segments);
         pushMessageBreak(segments);
-      } else if (hasAttachmentIds(delivery)) {
+      } else if (delivery !== undefined) {
         pushEmptyMessage(segments, delivery);
       }
       cursor = nested.index;

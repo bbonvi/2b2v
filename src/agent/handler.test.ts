@@ -2337,16 +2337,20 @@ describe("handleMessage", () => {
           && contentText(content).includes("## New Discord Event");
       }
       return Promise.resolve({
-        text: "done",
+        text: '<message reply="true" reply_to="source-1"></message>',
         toolCalls: [],
         rawResponse: {},
-        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "done" }] },
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: '<message reply="true" reply_to="source-1"></message>' }] },
       });
     };
 
-    const sentAttachments: string[][] = [];
-    const sender: MessageSender = (_text, _reply, _channelId, _voice, _signal, _replyToMessageId, attachments) => {
-      sentAttachments.push(attachments?.map((attachment) => attachment.id) ?? []);
+    const sentMessages: Array<{ text: string; replyToMessageId: string | undefined; attachmentIds: string[] }> = [];
+    const sender: MessageSender = (text, _reply, _channelId, _voice, _signal, replyToMessageId, attachments) => {
+      sentMessages.push({
+        text,
+        replyToMessageId,
+        attachmentIds: attachments?.map((attachment) => attachment.id) ?? [],
+      });
       return Promise.resolve({ sentMessageId: "sent-1" });
     };
 
@@ -2372,7 +2376,11 @@ describe("handleMessage", () => {
 
     expect(sawImageInput).toBe(false);
     expect(sawNormalTurnText).toBe(true);
-    expect(sentAttachments).toEqual([["img-1"]]);
+    expect(sentMessages).toEqual([{
+      text: "",
+      replyToMessageId: "source-1",
+      attachmentIds: ["img-1"],
+    }]);
   });
 
   test("does not resend a streamed explicit final message after generated image tool output", async () => {

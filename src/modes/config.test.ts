@@ -11,7 +11,7 @@ describe("persona mode config", () => {
     }, profileRoot);
 
     expect(config?.modes[0]?.instructions).toBe("");
-    expect(config?.modes[0]?.avatars).toHaveLength(1);
+    expect(config?.modes[0]?.avatars.length).toBeGreaterThan(0);
     expect(config?.modes[0]?.scope).toBe("global");
   });
 

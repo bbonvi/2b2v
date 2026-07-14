@@ -246,6 +246,7 @@ function modeById(config: ContextConfig | undefined, id: string | undefined): Pe
 
 function triggeredScheduleFingerprint(activation: TriggeredEpisodeActivation, timezone: string): string {
   return JSON.stringify({
+    planningVersion: 2,
     timezone,
     minIntervalMs: activation.minIntervalMs,
     maxIntervalMs: activation.maxIntervalMs,
@@ -344,9 +345,9 @@ function createPersonaModeContextRuntime(options: PersonaModeContextRuntimeOptio
     state.modeInitializedAt[mode.id] = modeStartedAt;
     const outcome = state.lastCycleOutcomes[mode.id];
     const baseline = outcome?.endedAt ?? modeStartedAt;
-    const cooldownFloor = outcome?.kind === "episode" ? baseline + activation.cooldownMs : baseline;
-    const earliestAt = Math.max(baseline + activation.minIntervalMs, cooldownFloor);
-    const latestAt = Math.max(baseline + activation.maxIntervalMs, earliestAt);
+    const intervalBaseline = outcome?.kind === "episode" ? baseline + activation.cooldownMs : baseline;
+    const earliestAt = intervalBaseline + activation.minIntervalMs;
+    const latestAt = intervalBaseline + activation.maxIntervalMs;
     if (latestAt < now) {
       state.lastCycleOutcomes[mode.id] = { kind: "missed", endedAt: now };
       return true;

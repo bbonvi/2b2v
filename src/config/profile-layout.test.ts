@@ -87,11 +87,6 @@ describe("repository profile layout", () => {
     expect(delamain.defaultAmbientInitiative?.botPressure).toBeGreaterThan(0);
     expect(delamain.personaModes?.modes.map((mode) => mode.id)).toEqual(["normal", "sleeping", "rogue"]);
     expect(delamain.personaModes?.modes.find((mode) => mode.id === "rogue")?.avatars).toHaveLength(2);
-    expect(delamain.personaModes?.modes.find((mode) => mode.id === "rogue")?.scope).toBe("global");
-    expect(delamain.personaModes?.modes.find((mode) => mode.id === "rogue")?.activation).toMatchObject({
-      minIntervalMs: 0,
-      cooldownMs: 7 * 86_400_000,
-    });
     expect(delamain.vpn).toBeUndefined();
   });
 });

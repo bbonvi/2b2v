@@ -110,6 +110,13 @@ describe("parseResponseDirectives", () => {
     });
   });
 
+  test("preserves empty message directives with delivery metadata", () => {
+    expect(parseResponseDirectives('<message reply="true" reply_to="12345"></message>')).toEqual({
+      ignored: false,
+      segments: [{ kind: "emptyMessage", delivery: { reply: true, replyTo: "12345" } }],
+    });
+  });
+
   test("preserves image-only message directives", () => {
     expect(parseResponseDirectives("<message asset_ids=[12]></message><message>next</message>")).toEqual({
       ignored: false,
