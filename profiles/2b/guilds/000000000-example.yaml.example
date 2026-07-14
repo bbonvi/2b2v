@@ -81,14 +81,11 @@ trim:
 # Discord user IDs with admin access to bot commands
 adminUserIds: []
 
-# Max canonical stored image dimension (larger user images resized to fit)
-imageMaxDimension: 4096
-
 # Max seconds between messages for same-author merge
 mergeMessageGapSeconds: 120
 
-# Max images per read_chat_images tool call
-imageReadMaxPerCall: 10
+# Max ordered references per image-generation request
+imageReferenceMaxPerCall: 10
 
 # Codex image generation request settings
 # imageGeneration:
@@ -101,9 +98,6 @@ imageReadMaxPerCall: 10
 #   fallbackModel: moonshotai/kimi-k2.5
 #   fallbackModelParams:
 #     temperature: 0
-
-# Enable automatic image captioning
-imageCaptioningEnabled: false
 
 # Emote/emoji settings
 emotes:
@@ -173,8 +167,6 @@ promptCaching:
 #   terminalVisibleMs: 600000
 #   maxImageReplacements: 2
 
-# Custom attachments directory (default: {dataDir}/attachments)
-# attachmentsDir: data/attachments
 
 # Guild-specific instructions injected into LLM context.
 # instructionsPath takes priority over inline instructions.

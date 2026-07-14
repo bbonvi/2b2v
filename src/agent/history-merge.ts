@@ -5,7 +5,6 @@ import type { HistoryMessage } from "./history-types.ts";
  */
 function isPlain(m: HistoryMessage): boolean {
   return m.replyToId === null
-    && m.imageIds.length === 0
     && (m.assets?.length ?? 0) === 0
     && (m.jobAnnotations?.length ?? 0) === 0
     && (m.historyAnnotations?.length ?? 0) === 0

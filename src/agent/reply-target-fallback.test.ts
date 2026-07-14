@@ -11,8 +11,6 @@ function makeMsg(overrides: Partial<HistoryMessage> & { id: string }): HistoryMe
     isBot: false,
     timestamp: 1000,
     replyToId: null,
-    imageIds: [],
-    captions: [],
     hasEmbeds: false,
     isSynthetic: false,
     relatedThreadId: null,
@@ -36,7 +34,6 @@ function baseDeps(overrides: Partial<ReplyFallbackDeps> = {}): ReplyFallbackDeps
     guildId: "g1",
     channelId: "ch1",
     fetchDiscordMessage: () => Promise.resolve(null),
-    processImage: () => Promise.resolve(),
     ...overrides,
   };
 }
@@ -149,8 +146,6 @@ describe("fetchMissingReplyTargets", () => {
   });
 
   test("does not eagerly download attachments on fetched message", async () => {
-    const processImageCalls: Array<{ url: string; messageId: string; sourceKind: string | undefined }> = [];
-
     const fetched: FetchedDiscordMessage = {
       id: TARGET_ID,
       authorId: "u99",
@@ -167,21 +162,15 @@ describe("fetchMissingReplyTargets", () => {
 
     const deps = baseDeps({
       fetchDiscordMessage: () => Promise.resolve(fetched),
-      processImage: (url, _contentType, messageId, sourceKind) => {
-        processImageCalls.push({ url, messageId, sourceKind });
-        return Promise.resolve();
-      },
     });
 
     const messages = [makeMsg({ id: "2", replyToId: TARGET_ID })];
-    await fetchMissingReplyTargets(deps, messages);
+    const result = await fetchMissingReplyTargets(deps, messages);
 
-    expect(processImageCalls).toHaveLength(0);
+    expect(result[0]?.assets).toBeUndefined();
   });
 
   test("adds sticker tags without eagerly downloading sticker previews", async () => {
-    const processImageCalls: Array<{ url: string; sourceKind: string | undefined }> = [];
-
     const fetched: FetchedDiscordMessage = {
       id: TARGET_ID,
       authorId: "u99",
@@ -191,25 +180,19 @@ describe("fetchMissingReplyTargets", () => {
       isBot: false,
       replyToId: null,
       attachments: [],
-      stickers: [{ name: "Blob Dance", url: "https://cdn.example.com/blob.png", format: 1 }],
+      stickers: [{ name: "Blob Dance" }],
     };
 
     const deps = baseDeps({
       fetchDiscordMessage: () => Promise.resolve(fetched),
-      processImage: (url, _contentType, _messageId, sourceKind) => {
-        processImageCalls.push({ url, sourceKind });
-        return Promise.resolve();
-      },
     });
 
     const result = await fetchMissingReplyTargets(deps, [makeMsg({ id: "2", replyToId: TARGET_ID })]);
 
     expect(result[0]?.content).toBe("<sticker>Blob Dance</sticker>");
-    expect(processImageCalls).toEqual([]);
   });
 
   test("does not eagerly download GIF-like embed previews", async () => {
-    const processImageCalls: Array<{ url: string; contentType: string; sourceKind: string | undefined }> = [];
     const fetched: FetchedDiscordMessage = {
       id: TARGET_ID,
       authorId: "u99",
@@ -228,19 +211,13 @@ describe("fetchMissingReplyTargets", () => {
 
     const deps = baseDeps({
       fetchDiscordMessage: () => Promise.resolve(fetched),
-      processImage: (url, contentType, _messageId, sourceKind) => {
-        processImageCalls.push({ url, contentType, sourceKind });
-        return Promise.resolve();
-      },
     });
 
-    await fetchMissingReplyTargets(deps, [makeMsg({ id: "2", replyToId: TARGET_ID })]);
-
-    expect(processImageCalls).toEqual([]);
+    const result = await fetchMissingReplyTargets(deps, [makeMsg({ id: "2", replyToId: TARGET_ID })]);
+    expect(result[0]?.content).toBe("https://tenor.com/view/dance");
   });
 
   test("does not eagerly download gifv embed previews", async () => {
-    const processImageCalls: Array<{ url: string; sourceKind: string | undefined }> = [];
     const fetched: FetchedDiscordMessage = {
       id: TARGET_ID,
       authorId: "u99",
@@ -259,15 +236,10 @@ describe("fetchMissingReplyTargets", () => {
 
     const deps = baseDeps({
       fetchDiscordMessage: () => Promise.resolve(fetched),
-      processImage: (url, _contentType, _messageId, sourceKind) => {
-        processImageCalls.push({ url, sourceKind });
-        return Promise.resolve();
-      },
     });
 
-    await fetchMissingReplyTargets(deps, [makeMsg({ id: "2", replyToId: TARGET_ID })]);
-
-    expect(processImageCalls).toEqual([]);
+    const result = await fetchMissingReplyTargets(deps, [makeMsg({ id: "2", replyToId: TARGET_ID })]);
+    expect(result[0]?.content).toBe("https://example.com/clip");
   });
 
   test("handles multiple missing targets", async () => {

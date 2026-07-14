@@ -18,7 +18,7 @@ function enqueue(store: AgentJobStore, overrides: Partial<Parameters<AgentJobSto
     sourceQuote: "make an image",
     prompt: "make an image",
     promptHash: "hash-1",
-    imageIds: [],
+    references: [],
     outputFormat: "png",
     is4k: false,
     separateJob: false,
@@ -49,10 +49,14 @@ describe("AgentJobStore", () => {
     expect(second.job.id).not.toBe(first.job.id);
   });
 
-  test("retains external reference URLs for the worker", () => {
+  test("retains ordered image references for the worker", () => {
     const store = new AgentJobStore(config);
-    const result = enqueue(store, { referenceUrls: ["https://example.com/reference.gif"] });
-    expect(result.job.input.referenceUrls).toEqual(["https://example.com/reference.gif"]);
+    const references = [
+      { type: "avatar" as const, userId: "123456789012345678" },
+      { type: "url" as const, url: "https://example.com/reference.gif" },
+    ];
+    const result = enqueue(store, { references });
+    expect(result.job.input.references).toEqual(references);
   });
 
   test("tracks source and delivery channels separately", () => {

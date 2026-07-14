@@ -1,5 +1,4 @@
 import type { HistoryAsset, HistoryMessage } from "./history-types.ts";
-import type { ImageSourceKind } from "../db/image-repository.ts";
 import { formatFileSize } from "./format-file-size.ts";
 
 const DELETED_MESSAGE_MARKER = "[deleted]";
@@ -26,12 +25,6 @@ export interface ReplyContext {
   replyMsgId: string;
   /** Whether the reply target is missing from both slices. */
   missingTarget: boolean;
-  /** Image IDs on the reply target. */
-  replyImageIds: number[];
-  /** Source media kinds on the reply target, parallel to replyImageIds. */
-  replyImageSourceKinds?: ImageSourceKind[];
-  /** Captions on the reply target. */
-  replyCaptions: string[];
   /** Lazy assets on the reply target. */
   replyAssets?: HistoryAsset[];
 }
@@ -40,7 +33,6 @@ export interface ReplyContext {
 export interface FormatInput {
   message: HistoryMessage;
   reply: ReplyContext | null;
-  captioningEnabled: boolean;
   includeMessageIds?: boolean;
   includeDisplayNames?: boolean;
 }
@@ -51,10 +43,10 @@ export interface FormatInput {
  *
  * Synthetic events (e.g., thread creation) are formatted as-is without author prefix.
  *
- * Meta keys in order: Quote, MissingTarget, ReplyImageIDs, ReplyCaptions, ImageIDs, Captions, Reactions
+ * Meta keys in order: Quote, MissingTarget, typed reply assets, typed assets, jobs, and reactions.
  */
 export function formatMessageLine(input: FormatInput): string {
-  const { message, reply, captioningEnabled, includeMessageIds, includeDisplayNames } = input;
+  const { message, reply, includeMessageIds, includeDisplayNames } = input;
 
   // Synthetic events are pre-formatted, output content directly
   if (message.isSynthetic) {
@@ -79,21 +71,9 @@ export function formatMessageLine(input: FormatInput): string {
     if (reply.missingTarget) {
       metaParts.push("MissingTarget: true");
     }
-    if (reply.replyImageIds.length > 0) {
-      metaParts.push(...formatImageIdMeta("Reply", reply.replyImageIds, reply.replyImageSourceKinds));
-    }
-    if (captioningEnabled && reply.replyCaptions.length > 0) {
-      metaParts.push(formatCaptionsMeta("Reply", reply.replyImageIds, reply.replyCaptions, reply.replyImageSourceKinds));
-    }
     if (reply.replyAssets !== undefined) metaParts.push(...formatAssetMeta("Reply", reply.replyAssets));
   }
 
-  if (message.imageIds.length > 0) {
-    metaParts.push(...formatImageIdMeta("", message.imageIds, message.imageSourceKinds));
-  }
-  if (captioningEnabled && message.captions.length > 0) {
-    metaParts.push(formatCaptionsMeta("", message.imageIds, message.captions, message.imageSourceKinds));
-  }
   if (message.assets !== undefined) metaParts.push(...formatAssetMeta("", message.assets));
   if (message.jobAnnotations !== undefined && message.jobAnnotations.length > 0) {
     metaParts.push(...message.jobAnnotations);
@@ -144,49 +124,6 @@ export function formatAssetMeta(prefix: "Reply" | "", assets: readonly HistoryAs
     parts.push(`${prefix}${labels[kind]}: ${values.join(", ")}`);
   }
   return parts;
-}
-
-function formatImageIdMeta(prefix: "Reply" | "", imageIds: number[], sourceKinds: ImageSourceKind[] | undefined): string[] {
-  const groups: Record<ImageSourceKind, number[]> = {
-    image: [],
-    gif: [],
-    sticker: [],
-  };
-  for (let i = 0; i < imageIds.length; i++) {
-    const id = imageIds[i];
-    if (id === undefined) continue;
-    const kind = sourceKinds?.[i];
-    if (kind === "gif" || kind === "sticker") {
-      groups[kind].push(id);
-    } else {
-      groups.image.push(id);
-    }
-  }
-
-  const reply = prefix === "Reply" ? "Reply" : "";
-  const parts: string[] = [];
-  if (groups.image.length > 0) parts.push(`${reply}ImageIDs: [${groups.image.join(", ")}]`);
-  if (groups.gif.length > 0) parts.push(`${reply}GIFImageIDs: [${groups.gif.join(", ")}]`);
-  if (groups.sticker.length > 0) parts.push(`${reply}StickerImageIDs: [${groups.sticker.join(", ")}]`);
-  return parts;
-}
-
-function formatCaptionsMeta(
-  prefix: "Reply" | "",
-  imageIds: number[],
-  captions: string[],
-  sourceKinds: ImageSourceKind[] | undefined,
-): string {
-  const key = prefix === "Reply" ? "ReplyCaptions" : "Captions";
-  const hasTypedImages = sourceKinds?.some((kind) => kind === "gif" || kind === "sticker") === true;
-  if (!hasTypedImages) return `${key}: [${captions.map((c) => `"${c}"`).join(", ")}]`;
-
-  const typedKey = prefix === "Reply" ? "ReplyCaptionByImageID" : "CaptionByImageID";
-  const entries = captions.map((caption, index) => {
-    const id = imageIds[index];
-    return id !== undefined ? `${id}: "${caption}"` : `"${caption}"`;
-  });
-  return `${typedKey}: [${entries.join(", ")}]`;
 }
 
 function formatDisplayNameSuffix(

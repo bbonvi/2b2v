@@ -305,14 +305,11 @@ tts:
         #     # similarityBoost: 0.4
         #     model: eleven_v3
 
-# Max image dimension (larger images resized to fit)
-imageMaxDimension: 768 # (longest edge stored for uploaded user images)
-
 # Max seconds between messages to merge consecutive same-author messages
 mergeMessageGapSeconds: 90 # (gap threshold for merging same-author history messages)
 
-# Max images the LLM can read in a single read_chat_images call
-imageReadMaxPerCall: 10 # (max stored images one read_chat_images call can load)
+# Max ordered references per image-generation request
+imageReferenceMaxPerCall: 10
 
 # Untrusted web-image inspection and generation-reference limits
 externalImages:
@@ -350,14 +347,11 @@ imageReading:
     fallbackProvider: "openai-codex"
     fallbackModel: "gpt-5.5"
 
-# Enable automatic image captioning (requires captioning model)
-imageCaptioningEnabled: false # (caption images automatically as they are stored)
-
 # Log level: debug | info | warn | error
 logLevel: debug # (runtime log verbosity)
 
-# Directory for SQLite database and attachments
-dataDir: data # (SQLite database and attachment storage root)
+# Directory for the SQLite database and Codex auth cache
+dataDir: data
 
 uiLang: ru # (language for built-in admin/VPN UI messages)
 # VPN configuration (WireGuard profile management)

@@ -35,7 +35,6 @@ const PROMPT_LAB_READ_TOOL_NAMES = new Set([
   "list_emojis",
   "list_memories",
   "list_channel_messages",
-  "read_chat_images",
   "read_user_avatar",
   "fetch_images",
   "fetch_url",
@@ -119,7 +118,7 @@ export function createPromptLabRunner(input: {
     extraTools: AgentTool[];
     log: Logger;
     requestLog: RequestLog;
-    resolveImageAttachments?: HandlerDeps["resolveImageAttachments"];
+    resolveAssetAttachments?: HandlerDeps["resolveAssetAttachments"];
     overrides?: Partial<HandlerDeps>;
   }) => HandlerDeps;
   runMemoryPostReplyExtraction: (input: {
@@ -290,8 +289,6 @@ export function createPromptLabRunner(input: {
       isBot: false,
       timestamp: now,
       replyToId: null,
-      imageIds: [],
-      captions: [],
       hasEmbeds: false,
       isSynthetic: false,
       relatedThreadId: null,
@@ -310,7 +307,6 @@ export function createPromptLabRunner(input: {
           return null;
         }
       },
-      processImage: async () => {},
     };
 
     const context = await input.buildContext(
@@ -451,7 +447,7 @@ export function createPromptLabRunner(input: {
           extraTools: visibleTools,
           log: input.log.child({ guildId: runInput.guildId, channelId: runInput.channelId, requestId: requestLog.requestId, component: "prompt-lab" }),
           requestLog,
-          resolveImageAttachments: () => Promise.resolve([]),
+          resolveAssetAttachments: () => Promise.resolve([]),
           overrides: {
             triggerOverride: { reason: "mention" },
             triggerInstructions: guildConfig.triggerInstructions,

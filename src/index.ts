@@ -17,7 +17,7 @@ import { botChannelPermissions, channelDisplayName, channelTypeLabel, createDisc
 import { registerReactionSyncRuntime } from "./discord/reaction-sync-runtime";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { createScheduledTaskRunner } from "./scheduler/scheduled-task-runtime";
-import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type HandleResult, type ImageAttachmentResolver, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
+import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type HandleResult, type AssetAttachmentResolver, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
 import { trackWriteToolStarts } from "./agent/tool-access";
 import { buildComputedContactContextForUser } from "./agent/contact-context";
 import { shouldRespond, type TriggerResult } from "./agent/triggers";
@@ -63,7 +63,7 @@ import { createFetchImagesTool } from "./agent/fetch-images-tool";
 import { loadExternalImage } from "./agent/external-image";
 import { createCodexGenerateImageTool, type GeneratedImageAttachment, type ReferenceImageInput } from "./agent/codex-image-tool";
 import { AgentJobStore, createCancelAgentJobTool, isActiveJobStatus, type ImageGenerationJobResult } from "./agent/job-runtime";
-import { annotateHistoryJobs, createGeneratedImageRuntime, DEFAULT_CODEX_IMAGE_ROUTER_MODEL, renderAgentJobsContext, renderImageGenerationInput, shortQuote, type GeneratedImageRuntime } from "./agent/generated-image-runtime";
+import { annotateHistoryJobs, createGeneratedImageRuntime, DEFAULT_CODEX_IMAGE_ROUTER_MODEL, imageReferencesForToolInput, renderAgentJobsContext, renderImageGenerationInput, shortQuote, type GeneratedImageRuntime } from "./agent/generated-image-runtime";
 import { createStoredAssetAttachmentResolver } from "./agent/stored-asset-attachments";
 import { loadAssetReferenceImage } from "./agent/asset-reference-image";
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
@@ -75,7 +75,7 @@ import { createModelImageSupportStore } from "./llm/model-image-support";
 import { createAmbientRuntime } from "./ambient/runtime";
 import { cacheAssetExtraction, getAssetById, getAssetsByMessageId, syncMessageAssets } from "./db/asset-repository";
 import { upsertThread, updateThreadActivity, markThreadArchived, listThreadsForContext, getThreadMetadata, getThread } from "./db/thread-repository";
-import { prepareImageBufferForContext } from "./db/image-ingest";
+import { prepareImageBufferForContext } from "./agent/image-buffer";
 import { deleteExpiredMemories, countUserMemoriesByUser } from "./db/memory-repository";
 import { deleteExpiredCodexReasoningContinuations, getCodexReasoningContinuation, upsertCodexReasoningContinuation } from "./db/codex-reasoning-continuation-repository";
 import { createRelationshipsManagementApi } from "./dashboard/relationships-management";
@@ -126,6 +126,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
   if (job === undefined) return;
   const sourceGuildConfig = getGuildConfig(job.guildId);
   const deliveryGuildConfig = getGuildConfig(job.deliveryGuildId);
+  const sourceGuild = client.guilds.cache.get(job.guildId);
   const guild = client.guilds.cache.get(job.deliveryGuildId);
   if (guild === undefined) {
     agentJobs.markFailed(job.id, "Delivery guild is unavailable.");
@@ -189,7 +190,6 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       logger: log,
       ...(sourceMessage !== undefined ? { replySourceMessage: sourceMessage } : {}),
       getLastTypingAt: completionTyping.getLastTypingAt,
-      getAttachmentsDir: (targetGuildId) => getGuildConfig(targetGuildId).attachmentsDir,
       routedFrom: {
         routedFromGuildId: job.guildId,
         routedFromChannelId: job.channelId,
@@ -214,8 +214,6 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       isBot: false,
       timestamp: Date.now(),
       replyToId: job.sourceMessageId,
-      imageIds: [],
-      captions: [],
       hasEmbeds: false,
       isSynthetic: true,
       relatedThreadId: null,
@@ -285,7 +283,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       log: log.child({ component: `async-image-${input.event}`, guildId: job.deliveryGuildId, channelId: job.deliveryChannelId, sourceGuildId: job.guildId, sourceChannelId: job.channelId, jobId: job.id, requestId: requestLog.requestId }),
       requestLog,
       tts,
-      resolveImageAttachments: createAssetAttachmentResolver(job.deliveryGuildId, deliveryGuildConfig,
+      resolveAssetAttachments: createAssetAttachmentResolver(job.deliveryGuildId, deliveryGuildConfig,
         log.child({ component: "stored-asset-attachments", guildId: job.deliveryGuildId, channelId: job.deliveryChannelId, jobId: job.id })),
       overrides: {
         ...(attachment !== undefined ? { initialPendingAttachments: [attachment] } : {}),
@@ -328,7 +326,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
         : DEFAULT_CODEX_IMAGE_ROUTER_MODEL,
       sessionId: `2b2v-image-job:${job.guildId}:${job.channelId}:${job.deliveryGuildId}:${job.deliveryChannelId}:${job.id}`,
       logger: log.child({ component: "async-image-job", guildId: job.deliveryGuildId, channelId: job.deliveryChannelId, sourceGuildId: job.guildId, sourceChannelId: job.channelId, jobId: job.id }),
-      imageReadMaxPerCall: sourceGuildConfig.imageReadMaxPerCall,
+      imageReferenceMaxPerCall: sourceGuildConfig.imageReferenceMaxPerCall,
       imageGenerationQuality: sourceGuildConfig.imageGeneration.quality,
       asyncJobAlreadyActiveTemplate: promptBundle.runtime.contextTemplates["codex-image-job-existing"],
       asyncJobStartedTemplate: promptBundle.runtime.contextTemplates["codex-image-job-started"],
@@ -344,13 +342,17 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
         });
       },
       resolveExternalReference: loadExternalReference,
+      resolveAvatarReference: async (userId, signal) => {
+        if (sourceGuild === undefined) throw new Error("Source guild is unavailable for the avatar reference.");
+        return await loadGuildAvatarReference(sourceGuild, userId, signal);
+      },
       onGeneratedImage: generated.onGeneratedImage,
     });
+    const referenceImages = imageReferencesForToolInput(job.input.references);
     const imageToolArgs = {
       jobId: job.id,
       prompt: job.input.prompt,
-      asset_ids: job.input.imageIds,
-      reference_urls: job.input.referenceUrls ?? [],
+      reference_images: referenceImages,
       output_format: job.input.outputFormat,
       "4k": job.input.is4k,
     };
@@ -358,8 +360,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     imageToolStarted = true;
     const result = await tool.execute(job.id, {
       prompt: job.input.prompt,
-      asset_ids: job.input.imageIds,
-      reference_urls: job.input.referenceUrls ?? [],
+      reference_images: referenceImages,
       output_format: job.input.outputFormat,
       "4k": job.input.is4k,
     }, controller.signal);
@@ -571,7 +572,7 @@ function createHandlerDeps(input: {
     generateSpeech?: (text: string) => Promise<TtsResult>;
   };
   generatedImages?: GeneratedImageRuntime;
-  resolveImageAttachments?: ImageAttachmentResolver;
+  resolveAssetAttachments?: AssetAttachmentResolver;
   overrides?: Partial<HandlerDeps>;
 }): HandlerDeps {
   return {
@@ -591,7 +592,7 @@ function createHandlerDeps(input: {
     ...(input.generatedImages !== undefined
       ? { consumeGeneratedAttachments: input.generatedImages.consumeGeneratedAttachments }
       : {}),
-    ...(input.resolveImageAttachments !== undefined ? { resolveImageAttachments: input.resolveImageAttachments } : {}),
+    ...(input.resolveAssetAttachments !== undefined ? { resolveAssetAttachments: input.resolveAssetAttachments } : {}),
     nativeReasoningContinuation: {
       load: (continuationInput) => {
         try {
@@ -617,7 +618,7 @@ function createHandlerDeps(input: {
   };
 }
 
-function createAssetAttachmentResolver(guildId: string, guildConfig: GuildConfig, logger: Logger): ImageAttachmentResolver {
+function createAssetAttachmentResolver(guildId: string, guildConfig: GuildConfig, logger: Logger): AssetAttachmentResolver {
   const resolveSource = createDiscordAssetSourceResolver({
     fetchMessage: async (channelId, messageId) => {
       const channel = await fetchAccessibleGuildChannel(channelId);
@@ -694,6 +695,15 @@ async function loadExternalReference(url: string, signal?: AbortSignal): Promise
     width: image.width,
     height: image.height,
   };
+}
+
+/** Resolve a current guild display avatar as an ephemeral image-generation reference. */
+async function loadGuildAvatarReference(guild: Guild, userId: string, signal?: AbortSignal): Promise<ReferenceImageInput | null> {
+  const member = await resolveGuildMemberReference(guild, userId);
+  if (member === undefined) return null;
+  const url = member.displayAvatarURL({ extension: "png", forceStatic: true, size: 2048 });
+  const image = await loadExternalReference(url, signal);
+  return { ...image, id: `avatar:${userId}` };
 }
 
 const startupMessageQueue: Message[] = [];
@@ -1481,7 +1491,6 @@ async function buildContext(
       trim: guildConfig.trim,
       mergeMessageGapSeconds: guildConfig.mergeMessageGapSeconds,
       timezone: guildConfig.timezone,
-      imageCaptioningEnabled: guildConfig.imageCaptioningEnabled,
       replyQuoteChars: guildConfig.trim.replyQuoteChars,
       displayNamesByUserId,
     },
@@ -1667,7 +1676,6 @@ async function buildContext(
             lines.push(formatMessageLine({
               message: m,
               reply: null,
-              captioningEnabled: guildConfig.imageCaptioningEnabled,
             }));
           }
         }
@@ -1731,7 +1739,7 @@ function collectHumanUserIds(messages: HistoryMessage[]): string[] {
   return [...recency.keys()].reverse();
 }
 
-function formatAmbientMemoryHistory(messages: HistoryMessage[], timezone: string, captioningEnabled: boolean): string {
+function formatAmbientMemoryHistory(messages: HistoryMessage[], timezone: string): string {
   const dateEntries = insertDateStamps(messages, timezone);
   const lines: string[] = [OLDER_LEGEND];
   for (const entry of dateEntries) {
@@ -1744,7 +1752,6 @@ function formatAmbientMemoryHistory(messages: HistoryMessage[], timezone: string
     lines.push(formatMessageLine({
       message: item,
       reply: null,
-      captioningEnabled,
       includeMessageIds: true,
       includeDisplayNames: true,
     }));
@@ -1823,7 +1830,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
           label: "Chat History — Newer",
           role: "developer",
           cached: false,
-          text: formatAmbientMemoryHistory(batch, guildConfig.timezone, guildConfig.imageCaptioningEnabled),
+          text: formatAmbientMemoryHistory(batch, guildConfig.timezone),
         },
       ],
       userMessage: "",
@@ -2354,7 +2361,7 @@ function buildAgentTools(
       model: codexImageModel,
       sessionId: `2b2v-image:${guildId}:${channelId}:${codexImageModel}`,
       logger: log.child({ component: "codex-image", guildId, channelId }),
-      imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
+      imageReferenceMaxPerCall: guildConfig.imageReferenceMaxPerCall,
       imageGenerationQuality: guildConfig.imageGeneration.quality,
       asyncJobAlreadyActiveTemplate: promptBundle.runtime.contextTemplates["codex-image-job-existing"],
       asyncJobStartedTemplate: promptBundle.runtime.contextTemplates["codex-image-job-started"],
@@ -2370,6 +2377,7 @@ function buildAgentTools(
         });
       },
       resolveExternalReference: loadExternalReference,
+      resolveAvatarReference: (userId, signal) => loadGuildAvatarReference(guild, userId, signal),
       onGeneratedImage: onGeneratedImage ?? (() => {}),
       ...(effectiveCurrentRequest === undefined ? {} : { enqueueImageJob: (input) => {
         const deliveryChannelId = channelId;
@@ -2387,8 +2395,7 @@ function buildAgentTools(
           sourceQuote: effectiveCurrentRequest.sourceQuote,
           prompt: input.prompt,
           promptHash: input.promptHash,
-          imageIds: input.imageIds,
-          referenceUrls: input.referenceUrls,
+          references: input.references,
           outputFormat: input.outputFormat,
           is4k: input.is4k,
           separateJob: input.separateJob,
@@ -2426,7 +2433,7 @@ function buildAgentTools(
       maxDimension: (globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES).maxDimension,
     },
     codex_generate_image: {
-      imageReadMaxPerCall: guildConfig.imageReadMaxPerCall,
+      imageReferenceMaxPerCall: guildConfig.imageReferenceMaxPerCall,
       imageGenerationQuality: guildConfig.imageGeneration.quality,
     },
     schedule_task: {
@@ -2588,7 +2595,6 @@ async function processTriggeredMessage(
       logger: log,
       replySourceMessage: message,
       getLastTypingAt: typing.getLastTypingAt,
-      getAttachmentsDir: (targetGuildId) => getGuildConfig(targetGuildId).attachmentsDir,
       routedFrom: {
         routedFromGuildId: guildId,
         routedFromChannelId: channelId,
@@ -2643,8 +2649,6 @@ async function processTriggeredMessage(
       isBot: message.author.bot,
       timestamp: options.currentTurnOverride?.timestamp ?? message.createdTimestamp,
       replyToId: message.reference?.messageId ?? null,
-      imageIds: [],
-      captions: [],
       assets: currentAssets.map((asset) => ({
         id: asset.id,
         kind: asset.kind,
@@ -2841,7 +2845,7 @@ async function processTriggeredMessage(
       requestLog,
       tts,
       generatedImages,
-      resolveImageAttachments: createAssetAttachmentResolver(guildId, guildConfig,
+      resolveAssetAttachments: createAssetAttachmentResolver(guildId, guildConfig,
         log.child({ component: "stored-asset-attachments", guildId, channelId, requestId: requestLog.requestId })),
       overrides: {
         onTriggered: () => {
@@ -3130,7 +3134,7 @@ client.on("messageDelete", (message) => {
     const result = cleanupDeletedDiscordMessage({ db, guildId, messageId });
     if (result.messagesDeleted === 0) return;
 
-    log.debug("message deleted from Discord", { messageId, guildId, images: result.imagesDeleted });
+    log.debug("message deleted from Discord", { messageId, guildId });
   } catch (err) {
     log.error("messageDelete handler error", {
       messageId: message.id,

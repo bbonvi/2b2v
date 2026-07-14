@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "./database.ts";
-import { insertImage } from "./image-repository.ts";
 import {
   cleanupDeletedBotMessage,
   cleanupDeletedDiscordMessage,
@@ -52,23 +51,16 @@ describe("message cleanup", () => {
       botUserId: "bot-1",
     });
 
-    expect(result).toEqual({ messagesDeleted: 0, imagesDeleted: 0 });
+    expect(result).toEqual({ messagesDeleted: 0 });
     db.close();
   });
 
-  test("marks a stored bot message deleted and removes images", () => {
+  test("marks a stored bot message deleted and removes assets", () => {
     const db = createDatabase(":memory:");
     insertMessage(db, "bot-message", { isBot: true, userId: "bot-1" });
-    insertImage(db, {
-      messageId: "bot-message",
-      guildId: "g1",
-      channelId: "c1",
-      path: "/tmp/missing-bot-image.png",
-      mime: "image/png",
-      width: 1,
-      height: 1,
-      createdAt: 1,
-    });
+    db.raw.prepare(`INSERT INTO message_assets
+      (message_id, guild_id, channel_id, source_kind, source_key, kind, created_at)
+      VALUES ('bot-message', 'g1', 'c1', 'attachment', 'a1', 'image', 1)`).run();
 
     const result = cleanupDeletedBotMessage({
       db,
@@ -78,26 +70,19 @@ describe("message cleanup", () => {
       botUserId: "bot-1",
     });
 
-    expect(result).toEqual({ messagesDeleted: 1, imagesDeleted: 1 });
+    expect(result).toEqual({ messagesDeleted: 1 });
     expect(db.raw.prepare("SELECT translated_content, deleted_at FROM messages WHERE id = 'bot-message'").get())
       .toMatchObject({ translated_content: "text" });
-    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images").get()).toEqual({ count: 0 });
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_assets").get()).toEqual({ count: 0 });
     db.close();
   });
 
-  test("marks a Discord message deleted with images and reactions removed", () => {
+  test("marks a Discord message deleted with assets and reactions removed", () => {
     const db = createDatabase(":memory:");
     insertMessage(db, "m1");
-    insertImage(db, {
-      messageId: "m1",
-      guildId: "g1",
-      channelId: "c1",
-      path: "/tmp/missing-test-image.png",
-      mime: "image/png",
-      width: 1,
-      height: 1,
-      createdAt: 1,
-    });
+    db.raw.prepare(`INSERT INTO message_assets
+      (message_id, guild_id, channel_id, source_kind, source_key, kind, created_at)
+      VALUES ('m1', 'g1', 'c1', 'attachment', 'a1', 'image', 1)`).run();
     db.raw
       .prepare("INSERT INTO message_reactions (message_id, guild_id, channel_id, emoji_key, emoji_label, count, updated_at) VALUES ('m1', 'g1', 'c1', 'e', 'e', 1, 1)")
       .run();
@@ -108,10 +93,10 @@ describe("message cleanup", () => {
       messageId: "m1",
     });
 
-    expect(result).toEqual({ messagesDeleted: 1, imagesDeleted: 1 });
+    expect(result).toEqual({ messagesDeleted: 1 });
     expect(db.raw.prepare("SELECT translated_content, deleted_at FROM messages WHERE id = 'm1'").get())
       .toMatchObject({ translated_content: "text" });
-    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images").get()).toEqual({ count: 0 });
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_assets").get()).toEqual({ count: 0 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_reactions").get()).toEqual({ count: 0 });
     db.close();
   });
@@ -128,28 +113,21 @@ describe("message cleanup", () => {
       count: 1,
     });
 
-    expect(result).toEqual({ messagesDeleted: 1, imagesDeleted: 0 });
+    expect(result).toEqual({ messagesDeleted: 1 });
     const remaining = db.raw.prepare("SELECT id FROM messages ORDER BY id").all() as Array<{ id: string }>;
     expect(remaining.map((row) => row.id)).toEqual(["old", "other-channel"]);
     db.close();
   });
 
-  test("guild cleanup removes guild memories, messages, images, and reactions", () => {
+  test("guild cleanup removes guild memories, messages, assets, and reactions", () => {
     const db = createDatabase(":memory:");
     insertGuildMemory(db, "g1");
     insertGuildMemory(db, "g2");
     insertMessage(db, "g1-message", { guildId: "g1" });
     insertMessage(db, "g2-message", { guildId: "g2" });
-    insertImage(db, {
-      messageId: "g1-message",
-      guildId: "g1",
-      channelId: "c1",
-      path: "/tmp/missing-guild-image.png",
-      mime: "image/png",
-      width: 1,
-      height: 1,
-      createdAt: 1,
-    });
+    db.raw.prepare(`INSERT INTO message_assets
+      (message_id, guild_id, channel_id, source_kind, source_key, kind, created_at)
+      VALUES ('g1-message', 'g1', 'c1', 'attachment', 'a1', 'image', 1)`).run();
     db.raw
       .prepare("INSERT INTO message_reactions (message_id, guild_id, channel_id, emoji_key, emoji_label, count, updated_at) VALUES ('g1-message', 'g1', 'c1', 'e', 'e', 1, 1)")
       .run();
@@ -159,12 +137,12 @@ describe("message cleanup", () => {
       guildId: "g1",
     });
 
-    expect(result).toEqual({ memoriesDeleted: 1, messagesDeleted: 1, imagesDeleted: 1 });
+    expect(result).toEqual({ memoriesDeleted: 1, messagesDeleted: 1 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE guild_id = 'g1'").get()).toEqual({ count: 0 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE guild_id = 'g2'").get()).toEqual({ count: 1 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM memories WHERE guild_id = 'g1'").get()).toEqual({ count: 0 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM memories WHERE guild_id = 'g2'").get()).toEqual({ count: 1 });
-    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images").get()).toEqual({ count: 0 });
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_assets").get()).toEqual({ count: 0 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_reactions").get()).toEqual({ count: 0 });
     db.close();
   });

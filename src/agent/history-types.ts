@@ -1,5 +1,4 @@
 import type { TrimConfig } from "../config/types.ts";
-import type { ImageSourceKind } from "../db/image-repository.ts";
 import type { AssetKind, AssetSourceKind } from "../db/asset-repository.ts";
 
 export interface HistoryAsset {
@@ -34,12 +33,6 @@ export interface HistoryMessage {
   timestamp: number;
   /** Reply target message ID, or null. */
   replyToId: string | null;
-  /** Image IDs attached to this message. */
-  imageIds: number[];
-  /** Image captions (parallel to imageIds), empty strings if no caption. */
-  captions: string[];
-  /** Source media kinds (parallel to imageIds), used to mark GIF/sticker previews in history. */
-  imageSourceKinds?: ImageSourceKind[];
   /** Lazy message assets shown as typed short IDs. */
   assets?: HistoryAsset[];
   /** Whether the message has embeds (prevents merging). */
@@ -71,7 +64,6 @@ export interface HistoryProcessingConfig {
   trim: TrimConfig;
   mergeMessageGapSeconds: number;
   timezone: string;
-  imageCaptioningEnabled: boolean;
   /** Current Discord display names keyed by user ID. Used only for volatile recent history. */
   displayNamesByUserId?: ReadonlyMap<string, string>;
 }

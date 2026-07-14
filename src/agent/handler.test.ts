@@ -122,13 +122,10 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultTrim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
     defaultTriggers: { mention: true, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingResumeGraceMs: 3000, typingMaxWaitMs: 15000 },
     defaultTriggerInstructions: {},
-    defaultImageMaxDimension: 768,
     defaultMergeMessageGapSeconds: 120,
-    defaultImageReadMaxPerCall: 10,
-    defaultImageCaptioningEnabled: false,
+    defaultImageReferenceMaxPerCall: 10,
     defaultImageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
     defaultImageGeneration: { quality: "auto" },
-    defaultAttachmentsDir: "data/attachments",
     logLevel: "info",
     dataDir: "./data",
     uiLang: "en",
@@ -161,13 +158,10 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     timezone: "UTC",
     trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
     adminUserIds: [],
-    imageMaxDimension: 4096,
     mergeMessageGapSeconds: 120,
-    imageReadMaxPerCall: 10,
-    imageCaptioningEnabled: false,
+    imageReferenceMaxPerCall: 10,
     imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
     imageGeneration: { quality: "auto" },
-    attachmentsDir: "data/attachments",
     instructions: "",
     emotes: { include: false },
     members: { include: true },
@@ -1022,7 +1016,7 @@ describe("handleMessage", () => {
     ]);
   });
 
-  test("attaches stored asset_ids on the requested message only", async () => {
+  test("attaches typed asset_ids on the requested message only", async () => {
     const completeChat: ChatCompleteFn = () => Promise.resolve({
       text: "<message asset_ids=[12]>again</message><message asset_ids=[13]></message><message>done</message>",
       toolCalls: [],
@@ -1040,18 +1034,18 @@ describe("handleMessage", () => {
       makeDeps({
         completeChat,
         sender,
-        resolveImageAttachments: (imageIds) => Promise.resolve(imageIds.map((id) => ({
-          id: `chat-image-${id}`,
+        resolveAssetAttachments: (assetIds) => Promise.resolve(assetIds.map((id) => ({
+          id: `chat-asset-${id}`,
           buffer: Buffer.from("image"),
-          filename: `chat-image-${id}.png`,
+          filename: `chat-asset-${id}.png`,
           contentType: "image/png",
         }))),
       }),
     );
 
     expect(senderCalls).toEqual([
-      { text: "again", attachmentIds: ["chat-image-12"] },
-      { text: "", attachmentIds: ["chat-image-13"] },
+      { text: "again", attachmentIds: ["chat-asset-12"] },
+      { text: "", attachmentIds: ["chat-asset-13"] },
       { text: "done", attachmentIds: [] },
     ]);
   });
@@ -2821,7 +2815,7 @@ describe("handleMessage", () => {
 
   test("passes image tool results back to the model as multimodal context", async () => {
     const tool: AgentTool = {
-      name: "read_chat_images",
+      name: "read_asset",
       label: "Read Images",
       description: "Read images",
       parameters: Type.Object({}),
@@ -2843,7 +2837,7 @@ describe("handleMessage", () => {
           toolCalls: [{
             id: "call-1",
             type: "function",
-            function: { name: "read_chat_images", arguments: "{}" },
+            function: { name: "read_asset", arguments: "{}" },
           }],
           rawResponse: {},
           messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
@@ -2875,7 +2869,7 @@ describe("handleMessage", () => {
 
   test("uses live OpenRouter metadata instead of static registry for image support", async () => {
     const tool: AgentTool = {
-      name: "read_chat_images",
+      name: "read_asset",
       label: "Read Images",
       description: "Read images",
       parameters: Type.Object({}),
@@ -2908,7 +2902,7 @@ describe("handleMessage", () => {
           toolCalls: [{
             id: "call-1",
             type: "function",
-            function: { name: "read_chat_images", arguments: "{}" },
+            function: { name: "read_asset", arguments: "{}" },
           }],
           rawResponse: {},
           messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
@@ -2950,7 +2944,7 @@ describe("handleMessage", () => {
 
   test("returns a clear tool error instead of image parts for text-only models", async () => {
     const tool: AgentTool = {
-      name: "read_chat_images",
+      name: "read_asset",
       label: "Read Images",
       description: "Read images",
       parameters: Type.Object({}),
@@ -2972,14 +2966,14 @@ describe("handleMessage", () => {
           toolCalls: [{
             id: "call-1",
             type: "function",
-            function: { name: "read_chat_images", arguments: "{}" },
+            function: { name: "read_asset", arguments: "{}" },
           }],
           rawResponse: {},
           messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
         });
       }
 
-      const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_chat_images");
+      const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_asset");
       expect(typeof toolMessage?.content).toBe("string");
       expect(toolMessage?.content).toContain("current LLM endpoint cannot read image input");
       expect(request.messages.some((m) =>
@@ -3008,7 +3002,7 @@ describe("handleMessage", () => {
 
   test("uses fallback image model when the selected model cannot read image input", async () => {
     const tool: AgentTool = {
-      name: "read_chat_images",
+      name: "read_asset",
       label: "Read Images",
       description: "Read images",
       parameters: Type.Object({}),
@@ -3051,14 +3045,14 @@ describe("handleMessage", () => {
           toolCalls: [{
             id: "call-1",
             type: "function",
-            function: { name: "read_chat_images", arguments: "{}" },
+            function: { name: "read_asset", arguments: "{}" },
           }],
           rawResponse: {},
           messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
         });
       }
 
-      const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_chat_images");
+      const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_asset");
       expect(toolMessage?.content).toContain("Native image reading was unavailable");
       expect(toolMessage?.content).toContain("fallback image model moonshotai/kimi-k2.5");
       expect(toolMessage?.content).toContain("A very detailed image description.");
@@ -3097,7 +3091,7 @@ describe("handleMessage", () => {
 
   test("recovers when provider rejects image input after an image tool result", async () => {
     const tool: AgentTool = {
-      name: "read_chat_images",
+      name: "read_asset",
       label: "Read Images",
       description: "Read images",
       parameters: Type.Object({}),
@@ -3119,7 +3113,7 @@ describe("handleMessage", () => {
           toolCalls: [{
             id: "call-1",
             type: "function",
-            function: { name: "read_chat_images", arguments: "{}" },
+            function: { name: "read_asset", arguments: "{}" },
           }],
           rawResponse: {},
           messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
@@ -3132,7 +3126,7 @@ describe("handleMessage", () => {
       expect(request.messages.some((m) =>
         Array.isArray(m.content) && m.content.some((part) => part.type === "image_url")
       )).toBe(false);
-      const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_chat_images");
+      const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_asset");
       expect(toolMessage?.content).toContain("current LLM endpoint cannot read image input");
       expect(request.messages.some((m) => m.role === "user" && contentText(m.content).includes("## New Discord Event"))).toBe(true);
 
@@ -3155,7 +3149,7 @@ describe("handleMessage", () => {
 
   test("falls back to image description when provider rejects native image input", async () => {
     const tool: AgentTool = {
-      name: "read_chat_images",
+      name: "read_asset",
       label: "Read Images",
       description: "Read images",
       parameters: Type.Object({}),
@@ -3191,7 +3185,7 @@ describe("handleMessage", () => {
           toolCalls: [{
             id: "call-1",
             type: "function",
-            function: { name: "read_chat_images", arguments: "{}" },
+            function: { name: "read_asset", arguments: "{}" },
           }],
           rawResponse: {},
           messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
@@ -3204,7 +3198,7 @@ describe("handleMessage", () => {
       expect(request.messages.some((m) =>
         Array.isArray(m.content) && m.content.some((part) => part.type === "image_url")
       )).toBe(false);
-      const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_chat_images");
+      const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_asset");
       expect(toolMessage?.content).toContain("Native image reading was unavailable");
       expect(toolMessage?.content).toContain("Fallback saw a small square test image.");
       expect(request.messages.some((m) => m.role === "user" && contentText(m.content).includes("## New Discord Event"))).toBe(true);

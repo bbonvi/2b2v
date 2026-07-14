@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { syncMessageAssets } from "../db/asset-repository";
 import { createDatabase, type Database } from "../db/database";
 import { buildComputedContactContextForUser, buildComputedContactContexts } from "./contact-context";
 
@@ -43,13 +44,6 @@ function insertMessage(input: {
     input.createdAt,
     input.replyToId ?? null,
   );
-}
-
-function insertImage(messageId: string): void {
-  db.raw.prepare(
-    `INSERT INTO images (message_id, guild_id, channel_id, caption, source_kind, path, mime, width, height, created_at)
-     VALUES (?, 'g', 'c', NULL, 'image', '/tmp/test.webp', 'image/webp', 100, 100, ?)`
-  ).run(messageId, NOW);
 }
 
 describe("computed contact context", () => {
@@ -155,7 +149,15 @@ describe("computed contact context", () => {
     insertMessage({ id: "b1", userId: BOT_ID, username: "2B", content: "https://example.com", createdAt: NOW - 3 * DAY + 60_000, isBot: true });
     insertMessage({ id: "u2", userId: "toolish", username: "toolish", content: "2b make image", createdAt: NOW - 2 * DAY });
     insertMessage({ id: "b2", userId: BOT_ID, username: "2B", content: "держи", createdAt: NOW - 2 * DAY + 60_000, isBot: true });
-    insertImage("b2");
+    syncMessageAssets(db, {
+      messageId: "b2",
+      indexedAt: NOW,
+      assets: [{
+        messageId: "b2", guildId: "g", channelId: "c", sourceKind: "attachment", sourceKey: "image-1",
+        kind: "image", filename: "test.webp", contentType: "image/webp", size: 100,
+        width: 100, height: 100, durationSeconds: null, createdAt: NOW,
+      }],
+    });
 
     const context = buildComputedContactContextForUser({ db, botUserId: BOT_ID, botAddressAliases: ["2b"], userId: "toolish", now: NOW });
 

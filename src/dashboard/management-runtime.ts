@@ -1,6 +1,5 @@
 import type { Client, Guild, GuildBasedChannel, ThreadChannel } from "discord.js";
 import type { Database } from "../db/database";
-import { deleteImageFiles } from "../db/message-cleanup";
 import { deleteMemory, isMemoryKind, updateMemory } from "../db/memory-repository";
 import { channelTypeLabel, isSendableGuildChannel } from "../discord/message-sender";
 import {
@@ -41,12 +40,10 @@ export type DashboardManagementRuntime = {
   editMessage: (input: { messageId: string; guildId: string; channelId: string; content: string }) => Promise<{ message: DecoratedManagementMessage }>;
   deleteMessages: (input: { messageIds: string[]; guildId: string; channelId: string; deleteDiscord?: boolean }) => Promise<{
     deletedMessageIds: string[];
-    deletedImages: number;
     discordDeletion: DiscordManagementDeleteResult;
   }>;
   deleteLatestMessages: (input: { guildId: string; channelId: string; count: number; deleteDiscord?: boolean }) => Promise<{
     deletedMessageIds: string[];
-    deletedImages: number;
     discordDeletion: DiscordManagementDeleteResult;
     scopedTo: { guildId: string; channelId: string };
   }>;
@@ -222,7 +219,7 @@ export function createDashboardManagementRuntime(input: {
     guildId: string;
     channelId: string;
     deleteDiscord?: boolean;
-  }): Promise<{ deletedMessageIds: string[]; deletedImages: number; discordDeletion: DiscordManagementDeleteResult }> => {
+  }): Promise<{ deletedMessageIds: string[]; discordDeletion: DiscordManagementDeleteResult }> => {
     const requestedIds = new Set(deleteInput.messageIds);
     const validRows = listManagementMessages(input.db, {
       guildId: deleteInput.guildId,
@@ -240,10 +237,8 @@ export function createDashboardManagementRuntime(input: {
       guildId: deleteInput.guildId,
       channelId: deleteInput.channelId,
     });
-    deleteImageFiles(deleted.imagePaths);
     return {
       deletedMessageIds: deleted.messageIds,
-      deletedImages: deleted.imagePaths.length,
       discordDeletion,
     };
   };
@@ -273,7 +268,6 @@ export function createDashboardManagementRuntime(input: {
     deleteDiscord?: boolean;
   }): Promise<{
     deletedMessageIds: string[];
-    deletedImages: number;
     discordDeletion: DiscordManagementDeleteResult;
     scopedTo: { guildId: string; channelId: string };
   }> => {

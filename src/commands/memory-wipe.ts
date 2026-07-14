@@ -12,7 +12,6 @@ export interface WipeResult {
 
 export interface WipeRecentResult {
   messagesDeleted: number;
-  imagesDeleted: number;
 }
 
 export interface MemoryWipeDeps {
@@ -65,7 +64,7 @@ export function createMemoryWipeHandler(deps: MemoryWipeDeps) {
       try {
         const result = await deps.wipeRecent(interaction.guildId, interaction.channelId, recent);
         await interaction.reply({
-          content: `Deleted ${String(result.messagesDeleted)} messages and ${String(result.imagesDeleted)} images from this channel.`,
+          content: `Deleted ${String(result.messagesDeleted)} messages from this channel.`,
           flags: MessageFlags.Ephemeral,
         });
       } catch (_err) {

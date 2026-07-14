@@ -5,7 +5,7 @@ import { createListChannelMessagesTool, type ListChannelMessage, type ListChanne
 function message(id: string, author: string, content: string, timestamp: number, assets?: ListChannelMessage["assets"]): ListChannelMessage {
   return {
     id, author, authorId: `u-${author}`, content, isBot: false, timestamp, replyToId: null,
-    imageIds: [], captions: [], hasEmbeds: false, isSynthetic: false, relatedThreadId: null,
+    hasEmbeds: false, isSynthetic: false, relatedThreadId: null,
     ...(assets === undefined ? {} : { assets }),
   };
 }

@@ -162,10 +162,8 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultTimezone).toBe("UTC");
     expect(cfg.defaultTrim).toEqual({ trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 });
     expect(cfg.defaultTriggers).toEqual(defaultTriggerConfig());
-    expect(cfg.defaultImageMaxDimension).toBe(4096);
     expect(cfg.defaultMergeMessageGapSeconds).toBe(120);
-    expect(cfg.defaultImageReadMaxPerCall).toBe(10);
-    expect(cfg.defaultImageCaptioningEnabled).toBe(false);
+    expect(cfg.defaultImageReferenceMaxPerCall).toBe(10);
     expect(cfg.defaultImageReading).toEqual({
       fallbackEnabled: false,
       fallbackProvider: "openrouter",
@@ -173,7 +171,6 @@ describe("loadGlobalConfig", () => {
       fallbackModelParams: {},
     });
     expect(cfg.defaultImageGeneration).toEqual({ quality: "auto" });
-    expect(cfg.defaultAttachmentsDir).toBe("data/attachments");
     expect(cfg.defaultAssetReading).toEqual({
       maxCharsPerRead: 30000,
       maxDownloadBytes: 104857600,
@@ -232,6 +229,12 @@ describe("loadGlobalConfig", () => {
     });
   });
 
+  test("rejects a non-positive image reference limit", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "imageReferenceMaxPerCall: 0\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow("imageReferenceMaxPerCall must be a positive integer");
+  });
+
   test("resolves ElevenLabs request parameters from TTS config", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, [
@@ -273,13 +276,6 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultTriggers.mention).toBe(false);
     expect(cfg.defaultTriggers.keywords).toEqual(["bot"]);
     expect(cfg.defaultTriggers.randomChance).toBe(0.05);
-  });
-
-  test("derives attachmentsDir from YAML dataDir", () => {
-    const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "dataDir: /srv/data\n");
-    const cfg = loadGlobalConfig(BASE_ENV, file);
-    expect(cfg.defaultAttachmentsDir).toBe("/srv/data/attachments");
   });
 
   test("throws on missing DISCORD_TOKEN", () => {
@@ -600,8 +596,7 @@ describe("resolveGuildConfig", () => {
     expect(resolved.timezone).toBe("UTC");
     expect(resolved.trim).toEqual({ trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 });
     expect(resolved.mergeMessageGapSeconds).toBe(120);
-    expect(resolved.imageReadMaxPerCall).toBe(10);
-    expect(resolved.imageCaptioningEnabled).toBe(false);
+    expect(resolved.imageReferenceMaxPerCall).toBe(10);
     expect(resolved.imageReading).toEqual({
       fallbackEnabled: false,
       fallbackProvider: "openrouter",
@@ -609,7 +604,6 @@ describe("resolveGuildConfig", () => {
       fallbackModelParams: {},
     });
     expect(resolved.imageGeneration).toEqual({ quality: "auto" });
-    expect(resolved.attachmentsDir).toBe("data/attachments");
     expect(resolved.instructions).toBe("");
   });
 
@@ -620,8 +614,7 @@ describe("resolveGuildConfig", () => {
       slug: "override",
       trim: { windowSize: 30, messageCharLimit: 500 },
       mergeMessageGapSeconds: 60,
-      imageReadMaxPerCall: 5,
-      imageCaptioningEnabled: true,
+      imageReferenceMaxPerCall: 5,
       imageReading: {
         fallbackEnabled: true,
         fallbackModel: "openai/gpt-4o-mini",
@@ -630,15 +623,13 @@ describe("resolveGuildConfig", () => {
       imageGeneration: {
         quality: "high",
       },
-      attachmentsDir: "/custom/attachments",
     };
     const resolved = resolveGuildConfig(global, partial);
     expect(resolved.trim.windowSize).toBe(30);
     expect(resolved.trim.messageCharLimit).toBe(500);
     expect(resolved.trim.replyQuoteChars).toBe(50); // default
     expect(resolved.mergeMessageGapSeconds).toBe(60);
-    expect(resolved.imageReadMaxPerCall).toBe(5);
-    expect(resolved.imageCaptioningEnabled).toBe(true);
+    expect(resolved.imageReferenceMaxPerCall).toBe(5);
     expect(resolved.imageReading).toEqual({
       fallbackEnabled: true,
       fallbackProvider: "openrouter",
@@ -646,7 +637,15 @@ describe("resolveGuildConfig", () => {
       fallbackModelParams: { temperature: 0 },
     });
     expect(resolved.imageGeneration).toEqual({ quality: "high" });
-    expect(resolved.attachmentsDir).toBe("/custom/attachments");
+  });
+
+  test("rejects an invalid guild image reference limit", () => {
+    const global = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "none.yaml"));
+    expect(() => resolveGuildConfig(global, {
+      guildId: "99",
+      slug: "invalid-image-limit",
+      imageReferenceMaxPerCall: 1.5,
+    })).toThrow("imageReferenceMaxPerCall must be a positive integer");
   });
 
   test("guild inline instructions override global default", () => {
@@ -1340,13 +1339,10 @@ describe("saveGuildConfig", () => {
       timezone: "Asia/Tokyo",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
       adminUserIds: [],
-      imageMaxDimension: 4096,
       mergeMessageGapSeconds: 120,
-      imageReadMaxPerCall: 10,
-      imageCaptioningEnabled: false,
+      imageReferenceMaxPerCall: 10,
       imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
       imageGeneration: { quality: "auto" },
-      attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
       members: { include: true },
@@ -1385,13 +1381,10 @@ describe("saveGuildConfig", () => {
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
       adminUserIds: [],
-      imageMaxDimension: 4096,
       mergeMessageGapSeconds: 120,
-      imageReadMaxPerCall: 10,
-      imageCaptioningEnabled: false,
+      imageReferenceMaxPerCall: 10,
       imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
       imageGeneration: { quality: "auto" },
-      attachmentsDir: "data/attachments",
       instructions: "Custom guild instructions",
       emotes: { include: false },
       members: { include: true },
@@ -1426,13 +1419,10 @@ describe("saveGuildConfig", () => {
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
       adminUserIds: [],
-      imageMaxDimension: 4096,
       mergeMessageGapSeconds: 120,
-      imageReadMaxPerCall: 10,
-      imageCaptioningEnabled: false,
+      imageReferenceMaxPerCall: 10,
       imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
       imageGeneration: { quality: "auto" },
-      attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
       members: { include: true },
@@ -1734,13 +1724,10 @@ describe("saveGuildConfig emotes", () => {
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
       adminUserIds: [],
-      imageMaxDimension: 4096,
       mergeMessageGapSeconds: 120,
-      imageReadMaxPerCall: 10,
-      imageCaptioningEnabled: false,
+      imageReferenceMaxPerCall: 10,
       imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
       imageGeneration: { quality: "auto" },
-      attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: true },
       members: { include: true },
@@ -1782,13 +1769,10 @@ describe("saveGuildConfig triggerInstructions", () => {
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
       adminUserIds: [],
-      imageMaxDimension: 4096,
       mergeMessageGapSeconds: 120,
-      imageReadMaxPerCall: 10,
-      imageCaptioningEnabled: false,
+      imageReferenceMaxPerCall: 10,
       imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
       imageGeneration: { quality: "auto" },
-      attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
       members: { include: true },
@@ -1823,13 +1807,10 @@ describe("saveGuildConfig triggerInstructions", () => {
       timezone: "UTC",
       trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
       adminUserIds: [],
-      imageMaxDimension: 4096,
       mergeMessageGapSeconds: 120,
-      imageReadMaxPerCall: 10,
-      imageCaptioningEnabled: false,
+      imageReferenceMaxPerCall: 10,
       imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
       imageGeneration: { quality: "auto" },
-      attachmentsDir: "data/attachments",
       instructions: "",
       emotes: { include: false },
       members: { include: true },

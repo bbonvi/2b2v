@@ -221,8 +221,8 @@ export type MessageSender = (
   dedupeKey?: string,
 ) => Promise<{ sentMessageId: string; warnings?: string[] }>;
 
-/** Resolves stored chat ImageIDs into Discord-ready file attachments. */
-export type ImageAttachmentResolver = (imageIds: number[]) => Promise<OutboundAttachment[]>;
+/** Resolves stored chat asset IDs into Discord-ready file attachments. */
+export type AssetAttachmentResolver = (assetIds: number[]) => Promise<OutboundAttachment[]>;
 
 /** Dependencies injected into the handler. No direct discord.js coupling. */
 export interface HandlerDeps {
@@ -265,7 +265,7 @@ export interface HandlerDeps {
   /** Attachments already produced before this reply loop; sent with the first visible message. */
   initialPendingAttachments?: OutboundAttachment[];
   /** Resolves asset_ids on <message> envelopes into outgoing Discord attachments. */
-  resolveImageAttachments?: ImageAttachmentResolver;
+  resolveAssetAttachments?: AssetAttachmentResolver;
   /** Disable streamed Discord sends so callers can re-check state before final delivery. */
   disableLiveOutput?: boolean;
   /** Override default first-message Discord reply anchoring. */
@@ -441,7 +441,7 @@ function setToolResultContent(
 }
 
 function imageUnsupportedText(): string {
-  return "Image reading failed because the current LLM endpoint cannot read image input; continue using only text metadata/captions already available.";
+  return "Image reading failed because the current LLM endpoint cannot read image input; continue using only available text metadata.";
 }
 
 function imageFallbackSourceName(source: ImageFollowUpSource | undefined): string {
@@ -591,7 +591,7 @@ function isImageInputUnsupportedError(error: unknown): boolean {
 }
 
 function appendImageUnsupportedToolText(text: string, imageCount: number): string {
-  const notice = `Image reading failed because the current LLM endpoint cannot read image input, so ${imageCount === 1 ? "the image was" : "the images were"} not sent; use available text metadata/captions or say images cannot be inspected with this model.`;
+  const notice = `Image reading failed because the current LLM endpoint cannot read image input, so ${imageCount === 1 ? "the image was" : "the images were"} not sent; use available text metadata or say images cannot be inspected with this model.`;
   return text.trim() === "" ? notice : `${text.trim()}\n\n${notice}`;
 }
 
@@ -2002,7 +2002,7 @@ async function sendResponseSegments(input: {
   typingHoldMsForSegment?: (segment: DispatchSegment) => number;
   signal?: AbortSignal;
   pendingAttachments?: OutboundAttachment[];
-  resolveImageAttachments?: ImageAttachmentResolver;
+  resolveAssetAttachments?: AssetAttachmentResolver;
 }): Promise<number> {
   let sent = input.sentOffset ?? 0;
   let sentNow = 0;
@@ -2020,7 +2020,7 @@ async function sendResponseSegments(input: {
       : undefined;
     const referencedIds = segment.delivery?.assetIds;
     const referencedAttachments = referencedIds !== undefined && referencedIds.length > 0
-      ? (await input.resolveImageAttachments?.(referencedIds)) ?? []
+      ? (await input.resolveAssetAttachments?.(referencedIds)) ?? []
       : [];
     const attachments = [
       ...(pendingAttachments ?? []),
@@ -2129,7 +2129,7 @@ interface LiveMessageDispatchDeps {
   typingHoldMsForSegment?: (segment: DispatchSegment) => number;
   signal?: AbortSignal;
   pendingAttachments?: OutboundAttachment[];
-  resolveImageAttachments?: ImageAttachmentResolver;
+  resolveAssetAttachments?: AssetAttachmentResolver;
 }
 
 class LiveMessageDispatcher {
@@ -2655,7 +2655,7 @@ export async function handleMessage(
         typingHoldMsForSegment,
         signal: wallController.signal,
         pendingAttachments,
-        resolveImageAttachments: deps.resolveImageAttachments,
+        resolveAssetAttachments: deps.resolveAssetAttachments,
       });
       liveDispatchers.set(key, dispatcher);
       return dispatcher;
@@ -2835,7 +2835,7 @@ export async function handleMessage(
         typingHoldMsForSegment,
         signal: wallController.signal.aborted ? undefined : wallController.signal,
         pendingAttachments,
-        resolveImageAttachments: deps.resolveImageAttachments,
+        resolveAssetAttachments: deps.resolveAssetAttachments,
       });
     }
 

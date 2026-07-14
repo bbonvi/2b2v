@@ -11,8 +11,6 @@ function msg(id: string, content: string): HistoryMessage {
     isBot: false,
     timestamp: 1000,
     replyToId: null,
-    imageIds: [],
-    captions: [],
     hasEmbeds: false,
     isSynthetic: false,
     relatedThreadId: null,
@@ -68,15 +66,6 @@ describe("trimMessageContent", () => {
     m.replyToId = "99";
     const result = trimMessageContent(m, 200);
     expect(result.replyToId).toBe("99");
-  });
-
-  test("preserves image metadata", () => {
-    const m = msg("1", "x".repeat(300));
-    m.imageIds = [10, 20];
-    m.captions = ["a", "b"];
-    const result = trimMessageContent(m, 200);
-    expect(result.imageIds).toEqual([10, 20]);
-    expect(result.captions).toEqual(["a", "b"]);
   });
 
   test("does not mutate input", () => {

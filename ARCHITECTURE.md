@@ -84,11 +84,11 @@ Discord uploads, embeds, and stickers are stored as metadata-only short `#ID` as
 
 Asset history backfill pages each stored channel newest-first through Discord's 100-message endpoint. Per-channel cursors and `(message_id, source_kind, source_key)` uniqueness make page retries idempotent.
 
-Avatar reads are ephemeral and guild-scoped. They must not write avatar bytes into SQLite or the image attachment store.
+Avatar reads and image-generation references are ephemeral and guild-scoped. `read_user_avatar` returns the canonical user ID used by an ordered avatar reference; async workers resolve the current display avatar in the source guild without persisting its URL or bytes.
 
 External image URLs are ephemeral. Image search returns metadata only; page reads append normalized image references; visual inspection and generation references share one bounded downloader that rejects private-network targets and revalidates redirects. GIF and other animated web references are decoded as static first frames, matching Discord GIF generation references.
 
-Image generation is state-changing async work. Foreground turns should start the job and acknowledge; workers handle typing, timeout, chat-asset or inspected-web reference resolution, captioning, storage, and final delivery.
+Image generation is state-changing async work. Foreground turns should start the job and acknowledge; workers handle typing, timeout, ordered chat-asset, inspected-web, or guild-avatar reference resolution, and final delivery.
 
 Response directive parsing is deliberately narrow. Do not add broad XML parsing.
 

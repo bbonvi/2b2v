@@ -12,8 +12,6 @@ function msg(id: string, timestamp: number, overrides?: Partial<HistoryMessage>)
     isBot: false,
     timestamp,
     replyToId: null,
-    imageIds: [],
-    captions: [],
     hasEmbeds: false,
     isSynthetic: false,
     relatedThreadId: null,

@@ -49,7 +49,6 @@ export interface ManagementMemoryRow {
 
 export interface DeletedStoredMessages {
   messageIds: string[];
-  imagePaths: string[];
 }
 
 function clampLimit(limit: number | undefined, fallback: number, max: number): number {
@@ -177,7 +176,7 @@ export function deleteStoredManagementMessages(
   input: { ids: readonly string[]; guildId: string; channelId: string },
 ): DeletedStoredMessages {
   const ids = [...new Set(input.ids.filter((id) => id.trim() !== ""))];
-  if (ids.length === 0) return { messageIds: [], imagePaths: [] };
+  if (ids.length === 0) return { messageIds: [] };
   const idPlaceholders = placeholders(ids);
   const rows = db.raw
     .prepare(
@@ -187,16 +186,9 @@ export function deleteStoredManagementMessages(
     )
     .all(...ids, input.guildId, input.channelId) as Array<{ id: string }>;
   const messageIds = rows.map((row) => row.id);
-  if (messageIds.length === 0) return { messageIds: [], imagePaths: [] };
+  if (messageIds.length === 0) return { messageIds: [] };
 
   const rowPlaceholders = placeholders(messageIds);
-  const imageRows = db.raw
-    .prepare(`SELECT path FROM images WHERE message_id IN (${rowPlaceholders}) AND guild_id = ? AND channel_id = ?`)
-    .all(...messageIds, input.guildId, input.channelId) as Array<{ path: string }>;
-
-  db.raw
-    .prepare(`DELETE FROM images WHERE message_id IN (${rowPlaceholders}) AND guild_id = ? AND channel_id = ?`)
-    .run(...messageIds, input.guildId, input.channelId);
   db.raw
     .prepare(`DELETE FROM message_assets WHERE message_id IN (${rowPlaceholders}) AND guild_id = ? AND channel_id = ?`)
     .run(...messageIds, input.guildId, input.channelId);
@@ -207,7 +199,7 @@ export function deleteStoredManagementMessages(
     .prepare(`DELETE FROM messages WHERE id IN (${rowPlaceholders}) AND guild_id = ? AND channel_id = ?`)
     .run(...messageIds, input.guildId, input.channelId);
 
-  return { messageIds, imagePaths: imageRows.map((row) => row.path) };
+  return { messageIds };
 }
 
 /** List memory rows across scopes for dashboard inspection and editing. */

@@ -1,4 +1,4 @@
-import type { ImageAttachmentResolver, OutboundAttachment } from "./handler.ts";
+import type { AssetAttachmentResolver, OutboundAttachment } from "./handler.ts";
 import type { Database } from "../db/database.ts";
 import type { Logger } from "../logger.ts";
 import { getAssetById } from "../db/asset-repository.ts";
@@ -12,7 +12,7 @@ export function createStoredAssetAttachmentResolver(input: {
   maxDownloadBytes: number;
   resolveSource: (asset: NonNullable<ReturnType<typeof getAssetById>>) => Promise<ResolvedAssetSource | null>;
   logger: Logger;
-}): ImageAttachmentResolver {
+}): AssetAttachmentResolver {
   return async (assetIds) => {
     const attachments: OutboundAttachment[] = [];
     for (const id of assetIds) {

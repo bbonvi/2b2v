@@ -78,7 +78,6 @@ export async function processHistory(
     newer: newerTrimmed,
     latestUserMessage: latestWithDisplayName,
     replyQuoteChars: config.replyQuoteChars,
-    captioningEnabled: config.imageCaptioningEnabled,
     normalizedContentMap,
     extraLookup: fetched,
   });
@@ -97,7 +96,6 @@ export async function processHistory(
         lines.push(formatMessageLine({
           message: m,
           reply: replyResult.older.get(m.id) ?? null,
-          captioningEnabled: config.imageCaptioningEnabled,
         }));
       }
     }
@@ -129,7 +127,6 @@ export async function processHistory(
         lines.push(formatMessageLine({
           message: m,
           reply,
-          captioningEnabled: config.imageCaptioningEnabled,
           includeMessageIds: true,
           includeDisplayNames: true,
         }));

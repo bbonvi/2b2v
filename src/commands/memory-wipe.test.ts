@@ -46,7 +46,7 @@ describe("createMemoryWipeHandler", () => {
   function makeDeps(overrides?: Partial<MemoryWipeDeps>): MemoryWipeDeps {
     return {
       wipeGuild: mock(() => Promise.resolve({ memoriesDeleted: 5, messagesDeleted: 10 } satisfies WipeResult)),
-      wipeRecent: mock(() => Promise.resolve({ messagesDeleted: 3, imagesDeleted: 1 } satisfies WipeRecentResult)),
+      wipeRecent: mock(() => Promise.resolve({ messagesDeleted: 3 } satisfies WipeRecentResult)),
       adminUserIds: [],
       ...overrides,
     };
@@ -197,7 +197,6 @@ describe("createMemoryWipeHandler", () => {
 
     const call = replyArg(interaction) as { content: string; flags: number };
     expect(call.content).toContain("3 messages");
-    expect(call.content).toContain("1 images");
     expect(call.flags).toBe(MessageFlags.Ephemeral);
   });
 

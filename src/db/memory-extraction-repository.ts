@@ -200,8 +200,6 @@ export function getMessagesSinceMemoryExtraction(
     isBot: row.is_bot === 1,
     timestamp: row.created_at,
     replyToId: row.reply_to_id,
-    imageIds: [],
-    captions: [],
     hasEmbeds: false,
     isSynthetic: row.is_synthetic === 1,
     relatedThreadId: row.related_thread_id,

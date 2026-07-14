@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "./database";
 import { deleteBotMessageState, getRoutedMessageSource, upsertBotMessageContent } from "./message-repository";
 import { upsertMessageReaction } from "./message-reactions";
-import { insertImage } from "./image-repository";
 
 let db: Database;
 
@@ -134,29 +133,14 @@ describe("bot message state helpers", () => {
     })).toThrow("Refusing");
   });
 
-  test("deleteBotMessageState marks only the bot message deleted and removes its own image metadata", () => {
+  test("deleteBotMessageState marks only the bot message deleted and removes its own asset metadata", () => {
     insertMessage({ id: "bot-msg", userId: "bot-1", isBot: true });
     insertMessage({ id: "user-msg", userId: "user-1", isBot: false });
-    insertImage(db, {
-      messageId: "bot-msg",
-      guildId: "g1",
-      channelId: "c1",
-      path: "/tmp/bot.webp",
-      mime: "image/webp",
-      width: 10,
-      height: 10,
-      createdAt: 100,
-    });
-    insertImage(db, {
-      messageId: "user-msg",
-      guildId: "g1",
-      channelId: "c1",
-      path: "/tmp/user.webp",
-      mime: "image/webp",
-      width: 10,
-      height: 10,
-      createdAt: 100,
-    });
+    const insertAsset = db.raw.prepare(`INSERT INTO message_assets
+      (message_id, guild_id, channel_id, source_kind, source_key, kind, filename, created_at)
+      VALUES (?, 'g1', 'c1', 'attachment', ?, 'image', ?, 100)`);
+    insertAsset.run("bot-msg", "bot-asset", "bot.webp");
+    insertAsset.run("user-msg", "user-asset", "user.webp");
     expect(upsertMessageReaction(db, {
       messageId: "bot-msg",
       guildId: "g1",
@@ -183,12 +167,12 @@ describe("bot message state helpers", () => {
       botUserId: "bot-1",
     });
 
-    expect(result).toEqual({ deleted: true, imageCount: 1, imagePaths: ["/tmp/bot.webp"] });
+    expect(result).toEqual({ deleted: true });
     expect(db.raw.prepare("SELECT translated_content, deleted_at FROM messages WHERE id = 'bot-msg'").get())
       .toMatchObject({ translated_content: "old text" });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = 'user-msg'").get()).toEqual({ count: 1 });
-    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images WHERE message_id = 'bot-msg'").get()).toEqual({ count: 0 });
-    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM images WHERE message_id = 'user-msg'").get()).toEqual({ count: 1 });
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_assets WHERE message_id = 'bot-msg'").get()).toEqual({ count: 0 });
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_assets WHERE message_id = 'user-msg'").get()).toEqual({ count: 1 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_reactions WHERE message_id = 'bot-msg'").get()).toEqual({ count: 0 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_reactions WHERE message_id = 'user-msg'").get()).toEqual({ count: 1 });
   });

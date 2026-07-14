@@ -164,7 +164,6 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
     "ALTER TABLE messages ADD COLUMN routed_from_message_id TEXT",
     "ALTER TABLE messages ADD COLUMN assets_indexed_at INTEGER",
     "ALTER TABLE messages ADD COLUMN deleted_at INTEGER",
-    "ALTER TABLE images ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'image' CHECK(source_kind IN ('image', 'gif', 'sticker'))",
     "ALTER TABLE threads ADD COLUMN created_by_bot INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE threads ADD COLUMN archived_at INTEGER",
     "ALTER TABLE memories ADD COLUMN expires_at INTEGER",
@@ -179,6 +178,8 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
   ]) {
     ignoreExistingColumn(raw, sql);
   }
+
+  raw.run("DROP TABLE IF EXISTS images");
 
   const memoryColumns = tableColumns(raw, "memories");
   const hasStructuredMemorySchema = migrateLegacyMemoryRows(raw, memoryColumns);

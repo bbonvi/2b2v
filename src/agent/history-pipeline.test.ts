@@ -14,8 +14,6 @@ function msg(overrides?: Partial<HistoryMessage>): HistoryMessage {
     isBot: false,
     timestamp: 1000,
     replyToId: null,
-    imageIds: [],
-    captions: [],
     hasEmbeds: false,
     isSynthetic: false,
     relatedThreadId: null,
@@ -33,7 +31,6 @@ const defaultConfig = {
   },
   mergeMessageGapSeconds: 120,
   timezone: "UTC",
-  imageCaptioningEnabled: false,
   replyQuoteChars: 80,
 };
 
@@ -43,7 +40,6 @@ function makeDeps(db: Database): ReplyFallbackDeps {
     guildId: "g1",
     channelId: "c1",
     fetchDiscordMessage: () => Promise.resolve(null),
-    processImage: () => Promise.resolve(),
   };
 }
 

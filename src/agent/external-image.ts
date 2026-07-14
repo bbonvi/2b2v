@@ -2,7 +2,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import sharp from "sharp";
 import type { ExternalImagesConfig } from "../config/types.ts";
-import { imageMimeFromBuffer, prepareImageBufferForContext } from "../db/image-ingest.ts";
+import { imageMimeFromBuffer, prepareImageBufferForContext } from "./image-buffer.ts";
 import { readLimitedResponseBody } from "./read-asset-tool.ts";
 
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif", "image/tiff"]);

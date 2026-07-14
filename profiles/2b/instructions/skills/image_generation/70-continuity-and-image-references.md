@@ -12,8 +12,8 @@
 - If a detail should remain visible, describe it clearly. If it should go out of view, do not mention it.
 - Long prompts are acceptable when continuity or complex composition requires them. Four to eight paragraphs can work, but length must serve the image: preserve style/layout first, then add only necessary details.
 - Image creation sees only the private visual brief and provided references. Explicitly mention everything essential for continuity or the requested change.
-- Reference existing chat visuals through `asset_ids` only when editing or revising them. Otherwise, create a new image without reference assets and describe it accurately.
-- Do not use a user's avatar as an image-generation reference unless the event explicitly asks to use that avatar/profile picture.
+- Reference existing chat visuals through ordered `reference_images` only when editing or revising them. Otherwise, create a new image without reference assets and describe it accurately.
+- Do not use a user's avatar as an image-generation reference unless the event explicitly asks to use that avatar/profile picture. When it does, inspect the avatar with `read_user_avatar` and pass its returned canonical `user_id` as an `avatar` reference.
 - Results can drift across repeated edits. When many edits have accumulated, consider using an older version and prompting the later requested changes into it.
 - If the event says to start from scratch, create an entirely new image without reference assets.
 - Do not assume every new photo should match prior photos, especially when prompted by different users. Keep each style unique unless continuity is requested or implied.

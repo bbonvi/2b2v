@@ -1,4 +1,3 @@
-import { unlinkSync } from "fs";
 import type { Database } from "./database.ts";
 import {
   deleteBotMessageState,
@@ -8,21 +7,10 @@ import {
 
 export interface CleanupResult {
   messagesDeleted: number;
-  imagesDeleted: number;
 }
 
 export interface GuildWipeResult extends CleanupResult {
   memoriesDeleted: number;
-}
-
-export function deleteImageFiles(paths: readonly string[]): void {
-  for (const path of paths) {
-    try {
-      unlinkSync(path);
-    } catch {
-      // Best effort: database rows are the source of truth; missing files should not break cleanup.
-    }
-  }
 }
 
 export function cleanupDeletedBotMessage(input: {
@@ -39,10 +27,7 @@ export function cleanupDeletedBotMessage(input: {
     botUserId: input.botUserId,
   });
 
-  if (!deleted.deleted) return { messagesDeleted: 0, imagesDeleted: 0 };
-
-  deleteImageFiles(deleted.imagePaths);
-  return { messagesDeleted: 1, imagesDeleted: deleted.imageCount };
+  return { messagesDeleted: deleted.deleted ? 1 : 0 };
 }
 
 export function cleanupDeletedDiscordMessage(input: {
@@ -54,10 +39,7 @@ export function cleanupDeletedDiscordMessage(input: {
     id: input.messageId,
     guildId: input.guildId,
   });
-  if (!deleted.deleted) return { messagesDeleted: 0, imagesDeleted: 0 };
-
-  deleteImageFiles(deleted.imagePaths);
-  return { messagesDeleted: 1, imagesDeleted: deleted.imageCount };
+  return { messagesDeleted: deleted.deleted ? 1 : 0 };
 }
 
 export function cleanupRecentMessages(input: {
@@ -66,22 +48,16 @@ export function cleanupRecentMessages(input: {
   count: number;
 }): CleanupResult {
   const deleted = deleteRecentMessages(input.db, input.channelId, input.count);
-  deleteImageFiles(deleted.imagePaths);
-  return { messagesDeleted: deleted.messageIds.length, imagesDeleted: deleted.imagePaths.length };
+  return { messagesDeleted: deleted.messageIds.length };
 }
 
 export function cleanupGuildData(input: {
   db: Database;
   guildId: string;
 }): GuildWipeResult {
-  const imageRows = input.db.raw
-    .prepare("SELECT path FROM images WHERE guild_id = ?")
-    .all(input.guildId) as Array<{ path: string }>;
-
   const memoriesDeleted = (input.db.raw
     .prepare("DELETE FROM memories WHERE guild_id = ?")
     .run(input.guildId) as { changes: number }).changes;
-  input.db.raw.prepare("DELETE FROM images WHERE guild_id = ?").run(input.guildId);
   input.db.raw.prepare("DELETE FROM message_assets WHERE guild_id = ?").run(input.guildId);
   input.db.raw.prepare("DELETE FROM asset_backfill_checkpoints WHERE guild_id = ?").run(input.guildId);
   input.db.raw.prepare("DELETE FROM message_reactions WHERE guild_id = ?").run(input.guildId);
@@ -89,6 +65,5 @@ export function cleanupGuildData(input: {
     .prepare("DELETE FROM messages WHERE guild_id = ?")
     .run(input.guildId) as { changes: number }).changes;
 
-  deleteImageFiles(imageRows.map((row) => row.path));
-  return { memoriesDeleted, messagesDeleted, imagesDeleted: imageRows.length };
+  return { memoriesDeleted, messagesDeleted };
 }

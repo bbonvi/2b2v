@@ -6,7 +6,6 @@ import type { HistoryAsset } from "../agent/history-types.ts";
 
 export interface DeleteRecentResult {
   messageIds: string[];
-  imagePaths: string[];
 }
 
 export interface StoredBotMessageState {
@@ -41,8 +40,6 @@ export interface UpsertBotMessageContentInput {
 
 export interface DeleteBotMessageStateResult {
   deleted: boolean;
-  imageCount: number;
-  imagePaths: string[];
 }
 
 export interface MessageSearchFilter {
@@ -185,8 +182,6 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
       isBot: r.is_bot === 1,
       timestamp: r.created_at,
       replyToId: r.reply_to_id,
-      imageIds: [],
-      captions: [],
       ...(assets.length > 0 ? { assets } : {}),
       hasEmbeds: false,
       isSynthetic: r.is_synthetic === 1,
@@ -440,7 +435,7 @@ export function getRoutedMessageSource(
   };
 }
 
-/** Mark a stored Discord message as deleted while dropping local media/reaction metadata. */
+/** Mark a stored Discord message as deleted while dropping asset and reaction metadata. */
 export function markDiscordMessageDeleted(
   db: Database,
   input: { id: string; guildId: string; channelId?: string; botUserId?: string },
@@ -461,25 +456,19 @@ export function markDiscordMessageDeleted(
     )
     .get(...params) as { id: string } | null;
   if (existing === null) {
-    return { deleted: false, imageCount: 0, imagePaths: [] };
+    return { deleted: false };
   }
 
-  const imageScope = input.channelId !== undefined
+  const metadataScope = input.channelId !== undefined
     ? "message_id = ? AND guild_id = ? AND channel_id = ?"
     : "message_id = ? AND guild_id = ?";
-  const imageParams = input.channelId !== undefined
+  const metadataParams = input.channelId !== undefined
     ? [input.id, input.guildId, input.channelId]
     : [input.id, input.guildId];
-  const imageRows = db.raw
-    .prepare(`SELECT path FROM images WHERE ${imageScope}`)
-    .all(...imageParams) as Array<{ path: string }>;
-  const imageResult = db.raw
-    .prepare(`DELETE FROM images WHERE ${imageScope}`)
-    .run(...imageParams) as { changes: number };
-  db.raw.prepare(`DELETE FROM message_assets WHERE ${imageScope}`).run(...imageParams);
+  db.raw.prepare(`DELETE FROM message_assets WHERE ${metadataScope}`).run(...metadataParams);
   db.raw
-    .prepare(`DELETE FROM message_reactions WHERE ${imageScope}`)
-    .run(...imageParams);
+    .prepare(`DELETE FROM message_reactions WHERE ${metadataScope}`)
+    .run(...metadataParams);
   db.raw
     .prepare(
       `UPDATE messages
@@ -489,7 +478,7 @@ export function markDiscordMessageDeleted(
     )
     .run(Date.now(), ...params);
 
-  return { deleted: true, imageCount: imageResult.changes, imagePaths: imageRows.map((row) => row.path) };
+  return { deleted: true };
 }
 
 /** Mark a real bot-authored message row as deleted. */
@@ -1208,7 +1197,7 @@ export function insertPromptOnlyBotMessage(db: Database, input: InsertPromptOnly
 
 /**
  * Delete the N most recent messages from a channel.
- * Returns deleted message IDs and associated image file paths for cleanup.
+ * Returns deleted message IDs.
  */
 export function deleteRecentMessages(
   db: Database,
@@ -1223,22 +1212,16 @@ export function deleteRecentMessages(
     .all(channelId, count) as Array<{ id: string }>;
 
   if (messageRows.length === 0) {
-    return { messageIds: [], imagePaths: [] };
+    return { messageIds: [] };
   }
 
   const messageIds = messageRows.map((r) => r.id);
   const placeholders = messageIds.map(() => "?").join(",");
 
-  // Get image paths before deletion
-  const imageRows = db.raw
-    .prepare(`SELECT path FROM images WHERE message_id IN (${placeholders})`)
-    .all(...messageIds) as Array<{ path: string }>;
-
-  // Delete images then messages (foreign key order)
-  db.raw.prepare(`DELETE FROM images WHERE message_id IN (${placeholders})`).run(...messageIds);
+  // Delete associated metadata before messages.
   db.raw.prepare(`DELETE FROM message_assets WHERE message_id IN (${placeholders})`).run(...messageIds);
   db.raw.prepare(`DELETE FROM message_reactions WHERE message_id IN (${placeholders})`).run(...messageIds);
   db.raw.prepare(`DELETE FROM messages WHERE id IN (${placeholders})`).run(...messageIds);
 
-  return { messageIds, imagePaths: imageRows.map((r) => r.path) };
+  return { messageIds };
 }

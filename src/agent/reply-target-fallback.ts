@@ -1,6 +1,5 @@
 import type { Database } from "../db/database.ts";
 import { getAssetsByMessageId } from "../db/asset-repository.ts";
-import type { ImageSourceKind } from "../db/image-repository.ts";
 import type { HistoryMessage } from "./history-types.ts";
 import { appendStickerTags, type StickerLike } from "../discord/message-media.ts";
 
@@ -42,8 +41,6 @@ export interface ReplyFallbackDeps {
   channelId: string;
   /** Fetch a single message from Discord by channel+message ID. Returns null on failure/not found. */
   fetchDiscordMessage: (channelId: string, messageId: string) => Promise<FetchedDiscordMessage | null>;
-  /** Process and store an image attachment or preview (fire-and-forget semantics). */
-  processImage?: (url: string, contentType: string, messageId: string, sourceKind?: ImageSourceKind) => Promise<void>;
   /** Persist generalized lazy asset metadata for a fetched reply target. */
   syncAssets?: (message: FetchedDiscordMessage) => void;
 }
@@ -86,8 +83,6 @@ function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMess
       isBot: row.is_bot === 1,
       timestamp: row.created_at,
       replyToId: row.reply_to_id,
-      imageIds: [],
-      captions: [],
       ...(assets.length > 0 ? { assets: assets.map((asset) => ({
         id: asset.id, kind: asset.kind, sourceKind: asset.sourceKind, filename: asset.filename,
         contentType: asset.contentType, size: asset.size, width: asset.width, height: asset.height,
@@ -111,7 +106,7 @@ function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMess
  * 3. Fetched from Discord when not yet stored
  *
  * For each missing target, fetches from Discord, persists to SQLite,
- * and ingests image attachments.
+ * and indexes lazy attachment metadata.
  *
  * Returns the fetched messages as HistoryMessage[] for inclusion in history.
  * On fetch failure, the message is silently skipped (resolveReplies handles missingTarget).
@@ -187,8 +182,6 @@ export async function fetchMissingReplyTargets(
       isBot: discordMsg.isBot,
       timestamp: discordMsg.timestamp,
       replyToId: discordMsg.replyToId,
-      imageIds: [], // Images are ingested asynchronously; IDs not available yet
-      captions: [],
       ...(assets.length > 0 ? { assets: assets.map((asset) => ({
         id: asset.id, kind: asset.kind, sourceKind: asset.sourceKind, filename: asset.filename,
         contentType: asset.contentType, size: asset.size, width: asset.width, height: asset.height,

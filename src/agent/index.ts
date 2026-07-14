@@ -94,8 +94,6 @@ export {
   type BraveSearchResult,
 } from "./brave-search-tool.ts";
 
-export { createReadChatImagesTool, type ReadChatImagesToolDeps } from "./read-chat-images-tool.ts";
-
 export {
   createReadUserAvatarTool,
   type AvatarSize,

@@ -72,6 +72,24 @@ describe("database initialization", () => {
     expect(tables.map((row) => row.name).sort()).toEqual(["relationship_events", "relationship_profiles"]);
   });
 
+  test("drops the obsolete stored-images table", () => {
+    const legacyPath = path.join(tmpDir, "legacy-images.db");
+    const legacy = new BunDatabase(legacyPath);
+    legacy.run("CREATE TABLE images (id INTEGER PRIMARY KEY, path TEXT NOT NULL)");
+    legacy.run("INSERT INTO images (path) VALUES ('obsolete.webp')");
+    legacy.close();
+
+    const migrated = createDatabase(legacyPath);
+    try {
+      const table = migrated.raw
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='images'")
+        .get();
+      expect(table).toBeNull();
+    } finally {
+      migrated.close();
+    }
+  });
+
 });
 
 describe("memories table", () => {
@@ -378,76 +396,6 @@ describe("messages table", () => {
   });
 });
 
-describe("images table", () => {
-  test("creates images table", () => {
-    const info = db.raw
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='images'")
-      .get() as { name: string } | undefined;
-    expect(info?.name).toBe("images");
-  });
-
-  test("inserts an image with autoincrement ID", () => {
-    const now = Date.now();
-    db.raw
-      .prepare(
-        `INSERT INTO images (message_id, guild_id, channel_id, caption, path, mime, width, height, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run("msg-1", "guild-1", "ch-1", null, "attachments/guild-1-ch-1/images/1.jpg", "image/jpeg", 768, 512, now);
-
-    const row = db.raw.prepare("SELECT * FROM images WHERE message_id = ?").get("msg-1") as Record<string, unknown>;
-    expect(row.id).toBe(1);
-    expect(row.guild_id).toBe("guild-1");
-    expect(row.width).toBe(768);
-    expect(row.caption).toBeNull();
-    expect(row.source_kind).toBe("image");
-  });
-
-  test("autoincrement produces sequential IDs", () => {
-    const now = Date.now();
-    const insert = db.raw.prepare(
-      `INSERT INTO images (message_id, guild_id, channel_id, path, mime, width, height, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    insert.run("msg-1", "g", "c", "p1.jpg", "image/jpeg", 100, 100, now);
-    insert.run("msg-2", "g", "c", "p2.jpg", "image/jpeg", 100, 100, now);
-    insert.run("msg-3", "g", "c", "p3.jpg", "image/jpeg", 100, 100, now);
-
-    const rows = db.raw.prepare("SELECT id FROM images ORDER BY id").all() as { id: number }[];
-    expect(rows.map((r) => r.id)).toEqual([1, 2, 3]);
-  });
-
-  test("multiple images per message", () => {
-    const now = Date.now();
-    const insert = db.raw.prepare(
-      `INSERT INTO images (message_id, guild_id, channel_id, path, mime, width, height, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    insert.run("msg-1", "g", "c", "p1.jpg", "image/jpeg", 100, 100, now);
-    insert.run("msg-1", "g", "c", "p2.jpg", "image/jpeg", 200, 200, now);
-
-    const rows = db.raw.prepare("SELECT * FROM images WHERE message_id = ? ORDER BY id").all("msg-1") as { id: number }[];
-    expect(rows).toHaveLength(2);
-  });
-
-  test("message_id index exists", () => {
-    const idx = db.raw
-      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_images_message_id'")
-      .get() as { name: string } | undefined;
-    expect(idx?.name).toBe("idx_images_message_id");
-  });
-
-  test("source_kind only accepts known media kinds", () => {
-    expect(() => {
-      db.raw
-        .prepare(
-          `INSERT INTO images (message_id, guild_id, channel_id, source_kind, path, mime, width, height, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run("msg-bad", "g", "c", "video", "p.jpg", "image/jpeg", 100, 100, Date.now());
-    }).toThrow();
-  });
-});
 
 describe("threads table", () => {
   test("creates threads table", () => {

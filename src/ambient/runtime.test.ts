@@ -19,8 +19,6 @@ function msg(overrides: Partial<HistoryMessage> = {}): HistoryMessage {
     isBot: false,
     timestamp: Date.UTC(2026, 6, 7, 21, 10, 6, 846),
     replyToId: null,
-    imageIds: [],
-    captions: [],
     hasEmbeds: false,
     isSynthetic: false,
     relatedThreadId: null,

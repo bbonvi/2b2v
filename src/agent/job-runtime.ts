@@ -6,11 +6,15 @@ export type AgentJobKind = "image_generation";
 export type AgentJobStatus = "queued" | "running" | "cancelling" | "cancelled" | "sent" | "failed" | "timed_out";
 export type CancelMode = "replacement" | "explicit_cancel";
 
+export type ImageReference =
+  | { type: "asset"; assetId: number }
+  | { type: "url"; url: string }
+  | { type: "avatar"; userId: string };
+
 export interface ImageGenerationJobInput {
   prompt: string;
   promptHash: string;
-  imageIds: number[];
-  referenceUrls?: string[];
+  references: ImageReference[];
   outputFormat: "png" | "jpeg" | "webp";
   is4k: boolean;
   separateJob: boolean;
@@ -75,8 +79,7 @@ export interface EnqueueImageJobInput {
   sourceQuote: string;
   prompt: string;
   promptHash: string;
-  imageIds: number[];
-  referenceUrls?: string[];
+  references: ImageReference[];
   outputFormat: "png" | "jpeg" | "webp";
   is4k: boolean;
   separateJob: boolean;
@@ -142,8 +145,7 @@ export class AgentJobStore {
       input: {
         prompt: input.prompt,
         promptHash: input.promptHash,
-        imageIds: input.imageIds,
-        referenceUrls: input.referenceUrls ?? [],
+        references: input.references,
         outputFormat: input.outputFormat,
         is4k: input.is4k,
         separateJob: input.separateJob,

@@ -5,8 +5,11 @@ test("renders the complete effective image generation input without internal fie
   const rendered = renderImageGenerationInput({
     prompt: "Use both references",
     promptHash: "internal-hash",
-    imageIds: [12, 34],
-    referenceUrls: ["https://example.com/reference.gif"],
+    references: [
+      { type: "asset", assetId: 12 },
+      { type: "avatar", userId: "123456789012345678" },
+      { type: "url", url: "https://example.com/reference.gif" },
+    ],
     outputFormat: "webp",
     is4k: true,
     separateJob: true,
@@ -16,8 +19,11 @@ test("renders the complete effective image generation input without internal fie
 
   expect(JSON.parse(rendered)).toEqual({
     prompt: "Use both references",
-    asset_ids: [12, 34],
-    reference_urls: ["https://example.com/reference.gif"],
+    reference_images: [
+      { type: "asset", asset_id: 12 },
+      { type: "avatar", user_id: "123456789012345678" },
+      { type: "url", url: "https://example.com/reference.gif" },
+    ],
     output_format: "webp",
     "4k": true,
     separate_job: true,

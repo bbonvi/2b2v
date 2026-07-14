@@ -160,7 +160,6 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
         newer: messages,
         latestUserMessage: null,
         replyQuoteChars: 200,
-        captioningEnabled: false,
         extraLookup: getHistoryMessagesByIds(db, replyIds),
       }).newer;
       const intro = pattern === undefined
@@ -170,7 +169,6 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
         `[${formatLocalWallClock(message.timestamp, timezone)}]\n${formatMessageLine({
           message,
           reply: replies.get(message.id) ?? null,
-          captioningEnabled: false,
           includeMessageIds: true,
         })}`)];
       return { content: [{ type: "text", text: lines.join("\n\n") }], details: { count: messages.length } };

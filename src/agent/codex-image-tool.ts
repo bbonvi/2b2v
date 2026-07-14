@@ -5,10 +5,10 @@ import { arch, platform, release } from "node:os";
 import sharp from "sharp";
 import { getCodexApiKey } from "../llm/codex-auth.ts";
 import type { Logger } from "../logger.ts";
-import type { EnqueueImageJobResult } from "./job-runtime.ts";
+import type { EnqueueImageJobResult, ImageReference } from "./job-runtime.ts";
 import type { ImageGenerationQuality } from "../config/types.ts";
 import { renderPromptTemplate, type PromptTemplateVariables } from "../config/prompt-template.ts";
-import { imageExtensionForMime, imageMimeFromBuffer } from "../db/image-ingest.ts";
+import { imageExtensionForMime, imageMimeFromBuffer } from "./image-buffer.ts";
 import { AssetIdSchema, parseAssetId } from "./asset-id.ts";
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
@@ -33,11 +33,21 @@ const CodexGenerateImageParams = Type.Object({
   prompt: Type.String({
     description: "The final visual brief sent to Codex image generation.",
   }),
-  asset_ids: Type.Optional(Type.Array(AssetIdSchema, {
-    description: "Visual image or GIF #IDs from chat history to use as reference inputs.",
-  })),
-  reference_urls: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
-    description: "Inspected public web image URLs to use as reference inputs.",
+  reference_images: Type.Optional(Type.Array(Type.Union([
+    Type.Object({
+      type: Type.Literal("asset"),
+      asset_id: AssetIdSchema,
+    }, { additionalProperties: false }),
+    Type.Object({
+      type: Type.Literal("url"),
+      url: Type.String({ minLength: 1 }),
+    }, { additionalProperties: false }),
+    Type.Object({
+      type: Type.Literal("avatar"),
+      user_id: Type.String({ pattern: "^[0-9]{17,20}$" }),
+    }, { additionalProperties: false }),
+  ]), {
+    description: "Ordered chat asset, inspected public URL, or guild user avatar references.",
   })),
   output_format: Type.Optional(Type.Union([
     Type.Literal("png"),
@@ -77,14 +87,6 @@ export interface GeneratedImageAttachment {
   is4k?: boolean;
 }
 
-interface ReferenceImageRecord {
-  id: number;
-  mime: string;
-  width: number;
-  height: number;
-  path: string;
-}
-
 export interface ReferenceImageInput {
   id: number | string;
   data: string;
@@ -100,12 +102,11 @@ export interface CodexGenerateImageToolDeps {
   enableDirectImageFallback?: boolean;
   fetchFn?: typeof fetch;
   logger?: Logger;
-  imageReadMaxPerCall: number;
+  imageReferenceMaxPerCall: number;
   imageGenerationQuality: ImageGenerationQuality;
-  getImageById?: (id: number) => ReferenceImageRecord | null;
-  readFile?: (path: string) => Buffer | null;
   resolveReferenceImage?: (id: number) => Promise<ReferenceImageInput | null>;
   resolveExternalReference?: (url: string, signal?: AbortSignal) => Promise<ReferenceImageInput>;
+  resolveAvatarReference?: (userId: string, signal?: AbortSignal) => Promise<ReferenceImageInput | null>;
   onGeneratedImage: (attachment: GeneratedImageAttachment) => void;
   /** Tool-result template used when a related async image job is already active. */
   asyncJobAlreadyActiveTemplate?: string;
@@ -114,8 +115,7 @@ export interface CodexGenerateImageToolDeps {
   enqueueImageJob?: (input: {
     prompt: string;
     promptHash: string;
-    imageIds: number[];
-    referenceUrls: string[];
+    references: ImageReference[];
     outputFormat: OutputFormat;
     is4k: boolean;
     separateJob: boolean;
@@ -132,8 +132,7 @@ type CodexGenerateImageDetails =
     backendImageModel: "gpt-image-2";
     outputFormat: OutputFormat;
     is4k: boolean;
-    referenceImageIds: number[];
-    referenceUrls: string[];
+    references: ImageReference[];
     responseId?: string;
     imageGenerationId?: string;
     revisedPrompt?: string;
@@ -177,13 +176,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function promptHash(prompt: string, imageIds: readonly number[], referenceUrls: readonly string[], is4k: boolean): string {
+function promptHash(prompt: string, references: readonly ImageReference[], is4k: boolean): string {
   return createHash("sha256")
     .update(normalizePrompt(prompt))
     .update("|")
-    .update(imageIds.join(","))
-    .update("|")
-    .update(referenceUrls.join(","))
+    .update(JSON.stringify(references))
     .update("|")
     .update(is4k ? "4k" : "standard")
     .digest("hex")
@@ -971,69 +968,69 @@ function outputFormat(value: unknown): OutputFormat {
   return value === "jpeg" || value === "webp" || value === "png" ? value : DEFAULT_OUTPUT_FORMAT;
 }
 
-function parseAssetIds(value: unknown): number[] {
+function parseImageReferences(value: unknown): ImageReference[] {
   if (value === undefined) return [];
-  if (!Array.isArray(value)) throw new Error("asset_ids must be an array of visual chat asset IDs.");
-  const result: number[] = [];
-  const seen = new Set<number>();
+  if (!Array.isArray(value)) throw new Error("reference_images must be an array.");
+  const references: ImageReference[] = [];
+  const seen = new Set<string>();
   for (const item of value) {
-    const id = parseAssetId(item);
-    if (id === null) throw new Error("asset_ids must contain positive integer visual asset IDs, optionally prefixed with #.");
-    if (seen.has(id)) continue;
-    seen.add(id);
-    result.push(id);
+    if (!isRecord(item) || typeof item.type !== "string") {
+      throw new Error("Each reference_images entry must have a supported type.");
+    }
+    let reference: ImageReference;
+    if (item.type === "asset") {
+      const assetId = parseAssetId(item.asset_id);
+      if (assetId === null) throw new Error("Asset references require a positive asset_id, optionally prefixed with #.");
+      reference = { type: "asset", assetId };
+    } else if (item.type === "url") {
+      if (typeof item.url !== "string") throw new Error("URL references require a URL string.");
+      let url: URL;
+      try { url = new URL(item.url); } catch { throw new Error(`Invalid reference URL: ${item.url}`); }
+      if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("URL references support only HTTP/HTTPS URLs.");
+      reference = { type: "url", url: url.toString() };
+    } else if (item.type === "avatar") {
+      if (typeof item.user_id !== "string" || !/^\d{17,20}$/u.test(item.user_id)) {
+        throw new Error("Avatar references require a Discord user_id.");
+      }
+      reference = { type: "avatar", userId: item.user_id };
+    } else {
+      throw new Error(`Unsupported image reference type: ${item.type}`);
+    }
+    const key = JSON.stringify(reference);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    references.push(reference);
   }
-  return result;
-}
-
-function parseReferenceUrls(value: unknown): string[] {
-  if (value === undefined) return [];
-  if (!Array.isArray(value)) throw new Error("reference_urls must be an array of inspected public image URLs.");
-  const urls = new Set<string>();
-  for (const item of value) {
-    if (typeof item !== "string") throw new Error("reference_urls must contain URL strings.");
-    let url: URL;
-    try { url = new URL(item); } catch { throw new Error(`Invalid reference URL: ${item}`); }
-    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("reference_urls support only HTTP/HTTPS URLs.");
-    urls.add(url.toString());
-  }
-  return [...urls];
+  return references;
 }
 
 async function loadReferenceImages(
   deps: CodexGenerateImageToolDeps,
-  imageIds: number[],
-  referenceUrls: string[],
+  references: ImageReference[],
   signal?: AbortSignal,
 ): Promise<ReferenceImageInput[]> {
-  const count = imageIds.length + referenceUrls.length;
-  if (count > deps.imageReadMaxPerCall) {
-    throw new Error(`Too many reference images requested (${count}); maximum is ${deps.imageReadMaxPerCall} per call.`);
+  if (references.length > deps.imageReferenceMaxPerCall) {
+    throw new Error(`Too many reference images requested (${references.length}); maximum is ${deps.imageReferenceMaxPerCall} per call.`);
   }
 
   const images: ReferenceImageInput[] = [];
-  for (const id of imageIds) {
-    if (deps.resolveReferenceImage !== undefined) {
-      const resolved = await deps.resolveReferenceImage(id);
-      if (resolved === null) throw new Error(`Reference asset ${id} was not found or is not visual.`);
+  for (const reference of references) {
+    if (reference.type === "asset") {
+      if (deps.resolveReferenceImage === undefined) throw new Error("Chat asset references are unavailable.");
+      const resolved = await deps.resolveReferenceImage(reference.assetId);
+      if (resolved === null) throw new Error(`Reference asset ${reference.assetId} was not found or is not visual.`);
       images.push(resolved);
       continue;
     }
-    const record = deps.getImageById?.(id) ?? null;
-    if (record === null) throw new Error(`Reference image ${id} was not found.`);
-    const buffer = deps.readFile?.(record.path) ?? null;
-    if (buffer === null) throw new Error(`Reference image ${id} could not be read from storage.`);
-    images.push({
-      id: record.id,
-      data: buffer.toString("base64"),
-      mimeType: record.mime,
-      width: record.width,
-      height: record.height,
-    });
-  }
-  for (const url of referenceUrls) {
-    if (deps.resolveExternalReference === undefined) throw new Error("External image references are unavailable.");
-    images.push(await deps.resolveExternalReference(url, signal));
+    if (reference.type === "url") {
+      if (deps.resolveExternalReference === undefined) throw new Error("External image references are unavailable.");
+      images.push(await deps.resolveExternalReference(reference.url, signal));
+      continue;
+    }
+    if (deps.resolveAvatarReference === undefined) throw new Error("Avatar references are unavailable.");
+    const resolved = await deps.resolveAvatarReference(reference.userId, signal);
+    if (resolved === null) throw new Error(`Avatar reference for user ${reference.userId} is no longer available in this guild.`);
+    images.push(resolved);
   }
   return images;
 }
@@ -1063,8 +1060,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         prompt: string;
         output_format?: unknown;
         "4k"?: unknown;
-        asset_ids?: unknown;
-        reference_urls?: unknown;
+        reference_images?: unknown;
         separate_job?: unknown;
         allows_group_corrections?: unknown;
         replaces_job_id?: unknown;
@@ -1073,10 +1069,9 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
       if (prompt === "") throw new Error("Image prompt must not be empty.");
       const output = outputFormat(p.output_format);
       const is4k = p["4k"] === true;
-      const imageIds = parseAssetIds(p.asset_ids);
-      const referenceUrls = parseReferenceUrls(p.reference_urls);
-      if (imageIds.length + referenceUrls.length > deps.imageReadMaxPerCall) {
-        throw new Error(`Too many reference images requested (${imageIds.length + referenceUrls.length}); maximum is ${deps.imageReadMaxPerCall} per call.`);
+      const references = parseImageReferences(p.reference_images);
+      if (references.length > deps.imageReferenceMaxPerCall) {
+        throw new Error(`Too many reference images requested (${references.length}); maximum is ${deps.imageReferenceMaxPerCall} per call.`);
       }
       if (deps.enqueueImageJob !== undefined) {
         const replacesJobId = typeof p.replaces_job_id === "string" && p.replaces_job_id.trim() !== ""
@@ -1084,9 +1079,8 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
           : undefined;
         const enqueueResult = deps.enqueueImageJob({
           prompt,
-          promptHash: promptHash(prompt, imageIds, referenceUrls, is4k),
-          imageIds,
-          referenceUrls,
+          promptHash: promptHash(prompt, references, is4k),
+          references,
           outputFormat: output,
           is4k,
           separateJob: p.separate_job === true,
@@ -1138,7 +1132,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
           },
         };
       }
-      const referenceImages = await loadReferenceImages(deps, imageIds, referenceUrls, signal);
+      const referenceImages = await loadReferenceImages(deps, references, signal);
       const token = await getCodexApiKey(deps.codexAuthPath);
       const accountId = extractChatGptAccountId(token);
       const parsed = await requestImage({
@@ -1212,8 +1206,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         parsed.requestedSize !== undefined ? `Requested size: ${parsed.requestedSize}.` : "",
         actualSize !== undefined ? `Actual size: ${actualSize}.` : "",
         `Attachment ID: ${attachmentId}.`,
-        imageIds.length > 0 ? `Reference asset IDs: [${imageIds.join(", ")}].` : "",
-        referenceUrls.length > 0 ? `Reference URLs: [${referenceUrls.join(", ")}].` : "",
+        references.length > 0 ? `References: ${JSON.stringify(references)}.` : "",
         `Status: ${parsed.image.status}.`,
         parsed.image.revisedPrompt !== undefined ? `Revised prompt: ${parsed.image.revisedPrompt}` : "",
         "The generated image is queued and will be attached to the final Discord reply.",
@@ -1227,8 +1220,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
           model: deps.model,
           backendImageModel: BACKEND_IMAGE_MODEL,
           outputFormat: output,
-          referenceImageIds: imageIds,
-          referenceUrls,
+          references,
           responseId: parsed.responseId,
           imageGenerationId: parsed.image.id,
           revisedPrompt: parsed.image.revisedPrompt,

@@ -111,7 +111,6 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
         newer: messages,
         latestUserMessage: null,
         replyQuoteChars: 200,
-        captioningEnabled: false,
       }).newer;
       const oldestMessageId = messages[0]?.id;
       const newestMessageId = messages[messages.length - 1]?.id;
@@ -121,7 +120,6 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
         ...messages.map((message) => `[${formatLocalWallClock(message.timestamp, timezone)}]\n${formatMessageLine({
           message,
           reply: replies.get(message.id) ?? null,
-          captioningEnabled: false,
           includeMessageIds: true,
         })}`),
         cursorLine,

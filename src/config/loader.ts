@@ -121,6 +121,14 @@ function resolveExternalImagesConfig(input: Partial<ExternalImagesConfig> | unde
   };
 }
 
+function resolveImageReferenceMaxPerCall(value: number | undefined, fallback: number, key: string): number {
+  const resolved = value ?? fallback;
+  if (!Number.isSafeInteger(resolved) || resolved <= 0) {
+    throw new Error(`${key} must be a positive integer`);
+  }
+  return resolved;
+}
+
 function resolveTextNormalizationMode(
   value: unknown,
 ): TextNormalizationMode | undefined {
@@ -997,8 +1005,6 @@ export function loadGlobalConfig(
     throw new Error("OPENROUTER_API_KEY is required when any OpenRouter LLM backend is enabled");
   }
 
-  const defaultAttachmentsDir = yaml.attachmentsDir ?? `${dataDir}/attachments`;
-
   return {
     discordToken,
     ...(openrouterApiKey !== undefined && openrouterApiKey !== "" ? { openrouterApiKey } : {}),
@@ -1037,13 +1043,10 @@ export function loadGlobalConfig(
       follow_up: yaml.triggerInstructions?.follow_up,
       ambient_initiative: yaml.triggerInstructions?.ambient_initiative,
     },
-    defaultImageMaxDimension: yaml.imageMaxDimension ?? 4096,
     defaultMergeMessageGapSeconds: yaml.mergeMessageGapSeconds ?? 120,
-    defaultImageReadMaxPerCall: yaml.imageReadMaxPerCall ?? 10,
-    defaultImageCaptioningEnabled: yaml.imageCaptioningEnabled ?? false,
+    defaultImageReferenceMaxPerCall: resolveImageReferenceMaxPerCall(yaml.imageReferenceMaxPerCall, 10, "imageReferenceMaxPerCall"),
     defaultImageReading,
     defaultImageGeneration,
-    defaultAttachmentsDir,
     defaultAssetReading: resolveAssetReadingConfig(yaml.assetReading),
     logLevel: yaml.logLevel ?? "info",
     dataDir,
@@ -1144,13 +1147,14 @@ export function resolveGuildConfig(
       replyQuoteChars: partial.trim?.replyQuoteChars ?? global.defaultTrim.replyQuoteChars,
     },
     adminUserIds: partial.adminUserIds ?? [],
-    imageMaxDimension: partial.imageMaxDimension ?? global.defaultImageMaxDimension,
     mergeMessageGapSeconds: partial.mergeMessageGapSeconds ?? global.defaultMergeMessageGapSeconds,
-    imageReadMaxPerCall: partial.imageReadMaxPerCall ?? global.defaultImageReadMaxPerCall,
-    imageCaptioningEnabled: partial.imageCaptioningEnabled ?? global.defaultImageCaptioningEnabled,
+    imageReferenceMaxPerCall: resolveImageReferenceMaxPerCall(
+      partial.imageReferenceMaxPerCall,
+      global.defaultImageReferenceMaxPerCall,
+      "imageReferenceMaxPerCall",
+    ),
     imageReading: resolveGuildImageReading(global.defaultImageReading, partial.imageReading),
     imageGeneration: resolveGuildImageGeneration(global.defaultImageGeneration, partial.imageGeneration),
-    attachmentsDir: partial.attachmentsDir ?? global.defaultAttachmentsDir,
     assetReading: resolveAssetReadingConfig(partial.assetReading, global.defaultAssetReading),
     instructions,
     tts: resolveTtsConfig(partial.tts) ?? global.defaultTts,
@@ -1246,13 +1250,10 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     timezone: config.timezone,
     trim: config.trim,
     adminUserIds: config.adminUserIds.length > 0 ? config.adminUserIds : undefined,
-    imageMaxDimension: config.imageMaxDimension,
     mergeMessageGapSeconds: config.mergeMessageGapSeconds,
-    imageReadMaxPerCall: config.imageReadMaxPerCall,
-    imageCaptioningEnabled: config.imageCaptioningEnabled,
+    imageReferenceMaxPerCall: config.imageReferenceMaxPerCall,
     imageReading: config.imageReading,
     imageGeneration: config.imageGeneration,
-    attachmentsDir: config.attachmentsDir,
     assetReading: config.assetReading,
     instructions: config.instructions !== "" ? config.instructions : undefined,
     tts: config.tts,

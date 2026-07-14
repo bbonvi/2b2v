@@ -148,7 +148,7 @@ export function buildComputedContactContexts(input: BuildContactContextsInput): 
   };
   const rows = loadContactRows(input);
   const turns = mergeContactTurns(rows);
-  const imageMessageIds = loadImageMessageIds(input.db);
+  const visualAssetMessageIds = loadVisualAssetMessageIds(input.db);
   const memoryCounts = loadUserMemoryCounts(input.db, now);
   const stats = new Map<string, UserContactStats>();
   const messageUser = new Map<string, string>();
@@ -182,7 +182,7 @@ export function buildComputedContactContexts(input: BuildContactContextsInput): 
       botAddressPatternForGuild(turn.guild_id),
       botMessageIds,
       messageUser,
-      imageMessageIds,
+      visualAssetMessageIds,
     );
     if (event !== null) {
       const userStats = ensureStats(stats, event.userId, event.username);
@@ -316,9 +316,9 @@ function joinTurnText(left: string, right: string): string {
   return `${left}\n${right}`;
 }
 
-function loadImageMessageIds(db: Database): Set<string> {
+function loadVisualAssetMessageIds(db: Database): Set<string> {
   const rows = db.raw
-    .prepare("SELECT DISTINCT message_id FROM images")
+    .prepare("SELECT DISTINCT message_id FROM message_assets WHERE kind IN ('image', 'gif', 'video')")
     .all() as Array<{ message_id: string }>;
   return new Set(rows.map((row) => row.message_id));
 }
@@ -385,7 +385,7 @@ function contactEventForTurn(
   botAddressPattern: RegExp | null,
   botMessageIds: Set<string>,
   messageUser: Map<string, string>,
-  imageMessageIds: Set<string>,
+  visualAssetMessageIds: Set<string>,
 ): ContactEvent | null {
   const isBot = turn.is_bot === 1 && turn.user_id === botUserId;
   const previousIsClose = previous !== undefined
@@ -407,7 +407,7 @@ function contactEventForTurn(
     };
   }
 
-  const instrumental = botReplyLooksInstrumental(turn, imageMessageIds);
+  const instrumental = botReplyLooksInstrumental(turn, visualAssetMessageIds);
   let repliedUserId: string | undefined;
   for (const replyToId of turn.reply_to_ids) {
     repliedUserId = messageUser.get(replyToId);
@@ -438,8 +438,8 @@ function contactEventForTurn(
   return null;
 }
 
-function botReplyLooksInstrumental(turn: ContactTurn, imageMessageIds: Set<string>): boolean {
-  return turn.ids.some((id) => imageMessageIds.has(id)) || URL_RE.test(turn.raw_content) || URL_RE.test(turn.translated_content);
+function botReplyLooksInstrumental(turn: ContactTurn, visualAssetMessageIds: Set<string>): boolean {
+  return turn.ids.some((id) => visualAssetMessageIds.has(id)) || URL_RE.test(turn.raw_content) || URL_RE.test(turn.translated_content);
 }
 
 function addContactEvent(

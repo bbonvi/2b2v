@@ -2,7 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Client, Guild, TextChannel } from "discord.js";
 import type { AssembledContext } from "../agent/context-assembly";
 import { createGeneratedImageRuntime, type GeneratedImageRuntime, shortQuote } from "../agent/generated-image-runtime";
-import type { HandleResult, HandlerDeps, ImageAttachmentResolver, IncomingMessage, MessageSender } from "../agent/handler";
+import type { HandleResult, HandlerDeps, AssetAttachmentResolver, IncomingMessage, MessageSender } from "../agent/handler";
 import type { HistoryMessage } from "../agent/history-types";
 import type { GuildConfig } from "../config/types";
 import type { Database } from "../db/database";
@@ -65,7 +65,6 @@ export function createScheduledTaskRunner(input: {
     botUsername: string;
     logger: Logger;
     getLastTypingAt?: () => number;
-    getAttachmentsDir: (targetGuildId: string) => string;
   }) => MessageSender;
   createTtsGenerator: (guildConfig: GuildConfig) => TtsGenerator;
   createHandlerDeps: (input: {
@@ -78,10 +77,10 @@ export function createScheduledTaskRunner(input: {
     requestLog: RequestLog;
     tts?: TtsGenerator;
     generatedImages?: GeneratedImageRuntime;
-    resolveImageAttachments?: ImageAttachmentResolver;
+    resolveAssetAttachments?: AssetAttachmentResolver;
     overrides?: Partial<HandlerDeps>;
   }) => HandlerDeps;
-  resolveAssetAttachments: (guildId: string, guildConfig: GuildConfig, logger: Logger) => ImageAttachmentResolver;
+  resolveAssetAttachments: (guildId: string, guildConfig: GuildConfig, logger: Logger) => AssetAttachmentResolver;
   runLoggedAgentTurn: (input: { incoming: IncomingMessage; deps: HandlerDeps; requestLog: RequestLog; logger: Logger; afterSuccess?: (result: HandleResult) => void | Promise<void>; onFinally?: (result: HandleResult | undefined) => void }) => Promise<HandleResult>;
   runMemoryPostReplyExtraction: (input: { guildConfig: GuildConfig; memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]; guild: Guild; channel: unknown; sourceRequestId: string; source?: string; currentUserId: string; currentUsername?: string }) => Promise<unknown>;
   runRelationshipPostReplyExtraction: (input: { guildConfig: GuildConfig; memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]; guild?: Guild; channel?: unknown; source?: string; sourceRequestId?: string; currentUserId: string; currentUsername?: string }) => Promise<void>;
@@ -123,7 +122,6 @@ export function createScheduledTaskRunner(input: {
         botUsername,
         logger: scheduleLog,
         getLastTypingAt: typing.getLastTypingAt,
-        getAttachmentsDir: (targetGuildId) => input.getGuildConfig(targetGuildId).attachmentsDir,
       });
 
       const now = Date.now();
@@ -135,8 +133,6 @@ export function createScheduledTaskRunner(input: {
         isBot: false,
         timestamp: now,
         replyToId: null,
-        imageIds: [],
-        captions: [],
         hasEmbeds: false,
         isSynthetic: true,
         relatedThreadId: null,
@@ -228,7 +224,7 @@ export function createScheduledTaskRunner(input: {
         requestLog,
         tts: input.createTtsGenerator(guildConfig),
         generatedImages,
-        resolveImageAttachments: input.resolveAssetAttachments(guildId, guildConfig,
+        resolveAssetAttachments: input.resolveAssetAttachments(guildId, guildConfig,
           scheduleLog.child({ component: "stored-asset-attachments", guildId, channelId })),
         overrides: {
           onStillWorking: (destinationChannelId) => { typing.startLoop(destinationChannelId); },

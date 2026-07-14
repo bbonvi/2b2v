@@ -260,7 +260,6 @@ export function createDiscordMessageSender(input: {
   logger: Logger;
   replySourceMessage?: Message;
   getLastTypingAt?: () => number;
-  getAttachmentsDir: (guildId: string) => string;
   routedFrom?: RoutedMessageSource;
 }): MessageSender {
   const storeBotMessage = createBotMessageStore({

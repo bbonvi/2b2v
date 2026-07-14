@@ -15,6 +15,7 @@ import {
   parseCodexDirectImageResponse,
   parseCodexImageSse,
 } from "./codex-image-tool.ts";
+import type { ImageReference } from "./job-runtime.ts";
 
 function sseResponse(events: unknown[]): Response {
   const body = events
@@ -317,10 +318,8 @@ describe("createCodexGenerateImageTool", () => {
     const tool = createCodexGenerateImageTool({
       codexAuthPath: "unused",
       model: "gpt-5.5",
-      imageReadMaxPerCall: 2,
+      imageReferenceMaxPerCall: 2,
       imageGenerationQuality: "auto",
-      getImageById: () => null,
-      readFile: () => null,
       onGeneratedImage: () => {},
       enqueueImageJob: (input) => {
         observed = { outputFormat: input.outputFormat, is4k: input.is4k };
@@ -362,10 +361,8 @@ describe("createCodexGenerateImageTool", () => {
     const tool = createCodexGenerateImageTool({
       codexAuthPath: "unused",
       model: "gpt-5.5",
-      imageReadMaxPerCall: 2,
+      imageReferenceMaxPerCall: 2,
       imageGenerationQuality: "auto",
-      getImageById: () => null,
-      readFile: () => null,
       onGeneratedImage: () => {},
       enqueueImageJob: (input) => {
         observed = { outputFormat: input.outputFormat, is4k: input.is4k };
@@ -414,18 +411,17 @@ describe("createCodexGenerateImageTool", () => {
     const tool = createCodexGenerateImageTool({
       codexAuthPath: fakeCodexAuthPath(),
       model: "gpt-5.5",
-      imageReadMaxPerCall: 2,
+      imageReferenceMaxPerCall: 2,
       imageGenerationQuality: "medium",
-      getImageById: (id) => id === 7
+      resolveReferenceImage: (id) => Promise.resolve(id === 7
         ? {
           id: 7,
-          mime: "image/webp",
+          mimeType: "image/webp",
           width: 1200,
           height: 800,
-          path: "image-7.webp",
+          data: Buffer.from("reference-image").toString("base64"),
         }
-        : null,
-      readFile: (path) => path === "image-7.webp" ? Buffer.from("reference-image") : null,
+        : null),
       onGeneratedImage: (attachment) => {
         generatedTransport = attachment.transport;
       },
@@ -434,7 +430,7 @@ describe("createCodexGenerateImageTool", () => {
 
     const result = await tool.execute("call-1", {
       prompt: "turn this into a rainy noir poster",
-      asset_ids: ["#7"],
+      reference_images: [{ type: "asset", asset_id: "#7" }],
     });
 
     expect(requestedUrl).toContain("/images/edits");
@@ -450,7 +446,7 @@ describe("createCodexGenerateImageTool", () => {
     expect(generatedTransport).toBe("direct-edits");
     expect(result.details).toMatchObject({
       transport: "direct-edits",
-      referenceImageIds: [7],
+      references: [{ type: "asset", assetId: 7 }],
     });
   });
 
@@ -466,7 +462,7 @@ describe("createCodexGenerateImageTool", () => {
     const tool = createCodexGenerateImageTool({
       codexAuthPath: fakeCodexAuthPath(),
       model: "gpt-5.5",
-      imageReadMaxPerCall: 2,
+      imageReferenceMaxPerCall: 2,
       imageGenerationQuality: "auto",
       fetchFn,
       resolveExternalReference: (url) => Promise.resolve({
@@ -480,28 +476,27 @@ describe("createCodexGenerateImageTool", () => {
     });
     const result = await tool.execute("call-web", {
       prompt: "use this pose",
-      reference_urls: ["https://example.com/pose.gif"],
+      reference_images: [{ type: "url", url: "https://example.com/pose.gif" }],
     });
     expect(requestedBody).toMatchObject({
       images: [{ image_url: `data:image/jpeg;base64,${Buffer.from("first-frame").toString("base64")}` }],
     });
     expect(result.details).toMatchObject({
-      referenceImageIds: [],
-      referenceUrls: ["https://example.com/pose.gif"],
+      references: [{ type: "url", url: "https://example.com/pose.gif" }],
       transport: "direct-edits",
     });
   });
 
-  test("stores reference URLs in async image jobs and enforces the combined limit", async () => {
-    let observed: string[] | undefined;
+  test("stores ordered references in async image jobs and enforces the limit", async () => {
+    let observed: ImageReference[] | undefined;
     const tool = createCodexGenerateImageTool({
       codexAuthPath: "unused",
       model: "gpt-5.5",
-      imageReadMaxPerCall: 2,
+      imageReferenceMaxPerCall: 2,
       imageGenerationQuality: "auto",
       onGeneratedImage: () => {},
       enqueueImageJob: (input) => {
-        observed = input.referenceUrls;
+        observed = input.references;
         return {
           created: true,
           reason: "created",
@@ -524,19 +519,73 @@ describe("createCodexGenerateImageTool", () => {
         };
       },
     });
-    await tool.execute("call-web", { prompt: "reference", reference_urls: ["https://example.com/a.png"] });
-    expect(observed).toEqual(["https://example.com/a.png"]);
+    await tool.execute("call-web", {
+      prompt: "reference",
+      reference_images: [
+        { type: "url", url: "https://example.com/a.png" },
+        { type: "avatar", user_id: "123456789012345678" },
+      ],
+    });
+    expect(observed).toEqual([
+      { type: "url", url: "https://example.com/a.png" },
+      { type: "avatar", userId: "123456789012345678" },
+    ]);
     try {
       await tool.execute("call-limit", {
         prompt: "too many",
-        asset_ids: [1, 2],
-        reference_urls: ["https://example.com/a.png"],
+        reference_images: [
+          { type: "asset", asset_id: 1 },
+          { type: "asset", asset_id: 2 },
+          { type: "url", url: "https://example.com/a.png" },
+        ],
       });
       expect.unreachable("combined reference limit should reject");
     } catch (cause) {
       expect(cause).toBeInstanceOf(Error);
       expect((cause as Error).message).toContain("maximum is 2");
     }
+  });
+
+  test("resolves avatar references in their declared order", async () => {
+    const resolved: string[] = [];
+    const tool = createCodexGenerateImageTool({
+      codexAuthPath: fakeCodexAuthPath(),
+      model: "gpt-5.5",
+      imageReferenceMaxPerCall: 3,
+      imageGenerationQuality: "auto",
+      resolveExternalReference: (url) => {
+        resolved.push(`url:${url}`);
+        return Promise.resolve({ id: url, data: "dXJs", mimeType: "image/png", width: 1, height: 1 });
+      },
+      resolveAvatarReference: (userId) => {
+        resolved.push(`avatar:${userId}`);
+        return Promise.resolve({ id: `avatar:${userId}`, data: "YXZhdGFy", mimeType: "image/png", width: 1, height: 1 });
+      },
+      resolveReferenceImage: (assetId) => {
+        resolved.push(`asset:${assetId}`);
+        return Promise.resolve({ id: assetId, data: "YXNzZXQ=", mimeType: "image/png", width: 1, height: 1 });
+      },
+      onGeneratedImage: () => {},
+      fetchFn: Object.assign(
+        () => Promise.resolve(Response.json({ data: [{ b64_json: "Z2VuZXJhdGVk" }] })),
+        { preconnect: fetch.preconnect },
+      ),
+    });
+
+    await tool.execute("call-ordered", {
+      prompt: "ordered references",
+      reference_images: [
+        { type: "url", url: "https://example.com/first.png" },
+        { type: "avatar", user_id: "123456789012345678" },
+        { type: "asset", asset_id: "#7" },
+      ],
+    });
+
+    expect(resolved).toEqual([
+      "url:https://example.com/first.png",
+      "avatar:123456789012345678",
+      "asset:7",
+    ]);
   });
 });
 

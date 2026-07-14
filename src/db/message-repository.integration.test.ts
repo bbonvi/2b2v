@@ -334,39 +334,6 @@ describe("searchMessagesLiteral", () => {
 });
 
 describe("getHistoryMessages", () => {
-  function insertImage(
-    messageId: string,
-    opts: {
-      guildId?: string;
-      channelId?: string;
-      caption?: string | null;
-      path?: string;
-      mime?: string;
-      width?: number;
-      height?: number;
-      sourceKind?: string;
-    } = {}
-  ): number {
-    const result = db.raw
-      .prepare(
-        `INSERT INTO images (message_id, guild_id, channel_id, caption, source_kind, path, mime, width, height, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        messageId,
-        opts.guildId ?? "g1",
-        opts.channelId ?? "c1",
-        opts.caption ?? null,
-        opts.sourceKind ?? "image",
-        opts.path ?? "/tmp/img.jpg",
-        opts.mime ?? "image/jpeg",
-        opts.width ?? 100,
-        opts.height ?? 100,
-        now
-      );
-    return Number(result.lastInsertRowid);
-  }
-
   test("returns correct HistoryMessage shape with all fields mapped", () => {
     insertMessage("m1", {
       channelId: "c1",
@@ -391,51 +358,12 @@ describe("getHistoryMessages", () => {
       isBot: false,
       timestamp: now - 1 * hour,
       replyToId: "m0",
-      imageIds: [],
-      captions: [],
       hasEmbeds: false,
       isSynthetic: false,
       isPromptOnly: false,
       isDeleted: false,
       relatedThreadId: null,
     });
-  });
-
-  test("legacy stored images are omitted after asset cutover", () => {
-    insertMessage("m1", { channelId: "c1", createdAt: now - 2 * hour });
-    insertMessage("m2", { channelId: "c1", createdAt: now - 1 * hour });
-
-    insertImage("m1", { caption: "cat photo" });
-    insertImage("m1", { caption: "dog photo" });
-    insertImage("m2", { caption: "bird photo" });
-
-    const results = getHistoryMessages(db, "c1", 10);
-    expect(results.length).toBe(2);
-
-    const msg1 = results[0];
-    if (msg1 === undefined) throw new Error("unreachable");
-    expect(msg1.id).toBe("m1");
-    expect(msg1.imageIds).toEqual([]);
-    expect(msg1.captions).toEqual([]);
-    expect(msg1.imageSourceKinds).toBeUndefined();
-
-    const msg2 = results[1];
-    if (msg2 === undefined) throw new Error("unreachable");
-    expect(msg2.id).toBe("m2");
-    expect(msg2.imageIds).toEqual([]);
-    expect(msg2.captions).toEqual([]);
-  });
-
-  test("messages without images have empty imageIds/captions", () => {
-    insertMessage("m1", { channelId: "c1", createdAt: now });
-
-    const results = getHistoryMessages(db, "c1", 10);
-    expect(results.length).toBe(1);
-
-    const m = results[0];
-    if (m === undefined) throw new Error("unreachable");
-    expect(m.imageIds).toEqual([]);
-    expect(m.captions).toEqual([]);
   });
 
   test("respects limit parameter", () => {
@@ -461,7 +389,6 @@ describe("getHistoryMessages", () => {
   test("hasEmbeds is always false", () => {
     insertMessage("m1", { channelId: "c1", createdAt: now });
     insertMessage("m2", { channelId: "c1", createdAt: now - 1 * hour });
-    insertImage("m1", { caption: "with image" });
 
     const results = getHistoryMessages(db, "c1", 10);
     for (const msg of results) {
@@ -555,39 +482,6 @@ describe("getContextHistoryMessages", () => {
 });
 
 describe("getParentPreContext", () => {
-  function insertImage(
-    messageId: string,
-    opts: {
-      guildId?: string;
-      channelId?: string;
-      caption?: string | null;
-      path?: string;
-      mime?: string;
-      width?: number;
-      height?: number;
-      sourceKind?: string;
-    } = {}
-  ): number {
-    const result = db.raw
-      .prepare(
-        `INSERT INTO images (message_id, guild_id, channel_id, caption, source_kind, path, mime, width, height, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        messageId,
-        opts.guildId ?? "g1",
-        opts.channelId ?? "parent-chan",
-        opts.caption ?? null,
-        opts.sourceKind ?? "image",
-        opts.path ?? "/tmp/img.jpg",
-        opts.mime ?? "image/jpeg",
-        opts.width ?? 100,
-        opts.height ?? 100,
-        now
-      );
-    return Number(result.lastInsertRowid);
-  }
-
   test("returns messages before the specified timestamp", () => {
     // Thread created at now - 2hr, so we want messages before that
     const threadCreatedAt = now - 2 * hour;
@@ -669,8 +563,6 @@ describe("getParentPreContext", () => {
       isBot: false,
       timestamp: now - 1 * hour,
       replyToId: "m0",
-      imageIds: [],
-      captions: [],
       hasEmbeds: false,
       isSynthetic: false,
       isPromptOnly: false,
@@ -678,31 +570,6 @@ describe("getParentPreContext", () => {
       relatedThreadId: null,
       reactions: undefined,
     });
-  });
-
-  test("omits legacy stored images from parent context", () => {
-    const threadCreatedAt = now;
-
-    insertMessage("m1", { channelId: "parent-chan", createdAt: now - 2 * hour });
-    insertMessage("m2", { channelId: "parent-chan", createdAt: now - 1 * hour });
-
-    insertImage("m1", { caption: "first image" });
-    insertImage("m1", { caption: "second image" });
-    insertImage("m2", { caption: null });
-
-    const results = getParentPreContext(db, "parent-chan", threadCreatedAt, 20);
-
-    expect(results.length).toBe(2);
-
-    const msg1 = results[0];
-    if (msg1 === undefined) throw new Error("unreachable");
-    expect(msg1.imageIds).toEqual([]);
-    expect(msg1.captions).toEqual([]);
-
-    const msg2 = results[1];
-    if (msg2 === undefined) throw new Error("unreachable");
-    expect(msg2.imageIds).toEqual([]);
-    expect(msg2.captions).toEqual([]);
   });
 
   test("returns empty array when no messages exist before timestamp", () => {

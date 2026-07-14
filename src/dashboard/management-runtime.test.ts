@@ -1,9 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, writeFileSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
 import { createDatabase, type Database } from "../db/database";
-import { insertImage } from "../db/image-repository";
 import { createDashboardManagementRuntime } from "./management-runtime";
 
 let db: Database;
@@ -41,21 +37,11 @@ function managementRuntime(): ReturnType<typeof createDashboardManagementRuntime
 }
 
 describe("dashboard management runtime", () => {
-  test("deletes local image files for deleted stored messages", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "2b2v-dashboard-delete-"));
-    const imagePath = join(dir, "image.webp");
-    writeFileSync(imagePath, "image");
+  test("deletes stored messages and their lazy metadata", async () => {
     insertMessage("m1");
-    insertImage(db, {
-      messageId: "m1",
-      guildId: "g1",
-      channelId: "c1",
-      path: imagePath,
-      mime: "image/webp",
-      width: 1,
-      height: 1,
-      createdAt: 1,
-    });
+    db.raw.prepare(`INSERT INTO message_assets
+      (message_id, guild_id, channel_id, source_kind, source_key, kind, filename, created_at)
+      VALUES ('m1', 'g1', 'c1', 'attachment', 'a1', 'image', 'image.webp', 1)`).run();
 
     const result = await managementRuntime().deleteMessages({
       messageIds: ["m1"],
@@ -63,7 +49,7 @@ describe("dashboard management runtime", () => {
       channelId: "c1",
     });
 
-    expect(result.deletedImages).toBe(1);
-    expect(existsSync(imagePath)).toBe(false);
+    expect(result.deletedMessageIds).toEqual(["m1"]);
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_assets").get()).toEqual({ count: 0 });
   });
 });

@@ -1,5 +1,5 @@
 import type { HistoryMessage } from "./history-types";
-import { isActiveJobStatus, type AgentJob, type ImageGenerationJobInput } from "./job-runtime";
+import { isActiveJobStatus, type AgentJob, type ImageGenerationJobInput, type ImageReference } from "./job-runtime";
 import type { GeneratedImageAttachment } from "./codex-image-tool";
 import type { OutboundAttachment } from "./handler";
 
@@ -49,13 +49,21 @@ export function shortQuote(text: string, maxLength = 120): string {
 export function renderImageGenerationInput(input: ImageGenerationJobInput): string {
   return JSON.stringify({
     prompt: input.prompt,
-    asset_ids: input.imageIds,
-    reference_urls: input.referenceUrls ?? [],
+    reference_images: imageReferencesForToolInput(input.references),
     output_format: input.outputFormat,
     "4k": input.is4k,
     separate_job: input.separateJob,
     allows_group_corrections: input.allowsGroupCorrections,
     ...(input.replacesJobId !== undefined ? { replaces_job_id: input.replacesJobId } : {}),
+  });
+}
+
+/** Convert normalized references back to the public image-tool input shape. */
+export function imageReferencesForToolInput(references: readonly ImageReference[]): Array<Record<string, unknown>> {
+  return references.map((reference) => {
+    if (reference.type === "asset") return { type: reference.type, asset_id: reference.assetId };
+    if (reference.type === "url") return { type: reference.type, url: reference.url };
+    return { type: reference.type, user_id: reference.userId };
   });
 }
 

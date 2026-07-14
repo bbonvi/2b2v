@@ -177,7 +177,7 @@ type CreateHandlerDepsInput = {
   requestLog: RequestLog;
   tts?: { ttsEnabled: boolean; generateSpeech?: NonNullable<HandlerDeps["generateSpeech"]> };
   generatedImages?: ReturnType<typeof createGeneratedImageRuntime>;
-  resolveImageAttachments?: HandlerDeps["resolveImageAttachments"];
+  resolveAssetAttachments?: HandlerDeps["resolveAssetAttachments"];
   overrides?: Partial<HandlerDeps>;
 };
 
@@ -208,7 +208,6 @@ export type AmbientRuntimeDeps = {
     botUserId: string;
     botUsername: string;
     logger: Logger;
-    getAttachmentsDir: (targetGuildId: string) => string;
   }) => MessageSender;
   createHandlerDeps: (input: CreateHandlerDepsInput) => HandlerDeps;
   processTriggeredMessage: (message: Message, triggerResult?: NonNullable<TriggerResult>, currentTurnMessages?: readonly Message[], options?: { disableLiveOutput?: boolean; defaultReply?: boolean; triggerInstruction?: string; currentTurnOverride?: { messageId: string; timestamp: number; content: string }; preSendCheck?: () => boolean; onWriteToolStart?: (toolName: string) => void }) => Promise<unknown>;
@@ -1839,8 +1838,6 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       isBot: actorIsBot,
       timestamp: now,
       replyToId: null,
-      imageIds: [],
-      captions: [],
       hasEmbeds: false,
       isSynthetic: true,
       relatedThreadId: null,
@@ -1893,7 +1890,6 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       botUserId,
       botUsername,
       logger: log.child({ component: "ambient-initiative-send", guildId: input.candidate.guildId, channelId: input.candidate.channelId }),
-      getAttachmentsDir: (targetGuildId) => getGuildConfig(targetGuildId).attachmentsDir,
     });
     const targetBotId = input.candidate.targetBotId;
     let targetMentionPending = targetBotId !== undefined;
@@ -1982,7 +1978,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         log: log.child({ guildId: input.candidate.guildId, channelId: input.candidate.channelId, requestId: input.requestLog.requestId, component: "ambient-initiative" }),
         requestLog: input.requestLog,
         generatedImages,
-        resolveImageAttachments: createStoredAssetAttachmentResolver({
+        resolveAssetAttachments: createStoredAssetAttachmentResolver({
           db,
           guildId: input.candidate.guildId,
           maxDownloadBytes: input.guildConfig.assetReading?.maxDownloadBytes ?? DEFAULT_ASSET_READING.maxDownloadBytes,

@@ -449,16 +449,12 @@ export interface GuildConfig {
   timezone: string;
   trim: TrimConfig;
   adminUserIds: string[];
-  /** Longest edge for canonical stored user images. */
-  imageMaxDimension: number;
   mergeMessageGapSeconds: number;
-  imageReadMaxPerCall: number;
-  imageCaptioningEnabled: boolean;
+  imageReferenceMaxPerCall: number;
   /** Dedicated fallback for image tool results when the main model cannot read image input. */
   imageReading: ImageReadingConfig;
   /** Dedicated image-generation request settings. */
   imageGeneration: ImageGenerationConfig;
-  attachmentsDir: string;
   assetReading?: AssetReadingConfig;
   instructions: string;
   tts?: TtsConfig;
@@ -511,15 +507,12 @@ export interface GlobalConfig {
   defaultTrim: TrimConfig;
   defaultTriggers: TriggerConfig;
   defaultTriggerInstructions: TriggerInstructions;
-  defaultImageMaxDimension: number;
   defaultMergeMessageGapSeconds: number;
-  defaultImageReadMaxPerCall: number;
-  defaultImageCaptioningEnabled: boolean;
+  defaultImageReferenceMaxPerCall: number;
   /** Default fallback for image tool results when the main model cannot read image input. */
   defaultImageReading: ImageReadingConfig;
   /** Default image-generation request settings. */
   defaultImageGeneration: ImageGenerationConfig;
-  defaultAttachmentsDir: string;
   defaultAssetReading?: AssetReadingConfig;
   logLevel: string;
   dataDir: string;
@@ -578,10 +571,8 @@ export interface GuildConfigYaml {
   timezone?: string;
   trim?: Partial<TrimConfig>;
   adminUserIds?: string[];
-  imageMaxDimension?: number;
   mergeMessageGapSeconds?: number;
-  imageReadMaxPerCall?: number;
-  imageCaptioningEnabled?: boolean;
+  imageReferenceMaxPerCall?: number;
   imageReading?: {
     fallbackEnabled?: boolean;
     fallbackProvider?: LlmProvider;
@@ -591,7 +582,6 @@ export interface GuildConfigYaml {
   imageGeneration?: {
     quality?: ImageGenerationQuality;
   };
-  attachmentsDir?: string;
   assetReading?: AssetReadingConfigYaml;
   instructions?: string;
   instructionsPath?: string;
@@ -670,10 +660,8 @@ export interface MainConfigYaml {
   trim?: Partial<TrimConfig>;
   triggers?: Partial<TriggerConfig>;
   triggerInstructions?: Partial<TriggerInstructions>;
-  imageMaxDimension?: number;
   mergeMessageGapSeconds?: number;
-  imageReadMaxPerCall?: number;
-  imageCaptioningEnabled?: boolean;
+  imageReferenceMaxPerCall?: number;
   imageReading?: {
     fallbackEnabled?: boolean;
     fallbackProvider?: LlmProvider;
@@ -684,7 +672,6 @@ export interface MainConfigYaml {
     quality?: ImageGenerationQuality;
   };
   externalImages?: Partial<ExternalImagesConfig>;
-  attachmentsDir?: string;
   assetReading?: AssetReadingConfigYaml;
   logLevel?: string;
   dataDir?: string;

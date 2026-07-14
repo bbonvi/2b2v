@@ -21,6 +21,88 @@ memoryExtraction:
 ambientAttention:
   enabled: false
 
+promptTransport:
+    openaiCodex:
+        mode: split-input # (send stable sections as separate cacheable input messages)
+        sections:
+            system: { role: developer, target: instructions } # (top-level system/developer instruction bucket)
+            core: { role: developer, target: input, cacheGroup: core } # (stable persona/style prompt)
+            skills: { role: developer, target: input, cacheGroup: skills } # (stable available-skill index)
+            runtime: { role: developer, target: input, cacheGroup: runtime } # (stable runtime behavior policy)
+            stableContext: {
+                    role: developer,
+                    target: input,
+                    cacheGroup: stable-context,
+                } # (less volatile contextual prefix)
+            olderHistory: { role: user, target: input, cacheGroup: older-history } # (cached older chat history)
+            serverMembers: { role: user, target: input, cacheGroup: members } # (visible member/display-name context)
+            threadsInChannel: { role: user, target: input, cacheGroup: threads } # (thread list/metadata context)
+            discordContext: { role: user, target: input, cacheGroup: context } # (current guild/channel navigation context)
+            upcomingSchedules: { role: user, target: input, cacheGroup: shcedules } # (pending schedule summary)
+            memories: { role: user, target: input, cacheGroup: memories } # (selected memory context)
+            recentHistory: { role: user, target: input, cacheGroup: recent } # (uncached recent chat history)
+            currentContext: {
+                    role: user,
+                    target: input,
+                    cacheGroup: current-context,
+                } # (time/contact/current-turn metadata)
+            responseInstruction: {
+                    role: developer,
+                    target: input,
+                    cacheGroup: response-instruction,
+                } # (reply-loop behavior instruction)
+            currentTurn: { role: user, target: input, cacheGroup: current-turn } # (new Discord event text)
+            finalActionInstruction: {
+                    role: developer,
+                    target: input,
+                    cacheGroup: final-action,
+                } # (last instruction before action)
+    openrouter:
+        sections:
+            system: { role: developer, target: input, cacheGroup: core } # (system prompt section in OpenRouter messages)
+            core: { role: developer, target: input, cacheGroup: core } # (stable persona/style prompt)
+            skills: { role: developer, target: input, cacheGroup: runtime } # (stable available-skill index)
+            runtime: { role: developer, target: input, cacheGroup: runtime } # (stable runtime behavior policy)
+            stableContext: {
+                    role: user,
+                    target: input,
+                    cacheGroup: stable-context,
+                } # (less volatile contextual prefix)
+            olderHistory: { role: user, target: input, cacheGroup: older-history } # (cached older chat history)
+            serverMembers: { role: user, target: input } # (visible member/display-name context)
+            threadsInChannel: { role: user, target: input } # (thread list/metadata context)
+            discordContext: { role: user, target: input } # (current guild/channel navigation context)
+            upcomingSchedules: { role: user, target: input } # (pending schedule summary)
+            memories: { role: user, target: input } # (selected memory context)
+            recentHistory: { role: user, target: input } # (uncached recent chat history)
+            currentContext: { role: user, target: input } # (time/contact/current-turn metadata)
+            responseInstruction: { role: developer, target: input } # (reply-loop behavior instruction)
+            currentTurn: { role: user, target: input } # (new Discord event text)
+            finalActionInstruction: { role: user, target: input } # (last instruction before action)
+
+replyLoop:
+    maxToolCalls: 48 # Hard cap on tool calls in one response run
+    wallClockTimeoutMs: 300000 # Hard timeout per response run (milliseconds)
+    llmOutputTimeoutMs: 45000 # Timeout for one LLM turn (milliseconds)
+
+agentJobs:
+    imageTimeoutMs: 300000 # (max async image job runtime)
+    imageCancelGraceMs: 60000 # (window where replacement/cancel can target a fresh image job)
+    terminalVisibleMs: 600000 # (how long completed/failed jobs stay visible in prompt context)
+    maxImageReplacements: 2 # (max times one image request may be replaced)
+
+reasoningContinuation:
+    enabled: true
+    maxAgeMs: 1800000 # Replay latest encrypted Codex native continuation for same guild/channel/user within 30 minutes
+
+
+trim:
+    trimTrigger: 1200 # Start trimming when history exceeds this many messages
+    trimTarget: 600 # Trim down to this many messages
+    windowSize: 150 # Recent messages kept uncached (newer slice)
+    messageCharLimit: 200 # Max chars per message before truncation
+    replyQuoteChars: 50 # Max chars for reply quote excerpts
+
 ambientInitiative:
     enabled: true # (allow proactive non-triggered initiative in the main channel)
     audience: bots # (direct automatic initiative only to configured bot targets)
@@ -80,6 +162,44 @@ triggers:
 
 promptCaching:
   enabled: true
+
+# Max ordered references per image-generation request
+imageReferenceMaxPerCall: 10
+
+# Untrusted web-image inspection and generation-reference limits
+externalImages:
+    maxImagesPerCall: 5
+    maxBytes: 20971520
+    timeoutMs: 15000
+    maxRedirects: 5
+    maxDimension: 1920
+    maxPageImages: 10
+
+# Lazy message-asset reading, transcription, and video preview limits
+assetReading:
+    maxCharsPerRead: 30000
+    maxDownloadBytes: 104857600
+    maxTranscriptionDurationSeconds: 7200
+    videoPreviewMaxBytes: 104857600
+    videoPreviewTimesSeconds: [0, 1, 5]
+    videoPreviewTimeoutSeconds: 30
+    timeoutSeconds:
+        image: 30
+        gif: 30
+        audio: 90
+        video: 180
+        text: 30
+        file: 30
+
+# Codex image generation request settings
+imageGeneration:
+    quality: "high"
+
+# If the main model cannot read image input, describe images with this vision model.
+imageReading:
+    fallbackEnabled: true
+    fallbackProvider: "openai-codex"
+    fallbackModel: "gpt-5.5"
 
 tts:
     enabled: true # (allow <voice>/<audio> output as ElevenLabs attachment)

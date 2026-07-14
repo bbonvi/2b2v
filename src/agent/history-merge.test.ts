@@ -11,8 +11,6 @@ function msg(id: string, timestamp: number, overrides?: Partial<HistoryMessage>)
     isBot: false,
     timestamp,
     replyToId: null,
-    imageIds: [],
-    captions: [],
     hasEmbeds: false,
     isSynthetic: false,
     relatedThreadId: null,
@@ -83,15 +81,6 @@ describe("mergeConsecutiveMessages", () => {
     expect(result).toHaveLength(2);
   });
 
-  test("does not merge messages with images", () => {
-    const msgs = [
-      msg("1", 1000),
-      msg("2", 1000 + 30_000, { imageIds: [1] }),
-    ];
-    const result = mergeConsecutiveMessages(msgs, GAP);
-    expect(result).toHaveLength(2);
-  });
-
   test("does not merge messages with embeds", () => {
     const msgs = [
       msg("1", 1000),
@@ -113,15 +102,6 @@ describe("mergeConsecutiveMessages", () => {
   test("does not merge deleted messages", () => {
     const msgs = [
       msg("1", 1000, { isDeleted: true, content: "removed" }),
-      msg("2", 1000 + 30_000),
-    ];
-    const result = mergeConsecutiveMessages(msgs, GAP);
-    expect(result).toHaveLength(2);
-  });
-
-  test("first message with images blocks merge even if second is plain", () => {
-    const msgs = [
-      msg("1", 1000, { imageIds: [1] }),
       msg("2", 1000 + 30_000),
     ];
     const result = mergeConsecutiveMessages(msgs, GAP);
