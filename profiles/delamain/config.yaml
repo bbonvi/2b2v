@@ -47,4 +47,4 @@ tts:
             speed: 1.10 # (voice playback/speech speed)
             style: 0.0 # (ElevenLabs style exaggeration)
             similarityBoost: 0.95 # (how strongly to preserve selected voice identity)
-            model: eleven_v2
+            model: eleven_multilingual_v2
