@@ -42,6 +42,18 @@ describe("shouldRespond", () => {
     expect(result).toEqual({ reason: "mention" });
   });
 
+  test("allows deliberate mention and keyword triggers from other bots", () => {
+    expect(shouldRespond(
+      makeInput({ authorId: "other-bot", authorIsBot: true, mentionedUserIds: ["bot-1"] }),
+      makeTriggers({ mention: true, randomChance: 1 }),
+    )).toEqual({ reason: "mention" });
+
+    expect(shouldRespond(
+      makeInput({ authorId: "other-bot", authorIsBot: true, content: "hello 2B" }),
+      makeTriggers({ keywords: ["2b"], randomChance: 1 }),
+    )).toEqual({ reason: "keyword", keyword: "2b" });
+  });
+
   test("returns 'mention' when message replies to the bot and mention trigger enabled", () => {
     const result = shouldRespond(
       makeInput({ repliedToBot: true }),
@@ -105,6 +117,15 @@ describe("shouldRespond", () => {
       makeInput(),
       makeTriggers({ randomChance: 0.1 }),
       () => 0.9 // above threshold
+    );
+    expect(result).toBeNull();
+  });
+
+  test("never random-triggers for another bot author", () => {
+    const result = shouldRespond(
+      makeInput({ authorId: "other-bot", authorIsBot: true }),
+      makeTriggers({ randomChance: 1 }),
+      () => 0,
     );
     expect(result).toBeNull();
   });

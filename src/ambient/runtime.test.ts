@@ -140,6 +140,7 @@ describe("resolveLocalChannelShape", () => {
         db,
         guildId: "g1",
         channelId: "c1",
+        botUserId: "bot-1",
         config,
         history: groupHistory(now, 13),
         userId: "u0",
@@ -162,6 +163,7 @@ describe("resolveLocalChannelShape", () => {
         db,
         guildId: "g1",
         channelId: "c1",
+        botUserId: "bot-1",
         config,
         history: groupHistory(now, 17),
         userId: "u0",
@@ -184,11 +186,34 @@ describe("resolveLocalChannelShape", () => {
         db,
         guildId: "g1",
         channelId: "c1",
+        botUserId: "bot-1",
         config,
         history: groupHistory(now, 13),
         userId: "u0",
         now,
       })).toBe("busy_group_chat");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not count an external bot as the persona's own participation", () => {
+    const db = createDatabase(":memory:");
+    const now = Date.UTC(2026, 6, 8, 12, 0, 0);
+    try {
+      expect(resolveLocalChannelShape({
+        db,
+        guildId: "g1",
+        channelId: "c1",
+        botUserId: "bot-1",
+        config: DEFAULT_AMBIENT_ATTENTION,
+        history: [
+          msg({ id: "human", authorId: "u1", timestamp: now - 1000 }),
+          msg({ id: "external", authorId: "other-bot", isBot: true, timestamp: now }),
+        ],
+        userId: "u1",
+        now,
+      })).toBe("mostly_one_user");
     } finally {
       db.close();
     }

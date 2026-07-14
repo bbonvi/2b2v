@@ -4,6 +4,8 @@ import type { TriggerConfig } from "../config/types.ts";
 export interface TriggerInput {
   content: string;
   authorId: string;
+  /** Whether Discord identifies the author as an automated bot account. */
+  authorIsBot?: boolean;
   botUserId: string;
   mentionedUserIds: string[];
   /** Whether this Discord message directly replies to one of the bot's visible messages. */
@@ -24,7 +26,8 @@ export type TriggerResult =
 /**
  * Evaluate whether the bot should respond to a message.
  *
- * Priority: mention > keyword > random.
+ * Priority: mention > keyword > random. Automated bot authors are eligible
+ * for deliberate mention/keyword triggers, but never random replies.
  * Returns null if the bot should not respond.
  *
  * @param rng - Injectable RNG for deterministic testing. Defaults to Math.random.
@@ -56,6 +59,8 @@ export function shouldRespond(
       }
     }
   }
+
+  if (input.authorIsBot === true) return null;
 
   // 3. Random chance
   if (triggers.randomChance > 0 && rng() < triggers.randomChance) {

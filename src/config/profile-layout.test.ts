@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import type { Logger } from "../logger.ts";
 import { loadInstructionBundle } from "./instruction-bundle.ts";
@@ -43,6 +43,16 @@ describe("repository profile layout", () => {
       expect(Object.keys(bundle.runtime.toolParameterDescriptions).length).toBeGreaterThan(0);
       expect(Object.keys(bundle.runtime.contextTemplates).length).toBeGreaterThan(0);
       expect(bundle.runtime.skills.byId.image_generation).toBeDefined();
+    }
+  });
+
+  test("loads shared bot conversation policy for every profile", () => {
+    const policyPath = join(PROFILES_DIR, "shared", "instructions", "runtime", "reply", "05-bot-conversations.md");
+    const policy = readFileSync(policyPath, "utf-8").trim();
+
+    for (const profile of ["2b", "delamain"]) {
+      const bundle = loadInstructionBundle(PROFILES_DIR, profile, makeLogger());
+      expect(bundle.runtime.reply).toContain(policy);
     }
   });
 

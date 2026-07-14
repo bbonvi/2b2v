@@ -114,6 +114,7 @@ export function resolveLocalChannelShape(input: {
   db: Database;
   guildId: string;
   channelId: string;
+  botUserId: string;
   config: AmbientAttentionConfig;
   history: readonly HistoryMessage[];
   userId: string;
@@ -123,7 +124,9 @@ export function resolveLocalChannelShape(input: {
   const humanMessages = recent.filter((message) => !message.isBot);
   const uniqueHumans = new Set(humanMessages.map((message) => message.authorId));
   const userMessages = humanMessages.filter((message) => message.authorId === input.userId).length;
-  const botMessages = recent.filter((message) => message.isBot && message.isPromptOnly !== true).length;
+  const botMessages = recent.filter((message) =>
+    message.isBot && message.authorId === input.botUserId && message.isPromptOnly !== true
+  ).length;
   if (humanMessages.length === 0) return "no_recent_human_chatter";
   if (uniqueHumans.size <= 1 && userMessages > 0 && botMessages > 0) return "mostly_user_and_bot";
   if (uniqueHumans.size <= 1) return "mostly_one_user";
@@ -422,6 +425,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       {
         content: message.content,
         authorId: message.authorId,
+        authorIsBot: message.isBot,
         botUserId,
         mentionedUserIds: [],
       },
@@ -463,9 +467,10 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
 
   function recentBotInvolvement(history: readonly HistoryMessage[], userId: string, now: number): string {
     const recent = history.filter((message) => now - message.timestamp <= 10 * 60 * 1000);
+    const botUserId = client.user?.id ?? "";
     for (let i = recent.length - 1; i >= 0; i -= 1) {
       const message = recent[i];
-      if (message === undefined || !message.isBot) continue;
+      if (message === undefined || !message.isBot || message.authorId !== botUserId) continue;
       if (isPromptOnlyIgnore(message)) {
         if (message.replyToId !== null) {
           const target = history.find((item) => item.id === message.replyToId);
@@ -521,6 +526,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         db,
         guildId: candidate.guildId,
         channelId: candidate.channelId,
+        botUserId: client.user?.id ?? "",
         config,
         history,
         userId: candidate.userId,
@@ -1257,7 +1263,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     return rows
       .filter((row) => {
         if (row.scope === "user") {
-          if (row.subject_user_id === null || !guild.members.cache.has(row.subject_user_id)) return false;
+          if (row.subject_user_id === null || !isHumanGuildMember(guild, row.subject_user_id)) return false;
           if (row.source_guild_id !== null && row.source_guild_id !== guild.id) return false;
         }
         if (row.scope === "guild" && row.source_channel_id !== null && row.source_channel_id !== channelId) return false;
@@ -1279,10 +1285,16 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     for (const [userId, memoryCount] of memoryCounts) {
       if (memoryCount <= 0) continue;
       const member = guild.members.cache.get(userId);
+      if (member?.user.bot === true) continue;
       const status = member?.presence?.status;
       if (status === "online" || status === "idle" || status === "dnd") count += 1;
     }
     return count;
+  }
+
+  function isHumanGuildMember(guild: Guild, userId: string): boolean {
+    const member = guild.members.cache.get(userId);
+    return member !== undefined && !member.user.bot;
   }
 
   function latestMessageStats(guildId: string, channelId: string, config: AmbientInitiativeConfig, now: number): {
@@ -1294,22 +1306,22 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     const after = now - config.recentActivityMaxMs;
     const rows = db.raw
       .prepare(
-        `SELECT is_bot, created_at
+        `SELECT user_id, is_bot, created_at
          FROM messages
          WHERE guild_id = ? AND channel_id = ? AND is_synthetic = 0 AND is_prompt_only = 0 AND created_at >= ?
          ORDER BY created_at DESC, id DESC
          LIMIT 200`
       )
-      .all(guildId, channelId, after) as Array<{ is_bot: number; created_at: number }>;
+      .all(guildId, channelId, after) as Array<{ user_id: string; is_bot: number; created_at: number }>;
     let lastHumanAt: number | null = null;
     let lastBotAt: number | null = null;
     let recentHumanCount = 0;
     let recentBotCount = 0;
     for (const row of rows) {
-      if (row.is_bot === 1) {
+      if (row.is_bot === 1 && row.user_id === client.user?.id) {
         recentBotCount += 1;
         lastBotAt ??= row.created_at;
-      } else {
+      } else if (row.is_bot === 0) {
         recentHumanCount += 1;
         lastHumanAt ??= row.created_at;
       }
@@ -1611,6 +1623,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     config: AmbientInitiativeConfig;
     candidate: AmbientInitiativeCandidate;
     decision: AmbientInitiativeDecision;
+    guild: Guild;
   }): { passed: boolean; explanation: string; probabilityThreshold: number; confidenceThreshold: number } {
     const kindConfig = ambientInitiativeKindConfig(input.config, input.candidate.kind);
     if (!input.decision.should_initiate) {
@@ -1650,6 +1663,14 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         return {
           passed: false,
           explanation: "Targeted follow-up must name a target user.",
+          probabilityThreshold: kindConfig.probabilityThreshold,
+          confidenceThreshold: kindConfig.confidenceThreshold,
+        };
+      }
+      if (!isHumanGuildMember(input.guild, input.decision.target_user_id)) {
+        return {
+          passed: false,
+          explanation: "Targeted follow-up target must be a human guild member.",
           probabilityThreshold: kindConfig.probabilityThreshold,
           confidenceThreshold: kindConfig.confidenceThreshold,
         };
@@ -2041,7 +2062,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         return { requestId: requestLog.requestId, drafts: input.draft?.drafts, sent, ignored };
       }
 
-      const verdict = ambientInitiativeDecisionPassed({ config, candidate: input.candidate, decision });
+      const verdict = ambientInitiativeDecisionPassed({ config, candidate: input.candidate, decision, guild: input.guild });
       recordAmbientRuntimeAction(
         requestLog,
         `ambient-initiative-decision:${input.candidate.id}`,
@@ -2427,6 +2448,11 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
 
   function maybeScheduleAmbientAttention(message: Message, triggerResult: TriggerResult): void {
     if (message.guildId === null || message.guild === null) return;
+    if (message.author.bot) {
+      clearPendingAmbientForUser(message.guildId, message.channelId, message.author.id);
+      ambientLeases.delete(ambientLeaseKey(message.guildId, message.channelId, message.author.id));
+      return;
+    }
     const guildConfig = getGuildConfig(message.guildId);
     const config = guildConfig.ambientAttention;
     if (config === undefined || !config.enabled) return;
@@ -2558,6 +2584,17 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     const config = getGuildConfig(input.guildId).ambientAttention;
     if (config === undefined || !config.enabled || !config.lingering.enabled) return;
     if (!input.allowLease) return;
+    const sourceRow = input.message === undefined
+      ? db.raw
+        .prepare("SELECT is_bot FROM messages WHERE id = ? AND guild_id = ? AND is_prompt_only = 0")
+        .get(input.sourceMessageId, input.guildId) as { is_bot: number } | null
+      : null;
+    const sourceIsBot = input.message?.author.bot ?? (sourceRow?.is_bot === 1);
+    if (sourceIsBot) {
+      clearPendingAmbientForUser(input.guildId, input.channelId, input.userId);
+      ambientLeases.delete(ambientLeaseKey(input.guildId, input.channelId, input.userId));
+      return;
+    }
     const now = Date.now();
     const botMessage = getMessageById(db, input.botMessageId, input.guildId);
     const botMessageCreatedAt = botMessage?.createdAt ?? now;

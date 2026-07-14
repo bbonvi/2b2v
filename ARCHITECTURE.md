@@ -16,6 +16,8 @@ Typing is runtime-owned. Model work must not wait on typing simulation; pending 
 
 Dispatch batches preserve the causal reply target. Debounced same-author follow-up text may join the current dispatch unit, but unrelated chatter and later triggers must not inherit another message's trigger reason.
 
+External Discord bots may enter deliberate mention, reply, and keyword trigger paths, but they are ineligible for random replies and ambient attention, lingering, or follow-up leases. Bot-only traffic must not seed ambient initiative; the current client's own messages must never re-enter the reply loop.
+
 Prompt history remains chronological at run time. The current Discord event pins the causal target; real trigger messages already stored in chat history should be marked, not re-appended as the newest line.
 
 Thread tools manage thread state only. Later sends still require explicit `<message channel_id="...">` routing.
@@ -51,6 +53,8 @@ Normal replies receive only the active speaker relationship slice. Relationships
 ## History, Search, Memory
 
 SQLite stores message history and backs structured/regex discovery plus chronological context retrieval.
+
+`messages.is_bot` identifies any Discord bot author. Logic that specifically means the current bot's own output must also match `user_id` against the live client user ID.
 
 Discord-deleted messages keep their stored text and are marked deleted in prompt history with `[deleted]`; local media and reactions are still removed.
 

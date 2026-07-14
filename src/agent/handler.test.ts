@@ -629,6 +629,30 @@ describe("handleMessage", () => {
     expect(currentTurn).toContain("first trigger [msg-break] latest followup");
   });
 
+  test("marks an external bot author in current event metadata", async () => {
+    let currentTurn = "";
+    const completeChat: ChatCompleteFn = (request) => {
+      currentTurn = findMessageContent(request.messages, "## New Discord Event") ?? "";
+      return Promise.resolve({
+        text: "ok",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({
+        authorId: "other-bot",
+        authorIsBot: true,
+        mentionedUserIds: ["bot-1"],
+      }),
+      makeDeps({ completeChat }),
+    );
+
+    expect(currentTurn).toContain("Trigger AuthorIsBot: true");
+  });
+
   test("splits Codex stable prompt into input messages", async () => {
     const completeChat: ChatCompleteFn = (request) => {
       const payload = {

@@ -1040,12 +1040,12 @@ function buildTemporalContext(input: {
     guildId: input.guildId,
     channelId: input.channelId,
     userId: input.latestUserMessage.authorId,
-    isBot: false,
+    isBot: input.latestUserMessage.isBot,
   });
   const previousUserAnyMessage = getLatestMessageActivityBefore(db, {
     ...before,
     userId: input.latestUserMessage.authorId,
-    isBot: false,
+    isBot: input.latestUserMessage.isBot,
   });
   const previousBotChannelMessage = botUserId !== undefined
     ? getLatestMessageActivityBefore(db, {
@@ -2508,6 +2508,7 @@ function evaluateMessageTrigger(message: Message, guildConfig: GuildConfig): Tri
     {
       content: message.content,
       authorId: message.author.id,
+      authorIsBot: message.author.bot,
       botUserId: client.user?.id ?? "",
       mentionedUserIds: [...message.mentions.users.keys()],
       repliedToBot: messageRepliesToOwnBot(message),
@@ -2639,7 +2640,7 @@ async function processTriggeredMessage(
       authorDisplayName: authorDisplayName(message),
       authorId: message.author.id,
       content: options.currentTurnOverride?.content ?? translatedContent,
-      isBot: false,
+      isBot: message.author.bot,
       timestamp: options.currentTurnOverride?.timestamp ?? message.createdTimestamp,
       replyToId: message.reference?.messageId ?? null,
       imageIds: [],
@@ -2960,9 +2961,7 @@ async function processTriggeredMessage(
     return { coveredMessageIds: [] };
   } finally {
     activeTyping?.stopLoop();
-    if (!message.author.bot) {
-      requestLogStore.decrementActive();
-    }
+    requestLogStore.decrementActive();
   }
 }
 
@@ -3012,8 +3011,9 @@ function drainStartupMessageQueue(): void {
 // --- 23. messageCreate handler ---
 async function processDiscordMessageCreate(message: Message): Promise<void> {
   try {
-    // Ignore bots (including self)
-    if (message.author.bot) return;
+    // Never re-process this client's own Discord output. Other bots may use
+    // the normal deliberate trigger paths.
+    if (message.author.id === client.user?.id) return;
     // Ignore DMs
     if (message.guild === null || message.guildId === null) return;
 
@@ -3042,7 +3042,18 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
         `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(message.id, guildId, channelId, message.author.id, message.author.username, message.content, translatedContent, 0, messageCreatedAt, message.reference?.messageId ?? null);
+      .run(
+        message.id,
+        guildId,
+        channelId,
+        message.author.id,
+        message.author.username,
+        message.content,
+        translatedContent,
+        message.author.bot ? 1 : 0,
+        messageCreatedAt,
+        message.reference?.messageId ?? null,
+      );
 
     // Update thread activity if message is in a thread
     if (message.channel.isThread()) {

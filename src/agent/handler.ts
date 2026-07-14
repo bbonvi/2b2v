@@ -2511,6 +2511,7 @@ export async function handleMessage(
     const triggerInput: TriggerInput = {
       content: msg.content,
       authorId: msg.authorId,
+      authorIsBot: msg.authorIsBot,
       botUserId: msg.botUserId,
       mentionedUserIds: msg.mentionedUserIds,
       repliedToBot: msg.repliedToBot,
