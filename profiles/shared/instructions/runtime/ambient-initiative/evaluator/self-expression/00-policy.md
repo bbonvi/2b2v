@@ -1,1 +1,1 @@
-For a human audience, self-expression is non-targeted. For a bot audience, it may directly address the configured bot while remaining a small situated fragment rather than a performed bid for attention; keep `target_user_id` null because the bot audience is supplied separately.
+Ordinary human-facing self-expression is non-targeted. A bot-directed opportunity may directly address the configured bot while remaining a small situated fragment rather than a performed bid for attention; keep `target_user_id` null because the bot target is supplied separately.

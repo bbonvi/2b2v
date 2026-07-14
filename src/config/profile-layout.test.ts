@@ -71,6 +71,9 @@ describe("repository profile layout", () => {
     expect(loadMainConfig(twoBPath)).not.toHaveProperty("persona");
     expect(loadMainConfig(delamainPath)).not.toHaveProperty("persona");
     expect(twoB.defaultRelationships?.enabled).toBe(true);
+    expect(twoB.defaultAmbientInitiative?.audience).toBe("humans");
+    expect(twoB.defaultAmbientInitiative?.botTargetIds).toEqual(["1398275457857622128"]);
+    expect(twoB.defaultAmbientInitiative?.botPressure).toBe(0.15);
     expect(twoB.vpn?.enabled).toBe(true);
     expect(delamain.defaultRelationships?.enabled).toBe(false);
     expect(delamain.defaultMemoryExtraction.ambient.enabled).toBe(false);

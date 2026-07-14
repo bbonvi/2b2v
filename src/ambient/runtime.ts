@@ -32,13 +32,13 @@ import { DEFAULT_ASSET_READING } from "../config/defaults";
 import { createGeneratedImageRuntime, shortQuote } from "../agent/generated-image-runtime";
 import { formatLocalWallClock } from "../time/agent-time";
 
-/** Apply the audience-specific initiative pressure bias and normalize it for probability use. */
-export function applyAmbientInitiativeAudiencePressure(
+/** Apply bot-specific initiative pressure and normalize it for probability use. */
+export function applyAmbientInitiativeBotPressure(
   pressure: number,
-  audience: AmbientInitiativeConfig["audience"],
+  botDirected: boolean,
   botPressure: number,
 ): number {
-  return Math.max(0, Math.min(1, pressure + (audience === "bots" ? botPressure : 0)));
+  return Math.max(0, Math.min(1, pressure + (botDirected ? botPressure : 0)));
 }
 
 /** Ensure a bot-directed initiative visibly pings its configured Discord target. */
@@ -1411,6 +1411,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     config: AmbientInitiativeConfig,
     kind: AmbientInitiativeKind,
     signals: AmbientInitiativeSignals,
+    botDirected = false,
   ): AmbientInitiativePressure {
     const kindConfig = ambientInitiativeKindConfig(config, kind);
     let pressure = kindConfig.basePressure;
@@ -1424,7 +1425,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     if (signals.recentInitiatives.length > 0) pressure -= 0.12;
     if (!signals.inActiveHours) pressure -= 0.35;
     if (signals.lastHumanAt === null) pressure -= 0.25;
-    const finalPressure = applyAmbientInitiativeAudiencePressure(pressure, config.audience, config.botPressure);
+    const finalPressure = applyAmbientInitiativeBotPressure(pressure, botDirected, config.botPressure);
     const roll = Math.random();
     return {
       kind,
@@ -1439,14 +1440,14 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         openLoops: signals.openLoops.length,
         recentInitiatives: signals.recentInitiatives.length,
         lastBotAgeMs: signals.lastBotAt !== null ? signals.now - signals.lastBotAt : null,
-        audience: config.audience,
-        botPressure: config.audience === "bots" ? config.botPressure : 0,
+        audience: botDirected ? "bots" : "humans",
+        botPressure: botDirected ? config.botPressure : 0,
       },
     };
   }
 
   async function selectAmbientInitiativeBotTarget(guild: Guild, config: AmbientInitiativeConfig): Promise<string | null> {
-    if (config.audience !== "bots") return null;
+    if (config.botTargetIds.length === 0) return null;
     const selfId = client.user?.id ?? "";
     const available: string[] = [];
     for (const targetId of config.botTargetIds) {
@@ -2086,7 +2087,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
             passed: true,
             inputs: { forced: true },
           } satisfies AmbientInitiativePressure
-        : ambientInitiativePressureForKind(config, input.candidate.kind, signals);
+        : ambientInitiativePressureForKind(config, input.candidate.kind, signals, input.candidate.targetBotId !== undefined);
       recordAmbientRuntimeAction(
         requestLog,
         `ambient-initiative-pressure:${input.candidate.id}`,
@@ -2231,17 +2232,25 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     if (config.audience === "bots" && forcedKind === "targeted_checkin") {
       return { error: "Bot-audience ambient initiative supports self-expression only." };
     }
-    const targetBotId = await selectAmbientInitiativeBotTarget(guild, config);
-    if (config.audience === "bots" && targetBotId === null) {
+    const availableBotTargetId = await selectAmbientInitiativeBotTarget(guild, config);
+    if (config.audience === "bots" && availableBotTargetId === null) {
       return { error: "No configured ambient initiative bot target is available in the guild." };
     }
+    const signals = buildAmbientInitiativeSignals(guild, channel.id, guildConfig, config);
+    const botDirected = availableBotTargetId !== null
+      && (config.audience === "bots" || (
+        forcedKind !== "targeted_checkin"
+        && config.selfExpression.enabled
+        && ambientInitiativePressureForKind(config, "self_expression", signals, true).passed
+      ));
+    const targetBotId = botDirected ? availableBotTargetId : null;
     const candidateKinds: AmbientInitiativeKind[] = config.audience === "bots"
       ? ["self_expression"]
       : ["self_expression", "targeted_checkin"];
     const eligibleKinds = candidateKinds
       .filter((candidateKind) => ambientInitiativeKindConfig(config, candidateKind).enabled);
-    const kind = forcedKind ?? eligibleKinds
-      .map((candidateKind) => ambientInitiativePressureForKind(config, candidateKind, buildAmbientInitiativeSignals(guild, channel.id, guildConfig, config)))
+    const kind = botDirected ? "self_expression" : forcedKind ?? eligibleKinds
+      .map((candidateKind) => ambientInitiativePressureForKind(config, candidateKind, signals))
       .sort((a, b) => b.pressure - a.pressure)[0]?.kind ?? "self_expression";
     const runMode: AmbientInitiativeRunMode = mode === "automatic" && config.shadowMode ? "shadow" : mode;
     const draft = runMode === "shadow" ? { drafts: [] as PromptLabDraftMessage[], dryRuns: [] as PromptLabDryRun[] } : undefined;
@@ -2301,10 +2310,15 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     if (config.audience === "bots" && input.kind === "targeted_checkin") {
       throw new Error("Bot-audience ambient initiative supports self-expression only.");
     }
-    const targetBotId = await selectAmbientInitiativeBotTarget(guild, config);
-    if (config.audience === "bots" && targetBotId === null) {
+    const availableBotTargetId = await selectAmbientInitiativeBotTarget(guild, config);
+    if (config.audience === "bots" && availableBotTargetId === null) {
       throw new Error("No configured ambient initiative bot target is available in the guild.");
     }
+    const signals = buildAmbientInitiativeSignals(guild, input.channelId, guildConfig, config);
+    const botDirected = availableBotTargetId !== null
+      && input.kind === "self_expression"
+      && (config.audience === "bots" || ambientInitiativePressureForKind(config, "self_expression", signals, true).passed);
+    const targetBotId = botDirected ? availableBotTargetId : null;
     const drafts: PromptLabDraftMessage[] = [];
     const dryRuns: PromptLabDryRun[] = [];
     const candidate: AmbientInitiativeCandidate = {

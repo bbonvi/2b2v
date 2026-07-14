@@ -32,8 +32,8 @@ ambientInitiative:
     checkIntervalMinMs: 720000 # (shortest jittered opportunity check interval)
     checkIntervalMaxMs: 2700000 # (longest jittered opportunity check interval)
     activeHours:
-        start: "10:00" # (local start of proactive-speaking window)
-        end: "23:00" # (local end; may cross midnight)
+        start: "08:00" # (local start of proactive-speaking window)
+        end: "00:00" # (local end; may cross midnight)
     historyLimit: 60 # (recent channel messages shown to evaluator/generator)
     recentActivityMinMs: 300000 # (avoid speaking immediately after fresh human activity)
     recentActivityMaxMs: 10800000 # (avoid treating dead rooms as opportunities)

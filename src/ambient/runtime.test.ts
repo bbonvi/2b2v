@@ -3,7 +3,7 @@ import type { HistoryMessage } from "../agent/history-types.ts";
 import { DEFAULT_AMBIENT_ATTENTION } from "../config/defaults.ts";
 import { createDatabase, type Database } from "../db/database.ts";
 import {
-  applyAmbientInitiativeAudiencePressure,
+  applyAmbientInitiativeBotPressure,
   ensureAmbientInitiativeBotMention,
   renderAmbientHistory,
   resolveLocalChannelShape,
@@ -122,11 +122,11 @@ describe("renderAmbientHistory", () => {
 
 describe("bot-audience ambient initiative", () => {
   test("applies signed bot pressure only to bot-directed initiative", () => {
-    expect(applyAmbientInitiativeAudiencePressure(0.5, "bots", 0.2)).toBe(0.7);
-    expect(applyAmbientInitiativeAudiencePressure(0.5, "bots", -0.3)).toBe(0.2);
-    expect(applyAmbientInitiativeAudiencePressure(0.5, "humans", 0.2)).toBe(0.5);
-    expect(applyAmbientInitiativeAudiencePressure(0.9, "bots", 0.5)).toBe(1);
-    expect(applyAmbientInitiativeAudiencePressure(0.1, "bots", -0.5)).toBe(0);
+    expect(applyAmbientInitiativeBotPressure(0.5, true, 0.2)).toBe(0.7);
+    expect(applyAmbientInitiativeBotPressure(0.5, true, -0.3)).toBe(0.2);
+    expect(applyAmbientInitiativeBotPressure(0.5, false, 0.2)).toBe(0.5);
+    expect(applyAmbientInitiativeBotPressure(0.9, true, 0.5)).toBe(1);
+    expect(applyAmbientInitiativeBotPressure(0.1, true, -0.5)).toBe(0);
   });
 
   test("adds exactly one explicit Discord mention for the target bot", () => {

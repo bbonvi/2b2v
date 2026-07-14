@@ -18,7 +18,7 @@ Dispatch batches preserve the causal reply target. Debounced same-author follow-
 
 External Discord bots may enter deliberate mention, reply, and keyword trigger paths, but they are ineligible for random replies and ambient attention, lingering, or follow-up leases. Bot-only traffic must not seed ambient initiative; the current client's own messages must never re-enter the reply loop.
 
-Ambient initiative may explicitly use the `bots` audience with an allowlisted target. This reuses the ordinary initiative timer, human-activity gates, evaluator, cooldowns, and budgets; `botPressure` is applied as a signed additive pressure bias, and visible output must mention the selected bot so its deliberate trigger path can respond.
+Ambient initiative may explicitly use the `bots` audience with an allowlisted target. A normal human-audience configuration may also consider allowlisted bots when `botTargetIds` are present. Both reuse the ordinary initiative timer, human-activity gates, evaluator, cooldowns, and budgets; `botPressure` is applied only to bot-directed pressure, and visible output must mention the selected bot so its deliberate trigger path can respond.
 
 Prompt history remains chronological at run time. The current Discord event pins the causal target; real trigger messages already stored in chat history should be marked, not re-appended as the newest line.
 
