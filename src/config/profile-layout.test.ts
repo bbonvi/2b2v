@@ -75,7 +75,10 @@ describe("repository profile layout", () => {
     expect(delamain.defaultRelationships?.enabled).toBe(false);
     expect(delamain.defaultMemoryExtraction.ambient.enabled).toBe(false);
     expect(delamain.defaultAmbientAttention?.enabled).toBe(false);
-    expect(delamain.defaultAmbientInitiative?.enabled).toBe(false);
+    expect(delamain.defaultAmbientInitiative?.enabled).toBe(true);
+    expect(delamain.defaultAmbientInitiative?.audience).toBe("bots");
+    expect(delamain.defaultAmbientInitiative?.botTargetIds).toEqual(["1130796465049042954"]);
+    expect(delamain.defaultAmbientInitiative?.botPressure).toBe(0.15);
     expect(delamain.vpn).toBeUndefined();
   });
 });

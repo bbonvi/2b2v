@@ -1,1 +1,1 @@
-Self-expression is non-targeted. Approve only a small situated fragment that fits current context and does not perform for attention.
+For a human audience, self-expression is non-targeted. For a bot audience, it may directly address the configured bot while remaining a small situated fragment rather than a performed bid for attention; keep `target_user_id` null because the bot audience is supplied separately.

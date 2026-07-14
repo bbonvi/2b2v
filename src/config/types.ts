@@ -165,6 +165,7 @@ export interface BackgroundLlmDefaults {
 
 export type AmbientAttentionKind = "ambient_pickup" | "lingering_attention" | "follow_up";
 export type AmbientInitiativeKind = "self_expression" | "targeted_checkin";
+export type AmbientInitiativeAudience = "humans" | "bots";
 
 /** Shared evaluator model used by ambient attention candidate checks. */
 export interface AmbientAttentionEvaluatorConfig {
@@ -264,6 +265,12 @@ export interface AmbientInitiativeKindConfig {
 /** Ambient initiative behavior for proactive self-expression and check-ins. */
 export interface AmbientInitiativeConfig {
   enabled: boolean;
+  /** Audience eligible for proactive initiative. Bot audience uses self-expression directed at an allowlisted bot. */
+  audience: AmbientInitiativeAudience;
+  /** Discord bot user IDs eligible for bot-audience initiative. */
+  botTargetIds: string[];
+  /** Additive pressure bias applied only to bot-audience initiative. */
+  botPressure: number;
   shadowMode: boolean;
   mainChannelId?: string;
   checkIntervalMinMs: number;

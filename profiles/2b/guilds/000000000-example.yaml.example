@@ -72,6 +72,12 @@ trim:
 #   followUp:
 #     enabled: false
 
+# Optional ambient initiative audience override. The default audience is humans.
+# ambientInitiative:
+#   audience: bots
+#   botTargetIds: ["000000000000000000"]
+#   botPressure: 0.15 # signed additive bias, from -1 to 1
+
 # Discord user IDs with admin access to bot commands
 adminUserIds: []
 

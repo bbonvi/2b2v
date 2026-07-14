@@ -32,6 +32,22 @@ import { DEFAULT_ASSET_READING } from "../config/defaults";
 import { createGeneratedImageRuntime, shortQuote } from "../agent/generated-image-runtime";
 import { formatLocalWallClock } from "../time/agent-time";
 
+/** Apply the audience-specific initiative pressure bias and normalize it for probability use. */
+export function applyAmbientInitiativeAudiencePressure(
+  pressure: number,
+  audience: AmbientInitiativeConfig["audience"],
+  botPressure: number,
+): number {
+  return Math.max(0, Math.min(1, pressure + (audience === "bots" ? botPressure : 0)));
+}
+
+/** Ensure a bot-directed initiative visibly pings its configured Discord target. */
+export function ensureAmbientInitiativeBotMention(text: string, targetBotId: string): string {
+  const mention = `<@${targetBotId}>`;
+  if (text.includes(mention) || text.includes(`<@!${targetBotId}>`)) return text;
+  return text === "" ? mention : `${mention} ${text}`;
+}
+
 export function renderAmbientHistory(input: {
   history: HistoryMessage[];
   timezone: string;
@@ -1058,6 +1074,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     mode: AmbientInitiativeRunMode;
     forced: boolean;
     forceDecision: boolean;
+    targetBotId?: string;
     runToken?: string;
   };
 
@@ -1407,7 +1424,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     if (signals.recentInitiatives.length > 0) pressure -= 0.12;
     if (!signals.inActiveHours) pressure -= 0.35;
     if (signals.lastHumanAt === null) pressure -= 0.25;
-    const finalPressure = Math.max(0, Math.min(1, pressure));
+    const finalPressure = applyAmbientInitiativeAudiencePressure(pressure, config.audience, config.botPressure);
     const roll = Math.random();
     return {
       kind,
@@ -1422,8 +1439,35 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         openLoops: signals.openLoops.length,
         recentInitiatives: signals.recentInitiatives.length,
         lastBotAgeMs: signals.lastBotAt !== null ? signals.now - signals.lastBotAt : null,
+        audience: config.audience,
+        botPressure: config.audience === "bots" ? config.botPressure : 0,
       },
     };
+  }
+
+  async function selectAmbientInitiativeBotTarget(guild: Guild, config: AmbientInitiativeConfig): Promise<string | null> {
+    if (config.audience !== "bots") return null;
+    const selfId = client.user?.id ?? "";
+    const available: string[] = [];
+    for (const targetId of config.botTargetIds) {
+      if (targetId === selfId) continue;
+      const cached = guild.members.cache.get(targetId);
+      const member = cached ?? await guild.members.fetch(targetId).catch(() => null);
+      if (member?.user.bot === true) available.push(targetId);
+    }
+    if (available.length === 0) return null;
+    return available[Math.floor(Math.random() * available.length)] ?? null;
+  }
+
+  function ambientInitiativeAudienceText(guild: Guild, candidate: AmbientInitiativeCandidate): string {
+    if (candidate.targetBotId === undefined) return "audience: humans";
+    const member = guild.members.cache.get(candidate.targetBotId);
+    return [
+      "audience: bots",
+      `target_bot_id: ${candidate.targetBotId}`,
+      `target_bot_username: ${member?.user.username ?? "unknown"}`,
+      "The target is another automated agent or LLM. The runtime adds its Discord mention to the first visible message.",
+    ].join("\n");
   }
 
   function initiativeEvaluatorPolicyForKind(kind: AmbientInitiativeKind): string {
@@ -1499,6 +1543,8 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     requestLog.setTrigger({
       type: "ambient_initiative_evaluator",
       kind: input.candidate.kind,
+      audience: input.candidate.targetBotId !== undefined ? "bots" : "humans",
+      ...(input.candidate.targetBotId !== undefined ? { targetBotId: input.candidate.targetBotId } : {}),
       status: input.status,
       mode: input.candidate.mode,
       ...(input.candidate.runToken !== undefined ? { runToken: input.candidate.runToken } : {}),
@@ -1515,6 +1561,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
   }
 
   async function evaluateAmbientInitiativeCandidate(input: {
+    guild: Guild;
     config: AmbientInitiativeConfig;
     guildConfig: GuildConfig;
     candidate: AmbientInitiativeCandidate;
@@ -1536,6 +1583,9 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       `forced_draft: ${input.candidate.forced}`,
       `candidate_kind: ${input.candidate.kind}`,
       `now: ${new Date(input.signals.now).toISOString()}`,
+      "",
+      "Audience:",
+      ambientInitiativeAudienceText(input.guild, input.candidate),
       "",
       "Signals:",
       renderAmbientInitiativeSignals(input.signals),
@@ -1705,7 +1755,11 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     };
   }
 
-  function ambientInitiativeGenerationInstruction(decision: AmbientInitiativeDecision): string {
+  function ambientInitiativeGenerationInstruction(
+    guild: Guild,
+    candidate: AmbientInitiativeCandidate,
+    decision: AmbientInitiativeDecision,
+  ): string {
     const target = decision.target_user_id !== null ? `target_user_id: ${decision.target_user_id}` : "target_user_id: none";
     return [
       "Ambient Initiative selected this proactive turn.",
@@ -1714,13 +1768,14 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       "Evaluator handoff:",
       `kind: ${decision.kind}`,
       target,
+      ambientInitiativeAudienceText(guild, candidate),
       `source: ${decision.source}`,
       `anchor: ${decision.anchor}`,
       `required_shape: ${decision.required_shape}`,
       `avoid: ${decision.avoid.length > 0 ? decision.avoid.join(", ") : "none"}`,
       `reason: ${decision.reason}`,
       "",
-      "You may still output <ignore> if the initiative no longer fits. Default visible message delivery is reply=false.",
+      "You may still output <ignore> if the initiative no longer fits. Default visible message delivery is reply=false. Do not write the target bot mention yourself.",
     ].join("\n");
   }
 
@@ -1737,12 +1792,13 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     ].join("\n");
   }
 
-  function initiativeTargetUser(guild: Guild, decision: AmbientInitiativeDecision): {
+  function initiativeTargetUser(guild: Guild, candidate: AmbientInitiativeCandidate, decision: AmbientInitiativeDecision): {
     id: string;
     username: string;
     displayName?: string;
     globalName?: string;
   } {
+    if (candidate.targetBotId !== undefined) return promptLabUserFromGuild(guild, candidate.targetBotId);
     if (decision.target_user_id !== null) return promptLabUserFromGuild(guild, decision.target_user_id);
     return {
       id: "ambient-initiative",
@@ -1767,18 +1823,19 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     const botUsername = client.user?.username ?? "bot";
     const now = Date.now();
     const syntheticContent = [
-      ambientInitiativeGenerationInstruction(input.decision),
+      ambientInitiativeGenerationInstruction(input.guild, input.candidate, input.decision),
       "",
       selfMemoryConstraintText(input.candidate.guildId),
     ].filter((part) => part !== "").join("\n");
-    const actor = initiativeTargetUser(input.guild, input.decision);
+    const actor = initiativeTargetUser(input.guild, input.candidate, input.decision);
+    const actorIsBot = input.candidate.targetBotId !== undefined;
     const syntheticLatestMessage: HistoryMessage = {
       id: input.candidate.id,
       author: actor.username,
       authorDisplayName: actor.displayName,
       authorId: actor.id,
       content: syntheticContent,
-      isBot: false,
+      isBot: actorIsBot,
       timestamp: now,
       replyToId: null,
       imageIds: [],
@@ -1837,19 +1894,30 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       logger: log.child({ component: "ambient-initiative-send", guildId: input.candidate.guildId, channelId: input.candidate.channelId }),
       getAttachmentsDir: (targetGuildId) => getGuildConfig(targetGuildId).attachmentsDir,
     });
-    const draftSender: MessageSender = (text, reply, destinationChannelId, voice, _signal, replyToMessageId, attachments) => {
-      if (input.draft === undefined) return baseSender(text, reply, destinationChannelId, voice, _signal, replyToMessageId, attachments);
+    const targetBotId = input.candidate.targetBotId;
+    let targetMentionPending = targetBotId !== undefined;
+    const draftSender: MessageSender = async (text, reply, destinationChannelId, voice, _signal, replyToMessageId, attachments) => {
+      const shouldMention = targetMentionPending && targetBotId !== undefined;
+      const visibleText = shouldMention
+        ? ensureAmbientInitiativeBotMention(text, targetBotId)
+        : text;
+      if (input.draft === undefined) {
+        const result = await baseSender(visibleText, reply, destinationChannelId, voice, _signal, replyToMessageId, attachments);
+        if (shouldMention) targetMentionPending = false;
+        return result;
+      }
       const id = promptLabSyntheticId(input.draft.drafts.length + 1);
       input.draft.drafts.push({
         id,
-        text,
+        text: visibleText,
         reply,
         ...(destinationChannelId !== undefined ? { channelId: destinationChannelId } : {}),
         ...(replyToMessageId !== undefined ? { replyToMessageId } : {}),
         attachments: attachments?.map((attachment) => attachment.filename) ?? [],
         voice: voice !== undefined,
       });
-      return Promise.resolve({ sentMessageId: id });
+      if (shouldMention) targetMentionPending = false;
+      return { sentMessageId: id };
     };
 
     const preSendCheck = (): boolean => {
@@ -1898,7 +1966,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         authorUsername: actor.username,
         authorDisplayName: actor.displayName,
         authorGlobalName: actor.globalName,
-        authorIsBot: false,
+        authorIsBot: actorIsBot,
         botUserId,
         mentionedUserIds: [],
         translatedContent: syntheticContent,
@@ -1930,7 +1998,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
           triggerOverride: { reason: "ambient_initiative" },
           triggerInstructions: {
             ...input.guildConfig.triggerInstructions,
-            ambient_initiative: ambientInitiativeGenerationInstruction(input.decision),
+            ambient_initiative: ambientInitiativeGenerationInstruction(input.guild, input.candidate, input.decision),
           },
           liveMessageTypingHoldMs: 0,
           disableLiveOutput: true,
@@ -2039,6 +2107,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       const decision = input.candidate.forceDecision
         ? forcedAmbientInitiativeDecision(input.candidate.kind, signals, history)
         : await evaluateAmbientInitiativeCandidate({
+            guild: input.guild,
             config,
             guildConfig,
             candidate: input.candidate,
@@ -2118,7 +2187,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
           guildId: input.candidate.guildId,
           channelId: input.candidate.channelId,
           kind: input.candidate.kind,
-          targetUserId: decision.target_user_id,
+          targetUserId: input.candidate.targetBotId ?? decision.target_user_id,
           summary: decision.reason,
           text: responseText ?? "",
           sent,
@@ -2131,7 +2200,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
           guildId: input.candidate.guildId,
           channelId: input.candidate.channelId,
           kind: input.candidate.kind,
-          targetUserId: decision.target_user_id,
+          targetUserId: input.candidate.targetBotId ?? decision.target_user_id,
           summary: decision.reason,
           text: responseText ?? "",
           sent: false,
@@ -2159,7 +2228,17 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     if (config === undefined || (!config.enabled && mode !== "draft")) return { error: "Ambient initiative is disabled." };
     const channel = resolveAmbientInitiativeMainChannel(guild, config);
     if (channel === null) return { error: "No ambient initiative main channel is available." };
-    const eligibleKinds = (["self_expression", "targeted_checkin"] as AmbientInitiativeKind[])
+    if (config.audience === "bots" && forcedKind === "targeted_checkin") {
+      return { error: "Bot-audience ambient initiative supports self-expression only." };
+    }
+    const targetBotId = await selectAmbientInitiativeBotTarget(guild, config);
+    if (config.audience === "bots" && targetBotId === null) {
+      return { error: "No configured ambient initiative bot target is available in the guild." };
+    }
+    const candidateKinds: AmbientInitiativeKind[] = config.audience === "bots"
+      ? ["self_expression"]
+      : ["self_expression", "targeted_checkin"];
+    const eligibleKinds = candidateKinds
       .filter((candidateKind) => ambientInitiativeKindConfig(config, candidateKind).enabled);
     const kind = forcedKind ?? eligibleKinds
       .map((candidateKind) => ambientInitiativePressureForKind(config, candidateKind, buildAmbientInitiativeSignals(guild, channel.id, guildConfig, config)))
@@ -2175,6 +2254,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       mode: runMode,
       forced: runMode === "draft",
       forceDecision: false,
+      ...(targetBotId !== null ? { targetBotId } : {}),
       ...(runToken !== undefined ? { runToken } : {}),
     };
     const result = await runAmbientInitiativeCandidate({ guild, channel, candidate, ...(draft !== undefined ? { draft } : {}) });
@@ -2216,7 +2296,15 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       throw new Error("Channel is unavailable or does not belong to the selected guild.");
     }
     const guildConfig = getGuildConfig(input.guildId);
-    if (guildConfig.ambientInitiative === undefined) throw new Error("Ambient initiative is not configured for this guild.");
+    const config = guildConfig.ambientInitiative;
+    if (config === undefined) throw new Error("Ambient initiative is not configured for this guild.");
+    if (config.audience === "bots" && input.kind === "targeted_checkin") {
+      throw new Error("Bot-audience ambient initiative supports self-expression only.");
+    }
+    const targetBotId = await selectAmbientInitiativeBotTarget(guild, config);
+    if (config.audience === "bots" && targetBotId === null) {
+      throw new Error("No configured ambient initiative bot target is available in the guild.");
+    }
     const drafts: PromptLabDraftMessage[] = [];
     const dryRuns: PromptLabDryRun[] = [];
     const candidate: AmbientInitiativeCandidate = {
@@ -2228,6 +2316,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       mode: "draft",
       forced: true,
       forceDecision: input.force === true,
+      ...(targetBotId !== null ? { targetBotId } : {}),
       ...(input.runToken !== undefined ? { runToken: input.runToken } : {}),
     };
     const result = await runAmbientInitiativeCandidate({

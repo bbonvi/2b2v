@@ -73,7 +73,7 @@ PROFILE=2b bun run dev
 PROFILE=delamain bun run dev
 ```
 
-The Delamain profile disables relationships, ambient memory extraction, ambient attention, ambient initiative, and VPN. Profile-specific instruction files override shared files at the same relative path; skill packs override by manifest ID.
+The Delamain profile disables relationships, ambient memory extraction, ambient attention, and VPN. Its ambient initiative is bot-audience only and targets the configured 2B Discord account; `botPressure` is a signed additive bias on those initiative opportunities. Profile-specific instruction files override shared files at the same relative path; skill packs override by manifest ID.
 
 Minimal guild config:
 

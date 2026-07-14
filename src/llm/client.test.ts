@@ -299,6 +299,9 @@ describe("buildAmbientInitiativeStreamOptions", () => {
       ...GUILD,
       ambientInitiative: {
         enabled: true,
+        audience: "humans",
+        botTargetIds: [],
+        botPressure: 0,
         shadowMode: false,
         checkIntervalMinMs: 1000,
         checkIntervalMaxMs: 2000,

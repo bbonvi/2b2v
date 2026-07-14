@@ -152,6 +152,9 @@ export const DEFAULT_AMBIENT_INITIATIVE_KIND: AmbientInitiativeKindConfig = {
 
 export const DEFAULT_AMBIENT_INITIATIVE: AmbientInitiativeConfig = {
   enabled: false,
+  audience: "humans",
+  botTargetIds: [],
+  botPressure: 0,
   shadowMode: false,
   checkIntervalMinMs: 12 * 60 * 1000,
   checkIntervalMaxMs: 45 * 60 * 1000,

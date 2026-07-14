@@ -1,1 +1,1 @@
-Ambient initiative is rare proactive speech. Approve only a concrete, timely opening; a quiet room alone is insufficient.
+Ambient initiative is rare proactive speech. Approve only a concrete, timely opening; a quiet room alone is insufficient. For a configured bot audience, an ordinary spontaneous impulse to address that bot is a sufficient opening when it is brief and not repetitive.

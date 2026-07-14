@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import type { HistoryMessage } from "../agent/history-types.ts";
 import { DEFAULT_AMBIENT_ATTENTION } from "../config/defaults.ts";
 import { createDatabase, type Database } from "../db/database.ts";
-import { renderAmbientHistory, resolveLocalChannelShape, shouldDeferAmbientCandidateForTyping } from "./runtime.ts";
+import {
+  applyAmbientInitiativeAudiencePressure,
+  ensureAmbientInitiativeBotMention,
+  renderAmbientHistory,
+  resolveLocalChannelShape,
+  shouldDeferAmbientCandidateForTyping,
+} from "./runtime.ts";
 
 function msg(overrides: Partial<HistoryMessage> = {}): HistoryMessage {
   return {
@@ -111,6 +117,23 @@ describe("renderAmbientHistory", () => {
     });
 
     expect(text).toContain("removed text [deleted]");
+  });
+});
+
+describe("bot-audience ambient initiative", () => {
+  test("applies signed bot pressure only to bot-directed initiative", () => {
+    expect(applyAmbientInitiativeAudiencePressure(0.5, "bots", 0.2)).toBe(0.7);
+    expect(applyAmbientInitiativeAudiencePressure(0.5, "bots", -0.3)).toBe(0.2);
+    expect(applyAmbientInitiativeAudiencePressure(0.5, "humans", 0.2)).toBe(0.5);
+    expect(applyAmbientInitiativeAudiencePressure(0.9, "bots", 0.5)).toBe(1);
+    expect(applyAmbientInitiativeAudiencePressure(0.1, "bots", -0.5)).toBe(0);
+  });
+
+  test("adds exactly one explicit Discord mention for the target bot", () => {
+    expect(ensureAmbientInitiativeBotMention("A thought.", "123")).toBe("<@123> A thought.");
+    expect(ensureAmbientInitiativeBotMention("<@123> A thought.", "123")).toBe("<@123> A thought.");
+    expect(ensureAmbientInitiativeBotMention("<@!123> A thought.", "123")).toBe("<@!123> A thought.");
+    expect(ensureAmbientInitiativeBotMention("", "123")).toBe("<@123>");
   });
 });
 

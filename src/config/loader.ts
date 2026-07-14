@@ -63,6 +63,7 @@ import type {
   AmbientAttentionEvaluatorConfig,
   AmbientAttentionConfigYaml,
   AmbientInitiativeConfig,
+  AmbientInitiativeAudience,
   AmbientInitiativeEvaluatorConfig,
   AmbientInitiativeKindConfig,
   AmbientInitiativeConfigYaml,
@@ -549,6 +550,27 @@ function resolveAmbientInitiativeKindConfig<T extends AmbientInitiativeKindConfi
   return resolved;
 }
 
+function parseAmbientInitiativeAudience(value: unknown, fallback: AmbientInitiativeAudience): AmbientInitiativeAudience {
+  if (value === undefined) return fallback;
+  if (value === "humans" || value === "bots") return value;
+  throw new Error("ambientInitiative.audience must be humans or bots");
+}
+
+function parseAmbientInitiativeBotTargetIds(value: unknown, fallback: readonly string[]): string[] {
+  if (value === undefined) return [...fallback];
+  if (!Array.isArray(value)) {
+    throw new Error("ambientInitiative.botTargetIds must contain non-empty Discord user IDs");
+  }
+  const targetIds: string[] = [];
+  for (const targetId of value as unknown[]) {
+    if (typeof targetId !== "string" || targetId.trim() === "") {
+      throw new Error("ambientInitiative.botTargetIds must contain non-empty Discord user IDs");
+    }
+    targetIds.push(targetId);
+  }
+  return targetIds;
+}
+
 function resolveAmbientInitiativeConfig(
   defaults: AmbientInitiativeConfig | undefined,
   partial: AmbientInitiativeConfigYaml | undefined,
@@ -558,6 +580,8 @@ function resolveAmbientInitiativeConfig(
   const resolved: AmbientInitiativeConfig = {
     ...base,
     ...partial,
+    audience: parseAmbientInitiativeAudience(partial?.audience, base.audience),
+    botTargetIds: parseAmbientInitiativeBotTargetIds(partial?.botTargetIds, base.botTargetIds),
     activeHours: {
       ...base.activeHours,
       ...partial?.activeHours,
@@ -641,6 +665,15 @@ function validateClockTime(value: string, keyPrefix: string): void {
 }
 
 function validateAmbientInitiativeConfig(config: AmbientInitiativeConfig, keyPrefix: string): void {
+  if (!Number.isFinite(config.botPressure) || config.botPressure < -1 || config.botPressure > 1) {
+    throw new Error(`${keyPrefix}.botPressure must be between -1 and 1`);
+  }
+  if (new Set(config.botTargetIds).size !== config.botTargetIds.length) {
+    throw new Error(`${keyPrefix}.botTargetIds must not contain duplicates`);
+  }
+  if (config.audience === "bots" && config.botTargetIds.length === 0) {
+    throw new Error(`${keyPrefix}.botTargetIds must not be empty when audience is bots`);
+  }
   if (!Number.isFinite(config.checkIntervalMinMs) || config.checkIntervalMinMs < 1000) {
     throw new Error(`${keyPrefix}.checkIntervalMinMs must be >= 1000`);
   }

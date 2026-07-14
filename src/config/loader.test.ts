@@ -1034,6 +1034,9 @@ describe("resolveGuildConfig", () => {
     writeFileSync(cfgFile, [
       "ambientInitiative:",
       "  enabled: true",
+      "  audience: bots",
+      "  botTargetIds: [\"1130796465049042954\"]",
+      "  botPressure: -0.15",
       "  shadowMode: true",
       "  checkIntervalMinMs: 1000",
       "  checkIntervalMaxMs: 2000",
@@ -1064,11 +1067,51 @@ describe("resolveGuildConfig", () => {
     });
 
     expect(resolved.ambientInitiative?.enabled).toBe(true);
+    expect(resolved.ambientInitiative?.audience).toBe("bots");
+    expect(resolved.ambientInitiative?.botTargetIds).toEqual(["1130796465049042954"]);
+    expect(resolved.ambientInitiative?.botPressure).toBe(-0.15);
     expect(resolved.ambientInitiative?.shadowMode).toBe(false);
     expect(resolved.ambientInitiative?.activeHours.timezone).toBe("Europe/Moscow");
     expect(resolved.ambientInitiative?.selfExpression.maxPerDay).toBe(4);
     expect(resolved.ambientInitiative?.targetedCheckin.maxPerUserPerDay).toBe(1);
     expect(resolved.ambientInitiative?.targetedCheckin.openLoopMaxAgeMs).toBe(172800000);
+  });
+
+  test("validates bot-audience ambient initiative configuration", () => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    const cfgFile = join(TEST_DIR, "config.yaml");
+    writeFileSync(cfgFile, [
+      "ambientInitiative:",
+      "  enabled: true",
+      "  audience: bots",
+      "  botPressure: 1.1",
+    ].join("\n"));
+
+    expect(() => loadGlobalConfig(BASE_ENV, cfgFile)).toThrow("botPressure must be between -1 and 1");
+
+    writeFileSync(cfgFile, [
+      "ambientInitiative:",
+      "  enabled: true",
+      "  audience: bots",
+      "  botPressure: -0.2",
+    ].join("\n"));
+
+    expect(() => loadGlobalConfig(BASE_ENV, cfgFile)).toThrow("botTargetIds must not be empty");
+
+    writeFileSync(cfgFile, [
+      "ambientInitiative:",
+      "  audience: everyone",
+    ].join("\n"));
+
+    expect(() => loadGlobalConfig(BASE_ENV, cfgFile)).toThrow("audience must be humans or bots");
+
+    writeFileSync(cfgFile, [
+      "ambientInitiative:",
+      "  audience: bots",
+      "  botTargetIds: 1130796465049042954",
+    ].join("\n"));
+
+    expect(() => loadGlobalConfig(BASE_ENV, cfgFile)).toThrow("botTargetIds must contain non-empty Discord user IDs");
   });
 
   test("relationships config inherits global config and applies guild overrides", () => {
