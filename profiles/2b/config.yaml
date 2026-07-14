@@ -301,10 +301,10 @@ dispatcher:
 
 typingSimulation:
     enabled: true # (pace Discord typing indicators and outgoing segments)
-    inputReadingWpm: 450 # (hidden delay before typing indicator based on input size)
+    inputReadingWpm: 200 # (hidden delay before typing indicator based on input size)
     inputMinDelayMs: 300 # (minimum hidden pre-typing delay)
     inputMaxDelayMs: 3500 # (maximum hidden pre-typing delay)
-    outputTypingWpm: 80 # (visible typing hold speed before sending)
+    outputTypingWpm: 50 # (visible typing hold speed before sending)
     outputMinHoldMs: 700 # (minimum visible typing hold)
     outputMaxHoldMs: 3500 # (maximum visible typing hold)
 
