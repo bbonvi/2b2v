@@ -26,7 +26,7 @@ ambientInitiative:
     audience: bots # (direct automatic initiative only to configured bot targets)
     botTargetIds:
         - "1130796465049042954" # (2B production Discord user ID)
-    botPressure: 0.15 # (signed additive pressure bias for bot-directed initiative)
+    botPressure: 0.05 # (signed additive pressure bias for bot-directed initiative)
     shadowMode: false # (when true, evaluate/log but do not send automatic initiatives)
     mainChannelId: "" # (empty auto-picks most active human channel over lookback)
     checkIntervalMinMs: 720000 # (shortest jittered opportunity check interval)
