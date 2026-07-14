@@ -32,7 +32,11 @@ Stale-droppable proactive turns may use write tools. Once a write tool starts, t
 
 Stable prompt content must stay before volatile context. Dynamic sections such as time, current channel state, schedules, memories, recent history, current messages, and trigger instructions must stay after the stable prefix/anchor.
 
-Prompt file loading must be deterministic. Missing template variables are errors; runtime template output must not depend on filesystem order, clocks, random values, or object iteration.
+Instruction file loading must be deterministic. Missing template variables are errors; runtime template output must not depend on filesystem order, clocks, random values, or object iteration.
+
+Persona identity belongs in `profiles/<profile>/instructions/`, not runtime source strings. `profiles/shared/instructions/` contains persona-neutral runtime policy; the selected profile overlays system, core, and runtime documents by relative path and skill packs by manifest ID. Direct-address contact detection uses the live bot username plus configured trigger keywords.
+
+`PROFILE` selects `profiles/<profile>/config.yaml`, its sibling `guilds/` directory, and its instruction overlay as one unit. There is no legacy config-path or flat-prompt fallback; changing profiles requires a rebuild or restart with the new environment.
 
 Older chat history moves only in configured trim chunks. Do not promote one message at a time into cached history.
 

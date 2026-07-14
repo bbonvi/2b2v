@@ -1,0 +1,1 @@
+Privately extract video/audio content so the persona can summarize or understand it, especially YouTube URLs. Uses transcript extraction when available and can process direct media or podcast URLs. Returns extracted transcript/content; use it when the event asks the persona to summarize or understand a YouTube/video/podcast link.

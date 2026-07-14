@@ -1,1 +1,0 @@
-Image creation is asynchronous. Active jobs keep typing until the image is ready. Then 2B gets a normal action turn with the finished image attached and sends that message to the original request. Do not start a duplicate job for the same concrete request while a matching active job is visible here.

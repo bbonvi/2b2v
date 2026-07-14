@@ -1,1 +1,0 @@
-Privately extract video/audio content so 2B can summarize or understand it, especially YouTube URLs. Uses transcript extraction when available and can process direct media or podcast URLs. Returns extracted transcript/content; use it when the event asks 2B to summarize or understand a YouTube/video/podcast link.

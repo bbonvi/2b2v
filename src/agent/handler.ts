@@ -42,7 +42,7 @@ import {
   type ResponseSegment,
 } from "./response-directives.ts";
 import { currentLocalContext } from "../time/agent-time.ts";
-import type { RuntimePromptBundle } from "../config/prompt-bundle.ts";
+import type { RuntimePromptBundle } from "../config/instruction-bundle.ts";
 import { renderPromptTemplate } from "../config/prompt-template.ts";
 import { createLoadSkillTool } from "./load-skill-tool.ts";
 import { typingSimulationDelayMs } from "./typing-simulation.ts";
@@ -743,7 +743,7 @@ function intermediateStatusText(text: string): string {
 function buildRuntimeInstruction(runtimePrompts: RuntimePromptBundle | undefined): string {
   const external = runtimePrompts?.reply.trim() ?? "";
   if (external !== "") return external;
-  return "## Runtime\n2B is present in this Discord room. Given the room state and new event, produce 2B's next action and use tools only when useful.";
+  return "## Runtime\nYou are present in this Discord room. Given the room state and new event, produce your next action and use tools only when useful.";
 }
 
 function buildSkillsInstruction(runtimePrompts: RuntimePromptBundle | undefined): string {
@@ -754,17 +754,15 @@ function buildFinalActionInstruction(runtimePrompts: RuntimePromptBundle | undef
   const base = runtimePrompts?.finalActionInstruction.trim() ?? "";
   const instruction = base !== ""
     ? base
-    : "## Final Action Instruction\nContinue the Discord room as 2B. Emit only her next runtime action: visible speech, silence, voice, or private action. Do not explain the choice.";
+    : "## Final Action Instruction\nContinue the Discord room in character. Emit only your next runtime action: visible speech, silence, voice, or private action. Do not explain the choice.";
   const trigger = triggerInstruction?.trim() ?? "";
-  const mode = scheduledTaskRun
-    ? [
-        "## Scheduled Task Context",
-        "Run the scheduled task privately. Use tools when useful, and produce visible Discord output only when the task instructions call for it, something useful changed, or a user-facing stop/closure is needed. Otherwise output <ignore>. Do not call record_memory or record_relationship here.",
-      ].join("\n")
-    : [
-        "## Execution Mode: Visible Reply",
-        "Produce 2B's visible Discord action. Use other tools when necessary, but do not call record_memory or record_relationship in this mode.",
-      ].join("\n");
+  const modeKey = scheduledTaskRun ? "scheduled-task-execution-mode" : "visible-reply-execution-mode";
+  const externalMode = runtimePrompts?.contextTemplates[modeKey]?.trim() ?? "";
+  const mode = externalMode !== ""
+    ? externalMode
+    : scheduledTaskRun
+      ? "## Scheduled Task Context\nRun the scheduled task privately. Produce visible Discord output only when useful or requested; otherwise output <ignore>. Do not call record_memory or record_relationship here."
+      : "## Execution Mode: Visible Reply\nProduce your visible Discord action. Do not call record_memory or record_relationship in this mode.";
   const withMode = `${mode}\n\n${instruction}`;
   if (trigger === "") return withMode;
   return `${withMode}\n\n## Trigger Context\n${trigger}`;
@@ -928,7 +926,7 @@ function buildCurrentMessageMetadata(msg: IncomingMessage, runtimePrompts?: Runt
   }
   if (msg.assets !== undefined) lines.push(...formatAssetMeta("", msg.assets));
   if (msg.repliedToBotRouteSource !== undefined) {
-    lines.push("Reply Context: The current event replies to a message 2B previously sent here from another channel.");
+    lines.push("Reply Context: The current event replies to a message you previously sent here from another channel.");
     lines.push(`Source GuildID: ${msg.repliedToBotRouteSource.sourceGuildId}`);
     lines.push(`Source ChannelID: ${msg.repliedToBotRouteSource.sourceChannelId}`);
     lines.push(`Source MsgID: ${msg.repliedToBotRouteSource.sourceMessageId}`);
@@ -940,7 +938,7 @@ function buildCurrentMessageMetadata(msg: IncomingMessage, runtimePrompts?: Runt
         sourceChannelId: msg.repliedToBotRouteSource.sourceChannelId,
         sourceMessageId: msg.repliedToBotRouteSource.sourceMessageId,
       },
-      "Use chat history/search if source context is needed for 2B's next action; do not expose source-channel details unless relevant.",
+      "Use chat history/search if source context is needed for your next action; do not expose source-channel details unless relevant.",
     ));
   }
   return lines.join("\n");
@@ -2336,14 +2334,22 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
   const now = Date.now();
   const passKind = input.passKind ?? "post_reply";
   const maxToolCalls = input.guildConfig.memoryExtraction.maxToolCalls;
+  const executionMode = runtimeContextTemplate(
+    input.runtimePrompts,
+    "memory-maintenance-execution-mode",
+    { maxToolCalls },
+    [
+      "## Execution Mode: Memory Maintenance",
+      "Private memory maintenance is active. Other tool calls are not available in this mode.",
+      `You may call record_memory up to ${maxToolCalls} times. Make all useful focused edits before stopping; a single call may include multiple actions when they belong to the same pass.`,
+      "If there are no memory changes, do not call record_memory; output nothing.",
+    ].join("\n"),
+  );
   return [
     ...(input.visibleUserMemoryContext !== undefined && input.visibleUserMemoryContext.trim() !== ""
       ? [input.visibleUserMemoryContext.trim(), ""]
       : []),
-    "## Execution Mode: Memory Maintenance",
-    "Private memory maintenance is active. Other tool calls are not available in this mode.",
-    `You may call record_memory up to ${maxToolCalls} times. Make all useful focused edits before stopping; a single call may include multiple actions when they belong to the same pass.`,
-    "If there are no memory changes, do not call record_memory; output nothing.",
+    executionMode,
     "",
     passKind === "ambient" ? "## Ambient Memory Consideration" : "## Post-Reply Memory Consideration",
     "Current time for expiresIn decisions:",

@@ -13,7 +13,7 @@ const ListEmojisParams = Type.Object({});
 
 /**
  * Format custom emoji inventory for compact model discovery.
- * Rows intentionally include both the `:name:` form 2B should write and the raw Discord form for disambiguation.
+ * Rows intentionally include both the `:name:` form the model should write and the raw Discord form for disambiguation.
  */
 export function buildEmojiListOutput(emojis: EmojiEntry[]): string {
   if (emojis.length === 0) {

@@ -65,6 +65,7 @@ export function shouldRespond(
   return null;
 }
 
-function escapeRegex(s: string): string {
+/** Escape literal text before interpolating it into a regular expression. */
+export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

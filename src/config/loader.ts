@@ -180,13 +180,16 @@ function resolveTtsConfig(
  * Returns undefined if VPN is not enabled.
  */
 function resolveVpnConfig(
-  partial: MainConfigYaml["vpn"] | undefined
+  partial: MainConfigYaml["vpn"] | undefined,
+  env: Record<string, string | undefined>,
 ): VpnConfig | undefined {
   if (partial?.enabled !== true) return undefined;
+  const apiUrl = env.VPN_API_URL?.trim();
+  const vpnPeer = env.VPN_PEER?.trim();
   return {
     enabled: true,
-    apiUrl: partial.apiUrl ?? "",
-    vpnPeer: partial.vpnPeer ?? "",
+    apiUrl: apiUrl !== undefined && apiUrl !== "" ? apiUrl : partial.apiUrl ?? "",
+    vpnPeer: vpnPeer !== undefined && vpnPeer !== "" ? vpnPeer : partial.vpnPeer ?? "",
   };
 }
 
@@ -891,7 +894,7 @@ function validateSchedulePressureConfig(config: SchedulePressureConfig, keyPrefi
  * Returns an empty object if the file does not exist.
  * Throws on malformed YAML.
  */
-export function loadMainConfig(configPath: string = "config/config.yaml"): MainConfigYaml {
+export function loadMainConfig(configPath: string): MainConfigYaml {
   if (!existsSync(configPath)) return {};
   const raw = readFileSync(configPath, "utf-8");
   return (parse(raw) ?? {}) as MainConfigYaml;
@@ -923,16 +926,6 @@ export function resolveInstructions(
   return instructions ?? "";
 }
 
-function assertNoDeprecatedGlobalPromptKeys(yaml: MainConfigYaml): void {
-  const raw = yaml as Record<string, unknown>;
-  const deprecatedKeys = ["personaPath", "toolInstructionsPath", "instructionsPath", "instructions"] as const;
-  for (const key of deprecatedKeys) {
-    if (raw[key] !== undefined) {
-      throw new Error(`Deprecated config key "${key}" is no longer supported. Put prompt markdown in prompts/ instead.`);
-    }
-  }
-}
-
 function assertNoDeprecatedReplyLoopKey(yaml: MainConfigYaml | GuildConfigYaml, scope: string): void {
   const raw = yaml as Record<string, unknown>;
   if (raw.actionLoop !== undefined) {
@@ -946,16 +939,14 @@ function assertNoDeprecatedReplyLoopKey(yaml: MainConfigYaml | GuildConfigYaml, 
  * Throws if required secrets are missing.
  */
 export function loadGlobalConfig(
-  env: Record<string, string | undefined> = process.env as Record<string, string | undefined>,
-  configPath: string = "config/config.yaml",
+  env: Record<string, string | undefined>,
+  configPath: string,
 ): GlobalConfig {
   const discordToken = env.DISCORD_TOKEN;
   if (discordToken === undefined || discordToken === "") throw new Error("DISCORD_TOKEN is required");
 
   const yaml = loadMainConfig(configPath);
-  assertNoDeprecatedGlobalPromptKeys(yaml);
   assertNoDeprecatedReplyLoopKey(yaml, "global");
-
   const dataDir = yaml.dataDir ?? "data";
   const defaultLlmProvider = parseLlmProvider(yaml.llmProvider, "llmProvider") ?? DEFAULT_LLM_PROVIDER;
   const defaultImageReading = resolveGlobalImageReading(yaml.imageReading);
@@ -1021,13 +1012,12 @@ export function loadGlobalConfig(
     defaultImageGeneration,
     defaultAttachmentsDir,
     defaultAssetReading: resolveAssetReadingConfig(yaml.assetReading),
-    defaultInstructions: "",
     logLevel: yaml.logLevel ?? "info",
     dataDir,
     elevenLabsApiKey: env.ELEVENLABS_API_KEY,
     defaultTts: resolveTtsConfig(yaml.tts),
     uiLang: (yaml.uiLang === "ru" ? "ru" : "en") as UiLang,
-    vpn: resolveVpnConfig(yaml.vpn),
+    vpn: resolveVpnConfig(yaml.vpn, env),
     defaultEmotes: {
       include: yaml.emotes?.include ?? DEFAULT_EMOTES.include,
     },
@@ -1129,7 +1119,7 @@ export function resolveGuildConfig(
     imageGeneration: resolveGuildImageGeneration(global.defaultImageGeneration, partial.imageGeneration),
     attachmentsDir: partial.attachmentsDir ?? global.defaultAttachmentsDir,
     assetReading: resolveAssetReadingConfig(partial.assetReading, global.defaultAssetReading),
-    instructions: instructions !== "" ? instructions : global.defaultInstructions,
+    instructions,
     tts: resolveTtsConfig(partial.tts) ?? global.defaultTts,
     emotes: {
       include: partial.emotes?.include ?? global.defaultEmotes.include,

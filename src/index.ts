@@ -98,7 +98,8 @@ import { memoryWipeCommandDefinition } from "./commands/memory-wipe";
 import { vpnCommandDefinition } from "./commands/vpn";
 import { createVpnClient, type VpnClient } from "./vpn/api-client";
 import { createSessionStore, type SessionStore } from "./vpn/session";
-import { loadPromptBundle, type PromptBundle } from "./config/prompt-bundle";
+import { loadInstructionBundle, type PromptBundle } from "./config/instruction-bundle";
+import { requireProfileConfigPath } from "./config/profile";
 import { renderPromptTemplate } from "./config/prompt-template";
 import { resolveReactionEmojiInput } from "./discord/reaction-emoji";
 import { createDiscordReplyFallbackDeps, createSyntheticReplyFallbackDeps, syncDeletedOwnBotMessage, syncEditedOwnBotMessage } from "./discord/reply-fallback-runtime";
@@ -670,10 +671,19 @@ log.info("bot starting", {
 });
 
 // --- 1. Load global config (throws on missing secrets) ---
-let globalConfig = loadGlobalConfig();
+const configuredProfile = process.env.PROFILE?.trim();
+if (configuredProfile === undefined || configuredProfile === "") {
+  throw new Error("PROFILE is required (for example, PROFILE=2b or PROFILE=delamain)");
+}
+const profile = configuredProfile;
+const profilesDir = "profiles";
+const profileDir = join(profilesDir, profile);
+const configPath = requireProfileConfigPath(profilesDir, profile);
+const guildsDir = join(profileDir, "guilds");
+let globalConfig = loadGlobalConfig(process.env as Record<string, string | undefined>, configPath);
 validateTrimConfig(globalConfig.defaultTrim);
 validateVpnConfig(globalConfig.vpn);
-log.info("config loaded", { model: globalConfig.defaultModel });
+log.info("profile loaded", { profile, model: globalConfig.defaultModel, configPath });
 
 async function loadExternalReference(url: string, signal?: AbortSignal): Promise<ReferenceImageInput> {
   const image = await loadExternalImage(url, globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES, {}, signal);
@@ -706,7 +716,6 @@ const db: Database = createDatabase(dbPath);
 log.info("database ready", { path: dbPath });
 
 // --- 4. Load guild configs ---
-const guildsDir = join("config", "guilds");
 const guildConfigs = loadGuildConfigs(guildsDir, globalConfig);
 log.info("guild configs loaded", { count: guildConfigs.size });
 
@@ -719,8 +728,8 @@ const agentJobCleanupTimer = setInterval(() => {
 const modelImageSupport = createModelImageSupportStore({ log });
 await modelImageSupport.refresh(globalConfig, guildConfigs, "startup");
 
-// --- 8. Load prompt bundle. prompts/system/** and prompts/core/** are stable instructions; runtime prompts are scoped.
-let promptBundle: PromptBundle = loadPromptBundle("prompts", log);
+// --- 8. Load shared instructions plus the selected profile overlay.
+let promptBundle: PromptBundle = loadInstructionBundle(profilesDir, profile, log);
 
 function runtimeToolDescription(
   toolName: string,
@@ -1368,6 +1377,15 @@ async function runRelationshipPostReplyExtraction(input: {
         onRelationshipResult: input.onResult,
       });
   try {
+    const executionMode = runtimeContextTemplate(
+      "relationship-maintenance-execution-mode",
+      { maxToolCalls: config.maxToolCalls },
+      [
+        "## Execution Mode: Relationship Maintenance",
+        "Private relationships maintenance is active. Other tool calls are not available in this mode.",
+        `You may call record_relationship up to ${config.maxToolCalls} times; make one focused relationship update per call and stop when no useful relationship work remains.`,
+      ].join("\n"),
+    );
     await runSilentToolAgentPass({
       globalConfig,
       guildConfig: input.guildConfig,
@@ -1382,9 +1400,7 @@ async function runRelationshipPostReplyExtraction(input: {
       tools: toolsForMaintenancePass(input.memoryRequest.availableTools, maintenanceTools, "record_relationship", "silent relationships pass"),
       runtimeInstruction: promptBundle.runtime.reply,
       controlMessage: [
-        "## Execution Mode: Relationship Maintenance",
-        "Private relationships maintenance is active. Other tool calls are not available in this mode.",
-        `You may call record_relationship up to ${config.maxToolCalls} times; make one focused relationship update per call and stop when no useful relationship work remains.`,
+        executionMode,
         "",
         "## Post-Reply Relationship Consideration",
         "Current time:",
@@ -1539,6 +1555,10 @@ async function buildContext(
     ? buildComputedContactContextForUser({
       db,
       botUserId: client.user.id,
+      botAddressAliasesForGuild: (contactGuildId) => [
+        client.user?.username ?? "",
+        ...getGuildConfig(contactGuildId).triggers.keywords,
+      ],
       userId: latestUserMessage.authorId,
       currentChannelId: channelId,
       beforeCreatedAt: (currentTurnBoundary ?? { timestamp: latestUserMessage.timestamp }).timestamp,
@@ -3121,7 +3141,7 @@ function scheduleConfigReload(): void {
 }
 
 function configReloadFingerprint(): string {
-  const paths = ["config/config.yaml", "config/guilds"];
+  const paths = [configPath, guildsDir];
   const parts: string[] = [];
   for (const path of paths) {
     if (!existsSync(path)) continue;
@@ -3139,8 +3159,10 @@ function configReloadFingerprint(): string {
 
 async function reloadConfigs(): Promise<void> {
   try {
+    requireProfileConfigPath(profilesDir, profile);
     const newGlobal = loadGlobalConfig(
       process.env as Record<string, string | undefined>,
+      configPath,
     );
     validateTrimConfig(newGlobal.defaultTrim);
 
@@ -3149,7 +3171,7 @@ async function reloadConfigs(): Promise<void> {
     await modelImageSupport.refresh(newGlobal, newGuilds, "hot_reload");
 
     globalConfig = newGlobal;
-    promptBundle = loadPromptBundle("prompts", log);
+    promptBundle = loadInstructionBundle(profilesDir, profile, log);
 
     guildConfigs.clear();
     for (const [id, cfg] of newGuilds) {
@@ -3171,15 +3193,15 @@ async function reloadConfigs(): Promise<void> {
   }
 }
 
-if (existsSync("config")) {
-  const watcher = watch("config", { recursive: true }, (_event, _filename) => {
+if (existsSync(profileDir)) {
+  const watcher = watch(profileDir, { recursive: true }, (_event, _filename) => {
     lastConfigFingerprint = configReloadFingerprint();
     scheduleConfigReload();
   });
 
   // Prevent watcher from keeping the process alive during shutdown
   watcher.unref();
-  log.info("config hot-reload watcher started");
+  log.info("profile hot-reload watcher started");
 
   configReloadPollTimer = setInterval(() => {
     const fingerprint = configReloadFingerprint();
@@ -3191,13 +3213,14 @@ if (existsSync("config")) {
   log.info("config hot-reload poller started", { intervalMs: CONFIG_RELOAD_POLL_MS });
 }
 
-if (existsSync("prompts")) {
-  const watcher = watch("prompts", { recursive: true }, (_event, _filename) => {
+const sharedInstructionsDir = join(profilesDir, "shared", "instructions");
+if (existsSync(sharedInstructionsDir)) {
+  const watcher = watch(sharedInstructionsDir, { recursive: true }, (_event, _filename) => {
     scheduleConfigReload();
   });
 
   watcher.unref();
-  log.info("prompt hot-reload watcher started");
+  log.info("shared instructions hot-reload watcher started");
 }
 
 // --- Health check summary ---

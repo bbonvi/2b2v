@@ -1,1 +1,0 @@
-No new image job was started. Active related image job {{jobId}} is {{jobStatus}}. Do not call codex_generate_image again for the same request while this job is active. Let 2B state this status unless the event explicitly asked for a separate variant or a valid replacement.

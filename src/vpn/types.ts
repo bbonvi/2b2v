@@ -1,6 +1,6 @@
 /**
- * VPN data contracts matching the 2b VPN API.
- * These types mirror the Python TypedDict definitions in 2b/src/vpn/wg.py.
+ * VPN data contracts matching the configured VPN API.
+ * These types mirror the upstream Python TypedDict definitions.
  */
 
 /** WireGuard server configuration as returned by /list-servers. */

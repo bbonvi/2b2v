@@ -8,7 +8,7 @@ import { createCloseThreadTool, createStartThreadTool } from "../agent/start-thr
 import { applyRuntimeToolPrompts } from "../agent/runtime-tool-prompts";
 import { shortQuote } from "../agent/generated-image-runtime";
 import type { GuildConfig } from "../config/types";
-import type { PromptBundle } from "../config/prompt-bundle";
+import type { PromptBundle } from "../config/instruction-bundle";
 import type { Database } from "../db/database";
 import { getThread } from "../db/thread-repository";
 import { channelDisplayName, type SendableGuildChannel } from "../discord/message-sender";

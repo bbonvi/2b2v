@@ -94,13 +94,13 @@ describe("renderAmbientHistory", () => {
     const text = renderAmbientHistory({
       history: [
         msg({ id: "u1", content: "source" }),
-        msg({ id: "b1", authorId: "bot-1", isBot: true, content: "previous reply", timestamp: Date.UTC(2026, 6, 7, 21, 12, 0), replyToId: "u1" }),
+        msg({ id: "b1", author: "Delamain", authorId: "bot-1", isBot: true, content: "previous reply", timestamp: Date.UTC(2026, 6, 7, 21, 12, 0), replyToId: "u1" }),
       ],
       timezone: "UTC",
       followUpAnchorMessageId: "b1",
     });
 
-    expect(text).toContain("2B (bot-1) reply_to=u1 <follow_up_anchor>: previous reply");
+    expect(text).toContain("Delamain (bot-1) reply_to=u1 <follow_up_anchor>: previous reply");
     expect(text).not.toContain("<trigger>");
   });
 

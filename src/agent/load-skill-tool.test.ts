@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createLoadSkillTool } from "./load-skill-tool.ts";
-import type { PromptSkillBundle } from "../config/prompt-bundle.ts";
+import type { PromptSkillBundle } from "../config/instruction-bundle.ts";
 
 function skills(): PromptSkillBundle {
   return {

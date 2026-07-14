@@ -43,7 +43,7 @@ export async function loadExternalImage(
     response = await fetchFn(current, {
       signal: requestSignal,
       redirect: "manual",
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; 2B-ImageFetcher/1.0)" },
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; PersonaBot-ImageFetcher/1.0)" },
     });
     if (!REDIRECT_STATUSES.has(response.status)) break;
     if (redirects === config.maxRedirects) throw new Error(`Too many redirects; maximum is ${config.maxRedirects}.`);

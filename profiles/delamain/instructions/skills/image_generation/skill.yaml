@@ -1,0 +1,10 @@
+id: image_generation
+title: Image Generation
+description: Use when Delamain has accepted a request to create or edit a raster image.
+required_for_tools:
+  - codex_generate_image
+instructions:
+  - 00-runtime.md
+  - 20-image-direction.md
+  - 40-edits-and-references.md
+  - 60-people-from-chat.md

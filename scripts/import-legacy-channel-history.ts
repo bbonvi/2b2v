@@ -4,6 +4,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { Database } from "../src/db/database.ts";
+import { validateProfileName } from "../src/config/profile.ts";
 
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DEFAULT_PAGE_SIZE = 100;
@@ -94,7 +95,7 @@ Options:
   --bot-user-id <id>         Current bot user ID. Defaults to /users/@me from the token.
   --since <date>             Stop once fetched messages are older than this date.
   --max-messages <n>         Stop after roughly n fetched Discord messages.
-  --config <path>            Minimal config YAML path. Default: config/config.yaml.
+  --config <path>            Minimal config YAML path. Defaults to the selected PROFILE.
   --db <path>                SQLite DB path. Default: <dataDir>/bot.db.
   --data-dir <path>          Data dir fallback if --db is omitted.
   --quiet                    Suppress progress logs.
@@ -153,7 +154,8 @@ function parseArgs(argv: string[]): Args {
   let channelId: string | undefined;
   let discordToken: string | undefined;
   let botUserId: string | undefined;
-  let configPath = "config/config.yaml";
+  const profile = validateProfileName(process.env.PROFILE?.trim() ?? "2b");
+  let configPath = join("profiles", profile, "config.yaml");
   let dbPath: string | undefined;
   let dataDir: string | undefined;
   let since: number | undefined;

@@ -260,8 +260,8 @@ export function buildDownloadPanel(
   }
 
   const configText = peerToConfig(profile, server, vpnPeer);
-  const zipBuffer = generateZip(configText, `2b-${server.public_name}.conf`);
-  const attachment = new AttachmentBuilder(zipBuffer, { name: `2b-${server.public_name}.zip` });
+  const zipBuffer = generateZip(configText, `vpn-${server.public_name}.conf`);
+  const attachment = new AttachmentBuilder(zipBuffer, { name: `vpn-${server.public_name}.zip` });
 
   const content = `## Profile "${profile.name}"
 

@@ -11,7 +11,7 @@ import { handleMessage, type HandlerDeps, type MessageSender } from "../agent/ha
 import { formatHistoryContent } from "../agent/history-formatting";
 import { trackWriteToolStarts } from "../agent/tool-access";
 import { isActiveJobStatus, type AgentJobStore } from "../agent/job-runtime";
-import type { PromptBundle } from "../config/prompt-bundle";
+import type { PromptBundle } from "../config/instruction-bundle";
 import type { GlobalConfig } from "../config/types";
 import type { GeneratedImageAttachment } from "../agent/codex-image-tool";
 import { botChannelPermissions, isSendableGuildChannel, type ResolveTargetChannel, type SendableGuildChannel } from "../discord/message-sender";
@@ -40,7 +40,7 @@ export function renderAmbientHistory(input: {
 }): string {
   const triggerIds = new Set(input.triggerMessageIds ?? []);
   return input.history.map((message) => {
-    const who = message.isBot ? "2B" : message.author;
+    const who = message.author;
     const marker = message.id === input.followUpAnchorMessageId
       ? " <follow_up_anchor>"
       : triggerIds.has(message.id)
@@ -125,7 +125,7 @@ export function resolveLocalChannelShape(input: {
   const userMessages = humanMessages.filter((message) => message.authorId === input.userId).length;
   const botMessages = recent.filter((message) => message.isBot && message.isPromptOnly !== true).length;
   if (humanMessages.length === 0) return "no_recent_human_chatter";
-  if (uniqueHumans.size <= 1 && userMessages > 0 && botMessages > 0) return "mostly_user_and_2b";
+  if (uniqueHumans.size <= 1 && userMessages > 0 && botMessages > 0) return "mostly_user_and_bot";
   if (uniqueHumans.size <= 1) return "mostly_one_user";
   if (uniqueHumans.size <= 4 && humanMessages.length <= 12) return "small_mixed_chat";
   return isChannelBusy(input) ? "busy_group_chat" : "group_chat_not_busy";
@@ -469,23 +469,23 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       if (isPromptOnlyIgnore(message)) {
         if (message.replyToId !== null) {
           const target = history.find((item) => item.id === message.replyToId);
-          if (target !== undefined && target.authorId === userId) return "2b_recently_chose_silence_for_same_user";
-          if (target !== undefined && !target.isBot) return "2b_recently_chose_silence_for_other_user";
+          if (target !== undefined && target.authorId === userId) return "bot_recently_chose_silence_for_same_user";
+          if (target !== undefined && !target.isBot) return "bot_recently_chose_silence_for_other_user";
         }
-        return "2b_recently_chose_silence";
+        return "bot_recently_chose_silence";
       }
       if (message.isPromptOnly === true) continue;
       if (message.replyToId !== null) {
         const target = history.find((item) => item.id === message.replyToId);
-        if (target !== undefined && target.authorId === userId) return "2b_replied_to_same_user_recently";
-        if (target !== undefined && !target.isBot) return "2b_replied_to_other_user_recently";
+        if (target !== undefined && target.authorId === userId) return "bot_replied_to_same_user_recently";
+        if (target !== undefined && !target.isBot) return "bot_replied_to_other_user_recently";
       }
       const previousHuman = history
         .filter((item) => !item.isBot && item.timestamp <= message.timestamp)
         .at(-1);
-      if (previousHuman?.authorId === userId) return "2b_spoke_after_same_user_recently";
-      if (previousHuman !== undefined) return "2b_spoke_after_other_user_recently";
-      return "2b_spoke_recently";
+      if (previousHuman?.authorId === userId) return "bot_spoke_after_same_user_recently";
+      if (previousHuman !== undefined) return "bot_spoke_after_other_user_recently";
+      return "bot_spoke_recently";
     }
     return "none_recent";
   }
@@ -495,6 +495,10 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     const contact = buildComputedContactContextForUser({
       db,
       botUserId: client.user?.id ?? "",
+      botAddressAliasesForGuild: (contactGuildId) => [
+        client.user?.username ?? "",
+        ...getGuildConfig(contactGuildId).triggers.keywords,
+      ],
       userId: candidate.userId,
       currentChannelId: candidate.channelId,
       beforeCreatedAt: candidate.triggerCreatedAt,
@@ -510,8 +514,8 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       `direct_contact_events: ${contact?.directContactEvents ?? 0}`,
       `active_contact_days: ${contact?.activeContactDays ?? 0}`,
       `direct_contact_recency: ${recencyBucket(contact?.lastContactAt ?? null, now)}`,
-      `last_user_to_2b: ${recencyBucket(contact?.lastUserToBotAt ?? null, now)}`,
-      `last_2b_to_user: ${recencyBucket(contact?.lastBotToUserAt ?? null, now)}`,
+      `last_user_to_bot: ${recencyBucket(contact?.lastUserToBotAt ?? null, now)}`,
+      `last_bot_to_user: ${recencyBucket(contact?.lastBotToUserAt ?? null, now)}`,
       `memory_count_bucket: ${memoryBucket}`,
       `local_channel_shape: ${resolveLocalChannelShape({
         db,
@@ -522,7 +526,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         userId: candidate.userId,
         now,
       })}`,
-      `recent_2b_involvement: ${recentBotInvolvement(history, candidate.userId, now)}`,
+      `recent_bot_involvement: ${recentBotInvolvement(history, candidate.userId, now)}`,
     ].join("\n");
   }
 
@@ -758,7 +762,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         return { ok: false, reason: "newer normal trigger exists" };
       }
       if (afterTrigger.some((message) => message.isBot && message.isPromptOnly !== true)) {
-        return { ok: false, reason: "2b spoke after trigger" };
+        return { ok: false, reason: "bot spoke after trigger" };
       }
       if (newHumanMessages.length > 0) return { ok: false, reason: "newer human message exists" };
     }
@@ -818,7 +822,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     const mode = ambientModeConfig(config, candidate.kind);
     const system = [
       ambientEvaluatorPolicyForKind(candidate.kind),
-      "You decide whether 2B should naturally speak in Discord ambient attention.",
+      "Decide whether the configured persona should naturally speak in Discord ambient attention.",
       "Usually choose silence. Do not write the reply text.",
       "Return only compact JSON with should_reply, reply_probability, confidence, intent, default_reply, reason.",
       "reply_probability and confidence must be 0..1. reason should be one short sentence.",
@@ -1347,7 +1351,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     if (!input.forced && !input.signals.inActiveHours) return { ok: false, reason: "outside active hours" };
     if (!input.forced && input.signals.activeTyping) return { ok: false, reason: "user typing active" };
     if (!input.forced && input.signals.lastBotAt !== null && input.signals.now - input.signals.lastBotAt < input.config.botCooldownMs) {
-      return { ok: false, reason: "recent 2b output" };
+      return { ok: false, reason: "recent bot output" };
     }
     if (!input.forced && input.signals.quietMs !== null && input.signals.quietMs < input.config.quietWindowMs) {
       return { ok: false, reason: "quiet window too short" };
@@ -2587,7 +2591,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       channelId: input.channelId,
       guildId: input.guildId,
       defaultReply: config.followUp.defaultReply,
-      syntheticContent: "Conversation is quiet after 2B's previous reply. Decide whether one small follow-up is natural now.",
+      syntheticContent: "Conversation is quiet after your previous reply. Decide whether one small follow-up is natural now.",
       syntheticTimestamp: botMessageCreatedAt,
     });
   }

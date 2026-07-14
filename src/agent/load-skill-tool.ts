@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { PromptSkillBundle } from "../config/prompt-bundle.ts";
+import type { PromptSkillBundle } from "../config/instruction-bundle.ts";
 
 export interface LoadSkillToolDeps {
   skills: PromptSkillBundle;
@@ -14,7 +14,7 @@ export interface LoadedSkillDetails {
 const LoadSkillParams = Type.Object({
   skill: Type.String({
     minLength: 1,
-    description: "Specialized instruction pack 2B needs before a required private action.",
+    description: "Specialized instruction pack needed before a required private action.",
   }),
 });
 
@@ -28,7 +28,7 @@ export function createLoadSkillTool(deps: LoadSkillToolDeps): AgentTool {
   return {
     name: "load_skill",
     label: "load_skill",
-    description: "Load a specialized private instruction pack before 2B takes a required action.",
+    description: "Load a specialized private instruction pack before taking a required action.",
     parameters: LoadSkillParams,
 
     execute: (_toolCallId: string, params: unknown): Promise<AgentToolResult<LoadedSkillDetails | { error: boolean }>> => {

@@ -1,0 +1,1 @@
+Use these memories quietly for factual continuity. Current explicit chat instructions override ordinary stored facts, but do not silently rewrite durable identity, preferences, or constraints. Number after scope is confidence (0-1); `[IMPORTANT]` marks scarce high-priority context. Newer and more relevant memories are nearer the bottom.

@@ -76,7 +76,6 @@ const GLOBAL: GlobalConfig = {
   defaultImageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
   defaultImageGeneration: { quality: "auto" },
   defaultAttachmentsDir: "data/attachments",
-  defaultInstructions: "",
   logLevel: "info",
   dataDir: "data",
   uiLang: "en",

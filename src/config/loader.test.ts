@@ -183,7 +183,6 @@ describe("loadGlobalConfig", () => {
       videoPreviewTimeoutSeconds: 30,
       timeoutSeconds: { image: 30, gif: 30, audio: 90, video: 180, text: 30, file: 30 },
     });
-    expect(cfg.defaultInstructions).toBe("");
     expect((cfg as unknown as { defaultPromptCaching?: unknown }).defaultPromptCaching).toEqual({
       enabled: true,
     });
@@ -265,92 +264,6 @@ describe("loadGlobalConfig", () => {
     expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
       'tts.voices.normal.applyTextNormalization must be "auto", "on", or "off"',
     );
-  });
-
-  test("rejects deprecated global instructionsPath/instructions keys", () => {
-    const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "instructionsPath: config/instructions.md\n");
-    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
-      'Deprecated config key "instructionsPath" is no longer supported. Put prompt markdown in prompts/ instead.',
-    );
-  });
-
-  test("rejects deprecated global persona/toolInstructions path keys", () => {
-    const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "personaPath: config/persona.md\n");
-    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
-      'Deprecated config key "personaPath" is no longer supported. Put prompt markdown in prompts/ instead.',
-    );
-  });
-
-  test("does not derive legacy promptProfile when promptProfile is omitted", () => {
-    const cfgPath = join(TEST_DIR, "nonexistent.yaml");
-    const cfg = loadGlobalConfig(BASE_ENV, cfgPath);
-    expect((cfg as unknown as { promptProfile?: unknown }).promptProfile).toBeUndefined();
-    expect(cfg.defaultInstructions).toBe("");
-  });
-
-  test("ignores legacy promptProfile sources from YAML", () => {
-    const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(
-      file,
-      [
-        "promptProfile:",
-        "  persona:",
-        "    - file: config/persona.md",
-        '    - text: "Persona addon"',
-        "  toolInstructions:",
-        "    - file: config/tool_instructions.md",
-        "    - file: config/ops.md",
-        "      optional: true",
-        "  instructions:",
-        "    - file: config/instructions.md",
-        '    - text: "Instruction addon"',
-        "  lateInstructions:",
-        "    - file: config/late_instructions.md",
-        '    - text: "Late reinforcement"',
-      ].join("\n"),
-    );
-    const cfg = loadGlobalConfig(BASE_ENV, file);
-    expect((cfg as unknown as { promptProfile?: unknown }).promptProfile).toBeUndefined();
-    expect(cfg.defaultInstructions).toBe("");
-  });
-
-  test("does not load defaultInstructions from legacy promptProfile inline source", () => {
-    const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(file, "promptProfile:\n  instructions:\n    - text: Legacy global instructions\n");
-    const cfg = loadGlobalConfig(BASE_ENV, file);
-    expect(cfg.defaultInstructions).toBe("");
-  });
-
-  test("does not load defaultInstructions from legacy promptProfile file source", () => {
-    const instrFile = join(TEST_DIR, "instr.md");
-    writeFileSync(instrFile, "File-based instructions\n");
-    const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(
-      file,
-      [
-        "promptProfile:",
-        "  instructions:",
-        `    - file: ${instrFile}`,
-      ].join("\n"),
-    );
-    const cfg = loadGlobalConfig(BASE_ENV, file);
-    expect(cfg.defaultInstructions).toBe("");
-  });
-
-  test("does not validate ignored legacy promptProfile sources", () => {
-    const file = join(TEST_DIR, "config.yaml");
-    writeFileSync(
-      file,
-      [
-        "promptProfile:",
-        "  persona:",
-        "    - file: config/persona.md",
-        '      text: "invalid"',
-      ].join("\n"),
-    );
-    expect(() => loadGlobalConfig(BASE_ENV, file)).not.toThrow();
   });
 
   test("reads triggers from YAML", () => {
@@ -763,12 +676,8 @@ describe("resolveGuildConfig", () => {
     rmSync(instrFile);
   });
 
-  test("falls back to global defaultInstructions when guild has none", () => {
-    mkdirSync(TEST_DIR, { recursive: true });
-    const cfgFile = join(TEST_DIR, "config.yaml");
-    writeFileSync(cfgFile, "promptProfile:\n  instructions:\n    - text: Global default\n");
-    const global = loadGlobalConfig(BASE_ENV, cfgFile);
-    expect(global.defaultInstructions).toBe("");
+  test("uses empty guild instructions when none are configured", () => {
+    const global = loadGlobalConfig(BASE_ENV, join(TEST_DIR, "none.yaml"));
     const partial: GuildConfigYaml & { guildId: string; slug: string } = {
       guildId: "52",
       slug: "no-instr",
@@ -1547,6 +1456,17 @@ describe("loadGlobalConfig vpn", () => {
     writeFileSync(file, "vpn:\n  enabled: true\n  apiUrl: https://vpn.example.com\n  vpnPeer: 5.6.7.8\n");
     const cfg = loadGlobalConfig(BASE_ENV, file);
     expect(cfg.vpn).toEqual({ enabled: true, apiUrl: "https://vpn.example.com", vpnPeer: "5.6.7.8" });
+  });
+
+  test("vpn credentials can be supplied by the environment", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "vpn:\n  enabled: true\n  apiUrl: https://yaml.example.com\n  vpnPeer: yaml-peer\n");
+    const cfg = loadGlobalConfig({
+      ...BASE_ENV,
+      VPN_API_URL: "https://env.example.com",
+      VPN_PEER: "env-peer",
+    }, file);
+    expect(cfg.vpn).toEqual({ enabled: true, apiUrl: "https://env.example.com", vpnPeer: "env-peer" });
   });
 
   test("vpn fields default to empty strings when enabled", () => {

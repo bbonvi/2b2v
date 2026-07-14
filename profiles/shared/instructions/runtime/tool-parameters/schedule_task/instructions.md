@@ -1,0 +1,1 @@
+Detailed instruction for the persona's future private task, not literal text to send. Include requester, notify target, run behavior, stop condition, and any context the future run needs. For recurring tasks, say when the task should complete itself.

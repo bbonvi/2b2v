@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { applyRuntimeToolPrompts } from "./runtime-tool-prompts.ts";
-import type { RuntimePromptBundle } from "../config/prompt-bundle.ts";
+import type { RuntimePromptBundle } from "../config/instruction-bundle.ts";
 
 function runtimePrompts(): RuntimePromptBundle {
   return {

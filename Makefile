@@ -1,4 +1,4 @@
-.PHONY: test test-unit check lint
+.PHONY: test test-unit check check-profiles lint
 
 # Supports: make test, make test src/agent/, make test src/agent/foo.test.ts
 test:
@@ -14,8 +14,12 @@ UNIT_TEST_FILES := $(shell find src -name '*.test.ts' ! -name '*.integration.tes
 test-unit:
 	bun test --timeout 5000 $(if $(filter-out test-unit,$(MAKECMDGOALS)),$(filter-out test-unit,$(MAKECMDGOALS)),$(UNIT_TEST_FILES))
 
-# Type-check + lint
-check:
+# Validate the committed profile layout and load both instruction stacks.
+check-profiles:
+	bun test src/config/profile-layout.test.ts
+
+# Profile validation + type-check + lint
+check: check-profiles
 	bun run check
 
 lint:

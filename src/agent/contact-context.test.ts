@@ -23,15 +23,17 @@ function insertMessage(input: {
   createdAt: number;
   content: string;
   isBot?: boolean;
+  guildId?: string;
   channelId?: string;
   replyToId?: string;
 }): void {
   db.raw.prepare(
     `INSERT INTO messages
        (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
-     VALUES (?, 'g', ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     input.id,
+    input.guildId ?? "g",
     input.channelId ?? "c",
     input.userId,
     input.username,
@@ -54,7 +56,7 @@ describe("computed contact context", () => {
   test("renders no direct context for users without contact with 2B", () => {
     insertMessage({ id: "u1", userId: "u1", username: "alice", content: "hello room", createdAt: NOW - DAY });
 
-    expect(buildComputedContactContextForUser({ db, botUserId: BOT_ID, userId: "u1", now: NOW })).toBeNull();
+    expect(buildComputedContactContextForUser({ db, botUserId: BOT_ID, botAddressAliases: ["2b"], userId: "u1", now: NOW })).toBeNull();
   });
 
   test("counts explicit address and bot adjacency as direct contact", () => {
@@ -62,14 +64,30 @@ describe("computed contact context", () => {
     insertMessage({ id: "b1", userId: BOT_ID, username: "2B", content: "вижу", createdAt: NOW - 3 * DAY + 60_000, isBot: true });
     insertMessage({ id: "u2", userId: "u1", username: "alice", content: "2b, еще раз", createdAt: NOW - 60_000 });
 
-    const context = buildComputedContactContextForUser({ db, botUserId: BOT_ID, userId: "u1", now: NOW });
+    const context = buildComputedContactContextForUser({ db, botUserId: BOT_ID, botAddressAliases: ["2b"], userId: "u1", now: NOW });
 
     expect(context).not.toBeNull();
     expect(context?.directContactEvents).toBe(3);
     expect(context?.activeContactDays).toBe(2);
     expect(context?.lastContactAt).toBe(NOW - 60_000);
     expect(context?.rendered).toContain("Known contact:");
-    expect(context?.rendered).toContain("2B last replied");
+    expect(context?.rendered).toContain("you last replied");
+  });
+
+  test("resolves direct-address aliases per historical guild", () => {
+    insertMessage({ id: "g1-u", guildId: "g1", channelId: "g1-c", userId: "u1", username: "alice", content: "2b, смотри", createdAt: NOW - DAY });
+    insertMessage({ id: "g2-u", guildId: "g2", channelId: "g2-c", userId: "u1", username: "alice", content: "delamain, смотри", createdAt: NOW - 60_000 });
+
+    const context = buildComputedContactContextForUser({
+      db,
+      botUserId: BOT_ID,
+      botAddressAliasesForGuild: (guildId) => guildId === "g1" ? ["2b"] : ["delamain"],
+      userId: "u1",
+      now: NOW,
+    });
+
+    expect(context?.directContactEvents).toBe(2);
+    expect(context?.contactGuilds).toBe(2);
   });
 
   test("merges same-author split messages into one contact turn", () => {
@@ -79,7 +97,7 @@ describe("computed contact context", () => {
     insertMessage({ id: "b1", userId: BOT_ID, username: "2B", content: "что", createdAt: NOW - 30_000, isBot: true });
     insertMessage({ id: "b2", userId: BOT_ID, username: "2B", content: "говори", createdAt: NOW - 20_000, isBot: true });
 
-    const context = buildComputedContactContextForUser({ db, botUserId: BOT_ID, userId: "split", now: NOW });
+    const context = buildComputedContactContextForUser({ db, botUserId: BOT_ID, botAddressAliases: ["2b"], userId: "split", now: NOW });
 
     expect(context?.totalMessages).toBe(1);
     expect(context?.directContactEvents).toBe(2);
@@ -123,7 +141,7 @@ describe("computed contact context", () => {
       });
     }
 
-    const contexts = buildComputedContactContexts({ db, botUserId: BOT_ID, now: NOW });
+    const contexts = buildComputedContactContexts({ db, botUserId: BOT_ID, botAddressAliases: ["2b"], now: NOW });
     const burst = contexts.find((item) => item.userId === "burst");
     const steady = contexts.find((item) => item.userId === "steady");
 
@@ -139,7 +157,7 @@ describe("computed contact context", () => {
     insertMessage({ id: "b2", userId: BOT_ID, username: "2B", content: "держи", createdAt: NOW - 2 * DAY + 60_000, isBot: true });
     insertImage("b2");
 
-    const context = buildComputedContactContextForUser({ db, botUserId: BOT_ID, userId: "toolish", now: NOW });
+    const context = buildComputedContactContextForUser({ db, botUserId: BOT_ID, botAddressAliases: ["2b"], userId: "toolish", now: NOW });
 
     expect(context?.instrumentalBotReplies).toBe(2);
     expect(context?.rendered).toContain("links/images");

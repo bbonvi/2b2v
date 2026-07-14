@@ -1,0 +1,36 @@
+# Delamain instance configuration.
+# Start with PROFILE=delamain and a separate environment/token.
+dataDir: data/delamain
+
+llmProvider: openai-codex
+model: gpt-5.6-sol
+thinkingLevel: medium
+codexTransport: websocket-cached
+timezone: Europe/Moscow
+
+relationships:
+  enabled: false
+  promptInjection: false
+
+memoryExtraction:
+  postReply: true
+  maxToolCalls: 3
+  ambient:
+    enabled: false
+
+ambientAttention:
+  enabled: false
+
+ambientInitiative:
+  enabled: false
+
+vpn:
+  enabled: false
+
+triggers:
+  mention: true
+  keywords: [delamain, деламейн]
+  randomChance: 0
+
+promptCaching:
+  enabled: true

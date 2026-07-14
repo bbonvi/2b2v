@@ -1,1 +1,0 @@
-Detailed instruction for 2B's future private task, not literal text to send. Include requester, notify target, run behavior, stop condition, and any context future 2B needs. For recurring tasks, say when she should complete the task herself.

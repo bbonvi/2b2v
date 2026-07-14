@@ -137,7 +137,7 @@ async function fetchPageImageReferences(
 ): Promise<PageImageReference[]> {
   const response = await abortable(fetchFn(url, {
     signal,
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; 2B-PageReader/1.0)", Accept: "text/html,application/xhtml+xml" },
+    headers: { "User-Agent": "Mozilla/5.0 (compatible; PersonaBot-PageReader/1.0)", Accept: "text/html,application/xhtml+xml" },
   }), signal);
   if (!response.ok) return [];
   const contentType = response.headers.get("content-type") ?? "";

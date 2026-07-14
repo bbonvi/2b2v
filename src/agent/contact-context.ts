@@ -1,5 +1,6 @@
 import type { Database } from "../db/database";
 import { formatElapsedDuration } from "../time/agent-time";
+import { escapeRegex } from "./triggers";
 
 const DIRECT_GAP_MS = 30 * 60 * 1000;
 const TURN_MERGE_MS = 30 * 1000;
@@ -7,7 +8,6 @@ const RECENT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const SALIENCE_HALF_LIFE_MS = 3 * 24 * 60 * 60 * 1000;
 const STALE_CONTACT_MS = 30 * 24 * 60 * 60 * 1000;
 const COLD_CONTACT_MS = 90 * 24 * 60 * 60 * 1000;
-const BOT_ADDRESS_RE = /(?:^|[\s,.:;!?()[\]{}"'`])(?:2b|2б|туби|тубишка)(?=$|[\s,.:;!?()[\]{}"'`])/iu;
 const URL_RE = /https?:\/\/\S+/i;
 
 interface ContactMessageRow {
@@ -117,15 +117,35 @@ export interface ComputedContactContext {
 interface BuildContactContextsInput {
   db: Database;
   botUserId: string;
+  /** Fallback names and trigger keywords that count as direct address. */
+  botAddressAliases?: readonly string[];
+  /** Resolve names and trigger keywords for each historical guild. */
+  botAddressAliasesForGuild?: (guildId: string) => readonly string[];
   now?: number;
   currentChannelId?: string;
   beforeCreatedAt?: number;
   beforeMessageId?: string;
 }
 
-/** Build deterministic user-to-2B familiarity context from stored chat history. */
+/** Build deterministic user-to-bot familiarity context from stored chat history. */
 export function buildComputedContactContexts(input: BuildContactContextsInput): ComputedContactContext[] {
   const now = input.now ?? Date.now();
+  const addressPatterns = new Map<string, RegExp | null>();
+  const botAddressPatternForGuild = (guildId: string): RegExp | null => {
+    const cached = addressPatterns.get(guildId);
+    if (cached !== undefined || addressPatterns.has(guildId)) return cached ?? null;
+    const addressAliases = [...new Set(
+      (input.botAddressAliasesForGuild?.(guildId) ?? input.botAddressAliases ?? [])
+        .map((alias) => alias.trim())
+        .filter((alias) => alias !== "")
+        .map((alias) => alias.toLocaleLowerCase()),
+    )];
+    const pattern = addressAliases.length > 0
+      ? new RegExp(`(?<![\\p{L}\\p{N}])(?:${addressAliases.map(escapeRegex).join("|")})(?![\\p{L}\\p{N}])`, "iu")
+      : null;
+    addressPatterns.set(guildId, pattern);
+    return pattern;
+  };
   const rows = loadContactRows(input);
   const turns = mergeContactTurns(rows);
   const imageMessageIds = loadImageMessageIds(input.db);
@@ -155,7 +175,15 @@ export function buildComputedContactContexts(input: BuildContactContextsInput): 
     }
 
     const previous = lastByChannel.get(turn.channel_id);
-    const event = contactEventForTurn(turn, previous, input.botUserId, botMessageIds, messageUser, imageMessageIds);
+    const event = contactEventForTurn(
+      turn,
+      previous,
+      input.botUserId,
+      botAddressPatternForGuild(turn.guild_id),
+      botMessageIds,
+      messageUser,
+      imageMessageIds,
+    );
     if (event !== null) {
       const userStats = ensureStats(stats, event.userId, event.username);
       addContactEvent(userStats, event, now, contactDaysByUser);
@@ -354,6 +382,7 @@ function contactEventForTurn(
   turn: ContactTurn,
   previous: ContactTurn | undefined,
   botUserId: string,
+  botAddressPattern: RegExp | null,
   botMessageIds: Set<string>,
   messageUser: Map<string, string>,
   imageMessageIds: Set<string>,
@@ -364,7 +393,7 @@ function contactEventForTurn(
   if (!isBot) {
     const repliedToBot = turn.reply_to_ids.some((replyToId) => botMessageIds.has(replyToId));
     const followsBot = previousIsClose && previous.is_bot === 1 && previous.user_id === botUserId;
-    const namesBot = BOT_ADDRESS_RE.test(turn.translated_content);
+    const namesBot = botAddressPattern?.test(turn.translated_content) ?? false;
     const mentionsBot = turn.raw_content.includes(`<@${botUserId}>`) || turn.raw_content.includes(`<@!${botUserId}>`);
     if (!repliedToBot && !followsBot && !namesBot && !mentionsBot) return null;
     return {
@@ -584,18 +613,18 @@ function trimSentencePunctuation(text: string): string {
 
 function rapportImplication(stats: UserContactStats): string {
   const score = stats.familiarityScore;
-  if (score <= 10) return "Treat this as near-first contact; 2B should not assume rapport.";
-  if (score <= 25) return "2B has very little direct history with them; avoid familiar shortcuts.";
-  if (score <= 40) return "2B may recognize them, but they are not important by default.";
+  if (score <= 10) return "Treat this as near-first contact; do not assume rapport.";
+  if (score <= 25) return "You have very little direct history with them; avoid familiar shortcuts.";
+  if (score <= 40) return "You may recognize them, but they are not important by default.";
   if (score <= 55) return "Some continuity exists, but closeness is not implied.";
-  if (score <= 70) return "2B has enough history to treat them as a familiar regular, not as close.";
+  if (score <= 70) return "You have enough history to treat them as a familiar regular, not as close.";
   if (score > 85 && stats.directRank !== null && stats.directRank <= 5) {
-    return "They are one of the recurring people in 2B's chat life; 2B can recognize them without introduction.";
+    return "They are one of the recurring people in your chat life; you can recognize them without introduction.";
   }
   if (score > 70 && stats.directRank !== null && stats.directRank <= 10) {
-    return "2B has a well-established history with them, but that still does not imply affection or obligation.";
+    return "You have a well-established history with them, but that still does not imply affection or obligation.";
   }
-  return "2B has recurring history with them, but they are not one of the central few.";
+  return "You have recurring history with them, but they are not one of the central few.";
 }
 
 function recencySummary(stats: UserContactStats, now: number): string {
@@ -603,11 +632,11 @@ function recencySummary(stats: UserContactStats, now: number): string {
   const lastContact = `Last direct contact was ${formatElapsedDuration(stats.lastContactAt, now)} ago`;
   if (stats.lastUserToBotAt === null) return lastContact;
   if (stats.lastBotToUserAt === null) {
-    return `${lastContact}; 2B has not clearly replied before`;
+    return `${lastContact}; you have not clearly replied before`;
   }
   const delta = Math.abs(stats.lastUserToBotAt - stats.lastBotToUserAt);
   if (delta <= DIRECT_GAP_MS) return lastContact;
-  return `${lastContact}; 2B last replied ${formatElapsedDuration(stats.lastBotToUserAt, now)} ago`;
+  return `${lastContact}; you last replied ${formatElapsedDuration(stats.lastBotToUserAt, now)} ago`;
 }
 
 function dialogueImplication(stats: UserContactStats): string {
@@ -645,10 +674,10 @@ function instrumentalImplication(stats: UserContactStats): string {
 function memoryImplication(stats: UserContactStats): string {
   if (stats.memoryCount <= 0) return "";
   if (stats.memoryRank !== null && stats.memoryRank <= 5) {
-    return "2B has unusually much stored context about them; use it for continuity.";
+    return "You have unusually much stored context about them; use it for continuity.";
   }
   if (stats.memoryRank !== null && stats.memoryRank <= 15) {
-    return "2B has a few stored notes about them; enough for continuity, not closeness.";
+    return "You have a few stored notes about them; enough for continuity, not closeness.";
   }
   return "";
 }
@@ -670,9 +699,9 @@ function staleImplication(stats: UserContactStats, now: number): string {
 
 function chatterImplication(stats: UserContactStats): string {
   const share = stats.directContactEvents / Math.max(1, stats.totalMessages);
-  if (stats.totalMessages <= 10 && share >= 0.4) return "They do not talk much overall, but when they do, 2B is a meaningful target.";
-  if (stats.totalMessages >= 100 && share < 0.15) return "They talk a lot generally, so 2B contact is only a small part of their room presence.";
-  if (share >= 0.35) return "2B is a frequent target of their chat presence.";
+  if (stats.totalMessages <= 10 && share >= 0.4) return "They do not talk much overall, but when they do, you are a meaningful target.";
+  if (stats.totalMessages >= 100 && share < 0.15) return "They talk a lot generally, so contact with you is only a small part of their room presence.";
+  if (share >= 0.35) return "You are a frequent target of their chat presence.";
   return "";
 }
 
@@ -686,8 +715,8 @@ function timeShapeClause(stats: UserContactStats): string {
 }
 
 function rankClause(stats: UserContactStats): string {
-  if (stats.directRank !== null && stats.directRank <= 5 && stats.directContactEvents >= 10) return "They are among 2B's most frequent direct contacts.";
-  if (stats.directRank !== null && stats.directRank <= 20 && stats.directContactEvents >= 5) return "They are among 2B's more frequent direct contacts.";
+  if (stats.directRank !== null && stats.directRank <= 5 && stats.directContactEvents >= 10) return "They are among your most frequent direct contacts.";
+  if (stats.directRank !== null && stats.directRank <= 20 && stats.directContactEvents >= 5) return "They are among your more frequent direct contacts.";
   return "";
 }
 

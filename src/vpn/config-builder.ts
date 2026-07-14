@@ -6,7 +6,7 @@ const PERSISTENT_KEEPALIVE = 30;
 
 /**
  * Generate a WireGuard configuration string from a peer and server.
- * Output matches the 2b Python peer_into_conf format exactly.
+ * Output matches the upstream Python peer_into_conf format exactly.
  */
 export function peerToConfig(peer: Peer, server: WgServer, endpointHost: string): string {
   return `[Interface]

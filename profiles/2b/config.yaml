@@ -1,0 +1,365 @@
+# 2B profile configuration.
+# All fields are optional. Missing values use hardcoded defaults.
+
+# LLM model (OpenRouter model ID)
+llmProvider: "openai-codex"
+model: "gpt-5.6-sol"
+modelParams: {}
+    # maxTokens: 200000
+    # textVerbosity: "medium" # (Codex output verbosity; low keeps replies compact)
+
+thinkingLevel: "medium" # (main model reasoning effort)
+codexTransport: "websocket-cached" # (Codex API transport; cached keeps stable prompt reuse)
+
+# OpenRouter prompt caching control.
+# When enabled, stable prompt sections are marked with cache_control breakpoints.
+# OpenRouter/provider routing decides whether the selected provider uses them.
+promptCaching:
+    enabled: true # (enable provider prompt-cache hints/session routing)
+
+reasoningContinuation:
+    enabled: true
+    maxAgeMs: 1800000 # Replay latest encrypted Codex native continuation for same guild/channel/user within 30 minutes
+
+# Prompt transport controls where logical prompt sections land. Defaults shown here
+# are cache-friendly: stable sections first, volatile/current turn last.
+# Roles: system | developer | user. Targets: input | instructions (Codex only).
+promptTransport:
+    openaiCodex:
+        mode: split-input # (send stable sections as separate cacheable input messages)
+        sections:
+            system: { role: developer, target: instructions } # (top-level system/developer instruction bucket)
+            core: { role: developer, target: input, cacheGroup: core } # (stable persona/style prompt)
+            skills: { role: developer, target: input, cacheGroup: skills } # (stable available-skill index)
+            runtime: { role: developer, target: input, cacheGroup: runtime } # (stable runtime behavior policy)
+            stableContext: {
+                    role: developer,
+                    target: input,
+                    cacheGroup: stable-context,
+                } # (less volatile contextual prefix)
+            olderHistory: { role: user, target: input, cacheGroup: older-history } # (cached older chat history)
+            serverMembers: { role: user, target: input, cacheGroup: members } # (visible member/display-name context)
+            threadsInChannel: { role: user, target: input, cacheGroup: threads } # (thread list/metadata context)
+            discordContext: { role: user, target: input, cacheGroup: context } # (current guild/channel navigation context)
+            upcomingSchedules: { role: user, target: input, cacheGroup: shcedules } # (pending schedule summary)
+            memories: { role: user, target: input, cacheGroup: memories } # (selected memory context)
+            recentHistory: { role: user, target: input, cacheGroup: recent } # (uncached recent chat history)
+            currentContext: {
+                    role: user,
+                    target: input,
+                    cacheGroup: current-context,
+                } # (time/contact/current-turn metadata)
+            responseInstruction: {
+                    role: developer,
+                    target: input,
+                    cacheGroup: response-instruction,
+                } # (reply-loop behavior instruction)
+            currentTurn: { role: user, target: input, cacheGroup: current-turn } # (new Discord event text)
+            finalActionInstruction: {
+                    role: developer,
+                    target: input,
+                    cacheGroup: final-action,
+                } # (last instruction before action)
+    openrouter:
+        sections:
+            system: { role: developer, target: input, cacheGroup: core } # (system prompt section in OpenRouter messages)
+            core: { role: developer, target: input, cacheGroup: core } # (stable persona/style prompt)
+            skills: { role: developer, target: input, cacheGroup: runtime } # (stable available-skill index)
+            runtime: { role: developer, target: input, cacheGroup: runtime } # (stable runtime behavior policy)
+            stableContext: {
+                    role: user,
+                    target: input,
+                    cacheGroup: stable-context,
+                } # (less volatile contextual prefix)
+            olderHistory: { role: user, target: input, cacheGroup: older-history } # (cached older chat history)
+            serverMembers: { role: user, target: input } # (visible member/display-name context)
+            threadsInChannel: { role: user, target: input } # (thread list/metadata context)
+            discordContext: { role: user, target: input } # (current guild/channel navigation context)
+            upcomingSchedules: { role: user, target: input } # (pending schedule summary)
+            memories: { role: user, target: input } # (selected memory context)
+            recentHistory: { role: user, target: input } # (uncached recent chat history)
+            currentContext: { role: user, target: input } # (time/contact/current-turn metadata)
+            responseInstruction: { role: developer, target: input } # (reply-loop behavior instruction)
+            currentTurn: { role: user, target: input } # (new Discord event text)
+            finalActionInstruction: { role: user, target: input } # (last instruction before action)
+
+replyLoop:
+    maxToolCalls: 48 # Hard cap on tool calls in one response run
+    wallClockTimeoutMs: 300000 # Hard timeout per response run (milliseconds)
+    llmOutputTimeoutMs: 45000 # Timeout for one LLM turn (milliseconds)
+
+agentJobs:
+    imageTimeoutMs: 300000 # (max async image job runtime)
+    imageCancelGraceMs: 60000 # (window where replacement/cancel can target a fresh image job)
+    terminalVisibleMs: 600000 # (how long completed/failed jobs stay visible in prompt context)
+    maxImageReplacements: 2 # (max times one image request may be replaced)
+
+# Thinking/reasoning level for the model
+
+# Default timezone for guilds that don't override
+timezone: Europe/Moscow # (default wall-clock timezone for model context and schedules)
+
+# Trigger-specific instructions injected when bot responds to each trigger type.
+# Provides behavioral context for how the bot should behave in each scenario.
+triggerInstructions:
+    mention: "The event directly caught 2B's attention. Choose the next scene beat." # (extra prompt text for mention-triggered turns)
+    keyword: "This was a keyword match and may be accidental. Silence is allowed if it is the truthful beat." # (extra prompt text for keyword-triggered turns)
+    random: "2B is entering unprompted. Keep the beat small or stay silent." # (extra prompt text for random-triggered turns)
+    scheduled: "This is a private scheduled task. Use context and tools as needed, stay silent by default, and notify only when useful, requested, or closing the loop. If the task should stop, complete it and speak naturally only when the user needs to know." # (extra prompt text for scheduled turns)
+    ambient_pickup: "2B noticed a quiet unaddressed message. Prefer a normal channel message, keep it small, and stay silent if the moment passed or 2B dislikes the user." # (extra prompt text for quiet pickup)
+    lingering_attention: "2B is still lightly attentive after a recent exchange with this user. Reply only if the new beat naturally belongs to that exchange and if it is addressed to 2B in any way. Stay silent if clearly not addressed to 2B." # (extra prompt text for lingering attention)
+    follow_up: "2B may add one small follow-up after silence, but most of the time she should stay silent unless there is a concrete natural intent." # (extra prompt text for follow-up turns)
+    ambient_initiative: "2B is speaking proactively. Stay silent if the initiative feels forced, stale, performative, or creepy." # (extra prompt text for proactive initiative)
+# Context window trimming thresholds
+trim:
+    trimTrigger: 1200 # Start trimming when history exceeds this many messages
+    trimTarget: 600 # Trim down to this many messages
+    windowSize: 150 # Recent messages kept uncached (newer slice)
+    messageCharLimit: 200 # Max chars per message before truncation
+    replyQuoteChars: 50 # Max chars for reply quote excerpts
+
+# Background memory extraction
+memoryExtraction:
+    postReply: true # (run a silent memory pass after visible bot replies)
+    maxToolCalls: 5 # (max record_memory calls per maintenance pass)
+    ambient:
+        enabled: true # (also review non-triggered chatter periodically)
+        everyMessages: 300 # (human messages since the last successful memory pass)
+        maxBatchMessages: 300 # (max chronological messages reviewed per ambient pass)
+        minIntervalSeconds: 600 # (minimum seconds between ambient passes per channel)
+
+# Non-admin recurring scheduled-task pressure caps.
+schedulePressure:
+    maxRequesterRunsPerHour: 120
+    maxRequesterRunsPerDay: 500
+    maxGuildRunsPerHour: 600
+    maxGuildRunsPerDay: 3000
+
+# Durable per-user relationship profiles.
+relationships:
+    enabled: true
+    promptInjection: true
+    maxAxisDeltaPerSignal: 4
+    maxToolCalls: 5
+
+ambientAttention:
+    enabled: true # (enable delayed non-trigger attention candidates)
+    evaluator:
+        provider: openai-codex
+        model: gpt-5.3-codex-spark
+        thinkingLevel: minimal # (fast evaluator reasoning; it only decides speak/silence)
+        llmOutputTimeoutMs: 8000 # (timeout for one evaluator decision)
+        modelParams:
+            textVerbosity: low # (keep evaluator JSON terse)
+    historyLimit: 50 # (recent messages shown to evaluator)
+    busyWindowMs: 60000 # (activity window used for busy-channel gate)
+    busyMessageLimit: 6 # (human messages in busyWindowMs above this drop ambient)
+    staleAfterMs: 180000 # (drop candidates older than this)
+    maxNewMessagesBeforeDrop: 4 # (drop if too much newer human context appears)
+    ambientPickup:
+        enabled: true # (allow pickup of quiet unaddressed messages)
+        minDelayMs: 90000 # (minimum wait before evaluating quiet pickup)
+        maxDelayMs: 160000 # (maximum wait before evaluating quiet pickup)
+        probabilityThreshold: 0.7 # (minimum evaluator reply probability after jitter)
+        confidenceThreshold: 0.7 # (minimum evaluator confidence)
+        cooldownMs: 300000 # (per-user/channel cooldown for this mode)
+        typingActiveMs: 8000 # (typing block before quiet pickup can evaluate)
+        maxRepliesPerUserPerHour: 4 # (pickup budget per user)
+        maxRepliesPerChannelPerHour: 8 # (pickup budget per channel)
+        randomJitter: 0.04 # (small score wobble, not primary decision)
+        defaultReply: false # (send normal channel message unless model explicitly anchors)
+        minQuietMs: 80000 # (minimum silence after trigger before pickup can pass)
+    lingering:
+        enabled: true # (keep temporary attention after 2B replies)
+        minDelayMs: 2500 # (minimum wait before evaluating same-user continuation)
+        maxDelayMs: 6000 # (maximum wait before evaluating same-user continuation)
+        probabilityThreshold: 0.55 # (threshold during strong attention window)
+        confidenceThreshold: 0.55 # (confidence threshold during strong window)
+        cooldownMs: 0 # (lingering uses burst debounce + lease instead of cooldown)
+        randomJitter: 0.04 # (small score wobble, not primary decision)
+        defaultReply: false # (first lingering message replies by default)
+        strongWindowMs: 60000 # (lower-threshold attention window after 2B reply)
+        weakWindowMs: 180000 # (lease expiry; weak window gates harder)
+        typingActiveMs: 2000 # (short typing block for conversational continuation)
+        typingExtensionMs: 30000 # (extend lease when same user types)
+        maxTypingExtensions: 6 # (cap typing-based lease extensions)
+        maxRepliesPerUserPerHour: 100 # (separate higher lingering budget per user)
+        maxRepliesPerChannelPerHour: 100 # (separate higher lingering budget per channel)
+    followUp:
+        enabled: false # (allow rare follow-up after direct exchange goes quiet)
+        minDelayMs: 12000 # (minimum wait after 2B reply before follow-up eval)
+        maxDelayMs: 30000 # (maximum wait after 2B reply before follow-up eval)
+        probabilityThreshold: 0.5 # (high probability required because follow-ups are intrusive)
+        confidenceThreshold: 0.5 # (high confidence required)
+        cooldownMs: 300000 # (per-user/channel cooldown for follow-ups)
+        typingActiveMs: 8000 # (typing block before follow-up can evaluate)
+        maxRepliesPerUserPerHour: 2 # (follow-up budget per user)
+        maxRepliesPerChannelPerHour: 4 # (follow-up budget per channel)
+        randomJitter: 0.03 # (small score wobble, not primary decision)
+        defaultReply: true # (send normal channel message unless anchoring is needed)
+        silenceMs: 12000 # (required silence after 2B reply)
+        maxPerExchange: 1 # (hard cap on follow-ups per exchange)
+
+ambientInitiative:
+    enabled: true # (allow proactive non-triggered initiative in the main channel)
+    shadowMode: false # (when true, evaluate/log but do not send automatic initiatives)
+    mainChannelId: "" # (empty auto-picks most active human channel over lookback)
+    checkIntervalMinMs: 720000 # (shortest jittered opportunity check interval)
+    checkIntervalMaxMs: 2700000 # (longest jittered opportunity check interval)
+    activeHours:
+        start: "10:00" # (local start of proactive-speaking window)
+        end: "23:00" # (local end; may cross midnight)
+    historyLimit: 60 # (recent channel messages shown to evaluator/generator)
+    recentActivityMinMs: 300000 # (avoid speaking immediately after fresh human activity)
+    recentActivityMaxMs: 10800000 # (avoid treating dead rooms as opportunities)
+    quietWindowMs: 360000 # (minimum quiet after human activity before opportunity)
+    typingActiveMs: 10000 # (typing-start window that blocks initiative)
+    botCooldownMs: 2700000 # (minimum time after visible 2B output)
+    fatigueAfterAnyMs: 3600000 # (shared chance reduction after any initiative)
+    maxPerDay: 5 # (shared sent-initiative cap per main channel)
+    minMainChannelHumanMessages: 20 # (minimum 7-day human messages for auto main channel)
+    mainChannelLookbackDays: 7 # (auto main-channel activity lookback)
+    evaluator:
+        provider: openai-codex
+        model: gpt-5.3-codex-spark
+        thinkingLevel: minimal # (fast first-pass decision only)
+        llmOutputTimeoutMs: 8000 # (timeout for evaluator JSON)
+        modelParams:
+            textVerbosity: low # (keep evaluator output compact)
+    selfExpression:
+        enabled: true # (allow non-targeted incomplete thought dumps)
+        basePressure: 0.28 # (starting chance pressure before room signals)
+        pressureThreshold: 0.5 # (minimum pressure before evaluator spend)
+        probabilityThreshold: 0.5 # (minimum evaluator initiative probability)
+        confidenceThreshold: 0.6 # (minimum evaluator confidence)
+        cooldownMs: 10800000 # (per-kind cooldown after sent self-expression)
+        maxPerDay: 3 # (sent self-expression cap per main channel)
+    targetedCheckin:
+        enabled: true # (allow anchored user follow-ups/check-ins)
+        basePressure: 0.10 # (starting pressure before open-loop signals)
+        pressureThreshold: 0.5 # (minimum pressure before evaluator spend)
+        probabilityThreshold: 0.75 # (minimum evaluator initiative probability)
+        confidenceThreshold: 0.75 # (minimum evaluator confidence)
+        cooldownMs: 7200000 # (per-kind cooldown after sent targeted follow-up)
+        maxPerDay: 3 # (sent targeted follow-up cap per main channel)
+        maxPerUserPerDay: 1 # (same target user daily cap)
+        openLoopMaxAgeMs: 172800000 # (oldest memory/open-loop anchor allowed)
+# Default trigger settings (guilds can override)
+triggers:
+    mention: true # (respond when @mentioned)
+    keywords:
+        - "2b"
+        - "тубишка"
+        - "туби"
+    randomChance: 0.001 # (0-1 probability of responding to any message)
+    keywordDebounceMs: 2000 # (wait this long after a keyword trigger before replying)
+    typingIdleMs: 10000 # (treat typingStart from the triggering user as active for this long)
+    typingResumeGraceMs: 5000 # (brief wait after a same-user chunk to catch continued typing)
+    typingMaxWaitMs: 120000 # (hard cap for typing-aware keyword/mention waits)
+
+dispatcher:
+    enabled: true # (serialize/debounce per-channel message handling)
+    mentionDebounceMs: 2000 # (used for mentions only when typing-aware waits are disabled)
+    defaultDebounceMs: 2000 # (debounce for non-mention dispatcher batches)
+
+typingSimulation:
+    enabled: true # (pace Discord typing indicators and outgoing segments)
+    inputReadingWpm: 450 # (hidden delay before typing indicator based on input size)
+    inputMinDelayMs: 300 # (minimum hidden pre-typing delay)
+    inputMaxDelayMs: 3500 # (maximum hidden pre-typing delay)
+    outputTypingWpm: 80 # (visible typing hold speed before sending)
+    outputMinHoldMs: 700 # (minimum visible typing hold)
+    outputMaxHoldMs: 3500 # (maximum visible typing hold)
+
+# Emote/emoji settings
+emotes:
+    include: false # (include available server emojis in LLM context)
+
+members:
+    include: false # (include server members list in context)
+
+# ElevenLabs text-to-speech configuration (requires ELEVENLABS_API_KEY env var)
+# When enabled, the bot can send voice messages as audio attachments
+tts:
+    enabled: true # (allow <voice>/<audio> output as ElevenLabs attachment)
+    voices:
+        normal:
+            voiceId: WAhoMTNdLdMoq1j3wf3I # (ElevenLabs voice ID)
+            # voiceId: g0QruJYStgk5oVbpq3Uv
+            stability: 0.65 # (higher is steadier, lower is more expressive)
+            applyTextNormalization: "on" # (normalize numbers/symbols before speech)
+            outputFormat: mp3_44100_128 # (audio codec/sample/bitrate)
+            speed: 1.15 # (voice playback/speech speed)
+            style: 0.0 # (ElevenLabs style exaggeration)
+            seed: 1 # (best-effort consistency seed)
+            similarityBoost: 0.70 # (how strongly to preserve selected voice identity)
+            model: eleven_v3
+        # whisper is obsolete and ignored. Use Eleven v3 tags like [whispers] inside <voice>...</voice>.
+        # whisper:
+        #     voiceId: WAhoMTNdLdMoq1j3wf3I
+        #     # speed: 1.05
+        #     # stability: 0.5
+        #     # similarityBoost: 0.4
+        #     model: eleven_v3
+
+# Max image dimension (larger images resized to fit)
+imageMaxDimension: 768 # (longest edge stored for uploaded user images)
+
+# Max seconds between messages to merge consecutive same-author messages
+mergeMessageGapSeconds: 90 # (gap threshold for merging same-author history messages)
+
+# Max images the LLM can read in a single read_chat_images call
+imageReadMaxPerCall: 10 # (max stored images one read_chat_images call can load)
+
+# Untrusted web-image inspection and generation-reference limits
+externalImages:
+    maxImagesPerCall: 5
+    maxBytes: 20971520
+    timeoutMs: 15000
+    maxRedirects: 5
+    maxDimension: 1920
+    maxPageImages: 10
+
+# Lazy message-asset reading, transcription, and video preview limits
+assetReading:
+    maxCharsPerRead: 30000
+    maxDownloadBytes: 104857600
+    maxTranscriptionDurationSeconds: 7200
+    videoPreviewMaxBytes: 104857600
+    videoPreviewTimesSeconds: [0, 1, 5]
+    videoPreviewTimeoutSeconds: 30
+    timeoutSeconds:
+        image: 30
+        gif: 30
+        audio: 90
+        video: 180
+        text: 30
+        file: 30
+
+# Codex image generation request settings
+imageGeneration:
+    quality: "high" # (Codex image generation quality hint)
+
+# If the main model cannot read image input, describe images with this vision model
+# and return that description from image tools instead.
+imageReading:
+    fallbackEnabled: true # (use separate vision model when main model cannot read images)
+    fallbackProvider: "openai-codex"
+    fallbackModel: "gpt-5.5"
+
+# Enable automatic image captioning (requires captioning model)
+imageCaptioningEnabled: false # (caption images automatically as they are stored)
+
+# Log level: debug | info | warn | error
+logLevel: debug # (runtime log verbosity)
+
+# Directory for SQLite database and attachments
+dataDir: data # (SQLite database and attachment storage root)
+
+uiLang: ru # (language for built-in admin/VPN UI messages)
+# VPN configuration (WireGuard profile management)
+# VPN_API_URL and VPN_PEER supply the credentials without storing them here.
+vpn:
+    enabled: true # (enable /vpn command)
+    apiUrl: ""
+    vpnPeer: ""

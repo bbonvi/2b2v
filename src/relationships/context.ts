@@ -85,8 +85,8 @@ function relationshipStance(profile: RelationshipProfile): string {
     .slice(0, 6)
     .map((entry) => entry.phrase);
   return phrases.length > 0
-    ? `2B ${sentenceList(phrases)}.`
-    : "2B has no strong stored feeling toward this user yet.";
+    ? `The persona ${sentenceList(phrases)}.`
+    : "The persona has no strong stored feeling toward this user yet.";
 }
 
 function compactProfileLine(entry: RelationshipContextProfile): string {
@@ -115,7 +115,7 @@ export function renderRelationshipPromptContext(input: {
       "## Relationship With Current User",
       policy,
       `Subject: ${input.currentLabel}.`,
-      "This is 2B's stored relationship stance toward this user.",
+      "This is your stored relationship stance toward this user.",
       input.computedContact !== undefined ? `Computed contact: ${input.computedContact}` : "",
       "No stored relationship profile yet.",
       input.others !== undefined && input.others.length > 0
@@ -131,7 +131,7 @@ export function renderRelationshipPromptContext(input: {
     "## Relationship With Current User",
     policy,
     `Subject: ${input.currentLabel}.`,
-    "This is 2B's stored relationship stance toward this user.",
+    "This is your stored relationship stance toward this user.",
     input.computedContact !== undefined ? `Computed contact: ${input.computedContact}` : "",
     `Relationship stance: ${relationshipStance(current)}`,
     notes !== "" ? `Notes: ${notes}.` : "",

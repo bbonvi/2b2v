@@ -14,9 +14,10 @@ Personal Discord bot.
 
 ```bash
 cp .env.example .env
-cp config/config.yaml.example config/config.yaml
-cp config/guilds/000000000-example.yaml.example config/guilds/<YOUR_GUILD_ID>-<slug>.yaml
+cp profiles/2b/guilds/000000000-example.yaml.example profiles/2b/guilds/<YOUR_GUILD_ID>-<slug>.yaml
 ```
+
+Set `PROFILE=2b` or `PROFILE=delamain` in the environment file used by the stack.
 
 Development:
 
@@ -51,14 +52,22 @@ docker compose -f docker-compose.dev.yml exec bot bun run codex:login -- --auth 
 
 Treat Codex auth JSON as a secret. See `.env.example` and `.env.prod.example` for optional keys and infrastructure settings.
 
-## Configuration
+## Profiles
 
-Copy and edit the example files:
+Each profile owns its configuration, guild overrides, and persona-specific instructions. Shared runtime instructions live alongside them:
 
-- Global defaults: `config/config.yaml`
-- Guild config: `config/guilds/<id>-<slug>.yaml`
-- Persona/style prompts: `prompts/core/`
-- Runtime policy prompts: `prompts/runtime/`
+- `profiles/2b/config.yaml`, `profiles/2b/guilds/`, and `profiles/2b/instructions/`
+- `profiles/delamain/config.yaml` and `profiles/delamain/instructions/`
+- `profiles/shared/instructions/`
+
+Select the complete profile with one environment variable:
+
+```bash
+PROFILE=2b bun run dev
+PROFILE=delamain bun run dev
+```
+
+The Delamain profile disables relationships, ambient memory extraction, ambient attention, ambient initiative, and VPN. Profile-specific instruction files override shared files at the same relative path; skill packs override by manifest ID.
 
 Minimal guild config:
 
@@ -72,7 +81,7 @@ timezone: UTC
 adminUserIds: []
 ```
 
-All fields are optional unless the matching feature needs credentials or IDs. Live config files are ignored by git except committed `.example` files.
+All config fields are optional unless the matching feature needs credentials or IDs. `PROFILE` selects configuration and instructions together.
 
 Message uploads, embeds, and stickers appear in history and current-event metadata as typed references such as `Images: #12 photo.png` and `Audio: #13 voice.ogg`. Media is fetched lazily from Discord. Text and timestamped transcripts support regex search plus bounded line reads; `assetReading` controls output/download limits, per-kind timeouts, transcription duration, and video preview frames. Docker images include FFmpeg and ripgrep for media preview and safe regex search.
 
@@ -81,6 +90,7 @@ Web visuals use `search_images` for Brave image discovery, `fetch_url` for reada
 Verification:
 
 ```bash
+make check-profiles
 make check
 make test
 ```

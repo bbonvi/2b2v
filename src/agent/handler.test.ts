@@ -6,7 +6,7 @@ import type { AssembledContext, ContextSection } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig, PromptTransportConfig } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
 import { RequestLog } from "../logger.ts";
-import type { RuntimePromptBundle } from "../config/prompt-bundle.ts";
+import type { RuntimePromptBundle } from "../config/instruction-bundle.ts";
 import type { OpenRouterMessage } from "../llm/types.ts";
 
 const TEST_RUNTIME_PROMPTS = {
@@ -17,6 +17,8 @@ const TEST_RUNTIME_PROMPTS = {
   contextTemplates: {
     "agent-time-budget-exhausted": "Native turn time budget exhausted after {{timeoutMs}}ms; stop tool use.",
     "memory-pass-decision": "Review only strongly implied durable facts. Before adding, check existing memories. Prefer expiresIn for relative expiry.",
+    "visible-reply-execution-mode": "## Execution Mode: Visible Reply\nPersona-specific visible mode.",
+    "scheduled-task-execution-mode": "## Scheduled Task Context\nPersona-specific scheduled mode.",
   },
   memoryContextTemplates: {},
   imageDescriptionSystemPrompt: [
@@ -127,7 +129,6 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultImageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
     defaultImageGeneration: { quality: "auto" },
     defaultAttachmentsDir: "data/attachments",
-    defaultInstructions: "",
     logLevel: "info",
     dataDir: "./data",
     uiLang: "en",
@@ -504,6 +505,7 @@ describe("handleMessage", () => {
       expect(text).toContain(TEST_RUNTIME_PROMPTS.skills.indexPrompt.trim());
       expect(text).toContain(TEST_RUNTIME_PROMPTS.reply.trim());
       expect(text).toContain(TEST_RUNTIME_PROMPTS.finalActionInstruction.trim());
+      expect(text).toContain(TEST_RUNTIME_PROMPTS.contextTemplates["visible-reply-execution-mode"]);
       expect(text.indexOf(TEST_RUNTIME_PROMPTS.reply.trim())).toBeLessThan(text.indexOf("## Memory"));
       return Promise.resolve({
         text: "done",
@@ -555,7 +557,7 @@ describe("handleMessage", () => {
       expect(currentTurn).toContain("Trigger AuthorIsBot: false");
       expect(currentTurn).toContain("Trigger ReplyToMsgID: parent-msg");
       expect(currentTurn).toContain("Audio: #29 chunk_08.wav");
-      expect(currentTurn).toContain("Reply Context: The current event replies to a message 2B previously sent here from another channel.");
+      expect(currentTurn).toContain("Reply Context: The current event replies to a message you previously sent here from another channel.");
       expect(currentTurn).toContain("Source GuildID: source-guild");
       expect(currentTurn).toContain("Source ChannelID: source-channel");
       expect(currentTurn).toContain("Source MsgID: source-msg");

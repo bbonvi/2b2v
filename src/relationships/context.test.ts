@@ -21,7 +21,7 @@ describe("renderRelationshipPromptContext", () => {
     expect(rendered).not.toContain("personally open");
   });
 
-  test("names 2B relationship subject explicitly and keeps other users compact", () => {
+  test("addresses the active persona directly and keeps other users compact", () => {
     const current = emptyRelationshipProfile("u1", 1);
     current.axes.warmth = 15;
     current.axes.trust = 14;
@@ -45,15 +45,15 @@ describe("renderRelationshipPromptContext", () => {
     });
 
     expect(rendered).toContain("## Relationship With Current User");
-    expect(rendered).toContain("This is 2B's stored relationship stance toward this user.");
+    expect(rendered).toContain("This is your stored relationship stance toward this user.");
     expect(rendered).toContain("Computed contact: observed history with this user; familiarity.");
     expect(rendered).toContain("Subject: @alice / u1.");
-    expect(rendered).toContain("Relationship stance: 2B feels warm toward them, trusts them, and is slightly more personally open with them.");
+    expect(rendered).toContain("Relationship stance: The persona feels warm toward them, trusts them, and is slightly more personally open with them.");
     expect(rendered).toContain("Notes: first note; second note; third note.");
     expect(rendered).toContain("Boundaries: first boundary; second boundary.");
     expect(rendered).toContain("Open loops: first loop; second loop.");
     expect(rendered).toContain("Recent signals: first signal; second signal.");
-    expect(rendered).toContain("- @bob / u2: 2B trusts them; other note.");
+    expect(rendered).toContain("- @bob / u2: The persona trusts them; other note.");
     expect(rendered).not.toContain(".;");
     expect(rendered).not.toContain("。;");
     expect(rendered).not.toContain(";;");

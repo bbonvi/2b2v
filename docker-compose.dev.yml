@@ -12,8 +12,7 @@ services:
       UNSAFELY_BYPASS_DASHBOARD_AUTH: "true"
     volumes:
       - ./src:/app/src
-      - ./prompts:/app/prompts
-      - ./config:/app/config
+      - ./profiles:/app/profiles:ro
       - ./package.json:/app/package.json
       - ./tsconfig.json:/app/tsconfig.json
       - dev-data:/app/data

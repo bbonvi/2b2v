@@ -514,7 +514,6 @@ export interface GlobalConfig {
   defaultImageGeneration: ImageGenerationConfig;
   defaultAttachmentsDir: string;
   defaultAssetReading?: AssetReadingConfig;
-  defaultInstructions: string;
   logLevel: string;
   dataDir: string;
   elevenLabsApiKey?: string;
@@ -653,7 +652,7 @@ export interface GuildConfigYaml {
   };
 }
 
-/** Raw shape of the main config YAML file (config/config.yaml). All optional. */
+/** Raw shape of a profile's config YAML file. All optional. */
 export interface MainConfigYaml {
   llmProvider?: LlmProvider;
   model?: string;

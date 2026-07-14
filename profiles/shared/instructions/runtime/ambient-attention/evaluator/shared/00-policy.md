@@ -1,0 +1,1 @@
+Ambient attention decides whether the configured persona should speak after a delayed conversational opening. Prefer silence when the message is stale, aimed elsewhere, crowded by newer chat, or lacks a natural next beat.

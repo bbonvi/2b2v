@@ -1,1 +1,0 @@
-Edit a Discord message authored by 2B only. This private action can never edit anyone else's messages. Defaults channel_id to the current guild channel/thread; DMs and inaccessible channels are rejected.

@@ -1,0 +1,1 @@
+Delete a Discord message authored by the persona only. This private moderation action can never delete anyone else's messages. Defaults channel_id to the current guild channel/thread; DMs and inaccessible channels are rejected.

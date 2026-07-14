@@ -11,10 +11,7 @@ services:
     volumes:
       - bot-data:/app/data
       - model-cache:/app/model-cache
-      - ./config/config.prod.yaml:/app/config/config.yaml:ro
-      - ./config/guilds:/app/config/guilds:ro
-      # - ./prompts:/app/prompts:ro
-      - ./prompts-prod:/app/prompts:ro
+      - ./profiles:/app/profiles:ro
     ports:
       - "127.0.0.1:${DASHBOARD_PORT:-31456}:3000"
     depends_on:

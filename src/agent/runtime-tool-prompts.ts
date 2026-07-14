@@ -1,5 +1,5 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { RuntimePromptBundle } from "../config/prompt-bundle.ts";
+import type { RuntimePromptBundle } from "../config/instruction-bundle.ts";
 import { renderPromptTemplate, type PromptTemplateVariables } from "../config/prompt-template.ts";
 
 export type ToolPromptVariables = Record<string, PromptTemplateVariables>;
