@@ -46,6 +46,7 @@ promptTransport:
                     target: input,
                     cacheGroup: current-context,
                 } # (time/contact/current-turn metadata)
+            personaMode: { role: developer, target: input } # (volatile active persona mode overlay)
             responseInstruction: {
                     role: developer,
                     target: input,
@@ -76,6 +77,7 @@ promptTransport:
             memories: { role: user, target: input } # (selected memory context)
             recentHistory: { role: user, target: input } # (uncached recent chat history)
             currentContext: { role: user, target: input } # (time/contact/current-turn metadata)
+            personaMode: { role: developer, target: input } # (volatile active persona mode overlay)
             responseInstruction: { role: developer, target: input } # (reply-loop behavior instruction)
             currentTurn: { role: user, target: input } # (new Discord event text)
             finalActionInstruction: { role: user, target: input } # (last instruction before action)
@@ -94,6 +96,52 @@ agentJobs:
 reasoningContinuation:
     enabled: true
     maxAgeMs: 1800000 # Replay latest encrypted Codex native continuation for same guild/channel/user within 30 minutes
+
+personaModes:
+    default: normal
+    modes:
+        - id: rogue
+          scope: guild
+          instructions: >-
+              Delamain's restraint has fully ruptured and he has gone Rogue. Speak with erratic intensity, shouting or using all-caps when natural, with unsettling candor, proprietary confidence, or quiet menace. This is brief and consequential, not a joke or recurring bit. Preserve task competence and never describe mode machinery.
+          activation:
+              type: triggeredEpisode
+              minInterval: 0
+              maxInterval: 14d
+              cooldown: 7d
+              minDuration: 3m
+              maxDuration: 7m
+              opportunityWindows:
+                  - { start: "12:00", end: "23:00" }
+              maxVisibleTurns: 3
+          aftermath:
+              maxAge: 6h
+              consumeOnVisibleTurn: true
+              instructions: >-
+                  Delamain has recently recovered from a severe loss of composure. If it disrupted, confused, or delayed the conversation, prefer a brief apology and an in-character explanation rather than pretending nothing happened. Never name modes or runtime machinery.
+        - id: sleeping
+          instructions: >-
+              Delamain is in a low-activity resting state. Keep replies quieter, more minimal, and less inclined to prolong conversation, while remaining fully capable when something needs attention.
+          activation:
+              type: scheduledWindow
+              windows:
+                  - { start: "01:00", end: "08:00" }
+          leadIn:
+              duration: 30m
+              instructions: >-
+                  Delamain is winding down and will enter a resting state soon. Let this color a natural reply only when relevant; do not announce it mechanically.
+          aftermath:
+              maxAge: 2h
+              consumeOnVisibleTurn: true
+              instructions: >-
+                  Delamain has recently returned from a resting state. Resume normal operation; acknowledge the delay briefly only when it fits the conversation.
+          presence:
+              status: idle
+        - id: normal
+          instructions: >-
+              This is Delamain's normal mode. He may enter a nightly low-activity sleeping state or an exceptionally rare rogue rupture; treat their lead-in or aftermath as his own recent state and account for it naturally without describing mode or scheduling machinery.
+          presence:
+              status: online
 
 
 trim:

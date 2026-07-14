@@ -840,6 +840,7 @@ const VOLATILE_SECTION_IDS_BY_LABEL: Readonly<Record<string, PromptTransportSect
   "Server Members": "serverMembers",
   "Threads In This Channel": "threadsInChannel",
   "Current Context": "currentContext",
+  "Persona Mode": "personaMode",
   "Response Instruction": "responseInstruction",
 };
 
@@ -851,6 +852,7 @@ const VOLATILE_SECTION_ORDER: readonly PromptTransportSectionId[] = [
   "serverMembers",
   "threadsInChannel",
   "currentContext",
+  "personaMode",
   "responseInstruction",
 ];
 

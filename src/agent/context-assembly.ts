@@ -55,6 +55,8 @@ export interface ContextAssemblyInput {
   olderHistory: string;
   newerHistory: string;
   currentContext: string;
+  /** Active persona mode plus optional lead-in and aftermath instructions. */
+  personaMode: string;
   /** Optional volatile response instruction placed after all history/context sections. */
   responseInstruction: string;
   userMessage: string;
@@ -109,6 +111,7 @@ export const SECTION_DEFS: readonly SectionDef[] = [
   { label: "Memories",             role: "developer", cached: false, source: { kind: "field", inputKey: "memories", header: "## Memory" } },
   { label: "Chat History — Newer", role: "developer", cached: false, source: { kind: "field", inputKey: "newerHistory" } },
   { label: "Current Context",      role: "developer", cached: false, source: { kind: "field", inputKey: "currentContext", header: "## Current Context" } },
+  { label: "Persona Mode",         role: "developer", cached: false, source: { kind: "field", inputKey: "personaMode", header: "## Persona Mode" } },
   { label: "Response Instruction", role: "developer", cached: false, source: { kind: "field", inputKey: "responseInstruction" } },
 ];
 

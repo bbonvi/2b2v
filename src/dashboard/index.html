@@ -138,6 +138,82 @@
   .content { padding: 1rem 1.25rem; }
   .content[hidden] { display: none; }
 
+  .mode-rail {
+    --mode-accent: var(--accent);
+    position: sticky;
+    top: 48px;
+    z-index: 90;
+    display: grid;
+    grid-template-columns: minmax(180px, .8fr) minmax(320px, 2fr) minmax(190px, .8fr);
+    align-items: stretch;
+    background: #0b0d0f;
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 8px 20px rgba(0,0,0,.22);
+  }
+  .mode-rail[hidden] { display: none; }
+  .mode-rail[data-mode="sleeping"] { --mode-accent: #7b8fb8; }
+  .mode-rail[data-mode="rogue"] { --mode-accent: var(--red); }
+  .mode-primary, .mode-timeline, .mode-presentation {
+    min-width: 0;
+    padding: .7rem 1.25rem .75rem;
+  }
+  .mode-primary {
+    border-left: 3px solid var(--mode-accent);
+    display: grid;
+    align-content: center;
+  }
+  .mode-timeline, .mode-presentation { border-left: 1px solid var(--border); }
+  .mode-kicker {
+    color: var(--text-dim);
+    font: 600 .6rem/1.2 var(--sans);
+    letter-spacing: .14em;
+    text-transform: uppercase;
+  }
+  .mode-name {
+    color: var(--text-bright);
+    font: 600 1rem/1.25 var(--sans);
+    margin-top: .2rem;
+  }
+  .mode-current-detail, .mode-presentation-value {
+    color: var(--text-dim);
+    font-size: .67rem;
+    margin-top: .12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mode-timeline-value {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    min-height: 1.7rem;
+    margin-top: .16rem;
+    overflow: hidden;
+  }
+  .mode-event {
+    color: var(--text);
+    font-size: .68rem;
+    white-space: nowrap;
+  }
+  .mode-event + .mode-event::before {
+    content: "→";
+    color: var(--border-active);
+    margin-right: .55rem;
+  }
+  .mode-event strong { color: var(--text-bright); font-weight: 500; }
+  .mode-presentation { display: grid; align-content: center; }
+  .mode-presentation-value[data-state="retrying"] { color: var(--amber); }
+  .mode-presentation-value[data-state="updating"],
+  .mode-presentation-value[data-state="waiting"] { color: var(--accent); }
+  @media (max-width: 840px) {
+    .topbar { position: static; height: auto; min-height: 48px; flex-wrap: wrap; padding: .5rem .75rem; }
+    .mode-rail { position: static; grid-template-columns: 1fr auto; }
+    .mode-timeline { grid-column: 1 / -1; grid-row: 2; border-left: 3px solid transparent; border-top: 1px solid var(--border); }
+    .mode-primary, .mode-timeline, .mode-presentation { padding: .6rem .75rem; }
+    .mode-presentation { text-align: right; }
+    .mode-timeline-value { overflow-x: auto; }
+  }
+
   .log-count {
     font-size: .65rem;
     color: var(--text-dim);
@@ -1297,6 +1373,22 @@
   </div>
 </div>
 
+<section class="mode-rail" id="mode-rail" aria-live="polite" aria-label="Persona mode status">
+  <div class="mode-primary">
+    <span class="mode-kicker" id="mode-profile">Persona mode</span>
+    <strong class="mode-name" id="mode-name">Loading</strong>
+    <span class="mode-current-detail" id="mode-current-detail">Reading runtime state…</span>
+  </div>
+  <div class="mode-timeline">
+    <span class="mode-kicker">Timeline</span>
+    <div class="mode-timeline-value" id="mode-timeline-value"></div>
+  </div>
+  <div class="mode-presentation">
+    <span class="mode-kicker">Discord presentation</span>
+    <span class="mode-presentation-value" id="mode-presentation-value">Waiting</span>
+  </div>
+</section>
+
 <div class="content" id="log-view">
   <div class="log-count" id="log-count"></div>
   <div id="log-list"></div>
@@ -1380,6 +1472,12 @@
   const btnRefresh = document.getElementById('btn-refresh');
   const statusBadge = document.getElementById('status-badge');
   const statusText = document.getElementById('status-text');
+  const modeRail = document.getElementById('mode-rail');
+  const modeProfile = document.getElementById('mode-profile');
+  const modeName = document.getElementById('mode-name');
+  const modeCurrentDetail = document.getElementById('mode-current-detail');
+  const modeTimelineValue = document.getElementById('mode-timeline-value');
+  const modePresentationValue = document.getElementById('mode-presentation-value');
   const tabLogs = document.getElementById('tab-logs');
   const tabManagement = document.getElementById('tab-management');
   const tabRelationship = document.getElementById('tab-relationships');
@@ -1450,6 +1548,126 @@
       second: '2-digit',
       hour12: false
     });
+  }
+
+  function readableModeName(id) {
+    return String(id || 'unknown').replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  function modeLocalTime(ms, timezone, includeDate) {
+    const options = includeDate
+      ? { timeZone: timezone, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }
+      : { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false };
+    return new Intl.DateTimeFormat('en-GB', options).format(new Date(ms));
+  }
+
+  function conciseDistance(targetMs) {
+    const delta = Math.abs(targetMs - Date.now());
+    if (delta < 60000) return '<1m';
+    const minutes = Math.floor(delta / 60000);
+    if (minutes < 60) return minutes + 'm';
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return hours + 'h ' + (minutes % 60) + 'm';
+    return Math.floor(hours / 24) + 'd ' + (hours % 24) + 'h';
+  }
+
+  function renderPersonaMode(status) {
+    if (status.enabled !== true || status.current == null) {
+      modeRail.hidden = true;
+      return;
+    }
+    modeRail.hidden = false;
+    const guilds = Array.isArray(status.guilds) ? status.guilds : [];
+    const activeGuilds = guilds.filter(entry => entry.status != null && entry.status.current != null);
+    modeRail.dataset.mode = activeGuilds[0]?.status.current.id || status.current.id;
+    modeProfile.textContent = (status.profile || 'Persona') + ' · ' + status.timezone;
+    modeName.textContent = readableModeName(status.current.id) + ' globally';
+    const currentDetails = [];
+    if (status.current.endsAt != null) {
+      currentDetails.push('until ' + modeLocalTime(status.current.endsAt, status.timezone, false));
+      currentDetails.push(conciseDistance(status.current.endsAt) + ' remaining');
+    } else {
+      currentDetails.push('default state');
+    }
+    if (status.current.visibleTurns != null && status.current.maxVisibleTurns != null) {
+      currentDetails.push(status.current.visibleTurns + '/' + status.current.maxVisibleTurns + ' visible turns');
+    }
+    if (activeGuilds.length > 0) {
+      currentDetails.push(activeGuilds.length + (activeGuilds.length === 1 ? ' guild override' : ' guild overrides'));
+    }
+    modeCurrentDetail.textContent = currentDetails.join(' · ');
+
+    const events = [];
+    for (const entry of activeGuilds) {
+      const current = entry.status.current;
+      const turns = current.visibleTurns != null && current.maxVisibleTurns != null
+        ? ' · ' + current.visibleTurns + '/' + current.maxVisibleTurns + ' turns'
+        : '';
+      const remaining = current.endsAt != null ? ' · ' + conciseDistance(current.endsAt) + ' left' : '';
+      events.push('<span class="mode-event"><strong>' + esc(readableModeName(current.id)) + ' active</strong> · ' + esc(entry.guildName || entry.guildId) + esc(turns + remaining) + '</span>');
+    }
+    if (status.aftermath != null) {
+      events.push('<span class="mode-event"><strong>' + esc(readableModeName(status.aftermath.modeId)) + ' aftermath</strong> · expires in ' + esc(conciseDistance(status.aftermath.expiresAt)) + '</span>');
+    }
+    const upcoming = (status.upcoming || []).map(event => ({ event, guildName: '' }));
+    for (const entry of guilds) {
+      for (const event of (entry.status?.upcoming || [])) {
+        upcoming.push({ event, guildName: entry.guildName || entry.guildId });
+      }
+      if (entry.status?.aftermath != null) {
+        events.push('<span class="mode-event"><strong>' + esc(readableModeName(entry.status.aftermath.modeId)) + ' aftermath</strong> · ' + esc(entry.guildName || entry.guildId) + ' · ' + esc(conciseDistance(entry.status.aftermath.expiresAt)) + ' left</span>');
+      }
+    }
+    upcoming.sort((a, b) => a.event.startsAt - b.event.startsAt);
+    for (const item of upcoming.slice(0, Math.max(0, 3 - events.length))) {
+      const event = item.event;
+      const owner = item.guildName === '' ? '' : ' · ' + item.guildName;
+      if (event.kind === 'episode' && event.startsAt <= Date.now()) {
+        const deadline = event.activationDeadlineAt || event.windowEndsAt;
+        events.push('<span class="mode-event"><strong>' + esc(readableModeName(event.modeId)) + ' eligible now</strong>' + esc(owner) + ' · until ' + esc(modeLocalTime(deadline, status.timezone, false)) + '</span>');
+      } else {
+        const kind = event.kind === 'episode' ? 'opportunity' : 'starts';
+        const date = modeLocalTime(event.startsAt, status.timezone, true);
+        events.push('<span class="mode-event"><strong>' + esc(readableModeName(event.modeId)) + '</strong> ' + kind + esc(owner) + ' · ' + esc(date) + ' · in ' + esc(conciseDistance(event.startsAt)) + '</span>');
+      }
+    }
+    const visibleEvents = events.slice(0, 3);
+    if (events.length > visibleEvents.length) {
+      visibleEvents.push('<span class="mode-event">+' + (events.length - visibleEvents.length) + ' more</span>');
+    }
+    modeTimelineValue.innerHTML = visibleEvents.length > 0
+      ? visibleEvents.join('')
+      : '<span class="mode-event">No upcoming transition planned</span>';
+
+    const presence = status.current.presence;
+    const presentation = status.presentation || { avatar: 'disabled' };
+    const parts = [presentation.desiredAvatarId || status.current.avatarId];
+    if (presence != null) parts.push(presence.status === 'idle' ? 'away' : presence.status);
+    if (presence != null && presence.activity != null) parts.push(presence.activity.name);
+    if (presentation.avatar === 'retrying' && presentation.retryAt != null) {
+      parts.push('retry in ' + conciseDistance(presentation.retryAt));
+    } else if (presentation.avatar !== 'applied') {
+      parts.push(presentation.avatar);
+    }
+    const guildOverrides = guilds.filter(entry => entry.status?.current != null);
+    const guildRetries = guilds.filter(entry => entry.status?.presentation?.avatar === 'retrying');
+    if (guildOverrides.length > 0) parts.push(guildOverrides.length + ' local avatar' + (guildOverrides.length === 1 ? '' : 's'));
+    if (guildRetries.length > 0) parts.push(guildRetries.length + (guildRetries.length === 1 ? ' local avatar retry' : ' local avatar retries'));
+    modePresentationValue.dataset.state = guildRetries.length > 0 ? 'retrying' : presentation.avatar;
+    modePresentationValue.textContent = parts.join(' · ');
+  }
+
+  async function refreshPersonaMode() {
+    try {
+      const response = await fetch('/api/persona-modes');
+      if (response.status === 401) { location.href = '/login'; return; }
+      if (!response.ok) throw new Error('mode status unavailable');
+      renderPersonaMode(await response.json());
+    } catch {
+      modeCurrentDetail.textContent = 'Runtime status unavailable';
+      modeTimelineValue.innerHTML = '';
+      modePresentationValue.textContent = 'Unknown';
+    }
   }
 
   function jsStr(s) {
@@ -2856,6 +3074,7 @@
   }
 
   let statusPollTimer = null;
+  let modeStatusPollTimer = null;
   let logPollTimer = null;
   let logPollingActive = false;
   let managementPollTimer = null;
@@ -2881,7 +3100,9 @@
 
   function startPolling() {
     refreshStatus();
+    refreshPersonaMode();
     if (statusPollTimer === null) statusPollTimer = setInterval(refreshStatus, 1000);
+    if (modeStatusPollTimer === null) modeStatusPollTimer = setInterval(refreshPersonaMode, 5000);
     if (!logPollingActive) {
       logPollingActive = true;
       pollLogs();
@@ -2893,6 +3114,10 @@
     if (statusPollTimer !== null) {
       clearInterval(statusPollTimer);
       statusPollTimer = null;
+    }
+    if (modeStatusPollTimer !== null) {
+      clearInterval(modeStatusPollTimer);
+      modeStatusPollTimer = null;
     }
     if (logPollTimer !== null) {
       clearTimeout(logPollTimer);

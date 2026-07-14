@@ -169,6 +169,12 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_schedules_guild_channel_enabled
     ON schedules(guild_id, channel_id, enabled);
 
+  CREATE TABLE IF NOT EXISTS persona_mode_context_state (
+    scope_key    TEXT PRIMARY KEY,
+    state_json   TEXT NOT NULL,
+    updated_at   INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS message_assets (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id            TEXT NOT NULL,

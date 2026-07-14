@@ -111,6 +111,7 @@ export function createPromptLabRunner(input: {
     dryRun?: boolean;
   }) => AgentTool[];
   createHandlerDeps: (input: {
+    guildId: string;
     guildConfig: GuildConfig;
     context: AssembledContext;
     currentChannelId: string;
@@ -119,6 +120,7 @@ export function createPromptLabRunner(input: {
     log: Logger;
     requestLog: RequestLog;
     resolveAssetAttachments?: HandlerDeps["resolveAssetAttachments"];
+    modeLifecycle?: boolean;
     overrides?: Partial<HandlerDeps>;
   }) => HandlerDeps;
   runMemoryPostReplyExtraction: (input: {
@@ -440,6 +442,7 @@ export function createPromptLabRunner(input: {
       const result = await handleMessage(
         incomingMessage,
         input.createHandlerDeps({
+          guildId: runInput.guildId,
           guildConfig,
           context,
           currentChannelId: runInput.channelId,
@@ -447,6 +450,7 @@ export function createPromptLabRunner(input: {
           extraTools: visibleTools,
           log: input.log.child({ guildId: runInput.guildId, channelId: runInput.channelId, requestId: requestLog.requestId, component: "prompt-lab" }),
           requestLog,
+          modeLifecycle: false,
           resolveAssetAttachments: () => Promise.resolve([]),
           overrides: {
             triggerOverride: { reason: "mention" },

@@ -1,6 +1,6 @@
 import { parse, stringify } from "yaml";
 import { readFileSync, readdirSync, writeFileSync, existsSync } from "fs";
-import { join, basename } from "path";
+import { join, basename, dirname } from "path";
 import {
   DEFAULT_AGENT_JOBS,
   DEFAULT_ASSET_READING,
@@ -76,6 +76,7 @@ import type {
   ExternalImagesConfig,
 } from "./types.ts";
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
+import { resolvePersonaModesConfig } from "../modes/config.ts";
 
 function resolveAssetReadingConfig(input: AssetReadingConfigYaml | undefined, fallback: AssetReadingConfig = DEFAULT_ASSET_READING): AssetReadingConfig {
   const positive = (value: number | undefined, fallback: number, name: string): number => {
@@ -995,6 +996,7 @@ export function loadGlobalConfig(
   const defaultAmbientAttention = resolveAmbientAttentionConfig(undefined, yaml.ambientAttention);
   const defaultAmbientInitiative = resolveAmbientInitiativeConfig(undefined, yaml.ambientInitiative);
   const defaultRelationships = resolveRelationshipConfig(undefined, yaml.relationships);
+  const personaModes = resolvePersonaModesConfig(yaml.personaModes, dirname(configPath));
   const openrouterApiKey = env.OPENROUTER_API_KEY;
   const usesOpenRouter = defaultLlmProvider === "openrouter"
     || yaml.backgroundLlm?.provider === "openrouter"
@@ -1077,6 +1079,7 @@ export function loadGlobalConfig(
     defaultReasoningContinuation: resolveGlobalReasoningContinuation(yaml.reasoningContinuation),
     defaultMemoryExtraction: resolveGlobalMemoryExtraction(yaml.memoryExtraction),
     defaultRelationships,
+    personaModes,
   };
 }
 

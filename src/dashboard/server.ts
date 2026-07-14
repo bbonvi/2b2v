@@ -21,6 +21,7 @@ type DashboardManagementResult = object;
 type AwaitableDashboardManagementResult = DashboardManagementResult | Promise<DashboardManagementResult>;
 
 interface DashboardManagementApi {
+  getPersonaModeStatus?: () => AwaitableDashboardManagementResult;
   getDirectory: () => ManagementDirectory;
   listMessages: (filter: { guildId?: string; channelId?: string; limit?: number }) => AwaitableDashboardManagementResult;
   editMessage: (input: { messageId: string; guildId: string; channelId: string; content: string }) => AwaitableDashboardManagementResult;
@@ -328,6 +329,13 @@ export function startDashboard(opts: DashboardOptions): void {
         const denied = requireAuth(req);
         if (denied !== null) return denied;
         return json({ activeRequests: requestLogStore.getActiveCount() });
+      },
+
+      "/api/persona-modes": async (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        if (management?.getPersonaModeStatus === undefined) return json({ error: "Persona modes are unavailable" }, 404);
+        return json(await management.getPersonaModeStatus());
       },
 
       "/api/management/directory": (req) => {

@@ -1,5 +1,6 @@
 import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 import type { AssetKind } from "../db/asset-repository.ts";
+import type { PersonaModesConfig, PersonaModesConfigYaml } from "../modes/types.ts";
 
 /** UI language for VPN panel. */
 export type UiLang = "en" | "ru";
@@ -93,6 +94,7 @@ export type PromptTransportSectionId =
   | "memories"
   | "recentHistory"
   | "currentContext"
+  | "personaMode"
   | "responseInstruction"
   | "currentTurn"
   | "finalActionInstruction";
@@ -552,6 +554,8 @@ export interface GlobalConfig {
   defaultMemoryExtraction: MemoryExtractionConfig;
   /** Default durable relationship-profile behavior. */
   defaultRelationships?: RelationshipConfig;
+  /** Profile-local timed persona modes and presentation state. */
+  personaModes?: PersonaModesConfig;
 }
 
 /** Full resolved app config. */
@@ -724,6 +728,7 @@ export interface MainConfigYaml {
   ambientAttention?: AmbientAttentionConfigYaml;
   ambientInitiative?: AmbientInitiativeConfigYaml;
   relationships?: RelationshipConfigYaml;
+  personaModes?: PersonaModesConfigYaml;
   replyLoop?: {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;

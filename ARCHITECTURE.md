@@ -46,6 +46,14 @@ Older chat history moves only in configured trim chunks. Do not promote one mess
 
 Volatile social data, such as current display names and reaction counts, belongs only in recent uncached history.
 
+## Persona Modes
+
+Persona modes are profile-local. Ordered config determines precedence; the default mode is the global fallback. Global modes share state and account presentation. Guild-scoped modes persist independent state per guild, inject context only into that guild, and use Discord's guild-member avatar override; presence remains global and is rejected on guild modes. Their volatile developer prompt may temporarily override ordinary persona, tone, and style, but never authorization, safety boundaries, tool contracts, or factual integrity.
+
+Triggered episodes choose and persist one eligible instant before the opportunity. They activate only on a natural agent turn, expire silently when missed, and are bounded by duration and captured visible-turn limits. Interval bounds plan every next cycle; cooldown constrains only cycles following an episode that actually ran. Runtime config reload compares scheduling fingerprints before replanning, while presentation and instruction edits leave a pending opportunity intact. Scheduled modes may expose lead-in and aftermath context without forcing output.
+
+Avatar and presence changes converge on current desired presentation. Only one avatar request may run at a time; rate-limit retries retain the latest desired avatar and never queue stale mode changes. Random candidate selection and rotation deadlines are persisted. The dashboard receives a semantic status projection, not the persistence document.
+
 ## Relationship State
 
 Relationship state is per Discord user, not per guild. Relationship extraction runs after replies and ignored/silent turns, after the memory pass, and never posts directly.

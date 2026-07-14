@@ -20,6 +20,7 @@ function makeInput(overrides: Partial<ContextAssemblyInput> = {}): ContextAssemb
     olderHistory: "## Chat History (Older)\nLegend: ...\n[@alice]: hello",
     newerHistory: "## Chat History (Recent)\n[@bob]: hi there",
     currentContext: "Guild: g1 | Channel: c1\nDate/Time: 2026-01-01T00:00:00Z",
+    personaMode: "",
     responseInstruction: "",
     userMessage: "[@carol]: what's up?",
     ...overrides,
@@ -95,6 +96,12 @@ describe("SECTION_DEFS", () => {
 
   test("Response Instruction is the last section", () => {
     expect(SECTION_DEFS[SECTION_DEFS.length - 1]?.label).toBe("Response Instruction");
+  });
+
+  test("Persona Mode is a volatile developer section immediately before response instructions", () => {
+    const result = assembleContext(makeInput({ personaMode: "Active mode: sleeping.", responseInstruction: "Respond now." }));
+    expect(result.sections.slice(-2).map((section) => section.label)).toEqual(["Persona Mode", "Response Instruction"]);
+    expect(result.sections.at(-2)).toMatchObject({ cached: false, role: "developer" });
   });
 });
 

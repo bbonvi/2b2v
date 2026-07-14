@@ -68,6 +68,7 @@ export function createScheduledTaskRunner(input: {
   }) => MessageSender;
   createTtsGenerator: (guildConfig: GuildConfig) => TtsGenerator;
   createHandlerDeps: (input: {
+    guildId: string;
     guildConfig: GuildConfig;
     context: AssembledContext;
     currentChannelId: string;
@@ -86,6 +87,7 @@ export function createScheduledTaskRunner(input: {
   runRelationshipPostReplyExtraction: (input: { guildConfig: GuildConfig; memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]; guild?: Guild; channel?: unknown; source?: string; sourceRequestId?: string; currentUserId: string; currentUsername?: string }) => Promise<void>;
   onScheduleCompleted?: (scheduleId: string) => void;
   markScheduledAttentionBusy?: (guildId: string, channelId: string) => () => void;
+  preparePersonaModeTurn?: (guildId: string) => void;
 }): (event: ScheduleFireEvent) => Promise<void> {
   return async (event) => {
     const { schedule } = event;
@@ -143,6 +145,7 @@ export function createScheduledTaskRunner(input: {
         channelId,
       });
       const scheduledInstruction = scheduledTaskInstruction(event);
+      input.preparePersonaModeTurn?.(guildId);
       const context = await input.buildContext(
         guildId,
         channelId,
@@ -215,6 +218,7 @@ export function createScheduledTaskRunner(input: {
       });
 
       const deps = input.createHandlerDeps({
+        guildId,
         guildConfig,
         context,
         currentChannelId: channelId,

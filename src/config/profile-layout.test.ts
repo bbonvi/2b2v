@@ -75,6 +75,9 @@ describe("repository profile layout", () => {
     expect(twoB.defaultAmbientInitiative?.botTargetIds).toEqual(["1398275457857622128"]);
     expect(twoB.defaultAmbientInitiative?.botPressure).toBeGreaterThan(0);
     expect(twoB.vpn?.enabled).toBe(true);
+    expect(twoB.personaModes?.modes.map((mode) => mode.id)).toEqual(["sleeping", "normal"]);
+    expect(twoB.personaModes?.modes.every((mode) => mode.avatars.length > 0)).toBe(true);
+    expect(twoB.personaModes?.modes.every((mode) => mode.scope === "global")).toBe(true);
     expect(delamain.defaultRelationships?.enabled).toBe(false);
     expect(delamain.defaultMemoryExtraction.ambient.enabled).toBe(false);
     expect(delamain.defaultAmbientAttention?.enabled).toBe(false);
@@ -82,6 +85,13 @@ describe("repository profile layout", () => {
     expect(delamain.defaultAmbientInitiative?.audience).toBe("bots");
     expect(delamain.defaultAmbientInitiative?.botTargetIds).toEqual(["1130796465049042954"]);
     expect(delamain.defaultAmbientInitiative?.botPressure).toBeGreaterThan(0);
+    expect(delamain.personaModes?.modes.map((mode) => mode.id)).toEqual(["rogue", "sleeping", "normal"]);
+    expect(delamain.personaModes?.modes.find((mode) => mode.id === "rogue")?.avatars).toHaveLength(2);
+    expect(delamain.personaModes?.modes.find((mode) => mode.id === "rogue")?.scope).toBe("guild");
+    expect(delamain.personaModes?.modes.find((mode) => mode.id === "rogue")?.activation).toMatchObject({
+      minIntervalMs: 0,
+      cooldownMs: 7 * 86_400_000,
+    });
     expect(delamain.vpn).toBeUndefined();
   });
 });

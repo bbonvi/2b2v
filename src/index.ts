@@ -73,6 +73,8 @@ import { createReactToMessageTool } from "./agent/react-to-message-tool";
 import { applyRuntimeToolPrompts, type ToolPromptVariables } from "./agent/runtime-tool-prompts";
 import { createModelImageSupportStore } from "./llm/model-image-support";
 import { createAmbientRuntime } from "./ambient/runtime";
+import { createPersonaModeRuntime } from "./modes/runtime";
+import type { PersonaModeActivityType } from "./modes/types";
 import { cacheAssetExtraction, getAssetById, getAssetsByMessageId, syncMessageAssets } from "./db/asset-repository";
 import { upsertThread, updateThreadActivity, markThreadArchived, listThreadsForContext, getThreadMetadata, getThread } from "./db/thread-repository";
 import { prepareImageBufferForContext } from "./agent/image-buffer";
@@ -109,7 +111,7 @@ import { DEFAULT_ASSET_READING, DEFAULT_EXTERNAL_IMAGES } from "./config/default
 import { join } from "path";
 import { mkdirSync, existsSync, readdirSync, statSync, watch } from "fs";
 import type { Database } from "./db/database";
-import { ChannelType, PermissionFlagsBits, type Client, type Guild, type GuildBasedChannel, type GuildMember, type Message, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
+import { ActivityType, ChannelType, PermissionFlagsBits, type Client, type Guild, type GuildBasedChannel, type GuildMember, type Message, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
 
 const pkg = await Bun.file(new URL("../package.json", import.meta.url).pathname).json() as { version?: string };
 const CONTEXT_IMAGE_MAX_DIMENSION = 1024;
@@ -275,6 +277,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       // already-generated Discord attachment and short delivery text.
     };
     const completionResult = await handleMessage(completionIncoming, createHandlerDeps({
+      guildId: job.deliveryGuildId,
       guildConfig: deliveryGuildConfig,
       context,
       currentChannelId: job.deliveryChannelId,
@@ -560,6 +563,7 @@ function createTtsGenerator(guildConfig: GuildConfig): {
 }
 
 function createHandlerDeps(input: {
+  guildId: string;
   guildConfig: GuildConfig;
   context: AssembledContext;
   currentChannelId: string;
@@ -573,8 +577,12 @@ function createHandlerDeps(input: {
   };
   generatedImages?: GeneratedImageRuntime;
   resolveAssetAttachments?: AssetAttachmentResolver;
+  modeLifecycle?: boolean;
   overrides?: Partial<HandlerDeps>;
 }): HandlerDeps {
+  let visibleModeOutput = false;
+  const onVisibleOutput = input.overrides?.onVisibleOutput;
+  const onAgentEnd = input.overrides?.onAgentEnd;
   return {
     globalConfig,
     guildConfig: input.guildConfig,
@@ -615,6 +623,15 @@ function createHandlerDeps(input: {
       },
     },
     ...input.overrides,
+    onVisibleOutput: () => {
+      onVisibleOutput?.();
+      visibleModeOutput = true;
+    },
+    onAgentEnd: () => {
+      onAgentEnd?.();
+      if (input.modeLifecycle === false || !visibleModeOutput) return;
+      personaModeRuntime.noteVisibleTurn(input.guildId);
+    },
   };
 }
 
@@ -724,6 +741,66 @@ if (!existsSync(globalConfig.dataDir)) {
 const dbPath = join(globalConfig.dataDir, "bot.db");
 const db: Database = createDatabase(dbPath);
 log.info("database ready", { path: dbPath });
+
+function discordActivityType(type: PersonaModeActivityType): ActivityType {
+  const types: Record<PersonaModeActivityType, ActivityType> = {
+    playing: ActivityType.Playing,
+    streaming: ActivityType.Streaming,
+    listening: ActivityType.Listening,
+    watching: ActivityType.Watching,
+    custom: ActivityType.Custom,
+    competing: ActivityType.Competing,
+  };
+  return types[type];
+}
+
+const personaModeRuntime = createPersonaModeRuntime({
+  db,
+  config: globalConfig.personaModes,
+  timezone: globalConfig.defaultTimezone,
+  log: log.child({ component: "persona-modes" }),
+  guildIds: () => [...client.guilds.cache.keys()],
+  presentation: {
+    global: {
+      currentAvatarHash: () => client.user?.avatar ?? null,
+      applyAvatar: async (candidate) => {
+        const user = client.user;
+        if (user === null) throw new Error("Discord client is not ready");
+        const bytes = Buffer.from(await Bun.file(candidate.path).arrayBuffer());
+        const updated = await user.setAvatar(bytes);
+        return { discordAvatarHash: updated.avatar };
+      },
+      applyPresence: (presence) => {
+        const user = client.user;
+        if (user === null) throw new Error("Discord client is not ready");
+        user.setPresence({
+          status: presence?.status ?? "online",
+          activities: presence?.activity === undefined
+            ? []
+            : [{
+                type: discordActivityType(presence.activity.type),
+                name: presence.activity.name,
+                ...(presence.activity.state !== undefined ? { state: presence.activity.state } : {}),
+                ...(presence.activity.url !== undefined ? { url: presence.activity.url } : {}),
+              }],
+        });
+      },
+    },
+    guild: {
+      currentAvatarHash: (guildId) => client.guilds.cache.get(guildId)?.members.me?.avatar ?? null,
+      applyAvatar: async (guildId, candidate) => {
+        const guild = client.guilds.cache.get(guildId);
+        if (guild === undefined) throw new Error(`Discord guild ${guildId} is not available`);
+        const avatar = candidate === null
+          ? null
+          : Buffer.from(await Bun.file(candidate.path).arrayBuffer());
+        const updated = await guild.members.editMe({ avatar });
+        return { discordAvatarHash: updated.avatar };
+      },
+    },
+  },
+});
+client.on("shardResume", () => personaModeRuntime.reapplyPresentation());
 
 // --- 4. Load guild configs ---
 const guildConfigs = loadGuildConfigs(guildsDir, globalConfig);
@@ -851,6 +928,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
     runRelationshipPostReplyExtraction,
     onScheduleCompleted: (id) => scheduler.removeSchedule(id),
     markScheduledAttentionBusy,
+    preparePersonaModeTurn: (guildId) => personaModeRuntime.prepareNaturalTurn(guildId),
   }),
   log,
 });
@@ -876,6 +954,7 @@ const memoryCleanupTimer = setInterval(() => {
 
 // --- 13. Wait for Discord client login ---
 await discordLoginPromise;
+personaModeRuntime.start();
 
 // --- 14. Register slash commands ---
 const botUser = client.user;
@@ -1702,6 +1781,7 @@ async function buildContext(
       olderHistory: olderText,
       newerHistory: newerText,
       currentContext: [currentContext, relationshipsContext].filter((part) => part !== "").join("\n\n"),
+      personaMode: personaModeRuntime.renderPromptContext(guildId),
       responseInstruction: "",
       userMessage,
     });
@@ -2472,6 +2552,7 @@ const ambientRuntime = createAmbientRuntime({
   createHandlerDeps,
   processTriggeredMessage,
   isAutonomousAttentionBusy: isScheduledAttentionBusy,
+  preparePersonaModeTurn: (guildId) => personaModeRuntime.prepareNaturalTurn(guildId),
 });
 
 // --- 21. Channel dispatcher ---
@@ -2675,6 +2756,7 @@ async function processTriggeredMessage(
     });
 
     const isThread = message.channel.isThread();
+    personaModeRuntime.prepareNaturalTurn(guildId);
     const context = await buildContext(
       guildId,
       channelId,
@@ -2836,6 +2918,7 @@ async function processTriggeredMessage(
     const tts = createTtsGenerator(guildConfig);
 
     const deps = createHandlerDeps({
+      guildId,
       guildConfig,
       context,
       currentChannelId: channelId,
@@ -3156,20 +3239,22 @@ function scheduleConfigReload(): void {
 }
 
 function configReloadFingerprint(): string {
-  const paths = [configPath, guildsDir];
   const parts: string[] = [];
-  for (const path of paths) {
+  const pending = [profileDir];
+  while (pending.length > 0) {
+    const path = pending.pop();
+    if (path === undefined) continue;
     if (!existsSync(path)) continue;
     const stat = statSync(path);
     parts.push(`${path}:${stat.mtimeMs}:${stat.size}`);
     if (!stat.isDirectory()) continue;
-    for (const entry of readdirSync(path).filter((name) => name.endsWith(".yaml") || name.endsWith(".yml")).sort()) {
-      const filePath = `${path}/${entry}`;
-      const fileStat = statSync(filePath);
-      if (fileStat.isFile()) parts.push(`${filePath}:${fileStat.mtimeMs}:${fileStat.size}`);
+    for (const entry of readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en"))) {
+      const entryPath = join(path, entry.name);
+      if (entry.isDirectory()) pending.push(entryPath);
+      else if (/\.(?:ya?ml|md|png|jpe?g|webp)$/i.test(entry.name)) pending.push(entryPath);
     }
   }
-  return parts.join("|");
+  return parts.sort().join("|");
 }
 
 async function reloadConfigs(): Promise<void> {
@@ -3187,6 +3272,7 @@ async function reloadConfigs(): Promise<void> {
 
     globalConfig = newGlobal;
     promptBundle = loadInstructionBundle(profilesDir, profile, log);
+    personaModeRuntime.update(newGlobal.personaModes, newGlobal.defaultTimezone);
 
     guildConfigs.clear();
     for (const [id, cfg] of newGuilds) {
@@ -3300,6 +3386,17 @@ const dashboardPasswordlessCidrs = parseDashboardPasswordlessCidrs(process.env.D
 const dashboardTrustedProxyCidrs = parseDashboardPasswordlessCidrs(process.env.DASHBOARD_TRUSTED_PROXY_CIDRS);
 const dashboardManagementRuntime = createDashboardManagementRuntime({ client, db });
 const dashboardManagement = {
+  getPersonaModeStatus: () => {
+    const status = personaModeRuntime.getStatus();
+    return {
+      profile,
+      ...status,
+      guilds: status.guilds.map((entry) => ({
+        ...entry,
+        guildName: client.guilds.cache.get(entry.guildId)?.name ?? entry.guildId,
+      })),
+    };
+  },
   getDirectory: dashboardManagementRuntime.getDirectory,
   listMessages: dashboardManagementRuntime.listMessages,
   editMessage: dashboardManagementRuntime.editMessage,
@@ -3345,6 +3442,7 @@ async function shutdown(signal: string): Promise<void> {
   ambientRuntime.clearAmbientAttentionState();
   ambientRuntime.clearAmbientInitiativeState();
   scheduler.stop();
+  personaModeRuntime.stop();
   await client.destroy();
   db.close();
 

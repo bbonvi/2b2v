@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { GatewayIntentBits } from "discord.js";
-import { REQUIRED_INTENTS, checkMessageContentIntent } from "./client.ts";
+import { REQUIRED_INTENTS, checkMessageContentIntent, shouldRejectPersonaAvatarRateLimit } from "./client.ts";
 
 describe("REQUIRED_INTENTS", () => {
   test("includes all intents from spec", () => {
@@ -31,5 +31,14 @@ describe("checkMessageContentIntent", () => {
 
   test("returns false for undefined content", () => {
     expect(checkMessageContentIntent(undefined)).toBe(false);
+  });
+});
+
+describe("shouldRejectPersonaAvatarRateLimit", () => {
+  test("matches only account and guild-member avatar routes", () => {
+    expect(shouldRejectPersonaAvatarRateLimit("/users/@me")).toBe(true);
+    expect(shouldRejectPersonaAvatarRateLimit("/guilds/:id/members/@me")).toBe(true);
+    expect(shouldRejectPersonaAvatarRateLimit("/guilds/:id/channels")).toBe(false);
+    expect(shouldRejectPersonaAvatarRateLimit("/channels/:id/messages")).toBe(false);
   });
 });

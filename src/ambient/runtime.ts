@@ -168,6 +168,7 @@ export type AmbientRuntime = {
 };
 
 type CreateHandlerDepsInput = {
+  guildId: string;
   guildConfig: GuildConfig;
   context: AssembledContext;
   currentChannelId: string;
@@ -178,6 +179,7 @@ type CreateHandlerDepsInput = {
   tts?: { ttsEnabled: boolean; generateSpeech?: NonNullable<HandlerDeps["generateSpeech"]> };
   generatedImages?: ReturnType<typeof createGeneratedImageRuntime>;
   resolveAssetAttachments?: HandlerDeps["resolveAssetAttachments"];
+  modeLifecycle?: boolean;
   overrides?: Partial<HandlerDeps>;
 };
 
@@ -212,6 +214,7 @@ export type AmbientRuntimeDeps = {
   createHandlerDeps: (input: CreateHandlerDepsInput) => HandlerDeps;
   processTriggeredMessage: (message: Message, triggerResult?: NonNullable<TriggerResult>, currentTurnMessages?: readonly Message[], options?: { disableLiveOutput?: boolean; defaultReply?: boolean; triggerInstruction?: string; currentTurnOverride?: { messageId: string; timestamp: number; content: string }; preSendCheck?: () => boolean; onWriteToolStart?: (toolName: string) => void }) => Promise<unknown>;
   isAutonomousAttentionBusy?: (guildId: string, channelId: string) => boolean;
+  preparePersonaModeTurn?: (guildId: string) => void;
 };
 
 /** Decide whether typing should postpone an ambient candidate instead of consuming it. */
@@ -228,6 +231,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
   const { db, client, log, requestLogStore, agentJobs } = input;
   const getPromptBundle = input.getPromptBundle;
   const getGlobalConfig = input.getGlobalConfig;
+  const preparePersonaModeTurn = input.preparePersonaModeTurn;
   const TYPING_INTERVAL_MS = input.typingIntervalMs;
   const getGuildConfig = input.getGuildConfig;
   const dashboardTriggerLocation = input.dashboardTriggerLocation;
@@ -1848,6 +1852,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       guildId: input.candidate.guildId,
       channelId: input.candidate.channelId,
     });
+    if (input.draft === undefined) preparePersonaModeTurn?.(input.candidate.guildId);
     const context = await buildContext(
       input.candidate.guildId,
       input.candidate.channelId,
@@ -1970,6 +1975,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         messageId: input.candidate.id,
       },
       createHandlerDeps({
+        guildId: input.candidate.guildId,
         guildConfig: input.guildConfig,
         context,
         currentChannelId: input.candidate.channelId,
@@ -1977,6 +1983,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         extraTools: tools,
         log: log.child({ guildId: input.candidate.guildId, channelId: input.candidate.channelId, requestId: input.requestLog.requestId, component: "ambient-initiative" }),
         requestLog: input.requestLog,
+        modeLifecycle: input.draft === undefined,
         generatedImages,
         resolveAssetAttachments: createStoredAssetAttachmentResolver({
           db,

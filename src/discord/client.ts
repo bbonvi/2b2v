@@ -27,11 +27,21 @@ export function checkMessageContentIntent(content: string | undefined): boolean 
   return content !== undefined && content !== "";
 }
 
+/** Keep persona avatar retries under the latest-desired-state reconciler. */
+export function shouldRejectPersonaAvatarRateLimit(route: string): boolean {
+  return route === "/users/@me" || (route.startsWith("/guilds/") && route.endsWith("/members/@me"));
+}
+
 /** Build discord.js ClientOptions with required intents and partials. */
 export function buildClientOptions(): ClientOptions {
   return {
     intents: [...REQUIRED_INTENTS],
     partials: [Partials.Message, Partials.Channel, Partials.Reaction],
+    rest: {
+      // Persona avatars use a latest-desired-state reconciler. Surface this
+      // route's rate limits instead of letting discord.js queue a stale update.
+      rejectOnRateLimit: (rateLimit) => shouldRejectPersonaAvatarRateLimit(rateLimit.route),
+    },
   };
 }
 
