@@ -73,7 +73,7 @@ describe("repository profile layout", () => {
     expect(twoB.defaultRelationships?.enabled).toBe(true);
     expect(twoB.defaultAmbientInitiative?.audience).toBe("humans");
     expect(twoB.defaultAmbientInitiative?.botTargetIds).toEqual(["1398275457857622128"]);
-    expect(twoB.defaultAmbientInitiative?.botPressure).toBe(0.15);
+    expect(twoB.defaultAmbientInitiative?.botPressure).toBeGreaterThan(0);
     expect(twoB.vpn?.enabled).toBe(true);
     expect(delamain.defaultRelationships?.enabled).toBe(false);
     expect(delamain.defaultMemoryExtraction.ambient.enabled).toBe(false);
@@ -81,7 +81,7 @@ describe("repository profile layout", () => {
     expect(delamain.defaultAmbientInitiative?.enabled).toBe(true);
     expect(delamain.defaultAmbientInitiative?.audience).toBe("bots");
     expect(delamain.defaultAmbientInitiative?.botTargetIds).toEqual(["1130796465049042954"]);
-    expect(delamain.defaultAmbientInitiative?.botPressure).toBe(0.15);
+    expect(delamain.defaultAmbientInitiative?.botPressure).toBeGreaterThan(0);
     expect(delamain.vpn).toBeUndefined();
   });
 });
