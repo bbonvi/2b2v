@@ -76,6 +76,8 @@ Rendered chat history exposes `oldest_visible_message_id` when stored prior cont
 
 Memory scopes have product meaning: guild memories are server-local, user memories follow the Discord user across guilds, and self memories are the bot/persona's portable private context. Scratchpad memories must expire.
 
+Normal reply context reserves a small bounded slice for memories of recent visible human speakers in addition to current-speaker, guild, and self memories; person-specific rows remain explicitly subject-labelled.
+
 High-priority memories are selected before ordinary rows under caps and rendered with `[IMPORTANT]` near the bottom of the memory block.
 
 Memory writes may happen after the visible reply loop. The silent memory pass sends no Discord output and does not keep typing active.

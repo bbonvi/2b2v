@@ -25,12 +25,17 @@ export interface MemoryContextInput {
   db: Database;
   guildId: string;
   currentUserId: string;
+  /** Human users visible in rendered history, newest visible activity first. */
+  visibleUserIds?: readonly string[];
   resolveUserId?: (userId: string) => string | undefined;
   limit?: number;
+  recentUserMaxUsers?: number;
+  recentUserMaxMemoriesPerUser?: number;
+  recentUserMaxRows?: number;
   contextInstruction?: string;
 }
 
-export interface VisibleUserMemoryContextInput {
+interface VisibleUserMemorySelectionInput {
   db: Database;
   guildId: string;
   currentUserId: string;
@@ -40,7 +45,16 @@ export interface VisibleUserMemoryContextInput {
   maxUsers?: number;
   maxMemoriesPerUser?: number;
   maxRows?: number;
+}
+
+export interface VisibleUserMemoryContextInput extends VisibleUserMemorySelectionInput {
   contextInstruction?: string;
+}
+
+interface VisibleUserMemoryGroup {
+  userId: string;
+  rows: MemoryRow[];
+  total: number;
 }
 
 export interface MemoryExtractionInput {
@@ -92,6 +106,9 @@ interface MemoryMutationInput {
 type MemorySubject = "global" | "user" | "self";
 type ExpiresInUnit = "minutes" | "hours" | "days" | "weeks" | "months";
 const MAX_SCRATCHPAD_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_RECENT_USER_MAX_USERS = 3;
+const DEFAULT_RECENT_USER_MAX_MEMORIES = 2;
+const DEFAULT_RECENT_USER_MAX_ROWS = 6;
 
 interface ExpiresIn {
   amount: number;
@@ -202,6 +219,15 @@ function formatExpiry(expiresAt: number, now = Date.now()): string {
   return `expires in ${units.value} ${units.label}${units.value === 1 ? "" : "s"}`;
 }
 
+function formatMemoryRow(
+  row: MemoryRow,
+  currentGuildId: string,
+  resolveUserId?: (userId: string) => string | undefined,
+): string {
+  const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
+  return `- ${row.id} [${scopeLabel(row, currentGuildId, resolveUserId)}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${expiry} ${row.content}`;
+}
+
 function memoryClockContext(timezone: string | undefined, now = Date.now()): string {
   const tz = timezone ?? "UTC";
   return currentLocalContext(tz, now);
@@ -218,7 +244,24 @@ export function buildMemoryPolicyInstructions(): string[] {
 /** Build the uncached memory block injected into the conversation prompt. */
 export function buildMemoryContext(input: MemoryContextInput): string {
   const limit = Math.max(1, input.limit ?? 80);
-  const maxSelfLimit = Math.min(limit, 30);
+  const recentGroups = input.visibleUserIds === undefined
+    ? []
+    : selectVisibleUserMemoryGroups({
+        db: input.db,
+        guildId: input.guildId,
+        currentUserId: input.currentUserId,
+        visibleUserIds: input.visibleUserIds,
+        maxUsers: input.recentUserMaxUsers ?? DEFAULT_RECENT_USER_MAX_USERS,
+        maxMemoriesPerUser: input.recentUserMaxMemoriesPerUser ?? DEFAULT_RECENT_USER_MAX_MEMORIES,
+        maxRows: Math.min(
+          input.recentUserMaxRows ?? DEFAULT_RECENT_USER_MAX_ROWS,
+          Math.max(0, limit - 1),
+        ),
+      });
+  const recentRows = recentGroups.flatMap((group) => group.rows);
+  const recentTotal = recentGroups.reduce((total, group) => total + group.total, 0);
+  const primaryLimit = Math.max(0, limit - recentRows.length);
+  const maxSelfLimit = Math.min(primaryLimit, 30);
   const selfTotal = countMemories(input.db, {
     guildId: input.guildId,
     scope: "self",
@@ -228,7 +271,7 @@ export function buildMemoryContext(input: MemoryContextInput): string {
     scope: "self",
     limit: maxSelfLimit,
   }).filter((row) => row.content.trim() !== "");
-  const conversationalLimit = Math.max(0, limit - selfRows.length);
+  const conversationalLimit = Math.max(0, primaryLimit - selfRows.length);
   const conversationalTotal = countMemories(input.db, {
     guildId: input.guildId,
     subjectUserId: input.currentUserId,
@@ -242,7 +285,7 @@ export function buildMemoryContext(input: MemoryContextInput): string {
         limit: conversationalLimit,
       }).filter((row) => row.content.trim() !== "")
     : [];
-  const total = conversationalTotal + selfTotal;
+  const total = conversationalTotal + selfTotal + recentTotal;
   const rows = [...conversationalRows, ...selfRows]
     .sort((a, b) => {
       const priorityDiff = a.priority - b.priority;
@@ -251,14 +294,15 @@ export function buildMemoryContext(input: MemoryContextInput): string {
       return updatedDiff !== 0 ? updatedDiff : a.id - b.id;
     });
 
-  if (rows.length === 0) return "";
+  if (rows.length === 0 && recentRows.length === 0) return "";
 
-  const lines = rows.map((row) => {
-    const label = scopeLabel(row, input.guildId, input.resolveUserId);
-    const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
-    return `- ${row.id} [${label}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${expiry} ${row.content}`;
-  });
-  const showingLine = selfTotal > 0
+  const lines = rows.map((row) => formatMemoryRow(row, input.guildId, input.resolveUserId));
+  const recentLines = [...recentGroups].reverse().flatMap((group) => [...group.rows]
+    .reverse()
+    .map((row) => formatMemoryRow(row, input.guildId, input.resolveUserId)));
+  const showingLine = recentTotal > 0
+    ? `Showing ${rows.length + recentRows.length}/${total} memories (${conversationalRows.length}/${conversationalTotal} guild/current user, ${selfRows.length}/${selfTotal} self, ${recentRows.length}/${recentTotal} recent speakers).`
+    : selfTotal > 0
     ? `Showing ${rows.length}/${total} memories (${conversationalRows.length}/${conversationalTotal} guild/user, ${selfRows.length}/${selfTotal} self).`
     : `Showing ${rows.length}/${total} memories.`;
   const contextInstruction = input.contextInstruction?.trim() !== ""
@@ -268,16 +312,24 @@ export function buildMemoryContext(input: MemoryContextInput): string {
     showingLine,
     contextInstruction,
     ...lines,
+    ...(recentGroups.length > 0
+      ? [
+          "Recent speaker memories apply only to their named subject; use them when relevant and do not spill person-specific context onto others.",
+          ...recentLines,
+        ]
+      : []),
   ].join("\n");
 }
 
-/** Build memory-pass-only dedupe context for other users visible in chat history. */
-export function buildVisibleUserMemoryContext(input: VisibleUserMemoryContextInput): string {
-  const maxUsers = input.maxUsers ?? 10;
-  const maxMemoriesPerUser = input.maxMemoriesPerUser ?? 10;
-  const maxRows = input.maxRows ?? 100;
+/** Select bounded user-memory groups for recent visible human speakers. */
+function selectVisibleUserMemoryGroups(input: VisibleUserMemorySelectionInput): VisibleUserMemoryGroup[] {
+  const maxUsers = Math.max(0, Math.trunc(input.maxUsers ?? 10));
+  const maxMemoriesPerUser = Math.max(0, Math.trunc(input.maxMemoriesPerUser ?? 10));
+  const maxRows = Math.max(0, Math.trunc(input.maxRows ?? 100));
+  if (maxUsers === 0 || maxMemoriesPerUser === 0 || maxRows === 0) return [];
+
   const seen = new Set<string>([input.currentUserId]);
-  const groups: Array<{ userId: string; rows: MemoryRow[] }> = [];
+  const groups: VisibleUserMemoryGroup[] = [];
   let rowCount = 0;
 
   for (const userId of input.visibleUserIds) {
@@ -286,16 +338,27 @@ export function buildVisibleUserMemoryContext(input: VisibleUserMemoryContextInp
     seen.add(userId);
 
     const remainingRows = maxRows - rowCount;
+    const rowLimit = Math.min(maxMemoriesPerUser, remainingRows);
     const rows = listMemories(input.db, {
       guildId: input.guildId,
       subjectUserId: userId,
-      limit: Math.min(maxMemoriesPerUser, remainingRows),
+      limit: rowLimit,
     });
     if (rows.length === 0) continue;
 
-    groups.push({ userId, rows });
+    groups.push({
+      userId,
+      rows,
+      total: countMemories(input.db, { guildId: input.guildId, subjectUserId: userId }),
+    });
     rowCount += rows.length;
   }
+  return groups;
+}
+
+/** Build memory-pass-only dedupe context for other users visible in chat history. */
+export function buildVisibleUserMemoryContext(input: VisibleUserMemoryContextInput): string {
+  const groups = selectVisibleUserMemoryGroups(input);
 
   if (groups.length === 0) return "";
 

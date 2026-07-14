@@ -1580,6 +1580,7 @@ async function buildContext(
     db,
     guildId,
     currentUserId: latestUserMessage.authorId,
+    visibleUserIds,
     resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
     contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
   });

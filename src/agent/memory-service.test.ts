@@ -145,6 +145,53 @@ describe("buildMemoryContext", () => {
     expect(context).toContain("Showing 3/4 memories");
     expect(context.match(/^- /gm)).toHaveLength(3);
   });
+
+  test("reserves a bounded slice for recent visible speakers", () => {
+    createMemory(db, { guildId: "g1", subjectUserId: "u-current", kind: "fact", content: "Current memory one." });
+    createMemory(db, { guildId: "g1", subjectUserId: "u-current", kind: "fact", content: "Current memory two." });
+    const recentImportant = createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u-recent",
+      kind: "preference",
+      content: "Recent important memory.",
+      priority: 1,
+    });
+    const recentMiddle = createMemory(db, { guildId: "g1", subjectUserId: "u-recent", kind: "fact", content: "Recent middle memory." });
+    const recentNewest = createMemory(db, { guildId: "g1", subjectUserId: "u-recent", kind: "fact", content: "Recent newest memory." });
+    createMemory(db, { guildId: "g1", subjectUserId: "u-second", kind: "interest", content: "Second speaker memory." });
+    createMemory(db, { guildId: "g1", subjectUserId: "u-excluded", kind: "fact", content: "Excluded speaker memory." });
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, recentImportant);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, recentMiddle);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(300, recentNewest);
+
+    const context = buildMemoryContext({
+      db,
+      guildId: "g1",
+      currentUserId: "u-current",
+      visibleUserIds: ["u-current", "u-recent", "u-second", "u-excluded"],
+      resolveUserId: (id) => ({
+        "u-current": "current",
+        "u-recent": "recent",
+        "u-second": "second",
+        "u-excluded": "excluded",
+      })[id],
+      limit: 5,
+      recentUserMaxUsers: 2,
+      recentUserMaxMemoriesPerUser: 2,
+      recentUserMaxRows: 3,
+    });
+
+    expect(context).toContain("Showing 5/6 memories (2/2 guild/current user, 0/0 self, 3/4 recent speakers).");
+    expect(context.match(/^- /gm)).toHaveLength(5);
+    expect(context).toContain("Current memory one.");
+    expect(context).toContain("Current memory two.");
+    expect(context).toContain("[@recent] [0.7] [preference] [IMPORTANT] Recent important memory.");
+    expect(context).toContain("[@recent] [0.7] [fact] Recent newest memory.");
+    expect(context).not.toContain("Recent middle memory.");
+    expect(context).toContain("[@second] [0.7] [interest] Second speaker memory.");
+    expect(context).not.toContain("Excluded speaker memory.");
+    expect(context.indexOf("Second speaker memory.")).toBeLessThan(context.indexOf("Recent important memory."));
+  });
 });
 
 describe("buildVisibleUserMemoryContext", () => {
