@@ -129,7 +129,7 @@ personaModes:
               instructions: >-
                   Delamain has recently returned from a resting state. Resume normal operation; acknowledge the delay briefly only when it fits the conversation.
           presence:
-              status: idle
+              status: dnd
 
         - id: rogue
           scope: global
