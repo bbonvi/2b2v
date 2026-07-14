@@ -7,6 +7,8 @@ model: gpt-5.6-sol
 thinkingLevel: medium
 codexTransport: websocket-cached
 timezone: Europe/Moscow
+modelParams:
+    textVerbosity: "low"
 
 relationships:
   enabled: false
@@ -254,11 +256,10 @@ tts:
     voices:
         normal:
             voiceId: 8EintQMk6LYynyFGHba1 # (ElevenLabs voice ID)
-            # voiceId: g0QruJYStgk5oVbpq3Uv
-            stability: 0.90 # (higher is steadier, lower is more expressive)
+            stability: 0.9 # (higher is steadier, lower is more expressive)
             applyTextNormalization: "on" # (normalize numbers/symbols before speech)
             outputFormat: mp3_44100_128 # (audio codec/sample/bitrate)
-            speed: 1.10 # (voice playback/speech speed)
+            speed: 1.15 # (voice playback/speech speed)
             style: 0.0 # (ElevenLabs style exaggeration)
             similarityBoost: 0.95 # (how strongly to preserve selected voice identity)
             model: eleven_multilingual_v2
