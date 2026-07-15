@@ -44,6 +44,17 @@ describe("database initialization", () => {
     expect(columns.some((column) => column.name === "priority")).toBe(true);
   });
 
+  test("creates memory applicability table and lookup index", () => {
+    const table = db.raw
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_applicability'")
+      .get() as { name: string } | undefined;
+    const index = db.raw
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_memory_applicability_user'")
+      .get() as { name: string } | undefined;
+    expect(table?.name).toBe("memory_applicability");
+    expect(index?.name).toBe("idx_memory_applicability_user");
+  });
+
   test("creates messages table", () => {
     const info = db.raw
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='messages'")
@@ -273,8 +284,12 @@ describe("memories table", () => {
       const schema = migrated.raw
         .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='memories'")
         .get() as { sql: string };
+      const applicability = migrated.raw
+        .prepare("SELECT user_id FROM memory_applicability")
+        .all() as Array<{ user_id: string }>;
 
       expect(rows).toEqual([{ kind: "fact", content: "Keep this fact." }]);
+      expect(applicability).toEqual([{ user_id: "user-1" }]);
       expect(schema.sql).toContain("'identity'");
       expect(schema.sql).toContain("'journal'");
       expect(schema.sql).toContain("scope IN ('guild', 'user', 'self')");

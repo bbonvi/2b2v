@@ -1,6 +1,7 @@
 import type { Database } from "../db/database";
 import type { MemoryKind } from "../db/memory-kinds";
 import { sanitizeMemoryContent } from "../db/memory-content";
+import { listMemoryApplicability } from "../db/memory-repository";
 
 export interface ManagementLabel {
   id: string;
@@ -36,6 +37,7 @@ export interface ManagementMemoryRow {
   scope: "guild" | "user" | "self";
   guildId: string | null;
   subjectUserId: string | null;
+  appliesToUserIds: string[];
   kind: MemoryKind;
   content: string;
   sourceMessageId: string | null;
@@ -249,11 +251,13 @@ export function listManagementMemories(
       deleted_at: number | null;
     }>;
 
+  const applicability = listMemoryApplicability(db, rows.map((row) => row.id));
   return rows.map((row) => ({
     id: row.id,
     scope: row.scope,
     guildId: row.guild_id,
     subjectUserId: row.subject_user_id,
+    appliesToUserIds: applicability.get(row.id) ?? [],
     kind: row.kind,
     content: sanitizeMemoryContent(row.content),
     sourceMessageId: row.source_message_id,
@@ -298,6 +302,10 @@ export function storedManagementDirectoryIds(db: Database): {
     if (row.guild_id !== null) guildIds.add(row.guild_id);
     if (row.subject_user_id !== null) userIds.add(row.subject_user_id);
   }
+  const applicabilityRows = db.raw
+    .prepare("SELECT DISTINCT user_id FROM memory_applicability")
+    .all() as Array<{ user_id: string }>;
+  for (const row of applicabilityRows) userIds.add(row.user_id);
 
   return {
     guildIds: [...guildIds],

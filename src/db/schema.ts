@@ -46,6 +46,15 @@ export function memorySchemaHasCurrentChecks(sql: string | undefined): boolean {
 export const SCHEMA_SQL = `
   ${memoriesTableSql("memories", true)};
 
+  CREATE TABLE IF NOT EXISTS memory_applicability (
+    memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    user_id   TEXT NOT NULL,
+    PRIMARY KEY (memory_id, user_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_memory_applicability_user
+    ON memory_applicability(user_id, memory_id);
+
   CREATE TABLE IF NOT EXISTS messages (
     id                  TEXT PRIMARY KEY,
     guild_id            TEXT NOT NULL,

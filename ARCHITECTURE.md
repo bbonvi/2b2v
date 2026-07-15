@@ -74,7 +74,7 @@ Merged history rows must preserve all component Discord message IDs. Reply resol
 
 Rendered chat history exposes `oldest_visible_message_id` when stored prior context exists, so `list_channel_messages(before_message_id=...)` can page before the prompt window; search result MsgIDs can anchor `around_message_id` context windows.
 
-Memory scopes have product meaning: guild memories are server-local, user memories follow the Discord user across guilds, and self memories are the bot/persona's portable private context. Scratchpad memories must expire.
+Memory scopes have product meaning: guild memories are server-local, user memories follow the Discord user across guilds, and self memories are the bot/persona's portable private context. `subject_user_id` remains singular ownership; `memory_applicability` independently lists users whose presence makes a row relevant. User memories always apply to their subject, while untargeted guild/self memories remain generally available. Scratchpad memories must expire.
 
 Normal reply context reserves a small bounded slice for memories of recent visible human speakers in addition to current-speaker, guild, and self memories; person-specific rows remain explicitly subject-labelled.
 
@@ -90,7 +90,7 @@ Ambient memory extraction is separate from reply triggering. Successful post-rep
 
 Agent schedule tools are current-guild and current-channel scoped. Scheduled tasks are private by default, carry requester metadata plus a concise handoff note/fire count, and may self-complete recurring work. Non-admin recurring task pressure caps are configured by `schedulePressure`. One-off timers longer than JavaScript's maximum timeout must be chunked and re-armed.
 
-Discord uploads, embeds, and stickers are stored as metadata-only short `#ID` asset references shown in history and current-event metadata. Reads, reposts, and image-generation references resolve live sources lazily; signed Discord URLs are never persisted. Textual views use line-ranged reads and ripgrep regex search; ElevenLabs transcripts are cached as timestamped lines, while ordinary attachment bytes remain ephemeral. Per-kind deadlines bound work below the reply-loop deadline.
+Discord uploads, embeds, and stickers are stored as metadata-only short `#ID` asset references shown in history and current-event metadata. Asset IDs are not guild-scoped: reads, reposts, and image-generation references may cross guilds when the bot can still access the source channel, and read/search output reports the source guild/channel plus locality. Live access is rechecked before cached transcripts are exposed. Signed Discord URLs are never persisted. Textual views use line-ranged reads and ripgrep regex search; ElevenLabs transcripts are cached as timestamped lines, while ordinary attachment bytes remain ephemeral. Per-kind deadlines bound work below the reply-loop deadline.
 
 Asset history backfill pages each stored channel newest-first through Discord's 100-message endpoint. Per-channel cursors and `(message_id, source_kind, source_key)` uniqueness make page retries idempotent.
 

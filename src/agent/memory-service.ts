@@ -140,6 +140,10 @@ const MemoryWriteActionSchema = Type.Union([
       minLength: 1,
       description: "Username for subject=user.",
     })),
+    applies_to: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+      maxItems: 20,
+      description: "Users whose presence makes this memory relevant; this does not change its subject.",
+    })),
     kind: Type.String({ enum: [...MEMORY_KINDS] }),
     content: Type.String({ minLength: 1 }),
     confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
@@ -177,6 +181,7 @@ type MemoryExtraction = {
       id?: number;
       subject: MemorySubject;
       username?: string;
+      applies_to?: string[];
       kind: MemoryKind;
       content: string;
       confidence?: number;
@@ -198,6 +203,16 @@ function scopeLabel(row: MemoryRow, currentGuildId: string, resolveUserId?: (use
   }
   const username = resolveUserId?.(row.subjectUserId);
   return username !== undefined && username !== "" ? `@${username}` : `user:${row.subjectUserId}`;
+}
+
+function applicabilityLabel(row: MemoryRow, resolveUserId?: (userId: string) => string | undefined): string {
+  const nonSubjectIds = row.appliesToUserIds.filter((userId) => userId !== row.subjectUserId);
+  if (nonSubjectIds.length === 0) return "";
+  const labels = nonSubjectIds.map((userId) => {
+    const username = resolveUserId?.(userId);
+    return username !== undefined && username !== "" ? `@${username}` : `user:${userId}`;
+  });
+  return ` [applies:${labels.join(",")}]`;
 }
 
 function formatConfidence(confidence: number): string {
@@ -225,7 +240,7 @@ function formatMemoryRow(
   resolveUserId?: (userId: string) => string | undefined,
 ): string {
   const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
-  return `- ${row.id} [${scopeLabel(row, currentGuildId, resolveUserId)}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${expiry} ${row.content}`;
+  return `- ${row.id} [${scopeLabel(row, currentGuildId, resolveUserId)}]${applicabilityLabel(row, resolveUserId)} [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${expiry} ${row.content}`;
 }
 
 function memoryClockContext(timezone: string | undefined, now = Date.now()): string {
@@ -244,6 +259,7 @@ export function buildMemoryPolicyInstructions(): string[] {
 /** Build the uncached memory block injected into the conversation prompt. */
 export function buildMemoryContext(input: MemoryContextInput): string {
   const limit = Math.max(1, input.limit ?? 80);
+  const applicableUserIds = [...new Set([input.currentUserId, ...(input.visibleUserIds ?? [])])];
   const recentGroups = input.visibleUserIds === undefined
     ? []
     : selectVisibleUserMemoryGroups({
@@ -265,10 +281,12 @@ export function buildMemoryContext(input: MemoryContextInput): string {
   const selfTotal = countMemories(input.db, {
     guildId: input.guildId,
     scope: "self",
+    applicableToUserIds: applicableUserIds,
   });
   const selfRows = listMemories(input.db, {
     guildId: input.guildId,
     scope: "self",
+    applicableToUserIds: applicableUserIds,
     limit: maxSelfLimit,
   }).filter((row) => row.content.trim() !== "");
   const conversationalLimit = Math.max(0, primaryLimit - selfRows.length);
@@ -276,12 +294,14 @@ export function buildMemoryContext(input: MemoryContextInput): string {
     guildId: input.guildId,
     subjectUserId: input.currentUserId,
     includeGlobal: true,
+    applicableToUserIds: applicableUserIds,
   });
   const conversationalRows = conversationalLimit > 0
     ? listMemories(input.db, {
         guildId: input.guildId,
         subjectUserId: input.currentUserId,
         includeGlobal: true,
+        applicableToUserIds: applicableUserIds,
         limit: conversationalLimit,
       }).filter((row) => row.content.trim() !== "")
     : [];
@@ -387,6 +407,13 @@ function normalizeUsername(value: unknown): string | undefined {
   return username !== "" ? username : undefined;
 }
 
+function normalizeUsernameList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return [...new Set(value
+    .map((entry) => normalizeUsername(entry))
+    .filter((entry): entry is string => entry !== undefined))];
+}
+
 function normalizeSubject(value: unknown): MemorySubject {
   if (value === "global" || value === "server") return "global";
   if (value === "self" || value === "own" || value === "bot" || value === "persona") return "self";
@@ -475,6 +502,9 @@ function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][
       ...(normalizeUsername(value.username ?? value.subject) !== undefined
         ? { username: normalizeUsername(value.username ?? value.subject) }
         : {}),
+      ...(normalizeUsernameList(value.applies_to) !== undefined
+        ? { applies_to: normalizeUsernameList(value.applies_to) }
+        : {}),
       kind,
       content,
       ...(confidence !== undefined ? { confidence } : {}),
@@ -544,6 +574,11 @@ function memoryExtractionResponseFormat(): Record<string, unknown> {
                     id: { type: "integer", minimum: 1 },
                     subject: { type: "string", enum: ["global", "user", "self"] },
                     username: { type: "string", minLength: 1 },
+                    applies_to: {
+                      type: "array",
+                      maxItems: 20,
+                      items: { type: "string", minLength: 1 },
+                    },
                     kind: { type: "string", enum: [...MEMORY_KINDS] },
                     content: { type: "string", minLength: 1 },
                     confidence: { type: "number", minimum: 0, maximum: 1 },
@@ -645,6 +680,25 @@ interface MemoryActionTarget {
   subjectUserId: string | null;
 }
 
+async function resolveApplicableUserIds(
+  input: MemoryMutationInput,
+  usernames: readonly string[] | undefined,
+): Promise<string[] | undefined> {
+  if (usernames === undefined) return undefined;
+  const userIds: string[] = [];
+  for (const username of usernames) {
+    if (input.currentUsername !== undefined && username.toLowerCase() === input.currentUsername.toLowerCase()) {
+      userIds.push(input.currentUserId);
+      continue;
+    }
+    if (input.resolveUsername === undefined) return undefined;
+    const userId = await input.resolveUsername(username);
+    if (userId === undefined) return undefined;
+    userIds.push(userId);
+  }
+  return [...new Set(userIds)];
+}
+
 async function actionMemoryTarget(
   input: MemoryMutationInput,
   action: Extract<MemoryExtraction["actions"][number], { action: "upsert" }>,
@@ -680,6 +734,8 @@ async function applyMemoryActions(input: MemoryMutationInput, extraction: Memory
 
     const target = await actionMemoryTarget(input, action, existing);
     if (target === undefined) continue;
+    const appliesToUserIds = await resolveApplicableUserIds(input, action.applies_to);
+    if (action.applies_to !== undefined && appliesToUserIds === undefined) continue;
     if (!memoryKindScopeIsValid(action.kind, target.scope)) continue;
     if (!scratchpadExpiryIsValid(action, existing)) continue;
     const expiresAt = action.expiresIn === undefined
@@ -691,6 +747,7 @@ async function applyMemoryActions(input: MemoryMutationInput, extraction: Memory
       scope: target.scope,
       ...(target.scope === "guild" ? { guildId: input.guildId } : {}),
       subjectUserId: target.subjectUserId,
+      ...(appliesToUserIds !== undefined ? { appliesToUserIds } : {}),
       kind: action.kind,
       content: action.content.trim(),
       sourceMessageId: input.sourceMessageId,
@@ -714,8 +771,14 @@ async function applyMemoryActions(input: MemoryMutationInput, extraction: Memory
 
     const duplicate = duplicateMemory(input, target.scope, target.subjectUserId, action.kind, payload.content);
     if (duplicate !== null) {
-      if (action.important === true && duplicate.priority < 1) {
-        updateMemory(input.db, duplicate.id, { priority: 1 });
+      const mergedAppliesToUserIds = appliesToUserIds === undefined
+        ? undefined
+        : [...new Set([...duplicate.appliesToUserIds, ...appliesToUserIds])];
+      if ((action.important === true && duplicate.priority < 1) || mergedAppliesToUserIds !== undefined) {
+        updateMemory(input.db, duplicate.id, {
+          ...(action.important === true && duplicate.priority < 1 ? { priority: 1 } : {}),
+          ...(mergedAppliesToUserIds !== undefined ? { appliesToUserIds: mergedAppliesToUserIds } : {}),
+        });
         applied += 1;
       }
       continue;

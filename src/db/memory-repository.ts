@@ -10,6 +10,7 @@ export interface MemoryRow {
   scope: MemoryScope;
   guildId: string | null;
   subjectUserId: string | null;
+  appliesToUserIds: string[];
   kind: MemoryKind;
   content: string;
   sourceMessageId: string | null;
@@ -26,6 +27,7 @@ export interface CreateMemoryInput {
   guildId: string;
   scope?: MemoryScope;
   subjectUserId?: string | null;
+  appliesToUserIds?: readonly string[];
   kind: MemoryKind;
   content: string;
   sourceMessageId?: string | null;
@@ -39,6 +41,7 @@ export interface UpdateMemoryInput {
   scope?: MemoryScope;
   guildId?: string | null;
   subjectUserId?: string | null;
+  appliesToUserIds?: readonly string[];
   kind?: MemoryKind;
   content?: string;
   sourceMessageId?: string | null;
@@ -56,6 +59,8 @@ export interface ListMemoriesFilter {
   includeGlobal?: boolean;
   includeSelf?: boolean;
   includeDeleted?: boolean;
+  /** Keep untargeted rows plus rows applicable to at least one of these users. */
+  applicableToUserIds?: readonly string[];
   limit?: number;
 }
 
@@ -69,6 +74,51 @@ function clampConfidence(value: number | undefined): number {
 function clampPriority(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.trunc(value));
+}
+
+function normalizeUserIds(userIds: readonly string[] | undefined): string[] {
+  if (userIds === undefined) return [];
+  return [...new Set(userIds.map((userId) => userId.trim()).filter((userId) => userId !== ""))];
+}
+
+function effectiveApplicability(
+  scope: MemoryScope,
+  subjectUserId: string | null,
+  userIds: readonly string[] | undefined,
+): string[] {
+  const normalized = normalizeUserIds(userIds);
+  if (scope === "user" && subjectUserId !== null && !normalized.includes(subjectUserId)) {
+    normalized.push(subjectUserId);
+  }
+  return normalized;
+}
+
+function replaceMemoryApplicability(db: Database, memoryId: number, userIds: readonly string[]): void {
+  db.raw.prepare("DELETE FROM memory_applicability WHERE memory_id = ?").run(memoryId);
+  if (userIds.length === 0) return;
+  const insert = db.raw.prepare("INSERT INTO memory_applicability (memory_id, user_id) VALUES (?, ?)");
+  for (const userId of userIds) insert.run(memoryId, userId);
+}
+
+/** Return applicability user IDs keyed by memory ID. */
+export function listMemoryApplicability(
+  db: Database,
+  memoryIds: readonly number[],
+): Map<number, string[]> {
+  const uniqueIds = [...new Set(memoryIds)];
+  const result = new Map<number, string[]>();
+  for (const id of uniqueIds) result.set(id, []);
+  const chunkSize = 400;
+  for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+    const chunk = uniqueIds.slice(offset, offset + chunkSize);
+    if (chunk.length === 0) continue;
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = db.raw
+      .prepare(`SELECT memory_id, user_id FROM memory_applicability WHERE memory_id IN (${placeholders}) ORDER BY memory_id, user_id`)
+      .all(...chunk) as Array<{ memory_id: number; user_id: string }>;
+    for (const row of rows) result.get(row.memory_id)?.push(row.user_id);
+  }
+  return result;
 }
 
 function scopeForSubject(subjectUserId: string | null | undefined): MemoryScope {
@@ -174,6 +224,22 @@ function memoryFilterConditions(filter: CountMemoriesFilter): {
     params.push(filter.guildId);
   }
 
+  if (filter.applicableToUserIds !== undefined) {
+    const userIds = normalizeUserIds(filter.applicableToUserIds);
+    const applicableClause = userIds.length === 0
+      ? ""
+      : ` OR EXISTS (
+          SELECT 1 FROM memory_applicability applicable
+          WHERE applicable.memory_id = memories.id
+            AND applicable.user_id IN (${userIds.map(() => "?").join(",")})
+        )`;
+    conditions.push(`(
+      NOT EXISTS (SELECT 1 FROM memory_applicability targeted WHERE targeted.memory_id = memories.id)
+      ${applicableClause}
+    )`);
+    params.push(...userIds);
+  }
+
   if (filter.includeDeleted !== true) {
     conditions.push("deleted_at IS NULL");
     conditions.push("(expires_at IS NULL OR expires_at > ?)");
@@ -212,7 +278,13 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
       input.expiresAt ?? null,
     );
 
-  return Number(result.lastInsertRowid);
+  const id = Number(result.lastInsertRowid);
+  replaceMemoryApplicability(
+    db,
+    id,
+    effectiveApplicability(scope, subjectUserId, input.appliesToUserIds),
+  );
+  return id;
 }
 
 /** Update fields on an existing memory. Returns true if the row existed. */
@@ -220,8 +292,8 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
   const sets: string[] = [];
   const params: (string | number | null)[] = [];
   const existing = db.raw
-    .prepare("SELECT scope, kind FROM memories WHERE id = ?")
-    .get(id) as { scope: MemoryScope; kind: MemoryKind } | null;
+    .prepare("SELECT scope, subject_user_id, kind FROM memories WHERE id = ?")
+    .get(id) as { scope: MemoryScope; subject_user_id: string | null; kind: MemoryKind } | null;
   if (existing === null) return false;
   if (input.scope === undefined && ("guildId" in input || "subjectUserId" in input)) {
     throw new Error("Changing memory scope fields requires scope.");
@@ -279,6 +351,20 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
   params.push(id);
 
   const result = db.raw.prepare(`UPDATE memories SET ${sets.join(", ")} WHERE id = ?`).run(...params);
+  if (result.changes > 0 && input.appliesToUserIds !== undefined) {
+    const subjectUserId = input.scope !== undefined
+      ? updateScopeFields(input).subjectUserId
+      : existing.subject_user_id;
+    replaceMemoryApplicability(
+      db,
+      id,
+      effectiveApplicability(effectiveScope, subjectUserId, input.appliesToUserIds),
+    );
+  } else if (result.changes > 0 && input.scope === "user") {
+    const subjectUserId = updateScopeFields(input).subjectUserId;
+    const current = listMemoryApplicability(db, [id]).get(id) ?? [];
+    replaceMemoryApplicability(db, id, effectiveApplicability("user", subjectUserId, current));
+  }
   return result.changes > 0;
 }
 
@@ -301,7 +387,7 @@ export function getMemory(db: Database, id: number): MemoryRow | null {
     .prepare("SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)")
     .get(id, Date.now()) as Record<string, unknown> | null;
   if (row === null) return null;
-  return mapRow(row);
+  return mapRow(row, listMemoryApplicability(db, [id]).get(id) ?? []);
 }
 
 /** List active memories by scope, optionally combining current guild and portable user rows for prompt context. */
@@ -315,7 +401,8 @@ export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRo
   }
 
   const rows = db.raw.prepare(sql).all(...params) as Record<string, unknown>[];
-  return rows.map(mapRow);
+  const applicability = listMemoryApplicability(db, rows.map((row) => Number(row.id)));
+  return rows.map((row) => mapRow(row, applicability.get(Number(row.id)) ?? []));
 }
 
 /** Count memories matching the same active/deleted/scope filters as listMemories. */
@@ -344,7 +431,7 @@ export function countUserMemoriesByUser(db: Database, _guildId: string): Map<str
   return result;
 }
 
-function mapRow(row: Record<string, unknown>): MemoryRow {
+function mapRow(row: Record<string, unknown>, appliesToUserIds: string[]): MemoryRow {
   const provenanceRaw = row.provenance_json;
   let provenance: Record<string, unknown> | null = null;
   if (typeof provenanceRaw === "string" && provenanceRaw.trim() !== "") {
@@ -358,6 +445,7 @@ function mapRow(row: Record<string, unknown>): MemoryRow {
     scope: row.scope as MemoryScope,
     guildId: row.guild_id as string | null,
     subjectUserId: row.subject_user_id as string | null,
+    appliesToUserIds,
     kind: row.kind as MemoryKind,
     content: sanitizeMemoryContent(row.content as string),
     sourceMessageId: row.source_message_id as string | null,

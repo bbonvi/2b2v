@@ -1987,7 +1987,6 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
         generatedImages,
         resolveAssetAttachments: createStoredAssetAttachmentResolver({
           db,
-          guildId: input.candidate.guildId,
           maxDownloadBytes: input.guildConfig.assetReading?.maxDownloadBytes ?? DEFAULT_ASSET_READING.maxDownloadBytes,
           resolveSource: createDiscordAssetSourceResolver({
             fetchMessage: async (channelId, messageId) => {

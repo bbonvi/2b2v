@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { AssetIdSchema, parseAssetId } from "./asset-id.ts";
-import { loadAssetTextView, type ReadAssetToolDeps } from "./read-asset-tool.ts";
+import { formatAssetOrigin, loadAssetTextView, type AssetOrigin, type ReadAssetToolDeps } from "./read-asset-tool.ts";
 import { runRipgrep as runRipgrepProcess } from "./ripgrep.ts";
 
 const SearchAssetParams = Type.Object({
@@ -18,7 +18,7 @@ export function createSearchAssetTool(deps: ReadAssetToolDeps): AgentTool {
     label: "Search Asset",
     description: "Regex-search a text attachment or cached/new audio or video transcript and return line-numbered context.",
     parameters: SearchAssetParams,
-    async execute(_toolCallId, params, signal): Promise<AgentToolResult<{ assetId: number; matched: boolean }>> {
+    async execute(_toolCallId, params, signal): Promise<AgentToolResult<{ assetId: number; origin: AssetOrigin; matched: boolean }>> {
       const input = params as { asset_id: unknown; pattern: string; context_lines?: number; max_results?: number };
       const assetId = parseAssetId(input.asset_id);
       if (assetId === null) throw new Error("asset_id must be a positive integer, optionally prefixed with #");
@@ -27,6 +27,8 @@ export function createSearchAssetTool(deps: ReadAssetToolDeps): AgentTool {
       if (asset.kind !== "text" && asset.kind !== "audio" && asset.kind !== "video") {
         throw new Error(`Asset #${assetId} is not text-searchable.`);
       }
+      const origin = await deps.resolveOrigin(asset);
+      if (origin === null) throw new Error(`Asset ${assetId} source channel is unavailable or inaccessible.`);
       const timeoutSignal = AbortSignal.timeout(deps.config.timeoutSeconds[asset.kind] * 1000);
       const searchSignal = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
       const source = await deps.resolveSource(asset);
@@ -39,12 +41,12 @@ export function createSearchAssetTool(deps: ReadAssetToolDeps): AgentTool {
       const contextLines = input.context_lines ?? 2;
       const result = await runRipgrep(view.text, input.pattern, contextLines, maxResults, deps.config.maxCharsPerRead, searchSignal);
       const filename = effectiveSource.filename ?? asset.filename;
-      const heading = `Asset: ${asset.kind === "text" ? "Text" : "Transcript"} #${asset.id}${filename !== null ? ` — ${filename}` : ""}\nRegex: ${JSON.stringify(input.pattern)}`;
+      const heading = `Asset: ${asset.kind === "text" ? "Text" : "Transcript"} #${asset.id}${filename !== null ? ` — ${filename}` : ""}\n${formatAssetOrigin(origin)}\nRegex: ${JSON.stringify(input.pattern)}`;
       return {
         content: [{ type: "text", text: result === null
           ? `${heading}\nNo matches.`
           : `${heading}\nShowing up to ${maxResults} matching lines with ${contextLines} context lines:\n${result}` }],
-        details: { assetId: asset.id, matched: result !== null },
+        details: { assetId: asset.id, origin, matched: result !== null },
       };
     },
   };

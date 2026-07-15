@@ -188,5 +188,8 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
   createMemoryIndexes(raw);
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_scope_active ON memories(scope, deleted_at, updated_at)");
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_priority_active ON memories(priority, deleted_at, updated_at)");
+  raw.run(`INSERT OR IGNORE INTO memory_applicability (memory_id, user_id)
+    SELECT id, subject_user_id FROM memories
+    WHERE scope = 'user' AND subject_user_id IS NOT NULL`);
   sanitizeExistingMemoryRows(raw);
 }

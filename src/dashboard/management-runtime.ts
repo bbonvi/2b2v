@@ -26,6 +26,7 @@ export type DecoratedManagementMessage = ManagementMessageRow & {
 export type DecoratedManagementMemory = ManagementMemoryRow & {
   guildName?: string;
   subjectUsername?: string;
+  appliesToUsernames: string[];
 };
 
 export type DiscordManagementDeleteResult = {
@@ -178,6 +179,7 @@ export function createDashboardManagementRuntime(input: {
     ...row,
     ...(row.guildId !== null ? { guildName: managementGuildName(row.guildId) } : {}),
     ...(row.subjectUserId !== null ? { subjectUsername: managementUserName(row.subjectUserId) } : {}),
+    appliesToUsernames: row.appliesToUserIds.map(managementUserName),
   });
 
   const tryDeleteDiscordManagementMessages = async (deleteInput: {

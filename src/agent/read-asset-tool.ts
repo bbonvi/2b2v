@@ -17,10 +17,22 @@ export interface ResolvedAssetSource {
   filename: string | null;
 }
 
+export type AssetOriginLocation = "current-channel" | "other-channel" | "other-guild";
+
+export interface AssetOrigin {
+  guildId: string;
+  guildName: string;
+  channelId: string;
+  channelName: string;
+  location: AssetOriginLocation;
+}
+
 export interface ReadAssetToolDeps {
   config: AssetReadingConfig;
   elevenLabsApiKey?: string;
   getAsset: (id: number) => MessageAsset | null;
+  /** Resolve visible origin metadata and confirm the bot can still access the source channel. */
+  resolveOrigin: (asset: MessageAsset) => Promise<AssetOrigin | null>;
   resolveSource: (asset: MessageAsset) => Promise<ResolvedAssetSource | null>;
   cacheExtraction: (id: number, text: string, provider: string) => void;
   prepareImage: (buffer: Buffer, mimeType: string) => Promise<{ data: Buffer; mime: string; width: number; height: number }>;
@@ -34,6 +46,16 @@ export interface AssetTextView {
   providerLabel?: string;
 }
 
+/** Render source location for model-visible asset tool output. */
+export function formatAssetOrigin(origin: AssetOrigin): string {
+  const location = origin.location === "current-channel"
+    ? "current channel"
+    : origin.location === "other-channel"
+      ? "another channel in this guild"
+      : "another guild";
+  return `Origin: ${origin.guildName} (${origin.guildId}) / #${origin.channelName} (${origin.channelId}); location: ${location}`;
+}
+
 /** Read one lazy message asset, using line ranges for textual content. */
 export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
   const fetchFn = deps.fetchFn ?? fetch;
@@ -42,12 +64,14 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
     label: "Read Asset",
     description: "Read an image, GIF, audio, video, text, or file referenced by a typed chat asset ID.",
     parameters: ReadAssetParams,
-    async execute(_toolCallId, params, signal): Promise<AgentToolResult<{ assetId: number; startLine?: number; endLine?: number; totalLines?: number }>> {
+    async execute(_toolCallId, params, signal): Promise<AgentToolResult<{ assetId: number; origin: AssetOrigin; startLine?: number; endLine?: number; totalLines?: number }>> {
       const input = params as { asset_id: unknown; start_line?: number; line_count?: number };
       const assetId = parseAssetId(input.asset_id);
       if (assetId === null) throw new Error("asset_id must be a positive integer, optionally prefixed with #");
       const asset = deps.getAsset(assetId);
       if (asset === null) throw new Error(`Asset ${assetId} was not found.`);
+      const origin = await deps.resolveOrigin(asset);
+      if (origin === null) throw new Error(`Asset ${assetId} source channel is unavailable or inaccessible.`);
       const timeoutSignal = AbortSignal.timeout(deps.config.timeoutSeconds[asset.kind] * 1000);
       const readSignal = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
       const source = await deps.resolveSource(asset);
@@ -67,7 +91,7 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
       ].filter((fact) => fact !== "");
       const content: Array<TextContent | ImageContent> = [{
         type: "text",
-        text: `Asset: ${kindLabel} #${asset.id}${filename !== null ? ` — ${filename}` : ""}\n${facts.join("; ")}`,
+        text: `Asset: ${kindLabel} #${asset.id}${filename !== null ? ` — ${filename}` : ""}\n${formatAssetOrigin(origin)}\n${facts.join("; ")}`,
       }];
 
       if (asset.kind === "image" || asset.kind === "gif") {
@@ -75,7 +99,7 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
         const image = await deps.prepareImage(buffer, effectiveSource.contentType ?? asset.contentType ?? "image/png");
         readSignal.throwIfAborted();
         content.push({ type: "image", data: image.data.toString("base64"), mimeType: image.mime });
-        return { content, details: { assetId: asset.id } };
+        return { content, details: { assetId: asset.id, origin } };
       }
 
       if (asset.kind === "text" || asset.kind === "audio" || asset.kind === "video") {
@@ -110,12 +134,12 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
           }
         }
         return { content, details: range === null
-          ? { assetId: asset.id }
-          : { assetId: asset.id, startLine: range.startLine, endLine: range.endLine, totalLines: range.totalLines } };
+          ? { assetId: asset.id, origin }
+          : { assetId: asset.id, origin, startLine: range.startLine, endLine: range.endLine, totalLines: range.totalLines } };
       }
 
       content.push({ type: "text", text: "Content reading is unsupported for this file type; metadata and reposting remain available." });
-      return { content, details: { assetId: asset.id } };
+      return { content, details: { assetId: asset.id, origin } };
     },
   };
 }

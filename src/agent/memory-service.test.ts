@@ -48,6 +48,31 @@ describe("buildMemoryContext", () => {
     expect(context).toContain("[self] [0.7] [journal] Privately decided the server is worth returning to.");
   });
 
+  test("loads targeted self memories only when an applicable user is visible", () => {
+    createMemory(db, { guildId: "g1", scope: "self", kind: "journal", content: "General continuity." });
+    createMemory(db, {
+      guildId: "g1",
+      scope: "self",
+      appliesToUserIds: ["u2"],
+      kind: "journal",
+      content: "Use the stored reaction image when Bob starts baiting people.",
+    });
+
+    const withoutBob = buildMemoryContext({ db, guildId: "g1", currentUserId: "u1" });
+    const withBob = buildMemoryContext({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      visibleUserIds: ["u1", "u2"],
+      resolveUserId: (id) => id === "u2" ? "bob" : undefined,
+    });
+
+    expect(withoutBob).toContain("General continuity.");
+    expect(withoutBob).not.toContain("Bob starts baiting");
+    expect(withBob).toContain("[self] [applies:@bob]");
+    expect(withBob).toContain("Bob starts baiting");
+  });
+
   test("renders future expiry relatively", () => {
     createMemory(db, {
       guildId: "g1",
@@ -967,6 +992,31 @@ describe("createRecordMemoryTool", () => {
     expect(memories[0]?.subjectUserId).toBeNull();
     expect(memories[0]?.guildId).toBeNull();
     expect(memories[0]?.content).toBe("Told the server she keeps cheap red wine for bad nights.");
+  });
+
+  test("records and merges self behavior memories applicable to other users", async () => {
+    const tool = createRecordMemoryTool({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      currentUsername: "alice",
+      sourceMessageId: "m1",
+      resolveUsername: (username) => Promise.resolve(({ bob: "u2", charlie: "u3" })[username]),
+    });
+    const action = {
+      action: "upsert" as const,
+      subject: "self" as const,
+      kind: "journal" as const,
+      content: "Alice asked me to use reaction images when the named user starts baiting people.",
+    };
+
+    await tool.execute("call-1", { actions: [{ ...action, applies_to: ["@bob"] }] });
+    await tool.execute("call-2", { actions: [{ ...action, applies_to: ["charlie"] }] });
+
+    const memories = listMemories(db, { guildId: "g1", scope: "self" });
+    expect(memories).toHaveLength(1);
+    expect(memories[0]?.subjectUserId).toBeNull();
+    expect(memories[0]?.appliesToUserIds).toEqual(["u2", "u3"]);
   });
 
   test("rejects non-self journal memories", async () => {

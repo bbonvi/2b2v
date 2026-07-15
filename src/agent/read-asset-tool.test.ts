@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { AssetReadingConfig } from "../config/types.ts";
 import type { MessageAsset } from "../db/asset-repository.ts";
-import { createReadAssetTool } from "./read-asset-tool.ts";
+import { createReadAssetTool, type AssetOrigin } from "./read-asset-tool.ts";
 
 const config: AssetReadingConfig = {
   maxCharsPerRead: 100,
@@ -22,20 +22,30 @@ function asset(kind: MessageAsset["kind"]): MessageAsset {
   };
 }
 
+const origin: AssetOrigin = {
+  guildId: "source-guild",
+  guildName: "Source Guild",
+  channelId: "source-channel",
+  channelName: "memes",
+  location: "other-guild",
+};
+
 describe("read_asset", () => {
   test("reads a numbered line range from remote text", async () => {
     const source = Buffer.from("alpha\nbeta\ngamma");
     const tool = createReadAssetTool({
       config,
       getAsset: () => asset("text"),
+      resolveOrigin: () => Promise.resolve(origin),
       resolveSource: () => Promise.resolve({ url: "https://cdn.test/a", contentType: "text/plain", filename: "a.txt" }),
       cacheExtraction: () => {},
       prepareImage: () => Promise.reject(new Error("unused")),
       fetchFn: (() => Promise.resolve(new Response(source, { headers: { "content-length": String(source.length) } }))) as unknown as typeof fetch,
     });
     const result = await tool.execute("one", { asset_id: "#1", start_line: 2, line_count: 2 });
+    expect(result.content.some((part) => part.type === "text" && part.text.includes("Origin: Source Guild (source-guild) / #memes (source-channel); location: another guild"))).toBeTrue();
     expect(result.content.some((part) => part.type === "text" && part.text.includes("showing lines 2-3:\n2 | beta\n3 | gamma"))).toBeTrue();
-    expect(result.details).toEqual({ assetId: 1, startLine: 2, endLine: 3, totalLines: 3 });
+    expect(result.details).toEqual({ assetId: 1, origin, startLine: 2, endLine: 3, totalLines: 3 });
   });
 
   test("caches timestamped transcripts as numbered lines", async () => {
@@ -45,6 +55,7 @@ describe("read_asset", () => {
       config,
       elevenLabsApiKey: "key",
       getAsset: () => record,
+      resolveOrigin: () => Promise.resolve(origin),
       resolveSource: () => Promise.resolve(calls === 0
         ? { url: "https://cdn.test/audio", contentType: "audio/ogg", filename: "voice.ogg" }
         : null),
@@ -66,7 +77,7 @@ describe("read_asset", () => {
       }) as unknown as typeof fetch,
     });
     const first = await tool.execute("one", { asset_id: 1 });
-    expect(first.details).toEqual({ assetId: 1, startLine: 1, endLine: 1, totalLines: 1 });
+    expect(first.details).toEqual({ assetId: 1, origin, startLine: 1, endLine: 1, totalLines: 1 });
     expect(first.content.some((part) => part.type === "text" && part.text.includes("1 | [00:00–00:01] hello transcript"))).toBeTrue();
     await tool.execute("two", { asset_id: 1, start_line: 1 });
     expect(calls).toBe(1);
@@ -78,6 +89,7 @@ describe("read_asset", () => {
       config: { ...config, timeoutSeconds: { ...config.timeoutSeconds, audio: 0.01 } },
       elevenLabsApiKey: "key",
       getAsset: () => asset("audio"),
+      resolveOrigin: () => Promise.resolve(origin),
       resolveSource: () => Promise.resolve({ url: "https://cdn.test/audio", contentType: "audio/ogg", filename: "voice.ogg" }),
       cacheExtraction: () => {},
       prepareImage: () => Promise.reject(new Error("unused")),
@@ -95,6 +107,7 @@ describe("read_asset", () => {
       config,
       elevenLabsApiKey: "key",
       getAsset: () => asset("video"),
+      resolveOrigin: () => Promise.resolve(origin),
       resolveSource: () => Promise.resolve({ url: "https://cdn.test/video", contentType: "video/mp4", filename: "clip.mp4" }),
       cacheExtraction: () => {},
       prepareImage: () => Promise.reject(new Error("unused")),
@@ -105,6 +118,21 @@ describe("read_asset", () => {
     expect(result.content.some((part) => part.type === "text" && part.text.includes("Transcript unavailable: ElevenLabs transcription failed (400)"))).toBeTrue();
     expect(result.content.some((part) => part.type === "text" && part.text === "Video frame at 0s")).toBeTrue();
     expect(result.content.some((part) => part.type === "image")).toBeTrue();
-    expect(result.details).toEqual({ assetId: 1 });
+    expect(result.details).toEqual({ assetId: 1, origin });
+  });
+
+  test("rejects cached transcripts when the source channel is inaccessible", () => {
+    const record = asset("audio");
+    record.extractedText = "private cached transcript";
+    const tool = createReadAssetTool({
+      config,
+      getAsset: () => record,
+      resolveOrigin: () => Promise.resolve(null),
+      resolveSource: () => Promise.resolve(null),
+      cacheExtraction: () => {},
+      prepareImage: () => Promise.reject(new Error("unused")),
+    });
+
+    return expect(Promise.resolve(tool.execute("denied", { asset_id: 1 }))).rejects.toThrow("source channel is unavailable or inaccessible");
   });
 });

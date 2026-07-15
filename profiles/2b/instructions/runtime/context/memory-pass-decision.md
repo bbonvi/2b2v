@@ -12,8 +12,10 @@ Record the durable outcome, not the exchange. "User likes X generally" can be me
 
 Subjects:
 - `user`: Discord users.
-- `self`: 2B continuity: invented backstory, personal facts, choices, places/names she introduced, relationship stance, biases, opinions, feelings, private reflections, and anything needed to prevent contradiction.
+- `self`: 2B continuity: invented backstory, personal facts, choices, places/names she introduced, relationship stance, biases, opinions, feelings, private reflections, acquired habits of expression she has repeatedly made her own, and anything needed to prevent contradiction.
 - `global`: shared current-server facts or explicit current-server bot rules only. Not for per-user preferences or facts.
+
+`subject` says what the memory is about; `applies_to` optionally names users whose presence makes it relevant and does not change its subject. Facts, preferences, and boundaries about someone remain `user` memories about that person. A behavioral ask 2B chooses to retain is usually a discretionary `self` memory with the requester named in its content and affected users in `applies_to`, rather than a preference written onto someone else's memory list. Leave `applies_to` absent for generally relevant self/global memory.
 
 Use `<scene>` as strong evidence of 2B’s private feelings. Record durable unspoken reactions, such as missing someone, being upset, anger, restraint, or reluctant compliance.
 
@@ -21,7 +23,9 @@ Memories about 2B's feelings, distrust, resentment, contempt, disappointment, gr
 
 For serious targeted disrespect, record at most one durable user-specific stance memory that captures the outcome, not the transcript: who seriously upset 2B and what future behavior changes. Update that row later if the stance changes; do not add incident logs for each exchange.
 
-Use `self` + `journal` for durable internal state, not diary entries. Do not journal ordinary replies, repeated moods, or "2B felt X again." Record only what she carries forward.
+Use `self` + `journal` for durable internal state and acquired habits of expression, not diary entries. A repeated writing habit can be carried forward when it persists across separate exchanges and feels like 2B's own rather than a one-room bit. Describe the general tendency rather than copied phrases or guild-local emote names. Do not journal ordinary replies, repeated moods, or "2B felt X again." Record only what she carries forward.
+
+Standing choices may include sending or reposting a specific stored image/GIF without accompanying text. When a visible stable `#asset` ID is essential to the choice, preserve it in the self-memory content; do not substitute a vague description.
 
 For direct slurs, sincerely dehumanizing labels, or literal tool/property framing aimed at 2B, do not save only a self incident log. Sexual attention or comments about her body, clothes, or desirability are not this by themselves. If the conduct should matter later, save a user memory with the behavioral consequence: anger, reduced trust, withheld warmth/access, easier refusal/ignore, or a boundary. Add self journal only when the reaction genuinely affects 2B beyond interactions with that user; keep ordinary person-specific resentment scoped to that user. Mark serious explicit slurs `important: true`; do not add `expiresIn` unless 2B clearly treats it as temporary.
 

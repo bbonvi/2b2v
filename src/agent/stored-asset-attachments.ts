@@ -8,17 +8,17 @@ import { fetchAssetBuffer } from "./read-asset-tool.ts";
 /** Resolve prompt-visible asset IDs into exact outgoing Discord uploads on demand. */
 export function createStoredAssetAttachmentResolver(input: {
   db: Database;
-  guildId: string;
   maxDownloadBytes: number;
   resolveSource: (asset: NonNullable<ReturnType<typeof getAssetById>>) => Promise<ResolvedAssetSource | null>;
   logger: Logger;
+  fetchFn?: typeof fetch;
 }): AssetAttachmentResolver {
   return async (assetIds) => {
     const attachments: OutboundAttachment[] = [];
     for (const id of assetIds) {
       const asset = getAssetById(input.db, id);
-      if (asset === null || asset.guildId !== input.guildId) {
-        input.logger.warn("asset attachment not found", { assetId: id, guildId: input.guildId });
+      if (asset === null) {
+        input.logger.warn("asset attachment not found", { assetId: id });
         continue;
       }
       const source = await input.resolveSource(asset);
@@ -29,7 +29,7 @@ export function createStoredAssetAttachmentResolver(input: {
       try {
         attachments.push({
           id: `asset-${id}`,
-          buffer: await fetchAssetBuffer(fetch, source.url, input.maxDownloadBytes),
+          buffer: await fetchAssetBuffer(input.fetchFn ?? fetch, source.url, input.maxDownloadBytes),
           filename: source.filename ?? asset.filename ?? `asset-${id}`,
           contentType: source.contentType ?? asset.contentType ?? "application/octet-stream",
           historyText: `Reposted ${asset.kind} asset ${id}.`,

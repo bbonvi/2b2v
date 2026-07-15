@@ -335,7 +335,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       asyncJobStartedTemplate: promptBundle.runtime.contextTemplates["codex-image-job-started"],
       resolveReferenceImage: async (id) => {
         const asset = getAssetById(db, id);
-        if (asset === null || asset.guildId !== job.guildId) return null;
+        if (asset === null) return null;
         const source = await jobAssetSource(asset);
         if (source === null) return null;
         return await loadAssetReferenceImage({
@@ -635,7 +635,7 @@ function createHandlerDeps(input: {
   };
 }
 
-function createAssetAttachmentResolver(guildId: string, guildConfig: GuildConfig, logger: Logger): AssetAttachmentResolver {
+function createAssetAttachmentResolver(_guildId: string, guildConfig: GuildConfig, logger: Logger): AssetAttachmentResolver {
   const resolveSource = createDiscordAssetSourceResolver({
     fetchMessage: async (channelId, messageId) => {
       const channel = await fetchAccessibleGuildChannel(channelId);
@@ -649,7 +649,6 @@ function createAssetAttachmentResolver(guildId: string, guildConfig: GuildConfig
   });
   return createStoredAssetAttachmentResolver({
     db,
-    guildId,
     maxDownloadBytes: guildConfig.assetReading?.maxDownloadBytes ?? DEFAULT_ASSET_READING.maxDownloadBytes,
     resolveSource,
     logger,
@@ -2358,9 +2357,21 @@ function buildAgentTools(
   const assetToolDeps = {
     config: guildConfig.assetReading ?? { ...DEFAULT_ASSET_READING, videoPreviewTimesSeconds: [...DEFAULT_ASSET_READING.videoPreviewTimesSeconds] },
     elevenLabsApiKey: globalConfig.elevenLabsApiKey,
-    getAsset: (id) => {
-      const asset = getAssetById(db, id);
-      return asset !== null && asset.guildId === guildId ? asset : null;
+    getAsset: (id) => getAssetById(db, id),
+    resolveOrigin: async (asset) => {
+      const sourceChannel = await fetchAccessibleGuildChannel(asset.channelId);
+      if (sourceChannel === null) return null;
+      return {
+        guildId: sourceChannel.guildId,
+        guildName: sourceChannel.guild.name,
+        channelId: sourceChannel.id,
+        channelName: channelDisplayName(sourceChannel) ?? sourceChannel.id,
+        location: sourceChannel.guildId !== guildId
+          ? "other-guild"
+          : sourceChannel.id !== channelId
+            ? "other-channel"
+            : "current-channel",
+      };
     },
     resolveSource: resolveAssetSource,
     cacheExtraction: (id, text, provider) => cacheAssetExtraction(db, id, text, provider),
@@ -2448,7 +2459,7 @@ function buildAgentTools(
       asyncJobStartedTemplate: promptBundle.runtime.contextTemplates["codex-image-job-started"],
       resolveReferenceImage: async (id) => {
         const asset = getAssetById(db, id);
-        if (asset === null || asset.guildId !== guildId) return null;
+        if (asset === null) return null;
         const source = await resolveAssetSource(asset);
         if (source === null) return null;
         return await loadAssetReferenceImage({

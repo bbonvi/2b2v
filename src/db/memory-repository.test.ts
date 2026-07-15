@@ -36,6 +36,7 @@ describe("createMemory", () => {
     const row = getMemory(db, id);
     expect(row?.guildId).toBeNull();
     expect(row?.subjectUserId).toBe("u1");
+    expect(row?.appliesToUserIds).toEqual(["u1"]);
     expect(row?.kind).toBe("preference");
     expect(row?.content).toBe("User likes concise answers.");
     expect(row?.sourceMessageId).toBe("m1");
@@ -96,6 +97,21 @@ describe("createMemory", () => {
     expect(row?.subjectUserId).toBeNull();
     expect(row?.kind).toBe("journal");
   });
+
+  test("stores independent applicability without changing the subject", () => {
+    const id = createMemory(db, {
+      guildId: "g1",
+      scope: "self",
+      appliesToUserIds: ["u2", "u3", "u2"],
+      kind: "journal",
+      content: "Alice asked me to use reaction images when Bob starts baiting people.",
+    });
+
+    const row = getMemory(db, id);
+    expect(row?.scope).toBe("self");
+    expect(row?.subjectUserId).toBeNull();
+    expect(row?.appliesToUserIds).toEqual(["u2", "u3"]);
+  });
 });
 
 describe("updateMemory", () => {
@@ -141,6 +157,29 @@ describe("updateMemory", () => {
 
     expect(updateMemory(db, id, { priority: 1 })).toBe(true);
     expect(getMemory(db, id)?.priority).toBe(1);
+  });
+
+  test("replaces applicability while keeping user subjects applicable", () => {
+    const selfId = createMemory(db, {
+      guildId: "g1",
+      scope: "self",
+      appliesToUserIds: ["u1"],
+      kind: "journal",
+      content: "Targeted self memory.",
+    });
+    const userId = createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      appliesToUserIds: ["u2"],
+      kind: "fact",
+      content: "A fact about Alice.",
+    });
+
+    expect(updateMemory(db, selfId, { appliesToUserIds: ["u2"] })).toBe(true);
+    expect(getMemory(db, selfId)?.appliesToUserIds).toEqual(["u2"]);
+    expect(getMemory(db, userId)?.appliesToUserIds).toEqual(["u1", "u2"]);
+    expect(updateMemory(db, userId, { appliesToUserIds: ["u3"] })).toBe(true);
+    expect(getMemory(db, userId)?.appliesToUserIds).toEqual(["u1", "u3"]);
   });
 
   test("updates scope only with required ownership fields", () => {
@@ -258,6 +297,31 @@ describe("listMemories", () => {
 
     const rows = listMemories(db, { guildId: "g1", subjectUserId: "u1", limit: 2 });
     expect(rows.map((row) => row.content)).toEqual(["Newest", "Middle"]);
+  });
+
+  test("keeps untargeted memories and filters targeted memories by applicable users", () => {
+    createMemory(db, { guildId: "g1", scope: "self", kind: "journal", content: "General self memory." });
+    createMemory(db, {
+      guildId: "g1",
+      scope: "self",
+      appliesToUserIds: ["u1"],
+      kind: "journal",
+      content: "Alice-specific self memory.",
+    });
+    createMemory(db, {
+      guildId: "g1",
+      scope: "self",
+      appliesToUserIds: ["u2"],
+      kind: "journal",
+      content: "Bob-specific self memory.",
+    });
+
+    const filter = { guildId: "g1", scope: "self" as const, applicableToUserIds: ["u1"] };
+    expect(listMemories(db, filter).map((row) => row.content).sort()).toEqual([
+      "Alice-specific self memory.",
+      "General self memory.",
+    ]);
+    expect(countMemories(db, filter)).toBe(2);
   });
 
   test("returns important memories before newer normal memories", () => {

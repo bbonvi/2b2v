@@ -2637,6 +2637,9 @@
           + '<span>' + esc(memory.scope) + '</span>'
           + '<span>' + esc(memory.kind) + '</span>'
           + '<span>' + esc(owner) + '</span>'
+          + (memory.appliesToUsernames.length > 0
+            ? '<span>applies to ' + memory.appliesToUsernames.map(name => '@' + esc(name)).join(', ') + '</span>'
+            : '')
           + '<span>conf ' + esc(Number(memory.confidence).toFixed(2)) + '</span>'
           + (important ? '<span class="memory-important-badge">important</span>' : '')
           + (memory.expiresAt != null ? '<span>expires ' + esc(fmtDateTime(memory.expiresAt)) + '</span>' : '')

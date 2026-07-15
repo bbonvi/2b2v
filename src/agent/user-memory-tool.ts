@@ -61,7 +61,9 @@ function formatMemory(row: MemoryRow): string {
     : row.subjectUserId === null
     ? "guild"
     : `user:${row.subjectUserId}`;
-  return `- ${row.id} [${scope}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""} ${row.content}`;
+  const applicable = row.appliesToUserIds.filter((userId) => userId !== row.subjectUserId);
+  const applies = applicable.length > 0 ? ` [applies:${applicable.map((userId) => `user:${userId}`).join(",")}]` : "";
+  return `- ${row.id} [${scope}]${applies} [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""} ${row.content}`;
 }
 
 function formatUserMemory(row: MemoryRow): string {

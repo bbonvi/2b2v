@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { AssetReadingConfig } from "../config/types.ts";
 import type { MessageAsset } from "../db/asset-repository.ts";
 import { createSearchAssetTool } from "./search-asset-tool.ts";
+import type { AssetOrigin } from "./read-asset-tool.ts";
 
 const config: AssetReadingConfig = {
   maxCharsPerRead: 30_000,
@@ -33,11 +34,20 @@ const asset: MessageAsset = {
   createdAt: 1,
 };
 
+const origin: AssetOrigin = {
+  guildId: "g",
+  guildName: "Guild",
+  channelId: "elsewhere",
+  channelName: "logs",
+  location: "other-channel",
+};
+
 describe("search_asset", () => {
   test("returns regex matches with numbered context lines", async () => {
     const tool = createSearchAssetTool({
       config,
       getAsset: () => asset,
+      resolveOrigin: () => Promise.resolve(origin),
       resolveSource: () => Promise.resolve({ url: "https://cdn.test/source", contentType: "text/javascript", filename: "source.js" }),
       cacheExtraction: () => {},
       prepareImage: () => Promise.reject(new Error("unused")),
@@ -48,13 +58,15 @@ describe("search_asset", () => {
     expect(text).toContain("1-before");
     expect(text).toContain("2:refreshToken");
     expect(text).toContain("3-after");
-    expect(result.details).toEqual({ assetId: 7, matched: true });
+    expect(text).toContain("Origin: Guild (g) / #logs (elsewhere); location: another channel in this guild");
+    expect(result.details).toEqual({ assetId: 7, origin, matched: true });
   });
 
   test("returns a clear invalid-regex error", () => {
     const tool = createSearchAssetTool({
       config,
       getAsset: () => asset,
+      resolveOrigin: () => Promise.resolve(origin),
       resolveSource: () => Promise.resolve({ url: "https://cdn.test/source", contentType: "text/plain", filename: "source.js" }),
       cacheExtraction: () => {},
       prepareImage: () => Promise.reject(new Error("unused")),
