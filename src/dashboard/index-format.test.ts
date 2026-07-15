@@ -221,11 +221,16 @@ describe("dashboard lifecycle formatting", () => {
 describe("dashboard memory workspace", () => {
   test("keeps memory editing in its own island and Prompt Lab in Management", () => {
     const html = readFileSync("src/dashboard/index.html", "utf8");
+    const island = readFileSync("src/dashboard/memories-tab.tsx", "utf8");
 
     expect(html).toContain('id="tab-memories"');
     expect(html).toContain('id="memories-tab-root"');
     expect(html).toContain('src="/assets/memories-tab.js"');
     expect(html).toContain('id="lab-prompt"');
     expect(html).not.toContain('id="m-memory-list"');
+    expect(loadDashboardScript()).toContain("modeRail.style.display = tab === 'logs' ? '' : 'none';");
+    expect(island).not.toContain("Structured context archive");
+    expect(island).not.toContain("memory-card-rank");
+    expect(island).toContain("higher priority first · then latest update");
   });
 });

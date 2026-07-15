@@ -28,7 +28,7 @@ type AwaitableDashboardManagementResult = DashboardManagementResult | Promise<Da
 
 interface DashboardManagementApi {
   getPersonaModeStatus?: () => AwaitableDashboardManagementResult;
-  getDirectory: () => ManagementDirectory;
+  getDirectory: () => ManagementDirectory | Promise<ManagementDirectory>;
   listMessages: (filter: { guildId?: string; channelId?: string; limit?: number }) => AwaitableDashboardManagementResult;
   editMessage: (input: { messageId: string; guildId: string; channelId: string; content: string }) => AwaitableDashboardManagementResult;
   deleteMessages: (input: { messageIds: string[]; guildId: string; channelId: string; deleteDiscord?: boolean }) => AwaitableDashboardManagementResult;
@@ -421,11 +421,11 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
         return json(await management.getPersonaModeStatus());
       },
 
-      "/api/management/directory": (req) => {
+      "/api/management/directory": async (req) => {
         const denied = requireAuth(req);
         if (denied !== null) return denied;
         if (management === undefined) return json({ error: "Management API is disabled" }, 404);
-        return json(management.getDirectory());
+        return json(await management.getDirectory());
       },
 
       "/api/management/messages": async (req) => {

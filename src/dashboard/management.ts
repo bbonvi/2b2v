@@ -381,10 +381,12 @@ export function storedManagementDirectoryIds(db: Database): {
   guildIds: string[];
   channelPairs: Array<{ id: string; guildId: string }>;
   userIds: string[];
+  userLabels: ManagementLabel[];
 } {
   const guildIds = new Set<string>();
   const channelPairs = new Map<string, { id: string; guildId: string }>();
   const userIds = new Set<string>();
+  const userLabels = new Map<string, ManagementLabel>();
 
   const messageRows = db.raw
     .prepare("SELECT DISTINCT guild_id, channel_id, user_id FROM messages")
@@ -393,6 +395,17 @@ export function storedManagementDirectoryIds(db: Database): {
     guildIds.add(row.guild_id);
     channelPairs.set(`${row.guild_id}:${row.channel_id}`, { id: row.channel_id, guildId: row.guild_id });
     userIds.add(row.user_id);
+  }
+  const usernameRows = db.raw
+    .prepare(
+      `SELECT user_id, author_username
+       FROM messages
+       WHERE is_synthetic = 0 AND is_prompt_only = 0 AND trim(author_username) <> ''
+       ORDER BY created_at DESC, id DESC`
+    )
+    .all() as Array<{ user_id: string; author_username: string }>;
+  for (const row of usernameRows) {
+    if (!userLabels.has(row.user_id)) userLabels.set(row.user_id, { id: row.user_id, name: row.author_username });
   }
 
   const memoryRows = db.raw
@@ -411,5 +424,6 @@ export function storedManagementDirectoryIds(db: Database): {
     guildIds: [...guildIds],
     channelPairs: [...channelPairs.values()],
     userIds: [...userIds],
+    userLabels: [...userLabels.values()],
   };
 }

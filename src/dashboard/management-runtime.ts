@@ -41,7 +41,7 @@ export type DiscordManagementDeleteResult = {
 };
 
 export type DashboardManagementRuntime = {
-  getDirectory: () => ManagementDirectory;
+  getDirectory: () => Promise<ManagementDirectory>;
   listMessages: (filter: { guildId?: string; channelId?: string; limit?: number }) => { messages: DecoratedManagementMessage[] };
   editMessage: (input: { messageId: string; guildId: string; channelId: string; content: string }) => Promise<{ message: DecoratedManagementMessage }>;
   deleteMessages: (input: { messageIds: string[]; guildId: string; channelId: string; deleteDiscord?: boolean }) => Promise<{
@@ -119,6 +119,15 @@ export function createDashboardManagementRuntime(input: {
   client: Client;
   db: Database;
 }): DashboardManagementRuntime {
+  const storedUsernameStatement = input.db.raw.prepare(
+    `SELECT author_username
+     FROM messages
+     WHERE user_id = ? AND is_synthetic = 0 AND is_prompt_only = 0 AND trim(author_username) <> ''
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1`
+  );
+  const storedUsernameCache = new Map<string, string>();
+  const attemptedDirectoryUserFetches = new Set<string>();
   const managementGuildName = (guildId: string): string => input.client.guilds.cache.get(guildId)?.name ?? guildId;
 
   const managementChannelName = (channelId: string): { name: string; type: string } => {
@@ -132,12 +141,21 @@ export function createDashboardManagementRuntime(input: {
     return { name: channelId, type: "stored" };
   };
 
-  const managementUserName = (userId: string): string =>
-    input.client.users.cache.get(userId)?.username
-    ?? input.client.guilds.cache.find((guild) => guild.members.cache.has(userId))?.members.cache.get(userId)?.user.username
-    ?? userId;
+  const managementUserName = (userId: string): string => {
+    const liveName = input.client.users.cache.get(userId)?.username
+      ?? input.client.guilds.cache.find((guild) => guild.members.cache.has(userId))?.members.cache.get(userId)?.user.username;
+    if (liveName !== undefined) return liveName;
+    const cached = storedUsernameCache.get(userId);
+    if (cached !== undefined) return cached;
+    const row = storedUsernameStatement.get(userId) as { author_username: string } | null;
+    if (row !== null) {
+      storedUsernameCache.set(userId, row.author_username);
+      return row.author_username;
+    }
+    return userId;
+  };
 
-  const buildManagementDirectory = (): ManagementDirectory => {
+  const buildManagementDirectory = async (): Promise<ManagementDirectory> => {
     const stored = storedManagementDirectoryIds(input.db);
     const guilds = new Map<string, ManagementLabel>();
     for (const guild of input.client.guilds.cache.values()) {
@@ -174,9 +192,28 @@ export function createDashboardManagementRuntime(input: {
     for (const user of input.client.users.cache.values()) {
       users.set(user.id, { id: user.id, name: user.username });
     }
+    for (const storedUser of stored.userLabels) {
+      const existing = users.get(storedUser.id);
+      if (existing === undefined || existing.name === existing.id) {
+        const liveName = managementUserName(storedUser.id);
+        users.set(storedUser.id, {
+          id: storedUser.id,
+          name: liveName === storedUser.id ? storedUser.name : liveName,
+        });
+      }
+    }
     for (const userId of stored.userIds) {
       if (!users.has(userId)) users.set(userId, { id: userId, name: managementUserName(userId) });
     }
+    const unresolvedUsers = [...users.values()].filter((user) => user.name === user.id && !attemptedDirectoryUserFetches.has(user.id));
+    await Promise.all(unresolvedUsers.map(async (user) => {
+      attemptedDirectoryUserFetches.add(user.id);
+      const fetched = await input.client.users.fetch(user.id).catch(() => null);
+      if (fetched !== null) {
+        storedUsernameCache.set(user.id, fetched.username);
+        users.set(user.id, { id: user.id, name: fetched.username });
+      }
+    }));
 
     return {
       guilds: sortLabels([...guilds.values()]),

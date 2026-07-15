@@ -13,21 +13,21 @@ afterEach(() => {
   db.close();
 });
 
-function insertMessage(id: string): void {
+function insertMessage(id: string, userId = "u1", username = "alice"): void {
   db.raw
     .prepare(
       `INSERT INTO messages
          (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at)
-       VALUES (?, 'g1', 'c1', 'u1', 'alice', 'raw', 'text', 0, 1)`
+       VALUES (?, 'g1', 'c1', ?, ?, 'raw', 'text', 0, 1)`
     )
-    .run(id);
+    .run(id, userId, username);
 }
 
-function managementRuntime(): ReturnType<typeof createDashboardManagementRuntime> {
+function managementRuntime(fetchUser: (userId: string) => Promise<{ username: string } | null> = () => Promise.resolve(null)): ReturnType<typeof createDashboardManagementRuntime> {
   return createDashboardManagementRuntime({
     client: {
       guilds: { cache: new Collection() },
-      users: { cache: new Collection() },
+      users: { cache: new Collection(), fetch: fetchUser },
       channels: {
         cache: new Collection(),
         fetch: () => Promise.resolve(null),
@@ -38,6 +38,27 @@ function managementRuntime(): ReturnType<typeof createDashboardManagementRuntime
 }
 
 describe("dashboard management runtime", () => {
+  test("uses persisted message usernames when Discord caches are cold", async () => {
+    insertMessage("m1");
+
+    expect((await managementRuntime().getDirectory()).users).toContainEqual({ id: "u1", name: "alice" });
+  });
+
+  test("resolves uncached memory users through Discord", async () => {
+    const runtime = managementRuntime((userId) => Promise.resolve(userId === "u9" ? { username: "remote-user" } : null));
+    runtime.createMemory({
+      scope: "self",
+      appliesTo: ["u9"],
+      kind: "fact",
+      content: "remote user memory",
+      confidence: 0.7,
+      priority: 0,
+    });
+
+    expect((await runtime.getDirectory()).users).toContainEqual({ id: "u9", name: "remote-user" });
+    expect((await runtime.getDirectory()).users).toContainEqual({ id: "u9", name: "remote-user" });
+  });
+
   test("deletes stored messages and their lazy metadata", async () => {
     insertMessage("m1");
     db.raw.prepare(`INSERT INTO message_assets
@@ -56,6 +77,8 @@ describe("dashboard management runtime", () => {
 
   test("creates and fully edits structured memories", () => {
     insertMessage("m1");
+    insertMessage("m2", "u2", "bob");
+    insertMessage("m3", "u3", "carol");
     const runtime = managementRuntime();
     const created = runtime.createMemory({
       scope: "guild",
@@ -86,7 +109,9 @@ describe("dashboard management runtime", () => {
       scope: "user",
       guildId: null,
       subjectUserId: "u1",
+      subjectUsername: "alice",
       appliesTo: ["u2", "u3"],
+      appliesToUsernames: ["bob", "carol"],
       kind: "preference",
       content: "updated",
       sourceMessageId: "m1",

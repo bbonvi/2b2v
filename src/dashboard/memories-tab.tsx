@@ -222,7 +222,7 @@ function UserPicker(props: {
           <div className="memory-picker-results">
             {shownUsers.map((user) => (
               <button type="button" className={user.id === props.value ? "memory-picker-option selected" : "memory-picker-option"} key={user.id} onClick={() => { props.onChange(user.id); setOpen(false); }}>
-                <strong>@{user.name}</strong><small>{user.id}</small>
+                <strong>@{user.name}</strong>
               </button>
             ))}
             {shownUsers.length === 0 ? <div className="memory-picker-empty">No matching users</div> : null}
@@ -239,6 +239,8 @@ function UserMultiPicker(props: {
   onChange: (userIds: string[]) => void;
 }): JSX.Element {
   const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const selected = new Set(props.values);
   const candidates = props.users.filter((user) => {
     const needle = query.trim().toLocaleLowerCase();
@@ -246,7 +248,14 @@ function UserMultiPicker(props: {
   }).slice(0, 10);
 
   return (
-    <div className="memory-multi-picker">
+    <div
+      className="memory-multi-picker"
+      ref={rootRef}
+      onBlur={(event) => {
+        if (event.relatedTarget instanceof Node && rootRef.current?.contains(event.relatedTarget) === true) return;
+        setOpen(false);
+      }}
+    >
       <div className="memory-user-chips">
         {props.values.map((userId) => (
           <button type="button" key={userId} onClick={() => props.onChange(props.values.filter((value) => value !== userId))} title="Remove">
@@ -254,12 +263,12 @@ function UserMultiPicker(props: {
           </button>
         ))}
       </div>
-      <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Type a username to add…" />
-      {query !== "" ? (
+      <input value={query} onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.currentTarget.value); setOpen(true); }} placeholder="Type a username to add…" />
+      {open ? (
         <div className="memory-multi-results">
           {candidates.map((user) => (
             <button type="button" key={user.id} onClick={() => { props.onChange([...props.values, user.id]); setQuery(""); }}>
-              <strong>@{user.name}</strong><small>{user.id}</small>
+              <strong>@{user.name}</strong>
             </button>
           ))}
           {candidates.length === 0 ? <div>No matching users</div> : null}
@@ -331,6 +340,24 @@ function MemoriesTab(): JSX.Element {
   }, [filters, reloadToken]);
 
   const visibleChannels = useMemo(() => directory.channels.filter((channel) => filters.guildId === "" || channel.guildId === filters.guildId), [directory.channels, filters.guildId]);
+  const resolvedUsers = useMemo(() => {
+    const users = new Map(directory.users.map((user) => [user.id, user]));
+    for (const memory of memories) {
+      if (memory.subjectUserId !== null && memory.subjectUsername !== undefined && memory.subjectUsername !== memory.subjectUserId) {
+        users.set(memory.subjectUserId, { id: memory.subjectUserId, name: memory.subjectUsername });
+      }
+      if (memory.appliesTo !== "all" && memory.appliesToUsernames !== "all") {
+        memory.appliesTo.forEach((userId, index) => {
+          const username = memory.appliesToUsernames[index];
+          if (username !== undefined && username !== userId) users.set(userId, { id: userId, name: username });
+        });
+      }
+    }
+    return [...users.values()].sort((left, right) => {
+      const nameOrder = left.name.localeCompare(right.name);
+      return nameOrder !== 0 ? nameOrder : left.id.localeCompare(right.id);
+    });
+  }, [directory.users, memories]);
   const draftLifecycle = draft?.deletedAt !== null && draft?.deletedAt !== undefined
     ? "deleted"
     : draft !== null && draft.expiresAtInput !== "" && new Date(draft.expiresAtInput).getTime() <= Date.now()
@@ -445,18 +472,11 @@ function MemoriesTab(): JSX.Element {
 
   return (
     <div className="memories-workspace">
-      <header className="memories-header">
-        <div>
-          <span className="memories-kicker">Structured context archive</span>
-          <h1>Memories</h1>
-          <p>Portable, server-local, and private memories in the exact order 2B considers them: priority first, then latest update.</p>
-        </div>
-        <div className="memories-header-actions">
-          <span className="memories-count">{loading ? "reading…" : `${memories.length} shown`}</span>
-          <button className="btn" type="button" onClick={() => setReloadToken((value) => value + 1)}>Refresh</button>
-          <button className="btn primary" type="button" onClick={() => { setDraft(newDraft(directory)); setError(""); setNotice(""); }}>New memory</button>
-        </div>
-      </header>
+      <div className="memories-toolbar">
+        <span className="memories-count">{loading ? "reading…" : `${memories.length} shown`}</span>
+        <button className="btn" type="button" onClick={() => setReloadToken((value) => value + 1)}>Refresh</button>
+        <button className="btn primary" type="button" onClick={() => { setDraft(newDraft(directory)); setError(""); setNotice(""); }}>New memory</button>
+      </div>
 
       <section className="memory-filter-panel" aria-label="Memory filters">
         <label className="memory-filter-search">
@@ -469,8 +489,8 @@ function MemoriesTab(): JSX.Element {
         <label><span>Kind</span><select value={filters.kind} onChange={(event) => setFilters({ ...filters, kind: event.currentTarget.value as Filters["kind"] })}><option value="">Every kind</option>{MEMORY_KINDS.map((kind) => <option key={kind} value={kind}>{humanize(kind)}</option>)}</select></label>
         <label><span>Applicability</span><select value={filters.applicabilityMode} onChange={(event) => setFilters({ ...filters, applicabilityMode: event.currentTarget.value as Filters["applicabilityMode"] })}><option value="">Everyone + selected</option><option value="all">Everyone only</option><option value="users">Selected users only</option></select></label>
         <label><span>Status</span><select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.currentTarget.value as MemoryStatus })}><option value="active">Active</option><option value="expired">Expired</option><option value="deleted">Deleted</option><option value="all">All states</option></select></label>
-        <div className="memory-filter-user"><span>Subject username</span><UserPicker compact users={directory.users} value={filters.subjectUserId} onChange={(subjectUserId) => setFilters({ ...filters, subjectUserId })} placeholder="Any subject" /></div>
-        <div className="memory-filter-user"><span>Applies to username</span><UserPicker compact users={directory.users} value={filters.applicableToUserId} onChange={(applicableToUserId) => setFilters({ ...filters, applicableToUserId })} placeholder="Any viewer" /></div>
+        <div className="memory-filter-user"><span>Subject username</span><UserPicker compact users={resolvedUsers} value={filters.subjectUserId} onChange={(subjectUserId) => setFilters({ ...filters, subjectUserId })} placeholder="Any subject" /></div>
+        <div className="memory-filter-user"><span>Applies to username</span><UserPicker compact users={resolvedUsers} value={filters.applicableToUserId} onChange={(applicableToUserId) => setFilters({ ...filters, applicableToUserId })} placeholder="Any viewer" /></div>
         <button className="memory-clear-filters" type="button" onClick={clearFilters}>Clear filters</button>
       </section>
 
@@ -479,7 +499,7 @@ function MemoriesTab(): JSX.Element {
 
       <div className="memories-layout">
         <section className="memory-catalog" aria-label="Memory catalog">
-          <div className="memory-catalog-heading"><span>2B order</span><span>priority ↓ · updated ↓</span></div>
+          <div className="memory-catalog-heading"><span>Memories</span><span>higher priority first · then latest update</span></div>
           <div className="memory-list">
             {memories.map((memory) => {
               const status = memoryStatus(memory);
@@ -487,12 +507,14 @@ function MemoriesTab(): JSX.Element {
               const owner = memory.scope === "guild" ? memory.guildName ?? memory.guildId ?? "Guild" : memory.scope === "user" ? `@${memory.subjectUsername ?? memory.subjectUserId ?? "unknown"}` : "2B / self";
               const source = memory.sourceChannelId === null ? "no source link" : `${memory.sourceGuildName ?? memory.sourceGuildId ?? "guild"} / #${memory.sourceChannelName ?? memory.sourceChannelId}`;
               return (
-                <button type="button" key={memory.id} className={`memory-card ${status}${selected ? " selected" : ""}${memory.priority > 0 ? " priority" : ""}`} onClick={() => { setDraft(draftFromMemory(memory)); setError(""); setNotice(""); }}>
-                  <span className="memory-card-rank">{memory.priority > 0 ? `P${memory.priority}` : "—"}</span>
+                <button type="button" key={memory.id} className={`memory-card scope-${memory.scope} ${status}${selected ? " selected" : ""}${memory.priority > 0 ? " priority" : ""}`} onClick={() => { setDraft(draftFromMemory(memory)); setError(""); setNotice(""); }}>
                   <span className="memory-card-main">
-                    <span className="memory-card-meta"><strong>#{memory.id}</strong><span>{humanize(memory.kind)}</span><span>{humanize(memory.scope)}</span><span>{owner}</span>{status !== "active" ? <em>{status}</em> : null}</span>
+                    <span className="memory-card-meta"><strong>#{memory.id}</strong>{memory.priority > 0 ? <b>priority {memory.priority}</b> : null}<span className={`memory-kind-label kind-${memory.kind}`}>{humanize(memory.kind)}</span><span className="memory-scope-label">{humanize(memory.scope)}</span><b className="memory-card-owner">{owner}</b>{status !== "active" ? <em>{status}</em> : null}</span>
                     <span className="memory-card-content">{memory.content}</span>
-                    <span className="memory-card-foot"><span>{memory.appliesToUsernames === "all" ? "applies to everyone" : `applies to ${memory.appliesToUsernames.map((name) => `@${name}`).join(", ")}`}</span><span>{source}</span><span>updated {formatDate(memory.updatedAt)}</span></span>
+                    <span className="memory-card-foot">
+                      <span>{memory.appliesToUsernames === "all" ? "applies to everyone" : <>applies to {memory.appliesToUsernames.map((name, index) => <span key={name}>{index > 0 ? ", " : ""}<b>@{name}</b></span>)}</>}</span>
+                      <span>{source}</span><span>updated {formatDate(memory.updatedAt)}</span>
+                    </span>
                   </span>
                 </button>
               );
@@ -519,18 +541,18 @@ function MemoriesTab(): JSX.Element {
                 </div>
 
                 {draft.scope === "guild" ? <label><span>Guild</span><select value={draft.guildId} onChange={(event) => updateDraft("guildId", event.currentTarget.value)}><option value="">Choose guild</option>{directory.guilds.map((guild) => <option key={guild.id} value={guild.id}>{guild.name}</option>)}</select></label> : null}
-                {draft.scope === "user" ? <div className="memory-editor-picker"><span>Subject</span><UserPicker users={directory.users} value={draft.subjectUserId} onChange={(value) => updateDraft("subjectUserId", value)} placeholder="Choose username" /></div> : null}
+                {draft.scope === "user" ? <div className="memory-editor-picker"><span>Subject</span><UserPicker users={resolvedUsers} value={draft.subjectUserId} onChange={(value) => updateDraft("subjectUserId", value)} placeholder="Choose username" /></div> : null}
                 {draft.scope === "self" ? <div className="memory-scope-note"><strong>Self scope</strong><span>Private, portable context about 2B herself.</span></div> : null}
 
                 <div className="memory-editor-grid two">
                   <label><span>Kind</span><select value={draft.kind} onChange={(event) => updateDraft("kind", event.currentTarget.value as MemoryKind)}>{MEMORY_KINDS.filter((kind) => kind !== "journal" || draft.scope === "self").map((kind) => <option key={kind} value={kind}>{humanize(kind)}</option>)}</select></label>
-                  <label><span>Priority <small>ordering</small></span><input type="number" min="0" step="1" value={draft.priority} onChange={(event) => updateDraft("priority", Number(event.currentTarget.value))} /></label>
+                  <label><span>Priority <small>higher appears first</small></span><input type="number" min="0" step="1" value={draft.priority} onChange={(event) => updateDraft("priority", Number(event.currentTarget.value))} /></label>
                 </div>
 
                 <div className="memory-applicability">
                   <div className="memory-editor-label"><span>Applies to</span><small>Independent from subject</small></div>
                   <div className="memory-applicability-switch"><button type="button" className={draft.appliesToMode === "all" ? "active" : ""} onClick={() => updateDraft("appliesToMode", "all")}>Everyone</button><button type="button" className={draft.appliesToMode === "users" ? "active" : ""} onClick={() => updateDraft("appliesToMode", "users")}>Selected users</button></div>
-                  {draft.appliesToMode === "users" ? <UserMultiPicker users={directory.users} values={draft.appliesToUserIds} onChange={(values) => updateDraft("appliesToUserIds", values)} /> : <div className="memory-scope-note"><strong>Universal relevance</strong><span>This memory is eligible regardless of who is present.</span></div>}
+                  {draft.appliesToMode === "users" ? <UserMultiPicker users={resolvedUsers} values={draft.appliesToUserIds} onChange={(values) => updateDraft("appliesToUserIds", values)} /> : <div className="memory-scope-note"><strong>Universal relevance</strong><span>This memory is eligible regardless of who is present.</span></div>}
                 </div>
 
                 <div className="memory-confidence-row">
