@@ -1866,7 +1866,7 @@
   </div>
   <div class="prompt-lab" id="prompt-lab">
     <select id="lab-user"><option value="">Sender</option></select>
-    <textarea id="lab-prompt" placeholder="Test prompt as a virtual mention..."></textarea>
+    <textarea id="lab-prompt" autocomplete="off" data-1p-ignore="true" data-bwignore="true" data-lpignore="true" placeholder="Test prompt as a virtual mention..."></textarea>
     <div class="prompt-lab-run">
       <button class="btn primary" id="lab-run">Run as mention</button>
       <div class="prompt-lab-initiative">
@@ -3060,7 +3060,7 @@
 
   function renderMessageEditor(message) {
     return '<div class="management-editor" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">'
-      + '<textarea id="edit-message-' + esc(message.id) + '">' + esc(message.translatedContent) + '</textarea>'
+      + '<textarea id="edit-message-' + esc(message.id) + '" autocomplete="off" data-1p-ignore="true" data-bwignore="true" data-lpignore="true">' + esc(message.translatedContent) + '</textarea>'
       + '<div class="management-row-actions">'
         + '<button class="btn btn-sm primary" onclick=\'window.__saveManagementMessage(' + jsStr(message.id) + ',' + jsStr(message.guildId) + ',' + jsStr(message.channelId) + ')\'>Save</button>'
         + '<button class="btn btn-sm" onclick="window.__cancelManagementEdit()">Cancel</button>'

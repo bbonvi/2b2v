@@ -19,6 +19,13 @@ const MEMORY_KINDS = [
   "scratchpad",
 ] as const satisfies readonly MemoryKind[];
 
+const NON_CREDENTIAL_INPUT_PROPS = {
+  autoComplete: "off",
+  "data-1p-ignore": "true",
+  "data-bwignore": "true",
+  "data-lpignore": "true",
+} as const;
+
 type MemoryScope = "guild" | "user" | "self";
 type MemoryStatus = "active" | "expired" | "deleted" | "all";
 
@@ -219,7 +226,7 @@ function UserPicker(props: {
       </button>
       {open ? (
         <div className="memory-picker-popover">
-          <input autoFocus value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Search username or ID" />
+          <input {...NON_CREDENTIAL_INPUT_PROPS} autoFocus value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Search username or ID" />
           {props.value !== "" ? <button type="button" className="memory-picker-option muted" onClick={() => { props.onChange(""); setOpen(false); }}>Clear selection</button> : null}
           <div className="memory-picker-results">
             {shownUsers.map((user) => (
@@ -265,11 +272,11 @@ function UserMultiPicker(props: {
           </button>
         ))}
       </div>
-      <input value={query} onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.currentTarget.value); setOpen(true); }} placeholder="Type a username to add…" />
+      <input {...NON_CREDENTIAL_INPUT_PROPS} value={query} onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.currentTarget.value); setOpen(true); }} placeholder="Type a username to add…" />
       {open ? (
         <div className="memory-multi-results">
           {candidates.map((user) => (
-            <button type="button" key={user.id} onClick={() => { props.onChange([...props.values, user.id]); setQuery(""); }}>
+            <button type="button" key={user.id} onClick={() => { props.onChange([...props.values, user.id]); setQuery(""); setOpen(false); }}>
               <strong>@{user.name}</strong>
             </button>
           ))}
@@ -490,7 +497,7 @@ function MemoriesTab(): JSX.Element {
       <section className="memory-filter-panel" aria-label="Memory filters">
         <label className="memory-filter-search">
           <span>Search</span>
-          <input value={filters.query} onChange={(event) => setFilters({ ...filters, query: event.currentTarget.value })} placeholder="Content, memory ID, or source message ID" />
+          <input {...NON_CREDENTIAL_INPUT_PROPS} value={filters.query} onChange={(event) => setFilters({ ...filters, query: event.currentTarget.value })} placeholder="Content, memory ID, or source message ID" />
         </label>
         <label><span>Guild visibility</span><select value={filters.guildId} onChange={(event) => setFilters({ ...filters, guildId: event.currentTarget.value, channelId: "" })}><option value="">Every guild</option>{directory.guilds.map((guild) => <option key={guild.id} value={guild.id}>{guild.name}</option>)}</select></label>
         <label><span>Source channel</span><select value={filters.channelId} onChange={(event) => setFilters({ ...filters, channelId: event.currentTarget.value })}><option value="">Every channel</option>{visibleChannels.map((channel) => <option key={`${channel.guildId}:${channel.id}`} value={channel.id}>#{channel.name}</option>)}</select></label>
@@ -537,14 +544,14 @@ function MemoriesTab(): JSX.Element {
           {draft === null ? (
             <div className="memory-inspector-empty"><span>Memory inspector</span><strong>Select a row or create a new memory.</strong><p>Subject, scope, applicability, expiry, ordering, confidence, and provenance are edited here without exposing stored Discord IDs as the primary interface.</p></div>
           ) : (
-            <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
+            <form autoComplete="off" onSubmit={(event) => { event.preventDefault(); void save(); }}>
               <div className="memory-inspector-head">
                 <div><span>{draft.id === null ? "New structured memory" : `Memory #${draft.id}`}</span><strong>{draft.id === null ? "Create" : humanize(draftLifecycle)}</strong></div>
                 <button type="button" className="memory-inspector-close" onClick={() => setDraft(null)} aria-label="Close editor">×</button>
               </div>
 
               <fieldset disabled={saving || draft.deletedAt !== null}>
-                <label className="memory-editor-content"><span>Memory</span><textarea autoFocus={draft.id === null} value={draft.content} onChange={(event) => updateDraft("content", event.currentTarget.value)} placeholder="Write one durable, focused memory…" /></label>
+                <label className="memory-editor-content"><span>Memory</span><textarea {...NON_CREDENTIAL_INPUT_PROPS} autoFocus={draft.id === null} value={draft.content} onChange={(event) => updateDraft("content", event.currentTarget.value)} placeholder="Write one durable, focused memory…" /></label>
 
                 <div className="memory-scope-switch" aria-label="Memory scope">
                   {(["guild", "user", "self"] as const).map((scope) => <button type="button" className={draft.scope === scope ? "active" : ""} key={scope} onClick={() => setScope(scope)}>{humanize(scope)}</button>)}
@@ -575,7 +582,7 @@ function MemoriesTab(): JSX.Element {
 
                 <div className="memory-expiry-editor">
                   <div className="memory-editor-label"><span>Expiry</span><small>{draft.kind === "scratchpad" ? "required for scratchpad" : "optional"}</small></div>
-                  <input type="datetime-local" value={draft.expiresAtInput} onChange={(event) => updateDraft("expiresAtInput", event.currentTarget.value)} />
+                  <input {...NON_CREDENTIAL_INPUT_PROPS} type="datetime-local" value={draft.expiresAtInput} onChange={(event) => updateDraft("expiresAtInput", event.currentTarget.value)} />
                   <div className="memory-expiry-shortcuts">
                     <button type="button" onClick={() => updateDraft("expiresAtInput", "")}>Never</button>
                     <button type="button" onClick={() => updateDraft("expiresAtInput", toLocalDateTimeInput(Date.now() + 86_400_000))}>+1 day</button>
@@ -586,8 +593,8 @@ function MemoriesTab(): JSX.Element {
 
                 <details className="memory-advanced">
                   <summary>Source & provenance</summary>
-                  <label><span>Source message ID</span><input value={draft.sourceMessageId} onChange={(event) => updateDraft("sourceMessageId", event.currentTarget.value)} placeholder="Optional Discord message ID" /></label>
-                  <label><span>Provenance JSON</span><textarea value={draft.provenanceText} onChange={(event) => updateDraft("provenanceText", event.currentTarget.value)} placeholder={'{\n  "source": "dashboard"\n}'} /></label>
+                  <label><span>Source message ID</span><input {...NON_CREDENTIAL_INPUT_PROPS} value={draft.sourceMessageId} onChange={(event) => updateDraft("sourceMessageId", event.currentTarget.value)} placeholder="Optional Discord message ID" /></label>
+                  <label><span>Provenance JSON</span><textarea {...NON_CREDENTIAL_INPUT_PROPS} value={draft.provenanceText} onChange={(event) => updateDraft("provenanceText", event.currentTarget.value)} placeholder={'{\n  "source": "dashboard"\n}'} /></label>
                 </details>
               </fieldset>
 
