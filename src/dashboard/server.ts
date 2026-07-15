@@ -605,6 +605,7 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
             subjectUserId: optionalStringParam(url, "subjectUserId"),
             applicableToUserId: optionalStringParam(url, "applicableToUserId"),
             applicabilityMode: optionalApplicabilityMode(url),
+            important: optionalBooleanParam(url, "important"),
             status: optionalMemoryStatus(url),
             query: optionalStringParam(url, "query"),
             limit: optionalNumberParam(url, "limit"),

@@ -97,6 +97,10 @@ describe("dashboard memory management", () => {
 
     expect(listManagementMemories(db, { guildId: "g1" }).map((row) => row.content))
       .toEqual(["important newer", "important older", "ordinary newer"]);
+    expect(listManagementMemories(db, { guildId: "g1", important: true }).map((row) => row.content))
+      .toEqual(["important newer", "important older"]);
+    expect(listManagementMemories(db, { guildId: "g1", important: false }).map((row) => row.content))
+      .toEqual(["ordinary newer"]);
   });
 
   test("filters by source channel, subject, applicability, kind, and lifecycle state", () => {

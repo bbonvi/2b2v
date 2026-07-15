@@ -59,7 +59,7 @@ interface MemoryDraft {
   sourceMessageId: string;
   provenanceText: string;
   confidence: number;
-  priority: number;
+  important: boolean;
   expiresAtInput: string;
   createdAt: number | null;
   updatedAt: number | null;
@@ -75,6 +75,7 @@ interface Filters {
   subjectUserId: string;
   applicableToUserId: string;
   applicabilityMode: "" | "all" | "users";
+  importance: "" | "important" | "ordinary";
   status: MemoryStatus;
 }
 
@@ -87,6 +88,7 @@ const EMPTY_FILTERS: Filters = {
   subjectUserId: "",
   applicableToUserId: "",
   applicabilityMode: "",
+  importance: "",
   status: "active",
 };
 
@@ -133,7 +135,7 @@ function draftFromMemory(memory: MemoryRecord): MemoryDraft {
     sourceMessageId: memory.sourceMessageId ?? "",
     provenanceText: memory.provenance === null ? "" : JSON.stringify(memory.provenance, null, 2),
     confidence: memory.confidence,
-    priority: memory.priority,
+    important: memory.priority > 0,
     expiresAtInput: toLocalDateTimeInput(memory.expiresAt),
     createdAt: memory.createdAt,
     updatedAt: memory.updatedAt,
@@ -154,7 +156,7 @@ function newDraft(directory: ManagementDirectory): MemoryDraft {
     sourceMessageId: "",
     provenanceText: "",
     confidence: 0.7,
-    priority: 0,
+    important: false,
     expiresAtInput: "",
     createdAt: null,
     updatedAt: null,
@@ -317,6 +319,7 @@ function MemoriesTab(): JSX.Element {
       if (filters.subjectUserId !== "") params.set("subjectUserId", filters.subjectUserId);
       if (filters.applicableToUserId !== "") params.set("applicableToUserId", filters.applicableToUserId);
       if (filters.applicabilityMode !== "") params.set("applicabilityMode", filters.applicabilityMode);
+      if (filters.importance !== "") params.set("important", String(filters.importance === "important"));
       setLoading(true);
       setError("");
       void api<{ memories: MemoryRecord[] }>(`/api/management/memories?${params.toString()}`, { signal: controller.signal })
@@ -401,7 +404,7 @@ function MemoriesTab(): JSX.Element {
       sourceMessageId: draft.sourceMessageId.trim() === "" ? null : draft.sourceMessageId.trim(),
       provenance,
       confidence: draft.confidence,
-      priority: Math.max(0, Math.trunc(draft.priority)),
+      priority: draft.important ? 1 : 0,
       expiresAt,
     };
     setSaving(true);
@@ -488,6 +491,7 @@ function MemoriesTab(): JSX.Element {
         <label><span>Scope</span><select value={filters.scope} onChange={(event) => setFilters({ ...filters, scope: event.currentTarget.value as Filters["scope"] })}><option value="">Every scope</option><option value="guild">Guild</option><option value="user">User</option><option value="self">Self</option></select></label>
         <label><span>Kind</span><select value={filters.kind} onChange={(event) => setFilters({ ...filters, kind: event.currentTarget.value as Filters["kind"] })}><option value="">Every kind</option>{MEMORY_KINDS.map((kind) => <option key={kind} value={kind}>{humanize(kind)}</option>)}</select></label>
         <label><span>Applicability</span><select value={filters.applicabilityMode} onChange={(event) => setFilters({ ...filters, applicabilityMode: event.currentTarget.value as Filters["applicabilityMode"] })}><option value="">Everyone + selected</option><option value="all">Everyone only</option><option value="users">Selected users only</option></select></label>
+        <label><span>Importance</span><select value={filters.importance} onChange={(event) => setFilters({ ...filters, importance: event.currentTarget.value as Filters["importance"] })}><option value="">Important + ordinary</option><option value="important">Important only</option><option value="ordinary">Ordinary only</option></select></label>
         <label><span>Status</span><select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.currentTarget.value as MemoryStatus })}><option value="active">Active</option><option value="expired">Expired</option><option value="deleted">Deleted</option><option value="all">All states</option></select></label>
         <div className="memory-filter-user"><span>Subject username</span><UserPicker compact users={resolvedUsers} value={filters.subjectUserId} onChange={(subjectUserId) => setFilters({ ...filters, subjectUserId })} placeholder="Any subject" /></div>
         <div className="memory-filter-user"><span>Applies to username</span><UserPicker compact users={resolvedUsers} value={filters.applicableToUserId} onChange={(applicableToUserId) => setFilters({ ...filters, applicableToUserId })} placeholder="Any viewer" /></div>
@@ -499,7 +503,7 @@ function MemoriesTab(): JSX.Element {
 
       <div className="memories-layout">
         <section className="memory-catalog" aria-label="Memory catalog">
-          <div className="memory-catalog-heading"><span>Memories</span><span>higher priority first · then latest update</span></div>
+          <div className="memory-catalog-heading"><span>Memories</span><span>important first · then latest update</span></div>
           <div className="memory-list">
             {memories.map((memory) => {
               const status = memoryStatus(memory);
@@ -509,10 +513,10 @@ function MemoriesTab(): JSX.Element {
               return (
                 <button type="button" key={memory.id} className={`memory-card scope-${memory.scope} ${status}${selected ? " selected" : ""}${memory.priority > 0 ? " priority" : ""}`} onClick={() => { setDraft(draftFromMemory(memory)); setError(""); setNotice(""); }}>
                   <span className="memory-card-main">
-                    <span className="memory-card-meta"><strong>#{memory.id}</strong>{memory.priority > 0 ? <b>priority {memory.priority}</b> : null}<span className={`memory-kind-label kind-${memory.kind}`}>{humanize(memory.kind)}</span><span className="memory-scope-label">{humanize(memory.scope)}</span><b className="memory-card-owner">{owner}</b>{status !== "active" ? <em>{status}</em> : null}</span>
+                    <span className="memory-card-meta"><strong>#{memory.id}</strong>{memory.priority > 0 ? <b className="memory-important-badge">Important</b> : null}<span className={`memory-kind-label kind-${memory.kind}`}>{humanize(memory.kind)}</span><span className="memory-scope-label">{humanize(memory.scope)}</span><b className="memory-card-owner">{owner}</b>{status !== "active" ? <em>{status}</em> : null}</span>
                     <span className="memory-card-content">{memory.content}</span>
                     <span className="memory-card-foot">
-                      <span>{memory.appliesToUsernames === "all" ? "applies to everyone" : <>applies to {memory.appliesToUsernames.map((name, index) => <span key={name}>{index > 0 ? ", " : ""}<b>@{name}</b></span>)}</>}</span>
+                      <span>{memory.appliesToUsernames === "all" ? "applies to everyone" : <>applies to {memory.appliesToUsernames.map((name, index) => <span key={`${name}:${index}`}>{index > 0 ? ", " : ""}<b>@{name}</b></span>)}</>}</span>
                       <span>{source}</span><span>updated {formatDate(memory.updatedAt)}</span>
                     </span>
                   </span>
@@ -546,7 +550,10 @@ function MemoriesTab(): JSX.Element {
 
                 <div className="memory-editor-grid two">
                   <label><span>Kind</span><select value={draft.kind} onChange={(event) => updateDraft("kind", event.currentTarget.value as MemoryKind)}>{MEMORY_KINDS.filter((kind) => kind !== "journal" || draft.scope === "self").map((kind) => <option key={kind} value={kind}>{humanize(kind)}</option>)}</select></label>
-                  <label><span>Priority <small>higher appears first</small></span><input type="number" min="0" step="1" value={draft.priority} onChange={(event) => updateDraft("priority", Number(event.currentTarget.value))} /></label>
+                  <div className="memory-important-editor">
+                    <span>Importance</span>
+                    <label><input type="checkbox" checked={draft.important} onChange={(event) => updateDraft("important", event.currentTarget.checked)} /><span><strong>Important</strong><small>Pinned above ordinary memories</small></span></label>
+                  </div>
                 </div>
 
                 <div className="memory-applicability">

@@ -63,6 +63,7 @@ export interface ManagementMemoryFilter {
   subjectUserId?: string;
   applicableToUserId?: string;
   applicabilityMode?: "all" | "users";
+  important?: boolean;
   status?: ManagementMemoryStatus;
   query?: string;
   limit?: number;
@@ -283,6 +284,9 @@ export function listManagementMemories(
   if (filter.applicabilityMode !== undefined) {
     conditions.push("m.applicability_mode = ?");
     params.push(filter.applicabilityMode);
+  }
+  if (filter.important !== undefined) {
+    conditions.push(filter.important ? "m.priority > 0" : "m.priority = 0");
   }
   if (filter.query !== undefined && filter.query.trim() !== "") {
     conditions.push("(m.content LIKE ? ESCAPE '\\' OR CAST(m.id AS TEXT) = ? OR m.source_message_id = ?)");

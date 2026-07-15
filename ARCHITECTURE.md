@@ -62,7 +62,7 @@ Avatar and presence changes converge on current desired presentation. Only one a
 
 Dashboard request logs are projected as source lifecycles: reply work, ambient evaluation, memory extraction, and relationship extraction sharing a Discord message ID appear under one expandable row. Synthetic schedules and other non-message work use their own trigger lifecycle. Lifecycles stay ordered by their first request timestamp as later child phases arrive. A lifecycle is highlighted only when a child phase has an effective result, currently an applied memory change, an accepted relationship signal, or a selected ambient decision; no-op phases stay neutral.
 
-The dashboard Memories tab is the administrative surface for structured memory. It preserves runtime ordering (priority, latest update, ID), resolves Discord IDs into selectable guild/channel/user labels, and exposes scope, subject, applicability, kind, confidence, priority, expiry, source, provenance, deletion, and restoration without mixing memory editing into message management. Prompt Lab remains in Management because it operates on a virtual message rather than stored memory.
+The dashboard Memories tab is the administrative surface for structured memory. It preserves runtime ordering (important rows, latest update, ID), resolves Discord IDs into selectable guild/channel/user labels, and exposes scope, subject, applicability, kind, confidence, importance, expiry, source, provenance, deletion, and restoration without mixing memory editing into message management. Prompt Lab remains in Management because it operates on a virtual message rather than stored memory.
 
 ## Relationship State
 

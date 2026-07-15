@@ -231,6 +231,8 @@ describe("dashboard memory workspace", () => {
     expect(loadDashboardScript()).toContain("modeRail.style.display = tab === 'logs' ? '' : 'none';");
     expect(island).not.toContain("Structured context archive");
     expect(island).not.toContain("memory-card-rank");
-    expect(island).toContain("higher priority first · then latest update");
+    expect(island).toContain("important first · then latest update");
+    expect(island).toContain("Important only");
+    expect(island).toContain('type="checkbox" checked={draft.important}');
   });
 });
