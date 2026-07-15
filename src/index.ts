@@ -3661,6 +3661,7 @@ async function shutdown(signal: string): Promise<void> {
   db.close();
 
   log.info("shutdown complete");
+  process.exit(0);
 }
 
 let shutdownPromise: Promise<void> | null = null;
