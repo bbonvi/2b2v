@@ -242,7 +242,7 @@ ambientInitiative:
     checkIntervalMaxMs: 2700000 # (longest jittered opportunity check interval)
     botTargetIds:
         - "1398275457857622128" # (Delamain Discord user ID)
-    botPressure: 0.05
+    botPressure: 0.08
     activeHours:
         start: "10:00" # (local start of proactive-speaking window)
         end: "23:00" # (local end; may cross midnight)
