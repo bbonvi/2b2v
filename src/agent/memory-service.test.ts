@@ -28,8 +28,8 @@ describe("buildMemoryContext", () => {
 
     expect(context).toContain("Showing 2/2 memories.");
     expect(context).toContain("Use memory as background context.");
-    expect(context).toContain("[guild] [0.7] [global_note] Global note");
-    expect(context).toContain("[@alice] [0.8] [preference] Likes concise answers");
+    expect(context).toContain("[guild] [applies:all] [0.7] [global_note] Global note");
+    expect(context).toContain("[@alice] [applies:@alice] [0.8] [preference] Likes concise answers");
     expect(context).not.toContain("Other user fact");
   });
 
@@ -45,7 +45,7 @@ describe("buildMemoryContext", () => {
     });
 
     expect(context).toContain("Showing 3/3 memories (2/2 guild/user, 1/1 self).");
-    expect(context).toContain("[self] [0.7] [journal] Privately decided the server is worth returning to.");
+    expect(context).toContain("[self] [applies:all] [0.7] [journal] Privately decided the server is worth returning to.");
   });
 
   test("loads targeted self memories only when an applicable user is visible", () => {
@@ -53,7 +53,7 @@ describe("buildMemoryContext", () => {
     createMemory(db, {
       guildId: "g1",
       scope: "self",
-      appliesToUserIds: ["u2"],
+      appliesTo: ["u2"],
       kind: "journal",
       content: "Use the stored reaction image when Bob starts baiting people.",
     });
@@ -71,6 +71,30 @@ describe("buildMemoryContext", () => {
     expect(withoutBob).not.toContain("Bob starts baiting");
     expect(withBob).toContain("[self] [applies:@bob]");
     expect(withBob).toContain("Bob starts baiting");
+  });
+
+  test("loads user-owned preferences by applicability even when their subject is absent", () => {
+    createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u-owner",
+      appliesTo: "all",
+      kind: "preference",
+      content: "Owner requested a reaction available for everyone.",
+    });
+    createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u-owner",
+      appliesTo: ["u-target"],
+      kind: "preference",
+      content: "Owner requested a reaction specifically around Target.",
+    });
+
+    const unrelated = buildMemoryContext({ db, guildId: "g1", currentUserId: "u-other" });
+    const target = buildMemoryContext({ db, guildId: "g1", currentUserId: "u-target" });
+    expect(unrelated).toContain("available for everyone");
+    expect(unrelated).not.toContain("specifically around Target");
+    expect(target).toContain("available for everyone");
+    expect(target).toContain("specifically around Target");
   });
 
   test("renders future expiry relatively", () => {
@@ -206,15 +230,14 @@ describe("buildMemoryContext", () => {
       recentUserMaxRows: 3,
     });
 
-    expect(context).toContain("Showing 5/6 memories (2/2 guild/current user, 0/0 self, 3/4 recent speakers).");
+    expect(context).toContain("Showing 5/7 memories (1/2 guild/current user, 0/0 self, 3/4 recent speakers, 1/1 cross-subject applicable).");
     expect(context.match(/^- /gm)).toHaveLength(5);
-    expect(context).toContain("Current memory one.");
     expect(context).toContain("Current memory two.");
-    expect(context).toContain("[@recent] [0.7] [preference] [IMPORTANT] Recent important memory.");
-    expect(context).toContain("[@recent] [0.7] [fact] Recent newest memory.");
+    expect(context).toContain("[@recent] [applies:@recent] [0.7] [preference] [IMPORTANT] Recent important memory.");
+    expect(context).toContain("[@recent] [applies:@recent] [0.7] [fact] Recent newest memory.");
     expect(context).not.toContain("Recent middle memory.");
-    expect(context).toContain("[@second] [0.7] [interest] Second speaker memory.");
-    expect(context).not.toContain("Excluded speaker memory.");
+    expect(context).toContain("[@second] [applies:@second] [0.7] [interest] Second speaker memory.");
+    expect(context).toContain("Excluded speaker memory.");
     expect(context.indexOf("Second speaker memory.")).toBeLessThan(context.indexOf("Recent important memory."));
   });
 });
@@ -308,7 +331,7 @@ describe("extractAndApplyMemories", () => {
       completeChat: () => Promise.resolve({
         text: JSON.stringify({
           actions: [{
-            action: "upsert",
+            action: "create",
             subject: "user",
             username: "@alice",
             kind: "identity",
@@ -324,8 +347,8 @@ describe("extractAndApplyMemories", () => {
     expect(memories[0]?.content).toBe("Preferred name is Sasha.");
   });
 
-  test("does not create duplicate memory rows for identical content", async () => {
-    createMemory(db, {
+  test("updates an existing row without creating a duplicate", async () => {
+    const existing = createMemory(db, {
       guildId: "g1",
       subjectUserId: "u1",
       kind: "fact",
@@ -347,7 +370,8 @@ describe("extractAndApplyMemories", () => {
       completeChat: () => Promise.resolve({
         text: JSON.stringify({
           actions: [{
-            action: "upsert",
+            action: "update",
+            id: existing,
             subject: "user",
             username: "@alice",
             kind: "fact",
@@ -384,7 +408,8 @@ describe("extractAndApplyMemories", () => {
       completeChat: () => Promise.resolve({
         text: JSON.stringify({
           actions: [{
-            action: "upsert",
+            action: "update",
+            id: existing,
             subject: "user",
             username: "@alice",
             kind: "fact",
@@ -400,7 +425,7 @@ describe("extractAndApplyMemories", () => {
     expect(getMemory(db, existing)?.priority).toBe(1);
   });
 
-  test("applies upsert and delete actions", async () => {
+  test("applies create, update, and delete actions", async () => {
     const existing = createMemory(db, {
       guildId: "g1",
       subjectUserId: "u1",
@@ -429,7 +454,7 @@ describe("extractAndApplyMemories", () => {
         text: JSON.stringify({
           actions: [
             {
-              action: "upsert",
+              action: "update",
               id: existing,
               subject: "user",
               username: "@alice",
@@ -438,7 +463,7 @@ describe("extractAndApplyMemories", () => {
               confidence: 0.95,
             },
             {
-              action: "upsert",
+              action: "create",
               subject: "global",
               kind: "interest",
               content: "The server is testing the bot rewrite.",
@@ -474,7 +499,7 @@ describe("extractAndApplyMemories", () => {
       completeChat: () => Promise.resolve({
         text: JSON.stringify({
           actions: [{
-            action: "upsert",
+              action: "update",
             subject: "user",
             username: "@alice",
             kind: "project",
@@ -505,7 +530,7 @@ describe("extractAndApplyMemories", () => {
       completeChat: () => Promise.resolve({
         text: JSON.stringify({
           actions: [{
-            action: "upsert",
+            action: "create",
             subject: "user",
             username: "@alice",
             kind: "fact",
@@ -539,7 +564,7 @@ describe("extractAndApplyMemories", () => {
       completeChat: () => Promise.resolve({
         text: JSON.stringify({
           actions: [{
-            action: "upsert",
+            action: "create",
             subject: "user",
             username: "@alice",
             kind: "fact",
@@ -612,7 +637,7 @@ describe("extractAndApplyMemories", () => {
         text: JSON.stringify({
           actions: [
             {
-              action: "upsert",
+            action: "create",
               id: otherGuild,
               subject: "user",
               username: "@alice",
@@ -632,7 +657,7 @@ describe("extractAndApplyMemories", () => {
     expect(getMemory(db, otherUser)).toBeNull();
   });
 
-  test("preserves existing memory scope when updating by id", async () => {
+  test("changes memory subject and scope when explicitly updated", async () => {
     const userMemory = createMemory(db, {
       guildId: "g1",
       subjectUserId: "u1",
@@ -661,14 +686,14 @@ describe("extractAndApplyMemories", () => {
         text: JSON.stringify({
           actions: [
             {
-              action: "upsert",
+              action: "update",
               id: userMemory,
               subject: "global",
               kind: "preference",
               content: "updated user memory",
             },
             {
-              action: "upsert",
+              action: "update",
               id: globalMemory,
               subject: "user",
               username: "@alice",
@@ -683,14 +708,59 @@ describe("extractAndApplyMemories", () => {
       }),
     });
 
-    expect(getMemory(db, userMemory)?.subjectUserId).toBe("u1");
+    expect(getMemory(db, userMemory)?.scope).toBe("guild");
+    expect(getMemory(db, userMemory)?.subjectUserId).toBeNull();
     expect(getMemory(db, userMemory)?.content).toBe("updated user memory");
-    expect(getMemory(db, globalMemory)?.subjectUserId).toBeNull();
+    expect(getMemory(db, globalMemory)?.scope).toBe("user");
+    expect(getMemory(db, globalMemory)?.subjectUserId).toBe("u1");
     expect(getMemory(db, globalMemory)?.content).toBe("updated global memory");
   });
 });
 
 describe("createRecordMemoryTool", () => {
+  test("applies a mixed action batch atomically", async () => {
+    const updated = createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Old" });
+    const deleted = createMemory(db, { guildId: "g1", kind: "global_note", content: "Delete me" });
+    const tool = createRecordMemoryTool({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      currentUsername: "alice",
+      sourceMessageId: "m1",
+    });
+
+    const result = await tool.execute("call-1", { actions: [
+      { action: "update", id: updated, subject: "user", username: "alice", applies_to: "all", kind: "fact", content: "New" },
+      { action: "delete", id: deleted },
+      { action: "create", subject: "self", applies_to: "all", kind: "journal", content: "A new coherent self memory." },
+    ] });
+
+    expect(result.details).toEqual({ applied: 3, requested: 3 });
+    expect(getMemory(db, updated)?.content).toBe("New");
+    expect(getMemory(db, updated)?.appliesTo).toBe("all");
+    expect(getMemory(db, deleted)).toBeNull();
+    expect(listMemories(db, { guildId: "g1", scope: "self" })).toHaveLength(1);
+  });
+
+  test("rejects the whole batch when any action is invalid", async () => {
+    const tool = createRecordMemoryTool({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      currentUsername: "alice",
+      sourceMessageId: "m1",
+      resolveUsername: () => Promise.resolve(undefined),
+    });
+
+    const result = await tool.execute("call-1", { actions: [
+      { action: "create", subject: "user", username: "alice", applies_to: ["alice"], kind: "fact", content: "Would be valid alone." },
+      { action: "create", subject: "user", username: "missing", applies_to: ["missing"], kind: "fact", content: "Cannot resolve." },
+    ] });
+
+    expect(result.details).toEqual({ error: true });
+    expect(listMemories(db, { guildId: "g1", scope: "user" })).toHaveLength(0);
+  });
+
   test("applies memory updates through a real tool", async () => {
     const before = Date.now();
     const tool = createRecordMemoryTool({
@@ -703,9 +773,10 @@ describe("createRecordMemoryTool", () => {
 
     await tool.execute("call-1", {
       actions: [{
-        action: "upsert",
+        action: "create",
         subject: "user",
         username: "@alice",
+        applies_to: ["@alice"],
         kind: "preference",
         content: "Prefers concise answers.",
         important: true,
@@ -733,9 +804,10 @@ describe("createRecordMemoryTool", () => {
 
     await tool.execute("call-1", {
       actions: [{
-        action: "upsert",
+        action: "create",
         subject: "user",
         username: "@alice",
+        applies_to: ["@alice"],
         kind: "preference",
         content: "In guild 427489527263789058: 17 [user:209563208199962625] [preference] Prefers concise answers.",
       }],
@@ -773,19 +845,21 @@ describe("createRecordMemoryTool", () => {
     await tool.execute("call-1", {
       actions: [
         {
-          action: "upsert",
+          action: "update",
           id: temporary,
           subject: "user",
           username: "@alice",
+          applies_to: ["@alice"],
           kind: "fact",
           content: "Launch focus is now durable context.",
           expiresIn: null,
         },
         {
-          action: "upsert",
+          action: "update",
           id: prolonged,
           subject: "user",
           username: "@alice",
+          applies_to: ["@alice"],
           kind: "scratchpad",
           content: "Temporary dashboard focus lasts through tonight.",
           expiresIn: { amount: 3, unit: "hours" },
@@ -819,10 +893,11 @@ describe("createRecordMemoryTool", () => {
 
     await tool.execute("call-1", {
       actions: [{
-        action: "upsert",
+        action: "update",
         id: scratchpad,
         subject: "user",
         username: "@alice",
+        applies_to: ["@alice"],
         kind: "scratchpad",
         content: "Check dashboard auth headers next.",
       }],
@@ -832,7 +907,7 @@ describe("createRecordMemoryTool", () => {
     expect(getMemory(db, scratchpad)?.expiresAt).toBe(expiresAt);
   });
 
-  test("rejects scratchpad upserts without an expiry through a real tool", async () => {
+  test("rejects scratchpad creates without an expiry through a real tool", async () => {
     const tool = createRecordMemoryTool({
       db,
       guildId: "g1",
@@ -844,24 +919,27 @@ describe("createRecordMemoryTool", () => {
     await tool.execute("call-1", {
       actions: [
         {
-          action: "upsert",
+          action: "create",
           subject: "user",
           username: "@alice",
+          applies_to: ["@alice"],
           kind: "scratchpad",
           content: "Missing expiry.",
         },
         {
-          action: "upsert",
+          action: "create",
           subject: "user",
           username: "@alice",
+          applies_to: ["@alice"],
           kind: "scratchpad",
           content: "Null expiry.",
           expiresIn: null,
         },
         {
-          action: "upsert",
+          action: "create",
           subject: "user",
           username: "@alice",
+          applies_to: ["@alice"],
           kind: "scratchpad",
           content: "Too long.",
           expiresIn: { amount: 2, unit: "days" },
@@ -883,9 +961,10 @@ describe("createRecordMemoryTool", () => {
 
     await tool.execute("call-1", {
       actions: [{
-        action: "upsert",
+        action: "create",
         subject: "user",
         username: "@alice",
+        applies_to: ["@alice"],
         kind: "project",
         content: "Legacy project kind should not be coerced.",
       }],
@@ -894,7 +973,7 @@ describe("createRecordMemoryTool", () => {
     expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
   });
 
-  test("skips upserts with non-positive expiresIn through a real tool", async () => {
+  test("rejects creates with non-positive expiresIn through a real tool", async () => {
     const tool = createRecordMemoryTool({
       db,
       guildId: "g1",
@@ -905,9 +984,10 @@ describe("createRecordMemoryTool", () => {
 
     await tool.execute("call-1", {
       actions: [{
-        action: "upsert",
+        action: "create",
         subject: "user",
         username: "@alice",
+        applies_to: ["@alice"],
         kind: "fact",
         content: "This already expired.",
         expiresIn: { amount: 0, unit: "hours" },
@@ -917,7 +997,7 @@ describe("createRecordMemoryTool", () => {
     expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
   });
 
-  test("skips upserts with raw expiresAt through a real tool", async () => {
+  test("rejects creates with raw expiresAt through a real tool", async () => {
     const tool = createRecordMemoryTool({
       db,
       guildId: "g1",
@@ -928,9 +1008,10 @@ describe("createRecordMemoryTool", () => {
 
     await tool.execute("call-1", {
       actions: [{
-        action: "upsert",
+        action: "create",
         subject: "user",
         username: "@alice",
+        applies_to: ["@alice"],
         kind: "fact",
         content: "This attempts timestamp expiry.",
         expiresAt: Date.now() + 60_000,
@@ -952,9 +1033,10 @@ describe("createRecordMemoryTool", () => {
 
     await tool.execute("call-1", {
       actions: [{
-        action: "upsert",
+        action: "create",
         subject: "user",
         username: "@bob",
+        applies_to: ["@bob"],
         kind: "fact",
         content: "Bob is working on the dashboard.",
         confidence: 0.6,
@@ -978,8 +1060,9 @@ describe("createRecordMemoryTool", () => {
 
     await tool.execute("call-1", {
       actions: [{
-        action: "upsert",
+        action: "create",
         subject: "self",
+        applies_to: "all",
         kind: "journal",
         content: "Told the server she keeps cheap red wine for bad nights.",
         confidence: 0.85,
@@ -994,7 +1077,7 @@ describe("createRecordMemoryTool", () => {
     expect(memories[0]?.content).toBe("Told the server she keeps cheap red wine for bad nights.");
   });
 
-  test("records and merges self behavior memories applicable to other users", async () => {
+  test("records exact multi-user applicability", async () => {
     const tool = createRecordMemoryTool({
       db,
       guildId: "g1",
@@ -1003,20 +1086,18 @@ describe("createRecordMemoryTool", () => {
       sourceMessageId: "m1",
       resolveUsername: (username) => Promise.resolve(({ bob: "u2", charlie: "u3" })[username]),
     });
-    const action = {
-      action: "upsert" as const,
-      subject: "self" as const,
-      kind: "journal" as const,
+    await tool.execute("call-1", { actions: [{
+      action: "create",
+      subject: "self",
+      applies_to: ["@bob", "charlie"],
+      kind: "journal",
       content: "Alice asked me to use reaction images when the named user starts baiting people.",
-    };
-
-    await tool.execute("call-1", { actions: [{ ...action, applies_to: ["@bob"] }] });
-    await tool.execute("call-2", { actions: [{ ...action, applies_to: ["charlie"] }] });
+    }] });
 
     const memories = listMemories(db, { guildId: "g1", scope: "self" });
     expect(memories).toHaveLength(1);
     expect(memories[0]?.subjectUserId).toBeNull();
-    expect(memories[0]?.appliesToUserIds).toEqual(["u2", "u3"]);
+    expect(memories[0]?.appliesTo).toEqual(["u2", "u3"]);
   });
 
   test("rejects non-self journal memories", async () => {
@@ -1030,9 +1111,10 @@ describe("createRecordMemoryTool", () => {
 
     await tool.execute("call-1", {
       actions: [{
-        action: "upsert",
+        action: "create",
         subject: "user",
         username: "@alice",
+        applies_to: ["@alice"],
         kind: "journal",
         content: "This should not become a user journal.",
       }],

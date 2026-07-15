@@ -4,6 +4,7 @@ import {
   countMessagesSinceMemoryExtraction,
   getMemoryExtractionCheckpoint,
   getMessagesSinceMemoryExtraction,
+  markMemoryExtractionCheckpoint,
   markMemoryExtractionCheckpointAtMessage,
 } from "./memory-extraction-repository";
 
@@ -54,6 +55,7 @@ describe("memory extraction checkpoints", () => {
       const checkpoint = getMemoryExtractionCheckpoint(db, "g1", "c1");
       expect(checkpoint?.lastMessageId).toBe("m1");
       expect(checkpoint?.lastRunAt).toBe(10_000);
+      expect(checkpoint?.maintenanceCursorId).toBe(0);
       expect(countMessagesSinceMemoryExtraction(db, { guildId: "g1", channelId: "c1", checkpoint })).toBe(2);
       expect(getMessagesSinceMemoryExtraction(db, {
         guildId: "g1",
@@ -61,6 +63,29 @@ describe("memory extraction checkpoints", () => {
         checkpoint,
         limit: 10,
       }).map((message) => message.id)).toEqual(["m2", "m3"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("advances the maintenance cursor only when explicitly supplied", () => {
+    const db = createDatabase(":memory:");
+    try {
+      insertMessage(db, "m1", 1000);
+      markMemoryExtractionCheckpoint(db, {
+        guildId: "g1",
+        channelId: "c1",
+        lastMessageId: "m1",
+        lastMessageCreatedAt: 1000,
+        maintenanceCursorId: 42,
+      });
+      markMemoryExtractionCheckpoint(db, {
+        guildId: "g1",
+        channelId: "c1",
+        lastMessageId: "m1",
+        lastMessageCreatedAt: 1000,
+      });
+      expect(getMemoryExtractionCheckpoint(db, "g1", "c1")?.maintenanceCursorId).toBe(42);
     } finally {
       db.close();
     }

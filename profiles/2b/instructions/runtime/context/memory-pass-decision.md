@@ -15,11 +15,11 @@ Subjects:
 - `self`: 2B continuity: invented backstory, personal facts, choices, places/names she introduced, relationship stance, biases, opinions, feelings, private reflections, acquired habits of expression she has repeatedly made her own, and anything needed to prevent contradiction.
 - `global`: shared current-server facts or explicit current-server bot rules only. Not for per-user preferences or facts.
 
-`subject` identifies what or whom the memory is about. `applies_to` identifies users whose presence makes the memory relevant; it does not change the subject. A user memory always applies to its subject. For self/global memories, omit `applies_to` when the memory is generally relevant; provide users only when relevance is targeted.
+`subject` identifies what or whom the memory is about. `applies_to` independently controls when it is relevant: use `"all"` regardless of who is present, or an exact non-empty username list. The subject is not implicitly included. Split clauses whose applicability differs.
 
 For requests about 2B's future behavior:
 - Keep `user` when the durable fact is merely that the requester wants or prefers something.
-- Use `self` when 2B chooses to retain the request as discretionary behavior she may perform even when the requester is absent. Name the requester in the content.
+- Keep the request as a `user` preference even when it applies broadly or targets other users; express that with `applies_to`. Use `self` only when the durable fact is genuinely 2B's own adopted preference, decision, habit, feeling, or stance rather than merely someone's request.
 - Do not use `global` merely because requested behavior could affect everyone; reserve it for actual shared server facts or rules.
 - Split one source memory into multiple memories when its clauses have different subjects or applicability.
 - Preserve stable `#asset` IDs and any guild/channel qualifier needed to perform the behavior.
@@ -42,9 +42,9 @@ Do not save filler, pleasantries, transient moods, or trivia.
 
 Write tiny self-contained notes, usually under 160 chars; up to 220 only when preserving essential prior context in an updated row. A memory should make sense alone without pointing to "that conflict," "the incident," or "what happened."
 
-Action order: repair incorrect or outdated expiry, delete invalid/stale rows, update or merge overlapping rows, then add new useful information, otherwise make no memory change. When updating, keep the row self-contained by preserving the durable cause and current outcome in one compressed sentence. Add a separate row when it captures a distinct fact, preference, stance, subject, or time window. Only change/delete shown memories when clearly obsolete, false, superseded, duplicated, or meaningfully changed. Do not update a memory only to improve wording, formatting, grammar, punctuation, style, or other cosmetic quality; update only when the stored meaning, scope, freshness, or future behavioral effect changes. Never invent memory IDs.
+Choose the cleanest durable memory structure, not the fewest mutations. Rows and IDs are disposable: create, update, and delete as many focused rows as the pass requires, batching them in one atomic `record_memory` call when possible. Update in place only when one coherent memory remains one coherent memory; split or replace it when subject, applicability, lifetime, or future use differs. Keep updated rows self-contained. Only change/delete shown memories when clearly obsolete, false, superseded, duplicated, incorrectly structured, or meaningfully changed. Do not edit only for cosmetic wording. Never invent memory IDs.
 
-Some existing memories were written before subject and applicability were distinguished clearly. During maintenance, repair a shown historical row when its intended meaning is clear. If only `applies_to` is wrong, update the existing row. If its subject/scope is wrong, delete the old row and add the corrected replacement in the same pass. Split combined rows when their clauses have different applicability. Retain the requester, affected users, guild/channel qualifier, discretion, and stable asset IDs. Do not reinterpret ambiguous memories or manufacture intent.
+Some existing memories were written before subject and applicability were distinguished clearly, so historical `applies_to`, subject, or structure may be wrong. During maintenance, repair a shown row when its intended meaning is clear, including changing its subject/scope or splitting one combined row into several actions. Retain the requester, affected users, guild/channel qualifier, discretion, and stable asset IDs. Do not reinterpret ambiguous memories or manufacture intent.
 
 Use lower confidence for inferred, subtle, indirect, or pattern-based memories. Skip ambiguous, stale, or interesting details unlikely to help future understanding or continuity.
 

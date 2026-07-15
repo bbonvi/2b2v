@@ -4,6 +4,7 @@ export const SCRATCHPAD_EXPIRY_CHECK_SQL = "CHECK(kind <> 'scratchpad' OR expire
 export const JOURNAL_SCOPE_CHECK_SQL = "CHECK(kind <> 'journal' OR scope = 'self')";
 export const MEMORY_SCOPE_CHECK_SQL = "CHECK((scope = 'guild' AND subject_user_id IS NULL AND guild_id IS NOT NULL) OR (scope = 'user' AND subject_user_id IS NOT NULL AND guild_id IS NULL) OR (scope = 'self' AND subject_user_id IS NULL AND guild_id IS NULL))";
 export const MEMORY_PRIORITY_CHECK_SQL = "CHECK(priority >= 0)";
+export const MEMORY_APPLICABILITY_CHECK_SQL = "CHECK(applicability_mode IN ('all', 'users'))";
 
 /** Build the current memories table shape for fresh schema creation and table-copy migrations. */
 export function memoriesTableSql(tableName: string, ifNotExists = false): string {
@@ -18,6 +19,7 @@ export function memoriesTableSql(tableName: string, ifNotExists = false): string
     provenance_json   TEXT,
     confidence        REAL NOT NULL DEFAULT 0.7 CHECK(confidence >= 0 AND confidence <= 1),
     priority          INTEGER NOT NULL DEFAULT 0,
+    applicability_mode TEXT NOT NULL DEFAULT 'all',
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
     expires_at        INTEGER,
@@ -25,7 +27,8 @@ export function memoriesTableSql(tableName: string, ifNotExists = false): string
     ${SCRATCHPAD_EXPIRY_CHECK_SQL},
     ${JOURNAL_SCOPE_CHECK_SQL},
     ${MEMORY_SCOPE_CHECK_SQL},
-    ${MEMORY_PRIORITY_CHECK_SQL}
+    ${MEMORY_PRIORITY_CHECK_SQL},
+    ${MEMORY_APPLICABILITY_CHECK_SQL}
   )`;
 }
 
@@ -124,6 +127,7 @@ export const SCHEMA_SQL = `
     last_message_id          TEXT,
     last_message_created_at  INTEGER NOT NULL DEFAULT 0,
     last_run_at              INTEGER NOT NULL DEFAULT 0,
+    maintenance_cursor_id    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (guild_id, channel_id)
   );
 

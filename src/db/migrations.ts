@@ -62,7 +62,7 @@ function migrateLegacyMemoryRows(raw: BunDatabase, memoryColumns: readonly Table
 
   runInTransaction(raw, () => {
     raw.run(memoriesTableSql("memories_new"));
-    raw.run(`INSERT INTO memories_new (scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, priority, created_at, updated_at, expires_at, deleted_at)
+    raw.run(`INSERT INTO memories_new (scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, priority, applicability_mode, created_at, updated_at, expires_at, deleted_at)
       SELECT
         CASE WHEN scope = 'user' THEN 'user' ELSE 'guild' END,
         CASE WHEN scope = 'user' THEN NULL ELSE COALESCE(guild_id, '') END,
@@ -82,6 +82,7 @@ function migrateLegacyMemoryRows(raw: BunDatabase, memoryColumns: readonly Table
         NULL,
         0.7,
         0,
+        CASE WHEN scope = 'user' THEN 'users' ELSE 'all' END,
         created_at,
         updated_at,
         CASE WHEN expires_at IS NOT NULL AND expires_at > (strftime('%s','now') * 1000) THEN expires_at ELSE NULL END,
@@ -110,10 +111,16 @@ function migrateStructuredMemoryChecks(raw: BunDatabase, memoryColumns: readonly
     ? "CASE WHEN scope IN ('guild', 'user', 'self') THEN scope WHEN subject_user_id IS NOT NULL THEN 'user' ELSE 'guild' END"
     : "CASE WHEN subject_user_id IS NOT NULL THEN 'user' ELSE 'guild' END";
   const kindExpression = `CASE WHEN ${STRUCTURED_MEMORY_KIND_SQL} = 'journal' AND ${scopeExpression} <> 'self' THEN 'fact' ELSE ${STRUCTURED_MEMORY_KIND_SQL} END`;
+  const applicabilityExpression = hasColumn(memoryColumns, "applicability_mode")
+    ? "CASE WHEN applicability_mode = 'users' THEN 'users' ELSE 'all' END"
+    : `CASE WHEN ${scopeExpression} = 'user' THEN 'users' ELSE 'all' END`;
+  const applicabilityRows = raw
+    .prepare("SELECT memory_id, user_id FROM memory_applicability")
+    .all() as Array<{ memory_id: number; user_id: string }>;
 
   runInTransaction(raw, () => {
     raw.run(memoriesTableSql("memories_new"));
-    raw.run(`INSERT INTO memories_new (id, scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, priority, created_at, updated_at, expires_at, deleted_at)
+    raw.run(`INSERT INTO memories_new (id, scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, priority, applicability_mode, created_at, updated_at, expires_at, deleted_at)
       SELECT
         id,
         ${scopeExpression},
@@ -133,6 +140,7 @@ function migrateStructuredMemoryChecks(raw: BunDatabase, memoryColumns: readonly
           ELSE COALESCE(confidence, 0.7)
         END,
         ${priorityExpression},
+        ${applicabilityExpression},
         created_at,
         updated_at,
         expires_at,
@@ -143,6 +151,10 @@ function migrateStructuredMemoryChecks(raw: BunDatabase, memoryColumns: readonly
         AND (kind IS NULL OR kind <> 'scratchpad' OR expires_at IS NOT NULL)`);
     raw.run("DROP TABLE memories");
     raw.run("ALTER TABLE memories_new RENAME TO memories");
+    const restoreApplicability = raw.prepare(
+      "INSERT OR IGNORE INTO memory_applicability (memory_id, user_id) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM memories WHERE id = ?)",
+    );
+    for (const row of applicabilityRows) restoreApplicability.run(row.memory_id, row.user_id, row.memory_id);
     createMemoryIndexes(raw);
   });
 }
@@ -150,6 +162,21 @@ function migrateStructuredMemoryChecks(raw: BunDatabase, memoryColumns: readonly
 function createMemoryIndexes(raw: BunDatabase): void {
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_guild_subject ON memories(guild_id, subject_user_id)");
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_guild_active ON memories(guild_id, deleted_at)");
+}
+
+function migrateMemoryApplicabilityMode(raw: BunDatabase, existedBeforeMigration: boolean): void {
+  if (existedBeforeMigration) return;
+  runInTransaction(raw, () => {
+    if (!hasColumn(tableColumns(raw, "memories"), "applicability_mode")) {
+      raw.run("ALTER TABLE memories ADD COLUMN applicability_mode TEXT NOT NULL DEFAULT 'all' CHECK(applicability_mode IN ('all', 'users'))");
+    }
+    raw.run(`UPDATE memories SET applicability_mode = 'users'
+      WHERE scope = 'user'
+         OR EXISTS (SELECT 1 FROM memory_applicability WHERE memory_id = memories.id)`);
+    raw.run(`INSERT OR IGNORE INTO memory_applicability (memory_id, user_id)
+      SELECT id, subject_user_id FROM memories
+      WHERE scope = 'user' AND subject_user_id IS NOT NULL`);
+  });
 }
 
 /** Apply idempotent migrations needed by databases created by older bot versions. */
@@ -169,6 +196,7 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
     "ALTER TABLE memories ADD COLUMN expires_at INTEGER",
     "ALTER TABLE memories ADD COLUMN provenance_json TEXT",
     "ALTER TABLE memories ADD COLUMN priority INTEGER NOT NULL DEFAULT 0 CHECK(priority >= 0)",
+    "ALTER TABLE memory_extraction_checkpoints ADD COLUMN maintenance_cursor_id INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE schedules ADD COLUMN created_by_user_id TEXT",
     "ALTER TABLE schedules ADD COLUMN created_by_username TEXT",
     "ALTER TABLE schedules ADD COLUMN handoff_note TEXT NOT NULL DEFAULT ''",
@@ -182,14 +210,13 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
   raw.run("DROP TABLE IF EXISTS images");
 
   const memoryColumns = tableColumns(raw, "memories");
+  const hadMemoryApplicabilityMode = hasColumn(memoryColumns, "applicability_mode");
   const hasStructuredMemorySchema = migrateLegacyMemoryRows(raw, memoryColumns);
   if (hasStructuredMemorySchema) migrateStructuredMemoryChecks(raw, memoryColumns);
+  migrateMemoryApplicabilityMode(raw, hadMemoryApplicabilityMode);
 
   createMemoryIndexes(raw);
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_scope_active ON memories(scope, deleted_at, updated_at)");
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_priority_active ON memories(priority, deleted_at, updated_at)");
-  raw.run(`INSERT OR IGNORE INTO memory_applicability (memory_id, user_id)
-    SELECT id, subject_user_id FROM memories
-    WHERE scope = 'user' AND subject_user_id IS NOT NULL`);
   sanitizeExistingMemoryRows(raw);
 }

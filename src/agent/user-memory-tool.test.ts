@@ -160,7 +160,7 @@ describe("createMemoryListTool", () => {
     const text = textOf(result);
 
     expect(text).toContain("Self memories (1/1 shown):");
-    expect(text).toContain("[self] [0.7] [journal] Privately decided the room matters.");
+    expect(text).toContain("[self] [applies:all] [0.7] [journal] Privately decided the room matters.");
     expect(text).not.toContain("Portable user note");
     expect(text).not.toContain("Guild note");
     expect(result.details).toEqual({ target: "self", count: 1, total: 1 });

@@ -4,13 +4,14 @@ import type { MemoryKind } from "./memory-kinds";
 export { MEMORY_KINDS, isMemoryKind, type MemoryKind } from "./memory-kinds";
 
 export type MemoryScope = "guild" | "user" | "self";
+export type MemoryApplicability = "all" | readonly string[];
 
 export interface MemoryRow {
   id: number;
   scope: MemoryScope;
   guildId: string | null;
   subjectUserId: string | null;
-  appliesToUserIds: string[];
+  appliesTo: "all" | string[];
   kind: MemoryKind;
   content: string;
   sourceMessageId: string | null;
@@ -27,7 +28,7 @@ export interface CreateMemoryInput {
   guildId: string;
   scope?: MemoryScope;
   subjectUserId?: string | null;
-  appliesToUserIds?: readonly string[];
+  appliesTo?: MemoryApplicability;
   kind: MemoryKind;
   content: string;
   sourceMessageId?: string | null;
@@ -41,7 +42,7 @@ export interface UpdateMemoryInput {
   scope?: MemoryScope;
   guildId?: string | null;
   subjectUserId?: string | null;
-  appliesToUserIds?: readonly string[];
+  appliesTo?: MemoryApplicability;
   kind?: MemoryKind;
   content?: string;
   sourceMessageId?: string | null;
@@ -59,12 +60,18 @@ export interface ListMemoriesFilter {
   includeGlobal?: boolean;
   includeSelf?: boolean;
   includeDeleted?: boolean;
-  /** Keep untargeted rows plus rows applicable to at least one of these users. */
+  /** Keep rows applicable to everyone plus rows applicable to at least one of these users. */
   applicableToUserIds?: readonly string[];
+  excludeSubjectUserIds?: readonly string[];
   limit?: number;
 }
 
 export type CountMemoriesFilter = Omit<ListMemoriesFilter, "limit">;
+
+export interface MemoryMaintenanceBatch {
+  rows: MemoryRow[];
+  nextCursorId: number;
+}
 
 function clampConfidence(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value)) return 0.7;
@@ -84,20 +91,22 @@ function normalizeUserIds(userIds: readonly string[] | undefined): string[] {
 function effectiveApplicability(
   scope: MemoryScope,
   subjectUserId: string | null,
-  userIds: readonly string[] | undefined,
-): string[] {
-  const normalized = normalizeUserIds(userIds);
-  if (scope === "user" && subjectUserId !== null && !normalized.includes(subjectUserId)) {
-    normalized.push(subjectUserId);
+  appliesTo: MemoryApplicability | undefined,
+): "all" | string[] {
+  if (appliesTo === "all") return "all";
+  if (appliesTo !== undefined) {
+    const normalized = normalizeUserIds(appliesTo);
+    if (normalized.length === 0) throw new Error("User-targeted applicability requires at least one user ID.");
+    return normalized;
   }
-  return normalized;
+  return scope === "user" && subjectUserId !== null ? [subjectUserId] : "all";
 }
 
-function replaceMemoryApplicability(db: Database, memoryId: number, userIds: readonly string[]): void {
+function replaceMemoryApplicability(db: Database, memoryId: number, appliesTo: "all" | readonly string[]): void {
   db.raw.prepare("DELETE FROM memory_applicability WHERE memory_id = ?").run(memoryId);
-  if (userIds.length === 0) return;
+  if (appliesTo === "all") return;
   const insert = db.raw.prepare("INSERT INTO memory_applicability (memory_id, user_id) VALUES (?, ?)");
-  for (const userId of userIds) insert.run(memoryId, userId);
+  for (const userId of appliesTo) insert.run(memoryId, userId);
 }
 
 /** Return applicability user IDs keyed by memory ID. */
@@ -188,7 +197,9 @@ function memoryFilterConditions(filter: CountMemoriesFilter): {
     params.push(filter.guildId);
   } else if (filter.scope === "user") {
     if (filter.subjectUserId === undefined || filter.subjectUserId === null) {
-      conditions.push("1 = 0");
+      conditions.push("scope = 'user'");
+      conditions.push("subject_user_id IS NOT NULL");
+      conditions.push("guild_id IS NULL");
     } else {
       conditions.push("scope = 'user'");
       conditions.push("subject_user_id = ?");
@@ -224,6 +235,14 @@ function memoryFilterConditions(filter: CountMemoriesFilter): {
     params.push(filter.guildId);
   }
 
+  if (filter.excludeSubjectUserIds !== undefined) {
+    const excluded = normalizeUserIds(filter.excludeSubjectUserIds);
+    if (excluded.length > 0) {
+      conditions.push(`(subject_user_id IS NULL OR subject_user_id NOT IN (${excluded.map(() => "?").join(",")}))`);
+      params.push(...excluded);
+    }
+  }
+
   if (filter.applicableToUserIds !== undefined) {
     const userIds = normalizeUserIds(filter.applicableToUserIds);
     const applicableClause = userIds.length === 0
@@ -233,10 +252,7 @@ function memoryFilterConditions(filter: CountMemoriesFilter): {
           WHERE applicable.memory_id = memories.id
             AND applicable.user_id IN (${userIds.map(() => "?").join(",")})
         )`;
-    conditions.push(`(
-      NOT EXISTS (SELECT 1 FROM memory_applicability targeted WHERE targeted.memory_id = memories.id)
-      ${applicableClause}
-    )`);
+    conditions.push(`(applicability_mode = 'all'${applicableClause})`);
     params.push(...userIds);
   }
 
@@ -253,6 +269,7 @@ function memoryFilterConditions(filter: CountMemoriesFilter): {
 export function createMemory(db: Database, input: CreateMemoryInput): number {
   const now = Date.now();
   const { scope, guildId, subjectUserId } = createScopeFields(input);
+  const appliesTo = effectiveApplicability(scope, subjectUserId, input.appliesTo);
   assertKindScope(input.kind, scope);
   const content = sanitizeMemoryContent(input.content);
   if (content === "") {
@@ -260,8 +277,8 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
   }
   const result = db.raw
     .prepare(
-      `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, priority, created_at, updated_at, expires_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+      `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, priority, applicability_mode, created_at, updated_at, expires_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
     )
     .run(
       scope,
@@ -273,6 +290,7 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
       input.provenance !== undefined && input.provenance !== null ? JSON.stringify(input.provenance) : null,
       clampConfidence(input.confidence),
       clampPriority(input.priority),
+      appliesTo === "all" ? "all" : "users",
       now,
       now,
       input.expiresAt ?? null,
@@ -282,7 +300,7 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
   replaceMemoryApplicability(
     db,
     id,
-    effectiveApplicability(scope, subjectUserId, input.appliesToUserIds),
+    appliesTo,
   );
   return id;
 }
@@ -300,10 +318,13 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
   }
   const effectiveScope = input.scope ?? existing.scope;
   const effectiveKind = input.kind ?? existing.kind;
+  const scopeFields = input.scope !== undefined ? updateScopeFields(input) : null;
+  const resolvedApplicability = input.appliesTo !== undefined
+    ? effectiveApplicability(effectiveScope, scopeFields?.subjectUserId ?? existing.subject_user_id, input.appliesTo)
+    : undefined;
   assertKindScope(effectiveKind, effectiveScope);
 
-  if (input.scope !== undefined) {
-    const scopeFields = updateScopeFields(input);
+  if (scopeFields !== null) {
     sets.push("scope = ?");
     params.push(scopeFields.scope);
     sets.push("guild_id = ?");
@@ -337,6 +358,10 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
     sets.push("priority = ?");
     params.push(clampPriority(input.priority));
   }
+  if (input.appliesTo !== undefined) {
+    sets.push("applicability_mode = ?");
+    params.push(resolvedApplicability === "all" ? "all" : "users");
+  }
   if ("expiresAt" in input) {
     sets.push("expires_at = ?");
     params.push(input.expiresAt ?? null);
@@ -351,19 +376,8 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
   params.push(id);
 
   const result = db.raw.prepare(`UPDATE memories SET ${sets.join(", ")} WHERE id = ?`).run(...params);
-  if (result.changes > 0 && input.appliesToUserIds !== undefined) {
-    const subjectUserId = input.scope !== undefined
-      ? updateScopeFields(input).subjectUserId
-      : existing.subject_user_id;
-    replaceMemoryApplicability(
-      db,
-      id,
-      effectiveApplicability(effectiveScope, subjectUserId, input.appliesToUserIds),
-    );
-  } else if (result.changes > 0 && input.scope === "user") {
-    const subjectUserId = updateScopeFields(input).subjectUserId;
-    const current = listMemoryApplicability(db, [id]).get(id) ?? [];
-    replaceMemoryApplicability(db, id, effectiveApplicability("user", subjectUserId, current));
+  if (result.changes > 0 && resolvedApplicability !== undefined) {
+    replaceMemoryApplicability(db, id, resolvedApplicability);
   }
   return result.changes > 0;
 }
@@ -431,6 +445,34 @@ export function countUserMemoriesByUser(db: Database, _guildId: string): Map<str
   return result;
 }
 
+/** Return a bounded, rotating slice of memories maintainable from one guild. */
+export function listMemoryMaintenanceBatch(
+  db: Database,
+  input: { guildId: string; afterId: number; limit: number },
+): MemoryMaintenanceBatch {
+  const limit = Math.max(1, Math.trunc(input.limit));
+  const select = (afterId: number): Record<string, unknown>[] => db.raw
+    .prepare(
+      `SELECT * FROM memories
+       WHERE id > ?
+         AND deleted_at IS NULL
+         AND (expires_at IS NULL OR expires_at > ?)
+         AND (scope IN ('user', 'self') OR (scope = 'guild' AND guild_id = ?))
+       ORDER BY id ASC
+       LIMIT ?`,
+    )
+    .all(afterId, Date.now(), input.guildId, limit) as Record<string, unknown>[];
+
+  let rows = select(Math.max(0, Math.trunc(input.afterId)));
+  if (rows.length === 0 && input.afterId > 0) rows = select(0);
+  const applicability = listMemoryApplicability(db, rows.map((row) => Number(row.id)));
+  const mapped = rows.map((row) => mapRow(row, applicability.get(Number(row.id)) ?? []));
+  return {
+    rows: mapped,
+    nextCursorId: mapped.at(-1)?.id ?? Math.max(0, Math.trunc(input.afterId)),
+  };
+}
+
 function mapRow(row: Record<string, unknown>, appliesToUserIds: string[]): MemoryRow {
   const provenanceRaw = row.provenance_json;
   let provenance: Record<string, unknown> | null = null;
@@ -445,7 +487,7 @@ function mapRow(row: Record<string, unknown>, appliesToUserIds: string[]): Memor
     scope: row.scope as MemoryScope,
     guildId: row.guild_id as string | null,
     subjectUserId: row.subject_user_id as string | null,
-    appliesToUserIds,
+    appliesTo: row.applicability_mode === "all" ? "all" : appliesToUserIds,
     kind: row.kind as MemoryKind,
     content: sanitizeMemoryContent(row.content as string),
     sourceMessageId: row.source_message_id as string | null,

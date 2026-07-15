@@ -78,15 +78,15 @@ Merged history rows must preserve all component Discord message IDs. Reply resol
 
 Rendered chat history exposes `oldest_visible_message_id` when stored prior context exists, so `list_channel_messages(before_message_id=...)` can page before the prompt window; search result MsgIDs can anchor `around_message_id` context windows.
 
-Memory scopes have product meaning: guild memories are server-local, user memories follow the Discord user across guilds, and self memories are the bot/persona's portable private context. `subject_user_id` remains singular ownership; `memory_applicability` independently lists users whose presence makes a row relevant. User memories always apply to their subject, while untargeted guild/self memories remain generally available. Scratchpad memories must expire.
+Memory scopes have product meaning: guild memories are server-local, user memories follow the Discord user across guilds, and self memories are the bot/persona's portable private context. `subject_user_id` remains singular ownership. `applicability_mode` plus `memory_applicability` independently encode either everyone or an exact non-empty user set; ownership never implies applicability. Scratchpad memories must expire.
 
 Normal reply context reserves a small bounded slice for memories of recent visible human speakers in addition to current-speaker, guild, and self memories; person-specific rows remain explicitly subject-labelled.
 
 High-priority memories are selected before ordinary rows under caps and rendered with `[IMPORTANT]` near the bottom of the memory block.
 
-Memory writes may happen after the visible reply loop. The silent memory pass sends no Discord output and does not keep typing active.
+Memory writes may happen after the visible reply loop. `record_memory` accepts explicit create/update/delete actions and commits the complete batch atomically. The silent memory pass sends no Discord output and does not keep typing active.
 
-Ambient memory extraction is separate from reply triggering. Successful post-reply memory passes reset the same channel checkpoint so ambient extraction does not double-pay for active conversations.
+Ambient memory extraction is separate from reply triggering. Each ambient pass also receives a bounded rotating slice of stored guild-accessible memories for general maintenance, with its cursor advanced only after success. Successful post-reply memory passes reset the same channel message checkpoint without advancing that maintenance cursor, so ambient extraction does not double-pay for active conversations.
 
 ## Safety Boundaries
 

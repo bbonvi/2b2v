@@ -8,6 +8,7 @@ import {
   deleteExpiredMemories,
   deleteMemory,
   getMemory,
+  listMemoryMaintenanceBatch,
   listMemories,
   updateMemory,
 } from "./memory-repository";
@@ -36,7 +37,7 @@ describe("createMemory", () => {
     const row = getMemory(db, id);
     expect(row?.guildId).toBeNull();
     expect(row?.subjectUserId).toBe("u1");
-    expect(row?.appliesToUserIds).toEqual(["u1"]);
+    expect(row?.appliesTo).toEqual(["u1"]);
     expect(row?.kind).toBe("preference");
     expect(row?.content).toBe("User likes concise answers.");
     expect(row?.sourceMessageId).toBe("m1");
@@ -102,7 +103,7 @@ describe("createMemory", () => {
     const id = createMemory(db, {
       guildId: "g1",
       scope: "self",
-      appliesToUserIds: ["u2", "u3", "u2"],
+      appliesTo: ["u2", "u3", "u2"],
       kind: "journal",
       content: "Alice asked me to use reaction images when Bob starts baiting people.",
     });
@@ -110,7 +111,7 @@ describe("createMemory", () => {
     const row = getMemory(db, id);
     expect(row?.scope).toBe("self");
     expect(row?.subjectUserId).toBeNull();
-    expect(row?.appliesToUserIds).toEqual(["u2", "u3"]);
+    expect(row?.appliesTo).toEqual(["u2", "u3"]);
   });
 });
 
@@ -159,27 +160,40 @@ describe("updateMemory", () => {
     expect(getMemory(db, id)?.priority).toBe(1);
   });
 
-  test("replaces applicability while keeping user subjects applicable", () => {
+  test("replaces exact applicability without implicitly adding the subject", () => {
     const selfId = createMemory(db, {
       guildId: "g1",
       scope: "self",
-      appliesToUserIds: ["u1"],
+      appliesTo: ["u1"],
       kind: "journal",
       content: "Targeted self memory.",
     });
     const userId = createMemory(db, {
       guildId: "g1",
       subjectUserId: "u1",
-      appliesToUserIds: ["u2"],
+      appliesTo: ["u2"],
       kind: "fact",
       content: "A fact about Alice.",
     });
 
-    expect(updateMemory(db, selfId, { appliesToUserIds: ["u2"] })).toBe(true);
-    expect(getMemory(db, selfId)?.appliesToUserIds).toEqual(["u2"]);
-    expect(getMemory(db, userId)?.appliesToUserIds).toEqual(["u1", "u2"]);
-    expect(updateMemory(db, userId, { appliesToUserIds: ["u3"] })).toBe(true);
-    expect(getMemory(db, userId)?.appliesToUserIds).toEqual(["u1", "u3"]);
+    expect(updateMemory(db, selfId, { appliesTo: ["u2"] })).toBe(true);
+    expect(getMemory(db, selfId)?.appliesTo).toEqual(["u2"]);
+    expect(getMemory(db, userId)?.appliesTo).toEqual(["u2"]);
+    expect(updateMemory(db, userId, { appliesTo: ["u3"] })).toBe(true);
+    expect(getMemory(db, userId)?.appliesTo).toEqual(["u3"]);
+  });
+
+  test("rejects empty applicability before mutating the row", () => {
+    const id = createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      appliesTo: "all",
+      kind: "fact",
+      content: "Stable",
+    });
+
+    expect(() => updateMemory(db, id, { appliesTo: [] })).toThrow("requires at least one user ID");
+    expect(getMemory(db, id)?.appliesTo).toBe("all");
   });
 
   test("updates scope only with required ownership fields", () => {
@@ -299,19 +313,19 @@ describe("listMemories", () => {
     expect(rows.map((row) => row.content)).toEqual(["Newest", "Middle"]);
   });
 
-  test("keeps untargeted memories and filters targeted memories by applicable users", () => {
+  test("keeps all-user memories and filters exact-user memories by applicable users", () => {
     createMemory(db, { guildId: "g1", scope: "self", kind: "journal", content: "General self memory." });
     createMemory(db, {
       guildId: "g1",
       scope: "self",
-      appliesToUserIds: ["u1"],
+      appliesTo: ["u1"],
       kind: "journal",
       content: "Alice-specific self memory.",
     });
     createMemory(db, {
       guildId: "g1",
       scope: "self",
-      appliesToUserIds: ["u2"],
+      appliesTo: ["u2"],
       kind: "journal",
       content: "Bob-specific self memory.",
     });
@@ -322,6 +336,25 @@ describe("listMemories", () => {
       "General self memory.",
     ]);
     expect(countMemories(db, filter)).toBe(2);
+  });
+
+  test("loads broadly applicable user memories independently of their subject", () => {
+    createMemory(db, {
+      guildId: "g1",
+      subjectUserId: "u-owner",
+      appliesTo: "all",
+      kind: "preference",
+      content: "Owner prefers this behavior for everyone.",
+    });
+
+    const rows = listMemories(db, {
+      guildId: "g1",
+      scope: "user",
+      applicableToUserIds: ["u-other"],
+      excludeSubjectUserIds: ["u-other"],
+    });
+    expect(rows.map((row) => row.content)).toEqual(["Owner prefers this behavior for everyone."]);
+    expect(rows[0]?.appliesTo).toBe("all");
   });
 
   test("returns important memories before newer normal memories", () => {
@@ -365,6 +398,24 @@ describe("listMemories", () => {
     expect(getMemory(db, active)?.content).toBe("Active");
     expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" }).map((row) => row.content)).toEqual(["Active"]);
     expect(countUserMemoriesByUser(db, "g1").get("u1")).toBe(1);
+  });
+});
+
+describe("listMemoryMaintenanceBatch", () => {
+  test("rotates bounded maintainable rows and excludes foreign guild memories", () => {
+    const first = createMemory(db, { guildId: "g1", kind: "global_note", content: "First" });
+    const second = createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Second" });
+    createMemory(db, { guildId: "g2", kind: "global_note", content: "Foreign" });
+    const fourth = createMemory(db, { guildId: "g1", scope: "self", kind: "journal", content: "Fourth" });
+
+    const initial = listMemoryMaintenanceBatch(db, { guildId: "g1", afterId: 0, limit: 2 });
+    expect(initial.rows.map((row) => row.id)).toEqual([first, second]);
+    expect(initial.nextCursorId).toBe(second);
+
+    const next = listMemoryMaintenanceBatch(db, { guildId: "g1", afterId: initial.nextCursorId, limit: 2 });
+    expect(next.rows.map((row) => row.id)).toEqual([fourth]);
+    const wrapped = listMemoryMaintenanceBatch(db, { guildId: "g1", afterId: next.nextCursorId, limit: 2 });
+    expect(wrapped.rows.map((row) => row.id)).toEqual([first, second]);
   });
 });
 

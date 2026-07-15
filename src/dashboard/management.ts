@@ -37,7 +37,7 @@ export interface ManagementMemoryRow {
   scope: "guild" | "user" | "self";
   guildId: string | null;
   subjectUserId: string | null;
-  appliesToUserIds: string[];
+  appliesTo: "all" | string[];
   kind: MemoryKind;
   content: string;
   sourceMessageId: string | null;
@@ -228,7 +228,7 @@ export function listManagementMemories(
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const rows = db.raw
     .prepare(
-      `SELECT id, scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, priority,
+      `SELECT id, scope, guild_id, subject_user_id, applicability_mode, kind, content, source_message_id, confidence, priority,
               created_at, updated_at, expires_at, deleted_at
        FROM memories
        ${where}
@@ -240,6 +240,7 @@ export function listManagementMemories(
       scope: "guild" | "user" | "self";
       guild_id: string | null;
       subject_user_id: string | null;
+      applicability_mode: "all" | "users";
       kind: MemoryKind;
       content: string;
       source_message_id: string | null;
@@ -257,7 +258,7 @@ export function listManagementMemories(
     scope: row.scope,
     guildId: row.guild_id,
     subjectUserId: row.subject_user_id,
-    appliesToUserIds: applicability.get(row.id) ?? [],
+    appliesTo: row.applicability_mode === "all" ? "all" : applicability.get(row.id) ?? [],
     kind: row.kind,
     content: sanitizeMemoryContent(row.content),
     sourceMessageId: row.source_message_id,

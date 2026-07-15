@@ -3,6 +3,7 @@ import { createDatabase, type Database } from "./database";
 import { Database as BunDatabase } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createMemory, getMemory } from "./memory-repository";
 
 let db: Database;
 let tmpDir: string;
@@ -53,6 +54,27 @@ describe("database initialization", () => {
       .get() as { name: string } | undefined;
     expect(table?.name).toBe("memory_applicability");
     expect(index?.name).toBe("idx_memory_applicability_user");
+  });
+
+  test("preserves explicit all applicability across restarts", () => {
+    const dbPath = path.join(tmpDir, "all-applicability.db");
+    const existing = createDatabase(dbPath);
+    const id = createMemory(existing, {
+      guildId: "g1",
+      subjectUserId: "u1",
+      appliesTo: "all",
+      kind: "preference",
+      content: "Applies broadly.",
+    });
+    existing.close();
+
+    const reopened = createDatabase(dbPath);
+    try {
+      expect(getMemory(reopened, id)?.appliesTo).toBe("all");
+      expect(reopened.raw.prepare("SELECT user_id FROM memory_applicability WHERE memory_id = ?").all(id)).toEqual([]);
+    } finally {
+      reopened.close();
+    }
   });
 
   test("creates messages table", () => {
@@ -282,21 +304,28 @@ describe("memories table", () => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     insert.run("guild-1", null, "project", "Drop this legacy project.", null, 0.7, now, now, null, null);
-    insert.run("guild-1", "user-1", "fact", "Keep this fact.", null, 0.7, now, now, null, null);
+    const kept = insert.run("guild-1", "user-1", "fact", "Keep this fact.", null, 0.7, now, now, null, null);
+    legacy.run(`CREATE TABLE memory_applicability (
+      memory_id INTEGER NOT NULL,
+      user_id TEXT NOT NULL,
+      PRIMARY KEY (memory_id, user_id)
+    )`);
+    legacy.prepare("INSERT INTO memory_applicability (memory_id, user_id) VALUES (?, ?)")
+      .run(Number(kept.lastInsertRowid), "user-2");
     legacy.close();
 
     const migrated = createDatabase(legacyPath);
     try {
-      const rows = migrated.raw.prepare("SELECT kind, content FROM memories ORDER BY id").all() as Array<{ kind: string; content: string }>;
+      const rows = migrated.raw.prepare("SELECT kind, content, applicability_mode FROM memories ORDER BY id").all() as Array<{ kind: string; content: string; applicability_mode: string }>;
       const schema = migrated.raw
         .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='memories'")
         .get() as { sql: string };
       const applicability = migrated.raw
-        .prepare("SELECT user_id FROM memory_applicability")
+        .prepare("SELECT user_id FROM memory_applicability ORDER BY user_id")
         .all() as Array<{ user_id: string }>;
 
-      expect(rows).toEqual([{ kind: "fact", content: "Keep this fact." }]);
-      expect(applicability).toEqual([{ user_id: "user-1" }]);
+      expect(rows).toEqual([{ kind: "fact", content: "Keep this fact.", applicability_mode: "users" }]);
+      expect(applicability).toEqual([{ user_id: "user-1" }, { user_id: "user-2" }]);
       expect(schema.sql).toContain("'identity'");
       expect(schema.sql).toContain("'journal'");
       expect(schema.sql).toContain("scope IN ('guild', 'user', 'self')");

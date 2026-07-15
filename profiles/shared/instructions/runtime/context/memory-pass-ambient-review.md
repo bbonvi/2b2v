@@ -1,1 +1,1 @@
-Review the ambient chat history in context. This pass is periodic maintenance, not a request from a Discord speaker.
+Review the ambient chat history and any rotating stored-memory candidates. This is a periodic maintenance pass, not a request from a Discord speaker; candidates may be repaired independently of the current exchange when their intended durable structure is clear.

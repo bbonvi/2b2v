@@ -7,6 +7,7 @@ export interface MemoryExtractionCheckpoint {
   lastMessageId: string | null;
   lastMessageCreatedAt: number;
   lastRunAt: number;
+  maintenanceCursorId: number;
 }
 
 interface CheckpointRow {
@@ -15,6 +16,7 @@ interface CheckpointRow {
   last_message_id: string | null;
   last_message_created_at: number;
   last_run_at: number;
+  maintenance_cursor_id: number;
 }
 
 interface MessageCursor {
@@ -33,7 +35,7 @@ export function getMemoryExtractionCheckpoint(
 ): MemoryExtractionCheckpoint | null {
   const row = db.raw
     .prepare(
-      `SELECT guild_id, channel_id, last_message_id, last_message_created_at, last_run_at
+      `SELECT guild_id, channel_id, last_message_id, last_message_created_at, last_run_at, maintenance_cursor_id
        FROM memory_extraction_checkpoints
        WHERE guild_id = ? AND channel_id = ?`,
     )
@@ -45,6 +47,7 @@ export function getMemoryExtractionCheckpoint(
     lastMessageId: row.last_message_id,
     lastMessageCreatedAt: row.last_message_created_at,
     lastRunAt: row.last_run_at,
+    maintenanceCursorId: row.maintenance_cursor_id,
   };
 }
 
@@ -90,18 +93,23 @@ export function markMemoryExtractionCheckpoint(
     channelId: string;
     lastMessageId: string;
     lastMessageCreatedAt: number;
+    maintenanceCursorId?: number;
     now?: number;
   },
 ): void {
   db.raw
     .prepare(
       `INSERT INTO memory_extraction_checkpoints
-         (guild_id, channel_id, last_message_id, last_message_created_at, last_run_at)
-       VALUES (?, ?, ?, ?, ?)
+         (guild_id, channel_id, last_message_id, last_message_created_at, last_run_at, maintenance_cursor_id)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(guild_id, channel_id) DO UPDATE SET
          last_message_id = excluded.last_message_id,
          last_message_created_at = excluded.last_message_created_at,
-         last_run_at = excluded.last_run_at`,
+         last_run_at = excluded.last_run_at,
+         maintenance_cursor_id = CASE
+           WHEN ? = 1 THEN excluded.maintenance_cursor_id
+           ELSE memory_extraction_checkpoints.maintenance_cursor_id
+         END`,
     )
     .run(
       input.guildId,
@@ -109,6 +117,8 @@ export function markMemoryExtractionCheckpoint(
       input.lastMessageId,
       input.lastMessageCreatedAt,
       input.now ?? Date.now(),
+      input.maintenanceCursorId ?? 0,
+      input.maintenanceCursorId !== undefined ? 1 : 0,
     );
 }
 

@@ -45,7 +45,7 @@ import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
 import type { TtsResult } from "./tts/types";
-import { buildMemoryContext, buildVisibleUserMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
+import { buildMemoryContext, buildMemoryMaintenanceContext, buildVisibleUserMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
 import { createSearchChannelMessagesTool } from "./agent/search-channel-messages-tool";
 import { createScheduleTools } from "./agent/schedule-tool";
 import { createChatUserListTool, type MemberInfo } from "./agent/member-list-tool";
@@ -1062,6 +1062,15 @@ function resolveGuildUsername(guild: Guild, username: string): string | undefine
   return member?.id;
 }
 
+/** Resolve a username from the current guild first, then Discord's global user cache. */
+function resolveKnownUsername(guild: Guild, username: string): string | undefined {
+  const guildUserId = resolveGuildUsername(guild, username);
+  if (guildUserId !== undefined) return guildUserId;
+  const normalized = username.trim().replace(/^@+/, "").trim().toLowerCase();
+  if (normalized === "") return undefined;
+  return client.users.cache.find((user) => user.username.toLowerCase() === normalized)?.id;
+}
+
 /** Resolve a guild member by raw mention, user ID, username, or @username. */
 async function resolveGuildMemberReference(guild: Guild, reference: string): Promise<GuildMember | undefined> {
   const trimmed = reference.trim();
@@ -1295,14 +1304,14 @@ function createPostReplyMaintenanceTools(input: {
     dryRun: input.dryRun,
     recordMemoryDescription: runtimeToolDescription("record_memory", {}),
     resolveUsername: async (username) => {
-      const cached = resolveGuildUsername(input.guild, username);
+      const cached = resolveKnownUsername(input.guild, username);
       if (cached !== undefined) return cached;
       try {
         await input.guild.members.fetch();
       } catch {
         // Cache-only fallback below handles missing permissions.
       }
-      return resolveGuildUsername(input.guild, username);
+      return resolveKnownUsername(input.guild, username);
     },
   });
   const relationshipsConfig = getRelationshipConfig(input.guildConfig);
@@ -1832,6 +1841,7 @@ async function buildContext(
 }
 
 const ambientMemoryPasses = new Set<string>();
+const AMBIENT_MEMORY_MAINTENANCE_BATCH_SIZE = 12;
 
 function collectHumanUserIds(messages: HistoryMessage[]): string[] {
   const recency = new Map<string, true>();
@@ -1925,10 +1935,20 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
       contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
     });
+    const maintenance = buildMemoryMaintenanceContext({
+      db,
+      guildId,
+      afterId: checkpoint?.maintenanceCursorId ?? 0,
+      limit: AMBIENT_MEMORY_MAINTENANCE_BATCH_SIZE,
+      resolveUserId: (userId) => client.users.cache.get(userId)?.username,
+    });
     const context: AssembledContext = {
       sections: [
         ...(currentUserMemories !== ""
           ? [{ label: "Memories", role: "developer" as const, cached: false, text: `## Memory\n${currentUserMemories}` }]
+          : []),
+        ...(maintenance.text !== ""
+          ? [{ label: "Memory Maintenance Candidates", role: "developer" as const, cached: false, text: maintenance.text }]
           : []),
         {
           label: "Chat History — Newer",
@@ -1949,14 +1969,14 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       sourceMessageId: lastMessage.id,
       recordMemoryDescription: runtimeToolDescription("record_memory", {}),
       resolveUsername: async (username) => {
-        const cached = resolveGuildUsername(guild, username);
+        const cached = resolveKnownUsername(guild, username);
         if (cached !== undefined) return cached;
         try {
           await guild.members.fetch();
         } catch {
           // Cache-only fallback below handles missing permissions.
         }
-        return resolveGuildUsername(guild, username);
+        return resolveKnownUsername(guild, username);
       },
     });
     const incoming: IncomingMessage = {
@@ -1998,6 +2018,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
         channelId,
         lastMessageId: lastMessage.id,
         lastMessageCreatedAt: lastMessage.timestamp,
+        maintenanceCursorId: maintenance.nextCursorId,
       });
     } catch (err) {
       memoryLog.setError(err instanceof Error ? err.message : String(err));
