@@ -41,6 +41,24 @@ describe("parseResponseDirectives", () => {
     });
   });
 
+  test("blocks malformed private scene cards instead of exposing them as text", () => {
+    expect(parseResponseDirectives("<scene perspective=\"script_writer\">\nroom read: private\n</")).toEqual({
+      ignored: false,
+      malformedPrivateOutput: true,
+      segments: [],
+    });
+    expect(parseResponseDirectives("<scene>outer<scene>inner</scene><message>visible</message>")).toEqual({
+      ignored: false,
+      malformedPrivateOutput: true,
+      segments: [],
+    });
+    expect(parseResponseDirectives("</scene><message>visible</message>")).toEqual({
+      ignored: false,
+      malformedPrivateOutput: true,
+      segments: [],
+    });
+  });
+
   test("parses audio as a voice directive alias", () => {
     expect(parseResponseDirectives("Text <audio>hello</audio>")).toEqual({
       ignored: false,

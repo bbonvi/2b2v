@@ -1612,6 +1612,59 @@ describe("handleMessage", () => {
     });
   });
 
+  test("blocks malformed private scene output without scheduling maintenance", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<scene perspective=\"script_writer\">\nroom read: private\nopinion: private\n</",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: {
+        role: "assistant",
+        stopReason: "stop",
+        usage: { input: 1, output: 1, totalTokens: 2 },
+        content: [],
+      },
+    });
+    const sender = mock(() => Promise.resolve({ sentMessageId: "sent-1" }));
+    const afterReply = mock(() => Promise.resolve());
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, afterReply }),
+    );
+
+    expect(result.agentRan).toBe(true);
+    expect(result.responseText).toBeUndefined();
+    expect(sender).toHaveBeenCalledTimes(0);
+    expect(afterReply).toHaveBeenCalledTimes(0);
+  });
+
+  test("blocks provider-incomplete output without sending or scheduling maintenance", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<voice>[sings] partial output",
+      toolCalls: [],
+      stopReason: "length",
+      rawResponse: {},
+      messageForLogs: {
+        role: "assistant",
+        stopReason: "stop",
+        usage: { input: 1, output: 1, totalTokens: 2 },
+        content: [{ type: "text", text: "<voice>[sings] partial output" }],
+      },
+    });
+    const sender = mock(() => Promise.resolve({ sentMessageId: "sent-1" }));
+    const afterReply = mock(() => Promise.resolve());
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, afterReply }),
+    );
+
+    expect(result.agentRan).toBe(true);
+    expect(result.responseText).toBeUndefined();
+    expect(sender).toHaveBeenCalledTimes(0);
+    expect(afterReply).toHaveBeenCalledTimes(0);
+  });
+
   test("pre-send discard skips silent memory pass", async () => {
     const afterReply = mock(() => Promise.resolve());
     const sender = mock(() => Promise.resolve({ sentMessageId: "sent-1" }));

@@ -733,14 +733,23 @@ async function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined
   });
 }
 
-function intermediateStatusText(text: string): string {
+function intermediateStatusText(text: string): { text: string; malformedPrivateOutput: boolean } {
   const parsed = parseResponseDirectives(text);
-  if (parsed.ignored) return "";
-  return parsed.segments
+  if (parsed.ignored || parsed.malformedPrivateOutput === true) {
+    return { text: "", malformedPrivateOutput: parsed.malformedPrivateOutput === true };
+  }
+  return {
+    text: parsed.segments
     .filter((segment): segment is Extract<ResponseSegment, { kind: "text" }> => segment.kind === "text")
     .map((segment) => segment.text)
     .join("\n")
-    .trim();
+    .trim(),
+    malformedPrivateOutput: false,
+  };
+}
+
+function modelTurnStopReason(result: OpenRouterChatResult): string | undefined {
+  return result.stopReason;
 }
 
 function buildRuntimeInstruction(runtimePrompts: RuntimePromptBundle | undefined): string {
@@ -1391,7 +1400,7 @@ async function runNativeToolLoop(input: {
   allowEmptyFinalResponse?: boolean;
   stopOnAgentTimeBudget?: boolean;
   terminateAfterSuccessfulToolNames?: readonly string[];
-}): Promise<{ text: string }> {
+}): Promise<{ text: string; stopReason?: string }> {
   const toolsByName = new Map(input.tools.map((tool) => [tool.name, tool]));
   const loadedSkills = new Set<string>();
   const terminateAfterSuccessfulToolNames = new Set(input.terminateAfterSuccessfulToolNames ?? []);
@@ -1421,7 +1430,7 @@ async function runNativeToolLoop(input: {
     maxAttempts = MODEL_TURN_MAX_ATTEMPTS,
     signal: AbortSignal | null | undefined = input.signal,
     recoverAgentTimeBudget = true,
-  ): Promise<{ text: string }> => {
+  ): Promise<{ text: string; stopReason?: string }> => {
     let completedVisibleMessage = false;
     try {
       const result = await completeModelTurnWithRetries({
@@ -1456,8 +1465,12 @@ async function runNativeToolLoop(input: {
       });
       input.requestLog?.recordLLMCompletion(result.messageForLogs);
       const text = result.text.trim();
+      const stopReason = modelTurnStopReason(result);
+      if (stopReason === "length") {
+        return { text, stopReason };
+      }
       input.messages.push(assistantMessageFromResult({ ...result, text }));
-      return { text };
+      return { text, ...(stopReason !== undefined ? { stopReason } : {}) };
     } catch (error) {
       if (recoverAgentTimeBudget && isAgentTimeBudgetExceededError(error)) {
         return await finishAfterAgentTimeBudget();
@@ -1466,7 +1479,7 @@ async function runNativeToolLoop(input: {
     }
   };
 
-  const completeFinalAfterAgentTimeBudget = async (): Promise<{ text: string }> => {
+  const completeFinalAfterAgentTimeBudget = async (): Promise<{ text: string; stopReason?: string }> => {
     markAgentTimeBudgetExhausted();
     return await completeFinalWithoutTools(
       "Model produced an empty response after agent time budget exhaustion.",
@@ -1476,7 +1489,7 @@ async function runNativeToolLoop(input: {
     );
   };
 
-  const finishAfterAgentTimeBudget = async (): Promise<{ text: string }> => {
+  const finishAfterAgentTimeBudget = async (): Promise<{ text: string; stopReason?: string }> => {
     if (input.stopOnAgentTimeBudget === true) {
       return { text: "" };
     }
@@ -1550,16 +1563,25 @@ async function runNativeToolLoop(input: {
       throw error;
     }
     input.requestLog?.recordLLMCompletion(result.messageForLogs);
+    const stopReason = modelTurnStopReason(result);
+    if (stopReason === "length") {
+      const text = result.text.trim();
+      return { text, stopReason };
+    }
 
     if (result.toolCalls.length === 0) {
       const text = result.text.trim();
       input.messages.push(assistantMessageFromResult({ ...result, text }));
-      return { text };
+      return { text, ...(stopReason !== undefined ? { stopReason } : {}) };
     }
 
     if (!sentIntermediateStatus && !streamingState.visibleText) {
-      const statusText = intermediateStatusText(result.text);
-      if (statusText !== "" && input.sendIntermediateText !== undefined) {
+      const status = intermediateStatusText(result.text);
+      if (status.malformedPrivateOutput) {
+        input.log?.warn("malformed private output blocked from intermediate delivery", {
+          outputLength: result.text.length,
+        });
+      } else if (status.text !== "" && input.sendIntermediateText !== undefined) {
         const sent = await input.sendIntermediateText(result.text, undefined);
         if (sent) {
           sentIntermediateStatus = true;
@@ -2624,6 +2646,7 @@ export async function handleMessage(
   const startedAt = Date.now();
   let maintenanceTranscript: OpenRouterMessage[] | undefined;
   let finalText = "";
+  let finalStopReason: string | undefined;
   let mainReplyProviderNativeContent: ProviderNativeAssistantContent[] | undefined;
   const scheduleMemoryPass = (assistantReply: string, visibleReplySent: boolean): void => {
     const task = deps.afterReply?.({
@@ -2821,12 +2844,29 @@ export async function handleMessage(
         signal: wallController.signal,
       });
       finalText = result.text;
+      finalStopReason = result.stopReason;
       mainReplyProviderNativeContent = latestProviderNativeContent(mainMessages);
     } finally {
       clearTimeout(wallTimeout);
     }
 
+    if (finalStopReason === "length") {
+      deps.log?.warn("native reply blocked after incomplete model output", {
+        stopReason: finalStopReason,
+        outputLength: finalText.length,
+        visibleOutputAlreadySent: intermediateStatus.sent
+          || [...liveDispatchers.values()].some((dispatcher) => dispatcher.sentCount() > 0),
+      });
+      return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
+    }
+
     const parsedResponse = parseResponseDirectives(finalText);
+    if (parsedResponse.malformedPrivateOutput === true) {
+      deps.log?.warn("native reply blocked after malformed private output", {
+        outputLength: finalText.length,
+      });
+      return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
+    }
     if (parsedResponse.ignored) {
       if (parsedResponse.ignoredText !== undefined) {
         try {

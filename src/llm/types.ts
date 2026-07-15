@@ -87,6 +87,8 @@ export interface OpenRouterChatRequest {
 export interface OpenRouterChatResult {
   text: string;
   toolCalls: OpenRouterToolCall[];
+  /** Normalized terminal reason used to decide whether output is complete enough to deliver. */
+  stopReason?: string;
   /** Internal provider-native assistant blocks for same-loop continuation. */
   providerNativeContent?: ProviderNativeAssistantContent[];
   messageForLogs: Record<string, unknown>;

@@ -1,125 +1,49 @@
 # Architecture
 
-This file keeps maintainer invariants that are easy to break and not obvious from code shape alone. Setup, command reference, config inventories, and ordinary implementation details belong in code or `README.md`.
+This file records cross-cutting decisions whose intent is not obvious from one implementation site. Setup, schemas, configuration inventories, UI behavior, and ordinary control flow belong in code, tests, or `README.md`.
 
-## Reply Loop
+## Turn And Event Ownership
 
-The persona model speaks directly. There is no hidden orchestrator model and no custom JSON action protocol.
+Provider-native reasoning is private continuation state. Keep it attached to its matching native tool-call IDs, never render it to Discord or prompt-history text, and never save silent maintenance continuations for later visible turns.
 
-Tool results are appended back to the same model turn. Read-only tools may run concurrently only when allowlisted; state-changing or unknown tools remain ordered barriers.
+Accepted work before a restart cutoff belongs to the old process and must drain there. The new process owns only events recovered after that cutoff. Catch-up repairs missed Discord history; it is not crash replay and must not reconstruct stale typing, random triggers, or ambient candidates.
 
-Provider-native reasoning blocks are internal. Keep them with matching native tool call IDs until the next request needs them, but never render them to Discord or persisted prompt-history text. Silent memory and relationship maintenance continuations must not be stored in the cross-run continuation store.
+A dispatch batch has one causal reply target. Same-author text may be debounced into that batch, but unrelated chatter and later triggers must not inherit its trigger reason.
 
-Tool-budget exhaustion is recoverable: pending calls receive synthetic results, then the model gets one final no-tools turn.
+External bots may use deliberate mention, reply, and keyword paths. They do not qualify for random or ambient attention, and this bot's own messages must never re-enter its reply loop.
 
-Typing is runtime-owned. Model work must not wait on typing simulation; pending typing indicators must be cancelled on visible output, ignore, error, or agent end.
+Proactive turns are discardable until their first write action. After a write begins, the turn is committed: stale-send gates must not abandon it, and competing proactive work for the same user/channel must yield.
 
-Coordinated shutdown records a restart cutoff before refusing new Discord events, then drains accepted dispatcher work, scheduled runs, image jobs, and background maintenance while Discord and SQLite remain available. Startup performs a bounded catch-up over recently known channels before normal intake and ambient loops begin. Catch-up persists missed history but dispatches only deliberate mentions, configured keywords, and replies to this bot; stale typing, random triggers, and ambient candidates are intentionally not reconstructed.
+## Prompt Boundaries
 
-Restart catch-up is an operational gap repair, not crash recovery. Accepted work before the cutoff must drain in the old process, while the new process owns only messages Discord reports after the cutoff. Message ingestion is idempotent by Discord message ID so REST catch-up and queued Gateway events cannot dispatch twice.
+Stable prompt sections precede volatile context. Time, live room state, schedules, memories, recent history, current events, and trigger instructions must stay after the cacheable prefix.
 
-Dispatch batches preserve the causal reply target. Debounced same-author follow-up text may join the current dispatch unit, but unrelated chatter and later triggers must not inherit another message's trigger reason.
+Persona identity and behavioral policy belong under `profiles/<profile>/instructions/`; shared instructions must remain persona-neutral. Runtime source may contain only small atomic guardrails that are genuinely code-adjacent.
 
-External Discord bots may enter deliberate mention, reply, and keyword trigger paths, but they are ineligible for random replies and ambient attention, lingering, or follow-up leases. Bot-only traffic must not seed ambient initiative; the current client's own messages must never re-enter the reply loop.
+Persona modes may temporarily override presentation, tone, and ordinary style. They cannot override authorization, safety boundaries, tool contracts, or factual integrity. Guild-scoped modes may use guild-member presentation, but global presence remains account-wide.
 
-Ambient initiative may explicitly use the `bots` audience with an allowlisted target. A normal human-audience configuration may also consider allowlisted bots when `botTargetIds` are present. Both reuse the ordinary initiative timer, human-activity gates, evaluator, cooldowns, and budgets; `botPressure` is applied only to bot-directed pressure, and visible output must mention the selected bot so its deliberate trigger path can respond.
+## Durable State Semantics
 
-Prompt history remains chronological at run time. The current Discord event pins the causal target; real trigger messages already stored in chat history should be marked, not re-appended as the newest line.
+Relationship state follows a Discord user across guilds. It is context for later interaction, not an initiative queue or simulated life state.
 
-Thread tools manage thread state only. Later sends still require explicit `<message channel_id="...">` routing.
+Discord deletion is represented rather than rewritten: retained text is marked deleted in prompt history while locally held media and reactions are removed.
 
-Cross-channel and cross-guild reads/sends must go through accessible Discord channels. DMs stay out of scope. Cross-guild bot sends store output under the target guild/channel while preserving source request metadata.
+Merged history must preserve every component Discord message ID because reply resolution and prompt exclusions depend on those aliases.
 
-Message edit/delete tools must authorize against the live Discord message before mutating local state. They may only touch messages authored by the current bot user in accessible guild text channels/threads.
+Memory ownership, recall location, and relevance are independent dimensions. Never infer one from another. Community memory is guild-local, and scratchpad memory must expire.
 
-Ambient attention and initiative must re-check current chat state immediately before spending evaluator/generation work and again before visible send, so stale proactive replies can be dropped.
+## Authorization And Privacy
 
-Ambient pickup owns one debounced candidate per channel: each eligible human message replaces the candidate and restarts its quiet window, while the evaluator still receives recent channel history. Lingering attention and follow-ups remain per-user. Typing pauses pickup until the channel is idle; it must not restart the full pickup delay or create dashboard schedule rows for internal debounce replacements.
+Cross-channel and cross-guild operations require live access to the source and destination guild channels. DMs remain out of scope. Edit and delete operations must additionally verify the live Discord message is authored by the current bot.
 
-Stale-droppable proactive turns may use write tools. Once a write tool starts, the turn is committed: bypass stale pre-send drops, clear competing ambient candidates for that user/channel, and finish the reply. If a pre-send gate drops a read-only generation, do not run post-reply memory or relationship maintenance for that discarded generation.
+Asset IDs may cross guild boundaries only while the caller can still access the source channel. Signed Discord URLs are never persisted. Cached transcripts must be re-authorized against live channel access before disclosure.
 
-## Prompt Cache
+External image retrieval must reject private-network targets and revalidate every redirect. Web image bytes, Discord avatars, and signed attachment bytes remain ephemeral; accepted public image-generation URLs may be retained only as private job provenance.
 
-Stable prompt content must stay before volatile context. Dynamic sections such as time, current channel state, schedules, memories, recent history, current messages, and trigger instructions must stay after the stable prefix/anchor.
+Member timeout tools remain deliberately narrower than Discord's API: guild only, admin-requested, never the bot or known guild owner, positive duration, and at most Discord's 28-day limit.
 
-Instruction file loading must be deterministic. Missing template variables are errors; runtime template output must not depend on filesystem order, clocks, random values, or object iteration.
+## Asynchronous Work
 
-Persona identity belongs in `profiles/<profile>/instructions/`, not runtime source strings. `profiles/shared/instructions/` contains persona-neutral runtime policy; the selected profile overlays system, core, and runtime documents by relative path and skill packs by manifest ID. Direct-address contact detection uses the live bot username plus configured trigger keywords.
+Visible output, ignore, error, and agent termination all end runtime-owned typing. Model work never waits for typing simulation.
 
-`PROFILE` selects `profiles/<profile>/config.yaml`, its sibling `guilds/` directory, and its instruction overlay as one unit. There is no legacy config-path or flat-prompt fallback; changing profiles requires a rebuild or restart with the new environment.
-
-Older chat history moves only in configured trim chunks. Do not promote one message at a time into cached history.
-
-Volatile social data, such as current display names and reaction counts, belongs only in recent uncached history.
-
-## Persona Modes
-
-Persona modes are profile-local. Config order layers modes from lowest to highest precedence, so later active modes override earlier ones; the default mode remains the global fallback independently of its position. Global modes share state and account presentation. Guild-scoped modes persist independent state per guild, inject context only into that guild, and use Discord's guild-member avatar override; presence remains global and is rejected on guild modes. Their volatile developer prompt may temporarily override ordinary persona, tone, and style, but never authorization, safety boundaries, tool contracts, or factual integrity.
-
-Triggered episodes choose and persist one eligible instant before the opportunity. They activate only on a natural agent turn, expire silently when missed, and are bounded by duration and captured visible-turn limits. Interval bounds plan every next cycle; after an episode actually runs, cooldown shifts the next cycle's interval baseline forward. Runtime config reload compares scheduling fingerprints before replanning, while presentation and instruction edits leave a pending opportunity intact. Scheduled modes may expose lead-in and aftermath context without forcing output.
-
-Avatar and presence changes converge on current desired presentation. Only one avatar request may run at a time; rate-limit retries retain the latest desired avatar and never queue stale mode changes. Random candidate selection and rotation deadlines are persisted. The dashboard receives a semantic status projection, not the persistence document.
-
-Dashboard request logs are projected as source lifecycles: reply work, ambient evaluation, memory extraction, and relationship extraction sharing a Discord message ID appear under one expandable row. Synthetic schedules and other non-message work use their own trigger lifecycle. Lifecycles stay ordered by their first request timestamp as later child phases arrive. A lifecycle is highlighted only when a child phase has an effective result, currently an applied memory change, an accepted relationship signal, or a selected ambient decision; no-op phases stay neutral.
-
-The dashboard Memories tab is the administrative surface for structured memory. It preserves runtime ordering (important rows, latest update, ID), resolves Discord IDs into selectable guild/channel/user labels, and independently exposes what a row is about, where it can be recalled, when it is relevant, kind, confidence, importance, expiry, source, provenance, deletion, and restoration. Prompt Lab remains in Management because it operates on a virtual message rather than stored memory.
-
-## Relationship State
-
-Relationship state is per Discord user, not per guild. Relationship extraction runs after replies and ignored/silent turns, after the memory pass, and never posts directly.
-
-Normal replies receive only the active speaker relationship slice. Relationships are durable context, not a proactive activity queue or life simulation.
-
-## History, Search, Memory
-
-SQLite stores message history and backs structured/regex discovery plus chronological context retrieval.
-
-`messages.is_bot` identifies any Discord bot author. Logic that specifically means the current bot's own output must also match `user_id` against the live client user ID.
-
-Discord-deleted messages keep their stored text and are marked deleted in prompt history with `[deleted]`; local media and reactions are still removed.
-
-Merged history rows must preserve all component Discord message IDs. Reply resolution and prompt-visible search exclusions must treat aliases as present.
-
-`search_channel_messages` applies structured SQLite filters before an optional ripgrep regex over message text, MsgIDs, and indexed asset metadata. It returns newest matches in chronological history grammar with stable MsgIDs and asset IDs; broad regex scans should be narrowed by channel, author, asset, or local date range when possible.
-
-Rendered chat history exposes `oldest_visible_message_id` when stored prior context exists, so `list_channel_messages(before_message_id=...)` can page before the prompt window; search result MsgIDs can anchor `around_message_id` context windows.
-
-Structured memory separates three concerns. `about_type`/`about_user_id` identify community, one Discord user, or 2B herself. `recall_scope`/`recall_guild_id` make a row available anywhere or in one guild; community rows are necessarily guild-local and there is no channel recall type. `recall_mode` plus `memory_recall_users` make a row always relevant or relevant when any exact listed user is present. User rows default to anywhere/about-user-present, self rows to anywhere/always, and community rows to current-guild/always. Scratchpad memories must expire.
-
-Startup replaces the legacy scope/subject/applicability schema transactionally while preserving row IDs, content, provenance, confidence, priority, timestamps, expiry/deletion state, and exact user-trigger links. Legacy `global_note` and `user_note` kinds become `note`; semantic misclassification is repaired only by later memory maintenance when intent is clear.
-
-Normal reply context reserves a small bounded slice for memories of recent visible human speakers in addition to current-speaker, community, and self memories; rows remain explicitly labelled with about, location, and relevance.
-
-High-priority memories are selected before ordinary rows under caps and rendered with `[IMPORTANT]` near the bottom of the memory block.
-
-Memory writes may happen after the visible reply loop. `record_memory` accepts explicit create/update/delete actions and commits the complete batch atomically. The silent memory pass sends no Discord output and does not keep typing active.
-
-Ambient memory extraction is separate from reply triggering. Each ambient pass also receives a bounded rotating slice of stored guild-accessible memories for general maintenance, with its cursor advanced only after success. Successful post-reply memory passes reset the same channel message checkpoint without advancing that maintenance cursor, so ambient extraction does not double-pay for active conversations.
-
-## Safety Boundaries
-
-`discord_set_user_timeout` and `discord_remove_user_timeout` are intentionally narrow: rare, admin-requested Discord member timeout changes only. Runtime validation must continue rejecting DMs, bot self-timeouts, known guild-owner targets, non-positive durations, and set durations above Discord's 28 day maximum.
-
-Agent schedule tools are current-guild and current-channel scoped. Scheduled tasks are private by default, carry requester metadata plus a concise handoff note/fire count, and may self-complete recurring work. Non-admin recurring task pressure caps are configured by `schedulePressure`. One-off timers longer than JavaScript's maximum timeout must be chunked and re-armed.
-
-Discord uploads, embeds, and stickers are stored as metadata-only short `#ID` asset references shown in history and current-event metadata. Asset IDs are not guild-scoped: reads, reposts, and image-generation references may cross guilds when the bot can still access the source channel, and read/search output reports the source guild/channel plus locality. Live access is rechecked before cached transcripts are exposed. Signed Discord URLs are never persisted. Textual views use line-ranged reads and ripgrep regex search; ElevenLabs transcripts are cached as timestamped lines, while ordinary attachment bytes remain ephemeral. Per-kind deadlines bound work below the reply-loop deadline.
-
-Asset history backfill pages each stored channel newest-first through Discord's 100-message endpoint. Per-channel cursors and `(message_id, source_kind, source_key)` uniqueness make page retries idempotent.
-
-Avatar reads and image-generation references are ephemeral and guild-scoped. `read_user_avatar` returns the canonical user ID used by an ordered avatar reference; async workers resolve the current display avatar in the source guild without persisting its URL or bytes.
-
-External image bytes are ephemeral. Image search returns metadata only; page reads append normalized image references; visual inspection and generation references share one bounded downloader that rejects private-network targets and revalidates redirects. Exact public URLs used by an accepted generation job remain in its private durable input provenance, while signed Discord URLs remain represented by stable asset IDs and are never persisted. GIF and other animated web references are decoded as static first frames, matching Discord GIF generation references.
-
-Image generation is state-changing async work. Foreground turns should start the job and acknowledge; workers handle typing, timeout, ordered chat-asset, inspected-web, or guild-avatar reference resolution, and final delivery. Job lifecycle, exact effective input, result, and replacement lineage are durable; process-local abort handles are not. Work left active after an uncoordinated restart becomes a terminal interrupted job rather than being presented as still running.
-
-Generated assets link to their producer through `agent_job_assets` instead of duplicating provenance on the asset row. Prompt history shows only compact job/prompt summaries and producer IDs; private `list_agent_jobs`, `read_agent_job`, and `read_asset` calls expose complete details on demand after enforcing the current channel or asset-origin access boundary.
-
-Terminal jobs with linked output assets remain as long as that asset provenance exists. Unlinked terminal jobs are retained for 30 days, then removed by periodic cleanup; this bounds failed/cancelled-job and orphaned-input retention without severing usable generated assets from their prompts.
-
-Response directive parsing is deliberately narrow. Do not add broad XML parsing.
-
-ElevenLabs v3 bracket delivery tags inside `<voice>` are prompt policy, not code policy. Do not filter them in code.
-
-## Config Changes
-
-When adding or removing config fields, update example config, config types, loader logic, loader tests, README setup notes, and any invariant here affected by the change.
+Image generation is durable state-changing work. Exact effective input, replacement lineage, result, and delivery state survive process loss; process-local abort handles do not. Work abandoned by an uncoordinated restart becomes terminally interrupted rather than appearing active forever.

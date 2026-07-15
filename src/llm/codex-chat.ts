@@ -432,6 +432,7 @@ export async function completeCodexChat(request: OpenRouterChatRequest): Promise
       return {
         text,
         toolCalls,
+        stopReason: response.stopReason,
         providerNativeContent,
         messageForLogs: messageForLogs(response, text, toolCalls),
         rawResponse: response as unknown as Record<string, unknown>,
@@ -457,6 +458,7 @@ export async function completeCodexChat(request: OpenRouterChatRequest): Promise
     return {
       text,
       toolCalls,
+      stopReason: response.stopReason,
       providerNativeContent,
       messageForLogs: messageForLogs(response, text, toolCalls),
       rawResponse: response as unknown as Record<string, unknown>,

@@ -429,6 +429,7 @@ export async function completeOpenRouterChat(request: OpenRouterChatRequest): Pr
   return {
     text,
     toolCalls,
+    stopReason: mapStopReason(finishReason),
     messageForLogs: normalizeAssistantPayload(rawRecord, request.model, text, finishReason, toolCalls),
     rawResponse: rawRecord,
   };
@@ -535,6 +536,7 @@ async function completeOpenRouterStreamingChat(
   return {
     text,
     toolCalls,
+    stopReason: mapStopReason(finishReason),
     messageForLogs: normalizeAssistantPayload(rawResponse, request.model, text, finishReason, toolCalls),
     rawResponse,
   };
