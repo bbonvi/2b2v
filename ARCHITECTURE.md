@@ -62,7 +62,7 @@ Avatar and presence changes converge on current desired presentation. Only one a
 
 Dashboard request logs are projected as source lifecycles: reply work, ambient evaluation, memory extraction, and relationship extraction sharing a Discord message ID appear under one expandable row. Synthetic schedules and other non-message work use their own trigger lifecycle. Lifecycles stay ordered by their first request timestamp as later child phases arrive. A lifecycle is highlighted only when a child phase has an effective result, currently an applied memory change, an accepted relationship signal, or a selected ambient decision; no-op phases stay neutral.
 
-The dashboard Memories tab is the administrative surface for structured memory. It preserves runtime ordering (important rows, latest update, ID), resolves Discord IDs into selectable guild/channel/user labels, and exposes scope, subject, applicability, kind, confidence, importance, expiry, source, provenance, deletion, and restoration without mixing memory editing into message management. Prompt Lab remains in Management because it operates on a virtual message rather than stored memory.
+The dashboard Memories tab is the administrative surface for structured memory. It preserves runtime ordering (important rows, latest update, ID), resolves Discord IDs into selectable guild/channel/user labels, and independently exposes what a row is about, where it can be recalled, when it is relevant, kind, confidence, importance, expiry, source, provenance, deletion, and restoration. Prompt Lab remains in Management because it operates on a virtual message rather than stored memory.
 
 ## Relationship State
 
@@ -84,9 +84,11 @@ Merged history rows must preserve all component Discord message IDs. Reply resol
 
 Rendered chat history exposes `oldest_visible_message_id` when stored prior context exists, so `list_channel_messages(before_message_id=...)` can page before the prompt window; search result MsgIDs can anchor `around_message_id` context windows.
 
-Memory scopes have product meaning: guild memories are server-local, user memories follow the Discord user across guilds, and self memories are the bot/persona's portable private context. `subject_user_id` remains singular ownership. `applicability_mode` plus `memory_applicability` independently encode either everyone or an exact non-empty user set; ownership never implies applicability. Scratchpad memories must expire.
+Structured memory separates three concerns. `about_type`/`about_user_id` identify community, one Discord user, or 2B herself. `recall_scope`/`recall_guild_id` make a row available anywhere or in one guild; community rows are necessarily guild-local and there is no channel recall type. `recall_mode` plus `memory_recall_users` make a row always relevant or relevant when any exact listed user is present. User rows default to anywhere/about-user-present, self rows to anywhere/always, and community rows to current-guild/always. Scratchpad memories must expire.
 
-Normal reply context reserves a small bounded slice for memories of recent visible human speakers in addition to current-speaker, guild, and self memories; person-specific rows remain explicitly subject-labelled.
+Startup replaces the legacy scope/subject/applicability schema transactionally while preserving row IDs, content, provenance, confidence, priority, timestamps, expiry/deletion state, and exact user-trigger links. Legacy `global_note` and `user_note` kinds become `note`; semantic misclassification is repaired only by later memory maintenance when intent is clear.
+
+Normal reply context reserves a small bounded slice for memories of recent visible human speakers in addition to current-speaker, community, and self memories; rows remain explicitly labelled with about, location, and relevance.
 
 High-priority memories are selected before ordinary rows under caps and rendered with `[IMPORTANT]` near the bottom of the memory block.
 

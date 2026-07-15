@@ -33,8 +33,8 @@ function insertMessage(db: Database, id: string, overrides: {
 function insertGuildMemory(db: Database, guildId: string): void {
   db.raw
     .prepare(
-      `INSERT INTO memories (scope, guild_id, kind, content, created_at, updated_at)
-       VALUES ('guild', ?, 'fact', 'memory', 1, 1)`,
+      `INSERT INTO memories (about_type, recall_scope, recall_guild_id, recall_mode, kind, content, created_at, updated_at)
+       VALUES ('community', 'guild', ?, 'always', 'fact', 'memory', 1, 1)`,
     )
     .run(guildId);
 }
@@ -140,8 +140,8 @@ describe("message cleanup", () => {
     expect(result).toEqual({ memoriesDeleted: 1, messagesDeleted: 1 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE guild_id = 'g1'").get()).toEqual({ count: 0 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE guild_id = 'g2'").get()).toEqual({ count: 1 });
-    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM memories WHERE guild_id = 'g1'").get()).toEqual({ count: 0 });
-    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM memories WHERE guild_id = 'g2'").get()).toEqual({ count: 1 });
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM memories WHERE recall_guild_id = 'g1'").get()).toEqual({ count: 0 });
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM memories WHERE recall_guild_id = 'g2'").get()).toEqual({ count: 1 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_assets").get()).toEqual({ count: 0 });
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_reactions").get()).toEqual({ count: 0 });
     db.close();

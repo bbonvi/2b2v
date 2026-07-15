@@ -1288,24 +1288,22 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     const maxAgeMs = config.targetedCheckin.openLoopMaxAgeMs;
     const rows = db.raw
       .prepare(
-        `SELECT memories.id, memories.scope, memories.subject_user_id, memories.kind, memories.content, memories.updated_at,
+        `SELECT memories.id, memories.about_type, memories.about_user_id, memories.kind, memories.content, memories.updated_at,
                 messages.guild_id AS source_guild_id, messages.channel_id AS source_channel_id
          FROM memories
          LEFT JOIN messages ON messages.id = memories.source_message_id
          WHERE memories.deleted_at IS NULL
            AND (memories.expires_at IS NULL OR memories.expires_at > ?)
            AND memories.updated_at >= ?
-           AND (
-             (scope = 'user' AND subject_user_id IS NOT NULL)
-             OR (scope = 'guild' AND memories.guild_id = ?)
-           )
+           AND (memories.recall_scope = 'anywhere' OR memories.recall_guild_id = ?)
+           AND memories.about_type IN ('user', 'community')
          ORDER BY memories.updated_at DESC, memories.id DESC
          LIMIT 20`
       )
       .all(now, now - maxAgeMs, guild.id) as Array<{
         id: number;
-        scope: string;
-        subject_user_id: string | null;
+        about_type: string;
+        about_user_id: string | null;
         kind: string;
         content: string;
         updated_at: number;
@@ -1315,17 +1313,17 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
 
     return rows
       .filter((row) => {
-        if (row.scope === "user") {
-          if (row.subject_user_id === null || !isHumanGuildMember(guild, row.subject_user_id)) return false;
+        if (row.about_type === "user") {
+          if (row.about_user_id === null || !isHumanGuildMember(guild, row.about_user_id)) return false;
           if (row.source_guild_id !== null && row.source_guild_id !== guild.id) return false;
         }
-        if (row.scope === "guild" && row.source_channel_id !== null && row.source_channel_id !== channelId) return false;
+        if (row.about_type === "community" && row.source_channel_id !== null && row.source_channel_id !== channelId) return false;
         const content = row.content.toLowerCase();
         return row.kind === "scratchpad" || content.includes("check") || content.includes("later") || content.includes("собира");
       })
       .map((row) => ({
         memoryId: row.id,
-        userId: row.subject_user_id,
+        userId: row.about_user_id,
         kind: row.kind,
         content: row.content,
         ageMs: now - row.updated_at,
@@ -1819,7 +1817,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
   function selfMemoryConstraintText(guildId: string): string {
     const self = listMemories(db, {
       guildId,
-      scope: "self",
+      about: "self",
       limit: 12,
     });
     if (self.length === 0) return "Self memory constraints: none.";

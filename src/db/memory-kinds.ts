@@ -1,6 +1,5 @@
 export const MEMORY_KINDS = [
-  "global_note",
-  "user_note",
+  "note",
   "preference",
   "relationship",
   "fact",

@@ -1,34 +1,39 @@
 import { MEMORY_KIND_SQL_VALUES, MEMORY_KINDS } from "./memory-kinds";
 
 export const SCRATCHPAD_EXPIRY_CHECK_SQL = "CHECK(kind <> 'scratchpad' OR expires_at IS NOT NULL)";
-export const JOURNAL_SCOPE_CHECK_SQL = "CHECK(kind <> 'journal' OR scope = 'self')";
-export const MEMORY_SCOPE_CHECK_SQL = "CHECK((scope = 'guild' AND subject_user_id IS NULL AND guild_id IS NOT NULL) OR (scope = 'user' AND subject_user_id IS NOT NULL AND guild_id IS NULL) OR (scope = 'self' AND subject_user_id IS NULL AND guild_id IS NULL))";
+export const JOURNAL_ABOUT_CHECK_SQL = "CHECK(kind <> 'journal' OR about_type = 'self')";
+export const MEMORY_ABOUT_CHECK_SQL = "CHECK((about_type = 'user' AND about_user_id IS NOT NULL) OR (about_type IN ('self', 'community') AND about_user_id IS NULL))";
+export const MEMORY_RECALL_LOCATION_CHECK_SQL = "CHECK((recall_scope = 'anywhere' AND recall_guild_id IS NULL) OR (recall_scope = 'guild' AND recall_guild_id IS NOT NULL))";
+export const COMMUNITY_RECALL_CHECK_SQL = "CHECK(about_type <> 'community' OR recall_scope = 'guild')";
 export const MEMORY_PRIORITY_CHECK_SQL = "CHECK(priority >= 0)";
-export const MEMORY_APPLICABILITY_CHECK_SQL = "CHECK(applicability_mode IN ('all', 'users'))";
+export const MEMORY_RECALL_MODE_CHECK_SQL = "CHECK(recall_mode IN ('always', 'users'))";
 
 /** Build the current memories table shape for fresh schema creation and table-copy migrations. */
 export function memoriesTableSql(tableName: string, ifNotExists = false): string {
   return `CREATE TABLE ${ifNotExists ? "IF NOT EXISTS " : ""}${tableName} (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    scope             TEXT NOT NULL CHECK(scope IN ('guild', 'user', 'self')),
-    guild_id          TEXT,
-    subject_user_id   TEXT,
+    about_type        TEXT NOT NULL CHECK(about_type IN ('community', 'user', 'self')),
+    about_user_id     TEXT,
+    recall_scope      TEXT NOT NULL CHECK(recall_scope IN ('anywhere', 'guild')),
+    recall_guild_id   TEXT,
+    recall_mode       TEXT NOT NULL DEFAULT 'always',
     kind              TEXT NOT NULL CHECK(kind IN (${MEMORY_KIND_SQL_VALUES})),
     content           TEXT NOT NULL CHECK(length(trim(content)) > 0),
     source_message_id TEXT,
     provenance_json   TEXT,
     confidence        REAL NOT NULL DEFAULT 0.7 CHECK(confidence >= 0 AND confidence <= 1),
     priority          INTEGER NOT NULL DEFAULT 0,
-    applicability_mode TEXT NOT NULL DEFAULT 'all',
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
     expires_at        INTEGER,
     deleted_at        INTEGER,
     ${SCRATCHPAD_EXPIRY_CHECK_SQL},
-    ${JOURNAL_SCOPE_CHECK_SQL},
-    ${MEMORY_SCOPE_CHECK_SQL},
+    ${JOURNAL_ABOUT_CHECK_SQL},
+    ${MEMORY_ABOUT_CHECK_SQL},
+    ${MEMORY_RECALL_LOCATION_CHECK_SQL},
+    ${COMMUNITY_RECALL_CHECK_SQL},
     ${MEMORY_PRIORITY_CHECK_SQL},
-    ${MEMORY_APPLICABILITY_CHECK_SQL}
+    ${MEMORY_RECALL_MODE_CHECK_SQL}
   )`;
 }
 
@@ -36,27 +41,31 @@ export function memoriesTableSql(tableName: string, ifNotExists = false): string
 export function memorySchemaHasCurrentChecks(sql: string | undefined): boolean {
   return sql !== undefined
     && MEMORY_KINDS.every((kind) => sql.includes(`'${kind}'`))
-    && sql.includes("scope")
+    && sql.includes("about_type")
     && sql.includes("'self'")
+    && sql.includes("'community'")
     && !sql.includes("'project'")
     && sql.includes(SCRATCHPAD_EXPIRY_CHECK_SQL)
-    && sql.includes(JOURNAL_SCOPE_CHECK_SQL)
-    && sql.includes(MEMORY_SCOPE_CHECK_SQL)
+    && sql.includes(JOURNAL_ABOUT_CHECK_SQL)
+    && sql.includes(MEMORY_ABOUT_CHECK_SQL)
+    && sql.includes(MEMORY_RECALL_LOCATION_CHECK_SQL)
+    && sql.includes(COMMUNITY_RECALL_CHECK_SQL)
     && sql.includes(MEMORY_PRIORITY_CHECK_SQL)
+    && sql.includes(MEMORY_RECALL_MODE_CHECK_SQL)
     && sql.includes("CHECK(length(trim(content)) > 0)");
 }
 
 export const SCHEMA_SQL = `
   ${memoriesTableSql("memories", true)};
 
-  CREATE TABLE IF NOT EXISTS memory_applicability (
+  CREATE TABLE IF NOT EXISTS memory_recall_users (
     memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
     user_id   TEXT NOT NULL,
     PRIMARY KEY (memory_id, user_id)
   );
 
-  CREATE INDEX IF NOT EXISTS idx_memory_applicability_user
-    ON memory_applicability(user_id, memory_id);
+  CREATE INDEX IF NOT EXISTS idx_memory_recall_users_user
+    ON memory_recall_users(user_id, memory_id);
 
   CREATE TABLE IF NOT EXISTS messages (
     id                  TEXT PRIMARY KEY,

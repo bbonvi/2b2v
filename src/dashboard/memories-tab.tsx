@@ -7,8 +7,7 @@ import type { ManagementDirectory, ManagementLabel } from "./management";
 import type { MemoryKind } from "../db/memory-kinds";
 
 const MEMORY_KINDS = [
-  "global_note",
-  "user_note",
+  "note",
   "preference",
   "relationship",
   "fact",
@@ -26,18 +25,18 @@ const NON_CREDENTIAL_INPUT_PROPS = {
   "data-lpignore": "true",
 } as const;
 
-type MemoryScope = "guild" | "user" | "self";
+type MemoryAbout = "community" | "user" | "self";
 type MemoryStatus = "active" | "expired" | "deleted" | "all";
 
 interface MemoryRecord {
   id: number;
-  scope: MemoryScope;
-  guildId: string | null;
+  about: MemoryAbout;
+  recallIn: "anywhere" | { guildId: string };
   guildName?: string;
-  subjectUserId: string | null;
-  subjectUsername?: string;
-  appliesTo: "all" | string[];
-  appliesToUsernames: "all" | string[];
+  aboutUserId: string | null;
+  aboutUsername?: string;
+  recallWhen: "always" | string[];
+  recallWhenUsernames: "always" | string[];
   kind: MemoryKind;
   content: string;
   sourceMessageId: string | null;
@@ -56,11 +55,12 @@ interface MemoryRecord {
 
 interface MemoryDraft {
   id: number | null;
-  scope: MemoryScope;
-  guildId: string;
-  subjectUserId: string;
-  appliesToMode: "all" | "users";
-  appliesToUserIds: string[];
+  about: MemoryAbout;
+  recallScope: "anywhere" | "guild";
+  recallGuildId: string;
+  aboutUserId: string;
+  recallMode: "always" | "users";
+  recallUserIds: string[];
   kind: MemoryKind;
   content: string;
   sourceMessageId: string;
@@ -77,11 +77,12 @@ interface Filters {
   query: string;
   guildId: string;
   channelId: string;
-  scope: "" | MemoryScope;
+  about: "" | MemoryAbout;
+  recallScope: "" | "anywhere" | "guild";
   kind: "" | MemoryKind;
-  subjectUserId: string;
-  applicableToUserId: string;
-  applicabilityMode: "" | "all" | "users";
+  aboutUserId: string;
+  relevantUserId: string;
+  recallMode: "" | "always" | "users";
   importance: "" | "important" | "ordinary";
   status: MemoryStatus;
 }
@@ -90,16 +91,17 @@ const EMPTY_FILTERS: Filters = {
   query: "",
   guildId: "",
   channelId: "",
-  scope: "",
+  about: "",
+  recallScope: "",
   kind: "",
-  subjectUserId: "",
-  applicableToUserId: "",
-  applicabilityMode: "",
+  aboutUserId: "",
+  relevantUserId: "",
+  recallMode: "",
   importance: "",
   status: "active",
 };
 
-const FILTERS_KEY = "2b2v.dashboard.memories.filters.v1";
+const FILTERS_KEY = "2b2v.dashboard.memories.filters.v2";
 
 function humanize(value: string): string {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -132,11 +134,12 @@ function memoryStatus(memory: MemoryRecord): "active" | "expired" | "deleted" {
 function draftFromMemory(memory: MemoryRecord): MemoryDraft {
   return {
     id: memory.id,
-    scope: memory.scope,
-    guildId: memory.guildId ?? "",
-    subjectUserId: memory.subjectUserId ?? "",
-    appliesToMode: memory.appliesTo === "all" ? "all" : "users",
-    appliesToUserIds: memory.appliesTo === "all" ? [] : memory.appliesTo,
+    about: memory.about,
+    recallScope: memory.recallIn === "anywhere" ? "anywhere" : "guild",
+    recallGuildId: memory.recallIn === "anywhere" ? "" : memory.recallIn.guildId,
+    aboutUserId: memory.aboutUserId ?? "",
+    recallMode: memory.recallWhen === "always" ? "always" : "users",
+    recallUserIds: memory.recallWhen === "always" ? [] : memory.recallWhen,
     kind: memory.kind,
     content: memory.content,
     sourceMessageId: memory.sourceMessageId ?? "",
@@ -153,12 +156,13 @@ function draftFromMemory(memory: MemoryRecord): MemoryDraft {
 function newDraft(directory: ManagementDirectory): MemoryDraft {
   return {
     id: null,
-    scope: "guild",
-    guildId: directory.guilds[0]?.id ?? "",
-    subjectUserId: "",
-    appliesToMode: "all",
-    appliesToUserIds: [],
-    kind: "global_note",
+    about: "community",
+    recallScope: "guild",
+    recallGuildId: directory.guilds[0]?.id ?? "",
+    aboutUserId: "",
+    recallMode: "always",
+    recallUserIds: [],
+    kind: "note",
     content: "",
     sourceMessageId: "",
     provenanceText: "",
@@ -327,11 +331,12 @@ function MemoriesTab(): JSX.Element {
       if (filters.query.trim() !== "") params.set("query", filters.query.trim());
       if (filters.guildId !== "") params.set("guildId", filters.guildId);
       if (filters.channelId !== "") params.set("channelId", filters.channelId);
-      if (filters.scope !== "") params.set("scope", filters.scope);
+      if (filters.about !== "") params.set("about", filters.about);
+      if (filters.recallScope !== "") params.set("recallScope", filters.recallScope);
       if (filters.kind !== "") params.set("kind", filters.kind);
-      if (filters.subjectUserId !== "") params.set("subjectUserId", filters.subjectUserId);
-      if (filters.applicableToUserId !== "") params.set("applicableToUserId", filters.applicableToUserId);
-      if (filters.applicabilityMode !== "") params.set("applicabilityMode", filters.applicabilityMode);
+      if (filters.aboutUserId !== "") params.set("aboutUserId", filters.aboutUserId);
+      if (filters.relevantUserId !== "") params.set("relevantUserId", filters.relevantUserId);
+      if (filters.recallMode !== "") params.set("recallMode", filters.recallMode);
       if (filters.importance !== "") params.set("important", String(filters.importance === "important"));
       setLoading(true);
       setError("");
@@ -359,12 +364,12 @@ function MemoriesTab(): JSX.Element {
   const resolvedUsers = useMemo(() => {
     const users = new Map(directory.users.map((user) => [user.id, user]));
     for (const memory of memories) {
-      if (memory.subjectUserId !== null && memory.subjectUsername !== undefined && memory.subjectUsername !== memory.subjectUserId) {
-        users.set(memory.subjectUserId, { id: memory.subjectUserId, name: memory.subjectUsername });
+      if (memory.aboutUserId !== null && memory.aboutUsername !== undefined && memory.aboutUsername !== memory.aboutUserId) {
+        users.set(memory.aboutUserId, { id: memory.aboutUserId, name: memory.aboutUsername });
       }
-      if (memory.appliesTo !== "all" && memory.appliesToUsernames !== "all") {
-        memory.appliesTo.forEach((userId, index) => {
-          const username = memory.appliesToUsernames[index];
+      if (memory.recallWhen !== "always" && memory.recallWhenUsernames !== "always") {
+        memory.recallWhen.forEach((userId, index) => {
+          const username = memory.recallWhenUsernames[index];
           if (username !== undefined && username !== userId) users.set(userId, { id: userId, name: username });
         });
       }
@@ -389,10 +394,11 @@ function MemoriesTab(): JSX.Element {
     setError("");
     setNotice("");
     if (draft.content.trim() === "") { setError("Memory content cannot be empty."); return; }
-    if (draft.scope === "guild" && draft.guildId === "") { setError("Choose a guild for a guild memory."); return; }
-    if (draft.scope === "user" && draft.subjectUserId === "") { setError("Choose a subject for a user memory."); return; }
-    if (draft.appliesToMode === "users" && draft.appliesToUserIds.length === 0) { setError("Choose at least one applies-to user."); return; }
-    if (draft.kind === "journal" && draft.scope !== "self") { setError("Journal memories must use self scope."); return; }
+    if (draft.recallScope === "guild" && draft.recallGuildId === "") { setError("Choose a recall guild."); return; }
+    if (draft.about === "community" && draft.recallScope !== "guild") { setError("Community memories must be recalled in one guild."); return; }
+    if (draft.about === "user" && draft.aboutUserId === "") { setError("Choose who the memory is about."); return; }
+    if (draft.recallMode === "users" && draft.recallUserIds.length === 0) { setError("Choose at least one recall-trigger user."); return; }
+    if (draft.kind === "journal" && draft.about !== "self") { setError("Journal memories must be about self."); return; }
     if (draft.kind === "scratchpad" && draft.expiresAtInput === "") { setError("Scratchpad memories require an expiry time."); return; }
     let provenance: Record<string, unknown> | null = null;
     if (draft.provenanceText.trim() !== "") {
@@ -408,10 +414,10 @@ function MemoriesTab(): JSX.Element {
     const expiresAt = draft.expiresAtInput === "" ? null : new Date(draft.expiresAtInput).getTime();
     if (expiresAt !== null && !Number.isFinite(expiresAt)) { setError("Expiry time is invalid."); return; }
     const payload = {
-      scope: draft.scope,
-      guildId: draft.scope === "guild" ? draft.guildId : null,
-      subjectUserId: draft.scope === "user" ? draft.subjectUserId : null,
-      appliesTo: draft.appliesToMode === "all" ? "all" : draft.appliesToUserIds,
+      about: draft.about,
+      aboutUserId: draft.about === "user" ? draft.aboutUserId : null,
+      recallIn: draft.recallScope === "anywhere" ? "anywhere" : { guildId: draft.recallGuildId },
+      recallWhen: draft.recallMode === "always" ? "always" : draft.recallUserIds,
       kind: draft.kind,
       content: draft.content,
       sourceMessageId: draft.sourceMessageId.trim() === "" ? null : draft.sourceMessageId.trim(),
@@ -469,17 +475,18 @@ function MemoriesTab(): JSX.Element {
     }
   };
 
-  const setScope = (scope: MemoryScope): void => {
+  const setAbout = (about: MemoryAbout): void => {
     setDraft((current) => {
       if (current === null) return null;
       return {
         ...current,
-        scope,
-        kind: current.kind === "journal" && scope !== "self" ? "fact" : current.kind,
-        guildId: scope === "guild"
-          ? (current.guildId !== "" ? current.guildId : directory.guilds[0]?.id ?? "")
-          : "",
-        subjectUserId: scope === "user" ? current.subjectUserId : "",
+        about,
+        kind: current.kind === "journal" && about !== "self" ? "fact" : current.kind,
+        recallScope: about === "community" ? "guild" : current.about === "community" ? "anywhere" : current.recallScope,
+        recallGuildId: about === "community" && current.recallGuildId === ""
+          ? directory.guilds[0]?.id ?? ""
+          : current.recallGuildId,
+        aboutUserId: about === "user" ? current.aboutUserId : "",
       };
     });
   };
@@ -499,15 +506,16 @@ function MemoriesTab(): JSX.Element {
           <span>Search</span>
           <input {...NON_CREDENTIAL_INPUT_PROPS} value={filters.query} onChange={(event) => setFilters({ ...filters, query: event.currentTarget.value })} placeholder="Content, memory ID, or source message ID" />
         </label>
-        <label><span>Guild visibility</span><select value={filters.guildId} onChange={(event) => setFilters({ ...filters, guildId: event.currentTarget.value, channelId: "" })}><option value="">Every guild</option>{directory.guilds.map((guild) => <option key={guild.id} value={guild.id}>{guild.name}</option>)}</select></label>
+        <label><span>Available in guild</span><select value={filters.guildId} onChange={(event) => setFilters({ ...filters, guildId: event.currentTarget.value, channelId: "" })}><option value="">Every guild</option>{directory.guilds.map((guild) => <option key={guild.id} value={guild.id}>{guild.name}</option>)}</select></label>
         <label><span>Source channel</span><select value={filters.channelId} onChange={(event) => setFilters({ ...filters, channelId: event.currentTarget.value })}><option value="">Every channel</option>{visibleChannels.map((channel) => <option key={`${channel.guildId}:${channel.id}`} value={channel.id}>#{channel.name}</option>)}</select></label>
-        <label><span>Scope</span><select value={filters.scope} onChange={(event) => setFilters({ ...filters, scope: event.currentTarget.value as Filters["scope"] })}><option value="">Every scope</option><option value="guild">Guild</option><option value="user">User</option><option value="self">Self</option></select></label>
+        <label><span>About</span><select value={filters.about} onChange={(event) => setFilters({ ...filters, about: event.currentTarget.value as Filters["about"] })}><option value="">Everything</option><option value="community">Community</option><option value="user">User</option><option value="self">Self</option></select></label>
+        <label><span>Recall location</span><select value={filters.recallScope} onChange={(event) => setFilters({ ...filters, recallScope: event.currentTarget.value as Filters["recallScope"] })}><option value="">Anywhere + guild</option><option value="anywhere">Anywhere</option><option value="guild">One guild</option></select></label>
         <label><span>Kind</span><select value={filters.kind} onChange={(event) => setFilters({ ...filters, kind: event.currentTarget.value as Filters["kind"] })}><option value="">Every kind</option>{MEMORY_KINDS.map((kind) => <option key={kind} value={kind}>{humanize(kind)}</option>)}</select></label>
-        <label><span>Applicability</span><select value={filters.applicabilityMode} onChange={(event) => setFilters({ ...filters, applicabilityMode: event.currentTarget.value as Filters["applicabilityMode"] })}><option value="">Everyone + selected</option><option value="all">Everyone only</option><option value="users">Selected users only</option></select></label>
+        <label><span>Recall trigger</span><select value={filters.recallMode} onChange={(event) => setFilters({ ...filters, recallMode: event.currentTarget.value as Filters["recallMode"] })}><option value="">Always + user presence</option><option value="always">Always</option><option value="users">Users present</option></select></label>
         <label><span>Importance</span><select value={filters.importance} onChange={(event) => setFilters({ ...filters, importance: event.currentTarget.value as Filters["importance"] })}><option value="">Important + ordinary</option><option value="important">Important only</option><option value="ordinary">Ordinary only</option></select></label>
         <label><span>Status</span><select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.currentTarget.value as MemoryStatus })}><option value="active">Active</option><option value="expired">Expired</option><option value="deleted">Deleted</option><option value="all">All states</option></select></label>
-        <div className="memory-filter-user"><span>Subject username</span><UserPicker compact users={resolvedUsers} value={filters.subjectUserId} onChange={(subjectUserId) => setFilters({ ...filters, subjectUserId })} placeholder="Any subject" /></div>
-        <div className="memory-filter-user"><span>Applies to username</span><UserPicker compact users={resolvedUsers} value={filters.applicableToUserId} onChange={(applicableToUserId) => setFilters({ ...filters, applicableToUserId })} placeholder="Any viewer" /></div>
+        <div className="memory-filter-user"><span>About username</span><UserPicker compact users={resolvedUsers} value={filters.aboutUserId} onChange={(aboutUserId) => setFilters({ ...filters, aboutUserId })} placeholder="Any user" /></div>
+        <div className="memory-filter-user"><span>Relevant with username</span><UserPicker compact users={resolvedUsers} value={filters.relevantUserId} onChange={(relevantUserId) => setFilters({ ...filters, relevantUserId })} placeholder="Any user" /></div>
         <button className="memory-clear-filters" type="button" onClick={clearFilters}>Clear filters</button>
       </section>
 
@@ -521,15 +529,16 @@ function MemoriesTab(): JSX.Element {
             {memories.map((memory) => {
               const status = memoryStatus(memory);
               const selected = draft?.id === memory.id;
-              const owner = memory.scope === "guild" ? memory.guildName ?? memory.guildId ?? "Guild" : memory.scope === "user" ? `@${memory.subjectUsername ?? memory.subjectUserId ?? "unknown"}` : "2B / self";
+              const owner = memory.about === "community" ? "Community" : memory.about === "user" ? `@${memory.aboutUsername ?? memory.aboutUserId ?? "unknown"}` : "2B / self";
+              const recallLocation = memory.recallIn === "anywhere" ? "anywhere" : memory.guildName ?? memory.recallIn.guildId;
               const source = memory.sourceChannelId === null ? "no source link" : `${memory.sourceGuildName ?? memory.sourceGuildId ?? "guild"} / #${memory.sourceChannelName ?? memory.sourceChannelId}`;
               return (
-                <button type="button" key={memory.id} className={`memory-card scope-${memory.scope} ${status}${selected ? " selected" : ""}${memory.priority > 0 ? " priority" : ""}`} onClick={() => { setDraft(draftFromMemory(memory)); setError(""); setNotice(""); }}>
+                <button type="button" key={memory.id} className={`memory-card about-${memory.about} ${status}${selected ? " selected" : ""}${memory.priority > 0 ? " priority" : ""}`} onClick={() => { setDraft(draftFromMemory(memory)); setError(""); setNotice(""); }}>
                   <span className="memory-card-main">
-                    <span className="memory-card-meta"><strong>#{memory.id}</strong>{memory.priority > 0 ? <b className="memory-important-badge">Important</b> : null}<span className={`memory-kind-label kind-${memory.kind}`}>{humanize(memory.kind)}</span><span className="memory-scope-label">{humanize(memory.scope)}</span><b className="memory-card-owner">{owner}</b>{status !== "active" ? <em>{status}</em> : null}</span>
+                    <span className="memory-card-meta"><strong>#{memory.id}</strong>{memory.priority > 0 ? <b className="memory-important-badge">Important</b> : null}<span className={`memory-kind-label kind-${memory.kind}`}>{humanize(memory.kind)}</span><span className="memory-about-label">{humanize(memory.about)}</span><b className="memory-card-owner">{owner}</b>{status !== "active" ? <em>{status}</em> : null}</span>
                     <span className="memory-card-content">{memory.content}</span>
                     <span className="memory-card-foot">
-                      <span>{memory.appliesToUsernames === "all" ? "applies to everyone" : <>applies to {memory.appliesToUsernames.map((name, index) => <span key={`${name}:${index}`}>{index > 0 ? ", " : ""}<b>@{name}</b></span>)}</>}</span>
+                      <span>in {recallLocation}; {memory.recallWhenUsernames === "always" ? "always relevant" : <>when any of {memory.recallWhenUsernames.map((name, index) => <span key={`${name}:${index}`}>{index > 0 ? ", " : ""}<b>@{name}</b></span>)} are present</>}</span>
                       <span>{source}</span><span>updated {formatDate(memory.updatedAt)}</span>
                     </span>
                   </span>
@@ -542,7 +551,7 @@ function MemoriesTab(): JSX.Element {
 
         <aside className="memory-inspector" aria-label="Memory editor">
           {draft === null ? (
-            <div className="memory-inspector-empty"><span>Memory inspector</span><strong>Select a row or create a new memory.</strong><p>Subject, scope, applicability, expiry, ordering, confidence, and provenance are edited here without exposing stored Discord IDs as the primary interface.</p></div>
+            <div className="memory-inspector-empty"><span>Memory inspector</span><strong>Select a row or create a new memory.</strong><p>What a memory describes, where it can be recalled, and when it is relevant are edited independently.</p></div>
           ) : (
             <form autoComplete="off" onSubmit={(event) => { event.preventDefault(); void save(); }}>
               <div className="memory-inspector-head">
@@ -553,26 +562,31 @@ function MemoriesTab(): JSX.Element {
               <fieldset disabled={saving || draft.deletedAt !== null}>
                 <label className="memory-editor-content"><span>Memory</span><textarea {...NON_CREDENTIAL_INPUT_PROPS} autoFocus={draft.id === null} value={draft.content} onChange={(event) => updateDraft("content", event.currentTarget.value)} placeholder="Write one durable, focused memory…" /></label>
 
-                <div className="memory-scope-switch" aria-label="Memory scope">
-                  {(["guild", "user", "self"] as const).map((scope) => <button type="button" className={draft.scope === scope ? "active" : ""} key={scope} onClick={() => setScope(scope)}>{humanize(scope)}</button>)}
+                <div className="memory-about-switch" aria-label="What the memory is about">
+                  {(["community", "user", "self"] as const).map((about) => <button type="button" className={draft.about === about ? "active" : ""} key={about} onClick={() => setAbout(about)}>{humanize(about)}</button>)}
                 </div>
 
-                {draft.scope === "guild" ? <label><span>Guild</span><select value={draft.guildId} onChange={(event) => updateDraft("guildId", event.currentTarget.value)}><option value="">Choose guild</option>{directory.guilds.map((guild) => <option key={guild.id} value={guild.id}>{guild.name}</option>)}</select></label> : null}
-                {draft.scope === "user" ? <div className="memory-editor-picker"><span>Subject</span><UserPicker users={resolvedUsers} value={draft.subjectUserId} onChange={(value) => updateDraft("subjectUserId", value)} placeholder="Choose username" /></div> : null}
-                {draft.scope === "self" ? <div className="memory-scope-note"><strong>Self scope</strong><span>Private, portable context about 2B herself.</span></div> : null}
+                {draft.about === "user" ? <div className="memory-editor-picker"><span>About user</span><UserPicker users={resolvedUsers} value={draft.aboutUserId} onChange={(value) => updateDraft("aboutUserId", value)} placeholder="Choose username" /></div> : null}
+                {draft.about === "self" ? <div className="memory-about-note"><strong>About self</strong><span>Context about 2B herself.</span></div> : null}
+
+                <div className="memory-recall">
+                  <div className="memory-editor-label"><span>Recall in</span><small>Independent from what it describes</small></div>
+                  <div className="memory-recall-switch"><button type="button" disabled={draft.about === "community"} className={draft.recallScope === "anywhere" ? "active" : ""} onClick={() => updateDraft("recallScope", "anywhere")}>Anywhere</button><button type="button" className={draft.recallScope === "guild" ? "active" : ""} onClick={() => updateDraft("recallScope", "guild")}>One guild</button></div>
+                  {draft.recallScope === "guild" ? <label><span>Guild</span><select value={draft.recallGuildId} onChange={(event) => updateDraft("recallGuildId", event.currentTarget.value)}><option value="">Choose guild</option>{directory.guilds.map((guild) => <option key={guild.id} value={guild.id}>{guild.name}</option>)}</select></label> : null}
+                </div>
 
                 <div className="memory-editor-grid two">
-                  <label><span>Kind</span><select value={draft.kind} onChange={(event) => updateDraft("kind", event.currentTarget.value as MemoryKind)}>{MEMORY_KINDS.filter((kind) => kind !== "journal" || draft.scope === "self").map((kind) => <option key={kind} value={kind}>{humanize(kind)}</option>)}</select></label>
+                  <label><span>Kind</span><select value={draft.kind} onChange={(event) => updateDraft("kind", event.currentTarget.value as MemoryKind)}>{MEMORY_KINDS.filter((kind) => kind !== "journal" || draft.about === "self").map((kind) => <option key={kind} value={kind}>{humanize(kind)}</option>)}</select></label>
                   <div className="memory-important-editor">
                     <span>Importance</span>
                     <label><input type="checkbox" checked={draft.important} onChange={(event) => updateDraft("important", event.currentTarget.checked)} /><span><strong>Important</strong><small>Pinned above ordinary memories</small></span></label>
                   </div>
                 </div>
 
-                <div className="memory-applicability">
-                  <div className="memory-editor-label"><span>Applies to</span><small>Independent from subject</small></div>
-                  <div className="memory-applicability-switch"><button type="button" className={draft.appliesToMode === "all" ? "active" : ""} onClick={() => updateDraft("appliesToMode", "all")}>Everyone</button><button type="button" className={draft.appliesToMode === "users" ? "active" : ""} onClick={() => updateDraft("appliesToMode", "users")}>Selected users</button></div>
-                  {draft.appliesToMode === "users" ? <UserMultiPicker users={resolvedUsers} values={draft.appliesToUserIds} onChange={(values) => updateDraft("appliesToUserIds", values)} /> : <div className="memory-scope-note"><strong>Universal relevance</strong><span>This memory is eligible regardless of who is present.</span></div>}
+                <div className="memory-recall">
+                  <div className="memory-editor-label"><span>Recall when</span><small>Independent from what it describes</small></div>
+                  <div className="memory-recall-switch"><button type="button" className={draft.recallMode === "always" ? "active" : ""} onClick={() => updateDraft("recallMode", "always")}>Always</button><button type="button" className={draft.recallMode === "users" ? "active" : ""} onClick={() => updateDraft("recallMode", "users")}>Users present</button></div>
+                  {draft.recallMode === "users" ? <UserMultiPicker users={resolvedUsers} values={draft.recallUserIds} onChange={(values) => updateDraft("recallUserIds", values)} /> : <div className="memory-about-note"><strong>Always relevant</strong><span>Recall does not depend on who is present.</span></div>}
                 </div>
 
                 <div className="memory-confidence-row">

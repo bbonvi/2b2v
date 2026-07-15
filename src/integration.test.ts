@@ -90,30 +90,30 @@ describe("translation → message storage pipeline", () => {
 
 describe("memory repository → DB roundtrip", () => {
   test("guild memories are isolated while user memories are portable", () => {
-    createMemory(db, { kind: "global_note", guildId: "guild-A", content: "A data" });
-    createMemory(db, { kind: "global_note", guildId: "guild-B", content: "B data" });
-    createMemory(db, { kind: "user_note", guildId: "guild-A", subjectUserId: "user-1", content: "Portable data" });
+    createMemory(db, { kind: "note", guildId: "guild-A", content: "A data" });
+    createMemory(db, { kind: "note", guildId: "guild-B", content: "B data" });
+    createMemory(db, { kind: "note", guildId: "guild-A", aboutUserId: "user-1", content: "Portable data" });
 
     const listA = listMemories(db, { guildId: "guild-A" });
     const listB = listMemories(db, { guildId: "guild-B" });
 
     expect(listA[0]?.content).toBe("A data");
     expect(listB[0]?.content).toBe("B data");
-    expect(listMemories(db, { guildId: "guild-B", subjectUserId: "user-1" })[0]?.content).toBe("Portable data");
+    expect(listMemories(db, { guildId: "guild-B", aboutUserId: "user-1" })[0]?.content).toBe("Portable data");
   });
 
   test("subject-scoped memories are readable", () => {
     const id = createMemory(db, {
       kind: "preference",
       guildId: GUILD_ID,
-      subjectUserId: USER_ID,
+      aboutUserId: USER_ID,
       content: "prefers concise answers",
       confidence: 0.9,
     });
 
     const row = getMemory(db, id);
     expect(row?.kind).toBe("preference");
-    expect(row?.subjectUserId).toBe(USER_ID);
+    expect(row?.aboutUserId).toBe(USER_ID);
     expect(row?.confidence).toBe(0.9);
   });
 });
@@ -217,11 +217,11 @@ describe("message storage and retrieval", () => {
   });
 
   test("soft-deleted memories are hidden by listMemories", () => {
-    const deleted = createMemory(db, { kind: "user_note", guildId: GUILD_ID, subjectUserId: "user-1", content: "deleted" });
-    createMemory(db, { kind: "user_note", guildId: GUILD_ID, subjectUserId: "user-1", content: "still valid" });
+    const deleted = createMemory(db, { kind: "note", guildId: GUILD_ID, aboutUserId: "user-1", content: "deleted" });
+    createMemory(db, { kind: "note", guildId: GUILD_ID, aboutUserId: "user-1", content: "still valid" });
     db.raw.prepare("UPDATE memories SET deleted_at = ? WHERE id = ?").run(Date.now(), deleted);
 
-    const visible = listMemories(db, { guildId: GUILD_ID, subjectUserId: "user-1" }).map((row) => row.content);
+    const visible = listMemories(db, { guildId: GUILD_ID, aboutUserId: "user-1" }).map((row) => row.content);
     expect(visible).toContain("still valid");
     expect(visible).not.toContain("deleted");
   });

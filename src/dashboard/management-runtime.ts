@@ -28,8 +28,8 @@ export type DecoratedManagementMessage = ManagementMessageRow & {
 
 export type DecoratedManagementMemory = ManagementMemoryRow & {
   guildName?: string;
-  subjectUsername?: string;
-  appliesToUsernames: "all" | string[];
+  aboutUsername?: string;
+  recallWhenUsernames: "always" | string[];
   sourceGuildName?: string;
   sourceChannelName?: string;
 };
@@ -96,18 +96,21 @@ function isDiscordMessageDeleteChannel(channel: unknown): channel is {
 
 function assertManagementMemoryState(input: ManagementMemoryCreateInput): void {
   if (input.content.trim() === "") throw new Error("Memory content cannot be empty.");
-  if (input.scope === "guild" && (input.guildId === undefined || input.guildId === null || input.guildId.trim() === "")) {
-    throw new Error("Guild memories require a guild.");
+  if (input.recallIn !== "anywhere" && input.recallIn.guildId.trim() === "") {
+    throw new Error("Guild recall requires a guild.");
   }
-  if (input.scope === "user" && (input.subjectUserId === undefined || input.subjectUserId === null || input.subjectUserId.trim() === "")) {
-    throw new Error("User memories require a subject.");
+  if (input.about === "community" && input.recallIn === "anywhere") {
+    throw new Error("Community memories must be recalled in one guild.");
   }
-  if (input.kind === "journal" && input.scope !== "self") throw new Error("Journal memories must use self scope.");
+  if (input.about === "user" && (input.aboutUserId === undefined || input.aboutUserId === null || input.aboutUserId.trim() === "")) {
+    throw new Error("User memories require an about-user.");
+  }
+  if (input.kind === "journal" && input.about !== "self") throw new Error("Journal memories must be about self.");
   if (input.kind === "scratchpad" && (input.expiresAt === undefined || input.expiresAt === null)) {
     throw new Error("Scratchpad memories require an expiry time.");
   }
-  if (input.appliesTo !== "all" && input.appliesTo.length === 0) {
-    throw new Error("Targeted applicability requires at least one user.");
+  if (input.recallWhen !== "always" && input.recallWhen.length === 0) {
+    throw new Error("User-triggered recall requires at least one user.");
   }
   if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) {
     throw new Error("Confidence must be between 0 and 1.");
@@ -237,9 +240,9 @@ export function createDashboardManagementRuntime(input: {
     const sourceChannel = row.sourceChannelId !== null ? managementChannelName(row.sourceChannelId) : null;
     return {
       ...row,
-      ...(row.guildId !== null ? { guildName: managementGuildName(row.guildId) } : {}),
-      ...(row.subjectUserId !== null ? { subjectUsername: managementUserName(row.subjectUserId) } : {}),
-      appliesToUsernames: row.appliesTo === "all" ? "all" : row.appliesTo.map(managementUserName),
+      ...(row.recallIn !== "anywhere" ? { guildName: managementGuildName(row.recallIn.guildId) } : {}),
+      ...(row.aboutUserId !== null ? { aboutUsername: managementUserName(row.aboutUserId) } : {}),
+      recallWhenUsernames: row.recallWhen === "always" ? "always" : row.recallWhen.map(managementUserName),
       ...(row.sourceGuildId !== null ? { sourceGuildName: managementGuildName(row.sourceGuildId) } : {}),
       ...(sourceChannel !== null ? { sourceChannelName: sourceChannel.name } : {}),
     };
@@ -357,10 +360,11 @@ export function createDashboardManagementRuntime(input: {
   const createManagementMemoryState = (memoryInput: ManagementMemoryCreateInput): { memory: DecoratedManagementMemory } => {
     assertManagementMemoryState(memoryInput);
     const memoryId = createMemory(input.db, {
-      guildId: memoryInput.guildId ?? "",
-      scope: memoryInput.scope,
-      subjectUserId: memoryInput.subjectUserId,
-      appliesTo: memoryInput.appliesTo,
+      guildId: memoryInput.recallIn === "anywhere" ? "" : memoryInput.recallIn.guildId,
+      about: memoryInput.about,
+      aboutUserId: memoryInput.aboutUserId,
+      recallIn: memoryInput.recallIn,
+      recallWhen: memoryInput.recallWhen,
       kind: memoryInput.kind,
       content: memoryInput.content,
       sourceMessageId: memoryInput.sourceMessageId,
@@ -379,10 +383,10 @@ export function createDashboardManagementRuntime(input: {
     if (existing === null) throw new Error("Memory not found.");
     if (existing.deletedAt !== null) throw new Error("Deleted memories cannot be edited.");
     const next: ManagementMemoryCreateInput = {
-      scope: memoryInput.scope ?? existing.scope,
-      guildId: "guildId" in memoryInput ? memoryInput.guildId : existing.guildId,
-      subjectUserId: "subjectUserId" in memoryInput ? memoryInput.subjectUserId : existing.subjectUserId,
-      appliesTo: memoryInput.appliesTo ?? existing.appliesTo,
+      about: memoryInput.about ?? existing.about,
+      aboutUserId: "aboutUserId" in memoryInput ? memoryInput.aboutUserId : existing.aboutUserId,
+      recallIn: memoryInput.recallIn ?? existing.recallIn,
+      recallWhen: memoryInput.recallWhen ?? existing.recallWhen,
       kind: memoryInput.kind ?? existing.kind,
       content: memoryInput.content ?? existing.content,
       sourceMessageId: "sourceMessageId" in memoryInput ? memoryInput.sourceMessageId : existing.sourceMessageId,
@@ -393,10 +397,10 @@ export function createDashboardManagementRuntime(input: {
     };
     assertManagementMemoryState(next);
     const updated = updateMemory(input.db, memoryInput.memoryId, {
-      scope: next.scope,
-      guildId: next.guildId,
-      subjectUserId: next.subjectUserId,
-      appliesTo: next.appliesTo,
+      about: next.about,
+      aboutUserId: next.aboutUserId,
+      recallIn: next.recallIn,
+      recallWhen: next.recallWhen,
       kind: next.kind,
       content: next.content,
       sourceMessageId: next.sourceMessageId,

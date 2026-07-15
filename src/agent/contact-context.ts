@@ -326,18 +326,18 @@ function loadVisualAssetMessageIds(db: Database): Set<string> {
 function loadUserMemoryCounts(db: Database, now: number): Map<string, number> {
   const rows = db.raw
     .prepare(
-      `SELECT subject_user_id, COUNT(*) AS count
+      `SELECT about_user_id, COUNT(*) AS count
        FROM memories
-       WHERE scope = 'user'
-         AND guild_id IS NULL
-         AND subject_user_id IS NOT NULL
+       WHERE about_type = 'user'
+         AND recall_scope = 'anywhere'
+         AND about_user_id IS NOT NULL
          AND deleted_at IS NULL
          AND (expires_at IS NULL OR expires_at > ?)
-       GROUP BY subject_user_id`
+       GROUP BY about_user_id`
     )
-    .all(now) as Array<{ subject_user_id: string; count: number }>;
+    .all(now) as Array<{ about_user_id: string; count: number }>;
   const counts = new Map<string, number>();
-  for (const row of rows) counts.set(row.subject_user_id, row.count);
+  for (const row of rows) counts.set(row.about_user_id, row.count);
   return counts;
 }
 

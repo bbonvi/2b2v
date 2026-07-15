@@ -87,11 +87,11 @@ describe("dashboard memory management", () => {
     db.raw
       .prepare(
         `INSERT INTO memories
-           (scope, guild_id, kind, content, confidence, priority, created_at, updated_at)
+           (about_type, recall_scope, recall_guild_id, recall_mode, kind, content, confidence, priority, created_at, updated_at)
          VALUES
-           ('guild', 'g1', 'fact', 'ordinary newer', 0.7, 0, 40, 40),
-           ('guild', 'g1', 'fact', 'important older', 0.7, 1, 20, 20),
-           ('guild', 'g1', 'fact', 'important newer', 0.7, 1, 30, 30)`
+           ('community', 'guild', 'g1', 'always', 'fact', 'ordinary newer', 0.7, 0, 40, 40),
+           ('community', 'guild', 'g1', 'always', 'fact', 'important older', 0.7, 1, 20, 20),
+           ('community', 'guild', 'g1', 'always', 'fact', 'important newer', 0.7, 1, 30, 30)`
       )
       .run();
 
@@ -108,18 +108,18 @@ describe("dashboard memory management", () => {
     insertMessage("source-other", { guildId: "g1", channelId: "c2" });
     const activeId = createMemory(db, {
       guildId: "g1",
-      scope: "user",
-      subjectUserId: "u1",
-      appliesTo: ["u2"],
+      about: "user",
+      aboutUserId: "u1",
+      recallWhen: ["u2"],
       kind: "preference",
       content: "active match",
       sourceMessageId: "source-active",
     });
     createMemory(db, {
       guildId: "g1",
-      scope: "user",
-      subjectUserId: "u3",
-      appliesTo: "all",
+      about: "user",
+      aboutUserId: "u3",
+      recallWhen: "always",
       kind: "fact",
       content: "other source",
       sourceMessageId: "source-other",
@@ -133,10 +133,10 @@ describe("dashboard memory management", () => {
 
     const matches = listManagementMemories(db, {
       channelId: "c1",
-      scope: "user",
+      about: "user",
       kind: "preference",
-      subjectUserId: "u1",
-      applicableToUserId: "u2",
+      aboutUserId: "u1",
+      relevantUserId: "u2",
     });
     expect(matches.map((row) => row.id)).toEqual([activeId]);
     expect(matches[0]?.sourceGuildId).toBe("g1");

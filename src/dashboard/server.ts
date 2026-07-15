@@ -220,9 +220,9 @@ function optionalBooleanParam(url: URL, name: string): boolean | undefined {
   return value === "true" || value === "1";
 }
 
-function optionalManagementScope(url: URL): "guild" | "user" | "self" | undefined {
-  const value = optionalStringParam(url, "scope");
-  return value === "guild" || value === "user" || value === "self" ? value : undefined;
+function optionalMemoryAbout(url: URL): "community" | "user" | "self" | undefined {
+  const value = optionalStringParam(url, "about");
+  return value === "community" || value === "user" || value === "self" ? value : undefined;
 }
 
 function optionalMemoryStatus(url: URL): "active" | "expired" | "deleted" | "all" | undefined {
@@ -230,32 +230,44 @@ function optionalMemoryStatus(url: URL): "active" | "expired" | "deleted" | "all
   return value === "active" || value === "expired" || value === "deleted" || value === "all" ? value : undefined;
 }
 
-function optionalApplicabilityMode(url: URL): "all" | "users" | undefined {
-  const value = optionalStringParam(url, "applicabilityMode");
-  return value === "all" || value === "users" ? value : undefined;
+function optionalRecallMode(url: URL): "always" | "users" | undefined {
+  const value = optionalStringParam(url, "recallMode");
+  return value === "always" || value === "users" ? value : undefined;
+}
+
+function optionalRecallScope(url: URL): "anywhere" | "guild" | undefined {
+  const value = optionalStringParam(url, "recallScope");
+  return value === "anywhere" || value === "guild" ? value : undefined;
 }
 
 function parseMemoryMutationBody(body: Record<string, unknown>): Omit<ManagementMemoryEditInput, "memoryId"> {
   const result: Omit<ManagementMemoryEditInput, "memoryId"> = {};
-  if ("scope" in body) {
-    if (body.scope !== "guild" && body.scope !== "user" && body.scope !== "self") throw new Error("Invalid memory scope.");
-    result.scope = body.scope;
+  if ("about" in body) {
+    if (body.about !== "community" && body.about !== "user" && body.about !== "self") throw new Error("Invalid memory subject.");
+    result.about = body.about;
   }
-  if ("guildId" in body) {
-    if (typeof body.guildId !== "string" && body.guildId !== null) throw new Error("guildId must be a string or null.");
-    result.guildId = typeof body.guildId === "string" ? body.guildId.trim() : null;
-  }
-  if ("subjectUserId" in body) {
-    if (typeof body.subjectUserId !== "string" && body.subjectUserId !== null) throw new Error("subjectUserId must be a string or null.");
-    result.subjectUserId = typeof body.subjectUserId === "string" ? body.subjectUserId.trim() : null;
-  }
-  if ("appliesTo" in body) {
-    if (body.appliesTo === "all") {
-      result.appliesTo = "all";
-    } else if (Array.isArray(body.appliesTo) && body.appliesTo.every((entry) => typeof entry === "string" && entry.trim() !== "")) {
-      result.appliesTo = [...new Set(body.appliesTo.map((entry) => String(entry).trim()))];
+  if ("recallIn" in body) {
+    if (body.recallIn === "anywhere") {
+      result.recallIn = "anywhere";
+    } else if (body.recallIn !== null && typeof body.recallIn === "object" && !Array.isArray(body.recallIn)
+      && typeof (body.recallIn as { guildId?: unknown }).guildId === "string"
+      && (body.recallIn as { guildId: string }).guildId.trim() !== "") {
+      result.recallIn = { guildId: (body.recallIn as { guildId: string }).guildId.trim() };
     } else {
-      throw new Error("appliesTo must be 'all' or a non-empty user ID list.");
+      throw new Error("recallIn must be 'anywhere' or a guild object.");
+    }
+  }
+  if ("aboutUserId" in body) {
+    if (typeof body.aboutUserId !== "string" && body.aboutUserId !== null) throw new Error("aboutUserId must be a string or null.");
+    result.aboutUserId = typeof body.aboutUserId === "string" ? body.aboutUserId.trim() : null;
+  }
+  if ("recallWhen" in body) {
+    if (body.recallWhen === "always") {
+      result.recallWhen = "always";
+    } else if (Array.isArray(body.recallWhen) && body.recallWhen.every((entry) => typeof entry === "string" && entry.trim() !== "")) {
+      result.recallWhen = [...new Set(body.recallWhen.map((entry) => String(entry).trim()))];
+    } else {
+      throw new Error("recallWhen must be 'always' or a non-empty user ID list.");
     }
   }
   if ("kind" in body) {
@@ -600,11 +612,12 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
           return json(await management.listMemories({
             guildId: optionalStringParam(url, "guildId"),
             channelId: optionalStringParam(url, "channelId"),
-            scope: optionalManagementScope(url),
+            about: optionalMemoryAbout(url),
             ...(kind !== undefined && isMemoryKind(kind) ? { kind } : {}),
-            subjectUserId: optionalStringParam(url, "subjectUserId"),
-            applicableToUserId: optionalStringParam(url, "applicableToUserId"),
-            applicabilityMode: optionalApplicabilityMode(url),
+            aboutUserId: optionalStringParam(url, "aboutUserId"),
+            relevantUserId: optionalStringParam(url, "relevantUserId"),
+            recallMode: optionalRecallMode(url),
+            recallScope: optionalRecallScope(url),
             important: optionalBooleanParam(url, "important"),
             status: optionalMemoryStatus(url),
             query: optionalStringParam(url, "query"),
@@ -617,19 +630,19 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
           if (management === undefined) return json({ error: "Management API is disabled" }, 404);
           try {
             const parsed = parseMemoryMutationBody(await readJsonObject(req));
-            if (parsed.scope === undefined || parsed.appliesTo === undefined || parsed.kind === undefined
+            if (parsed.about === undefined || parsed.recallIn === undefined || parsed.recallWhen === undefined || parsed.kind === undefined
               || parsed.content === undefined || parsed.confidence === undefined || parsed.priority === undefined) {
-              return json({ error: "scope, appliesTo, kind, content, confidence, and priority are required." }, 400);
+              return json({ error: "about, recallIn, recallWhen, kind, content, confidence, and priority are required." }, 400);
             }
             return json(await management.createMemory({
-              scope: parsed.scope,
-              appliesTo: parsed.appliesTo,
+              about: parsed.about,
+              recallIn: parsed.recallIn,
+              recallWhen: parsed.recallWhen,
               kind: parsed.kind,
               content: parsed.content,
               confidence: parsed.confidence,
               priority: parsed.priority,
-              ...(parsed.guildId !== undefined ? { guildId: parsed.guildId } : {}),
-              ...(parsed.subjectUserId !== undefined ? { subjectUserId: parsed.subjectUserId } : {}),
+              ...(parsed.aboutUserId !== undefined ? { aboutUserId: parsed.aboutUserId } : {}),
               ...(parsed.sourceMessageId !== undefined ? { sourceMessageId: parsed.sourceMessageId } : {}),
               ...(parsed.provenance !== undefined ? { provenance: parsed.provenance } : {}),
               ...(parsed.expiresAt !== undefined ? { expiresAt: parsed.expiresAt } : {}),

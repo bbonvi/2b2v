@@ -14,10 +14,10 @@ afterEach(() => {
 });
 
 describe("buildMemoryContext", () => {
-  test("includes global and current-speaker memories only", () => {
-    createMemory(db, { guildId: "g1", kind: "global_note", content: "Global note" });
-    createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "preference", content: "Likes concise answers", confidence: 0.8 });
-    createMemory(db, { guildId: "g1", subjectUserId: "u2", kind: "fact", content: "Other user fact" });
+  test("includes community and current-speaker memories only", () => {
+    createMemory(db, { guildId: "g1", kind: "note", content: "Global note" });
+    createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "preference", content: "Likes concise answers", confidence: 0.8 });
+    createMemory(db, { guildId: "g1", aboutUserId: "u2", kind: "fact", content: "Other user fact" });
 
     const context = buildMemoryContext({
       db,
@@ -28,15 +28,15 @@ describe("buildMemoryContext", () => {
 
     expect(context).toContain("Showing 2/2 memories.");
     expect(context).toContain("Use memory as background context.");
-    expect(context).toContain("[guild] [applies:all] [0.7] [global_note] Global note");
-    expect(context).toContain("[@alice] [applies:@alice] [0.8] [preference] Likes concise answers");
+    expect(context).toContain("[about:community] [in:this-guild] [when:always] [0.7] [note] Global note");
+    expect(context).toContain("[about:@alice] [in:anywhere] [when:any(@alice)] [0.8] [preference] Likes concise answers");
     expect(context).not.toContain("Other user fact");
   });
 
   test("includes self memories as bot continuity", () => {
-    createMemory(db, { guildId: "g1", kind: "global_note", content: "Global note" });
-    createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "preference", content: "Likes concise answers" });
-    createMemory(db, { guildId: "g1", scope: "self", kind: "journal", content: "Privately decided the server is worth returning to." });
+    createMemory(db, { guildId: "g1", kind: "note", content: "Global note" });
+    createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "preference", content: "Likes concise answers" });
+    createMemory(db, { guildId: "g1", about: "self", kind: "journal", content: "Privately decided the server is worth returning to." });
 
     const context = buildMemoryContext({
       db,
@@ -44,16 +44,16 @@ describe("buildMemoryContext", () => {
       currentUserId: "u1",
     });
 
-    expect(context).toContain("Showing 3/3 memories (2/2 guild/user, 1/1 self).");
-    expect(context).toContain("[self] [applies:all] [0.7] [journal] Privately decided the server is worth returning to.");
+    expect(context).toContain("Showing 3/3 memories (2/2 community/user, 1/1 self).");
+    expect(context).toContain("[about:self] [in:anywhere] [when:always] [0.7] [journal] Privately decided the server is worth returning to.");
   });
 
-  test("loads targeted self memories only when an applicable user is visible", () => {
-    createMemory(db, { guildId: "g1", scope: "self", kind: "journal", content: "General continuity." });
+  test("loads targeted self memories only when a recall user is visible", () => {
+    createMemory(db, { guildId: "g1", about: "self", kind: "journal", content: "General continuity." });
     createMemory(db, {
       guildId: "g1",
-      scope: "self",
-      appliesTo: ["u2"],
+      about: "self",
+      recallWhen: ["u2"],
       kind: "journal",
       content: "Use the stored reaction image when Bob starts baiting people.",
     });
@@ -69,22 +69,22 @@ describe("buildMemoryContext", () => {
 
     expect(withoutBob).toContain("General continuity.");
     expect(withoutBob).not.toContain("Bob starts baiting");
-    expect(withBob).toContain("[self] [applies:@bob]");
+    expect(withBob).toContain("[about:self] [in:anywhere] [when:any(@bob)]");
     expect(withBob).toContain("Bob starts baiting");
   });
 
-  test("loads user-owned preferences by applicability even when their subject is absent", () => {
+  test("loads user preferences by recall trigger even when their subject is absent", () => {
     createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u-owner",
-      appliesTo: "all",
+      aboutUserId: "u-owner",
+      recallWhen: "always",
       kind: "preference",
       content: "Owner requested a reaction available for everyone.",
     });
     createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u-owner",
-      appliesTo: ["u-target"],
+      aboutUserId: "u-owner",
+      recallWhen: ["u-target"],
       kind: "preference",
       content: "Owner requested a reaction specifically around Target.",
     });
@@ -100,7 +100,7 @@ describe("buildMemoryContext", () => {
   test("renders future expiry relatively", () => {
     createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "scratchpad",
       content: "Alice is temporarily focused on launch prep.",
       expiresAt: Date.now() + (3 * 24 * 60 * 60 * 1000),
@@ -117,8 +117,8 @@ describe("buildMemoryContext", () => {
   });
 
   test("renders newest capped memories at the bottom", () => {
-    const old = createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Older memory." });
-    const fresh = createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Fresh memory." });
+    const old = createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "Older memory." });
+    const fresh = createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "Fresh memory." });
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, old);
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, fresh);
 
@@ -133,8 +133,8 @@ describe("buildMemoryContext", () => {
   });
 
   test("shows visible memories out of total when capped", () => {
-    const old = createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Older memory." });
-    const fresh = createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Fresh memory." });
+    const old = createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "Older memory." });
+    const fresh = createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "Fresh memory." });
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, old);
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, fresh);
 
@@ -153,13 +153,13 @@ describe("buildMemoryContext", () => {
   test("keeps important capped memories and renders them at the bottom", () => {
     const important = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "fact",
       content: "Old important memory.",
       priority: 1,
     });
-    const fresh = createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Fresh normal memory." });
-    const newest = createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Newest normal memory." });
+    const fresh = createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "Fresh normal memory." });
+    const newest = createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "Newest normal memory." });
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, important);
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, fresh);
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(300, newest);
@@ -179,10 +179,10 @@ describe("buildMemoryContext", () => {
   });
 
   test("keeps self memories inside the total memory cap", () => {
-    createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "User memory one." });
-    createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "User memory two." });
-    createMemory(db, { guildId: "g1", scope: "self", kind: "journal", content: "Self memory one." });
-    createMemory(db, { guildId: "g1", scope: "self", kind: "journal", content: "Self memory two." });
+    createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "User memory one." });
+    createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "User memory two." });
+    createMemory(db, { guildId: "g1", about: "self", kind: "journal", content: "Self memory one." });
+    createMemory(db, { guildId: "g1", about: "self", kind: "journal", content: "Self memory two." });
 
     const context = buildMemoryContext({
       db,
@@ -196,19 +196,19 @@ describe("buildMemoryContext", () => {
   });
 
   test("reserves a bounded slice for recent visible speakers", () => {
-    createMemory(db, { guildId: "g1", subjectUserId: "u-current", kind: "fact", content: "Current memory one." });
-    createMemory(db, { guildId: "g1", subjectUserId: "u-current", kind: "fact", content: "Current memory two." });
+    createMemory(db, { guildId: "g1", aboutUserId: "u-current", kind: "fact", content: "Current memory one." });
+    createMemory(db, { guildId: "g1", aboutUserId: "u-current", kind: "fact", content: "Current memory two." });
     const recentImportant = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u-recent",
+      aboutUserId: "u-recent",
       kind: "preference",
       content: "Recent important memory.",
       priority: 1,
     });
-    const recentMiddle = createMemory(db, { guildId: "g1", subjectUserId: "u-recent", kind: "fact", content: "Recent middle memory." });
-    const recentNewest = createMemory(db, { guildId: "g1", subjectUserId: "u-recent", kind: "fact", content: "Recent newest memory." });
-    createMemory(db, { guildId: "g1", subjectUserId: "u-second", kind: "interest", content: "Second speaker memory." });
-    createMemory(db, { guildId: "g1", subjectUserId: "u-excluded", kind: "fact", content: "Excluded speaker memory." });
+    const recentMiddle = createMemory(db, { guildId: "g1", aboutUserId: "u-recent", kind: "fact", content: "Recent middle memory." });
+    const recentNewest = createMemory(db, { guildId: "g1", aboutUserId: "u-recent", kind: "fact", content: "Recent newest memory." });
+    createMemory(db, { guildId: "g1", aboutUserId: "u-second", kind: "interest", content: "Second speaker memory." });
+    createMemory(db, { guildId: "g1", aboutUserId: "u-excluded", kind: "fact", content: "Excluded speaker memory." });
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, recentImportant);
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, recentMiddle);
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(300, recentNewest);
@@ -230,27 +230,27 @@ describe("buildMemoryContext", () => {
       recentUserMaxRows: 3,
     });
 
-    expect(context).toContain("Showing 5/7 memories (1/2 guild/current user, 0/0 self, 3/4 recent speakers, 1/1 cross-subject applicable).");
+    expect(context).toContain("Showing 5/6 memories (2/2 community/current user, 0/0 self, 3/4 recent speakers, 0/0 cross-subject relevant).");
     expect(context.match(/^- /gm)).toHaveLength(5);
     expect(context).toContain("Current memory two.");
-    expect(context).toContain("[@recent] [applies:@recent] [0.7] [preference] [IMPORTANT] Recent important memory.");
-    expect(context).toContain("[@recent] [applies:@recent] [0.7] [fact] Recent newest memory.");
+    expect(context).toContain("[about:@recent] [in:anywhere] [when:any(@recent)] [0.7] [preference] [IMPORTANT] Recent important memory.");
+    expect(context).toContain("[about:@recent] [in:anywhere] [when:any(@recent)] [0.7] [fact] Recent newest memory.");
     expect(context).not.toContain("Recent middle memory.");
-    expect(context).toContain("[@second] [applies:@second] [0.7] [interest] Second speaker memory.");
-    expect(context).toContain("Excluded speaker memory.");
+    expect(context).toContain("[about:@second] [in:anywhere] [when:any(@second)] [0.7] [interest] Second speaker memory.");
+    expect(context).not.toContain("Excluded speaker memory.");
     expect(context.indexOf("Second speaker memory.")).toBeLessThan(context.indexOf("Recent important memory."));
   });
 });
 
 describe("buildVisibleUserMemoryContext", () => {
   test("hydrates newest visible users and newest memories within caps", () => {
-    const newest = createMemory(db, { guildId: "g1", subjectUserId: "u-new", kind: "fact", content: "Newest visible-user memory." });
-    const middle = createMemory(db, { guildId: "g1", subjectUserId: "u-new", kind: "fact", content: "Middle visible-user memory." });
-    const oldest = createMemory(db, { guildId: "g1", subjectUserId: "u-new", kind: "fact", content: "Oldest visible-user memory." });
-    const midUser = createMemory(db, { guildId: "g1", subjectUserId: "u-mid", kind: "interest", content: "Mid user memory." });
-    createMemory(db, { guildId: "g1", subjectUserId: "u-old", kind: "fact", content: "Old visible-user memory." });
-    createMemory(db, { guildId: "g1", subjectUserId: "u-current", kind: "preference", content: "Current user memory." });
-    createMemory(db, { guildId: "g1", kind: "global_note", content: "Global memory." });
+    const newest = createMemory(db, { guildId: "g1", aboutUserId: "u-new", kind: "fact", content: "Newest visible-user memory." });
+    const middle = createMemory(db, { guildId: "g1", aboutUserId: "u-new", kind: "fact", content: "Middle visible-user memory." });
+    const oldest = createMemory(db, { guildId: "g1", aboutUserId: "u-new", kind: "fact", content: "Oldest visible-user memory." });
+    const midUser = createMemory(db, { guildId: "g1", aboutUserId: "u-mid", kind: "interest", content: "Mid user memory." });
+    createMemory(db, { guildId: "g1", aboutUserId: "u-old", kind: "fact", content: "Old visible-user memory." });
+    createMemory(db, { guildId: "g1", aboutUserId: "u-current", kind: "preference", content: "Current user memory." });
+    createMemory(db, { guildId: "g1", kind: "note", content: "Global memory." });
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(300, newest);
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, middle);
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, oldest);
@@ -283,7 +283,7 @@ describe("buildVisibleUserMemoryContext", () => {
 });
 
 describe("extractAndApplyMemories", () => {
-  test("normalizes sloppy add-array output from unsupported structured output providers", async () => {
+  test("normalizes array output from unsupported structured output providers", async () => {
     await extractAndApplyMemories({
       db,
       guildId: "g1",
@@ -299,8 +299,8 @@ describe("extractAndApplyMemories", () => {
       completeChat: () => Promise.resolve({
         text: JSON.stringify([
           {
-            action: "add",
-            subject: "user",
+            action: "create",
+            about: "user", recall_in: "anywhere",
             username: "@alice",
             content: "Is the creator of the bot 2B.",
           },
@@ -309,7 +309,7 @@ describe("extractAndApplyMemories", () => {
       }),
     });
 
-    const memories = listMemories(db, { guildId: "g1", subjectUserId: "u1" });
+    const memories = listMemories(db, { guildId: "g1", aboutUserId: "u1" });
     expect(memories).toHaveLength(1);
     expect(memories[0]?.kind).toBe("fact");
     expect(memories[0]?.content).toBe("Is the creator of the bot 2B.");
@@ -332,7 +332,7 @@ describe("extractAndApplyMemories", () => {
         text: JSON.stringify({
           actions: [{
             action: "create",
-            subject: "user",
+            about: "user", recall_in: "anywhere",
             username: "@alice",
             kind: "identity",
             content: "Preferred name is Sasha.",
@@ -342,7 +342,7 @@ describe("extractAndApplyMemories", () => {
       }),
     });
 
-    const memories = listMemories(db, { guildId: "g1", subjectUserId: "u1" });
+    const memories = listMemories(db, { guildId: "g1", aboutUserId: "u1" });
     expect(memories).toHaveLength(1);
     expect(memories[0]?.content).toBe("Preferred name is Sasha.");
   });
@@ -350,7 +350,7 @@ describe("extractAndApplyMemories", () => {
   test("updates an existing row without creating a duplicate", async () => {
     const existing = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "fact",
       content: "Is the creator of the bot 2B.",
     });
@@ -372,7 +372,7 @@ describe("extractAndApplyMemories", () => {
           actions: [{
             action: "update",
             id: existing,
-            subject: "user",
+            about: "user", recall_in: "anywhere",
             username: "@alice",
             kind: "fact",
             content: "Is the creator of the bot 2B.",
@@ -382,13 +382,13 @@ describe("extractAndApplyMemories", () => {
       }),
     });
 
-    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(1);
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" })).toHaveLength(1);
   });
 
   test("upgrades duplicate memory priority when important is set", async () => {
     const existing = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "fact",
       content: "2B is still angry about the slur.",
     });
@@ -410,7 +410,7 @@ describe("extractAndApplyMemories", () => {
           actions: [{
             action: "update",
             id: existing,
-            subject: "user",
+            about: "user", recall_in: "anywhere",
             username: "@alice",
             kind: "fact",
             content: "2B is still angry about the slur.",
@@ -421,20 +421,20 @@ describe("extractAndApplyMemories", () => {
       }),
     });
 
-    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(1);
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" })).toHaveLength(1);
     expect(getMemory(db, existing)?.priority).toBe(1);
   });
 
   test("applies create, update, and delete actions", async () => {
     const existing = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "preference",
       content: "old preference",
     });
     const removed = createMemory(db, {
       guildId: "g1",
-      kind: "global_note",
+      kind: "note",
       content: "stale",
     });
 
@@ -456,7 +456,7 @@ describe("extractAndApplyMemories", () => {
             {
               action: "update",
               id: existing,
-              subject: "user",
+              about: "user", recall_in: "anywhere",
               username: "@alice",
               kind: "preference",
               content: "Prefers short replies.",
@@ -464,7 +464,7 @@ describe("extractAndApplyMemories", () => {
             },
             {
               action: "create",
-              subject: "global",
+              about: "community", recall_in: "current_guild",
               kind: "interest",
               content: "The server is testing the bot rewrite.",
             },
@@ -500,7 +500,7 @@ describe("extractAndApplyMemories", () => {
         text: JSON.stringify({
           actions: [{
               action: "update",
-            subject: "user",
+            about: "user", recall_in: "anywhere",
             username: "@alice",
             kind: "project",
             content: "Legacy project kind should not be coerced.",
@@ -510,7 +510,7 @@ describe("extractAndApplyMemories", () => {
       }),
     });
 
-    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" })).toHaveLength(0);
   });
 
   test("applies relative expiresIn from extractor output", async () => {
@@ -531,7 +531,7 @@ describe("extractAndApplyMemories", () => {
         text: JSON.stringify({
           actions: [{
             action: "create",
-            subject: "user",
+            about: "user", recall_in: "anywhere",
             username: "@alice",
             kind: "fact",
             content: "Alice is at the conference today.",
@@ -542,7 +542,7 @@ describe("extractAndApplyMemories", () => {
       }),
     });
 
-    const expiresAt = listMemories(db, { guildId: "g1", subjectUserId: "u1" })[0]?.expiresAt;
+    const expiresAt = listMemories(db, { guildId: "g1", aboutUserId: "u1" })[0]?.expiresAt;
     const after = Date.now();
     expect(expiresAt).toBeGreaterThanOrEqual(before + 2 * 60 * 60 * 1000);
     expect(expiresAt).toBeLessThanOrEqual(after + 2 * 60 * 60 * 1000);
@@ -565,7 +565,7 @@ describe("extractAndApplyMemories", () => {
         text: JSON.stringify({
           actions: [{
             action: "create",
-            subject: "user",
+            about: "user", recall_in: "anywhere",
             username: "@alice",
             kind: "fact",
             content: "Alice is at the conference today.",
@@ -576,13 +576,13 @@ describe("extractAndApplyMemories", () => {
       }),
     });
 
-    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" })).toHaveLength(0);
   });
 
   test("ignores impossible delete ids from sloppy providers", async () => {
     const existing = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "fact",
       content: "Keep this memory.",
     });
@@ -611,12 +611,12 @@ describe("extractAndApplyMemories", () => {
   test("ignores update actions outside the current guild while allowing same-guild user targets", async () => {
     const otherGuild = createMemory(db, {
       guildId: "g2",
-      kind: "global_note",
+      kind: "note",
       content: "foreign guild",
     });
     const otherUser = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u2",
+      aboutUserId: "u2",
       kind: "fact",
       content: "other user fact",
     });
@@ -639,7 +639,7 @@ describe("extractAndApplyMemories", () => {
             {
             action: "create",
               id: otherGuild,
-              subject: "user",
+              about: "user", recall_in: "anywhere",
               username: "@alice",
               kind: "preference",
               content: "modified",
@@ -660,13 +660,13 @@ describe("extractAndApplyMemories", () => {
   test("changes memory subject and scope when explicitly updated", async () => {
     const userMemory = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "preference",
       content: "old user memory",
     });
     const globalMemory = createMemory(db, {
       guildId: "g1",
-      kind: "global_note",
+      kind: "note",
       content: "old global memory",
     });
 
@@ -688,16 +688,16 @@ describe("extractAndApplyMemories", () => {
             {
               action: "update",
               id: userMemory,
-              subject: "global",
+              about: "community", recall_in: "current_guild",
               kind: "preference",
               content: "updated user memory",
             },
             {
               action: "update",
               id: globalMemory,
-              subject: "user",
+              about: "user", recall_in: "anywhere",
               username: "@alice",
-              kind: "global_note",
+              kind: "note",
               content: "updated global memory",
             },
           ],
@@ -708,19 +708,19 @@ describe("extractAndApplyMemories", () => {
       }),
     });
 
-    expect(getMemory(db, userMemory)?.scope).toBe("guild");
-    expect(getMemory(db, userMemory)?.subjectUserId).toBeNull();
+    expect(getMemory(db, userMemory)?.about).toBe("community");
+    expect(getMemory(db, userMemory)?.aboutUserId).toBeNull();
     expect(getMemory(db, userMemory)?.content).toBe("updated user memory");
-    expect(getMemory(db, globalMemory)?.scope).toBe("user");
-    expect(getMemory(db, globalMemory)?.subjectUserId).toBe("u1");
+    expect(getMemory(db, globalMemory)?.about).toBe("user");
+    expect(getMemory(db, globalMemory)?.aboutUserId).toBe("u1");
     expect(getMemory(db, globalMemory)?.content).toBe("updated global memory");
   });
 });
 
 describe("createRecordMemoryTool", () => {
   test("applies a mixed action batch atomically", async () => {
-    const updated = createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Old" });
-    const deleted = createMemory(db, { guildId: "g1", kind: "global_note", content: "Delete me" });
+    const updated = createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "Old" });
+    const deleted = createMemory(db, { guildId: "g1", kind: "note", content: "Delete me" });
     const tool = createRecordMemoryTool({
       db,
       guildId: "g1",
@@ -730,16 +730,16 @@ describe("createRecordMemoryTool", () => {
     });
 
     const result = await tool.execute("call-1", { actions: [
-      { action: "update", id: updated, subject: "user", username: "alice", applies_to: "all", kind: "fact", content: "New" },
+      { action: "update", id: updated, about: "user", recall_in: "anywhere", username: "alice", recall_when: "always", kind: "fact", content: "New" },
       { action: "delete", id: deleted },
-      { action: "create", subject: "self", applies_to: "all", kind: "journal", content: "A new coherent self memory." },
+      { action: "create", about: "self", recall_in: "anywhere", recall_when: "always", kind: "journal", content: "A new coherent self memory." },
     ] });
 
     expect(result.details).toEqual({ applied: 3, requested: 3 });
     expect(getMemory(db, updated)?.content).toBe("New");
-    expect(getMemory(db, updated)?.appliesTo).toBe("all");
+    expect(getMemory(db, updated)?.recallWhen).toBe("always");
     expect(getMemory(db, deleted)).toBeNull();
-    expect(listMemories(db, { guildId: "g1", scope: "self" })).toHaveLength(1);
+    expect(listMemories(db, { guildId: "g1", about: "self" })).toHaveLength(1);
   });
 
   test("rejects the whole batch when any action is invalid", async () => {
@@ -753,12 +753,12 @@ describe("createRecordMemoryTool", () => {
     });
 
     const result = await tool.execute("call-1", { actions: [
-      { action: "create", subject: "user", username: "alice", applies_to: ["alice"], kind: "fact", content: "Would be valid alone." },
-      { action: "create", subject: "user", username: "missing", applies_to: ["missing"], kind: "fact", content: "Cannot resolve." },
+      { action: "create", about: "user", recall_in: "anywhere", username: "alice", recall_when: { users_present: ["alice"] }, kind: "fact", content: "Would be valid alone." },
+      { action: "create", about: "user", recall_in: "anywhere", username: "missing", recall_when: { users_present: ["missing"] }, kind: "fact", content: "Cannot resolve." },
     ] });
 
     expect(result.details).toEqual({ error: true });
-    expect(listMemories(db, { guildId: "g1", scope: "user" })).toHaveLength(0);
+    expect(listMemories(db, { guildId: "g1", about: "user" })).toHaveLength(0);
   });
 
   test("applies memory updates through a real tool", async () => {
@@ -774,9 +774,8 @@ describe("createRecordMemoryTool", () => {
     await tool.execute("call-1", {
       actions: [{
         action: "create",
-        subject: "user",
+        about: "user",
         username: "@alice",
-        applies_to: ["@alice"],
         kind: "preference",
         content: "Prefers concise answers.",
         important: true,
@@ -784,10 +783,12 @@ describe("createRecordMemoryTool", () => {
       }],
     });
 
-    const memories = listMemories(db, { guildId: "g1", subjectUserId: "u1" });
+    const memories = listMemories(db, { guildId: "g1", aboutUserId: "u1" });
     const after = Date.now();
     expect(memories).toHaveLength(1);
     expect(memories[0]?.content).toBe("Prefers concise answers.");
+    expect(memories[0]?.recallIn).toBe("anywhere");
+    expect(memories[0]?.recallWhen).toEqual(["u1"]);
     expect(memories[0]?.priority).toBe(1);
     expect(memories[0]?.expiresAt).toBeGreaterThanOrEqual(before + 90 * 60 * 1000);
     expect(memories[0]?.expiresAt).toBeLessThanOrEqual(after + 90 * 60 * 1000);
@@ -805,15 +806,15 @@ describe("createRecordMemoryTool", () => {
     await tool.execute("call-1", {
       actions: [{
         action: "create",
-        subject: "user",
+        about: "user", recall_in: "anywhere",
         username: "@alice",
-        applies_to: ["@alice"],
+        recall_when: { users_present: ["@alice"] },
         kind: "preference",
         content: "In guild 427489527263789058: 17 [user:209563208199962625] [preference] Prefers concise answers.",
       }],
     });
 
-    const memories = listMemories(db, { guildId: "g1", subjectUserId: "u1" });
+    const memories = listMemories(db, { guildId: "g1", aboutUserId: "u1" });
     expect(memories).toHaveLength(1);
     expect(memories[0]?.content).toBe("Prefers concise answers.");
   });
@@ -821,14 +822,14 @@ describe("createRecordMemoryTool", () => {
   test("clears and prolongs memory expiry through a real tool", async () => {
     const temporary = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "fact",
       content: "Temporary launch focus.",
       expiresAt: Date.now() + 60_000,
     });
     const prolonged = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "scratchpad",
       content: "Temporary dashboard focus.",
       expiresAt: Date.now() + 60_000,
@@ -847,9 +848,9 @@ describe("createRecordMemoryTool", () => {
         {
           action: "update",
           id: temporary,
-          subject: "user",
+          about: "user", recall_in: "anywhere",
           username: "@alice",
-          applies_to: ["@alice"],
+          recall_when: { users_present: ["@alice"] },
           kind: "fact",
           content: "Launch focus is now durable context.",
           expiresIn: null,
@@ -857,9 +858,9 @@ describe("createRecordMemoryTool", () => {
         {
           action: "update",
           id: prolonged,
-          subject: "user",
+          about: "user", recall_in: "anywhere",
           username: "@alice",
-          applies_to: ["@alice"],
+          recall_when: { users_present: ["@alice"] },
           kind: "scratchpad",
           content: "Temporary dashboard focus lasts through tonight.",
           expiresIn: { amount: 3, unit: "hours" },
@@ -878,7 +879,7 @@ describe("createRecordMemoryTool", () => {
     const expiresAt = Date.now() + 60_000;
     const scratchpad = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "scratchpad",
       content: "Check dashboard auth next.",
       expiresAt,
@@ -895,9 +896,9 @@ describe("createRecordMemoryTool", () => {
       actions: [{
         action: "update",
         id: scratchpad,
-        subject: "user",
+        about: "user", recall_in: "anywhere",
         username: "@alice",
-        applies_to: ["@alice"],
+        recall_when: { users_present: ["@alice"] },
         kind: "scratchpad",
         content: "Check dashboard auth headers next.",
       }],
@@ -920,26 +921,26 @@ describe("createRecordMemoryTool", () => {
       actions: [
         {
           action: "create",
-          subject: "user",
+          about: "user", recall_in: "anywhere",
           username: "@alice",
-          applies_to: ["@alice"],
+          recall_when: { users_present: ["@alice"] },
           kind: "scratchpad",
           content: "Missing expiry.",
         },
         {
           action: "create",
-          subject: "user",
+          about: "user", recall_in: "anywhere",
           username: "@alice",
-          applies_to: ["@alice"],
+          recall_when: { users_present: ["@alice"] },
           kind: "scratchpad",
           content: "Null expiry.",
           expiresIn: null,
         },
         {
           action: "create",
-          subject: "user",
+          about: "user", recall_in: "anywhere",
           username: "@alice",
-          applies_to: ["@alice"],
+          recall_when: { users_present: ["@alice"] },
           kind: "scratchpad",
           content: "Too long.",
           expiresIn: { amount: 2, unit: "days" },
@@ -947,7 +948,7 @@ describe("createRecordMemoryTool", () => {
       ],
     });
 
-    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" })).toHaveLength(0);
   });
 
   test("rejects explicit legacy project kind through a real tool", async () => {
@@ -962,15 +963,15 @@ describe("createRecordMemoryTool", () => {
     await tool.execute("call-1", {
       actions: [{
         action: "create",
-        subject: "user",
+        about: "user", recall_in: "anywhere",
         username: "@alice",
-        applies_to: ["@alice"],
+        recall_when: { users_present: ["@alice"] },
         kind: "project",
         content: "Legacy project kind should not be coerced.",
       }],
     });
 
-    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" })).toHaveLength(0);
   });
 
   test("rejects creates with non-positive expiresIn through a real tool", async () => {
@@ -985,16 +986,16 @@ describe("createRecordMemoryTool", () => {
     await tool.execute("call-1", {
       actions: [{
         action: "create",
-        subject: "user",
+        about: "user", recall_in: "anywhere",
         username: "@alice",
-        applies_to: ["@alice"],
+        recall_when: { users_present: ["@alice"] },
         kind: "fact",
         content: "This already expired.",
         expiresIn: { amount: 0, unit: "hours" },
       }],
     });
 
-    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" })).toHaveLength(0);
   });
 
   test("rejects creates with raw expiresAt through a real tool", async () => {
@@ -1009,16 +1010,16 @@ describe("createRecordMemoryTool", () => {
     await tool.execute("call-1", {
       actions: [{
         action: "create",
-        subject: "user",
+        about: "user", recall_in: "anywhere",
         username: "@alice",
-        applies_to: ["@alice"],
+        recall_when: { users_present: ["@alice"] },
         kind: "fact",
         content: "This attempts timestamp expiry.",
         expiresAt: Date.now() + 60_000,
       }],
     });
 
-    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" })).toHaveLength(0);
   });
 
   test("records memories for another user by username", async () => {
@@ -1034,16 +1035,16 @@ describe("createRecordMemoryTool", () => {
     await tool.execute("call-1", {
       actions: [{
         action: "create",
-        subject: "user",
+        about: "user", recall_in: "anywhere",
         username: "@bob",
-        applies_to: ["@bob"],
+        recall_when: { users_present: ["@bob"] },
         kind: "fact",
         content: "Bob is working on the dashboard.",
         confidence: 0.6,
       }],
     });
 
-    const memories = listMemories(db, { guildId: "g1", subjectUserId: "u2" });
+    const memories = listMemories(db, { guildId: "g1", aboutUserId: "u2" });
     expect(memories).toHaveLength(1);
     expect(memories[0]?.content).toBe("Bob is working on the dashboard.");
     expect(memories[0]?.confidence).toBe(0.6);
@@ -1061,23 +1062,23 @@ describe("createRecordMemoryTool", () => {
     await tool.execute("call-1", {
       actions: [{
         action: "create",
-        subject: "self",
-        applies_to: "all",
+        about: "self", recall_in: "anywhere",
+        recall_when: "always",
         kind: "journal",
         content: "Told the server she keeps cheap red wine for bad nights.",
         confidence: 0.85,
       }],
     });
 
-    const memories = listMemories(db, { guildId: "g1", scope: "self" });
+    const memories = listMemories(db, { guildId: "g1", about: "self" });
     expect(memories).toHaveLength(1);
-    expect(memories[0]?.scope).toBe("self");
-    expect(memories[0]?.subjectUserId).toBeNull();
-    expect(memories[0]?.guildId).toBeNull();
+    expect(memories[0]?.about).toBe("self");
+    expect(memories[0]?.aboutUserId).toBeNull();
+    expect(memories[0]?.recallIn).toBe("anywhere");
     expect(memories[0]?.content).toBe("Told the server she keeps cheap red wine for bad nights.");
   });
 
-  test("records exact multi-user applicability", async () => {
+  test("records exact multi-user recall triggers", async () => {
     const tool = createRecordMemoryTool({
       db,
       guildId: "g1",
@@ -1088,16 +1089,16 @@ describe("createRecordMemoryTool", () => {
     });
     await tool.execute("call-1", { actions: [{
       action: "create",
-      subject: "self",
-      applies_to: ["@bob", "charlie"],
+      about: "self", recall_in: "anywhere",
+      recall_when: { users_present: ["@bob", "charlie"] },
       kind: "journal",
       content: "Alice asked me to use reaction images when the named user starts baiting people.",
     }] });
 
-    const memories = listMemories(db, { guildId: "g1", scope: "self" });
+    const memories = listMemories(db, { guildId: "g1", about: "self" });
     expect(memories).toHaveLength(1);
-    expect(memories[0]?.subjectUserId).toBeNull();
-    expect(memories[0]?.appliesTo).toEqual(["u2", "u3"]);
+    expect(memories[0]?.aboutUserId).toBeNull();
+    expect(memories[0]?.recallWhen).toEqual(["u2", "u3"]);
   });
 
   test("rejects non-self journal memories", async () => {
@@ -1112,15 +1113,15 @@ describe("createRecordMemoryTool", () => {
     await tool.execute("call-1", {
       actions: [{
         action: "create",
-        subject: "user",
+        about: "user", recall_in: "anywhere",
         username: "@alice",
-        applies_to: ["@alice"],
+        recall_when: { users_present: ["@alice"] },
         kind: "journal",
         content: "This should not become a user journal.",
       }],
     });
 
-    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" })).toHaveLength(0);
-    expect(listMemories(db, { guildId: "g1", scope: "self" })).toHaveLength(0);
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" })).toHaveLength(0);
+    expect(listMemories(db, { guildId: "g1", about: "self" })).toHaveLength(0);
   });
 });

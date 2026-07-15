@@ -17,7 +17,7 @@ export interface MemoryListToolDeps {
 export type UserMemoryToolDeps = MemoryListToolDeps;
 
 type MemoryListToolResult = AgentToolResult<
-  | { target: "guild"; guildId: string; count: number; total: number }
+  | { target: "community"; guildId: string; count: number; total: number }
   | { target: "self"; count: number; total: number }
   | { target: "user"; userId: string; count: number; total: number }
   | { error: boolean }
@@ -26,7 +26,7 @@ type MemoryListToolResult = AgentToolResult<
 const MemoryListParams = Type.Object({
   target: Type.Optional(Type.Union([
     Type.Literal("user"),
-    Type.Literal("guild"),
+    Type.Literal("community"),
     Type.Literal("self"),
   ], {
     description: "Memory target.",
@@ -41,7 +41,7 @@ const MemoryListParams = Type.Object({
   })),
   guild_id: Type.Optional(Type.String({
     minLength: 1,
-    description: "Guild ID for target=guild or username resolution.",
+    description: "Guild ID for target=community or username resolution.",
   })),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Max memories to return." })),
 });
@@ -56,15 +56,12 @@ function formatConfidence(confidence: number): string {
 }
 
 function formatMemory(row: MemoryRow): string {
-  const scope = row.scope === "self"
-    ? "self"
-    : row.subjectUserId === null
-    ? "guild"
-    : `user:${row.subjectUserId}`;
-  const applies = row.appliesTo === "all"
-    ? " [applies:all]"
-    : ` [applies:${row.appliesTo.map((userId) => `user:${userId}`).join(",")}]`;
-  return `- ${row.id} [${scope}]${applies} [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""} ${row.content}`;
+  const about = row.about === "user" && row.aboutUserId !== null ? `user:${row.aboutUserId}` : row.about;
+  const recallIn = row.recallIn === "anywhere" ? "anywhere" : `guild:${row.recallIn.guildId}`;
+  const recallWhen = row.recallWhen === "always"
+    ? "always"
+    : `any(${row.recallWhen.map((userId) => `user:${userId}`).join(",")})`;
+  return `- ${row.id} [about:${about}] [in:${recallIn}] [when:${recallWhen}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""} ${row.content}`;
 }
 
 function formatUserMemory(row: MemoryRow): string {
@@ -77,7 +74,7 @@ function formatUserHeaderLabel(label: string, userId: string): string {
   return `${resolvedLabel} (user:${userId})`;
 }
 
-/** Create a read-only tool for retrieving guild or user memories. */
+/** Create a read-only tool for retrieving community, self, or user memories. */
 export function createMemoryListTool(deps: MemoryListToolDeps): AgentTool {
   const { db, currentGuildId, resolveUsername } = deps;
 
@@ -89,45 +86,45 @@ export function createMemoryListTool(deps: MemoryListToolDeps): AgentTool {
 
     async execute(_toolCallId: string, params: unknown): Promise<MemoryListToolResult> {
       const p = params as {
-        target?: "user" | "guild" | "self";
+        target?: "user" | "community" | "self";
         username?: string;
         user_id?: string;
         guild_id?: string;
         limit?: number;
       };
       const guildId = typeof p.guild_id === "string" && p.guild_id.trim() !== "" ? p.guild_id.trim() : currentGuildId;
-      const target = p.target ?? (p.username !== undefined || p.user_id !== undefined ? "user" : "guild");
+      const target = p.target ?? (p.username !== undefined || p.user_id !== undefined ? "user" : "community");
 
       const limit = typeof p.limit === "number" && Number.isFinite(p.limit)
         ? Math.max(1, Math.min(Math.floor(p.limit), 50))
         : 30;
 
-      if (target === "guild") {
+      if (target === "community") {
         if (guildId !== currentGuildId && deps.canAccessGuild !== undefined && !await deps.canAccessGuild(guildId)) {
           return {
             content: [{ type: "text", text: `Guild '${guildId}' not found or not accessible.` }],
             details: { error: true },
           };
         }
-        const total = countMemories(db, { guildId, subjectUserId: null });
-        const rows = listMemories(db, { guildId, subjectUserId: null, limit }).filter((row) => row.content.trim() !== "");
+        const total = countMemories(db, { guildId, about: "community" });
+        const rows = listMemories(db, { guildId, about: "community", limit }).filter((row) => row.content.trim() !== "");
         const guildName = deps.resolveGuildName?.(guildId);
         const label = guildName !== undefined && guildName !== "" ? `${guildName} (${guildId})` : guildId;
         if (rows.length === 0) {
           return {
-            content: [{ type: "text", text: `No guild memories found for ${label}.` }],
-            details: { target: "guild", guildId, count: 0, total },
+            content: [{ type: "text", text: `No community memories found for ${label}.` }],
+            details: { target: "community", guildId, count: 0, total },
           };
         }
         return {
-          content: [{ type: "text", text: `Guild memories for ${label} (${rows.length}/${total} shown):\n${rows.map(formatMemory).join("\n")}` }],
-          details: { target: "guild", guildId, count: rows.length, total },
+          content: [{ type: "text", text: `Community memories for ${label} (${rows.length}/${total} shown):\n${rows.map(formatMemory).join("\n")}` }],
+          details: { target: "community", guildId, count: rows.length, total },
         };
       }
 
       if (target === "self") {
-        const total = countMemories(db, { guildId, scope: "self" });
-        const rows = listMemories(db, { guildId, scope: "self", limit }).filter((row) => row.content.trim() !== "");
+        const total = countMemories(db, { guildId, about: "self" });
+        const rows = listMemories(db, { guildId, about: "self", limit }).filter((row) => row.content.trim() !== "");
         if (rows.length === 0) {
           return {
             content: [{ type: "text", text: "No self memories found." }],
@@ -169,18 +166,18 @@ export function createMemoryListTool(deps: MemoryListToolDeps): AgentTool {
         };
       }
 
-      const total = countMemories(db, { guildId, subjectUserId: userId });
-      const rows = listMemories(db, { guildId, subjectUserId: userId, limit }).filter((row) => row.content.trim() !== "");
+      const total = countMemories(db, { guildId, aboutUserId: userId });
+      const rows = listMemories(db, { guildId, aboutUserId: userId, limit }).filter((row) => row.content.trim() !== "");
       const headerLabel = formatUserHeaderLabel(label, userId);
       if (rows.length === 0) {
         return {
-          content: [{ type: "text", text: `No portable user memories found for ${headerLabel}; current-guild memories are separate, so use target=guild for shared server facts.` }],
+          content: [{ type: "text", text: `No user memories available here for ${headerLabel}.` }],
           details: { target, userId, count: 0, total },
         };
       }
 
       return {
-        content: [{ type: "text", text: `Portable user memories for ${headerLabel} (${rows.length}/${total} shown):\n${rows.map(formatUserMemory).join("\n")}` }],
+        content: [{ type: "text", text: `User memories for ${headerLabel} (${rows.length}/${total} shown):\n${rows.map(formatUserMemory).join("\n")}` }],
         details: { target, userId, count: rows.length, total },
       };
     },

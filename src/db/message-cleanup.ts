@@ -56,7 +56,7 @@ export function cleanupGuildData(input: {
   guildId: string;
 }): GuildWipeResult {
   const memoriesDeleted = (input.db.raw
-    .prepare("DELETE FROM memories WHERE guild_id = ?")
+    .prepare("DELETE FROM memories WHERE recall_scope = 'guild' AND recall_guild_id = ?")
     .run(input.guildId) as { changes: number }).changes;
   input.db.raw.prepare("DELETE FROM agent_jobs WHERE guild_id = ? OR delivery_guild_id = ?")
     .run(input.guildId, input.guildId);

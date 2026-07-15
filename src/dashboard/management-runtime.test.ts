@@ -47,8 +47,9 @@ describe("dashboard management runtime", () => {
   test("resolves uncached memory users through Discord", async () => {
     const runtime = managementRuntime((userId) => Promise.resolve(userId === "u9" ? { username: "remote-user" } : null));
     runtime.createMemory({
-      scope: "self",
-      appliesTo: ["u9"],
+      about: "self",
+      recallIn: "anywhere",
+      recallWhen: ["u9"],
       kind: "fact",
       content: "remote user memory",
       confidence: 0.7,
@@ -81,10 +82,10 @@ describe("dashboard management runtime", () => {
     insertMessage("m3", "u3", "carol");
     const runtime = managementRuntime();
     const created = runtime.createMemory({
-      scope: "guild",
-      guildId: "g1",
-      appliesTo: "all",
-      kind: "global_note",
+      about: "community",
+      recallIn: { guildId: "g1" },
+      recallWhen: "always",
+      kind: "note",
       content: "initial",
       confidence: 0.7,
       priority: 0,
@@ -92,10 +93,10 @@ describe("dashboard management runtime", () => {
 
     const edited = runtime.editMemory({
       memoryId: created.id,
-      scope: "user",
-      guildId: null,
-      subjectUserId: "u1",
-      appliesTo: ["u2", "u3"],
+      about: "user",
+      recallIn: "anywhere",
+      aboutUserId: "u1",
+      recallWhen: ["u2", "u3"],
       kind: "preference",
       content: "updated",
       sourceMessageId: "m1",
@@ -106,12 +107,12 @@ describe("dashboard management runtime", () => {
     }).memory;
 
     expect(edited).toMatchObject({
-      scope: "user",
-      guildId: null,
-      subjectUserId: "u1",
-      subjectUsername: "alice",
-      appliesTo: ["u2", "u3"],
-      appliesToUsernames: ["bob", "carol"],
+      about: "user",
+      recallIn: "anywhere",
+      aboutUserId: "u1",
+      aboutUsername: "alice",
+      recallWhen: ["u2", "u3"],
+      recallWhenUsernames: ["bob", "carol"],
       kind: "preference",
       content: "updated",
       sourceMessageId: "m1",
@@ -126,8 +127,9 @@ describe("dashboard management runtime", () => {
   test("restores soft-deleted memories", () => {
     const runtime = managementRuntime();
     const memoryId = runtime.createMemory({
-      scope: "self",
-      appliesTo: "all",
+      about: "self",
+      recallIn: "anywhere",
+      recallWhen: "always",
       kind: "identity",
       content: "recoverable",
       confidence: 0.8,

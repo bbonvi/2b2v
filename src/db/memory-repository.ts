@@ -3,15 +3,16 @@ import { sanitizeMemoryContent } from "./memory-content";
 import type { MemoryKind } from "./memory-kinds";
 export { MEMORY_KINDS, isMemoryKind, type MemoryKind } from "./memory-kinds";
 
-export type MemoryScope = "guild" | "user" | "self";
-export type MemoryApplicability = "all" | readonly string[];
+export type MemoryAbout = "community" | "user" | "self";
+export type MemoryRecallIn = "anywhere" | { guildId: string };
+export type MemoryRecallWhen = "always" | readonly string[];
 
 export interface MemoryRow {
   id: number;
-  scope: MemoryScope;
-  guildId: string | null;
-  subjectUserId: string | null;
-  appliesTo: "all" | string[];
+  about: MemoryAbout;
+  aboutUserId: string | null;
+  recallIn: "anywhere" | { guildId: string };
+  recallWhen: "always" | string[];
   kind: MemoryKind;
   content: string;
   sourceMessageId: string | null;
@@ -26,9 +27,10 @@ export interface MemoryRow {
 
 export interface CreateMemoryInput {
   guildId: string;
-  scope?: MemoryScope;
-  subjectUserId?: string | null;
-  appliesTo?: MemoryApplicability;
+  about?: MemoryAbout;
+  aboutUserId?: string | null;
+  recallIn?: MemoryRecallIn;
+  recallWhen?: MemoryRecallWhen;
   kind: MemoryKind;
   content: string;
   sourceMessageId?: string | null;
@@ -39,10 +41,10 @@ export interface CreateMemoryInput {
 }
 
 export interface UpdateMemoryInput {
-  scope?: MemoryScope;
-  guildId?: string | null;
-  subjectUserId?: string | null;
-  appliesTo?: MemoryApplicability;
+  about?: MemoryAbout;
+  aboutUserId?: string | null;
+  recallIn?: MemoryRecallIn;
+  recallWhen?: MemoryRecallWhen;
   kind?: MemoryKind;
   content?: string;
   sourceMessageId?: string | null;
@@ -55,14 +57,14 @@ export interface UpdateMemoryInput {
 
 export interface ListMemoriesFilter {
   guildId: string;
-  scope?: MemoryScope;
-  subjectUserId?: string | null;
-  includeGlobal?: boolean;
+  about?: MemoryAbout;
+  aboutUserId?: string | null;
+  includeCommunity?: boolean;
   includeSelf?: boolean;
   includeDeleted?: boolean;
-  /** Keep rows applicable to everyone plus rows applicable to at least one of these users. */
-  applicableToUserIds?: readonly string[];
-  excludeSubjectUserIds?: readonly string[];
+  /** Keep always-recalled rows plus rows triggered by at least one visible user. */
+  relevantUserIds?: readonly string[];
+  excludeAboutUserIds?: readonly string[];
   limit?: number;
 }
 
@@ -88,29 +90,29 @@ function normalizeUserIds(userIds: readonly string[] | undefined): string[] {
   return [...new Set(userIds.map((userId) => userId.trim()).filter((userId) => userId !== ""))];
 }
 
-function effectiveApplicability(
-  scope: MemoryScope,
-  subjectUserId: string | null,
-  appliesTo: MemoryApplicability | undefined,
-): "all" | string[] {
-  if (appliesTo === "all") return "all";
-  if (appliesTo !== undefined) {
-    const normalized = normalizeUserIds(appliesTo);
-    if (normalized.length === 0) throw new Error("User-targeted applicability requires at least one user ID.");
+function effectiveRecallWhen(
+  about: MemoryAbout,
+  aboutUserId: string | null,
+  recallWhen: MemoryRecallWhen | undefined,
+): "always" | string[] {
+  if (recallWhen === "always") return "always";
+  if (recallWhen !== undefined) {
+    const normalized = normalizeUserIds(recallWhen);
+    if (normalized.length === 0) throw new Error("User-triggered recall requires at least one user ID.");
     return normalized;
   }
-  return scope === "user" && subjectUserId !== null ? [subjectUserId] : "all";
+  return about === "user" && aboutUserId !== null ? [aboutUserId] : "always";
 }
 
-function replaceMemoryApplicability(db: Database, memoryId: number, appliesTo: "all" | readonly string[]): void {
-  db.raw.prepare("DELETE FROM memory_applicability WHERE memory_id = ?").run(memoryId);
-  if (appliesTo === "all") return;
-  const insert = db.raw.prepare("INSERT INTO memory_applicability (memory_id, user_id) VALUES (?, ?)");
-  for (const userId of appliesTo) insert.run(memoryId, userId);
+function replaceMemoryRecallUsers(db: Database, memoryId: number, recallWhen: "always" | readonly string[]): void {
+  db.raw.prepare("DELETE FROM memory_recall_users WHERE memory_id = ?").run(memoryId);
+  if (recallWhen === "always") return;
+  const insert = db.raw.prepare("INSERT INTO memory_recall_users (memory_id, user_id) VALUES (?, ?)");
+  for (const userId of recallWhen) insert.run(memoryId, userId);
 }
 
-/** Return applicability user IDs keyed by memory ID. */
-export function listMemoryApplicability(
+/** Return recall-trigger user IDs keyed by memory ID. */
+export function listMemoryRecallUsers(
   db: Database,
   memoryIds: readonly number[],
 ): Map<number, string[]> {
@@ -123,63 +125,40 @@ export function listMemoryApplicability(
     if (chunk.length === 0) continue;
     const placeholders = chunk.map(() => "?").join(",");
     const rows = db.raw
-      .prepare(`SELECT memory_id, user_id FROM memory_applicability WHERE memory_id IN (${placeholders}) ORDER BY memory_id, user_id`)
+      .prepare(`SELECT memory_id, user_id FROM memory_recall_users WHERE memory_id IN (${placeholders}) ORDER BY memory_id, user_id`)
       .all(...chunk) as Array<{ memory_id: number; user_id: string }>;
     for (const row of rows) result.get(row.memory_id)?.push(row.user_id);
   }
   return result;
 }
 
-function scopeForSubject(subjectUserId: string | null | undefined): MemoryScope {
-  return subjectUserId !== undefined && subjectUserId !== null ? "user" : "guild";
-}
-
-function createScopeFields(input: CreateMemoryInput): {
-  scope: MemoryScope;
-  guildId: string | null;
-  subjectUserId: string | null;
+function resolvedAboutFields(input: Pick<CreateMemoryInput, "about" | "aboutUserId">): {
+  about: MemoryAbout;
+  aboutUserId: string | null;
 } {
-  const scope = input.scope ?? scopeForSubject(input.subjectUserId);
-  if (scope === "self") {
-    return { scope, guildId: null, subjectUserId: null };
-  }
-  if (scope === "user") {
-    if (input.subjectUserId === undefined || input.subjectUserId === null || input.subjectUserId === "") {
-      throw new Error("User-scoped memories require subjectUserId.");
+  const about = input.about ?? (input.aboutUserId !== undefined && input.aboutUserId !== null ? "user" : "community");
+  if (about === "user") {
+    if (input.aboutUserId === undefined || input.aboutUserId === null || input.aboutUserId.trim() === "") {
+      throw new Error("User memories require aboutUserId.");
     }
-    return { scope, guildId: null, subjectUserId: input.subjectUserId };
+    return { about, aboutUserId: input.aboutUserId.trim() };
   }
-  return { scope, guildId: input.guildId, subjectUserId: null };
+  return { about, aboutUserId: null };
 }
 
-function assertKindScope(kind: MemoryKind, scope: MemoryScope): void {
-  if (kind === "journal" && scope !== "self") {
-    throw new Error("Journal memories must use self scope.");
+function resolvedRecallIn(about: MemoryAbout, guildId: string, recallIn: MemoryRecallIn | undefined): MemoryRecallIn {
+  const resolved = recallIn ?? (about === "community" ? { guildId } : "anywhere");
+  if (resolved !== "anywhere" && resolved.guildId.trim() === "") throw new Error("Guild recall requires a guild ID.");
+  if (about === "community" && resolved === "anywhere") {
+    throw new Error("Community memories must be recalled in one guild.");
   }
+  return resolved === "anywhere" ? resolved : { guildId: resolved.guildId.trim() };
 }
 
-function updateScopeFields(input: UpdateMemoryInput): {
-  scope: MemoryScope;
-  guildId: string | null;
-  subjectUserId: string | null;
-} {
-  const scope = input.scope;
-  if (scope === undefined) {
-    throw new Error("scope is required.");
+function assertKindAbout(kind: MemoryKind, about: MemoryAbout): void {
+  if (kind === "journal" && about !== "self") {
+    throw new Error("Journal memories must be about self.");
   }
-  if (scope === "self") {
-    return { scope, guildId: null, subjectUserId: null };
-  }
-  if (scope === "user") {
-    if (input.subjectUserId === undefined || input.subjectUserId === null || input.subjectUserId === "") {
-      throw new Error("User-scoped memories require subjectUserId.");
-    }
-    return { scope, guildId: null, subjectUserId: input.subjectUserId };
-  }
-  if (input.guildId === undefined || input.guildId === null || input.guildId === "") {
-    throw new Error("Guild-scoped memories require guildId.");
-  }
-  return { scope, guildId: input.guildId, subjectUserId: null };
 }
 
 function memoryFilterConditions(filter: CountMemoriesFilter): {
@@ -189,70 +168,54 @@ function memoryFilterConditions(filter: CountMemoriesFilter): {
   const conditions: string[] = [];
   const params: (string | number | null)[] = [];
 
-  if (filter.scope === "self") {
-    conditions.push("scope = 'self'");
-  } else if (filter.scope === "guild") {
-    conditions.push("scope = 'guild'");
-    conditions.push("guild_id = ?");
-    params.push(filter.guildId);
-  } else if (filter.scope === "user") {
-    if (filter.subjectUserId === undefined || filter.subjectUserId === null) {
-      conditions.push("scope = 'user'");
-      conditions.push("subject_user_id IS NOT NULL");
-      conditions.push("guild_id IS NULL");
-    } else {
-      conditions.push("scope = 'user'");
-      conditions.push("subject_user_id = ?");
-      params.push(filter.subjectUserId);
+  conditions.push("(recall_scope = 'anywhere' OR recall_guild_id = ?)");
+  params.push(filter.guildId);
+
+  if (filter.about === "self") {
+    conditions.push("about_type = 'self'");
+  } else if (filter.about === "community") {
+    conditions.push("about_type = 'community'");
+  } else if (filter.about === "user") {
+    conditions.push("about_type = 'user'");
+    if (filter.aboutUserId !== undefined && filter.aboutUserId !== null) {
+      conditions.push("about_user_id = ?");
+      params.push(filter.aboutUserId);
     }
-  } else if (filter.subjectUserId !== undefined) {
-    if (filter.includeGlobal === true) {
-      const clauses = [
-        "(scope = 'user' AND subject_user_id = ? AND guild_id IS NULL)",
-        "(scope = 'guild' AND subject_user_id IS NULL AND guild_id = ?)",
-      ];
-      params.push(filter.subjectUserId);
-      params.push(filter.guildId);
-      if (filter.includeSelf === true) {
-        clauses.push("(scope = 'self' AND subject_user_id IS NULL AND guild_id IS NULL)");
-      }
+  } else if (filter.aboutUserId !== undefined) {
+    if (filter.includeCommunity === true) {
+      const clauses = ["(about_type = 'user' AND about_user_id = ?)", "about_type = 'community'"];
+      params.push(filter.aboutUserId);
+      if (filter.includeSelf === true) clauses.push("about_type = 'self'");
       conditions.push(`(${clauses.join(" OR ")})`);
-    } else if (filter.subjectUserId === null) {
-      conditions.push("scope = 'guild'");
-      conditions.push("subject_user_id IS NULL");
-      conditions.push("guild_id = ?");
-      params.push(filter.guildId);
+    } else if (filter.aboutUserId === null) {
+      conditions.push("about_type = 'community'");
     } else {
-      conditions.push("scope = 'user'");
-      conditions.push("subject_user_id = ?");
-      conditions.push("guild_id IS NULL");
-      params.push(filter.subjectUserId);
+      conditions.push("about_type = 'user'");
+      conditions.push("about_user_id = ?");
+      params.push(filter.aboutUserId);
     }
   } else {
-    conditions.push("scope = 'guild'");
-    conditions.push("subject_user_id IS NULL");
-    conditions.push("guild_id = ?");
-    params.push(filter.guildId);
+    conditions.push("about_type = 'community'");
   }
 
-  if (filter.excludeSubjectUserIds !== undefined) {
-    const excluded = normalizeUserIds(filter.excludeSubjectUserIds);
+  if (filter.excludeAboutUserIds !== undefined) {
+    const excluded = normalizeUserIds(filter.excludeAboutUserIds);
     if (excluded.length > 0) {
-      conditions.push(`(subject_user_id IS NULL OR subject_user_id NOT IN (${excluded.map(() => "?").join(",")}))`);
+      conditions.push(`(about_user_id IS NULL OR about_user_id NOT IN (${excluded.map(() => "?").join(",")}))`);
       params.push(...excluded);
     }
   }
 
-  if (filter.applicableToUserIds !== undefined) {
-    const userIds = normalizeUserIds(filter.applicableToUserIds);
-    const applicableClause = userIds.length === 0
+  if (filter.relevantUserIds !== undefined) {
+    const userIds = normalizeUserIds(filter.relevantUserIds);
+    const triggeredClause = userIds.length === 0
       ? ""
       : ` OR EXISTS (
-          SELECT 1 FROM memory_applicability applicable
-          WHERE applicable.memory_id = memories.id
-            AND applicable.user_id IN (${userIds.map(() => "?").join(",")})
+          SELECT 1 FROM memory_recall_users recall_user
+          WHERE recall_user.memory_id = memories.id
+            AND recall_user.user_id IN (${userIds.map(() => "?").join(",")})
         )`;
-    conditions.push(`(applicability_mode = 'all'${applicableClause})`);
+    conditions.push(`(recall_mode = 'always'${triggeredClause})`);
     params.push(...userIds);
   }
 
@@ -268,40 +231,38 @@ function memoryFilterConditions(filter: CountMemoriesFilter): {
 /** Create a structured memory row and return its generated ID. */
 export function createMemory(db: Database, input: CreateMemoryInput): number {
   const now = Date.now();
-  const { scope, guildId, subjectUserId } = createScopeFields(input);
-  const appliesTo = effectiveApplicability(scope, subjectUserId, input.appliesTo);
-  assertKindScope(input.kind, scope);
+  const { about, aboutUserId } = resolvedAboutFields(input);
+  const recallIn = resolvedRecallIn(about, input.guildId, input.recallIn);
+  const recallWhen = effectiveRecallWhen(about, aboutUserId, input.recallWhen);
+  assertKindAbout(input.kind, about);
   const content = sanitizeMemoryContent(input.content);
   if (content === "") {
     throw new Error("Memory content cannot be empty.");
   }
   const result = db.raw
     .prepare(
-      `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, priority, applicability_mode, created_at, updated_at, expires_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+      `INSERT INTO memories (about_type, about_user_id, recall_scope, recall_guild_id, recall_mode, kind, content, source_message_id, provenance_json, confidence, priority, created_at, updated_at, expires_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
     )
     .run(
-      scope,
-      guildId,
-      subjectUserId,
+      about,
+      aboutUserId,
+      recallIn === "anywhere" ? "anywhere" : "guild",
+      recallIn === "anywhere" ? null : recallIn.guildId,
+      recallWhen === "always" ? "always" : "users",
       input.kind,
       content,
       input.sourceMessageId ?? null,
       input.provenance !== undefined && input.provenance !== null ? JSON.stringify(input.provenance) : null,
       clampConfidence(input.confidence),
       clampPriority(input.priority),
-      appliesTo === "all" ? "all" : "users",
       now,
       now,
       input.expiresAt ?? null,
     );
 
   const id = Number(result.lastInsertRowid);
-  replaceMemoryApplicability(
-    db,
-    id,
-    appliesTo,
-  );
+  replaceMemoryRecallUsers(db, id, recallWhen);
   return id;
 }
 
@@ -310,27 +271,45 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
   const sets: string[] = [];
   const params: (string | number | null)[] = [];
   const existing = db.raw
-    .prepare("SELECT scope, subject_user_id, kind FROM memories WHERE id = ?")
-    .get(id) as { scope: MemoryScope; subject_user_id: string | null; kind: MemoryKind } | null;
+    .prepare("SELECT about_type, about_user_id, recall_scope, recall_guild_id, recall_mode, kind FROM memories WHERE id = ?")
+    .get(id) as {
+      about_type: MemoryAbout;
+      about_user_id: string | null;
+      recall_scope: "anywhere" | "guild";
+      recall_guild_id: string | null;
+      recall_mode: "always" | "users";
+      kind: MemoryKind;
+  } | null;
   if (existing === null) return false;
-  if (input.scope === undefined && ("guildId" in input || "subjectUserId" in input)) {
-    throw new Error("Changing memory scope fields requires scope.");
+  if (input.about === undefined && "aboutUserId" in input && existing.about_type !== "user") {
+    throw new Error("Changing the about-user requires about=user.");
   }
-  const effectiveScope = input.scope ?? existing.scope;
+  const effectiveAbout = input.about ?? existing.about_type;
+  const aboutFields = input.about !== undefined || "aboutUserId" in input
+    ? resolvedAboutFields({ about: effectiveAbout, aboutUserId: input.aboutUserId ?? existing.about_user_id })
+    : { about: existing.about_type, aboutUserId: existing.about_user_id };
   const effectiveKind = input.kind ?? existing.kind;
-  const scopeFields = input.scope !== undefined ? updateScopeFields(input) : null;
-  const resolvedApplicability = input.appliesTo !== undefined
-    ? effectiveApplicability(effectiveScope, scopeFields?.subjectUserId ?? existing.subject_user_id, input.appliesTo)
+  const currentRecallIn: MemoryRecallIn = existing.recall_scope === "anywhere"
+    ? "anywhere"
+    : { guildId: existing.recall_guild_id ?? "" };
+  const recallIn = input.recallIn !== undefined
+    ? resolvedRecallIn(aboutFields.about, existing.recall_guild_id ?? "", input.recallIn)
+    : currentRecallIn;
+  if (aboutFields.about === "community" && recallIn === "anywhere") {
+    throw new Error("Community memories must be recalled in one guild.");
+  }
+  const resolvedRecallWhen = input.recallWhen !== undefined
+    ? effectiveRecallWhen(aboutFields.about, aboutFields.aboutUserId, input.recallWhen)
     : undefined;
-  assertKindScope(effectiveKind, effectiveScope);
+  assertKindAbout(effectiveKind, aboutFields.about);
 
-  if (scopeFields !== null) {
-    sets.push("scope = ?");
-    params.push(scopeFields.scope);
-    sets.push("guild_id = ?");
-    params.push(scopeFields.guildId);
-    sets.push("subject_user_id = ?");
-    params.push(scopeFields.subjectUserId);
+  if (input.about !== undefined || "aboutUserId" in input) {
+    sets.push("about_type = ?", "about_user_id = ?");
+    params.push(aboutFields.about, aboutFields.aboutUserId);
+  }
+  if (input.recallIn !== undefined) {
+    sets.push("recall_scope = ?", "recall_guild_id = ?");
+    params.push(recallIn === "anywhere" ? "anywhere" : "guild", recallIn === "anywhere" ? null : recallIn.guildId);
   }
   if (input.kind !== undefined) {
     sets.push("kind = ?");
@@ -358,9 +337,9 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
     sets.push("priority = ?");
     params.push(clampPriority(input.priority));
   }
-  if (input.appliesTo !== undefined) {
-    sets.push("applicability_mode = ?");
-    params.push(resolvedApplicability === "all" ? "all" : "users");
+  if (input.recallWhen !== undefined) {
+    sets.push("recall_mode = ?");
+    params.push(resolvedRecallWhen === "always" ? "always" : "users");
   }
   if ("expiresAt" in input) {
     sets.push("expires_at = ?");
@@ -376,8 +355,8 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
   params.push(id);
 
   const result = db.raw.prepare(`UPDATE memories SET ${sets.join(", ")} WHERE id = ?`).run(...params);
-  if (result.changes > 0 && resolvedApplicability !== undefined) {
-    replaceMemoryApplicability(db, id, resolvedApplicability);
+  if (result.changes > 0 && resolvedRecallWhen !== undefined) {
+    replaceMemoryRecallUsers(db, id, resolvedRecallWhen);
   }
   return result.changes > 0;
 }
@@ -401,10 +380,10 @@ export function getMemory(db: Database, id: number): MemoryRow | null {
     .prepare("SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)")
     .get(id, Date.now()) as Record<string, unknown> | null;
   if (row === null) return null;
-  return mapRow(row, listMemoryApplicability(db, [id]).get(id) ?? []);
+  return mapRow(row, listMemoryRecallUsers(db, [id]).get(id) ?? []);
 }
 
-/** List active memories by scope, optionally combining current guild and portable user rows for prompt context. */
+/** List active memories by subject, recall location, and optional user-presence trigger. */
 export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRow[] {
   const { conditions, params } = memoryFilterConditions(filter);
 
@@ -415,11 +394,11 @@ export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRo
   }
 
   const rows = db.raw.prepare(sql).all(...params) as Record<string, unknown>[];
-  const applicability = listMemoryApplicability(db, rows.map((row) => Number(row.id)));
-  return rows.map((row) => mapRow(row, applicability.get(Number(row.id)) ?? []));
+  const recallUsers = listMemoryRecallUsers(db, rows.map((row) => Number(row.id)));
+  return rows.map((row) => mapRow(row, recallUsers.get(Number(row.id)) ?? []));
 }
 
-/** Count memories matching the same active/deleted/scope filters as listMemories. */
+/** Count memories matching the same filters as listMemories. */
 export function countMemories(db: Database, filter: CountMemoriesFilter): number {
   const { conditions, params } = memoryFilterConditions(filter);
   const row = db.raw
@@ -428,19 +407,21 @@ export function countMemories(db: Database, filter: CountMemoriesFilter): number
   return row.count;
 }
 
-/** Count active portable user memories per userId. The guild argument is kept for caller shape. */
-export function countUserMemoriesByUser(db: Database, _guildId: string): Map<string, number> {
+/** Count active user memories available from the current guild, grouped by subject. */
+export function countUserMemoriesByUser(db: Database, guildId: string): Map<string, number> {
   const rows = db.raw
     .prepare(
-      `SELECT subject_user_id, COUNT(*) as count FROM memories
-       WHERE scope = 'user' AND guild_id IS NULL AND subject_user_id IS NOT NULL AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
-       GROUP BY subject_user_id`
+      `SELECT about_user_id, COUNT(*) as count FROM memories
+       WHERE about_type = 'user' AND about_user_id IS NOT NULL
+         AND (recall_scope = 'anywhere' OR recall_guild_id = ?)
+         AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
+       GROUP BY about_user_id`
     )
-    .all(Date.now()) as Array<{ subject_user_id: string; count: number }>;
+    .all(guildId, Date.now()) as Array<{ about_user_id: string; count: number }>;
 
   const result = new Map<string, number>();
   for (const row of rows) {
-    result.set(row.subject_user_id, row.count);
+    result.set(row.about_user_id, row.count);
   }
   return result;
 }
@@ -457,7 +438,7 @@ export function listMemoryMaintenanceBatch(
        WHERE id > ?
          AND deleted_at IS NULL
          AND (expires_at IS NULL OR expires_at > ?)
-         AND (scope IN ('user', 'self') OR (scope = 'guild' AND guild_id = ?))
+         AND (recall_scope = 'anywhere' OR recall_guild_id = ?)
        ORDER BY id ASC
        LIMIT ?`,
     )
@@ -465,15 +446,15 @@ export function listMemoryMaintenanceBatch(
 
   let rows = select(Math.max(0, Math.trunc(input.afterId)));
   if (rows.length === 0 && input.afterId > 0) rows = select(0);
-  const applicability = listMemoryApplicability(db, rows.map((row) => Number(row.id)));
-  const mapped = rows.map((row) => mapRow(row, applicability.get(Number(row.id)) ?? []));
+  const recallUsers = listMemoryRecallUsers(db, rows.map((row) => Number(row.id)));
+  const mapped = rows.map((row) => mapRow(row, recallUsers.get(Number(row.id)) ?? []));
   return {
     rows: mapped,
     nextCursorId: mapped.at(-1)?.id ?? Math.max(0, Math.trunc(input.afterId)),
   };
 }
 
-function mapRow(row: Record<string, unknown>, appliesToUserIds: string[]): MemoryRow {
+function mapRow(row: Record<string, unknown>, recallUserIds: string[]): MemoryRow {
   const provenanceRaw = row.provenance_json;
   let provenance: Record<string, unknown> | null = null;
   if (typeof provenanceRaw === "string" && provenanceRaw.trim() !== "") {
@@ -484,10 +465,10 @@ function mapRow(row: Record<string, unknown>, appliesToUserIds: string[]): Memor
   }
   return {
     id: Number(row.id),
-    scope: row.scope as MemoryScope,
-    guildId: row.guild_id as string | null,
-    subjectUserId: row.subject_user_id as string | null,
-    appliesTo: row.applicability_mode === "all" ? "all" : appliesToUserIds,
+    about: row.about_type as MemoryAbout,
+    aboutUserId: row.about_user_id as string | null,
+    recallIn: row.recall_scope === "anywhere" ? "anywhere" : { guildId: row.recall_guild_id as string },
+    recallWhen: row.recall_mode === "always" ? "always" : recallUserIds,
     kind: row.kind as MemoryKind,
     content: sanitizeMemoryContent(row.content as string),
     sourceMessageId: row.source_message_id as string | null,

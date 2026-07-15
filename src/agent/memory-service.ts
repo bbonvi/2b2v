@@ -12,9 +12,9 @@ import {
   listMemories,
   MEMORY_KINDS,
   updateMemory,
+  type MemoryAbout,
   type MemoryKind,
   type MemoryRow,
-  type MemoryScope,
 } from "../db/memory-repository";
 import { completeLlmChat } from "../llm/chat";
 import type { OpenRouterChatRequest } from "../llm/types";
@@ -112,13 +112,14 @@ interface MemoryMutationInput {
   resolveUsername?: (username: string) => Promise<string | undefined>;
 }
 
-type MemorySubject = "global" | "user" | "self";
+type MemoryRecallInInput = "anywhere" | "current_guild";
+type MemoryRecallWhenInput = "always" | { users_present: string[] };
 type ExpiresInUnit = "minutes" | "hours" | "days" | "weeks" | "months";
 const MAX_SCRATCHPAD_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_RECENT_USER_MAX_USERS = 3;
 const DEFAULT_RECENT_USER_MAX_MEMORIES = 2;
 const DEFAULT_RECENT_USER_MAX_ROWS = 6;
-const DEFAULT_CROSS_SUBJECT_APPLICABLE_ROWS = 10;
+const DEFAULT_CROSS_SUBJECT_RELEVANT_ROWS = 10;
 
 interface ExpiresIn {
   amount: number;
@@ -139,20 +140,21 @@ const ExpiresInSchema = Type.Object({
   ]),
 }, { additionalProperties: false });
 
-const MemoryAppliesToSchema = Type.Union([
-  Type.Literal("all", { description: "Relevant regardless of which users are present." }),
-  Type.Array(Type.String({ minLength: 1 }), {
-    minItems: 1,
-    description: "Exact usernames whose presence makes this memory relevant.",
-  }),
+const MemoryRecallWhenSchema = Type.Union([
+  Type.Literal("always", { description: "Relevant regardless of which users are present." }),
+  Type.Object({
+    users_present: Type.Array(Type.String({ minLength: 1 }), {
+      minItems: 1,
+      description: "Users whose presence makes this memory relevant; any match is sufficient.",
+    }),
+  }, { additionalProperties: false }),
 ]);
 
 const MemoryWriteProperties = {
-  subject: Type.Union([Type.Literal("global"), Type.Literal("user"), Type.Literal("self")], {
-    description: "What or whom the memory is about; independent from applies_to.",
+  about: Type.Union([Type.Literal("community"), Type.Literal("user"), Type.Literal("self")], {
+    description: "What or whom the memory describes; independent from recall conditions.",
   }),
-  username: Type.Optional(Type.String({ minLength: 1, description: "Username for subject=user." })),
-  applies_to: MemoryAppliesToSchema,
+  username: Type.Optional(Type.String({ minLength: 1, description: "Username for about=user." })),
   kind: Type.String({ enum: [...MEMORY_KINDS] }),
   content: Type.String({ minLength: 1 }),
   confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
@@ -166,11 +168,15 @@ const MemoryWriteActionSchema = Type.Union([
   Type.Object({
     action: Type.Literal("create"),
     ...MemoryWriteProperties,
+    recall_in: Type.Optional(Type.Union([Type.Literal("anywhere"), Type.Literal("current_guild")])),
+    recall_when: Type.Optional(MemoryRecallWhenSchema),
   }, { additionalProperties: false }),
   Type.Object({
     action: Type.Literal("update"),
     id: Type.Integer({ minimum: 1 }),
     ...MemoryWriteProperties,
+    recall_in: Type.Union([Type.Literal("anywhere"), Type.Literal("current_guild")]),
+    recall_when: MemoryRecallWhenSchema,
   }, { additionalProperties: false }),
   Type.Object({
     action: Type.Literal("delete"),
@@ -197,11 +203,24 @@ type MemoryExtraction = {
   actions: Array<
     | { action: "none" }
     | {
-      action: "create" | "update";
-      id?: number;
-      subject: MemorySubject;
+      action: "create";
+      about: MemoryAbout;
       username?: string;
-      applies_to: "all" | string[];
+      recall_in?: MemoryRecallInInput;
+      recall_when?: MemoryRecallWhenInput;
+      kind: MemoryKind;
+      content: string;
+      confidence?: number;
+      important?: boolean;
+      expiresIn?: ExpiresIn | null;
+    }
+    | {
+      action: "update";
+      id: number;
+      about: MemoryAbout;
+      username?: string;
+      recall_in: MemoryRecallInInput;
+      recall_when: MemoryRecallWhenInput;
       kind: MemoryKind;
       content: string;
       confidence?: number;
@@ -212,28 +231,30 @@ type MemoryExtraction = {
   >;
 };
 
-type MemoryWriteAction = Extract<MemoryExtraction["actions"][number], { subject: MemorySubject }>;
+type MemoryWriteAction = Extract<MemoryExtraction["actions"][number], { about: MemoryAbout }>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function scopeLabel(row: MemoryRow, currentGuildId: string, resolveUserId?: (userId: string) => string | undefined): string {
-  if (row.scope === "self") return "self";
-  if (row.subjectUserId === null) {
-    return row.guildId !== null && row.guildId !== currentGuildId ? `guild:${row.guildId}` : "guild";
-  }
-  const username = resolveUserId?.(row.subjectUserId);
-  return username !== undefined && username !== "" ? `@${username}` : `user:${row.subjectUserId}`;
+function aboutLabel(row: MemoryRow, resolveUserId?: (userId: string) => string | undefined): string {
+  if (row.about !== "user" || row.aboutUserId === null) return row.about;
+  const username = resolveUserId?.(row.aboutUserId);
+  return username !== undefined && username !== "" ? `@${username}` : `user:${row.aboutUserId}`;
 }
 
-function applicabilityLabel(row: MemoryRow, resolveUserId?: (userId: string) => string | undefined): string {
-  if (row.appliesTo === "all") return " [applies:all]";
-  const labels = row.appliesTo.map((userId) => {
+function recallLocationLabel(row: MemoryRow, currentGuildId: string): string {
+  if (row.recallIn === "anywhere") return "anywhere";
+  return row.recallIn.guildId === currentGuildId ? "this-guild" : `guild:${row.recallIn.guildId}`;
+}
+
+function recallTriggerLabel(row: MemoryRow, resolveUserId?: (userId: string) => string | undefined): string {
+  if (row.recallWhen === "always") return "always";
+  const labels = row.recallWhen.map((userId) => {
     const username = resolveUserId?.(userId);
     return username !== undefined && username !== "" ? `@${username}` : `user:${userId}`;
   });
-  return ` [applies:${labels.join(",")}]`;
+  return `any(${labels.join(",")})`;
 }
 
 function formatConfidence(confidence: number): string {
@@ -261,7 +282,7 @@ function formatMemoryRow(
   resolveUserId?: (userId: string) => string | undefined,
 ): string {
   const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
-  return `- ${row.id} [${scopeLabel(row, currentGuildId, resolveUserId)}]${applicabilityLabel(row, resolveUserId)} [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${expiry} ${row.content}`;
+  return `- ${row.id} [about:${aboutLabel(row, resolveUserId)}] [in:${recallLocationLabel(row, currentGuildId)}] [when:${recallTriggerLabel(row, resolveUserId)}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${expiry} ${row.content}`;
 }
 
 /** Build one rotating stored-memory slice for ambient corpus maintenance. */
@@ -301,7 +322,7 @@ export function buildMemoryPolicyInstructions(): string[] {
 /** Build the uncached memory block injected into the conversation prompt. */
 export function buildMemoryContext(input: MemoryContextInput): string {
   const limit = Math.max(1, input.limit ?? 80);
-  const applicableUserIds = [...new Set([input.currentUserId, ...(input.visibleUserIds ?? [])])];
+  const relevantUserIds = [...new Set([input.currentUserId, ...(input.visibleUserIds ?? [])])];
   const recentGroups = input.visibleUserIds === undefined
     ? []
     : selectVisibleUserMemoryGroups({
@@ -319,22 +340,22 @@ export function buildMemoryContext(input: MemoryContextInput): string {
   const recentRows = recentGroups.flatMap((group) => group.rows);
   const recentTotal = recentGroups.reduce((total, group) => total + group.total, 0);
   const crossSubjectLimit = Math.min(
-    DEFAULT_CROSS_SUBJECT_APPLICABLE_ROWS,
+    DEFAULT_CROSS_SUBJECT_RELEVANT_ROWS,
     Math.max(0, limit - recentRows.length - 1),
   );
-  const excludedCrossSubjects = [input.currentUserId, ...recentGroups.map((group) => group.userId)];
+  const excludedCrossSubjects = [input.currentUserId, ...(input.visibleUserIds ?? [])];
   const crossSubjectTotal = countMemories(input.db, {
     guildId: input.guildId,
-    scope: "user",
-    applicableToUserIds: applicableUserIds,
-    excludeSubjectUserIds: excludedCrossSubjects,
+    about: "user",
+    relevantUserIds,
+    excludeAboutUserIds: excludedCrossSubjects,
   });
   const crossSubjectRows = crossSubjectLimit > 0
     ? listMemories(input.db, {
         guildId: input.guildId,
-        scope: "user",
-        applicableToUserIds: applicableUserIds,
-        excludeSubjectUserIds: excludedCrossSubjects,
+        about: "user",
+        relevantUserIds,
+        excludeAboutUserIds: excludedCrossSubjects,
         limit: crossSubjectLimit,
       })
     : [];
@@ -342,28 +363,28 @@ export function buildMemoryContext(input: MemoryContextInput): string {
   const maxSelfLimit = Math.min(primaryLimit, 30);
   const selfTotal = countMemories(input.db, {
     guildId: input.guildId,
-    scope: "self",
-    applicableToUserIds: applicableUserIds,
+    about: "self",
+    relevantUserIds,
   });
   const selfRows = listMemories(input.db, {
     guildId: input.guildId,
-    scope: "self",
-    applicableToUserIds: applicableUserIds,
+    about: "self",
+    relevantUserIds,
     limit: maxSelfLimit,
   }).filter((row) => row.content.trim() !== "");
   const conversationalLimit = Math.max(0, primaryLimit - selfRows.length);
   const conversationalTotal = countMemories(input.db, {
     guildId: input.guildId,
-    subjectUserId: input.currentUserId,
-    includeGlobal: true,
-    applicableToUserIds: applicableUserIds,
+    aboutUserId: input.currentUserId,
+    includeCommunity: true,
+    relevantUserIds,
   });
   const conversationalRows = conversationalLimit > 0
     ? listMemories(input.db, {
         guildId: input.guildId,
-        subjectUserId: input.currentUserId,
-        includeGlobal: true,
-        applicableToUserIds: applicableUserIds,
+        aboutUserId: input.currentUserId,
+        includeCommunity: true,
+        relevantUserIds,
         limit: conversationalLimit,
       }).filter((row) => row.content.trim() !== "")
     : [];
@@ -383,9 +404,9 @@ export function buildMemoryContext(input: MemoryContextInput): string {
     .reverse()
     .map((row) => formatMemoryRow(row, input.guildId, input.resolveUserId)));
   const showingLine = recentTotal > 0 || crossSubjectTotal > 0
-    ? `Showing ${rows.length + recentRows.length}/${total} memories (${conversationalRows.length}/${conversationalTotal} guild/current user, ${selfRows.length}/${selfTotal} self, ${recentRows.length}/${recentTotal} recent speakers, ${crossSubjectRows.length}/${crossSubjectTotal} cross-subject applicable).`
+    ? `Showing ${rows.length + recentRows.length}/${total} memories (${conversationalRows.length}/${conversationalTotal} community/current user, ${selfRows.length}/${selfTotal} self, ${recentRows.length}/${recentTotal} recent speakers, ${crossSubjectRows.length}/${crossSubjectTotal} cross-subject relevant).`
     : selfTotal > 0
-    ? `Showing ${rows.length}/${total} memories (${conversationalRows.length}/${conversationalTotal} guild/user, ${selfRows.length}/${selfTotal} self).`
+    ? `Showing ${rows.length}/${total} memories (${conversationalRows.length}/${conversationalTotal} community/user, ${selfRows.length}/${selfTotal} self).`
     : `Showing ${rows.length}/${total} memories.`;
   const contextInstruction = input.contextInstruction?.trim() !== ""
     ? input.contextInstruction ?? "Use memory as background context."
@@ -423,8 +444,8 @@ function selectVisibleUserMemoryGroups(input: VisibleUserMemorySelectionInput): 
     const rowLimit = Math.min(maxMemoriesPerUser, remainingRows);
     const rows = listMemories(input.db, {
       guildId: input.guildId,
-      subjectUserId: userId,
-      applicableToUserIds: [input.currentUserId, ...input.visibleUserIds],
+      aboutUserId: userId,
+      relevantUserIds: [input.currentUserId, ...input.visibleUserIds],
       limit: rowLimit,
     });
     if (rows.length === 0) continue;
@@ -434,8 +455,8 @@ function selectVisibleUserMemoryGroups(input: VisibleUserMemorySelectionInput): 
       rows,
       total: countMemories(input.db, {
         guildId: input.guildId,
-        subjectUserId: userId,
-        applicableToUserIds: [input.currentUserId, ...input.visibleUserIds],
+        aboutUserId: userId,
+        relevantUserIds: [input.currentUserId, ...input.visibleUserIds],
       }),
     });
     rowCount += rows.length;
@@ -462,7 +483,7 @@ export function buildVisibleUserMemoryContext(input: VisibleUserMemoryContextInp
     lines.push(`### ${label}`);
     for (const row of [...group.rows].reverse()) {
       const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
-      lines.push(`- ${row.id}${applicabilityLabel(row, input.resolveUserId)} [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${expiry} ${row.content}`);
+      lines.push(`- ${row.id} [in:${recallLocationLabel(row, input.guildId)}] [when:${recallTriggerLabel(row, input.resolveUserId)}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${expiry} ${row.content}`);
     }
   }
   return lines.join("\n");
@@ -481,24 +502,28 @@ function normalizeUsernameList(value: unknown): string[] | undefined {
     .filter((entry): entry is string => entry !== undefined))];
 }
 
-function normalizeAppliesTo(
+function normalizeRecallWhen(
   value: unknown,
-  subject: MemorySubject,
+  about: MemoryAbout,
   username: string | undefined,
-): "all" | string[] | undefined {
-  if (value === "all") return "all";
-  const usernames = normalizeUsernameList(value);
-  if (usernames !== undefined && usernames.length > 0) return usernames;
+): MemoryRecallWhenInput | undefined {
+  if (value === "always") return "always";
+  if (isRecord(value)) {
+    const usernames = normalizeUsernameList(value.users_present);
+    if (usernames !== undefined && usernames.length > 0) return { users_present: usernames };
+  }
   if (value !== undefined) return undefined;
-  return subject === "user" && username !== undefined ? [username] : "all";
+  return about === "user" && username !== undefined ? { users_present: [username] } : "always";
 }
 
-function normalizeSubject(value: unknown): MemorySubject {
-  if (value === "global" || value === "server") return "global";
-  if (value === "self" || value === "own" || value === "bot" || value === "persona") return "self";
-  if (value === "user" || value === "other_user" || value === "username") return "user";
-  if (typeof value === "string" && value.trim().startsWith("@")) return "user";
-  return "user";
+function normalizeAbout(value: unknown): MemoryAbout | null {
+  return value === "community" || value === "self" || value === "user" ? value : null;
+}
+
+function normalizeRecallIn(value: unknown, about: MemoryAbout): MemoryRecallInInput | undefined {
+  if (value === "anywhere" || value === "current_guild") return value;
+  if (value !== undefined) return undefined;
+  return about === "community" ? "current_guild" : "anywhere";
 }
 
 function normalizeKind(value: unknown): MemoryKind | null {
@@ -548,8 +573,8 @@ function scratchpadExpiryIsValid(
   return existing?.kind === "scratchpad" && existing.expiresAt !== null;
 }
 
-function memoryKindScopeIsValid(kind: MemoryKind, scope: MemoryScope): boolean {
-  return kind !== "journal" || scope === "self";
+function memoryKindAboutIsValid(kind: MemoryKind, about: MemoryAbout): boolean {
+  return kind !== "journal" || about === "self";
 }
 
 function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][number] | null {
@@ -562,7 +587,7 @@ function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][
     return typeof id === "number" && Number.isInteger(id) && id > 0 ? { action: "delete", id } : null;
   }
 
-  if (rawAction === "upsert" || rawAction === "add" || rawAction === "create" || rawAction === "update") {
+  if (rawAction === "create" || rawAction === "update") {
     const content = typeof value.content === "string" ? value.content.trim() : "";
     if (content === "") return null;
     const id = typeof value.id === "number" && Number.isInteger(value.id) && value.id > 0 ? value.id : undefined;
@@ -574,24 +599,28 @@ function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][
     if ("expiresIn" in value && expiresIn === undefined) return null;
     const kind = "kind" in value ? normalizeKind(value.kind) : "fact";
     if (kind === null) return null;
-    const subject = normalizeSubject(value.subject);
-    const username = normalizeUsername(value.username ?? value.subject);
-    const appliesTo = normalizeAppliesTo(value.applies_to, subject, username);
-    if (appliesTo === undefined) return null;
-    const action = rawAction === "update" || (rawAction === "upsert" && id !== undefined) ? "update" : "create";
+    const about = normalizeAbout(value.about);
+    if (about === null) return null;
+    const username = normalizeUsername(value.username);
+    const recallIn = normalizeRecallIn(value.recall_in, about);
+    const recallWhen = normalizeRecallWhen(value.recall_when, about, username);
+    if (recallIn === undefined || recallWhen === undefined) return null;
+    const action = rawAction;
     if (action === "update" && id === undefined) return null;
-    return {
-      action,
-      ...(action === "update" && id !== undefined ? { id } : {}),
-      subject,
+    const normalized = {
+      about,
       ...(username !== undefined ? { username } : {}),
-      applies_to: appliesTo,
+      recall_in: recallIn,
+      recall_when: recallWhen,
       kind,
       content,
       ...(confidence !== undefined ? { confidence } : {}),
       ...(typeof value.important === "boolean" ? { important: value.important } : {}),
       ...(expiresIn !== undefined ? { expiresIn } : {}),
     };
+    return action === "update" && id !== undefined
+      ? { action, id, ...normalized }
+      : { action: "create", ...normalized };
   }
 
   return null;
@@ -649,15 +678,23 @@ function memoryExtractionResponseFormat(): Record<string, unknown> {
                 {
                   type: "object",
                   additionalProperties: false,
-                  required: ["action", "subject", "applies_to", "kind", "content"],
+                  required: ["action", "about", "kind", "content"],
                   properties: {
                     action: { const: "create" },
-                    subject: { type: "string", enum: ["global", "user", "self"] },
+                    about: { type: "string", enum: ["community", "user", "self"] },
                     username: { type: "string", minLength: 1 },
-                    applies_to: {
+                    recall_in: { type: "string", enum: ["anywhere", "current_guild"] },
+                    recall_when: {
                       anyOf: [
-                        { const: "all" },
-                        { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
+                        { const: "always" },
+                        {
+                          type: "object",
+                          additionalProperties: false,
+                          required: ["users_present"],
+                          properties: {
+                            users_present: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
+                          },
+                        },
                       ],
                     },
                     kind: { type: "string", enum: [...MEMORY_KINDS] },
@@ -683,16 +720,24 @@ function memoryExtractionResponseFormat(): Record<string, unknown> {
                 {
                   type: "object",
                   additionalProperties: false,
-                  required: ["action", "id", "subject", "applies_to", "kind", "content"],
+                  required: ["action", "id", "about", "recall_in", "recall_when", "kind", "content"],
                   properties: {
                     action: { const: "update" },
                     id: { type: "integer", minimum: 1 },
-                    subject: { type: "string", enum: ["global", "user", "self"] },
+                    about: { type: "string", enum: ["community", "user", "self"] },
                     username: { type: "string", minLength: 1 },
-                    applies_to: {
+                    recall_in: { type: "string", enum: ["anywhere", "current_guild"] },
+                    recall_when: {
                       anyOf: [
-                        { const: "all" },
-                        { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
+                        { const: "always" },
+                        {
+                          type: "object",
+                          additionalProperties: false,
+                          required: ["users_present"],
+                          properties: {
+                            users_present: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
+                          },
+                        },
                       ],
                     },
                     kind: { type: "string", enum: [...MEMORY_KINDS] },
@@ -766,13 +811,13 @@ function buildExtractionPrompt(input: MemoryExtractionInput): string {
 function editableMemory(input: MemoryMutationInput, id: number): MemoryRow | null {
   const existing = getMemory(input.db, id);
   if (existing === null) return null;
-  if (existing.guildId !== null && existing.guildId !== input.guildId) return null;
+  if (existing.recallIn !== "anywhere" && existing.recallIn.guildId !== input.guildId) return null;
   return existing;
 }
 
 interface MemoryActionTarget {
-  scope: MemoryScope;
-  subjectUserId: string | null;
+  about: MemoryAbout;
+  aboutUserId: string | null;
 }
 
 async function resolveUserReference(
@@ -791,13 +836,13 @@ async function resolveUserReference(
   return userId;
 }
 
-async function resolveApplicability(
+async function resolveRecallWhen(
   input: MemoryMutationInput,
-  appliesTo: "all" | readonly string[],
-): Promise<"all" | string[]> {
-  if (appliesTo === "all") return "all";
+  recallWhen: MemoryRecallWhenInput,
+): Promise<"always" | string[]> {
+  if (recallWhen === "always") return "always";
   const userIds: string[] = [];
-  for (const username of appliesTo) userIds.push(await resolveUserReference(input, username));
+  for (const username of recallWhen.users_present) userIds.push(await resolveUserReference(input, username));
   return [...new Set(userIds)];
 }
 
@@ -805,12 +850,12 @@ async function actionMemoryTarget(
   input: MemoryMutationInput,
   action: MemoryWriteAction,
 ): Promise<MemoryActionTarget> {
-  if (action.subject === "self") return { scope: "self", subjectUserId: null };
-  if (action.subject === "global") return { scope: "guild", subjectUserId: null };
+  if (action.about === "self") return { about: "self", aboutUserId: null };
+  if (action.about === "community") return { about: "community", aboutUserId: null };
 
   const username = normalizeUsername(action.username);
-  if (username === undefined) throw new Error("User-subject memories require username.");
-  return { scope: "user", subjectUserId: await resolveUserReference(input, username) };
+  if (username === undefined) throw new Error("User memories require username.");
+  return { about: "user", aboutUserId: await resolveUserReference(input, username) };
 }
 
 type PreparedMemoryMutation =
@@ -834,18 +879,24 @@ async function prepareMemoryActions(
       continue;
     }
 
-    const existing = action.action === "update" && action.id !== undefined ? editableMemory(input, action.id) : null;
-    if (action.action === "update" && (action.id === undefined || existing === null)) {
-      throw new Error(`Memory ${action.id ?? "(missing id)"} is not editable from this guild.`);
+    const existing = action.action === "update" ? editableMemory(input, action.id) : null;
+    if (action.action === "update" && existing === null) {
+      throw new Error(`Memory ${action.id} is not editable from this guild.`);
     }
-    if (action.action === "update" && action.id !== undefined) {
+    if (action.action === "update") {
       if (mutatedIds.has(action.id)) throw new Error(`Memory ${action.id} has multiple mutations in one batch.`);
       mutatedIds.add(action.id);
     }
 
     const target = await actionMemoryTarget(input, action);
-    const appliesTo = await resolveApplicability(input, action.applies_to);
-    if (!memoryKindScopeIsValid(action.kind, target.scope)) throw new Error("Journal memories require self subject.");
+    const recallIn = action.recall_in ?? (target.about === "community" ? "current_guild" : "anywhere");
+    const recallWhen = action.recall_when === undefined
+      ? target.about === "user" && target.aboutUserId !== null ? [target.aboutUserId] : "always"
+      : await resolveRecallWhen(input, action.recall_when);
+    if (!memoryKindAboutIsValid(action.kind, target.about)) throw new Error("Journal memories must be about self.");
+    if (target.about === "community" && recallIn !== "current_guild") {
+      throw new Error("Community memories must be recalled in the current guild.");
+    }
     if (!scratchpadExpiryIsValid(action, existing)) throw new Error("Scratchpad memories require expiresIn of at most one day.");
     const expiresAt = action.expiresIn === undefined
       ? undefined
@@ -853,10 +904,10 @@ async function prepareMemoryActions(
         ? null
         : expiresInToExpiresAt(action.expiresIn);
     const common = {
-      scope: target.scope,
-      ...(target.scope === "guild" ? { guildId: input.guildId } : {}),
-      subjectUserId: target.subjectUserId,
-      appliesTo,
+      about: target.about,
+      aboutUserId: target.aboutUserId,
+      recallIn: recallIn === "anywhere" ? "anywhere" as const : { guildId: input.guildId },
+      recallWhen,
       kind: action.kind,
       content: action.content.trim(),
       confidence: action.confidence,
@@ -865,7 +916,7 @@ async function prepareMemoryActions(
     };
     if (common.content === "") throw new Error("Memory content cannot be empty.");
 
-    if (action.action === "update" && action.id !== undefined) {
+    if (action.action === "update") {
       prepared.push({ action: "update", id: action.id, input: common });
     } else {
       prepared.push({

@@ -1,7 +1,7 @@
 import type { Database } from "../db/database";
 import type { MemoryKind } from "../db/memory-kinds";
 import { sanitizeMemoryContent } from "../db/memory-content";
-import { listMemoryApplicability } from "../db/memory-repository";
+import { listMemoryRecallUsers } from "../db/memory-repository";
 
 export interface ManagementLabel {
   id: string;
@@ -34,10 +34,10 @@ export interface ManagementMessageRow {
 
 export interface ManagementMemoryRow {
   id: number;
-  scope: "guild" | "user" | "self";
-  guildId: string | null;
-  subjectUserId: string | null;
-  appliesTo: "all" | string[];
+  about: "community" | "user" | "self";
+  aboutUserId: string | null;
+  recallIn: "anywhere" | { guildId: string };
+  recallWhen: "always" | string[];
   kind: MemoryKind;
   content: string;
   sourceMessageId: string | null;
@@ -58,11 +58,12 @@ export interface ManagementMemoryFilter {
   memoryId?: number;
   guildId?: string;
   channelId?: string;
-  scope?: "guild" | "user" | "self";
+  about?: "community" | "user" | "self";
   kind?: MemoryKind;
-  subjectUserId?: string;
-  applicableToUserId?: string;
-  applicabilityMode?: "all" | "users";
+  aboutUserId?: string;
+  relevantUserId?: string;
+  recallMode?: "always" | "users";
+  recallScope?: "anywhere" | "guild";
   important?: boolean;
   status?: ManagementMemoryStatus;
   query?: string;
@@ -70,10 +71,10 @@ export interface ManagementMemoryFilter {
 }
 
 export interface ManagementMemoryCreateInput {
-  scope: "guild" | "user" | "self";
-  guildId?: string | null;
-  subjectUserId?: string | null;
-  appliesTo: "all" | string[];
+  about: "community" | "user" | "self";
+  aboutUserId?: string | null;
+  recallIn: "anywhere" | { guildId: string };
+  recallWhen: "always" | string[];
   kind: MemoryKind;
   content: string;
   sourceMessageId?: string | null;
@@ -253,13 +254,12 @@ export function listManagementMemories(
     conditions.push("m.id = ?");
     params.push(filter.memoryId);
   }
-  if (filter.scope !== undefined) {
-    conditions.push("m.scope = ?");
-    params.push(filter.scope);
+  if (filter.about !== undefined) {
+    conditions.push("m.about_type = ?");
+    params.push(filter.about);
   }
   if (filter.guildId !== undefined) {
-    // Portable user/self memories are visible in every guild, matching the runtime context contract.
-    conditions.push("(m.scope <> 'guild' OR m.guild_id = ?)");
+    conditions.push("(m.recall_scope = 'anywhere' OR m.recall_guild_id = ?)");
     params.push(filter.guildId);
   }
   if (filter.channelId !== undefined) {
@@ -270,20 +270,24 @@ export function listManagementMemories(
     conditions.push("m.kind = ?");
     params.push(filter.kind);
   }
-  if (filter.subjectUserId !== undefined) {
-    conditions.push("m.subject_user_id = ?");
-    params.push(filter.subjectUserId);
+  if (filter.aboutUserId !== undefined) {
+    conditions.push("m.about_user_id = ?");
+    params.push(filter.aboutUserId);
   }
-  if (filter.applicableToUserId !== undefined) {
-    conditions.push(`(m.applicability_mode = 'all' OR EXISTS (
-      SELECT 1 FROM memory_applicability filtered_applicability
-      WHERE filtered_applicability.memory_id = m.id AND filtered_applicability.user_id = ?
+  if (filter.relevantUserId !== undefined) {
+    conditions.push(`(m.recall_mode = 'always' OR EXISTS (
+      SELECT 1 FROM memory_recall_users filtered_recall
+      WHERE filtered_recall.memory_id = m.id AND filtered_recall.user_id = ?
     ))`);
-    params.push(filter.applicableToUserId);
+    params.push(filter.relevantUserId);
   }
-  if (filter.applicabilityMode !== undefined) {
-    conditions.push("m.applicability_mode = ?");
-    params.push(filter.applicabilityMode);
+  if (filter.recallMode !== undefined) {
+    conditions.push("m.recall_mode = ?");
+    params.push(filter.recallMode);
+  }
+  if (filter.recallScope !== undefined) {
+    conditions.push("m.recall_scope = ?");
+    params.push(filter.recallScope);
   }
   if (filter.important !== undefined) {
     conditions.push(filter.important ? "m.priority > 0" : "m.priority = 0");
@@ -311,7 +315,7 @@ export function listManagementMemories(
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const rows = db.raw
     .prepare(
-      `SELECT m.id, m.scope, m.guild_id, m.subject_user_id, m.applicability_mode, m.kind, m.content, m.source_message_id,
+      `SELECT m.id, m.about_type, m.about_user_id, m.recall_scope, m.recall_guild_id, m.recall_mode, m.kind, m.content, m.source_message_id,
               m.provenance_json, m.confidence, m.priority, m.created_at, m.updated_at, m.expires_at, m.deleted_at,
               source.guild_id AS source_guild_id, source.channel_id AS source_channel_id
        FROM memories m
@@ -322,10 +326,11 @@ export function listManagementMemories(
     )
     .all(...params, clampLimit(filter.limit, 200, 1000)) as Array<{
       id: number;
-      scope: "guild" | "user" | "self";
-      guild_id: string | null;
-      subject_user_id: string | null;
-      applicability_mode: "all" | "users";
+      about_type: "community" | "user" | "self";
+      about_user_id: string | null;
+      recall_scope: "anywhere" | "guild";
+      recall_guild_id: string | null;
+      recall_mode: "always" | "users";
       kind: MemoryKind;
       content: string;
       source_message_id: string | null;
@@ -340,7 +345,7 @@ export function listManagementMemories(
       source_channel_id: string | null;
     }>;
 
-  const applicability = listMemoryApplicability(db, rows.map((row) => row.id));
+  const recallUsers = listMemoryRecallUsers(db, rows.map((row) => row.id));
   return rows.map((row) => {
     let provenance: Record<string, unknown> | null = null;
     if (row.provenance_json !== null && row.provenance_json.trim() !== "") {
@@ -355,10 +360,10 @@ export function listManagementMemories(
     }
     return {
       id: row.id,
-      scope: row.scope,
-      guildId: row.guild_id,
-      subjectUserId: row.subject_user_id,
-      appliesTo: row.applicability_mode === "all" ? "all" : applicability.get(row.id) ?? [],
+      about: row.about_type,
+      aboutUserId: row.about_user_id,
+      recallIn: row.recall_scope === "anywhere" ? "anywhere" : { guildId: row.recall_guild_id ?? "" },
+      recallWhen: row.recall_mode === "always" ? "always" : recallUsers.get(row.id) ?? [],
       kind: row.kind,
       content: sanitizeMemoryContent(row.content),
       sourceMessageId: row.source_message_id,
@@ -413,16 +418,16 @@ export function storedManagementDirectoryIds(db: Database): {
   }
 
   const memoryRows = db.raw
-    .prepare("SELECT DISTINCT guild_id, subject_user_id FROM memories")
-    .all() as Array<{ guild_id: string | null; subject_user_id: string | null }>;
+    .prepare("SELECT DISTINCT recall_guild_id, about_user_id FROM memories")
+    .all() as Array<{ recall_guild_id: string | null; about_user_id: string | null }>;
   for (const row of memoryRows) {
-    if (row.guild_id !== null) guildIds.add(row.guild_id);
-    if (row.subject_user_id !== null) userIds.add(row.subject_user_id);
+    if (row.recall_guild_id !== null) guildIds.add(row.recall_guild_id);
+    if (row.about_user_id !== null) userIds.add(row.about_user_id);
   }
-  const applicabilityRows = db.raw
-    .prepare("SELECT DISTINCT user_id FROM memory_applicability")
+  const recallRows = db.raw
+    .prepare("SELECT DISTINCT user_id FROM memory_recall_users")
     .all() as Array<{ user_id: string }>;
-  for (const row of applicabilityRows) userIds.add(row.user_id);
+  for (const row of recallRows) userIds.add(row.user_id);
 
   return {
     guildIds: [...guildIds],

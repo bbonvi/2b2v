@@ -27,7 +27,7 @@ describe("createMemory", () => {
   test("stores structured memory rows", () => {
     const id = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "preference",
       content: "User likes concise answers.",
       sourceMessageId: "m1",
@@ -35,9 +35,9 @@ describe("createMemory", () => {
     });
 
     const row = getMemory(db, id);
-    expect(row?.guildId).toBeNull();
-    expect(row?.subjectUserId).toBe("u1");
-    expect(row?.appliesTo).toEqual(["u1"]);
+    expect(row?.recallIn).toBe("anywhere");
+    expect(row?.aboutUserId).toBe("u1");
+    expect(row?.recallWhen).toEqual(["u1"]);
     expect(row?.kind).toBe("preference");
     expect(row?.content).toBe("User likes concise answers.");
     expect(row?.sourceMessageId).toBe("m1");
@@ -49,7 +49,7 @@ describe("createMemory", () => {
   test("stores important memory priority", () => {
     const id = createMemory(db, {
       guildId: "g1",
-      scope: "self",
+      about: "self",
       kind: "journal",
       content: "Important self continuity.",
       priority: 1,
@@ -61,7 +61,7 @@ describe("createMemory", () => {
   test("clamps confidence", () => {
     const id = createMemory(db, {
       guildId: "g1",
-      kind: "global_note",
+      kind: "note",
       content: "Global",
       confidence: 99,
     });
@@ -86,32 +86,32 @@ describe("createMemory", () => {
   test("stores self memories without guild or user ownership", () => {
     const id = createMemory(db, {
       guildId: "g1",
-      scope: "self",
+      about: "self",
       kind: "journal",
       content: "Privately decided the server is worth returning to.",
       confidence: 0.8,
     });
 
     const row = getMemory(db, id);
-    expect(row?.scope).toBe("self");
-    expect(row?.guildId).toBeNull();
-    expect(row?.subjectUserId).toBeNull();
+    expect(row?.about).toBe("self");
+    expect(row?.recallIn).toBe("anywhere");
+    expect(row?.aboutUserId).toBeNull();
     expect(row?.kind).toBe("journal");
   });
 
-  test("stores independent applicability without changing the subject", () => {
+  test("stores independent recall triggers without changing the subject", () => {
     const id = createMemory(db, {
       guildId: "g1",
-      scope: "self",
-      appliesTo: ["u2", "u3", "u2"],
+      about: "self",
+      recallWhen: ["u2", "u3", "u2"],
       kind: "journal",
       content: "Alice asked me to use reaction images when Bob starts baiting people.",
     });
 
     const row = getMemory(db, id);
-    expect(row?.scope).toBe("self");
-    expect(row?.subjectUserId).toBeNull();
-    expect(row?.appliesTo).toEqual(["u2", "u3"]);
+    expect(row?.about).toBe("self");
+    expect(row?.aboutUserId).toBeNull();
+    expect(row?.recallWhen).toEqual(["u2", "u3"]);
   });
 });
 
@@ -119,8 +119,8 @@ describe("updateMemory", () => {
   test("updates content and clears deletion marker", () => {
     const id = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
-      kind: "user_note",
+      aboutUserId: "u1",
+      kind: "note",
       content: "Old content",
     });
 
@@ -138,8 +138,8 @@ describe("updateMemory", () => {
     const expiresAt = Date.now() + 60_000;
     const id = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
-      kind: "user_note",
+      aboutUserId: "u1",
+      kind: "note",
       content: "Temporary content",
       expiresAt,
     });
@@ -152,7 +152,7 @@ describe("updateMemory", () => {
   test("updates memory priority", () => {
     const id = createMemory(db, {
       guildId: "g1",
-      kind: "global_note",
+      kind: "note",
       content: "Normal priority.",
     });
 
@@ -160,71 +160,69 @@ describe("updateMemory", () => {
     expect(getMemory(db, id)?.priority).toBe(1);
   });
 
-  test("replaces exact applicability without implicitly adding the subject", () => {
+  test("replaces exact recall triggers without implicitly adding the subject", () => {
     const selfId = createMemory(db, {
       guildId: "g1",
-      scope: "self",
-      appliesTo: ["u1"],
+      about: "self",
+      recallWhen: ["u1"],
       kind: "journal",
       content: "Targeted self memory.",
     });
     const userId = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
-      appliesTo: ["u2"],
+      aboutUserId: "u1",
+      recallWhen: ["u2"],
       kind: "fact",
       content: "A fact about Alice.",
     });
 
-    expect(updateMemory(db, selfId, { appliesTo: ["u2"] })).toBe(true);
-    expect(getMemory(db, selfId)?.appliesTo).toEqual(["u2"]);
-    expect(getMemory(db, userId)?.appliesTo).toEqual(["u2"]);
-    expect(updateMemory(db, userId, { appliesTo: ["u3"] })).toBe(true);
-    expect(getMemory(db, userId)?.appliesTo).toEqual(["u3"]);
+    expect(updateMemory(db, selfId, { recallWhen: ["u2"] })).toBe(true);
+    expect(getMemory(db, selfId)?.recallWhen).toEqual(["u2"]);
+    expect(getMemory(db, userId)?.recallWhen).toEqual(["u2"]);
+    expect(updateMemory(db, userId, { recallWhen: ["u3"] })).toBe(true);
+    expect(getMemory(db, userId)?.recallWhen).toEqual(["u3"]);
   });
 
-  test("rejects empty applicability before mutating the row", () => {
+  test("rejects empty user-triggered recall before mutating the row", () => {
     const id = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
-      appliesTo: "all",
+      aboutUserId: "u1",
+      recallWhen: "always",
       kind: "fact",
       content: "Stable",
     });
 
-    expect(() => updateMemory(db, id, { appliesTo: [] })).toThrow("requires at least one user ID");
-    expect(getMemory(db, id)?.appliesTo).toBe("all");
+    expect(() => updateMemory(db, id, { recallWhen: [] })).toThrow("requires at least one user ID");
+    expect(getMemory(db, id)?.recallWhen).toBe("always");
   });
 
-  test("updates scope only with required ownership fields", () => {
+  test("updates what a memory is about only with required fields", () => {
     const id = createMemory(db, {
       guildId: "g1",
-      kind: "global_note",
+      kind: "note",
       content: "Old scope",
     });
 
-    expect(() => updateMemory(db, id, { scope: "user", content: "Invalid user scope" })).toThrow();
-    expect(() => updateMemory(db, id, { scope: "guild", content: "Invalid guild scope" })).toThrow();
-    expect(() => updateMemory(db, id, { subjectUserId: "u1" })).toThrow("Changing memory scope fields requires scope.");
-    expect(() => updateMemory(db, id, { guildId: "g2" })).toThrow("Changing memory scope fields requires scope.");
+    expect(() => updateMemory(db, id, { about: "user", content: "Invalid user scope" })).toThrow();
+    expect(() => updateMemory(db, id, { aboutUserId: "u1" })).toThrow("requires about=user");
 
     expect(updateMemory(db, id, {
-      scope: "self",
+      about: "self",
       kind: "journal",
       content: "Moved to self journal.",
     })).toBe(true);
 
     const row = getMemory(db, id);
-    expect(row?.scope).toBe("self");
-    expect(row?.guildId).toBeNull();
-    expect(row?.subjectUserId).toBeNull();
+    expect(row?.about).toBe("self");
+    expect(row?.recallIn).toEqual({ guildId: "g1" });
+    expect(row?.aboutUserId).toBeNull();
     expect(row?.kind).toBe("journal");
   });
 
-  test("rejects journal scope transitions before SQL constraints", () => {
+  test("rejects journal subject transitions before SQL constraints", () => {
     const selfJournal = createMemory(db, {
       guildId: "g1",
-      scope: "self",
+      about: "self",
       kind: "journal",
       content: "Self-only journal.",
     });
@@ -235,14 +233,14 @@ describe("updateMemory", () => {
     });
 
     expect(() => updateMemory(db, selfJournal, {
-      scope: "guild",
-      guildId: "g1",
+      about: "community",
+      recallIn: { guildId: "g1" },
       content: "Invalid journal move.",
-    })).toThrow("Journal memories must use self scope.");
+    })).toThrow("Journal memories must be about self.");
     expect(() => updateMemory(db, guildMemory, {
       kind: "journal",
       content: "Invalid journal kind.",
-    })).toThrow("Journal memories must use self scope.");
+    })).toThrow("Journal memories must be about self.");
   });
 
   test("returns false when row does not exist", () => {
@@ -254,7 +252,7 @@ describe("deleteMemory", () => {
   test("soft-deletes existing rows", () => {
     const id = createMemory(db, {
       guildId: "g1",
-      kind: "global_note",
+      kind: "note",
       content: "Remove me",
     });
 
@@ -269,68 +267,77 @@ describe("deleteMemory", () => {
 });
 
 describe("listMemories", () => {
+  test("combines anywhere memories with only the current guild's local memories", () => {
+    createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "Anywhere" });
+    createMemory(db, { guildId: "g1", aboutUserId: "u1", recallIn: { guildId: "g1" }, kind: "fact", content: "Guild one" });
+    createMemory(db, { guildId: "g2", aboutUserId: "u1", recallIn: { guildId: "g2" }, kind: "fact", content: "Guild two" });
+
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" }).map((row) => row.content).sort()).toEqual(["Anywhere", "Guild one"]);
+    expect(listMemories(db, { guildId: "g2", aboutUserId: "u1" }).map((row) => row.content).sort()).toEqual(["Anywhere", "Guild two"]);
+  });
+
   test("filters portable user memories and current-guild rows together", () => {
-    createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "preference", content: "A" });
-    createMemory(db, { guildId: "g1", subjectUserId: "u2", kind: "fact", content: "B" });
-    createMemory(db, { guildId: "g1", kind: "global_note", content: "C" });
-    createMemory(db, { guildId: "g1", scope: "self", kind: "journal", content: "E" });
-    createMemory(db, { guildId: "g2", kind: "global_note", content: "D" });
+    createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "preference", content: "A" });
+    createMemory(db, { guildId: "g1", aboutUserId: "u2", kind: "fact", content: "B" });
+    createMemory(db, { guildId: "g1", kind: "note", content: "C" });
+    createMemory(db, { guildId: "g1", about: "self", kind: "journal", content: "E" });
+    createMemory(db, { guildId: "g2", kind: "note", content: "D" });
 
     const rows = listMemories(db, {
       guildId: "g1",
-      subjectUserId: "u1",
-      includeGlobal: true,
+      aboutUserId: "u1",
+      includeCommunity: true,
     });
 
     expect(rows.map((row) => row.content).sort()).toEqual(["A", "C"]);
-    expect(countMemories(db, { guildId: "g1", subjectUserId: "u1", includeGlobal: true })).toBe(2);
-    expect(listMemories(db, { guildId: "g1", scope: "self" }).map((row) => row.content)).toEqual(["E"]);
-    expect(countMemories(db, { guildId: "g1", scope: "self" })).toBe(1);
+    expect(countMemories(db, { guildId: "g1", aboutUserId: "u1", includeCommunity: true })).toBe(2);
+    expect(listMemories(db, { guildId: "g1", about: "self" }).map((row) => row.content)).toEqual(["E"]);
+    expect(countMemories(db, { guildId: "g1", about: "self" })).toBe(1);
   });
 
   test("returns newest updated memories first and enforces limit", () => {
     const now = Date.now();
     db.raw
       .prepare(
-        `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (about_type, about_user_id, recall_scope, recall_guild_id, recall_mode, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("user", null, "u1", "user_note", "Oldest", null, 0.7, now - 3000, now - 3000, null);
+      .run("user", "u1", "anywhere", null, "users", "note", "Oldest", null, 0.7, now - 3000, now - 3000, null);
     db.raw
       .prepare(
-        `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (about_type, about_user_id, recall_scope, recall_guild_id, recall_mode, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("user", null, "u1", "user_note", "Middle", null, 0.7, now - 2000, now - 2000, null);
+      .run("user", "u1", "anywhere", null, "users", "note", "Middle", null, 0.7, now - 2000, now - 2000, null);
     db.raw
       .prepare(
-        `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO memories (about_type, about_user_id, recall_scope, recall_guild_id, recall_mode, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("user", null, "u1", "user_note", "Newest", null, 0.7, now - 1000, now - 1000, null);
+      .run("user", "u1", "anywhere", null, "users", "note", "Newest", null, 0.7, now - 1000, now - 1000, null);
 
-    const rows = listMemories(db, { guildId: "g1", subjectUserId: "u1", limit: 2 });
+    const rows = listMemories(db, { guildId: "g1", aboutUserId: "u1", limit: 2 });
     expect(rows.map((row) => row.content)).toEqual(["Newest", "Middle"]);
   });
 
-  test("keeps all-user memories and filters exact-user memories by applicable users", () => {
-    createMemory(db, { guildId: "g1", scope: "self", kind: "journal", content: "General self memory." });
+  test("keeps always-relevant memories and filters user-triggered memories by relevant users", () => {
+    createMemory(db, { guildId: "g1", about: "self", kind: "journal", content: "General self memory." });
     createMemory(db, {
       guildId: "g1",
-      scope: "self",
-      appliesTo: ["u1"],
+      about: "self",
+      recallWhen: ["u1"],
       kind: "journal",
       content: "Alice-specific self memory.",
     });
     createMemory(db, {
       guildId: "g1",
-      scope: "self",
-      appliesTo: ["u2"],
+      about: "self",
+      recallWhen: ["u2"],
       kind: "journal",
       content: "Bob-specific self memory.",
     });
 
-    const filter = { guildId: "g1", scope: "self" as const, applicableToUserIds: ["u1"] };
+    const filter = { guildId: "g1", about: "self" as const, relevantUserIds: ["u1"] };
     expect(listMemories(db, filter).map((row) => row.content).sort()).toEqual([
       "Alice-specific self memory.",
       "General self memory.",
@@ -338,57 +345,70 @@ describe("listMemories", () => {
     expect(countMemories(db, filter)).toBe(2);
   });
 
+  test("recalls a multi-user trigger when any listed user is relevant", () => {
+    createMemory(db, {
+      guildId: "g1",
+      about: "self",
+      recallWhen: ["u2", "u3"],
+      kind: "journal",
+      content: "Relevant around either user.",
+    });
+
+    expect(listMemories(db, { guildId: "g1", about: "self", relevantUserIds: ["u3"] })).toHaveLength(1);
+    expect(listMemories(db, { guildId: "g1", about: "self", relevantUserIds: ["u4"] })).toHaveLength(0);
+  });
+
   test("loads broadly applicable user memories independently of their subject", () => {
     createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u-owner",
-      appliesTo: "all",
+      aboutUserId: "u-owner",
+      recallWhen: "always",
       kind: "preference",
       content: "Owner prefers this behavior for everyone.",
     });
 
     const rows = listMemories(db, {
       guildId: "g1",
-      scope: "user",
-      applicableToUserIds: ["u-other"],
-      excludeSubjectUserIds: ["u-other"],
+      about: "user",
+      relevantUserIds: ["u-other"],
+      excludeAboutUserIds: ["u-other"],
     });
     expect(rows.map((row) => row.content)).toEqual(["Owner prefers this behavior for everyone."]);
-    expect(rows[0]?.appliesTo).toBe("all");
+    expect(rows[0]?.recallWhen).toBe("always");
   });
 
   test("returns important memories before newer normal memories", () => {
     const oldImportant = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "fact",
       content: "Old important",
       priority: 1,
     });
     const freshNormal = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "fact",
       content: "Fresh normal",
     });
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, oldImportant);
     db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, freshNormal);
 
-    const rows = listMemories(db, { guildId: "g1", subjectUserId: "u1", limit: 1 });
+    const rows = listMemories(db, { guildId: "g1", aboutUserId: "u1", limit: 1 });
     expect(rows.map((row) => row.content)).toEqual(["Old important"]);
   });
 
   test("excludes expired memories from active reads and counts", () => {
     const expired = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "fact",
       content: "Expired",
       expiresAt: Date.now() - 1,
     });
     const active = createMemory(db, {
       guildId: "g1",
-      subjectUserId: "u1",
+      aboutUserId: "u1",
       kind: "fact",
       content: "Active",
       expiresAt: Date.now() + 60_000,
@@ -396,17 +416,17 @@ describe("listMemories", () => {
 
     expect(getMemory(db, expired)).toBeNull();
     expect(getMemory(db, active)?.content).toBe("Active");
-    expect(listMemories(db, { guildId: "g1", subjectUserId: "u1" }).map((row) => row.content)).toEqual(["Active"]);
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" }).map((row) => row.content)).toEqual(["Active"]);
     expect(countUserMemoriesByUser(db, "g1").get("u1")).toBe(1);
   });
 });
 
 describe("listMemoryMaintenanceBatch", () => {
   test("rotates bounded maintainable rows and excludes foreign guild memories", () => {
-    const first = createMemory(db, { guildId: "g1", kind: "global_note", content: "First" });
-    const second = createMemory(db, { guildId: "g1", subjectUserId: "u1", kind: "fact", content: "Second" });
-    createMemory(db, { guildId: "g2", kind: "global_note", content: "Foreign" });
-    const fourth = createMemory(db, { guildId: "g1", scope: "self", kind: "journal", content: "Fourth" });
+    const first = createMemory(db, { guildId: "g1", kind: "note", content: "First" });
+    const second = createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "Second" });
+    createMemory(db, { guildId: "g2", kind: "note", content: "Foreign" });
+    const fourth = createMemory(db, { guildId: "g1", about: "self", kind: "journal", content: "Fourth" });
 
     const initial = listMemoryMaintenanceBatch(db, { guildId: "g1", afterId: 0, limit: 2 });
     expect(initial.rows.map((row) => row.id)).toEqual([first, second]);
@@ -421,11 +441,11 @@ describe("listMemoryMaintenanceBatch", () => {
 
 describe("deleteExpiredMemories", () => {
   test("hard-deletes soft-deleted and expired rows", () => {
-    const deleted = createMemory(db, { guildId: "g1", kind: "global_note", content: "gone" });
-    const active = createMemory(db, { guildId: "g1", kind: "global_note", content: "active" });
+    const deleted = createMemory(db, { guildId: "g1", kind: "note", content: "gone" });
+    const active = createMemory(db, { guildId: "g1", kind: "note", content: "active" });
     createMemory(db, {
       guildId: "g1",
-      kind: "global_note",
+      kind: "note",
       content: "expired",
       expiresAt: Date.now() - 1,
     });

@@ -45,33 +45,33 @@ describe("database initialization", () => {
     expect(columns.some((column) => column.name === "priority")).toBe(true);
   });
 
-  test("creates memory applicability table and lookup index", () => {
+  test("creates memory recall-user table and lookup index", () => {
     const table = db.raw
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_applicability'")
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_recall_users'")
       .get() as { name: string } | undefined;
     const index = db.raw
-      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_memory_applicability_user'")
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_memory_recall_users_user'")
       .get() as { name: string } | undefined;
-    expect(table?.name).toBe("memory_applicability");
-    expect(index?.name).toBe("idx_memory_applicability_user");
+    expect(table?.name).toBe("memory_recall_users");
+    expect(index?.name).toBe("idx_memory_recall_users_user");
   });
 
-  test("preserves explicit all applicability across restarts", () => {
-    const dbPath = path.join(tmpDir, "all-applicability.db");
+  test("preserves always recall across restarts", () => {
+    const dbPath = path.join(tmpDir, "always-recall.db");
     const existing = createDatabase(dbPath);
     const id = createMemory(existing, {
       guildId: "g1",
-      subjectUserId: "u1",
-      appliesTo: "all",
+      aboutUserId: "u1",
+      recallWhen: "always",
       kind: "preference",
-      content: "Applies broadly.",
+      content: "Recall broadly.",
     });
     existing.close();
 
     const reopened = createDatabase(dbPath);
     try {
-      expect(getMemory(reopened, id)?.appliesTo).toBe("all");
-      expect(reopened.raw.prepare("SELECT user_id FROM memory_applicability WHERE memory_id = ?").all(id)).toEqual([]);
+      expect(getMemory(reopened, id)?.recallWhen).toBe("always");
+      expect(reopened.raw.prepare("SELECT user_id FROM memory_recall_users WHERE memory_id = ?").all(id)).toEqual([]);
     } finally {
       reopened.close();
     }
@@ -133,233 +133,143 @@ describe("database initialization", () => {
 });
 
 describe("memories table", () => {
-  test("inserts and retrieves a user memory", () => {
-    const now = Date.now();
-    const result = db.raw
-      .prepare(
-        `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run("user", null, "user-1", "preference", "Prefers dark mode", "msg-42", 0.9, now, now, null);
+  test("stores orthogonal about, recall location, and recall trigger fields", () => {
+    const userId = createMemory(db, {
+      guildId: "guild-1",
+      aboutUserId: "user-1",
+      kind: "preference",
+      content: "Prefers dark mode",
+    });
+    const communityId = createMemory(db, {
+      guildId: "guild-1",
+      kind: "note",
+      content: "Movie night is every Friday",
+    });
 
-    const memId = Number(result.lastInsertRowid);
-    const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get(memId) as Record<string, unknown>;
-    expect(row.guild_id).toBeNull();
-    expect(row.subject_user_id).toBe("user-1");
-    expect(row.kind).toBe("preference");
-    expect(row.content).toBe("Prefers dark mode");
-    expect(row.source_message_id).toBe("msg-42");
-    expect(row.confidence).toBe(0.9);
-    expect(row.deleted_at).toBeNull();
+    expect(getMemory(db, userId)).toMatchObject({
+      about: "user",
+      aboutUserId: "user-1",
+      recallIn: "anywhere",
+      recallWhen: ["user-1"],
+    });
+    expect(getMemory(db, communityId)).toMatchObject({
+      about: "community",
+      aboutUserId: null,
+      recallIn: { guildId: "guild-1" },
+      recallWhen: "always",
+    });
   });
 
-  test("inserts a global note without a subject user", () => {
-    const now = Date.now();
-    const result = db.raw
-      .prepare(
-        `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run("guild", "guild-1", null, "global_note", "Movie night is every Friday", null, 0.8, now, now, null);
-
-    const memId = Number(result.lastInsertRowid);
-    const row = db.raw.prepare("SELECT * FROM memories WHERE id = ?").get(memId) as Record<string, unknown>;
-    expect(row.guild_id).toBe("guild-1");
-    expect(row.subject_user_id).toBeNull();
-    expect(row.kind).toBe("global_note");
-    expect(row.content).toBe("Movie night is every Friday");
-  });
-
-  test("rejects unknown memory kind due to CHECK constraint", () => {
-    const now = Date.now();
-    const insert = () =>
-      db.raw
-        .prepare(
-          `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run("guild", "guild-1", null, "unknown", "Movie night is every Friday", null, 0.8, now, now, null);
-
-    expect(insert).toThrow();
-  });
-
-  test("accepts current memory kinds", () => {
+  test("enforces memory model invariants in SQLite", () => {
     const now = Date.now();
     const insert = db.raw.prepare(
-      `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO memories
+        (about_type, about_user_id, recall_scope, recall_guild_id, recall_mode, kind, content, confidence, priority, created_at, updated_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
     );
 
-    insert.run("user", null, "user-1", "identity", "Preferred name is Sasha.", null, 0.8, now, now, null, null);
-    insert.run("user", null, "user-1", "constraint", "Do not use voice replies.", null, 0.8, now, now, null, null);
-    insert.run("user", null, "user-1", "interest", "Likes puzzle games.", null, 0.8, now, now, null, null);
-    insert.run("self", null, null, "journal", "Privately decided the test room matters.", null, 0.8, now, now, null, null);
-    insert.run("user", null, "user-1", "scratchpad", "Check auth headers next.", null, 0.8, now, now, now + 60_000, null);
-
-    const rows = db.raw.prepare("SELECT kind FROM memories ORDER BY id").all() as Array<{ kind: string }>;
-    expect(rows.map((row) => row.kind)).toEqual(["identity", "constraint", "interest", "journal", "scratchpad"]);
+    expect(() => insert.run("community", null, "anywhere", null, "always", "note", "Invalid community", 0.8, now, now, null)).toThrow();
+    expect(() => insert.run("user", null, "anywhere", null, "always", "fact", "Missing user", 0.8, now, now, null)).toThrow();
+    expect(() => insert.run("user", "user-1", "anywhere", null, "always", "journal", "Wrong subject", 0.8, now, now, null)).toThrow();
+    expect(() => insert.run("user", "user-1", "anywhere", null, "always", "scratchpad", "Missing expiry", 0.8, now, now, null)).toThrow();
+    expect(() => insert.run("community", null, "guild", "guild-1", "always", "unknown", "Unknown kind", 0.8, now, now, null)).toThrow();
+    expect(() => insert.run("community", null, "guild", "guild-1", "always", "note", "", 0.8, now, now, null)).toThrow();
   });
 
-  test("rejects legacy project memory kind", () => {
-    const now = Date.now();
-    const insert = () =>
-      db.raw
-        .prepare(
-          `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run("guild", "guild-1", null, "project", "Legacy project memory", null, 0.8, now, now, null);
-
-    expect(insert).toThrow();
+  test("creates recall indexes", () => {
+    const indexes = db.raw
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_memories_about_user', 'idx_memories_recall_guild', 'idx_memory_recall_users_user')")
+      .all() as Array<{ name: string }>;
+    expect(indexes.map((row) => row.name).sort()).toEqual([
+      "idx_memories_about_user",
+      "idx_memories_recall_guild",
+      "idx_memory_recall_users_user",
+    ]);
   });
 
-  test("rejects scratchpad memory without expiry", () => {
-    const now = Date.now();
-    const insert = () =>
-      db.raw
-        .prepare(
-          `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run("user", null, "user-1", "scratchpad", "Missing expiry.", null, 0.8, now, now, null);
-
-    expect(insert).toThrow();
-  });
-
-  test("rejects journal memories outside self scope", () => {
-    const now = Date.now();
-    const insert = () =>
-      db.raw
-        .prepare(
-          `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run("user", null, "user-1", "journal", "Wrong scope.", null, 0.8, now, now, null);
-
-    expect(insert).toThrow();
-  });
-
-  test("rejects empty memory content due to CHECK constraint", () => {
-    const now = Date.now();
-    const insert = () =>
-      db.raw
-        .prepare(
-          `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run("guild", "guild-1", null, "global_note", "", null, 0.8, now, now, null);
-
-    expect(insert).toThrow();
-  });
-
-  test("autoincrement produces unique sequential IDs", () => {
-    const now = Date.now();
-    const insert = db.raw.prepare(
-      `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-
-    const r1 = insert.run("user", null, "u1", "fact", "first", null, 0.8, now, now, null);
-    const r2 = insert.run("user", null, "u1", "fact", "second", null, 0.8, now, now, null);
-    const r3 = insert.run("user", null, "u1", "fact", "third", null, 0.8, now, now, null);
-
-    expect(Number(r1.lastInsertRowid)).toBe(1);
-    expect(Number(r2.lastInsertRowid)).toBe(2);
-    expect(Number(r3.lastInsertRowid)).toBe(3);
-  });
-
-  test("guild_subject index supports efficient queries", () => {
-    const idx = db.raw
-      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_memories_guild_subject'")
-      .get() as { name: string } | undefined;
-    expect(idx?.name).toBe("idx_memories_guild_subject");
-  });
-
-  test("scope index supports self-memory queries", () => {
-    const idx = db.raw
-      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_memories_scope_active'")
-      .get() as { name: string } | undefined;
-    expect(idx?.name).toBe("idx_memories_scope_active");
-  });
-
-  test("migrates old structured memory schema and drops project rows", () => {
-    const legacyPath = path.join(tmpDir, "legacy-project.db");
+  test("migrates the production-shaped schema without losing IDs, metadata, or recall links", () => {
+    const legacyPath = path.join(tmpDir, "legacy-production-shape.db");
     const legacy = new BunDatabase(legacyPath);
-    const now = Date.now();
     legacy.run(`CREATE TABLE memories (
-      id                INTEGER PRIMARY KEY AUTOINCREMENT,
-      guild_id          TEXT NOT NULL,
-      subject_user_id   TEXT,
-      kind              TEXT NOT NULL CHECK(kind IN ('global_note', 'user_note', 'preference', 'relationship', 'project', 'fact')),
-      content           TEXT NOT NULL,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope TEXT NOT NULL CHECK(scope IN ('guild', 'user', 'self')),
+      guild_id TEXT,
+      subject_user_id TEXT,
+      kind TEXT NOT NULL CHECK(kind IN ('global_note', 'user_note', 'preference', 'relationship', 'project', 'fact', 'identity', 'constraint', 'interest', 'journal', 'scratchpad')),
+      content TEXT NOT NULL,
       source_message_id TEXT,
-      confidence        REAL NOT NULL DEFAULT 0.7,
-      created_at        INTEGER NOT NULL,
-      updated_at        INTEGER NOT NULL,
-      expires_at        INTEGER,
-      deleted_at        INTEGER
+      provenance_json TEXT,
+      confidence REAL NOT NULL DEFAULT 0.7,
+      priority INTEGER NOT NULL DEFAULT 0,
+      applicability_mode TEXT NOT NULL DEFAULT 'all' CHECK(applicability_mode IN ('all', 'users')),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      expires_at INTEGER,
+      deleted_at INTEGER
     )`);
-    const insert = legacy.prepare(
-      `INSERT INTO memories (guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    insert.run("guild-1", null, "project", "Drop this legacy project.", null, 0.7, now, now, null, null);
-    const kept = insert.run("guild-1", "user-1", "fact", "Keep this fact.", null, 0.7, now, now, null, null);
+    const insert = legacy.prepare(`INSERT INTO memories
+      (id, scope, guild_id, subject_user_id, kind, content, source_message_id, provenance_json, confidence, priority, applicability_mode, created_at, updated_at, expires_at, deleted_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    insert.run(41, "guild", "guild-1", null, "global_note", "Community fact", "m41", '{"source":"legacy"}', 0.91, 2, "all", 1001, 1002, null, null);
+    insert.run(42, "user", null, "user-1", "user_note", "User fact", "m42", '{"sourceMessageIds":["m42"]}', 0.82, 0, "users", 2001, 2002, 9001, null);
+    insert.run(43, "self", null, null, "journal", "Selective self memory", null, null, 0.73, 1, "users", 3001, 3002, null, 8001);
+    insert.run(44, "guild", "guild-1", null, "project", "Legacy project context", null, null, 0.64, 0, "all", 4001, 4002, null, null);
+    insert.run(45, "user", null, "user-5", "scratchpad", "Legacy non-expiring scratchpad", null, null, 0.55, 0, "users", 5001, 5002, null, null);
     legacy.run(`CREATE TABLE memory_applicability (
-      memory_id INTEGER NOT NULL,
+      memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
       user_id TEXT NOT NULL,
       PRIMARY KEY (memory_id, user_id)
     )`);
-    legacy.prepare("INSERT INTO memory_applicability (memory_id, user_id) VALUES (?, ?)")
-      .run(Number(kept.lastInsertRowid), "user-2");
+    const link = legacy.prepare("INSERT INTO memory_applicability (memory_id, user_id) VALUES (?, ?)");
+    link.run(42, "user-1");
+    link.run(43, "user-2");
+    link.run(43, "user-3");
+    link.run(43, "user-4");
     legacy.close();
 
     const migrated = createDatabase(legacyPath);
     try {
-      const rows = migrated.raw.prepare("SELECT kind, content, applicability_mode FROM memories ORDER BY id").all() as Array<{ kind: string; content: string; applicability_mode: string }>;
-      const schema = migrated.raw
-        .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='memories'")
-        .get() as { sql: string };
-      const applicability = migrated.raw
-        .prepare("SELECT user_id FROM memory_applicability ORDER BY user_id")
-        .all() as Array<{ user_id: string }>;
-
-      expect(rows).toEqual([{ kind: "fact", content: "Keep this fact.", applicability_mode: "users" }]);
-      expect(applicability).toEqual([{ user_id: "user-1" }, { user_id: "user-2" }]);
-      expect(schema.sql).toContain("'identity'");
-      expect(schema.sql).toContain("'journal'");
-      expect(schema.sql).toContain("scope IN ('guild', 'user', 'self')");
-      expect(schema.sql).toContain("kind <> 'scratchpad' OR expires_at IS NOT NULL");
-      expect(schema.sql).toContain("kind <> 'journal' OR scope = 'self'");
-      expect(schema.sql).toContain("scope = 'user' AND subject_user_id IS NOT NULL AND guild_id IS NULL");
-      expect(schema.sql).not.toContain("'project'");
+      const rows = migrated.raw.prepare(`SELECT id, about_type, about_user_id, recall_scope, recall_guild_id, recall_mode,
+        kind, content, source_message_id, provenance_json, confidence, priority, created_at, updated_at, expires_at, deleted_at
+        FROM memories ORDER BY id`).all();
+      expect(rows).toEqual([
+        { id: 41, about_type: "community", about_user_id: null, recall_scope: "guild", recall_guild_id: "guild-1", recall_mode: "always", kind: "note", content: "Community fact", source_message_id: "m41", provenance_json: '{"source":"legacy"}', confidence: 0.91, priority: 2, created_at: 1001, updated_at: 1002, expires_at: null, deleted_at: null },
+        { id: 42, about_type: "user", about_user_id: "user-1", recall_scope: "anywhere", recall_guild_id: null, recall_mode: "users", kind: "note", content: "User fact", source_message_id: "m42", provenance_json: '{"sourceMessageIds":["m42"]}', confidence: 0.82, priority: 0, created_at: 2001, updated_at: 2002, expires_at: 9001, deleted_at: null },
+        { id: 43, about_type: "self", about_user_id: null, recall_scope: "anywhere", recall_guild_id: null, recall_mode: "users", kind: "journal", content: "Selective self memory", source_message_id: null, provenance_json: null, confidence: 0.73, priority: 1, created_at: 3001, updated_at: 3002, expires_at: null, deleted_at: 8001 },
+        { id: 44, about_type: "community", about_user_id: null, recall_scope: "guild", recall_guild_id: "guild-1", recall_mode: "always", kind: "fact", content: "Legacy project context", source_message_id: null, provenance_json: null, confidence: 0.64, priority: 0, created_at: 4001, updated_at: 4002, expires_at: null, deleted_at: null },
+        { id: 45, about_type: "user", about_user_id: "user-5", recall_scope: "anywhere", recall_guild_id: null, recall_mode: "users", kind: "note", content: "Legacy non-expiring scratchpad", source_message_id: null, provenance_json: null, confidence: 0.55, priority: 0, created_at: 5001, updated_at: 5002, expires_at: null, deleted_at: null },
+      ]);
+      expect(migrated.raw.prepare("SELECT memory_id, user_id FROM memory_recall_users ORDER BY memory_id, user_id").all()).toEqual([
+        { memory_id: 42, user_id: "user-1" },
+        { memory_id: 43, user_id: "user-2" },
+        { memory_id: 43, user_id: "user-3" },
+        { memory_id: 43, user_id: "user-4" },
+        { memory_id: 45, user_id: "user-5" },
+      ]);
+      expect(migrated.raw.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_applicability'").get()).toBeNull();
+      expect(migrated.raw.prepare("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
     } finally {
       migrated.close();
+    }
+
+    const reopened = createDatabase(legacyPath);
+    try {
+      expect(reopened.raw.prepare("SELECT COUNT(*) AS count FROM memories").get()).toEqual({ count: 5 });
+      expect(reopened.raw.prepare("SELECT COUNT(*) AS count FROM memory_recall_users").get()).toEqual({ count: 5 });
+    } finally {
+      reopened.close();
     }
   });
 
   test("sanitizes existing malformed memory content on startup", () => {
     const dbPath = path.join(tmpDir, "malformed-memory.db");
     const existing = createDatabase(dbPath);
-    const now = Date.now();
-    existing.raw
-      .prepare(
-        `INSERT INTO memories (scope, guild_id, subject_user_id, kind, content, source_message_id, confidence, created_at, updated_at, expires_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        "user",
-        null,
-        "user-1",
-        "preference",
-        "In guild guild-1: 17 [user:user-1] [preference] Prefers concise answers.",
-        null,
-        0.7,
-        now,
-        now,
-        null,
-        null,
-      );
+    createMemory(existing, {
+      guildId: "guild-1",
+      aboutUserId: "user-1",
+      kind: "preference",
+      content: "In guild guild-1: 17 [user:user-1] [preference] Prefers concise answers.",
+    });
     existing.close();
 
     const migrated = createDatabase(dbPath);
