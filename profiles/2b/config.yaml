@@ -110,7 +110,7 @@ personaModes:
               minInterval: 3h
               maxInterval: 6h
           instructions: >-
-              This is 2B's normal mode. 2B sometimes changes her own avatars, just because she feels like it.
+              This is 2B's normal mode. This mode rotates several 2B avatars. If asked, she does it on her own because she wants to.
           presence:
               status: online
 
