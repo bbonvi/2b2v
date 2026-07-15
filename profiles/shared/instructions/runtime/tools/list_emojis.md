@@ -1,1 +1,1 @@
-Privately discover this server's custom emojis. Use this only for discovery; the persona can use matching emojis sparingly through the :name: syntax, but should not spam them.
+Privately discover this server's custom emojis. Use matching emojis sparingly in replies through the `:name:` syntax. When an emoji is useful as a visual reference, construct its static PNG URL from the returned ID using the provided template, inspect it with `fetch_images`, then pass the same URL to image generation if appropriate; do not expose the CDN URL in chat.

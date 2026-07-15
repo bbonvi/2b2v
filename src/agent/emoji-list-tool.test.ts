@@ -19,14 +19,14 @@ function makeDeps(overrides: Partial<EmojiListToolDeps> = {}): EmojiListToolDeps
 }
 
 describe("buildEmojiListOutput", () => {
-  test("formats compact legend and raw rows", () => {
+  test("formats compact rows and the image URL template", () => {
     const output = buildEmojiListOutput(EMOJIS);
 
     expect(output).toContain("Available custom emojis (2)");
-    expect(output).toContain("Legend: S=static, A=animated");
-    expect(output).toContain("Rows: kind | name | use | discord");
-    expect(output).toContain("S | wave | :wave: | <:wave:333>");
-    expect(output).toContain("A | dance | :dance: | <a:dance:222>");
+    expect(output).toContain("Rows: kind | emoji | id (S=static, A=animated)");
+    expect(output).toContain("Image URL: https://cdn.discordapp.com/emojis/{id}.png?size=4096");
+    expect(output).toContain("S | :wave: | 333");
+    expect(output).toContain("A | :dance: | 222");
   });
 
   test("handles no emojis gracefully", () => {

@@ -13,7 +13,7 @@ const ListEmojisParams = Type.Object({});
 
 /**
  * Format custom emoji inventory for compact model discovery.
- * Rows intentionally include both the `:name:` form the model should write and the raw Discord form for disambiguation.
+ * Rows include only reply syntax and the ID needed to construct a visual-reference URL.
  */
 export function buildEmojiListOutput(emojis: EmojiEntry[]): string {
   if (emojis.length === 0) {
@@ -22,16 +22,13 @@ export function buildEmojiListOutput(emojis: EmojiEntry[]): string {
 
   const rows = emojis.map((emoji) => {
     const kind = emoji.animated ? "A" : "S";
-    const discord = emoji.animated
-      ? `<a:${emoji.name}:${emoji.id}>`
-      : `<:${emoji.name}:${emoji.id}>`;
-    return `${kind} | ${emoji.name} | :${emoji.name}: | ${discord}`;
+    return `${kind} | :${emoji.name}: | ${emoji.id}`;
   });
 
   return [
     `Available custom emojis (${emojis.length})`,
-    "Legend: S=static, A=animated; use :name: in replies and let outbound translation send the Discord form.",
-    "Rows: kind | name | use | discord",
+    "Rows: kind | emoji | id (S=static, A=animated)",
+    "Image URL: https://cdn.discordapp.com/emojis/{id}.png?size=4096",
     ...rows,
   ].join("\n");
 }
