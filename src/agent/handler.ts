@@ -257,6 +257,8 @@ export interface HandlerDeps {
   triggerInstructions?: TriggerInstructions;
   completeChat?: ChatCompleteFn;
   afterReply?: (request: MemoryExtractionRequest) => Promise<void>;
+  /** Registers fire-and-forget maintenance so coordinated shutdown can await it. */
+  trackBackgroundTask?: (task: Promise<void>) => void;
   /** Persists prompt-only assistant traces such as ignored replies. */
   onIgnoredReply?: (request: IgnoredReplyRequest) => void | Promise<void>;
   /** Live OpenRouter metadata result for the selected main model. Unknown means try native image input first. */
@@ -2623,7 +2625,7 @@ export async function handleMessage(
   let finalText = "";
   let mainReplyProviderNativeContent: ProviderNativeAssistantContent[] | undefined;
   const scheduleMemoryPass = (assistantReply: string, visibleReplySent: boolean): void => {
-    void deps.afterReply?.({
+    const task = deps.afterReply?.({
       sourceMessageId: msg.messageId,
       userMessage: userContent,
       assistantReply,
@@ -2639,6 +2641,9 @@ export async function handleMessage(
         error: error instanceof Error ? error.message : String(error),
       });
     });
+    if (task === undefined) return;
+    deps.trackBackgroundTask?.(task);
+    void task;
   };
 
   try {

@@ -750,6 +750,54 @@ describe("createChannelDispatcher", () => {
     expect(batches).toHaveLength(0);
   });
 
+  test("drain flushes debounce work and refuses later enqueues", async () => {
+    const batches: string[][] = [];
+    const dispatcher = createChannelDispatcher({
+      config: makeConfig({ defaultDebounceMs: 10_000 }),
+      triggers: makeTriggers(),
+      handler: (messages) => {
+        batches.push(messages.map((message) => message.id));
+        return Promise.resolve(undefined);
+      },
+    });
+    enqueue(dispatcher, makeMessage("ch-1", "pending"));
+
+    await dispatcher.drain();
+
+    expect(batches).toEqual([["pending"]]);
+    expect(dispatcher.enqueue(makeMessage("ch-1", "late"), {
+      authorId: "user-1",
+      triggerResult: { reason: "mention" },
+    })).toBe(false);
+    dispatcher.dispose();
+  });
+
+  test("drain waits for running work and processes messages queued behind it", async () => {
+    const batches: string[][] = [];
+    let releaseFirst: (() => void) | undefined;
+    const dispatcher = createChannelDispatcher({
+      config: makeConfig({ defaultDebounceMs: 20 }),
+      triggers: makeTriggers(),
+      handler: (messages) => {
+        batches.push(messages.map((message) => message.id));
+        if (batches.length !== 1) return Promise.resolve(undefined);
+        return new Promise((resolve) => { releaseFirst = () => resolve(undefined); });
+      },
+    });
+    enqueue(dispatcher, makeMessage("ch-1", "running"));
+    await activeTimers.advance(20);
+    enqueue(dispatcher, makeMessage("ch-1", "queued"));
+
+    const draining = dispatcher.drain();
+    await Promise.resolve();
+    expect(batches).toEqual([["running"]]);
+    releaseFirst?.();
+    await draining;
+
+    expect(batches).toEqual([["running"], ["queued"]]);
+    dispatcher.dispose();
+  });
+
   test("handler errors do not break serialization", async () => {
     let callCount = 0;
     const handler: DispatchHandler = (_msgs) => {

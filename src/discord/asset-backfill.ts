@@ -18,9 +18,12 @@ export async function backfillMessageAssets(input: {
   client: Client;
   logger: Logger;
   delayMs?: number;
+  signal?: AbortSignal;
 }): Promise<void> {
   const failedChannels = new Set<string>();
+  const isAborted = (): boolean => input.signal?.aborted === true;
   for (;;) {
+    if (isAborted()) return;
     const channels = input.db.raw.prepare(`SELECT m.guild_id, m.channel_id, MIN(m.created_at) AS oldest_at,
         MAX(m.created_at) AS newest_at, c.before_message_id
       FROM messages m
@@ -32,6 +35,7 @@ export async function backfillMessageAssets(input: {
     const pending = channels.filter((row) => !failedChannels.has(row.channel_id));
     if (pending.length === 0) return;
     for (const row of pending) {
+      if (isAborted()) return;
       try {
         const channel = await input.client.channels.fetch(row.channel_id);
         if (channel === null || !("messages" in channel)) {
@@ -64,6 +68,7 @@ export async function backfillMessageAssets(input: {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+      if (isAborted()) return;
       await Bun.sleep(input.delayMs ?? 250);
     }
   }

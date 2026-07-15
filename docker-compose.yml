@@ -21,6 +21,8 @@ services:
       - ./profiles:/app/profiles:ro
     ports:
       - "127.0.0.1:${DASHBOARD_PORT:-31456}:3000"
+    # Replies and image delivery remain live during coordinated shutdown.
+    stop_grace_period: 30m
     restart: unless-stopped
 
 volumes:

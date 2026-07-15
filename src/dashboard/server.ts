@@ -259,7 +259,7 @@ async function relationshipsLabAssetResponse(): Promise<Response> {
   return new Response(relationshipsLabBundle.body, { headers: relationshipsLabBundle.headers });
 }
 
-export function startDashboard(opts: DashboardOptions): void {
+export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.serve> {
   const { port, password, bypassAuth = false, passwordlessCidrs = [], trustedProxyCidrs = [], management, log } = opts;
 
   function requestSocketAddress(req: Request): string | undefined {
@@ -595,6 +595,7 @@ export function startDashboard(opts: DashboardOptions): void {
   });
 
   log?.info("dashboard started", { port });
+  return server;
 }
 
 const loginHtml = `<!DOCTYPE html>

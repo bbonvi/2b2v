@@ -213,6 +213,7 @@ export type AmbientRuntimeDeps = {
   }) => MessageSender;
   createHandlerDeps: (input: CreateHandlerDepsInput) => HandlerDeps;
   processTriggeredMessage: (message: Message, triggerResult?: NonNullable<TriggerResult>, currentTurnMessages?: readonly Message[], options?: { disableLiveOutput?: boolean; defaultReply?: boolean; triggerInstruction?: string; currentTurnOverride?: { messageId: string; timestamp: number; content: string }; preSendCheck?: () => boolean; onWriteToolStart?: (toolName: string) => void }) => Promise<unknown>;
+  trackBackgroundTask?: (task: Promise<unknown>) => void;
   isAutonomousAttentionBusy?: (guildId: string, channelId: string) => boolean;
   preparePersonaModeTurn?: (guildId: string) => void;
 };
@@ -233,6 +234,14 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
   const getGlobalConfig = input.getGlobalConfig;
   const preparePersonaModeTurn = input.preparePersonaModeTurn;
   const TYPING_INTERVAL_MS = input.typingIntervalMs;
+
+  function startTrackedAmbientTask(task: Promise<unknown>, label: string): void {
+    const handled = task.catch((error: unknown) => {
+      log.error(`${label} failed`, { error: error instanceof Error ? error.message : String(error) });
+    });
+    input.trackBackgroundTask?.(handled);
+    void handled;
+  }
   const getGuildConfig = input.getGuildConfig;
   const dashboardTriggerLocation = input.dashboardTriggerLocation;
   const buildInboundResolvers = input.buildInboundResolvers;
@@ -308,6 +317,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
   };
 
   const ambientCandidateTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let ambientAttentionGeneration = 0;
   const ambientLeases = new Map<string, AmbientLease>();
   const ambientPendingCandidates = new Map<string, AmbientPendingCandidate>();
   const ambientTypingByChannelUser = new Map<string, number>();
@@ -684,11 +694,13 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
   function armPendingCandidate(key: string, candidate: AmbientCandidate, delayMs: number): void {
     clearPendingCandidate(key);
     logAmbientScheduled(candidate, delayMs);
+    const generation = ambientAttentionGeneration;
     const timer = setTimeout(() => {
+      if (generation !== ambientAttentionGeneration) return;
       const pending = ambientPendingCandidates.get(key);
       if (pending?.candidate.id === candidate.id) ambientPendingCandidates.delete(key);
       ambientCandidateTimers.delete(candidate.id);
-      void runAmbientCandidate(candidate);
+      startTrackedAmbientTask(runAmbientCandidate(candidate), "ambient candidate");
     }, delayMs);
     ambientPendingCandidates.set(key, { candidate, timer });
     ambientCandidateTimers.set(candidate.id, timer);
@@ -1041,6 +1053,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
   }
 
   function clearAmbientAttentionState(): void {
+    ambientAttentionGeneration += 1;
     for (const timer of ambientCandidateTimers.values()) clearTimeout(timer);
     ambientCandidateTimers.clear();
     ambientLeases.clear();
@@ -1132,6 +1145,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
   const ambientInitiativeLastByKind = new Map<string, number>();
   const ambientInitiativeRecords: AmbientInitiativeRecord[] = [];
   const AMBIENT_INITIATIVE_RECORD_LIMIT = 300;
+  let ambientInitiativeLoopsEnabled = false;
 
   function ambientInitiativeLockKey(guildId: string, channelId: string): string {
     return `${guildId}:${channelId}`;
@@ -1147,6 +1161,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
   }
 
   function clearAmbientInitiativeState(): void {
+    ambientInitiativeLoopsEnabled = false;
     for (const timer of ambientInitiativeTimers.values()) clearTimeout(timer);
     ambientInitiativeTimers.clear();
     ambientInitiativeRunning.clear();
@@ -2273,6 +2288,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
   }
 
   function scheduleAmbientInitiativeGuild(guildId: string): void {
+    if (!ambientInitiativeLoopsEnabled) return;
     const guildConfig = getGuildConfig(guildId);
     const config = guildConfig.ambientInitiative;
     if (config === undefined || !config.enabled) return;
@@ -2281,13 +2297,17 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     const delayMs = randomBetween(config.checkIntervalMinMs, config.checkIntervalMaxMs);
     const timer = setTimeout(() => {
       ambientInitiativeTimers.delete(guildId);
-      void runAmbientInitiativeOpportunity(guildId).finally(() => scheduleAmbientInitiativeGuild(guildId));
+      startTrackedAmbientTask(
+        runAmbientInitiativeOpportunity(guildId).finally(() => scheduleAmbientInitiativeGuild(guildId)),
+        "ambient initiative",
+      );
     }, delayMs);
     timer.unref();
     ambientInitiativeTimers.set(guildId, timer);
   }
 
   function startAmbientInitiativeLoops(): void {
+    ambientInitiativeLoopsEnabled = true;
     for (const guild of client.guilds.cache.values()) {
       scheduleAmbientInitiativeGuild(guild.id);
     }

@@ -70,6 +70,15 @@ export function shouldRespond(
   return null;
 }
 
+/** Evaluate only deliberate triggers, excluding the random-response branch. */
+export function shouldRespondDeliberately(
+  input: TriggerInput,
+  triggers: TriggerConfig,
+): Exclude<TriggerResult, { reason: "random" }> {
+  const result = shouldRespond(input, triggers, () => 1);
+  return result?.reason === "random" ? null : result;
+}
+
 /** Escape literal text before interpolating it into a regular expression. */
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

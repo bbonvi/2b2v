@@ -59,6 +59,8 @@ const MAX_ONE_OFF_TIMER_DELAY_MS = 2_147_483_647;
 export interface SchedulerEngine {
   start(): void;
   stop(): void;
+  /** Wait for schedule callbacks that had already started before stop(). */
+  drain(): Promise<void>;
   isRunning(): boolean;
   activeCount(): number;
   addSchedule(scheduleId: string): void;
@@ -81,6 +83,7 @@ export function createSchedulerEngine(
     MAX_ONE_OFF_TIMER_DELAY_MS,
   );
   const jobs = new Map<string, ActiveJob>();
+  const activeFires = new Set<Promise<void>>();
   let running = false;
 
   const noopLog: SchedulerLogger = { error: () => {} };
@@ -127,7 +130,12 @@ export function createSchedulerEngine(
             });
           },
         }, () => {
-          void fire(schedule.id);
+          void fire(schedule.id).catch((err: unknown) => {
+            logger.error("cron execution error", {
+              scheduleId: schedule.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
         });
         jobs.set(schedule.id, { cron, scheduleId: schedule.id });
       } catch (err) {
@@ -148,7 +156,12 @@ export function createSchedulerEngine(
     const delayMs = schedule.runAt - timers.now();
     if (delayMs <= 0) {
       if (fireWhenDue) {
-        void fire(schedule.id);
+        void fire(schedule.id).catch((err: unknown) => {
+          logger.error("one-off execution error", {
+            scheduleId: schedule.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
       } else {
         // Past one-offs found during startup should not fire unexpectedly.
         updateSchedule(db, schedule.id, { enabled: false });
@@ -176,7 +189,7 @@ export function createSchedulerEngine(
     return false;
   }
 
-  async function fire(scheduleId: string): Promise<void> {
+  async function executeFire(scheduleId: string): Promise<void> {
     const existing = getSchedule(db, scheduleId);
     if (!existing || !existing.enabled) return;
     if (existing.expiresAt !== null && existing.expiresAt <= timers.now()) {
@@ -207,6 +220,22 @@ export function createSchedulerEngine(
     }
   }
 
+  function fire(scheduleId: string): Promise<void> {
+    if (!running) return Promise.resolve();
+    const task = executeFire(scheduleId);
+    const tracked = task.finally(() => {
+      activeFires.delete(tracked);
+    });
+    activeFires.add(tracked);
+    return tracked;
+  }
+
+  async function drain(): Promise<void> {
+    while (activeFires.size > 0) {
+      await Promise.allSettled([...activeFires]);
+    }
+  }
+
   function clearJob(id: string): void {
     const job = jobs.get(id);
     if (job === undefined) return;
@@ -230,6 +259,8 @@ export function createSchedulerEngine(
       jobs.clear();
     },
 
+    drain,
+
     isRunning() {
       return running;
     },
@@ -239,6 +270,7 @@ export function createSchedulerEngine(
     },
 
     addSchedule(scheduleId: string) {
+      if (!running) return;
       const schedule = getSchedule(db, scheduleId);
       if (!schedule || !schedule.enabled) return;
       scheduleJob(schedule);

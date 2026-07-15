@@ -19,7 +19,13 @@ async function fetchCompleteReaction(reaction: MessageReaction | PartialMessageR
   }
 }
 
-export function registerReactionSyncRuntime(input: { client: Client; db: Database; log: Logger }): void {
+export function registerReactionSyncRuntime(input: {
+  client: Client;
+  db: Database;
+  log: Logger;
+  isAcceptingEvents?: () => boolean;
+  trackTask?: (task: Promise<void>) => void;
+}): void {
   const { client, db, log } = input;
 
   async function processMessageReactionCount(
@@ -56,29 +62,40 @@ export function registerReactionSyncRuntime(input: { client: Client; db: Databas
     deleteMessageReactions(db, message.id, message.guildId);
   }
 
-  client.on("messageReactionAdd", (reaction) => void (async () => {
-    try {
-      await processMessageReactionCount(reaction);
-    } catch (err) {
-      log.error("messageReactionAdd handler error", {
-        messageId: reaction.message.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  })());
+  client.on("messageReactionAdd", (reaction) => {
+    if (input.isAcceptingEvents?.() === false) return;
+    const task = (async () => {
+      try {
+        await processMessageReactionCount(reaction);
+      } catch (err) {
+        log.error("messageReactionAdd handler error", {
+          messageId: reaction.message.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+    input.trackTask?.(task);
+    void task;
+  });
 
-  client.on("messageReactionRemove", (reaction) => void (async () => {
-    try {
-      await processMessageReactionCount(reaction, true);
-    } catch (err) {
-      log.error("messageReactionRemove handler error", {
-        messageId: reaction.message.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  })());
+  client.on("messageReactionRemove", (reaction) => {
+    if (input.isAcceptingEvents?.() === false) return;
+    const task = (async () => {
+      try {
+        await processMessageReactionCount(reaction, true);
+      } catch (err) {
+        log.error("messageReactionRemove handler error", {
+          messageId: reaction.message.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+    input.trackTask?.(task);
+    void task;
+  });
 
   client.on("messageReactionRemoveEmoji", (reaction) => {
+    if (input.isAcceptingEvents?.() === false) return;
     try {
       processMessageReactionRemoveEmoji(reaction);
     } catch (err) {
@@ -90,6 +107,7 @@ export function registerReactionSyncRuntime(input: { client: Client; db: Databas
   });
 
   client.on("messageReactionRemoveAll", (message) => {
+    if (input.isAcceptingEvents?.() === false) return;
     try {
       processMessageReactionRemoveAll(message);
     } catch (err) {

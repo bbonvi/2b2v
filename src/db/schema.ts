@@ -112,6 +112,12 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_codex_reasoning_continuations_created
     ON codex_reasoning_continuations(created_at);
 
+  CREATE TABLE IF NOT EXISTS restart_recovery (
+    singleton   INTEGER PRIMARY KEY CHECK(singleton = 1),
+    cutoff_at  INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS memory_extraction_checkpoints (
     guild_id                 TEXT NOT NULL,
     channel_id               TEXT NOT NULL,

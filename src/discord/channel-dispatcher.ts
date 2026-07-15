@@ -72,10 +72,12 @@ interface ChannelState {
 }
 
 export interface ChannelDispatcher {
-  /** Enqueue a message for processing. Returns immediately. */
-  enqueue(message: unknown, options: EnqueueOptions): void;
+  /** Enqueue a message for processing. Returns false after draining begins. */
+  enqueue(message: unknown, options: EnqueueOptions): boolean;
   /** Record a typing start event for a user in a channel. */
   recordTyping(channelId: string, userId: string): void;
+  /** Stop accepting work, flush debounce waits, and resolve when all accepted work finishes. */
+  drain(): Promise<void>;
   /** Shut down all timers and pending state. */
   dispose(): void;
 }
@@ -208,6 +210,25 @@ export function createChannelDispatcher(opts: {
     clearTimeout: (timer: DispatcherTimer) => { clearTimeout(timer as ReturnType<typeof setTimeout>); },
   };
   const channels = new Map<string, ChannelState>();
+  let accepting = true;
+  let drainPromise: Promise<void> | null = null;
+  let resolveDrain: (() => void) | null = null;
+
+  function allChannelsIdle(): boolean {
+    for (const state of channels.values()) {
+      if (state.running || state.pending.length > 0 || state.queued.length > 0 || state.debounceTimer !== null) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function resolveDrainIfIdle(): void {
+    if (resolveDrain === null || !allChannelsIdle()) return;
+    const resolve = resolveDrain;
+    resolveDrain = null;
+    resolve();
+  }
 
   function getChannelId(message: unknown): string {
     // duck-type: discord.js Message has channelId
@@ -324,6 +345,10 @@ export function createChannelDispatcher(opts: {
 
   function ensurePendingDebounce(channelId: string, state: ChannelState): void {
     if (state.pending.length === 0 || state.debounceTimer !== null) return;
+    if (!accepting) {
+      fireDebounce(channelId);
+      return;
+    }
     const trigger = selectDispatchTrigger(state.pending);
     state.debounceTimer = timers.setTimeout(
       () => fireDebounce(channelId),
@@ -368,7 +393,10 @@ export function createChannelDispatcher(opts: {
 
     // Start handler with current pending batch
     const { batch, trigger: dispatchTrigger } = takeNextDispatchBatch(state);
-    if (batch.length === 0) return;
+    if (batch.length === 0) {
+      resolveDrainIfIdle();
+      return;
+    }
     state.running = true;
     debug?.("dispatcher_debounce_dispatch", {
       channelId,
@@ -400,15 +428,17 @@ export function createChannelDispatcher(opts: {
           state.queued = [];
         }
         ensurePendingDebounce(channelId, state);
+        resolveDrainIfIdle();
       });
   }
 
-  function enqueue(message: unknown, options: EnqueueOptions): void {
+  function enqueue(message: unknown, options: EnqueueOptions): boolean {
+    if (!accepting) return false;
     const channelId = getChannelId(message);
     const state = getOrCreateState(channelId);
     const messageId = getMessageId(message);
     if (state.suppressedIds.has(messageId)) {
-      return;
+      return false;
     }
 
     const pending: PendingMessage = {
@@ -467,9 +497,11 @@ export function createChannelDispatcher(opts: {
       () => fireDebounce(channelId),
       getDebounceMs(trigger),
     );
+    return true;
   }
 
   function recordTyping(channelId: string, userId: string): void {
+    if (!accepting) return;
     const observedAt = timers.now();
     const state = getOrCreateState(channelId);
     state.typingByUser.set(userId, observedAt);
@@ -477,7 +509,25 @@ export function createChannelDispatcher(opts: {
     debug?.("dispatcher_typing", { channelId, userId, observedAt });
   }
 
+  function drain(): Promise<void> {
+    if (drainPromise !== null) return drainPromise;
+    accepting = false;
+    drainPromise = new Promise<void>((resolve) => {
+      resolveDrain = resolve;
+    });
+    for (const [channelId, state] of channels) {
+      if (state.debounceTimer !== null) {
+        timers.clearTimeout(state.debounceTimer);
+        state.debounceTimer = null;
+      }
+      if (state.pending.length > 0) fireDebounce(channelId);
+    }
+    resolveDrainIfIdle();
+    return drainPromise;
+  }
+
   function dispose(): void {
+    accepting = false;
     for (const [, state] of channels) {
       if (state.debounceTimer !== null) {
         timers.clearTimeout(state.debounceTimer);
@@ -485,9 +535,10 @@ export function createChannelDispatcher(opts: {
       }
     }
     channels.clear();
+    resolveDrainIfIdle();
   }
 
-  return { enqueue, recordTyping, dispose };
+  return { enqueue, recordTyping, drain, dispose };
 }
 
 function triggerPriority(trigger: DispatchTrigger): number {

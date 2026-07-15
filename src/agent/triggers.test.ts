@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { shouldRespond, type TriggerInput } from "./triggers.ts";
+import { shouldRespond, shouldRespondDeliberately, type TriggerInput } from "./triggers.ts";
 import type { TriggerConfig } from "../config/types.ts";
 
 function makeTriggers(overrides: Partial<TriggerConfig> = {}): TriggerConfig {
@@ -196,5 +196,19 @@ describe("shouldRespond", () => {
       makeTriggers({ keywords: ["туби"] })
     );
     expect(result).toBeNull();
+  });
+});
+
+describe("shouldRespondDeliberately", () => {
+  test("preserves mentions, replies, and keywords while suppressing random triggers", () => {
+    const triggers = makeTriggers({ keywords: ["2b"], randomChance: 1 });
+
+    expect(shouldRespondDeliberately(makeInput({ mentionedUserIds: ["bot-1"] }), triggers))
+      .toEqual({ reason: "mention" });
+    expect(shouldRespondDeliberately(makeInput({ repliedToBot: true }), triggers))
+      .toEqual({ reason: "mention" });
+    expect(shouldRespondDeliberately(makeInput({ content: "hello 2b" }), triggers))
+      .toEqual({ reason: "keyword", keyword: "2b" });
+    expect(shouldRespondDeliberately(makeInput({ content: "ordinary message" }), triggers)).toBeNull();
   });
 });

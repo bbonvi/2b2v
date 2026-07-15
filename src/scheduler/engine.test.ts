@@ -272,6 +272,41 @@ describe("SchedulerEngine", () => {
     expect(e.activeCount()).toBe(0);
   });
 
+  test("a cron callback reaching the event loop after stop does not fire", async () => {
+    addCronSchedule("* * * * * *");
+    const e = makeEngine();
+    e.start();
+    e.stop();
+
+    crons.fire();
+    await Promise.resolve();
+
+    expect(fired).toHaveLength(0);
+  });
+
+  test("drain waits for a schedule callback that started before stop", async () => {
+    addCronSchedule("* * * * * *");
+    let release: (() => void) | undefined;
+    engine = createSchedulerEngine({
+      db,
+      onFire: () => new Promise<void>((resolve) => { release = resolve; }),
+      timers: timers.api,
+      createCron: crons.create,
+    });
+    engine.start();
+    crons.fire();
+    await Promise.resolve();
+    engine.stop();
+    let drained = false;
+    const draining = engine.drain().then(() => { drained = true; });
+    await Promise.resolve();
+
+    expect(drained).toBe(false);
+    release?.();
+    await draining;
+    expect(drained).toBe(true);
+  });
+
   test("handles invalid cron expression gracefully", () => {
     createSchedule(db, {
       guildId: "guild-1",

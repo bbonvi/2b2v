@@ -26,6 +26,8 @@ export function registerInteractionRuntime(input: {
   vpnEnabled: boolean;
   startTime: number;
   log: Logger;
+  isAcceptingEvents?: () => boolean;
+  trackTask?: (task: Promise<void>) => void;
 }): void {
   const commandHandlers = new Map<string, CommandHandler>();
 
@@ -72,56 +74,61 @@ export function registerInteractionRuntime(input: {
     }));
   }
 
-  input.client.on("interactionCreate", (interaction) => void (async () => {
-    if (interaction.isButton() || interaction.isStringSelectMenu()) {
-      try {
-        const handled = await handleVpnComponent(interaction, vpnDeps());
-        if (!handled) {
-          input.log.warn("unknown component interaction", { customId: interaction.customId });
+  input.client.on("interactionCreate", (interaction) => {
+    if (input.isAcceptingEvents?.() === false) return;
+    const task = (async () => {
+      if (interaction.isButton() || interaction.isStringSelectMenu()) {
+        try {
+          const handled = await handleVpnComponent(interaction, vpnDeps());
+          if (!handled) {
+            input.log.warn("unknown component interaction", { customId: interaction.customId });
+          }
+        } catch (err) {
+          input.log.error("component interaction error", {
+            customId: interaction.customId,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
-      } catch (err) {
-        input.log.error("component interaction error", {
-          customId: interaction.customId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+        return;
       }
-      return;
-    }
 
-    if (!interaction.isChatInputCommand()) return;
+      if (!interaction.isChatInputCommand()) return;
 
-    if (interaction.commandName === "vpn") {
+      if (interaction.commandName === "vpn") {
+        try {
+          await handleVpnCommand(interaction, vpnDeps());
+        } catch (err) {
+          input.log.error("vpn command error", {
+            guildId: interaction.guildId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({ content: "Произошла ошибка.", flags: MessageFlags.Ephemeral }).catch(() => {});
+          }
+        }
+        return;
+      }
+
+      if (interaction.guildId === null) return;
+      setupCommandHandlers(interaction.guildId);
+
+      const handler = commandHandlers.get(interaction.commandName);
+      if (handler === undefined) return;
+
       try {
-        await handleVpnCommand(interaction, vpnDeps());
+        await handler(interaction);
       } catch (err) {
-        input.log.error("vpn command error", {
+        input.log.error("command handler error", {
+          command: interaction.commandName,
           guildId: interaction.guildId,
           error: err instanceof Error ? err.message : String(err),
         });
         if (!interaction.replied && !interaction.deferred) {
-          await interaction.reply({ content: "Произошла ошибка.", flags: MessageFlags.Ephemeral }).catch(() => {});
+          await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral }).catch(() => {});
         }
       }
-      return;
-    }
-
-    if (interaction.guildId === null) return;
-    setupCommandHandlers(interaction.guildId);
-
-    const handler = commandHandlers.get(interaction.commandName);
-    if (handler === undefined) return;
-
-    try {
-      await handler(interaction);
-    } catch (err) {
-      input.log.error("command handler error", {
-        command: interaction.commandName,
-        guildId: interaction.guildId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral }).catch(() => {});
-      }
-    }
-  })());
+    })();
+    input.trackTask?.(task);
+    void task;
+  });
 }

@@ -147,6 +147,7 @@ interface PersonaModeRuntimeOptions {
   now?: () => number;
   random?: () => number;
   timers?: PersonaModeTimers;
+  trackBackgroundTask?: (task: Promise<void>) => void;
 }
 
 interface PersonaModeTimers {
@@ -183,6 +184,7 @@ interface PersonaModeContextRuntimeOptions {
   now: () => number;
   random: () => number;
   timers: PersonaModeTimers;
+  trackBackgroundTask?: (task: Promise<void>) => void;
 }
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -544,7 +546,7 @@ function createPersonaModeContextRuntime(options: PersonaModeContextRuntimeOptio
     }
     const attempted = desiredAvatar;
     avatarInFlight = true;
-    void options.presentation.applyAvatar(attempted).then((result) => {
+    const task = options.presentation.applyAvatar(attempted).then((result) => {
       state.appliedAvatarId = attempted?.id ?? null;
       state.appliedAvatarContentHash = attempted?.contentHash ?? INHERITED_AVATAR_CONTENT_HASH;
       state.appliedDiscordAvatarHash = result.discordAvatarHash;
@@ -573,6 +575,8 @@ function createPersonaModeContextRuntime(options: PersonaModeContextRuntimeOptio
       persist();
       reconcile(options.now());
     });
+    options.trackBackgroundTask?.(task);
+    void task;
   }
 
   function lifecycleTimes(now: number): number[] {
@@ -914,6 +918,7 @@ export function createPersonaModeRuntime(options: PersonaModeRuntimeOptions): Pe
     now,
     random,
     timers,
+    trackBackgroundTask: options.trackBackgroundTask,
   });
   const guildRuntimes = new Map<string, PersonaModeContextRuntime>();
 
@@ -934,6 +939,7 @@ export function createPersonaModeRuntime(options: PersonaModeRuntimeOptions): Pe
       now,
       random,
       timers,
+      trackBackgroundTask: options.trackBackgroundTask,
     });
     guildRuntimes.set(guildId, runtime);
     if (running) runtime.start();

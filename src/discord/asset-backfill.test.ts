@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
+import type { Client } from "discord.js";
 import { createDatabase } from "../db/database.ts";
-import { localMessageIdsInRange } from "./asset-backfill.ts";
+import { createLogger } from "../logger.ts";
+import { backfillMessageAssets, localMessageIdsInRange } from "./asset-backfill.ts";
 
 test("backfill page range includes missing Discord messages and excludes prior pages", () => {
   const db = createDatabase(":memory:");
@@ -11,5 +13,20 @@ test("backfill page range includes missing Discord messages and excludes prior p
   insert.run("200", 2);
   insert.run("300", 3);
   expect([...localMessageIdsInRange(db, "c", "301", "150")]).toEqual(["200", "300"]);
+  db.close();
+});
+
+test("asset backfill exits before querying Discord when shutdown already aborted it", async () => {
+  const db = createDatabase(":memory:");
+  const controller = new AbortController();
+  controller.abort();
+
+  await backfillMessageAssets({
+    db,
+    client: {} as Client,
+    logger: createLogger({ level: "error" }),
+    signal: controller.signal,
+  });
+
   db.close();
 });

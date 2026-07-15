@@ -20,7 +20,7 @@ import { createScheduledTaskRunner } from "./scheduler/scheduled-task-runtime";
 import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type HandleResult, type AssetAttachmentResolver, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
 import { trackWriteToolStarts } from "./agent/tool-access";
 import { buildComputedContactContextForUser } from "./agent/contact-context";
-import { shouldRespond, type TriggerResult } from "./agent/triggers";
+import { shouldRespond, shouldRespondDeliberately, type TriggerResult } from "./agent/triggers";
 import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
 import { typingSimulationDelayMs } from "./agent/typing-simulation";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
@@ -107,9 +107,12 @@ import { resolveReactionEmojiInput } from "./discord/reaction-emoji";
 import { createDiscordReplyFallbackDeps, createSyntheticReplyFallbackDeps, syncDeletedOwnBotMessage, syncEditedOwnBotMessage } from "./discord/reply-fallback-runtime";
 import { createDiscordAssetSourceResolver } from "./discord/asset-resolver";
 import { backfillMessageAssets } from "./discord/asset-backfill";
+import { fetchMessagesAfterRestart } from "./discord/restart-catchup";
+import { clearRestartRecoveryState, getRestartRecoveryState, listRecentDiscordChannels, setRestartRecoveryCutoff } from "./db/restart-recovery-repository";
+import { AsyncTaskTracker } from "./runtime/async-task-tracker";
 import { DEFAULT_ASSET_READING, DEFAULT_EXTERNAL_IMAGES } from "./config/defaults";
 import { join } from "path";
-import { mkdirSync, existsSync, readdirSync, statSync, watch } from "fs";
+import { mkdirSync, existsSync, readdirSync, statSync, watch, type FSWatcher } from "fs";
 import type { Database } from "./db/database";
 import { ActivityType, ChannelType, PermissionFlagsBits, type Client, type Guild, type GuildBasedChannel, type GuildMember, type Message, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
 
@@ -122,6 +125,15 @@ const logLevel = (process.env.LOG_LEVEL ?? "info") as LogLevel;
 const log = createLogger({ level: logLevel });
 
 const TYPING_INTERVAL_MS = 8_000;
+const RESTART_CATCHUP_MAX_AGE_MS = 30 * 60_000;
+const RESTART_CATCHUP_MAX_CHANNELS = 50;
+const RESTART_CATCHUP_MAX_MESSAGES_PER_CHANNEL = 500;
+
+const inboundMessageTasks = new AsyncTaskTracker();
+const imageJobTasks = new AsyncTaskTracker();
+const backgroundTasks = new AsyncTaskTracker();
+const assetBackfillController = new AbortController();
+let acceptingDiscordMessages = true;
 
 async function runImageGenerationJob(jobId: string): Promise<void> {
   const job = agentJobs.get(jobId);
@@ -622,6 +634,9 @@ function createHandlerDeps(input: {
         }
       },
     },
+    trackBackgroundTask: (task) => {
+      void backgroundTasks.track(task);
+    },
     ...input.overrides,
     onVisibleOutput: () => {
       onVisibleOutput?.();
@@ -758,6 +773,9 @@ const personaModeRuntime = createPersonaModeRuntime({
   config: globalConfig.personaModes,
   timezone: globalConfig.defaultTimezone,
   log: log.child({ component: "persona-modes" }),
+  trackBackgroundTask: (task) => {
+    void backgroundTasks.track(task);
+  },
   guildIds: () => [...client.guilds.cache.keys()],
   presentation: {
     global: {
@@ -988,6 +1006,10 @@ registerInteractionRuntime({
   vpnEnabled,
   startTime,
   log,
+  isAcceptingEvents: () => acceptingDiscordMessages,
+  trackTask: (task) => {
+    void backgroundTasks.track(task);
+  },
 });
 
 // --- 17. Build resolvers from a Discord guild ---
@@ -2495,7 +2517,7 @@ function buildAgentTools(
           ...(input.replacesJobId !== undefined ? { replacesJobId: input.replacesJobId } : {}),
         });
         if (result.created) {
-          void runImageGenerationJob(result.job.id).catch((err: unknown) => {
+          void imageJobTasks.track(runImageGenerationJob(result.job.id)).catch((err: unknown) => {
             log.error("async image job failed outside worker", {
               jobId: result.job.id,
               error: err instanceof Error ? err.message : String(err),
@@ -2563,6 +2585,9 @@ const ambientRuntime = createAmbientRuntime({
   createBotDiscordMessageSender,
   createHandlerDeps,
   processTriggeredMessage,
+  trackBackgroundTask: (task) => {
+    void backgroundTasks.track(task);
+  },
   isAutonomousAttentionBusy: isScheduledAttentionBusy,
   preparePersonaModeTurn: (guildId) => personaModeRuntime.prepareNaturalTurn(guildId),
 });
@@ -2603,18 +2628,18 @@ function messageRepliesToOwnBot(message: Message): boolean {
   return row !== null && row.user_id === botUserId && row.is_bot === 1;
 }
 
-function evaluateMessageTrigger(message: Message, guildConfig: GuildConfig): TriggerResult {
-  return shouldRespond(
-    {
-      content: message.content,
-      authorId: message.author.id,
-      authorIsBot: message.author.bot,
-      botUserId: client.user?.id ?? "",
-      mentionedUserIds: [...message.mentions.users.keys()],
-      repliedToBot: messageRepliesToOwnBot(message),
-    },
-    guildConfig.triggers,
-  );
+function evaluateMessageTrigger(message: Message, guildConfig: GuildConfig, deliberateOnly = false): TriggerResult {
+  const triggerInput = {
+    content: message.content,
+    authorId: message.author.id,
+    authorIsBot: message.author.bot,
+    botUserId: client.user?.id ?? "",
+    mentionedUserIds: [...message.mentions.users.keys()],
+    repliedToBot: messageRepliesToOwnBot(message),
+  };
+  return deliberateOnly
+    ? shouldRespondDeliberately(triggerInput, guildConfig.triggers)
+    : shouldRespond(triggerInput, guildConfig.triggers);
 }
 
 /** Process a triggered message through the full handler pipeline. */
@@ -3066,6 +3091,7 @@ async function processTriggeredMessage(
 
 // --- 22. typingStart handler ---
 client.on("typingStart", (typing: Typing) => {
+  if (!acceptingDiscordMessages) return;
   if (!typing.inGuild()) return;
   if (typing.user.bot) return;
   ambientRuntime.noteAmbientTyping(typing);
@@ -3080,16 +3106,29 @@ client.on("typingStart", (typing: Typing) => {
   );
 });
 
-registerReactionSyncRuntime({ client, db, log });
+registerReactionSyncRuntime({
+  client,
+  db,
+  log,
+  isAcceptingEvents: () => acceptingDiscordMessages,
+  trackTask: (task) => {
+    void backgroundTasks.track(task);
+  },
+});
 
 /** Queue Discord messages that arrive before startup dependencies are ready. */
 function handleMessageCreateEvent(message: Message): void {
+  if (!acceptingDiscordMessages) return;
   if (!startupMessageProcessingReady || startupMessageQueueDraining) {
     startupMessageQueue.push(message);
     return;
   }
 
-  void processDiscordMessageCreate(message);
+  startInboundMessageTask(message);
+}
+
+function startInboundMessageTask(message: Message): void {
+  void inboundMessageTasks.track(processDiscordMessageCreate(message));
 }
 
 function drainStartupMessageQueue(): void {
@@ -3100,11 +3139,63 @@ function drainStartupMessageQueue(): void {
   try {
     while (startupMessageQueue.length > 0) {
       const message = startupMessageQueue.shift();
-      if (message !== undefined) void processDiscordMessageCreate(message);
+      if (message !== undefined) startInboundMessageTask(message);
     }
   } finally {
     startupMessageQueueDraining = false;
   }
+}
+
+/** Persist one live Discord message and report whether this process claimed it first. */
+function persistInboundDiscordMessage(message: Message, translatedContent: string): boolean {
+  if (message.guild === null || message.guildId === null) return false;
+  const guildId = message.guildId;
+  const channelId = message.channelId;
+  const messageCreatedAt = message.createdTimestamp;
+  const now = Date.now();
+  const inserted = db.raw
+    .prepare(
+      `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      message.id,
+      guildId,
+      channelId,
+      message.author.id,
+      message.author.username,
+      message.content,
+      translatedContent,
+      message.author.bot ? 1 : 0,
+      messageCreatedAt,
+      message.reference?.messageId ?? null,
+    );
+
+  if (message.channel.isThread()) {
+    const updated = updateThreadActivity(db, channelId, {
+      lastActivityAt: messageCreatedAt,
+      lastMessageId: message.id,
+      archivedAt: message.channel.archived === true ? now : null,
+    });
+    if (!updated) {
+      upsertThread(db, {
+        threadId: channelId,
+        guildId,
+        parentChatId: message.channel.parentId ?? channelId,
+        starterMessageId: channelId,
+        threadName: message.channel.name,
+        createdAt: message.channel.createdTimestamp ?? now,
+        lastActivityAt: messageCreatedAt,
+        lastMessageId: message.id,
+        messageCount: message.channel.messageCount ?? 1,
+        createdByBot: message.channel.ownerId === client.user?.id,
+        archivedAt: message.channel.archived === true ? now : null,
+      });
+    }
+  }
+
+  syncMessageAssets(db, { messageId: message.id, assets: assetsFromDiscordMessage(message) });
+  return inserted.changes > 0;
 }
 
 // --- 23. messageCreate handler ---
@@ -3131,54 +3222,7 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
       translateInbound(message.content, inboundResolvers),
       message.stickers.values(),
     );
-
-    // Store message in SQLite using Discord time so prompt-history lookups can
-    // exclude the current turn precisely.
-    const messageCreatedAt = message.createdTimestamp;
-    const now = Date.now();
-    db.raw
-      .prepare(
-        `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        message.id,
-        guildId,
-        channelId,
-        message.author.id,
-        message.author.username,
-        message.content,
-        translatedContent,
-        message.author.bot ? 1 : 0,
-        messageCreatedAt,
-        message.reference?.messageId ?? null,
-      );
-
-    // Update thread activity if message is in a thread
-    if (message.channel.isThread()) {
-      const updated = updateThreadActivity(db, channelId, {
-        lastActivityAt: messageCreatedAt,
-        lastMessageId: message.id,
-        archivedAt: message.channel.archived === true ? now : null,
-      });
-      if (!updated) {
-        upsertThread(db, {
-          threadId: channelId,
-          guildId,
-          parentChatId: message.channel.parentId ?? channelId,
-          starterMessageId: channelId,
-          threadName: message.channel.name,
-          createdAt: message.channel.createdTimestamp ?? now,
-          lastActivityAt: messageCreatedAt,
-          lastMessageId: message.id,
-          messageCount: message.channel.messageCount ?? 1,
-          createdByBot: message.channel.ownerId === client.user?.id,
-          archivedAt: message.channel.archived === true ? now : null,
-        });
-      }
-    }
-
-    syncMessageAssets(db, { messageId: message.id, assets: assetsFromDiscordMessage(message) });
+    if (!persistInboundDiscordMessage(message, translatedContent)) return;
 
     const triggerResult = evaluateMessageTrigger(message, guildConfig);
     ambientRuntime.maybeScheduleAmbientAttention(message, triggerResult);
@@ -3208,19 +3252,111 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
   }
 }
 
+/** Recover deliberate triggers that arrived after coordinated shutdown stopped intake. */
+async function recoverMessagesAfterRestart(): Promise<void> {
+  const recovery = getRestartRecoveryState(db);
+  if (recovery === null) return;
+
+  const effectiveCutoffAt = Math.max(recovery.cutoffAt, Date.now() - RESTART_CATCHUP_MAX_AGE_MS);
+  const channels = listRecentDiscordChannels(db, RESTART_CATCHUP_MAX_CHANNELS);
+  let fetchedCount = 0;
+  let claimedCount = 0;
+  let triggerCount = 0;
+  if (effectiveCutoffAt !== recovery.cutoffAt) {
+    log.warn("restart catch-up cutoff was clamped", {
+      storedCutoffAt: recovery.cutoffAt,
+      effectiveCutoffAt,
+      maxAgeMs: RESTART_CATCHUP_MAX_AGE_MS,
+    });
+  }
+
+  for (const knownChannel of channels) {
+    try {
+      const channel = await fetchAccessibleGuildChannel(knownChannel.channelId);
+      if (channel === null || channel.guildId !== knownChannel.guildId) continue;
+      const fetched = await fetchMessagesAfterRestart<Message>({
+        cutoffAt: effectiveCutoffAt,
+        maxMessages: RESTART_CATCHUP_MAX_MESSAGES_PER_CHANNEL,
+        fetchAfter: async (afterMessageId, limit) => {
+          const page = await channel.messages.fetch({ after: afterMessageId, limit, cache: false });
+          return [...page.values()];
+        },
+      });
+      fetchedCount += fetched.fetched;
+      if (fetched.capped) {
+        log.warn("restart catch-up channel reached message cap", {
+          guildId: knownChannel.guildId,
+          channelId: knownChannel.channelId,
+          maxMessages: RESTART_CATCHUP_MAX_MESSAGES_PER_CHANNEL,
+        });
+      }
+
+      const recovered: Array<{ message: Message; triggerResult: TriggerResult }> = [];
+      for (const message of fetched.messages) {
+        if (message.author.id === client.user?.id || message.guild === null || message.guildId === null) continue;
+        const translatedContent = appendStickerTags(
+          translateInbound(message.content, buildInboundResolvers(message.guild)),
+          message.stickers.values(),
+        );
+        if (!persistInboundDiscordMessage(message, translatedContent)) continue;
+        claimedCount += 1;
+        const guildConfig = getGuildConfig(message.guildId);
+        const triggerResult = evaluateMessageTrigger(message, guildConfig, true);
+        if (triggerResult !== null) triggerCount += 1;
+        recovered.push({ message, triggerResult });
+      }
+
+      if (!recovered.some((entry) => entry.triggerResult !== null)) continue;
+      const guildConfig = getGuildConfig(knownChannel.guildId);
+      for (const entry of recovered) {
+        if (entry.triggerResult !== null) {
+          // Reuse only the normal-trigger guard; null recovered messages never seed ambient work.
+          ambientRuntime.maybeScheduleAmbientAttention(entry.message, entry.triggerResult);
+        }
+        if (guildConfig.dispatcher.enabled) {
+          getOrCreateDispatcher(knownChannel.guildId).enqueue(entry.message, {
+            authorId: entry.message.author.id,
+            triggerResult: entry.triggerResult,
+          });
+        } else if (entry.triggerResult !== null) {
+          await processTriggeredMessage(entry.message, entry.triggerResult);
+        }
+      }
+    } catch (error) {
+      log.warn("restart catch-up channel failed", {
+        guildId: knownChannel.guildId,
+        channelId: knownChannel.channelId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  clearRestartRecoveryState(db);
+  log.info("restart catch-up complete", {
+    cutoffAt: effectiveCutoffAt,
+    channels: channels.length,
+    fetched: fetchedCount,
+    claimed: claimedCount,
+    triggers: triggerCount,
+  });
+}
+
 client.on("messageUpdate", (_oldMessage, updatedMessage) => {
+  if (!acceptingDiscordMessages) return;
   if (updatedMessage.guildId === null) return;
   const stored = db.raw.prepare("SELECT 1 AS present FROM messages WHERE id = ?").get(updatedMessage.id) as { present: number } | null;
   if (stored === null) return;
-  void updatedMessage.fetch().then((message) => {
+  const task = updatedMessage.fetch().then((message) => {
     syncMessageAssets(db, { messageId: message.id, assets: assetsFromDiscordMessage(message) });
   }).catch((error: unknown) => {
     log.warn("message asset update failed", { messageId: updatedMessage.id, error: error instanceof Error ? error.message : String(error) });
   });
+  void backgroundTasks.track(task);
 });
 
 // --- 24. messageDelete handler ---
 client.on("messageDelete", (message) => {
+  if (!acceptingDiscordMessages) return;
   try {
     if (message.guildId === null) return;
 
@@ -3243,11 +3379,16 @@ const CONFIG_RELOAD_DEBOUNCE_MS = 500;
 const CONFIG_RELOAD_POLL_MS = 5000;
 let reloadTimer: ReturnType<typeof setTimeout> | null = null;
 let configReloadPollTimer: ReturnType<typeof setInterval> | null = null;
+const configWatchers: FSWatcher[] = [];
 let lastConfigFingerprint = configReloadFingerprint();
 
 function scheduleConfigReload(): void {
+  if (!acceptingDiscordMessages) return;
   if (reloadTimer !== null) clearTimeout(reloadTimer);
-  reloadTimer = setTimeout(() => void reloadConfigs(), CONFIG_RELOAD_DEBOUNCE_MS);
+  reloadTimer = setTimeout(() => {
+    reloadTimer = null;
+    void backgroundTasks.track(reloadConfigs());
+  }, CONFIG_RELOAD_DEBOUNCE_MS);
 }
 
 function configReloadFingerprint(): string {
@@ -3281,6 +3422,7 @@ async function reloadConfigs(): Promise<void> {
     // Reload guild configs — clear and rebuild
     const newGuilds = loadGuildConfigs(guildsDir, newGlobal);
     await modelImageSupport.refresh(newGlobal, newGuilds, "hot_reload");
+    if (!acceptingDiscordMessages) return;
 
     globalConfig = newGlobal;
     promptBundle = loadInstructionBundle(profilesDir, profile, log);
@@ -3291,12 +3433,16 @@ async function reloadConfigs(): Promise<void> {
       guildConfigs.set(id, cfg);
     }
 
-    // Invalidate dispatchers so they pick up new config on next enqueue
-    for (const d of dispatchers.values()) d.dispose();
+    // Swap first so new events use the new config while previously accepted work drains intact.
+    const previousDispatchers = [...dispatchers.values()];
     dispatchers.clear();
     ambientRuntime.clearAmbientAttentionState();
     ambientRuntime.clearAmbientInitiativeState();
     ambientRuntime.startAmbientInitiativeLoops();
+    await Promise.all(previousDispatchers.map(async (dispatcher) => {
+      await dispatcher.drain();
+      dispatcher.dispose();
+    }));
 
     log.info("config hot-reloaded", { model: globalConfig.defaultModel, guilds: guildConfigs.size });
   } catch (err) {
@@ -3314,6 +3460,7 @@ if (existsSync(profileDir)) {
 
   // Prevent watcher from keeping the process alive during shutdown
   watcher.unref();
+  configWatchers.push(watcher);
   log.info("profile hot-reload watcher started");
 
   configReloadPollTimer = setInterval(() => {
@@ -3333,10 +3480,12 @@ if (existsSync(sharedInstructionsDir)) {
   });
 
   watcher.unref();
+  configWatchers.push(watcher);
   log.info("shared instructions hot-reload watcher started");
 }
 
 // --- Health check summary ---
+await recoverMessagesAfterRestart();
 log.info("health check passed — all systems ready", {
   uptimeMs: Date.now() - startTime,
   guilds: guildConfigs.size,
@@ -3344,7 +3493,12 @@ log.info("health check passed — all systems ready", {
 });
 startupMessageProcessingReady = true;
 drainStartupMessageQueue();
-void backfillMessageAssets({ db, client, logger: log.child({ component: "asset-backfill" }) }).catch((error: unknown) => {
+void backgroundTasks.track(backfillMessageAssets({
+  db,
+  client,
+  logger: log.child({ component: "asset-backfill" }),
+  signal: assetBackfillController.signal,
+})).catch((error: unknown) => {
   log.warn("asset history backfill stopped", { error: error instanceof Error ? error.message : String(error) });
 });
 ambientRuntime.startAmbientInitiativeLoops();
@@ -3425,11 +3579,12 @@ const dashboardManagement = {
     getGuildConfig: () => resolveGuildConfig(globalConfig, { guildId: "dashboard", slug: "dashboard" }),
   }),
 };
+let dashboardServer: ReturnType<typeof startDashboard> | undefined;
 if (bypassDashboardAuth) {
-  startDashboard({ port: 3000, password: "", bypassAuth: true, management: dashboardManagement, log });
+  dashboardServer = startDashboard({ port: 3000, password: "", bypassAuth: true, management: dashboardManagement, log });
   log.warn("dashboard started with auth bypass — do not use in production");
 } else if (dashboardPassword !== undefined && dashboardPassword !== "") {
-  startDashboard({
+  dashboardServer = startDashboard({
     port: 3000,
     password: dashboardPassword,
     passwordlessCidrs: dashboardPasswordlessCidrs,
@@ -3445,24 +3600,55 @@ if (bypassDashboardAuth) {
 async function shutdown(signal: string): Promise<void> {
   log.info("shutting down", { signal });
 
+  setRestartRecoveryCutoff(db);
+  acceptingDiscordMessages = false;
+  startupMessageProcessingReady = false;
+  const dashboardStop = dashboardServer?.stop(false);
+
   clearInterval(memoryCleanupTimer);
   clearInterval(vpnSessionCleanupTimer);
   clearInterval(agentJobCleanupTimer);
   if (configReloadPollTimer !== null) clearInterval(configReloadPollTimer);
-  for (const d of dispatchers.values()) d.dispose();
-  dispatchers.clear();
+  if (reloadTimer !== null) clearTimeout(reloadTimer);
+  for (const watcher of configWatchers) watcher.close();
   ambientRuntime.clearAmbientAttentionState();
   ambientRuntime.clearAmbientInitiativeState();
   scheduler.stop();
   personaModeRuntime.stop();
+  assetBackfillController.abort(new Error("Asset backfill stopped for shutdown."));
+
+  await inboundMessageTasks.drain();
+  await Promise.all([...dispatchers.values()].map((dispatcher) => dispatcher.drain()));
+  await scheduler.drain();
+  await dashboardStop;
+  while (imageJobTasks.activeCount() > 0 || backgroundTasks.activeCount() > 0) {
+    await Promise.all([imageJobTasks.drain(), backgroundTasks.drain()]);
+  }
+
+  ambientRuntime.clearAmbientAttentionState();
+  ambientRuntime.clearAmbientInitiativeState();
+  for (const dispatcher of dispatchers.values()) dispatcher.dispose();
+  dispatchers.clear();
   await client.destroy();
   db.close();
 
   log.info("shutdown complete");
-  process.exit(0);
 }
 
-process.on("SIGINT", () => void shutdown("SIGINT"));
-process.on("SIGTERM", () => void shutdown("SIGTERM"));
+let shutdownPromise: Promise<void> | null = null;
+function requestShutdown(signal: string): void {
+  if (shutdownPromise !== null) {
+    log.warn("forcing shutdown after repeated signal", { signal });
+    process.exit(1);
+  }
+  shutdownPromise = shutdown(signal).catch((error: unknown) => {
+    log.error("graceful shutdown failed", { error: error instanceof Error ? error.message : String(error) });
+    process.exit(1);
+  });
+  void shutdownPromise;
+}
+
+process.on("SIGINT", () => requestShutdown("SIGINT"));
+process.on("SIGTERM", () => requestShutdown("SIGTERM"));
 
 export { db, guildConfigs, globalConfig, promptBundle, scheduler, client };

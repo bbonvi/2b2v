@@ -14,6 +14,10 @@ Tool-budget exhaustion is recoverable: pending calls receive synthetic results, 
 
 Typing is runtime-owned. Model work must not wait on typing simulation; pending typing indicators must be cancelled on visible output, ignore, error, or agent end.
 
+Coordinated shutdown records a restart cutoff before refusing new Discord events, then drains accepted dispatcher work, scheduled runs, image jobs, and background maintenance while Discord and SQLite remain available. Startup performs a bounded catch-up over recently known channels before normal intake and ambient loops begin. Catch-up persists missed history but dispatches only deliberate mentions, configured keywords, and replies to this bot; stale typing, random triggers, and ambient candidates are intentionally not reconstructed.
+
+Restart catch-up is an operational gap repair, not crash recovery. Accepted work before the cutoff must drain in the old process, while the new process owns only messages Discord reports after the cutoff. Message ingestion is idempotent by Discord message ID so REST catch-up and queued Gateway events cannot dispatch twice.
+
 Dispatch batches preserve the causal reply target. Debounced same-author follow-up text may join the current dispatch unit, but unrelated chatter and later triggers must not inherit another message's trigger reason.
 
 External Discord bots may enter deliberate mention, reply, and keyword trigger paths, but they are ineligible for random replies and ambient attention, lingering, or follow-up leases. Bot-only traffic must not seed ambient initiative; the current client's own messages must never re-enter the reply loop.
