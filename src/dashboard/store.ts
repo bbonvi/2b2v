@@ -422,7 +422,7 @@ function groupRequestLogs(entries: RequestLogEntry[]): RequestLogGroupSummary[] 
       estimatedCostUsd: estimatedCost > 0 ? estimatedCost : null,
       totalDurationMs: requests.reduce((total, request) => total + request.totalDurationMs, 0),
       outcome: combinedOutcome(requests.map((request) => request.outcome)),
-      timestamp: requests.reduce((latest, request) => request.timestamp > latest ? request.timestamp : latest, requests[0]?.timestamp ?? primary.timestamp),
+      timestamp: requests[0]?.timestamp ?? primary.timestamp,
     };
   }).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }

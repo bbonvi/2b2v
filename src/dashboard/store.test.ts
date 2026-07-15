@@ -274,6 +274,35 @@ describe("RequestLogStore", () => {
     expect(group?.requestCount).toBe(2);
   });
 
+  test("orders lifecycles by their first phase when an older lifecycle finishes later", () => {
+    const store = new RequestLogStore();
+    const olderContext = { messageId: "older", authorUsername: "alice", content: "first" };
+    const newerContext = { messageId: "newer", authorUsername: "bob", content: "second" };
+    store.push(makeEntry({
+      requestId: "older-main",
+      triggerContext: olderContext,
+      timestamp: "2026-06-17T00:00:01.000Z",
+    }));
+    store.push(makeEntry({
+      requestId: "newer-main",
+      triggerContext: newerContext,
+      timestamp: "2026-06-17T00:00:02.000Z",
+    }));
+    store.push(makeEntry({
+      requestId: "older-background",
+      trigger: { type: "background_memory_extraction", sourceRequestId: "older-main" },
+      triggerContext: olderContext,
+      timestamp: "2026-06-17T00:00:03.000Z",
+    }));
+
+    const groups = store.queryGroups();
+    expect(groups.map((group) => group.groupId)).toEqual([
+      "message:g1:c1:newer",
+      "message:g1:c1:older",
+    ]);
+    expect(groups[1]?.timestamp).toBe("2026-06-17T00:00:01.000Z");
+  });
+
   test("keeps empty maintenance and rejected ambient evaluations neutral", () => {
     const store = new RequestLogStore();
     store.push(makeEntry({

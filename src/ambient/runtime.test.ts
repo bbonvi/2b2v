@@ -3,6 +3,7 @@ import type { HistoryMessage } from "../agent/history-types.ts";
 import { DEFAULT_AMBIENT_ATTENTION } from "../config/defaults.ts";
 import { createDatabase, type Database } from "../db/database.ts";
 import {
+  ambientPendingKey,
   applyAmbientInitiativeBotPressure,
   ensureAmbientInitiativeBotMention,
   renderAmbientHistory,
@@ -145,6 +146,17 @@ describe("shouldDeferAmbientCandidateForTyping", () => {
     expect(shouldDeferAmbientCandidateForTyping("lingering_attention", "pre_send", "candidate stale")).toBe(false);
     expect(shouldDeferAmbientCandidateForTyping("ambient_pickup", "pre_send", "user typing active")).toBe(false);
     expect(shouldDeferAmbientCandidateForTyping("follow_up", "evaluate", "user typing active")).toBe(false);
+  });
+});
+
+describe("ambientPendingKey", () => {
+  test("shares pickup work across a channel but keeps conversational modes per user", () => {
+    expect(ambientPendingKey("ambient_pickup", "g1", "c1", "u1"))
+      .toBe(ambientPendingKey("ambient_pickup", "g1", "c1", "u2"));
+    expect(ambientPendingKey("lingering_attention", "g1", "c1", "u1"))
+      .not.toBe(ambientPendingKey("lingering_attention", "g1", "c1", "u2"));
+    expect(ambientPendingKey("follow_up", "g1", "c1", "u1"))
+      .not.toBe(ambientPendingKey("follow_up", "g1", "c1", "u2"));
   });
 });
 

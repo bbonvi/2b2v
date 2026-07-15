@@ -70,6 +70,7 @@ export function renderAmbientHistory(input: {
 const CHANNEL_ACTIVITY_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_ACTIVITY_BUCKET_MS = 60_000;
 const BUSY_ACTIVITY_RATIO = 0.8;
+const AMBIENT_TYPING_IDLE_GRACE_MS = 500;
 
 function percentileBucketCount(counts: readonly number[], percentile: number): number {
   if (counts.length === 0) return 0;
@@ -226,6 +227,18 @@ export function shouldDeferAmbientCandidateForTyping(
 ): boolean {
   return reason === "user typing active"
     && (kind === "lingering_attention" || (kind === "ambient_pickup" && phase === "evaluate"));
+}
+
+/** Scope pickup work to a channel while retaining user ownership for conversational follow-ons. */
+export function ambientPendingKey(
+  kind: AmbientAttentionKind,
+  guildId: string,
+  channelId: string,
+  userId: string,
+): string {
+  return kind === "ambient_pickup"
+    ? `${kind}:${guildId}:${channelId}`
+    : `${kind}:${guildId}:${channelId}:${userId}`;
 }
 
 export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime {
@@ -647,10 +660,6 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     emitAmbientRequestLog(requestLog);
   }
 
-  function ambientPendingKey(kind: AmbientAttentionKind, guildId: string, channelId: string, userId: string): string {
-    return `${kind}:${guildId}:${channelId}:${userId}`;
-  }
-
   function clearPendingCandidate(key: string): void {
     const pending = ambientPendingCandidates.get(key);
     if (pending === undefined) return;
@@ -691,9 +700,9 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     if (pending?.candidate.id === candidate.id) clearPendingCandidate(key);
   }
 
-  function armPendingCandidate(key: string, candidate: AmbientCandidate, delayMs: number): void {
+  function armPendingCandidate(key: string, candidate: AmbientCandidate, delayMs: number, logSchedule = true): void {
     clearPendingCandidate(key);
-    logAmbientScheduled(candidate, delayMs);
+    if (logSchedule) logAmbientScheduled(candidate, delayMs);
     const generation = ambientAttentionGeneration;
     const timer = setTimeout(() => {
       if (generation !== ambientAttentionGeneration) return;
@@ -717,11 +726,15 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     const existing = ambientPendingCandidates.get(key);
     const burstStartedAt = existing?.candidate.burstStartedAt ?? message.createdTimestamp;
     const burstMessageCount = (existing?.candidate.burstMessageCount ?? 0) + 1;
-    const triggerMessageIds = [...new Set([...(existing?.candidate.triggerMessageIds ?? []), message.id])];
-    const triggerMessages = [
-      ...(existing?.candidate.triggerMessages ?? []),
-      message,
-    ].filter((item, index, items) => items.findIndex((candidateMessage) => candidateMessage.id === item.id) === index);
+    const triggerMessageIds = kind === "ambient_pickup"
+      ? [message.id]
+      : [...new Set([...(existing?.candidate.triggerMessageIds ?? []), message.id])];
+    const triggerMessages = kind === "ambient_pickup"
+      ? [message]
+      : [
+          ...(existing?.candidate.triggerMessages ?? []),
+          message,
+        ].filter((item, index, items) => items.findIndex((candidateMessage) => candidateMessage.id === item.id) === index);
     const candidate: AmbientCandidate = {
       ...base,
       id: crypto.randomUUID(),
@@ -732,7 +745,8 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       burstStartedAt,
       burstMessageCount,
     };
-    armPendingCandidate(key, candidate, randomBetween(mode.minDelayMs, mode.maxDelayMs));
+    // Burst debounce replacements are internal queue state; the dashboard records the eventual evaluation.
+    armPendingCandidate(key, candidate, randomBetween(mode.minDelayMs, mode.maxDelayMs), false);
   }
 
   function reschedulePendingBurstForTyping(
@@ -754,10 +768,14 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     config: AmbientAttentionConfig,
   ): void {
     const key = ambientPendingKey(candidate.kind, candidate.guildId, candidate.channelId, candidate.userId);
-    const mode = ambientModeConfig(config, candidate.kind);
-    const delayMs = Math.max(ambientTypingActiveMs(config, candidate.kind), TYPING_INTERVAL_MS)
-      + randomBetween(mode.minDelayMs, mode.maxDelayMs);
-    armPendingCandidate(key, candidate, delayMs);
+    const activeMs = Math.max(ambientTypingActiveMs(config, candidate.kind), TYPING_INTERVAL_MS);
+    const delayMs = candidate.kind === "ambient_pickup"
+      ? activeMs + AMBIENT_TYPING_IDLE_GRACE_MS
+      : activeMs + randomBetween(
+          ambientModeConfig(config, candidate.kind).minDelayMs,
+          ambientModeConfig(config, candidate.kind).maxDelayMs,
+        );
+    armPendingCandidate(key, candidate, delayMs, false);
   }
 
   function ambientHardGate(
@@ -2380,6 +2398,18 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     const guildConfig = getGuildConfig(candidate.guildId);
     const config = guildConfig.ambientAttention;
     if (config === undefined) return;
+    if (
+      shouldDeferAmbientCandidateForTyping(candidate.kind, "evaluate", "user typing active")
+      && activeTypingInChannel(
+        candidate.guildId,
+        candidate.channelId,
+        ambientTypingActiveMs(config, candidate.kind),
+        Date.now(),
+      )
+    ) {
+      deferAmbientCandidateForTyping(candidate, config);
+      return;
+    }
     const requestLog = createAmbientRequestLog(candidate, "evaluating");
     requestLogStore.incrementActive();
     const gate = ambientHardGate(config, candidate, "evaluate");
@@ -2625,7 +2655,6 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     const now = Date.now();
     ambientTypingByChannelUser.set(ambientChannelUserKey(typing.guild.id, typing.channel.id, typing.user.id), now);
     clearPendingCandidate(ambientPendingKey("follow_up", typing.guild.id, typing.channel.id, typing.user.id));
-    reschedulePendingBurstForTyping("ambient_pickup", typing.guild.id, typing.channel.id, typing.user.id, config);
     const lease = ambientLeases.get(ambientLeaseKey(typing.guild.id, typing.channel.id, typing.user.id));
     if (lease === undefined || lease.expiresAt <= now) return;
     reschedulePendingBurstForTyping("lingering_attention", typing.guild.id, typing.channel.id, typing.user.id, config);

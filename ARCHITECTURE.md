@@ -34,6 +34,8 @@ Message edit/delete tools must authorize against the live Discord message before
 
 Ambient attention and initiative must re-check current chat state immediately before spending evaluator/generation work and again before visible send, so stale proactive replies can be dropped.
 
+Ambient pickup owns one debounced candidate per channel: each eligible human message replaces the candidate and restarts its quiet window, while the evaluator still receives recent channel history. Lingering attention and follow-ups remain per-user. Typing pauses pickup until the channel is idle; it must not restart the full pickup delay or create dashboard schedule rows for internal debounce replacements.
+
 Stale-droppable proactive turns may use write tools. Once a write tool starts, the turn is committed: bypass stale pre-send drops, clear competing ambient candidates for that user/channel, and finish the reply. If a pre-send gate drops a read-only generation, do not run post-reply memory or relationship maintenance for that discarded generation.
 
 ## Prompt Cache
@@ -58,7 +60,7 @@ Triggered episodes choose and persist one eligible instant before the opportunit
 
 Avatar and presence changes converge on current desired presentation. Only one avatar request may run at a time; rate-limit retries retain the latest desired avatar and never queue stale mode changes. Random candidate selection and rotation deadlines are persisted. The dashboard receives a semantic status projection, not the persistence document.
 
-Dashboard request logs are projected as source lifecycles: reply work, ambient evaluation, memory extraction, and relationship extraction sharing a Discord message ID appear under one expandable row. Synthetic schedules and other non-message work use their own trigger lifecycle. A lifecycle is highlighted only when a child phase has an effective result, currently an applied memory change, an accepted relationship signal, or a selected ambient decision; no-op phases stay neutral.
+Dashboard request logs are projected as source lifecycles: reply work, ambient evaluation, memory extraction, and relationship extraction sharing a Discord message ID appear under one expandable row. Synthetic schedules and other non-message work use their own trigger lifecycle. Lifecycles stay ordered by their first request timestamp as later child phases arrive. A lifecycle is highlighted only when a child phase has an effective result, currently an applied memory change, an accepted relationship signal, or a selected ambient decision; no-op phases stay neutral.
 
 ## Relationship State
 
