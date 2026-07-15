@@ -11,7 +11,7 @@ import { registerInteractionRuntime } from "./discord/interaction-runtime";
 import { translateInbound, translateOutbound, buildDisplayNameContext, type InboundResolvers, type OutboundResolvers } from "./discord/translation";
 import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
-import { appendStickerTags } from "./discord/message-media";
+import { appendStickerTags, messageDisplayContent } from "./discord/message-media";
 import { assetsFromDiscordMessage } from "./discord/message-assets";
 import { botChannelPermissions, channelDisplayName, channelTypeLabel, createDiscordMessageSender, createTargetChannelResolver, createTypingController, fetchAccessibleGuildChannel as fetchAccessibleDiscordGuildChannel, isSendableGuildChannel, type SendableGuildChannel } from "./discord/message-sender";
 import { registerReactionSyncRuntime } from "./discord/reaction-sync-runtime";
@@ -71,6 +71,7 @@ import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createSummarizeVideoTool } from "./agent/summarize-video-tool";
 import { createCloseThreadTool, createStartThreadTool } from "./agent/start-thread-tool";
 import { createReactToMessageTool } from "./agent/react-to-message-tool";
+import { createDiceRollTool, type DiceRollDelivery } from "./agent/dice-roll-tool";
 import { applyRuntimeToolPrompts, type ToolPromptVariables } from "./agent/runtime-tool-prompts";
 import { createModelImageSupportStore } from "./llm/model-image-support";
 import { createAmbientRuntime } from "./ambient/runtime";
@@ -2084,6 +2085,7 @@ function buildAgentTools(
       sourceMessageId: string;
       sourceQuote: string;
     };
+    deliverDiceRoll?: (input: DiceRollDelivery) => Promise<{ sentMessageId: string }>;
   } = {},
 ) {
   const includeImageGenerationTools = options.includeImageGenerationTools ?? true;
@@ -2494,8 +2496,25 @@ function buildAgentTools(
     },
   });
 
+  const diceRollTool = effectiveCurrentRequest === undefined || options.deliverDiceRoll === undefined
+    ? undefined
+    : createDiceRollTool({
+        db,
+        guildId,
+        channelId,
+        currentRequest: effectiveCurrentRequest,
+        resolveActor: async (reference) => {
+          const member = await resolveGuildMemberReference(guild, reference);
+          return member === undefined
+            ? null
+            : { userId: member.id, username: member.user.username };
+        },
+        deliver: options.deliverDiceRoll,
+      });
+
   const jobInspectionTools = createAgentJobInspectionTools({ store: agentJobs, guildId, channelId });
   const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memoryListTool, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, ...jobInspectionTools, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  if (diceRollTool !== undefined) tools.push(diceRollTool);
   if (includeImageGenerationTools) {
     const codexImageModel = guildConfig.llmProvider === "openai-codex"
       ? guildConfig.model ?? globalConfig.defaultModel
@@ -2700,13 +2719,14 @@ async function processTriggeredMessage(
   try {
     const guildConfig = getGuildConfig(guildId);
     const inboundResolvers = buildInboundResolvers(guild);
+    const displayContent = messageDisplayContent(message.content, message.components);
     const translatedContent = appendStickerTags(
-      translateInbound(message.content, inboundResolvers),
+      translateInbound(displayContent, inboundResolvers),
       message.stickers.values(),
     );
     const currentTurnEventContent = options.currentTurnOverride?.content ?? currentTurnMessages
       .map((current) => appendStickerTags(
-        translateInbound(current.content, inboundResolvers),
+        translateInbound(messageDisplayContent(current.content, current.components), inboundResolvers),
         current.stickers.values(),
       ))
       .filter((content) => content !== "")
@@ -2715,7 +2735,7 @@ async function processTriggeredMessage(
       ...dashboardTriggerLocation(guild, message.channel),
       messageId: options.currentTurnOverride?.messageId ?? message.id,
       authorUsername: message.author.username,
-      content: options.currentTurnOverride?.content ?? message.content,
+      content: options.currentTurnOverride?.content ?? displayContent,
       translatedContent: options.currentTurnOverride?.content ?? translatedContent,
     });
     const currentChannelObj = message.channel as SendableGuildChannel;
@@ -2756,6 +2776,8 @@ async function processTriggeredMessage(
       }
       return result;
     };
+    let rollVisibleOutputSent = false;
+    let noteRollVisibleOutput = (): void => {};
 
     const currentAssets = options.currentTurnOverride === undefined
       ? currentTurnMessages.flatMap((current) => getAssetsByMessageId(db, current.id))
@@ -2924,7 +2946,25 @@ async function processTriggeredMessage(
         sourceMessageId: message.id,
         sourceQuote: shortQuote(translatedContent),
       },
-      {},
+      {
+        deliverDiceRoll: async (input) => {
+          const result = await sender(
+            input.text,
+            false,
+            undefined,
+            undefined,
+            input.signal,
+            input.sourceMessageId,
+            undefined,
+            input.dedupeKey,
+            { kind: "components_v2_card", accentColor: 0x8f73ff },
+          );
+          if (result.sentMessageId === "") throw new Error("Discord did not return a roll result message ID.");
+          rollVisibleOutputSent = true;
+          noteRollVisibleOutput();
+          return { sentMessageId: result.sentMessageId };
+        },
+      },
     );
     const threadTools = applyRuntimeToolPrompts([startThreadTool, closeThreadTool], promptBundle.runtime);
     const baseExtraTools = [...agentTools, ...threadTools];
@@ -3000,6 +3040,7 @@ async function processTriggeredMessage(
         onStillWorking: (destinationChannelId) => { typing.startLoop(destinationChannelId); },
         getTypingStartedAt: typing.getTypingStartedAt,
         onVisibleOutput: typing.stopLoop,
+        hasExternalVisibleOutput: () => rollVisibleOutputSent,
         onAgentEnd: typing.stopLoop,
         triggerOverride,
         triggerInstructions: options.triggerInstruction !== undefined && triggerOverride !== undefined
@@ -3043,6 +3084,7 @@ async function processTriggeredMessage(
         },
       },
     });
+    noteRollVisibleOutput = () => { deps.onVisibleOutput?.(); };
 
     try {
       await runLoggedAgentTurn({
@@ -3176,7 +3218,7 @@ function drainStartupMessageQueue(): void {
 }
 
 /** Persist one live Discord message and report whether this process claimed it first. */
-function persistInboundDiscordMessage(message: Message, translatedContent: string): boolean {
+function persistInboundDiscordMessage(message: Message, rawContent: string, translatedContent: string): boolean {
   if (message.guild === null || message.guildId === null) return false;
   const guildId = message.guildId;
   const channelId = message.channelId;
@@ -3193,7 +3235,7 @@ function persistInboundDiscordMessage(message: Message, translatedContent: strin
       channelId,
       message.author.id,
       message.author.username,
-      message.content,
+      rawContent,
       translatedContent,
       message.author.bot ? 1 : 0,
       messageCreatedAt,
@@ -3247,11 +3289,12 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
 
     // Build inbound resolvers and translate
     const inboundResolvers = buildInboundResolvers(guild);
+    const displayContent = messageDisplayContent(message.content, message.components);
     const translatedContent = appendStickerTags(
-      translateInbound(message.content, inboundResolvers),
+      translateInbound(displayContent, inboundResolvers),
       message.stickers.values(),
     );
-    if (!persistInboundDiscordMessage(message, translatedContent)) return;
+    if (!persistInboundDiscordMessage(message, displayContent, translatedContent)) return;
 
     const triggerResult = evaluateMessageTrigger(message, guildConfig);
     ambientRuntime.maybeScheduleAmbientAttention(message, triggerResult);
@@ -3323,11 +3366,12 @@ async function recoverMessagesAfterRestart(): Promise<void> {
       const recovered: Array<{ message: Message; triggerResult: TriggerResult }> = [];
       for (const message of fetched.messages) {
         if (message.author.id === client.user?.id || message.guild === null || message.guildId === null) continue;
+        const displayContent = messageDisplayContent(message.content, message.components);
         const translatedContent = appendStickerTags(
-          translateInbound(message.content, buildInboundResolvers(message.guild)),
+          translateInbound(displayContent, buildInboundResolvers(message.guild)),
           message.stickers.values(),
         );
-        if (!persistInboundDiscordMessage(message, translatedContent)) continue;
+        if (!persistInboundDiscordMessage(message, displayContent, translatedContent)) continue;
         claimedCount += 1;
         const guildConfig = getGuildConfig(message.guildId);
         const triggerResult = evaluateMessageTrigger(message, guildConfig, true);

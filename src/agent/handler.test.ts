@@ -1612,6 +1612,30 @@ describe("handleMessage", () => {
     });
   });
 
+  test("counts public output produced by a tool when the final model turn stays silent", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<ignore>the tool already posted the result</ignore>",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    });
+    const afterReplyCalls: unknown[] = [];
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        hasExternalVisibleOutput: () => true,
+        afterReply: (request) => {
+          afterReplyCalls.push(request);
+          return Promise.resolve();
+        },
+      }),
+    );
+
+    expect(afterReplyCalls[0]).toMatchObject({ visibleReplySent: true });
+  });
+
   test("blocks malformed private scene output without scheduling maintenance", async () => {
     const completeChat: ChatCompleteFn = () => Promise.resolve({
       text: "<scene perspective=\"script_writer\">\nroom read: private\nopinion: private\n</",
@@ -2006,6 +2030,62 @@ describe("handleMessage", () => {
     expect(result.responseText).toBe("answer from tool");
     expect(calls).toBe(2);
     expect(toolCalls).toEqual([{ query: "x" }]);
+  });
+
+  test("accepts an empty final model turn after a tool produced public output", async () => {
+    let publicOutputSent = false;
+    const tool: AgentTool = {
+      name: "public_action",
+      label: "Public Action",
+      description: "Post public output",
+      parameters: Type.Object({}),
+      execute: () => {
+        publicOutputSent = true;
+        return Promise.resolve({ content: [{ type: "text", text: "Public output posted." }], details: {} });
+      },
+    };
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      return Promise.resolve(calls === 1
+        ? {
+            text: "",
+            toolCalls: [{
+              id: "call-public",
+              type: "function",
+              function: { name: "public_action", arguments: "{}" },
+            }],
+            rawResponse: {},
+            messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+          }
+        : {
+            text: "",
+            toolCalls: [],
+            rawResponse: {},
+            messageForLogs: { role: "assistant", usage: { input: 1, output: 0, totalTokens: 1 }, content: [] },
+          });
+    };
+    const afterReplyCalls: unknown[] = [];
+    const onStillWorking = mock(() => {});
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        extraTools: [tool],
+        hasExternalVisibleOutput: () => publicOutputSent,
+        onStillWorking,
+        afterReply: (request) => {
+          afterReplyCalls.push(request);
+          return Promise.resolve();
+        },
+      }),
+    );
+
+    expect(result.responseText).toBeUndefined();
+    expect(calls).toBe(2);
+    expect(onStillWorking).toHaveBeenCalledTimes(1);
+    expect(afterReplyCalls[0]).toMatchObject({ visibleReplySent: true });
   });
 
   test("stops retrying empty final model responses after three attempts", async () => {

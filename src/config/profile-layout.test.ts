@@ -41,6 +41,10 @@ describe("repository profile layout", () => {
       expect(bundle.runtime.finalActionInstruction).not.toBe("");
       expect(Object.keys(bundle.runtime.toolDescriptions).length).toBeGreaterThan(0);
       expect(Object.keys(bundle.runtime.toolParameterDescriptions).length).toBeGreaterThan(0);
+      expect(bundle.runtime.toolDescriptions.roll_dice).toBeDefined();
+      for (const parameter of ["count", "sides", "modifier", "target", "mode", "label", "actor"]) {
+        expect(bundle.runtime.toolParameterDescriptions[`roll_dice/${parameter}`]).toBeDefined();
+      }
       expect(Object.keys(bundle.runtime.contextTemplates).length).toBeGreaterThan(0);
       expect(bundle.runtime.skills.byId.image_generation).toBeDefined();
     }

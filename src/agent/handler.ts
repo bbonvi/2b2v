@@ -209,6 +209,12 @@ export interface CurrentTurnImageInput {
   metadataText?: string;
 }
 
+/** Optional Discord-native presentation for a visible message. */
+export interface MessagePresentation {
+  kind: "components_v2_card";
+  accentColor?: number;
+}
+
 /** Callback that performs the actual Discord send. */
 export type MessageSender = (
   text: string,
@@ -219,6 +225,7 @@ export type MessageSender = (
   replyToMessageId?: string,
   attachments?: OutboundAttachment[],
   dedupeKey?: string,
+  presentation?: MessagePresentation,
 ) => Promise<{ sentMessageId: string; warnings?: string[] }>;
 
 /** Resolves stored chat asset IDs into Discord-ready file attachments. */
@@ -245,6 +252,8 @@ export interface HandlerDeps {
   getTypingStartedAt?: () => number;
   /** Called after user-visible output starts so continuous background typing can stop. */
   onVisibleOutput?: () => void;
+  /** Reports public output produced directly by a state-changing tool in this reply loop. */
+  hasExternalVisibleOutput?: () => boolean;
   /** Minimum visible typing time before a buffered streamed follow-up message is sent. */
   liveMessageTypingHoldMs?: number;
   onAgentEnd?: () => void;
@@ -1388,6 +1397,7 @@ async function runNativeToolLoop(input: {
   streamFinalText?: (delta: string, channelId: string | undefined) => Promise<boolean>;
   onModelTurnStart?: (channelId: string | undefined) => void;
   onStillWorking?: (channelId: string | undefined) => void | Promise<void>;
+  hasExternalVisibleOutput?: () => boolean;
   currentChannelId?: string;
   imageInputSupported: boolean;
   imageFallback?: ImageFallbackRuntime;
@@ -1397,7 +1407,7 @@ async function runNativeToolLoop(input: {
   runtimePrompts?: RuntimePromptBundle;
   log?: Logger;
   signal?: AbortSignal;
-  allowEmptyFinalResponse?: boolean;
+  allowEmptyFinalResponse?: boolean | (() => boolean);
   stopOnAgentTimeBudget?: boolean;
   terminateAfterSuccessfulToolNames?: readonly string[];
 }): Promise<{ text: string; stopReason?: string }> {
@@ -1412,6 +1422,9 @@ async function runNativeToolLoop(input: {
   const streamingState = { visibleText: false };
   let agentTimeBudgetMarked = false;
   let asyncImageJobCreated = false;
+  const allowEmptyFinalResponse = (): boolean => typeof input.allowEmptyFinalResponse === "function"
+    ? input.allowEmptyFinalResponse()
+    : input.allowEmptyFinalResponse === true;
 
   const markAgentTimeBudgetExhausted = (): void => {
     if (agentTimeBudgetMarked) return;
@@ -1454,7 +1467,7 @@ async function runNativeToolLoop(input: {
         },
         timeoutMs: input.llmOutputTimeoutMs,
         maxAttempts,
-        validateResult: input.allowEmptyFinalResponse === true ? undefined : requireTextResult(emptyResponseMessage),
+        validateResult: allowEmptyFinalResponse() ? undefined : requireTextResult(emptyResponseMessage),
         onAttemptStart: () => {
           completedVisibleMessage = false;
           input.onModelTurnStart?.(undefined);
@@ -1535,7 +1548,7 @@ async function runNativeToolLoop(input: {
           signal: input.signal,
         },
         timeoutMs: input.llmOutputTimeoutMs,
-        validateResult: input.allowEmptyFinalResponse === true ? undefined : requireTextUnlessToolCalls("Model produced an empty response."),
+        validateResult: allowEmptyFinalResponse() ? undefined : requireTextUnlessToolCalls("Model produced an empty response."),
         onAttemptStart: () => {
           completedVisibleMessage = false;
           input.onModelTurnStart?.(undefined);
@@ -1783,6 +1796,11 @@ async function runNativeToolLoop(input: {
     }
     if (isAgentTimeBudgetExceededSignal(input.signal)) {
       return await finishAfterAgentTimeBudget();
+    }
+    // Direct public tool output stops typing when delivered. If the agent loop
+    // continues, resume immediately rather than waiting for a text segment.
+    if (input.hasExternalVisibleOutput?.() === true) {
+      await input.onStillWorking?.(undefined);
     }
   }
 
@@ -2687,6 +2705,7 @@ export async function handleMessage(
 
     const pendingAttachments: OutboundAttachment[] = [...(deps.initialPendingAttachments ?? [])];
     const intermediateStatus = { sent: false, sendCount: 0 };
+    const hasVisibleOutput = (): boolean => intermediateStatus.sent || deps.hasExternalVisibleOutput?.() === true;
     const replyFirst = deps.replyFirstOverride ?? chooseReplyMode(triggerResult);
     const liveMessageTypingHoldMs = deps.liveMessageTypingHoldMs ?? DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS;
     const typingHoldMsForSegment = deps.guildConfig.typingSimulation.enabled
@@ -2705,7 +2724,7 @@ export async function handleMessage(
         sender: deps.sender,
         generateSpeech: deps.generateSpeech,
         ttsEnabled: deps.ttsEnabled ?? false,
-        replyFirst: !intermediateStatus.sent && replyFirst,
+        replyFirst: !hasVisibleOutput() && replyFirst,
         destinationChannelId,
         currentChannelId: deps.currentChannelId,
         requestLog: reqLog,
@@ -2732,7 +2751,7 @@ export async function handleMessage(
           generateSpeech: deps.generateSpeech,
           ttsEnabled: deps.ttsEnabled ?? false,
           segments: parsed.segments,
-          replyFirst: !intermediateStatus.sent && replyFirst,
+          replyFirst: !hasVisibleOutput() && replyFirst,
           sentOffset: intermediateStatus.sendCount - 1,
           destinationChannelId,
           currentChannelId: deps.currentChannelId,
@@ -2821,6 +2840,7 @@ export async function handleMessage(
           liveDispatchers.get(destinationChannelId ?? "")?.startModelTurn();
         },
         onStillWorking: deps.onStillWorking,
+        hasExternalVisibleOutput: deps.hasExternalVisibleOutput,
         currentChannelId: deps.currentChannelId,
         imageInputSupported: supportsNativeImageInput(model.input, deps.modelImageInputSupport),
         toolTiming: timingState,
@@ -2841,6 +2861,7 @@ export async function handleMessage(
         consumeGeneratedAttachments: deps.consumeGeneratedAttachments,
         pendingAttachments,
         runtimePrompts: deps.runtimePrompts,
+        allowEmptyFinalResponse: deps.hasExternalVisibleOutput,
         signal: wallController.signal,
       });
       finalText = result.text;
@@ -2854,7 +2875,7 @@ export async function handleMessage(
       deps.log?.warn("native reply blocked after incomplete model output", {
         stopReason: finalStopReason,
         outputLength: finalText.length,
-        visibleOutputAlreadySent: intermediateStatus.sent
+        visibleOutputAlreadySent: hasVisibleOutput()
           || [...liveDispatchers.values()].some((dispatcher) => dispatcher.sentCount() > 0),
       });
       return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
@@ -2882,12 +2903,12 @@ export async function handleMessage(
           });
         }
       }
-      scheduleMemoryPass(parsedResponse.ignoredText ?? finalText, false);
+      scheduleMemoryPass(parsedResponse.ignoredText ?? finalText, hasVisibleOutput());
       deps.log?.debug("native_reply_ignored", { durationMs: Date.now() - startedAt });
       return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
     }
     if (parsedResponse.segments.length === 0) {
-      scheduleMemoryPass("", false);
+      scheduleMemoryPass("", hasVisibleOutput());
       deps.log?.debug("native_reply_empty_after_directives", { durationMs: Date.now() - startedAt });
       return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
     }
@@ -2903,7 +2924,7 @@ export async function handleMessage(
         generateSpeech: deps.generateSpeech,
         ttsEnabled: deps.ttsEnabled ?? false,
         segments: parsedResponse.segments,
-        replyFirst: !intermediateStatus.sent && replyFirst,
+        replyFirst: !hasVisibleOutput() && replyFirst,
         currentChannelId: deps.currentChannelId,
         requestLog: reqLog,
         log: deps.log,

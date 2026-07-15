@@ -91,6 +91,27 @@ describe("database initialization", () => {
     expect(info?.name).toBe("message_reactions");
   });
 
+  test("adds target-check columns to existing dice audit tables", () => {
+    const dbPath = path.join(tmpDir, "legacy-dice.db");
+    const legacy = new BunDatabase(dbPath);
+    legacy.run(`CREATE TABLE dice_rolls (
+      id TEXT PRIMARY KEY,
+      guild_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )`);
+    legacy.close();
+
+    const migrated = createDatabase(dbPath);
+    try {
+      const columns = migrated.raw.prepare("PRAGMA table_info(dice_rolls)").all() as Array<{ name: string }>;
+      expect(columns.some((column) => column.name === "target")).toBe(true);
+      expect(columns.some((column) => column.name === "succeeded")).toBe(true);
+    } finally {
+      migrated.close();
+    }
+  });
+
   test("creates durable agent job and asset provenance tables", () => {
     const tables = db.raw
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('agent_jobs', 'agent_job_assets')")

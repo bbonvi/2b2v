@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { AttachmentBuilder, ChannelType, PermissionFlagsBits, type Client, type GuildBasedChannel, type GuildTextBasedChannel, type Message, type ThreadChannel } from "discord.js";
+import { AttachmentBuilder, ChannelType, ContainerBuilder, MessageFlags, PermissionFlagsBits, TextDisplayBuilder, type Client, type GuildBasedChannel, type GuildTextBasedChannel, type Message, type ThreadChannel } from "discord.js";
 import { sendWithUnknownMessageReferenceFallback } from "./message-reference-retry";
 import { splitMessage } from "./split-message";
 import { translateOutbound, type OutboundResolvers } from "./translation";
-import type { MessageSender, OutboundAttachment } from "../agent/handler";
+import type { MessagePresentation, MessageSender, OutboundAttachment } from "../agent/handler";
 import type { Logger } from "../logger";
 import type { Database } from "../db/database";
 import { syncMessageAssets } from "../db/asset-repository.ts";
@@ -16,6 +16,8 @@ type AttachmentSendPayload = {
   files?: AttachmentBuilder[];
   nonce?: string;
   enforceNonce?: boolean;
+  components?: ContainerBuilder[];
+  flags?: MessageFlags.IsComponentsV2;
 };
 
 export type SendableGuildChannel = GuildTextBasedChannel & { sendTyping: () => Promise<void> };
@@ -32,6 +34,17 @@ function buildAttachmentPayload(content: string, attachments: AttachmentBuilder[
   return {
     ...(content !== "" ? { content } : {}),
     ...(attachments.length > 0 ? { files: attachments } : {}),
+    ...(nonce !== undefined ? { nonce, enforceNonce: true } : {}),
+  };
+}
+
+export function buildComponentsV2CardPayload(content: string, presentation: MessagePresentation, nonce?: string): AttachmentSendPayload {
+  const container = new ContainerBuilder()
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
+  if (presentation.accentColor !== undefined) container.setAccentColor(presentation.accentColor);
+  return {
+    components: [container],
+    flags: MessageFlags.IsComponentsV2,
     ...(nonce !== undefined ? { nonce, enforceNonce: true } : {}),
   };
 }
@@ -286,7 +299,7 @@ export function createDiscordMessageSender(input: {
     return attachments.map((attachment) => new AttachmentBuilder(attachment.buffer, { name: attachment.filename }));
   }
 
-  return async (text, reply, channelId, voice, _signal, replyToMessageId, attachments, dedupeKey) => {
+  return async (text, reply, channelId, voice, _signal, replyToMessageId, attachments, dedupeKey, presentation) => {
     const targetChannel = await input.resolveTargetChannel(channelId);
     const targetGuildId = targetChannel.guildId;
     const targetChannelId = targetChannel.id;
@@ -425,6 +438,22 @@ export function createDiscordMessageSender(input: {
     const warnings: string[] = [];
     const translated = translateOutbound(text, outboundResolvers, warnings);
     const imageAttachments = attachmentBuilders(attachments);
+    if (presentation?.kind === "components_v2_card") {
+      if (imageAttachments.length > 0) throw new Error("Components V2 cards cannot use legacy attachments through this sender.");
+      const payload = buildComponentsV2CardPayload(
+        translated,
+        presentation,
+        discordMessageNonce(dedupeKey, "card-0"),
+      );
+      const delivered = replyToMessageId !== undefined
+        ? await replyToSpecific(payload)
+        : reply
+          ? await replyToSource(payload)
+          : { message: await sendToTargetChannel(payload), replyToId: null };
+      storeBotMessage(delivered.message.id, targetGuildId, targetChannelId, text, text, delivered.replyToId);
+      noteThreadActivity(delivered.message.id);
+      return { sentMessageId: delivered.message.id, warnings: unresolvedEmojiWarnings(warnings) };
+    }
     const chunks = splitMessage(translated);
     if (chunks.length === 0 && imageAttachments.length > 0) chunks.push("");
     let firstId = "";

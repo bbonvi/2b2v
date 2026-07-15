@@ -94,6 +94,34 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_messages_user_guild
     ON messages(user_id, guild_id);
 
+  CREATE TABLE IF NOT EXISTS dice_rolls (
+    id                   TEXT PRIMARY KEY,
+    request_key          TEXT NOT NULL UNIQUE,
+    guild_id             TEXT NOT NULL,
+    channel_id           TEXT NOT NULL,
+    source_message_id    TEXT NOT NULL,
+    result_message_id    TEXT UNIQUE,
+    requested_by_user_id TEXT NOT NULL,
+    actor_user_id        TEXT NOT NULL,
+    actor_username       TEXT NOT NULL,
+    count                INTEGER NOT NULL CHECK(count BETWEEN 1 AND 100),
+    sides                INTEGER NOT NULL CHECK(sides BETWEEN 2 AND 1000000),
+    modifier             INTEGER NOT NULL CHECK(modifier BETWEEN -1000000 AND 1000000),
+    mode                 TEXT NOT NULL CHECK(mode IN ('normal', 'advantage', 'disadvantage')),
+    label                TEXT CHECK(label IS NULL OR length(label) <= 500),
+    rolls_json           TEXT NOT NULL,
+    kept_json            TEXT NOT NULL,
+    total                INTEGER NOT NULL,
+    target               INTEGER,
+    succeeded            INTEGER CHECK(succeeded IS NULL OR succeeded IN (0, 1)),
+    created_at           INTEGER NOT NULL,
+    delivered_at         INTEGER,
+    CHECK((target IS NULL AND succeeded IS NULL) OR (target IS NOT NULL AND succeeded IS NOT NULL))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_dice_rolls_scope_time
+    ON dice_rolls(guild_id, channel_id, created_at);
+
   CREATE TABLE IF NOT EXISTS message_reactions (
     message_id    TEXT NOT NULL,
     guild_id      TEXT NOT NULL,

@@ -230,6 +230,8 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
     "ALTER TABLE schedules ADD COLUMN fire_count INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE schedules ADD COLUMN expires_at INTEGER",
     "ALTER TABLE schedules ADD COLUMN max_fire_count INTEGER",
+    "ALTER TABLE dice_rolls ADD COLUMN target INTEGER",
+    "ALTER TABLE dice_rolls ADD COLUMN succeeded INTEGER CHECK(succeeded IS NULL OR succeeded IN (0, 1))",
   ]) {
     ignoreExistingColumn(raw, sql);
   }

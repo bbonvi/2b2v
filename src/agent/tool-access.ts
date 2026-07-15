@@ -10,6 +10,7 @@ const WRITE_TOOL_NAMES = new Set([
   "discord_set_user_timeout",
   "edit_own_message",
   "react_to_message",
+  "roll_dice",
   "schedule_task",
   "update_current_scheduled_task",
   "start_thread",
