@@ -139,6 +139,7 @@ describe("RequestLogStore", () => {
       estimatedCostUsd: 0.25,
       totalDurationMs: 100,
       hasError: true,
+      outcome: "error",
       timestamp: "2026-06-17T00:00:00.000Z",
     }]);
     const first = summaries[0];
@@ -207,6 +208,94 @@ describe("RequestLogStore", () => {
     expect(opts.guildIds.sort()).toEqual(["g1", "g2"]);
     expect(opts.channelIds.sort()).toEqual(["c1", "c2"]);
     expect(opts.usernames.sort()).toEqual(["alice", "bob"]);
+  });
+
+  test("groups reply, memory, relationship, and ambient phases by source message", () => {
+    const store = new RequestLogStore();
+    const context = { messageId: "m1", authorUsername: "alice", content: "hello" };
+    store.push(makeEntry({ requestId: "reply", triggerContext: context, timestamp: "2026-06-17T00:00:01.000Z" }));
+    store.push(makeEntry({
+      requestId: "memory",
+      trigger: { type: "background_memory_extraction", sourceRequestId: "reply" },
+      triggerContext: context,
+      timestamp: "2026-06-17T00:00:02.000Z",
+      tools: [{
+        tool: "record_memory",
+        args: { actions: [{ action: "create" }] },
+        status: "completed",
+        resultPayload: { details: { applied: 1, requested: 1 } },
+      }],
+    }));
+    store.push(makeEntry({
+      requestId: "relationship",
+      trigger: { type: "relationships_extraction", sourceRequestId: "reply" },
+      triggerContext: context,
+      timestamp: "2026-06-17T00:00:03.000Z",
+      tools: [{
+        tool: "record_relationship",
+        args: { signals: [{ summary: "warmer" }] },
+        status: "completed",
+        resultPayload: { details: { accepted: [{ userId: "u1" }] } },
+      }],
+    }));
+    store.push(makeEntry({
+      requestId: "ambient",
+      trigger: { type: "ambient_attention_evaluator", kind: "ambient_pickup" },
+      triggerContext: context,
+      timestamp: "2026-06-17T00:00:04.000Z",
+      tools: [{
+        tool: "ambient_decision",
+        args: {},
+        status: "completed",
+        resultPayload: { structuredContent: { status: "selected" } },
+      }],
+    }));
+
+    const groups = store.queryGroups();
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.groupId).toBe("message:g1:c1:m1");
+    expect(groups[0]?.requests.map((request) => request.requestId)).toEqual(["reply", "memory", "relationship", "ambient"]);
+    expect(groups[0]?.outcome).toBe("effective");
+    expect(groups[0]?.requests.map((request) => request.outcome)).toEqual(["default", "effective", "effective", "effective"]);
+
+    const detail = store.getSanitizedGroup("message:g1:c1:m1");
+    expect(detail?.entries.map((item) => item.entry.requestId)).toEqual(["reply", "memory", "relationship", "ambient"]);
+  });
+
+  test("groups synthetic scheduled-task phases without treating them as messages", () => {
+    const store = new RequestLogStore();
+    const context = { messageId: "scheduled:daily", authorUsername: "scheduler", content: "daily task" };
+    store.push(makeEntry({ requestId: "scheduled-run", authorUsername: "scheduler", triggerContext: context }));
+    store.push(makeEntry({ requestId: "scheduled-memory", authorUsername: "scheduler", triggerContext: context }));
+
+    const group = store.queryGroups()[0];
+    expect(group?.scope).toBe("trigger");
+    expect(group?.groupId).toBe("trigger:g1:c1:scheduled:daily");
+    expect(group?.requestCount).toBe(2);
+  });
+
+  test("keeps empty maintenance and rejected ambient evaluations neutral", () => {
+    const store = new RequestLogStore();
+    store.push(makeEntry({
+      requestId: "empty-memory",
+      tools: [{
+        tool: "record_memory",
+        args: { actions: [] },
+        status: "completed",
+        resultPayload: { details: { applied: 0, requested: 0 } },
+      }],
+    }));
+    store.push(makeEntry({
+      requestId: "dropped-ambient",
+      tools: [{
+        tool: "ambient_decision",
+        args: {},
+        status: "completed",
+        resultPayload: { structuredContent: { status: "dropped" } },
+      }],
+    }));
+
+    expect(store.querySummaries().map((entry) => entry.outcome)).toEqual(["default", "default"]);
   });
 
   test("active request tracking", () => {

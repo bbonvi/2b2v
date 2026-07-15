@@ -319,6 +319,20 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
         return json(entry);
       },
 
+      "/api/log-groups": (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        return json(requestLogStore.queryGroups(requestLogFilters(req), DASHBOARD_LOG_ENTRY_LIMIT));
+      },
+
+      "/api/log-groups/:groupId": (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        const group = requestLogStore.getSanitizedGroup(req.params.groupId);
+        if (group === null) return json({ error: "Log group not found" }, 404);
+        return json(group);
+      },
+
       "/api/filters": (req) => {
         const denied = requireAuth(req);
         if (denied !== null) return denied;

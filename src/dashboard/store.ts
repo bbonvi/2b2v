@@ -32,8 +32,34 @@ export interface RequestLogSummary {
   estimatedCostUsd: number | null;
   totalDurationMs: number;
   hasError: boolean;
+  outcome: RequestLogOutcome;
   status?: "active";
   timestamp: string;
+}
+
+export type RequestLogOutcome = "default" | "effective" | "error" | "active";
+
+export interface RequestLogGroupSummary {
+  groupId: string;
+  scope: "message" | "trigger";
+  sourceMessageId?: string;
+  guildId: string;
+  channelId: string;
+  authorUsername: string;
+  triggerContext?: RequestTriggerContext;
+  requests: RequestLogSummary[];
+  requestCount: number;
+  toolCount: number;
+  runtimeActionCount: number;
+  llmCallCount: number;
+  estimatedCostUsd: number | null;
+  totalDurationMs: number;
+  outcome: RequestLogOutcome;
+  timestamp: string;
+}
+
+export interface RequestLogGroupDetail extends RequestLogGroupSummary {
+  entries: Array<{ summary: RequestLogSummary; entry: RequestLogEntry }>;
 }
 
 export interface RequestLogFilters {
@@ -141,6 +167,23 @@ export class RequestLogStore {
   /** Returns compact rows for the dashboard list without large tool or LLM payloads. */
   querySummaries(filters: RequestLogFilters = {}, limit?: number): RequestLogSummary[] {
     return this.query(filters, limit).map((entry) => toSummary(entry));
+  }
+
+  /** Groups all request phases rooted in the same Discord message or synthetic trigger. */
+  queryGroups(filters: RequestLogFilters = {}, limit?: number): RequestLogGroupSummary[] {
+    const groups = groupRequestLogs(this.query(filters));
+    return limit === undefined ? groups : groups.slice(0, Math.max(0, limit));
+  }
+
+  /** Returns every full request phase belonging to one dashboard group. */
+  getSanitizedGroup(groupId: string): RequestLogGroupDetail | null {
+    const group = groupRequestLogs(this.query()).find((candidate) => candidate.groupId === groupId);
+    if (group === undefined) return null;
+    const entries = group.requests.flatMap((summary) => {
+      const entry = this.getSanitizedByRequestId(summary.requestId);
+      return entry === null ? [] : [{ summary, entry }];
+    });
+    return { ...group, entries };
   }
 
   /** Finds one full dashboard log entry by request ID for on-demand expansion. */
@@ -340,10 +383,103 @@ function toSummary(entry: RequestLogEntry): RequestLogSummary {
     estimatedCostUsd: estimatedCostUsd > 0 ? estimatedCostUsd : null,
     totalDurationMs: entry.totalDurationMs,
     hasError: entry.error !== undefined,
+    outcome: requestLogOutcome(entry),
     timestamp: entry.timestamp,
   };
   if (entry.status !== undefined) summary.status = entry.status;
   return summary;
+}
+
+function groupRequestLogs(entries: RequestLogEntry[]): RequestLogGroupSummary[] {
+  const grouped = new Map<string, RequestLogEntry[]>();
+  for (const entry of entries) {
+    const key = requestLogGroupKey(entry);
+    const current = grouped.get(key.groupId) ?? [];
+    current.push(entry);
+    grouped.set(key.groupId, current);
+  }
+
+  return [...grouped.entries()].map(([groupId, groupEntries]) => {
+    const orderedEntries = [...groupEntries].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    const requests = orderedEntries.map((entry) => toSummary(entry));
+    const primary = orderedEntries.find((entry) => entry.triggerContext?.content?.trim() !== "") ?? orderedEntries[0];
+    if (primary === undefined) throw new Error(`Dashboard group ${groupId} has no entries.`);
+    const key = requestLogGroupKey(primary);
+    const estimatedCost = requests.reduce((total, request) => total + (request.estimatedCostUsd ?? 0), 0);
+    return {
+      groupId,
+      scope: key.scope,
+      ...(key.sourceMessageId !== undefined ? { sourceMessageId: key.sourceMessageId } : {}),
+      guildId: primary.guildId,
+      channelId: primary.channelId,
+      authorUsername: primary.triggerContext?.authorUsername ?? primary.authorUsername,
+      ...(primary.triggerContext !== undefined ? { triggerContext: primary.triggerContext } : {}),
+      requests,
+      requestCount: requests.length,
+      toolCount: requests.reduce((total, request) => total + request.toolCount, 0),
+      runtimeActionCount: requests.reduce((total, request) => total + request.runtimeActionCount, 0),
+      llmCallCount: requests.reduce((total, request) => total + request.llmCallCount, 0),
+      estimatedCostUsd: estimatedCost > 0 ? estimatedCost : null,
+      totalDurationMs: requests.reduce((total, request) => total + request.totalDurationMs, 0),
+      outcome: combinedOutcome(requests.map((request) => request.outcome)),
+      timestamp: requests.reduce((latest, request) => request.timestamp > latest ? request.timestamp : latest, requests[0]?.timestamp ?? primary.timestamp),
+    };
+  }).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+function requestLogGroupKey(entry: RequestLogEntry): {
+  groupId: string;
+  scope: "message" | "trigger";
+  sourceMessageId?: string;
+} {
+  const trigger = isRecord(entry.trigger) ? entry.trigger : undefined;
+  const triggerSourceMessageId = typeof trigger?.sourceMessageId === "string" ? trigger.sourceMessageId : undefined;
+  const sourceMessageId = entry.triggerContext?.messageId
+    ?? entry.triggerContext?.sourceMessageId
+    ?? triggerSourceMessageId;
+  const syntheticTrigger = entry.authorUsername === "scheduler"
+    || entry.triggerContext?.authorUsername === "scheduler"
+    || trigger?.type === "ambient_initiative_evaluator";
+  if (sourceMessageId !== undefined && sourceMessageId !== "" && !syntheticTrigger) {
+    return {
+      groupId: `message:${entry.guildId}:${entry.channelId}:${sourceMessageId}`,
+      scope: "message",
+      sourceMessageId,
+    };
+  }
+  if (sourceMessageId !== undefined && sourceMessageId !== "") {
+    return {
+      groupId: `trigger:${entry.guildId}:${entry.channelId}:${sourceMessageId}`,
+      scope: "trigger",
+    };
+  }
+  return { groupId: `trigger:${entry.requestId}`, scope: "trigger" };
+}
+
+function requestLogOutcome(entry: RequestLogEntry): RequestLogOutcome {
+  if (entry.error !== undefined || entry.tools.some((tool) => tool.isError === true || tool.status === "error")) return "error";
+  if (entry.status === "active") return "active";
+  for (const tool of entry.tools) {
+    if (tool.status === "skipped" || tool.status === "error" || tool.isError === true) continue;
+    const payload = isRecord(tool.resultPayload) ? tool.resultPayload : undefined;
+    const details = isRecord(payload?.details) ? payload.details : undefined;
+    const structured = isRecord(payload?.structuredContent) ? payload.structuredContent : undefined;
+    if (tool.tool === "record_memory" && typeof details?.applied === "number" && details.applied > 0) return "effective";
+    if (tool.tool === "record_relationship" && Array.isArray(details?.accepted) && details.accepted.length > 0) return "effective";
+    if (tool.tool === "ambient_decision" && structured?.status === "selected") return "effective";
+  }
+  return "default";
+}
+
+function combinedOutcome(outcomes: readonly RequestLogOutcome[]): RequestLogOutcome {
+  if (outcomes.includes("error")) return "error";
+  if (outcomes.includes("active")) return "active";
+  if (outcomes.includes("effective")) return "effective";
+  return "default";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 const logDir = process.env.LOG_DIR;

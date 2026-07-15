@@ -7,6 +7,10 @@ interface PayloadTreeHelpers {
   renderPayloadTree(value: unknown, depth: number, keyName?: string): string;
 }
 
+interface StageOutputHelpers {
+  stageOutput(label: string, value: unknown, emptyText?: string): string;
+}
+
 function loadDashboardScript(): string {
   const html = readFileSync("src/dashboard/index.html", "utf8");
   const match = html.match(/<script>\n([\s\S]*)\n<\/script>/);
@@ -41,6 +45,33 @@ function loadPayloadTreeHelpers(): PayloadTreeHelpers {
 
   if (context.extracted === undefined) {
     throw new Error("Failed to load payload tree helpers");
+  }
+
+  return context.extracted;
+}
+
+function loadStageOutputHelpers(): StageOutputHelpers {
+  const html = readFileSync("src/dashboard/index.html", "utf8");
+  const helperStart = html.indexOf("const stageOutputPreviewChars =");
+  const helperEnd = html.indexOf("  function modelResponseText", helperStart);
+  if (helperStart < 0 || helperEnd < 0) {
+    throw new Error("stage output helper block not found in dashboard HTML");
+  }
+  const helperCode = [
+    `function esc(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }`,
+    html.slice(helperStart, helperEnd),
+  ].join("\n");
+  const context: { extracted?: StageOutputHelpers } = {};
+  runInNewContext(`${helperCode}; extracted = { stageOutput };`, context);
+
+  if (context.extracted === undefined) {
+    throw new Error("Failed to load stage output helpers");
   }
 
   return context.extracted;
@@ -165,5 +196,24 @@ describe("dashboard payload formatter", () => {
     expect(rendered).not.toContain("data-full=");
     expect(rendered).not.toContain("data-payload-expand-key=");
     expect(rendered).toContain("&quot;quoted&quot;\n");
+  });
+});
+
+describe("dashboard lifecycle formatting", () => {
+  test("uses collapsible request phases with only the main phase open by default", () => {
+    const script = loadDashboardScript();
+
+    expect(script).toContain("'<details class=\"' + classes.join(' ') + '\" data-collapse-key=\"phase:'");
+    expect(script).toContain("(index === 0 ? ' open' : '')");
+    expect(script).toContain("'<summary class=\"request-phase-head\">'");
+  });
+
+  test("shows twice as much stage output before offering show more", () => {
+    const helpers = loadStageOutputHelpers();
+    const atLimit = helpers.stageOutput("response", "x".repeat(1000));
+    const overLimit = helpers.stageOutput("response", "x".repeat(1001));
+
+    expect(atLimit).not.toContain('<details class="stage-more">');
+    expect(overLimit).toContain('<details class="stage-more"><summary>show more</summary><span>x</span></details>');
   });
 });

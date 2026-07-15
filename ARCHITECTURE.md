@@ -58,6 +58,8 @@ Triggered episodes choose and persist one eligible instant before the opportunit
 
 Avatar and presence changes converge on current desired presentation. Only one avatar request may run at a time; rate-limit retries retain the latest desired avatar and never queue stale mode changes. Random candidate selection and rotation deadlines are persisted. The dashboard receives a semantic status projection, not the persistence document.
 
+Dashboard request logs are projected as source lifecycles: reply work, ambient evaluation, memory extraction, and relationship extraction sharing a Discord message ID appear under one expandable row. Synthetic schedules and other non-message work use their own trigger lifecycle. A lifecycle is highlighted only when a child phase has an effective result, currently an applied memory change, an accepted relationship signal, or a selected ambient decision; no-op phases stay neutral.
+
 ## Relationship State
 
 Relationship state is per Discord user, not per guild. Relationship extraction runs after replies and ignored/silent turns, after the memory pass, and never posts directly.

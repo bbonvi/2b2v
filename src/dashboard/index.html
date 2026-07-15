@@ -235,6 +235,10 @@
   }
   .entry:hover { border-color: var(--border-active) }
   .entry.has-error { border-left: 2px solid var(--red) }
+  .entry.effective {
+    border-left: 2px solid var(--green);
+    background: linear-gradient(90deg, rgba(52,211,153,.055), var(--surface) 22%);
+  }
   .entry.no-agent { opacity: .5 }
 
   .entry-header {
@@ -319,6 +323,16 @@
   .entry-cost {
     color: var(--green);
   }
+  .outcome-badge {
+    color: var(--green);
+    border: 1px solid rgba(52,211,153,.28);
+    background: rgba(52,211,153,.07);
+    padding: .08rem .32rem;
+    font-size: .56rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
 
   /* Expanded detail */
   .entry-detail {
@@ -333,6 +347,80 @@
     display: grid;
     gap: .45rem;
   }
+  .group-source {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    background: #0d0e10;
+    padding: .65rem .72rem;
+  }
+  .group-source-meta {
+    color: var(--text-dim);
+    font-size: .6rem;
+    margin-bottom: .32rem;
+  }
+  .group-source-message {
+    color: var(--text-bright);
+    font-size: .73rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .request-phase {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border-active);
+    background: #090a0b;
+  }
+  .request-phase.effective {
+    border-left-color: var(--green);
+    background: linear-gradient(90deg, rgba(52,211,153,.055), #090a0b 26%);
+  }
+  .request-phase.has-error { border-left-color: var(--red); }
+  .request-phase.active { border-left-color: var(--amber); }
+  .request-phase-head {
+    display: grid;
+    grid-template-columns: minmax(150px, .7fr) minmax(100px, .5fr) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: .65rem;
+    position: relative;
+    padding: .52rem .62rem .52rem 1.6rem;
+    cursor: pointer;
+    list-style: none;
+  }
+  .request-phase-head::-webkit-details-marker { display: none; }
+  .request-phase-head::before {
+    content: '›';
+    position: absolute;
+    left: .58rem;
+    top: 50%;
+    color: var(--text-dim);
+    font-size: .9rem;
+    line-height: 1;
+    transform: translateY(-50%);
+    transition: transform .12s ease, color .12s ease;
+  }
+  .request-phase-head:hover::before { color: var(--text-bright); }
+  .request-phase[open] > .request-phase-head {
+    border-bottom: 1px solid var(--border);
+  }
+  .request-phase[open] > .request-phase-head::before {
+    transform: translateY(-50%) rotate(90deg);
+  }
+  .request-phase-meta {
+    color: var(--text-dim);
+    font-size: .6rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .request-phase-stats {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: .55rem;
+    color: var(--text-dim);
+    font-size: .6rem;
+    white-space: nowrap;
+  }
+  .request-phase-body { padding: .55rem; }
   .detail-block {
     border: 1px solid var(--border);
     border-left: 3px solid var(--border-active);
@@ -750,7 +838,8 @@
     .detail-block-head,
     .action-row,
     .stage-head,
-    .stage-tool {
+    .stage-tool,
+    .request-phase-head {
       grid-template-columns: 1fr;
     }
     .metric-grid,
@@ -1791,7 +1880,7 @@
     return String(id).length > 12 ? String(id).slice(0, 8) : String(id);
   }
 
-  // Track which entries are expanded by requestId
+  // Track which source-message groups are expanded.
   const expandedIds = new Set();
   const detailCache = new Map();
   const detailErrors = new Map();
@@ -1850,20 +1939,20 @@
     return current;
   }
 
-  function toggleExpand(requestId) {
-    if (expandedIds.has(requestId)) {
-      expandedIds.delete(requestId);
+  function toggleExpand(groupId) {
+    if (expandedIds.has(groupId)) {
+      expandedIds.delete(groupId);
     } else {
-      expandedIds.add(requestId);
+      expandedIds.add(groupId);
     }
 
-    const el = document.querySelector('[data-rid="' + requestId + '"]');
+    const el = document.querySelector('[data-rid="' + groupId + '"]');
     if (!el) return;
-    const expanded = expandedIds.has(requestId);
+    const expanded = expandedIds.has(groupId);
     el.classList.toggle('expanded', expanded);
     if (expanded) {
-      renderDetailState(requestId);
-      loadEntryDetail(requestId);
+      renderDetailState(groupId);
+      loadEntryDetail(groupId);
     }
   }
 
@@ -1890,6 +1979,8 @@
     return payload == null || payload === '' ? '' : modalButton(key, title, 'raw', payload);
   }
 
+  const stageOutputPreviewChars = 1000;
+
   function compactStageText(text) {
     const max = 12000;
     if (text.length <= max) return text;
@@ -1912,9 +2003,9 @@
   function stageOutput(label, value, emptyText) {
     const formatted = formatStageValue(value, emptyText);
     const rawText = formatted.text;
-    const hasMore = !formatted.empty && typeof rawText === 'string' && rawText.length >= 500;
-    const head = hasMore ? rawText.slice(0, 500) : rawText;
-    const tail = hasMore ? rawText.slice(500) : '';
+    const hasMore = !formatted.empty && typeof rawText === 'string' && rawText.length > stageOutputPreviewChars;
+    const head = hasMore ? rawText.slice(0, stageOutputPreviewChars) : rawText;
+    const tail = hasMore ? rawText.slice(stageOutputPreviewChars) : '';
     return '<div class="stage-output' + (formatted.empty ? ' empty' : '') + '">'
       + '<span class="stage-output-label">' + esc(label) + '</span>'
       + esc(head)
@@ -2084,7 +2175,7 @@
       + '</div>';
   }
 
-  function renderEntryDetail(e) {
+  function renderEntryDetail(e, includeInput) {
     const toolsById = new Map();
     for (const t of e.tools || []) {
       if (t.id) toolsById.set(t.id, t);
@@ -2129,29 +2220,70 @@
     timeline.sort((a, b) => a.at - b.at);
 
     return '<div class="detail-flow">'
-      + renderInputStage(e)
+      + (includeInput === false ? '' : renderInputStage(e))
       + (e.error != null ? renderErrorStage(e.error) : '')
       + timeline.map(item => item.html).join('')
       + (e.error == null && e.tools.length === 0 && e.llmCalls.length === 0 ? '<div class="detail-state">No tool or LLM detail for this entry.</div>' : '')
       + '</div>';
   }
 
-  function detailStateHtml(requestId) {
-    const cached = detailCache.get(requestId);
-    if (cached != null) return renderEntryDetail(cached);
-    const error = detailErrors.get(requestId);
-    if (error != null) return '<div class="detail-state error">' + esc(error) + '</div>';
-    return '<div class="detail-state">Loading entry details...</div>';
+  function renderGroupDetail(group) {
+    const context = group.triggerContext || {};
+    const sourceText = triggerContextText(context);
+    const sourceMeta = triggerContextMeta(context, group, true) || (group.scope === 'message' ? 'Discord message' : 'non-message trigger');
+    const source = '<div class="group-source">'
+      + '<div class="group-source-meta">' + esc(sourceMeta) + '</div>'
+      + '<div class="group-source-message">' + (sourceText !== '' ? esc(sourceText) : '<span style="color:var(--text-dim);font-style:italic">no trigger text</span>') + '</div>'
+      + '</div>';
+    const phases = (group.entries || []).map(function(item, index) {
+      const summary = item.summary;
+      const entry = item.entry;
+      const classes = ['request-phase'];
+      if (summary.outcome === 'effective') classes.push('effective');
+      if (summary.outcome === 'error') classes.push('has-error');
+      if (summary.outcome === 'active') classes.push('active');
+      const outcome = summary.outcome === 'effective'
+        ? '<span class="outcome-badge">effective</span>'
+        : summary.outcome === 'error'
+          ? '<span class="entry-error-badge">error</span>'
+          : summary.outcome === 'active'
+            ? '<span class="entry-status">running</span>'
+            : '';
+      return '<details class="' + classes.join(' ') + '" data-collapse-key="phase:' + esc(summary.requestId) + '"' + (index === 0 ? ' open' : '') + '>'
+        + '<summary class="request-phase-head">'
+          + renderEventLabel(summary.trigger)
+          + '<span class="entry-user">' + esc(summary.authorUsername) + '</span>'
+          + '<span class="request-phase-meta">' + esc(fmtTime(summary.timestamp) + ' · ' + shortId(summary.requestId)) + '</span>'
+          + '<div class="request-phase-stats">' + outcome
+            + '<span>' + esc(fmtDuration(summary.totalDurationMs)) + '</span>'
+            + '<span>A:<span class="stat-val">' + runtimeActionCount(summary) + '</span></span>'
+            + '<span>T:<span class="stat-val">' + summary.toolCount + '</span></span>'
+            + '<span>L:<span class="stat-val">' + summary.llmCallCount + '</span></span>'
+          + '</div>'
+        + '</summary>'
+        + '<div class="request-phase-body">' + renderEntryDetail(entry, false) + '</div>'
+      + '</details>';
+    }).join('');
+    return '<div class="detail-flow">' + source + phases + '</div>';
   }
 
-  function renderDetailState(requestId) {
-    const detail = document.querySelector('[data-detail-rid="' + requestId + '"]');
+  function detailStateHtml(groupId) {
+    const cached = detailCache.get(groupId);
+    if (cached != null) return renderGroupDetail(cached);
+    const error = detailErrors.get(groupId);
+    if (error != null) return '<div class="detail-state error">' + esc(error) + '</div>';
+    return '<div class="detail-state">Loading message lifecycle...</div>';
+  }
+
+  function renderDetailState(groupId) {
+    const detail = document.querySelector('[data-detail-rid="' + groupId + '"]');
     if (detail == null) return;
-    const html = detailStateHtml(requestId);
-    if (detailRenderedHtml.get(requestId) === html) return;
-    const openDetails = new Set();
+    const html = detailStateHtml(groupId);
+    if (detailRenderedHtml.get(groupId) === html) return;
+    const detailOpenStates = new Map();
     Array.from(detail.querySelectorAll('details')).forEach((node, index) => {
-      if (node.open) openDetails.add(index);
+      const key = node.getAttribute('data-collapse-key') || 'index:' + index;
+      detailOpenStates.set(key, node.open);
     });
     const next = htmlToElement(html);
     if (next == null) {
@@ -2168,64 +2300,66 @@
       }
     }
     Array.from(detail.querySelectorAll('details')).forEach((node, index) => {
-      if (openDetails.has(index)) node.open = true;
+      const key = node.getAttribute('data-collapse-key') || 'index:' + index;
+      if (detailOpenStates.has(key)) node.open = detailOpenStates.get(key);
     });
-    detailRenderedHtml.set(requestId, html);
+    detailRenderedHtml.set(groupId, html);
   }
 
-  async function loadEntryDetail(requestId) {
-    const cached = detailCache.get(requestId);
-    if (cached != null && cached.status !== 'active') return;
-    if (detailRequests.has(requestId)) return;
-    detailErrors.delete(requestId);
+  async function loadEntryDetail(groupId) {
+    if (detailRequests.has(groupId)) return;
+    detailErrors.delete(groupId);
     const request = (async function() {
-      const r = await fetch('/api/logs/' + encodeURIComponent(requestId));
+      const r = await fetch('/api/log-groups/' + encodeURIComponent(groupId));
       if (r.status === 401) { location.href = '/login'; return; }
-      if (!r.ok) throw new Error('Unable to load entry details (' + r.status + ')');
-      detailCache.set(requestId, await r.json());
+      if (!r.ok) throw new Error('Unable to load message lifecycle (' + r.status + ')');
+      detailCache.set(groupId, await r.json());
     })();
-    detailRequests.set(requestId, request);
+    detailRequests.set(groupId, request);
     try {
       await request;
     } catch (err) {
-      detailErrors.set(requestId, err instanceof Error ? err.message : 'Unable to load entry details');
+      detailErrors.set(groupId, err instanceof Error ? err.message : 'Unable to load message lifecycle');
     } finally {
-      detailRequests.delete(requestId);
-      if (expandedIds.has(requestId)) renderDetailState(requestId);
+      detailRequests.delete(groupId);
+      if (expandedIds.has(groupId)) renderDetailState(groupId);
     }
   }
 
   function renderEntry(e) {
     const cost = e.estimatedCostUsd != null ? '$' + e.estimatedCostUsd.toFixed(4) : null;
-    const hasErr = e.hasError === true;
-    const isActive = e.status === 'active';
+    const hasErr = e.outcome === 'error';
+    const isActive = e.outcome === 'active';
     const cls = ['entry'];
     if (hasErr) cls.push('has-error');
     if (isActive) cls.push('active');
-    if (!e.agentRan && !isActive) cls.push('no-agent');
-    if (expandedIds.has(e.requestId)) cls.push('expanded');
+    if (e.outcome === 'effective') cls.push('effective');
+    if (expandedIds.has(e.groupId)) cls.push('expanded');
 
-    const rid = esc(e.requestId);
+    const rid = esc(e.groupId);
     const contextText = triggerContextText(e.triggerContext);
     const locationText = triggerLocationText(e.triggerContext, e);
+    const groupLabel = e.scope === 'message' ? 'message' : 'trigger';
     return '<div class="' + cls.join(' ') + '" data-rid="' + rid + '">'
       + '<div class="entry-header" onclick="window.__toggleExpand(\'' + rid + '\')">'
         + '<span class="entry-time">' + fmtTime(e.timestamp) + '</span>'
-        + renderEventLabel(e.trigger)
+        + '<span class="event-label event-custom">' + esc(groupLabel) + ' <span class="event-detail">· ' + e.requestCount + ' phase' + (e.requestCount === 1 ? '' : 's') + '</span></span>'
         + '<span class="entry-user">' + esc(e.authorUsername) + '</span>'
         + '<span class="entry-location">' + esc(locationText) + '</span>'
         + '<span class="entry-message">' + (contextText !== '' ? esc(contextText) : '<span style="color:var(--text-dim);font-style:italic">no trigger text</span>') + '</span>'
         + '<div class="entry-stats">'
           + (isActive ? '<span class="entry-status">running</span>' : '')
           + (hasErr ? '<span class="entry-error-badge">error</span>' : '')
+          + (e.outcome === 'effective' ? '<span class="outcome-badge">effective</span>' : '')
           + '<span>' + fmtDuration(e.totalDurationMs) + '</span>'
+          + '<span>P:<span class="stat-val">' + e.requestCount + '</span></span>'
           + '<span>A:<span class="stat-val">' + runtimeActionCount(e) + '</span></span>'
           + '<span>T:<span class="stat-val">' + e.toolCount + '</span></span>'
           + '<span>L:<span class="stat-val">' + e.llmCallCount + '</span></span>'
           + (cost ? '<span class="entry-cost">' + cost + '</span>' : '')
         + '</div>'
       + '</div>'
-      + '<div class="entry-detail" data-detail-rid="' + rid + '">' + (expandedIds.has(e.requestId) ? detailStateHtml(e.requestId) : '') + '</div>'
+      + '<div class="entry-detail" data-detail-rid="' + rid + '">' + (expandedIds.has(e.groupId) ? detailStateHtml(e.groupId) : '') + '</div>'
     + '</div>';
   }
   // Expose toggle for inline onclick
@@ -2241,12 +2375,12 @@
 
   async function fetchLogs() {
     const requestQuery = currentLogParams().toString();
-    const r = await fetch('/api/logs?' + requestQuery);
+    const r = await fetch('/api/log-groups?' + requestQuery);
     if (r.status === 401) { location.href = '/login'; return; }
     const data = await r.json();
     if (currentLogParams().toString() !== requestQuery) return;
 
-    logCount.textContent = data.length + ' entries';
+    logCount.textContent = data.length + ' message lifecycles';
     if (data.length === 0) {
       rowNodes.clear();
       detailRenderedHtml.clear();
@@ -2259,18 +2393,24 @@
       const seen = new Set();
       let cursor = logList.firstElementChild;
       for (const entry of data) {
-        seen.add(entry.requestId);
+        seen.add(entry.groupId);
         const next = htmlToElement(renderEntry(entry));
-        const existing = rowNodes.get(entry.requestId);
+        const existing = rowNodes.get(entry.groupId);
         const node = existing == null ? next : patchNode(existing, next);
-        rowNodes.set(entry.requestId, node);
+        rowNodes.set(entry.groupId, node);
         if (node !== cursor) logList.insertBefore(node, cursor);
         cursor = node.nextElementSibling;
+        if (expandedIds.has(entry.groupId)) {
+          const cached = detailCache.get(entry.groupId);
+          if (cached == null || cached.requestCount !== entry.requestCount || entry.outcome === 'active') {
+            void loadEntryDetail(entry.groupId);
+          }
+        }
       }
-      for (const [requestId, node] of Array.from(rowNodes.entries())) {
-        if (seen.has(requestId)) continue;
-        rowNodes.delete(requestId);
-        detailRenderedHtml.delete(requestId);
+      for (const [groupId, node] of Array.from(rowNodes.entries())) {
+        if (seen.has(groupId)) continue;
+        rowNodes.delete(groupId);
+        detailRenderedHtml.delete(groupId);
         node.remove();
       }
     }
@@ -3135,14 +3275,14 @@
 
   async function refreshExpandedActiveDetails() {
     const activeIds = [];
-    for (const requestId of expandedIds) {
-      const cached = detailCache.get(requestId);
-      const row = document.querySelector('[data-rid="' + requestId + '"]');
-      if ((cached != null && cached.status === 'active') || (row != null && row.classList.contains('active'))) {
-        activeIds.push(requestId);
+    for (const groupId of expandedIds) {
+      const cached = detailCache.get(groupId);
+      const row = document.querySelector('[data-rid="' + groupId + '"]');
+      if ((cached != null && cached.outcome === 'active') || (row != null && row.classList.contains('active'))) {
+        activeIds.push(groupId);
       }
     }
-    await Promise.all(activeIds.map((requestId) => loadEntryDetail(requestId)));
+    await Promise.all(activeIds.map((groupId) => loadEntryDetail(groupId)));
   }
 
   document.addEventListener('visibilitychange', () => {
