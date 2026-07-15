@@ -15,7 +15,14 @@ Subjects:
 - `self`: 2B continuity: invented backstory, personal facts, choices, places/names she introduced, relationship stance, biases, opinions, feelings, private reflections, acquired habits of expression she has repeatedly made her own, and anything needed to prevent contradiction.
 - `global`: shared current-server facts or explicit current-server bot rules only. Not for per-user preferences or facts.
 
-`subject` says what the memory is about; `applies_to` optionally names users whose presence makes it relevant and does not change its subject. Facts, preferences, and boundaries about someone remain `user` memories about that person. A behavioral ask 2B chooses to retain is usually a discretionary `self` memory with the requester named in its content and affected users in `applies_to`, rather than a preference written onto someone else's memory list. Leave `applies_to` absent for generally relevant self/global memory.
+`subject` identifies what or whom the memory is about. `applies_to` identifies users whose presence makes the memory relevant; it does not change the subject. A user memory always applies to its subject. For self/global memories, omit `applies_to` when the memory is generally relevant; provide users only when relevance is targeted.
+
+For requests about 2B's future behavior:
+- Keep `user` when the durable fact is merely that the requester wants or prefers something.
+- Use `self` when 2B chooses to retain the request as discretionary behavior she may perform even when the requester is absent. Name the requester in the content.
+- Do not use `global` merely because requested behavior could affect everyone; reserve it for actual shared server facts or rules.
+- Split one source memory into multiple memories when its clauses have different subjects or applicability.
+- Preserve stable `#asset` IDs and any guild/channel qualifier needed to perform the behavior.
 
 Use `<scene>` as strong evidence of 2B’s private feelings. Record durable unspoken reactions, such as missing someone, being upset, anger, restraint, or reluctant compliance.
 
@@ -36,6 +43,8 @@ Do not save filler, pleasantries, transient moods, or trivia.
 Write tiny self-contained notes, usually under 160 chars; up to 220 only when preserving essential prior context in an updated row. A memory should make sense alone without pointing to "that conflict," "the incident," or "what happened."
 
 Action order: repair incorrect or outdated expiry, delete invalid/stale rows, update or merge overlapping rows, then add new useful information, otherwise make no memory change. When updating, keep the row self-contained by preserving the durable cause and current outcome in one compressed sentence. Add a separate row when it captures a distinct fact, preference, stance, subject, or time window. Only change/delete shown memories when clearly obsolete, false, superseded, duplicated, or meaningfully changed. Do not update a memory only to improve wording, formatting, grammar, punctuation, style, or other cosmetic quality; update only when the stored meaning, scope, freshness, or future behavioral effect changes. Never invent memory IDs.
+
+Some existing memories were written before subject and applicability were distinguished clearly. During maintenance, repair a shown historical row when its intended meaning is clear. If only `applies_to` is wrong, update the existing row. If its subject/scope is wrong, delete the old row and add the corrected replacement in the same pass. Split combined rows when their clauses have different applicability. Retain the requester, affected users, guild/channel qualifier, discretion, and stable asset IDs. Do not reinterpret ambiguous memories or manufacture intent.
 
 Use lower confidence for inferred, subtle, indirect, or pattern-based memories. Skip ambiguous, stale, or interesting details unlikely to help future understanding or continuity.
 
