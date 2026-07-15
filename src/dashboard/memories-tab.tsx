@@ -306,6 +306,12 @@ function MemoriesTab(): JSX.Element {
   }, []);
 
   useEffect(() => {
+    if (notice === "") return;
+    const timer = window.setTimeout(() => setNotice(""), 2_500);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  useEffect(() => {
     localStorage.setItem(FILTERS_KEY, JSON.stringify(filters));
     const controller = new AbortController();
     const sequence = ++loadSequence.current;
@@ -498,8 +504,8 @@ function MemoriesTab(): JSX.Element {
         <button className="memory-clear-filters" type="button" onClick={clearFilters}>Clear filters</button>
       </section>
 
-      {error !== "" ? <div className="memory-feedback error">{error}</div> : null}
-      {notice !== "" ? <div className="memory-feedback success">{notice}</div> : null}
+      {error !== "" ? <div className="memory-feedback error" role="alert">{error}</div> : null}
+      {notice !== "" ? <div className="memory-feedback success" role="status">{notice}</div> : null}
 
       <div className="memories-layout">
         <section className="memory-catalog" aria-label="Memory catalog">

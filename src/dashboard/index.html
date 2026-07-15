@@ -1464,10 +1464,24 @@
   }
   .memory-clear-filters:hover { color: var(--text-bright); border-color: var(--text-dim); }
   .memory-feedback {
-    margin-top: .75rem;
+    position: fixed;
+    z-index: 180;
+    top: 60px;
+    right: 1.25rem;
+    max-width: min(420px, calc(100vw - 2.5rem));
     border-left: 3px solid;
-    padding: .5rem .7rem;
+    border-top: 1px solid var(--border-active);
+    border-right: 1px solid var(--border-active);
+    border-bottom: 1px solid var(--border-active);
+    padding: .55rem .75rem;
     font-size: .68rem;
+    box-shadow: 0 12px 32px rgba(0,0,0,.42);
+    pointer-events: none;
+    animation: memory-feedback-in .14s ease-out;
+  }
+  @keyframes memory-feedback-in {
+    from { opacity: 0; transform: translateY(-5px); }
+    to { opacity: 1; transform: translateY(0); }
   }
   .memory-feedback.error { border-color: var(--red); background: var(--red-dim); color: #ffb4b4; }
   .memory-feedback.success { border-color: var(--green); background: var(--green-dim); color: #8aedae; }
