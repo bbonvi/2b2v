@@ -109,6 +109,41 @@ function selectNextDispatchTrigger(messages: readonly PendingMessage[]): Selecte
   return null;
 }
 
+function messageReplyTargetId(message: PendingMessage): string | null {
+  const reference = (message.message as { reference?: { messageId?: unknown } | null }).reference;
+  return typeof reference?.messageId === "string" ? reference.messageId : null;
+}
+
+/**
+ * Extend a triggered turn through ordinary split messages without crossing an
+ * explicit Discord reply into another conversational branch.
+ */
+function sameAuthorFollowupEndIndex(
+  batch: readonly PendingMessage[],
+  trigger: SelectedDispatchTrigger,
+  triggerIndex: number,
+): number {
+  if (!allowsSameAuthorFollowup(trigger.result)) return triggerIndex;
+
+  const branchMessageIds = new Set([trigger.message.id]);
+  const triggerReplyTargetId = messageReplyTargetId(trigger.message);
+  if (triggerReplyTargetId !== null) branchMessageIds.add(triggerReplyTargetId);
+
+  let endIndex = triggerIndex;
+  for (let i = triggerIndex + 1; i < batch.length; i += 1) {
+    const message = batch[i];
+    if (message === undefined || message.triggerResult !== null) break;
+    if (message.authorId !== trigger.message.authorId) continue;
+
+    const replyTargetId = messageReplyTargetId(message);
+    if (replyTargetId !== null && !branchMessageIds.has(replyTargetId)) break;
+
+    branchMessageIds.add(message.id);
+    endIndex = i;
+  }
+  return endIndex;
+}
+
 /**
  * Choose the concrete message to process for a selected trigger.
  * Typing-aware triggers may include same-author follow-up text after the
@@ -120,7 +155,10 @@ export function selectDispatchMessageForTrigger(
   trigger: SelectedDispatchTrigger,
 ): PendingMessage | undefined {
   if (allowsSameAuthorFollowup(trigger.result)) {
-    for (let i = batch.length - 1; i >= 0; i--) {
+    const triggerIndex = batch.findIndex((message) => message.id === trigger.message.id);
+    if (triggerIndex === -1) return trigger.message;
+    const endIndex = sameAuthorFollowupEndIndex(batch, trigger, triggerIndex);
+    for (let i = endIndex; i >= triggerIndex; i -= 1) {
       const message = batch[i];
       if (message !== undefined && message.authorId === trigger.message.authorId) return message;
     }
@@ -144,8 +182,8 @@ export function selectDispatchMessagesForTrigger(
   if (!allowsSameAuthorFollowup(trigger.result)) return [trigger.message];
 
   const triggerIndex = batch.findIndex((message) => message.id === trigger.message.id);
-  const selectedIndex = batch.findIndex((message) => message.id === selected.id);
-  if (triggerIndex === -1 || selectedIndex === -1) return [selected];
+  if (triggerIndex === -1) return [selected];
+  const endIndex = sameAuthorFollowupEndIndex(batch, trigger, triggerIndex);
 
   let startIndex = triggerIndex;
   for (let i = triggerIndex - 1; i >= 0; i -= 1) {
@@ -155,7 +193,7 @@ export function selectDispatchMessagesForTrigger(
   }
 
   return batch
-    .slice(startIndex, Math.max(triggerIndex, selectedIndex) + 1)
+    .slice(startIndex, endIndex + 1)
     .filter((message) => message.authorId === trigger.message.authorId);
 }
 
@@ -177,14 +215,7 @@ function takeNextDispatchBatch(state: ChannelState): {
     return { batch, trigger };
   }
 
-  let endIndex = triggerIndex;
-  if (allowsSameAuthorFollowup(trigger.result)) {
-    for (let i = triggerIndex + 1; i < state.pending.length; i += 1) {
-      const message = state.pending[i];
-      if (message === undefined || message.triggerResult !== null) break;
-      if (message.authorId === trigger.message.authorId) endIndex = i;
-    }
-  }
+  const endIndex = sameAuthorFollowupEndIndex(state.pending, trigger, triggerIndex);
 
   const batch = state.pending.slice(0, endIndex + 1);
   state.pending = state.pending.slice(endIndex + 1);

@@ -83,9 +83,14 @@ function makeTriggers(overrides: Partial<TriggerConfig> = {}): TriggerConfig {
 }
 
 let messageCounter = 0;
-function makeMessage(channelId: string, id?: string, createdTimestamp?: number): unknown {
+function makeMessage(channelId: string, id?: string, createdTimestamp?: number, replyToId?: string): unknown {
   messageCounter += 1;
-  return { channelId, id: id ?? `m-${messageCounter}`, ...(createdTimestamp !== undefined ? { createdTimestamp } : {}) };
+  return {
+    channelId,
+    id: id ?? `m-${messageCounter}`,
+    ...(createdTimestamp !== undefined ? { createdTimestamp } : {}),
+    ...(replyToId !== undefined ? { reference: { messageId: replyToId } } : {}),
+  };
 }
 
 function makePending(
@@ -93,10 +98,11 @@ function makePending(
   authorId: string,
   triggerResult: TriggerResult = null,
   receivedAt = 0,
+  replyToId?: string,
 ): PendingMessage {
   return {
     id,
-    message: makeMessage("ch-1", id),
+    message: makeMessage("ch-1", id, undefined, replyToId),
     receivedAt,
     authorId,
     triggerResult,
@@ -141,6 +147,41 @@ describe("createChannelDispatcher", () => {
     );
 
     expect(selected?.id).toBe("m-followup");
+  });
+
+  test("does not anchor a triggered reply to a same-author message in another reply branch", () => {
+    const keyword = makePending("m-keyword", "user-1", { reason: "keyword", keyword: "2b" }, 1000);
+    const otherBranch = makePending("m-other-branch", "user-1", null, 1001, "m-other-user");
+    const selected = selectDispatchMessageForTrigger(
+      [keyword, otherBranch],
+      { result: { reason: "keyword", keyword: "2b" }, message: keyword },
+    );
+
+    expect(selected?.id).toBe("m-keyword");
+  });
+
+  test("does not merge a same-author message that replies into another branch", () => {
+    const keyword = makePending("m-keyword", "user-1", { reason: "keyword", keyword: "2b" }, 1000);
+    const splitFollowup = makePending("m-split", "user-1", null, 1001);
+    const otherBranch = makePending("m-other-branch", "user-1", null, 1002, "m-other-user");
+    const selected = selectDispatchMessagesForTrigger(
+      [keyword, splitFollowup, otherBranch],
+      { result: { reason: "keyword", keyword: "2b" }, message: keyword },
+    );
+
+    expect(selected.map((message) => message.id)).toEqual(["m-keyword", "m-split"]);
+  });
+
+  test("merges same-author replies that stay on the triggered branch", () => {
+    const mention = makePending("m-mention", "user-1", { reason: "mention" }, 1000, "m-bot");
+    const sameTarget = makePending("m-same-target", "user-1", null, 1001, "m-bot");
+    const chained = makePending("m-chained", "user-1", null, 1002, "m-same-target");
+    const selected = selectDispatchMessagesForTrigger(
+      [mention, sameTarget, chained],
+      { result: { reason: "mention" }, message: mention },
+    );
+
+    expect(selected.map((message) => message.id)).toEqual(["m-mention", "m-same-target", "m-chained"]);
   });
 
   test("selects the current same-author debounce group for mention follow-up turns", () => {
@@ -297,6 +338,31 @@ describe("createChannelDispatcher", () => {
 
     expect(calls).toEqual([
       { ids: ["m-key", "m-followup"], trigger: { reason: "keyword", keyword: "туби" } },
+    ]);
+
+    dispatcher.dispose();
+  });
+
+  test("dispatches a divergent same-author reply outside the triggered turn", async () => {
+    const calls: Array<{ ids: string[]; trigger: TriggerResult }> = [];
+    const handler: DispatchHandler = (msgs, trigger) => {
+      calls.push({ ids: msgs.map((message) => message.id), trigger: trigger?.result ?? null });
+      return Promise.resolve(undefined);
+    };
+
+    const config = makeConfig({ defaultDebounceMs: 20 });
+    const triggers = makeTriggers({ keywordDebounceMs: 20, typingIdleMs: 0 });
+    const dispatcher = createChannelDispatcher({ config, triggers, handler });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-key"), { reason: "keyword", keyword: "туби" }, "user-1");
+    enqueue(dispatcher, makeMessage("ch-1", "m-split"), null, "user-1");
+    enqueue(dispatcher, makeMessage("ch-1", "m-other-branch", undefined, "m-other-user"), null, "user-1");
+
+    await delay(100);
+
+    expect(calls).toEqual([
+      { ids: ["m-key", "m-split"], trigger: { reason: "keyword", keyword: "туби" } },
+      { ids: ["m-other-branch"], trigger: null },
     ]);
 
     dispatcher.dispose();
