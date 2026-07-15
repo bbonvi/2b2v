@@ -1738,6 +1738,9 @@
     } else if (presentation.avatar !== 'applied') {
       parts.push(presentation.avatar);
     }
+    if (presentation.nextAvatarRotationAt != null) {
+      parts.push('reroll ' + modeLocalTime(presentation.nextAvatarRotationAt, status.timezone, true) + ' · in ' + conciseDistance(presentation.nextAvatarRotationAt));
+    }
     const guildOverrides = guilds.filter(entry => entry.status?.current != null);
     const guildRetries = guilds.filter(entry => entry.status?.presentation?.avatar === 'retrying');
     if (guildOverrides.length > 0) parts.push(guildOverrides.length + ' local avatar' + (guildOverrides.length === 1 ? '' : 's'));

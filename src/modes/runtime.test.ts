@@ -221,6 +221,30 @@ describe("persona mode runtime", () => {
     instance.stop();
   });
 
+  test("reports the next avatar rotation for the active mode", async () => {
+    const now = Date.UTC(2026, 0, 1, 0, 0);
+    let currentHash: string | null = null;
+    const rotating = {
+      ...normalMode([avatar("normal-1"), avatar("normal-2")]),
+      avatarRotation: { minIntervalMs: 60 * 60_000, maxIntervalMs: 60 * 60_000 },
+    };
+    const instance = runtime(modeConfig([rotating]), () => now, () => 0, {
+      presentation: presentation({
+        currentAvatarHash: () => currentHash,
+        applyAvatar: (candidate) => {
+          currentHash = `discord-${candidate.contentHash}`;
+          return Promise.resolve({ discordAvatarHash: currentHash });
+        },
+      }),
+    }).value;
+
+    instance.start();
+    await Bun.sleep(0);
+
+    expect(instance.getStatus().presentation.nextAvatarRotationAt).toBe(now + 60 * 60_000);
+    instance.stop();
+  });
+
   test("tracks guild-scoped episodes independently", () => {
     let now = Date.UTC(2026, 0, 1, 0, 0);
     const config = modeConfig([normalMode(), episodeMode({ scope: "guild", minIntervalMs: 0, maxIntervalMs: 0 })]);

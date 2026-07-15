@@ -117,6 +117,7 @@ export interface PersonaModeContextStatus {
     desiredAvatarId?: string;
     appliedAvatarId?: string | null;
     retryAt?: number;
+    nextAvatarRotationAt?: number;
   };
 }
 
@@ -746,6 +747,7 @@ function createPersonaModeContextRuntime(options: PersonaModeContextRuntimeOptio
       ? state.activeEpisode
       : undefined;
     const selectedAvatar = mode === undefined ? undefined : state.selectedAvatars[mode.id];
+    const nextAvatarRotationAt = mode === undefined ? undefined : state.nextAvatarRotations[mode.id];
     const applied = desiredAvatar !== undefined && avatarAlreadyApplied(desiredAvatar);
     const avatarState = desiredAvatar === undefined
       ? "disabled"
@@ -787,6 +789,7 @@ function createPersonaModeContextRuntime(options: PersonaModeContextRuntimeOptio
         ...(desiredAvatar !== undefined && desiredAvatar !== null ? { desiredAvatarId: desiredAvatar.id } : {}),
         ...(state.appliedAvatarId !== undefined ? { appliedAvatarId: state.appliedAvatarId } : {}),
         ...(state.avatarRetryNotBefore !== undefined ? { retryAt: state.avatarRetryNotBefore } : {}),
+        ...(nextAvatarRotationAt !== undefined ? { nextAvatarRotationAt } : {}),
       },
     };
   }
