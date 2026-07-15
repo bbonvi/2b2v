@@ -19,6 +19,7 @@ import { resolveGuildLlmProvider, resolveGuildModel, resolveGuildModelId, buildS
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { Logger, RequestLog } from "../logger.ts";
 import { completeLlmChat } from "../llm/chat.ts";
+import { ModelProviderError } from "../llm/codex-chat.ts";
 import type {
   OpenRouterChatRequest,
   OpenRouterChatResult,
@@ -673,6 +674,7 @@ function isProviderTransientErrorMessage(message: string): boolean {
 
 function normalizeModelTurnError(error: unknown, request: OpenRouterChatRequest): Error {
   const message = makeToolErrorText(error);
+  if (error instanceof ModelProviderError) return error;
   if (error instanceof EmptyModelResponseError || error instanceof ModelOutputTimeoutError) return error;
   if (isAgentTimeBudgetExceededError(error)) return error instanceof Error ? error : new Error(message);
   const provider = modelProviderName(request);
@@ -1133,6 +1135,7 @@ async function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 function isRetriableModelTurnError(error: unknown): boolean {
+  if (error instanceof ModelProviderError) return error.retryable;
   if (error instanceof EmptyModelResponseError) return true;
   if (error instanceof Error && error.name === "ModelOutputTimeoutError") return true;
   return isProviderTransientErrorMessage(makeToolErrorText(error));
@@ -1159,6 +1162,7 @@ async function completeModelTurnWithRetries(input: {
   maxAttempts?: number;
   validateResult?: (result: OpenRouterChatResult) => Error | undefined;
   onAttemptStart?: () => void;
+  hasCompletedVisibleMessage?: () => boolean;
   requestLog?: RequestLog;
   log?: Logger;
 }): Promise<OpenRouterChatResult> {
@@ -1170,7 +1174,9 @@ async function completeModelTurnWithRetries(input: {
       const validationError = input.validateResult?.(result);
       if (validationError !== undefined) {
         const normalizedError = normalizeModelTurnError(validationError, input.request);
-        const shouldRetry = attempt < maxAttempts && isRetriableModelTurnError(normalizedError);
+        const shouldRetry = attempt < maxAttempts
+          && input.hasCompletedVisibleMessage?.() !== true
+          && isRetriableModelTurnError(normalizedError);
         input.requestLog?.recordLLMError(normalizedError, result.messageForLogs);
         if (!shouldRetry) throw normalizedError;
         input.log?.warn("retrying LLM turn", {
@@ -1178,12 +1184,15 @@ async function completeModelTurnWithRetries(input: {
           maxAttempts,
           error: makeToolErrorText(normalizedError),
         });
+        await sleepMs(retryBackoffMs(attempt), input.request.signal);
         continue;
       }
       return result;
     } catch (error) {
       const normalizedError = normalizeModelTurnError(error, input.request);
-      const shouldRetry = attempt < maxAttempts && isRetriableModelTurnError(normalizedError);
+      const shouldRetry = attempt < maxAttempts
+        && input.hasCompletedVisibleMessage?.() !== true
+        && isRetriableModelTurnError(normalizedError);
       if (!isAgentTimeBudgetExceededError(normalizedError)) {
         input.requestLog?.recordLLMError(normalizedError);
       }
@@ -1195,10 +1204,16 @@ async function completeModelTurnWithRetries(input: {
         maxAttempts,
         error: makeToolErrorText(normalizedError),
       });
+      await sleepMs(retryBackoffMs(attempt), input.request.signal);
     }
   }
 
   throw new Error("LLM retry loop ended without a result.");
+}
+
+function retryBackoffMs(attempt: number): number {
+  const baseMs = 250 * (2 ** Math.max(0, attempt - 1));
+  return Math.round(baseMs * (0.8 + Math.random() * 0.4));
 }
 
 const PARALLEL_SAFE_READ_ONLY_TOOLS = new Set([
@@ -1404,6 +1419,7 @@ async function runNativeToolLoop(input: {
     signal: AbortSignal | null | undefined = input.signal,
     recoverAgentTimeBudget = true,
   ): Promise<{ text: string }> => {
+    let completedVisibleMessage = false;
     try {
       const result = await completeModelTurnWithRetries({
         complete: input.complete,
@@ -1416,7 +1432,10 @@ async function runNativeToolLoop(input: {
           onTextDelta: input.streamFinalText !== undefined
             ? async (delta) => {
               const sent = await input.streamFinalText?.(delta, undefined);
-              if (sent === true) streamingState.visibleText = true;
+              if (sent === true) {
+                streamingState.visibleText = true;
+                completedVisibleMessage = true;
+              }
             }
             : undefined,
           signal: signal ?? undefined,
@@ -1424,7 +1443,11 @@ async function runNativeToolLoop(input: {
         timeoutMs: input.llmOutputTimeoutMs,
         maxAttempts,
         validateResult: input.allowEmptyFinalResponse === true ? undefined : requireTextResult(emptyResponseMessage),
-        onAttemptStart: () => input.onModelTurnStart?.(undefined),
+        onAttemptStart: () => {
+          completedVisibleMessage = false;
+          input.onModelTurnStart?.(undefined);
+        },
+        hasCompletedVisibleMessage: () => completedVisibleMessage,
         requestLog: input.requestLog,
         log: input.log,
       });
@@ -1473,6 +1496,7 @@ async function runNativeToolLoop(input: {
 
   for (;;) {
     let result: OpenRouterChatResult;
+    let completedVisibleMessage = false;
     try {
       input.toolTiming?.markModelTurnStart();
       result = await completeModelTurnWithRetries({
@@ -1486,14 +1510,21 @@ async function runNativeToolLoop(input: {
           onTextDelta: input.streamFinalText !== undefined
             ? async (delta) => {
               const sent = await input.streamFinalText?.(delta, undefined);
-              if (sent === true) streamingState.visibleText = true;
+              if (sent === true) {
+                streamingState.visibleText = true;
+                completedVisibleMessage = true;
+              }
             }
             : undefined,
           signal: input.signal,
         },
         timeoutMs: input.llmOutputTimeoutMs,
         validateResult: input.allowEmptyFinalResponse === true ? undefined : requireTextUnlessToolCalls("Model produced an empty response."),
-        onAttemptStart: () => input.onModelTurnStart?.(undefined),
+        onAttemptStart: () => {
+          completedVisibleMessage = false;
+          input.onModelTurnStart?.(undefined);
+        },
+        hasCompletedVisibleMessage: () => completedVisibleMessage,
         requestLog: input.requestLog,
         log: input.log,
       });

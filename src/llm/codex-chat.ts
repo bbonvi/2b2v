@@ -25,6 +25,124 @@ import type {
 
 const DEFAULT_CODEX_AUTH_PATH = "data/codex-auth.json";
 
+export type ModelFailureKind =
+  | "transport"
+  | "provider_transient"
+  | "permanent"
+  | "aborted";
+
+/** Provider failure with retry semantics preserved across the LLM boundary. */
+export class ModelProviderError extends Error {
+  readonly kind: ModelFailureKind;
+  readonly retryable: boolean;
+  readonly transportCode?: number;
+
+  constructor(message: string, input: {
+    kind: ModelFailureKind;
+    retryable: boolean;
+    transportCode?: number;
+    cause?: unknown;
+  }) {
+    super(message, input.cause !== undefined ? { cause: input.cause } : undefined);
+    this.name = "ModelProviderError";
+    this.kind = input.kind;
+    this.retryable = input.retryable;
+    if (input.transportCode !== undefined) this.transportCode = input.transportCode;
+  }
+}
+
+const TRANSIENT_WEBSOCKET_CLOSE_CODES = new Set([1006, 1011, 1012, 1013]);
+const PERMANENT_WEBSOCKET_CLOSE_CODES = new Set([1002, 1003, 1007, 1008, 1009]);
+
+function websocketCloseCode(message: string): number | undefined {
+  const match = /websocket[^\d]{0,32}(\d{4})/i.exec(message);
+  if (match === null) return undefined;
+  const code = Number(match[1]);
+  return Number.isInteger(code) ? code : undefined;
+}
+
+/** Classify a failed Codex response without depending on pi-ai internals. */
+export function classifyCodexFailure(input: {
+  message: string;
+  stopReason?: string;
+  signal?: AbortSignal;
+  cause?: unknown;
+}): ModelProviderError {
+  const normalized = input.message.toLowerCase();
+  const transportCode = websocketCloseCode(input.message);
+  const aborted = input.stopReason === "aborted"
+    || input.signal?.aborted === true
+    || (input.cause instanceof Error && input.cause.name === "AbortError");
+  if (aborted) {
+    return new ModelProviderError(input.message, {
+      kind: "aborted",
+      retryable: false,
+      cause: input.cause,
+    });
+  }
+
+  if (transportCode !== undefined && PERMANENT_WEBSOCKET_CLOSE_CODES.has(transportCode)) {
+    return new ModelProviderError(input.message, {
+      kind: "permanent",
+      retryable: false,
+      transportCode,
+      cause: input.cause,
+    });
+  }
+  if (
+    normalized.includes("protocol error")
+    || normalized.includes("policy violation")
+    || normalized.includes("invalid data")
+    || normalized.includes("invalid payload")
+  ) {
+    return new ModelProviderError(input.message, {
+      kind: "permanent",
+      retryable: false,
+      ...(transportCode !== undefined ? { transportCode } : {}),
+      cause: input.cause,
+    });
+  }
+
+  const transientTransport = (transportCode !== undefined && TRANSIENT_WEBSOCKET_CLOSE_CODES.has(transportCode))
+    || normalized.includes("websocket")
+    || /(?:connection|connect|idle).*(?:timed out|timeout)/.test(normalized)
+    || /(?:timed out|timeout).*(?:connection|connect|idle)/.test(normalized)
+    || /premature.*(?:stream|clos)/.test(normalized)
+    || /stream.*(?:premature|closed unexpectedly|ended unexpectedly)/.test(normalized);
+  if (transientTransport) {
+    return new ModelProviderError(input.message, {
+      kind: "transport",
+      retryable: true,
+      ...(transportCode !== undefined ? { transportCode } : {}),
+      cause: input.cause,
+    });
+  }
+
+  const providerTransient = normalized.includes("server_error")
+    || normalized.includes("service unavailable")
+    || normalized.includes("temporarily unavailable")
+    || normalized.includes("overloaded")
+    || normalized.includes("rate limit")
+    || normalized.includes("you can retry your request")
+    || /\b(408|409|425|429|500|502|503|504)\b/.test(normalized);
+  return new ModelProviderError(input.message, {
+    kind: providerTransient ? "provider_transient" : "permanent",
+    retryable: providerTransient,
+    ...(transportCode !== undefined ? { transportCode } : {}),
+    cause: input.cause,
+  });
+}
+
+function failureMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function rethrowClassifiedCodexFailure(error: unknown, signal?: AbortSignal): never {
+  if (error instanceof ModelProviderError) throw error;
+  const message = failureMessage(error);
+  throw classifyCodexFailure({ message, signal, cause: error });
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -295,15 +413,42 @@ export async function completeCodexChat(request: OpenRouterChatRequest): Promise
     ...providerParamsWithoutInternalFields(request.providerParams),
   };
   if (request.onTextDelta !== undefined) {
-    const eventStream = stream(model, context, options);
-    for await (const event of eventStream) {
-      if (event.type === "text_delta") {
-        await request.onTextDelta(event.delta);
+    try {
+      const eventStream = stream(model, context, options);
+      for await (const event of eventStream) {
+        if (event.type === "text_delta") {
+          await request.onTextDelta(event.delta);
+        }
       }
+      const response = await eventStream.result();
+      if (response.stopReason === "error" || response.stopReason === "aborted") {
+        const message = response.errorMessage ?? `OpenAI Codex request failed: ${response.stopReason}`;
+        throw classifyCodexFailure({ message, stopReason: response.stopReason, signal: request.signal });
+      }
+
+      const text = resultText(response);
+      const toolCalls = resultToolCalls(response);
+      const providerNativeContent = resultProviderNativeContent(response);
+      return {
+        text,
+        toolCalls,
+        providerNativeContent,
+        messageForLogs: messageForLogs(response, text, toolCalls),
+        rawResponse: response as unknown as Record<string, unknown>,
+      };
+    } catch (error) {
+      rethrowClassifiedCodexFailure(error, request.signal);
     }
-    const response = await eventStream.result();
+  }
+
+  try {
+    const response = await complete(model, context, {
+      ...options,
+    });
+
     if (response.stopReason === "error" || response.stopReason === "aborted") {
-      throw new Error(response.errorMessage ?? `OpenAI Codex request failed: ${response.stopReason}`);
+      const message = response.errorMessage ?? `OpenAI Codex request failed: ${response.stopReason}`;
+      throw classifyCodexFailure({ message, stopReason: response.stopReason, signal: request.signal });
     }
 
     const text = resultText(response);
@@ -316,24 +461,7 @@ export async function completeCodexChat(request: OpenRouterChatRequest): Promise
       messageForLogs: messageForLogs(response, text, toolCalls),
       rawResponse: response as unknown as Record<string, unknown>,
     };
+  } catch (error) {
+    rethrowClassifiedCodexFailure(error, request.signal);
   }
-
-  const response = await complete(model, context, {
-    ...options,
-  });
-
-  if (response.stopReason === "error" || response.stopReason === "aborted") {
-    throw new Error(response.errorMessage ?? `OpenAI Codex request failed: ${response.stopReason}`);
-  }
-
-  const text = resultText(response);
-  const toolCalls = resultToolCalls(response);
-  const providerNativeContent = resultProviderNativeContent(response);
-  return {
-    text,
-    toolCalls,
-    providerNativeContent,
-    messageForLogs: messageForLogs(response, text, toolCalls),
-    rawResponse: response as unknown as Record<string, unknown>,
-  };
 }

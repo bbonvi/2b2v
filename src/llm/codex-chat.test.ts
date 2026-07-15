@@ -1,5 +1,33 @@
 import { describe, expect, test } from "bun:test";
-import { buildCodexContext } from "./codex-chat.ts";
+import { buildCodexContext, classifyCodexFailure } from "./codex-chat.ts";
+
+describe("classifyCodexFailure", () => {
+  test("classifies transient WebSocket and stream transport failures", () => {
+    expect(classifyCodexFailure({ message: "WebSocket closed 1006 Connection ended" })).toMatchObject({
+      kind: "transport",
+      retryable: true,
+      transportCode: 1006,
+    });
+    expect(classifyCodexFailure({ message: "Stream closed unexpectedly before completion" })).toMatchObject({
+      kind: "transport",
+      retryable: true,
+    });
+  });
+
+  test("keeps policy close codes and aborts non-retryable", () => {
+    for (const code of [1008, 1009]) {
+      expect(classifyCodexFailure({ message: `WebSocket closed ${code}` })).toMatchObject({
+        kind: "permanent",
+        retryable: false,
+        transportCode: code,
+      });
+    }
+    expect(classifyCodexFailure({ message: "request aborted", stopReason: "aborted" })).toMatchObject({
+      kind: "aborted",
+      retryable: false,
+    });
+  });
+});
 
 describe("buildCodexContext", () => {
   test("converts chat-completions-style requests to Codex contexts", () => {

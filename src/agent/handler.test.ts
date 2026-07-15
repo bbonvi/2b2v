@@ -8,6 +8,7 @@ import type { TtsResult } from "../tts/types.ts";
 import { RequestLog } from "../logger.ts";
 import type { RuntimePromptBundle } from "../config/instruction-bundle.ts";
 import type { OpenRouterMessage } from "../llm/types.ts";
+import { ModelProviderError } from "../llm/codex-chat.ts";
 
 const TEST_RUNTIME_PROMPTS = {
   reply: "# Runtime Core\nReserved action directives.",
@@ -1671,6 +1672,137 @@ describe("handleMessage", () => {
 
     expect(result.responseText).toBe("recovered after timeout");
     expect(calls).toBe(3);
+  });
+
+  test("retries the production WebSocket 1006 failure twice and records the recovered call", async () => {
+    const requestLog = new RequestLog("guild-1", "channel-1");
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      request.onPayload?.({ model: request.model, attempt: calls });
+      if (calls < 3) {
+        return Promise.reject(new ModelProviderError("WebSocket closed 1006 Connection ended", {
+          kind: "transport",
+          retryable: true,
+          transportCode: 1006,
+        }));
+      }
+      return Promise.resolve({
+        text: "recovered response",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "recovered response" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, requestLog }),
+    );
+
+    expect(result.responseText).toBe("recovered response");
+    expect(calls).toBe(3);
+    expect(requestLog.toEntry().llmCalls.map((call) => call.status)).toEqual(["error", "error", "completed"]);
+  });
+
+  test("does not retry permanent WebSocket close codes or aborted provider requests", async () => {
+    const failures = [
+      new ModelProviderError("WebSocket closed 1008 Policy violation", {
+        kind: "permanent",
+        retryable: false,
+        transportCode: 1008,
+      }),
+      new ModelProviderError("WebSocket closed 1009 Message too big", {
+        kind: "permanent",
+        retryable: false,
+        transportCode: 1009,
+      }),
+      new ModelProviderError("OpenAI Codex request failed: aborted", {
+        kind: "aborted",
+        retryable: false,
+      }),
+    ];
+
+    for (const failure of failures) {
+      let calls = 0;
+      const completeChat: ChatCompleteFn = () => {
+        calls += 1;
+        return Promise.reject(failure);
+      };
+
+      let thrown: unknown;
+      try {
+        await handleMessage(
+          makeMessage({ mentionedUserIds: ["bot-1"] }),
+          makeDeps({ completeChat }),
+        );
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toBe(failure.message);
+      expect(calls).toBe(1);
+    }
+  });
+
+  test("retries an abnormal stream closure before visible output", async () => {
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.reject(new ModelProviderError("Stream closed unexpectedly before completion", {
+          kind: "transport",
+          retryable: true,
+        }));
+      }
+      return Promise.resolve({
+        text: "recovered after stream closure",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "recovered after stream closure" }] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat }),
+    );
+
+    expect(result.responseText).toBe("recovered after stream closure");
+    expect(calls).toBe(2);
+  });
+
+  test("does not replay a failed turn after a completed streamed Discord message", async () => {
+    let calls = 0;
+    const completeChat: ChatCompleteFn = async (request) => {
+      calls += 1;
+      await request.onTextDelta?.("<message>already sent</message>");
+      throw new ModelProviderError("WebSocket closed 1006 Connection ended", {
+        kind: "transport",
+        retryable: true,
+        transportCode: 1006,
+      });
+    };
+    const sent: string[] = [];
+    const sender: MessageSender = (text) => {
+      sent.push(text);
+      return Promise.resolve({ sentMessageId: `sent-${sent.length}` });
+    };
+
+    let thrown: unknown;
+    try {
+      await handleMessage(
+        makeMessage({ mentionedUserIds: ["bot-1"] }),
+        makeDeps({ completeChat, sender }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ModelProviderError);
+    expect((thrown as Error).message).toBe("WebSocket closed 1006 Connection ended");
+    expect(calls).toBe(1);
+    expect(sent).toEqual(["already sent"]);
   });
 
   test("retries transient provider Not Found errors before sending final response", async () => {
