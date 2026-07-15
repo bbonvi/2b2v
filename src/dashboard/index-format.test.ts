@@ -217,3 +217,15 @@ describe("dashboard lifecycle formatting", () => {
     expect(overLimit).toContain('<details class="stage-more"><summary>show more</summary><span>x</span></details>');
   });
 });
+
+describe("dashboard memory workspace", () => {
+  test("keeps memory editing in its own island and Prompt Lab in Management", () => {
+    const html = readFileSync("src/dashboard/index.html", "utf8");
+
+    expect(html).toContain('id="tab-memories"');
+    expect(html).toContain('id="memories-tab-root"');
+    expect(html).toContain('src="/assets/memories-tab.js"');
+    expect(html).toContain('id="lab-prompt"');
+    expect(html).not.toContain('id="m-memory-list"');
+  });
+});

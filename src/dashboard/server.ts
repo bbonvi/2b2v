@@ -1,7 +1,13 @@
 import { requestLogStore } from "./store";
 import type { Logger } from "../logger";
+import { isMemoryKind } from "../db/memory-repository";
 import dashboard from "./index.html";
-import type { ManagementDirectory } from "./management";
+import type {
+  ManagementDirectory,
+  ManagementMemoryCreateInput,
+  ManagementMemoryEditInput,
+  ManagementMemoryFilter,
+} from "./management";
 
 const DASHBOARD_LOG_ENTRY_LIMIT = 100;
 
@@ -35,16 +41,11 @@ interface DashboardManagementApi {
     runToken?: string;
   }) => AwaitableDashboardManagementResult;
   runPromptLabAmbientInitiative: (input: { guildId: string; channelId: string; kind: "self_expression" | "targeted_checkin"; force?: boolean; runToken?: string }) => AwaitableDashboardManagementResult;
-  listMemories: (filter: { guildId?: string; scope?: "guild" | "user" | "self"; includeDeleted?: boolean; limit?: number }) => AwaitableDashboardManagementResult;
-  editMemory: (input: {
-    memoryId: number;
-    content?: string;
-    kind?: string;
-    confidence?: number;
-    priority?: number;
-    expiresAt?: number | null;
-  }) => AwaitableDashboardManagementResult;
+  listMemories: (filter: ManagementMemoryFilter) => AwaitableDashboardManagementResult;
+  createMemory: (input: ManagementMemoryCreateInput) => AwaitableDashboardManagementResult;
+  editMemory: (input: ManagementMemoryEditInput) => AwaitableDashboardManagementResult;
   deleteMemory: (memoryId: number) => AwaitableDashboardManagementResult;
+  restoreMemory: (memoryId: number) => AwaitableDashboardManagementResult;
   relationships: {
     getOverview: (input?: { userId?: string }) => AwaitableDashboardManagementResult;
     reset: (input?: { userId?: string }) => AwaitableDashboardManagementResult;
@@ -224,6 +225,72 @@ function optionalManagementScope(url: URL): "guild" | "user" | "self" | undefine
   return value === "guild" || value === "user" || value === "self" ? value : undefined;
 }
 
+function optionalMemoryStatus(url: URL): "active" | "expired" | "deleted" | "all" | undefined {
+  const value = optionalStringParam(url, "status");
+  return value === "active" || value === "expired" || value === "deleted" || value === "all" ? value : undefined;
+}
+
+function optionalApplicabilityMode(url: URL): "all" | "users" | undefined {
+  const value = optionalStringParam(url, "applicabilityMode");
+  return value === "all" || value === "users" ? value : undefined;
+}
+
+function parseMemoryMutationBody(body: Record<string, unknown>): Omit<ManagementMemoryEditInput, "memoryId"> {
+  const result: Omit<ManagementMemoryEditInput, "memoryId"> = {};
+  if ("scope" in body) {
+    if (body.scope !== "guild" && body.scope !== "user" && body.scope !== "self") throw new Error("Invalid memory scope.");
+    result.scope = body.scope;
+  }
+  if ("guildId" in body) {
+    if (typeof body.guildId !== "string" && body.guildId !== null) throw new Error("guildId must be a string or null.");
+    result.guildId = typeof body.guildId === "string" ? body.guildId.trim() : null;
+  }
+  if ("subjectUserId" in body) {
+    if (typeof body.subjectUserId !== "string" && body.subjectUserId !== null) throw new Error("subjectUserId must be a string or null.");
+    result.subjectUserId = typeof body.subjectUserId === "string" ? body.subjectUserId.trim() : null;
+  }
+  if ("appliesTo" in body) {
+    if (body.appliesTo === "all") {
+      result.appliesTo = "all";
+    } else if (Array.isArray(body.appliesTo) && body.appliesTo.every((entry) => typeof entry === "string" && entry.trim() !== "")) {
+      result.appliesTo = [...new Set(body.appliesTo.map((entry) => String(entry).trim()))];
+    } else {
+      throw new Error("appliesTo must be 'all' or a non-empty user ID list.");
+    }
+  }
+  if ("kind" in body) {
+    if (!isMemoryKind(body.kind)) throw new Error("Invalid memory kind.");
+    result.kind = body.kind;
+  }
+  if ("content" in body) {
+    if (typeof body.content !== "string") throw new Error("content must be a string.");
+    result.content = body.content;
+  }
+  if ("sourceMessageId" in body) {
+    if (typeof body.sourceMessageId !== "string" && body.sourceMessageId !== null) throw new Error("sourceMessageId must be a string or null.");
+    result.sourceMessageId = typeof body.sourceMessageId === "string" && body.sourceMessageId.trim() !== "" ? body.sourceMessageId.trim() : null;
+  }
+  if ("provenance" in body) {
+    if (body.provenance !== null && (typeof body.provenance !== "object" || Array.isArray(body.provenance))) {
+      throw new Error("provenance must be an object or null.");
+    }
+    result.provenance = body.provenance as Record<string, unknown> | null;
+  }
+  if ("confidence" in body) {
+    if (typeof body.confidence !== "number") throw new Error("confidence must be a number.");
+    result.confidence = body.confidence;
+  }
+  if ("priority" in body) {
+    if (typeof body.priority !== "number") throw new Error("priority must be a number.");
+    result.priority = body.priority;
+  }
+  if ("expiresAt" in body) {
+    if (typeof body.expiresAt !== "number" && body.expiresAt !== null) throw new Error("expiresAt must be a timestamp or null.");
+    result.expiresAt = body.expiresAt;
+  }
+  return result;
+}
+
 function requestLogFilters(req: Request): { guildId?: string; channelId?: string; authorUsername?: string } {
   const url = new URL(req.url);
   const filters: { guildId?: string; channelId?: string; authorUsername?: string } = {};
@@ -236,27 +303,29 @@ function requestLogFilters(req: Request): { guildId?: string; channelId?: string
   return filters;
 }
 
-let relationshipsLabBundle: { body: string; headers: Record<string, string> } | null = null;
+const dashboardAssetBundles = new Map<string, { body: string; headers: Record<string, string> }>();
 
-async function relationshipsLabAssetResponse(): Promise<Response> {
-  if (relationshipsLabBundle === null) {
+async function dashboardAssetResponse(entrypoint: string, label: string): Promise<Response> {
+  let bundle = dashboardAssetBundles.get(entrypoint);
+  if (bundle === undefined) {
     const result = await Bun.build({
-      entrypoints: [new URL("./relationships-lab.tsx", import.meta.url).pathname],
+      entrypoints: [new URL(entrypoint, import.meta.url).pathname],
       target: "browser",
       format: "esm",
       sourcemap: "none",
     });
     if (!result.success) {
-      return json({ error: "Relationship Lab bundle failed", logs: result.logs.map((entry) => entry.message) }, 500);
+      return json({ error: `${label} bundle failed`, logs: result.logs.map((entry) => entry.message) }, 500);
     }
     const output = result.outputs[0];
-    if (output === undefined) return json({ error: "Relationship Lab bundle was empty" }, 500);
-    relationshipsLabBundle = {
+    if (output === undefined) return json({ error: `${label} bundle was empty` }, 500);
+    bundle = {
       body: await output.text(),
       headers: { "content-type": "text/javascript; charset=utf-8" },
     };
+    dashboardAssetBundles.set(entrypoint, bundle);
   }
-  return new Response(relationshipsLabBundle.body, { headers: relationshipsLabBundle.headers });
+  return new Response(bundle.body, { headers: bundle.headers });
 }
 
 export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.serve> {
@@ -521,17 +590,53 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
         },
       },
 
-      "/api/management/memories": async (req) => {
-        const denied = requireAuth(req);
-        if (denied !== null) return denied;
-        if (management === undefined) return json({ error: "Management API is disabled" }, 404);
-        const url = new URL(req.url);
-        return json(await management.listMemories({
-          guildId: optionalStringParam(url, "guildId"),
-          scope: optionalManagementScope(url),
-          includeDeleted: optionalBooleanParam(url, "includeDeleted"),
-          limit: optionalNumberParam(url, "limit"),
-        }));
+      "/api/management/memories": {
+        GET: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          const url = new URL(req.url);
+          const kind = optionalStringParam(url, "kind");
+          return json(await management.listMemories({
+            guildId: optionalStringParam(url, "guildId"),
+            channelId: optionalStringParam(url, "channelId"),
+            scope: optionalManagementScope(url),
+            ...(kind !== undefined && isMemoryKind(kind) ? { kind } : {}),
+            subjectUserId: optionalStringParam(url, "subjectUserId"),
+            applicableToUserId: optionalStringParam(url, "applicableToUserId"),
+            applicabilityMode: optionalApplicabilityMode(url),
+            status: optionalMemoryStatus(url),
+            query: optionalStringParam(url, "query"),
+            limit: optionalNumberParam(url, "limit"),
+          }));
+        },
+        POST: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          try {
+            const parsed = parseMemoryMutationBody(await readJsonObject(req));
+            if (parsed.scope === undefined || parsed.appliesTo === undefined || parsed.kind === undefined
+              || parsed.content === undefined || parsed.confidence === undefined || parsed.priority === undefined) {
+              return json({ error: "scope, appliesTo, kind, content, confidence, and priority are required." }, 400);
+            }
+            return json(await management.createMemory({
+              scope: parsed.scope,
+              appliesTo: parsed.appliesTo,
+              kind: parsed.kind,
+              content: parsed.content,
+              confidence: parsed.confidence,
+              priority: parsed.priority,
+              ...(parsed.guildId !== undefined ? { guildId: parsed.guildId } : {}),
+              ...(parsed.subjectUserId !== undefined ? { subjectUserId: parsed.subjectUserId } : {}),
+              ...(parsed.sourceMessageId !== undefined ? { sourceMessageId: parsed.sourceMessageId } : {}),
+              ...(parsed.provenance !== undefined ? { provenance: parsed.provenance } : {}),
+              ...(parsed.expiresAt !== undefined ? { expiresAt: parsed.expiresAt } : {}),
+            }));
+          } catch (err) {
+            return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+          }
+        },
       },
 
       "/api/management/memories/:memoryId": {
@@ -542,16 +647,9 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
           try {
             const memoryId = Number(req.params.memoryId);
             if (!Number.isInteger(memoryId) || memoryId <= 0) return json({ error: "Valid memoryId is required." }, 400);
-            const body = await readJsonObject(req);
             return json(await management.editMemory({
               memoryId,
-              ...(typeof body.content === "string" ? { content: body.content } : {}),
-              ...(typeof body.kind === "string" ? { kind: body.kind } : {}),
-              ...(typeof body.confidence === "number" ? { confidence: body.confidence } : {}),
-              ...(typeof body.priority === "number" ? { priority: body.priority } : {}),
-              ...("expiresAt" in body && (typeof body.expiresAt === "number" || body.expiresAt === null)
-                ? { expiresAt: body.expiresAt }
-                : {}),
+              ...parseMemoryMutationBody(await readJsonObject(req)),
             }));
           } catch (err) {
             return json({ error: err instanceof Error ? err.message : String(err) }, 400);
@@ -564,6 +662,21 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
           const memoryId = Number(req.params.memoryId);
           if (!Number.isInteger(memoryId) || memoryId <= 0) return json({ error: "Valid memoryId is required." }, 400);
           return json(await management.deleteMemory(memoryId));
+        },
+      },
+
+      "/api/management/memories/:memoryId/restore": {
+        POST: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          try {
+            const memoryId = Number(req.params.memoryId);
+            if (!Number.isInteger(memoryId) || memoryId <= 0) return json({ error: "Valid memoryId is required." }, 400);
+            return json(await management.restoreMemory(memoryId));
+          } catch (err) {
+            return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+          }
         },
       },
 
@@ -588,7 +701,13 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
       "/assets/relationships-lab.js": async (req) => {
         const denied = requireAuth(req);
         if (denied !== null) return denied;
-        return relationshipsLabAssetResponse();
+        return dashboardAssetResponse("./relationships-lab.tsx", "Relationship Lab");
+      },
+
+      "/assets/memories-tab.js": async (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        return dashboardAssetResponse("./memories-tab.tsx", "Memories tab");
       },
 
       "/": {

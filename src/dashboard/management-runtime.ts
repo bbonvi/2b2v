@@ -1,6 +1,6 @@
 import type { Client, Guild, GuildBasedChannel, ThreadChannel } from "discord.js";
 import type { Database } from "../db/database";
-import { deleteMemory, isMemoryKind, updateMemory } from "../db/memory-repository";
+import { createMemory, deleteMemory, updateMemory } from "../db/memory-repository";
 import { channelTypeLabel, isSendableGuildChannel } from "../discord/message-sender";
 import {
   deleteStoredManagementMessages,
@@ -12,6 +12,9 @@ import {
   type ManagementChannelLabel,
   type ManagementDirectory,
   type ManagementLabel,
+  type ManagementMemoryCreateInput,
+  type ManagementMemoryEditInput,
+  type ManagementMemoryFilter,
   type ManagementMessageRow,
   type ManagementMemoryRow,
 } from "./management";
@@ -27,6 +30,8 @@ export type DecoratedManagementMemory = ManagementMemoryRow & {
   guildName?: string;
   subjectUsername?: string;
   appliesToUsernames: "all" | string[];
+  sourceGuildName?: string;
+  sourceChannelName?: string;
 };
 
 export type DiscordManagementDeleteResult = {
@@ -48,16 +53,11 @@ export type DashboardManagementRuntime = {
     discordDeletion: DiscordManagementDeleteResult;
     scopedTo: { guildId: string; channelId: string };
   }>;
-  listMemories: (filter: { guildId?: string; scope?: "guild" | "user" | "self"; includeDeleted?: boolean; limit?: number }) => { memories: DecoratedManagementMemory[] };
-  editMemory: (input: {
-    memoryId: number;
-    content?: string;
-    kind?: string;
-    confidence?: number;
-    priority?: number;
-    expiresAt?: number | null;
-  }) => { memory: DecoratedManagementMemory };
+  listMemories: (filter: ManagementMemoryFilter) => { memories: DecoratedManagementMemory[] };
+  createMemory: (input: ManagementMemoryCreateInput) => { memory: DecoratedManagementMemory };
+  editMemory: (input: ManagementMemoryEditInput) => { memory: DecoratedManagementMemory };
   deleteMemory: (memoryId: number) => { deleted: boolean; memoryId: number };
+  restoreMemory: (memoryId: number) => { memory: DecoratedManagementMemory };
   userName: (userId: string) => string;
 };
 
@@ -92,6 +92,27 @@ function isDiscordMessageDeleteChannel(channel: unknown): channel is {
     && typeof messages === "object"
     && "delete" in messages
     && typeof (messages as { delete?: unknown }).delete === "function";
+}
+
+function assertManagementMemoryState(input: ManagementMemoryCreateInput): void {
+  if (input.content.trim() === "") throw new Error("Memory content cannot be empty.");
+  if (input.scope === "guild" && (input.guildId === undefined || input.guildId === null || input.guildId.trim() === "")) {
+    throw new Error("Guild memories require a guild.");
+  }
+  if (input.scope === "user" && (input.subjectUserId === undefined || input.subjectUserId === null || input.subjectUserId.trim() === "")) {
+    throw new Error("User memories require a subject.");
+  }
+  if (input.kind === "journal" && input.scope !== "self") throw new Error("Journal memories must use self scope.");
+  if (input.kind === "scratchpad" && (input.expiresAt === undefined || input.expiresAt === null)) {
+    throw new Error("Scratchpad memories require an expiry time.");
+  }
+  if (input.appliesTo !== "all" && input.appliesTo.length === 0) {
+    throw new Error("Targeted applicability requires at least one user.");
+  }
+  if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) {
+    throw new Error("Confidence must be between 0 and 1.");
+  }
+  if (!Number.isFinite(input.priority) || input.priority < 0) throw new Error("Priority must be zero or greater.");
 }
 
 export function createDashboardManagementRuntime(input: {
@@ -175,12 +196,17 @@ export function createDashboardManagementRuntime(input: {
     };
   };
 
-  const decorateManagementMemory = (row: ManagementMemoryRow): DecoratedManagementMemory => ({
-    ...row,
-    ...(row.guildId !== null ? { guildName: managementGuildName(row.guildId) } : {}),
-    ...(row.subjectUserId !== null ? { subjectUsername: managementUserName(row.subjectUserId) } : {}),
-    appliesToUsernames: row.appliesTo === "all" ? "all" : row.appliesTo.map(managementUserName),
-  });
+  const decorateManagementMemory = (row: ManagementMemoryRow): DecoratedManagementMemory => {
+    const sourceChannel = row.sourceChannelId !== null ? managementChannelName(row.sourceChannelId) : null;
+    return {
+      ...row,
+      ...(row.guildId !== null ? { guildName: managementGuildName(row.guildId) } : {}),
+      ...(row.subjectUserId !== null ? { subjectUsername: managementUserName(row.subjectUserId) } : {}),
+      appliesToUsernames: row.appliesTo === "all" ? "all" : row.appliesTo.map(managementUserName),
+      ...(row.sourceGuildId !== null ? { sourceGuildName: managementGuildName(row.sourceGuildId) } : {}),
+      ...(sourceChannel !== null ? { sourceChannelName: sourceChannel.name } : {}),
+    };
+  };
 
   const tryDeleteDiscordManagementMessages = async (deleteInput: {
     channelId: string;
@@ -291,30 +317,70 @@ export function createDashboardManagementRuntime(input: {
     };
   };
 
-  const editManagementMemoryState = (memoryInput: {
-    memoryId: number;
-    content?: string;
-    kind?: string;
-    confidence?: number;
-    priority?: number;
-    expiresAt?: number | null;
-  }): { memory: DecoratedManagementMemory } => {
+  const createManagementMemoryState = (memoryInput: ManagementMemoryCreateInput): { memory: DecoratedManagementMemory } => {
+    assertManagementMemoryState(memoryInput);
+    const memoryId = createMemory(input.db, {
+      guildId: memoryInput.guildId ?? "",
+      scope: memoryInput.scope,
+      subjectUserId: memoryInput.subjectUserId,
+      appliesTo: memoryInput.appliesTo,
+      kind: memoryInput.kind,
+      content: memoryInput.content,
+      sourceMessageId: memoryInput.sourceMessageId,
+      provenance: memoryInput.provenance,
+      confidence: memoryInput.confidence,
+      priority: memoryInput.priority,
+      expiresAt: memoryInput.expiresAt,
+    });
+    const row = getManagementMemory(input.db, memoryId);
+    if (row === null) throw new Error("Memory disappeared after creation.");
+    return { memory: decorateManagementMemory(row) };
+  };
+
+  const editManagementMemoryState = (memoryInput: ManagementMemoryEditInput): { memory: DecoratedManagementMemory } => {
     const existing = getManagementMemory(input.db, memoryInput.memoryId);
     if (existing === null) throw new Error("Memory not found.");
     if (existing.deletedAt !== null) throw new Error("Deleted memories cannot be edited.");
-    if (memoryInput.kind !== undefined && !isMemoryKind(memoryInput.kind)) {
-      throw new Error(`Invalid memory kind: ${memoryInput.kind}`);
-    }
+    const next: ManagementMemoryCreateInput = {
+      scope: memoryInput.scope ?? existing.scope,
+      guildId: "guildId" in memoryInput ? memoryInput.guildId : existing.guildId,
+      subjectUserId: "subjectUserId" in memoryInput ? memoryInput.subjectUserId : existing.subjectUserId,
+      appliesTo: memoryInput.appliesTo ?? existing.appliesTo,
+      kind: memoryInput.kind ?? existing.kind,
+      content: memoryInput.content ?? existing.content,
+      sourceMessageId: "sourceMessageId" in memoryInput ? memoryInput.sourceMessageId : existing.sourceMessageId,
+      provenance: "provenance" in memoryInput ? memoryInput.provenance : existing.provenance,
+      confidence: memoryInput.confidence ?? existing.confidence,
+      priority: memoryInput.priority ?? existing.priority,
+      expiresAt: "expiresAt" in memoryInput ? memoryInput.expiresAt : existing.expiresAt,
+    };
+    assertManagementMemoryState(next);
     const updated = updateMemory(input.db, memoryInput.memoryId, {
-      ...(memoryInput.content !== undefined ? { content: memoryInput.content } : {}),
-      ...(memoryInput.kind !== undefined && isMemoryKind(memoryInput.kind) ? { kind: memoryInput.kind } : {}),
-      ...(memoryInput.confidence !== undefined ? { confidence: memoryInput.confidence } : {}),
-      ...(memoryInput.priority !== undefined ? { priority: memoryInput.priority } : {}),
-      ...("expiresAt" in memoryInput ? { expiresAt: memoryInput.expiresAt ?? null } : {}),
+      scope: next.scope,
+      guildId: next.guildId,
+      subjectUserId: next.subjectUserId,
+      appliesTo: next.appliesTo,
+      kind: next.kind,
+      content: next.content,
+      sourceMessageId: next.sourceMessageId,
+      provenance: next.provenance,
+      confidence: next.confidence,
+      priority: next.priority,
+      expiresAt: next.expiresAt,
     });
     if (!updated) throw new Error("Memory update did not change a row.");
     const row = getManagementMemory(input.db, memoryInput.memoryId);
     if (row === null) throw new Error("Memory disappeared after update.");
+    return { memory: decorateManagementMemory(row) };
+  };
+
+  const restoreManagementMemoryState = (memoryId: number): { memory: DecoratedManagementMemory } => {
+    const existing = getManagementMemory(input.db, memoryId);
+    if (existing === null) throw new Error("Memory not found.");
+    if (existing.deletedAt === null) throw new Error("Memory is not deleted.");
+    if (!updateMemory(input.db, memoryId, { deletedAt: null })) throw new Error("Memory could not be restored.");
+    const row = getManagementMemory(input.db, memoryId);
+    if (row === null) throw new Error("Memory disappeared after restoration.");
     return { memory: decorateManagementMemory(row) };
   };
 
@@ -329,8 +395,10 @@ export function createDashboardManagementRuntime(input: {
     listMemories: (filter) => ({
       memories: listManagementMemories(input.db, filter).map(decorateManagementMemory),
     }),
+    createMemory: createManagementMemoryState,
     editMemory: editManagementMemoryState,
     deleteMemory: (memoryId) => ({ deleted: deleteMemory(input.db, memoryId), memoryId }),
+    restoreMemory: restoreManagementMemoryState,
     userName: managementUserName,
   };
 }

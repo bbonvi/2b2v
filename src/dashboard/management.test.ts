@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { createDatabase, type Database } from "../db/database";
+import { createMemory } from "../db/memory-repository";
 import {
   deleteStoredManagementMessages,
   listManagementMemories,
@@ -96,5 +97,54 @@ describe("dashboard memory management", () => {
 
     expect(listManagementMemories(db, { guildId: "g1" }).map((row) => row.content))
       .toEqual(["important newer", "important older", "ordinary newer"]);
+  });
+
+  test("filters by source channel, subject, applicability, kind, and lifecycle state", () => {
+    insertMessage("source-active", { guildId: "g1", channelId: "c1" });
+    insertMessage("source-other", { guildId: "g1", channelId: "c2" });
+    const activeId = createMemory(db, {
+      guildId: "g1",
+      scope: "user",
+      subjectUserId: "u1",
+      appliesTo: ["u2"],
+      kind: "preference",
+      content: "active match",
+      sourceMessageId: "source-active",
+    });
+    createMemory(db, {
+      guildId: "g1",
+      scope: "user",
+      subjectUserId: "u3",
+      appliesTo: "all",
+      kind: "fact",
+      content: "other source",
+      sourceMessageId: "source-other",
+    });
+    const deletedId = createMemory(db, {
+      guildId: "g1",
+      kind: "fact",
+      content: "deleted row",
+    });
+    db.raw.prepare("UPDATE memories SET deleted_at = ? WHERE id = ?").run(Date.now(), deletedId);
+
+    const matches = listManagementMemories(db, {
+      channelId: "c1",
+      scope: "user",
+      kind: "preference",
+      subjectUserId: "u1",
+      applicableToUserId: "u2",
+    });
+    expect(matches.map((row) => row.id)).toEqual([activeId]);
+    expect(matches[0]?.sourceGuildId).toBe("g1");
+    expect(matches[0]?.sourceChannelId).toBe("c1");
+    expect(listManagementMemories(db, { status: "deleted" }).map((row) => row.id)).toContain(deletedId);
+  });
+
+  test("content search escapes wildcard characters", () => {
+    createMemory(db, { guildId: "g1", kind: "fact", content: "literal 100% marker" });
+    createMemory(db, { guildId: "g1", kind: "fact", content: "literal 1000 marker" });
+
+    expect(listManagementMemories(db, { query: "100%" }).map((row) => row.content))
+      .toEqual(["literal 100% marker"]);
   });
 });

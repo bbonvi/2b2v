@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { Collection } from "discord.js";
 import { createDatabase, type Database } from "../db/database";
 import { createDashboardManagementRuntime } from "./management-runtime";
 
@@ -25,10 +26,10 @@ function insertMessage(id: string): void {
 function managementRuntime(): ReturnType<typeof createDashboardManagementRuntime> {
   return createDashboardManagementRuntime({
     client: {
-      guilds: { cache: new Map() },
-      users: { cache: new Map() },
+      guilds: { cache: new Collection() },
+      users: { cache: new Collection() },
       channels: {
-        cache: new Map(),
+        cache: new Collection(),
         fetch: () => Promise.resolve(null),
       },
     } as never,
@@ -51,5 +52,66 @@ describe("dashboard management runtime", () => {
 
     expect(result.deletedMessageIds).toEqual(["m1"]);
     expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_assets").get()).toEqual({ count: 0 });
+  });
+
+  test("creates and fully edits structured memories", () => {
+    insertMessage("m1");
+    const runtime = managementRuntime();
+    const created = runtime.createMemory({
+      scope: "guild",
+      guildId: "g1",
+      appliesTo: "all",
+      kind: "global_note",
+      content: "initial",
+      confidence: 0.7,
+      priority: 0,
+    }).memory;
+
+    const edited = runtime.editMemory({
+      memoryId: created.id,
+      scope: "user",
+      guildId: null,
+      subjectUserId: "u1",
+      appliesTo: ["u2", "u3"],
+      kind: "preference",
+      content: "updated",
+      sourceMessageId: "m1",
+      provenance: { source: "dashboard" },
+      confidence: 0.95,
+      priority: 3,
+      expiresAt: 9_999_999_999_999,
+    }).memory;
+
+    expect(edited).toMatchObject({
+      scope: "user",
+      guildId: null,
+      subjectUserId: "u1",
+      appliesTo: ["u2", "u3"],
+      kind: "preference",
+      content: "updated",
+      sourceMessageId: "m1",
+      sourceGuildId: "g1",
+      sourceChannelId: "c1",
+      provenance: { source: "dashboard" },
+      confidence: 0.95,
+      priority: 3,
+    });
+  });
+
+  test("restores soft-deleted memories", () => {
+    const runtime = managementRuntime();
+    const memoryId = runtime.createMemory({
+      scope: "self",
+      appliesTo: "all",
+      kind: "identity",
+      content: "recoverable",
+      confidence: 0.8,
+      priority: 1,
+    }).memory.id;
+
+    expect(runtime.deleteMemory(memoryId).deleted).toBe(true);
+    expect(runtime.listMemories({ status: "deleted" }).memories.map((memory) => memory.id)).toEqual([memoryId]);
+    expect(runtime.restoreMemory(memoryId).memory.deletedAt).toBeNull();
+    expect(runtime.listMemories({ status: "active" }).memories.map((memory) => memory.id)).toEqual([memoryId]);
   });
 });

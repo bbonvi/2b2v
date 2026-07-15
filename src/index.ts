@@ -3600,8 +3600,10 @@ const dashboardManagement = {
   runPromptLab,
   runPromptLabAmbientInitiative: ambientRuntime.runPromptLabAmbientInitiative,
   listMemories: dashboardManagementRuntime.listMemories,
+  createMemory: dashboardManagementRuntime.createMemory,
   editMemory: dashboardManagementRuntime.editMemory,
   deleteMemory: dashboardManagementRuntime.deleteMemory,
+  restoreMemory: dashboardManagementRuntime.restoreMemory,
   relationships: createRelationshipsManagementApi({
     db,
     getGlobalConfig: () => globalConfig,
