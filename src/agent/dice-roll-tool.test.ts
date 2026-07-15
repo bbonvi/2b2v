@@ -105,7 +105,8 @@ describe("createDiceRollTool", () => {
       target: 14,
       succeeded: true,
     });
-    expect(deliveries[0]?.text).toContain("✅ Success · Target: `14`");
+    expect(deliveries[0]?.text).toContain("# 14 ✅");
+    expect(deliveries[0]?.text).toContain("Success · Target: `14`");
     expect((success.content[0] as TextContent).text).toContain("target=14");
     expect((success.content[0] as TextContent).text).toContain("threshold_outcome=success");
     expect((success.content[0] as TextContent).text).toContain("Check PASSED: total 14 met target 14.");
@@ -119,7 +120,8 @@ describe("createDiceRollTool", () => {
       target: 14,
       succeeded: false,
     });
-    expect(deliveries[1]?.text).toContain("❌ Failure · Target: `14`");
+    expect(deliveries[1]?.text).toContain("# 10 ❌");
+    expect(deliveries[1]?.text).toContain("Failure · Target: `14`");
     expect((failure.content[0] as TextContent).text).toContain("threshold_outcome=failure");
     expect((failure.content[0] as TextContent).text).toContain("Check FAILED: total 10 did not meet target 14.");
   });

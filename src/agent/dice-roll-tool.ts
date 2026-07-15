@@ -142,17 +142,18 @@ export function renderDiceRollMessage(roll: DiceRollRow): string {
   const actor = escapeDiscordDisplayText(roll.actorUsername);
   const label = roll.label === null ? "Dice roll" : escapeDiscordDisplayText(roll.label);
   const modifier = roll.modifier === 0 ? "" : ` ${roll.modifier > 0 ? "+" : "−"} ${Math.abs(roll.modifier)}`;
+  const outcomeIcon = roll.target === null ? "" : roll.succeeded === true ? " ✅" : " ❌";
   const outcome = roll.target === null
     ? ""
-    : `\n${roll.succeeded === true ? "✅ Success" : "❌ Failure"} · Target: \`${roll.target}\``;
+    : `\n${roll.succeeded === true ? "Success" : "Failure"} · Target: \`${roll.target}\``;
   if (roll.mode === "normal") {
     const breakdown = roll.count === 1 && roll.modifier === 0
       ? ""
       : `\n${roll.count === 1 ? "Roll" : "Dice"}: \`${roll.rolls.join(", ")}\``;
-    return `## 🎲 ${label}\n**${actor}** rolled \`${roll.count}d${roll.sides}${modifier}\`\n# ${roll.total}${outcome}${breakdown}`;
+    return `## 🎲 ${label}\n**${actor}** rolled \`${roll.count}d${roll.sides}${modifier}\`\n# ${roll.total}${outcomeIcon}${outcome}${breakdown}`;
   }
   const kept = roll.kept[0];
-  return `## 🎲 ${label}\n**${actor}** rolled \`1d${roll.sides} ${roll.mode}${modifier}\`\n# ${roll.total}${outcome}\nRolls: \`${roll.rolls.join(", ")}\` · Kept: \`${kept ?? "?"}\``;
+  return `## 🎲 ${label}\n**${actor}** rolled \`1d${roll.sides} ${roll.mode}${modifier}\`\n# ${roll.total}${outcomeIcon}${outcome}\nRolls: \`${roll.rolls.join(", ")}\` · Kept: \`${kept ?? "?"}\``;
 }
 
 function renderDiceRollToolResult(roll: DiceRollRow): string {
