@@ -14,6 +14,7 @@ import { resolveReplies } from "./history-replies.ts";
 import { runRipgrep } from "./ripgrep.ts";
 
 const ASSET_KINDS = ["image", "gif", "audio", "video", "text", "file"] as const;
+const SEARCH_SCOPES = ["current_channel", "current_guild", "all_guilds"] as const;
 
 export interface SearchChannelMessagesToolDeps {
   db: Database;
@@ -27,6 +28,9 @@ export interface SearchChannelMessagesToolDeps {
 
 const SearchChannelMessagesParams = Type.Object({
   pattern: Type.Optional(Type.String({ minLength: 1, maxLength: 1000, description: "Ripgrep-compatible regular expression." })),
+  scope: Type.Optional(Type.Union(SEARCH_SCOPES.map((scope) => Type.Literal(scope)), {
+    description: "Search scope. Defaults to the current channel; all_guilds covers every accessible stored guild channel.",
+  })),
   username: Type.Optional(Type.String({ description: "Stored historical Discord username." })),
   user_id: Type.Optional(Type.String({ description: "Stable Discord user ID." })),
   guild_id: Type.Optional(Type.String({ description: "Guild ID filter." })),
@@ -51,11 +55,12 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
   return {
     name: "search_channel_messages",
     label: "Search Channel Messages",
-    description: "Regex-search stored Discord messages and indexed attachment metadata using optional structured filters.",
+    description: "Regex-search stored Discord messages and indexed attachment metadata in the current channel, current guild, or all accessible guilds.",
     parameters: SearchChannelMessagesParams,
     async execute(_toolCallId, params, signal): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {
       const p = params as {
         pattern?: string;
+        scope?: typeof SEARCH_SCOPES[number];
         username?: string;
         user_id?: string;
         guild_id?: string;
@@ -72,11 +77,15 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
       const userId = p.user_id?.trim();
       const explicitGuildId = p.guild_id !== undefined && p.guild_id.trim() !== "";
       const explicitChannelId = p.channel_id !== undefined && p.channel_id.trim() !== "";
+      const scope = p.scope ?? "current_channel";
       const parsedAssetId = p.asset_id === undefined ? undefined : parseAssetId(p.asset_id);
       if (parsedAssetId === null) return error("asset_id must be a positive integer, optionally prefixed with #");
       const assetId = parsedAssetId;
       if (username === "" || userId === "") return error("username and user_id cannot be empty.");
       if (pattern === "") return error("pattern cannot be empty.");
+      if (scope === "all_guilds" && (explicitGuildId || explicitChannelId)) {
+        return error("scope=all_guilds cannot be combined with guild_id or channel_id.");
+      }
       const hasNarrowingFilter = explicitGuildId || explicitChannelId || username !== undefined || userId !== undefined
         || assetId !== undefined || p.has_assets !== undefined || p.asset_kind !== undefined
         || p.after !== undefined || p.before !== undefined;
@@ -84,8 +93,9 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
         return error("Provide a regex pattern or at least one narrowing filter.");
       }
 
-      let targetGuildId = explicitGuildId ? p.guild_id?.trim() ?? guildId : guildId;
-      let scopedChannelId: string | undefined = explicitGuildId ? undefined : currentChannelId;
+      let targetGuildId: string | undefined = explicitGuildId ? p.guild_id?.trim() ?? guildId : guildId;
+      let scopedChannelId: string | undefined = explicitGuildId || scope !== "current_channel" ? undefined : currentChannelId;
+      if (scope === "all_guilds") targetGuildId = undefined;
       if (explicitChannelId) {
         const requestedChannelId = p.channel_id?.trim() ?? "";
         if (deps.resolveChannel !== undefined) {
@@ -97,7 +107,7 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
           scopedChannelId = requestedChannelId;
         }
       }
-      if (scopedChannelId === undefined && targetGuildId !== guildId && deps.canAccessGuild !== undefined
+      if (targetGuildId !== undefined && scopedChannelId === undefined && targetGuildId !== guildId && deps.canAccessGuild !== undefined
           && !await deps.canAccessGuild(targetGuildId)) {
         return error(`Guild '${targetGuildId}' not found or not accessible.`);
       }
@@ -110,19 +120,24 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
 
       let accessibleChannelIds: string[] | undefined;
       if (scopedChannelId === undefined && deps.resolveChannel !== undefined) {
-        const rows = db.raw.prepare("SELECT DISTINCT channel_id FROM messages WHERE guild_id = ?").all(targetGuildId) as Array<{ channel_id: string }>;
+        const rows = targetGuildId === undefined
+          ? db.raw.prepare("SELECT DISTINCT channel_id FROM messages").all() as Array<{ channel_id: string }>
+          : db.raw.prepare("SELECT DISTINCT channel_id FROM messages WHERE guild_id = ?").all(targetGuildId) as Array<{ channel_id: string }>;
         const resolved = await Promise.all(rows.map(async ({ channel_id: channelId }) => ({
           channelId,
           channel: await deps.resolveChannel?.(channelId).catch(() => null),
         })));
         accessibleChannelIds = resolved
-          .filter(({ channel }) => channel !== null && channel !== undefined && channel.guildId === targetGuildId)
+          .filter(({ channel }) => channel !== null && channel !== undefined
+            && (targetGuildId === undefined || channel.guildId === targetGuildId))
           .map(({ channelId }) => channelId);
+      } else if (scope === "all_guilds") {
+        return error("All-guild search is unavailable because accessible channels cannot be verified.");
       }
 
       const limit = Math.max(1, Math.min(p.limit ?? 10, 50));
       let candidates = findMessageSearchCandidates(db, {
-        guildId: targetGuildId,
+        ...(targetGuildId !== undefined ? { guildId: targetGuildId } : {}),
         ...(scopedChannelId !== undefined ? { channelId: scopedChannelId } : {}),
         ...(accessibleChannelIds !== undefined ? { channelIds: accessibleChannelIds } : {}),
         ...(username !== undefined ? { username } : {}),

@@ -1,0 +1,1 @@
+Search boundary: `current_channel` (default), `current_guild`, or `all_guilds`. Use `all_guilds` when confirming uncertain screenshot, attribution, or continuity context that may come from another guild or channel; do not combine it with guild_id or channel_id.

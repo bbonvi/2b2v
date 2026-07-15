@@ -146,6 +146,37 @@ describe("search_channel_messages", () => {
     expect(text(result)).toContain("GuildID: g2; ChannelID: c2");
   });
 
+  test("searches stored messages across all accessible guilds", async () => {
+    insertMessage("current", "needle current");
+    insertMessage("remote", "needle remote", { guildId: "g2", channelId: "c2" });
+    insertMessage("hidden", "needle hidden", { guildId: "g3", channelId: "c3" });
+    const result = await tool({
+      resolveChannel: (channelId) => Promise.resolve(channelId === "c1"
+        ? { guildId: "g1", channelId }
+        : channelId === "c2" ? { guildId: "g2", channelId } : null),
+    }).execute("tc", { pattern: "needle", scope: "all_guilds" }, AbortSignal.timeout(5000));
+    const output = text(result);
+    expect(output).toContain("needle current");
+    expect(output).toContain("needle remote");
+    expect(output).not.toContain("needle hidden");
+    expect(output).toContain("GuildID: g2; ChannelID: c2");
+  });
+
+  test("searches all accessible channels in the current guild by scope", async () => {
+    insertMessage("current", "needle current");
+    insertMessage("other-channel", "needle other channel", { channelId: "c2" });
+    insertMessage("other-guild", "needle other guild", { guildId: "g2", channelId: "c3" });
+    const result = await tool({
+      resolveChannel: (channelId) => Promise.resolve(channelId === "c1" || channelId === "c2"
+        ? { guildId: "g1", channelId }
+        : { guildId: "g2", channelId }),
+    }).execute("tc", { pattern: "needle", scope: "current_guild" }, AbortSignal.timeout(5000));
+    const output = text(result);
+    expect(output).toContain("needle current");
+    expect(output).toContain("needle other channel");
+    expect(output).not.toContain("needle other guild");
+  });
+
   test("removes inaccessible channels from broad guild searches", async () => {
     insertMessage("open", "needle open", { channelId: "open" });
     insertMessage("private", "needle private", { channelId: "private" });
@@ -171,6 +202,10 @@ describe("search_channel_messages", () => {
     expect(text(empty)).toContain("Provide a regex pattern");
     const invalid = await tool().execute("tc", { pattern: "[" }, AbortSignal.timeout(5000));
     expect(text(invalid)).toContain("Invalid regex");
+    const conflictingScope = await tool().execute("tc", {
+      pattern: "x", scope: "all_guilds", guild_id: "g2",
+    }, AbortSignal.timeout(5000));
+    expect(text(conflictingScope)).toContain("cannot be combined");
   });
 
   test("shows reply target and quote when available", async () => {

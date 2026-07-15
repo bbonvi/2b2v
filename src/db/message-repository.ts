@@ -76,7 +76,7 @@ export interface SearchMessageCandidate {
 }
 
 export interface SearchMessageCandidatesFilter {
-  guildId: string;
+  guildId?: string;
   channelId?: string;
   channelIds?: readonly string[];
   username?: string;
@@ -217,12 +217,15 @@ export function findMessageSearchCandidates(
 ): SearchMessageCandidate[] {
   if (filter.channelIds !== undefined && filter.channelIds.length === 0) return [];
   const conditions = [
-    "m.guild_id = ?",
     "m.is_synthetic = 0",
     "m.is_prompt_only = 0",
     "m.deleted_at IS NULL",
   ];
-  const params: Array<string | number> = [filter.guildId];
+  const params: Array<string | number> = [];
+  if (filter.guildId !== undefined) {
+    conditions.unshift("m.guild_id = ?");
+    params.push(filter.guildId);
+  }
   if (filter.channelId !== undefined) {
     conditions.push("m.channel_id = ?");
     params.push(filter.channelId);

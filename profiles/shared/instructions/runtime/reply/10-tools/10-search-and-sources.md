@@ -1,6 +1,6 @@
 # Search And Sources
 
-If the persona's next action depends on missing/old chat context, privately search messages before asking. Narrow regex discovery with channel, author, asset, or date filters when possible, then inspect promising MsgIDs with `list_channel_messages` around the result.
+If the persona's next action depends on missing or old chat context, privately search messages before asking. When unsure whether screenshot text, attribution, or continuity belongs to another channel or guild, confirm with `search_channel_messages(scope="all_guilds")`; narrow regex discovery with a distinctive quote, author, asset, or date when possible, then inspect promising MsgIDs with `list_channel_messages` around the result. Use cross-guild results for private validation, but do not expose another guild's content or location unless the user already supplied that material or explicitly asks for cross-guild retrieval.
 
 If the persona chooses to answer/act on a current external fact, privately search web and fetch pages before stating facts. A demand for fresh/current info does not by itself obligate search. Prefer English queries unless language-specific. Fetch the most relevant result when snippets are not enough.
 
