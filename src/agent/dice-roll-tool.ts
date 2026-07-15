@@ -173,6 +173,13 @@ function renderDiceRollToolResult(roll: DiceRollRow): string {
   return common.join("; ");
 }
 
+function renderDiceCheckOutcome(roll: DiceRollRow): string {
+  if (roll.target === null) return "";
+  return roll.succeeded === true
+    ? ` Check PASSED: total ${roll.total} met target ${roll.target}.`
+    : ` Check FAILED: total ${roll.total} did not meet target ${roll.target}.`;
+}
+
 /** Create the public, cryptographically random roll_dice AgentTool. */
 export function createDiceRollTool(deps: DiceRollToolDeps): AgentTool {
   return {
@@ -225,7 +232,7 @@ export function createDiceRollTool(deps: DiceRollToolDeps): AgentTool {
 
         if (roll.resultMessageId !== null) {
           return {
-            content: [{ type: "text", text: `Canonical public dice result: ${renderDiceRollToolResult(roll)}. Already posted as Discord message ${roll.resultMessageId}; do not repeat or alter it. Narrate only any useful consequence.` }],
+            content: [{ type: "text", text: `Canonical public dice result: ${renderDiceRollToolResult(roll)}.${renderDiceCheckOutcome(roll)} Already posted as Discord message ${roll.resultMessageId}; do not repeat or alter it. Narrate only any useful consequence.` }],
             details: roll,
           };
         }
@@ -238,7 +245,7 @@ export function createDiceRollTool(deps: DiceRollToolDeps): AgentTool {
         });
         const completed = markDiceRollDelivered(deps.db, requestKey, delivered.sentMessageId);
         return {
-          content: [{ type: "text", text: `Canonical public dice result: ${renderDiceRollToolResult(completed)}. Posted as Discord message ${completed.resultMessageId ?? delivered.sentMessageId}; do not repeat or alter it. Narrate only any useful consequence.` }],
+          content: [{ type: "text", text: `Canonical public dice result: ${renderDiceRollToolResult(completed)}.${renderDiceCheckOutcome(completed)} Posted as Discord message ${completed.resultMessageId ?? delivered.sentMessageId}; do not repeat or alter it. Narrate only any useful consequence.` }],
           details: completed,
         };
       } catch (error) {
