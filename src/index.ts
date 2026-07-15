@@ -3050,14 +3050,17 @@ async function processTriggeredMessage(
         deps,
         requestLog,
         logger: log,
-        afterSuccess: (completed) => {
-          if (completed.responseText === undefined || completed.responseText === "" || sentBotMessageIds[0] === undefined) return;
+        afterSuccess: () => {
+          const botMessageId = sentBotMessageIds.at(-1);
+          // Attachment-only and intermediate-only replies have no response text;
+          // the delivered Discord message is the durable signal for lingering attention.
+          if (botMessageId === undefined) return;
           ambientRuntime.noteAmbientBotReply({
             guildId,
             channelId,
             userId: message.author.id,
             sourceMessageId: message.id,
-            botMessageId: sentBotMessageIds[0],
+            botMessageId,
             message,
             allowLease: triggerOverride?.reason === "mention" ||
               triggerOverride?.reason === "keyword" ||
