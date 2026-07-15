@@ -1730,8 +1730,9 @@
 
     const presence = status.current.presence;
     const presentation = status.presentation || { avatar: 'disabled' };
-    const parts = [presentation.desiredAvatarId || status.current.avatarId];
+    const parts = [];
     if (presence != null) parts.push(presence.status === 'idle' ? 'away' : presence.status);
+    parts.push(presentation.desiredAvatarId || status.current.avatarId);
     if (presence != null && presence.activity != null) parts.push(presence.activity.name);
     if (presentation.avatar === 'retrying' && presentation.retryAt != null) {
       parts.push('retry in ' + conciseDistance(presentation.retryAt));
@@ -1739,7 +1740,7 @@
       parts.push(presentation.avatar);
     }
     if (presentation.nextAvatarRotationAt != null) {
-      parts.push('reroll ' + modeLocalTime(presentation.nextAvatarRotationAt, status.timezone, true) + ' · in ' + conciseDistance(presentation.nextAvatarRotationAt));
+      parts.push('reroll in ' + conciseDistance(presentation.nextAvatarRotationAt));
     }
     const guildOverrides = guilds.filter(entry => entry.status?.current != null);
     const guildRetries = guilds.filter(entry => entry.status?.presentation?.avatar === 'retrying');
