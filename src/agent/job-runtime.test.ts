@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { createDatabase, type Database } from "../db/database.ts";
+import { getHistoryMessagesByIds } from "../db/message-repository.ts";
 import { AgentJobStore } from "./job-runtime.ts";
 
 const config = {
@@ -7,6 +9,18 @@ const config = {
   terminalVisibleMs: 600_000,
   maxImageReplacements: 2,
 };
+
+let db: Database;
+let store: AgentJobStore;
+
+beforeEach(() => {
+  db = createDatabase(":memory:");
+  store = new AgentJobStore(db, config);
+});
+
+afterEach(() => {
+  db.close();
+});
 
 function enqueue(store: AgentJobStore, overrides: Partial<Parameters<AgentJobStore["enqueueImageJob"]>[0]> = {}) {
   return store.enqueueImageJob({
@@ -17,19 +31,15 @@ function enqueue(store: AgentJobStore, overrides: Partial<Parameters<AgentJobSto
     sourceMessageId: "m1",
     sourceQuote: "make an image",
     prompt: "make an image",
-    promptHash: "hash-1",
     references: [],
     outputFormat: "png",
     is4k: false,
-    separateJob: false,
-    allowsGroupCorrections: false,
     ...overrides,
   });
 }
 
 describe("AgentJobStore", () => {
-  test("allows duplicate active image jobs while hard dedupe is disabled", () => {
-    const store = new AgentJobStore(config);
+  test("allows independent active image jobs", () => {
     const first = enqueue(store);
     const second = enqueue(store);
 
@@ -39,10 +49,9 @@ describe("AgentJobStore", () => {
     expect(second.job.id).not.toBe(first.job.id);
   });
 
-  test("allows explicit separate image jobs", () => {
-    const store = new AgentJobStore(config);
+  test("allows another image job with different input", () => {
     const first = enqueue(store);
-    const second = enqueue(store, { separateJob: true, promptHash: "hash-2" });
+    const second = enqueue(store, { prompt: "make another image" });
 
     expect(first.created).toBe(true);
     expect(second.created).toBe(true);
@@ -50,7 +59,6 @@ describe("AgentJobStore", () => {
   });
 
   test("retains ordered image references for the worker", () => {
-    const store = new AgentJobStore(config);
     const references = [
       { type: "avatar" as const, userId: "123456789012345678" },
       { type: "url" as const, url: "https://example.com/reference.gif" },
@@ -60,7 +68,6 @@ describe("AgentJobStore", () => {
   });
 
   test("tracks source and delivery channels separately", () => {
-    const store = new AgentJobStore(config);
     const result = enqueue(store, {
       guildId: "source-guild",
       channelId: "source-channel",
@@ -77,7 +84,6 @@ describe("AgentJobStore", () => {
   });
 
   test("renders cross-channel delivery annotations with channel_id", () => {
-    const store = new AgentJobStore(config);
     const result = enqueue(store, {
       guildId: "source-guild",
       channelId: "source-channel",
@@ -91,12 +97,10 @@ describe("AgentJobStore", () => {
   });
 
   test("rejects replacement cancellation after grace window", () => {
-    const store = new AgentJobStore(config);
     const first = enqueue(store, { now: 1_000 });
     store.start(first.job.id, undefined, 1_000);
 
     const cancelled = store.cancel(first.job.id, {
-      requesterId: "u1",
       reason: "make it blue",
       mode: "replacement",
       now: 70_000,
@@ -106,13 +110,11 @@ describe("AgentJobStore", () => {
     expect(store.get(first.job.id)?.status).toBe("running");
   });
 
-  test("allows group correction cancellation by another participant", () => {
-    const store = new AgentJobStore(config);
-    const first = enqueue(store, { allowsGroupCorrections: true, now: 1_000 });
+  test("allows model-selected cancellation without requester authorization", () => {
+    const first = enqueue(store, { now: 1_000 });
     store.start(first.job.id, undefined, 1_000);
 
     const cancelled = store.cancel(first.job.id, {
-      requesterId: "u2",
       reason: "include me too",
       mode: "replacement",
       now: 10_000,
@@ -122,29 +124,56 @@ describe("AgentJobStore", () => {
     expect(store.get(first.job.id)?.status).toBe("cancelled");
   });
 
-  test("allows cancellation by another participant while requester guard is disabled", () => {
-    const store = new AgentJobStore(config);
-    const first = enqueue(store, { now: 1_000 });
-    store.start(first.job.id, undefined, 1_000);
-
-    const cancelled = store.cancel(first.job.id, {
-      requesterId: "u2",
-      reason: "fix it",
-      mode: "replacement",
-      now: 10_000,
-    });
-
-    expect(cancelled.ok).toBe(true);
-    expect(store.get(first.job.id)?.status).toBe("cancelled");
-  });
-
-  test("keeps terminal jobs visible only for the configured ttl", () => {
-    const store = new AgentJobStore(config);
+  test("keeps terminal jobs durable after the prompt visibility ttl", () => {
     const first = enqueue(store, { now: 1_000 });
     store.markFailed(first.job.id, "failed", 2_000);
 
     expect(store.listVisible("g1", "c1", 2_000 + config.terminalVisibleMs)).toHaveLength(1);
-    expect(store.cleanup(2_001 + config.terminalVisibleMs)).toBe(1);
     expect(store.listVisible("g1", "c1", 2_001 + config.terminalVisibleMs)).toHaveLength(0);
+    expect(store.get(first.job.id)?.status).toBe("failed");
+    expect(store.list("g1", "c1", "terminal")).toHaveLength(1);
+  });
+
+  test("marks active jobs interrupted by a process restart as failed", () => {
+    const first = enqueue(store, { now: 1_000 });
+    store.start(first.job.id, undefined, 1_100);
+
+    const restartedStore = new AgentJobStore(db, config);
+
+    expect(restartedStore.get(first.job.id)).toMatchObject({
+      status: "failed",
+      error: "Interrupted before completion by a process restart.",
+    });
+  });
+
+  test("persists generated asset provenance across store instances", () => {
+    const job = enqueue(store).job;
+    db.raw.prepare(`INSERT INTO messages
+      (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at)
+      VALUES ('sent-1', 'g1', 'c1', 'bot', '2b', '', '', 1, 1)`).run();
+    db.raw.prepare(`INSERT INTO message_assets
+      (message_id, guild_id, channel_id, source_kind, source_key, kind, filename, created_at)
+      VALUES ('sent-1', 'g1', 'c1', 'attachment', 'discord-asset', 'image', 'generated.webp', 1)`).run();
+    const assetId = (db.raw.prepare("SELECT id FROM message_assets WHERE message_id = 'sent-1'").get() as { id: number }).id;
+
+    store.linkAsset(job.id, assetId);
+    store.markSent(job.id, "sent-1", { filename: "generated.webp" }, 2_000);
+    const restartedStore = new AgentJobStore(db, config);
+
+    expect(restartedStore.getForAsset(assetId)).toMatchObject({
+      role: "output",
+      job: { id: job.id, input: { prompt: "make an image" } },
+    });
+    expect(getHistoryMessagesByIds(db, ["sent-1"])[0]?.assets?.[0]?.jobId).toBe(job.id);
+    expect(restartedStore.cleanup(31 * 24 * 60 * 60 * 1000)).toBe(0);
+    expect(restartedStore.get(job.id)?.status).toBe("sent");
+  });
+
+  test("removes unlinked terminal jobs after 30 days", () => {
+    const job = enqueue(store, { now: 1_000 }).job;
+    store.markFailed(job.id, "failed", 2_000);
+
+    expect(store.cleanup(31 * 24 * 60 * 60 * 1000)).toBe(1);
+    expect(store.get(job.id)).toBeUndefined();
   });
 });

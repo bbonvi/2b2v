@@ -1,0 +1,1 @@
+Privately inspect one visible durable async job, including its exact effective input, references, lifecycle, result or failure, replacement lineage, sent message, and output asset IDs. Use this before revising prior image work when the original prompt matters.

@@ -27,7 +27,6 @@ export function createGeneratedImageRuntime(): GeneratedImageRuntime {
           buffer: image.buffer,
           filename: image.filename,
           contentType: image.contentType,
-          historyText: image.revisedPrompt ?? image.prompt,
           requestedSize: image.requestedSize,
           actualSize: image.actualSize,
           transport: image.transport,
@@ -52,8 +51,6 @@ export function renderImageGenerationInput(input: ImageGenerationJobInput): stri
     reference_images: imageReferencesForToolInput(input.references),
     output_format: input.outputFormat,
     "4k": input.is4k,
-    separate_job: input.separateJob,
-    allows_group_corrections: input.allowsGroupCorrections,
     ...(input.replacesJobId !== undefined ? { replaces_job_id: input.replacesJobId } : {}),
   });
 }
@@ -83,10 +80,15 @@ function formatJobAge(job: AgentJob, now: number): string {
   return `${seconds}s ago`;
 }
 
-export function renderAgentJobsContext(jobs: AgentJob[], template: string, now = Date.now()): string {
+export function renderAgentJobsContext(
+  jobs: AgentJob[],
+  template: string,
+  now = Date.now(),
+  assetsForJob: (jobId: string) => readonly { assetId: number }[] = () => [],
+): string {
   if (jobs.length === 0) return "";
   const lines = [
-    "## Active Image Jobs",
+    "## Image Jobs",
     template,
   ];
   for (const job of jobs) {
@@ -98,8 +100,12 @@ export function renderAgentJobsContext(jobs: AgentJob[], template: string, now =
     const delivery = job.deliveryGuildId !== job.guildId || job.deliveryChannelId !== job.channelId
       ? ` delivery channel ${job.deliveryChannelId}`
       : "";
+    const assets = assetsForJob(job.id);
+    const assetText = assets.length === 0
+      ? ""
+      : ` assets ${assets.map((asset) => `#${asset.assetId}`).join(", ")}`;
     lines.push(
-      `- ${job.id} ${job.status}${highRes} (${state}) for @${job.requesterUsername} from MsgID ${job.sourceMessageId}${delivery}${replacement}; requested ${formatJobAge(job, now)}; quote: "${job.sourceQuote}"${sent}${error}`,
+      `- ${job.id} ${job.status}${highRes} (${state}) for @${job.requesterUsername} from MsgID ${job.sourceMessageId}${delivery}${replacement}; requested ${formatJobAge(job, now)}; prompt: ${JSON.stringify(shortQuote(job.input.prompt, 180))}${sent}${assetText}${error}`,
     );
   }
   return lines.join("\n");

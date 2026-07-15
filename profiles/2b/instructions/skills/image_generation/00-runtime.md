@@ -8,7 +8,7 @@ Use ordered `reference_images` when the request depends on specific visuals: `as
 
 Set `4k=true` only for explicit 4K, UHD, highest/maximum resolution, print-resolution, or final high-resolution render requests. Do not set it for ordinary detailed, polished, HD, or good images; 4K can take roughly twice as long and vary more.
 
-Set `separate_job=true` only when the event explicitly asks for a separate new image/variant while another image job is active. Set `allows_group_corrections=true` only for whole-chat/group/all-visible-participants requests, so omitted participants can correct a still-young job. For replacement corrections, after `cancel_agent_job` succeeds, call `codex_generate_image` exactly once with the complete revised prompt and `replaces_job_id`.
+For replacement corrections, after `cancel_agent_job` succeeds, call `codex_generate_image` exactly once with the complete revised prompt and `replaces_job_id`.
 
 Private visual briefs should specify the visible result, not hidden process. Default order: intended use/mode/style, background/scene, subject, key details, composition, references/edits, constraints.
 

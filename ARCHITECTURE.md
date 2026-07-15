@@ -100,9 +100,13 @@ Asset history backfill pages each stored channel newest-first through Discord's 
 
 Avatar reads and image-generation references are ephemeral and guild-scoped. `read_user_avatar` returns the canonical user ID used by an ordered avatar reference; async workers resolve the current display avatar in the source guild without persisting its URL or bytes.
 
-External image URLs are ephemeral. Image search returns metadata only; page reads append normalized image references; visual inspection and generation references share one bounded downloader that rejects private-network targets and revalidates redirects. GIF and other animated web references are decoded as static first frames, matching Discord GIF generation references.
+External image bytes are ephemeral. Image search returns metadata only; page reads append normalized image references; visual inspection and generation references share one bounded downloader that rejects private-network targets and revalidates redirects. Exact public URLs used by an accepted generation job remain in its private durable input provenance, while signed Discord URLs remain represented by stable asset IDs and are never persisted. GIF and other animated web references are decoded as static first frames, matching Discord GIF generation references.
 
-Image generation is state-changing async work. Foreground turns should start the job and acknowledge; workers handle typing, timeout, ordered chat-asset, inspected-web, or guild-avatar reference resolution, and final delivery.
+Image generation is state-changing async work. Foreground turns should start the job and acknowledge; workers handle typing, timeout, ordered chat-asset, inspected-web, or guild-avatar reference resolution, and final delivery. Job lifecycle, exact effective input, result, and replacement lineage are durable; process-local abort handles are not. Work left active after an uncoordinated restart becomes a terminal interrupted job rather than being presented as still running.
+
+Generated assets link to their producer through `agent_job_assets` instead of duplicating provenance on the asset row. Prompt history shows only compact job/prompt summaries and producer IDs; private `list_agent_jobs`, `read_agent_job`, and `read_asset` calls expose complete details on demand after enforcing the current channel or asset-origin access boundary.
+
+Terminal jobs with linked output assets remain as long as that asset provenance exists. Unlinked terminal jobs are retained for 30 days, then removed by periodic cleanup; this bounds failed/cancelled-job and orphaned-input retention without severing usable generated assets from their prompts.
 
 Response directive parsing is deliberately narrow. Do not add broad XML parsing.
 

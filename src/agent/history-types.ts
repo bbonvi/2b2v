@@ -11,6 +11,8 @@ export interface HistoryAsset {
   width: number | null;
   height: number | null;
   durationSeconds: number | null;
+  /** Durable producer job for generated assets. */
+  jobId?: string;
 }
 
 /** A stored message with full metadata for history processing. */

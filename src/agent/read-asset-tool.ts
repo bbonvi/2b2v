@@ -31,6 +31,8 @@ export interface ReadAssetToolDeps {
   config: AssetReadingConfig;
   elevenLabsApiKey?: string;
   getAsset: (id: number) => MessageAsset | null;
+  /** Render private producer metadata for generated assets, when available. */
+  getProvenance?: (id: number) => string | null;
   /** Resolve visible origin metadata and confirm the bot can still access the source channel. */
   resolveOrigin: (asset: MessageAsset) => Promise<AssetOrigin | null>;
   resolveSource: (asset: MessageAsset) => Promise<ResolvedAssetSource | null>;
@@ -89,9 +91,10 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
         asset.durationSeconds !== null ? `duration: ${Math.round(asset.durationSeconds * 10) / 10}s` : "",
         `source: ${asset.sourceKind}`,
       ].filter((fact) => fact !== "");
+      const provenance = deps.getProvenance?.(asset.id) ?? null;
       const content: Array<TextContent | ImageContent> = [{
         type: "text",
-        text: `Asset: ${kindLabel} #${asset.id}${filename !== null ? ` — ${filename}` : ""}\n${formatAssetOrigin(origin)}\n${facts.join("; ")}`,
+        text: `Asset: ${kindLabel} #${asset.id}${filename !== null ? ` — ${filename}` : ""}\n${formatAssetOrigin(origin)}\n${facts.join("; ")}${provenance !== null ? `\n\nGeneration provenance:\n${provenance}` : ""}`,
       }];
 
       if (asset.kind === "image" || asset.kind === "gif") {

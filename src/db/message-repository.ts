@@ -139,17 +139,20 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
 
   const messageIds = rows.map((r) => r.id);
   const placeholders = messageIds.map(() => "?").join(",");
-  const assetRows = db.raw.prepare(`SELECT message_id, id, kind, source_kind, filename, content_type, size, width, height, duration_seconds
+  const assetRows = db.raw.prepare(`SELECT message_id, id, kind, source_kind, filename, content_type, size, width, height, duration_seconds,
+      (SELECT job_id FROM agent_job_assets WHERE asset_id = message_assets.id ORDER BY job_id LIMIT 1) AS job_id
     FROM message_assets WHERE message_id IN (${placeholders}) ORDER BY id ASC`).all(...messageIds) as Array<{
       message_id: string; id: number; kind: AssetKind;
       source_kind: AssetSourceKind; filename: string | null;
       content_type: string | null; size: number | null; width: number | null; height: number | null; duration_seconds: number | null;
+      job_id: string | null;
     }>;
   const assetMap = new Map<string, HistoryAsset[]>();
   for (const asset of assetRows) {
     const values = assetMap.get(asset.message_id) ?? [];
     values.push({ id: asset.id, kind: asset.kind, sourceKind: asset.source_kind, filename: asset.filename,
-      contentType: asset.content_type, size: asset.size, width: asset.width, height: asset.height, durationSeconds: asset.duration_seconds });
+      contentType: asset.content_type, size: asset.size, width: asset.width, height: asset.height, durationSeconds: asset.duration_seconds,
+      ...(asset.job_id !== null ? { jobId: asset.job_id } : {}) });
     assetMap.set(asset.message_id, values);
   }
 

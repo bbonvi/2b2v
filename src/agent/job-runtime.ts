@@ -1,6 +1,20 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { randomUUID } from "node:crypto";
+import type { Database } from "../db/database.ts";
+import {
+  createAgentJobRecord,
+  deleteExpiredUnlinkedAgentJobs,
+  failInterruptedAgentJobs,
+  getAgentJobForAsset,
+  getAgentJobRecord,
+  linkAgentJobAsset,
+  listAgentJobAssets,
+  listAgentJobRecords,
+  updateAgentJobRecord,
+  type AgentJobRecord,
+  type PersistedAgentJobState,
+} from "../db/agent-job-repository.ts";
 
 export type AgentJobKind = "image_generation";
 export type AgentJobStatus = "queued" | "running" | "cancelling" | "cancelled" | "sent" | "failed" | "timed_out";
@@ -13,12 +27,9 @@ export type ImageReference =
 
 export interface ImageGenerationJobInput {
   prompt: string;
-  promptHash: string;
   references: ImageReference[];
   outputFormat: "png" | "jpeg" | "webp";
   is4k: boolean;
-  separateJob: boolean;
-  allowsGroupCorrections: boolean;
   replacesJobId?: string;
 }
 
@@ -58,7 +69,6 @@ export interface AgentJob {
   replacesJobId?: string;
   replacementCount: number;
   cancelReason?: string;
-  abort?: () => void;
 }
 
 export interface AgentJobConfig {
@@ -78,12 +88,9 @@ export interface EnqueueImageJobInput {
   sourceMessageId: string;
   sourceQuote: string;
   prompt: string;
-  promptHash: string;
   references: ImageReference[];
   outputFormat: "png" | "jpeg" | "webp";
   is4k: boolean;
-  separateJob: boolean;
-  allowsGroupCorrections: boolean;
   replacesJobId?: string;
   now?: number;
 }
@@ -91,19 +98,23 @@ export interface EnqueueImageJobInput {
 export interface EnqueueImageJobResult {
   job: AgentJob;
   created: boolean;
-  reason: "created" | "already_running" | "replacement_limit";
+  reason: "created" | "replacement_limit";
 }
 
 const ACTIVE_STATUSES = new Set<AgentJobStatus>(["queued", "running", "cancelling"]);
 const TERMINAL_STATUSES = new Set<AgentJobStatus>(["cancelled", "sent", "failed", "timed_out"]);
+const UNLINKED_TERMINAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** In-memory generic job store. Durable persistence can replace this without changing tools. */
+/** Durable agent-job store with process-local cancellation handles for active workers. */
 export class AgentJobStore {
-  private readonly jobs = new Map<string, AgentJob>();
+  private readonly db: Database;
   private readonly config: AgentJobConfig;
+  private readonly aborts = new Map<string, () => void>();
 
-  constructor(config: AgentJobConfig) {
+  constructor(db: Database, config: AgentJobConfig) {
+    this.db = db;
     this.config = config;
+    failInterruptedAgentJobs(db);
   }
 
   enqueueImageJob(input: EnqueueImageJobInput): EnqueueImageJobResult {
@@ -112,20 +123,6 @@ export class AgentJobStore {
     if (replacement !== undefined && replacement.replacementCount >= this.config.maxImageReplacements) {
       return { job: replacement, created: false, reason: "replacement_limit" };
     }
-
-    /*
-     * Temporarily disabled: this hard dedupe guard has been producing false positives
-     * by blocking legitimate new image requests while an unrelated image job is active.
-     * Keep duplicate prevention in prompt/runtime context until a safer request matcher
-     * exists.
-     *
-     * if (!input.separateJob && input.replacesJobId === undefined) {
-     *   const existing = this.findMatchingActiveImageJob(input);
-     *   if (existing !== undefined) {
-     *     return { job: existing, created: false, reason: "already_running" };
-     *   }
-     * }
-     */
 
     const id = this.createShortId("img");
     const replacementRootJobId = replacement?.replacementRootJobId ?? replacement?.id;
@@ -144,107 +141,101 @@ export class AgentJobStore {
       createdAt: now,
       input: {
         prompt: input.prompt,
-        promptHash: input.promptHash,
         references: input.references,
         outputFormat: input.outputFormat,
         is4k: input.is4k,
-        separateJob: input.separateJob,
-        allowsGroupCorrections: input.allowsGroupCorrections,
         ...(input.replacesJobId !== undefined ? { replacesJobId: input.replacesJobId } : {}),
       },
       ...(replacementRootJobId !== undefined ? { replacementRootJobId } : {}),
       ...(input.replacesJobId !== undefined ? { replacesJobId: input.replacesJobId } : {}),
       replacementCount: (replacement?.replacementCount ?? -1) + 1,
     };
-    this.jobs.set(job.id, job);
+    createAgentJobRecord(this.db, toRecord(job));
     return { job, created: true, reason: "created" };
   }
 
   get(id: string): AgentJob | undefined {
-    return this.jobs.get(id);
+    const record = getAgentJobRecord(this.db, id);
+    return record === null ? undefined : fromRecord(record);
   }
 
   listVisible(guildId: string, channelId: string, now = Date.now()): AgentJob[] {
-    return [...this.jobs.values()]
-      .filter((job) =>
-        (job.guildId === guildId && job.channelId === channelId)
-        || (job.deliveryGuildId === guildId && job.deliveryChannelId === channelId)
-      )
-      .filter((job) => this.isActive(job) || (job.completedAt !== undefined && now - job.completedAt <= this.config.terminalVisibleMs))
-      .sort((a, b) => {
-        const timeDiff = a.createdAt - b.createdAt;
-        return timeDiff !== 0 ? timeDiff : a.id.localeCompare(b.id);
-      });
+    const active = listAgentJobRecords(this.db, { guildId, channelId, state: "active" });
+    const terminal = listAgentJobRecords(this.db, {
+      guildId,
+      channelId,
+      state: "terminal",
+      completedAfter: now - this.config.terminalVisibleMs,
+    });
+    return [...active, ...terminal].map(fromRecord).sort(compareJobsOldestFirst);
   }
 
   listActive(guildId: string, channelId: string): AgentJob[] {
-    return [...this.jobs.values()]
-      .filter((job) =>
-        this.isActive(job)
-        && (
-          (job.guildId === guildId && job.channelId === channelId)
-          || (job.deliveryGuildId === guildId && job.deliveryChannelId === channelId)
-        )
-      )
-      .sort((a, b) => {
-        const timeDiff = a.createdAt - b.createdAt;
-        return timeDiff !== 0 ? timeDiff : a.id.localeCompare(b.id);
-      });
+    return this.list(guildId, channelId, "active");
+  }
+
+  list(
+    guildId: string,
+    channelId: string,
+    state: PersistedAgentJobState = "all",
+    limit = 10,
+  ): AgentJob[] {
+    return listAgentJobRecords(this.db, {
+      guildId,
+      channelId,
+      state,
+      limit,
+      newestFirst: true,
+    }).map(fromRecord);
+  }
+
+  getVisible(id: string, guildId: string, channelId: string): AgentJob | undefined {
+    const job = this.get(id);
+    if (job === undefined) return undefined;
+    return jobIsInScope(job, guildId, channelId) ? job : undefined;
   }
 
   start(id: string, abort?: () => void, now = Date.now()): AgentJob | undefined {
-    const job = this.jobs.get(id);
+    const job = this.get(id);
     if (job === undefined || job.status !== "queued") return job;
-    job.status = "running";
-    job.startedAt = now;
-    job.abort = abort;
-    return job;
+    updateAgentJobRecord(this.db, id, { status: "running", startedAt: now });
+    if (abort !== undefined) this.aborts.set(id, abort);
+    return this.get(id);
   }
 
   markSent(id: string, sentMessageId: string, result: ImageGenerationJobResult, now = Date.now()): AgentJob | undefined {
-    const job = this.jobs.get(id);
+    const job = this.get(id);
     if (job === undefined || !this.isActive(job)) return job;
-    job.status = "sent";
-    job.completedAt = now;
-    job.sentMessageId = sentMessageId;
-    job.result = result;
-    job.abort = undefined;
-    return job;
+    updateAgentJobRecord(this.db, id, {
+      status: "sent",
+      completedAt: now,
+      sentMessageId,
+      resultJson: JSON.stringify(result),
+    });
+    this.aborts.delete(id);
+    return this.get(id);
   }
 
   markFailed(id: string, error: string, now = Date.now()): AgentJob | undefined {
-    const job = this.jobs.get(id);
+    const job = this.get(id);
     if (job === undefined || TERMINAL_STATUSES.has(job.status)) return job;
-    job.status = "failed";
-    job.completedAt = now;
-    job.error = error;
-    job.abort = undefined;
-    return job;
+    updateAgentJobRecord(this.db, id, { status: "failed", completedAt: now, error });
+    this.aborts.delete(id);
+    return this.get(id);
   }
 
   markTimedOut(id: string, error: string, now = Date.now()): AgentJob | undefined {
-    const job = this.jobs.get(id);
+    const job = this.get(id);
     if (job === undefined || TERMINAL_STATUSES.has(job.status)) return job;
-    job.status = "timed_out";
-    job.completedAt = now;
-    job.error = error;
-    job.abort = undefined;
-    return job;
+    updateAgentJobRecord(this.db, id, { status: "timed_out", completedAt: now, error });
+    this.aborts.delete(id);
+    return this.get(id);
   }
 
-  cancel(id: string, input: { requesterId: string; reason: string; mode: CancelMode; now?: number }): { ok: boolean; message: string; job?: AgentJob } {
-    const job = this.jobs.get(id);
+  cancel(id: string, input: { reason: string; mode: CancelMode; now?: number }): { ok: boolean; message: string; job?: AgentJob } {
+    const job = this.get(id);
     if (job === undefined) return { ok: false, message: `No job ${id} exists.` };
     if (!this.isActive(job)) return { ok: false, message: `Job ${id} is ${job.status} and cannot be cancelled.` };
-    /*
-     * Temporarily disabled: requester/group-correction authorization is too coarse
-     * for replacement corrections and can block legitimate follow-up fixes. Rely on
-     * the model's cancel_agent_job selection until cancellation policy is redesigned.
-     *
-     * if (job.requesterId !== input.requesterId && !job.input.allowsGroupCorrections) {
-     *   return { ok: false, message: `Job ${id} belongs to @${job.requesterUsername}; only that requester can cancel it.` };
-     * }
-     */
     const now = input.now ?? Date.now();
     const ageMs = now - (job.startedAt ?? job.createdAt);
     if (input.mode === "replacement" && ageMs > this.config.imageCancelGraceMs) {
@@ -254,23 +245,31 @@ export class AgentJobStore {
       return { ok: false, message: `Job ${id} has already reached the replacement limit.` };
     }
 
-    job.status = "cancelled";
-    job.completedAt = now;
-    job.cancelReason = input.reason;
-    job.abort?.();
-    job.abort = undefined;
-    return { ok: true, message: `Cancelled ${id}.`, job };
+    updateAgentJobRecord(this.db, id, {
+      status: "cancelled",
+      completedAt: now,
+      cancelReason: input.reason,
+    });
+    this.aborts.get(id)?.();
+    this.aborts.delete(id);
+    return { ok: true, message: `Cancelled ${id}.`, job: this.get(id) };
+  }
+
+  linkAsset(jobId: string, assetId: number, role = "output"): void {
+    linkAgentJobAsset(this.db, jobId, assetId, role);
+  }
+
+  listAssets(jobId: string): Array<{ assetId: number; role: string }> {
+    return listAgentJobAssets(this.db, jobId);
+  }
+
+  getForAsset(assetId: number): { job: AgentJob; role: string } | undefined {
+    const linked = getAgentJobForAsset(this.db, assetId);
+    return linked === null ? undefined : { job: fromRecord(linked.record), role: linked.role };
   }
 
   cleanup(now = Date.now()): number {
-    let removed = 0;
-    for (const [id, job] of this.jobs) {
-      if (job.completedAt === undefined) continue;
-      if (now - job.completedAt <= this.config.terminalVisibleMs) continue;
-      this.jobs.delete(id);
-      removed += 1;
-    }
-    return removed;
+    return deleteExpiredUnlinkedAgentJobs(this.db, now - UNLINKED_TERMINAL_RETENTION_MS);
   }
 
   annotationForMessage(messageId: string, guildId: string, channelId: string, now = Date.now()): string[] {
@@ -288,28 +287,81 @@ export class AgentJobStore {
     return ACTIVE_STATUSES.has(job.status);
   }
 
-  /*
-   * Hard image-job dedupe is disabled above. This matcher is intentionally retained
-   * as commented reference for the old behavior while we observe prompt-only handling.
-   *
-   * private findMatchingActiveImageJob(input: EnqueueImageJobInput): AgentJob | undefined {
-   *   return this.listActive(input.guildId, input.channelId)
-   *     .find((job) =>
-   *       job.sourceMessageId === input.sourceMessageId
-   *       || job.input.promptHash === input.promptHash
-   *       || job.requesterId === input.requesterId
-   *       || job.input.allowsGroupCorrections
-   *     );
-   * }
-   */
-
   private createShortId(prefix: "img"): string {
     for (let i = 0; i < 10; i += 1) {
       const id = `${prefix}-${randomUUID().replace(/-/g, "").slice(0, 6)}`;
-      if (!this.jobs.has(id)) return id;
+      if (this.get(id) === undefined) return id;
     }
     return `${prefix}-${randomUUID().replace(/-/g, "").slice(0, 10)}`;
   }
+}
+
+function compareJobsOldestFirst(a: AgentJob, b: AgentJob): number {
+  const timeDiff = a.createdAt - b.createdAt;
+  return timeDiff !== 0 ? timeDiff : a.id.localeCompare(b.id);
+}
+
+function jobIsInScope(job: AgentJob, guildId: string, channelId: string): boolean {
+  return (job.guildId === guildId && job.channelId === channelId)
+    || (job.deliveryGuildId === guildId && job.deliveryChannelId === channelId);
+}
+
+function toRecord(job: AgentJob): AgentJobRecord {
+  return {
+    id: job.id,
+    kind: job.kind,
+    guildId: job.guildId,
+    channelId: job.channelId,
+    deliveryGuildId: job.deliveryGuildId,
+    deliveryChannelId: job.deliveryChannelId,
+    requesterId: job.requesterId,
+    requesterUsername: job.requesterUsername,
+    sourceMessageId: job.sourceMessageId,
+    sourceQuote: job.sourceQuote,
+    status: job.status,
+    inputJson: JSON.stringify(job.input),
+    resultJson: job.result === undefined ? null : JSON.stringify(job.result),
+    error: job.error ?? null,
+    createdAt: job.createdAt,
+    startedAt: job.startedAt ?? null,
+    completedAt: job.completedAt ?? null,
+    sentMessageId: job.sentMessageId ?? null,
+    replacementRootJobId: job.replacementRootJobId ?? null,
+    replacesJobId: job.replacesJobId ?? null,
+    replacementCount: job.replacementCount,
+    cancelReason: job.cancelReason ?? null,
+  };
+}
+
+function fromRecord(record: AgentJobRecord): AgentJob {
+  const input = JSON.parse(record.inputJson) as ImageGenerationJobInput;
+  const result = record.resultJson === null
+    ? undefined
+    : JSON.parse(record.resultJson) as ImageGenerationJobResult;
+  return {
+    id: record.id,
+    kind: record.kind as AgentJobKind,
+    guildId: record.guildId,
+    channelId: record.channelId,
+    deliveryGuildId: record.deliveryGuildId,
+    deliveryChannelId: record.deliveryChannelId,
+    requesterId: record.requesterId,
+    requesterUsername: record.requesterUsername,
+    sourceMessageId: record.sourceMessageId,
+    sourceQuote: record.sourceQuote,
+    status: record.status as AgentJobStatus,
+    createdAt: record.createdAt,
+    input,
+    replacementCount: record.replacementCount,
+    ...(record.startedAt !== null ? { startedAt: record.startedAt } : {}),
+    ...(record.completedAt !== null ? { completedAt: record.completedAt } : {}),
+    ...(record.sentMessageId !== null ? { sentMessageId: record.sentMessageId } : {}),
+    ...(record.error !== null ? { error: record.error } : {}),
+    ...(result !== undefined ? { result } : {}),
+    ...(record.replacementRootJobId !== null ? { replacementRootJobId: record.replacementRootJobId } : {}),
+    ...(record.replacesJobId !== null ? { replacesJobId: record.replacesJobId } : {}),
+    ...(record.cancelReason !== null ? { cancelReason: record.cancelReason } : {}),
+  };
 }
 
 const CancelAgentJobParams = Type.Object({
@@ -327,7 +379,6 @@ const CancelAgentJobParams = Type.Object({
 /** Create the narrow cancellation tool for cancellable async jobs. */
 export function createCancelAgentJobTool(deps: {
   store: AgentJobStore;
-  requesterId: string;
 }): AgentTool {
   return {
     name: "cancel_agent_job",
@@ -337,7 +388,6 @@ export function createCancelAgentJobTool(deps: {
     execute: (_toolCallId, params): Promise<AgentToolResult<{ jobId: string; cancelled: boolean }>> => {
       const p = params as { job_id: string; reason: string; mode: CancelMode };
       const result = deps.store.cancel(p.job_id, {
-        requesterId: deps.requesterId,
         reason: p.reason,
         mode: p.mode,
       });

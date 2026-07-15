@@ -69,6 +69,13 @@ describe("database initialization", () => {
     expect(info?.name).toBe("message_reactions");
   });
 
+  test("creates durable agent job and asset provenance tables", () => {
+    const tables = db.raw
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('agent_jobs', 'agent_job_assets')")
+      .all() as Array<{ name: string }>;
+    expect(tables.map((row) => row.name).sort()).toEqual(["agent_job_assets", "agent_jobs"]);
+  });
+
   test("creates memory extraction checkpoints table", () => {
     const info = db.raw
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_extraction_checkpoints'")

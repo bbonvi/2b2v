@@ -196,7 +196,6 @@ export interface OutboundAttachment {
   buffer: Buffer;
   filename: string;
   contentType: string;
-  historyText?: string;
   requestedSize?: string;
   actualSize?: string;
   transport?: string;
@@ -1227,7 +1226,9 @@ const PARALLEL_SAFE_READ_ONLY_TOOLS = new Set([
   "list_scheduled_tasks",
   "list_chat_users",
   "list_channels",
+  "list_agent_jobs",
   "read_asset",
+  "read_agent_job",
   "read_user_avatar",
   "search_channel_messages",
   "search_images",

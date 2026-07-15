@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { arch, platform, release } from "node:os";
 import sharp from "sharp";
 import { getCodexApiKey } from "../llm/codex-auth.ts";
@@ -59,12 +59,6 @@ const CodexGenerateImageParams = Type.Object({
   "4k": Type.Optional(Type.Boolean({
     description: "Request a 4K image.",
   })),
-  separate_job: Type.Optional(Type.Boolean({
-    description: "Request a separate image job.",
-  })),
-  allows_group_corrections: Type.Optional(Type.Boolean({
-    description: "Allow group correction replacement handling.",
-  })),
   replaces_job_id: Type.Optional(Type.String({
     description:
       "Cancelled job id being replaced.",
@@ -108,18 +102,15 @@ export interface CodexGenerateImageToolDeps {
   resolveExternalReference?: (url: string, signal?: AbortSignal) => Promise<ReferenceImageInput>;
   resolveAvatarReference?: (userId: string, signal?: AbortSignal) => Promise<ReferenceImageInput | null>;
   onGeneratedImage: (attachment: GeneratedImageAttachment) => void;
-  /** Tool-result template used when a related async image job is already active. */
+  /** Tool-result template used when an async image job request is not accepted. */
   asyncJobAlreadyActiveTemplate?: string;
   /** Tool-result template used after a new async image job is queued. */
   asyncJobStartedTemplate?: string;
   enqueueImageJob?: (input: {
     prompt: string;
-    promptHash: string;
     references: ImageReference[];
     outputFormat: OutputFormat;
     is4k: boolean;
-    separateJob: boolean;
-    allowsGroupCorrections: boolean;
     replacesJobId?: string;
   }) => EnqueueImageJobResult;
 }
@@ -174,17 +165,6 @@ interface ParsedImageResult extends ParsedCodexResponse {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function promptHash(prompt: string, references: readonly ImageReference[], is4k: boolean): string {
-  return createHash("sha256")
-    .update(normalizePrompt(prompt))
-    .update("|")
-    .update(JSON.stringify(references))
-    .update("|")
-    .update(is4k ? "4k" : "standard")
-    .digest("hex")
-    .slice(0, 16);
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> {
@@ -1061,8 +1041,6 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         output_format?: unknown;
         "4k"?: unknown;
         reference_images?: unknown;
-        separate_job?: unknown;
-        allows_group_corrections?: unknown;
         replaces_job_id?: unknown;
       };
       const prompt = p.prompt.trim();
@@ -1079,12 +1057,9 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
           : undefined;
         const enqueueResult = deps.enqueueImageJob({
           prompt,
-          promptHash: promptHash(prompt, references, is4k),
           references,
           outputFormat: output,
           is4k,
-          separateJob: p.separate_job === true,
-          allowsGroupCorrections: p.allows_group_corrections === true,
           ...(replacesJobId !== undefined ? { replacesJobId } : {}),
         });
         if (!enqueueResult.created) {
@@ -1095,7 +1070,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
               jobStatus: enqueueResult.job.status,
               reason: enqueueResult.reason,
             },
-            `No new image job was started because related image job ${enqueueResult.job.id} is ${enqueueResult.job.status}; answer the user with this status.`,
+            `No new image job was started because job ${enqueueResult.job.id} is ${enqueueResult.job.status}; reason: ${enqueueResult.reason}.`,
           );
           return {
             content: [{

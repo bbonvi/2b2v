@@ -1,10 +1,9 @@
 import { expect, test } from "bun:test";
-import { renderImageGenerationInput } from "./generated-image-runtime";
+import { renderAgentJobsContext, renderImageGenerationInput } from "./generated-image-runtime";
 
-test("renders the complete effective image generation input without internal fields", () => {
+test("renders the complete effective image generation input", () => {
   const rendered = renderImageGenerationInput({
     prompt: "Use both references",
-    promptHash: "internal-hash",
     references: [
       { type: "asset", assetId: 12 },
       { type: "avatar", userId: "123456789012345678" },
@@ -12,8 +11,6 @@ test("renders the complete effective image generation input without internal fie
     ],
     outputFormat: "webp",
     is4k: true,
-    separateJob: true,
-    allowsGroupCorrections: true,
     replacesJobId: "img-old",
   });
 
@@ -26,9 +23,37 @@ test("renders the complete effective image generation input without internal fie
     ],
     output_format: "webp",
     "4k": true,
-    separate_job: true,
-    allows_group_corrections: true,
     replaces_job_id: "img-old",
   });
-  expect(rendered).not.toContain("promptHash");
+});
+
+test("renders compact actual prompts and durable output assets in job context", () => {
+  const rendered = renderAgentJobsContext([{
+    id: "img-abc123",
+    kind: "image_generation",
+    guildId: "g1",
+    channelId: "c1",
+    deliveryGuildId: "g1",
+    deliveryChannelId: "c1",
+    requesterId: "u1",
+    requesterUsername: "alice",
+    sourceMessageId: "m1",
+    sourceQuote: "make it better",
+    status: "sent",
+    createdAt: 1_000,
+    completedAt: 2_000,
+    sentMessageId: "m2",
+    input: {
+      prompt: "Actual detailed moonlit portrait prompt",
+      references: [],
+      outputFormat: "webp",
+      is4k: false,
+    },
+    replacementCount: 0,
+  }], "Async jobs.", 3_000, () => [{ assetId: 42 }]);
+
+  expect(rendered).toContain("## Image Jobs");
+  expect(rendered).toContain('prompt: "Actual detailed moonlit portrait prompt"');
+  expect(rendered).toContain("sent MsgID m2 assets #42");
+  expect(rendered).not.toContain("quote:");
 });

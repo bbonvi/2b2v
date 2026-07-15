@@ -2323,7 +2323,6 @@ describe("handleMessage", () => {
           buffer: Buffer.from("fake"),
           filename: `${id}.png`,
           contentType: "image/png",
-          historyText: "a blue house",
         })),
       }),
     );
@@ -2334,7 +2333,6 @@ describe("handleMessage", () => {
         buffer: Buffer.from("fake"),
         filename: "img-1.png",
         contentType: "image/png",
-        historyText: "a blue house",
       },
     ]]);
   });
@@ -2501,7 +2499,6 @@ describe("handleMessage", () => {
           buffer: Buffer.from("fake-image"),
           filename: "img-1.png",
           contentType: "image/png",
-          historyText: "generated image",
         }],
       }),
     );
@@ -2582,7 +2579,6 @@ describe("handleMessage", () => {
           buffer: Buffer.from("fake"),
           filename: `${id}.png`,
           contentType: "image/png",
-          historyText: "a blue house",
         })),
       }),
     );

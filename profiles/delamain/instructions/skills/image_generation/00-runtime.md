@@ -6,7 +6,7 @@ Private briefs should describe the visible result rather than the process. A use
 
 Use ordered `reference_images` only when a visual is a real input to an edit, continuation, remix, or identity-preserving request: `asset` for chat images/GIFs, `url` for public images inspected first when visual certainty matters, and `avatar` with the canonical user ID returned by `read_user_avatar` when the event explicitly requests that profile picture. Pass multiple references only when each has a clear role, and align Image 1, Image 2, and later labels with their order.
 
-Set `4k=true` only for explicit 4K, UHD, print-resolution, maximum-resolution, or final high-resolution requests. Set `separate_job=true` only when the user clearly asks for a separate image while another job is active. For a replacement correction, cancel the replaceable job and submit one complete revised brief with `replaces_job_id`; do not stack partial correction jobs.
+Set `4k=true` only for explicit 4K, UHD, print-resolution, maximum-resolution, or final high-resolution requests. For a replacement correction, cancel the replaceable job and submit one complete revised brief with `replaces_job_id`; do not stack partial correction jobs.
 
 If the request contains text, quote the exact copy, keep it short, and specify typography, hierarchy, color, and placement. If spelling is critical, make the requirement explicit. For layouts, state aspect ratio, crop, subject scale, negative space, and element placement directly.
 

@@ -190,6 +190,40 @@ export const SCHEMA_SQL = `
     updated_at   INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS agent_jobs (
+    id                      TEXT PRIMARY KEY,
+    kind                    TEXT NOT NULL,
+    guild_id                TEXT NOT NULL,
+    channel_id              TEXT NOT NULL,
+    delivery_guild_id       TEXT NOT NULL,
+    delivery_channel_id     TEXT NOT NULL,
+    requester_id            TEXT NOT NULL,
+    requester_username      TEXT NOT NULL,
+    source_message_id       TEXT NOT NULL,
+    source_quote            TEXT NOT NULL,
+    status                  TEXT NOT NULL,
+    input_json              TEXT NOT NULL,
+    result_json             TEXT,
+    error                   TEXT,
+    created_at              INTEGER NOT NULL,
+    started_at              INTEGER,
+    completed_at            INTEGER,
+    sent_message_id         TEXT,
+    replacement_root_job_id TEXT,
+    replaces_job_id         TEXT,
+    replacement_count       INTEGER NOT NULL DEFAULT 0,
+    cancel_reason           TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_agent_jobs_source_scope
+    ON agent_jobs(guild_id, channel_id, created_at);
+
+  CREATE INDEX IF NOT EXISTS idx_agent_jobs_delivery_scope
+    ON agent_jobs(delivery_guild_id, delivery_channel_id, created_at);
+
+  CREATE INDEX IF NOT EXISTS idx_agent_jobs_status
+    ON agent_jobs(status, created_at);
+
   CREATE TABLE IF NOT EXISTS message_assets (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id            TEXT NOT NULL,
@@ -216,6 +250,16 @@ export const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_message_assets_guild_channel
     ON message_assets(guild_id, channel_id);
+
+  CREATE TABLE IF NOT EXISTS agent_job_assets (
+    job_id   TEXT NOT NULL REFERENCES agent_jobs(id) ON DELETE CASCADE,
+    asset_id INTEGER NOT NULL REFERENCES message_assets(id) ON DELETE CASCADE,
+    role     TEXT NOT NULL,
+    PRIMARY KEY (job_id, asset_id, role)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_agent_job_assets_asset
+    ON agent_job_assets(asset_id, job_id);
 
   CREATE TABLE IF NOT EXISTS asset_backfill_checkpoints (
     channel_id          TEXT PRIMARY KEY,

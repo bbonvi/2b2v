@@ -31,6 +31,25 @@ const origin: AssetOrigin = {
 };
 
 describe("read_asset", () => {
+  test("includes durable generation provenance with an image", async () => {
+    const tool = createReadAssetTool({
+      config,
+      getAsset: () => ({ ...asset("image"), contentType: "image/png", width: 10, height: 10 }),
+      getProvenance: () => "Job: img-123\nOriginal effective input: {\"prompt\":\"moonlight\"}",
+      resolveOrigin: () => Promise.resolve(origin),
+      resolveSource: () => Promise.resolve({ url: "https://cdn.test/image", contentType: "image/png", filename: "image.png" }),
+      cacheExtraction: () => {},
+      prepareImage: (buffer) => Promise.resolve({ data: buffer, mime: "image/png", width: 10, height: 10 }),
+      fetchFn: (() => Promise.resolve(new Response(Buffer.from("png"), { headers: { "content-length": "3" } }))) as unknown as typeof fetch,
+    });
+
+    const result = await tool.execute("image", { asset_id: 1 });
+
+    expect(result.content[0]?.type === "text" && result.content[0].text).toContain("Generation provenance:\nJob: img-123");
+    expect(result.content[0]?.type === "text" && result.content[0].text).toContain('"prompt":"moonlight"');
+    expect(result.content.some((part) => part.type === "image")).toBeTrue();
+  });
+
   test("reads a numbered line range from remote text", async () => {
     const source = Buffer.from("alpha\nbeta\ngamma");
     const tool = createReadAssetTool({

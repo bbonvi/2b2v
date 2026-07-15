@@ -58,6 +58,8 @@ export function cleanupGuildData(input: {
   const memoriesDeleted = (input.db.raw
     .prepare("DELETE FROM memories WHERE guild_id = ?")
     .run(input.guildId) as { changes: number }).changes;
+  input.db.raw.prepare("DELETE FROM agent_jobs WHERE guild_id = ? OR delivery_guild_id = ?")
+    .run(input.guildId, input.guildId);
   input.db.raw.prepare("DELETE FROM message_assets WHERE guild_id = ?").run(input.guildId);
   input.db.raw.prepare("DELETE FROM asset_backfill_checkpoints WHERE guild_id = ?").run(input.guildId);
   input.db.raw.prepare("DELETE FROM message_reactions WHERE guild_id = ?").run(input.guildId);

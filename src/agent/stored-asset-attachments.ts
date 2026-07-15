@@ -32,7 +32,6 @@ export function createStoredAssetAttachmentResolver(input: {
           buffer: await fetchAssetBuffer(input.fetchFn ?? fetch, source.url, input.maxDownloadBytes),
           filename: source.filename ?? asset.filename ?? `asset-${id}`,
           contentType: source.contentType ?? asset.contentType ?? "application/octet-stream",
-          historyText: `Reposted ${asset.kind} asset ${id}.`,
         });
       } catch (error) {
         input.logger.warn("asset download failed", { assetId: id, error: error instanceof Error ? error.message : String(error) });

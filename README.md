@@ -97,6 +97,8 @@ Message uploads, embeds, and stickers appear in history and current-event metada
 
 Web visuals use `search_images` for Brave image discovery, `fetch_url` for readable Markdown plus preserved page-image URLs, and `fetch_images` for ephemeral inspection. Image generation accepts one ordered `reference_images` list containing lazy chat assets, inspected public URLs, or current-guild avatars identified by the canonical user ID returned from `read_user_avatar`; animated images use a static first-frame reference. `externalImages` controls download, redirect, size, dimension, and page-image limits.
 
+Async agent jobs are durable and channel-scoped. `list_agent_jobs` returns active or recent work, while `read_agent_job` exposes the exact effective input, lifecycle, result, replacement lineage, and output assets. Generated image assets retain their producer-job link, so `read_asset` returns both the image and its generation provenance for later revisions; unlinked terminal jobs expire after 30 days.
+
 Verification:
 
 ```bash

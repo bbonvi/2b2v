@@ -63,6 +63,7 @@ import { createFetchImagesTool } from "./agent/fetch-images-tool";
 import { loadExternalImage } from "./agent/external-image";
 import { createCodexGenerateImageTool, type GeneratedImageAttachment, type ReferenceImageInput } from "./agent/codex-image-tool";
 import { AgentJobStore, createCancelAgentJobTool, isActiveJobStatus, type ImageGenerationJobResult } from "./agent/job-runtime";
+import { createAgentJobInspectionTools, renderAgentJobDetails } from "./agent/agent-job-tool";
 import { annotateHistoryJobs, createGeneratedImageRuntime, DEFAULT_CODEX_IMAGE_ROUTER_MODEL, imageReferencesForToolInput, renderAgentJobsContext, renderImageGenerationInput, shortQuote, type GeneratedImageRuntime } from "./agent/generated-image-runtime";
 import { createStoredAssetAttachmentResolver } from "./agent/stored-asset-attachments";
 import { loadAssetReferenceImage } from "./agent/asset-reference-image";
@@ -399,19 +400,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     const latest = agentJobs.get(job.id);
     if (latest === undefined || !isActiveJobStatus(latest.status)) return;
     const generationInput = renderImageGenerationInput(job.input);
-    const outboundAttachment: OutboundAttachment = {
-      ...attachment,
-      historyText: [
-        `Async image job ${job.id}.`,
-        `4K: ${job.input.is4k ? "yes" : "no"}`,
-        details?.transport !== undefined ? `Transport: ${details.transport}` : "",
-        details?.requestedSize !== undefined ? `Requested size: ${details.requestedSize}` : "",
-        details?.actualSize !== undefined ? `Actual size: ${details.actualSize}` : "",
-        `Original request from @${job.requesterUsername}, MsgID ${job.sourceMessageId}: "${job.sourceQuote}"`,
-        `Generation input: ${generationInput}`,
-        typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}` : "",
-      ].filter((part) => part !== "").join("\n"),
-    };
+    const outboundAttachment: OutboundAttachment = attachment;
 
     const completionInstruction = runtimeContextTemplate("async-image-ready", {
       jobId: job.id,
@@ -432,6 +421,17 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     });
     if (sentMessageId === undefined) {
       throw new Error("Async image completion did not send a Discord message.");
+    }
+    const deliveredAsset = getAssetsByMessageId(db, sentMessageId)
+      .find((asset) => asset.filename === outboundAttachment.filename && (asset.kind === "image" || asset.kind === "gif"));
+    if (deliveredAsset === undefined) {
+      log.warn("generated image asset provenance could not be linked", {
+        jobId: job.id,
+        sentMessageId,
+        filename: outboundAttachment.filename,
+      });
+    } else {
+      agentJobs.linkAsset(job.id, deliveredAsset.id);
     }
     ambientRuntime.noteAmbientBotReply({
       guildId: job.deliveryGuildId,
@@ -823,11 +823,7 @@ client.on("shardResume", () => personaModeRuntime.reapplyPresentation());
 const guildConfigs = loadGuildConfigs(guildsDir, globalConfig);
 log.info("guild configs loaded", { count: guildConfigs.size });
 
-const agentJobs = new AgentJobStore(globalConfig.defaultAgentJobs);
-const agentJobCleanupTimer = setInterval(() => {
-  const removed = agentJobs.cleanup();
-  if (removed > 0) log.debug("agent jobs cleaned up", { removed });
-}, 60_000);
+const agentJobs = new AgentJobStore(db, globalConfig.defaultAgentJobs);
 
 const modelImageSupport = createModelImageSupportStore({ log });
 await modelImageSupport.refresh(globalConfig, guildConfigs, "startup");
@@ -966,6 +962,10 @@ const memoryCleanupTimer = setInterval(() => {
   const deletedContinuations = deleteExpiredCodexReasoningContinuations(db, continuationTtl);
   if (deletedContinuations > 0) {
     log.info("expired codex reasoning continuations cleaned", { deleted: deletedContinuations });
+  }
+  const deletedAgentJobs = agentJobs.cleanup();
+  if (deletedAgentJobs > 0) {
+    log.info("expired unlinked agent jobs cleaned", { deleted: deletedAgentJobs });
   }
 }, MEMORY_CLEANUP_INTERVAL_MS);
 
@@ -1811,6 +1811,8 @@ async function buildContext(
   const activeJobsText = renderAgentJobsContext(
     visibleJobs,
     runtimeContextTemplate("active-image-jobs", {}, "Image generation is asynchronous."),
+    Date.now(),
+    (jobId) => agentJobs.listAssets(jobId),
   );
   const activeJobsIndex = assembled.sections.findIndex((s) => s.label === "Chat History — Newer");
   const activeJobsInsertAt = activeJobsIndex === -1 ? assembled.sections.length : activeJobsIndex;
@@ -1818,7 +1820,7 @@ async function buildContext(
     ? assembled.sections
     : [
       ...assembled.sections.slice(0, activeJobsInsertAt),
-      { label: "Active Image Jobs", text: activeJobsText, cached: false, role: "developer" as const },
+      { label: "Image Jobs", text: activeJobsText, cached: false, role: "developer" as const },
       ...assembled.sections.slice(activeJobsInsertAt),
     ];
 
@@ -2380,6 +2382,12 @@ function buildAgentTools(
     config: guildConfig.assetReading ?? { ...DEFAULT_ASSET_READING, videoPreviewTimesSeconds: [...DEFAULT_ASSET_READING.videoPreviewTimesSeconds] },
     elevenLabsApiKey: globalConfig.elevenLabsApiKey,
     getAsset: (id) => getAssetById(db, id),
+    getProvenance: (id) => {
+      const linked = agentJobs.getForAsset(id);
+      return linked === undefined
+        ? null
+        : `Role: ${linked.role}\n${renderAgentJobDetails(linked.job, agentJobs.listAssets(linked.job.id))}`;
+    },
     resolveOrigin: async (asset) => {
       const sourceChannel = await fetchAccessibleGuildChannel(asset.channelId);
       if (sourceChannel === null) return null;
@@ -2465,7 +2473,8 @@ function buildAgentTools(
     },
   });
 
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memoryListTool, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const jobInspectionTools = createAgentJobInspectionTools({ store: agentJobs, guildId, channelId });
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memoryListTool, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, ...jobInspectionTools, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (includeImageGenerationTools) {
     const codexImageModel = guildConfig.llmProvider === "openai-codex"
       ? guildConfig.model ?? globalConfig.defaultModel
@@ -2508,12 +2517,9 @@ function buildAgentTools(
           sourceMessageId: effectiveCurrentRequest.sourceMessageId,
           sourceQuote: effectiveCurrentRequest.sourceQuote,
           prompt: input.prompt,
-          promptHash: input.promptHash,
           references: input.references,
           outputFormat: input.outputFormat,
           is4k: input.is4k,
-          separateJob: input.separateJob,
-          allowsGroupCorrections: input.allowsGroupCorrections,
           ...(input.replacesJobId !== undefined ? { replacesJobId: input.replacesJobId } : {}),
         });
         if (result.created) {
@@ -2530,7 +2536,6 @@ function buildAgentTools(
 
     const cancelJobTool = createCancelAgentJobTool({
       store: agentJobs,
-      requesterId: effectiveCurrentRequest?.requesterId ?? "unknown",
     });
     tools.push(codexGenerateImageTool, cancelJobTool);
   }
@@ -3607,7 +3612,6 @@ async function shutdown(signal: string): Promise<void> {
 
   clearInterval(memoryCleanupTimer);
   clearInterval(vpnSessionCleanupTimer);
-  clearInterval(agentJobCleanupTimer);
   if (configReloadPollTimer !== null) clearInterval(configReloadPollTimer);
   if (reloadTimer !== null) clearTimeout(reloadTimer);
   for (const watcher of configWatchers) watcher.close();

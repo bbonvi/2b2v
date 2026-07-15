@@ -65,12 +65,12 @@ describe("formatMessageLine", () => {
   test("groups lazy assets by type", () => {
     expect(formatMessageLine({
       message: message({ assets: [
-        { id: 21, kind: "image", sourceKind: "attachment", filename: "cat.png", contentType: "image/png", size: 10, width: 20, height: 30, durationSeconds: null },
+        { id: 21, kind: "image", sourceKind: "attachment", filename: "cat.png", contentType: "image/png", size: 10, width: 20, height: 30, durationSeconds: null, jobId: "img-abc123" },
         { id: 22, kind: "audio", sourceKind: "attachment", filename: "voice.ogg", contentType: "audio/ogg", size: 40, width: null, height: null, durationSeconds: 5 },
         { id: 23, kind: "file", sourceKind: "attachment", filename: "notes.pdf", contentType: "application/pdf", size: 50, width: null, height: null, durationSeconds: null },
       ] }),
       reply: null,
-    })).toBe("[@alice (Images: #21 cat.png; Audio: #22 voice.ogg (5s); Files: #23 notes.pdf (50B))]: hello");
+    })).toBe("[@alice (Images: #21 cat.png [Job img-abc123]; Audio: #22 voice.ogg (5s); Files: #23 notes.pdf (50B))]: hello");
   });
 
   test("formats reply assets and missing targets", () => {
