@@ -288,6 +288,7 @@ triggers:
         - "2b"
         - "тубишка"
         - "туби"
+        - "тубик"
     randomChance: 0.001 # (0-1 probability of responding to any message)
     keywordDebounceMs: 2000 # (wait this long after a keyword trigger before replying)
     typingIdleMs: 10000 # (treat typingStart from the triggering user as active for this long)
