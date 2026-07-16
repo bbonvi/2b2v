@@ -292,6 +292,11 @@
   .event-mention { color: #60a5fa; }
   .event-keyword { color: #f59e0b; }
   .event-random { color: #a78bfa; }
+  .event-scheduled { color: #fbbf24; }
+  .event-ambient-pickup,
+  .event-lingering-attention,
+  .event-follow-up { color: #38bdf8; }
+  .event-ambient-initiative { color: #2dd4bf; }
   .event-ambient-attention-evaluator { color: #38bdf8; }
   .event-ambient-initiative-evaluator { color: #2dd4bf; }
   .event-background-memory-extraction { color: #34d399; }
@@ -2148,6 +2153,11 @@
     if (kind === 'prompt_lab') return 'prompt lab';
     if (kind === 'ambient_attention_evaluator') return 'ambient eval';
     if (kind === 'ambient_initiative_evaluator') return 'initiative eval';
+    if (kind === 'ambient_pickup') return 'ambient pickup';
+    if (kind === 'lingering_attention') return 'lingering attention';
+    if (kind === 'follow_up') return 'follow-up';
+    if (kind === 'ambient_initiative') return 'ambient initiative';
+    if (kind === 'scheduled') return 'schedule';
     if (kind === 'keyword') return 'keyword';
     return kind;
   }
@@ -2183,6 +2193,27 @@
     return '<span class="event-label ' + esc(triggerClass(t)) + '">' + esc(fmtTrigger(t))
       + (detail !== '' ? ' <span class="event-detail">' + esc(detail) + '</span>' : '')
       + '</span>';
+  }
+
+  /** Resolve the user-visible cause of a lifecycle, ignoring its maintenance phases. */
+  function mainEntryTrigger(entry) {
+    const requests = Array.isArray(entry.requests) ? entry.requests : [];
+    const direct = requests.find(request => request && request.trigger && typeof request.trigger === 'object'
+      && typeof request.trigger.reason === 'string' && request.trigger.reason !== '');
+    if (direct) return direct.trigger;
+
+    const attention = requests.find(request => triggerKind(request && request.trigger) === 'ambient_attention_evaluator');
+    if (attention && attention.trigger && typeof attention.trigger.kind === 'string' && attention.trigger.kind !== '') {
+      return { reason: attention.trigger.kind };
+    }
+    if (requests.some(request => triggerKind(request && request.trigger) === 'ambient_initiative_evaluator')) {
+      return { reason: 'ambient_initiative' };
+    }
+
+    const first = requests.find(request => triggerKind(request && request.trigger) !== 'none');
+    if (first) return first.trigger;
+    if (entry.authorUsername === 'scheduler') return { reason: 'scheduled' };
+    return null;
   }
 
   function triggerContextText(ctx) {
@@ -2589,7 +2620,7 @@
       + '<div class="group-source-meta">' + esc(sourceMeta) + '</div>'
       + '<div class="group-source-message">' + (sourceText !== '' ? esc(sourceText) : '<span style="color:var(--text-dim);font-style:italic">no trigger text</span>') + '</div>'
       + '</div>';
-    const phases = (group.entries || []).map(function(item, index) {
+    const phases = (group.entries || []).map(function(item) {
       const summary = item.summary;
       const entry = item.entry;
       const classes = ['request-phase'];
@@ -2603,7 +2634,7 @@
           : summary.outcome === 'active'
             ? '<span class="entry-status">running</span>'
             : '';
-      return '<details class="' + classes.join(' ') + '" data-collapse-key="phase:' + esc(summary.requestId) + '"' + (index === 0 ? ' open' : '') + '>'
+      return '<details class="' + classes.join(' ') + '" data-collapse-key="phase:' + esc(summary.requestId) + '">'
         + '<summary class="request-phase-head">'
           + renderEventLabel(summary.trigger)
           + '<span class="entry-user">' + esc(summary.authorUsername) + '</span>'
@@ -2693,18 +2724,16 @@
     const rid = esc(e.groupId);
     const contextText = triggerContextText(e.triggerContext);
     const locationText = triggerLocationText(e.triggerContext, e);
-    const groupLabel = e.scope === 'message' ? 'message' : 'trigger';
     return '<div class="' + cls.join(' ') + '" data-rid="' + rid + '">'
       + '<div class="entry-header" onclick="window.__toggleExpand(\'' + rid + '\')">'
         + '<span class="entry-time">' + fmtTime(e.timestamp) + '</span>'
-        + '<span class="event-label event-custom">' + esc(groupLabel) + ' <span class="event-detail">· ' + e.requestCount + ' phase' + (e.requestCount === 1 ? '' : 's') + '</span></span>'
+        + renderEventLabel(mainEntryTrigger(e))
         + '<span class="entry-user">' + esc(e.authorUsername) + '</span>'
         + '<span class="entry-location">' + esc(locationText) + '</span>'
         + '<span class="entry-message">' + (contextText !== '' ? esc(contextText) : '<span style="color:var(--text-dim);font-style:italic">no trigger text</span>') + '</span>'
         + '<div class="entry-stats">'
           + (isActive ? '<span class="entry-status">running</span>' : '')
           + (hasErr ? '<span class="entry-error-badge">error</span>' : '')
-          + (e.outcome === 'effective' ? '<span class="outcome-badge">effective</span>' : '')
           + '<span>' + fmtDuration(e.totalDurationMs) + '</span>'
           + '<span>P:<span class="stat-val">' + e.requestCount + '</span></span>'
           + '<span>A:<span class="stat-val">' + runtimeActionCount(e) + '</span></span>'

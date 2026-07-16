@@ -11,6 +11,11 @@ interface StageOutputHelpers {
   stageOutput(label: string, value: unknown, emptyText?: string): string;
 }
 
+interface TriggerHelpers {
+  fmtTrigger(trigger: unknown): string;
+  mainEntryTrigger(entry: { requests?: Array<{ trigger?: unknown }>; authorUsername?: string }): unknown;
+}
+
 function loadDashboardScript(): string {
   const html = readFileSync("src/dashboard/index.html", "utf8");
   const match = html.match(/<script>\n([\s\S]*)\n<\/script>/);
@@ -72,6 +77,28 @@ function loadStageOutputHelpers(): StageOutputHelpers {
 
   if (context.extracted === undefined) {
     throw new Error("Failed to load stage output helpers");
+  }
+
+  return context.extracted;
+}
+
+function loadTriggerHelpers(): TriggerHelpers {
+  const html = readFileSync("src/dashboard/index.html", "utf8");
+  const helperStart = html.indexOf("function fmtTrigger(t)");
+  const helperEnd = html.indexOf("  function triggerContextText", helperStart);
+  if (helperStart < 0 || helperEnd < 0) {
+    throw new Error("trigger helper block not found in dashboard HTML");
+  }
+  const helperCode = [
+    "function shortId(id) { return String(id).slice(0, 8); }",
+    "function esc(value) { return String(value); }",
+    html.slice(helperStart, helperEnd),
+  ].join("\n");
+  const context: { extracted?: TriggerHelpers } = {};
+  runInNewContext(`${helperCode}; extracted = { fmtTrigger, mainEntryTrigger };`, context);
+
+  if (context.extracted === undefined) {
+    throw new Error("Failed to load trigger helpers");
   }
 
   return context.extracted;
@@ -200,12 +227,37 @@ describe("dashboard payload formatter", () => {
 });
 
 describe("dashboard lifecycle formatting", () => {
-  test("uses collapsible request phases with only the main phase open by default", () => {
+  test("uses collapsible request phases with every phase closed by default", () => {
     const script = loadDashboardScript();
 
     expect(script).toContain("'<details class=\"' + classes.join(' ') + '\" data-collapse-key=\"phase:'");
-    expect(script).toContain("(index === 0 ? ' open' : '')");
+    expect(script).not.toContain("(index === 0 ? ' open' : '')");
     expect(script).toContain("'<summary class=\"request-phase-head\">'");
+  });
+
+  test("shows the concrete lifecycle trigger without a redundant effective badge", () => {
+    const script = loadDashboardScript();
+    const helpers = loadTriggerHelpers();
+    const renderEntryStart = script.indexOf("function renderEntry(e)");
+    const renderEntryEnd = script.indexOf("// Expose toggle for inline onclick", renderEntryStart);
+    const renderEntry = script.slice(renderEntryStart, renderEntryEnd);
+
+    expect(renderEntry).toContain("renderEventLabel(mainEntryTrigger(e))");
+    expect(renderEntry).not.toContain("outcome-badge");
+    expect(helpers.mainEntryTrigger({
+      requests: [
+        { trigger: { type: "background_memory_extraction" } },
+        { trigger: { reason: "keyword", keyword: "2b" } },
+      ],
+    })).toEqual({ reason: "keyword", keyword: "2b" });
+    expect(helpers.mainEntryTrigger({
+      requests: [{ trigger: { type: "ambient_attention_evaluator", kind: "lingering_attention" } }],
+    })).toEqual({ reason: "lingering_attention" });
+    expect(helpers.mainEntryTrigger({
+      requests: [{ trigger: { type: "ambient_initiative_evaluator" } }],
+    })).toEqual({ reason: "ambient_initiative" });
+    expect(helpers.mainEntryTrigger({ authorUsername: "scheduler" })).toEqual({ reason: "scheduled" });
+    expect(helpers.fmtTrigger({ reason: "scheduled" })).toBe("schedule");
   });
 
   test("shows twice as much stage output before offering show more", () => {

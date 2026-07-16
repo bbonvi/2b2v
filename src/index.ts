@@ -2713,6 +2713,8 @@ async function processTriggeredMessage(
   requestLogStore.incrementActive();
   const requestLog = new RequestLog(guildId, channelId, requestLogStore);
   requestLog.setAuthor(message.author.username);
+  // Keep the dashboard's active row identifiable before the agent turn completes.
+  requestLog.setTrigger(triggerOverride ?? null);
   let requestLogEmitted = false;
   let activeTyping: ReturnType<typeof createTypingController> | null = null;
 
