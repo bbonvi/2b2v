@@ -55,7 +55,7 @@ export function diceRollHistoryEventFromCard(content: string, componentId: numbe
   const trait = notationIndex > 1 ? pills[1] : undefined;
   const detail = pills[notationIndex + 1];
   const modeMatch = detail?.match(/^(🟢|🔴) (?:Advantage|Disadvantage|Преимущество|Помеха) \((.*)\)$/);
-  const diceMatch = detail?.match(/^(?:Dice|Кубики) \((.*)\)$/);
+  const diceMatch = detail?.match(/^(🎲 -?\d+(?: 🎲 -?\d+)+)$/);
   const rollsText = modeMatch?.[2] ?? diceMatch?.[1];
   const rolls = rollsText === undefined
     ? []

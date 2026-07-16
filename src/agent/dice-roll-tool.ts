@@ -183,7 +183,6 @@ const ROLL_COPY = {
     failure: "FAILURE",
     advantage: "🟢 Advantage",
     disadvantage: "🔴 Disadvantage",
-    dice: "Dice",
   },
   ru: {
     check: "Проверка",
@@ -192,7 +191,6 @@ const ROLL_COPY = {
     failure: "ПРОВАЛ",
     advantage: "🟢 Преимущество",
     disadvantage: "🔴 Помеха",
-    dice: "Кубики",
   },
 } as const;
 
@@ -251,7 +249,7 @@ export function renderDiceRollMessage(roll: DiceRollRow): string {
   if (roll.mode !== "normal") {
     metadata.push(renderMetadataPill(`${copy[roll.mode]} (${roll.rolls.map((value) => `🎲 ${value}`).join(" ")})`));
   } else if (roll.count > 1) {
-    metadata.push(renderMetadataPill(`${copy.dice} (${roll.rolls.map((value) => `🎲 ${value}`).join(" ")})`));
+    metadata.push(renderMetadataPill(roll.rolls.map((value) => `🎲 ${value}`).join(" ")));
   }
   return `${result}${heading}\n\n${metadata.join(" ")}`;
 }

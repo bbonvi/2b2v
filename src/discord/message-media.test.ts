@@ -52,4 +52,18 @@ describe("message media helpers", () => {
       '<dice_roll source="Delamain" actor_name="Bish" lang="en" visibility="public" notation="d20+5" mode="advantage" rolls="9,16" kept="16" total="21" label="Pass quietly" trait="Dexterity (Stealth)" target="14" outcome="success"/>',
     );
   });
+
+  test("preserves unlabelled multi-die metadata in cross-bot history", () => {
+    const components = [{
+      toJSON: () => ({
+        type: 17,
+        id: 0x2b2d21,
+        components: [{ type: 10, content: "# `🎲 9`\n## Урон\n\n`Бонан` `2d6` `🎲 3 🎲 6`" }],
+      }),
+    }];
+
+    expect(messageDisplayContent("", components, "2B")).toBe(
+      '<dice_roll source="2B" actor_name="Бонан" lang="ru" visibility="public" notation="2d6" mode="normal" rolls="3,6" total="9" label="Урон"/>',
+    );
+  });
 });

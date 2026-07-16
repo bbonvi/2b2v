@@ -65,7 +65,7 @@ describe("createDiceRollTool", () => {
     expect(deliveries).toHaveLength(1);
     expect(deliveries[0]?.sourceMessageId).toBe("message-1");
     expect(deliveries[0]?.text).toContain("# `🎲 14`");
-    expect(deliveries[0]?.text).toContain("`V` `3d6+2` `Dice (🎲 2 🎲 6 🎲 4)`");
+    expect(deliveries[0]?.text).toContain("`V` `3d6+2` `🎲 2 🎲 6 🎲 4`");
     expect(deliveries[0]?.text).toContain("break & \"lock\" @\u200Beveryone :\u200Bparty:\u200B");
     expect(deliveries[0]?.historyText).toContain('label="break &amp; &quot;lock&quot; @everyone :party:"');
 
