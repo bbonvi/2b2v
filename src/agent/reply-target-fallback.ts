@@ -2,6 +2,7 @@ import type { Database } from "../db/database.ts";
 import { getAssetsByMessageId } from "../db/asset-repository.ts";
 import type { HistoryMessage } from "./history-types.ts";
 import { appendStickerTags, type StickerLike } from "../discord/message-media.ts";
+import { isDiceRollHistoryEvent } from "../dice-roll-contract";
 
 /** A Discord message as returned by the fetch callback. */
 export interface FetchedDiscordMessage {
@@ -89,7 +90,7 @@ function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMess
         durationSeconds: asset.durationSeconds,
       })) } : {}),
       hasEmbeds: false,
-      isSynthetic: row.is_synthetic === 1,
+      isSynthetic: row.is_synthetic === 1 || isDiceRollHistoryEvent(row.translated_content),
       relatedThreadId: row.related_thread_id,
     });
   }

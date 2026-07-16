@@ -213,6 +213,12 @@ export interface CurrentTurnImageInput {
 export interface MessagePresentation {
   kind: "components_v2_card";
   accentColor?: number;
+  /** Stable component identity used to recognize structured cards received from another bot. */
+  componentId?: number;
+  /** Prompt representation stored instead of the visible card text. */
+  history?: {
+    text: string;
+  };
 }
 
 /** Callback that performs the actual Discord send. */

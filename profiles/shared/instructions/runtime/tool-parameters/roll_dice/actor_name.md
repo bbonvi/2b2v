@@ -1,0 +1,1 @@
+Optional public name for the resolved actor. Prefer a nickname consistently established by how people address them in conversation; otherwise omit it and let the tool use their stable username. Do not copy a strange or temporary Discord display name merely because it is present.

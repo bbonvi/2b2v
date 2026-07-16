@@ -2,10 +2,13 @@ import { randomInt } from "node:crypto";
 import { Type, type Static } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Database } from "../db/database";
+import { DICE_ROLL_CARD_COMPONENT_IDS, escapeDiceRollXmlAttribute } from "../dice-roll-contract";
 import {
   createOrGetDiceRoll,
   getDiceRollByRequestKey,
   markDiceRollDelivered,
+  markDiceRollPrivatelyRecorded,
+  type DiceRollLanguage,
   type DiceRollMode,
   type DiceRollRow,
 } from "../db/dice-roll-repository";
@@ -15,6 +18,8 @@ export const MAX_DIE_SIDES = 1_000_000;
 export const MAX_DICE_MODIFIER = 1_000_000;
 export const MAX_DICE_TARGET = 1_000_000_000;
 export const MAX_DICE_LABEL_LENGTH = 500;
+export const MAX_DICE_ACTOR_NAME_LENGTH = 100;
+export const MAX_DICE_TRAIT_LENGTH = 100;
 
 const DiceRollParams = Type.Object({
   count: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_DICE_COUNT, default: 1 })),
@@ -28,6 +33,10 @@ const DiceRollParams = Type.Object({
   ], { default: "normal" })),
   label: Type.Optional(Type.String({ maxLength: MAX_DICE_LABEL_LENGTH })),
   actor: Type.Optional(Type.String({ maxLength: 100 })),
+  actor_name: Type.Optional(Type.String({ maxLength: MAX_DICE_ACTOR_NAME_LENGTH })),
+  trait: Type.Optional(Type.String({ maxLength: MAX_DICE_TRAIT_LENGTH })),
+  lang: Type.Optional(Type.Union([Type.Literal("en"), Type.Literal("ru")], { default: "en" })),
+  private: Type.Optional(Type.Boolean({ default: false })),
 });
 
 export type DiceRollInput = Static<typeof DiceRollParams>;
@@ -39,9 +48,18 @@ export interface DiceActor {
 
 export interface DiceRollDelivery {
   text: string;
+  historyText: string;
+  componentId: number;
   sourceMessageId: string;
   dedupeKey: string;
   signal?: AbortSignal;
+}
+
+export interface PrivateDiceRollRecord {
+  historyText: string;
+  sourceMessageId: string;
+  dedupeKey: string;
+  createdAt: number;
 }
 
 export interface DiceRollToolDeps {
@@ -54,7 +72,9 @@ export interface DiceRollToolDeps {
     sourceMessageId: string;
   };
   resolveActor: (reference: string) => Promise<DiceActor | null>;
+  sourceUsername: string;
   deliver: (input: DiceRollDelivery) => Promise<{ sentMessageId: string }>;
+  recordPrivate: (input: PrivateDiceRollRecord) => Promise<void>;
   randomInteger?: (minimum: number, maximumExclusive: number) => number;
 }
 
@@ -66,6 +86,10 @@ interface NormalizedDiceRoll {
   mode: DiceRollMode;
   label?: string;
   actorReference?: string;
+  actorName?: string;
+  trait?: string;
+  lang: DiceRollLanguage;
+  isPrivate: boolean;
 }
 
 function normalizeDiceRollInput(params: DiceRollInput): NormalizedDiceRoll | { error: string } {
@@ -76,6 +100,10 @@ function normalizeDiceRollInput(params: DiceRollInput): NormalizedDiceRoll | { e
   const mode = params.mode ?? "normal";
   const label = params.label?.trim();
   const actorReference = params.actor?.trim();
+  const actorName = params.actor_name?.trim();
+  const trait = params.trait?.trim();
+  const lang = params.lang ?? "en";
+  const isPrivate = params.private ?? false;
 
   if (!Number.isInteger(count) || count < 1 || count > MAX_DICE_COUNT) {
     return { error: `count must be an integer from 1 to ${MAX_DICE_COUNT}.` };
@@ -98,14 +126,24 @@ function normalizeDiceRollInput(params: DiceRollInput): NormalizedDiceRoll | { e
   if (actorReference !== undefined && actorReference.length > 100) {
     return { error: "actor must be at most 100 characters." };
   }
+  if (actorName !== undefined && actorName.length > MAX_DICE_ACTOR_NAME_LENGTH) {
+    return { error: `actor_name must be at most ${MAX_DICE_ACTOR_NAME_LENGTH} characters.` };
+  }
+  if (trait !== undefined && trait.length > MAX_DICE_TRAIT_LENGTH) {
+    return { error: `trait must be at most ${MAX_DICE_TRAIT_LENGTH} characters.` };
+  }
   return {
     count,
     sides,
     modifier,
     mode,
+    lang,
+    isPrivate,
     ...(target !== undefined ? { target } : {}),
     ...(label !== undefined && label !== "" ? { label } : {}),
     ...(actorReference !== undefined && actorReference !== "" ? { actorReference } : {}),
+    ...(actorName !== undefined && actorName !== "" ? { actorName } : {}),
+    ...(trait !== undefined && trait !== "" ? { trait } : {}),
   };
 }
 
@@ -137,30 +175,96 @@ function escapeDiscordDisplayText(value: string): string {
     .replaceAll(":", ":\u200B");
 }
 
+const ROLL_COPY = {
+  en: {
+    check: "Check",
+    difficulty: "Difficulty",
+    success: "SUCCESS",
+    failure: "FAILURE",
+    advantage: "🟢 Advantage",
+    disadvantage: "🔴 Disadvantage",
+    dice: "Dice",
+  },
+  ru: {
+    check: "Проверка",
+    difficulty: "Сложность",
+    success: "УСПЕХ",
+    failure: "ПРОВАЛ",
+    advantage: "🟢 Преимущество",
+    disadvantage: "🔴 Помеха",
+    dice: "Кубики",
+  },
+} as const;
+
+function renderVisibleNotation(roll: DiceRollRow): string {
+  const modifier = roll.modifier === 0 ? "" : roll.modifier > 0 ? `+${roll.modifier}` : `${roll.modifier}`;
+  return `${roll.count === 1 ? "" : roll.count}d${roll.sides}${modifier}`;
+}
+
+function renderMetadataPill(value: string): string {
+  const safe = value
+    .replace(/[\r\n]+/g, " ")
+    .replaceAll("`", "ˋ")
+    .replaceAll("@", "@\u200B");
+  return `\`${safe}\``;
+}
+
+/** Render the stable prompt event stored in place of localized card prose. */
+export function renderDiceRollHistoryEvent(roll: DiceRollRow, sourceUsername: string): string {
+  const notationModifier = roll.modifier === 0 ? "" : roll.modifier > 0 ? `+${roll.modifier}` : `${roll.modifier}`;
+  const attributes: Array<[string, string]> = [
+    ["source", sourceUsername],
+    ["actor_id", roll.actorUserId],
+    ["actor", roll.actorUsername],
+    ["actor_name", roll.actorName],
+    ["lang", roll.lang],
+    ["visibility", roll.isPrivate ? "private" : "public"],
+    ["notation", `${roll.count}d${roll.sides}${notationModifier}`],
+    ["mode", roll.mode],
+    ["rolls", roll.rolls.join(",")],
+    ["kept", roll.kept.join(",")],
+    ["total", String(roll.total)],
+  ];
+  if (roll.label !== null) attributes.splice(5, 0, ["label", roll.label]);
+  if (roll.trait !== null) attributes.splice(roll.label === null ? 5 : 6, 0, ["trait", roll.trait]);
+  if (roll.target !== null) {
+    attributes.push(["target", String(roll.target)], ["outcome", roll.succeeded === true ? "success" : "failure"]);
+  }
+  return `<dice_roll ${attributes.map(([key, value]) => `${key}="${escapeDiceRollXmlAttribute(value)}"`).join(" ")}/>`;
+}
+
 /** Render the immutable public ledger entry from a persisted roll. */
 export function renderDiceRollMessage(roll: DiceRollRow): string {
-  const actor = escapeDiscordDisplayText(roll.actorUsername);
-  const label = roll.label === null ? "Dice roll" : escapeDiscordDisplayText(roll.label);
-  const modifier = roll.modifier === 0 ? "" : ` ${roll.modifier > 0 ? "+" : "−"} ${Math.abs(roll.modifier)}`;
-  const outcomeIcon = roll.target === null ? "" : roll.succeeded === true ? " ✅" : " ❌";
-  const outcome = roll.target === null
+  const copy = ROLL_COPY[roll.lang];
+  const result = roll.target === null
+    ? `# \`🎲 ${roll.total}\``
+    : `# ${roll.succeeded === true ? "✅" : "❌"} ${roll.succeeded === true ? copy.success : copy.failure} \`🎲 ${roll.total}\``;
+  const headingLabel = roll.label === null ? (roll.target === null ? null : copy.check) : escapeDiscordDisplayText(roll.label);
+  const heading = headingLabel === null
     ? ""
-    : `\n${roll.succeeded === true ? "Success" : "Failure"} · Target: \`${roll.target}\``;
-  if (roll.mode === "normal") {
-    const breakdown = roll.count === 1 && roll.modifier === 0
-      ? ""
-      : `\n${roll.count === 1 ? "Roll" : "Dice"}: \`${roll.rolls.join(", ")}\``;
-    return `## 🎲 ${label}\n**${actor}** rolled \`${roll.count}d${roll.sides}${modifier}\`\n# ${roll.total}${outcomeIcon}${outcome}${breakdown}`;
+    : `\n## ${headingLabel}${roll.target === null ? "" : ` — ${copy.difficulty} \`${roll.target}\``}`;
+  const metadata = [
+    renderMetadataPill(roll.actorName),
+    ...(roll.trait === null ? [] : [renderMetadataPill(roll.trait)]),
+    renderMetadataPill(renderVisibleNotation(roll)),
+  ];
+  if (roll.mode !== "normal") {
+    metadata.push(renderMetadataPill(`${copy[roll.mode]} (${roll.rolls.map((value) => `🎲 ${value}`).join(" ")})`));
+  } else if (roll.count > 1) {
+    metadata.push(renderMetadataPill(`${copy.dice} (${roll.rolls.map((value) => `🎲 ${value}`).join(" ")})`));
   }
-  const kept = roll.kept[0];
-  return `## 🎲 ${label}\n**${actor}** rolled \`1d${roll.sides} ${roll.mode}${modifier}\`\n# ${roll.total}${outcomeIcon}${outcome}\nRolls: \`${roll.rolls.join(", ")}\` · Kept: \`${kept ?? "?"}\``;
+  return `${result}${heading}\n\n${metadata.join(" ")}`;
 }
 
 function renderDiceRollToolResult(roll: DiceRollRow): string {
   const label = roll.label === null ? "none" : JSON.stringify(roll.label);
   const common = [
     `actor=${JSON.stringify(roll.actorUsername)}`,
+    `actor_name=${JSON.stringify(roll.actorName)}`,
     `label=${label}`,
+    `trait=${roll.trait === null ? "none" : JSON.stringify(roll.trait)}`,
+    `lang=${roll.lang}`,
+    `visibility=${roll.isPrivate ? "private" : "public"}`,
     `dice=${roll.count}d${roll.sides}`,
     `rolls=[${roll.rolls.join(", ")}]`,
     `modifier=${roll.modifier}`,
@@ -181,12 +285,12 @@ function renderDiceCheckOutcome(roll: DiceRollRow): string {
     : ` Check FAILED: total ${roll.total} did not meet target ${roll.target}.`;
 }
 
-/** Create the public, cryptographically random roll_dice AgentTool. */
+/** Create the cryptographically random roll_dice AgentTool. */
 export function createDiceRollTool(deps: DiceRollToolDeps): AgentTool {
   return {
     name: "roll_dice",
     label: "Roll Dice",
-    description: "Roll dice with cryptographic randomness and post the canonical result publicly.",
+    description: "Roll dice with cryptographic randomness and record the canonical result.",
     parameters: DiceRollParams,
     execute: async (toolCallId, params, signal): Promise<AgentToolResult<DiceRollRow | { error: string }>> => {
       const normalized = normalizeDiceRollInput(params as DiceRollInput);
@@ -221,14 +325,34 @@ export function createDiceRollTool(deps: DiceRollToolDeps): AgentTool {
             requestedByUserId: deps.currentRequest.requesterId,
             actorUserId: actor.userId,
             actorUsername: actor.username,
+            actorName: normalized.actorName ?? actor.username,
             count: normalized.count,
             sides: normalized.sides,
             modifier: normalized.modifier,
             ...(normalized.target !== undefined ? { target: normalized.target } : {}),
             mode: normalized.mode,
             ...(normalized.label !== undefined ? { label: normalized.label } : {}),
+            ...(normalized.trait !== undefined ? { trait: normalized.trait } : {}),
+            lang: normalized.lang,
+            isPrivate: normalized.isPrivate,
             ...values,
           });
+        }
+
+        if (roll.isPrivate) {
+          if (roll.deliveredAt === null) {
+            await deps.recordPrivate({
+              historyText: renderDiceRollHistoryEvent(roll, deps.sourceUsername),
+              sourceMessageId: roll.sourceMessageId,
+              dedupeKey: `dice-roll-private:${requestKey}`,
+              createdAt: roll.createdAt,
+            });
+            roll = markDiceRollPrivatelyRecorded(deps.db, requestKey);
+          }
+          return {
+            content: [{ type: "text", text: `Canonical private dice result: ${renderDiceRollToolResult(roll)}.${renderDiceCheckOutcome(roll)} No public Discord message was sent. Keep the dice, target, and pass/fail outcome private; narrate only consequences appropriate to the scene.` }],
+            details: roll,
+          };
         }
 
         if (roll.resultMessageId !== null) {
@@ -240,6 +364,8 @@ export function createDiceRollTool(deps: DiceRollToolDeps): AgentTool {
 
         const delivered = await deps.deliver({
           text: renderDiceRollMessage(roll),
+          historyText: renderDiceRollHistoryEvent(roll, deps.sourceUsername),
+          componentId: DICE_ROLL_CARD_COMPONENT_IDS[roll.lang],
           sourceMessageId: roll.sourceMessageId,
           dedupeKey: `dice-roll:${requestKey}`,
           ...(signal !== undefined ? { signal } : {}),

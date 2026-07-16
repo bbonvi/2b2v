@@ -1,0 +1,1 @@
+Optional free-form capability or roll category established by the game or scene, such as `Strength (Athletics)`, `Dexterity saving throw`, `Attack`, or `Hacking`. Do not invent a D&D trait for a generic roll.

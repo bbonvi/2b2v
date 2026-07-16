@@ -2502,6 +2502,7 @@ function buildAgentTools(
         db,
         guildId,
         channelId,
+        sourceUsername: client.user?.username ?? "bot",
         currentRequest: effectiveCurrentRequest,
         resolveActor: async (reference) => {
           const member = await resolveGuildMemberReference(guild, reference);
@@ -2510,6 +2511,21 @@ function buildAgentTools(
             : { userId: member.id, username: member.user.username };
         },
         deliver: options.deliverDiceRoll,
+        recordPrivate: (input) => {
+          const botUser = client.user;
+          if (botUser === null) return Promise.reject(new Error("Discord bot identity is unavailable."));
+          insertPromptOnlyBotMessage(db, {
+            id: `prompt-only:${input.dedupeKey}`,
+            guildId,
+            channelId,
+            botUserId: botUser.id,
+            botUsername: botUser.username,
+            content: input.historyText,
+            replyToId: input.sourceMessageId,
+            createdAt: input.createdAt,
+          });
+          return Promise.resolve();
+        },
       });
 
   const jobInspectionTools = createAgentJobInspectionTools({ store: agentJobs, guildId, channelId });
@@ -2721,14 +2737,14 @@ async function processTriggeredMessage(
   try {
     const guildConfig = getGuildConfig(guildId);
     const inboundResolvers = buildInboundResolvers(guild);
-    const displayContent = messageDisplayContent(message.content, message.components);
+    const displayContent = messageDisplayContent(message.content, message.components, message.author.username);
     const translatedContent = appendStickerTags(
       translateInbound(displayContent, inboundResolvers),
       message.stickers.values(),
     );
     const currentTurnEventContent = options.currentTurnOverride?.content ?? currentTurnMessages
       .map((current) => appendStickerTags(
-        translateInbound(messageDisplayContent(current.content, current.components), inboundResolvers),
+        translateInbound(messageDisplayContent(current.content, current.components, current.author.username), inboundResolvers),
         current.stickers.values(),
       ))
       .filter((content) => content !== "")
@@ -2959,7 +2975,12 @@ async function processTriggeredMessage(
             input.sourceMessageId,
             undefined,
             input.dedupeKey,
-            { kind: "components_v2_card", accentColor: 0x8f73ff },
+            {
+              kind: "components_v2_card",
+              accentColor: 0x8f73ff,
+              componentId: input.componentId,
+              history: { text: input.historyText },
+            },
           );
           if (result.sentMessageId === "") throw new Error("Discord did not return a roll result message ID.");
           rollVisibleOutputSent = true;
@@ -3291,7 +3312,7 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
 
     // Build inbound resolvers and translate
     const inboundResolvers = buildInboundResolvers(guild);
-    const displayContent = messageDisplayContent(message.content, message.components);
+    const displayContent = messageDisplayContent(message.content, message.components, message.author.username);
     const translatedContent = appendStickerTags(
       translateInbound(displayContent, inboundResolvers),
       message.stickers.values(),
@@ -3368,7 +3389,7 @@ async function recoverMessagesAfterRestart(): Promise<void> {
       const recovered: Array<{ message: Message; triggerResult: TriggerResult }> = [];
       for (const message of fetched.messages) {
         if (message.author.id === client.user?.id || message.guild === null || message.guildId === null) continue;
-        const displayContent = messageDisplayContent(message.content, message.components);
+        const displayContent = messageDisplayContent(message.content, message.components, message.author.username);
         const translatedContent = appendStickerTags(
           translateInbound(displayContent, buildInboundResolvers(message.guild)),
           message.stickers.values(),

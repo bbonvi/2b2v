@@ -91,7 +91,7 @@ describe("database initialization", () => {
     expect(info?.name).toBe("message_reactions");
   });
 
-  test("adds target-check columns to existing dice audit tables", () => {
+  test("adds current columns to existing dice audit tables", () => {
     const dbPath = path.join(tmpDir, "legacy-dice.db");
     const legacy = new BunDatabase(dbPath);
     legacy.run(`CREATE TABLE dice_rolls (
@@ -107,6 +107,10 @@ describe("database initialization", () => {
       const columns = migrated.raw.prepare("PRAGMA table_info(dice_rolls)").all() as Array<{ name: string }>;
       expect(columns.some((column) => column.name === "target")).toBe(true);
       expect(columns.some((column) => column.name === "succeeded")).toBe(true);
+      expect(columns.some((column) => column.name === "actor_name")).toBe(true);
+      expect(columns.some((column) => column.name === "trait")).toBe(true);
+      expect(columns.some((column) => column.name === "lang")).toBe(true);
+      expect(columns.some((column) => column.name === "is_private")).toBe(true);
     } finally {
       migrated.close();
     }

@@ -1,5 +1,6 @@
 import type { Database } from "./database";
 import type { HistoryMessage } from "../agent/history-types";
+import { isDiceRollHistoryEvent } from "../dice-roll-contract";
 
 export interface MemoryExtractionCheckpoint {
   guildId: string;
@@ -211,7 +212,7 @@ export function getMessagesSinceMemoryExtraction(
     timestamp: row.created_at,
     replyToId: row.reply_to_id,
     hasEmbeds: false,
-    isSynthetic: row.is_synthetic === 1,
+    isSynthetic: row.is_synthetic === 1 || isDiceRollHistoryEvent(row.translated_content),
     relatedThreadId: row.related_thread_id,
   }));
 }

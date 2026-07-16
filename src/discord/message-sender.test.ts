@@ -6,7 +6,7 @@ describe("buildComponentsV2CardPayload", () => {
   test("builds a non-interactive Discord Components V2 card", () => {
     const payload = buildComponentsV2CardPayload(
       "## 🎲 Initiative\n### Result: 20",
-      { kind: "components_v2_card", accentColor: 0x8f73ff },
+      { kind: "components_v2_card", accentColor: 0x8f73ff, componentId: 2220 },
       "nonce-1",
     );
 
@@ -16,6 +16,7 @@ describe("buildComponentsV2CardPayload", () => {
     expect(payload.enforceNonce).toBe(true);
     expect(payload.components?.[0]?.toJSON()).toEqual({
       type: 17,
+      id: 2220,
       accent_color: 0x8f73ff,
       components: [{ type: 10, content: "## 🎲 Initiative\n### Result: 20" }],
     });

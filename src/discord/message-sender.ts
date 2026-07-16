@@ -42,6 +42,7 @@ export function buildComponentsV2CardPayload(content: string, presentation: Mess
   const container = new ContainerBuilder()
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
   if (presentation.accentColor !== undefined) container.setAccentColor(presentation.accentColor);
+  if (presentation.componentId !== undefined) container.setId(presentation.componentId);
   return {
     components: [container],
     flags: MessageFlags.IsComponentsV2,
@@ -450,7 +451,14 @@ export function createDiscordMessageSender(input: {
         : reply
           ? await replyToSource(payload)
           : { message: await sendToTargetChannel(payload), replyToId: null };
-      storeBotMessage(delivered.message.id, targetGuildId, targetChannelId, text, text, delivered.replyToId);
+      storeBotMessage(
+        delivered.message.id,
+        targetGuildId,
+        targetChannelId,
+        text,
+        presentation.history?.text ?? text,
+        delivered.replyToId,
+      );
       noteThreadActivity(delivered.message.id);
       return { sentMessageId: delivered.message.id, warnings: unresolvedEmojiWarnings(warnings) };
     }

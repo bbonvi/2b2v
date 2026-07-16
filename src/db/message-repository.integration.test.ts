@@ -366,6 +366,14 @@ describe("getHistoryMessages", () => {
     });
   });
 
+  test("treats searchable dice records as system-level prompt events", () => {
+    const event = '<dice_roll source="2B" actor_name="V" lang="en" notation="1d20" total="20"/>';
+    insertMessage("roll-1", { translatedContent: event, isBot: true });
+
+    expect(getHistoryMessages(db, "c1", 10)[0]).toMatchObject({ content: event, isSynthetic: true });
+    expect(searchMessagesLiteral(db, "dice_roll", { guildId: "g1", limit: 10 }).map((result) => result.id)).toEqual(["roll-1"]);
+  });
+
   test("respects limit parameter", () => {
     insertMessage("m1", { channelId: "c1", createdAt: now - 3 * hour });
     insertMessage("m2", { channelId: "c1", createdAt: now - 2 * hour });

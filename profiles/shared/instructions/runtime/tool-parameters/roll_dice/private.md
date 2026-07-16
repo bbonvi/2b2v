@@ -1,0 +1,1 @@
+Set true only for a deliberately hidden roll whose dice, target, and pass/fail result should remain private from channel participants. No widget is posted; narrate only the consequences the scene should reveal. Defaults to false.

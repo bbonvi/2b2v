@@ -3,6 +3,7 @@ import type { HistoryMessage } from "../agent/history-types";
 import type { TrimConfig } from "../config/types";
 import type { AssetKind, AssetSourceKind } from "./asset-repository.ts";
 import type { HistoryAsset } from "../agent/history-types.ts";
+import { isDiceRollHistoryEvent } from "../dice-roll-contract";
 
 export interface DeleteRecentResult {
   messageIds: string[];
@@ -187,7 +188,7 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
       replyToId: r.reply_to_id,
       ...(assets.length > 0 ? { assets } : {}),
       hasEmbeds: false,
-      isSynthetic: r.is_synthetic === 1,
+      isSynthetic: r.is_synthetic === 1 || isDiceRollHistoryEvent(r.translated_content),
       isPromptOnly: r.is_prompt_only === 1,
       isDeleted: r.deleted_at !== null,
       relatedThreadId: r.related_thread_id,

@@ -1,3 +1,5 @@
+import { diceRollHistoryEventFromCard } from "../dice-roll-contract";
+
 export interface StickerLike {
   name: string;
 }
@@ -20,9 +22,22 @@ function collectTextDisplayContent(value: unknown, output: string[]): void {
 export function messageDisplayContent(
   content: string,
   components: Iterable<SerializableMessageComponent>,
+  sourceUsername = "unknown",
 ): string {
   const parts = content.trim() === "" ? [] : [content];
-  for (const component of components) collectTextDisplayContent(component.toJSON(), parts);
+  for (const component of components) {
+    const value = component.toJSON();
+    if (content.trim() === "" && value !== null && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      const cardText: string[] = [];
+      collectTextDisplayContent(value, cardText);
+      const historyEvent = typeof record.id === "number"
+        ? diceRollHistoryEventFromCard(cardText.join("\n"), record.id, sourceUsername)
+        : null;
+      if (historyEvent !== null) return historyEvent;
+    }
+    collectTextDisplayContent(value, parts);
+  }
   return parts.join("\n");
 }
 

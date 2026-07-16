@@ -232,6 +232,10 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
     "ALTER TABLE schedules ADD COLUMN max_fire_count INTEGER",
     "ALTER TABLE dice_rolls ADD COLUMN target INTEGER",
     "ALTER TABLE dice_rolls ADD COLUMN succeeded INTEGER CHECK(succeeded IS NULL OR succeeded IN (0, 1))",
+    "ALTER TABLE dice_rolls ADD COLUMN actor_name TEXT",
+    "ALTER TABLE dice_rolls ADD COLUMN trait TEXT",
+    "ALTER TABLE dice_rolls ADD COLUMN lang TEXT NOT NULL DEFAULT 'en' CHECK(lang IN ('en', 'ru'))",
+    "ALTER TABLE dice_rolls ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0 CHECK(is_private IN (0, 1))",
   ]) {
     ignoreExistingColumn(raw, sql);
   }
