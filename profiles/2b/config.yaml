@@ -342,14 +342,14 @@ tts:
             seed: 1
             similarityBoost: 0.70
             useSpeakerBoost: false
-            model: eleven_multilingual_v2
+            model: eleven_flash_v2_5
 
 # One global live Discord voice presence. Finalized transcripts are retained in SQLite;
 # raw audio is used only for local inference and discarded.
 voice:
     enabled: true
     provider: openai-codex
-    model: gpt-5.6-sol
+    model: gpt-5.6-terra
     modelParams:
         textVerbosity: low
     thinkingLevel: minimal
