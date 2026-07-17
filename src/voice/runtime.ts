@@ -311,7 +311,7 @@ export class VoiceRuntime {
 
   async leave(
     reason = "Voice session ended",
-    options: { awaitMaintenance?: boolean } = {},
+    options: { awaitMaintenance?: boolean; runMaintenance?: boolean } = {},
   ): Promise<void> {
     const active = this.active;
     if (active === undefined) return;
@@ -332,6 +332,7 @@ export class VoiceRuntime {
     this.active = undefined;
     this.state = "disconnected";
     this.emit();
+    if (options.runMaintenance === false) return;
     const maintenance = this.deps.onMaintenance(active.id, true).catch((error: unknown) => {
       this.deps.log.warn("voice final maintenance failed", {
         error: error instanceof Error ? error.message : String(error),
@@ -499,7 +500,9 @@ export class VoiceRuntime {
   }
 
   async shutdown(): Promise<void> {
-    await this.leave("Bot shutdown");
+    // Final maintenance performs external model calls and must not hold container
+    // termination open; the durable transcript remains available after restart.
+    await this.leave("Bot shutdown", { runMaintenance: false });
     this.transcriber?.shutdown();
     this.transcriber = undefined;
   }
