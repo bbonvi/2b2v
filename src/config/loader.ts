@@ -204,12 +204,13 @@ const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   summaryEveryMs: 5 * 60 * 1000,
   maintenanceEverySegments: 60,
   stt: {
-    command: "whisper-server",
-    modelPath: "/opt/whisper/models/ggml-small.bin",
+    command: "faster-whisper-server",
+    modelPath: "/opt/faster-whisper/models/small",
+    computeType: "int8",
     language: "ru",
     initialPrompt: "Туби, 2B. Разговорная русская речь.",
     serverPort: 18_080,
-    threads: 6,
+    threads: 8,
     timeoutMs: 20_000,
     minUtteranceMs: 180,
     maxUtteranceMs: 15_000,
@@ -252,6 +253,7 @@ function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYaml | un
   if (resolved.model.trim() === "") throw new Error("voice.model must not be empty");
   if (resolved.stt.command.trim() === "") throw new Error("voice.stt.command must not be empty");
   if (resolved.stt.modelPath.trim() === "") throw new Error("voice.stt.modelPath must not be empty");
+  if (resolved.stt.computeType.trim() === "") throw new Error("voice.stt.computeType must not be empty");
   if (resolved.wakeWords.some((word) => word.trim() === "")) throw new Error("voice.wakeWords must contain non-empty strings");
   positiveVoiceInteger(resolved.lingeringAttentionMs, "voice.lingeringAttentionMs");
   positiveVoiceInteger(resolved.roomQuietMs, "voice.roomQuietMs");

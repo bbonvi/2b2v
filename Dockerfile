@@ -3,29 +3,23 @@
 FROM oven/bun:1.3-debian AS base
 WORKDIR /app
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates ffmpeg ripgrep \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg libgomp1 python3 ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
-# Build a pinned native CPU whisper.cpp and keep its persistent server plus multilingual model.
-FROM debian:bookworm-slim AS whisper-builder
-ARG WHISPER_CPP_VERSION=v1.9.1
+# Build against the runtime's Python ABI, then download the converted multilingual model.
+FROM base AS faster-whisper-builder
+ARG FASTER_WHISPER_VERSION=1.2.1
+ARG FASTER_WHISPER_MODEL_REVISION=536b0662742c02347bc0e980a01041f333bce120
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates cmake curl git g++ make \
+    && apt-get install -y --no-install-recommends python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
-WORKDIR /src
-RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} https://github.com/ggml-org/whisper.cpp.git . \
-    && cmake -S . -B build \
-      -DBUILD_SHARED_LIBS=OFF \
-      -DGGML_NATIVE=ON \
-      -DWHISPER_BUILD_TESTS=OFF \
-      -DWHISPER_BUILD_EXAMPLES=ON \
-    && cmake --build build --config Release --target whisper-cli whisper-server -j"$(nproc)" \
-    && ./models/download-ggml-model.sh small
+RUN python3 -m venv /opt/faster-whisper \
+    && /opt/faster-whisper/bin/pip install --no-cache-dir "faster-whisper==${FASTER_WHISPER_VERSION}" \
+    && /opt/faster-whisper/bin/python -c "from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-small', revision='${FASTER_WHISPER_MODEL_REVISION}', local_dir='/opt/faster-whisper/models/small')"
 
 FROM base AS voice-base
-COPY --link --from=whisper-builder /src/build/bin/whisper-cli /usr/local/bin/whisper-cli
-COPY --link --from=whisper-builder /src/build/bin/whisper-server /usr/local/bin/whisper-server
-COPY --link --from=whisper-builder /src/models/ggml-small.bin /opt/whisper/models/ggml-small.bin
+COPY --link --from=faster-whisper-builder /opt/faster-whisper /opt/faster-whisper
+COPY --chmod=755 scripts/faster_whisper_server.py /usr/local/bin/faster-whisper-server
 
 # Install standalone yt-dlp without pulling Python into the runtime image.
 FROM scratch AS yt-dlp

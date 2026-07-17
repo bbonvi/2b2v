@@ -34,7 +34,7 @@ import type {
   VoiceTranscriptRecord,
 } from "./repository.ts";
 import { VoiceResponseParser, type VoiceMessageDirective } from "./response-parser.ts";
-import { WhisperServerTranscriber } from "./stt.ts";
+import { FasterWhisperTranscriber } from "./stt.ts";
 import { decideVoiceTrigger } from "./trigger.ts";
 import {
   anchorUtteranceToWallClock,
@@ -123,7 +123,7 @@ interface ActiveSession {
   voiceConfig: VoiceConfig;
   connection: VoiceConnection;
   player: AudioPlayer;
-  transcriber: WhisperServerTranscriber;
+  transcriber: FasterWhisperTranscriber;
   sttController: AbortController;
   transcriptionQueue: Promise<void>;
   pendingTranscriptions: number;
@@ -155,7 +155,7 @@ interface VoiceTranscriptTiming {
 /** Global single-connection Discord voice coordinator. */
 export class VoiceRuntime {
   private active: ActiveSession | undefined;
-  private transcriber: WhisperServerTranscriber | undefined;
+  private transcriber: FasterWhisperTranscriber | undefined;
   private state: VoiceRuntimeSnapshot["state"] = "disconnected";
   private lastError: string | undefined;
   private readonly listeners = new Set<(snapshot: VoiceRuntimeSnapshot) => void>();
@@ -241,7 +241,7 @@ export class VoiceRuntime {
       throw new Error(`Already connected to voice channel ${this.active.channel.name} (${this.active.channel.id}). Leave it before joining another.`);
     }
     const { channel, config, voiceConfig } = await this.resolveJoinTarget(channelId);
-    this.transcriber ??= new WhisperServerTranscriber(
+    this.transcriber ??= new FasterWhisperTranscriber(
       voiceConfig.stt,
       this.deps.log.child({ component: "voice-stt" }),
     );

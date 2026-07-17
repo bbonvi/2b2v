@@ -194,6 +194,13 @@ describe("loadGlobalConfig", () => {
       outputMinHoldMs: 700,
       outputMaxHoldMs: 3500,
     });
+    expect(cfg.defaultVoice?.stt).toMatchObject({
+      command: "faster-whisper-server",
+      modelPath: "/opt/faster-whisper/models/small",
+      computeType: "int8",
+      language: "ru",
+      threads: 8,
+    });
     expect(cfg.defaultRelationships?.enabled).toBe(true);
     expect(cfg.defaultRelationships?.maxAxisDeltaPerSignal).toBe(4);
     expect(cfg.defaultRelationships?.maxToolCalls).toBe(5);
@@ -207,6 +214,14 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultModel).toBe("custom/model");
     expect(cfg.defaultTimezone).toBe("Asia/Tokyo");
     expect(cfg.logLevel).toBe("debug");
+  });
+
+  test("reads faster-whisper compute configuration", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "voice:\n  stt:\n    computeType: int8_float32\n    threads: 4\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultVoice?.stt.computeType).toBe("int8_float32");
+    expect(cfg.defaultVoice?.stt.threads).toBe(4);
   });
 
   test("reads lazy asset limits", () => {

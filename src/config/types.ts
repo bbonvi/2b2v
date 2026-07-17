@@ -442,6 +442,7 @@ export interface ExternalImagesConfig {
 export interface VoiceSttConfig {
   command: string;
   modelPath: string;
+  computeType: string;
   language: string;
   initialPrompt: string;
   serverPort: number;

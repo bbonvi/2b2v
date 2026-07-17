@@ -363,12 +363,13 @@ voice:
     summaryEveryMs: 300000
     maintenanceEverySegments: 60
     stt:
-        command: whisper-server
-        modelPath: /opt/whisper/models/ggml-small.bin
+        command: faster-whisper-server
+        modelPath: /opt/faster-whisper/models/small
+        computeType: int8
         language: ru
         initialPrompt: "Туби, 2B. Разговорная русская речь."
         serverPort: 18080
-        threads: 6
+        threads: 8
         timeoutMs: 20000
         minUtteranceMs: 180
         maxUtteranceMs: 15000
