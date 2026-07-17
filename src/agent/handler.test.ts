@@ -626,6 +626,39 @@ describe("handleMessage", () => {
     expect(currentTurn).toContain("first trigger [msg-break] latest followup");
   });
 
+  test("uses caller-provided headings for a non-message current turn", async () => {
+    let currentTurn = "";
+    const completeChat: ChatCompleteFn = (request) => {
+      currentTurn = findMessageContent(request.messages, "## Live Voice Response Opportunity") ?? "";
+      return Promise.resolve({
+        text: "ok",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({
+        eventContent: "Use the immediate exchange.",
+        eventPrompt: {
+          metadataHeading: "Voice Turn Metadata",
+          contentHeading: "Live Voice Response Opportunity",
+          metadataText: "Voice ChannelID: voice-1",
+        },
+        mentionedUserIds: ["bot-1"],
+      }),
+      makeDeps({ completeChat }),
+    );
+
+    expect(currentTurn).toContain("## Voice Turn Metadata");
+    expect(currentTurn).toContain("Voice ChannelID: voice-1");
+    expect(currentTurn).toContain("Use the immediate exchange.");
+    expect(currentTurn).not.toContain("## Discord Event Metadata");
+    expect(currentTurn).not.toContain("## New Discord Event");
+    expect(currentTurn).not.toContain("Trigger Author:");
+  });
+
   test("marks an external bot author in current event metadata", async () => {
     let currentTurn = "";
     const completeChat: ChatCompleteFn = (request) => {

@@ -935,7 +935,22 @@ async function voiceAssembledContext(
   guildConfig: GuildConfig,
 ): Promise<AssembledContext> {
   const instruction = request.instruction;
-  const transcript = renderVoiceHistory(request.history, guildConfig.timezone);
+  const lastOutputIndex = request.history.findLastIndex((entry) => entry.kind === "output");
+  // Keep the exchange around 2B's latest audible turn near the prompt tail,
+  // while bounding unusually long runs of uninterrupted human speech.
+  const immediateStart = Math.max(
+    0,
+    request.history.length - 16,
+    lastOutputIndex === -1 ? request.history.length - 8 : lastOutputIndex - 2,
+  );
+  const earlierHistory = renderVoiceHistory(
+    request.history.slice(0, immediateStart),
+    guildConfig.timezone,
+  );
+  const immediateExchange = renderVoiceHistory(
+    request.history.slice(immediateStart),
+    guildConfig.timezone,
+  );
   const latestUserMessage: HistoryMessage = {
     id: `voice:${request.sessionId}:${request.trigger.id}`,
     author: request.trigger.username,
@@ -985,8 +1000,9 @@ async function voiceAssembledContext(
       "## Live Voice Room",
       `GuildID: ${request.guildId}`,
       `Voice ChannelID: ${request.channelId}`,
-      "The history below is chronological and may span recent visits to this channel. [room] lines mark presence boundaries; user speech is fallible ASR output; 2B lines are words previously audible in the room, and [interrupted] marks a partial reply.",
-      transcript,
+      "The sections below are chronological and may span recent visits to this channel. [room] lines mark presence boundaries; user speech is fallible ASR output; 2B lines are words previously audible in the room, and [interrupted] marks a partial reply.",
+      earlierHistory === "" ? "" : `## Earlier Voice Room Context\n${earlierHistory}`,
+      `## Immediate Voice Exchange\n${immediateExchange}`,
       instruction === undefined
         ? ""
         : [
@@ -1175,6 +1191,21 @@ async function runVoiceAgentTurn(request: VoiceTurnRequest): Promise<void> {
     botUserId: client.user?.id ?? "",
     mentionedUserIds: [],
     translatedContent: request.trigger.normalizedText,
+    eventContent: [
+      "The room is available for your next action. Base it on the latest coherent exchange in Immediate Voice Exchange, including recent speech from all participants and your last audible reply.",
+      "The final ASR segment merely caused this turn to run; it is not a privileged standalone message and may be inaccurate, incomplete, incidental, or addressed to someone else. Do not answer it in isolation. Respond to what is socially current in the room, or remain silent when no response is appropriate.",
+    ].join("\n\n"),
+    eventPrompt: {
+      metadataHeading: "Voice Turn Metadata",
+      contentHeading: "Live Voice Response Opportunity",
+      metadataText: [
+        `GuildID: ${request.guildId}`,
+        `GuildName: ${guild.name}`,
+        `Voice ChannelID: ${request.channelId}`,
+        `Voice ChannelName: ${voiceRuntime.snapshot().channelName ?? request.channelId}`,
+        `Response Boundary SegmentID: ${request.trigger.id}`,
+      ].join("\n"),
+    },
     messageId: `voice:${request.sessionId}:${request.trigger.id}`,
   };
   try {
@@ -4305,7 +4336,9 @@ async function shutdown(signal: string): Promise<void> {
   setRestartRecoveryCutoff(db);
   acceptingDiscordMessages = false;
   startupMessageProcessingReady = false;
-  const dashboardStop = dashboardServer?.stop(false);
+  // The voice dashboard keeps an EventSource request open indefinitely, so a
+  // graceful HTTP stop cannot finish during process shutdown.
+  const dashboardStop = dashboardServer?.stop(true);
 
   clearInterval(memoryCleanupTimer);
   clearInterval(vpnSessionCleanupTimer);

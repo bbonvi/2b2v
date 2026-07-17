@@ -67,6 +67,12 @@ export interface IncomingMessage {
   translatedContent: string;
   /** Full visible current-turn event text, including debounced same-author followups. */
   eventContent?: string;
+  /** Voice and other non-message turns can replace Discord-message prompt headings. */
+  eventPrompt?: {
+    metadataHeading: string;
+    contentHeading: string;
+    metadataText?: string;
+  };
   messageId?: string;
   replyToMessageId?: string;
   repliedToBot?: boolean;
@@ -1006,8 +1012,8 @@ function buildInitialMessages(
 ): OpenRouterMessage[] {
   const roleAt = (index: number): PromptTransportRole => roles[index] ?? "user";
   const currentMessageMetadata = [
-    "## Discord Event Metadata",
-    buildCurrentMessageMetadata(msg, runtimePrompts),
+    `## ${msg.eventPrompt?.metadataHeading ?? "Discord Event Metadata"}`,
+    msg.eventPrompt?.metadataText ?? buildCurrentMessageMetadata(msg, runtimePrompts),
   ].join("\n");
 
   const imageMetadata = (msg.imageInputs ?? [])
@@ -1028,7 +1034,7 @@ function buildInitialMessages(
   const text = [
       currentMessageMetadata,
       imageMetadata !== "" ? `## Event Images\n${imageMetadata}` : "",
-      "## New Discord Event",
+      `## ${msg.eventPrompt?.contentHeading ?? "New Discord Event"}`,
       msg.eventContent ?? userContent,
   ].filter((part) => part !== "").join("\n\n");
   const images = imagePartsFromCurrentTurn(msg);
