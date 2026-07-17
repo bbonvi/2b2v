@@ -1,9 +1,5 @@
 import { formatMessageLine } from "../agent/history-formatting.ts";
-import {
-  formatDateStamp,
-  insertDateStamps,
-  RECENT_HISTORY_DATE_STAMP_GAP_MS,
-} from "../agent/history-dates.ts";
+import { formatDateStamp } from "../agent/history-dates.ts";
 import type { HistoryMessage } from "../agent/history-types.ts";
 import type { VoiceHistoryRecord, VoiceMoveHandoff } from "./repository.ts";
 
@@ -22,7 +18,7 @@ export function renderVoiceMoveHandoff(
   ].filter((line) => line !== "").join("\n");
 }
 
-/** Renders chronological voice events using the established chat-history grammar. */
+/** Renders chronological voice events with per-event local timestamps precise to seconds. */
 export function renderVoiceHistory(
   history: readonly VoiceHistoryRecord[],
   timezone: string,
@@ -87,15 +83,12 @@ export function renderVoiceHistory(
       ...(entry.output.cutoff ? { historyAnnotations: ["interrupted"] } : {}),
     };
   });
-  return insertDateStamps(messages, timezone, {
-    minGapMs: RECENT_HISTORY_DATE_STAMP_GAP_MS,
-  }).map((entry) => {
-    if (entry.type === "date") return entry.text;
-    const message = messages[entry.index];
-    return message === undefined
-      ? ""
-      : formatMessageLine({ message, reply: null });
-  }).filter((line) => line !== "").join("\n");
+  return messages.map((message) =>
+    `${formatDateStamp(message.timestamp, timezone, { includeSeconds: true })} ${formatMessageLine({
+      message,
+      reply: null,
+    })}`
+  ).join("\n");
 }
 
 /** Sorts every room-history event newest-first without changing the source array. */

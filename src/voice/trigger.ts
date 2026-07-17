@@ -1,5 +1,6 @@
 export interface VoiceTriggerState {
   attentionUntil: number;
+  attentionOwnerUserId?: string;
 }
 
 export interface VoiceTriggerDecision {
@@ -7,6 +8,7 @@ export interface VoiceTriggerDecision {
   attentionUntil: number;
   reason: "single_human" | "wake_word" | "lingering" | "none";
   wakeWord?: string;
+  attentionOwnerUserId?: string;
 }
 
 function normalizedWords(text: string): string[] {
@@ -16,6 +18,7 @@ function normalizedWords(text: string): string[] {
 /** Decide whether a finalized utterance deserves a voice-agent turn. */
 export function decideVoiceTrigger(input: {
   text: string;
+  userId: string;
   humanCount: number;
   wakeWords: readonly string[];
   now: number;
@@ -27,6 +30,7 @@ export function decideVoiceTrigger(input: {
       shouldConsider: input.text.trim() !== "",
       attentionUntil: input.now + input.lingeringAttentionMs,
       reason: "single_human",
+      attentionOwnerUserId: input.userId,
     };
   }
 
@@ -41,14 +45,26 @@ export function decideVoiceTrigger(input: {
       attentionUntil: input.now + input.lingeringAttentionMs,
       reason: "wake_word",
       wakeWord,
+      attentionOwnerUserId: input.userId,
     };
   }
-  if (input.state.attentionUntil >= input.now) {
+  if (
+    input.state.attentionUntil >= input.now
+    && input.state.attentionOwnerUserId === input.userId
+  ) {
     return {
       shouldConsider: true,
       attentionUntil: input.state.attentionUntil,
       reason: "lingering",
+      attentionOwnerUserId: input.userId,
     };
   }
-  return { shouldConsider: false, attentionUntil: input.state.attentionUntil, reason: "none" };
+  return {
+    shouldConsider: false,
+    attentionUntil: input.state.attentionUntil,
+    reason: "none",
+    ...(input.state.attentionOwnerUserId === undefined
+      ? {}
+      : { attentionOwnerUserId: input.state.attentionOwnerUserId }),
+  };
 }

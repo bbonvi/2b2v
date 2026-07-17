@@ -169,6 +169,12 @@ export class ElevenLabsVoiceStream {
     return this.alignedChars.slice(0, count).join("").trim();
   }
 
+  /** Resolve a submitted-text character boundary onto the synchronized playback clock. */
+  alignedEndMsAtCharacterOffset(characterOffset: number): number | undefined {
+    if (!Number.isSafeInteger(characterOffset) || characterOffset <= 0) return undefined;
+    return this.alignedCharacterEndsMs[characterOffset - 1];
+  }
+
   private onMessage(data: unknown): void {
     if (this.aborted) return;
     if (typeof data !== "string") return;

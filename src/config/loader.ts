@@ -198,6 +198,8 @@ const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   wakeWords: ["2b", "туби"],
   lingeringAttentionMs: 45_000,
   roomQuietMs: 700,
+  otherSpeakerGraceMs: 3_000,
+  yieldBoundaryMaxWaitMs: 1_500,
   emptyChannelGraceMs: 120_000,
   recentSessionContextMs: 6 * 60 * 60 * 1000,
   summaryEverySegments: 30,
@@ -259,6 +261,8 @@ function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYaml | un
   if (resolved.wakeWords.some((word) => word.trim() === "")) throw new Error("voice.wakeWords must contain non-empty strings");
   positiveVoiceInteger(resolved.lingeringAttentionMs, "voice.lingeringAttentionMs");
   positiveVoiceInteger(resolved.roomQuietMs, "voice.roomQuietMs");
+  positiveVoiceInteger(resolved.otherSpeakerGraceMs, "voice.otherSpeakerGraceMs");
+  positiveVoiceInteger(resolved.yieldBoundaryMaxWaitMs, "voice.yieldBoundaryMaxWaitMs");
   positiveVoiceInteger(resolved.emptyChannelGraceMs, "voice.emptyChannelGraceMs");
   positiveVoiceInteger(resolved.recentSessionContextMs, "voice.recentSessionContextMs");
   positiveVoiceInteger(resolved.summaryEverySegments, "voice.summaryEverySegments");

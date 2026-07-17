@@ -52,7 +52,17 @@ export interface VoiceTurnRequest {
   history: VoiceHistoryRecord[];
   handoff?: VoiceMoveHandoff;
   instruction?: VoiceInstructionRecord;
+  opportunity: VoiceTurnOpportunityContext;
   abortSignal: AbortSignal;
+}
+
+/** Volatile social state explaining why and amid whom a voice turn may run. */
+export interface VoiceTurnOpportunityContext {
+  source: "single_human" | "wake_word" | "lingering" | "instruction";
+  openedAt: number;
+  owner?: { userId: string; username: string };
+  currentSpeakers: Array<{ userId: string; username: string; speakingForMs: number }>;
+  recentInterrupters: Array<{ userId: string; username: string; at: number }>;
 }
 
 export interface VoiceRuntimeDeps {
@@ -85,6 +95,8 @@ export interface VoiceRuntimeSnapshot {
     lastWakeWord?: string;
     lastTriggerSegmentId?: number;
     pendingSegmentId?: number;
+    ownerUserId?: string;
+    ownerUsername?: string;
   };
   currentOutput?: { turnId: string; plannedText: string; audibleText: string; interrupted: boolean };
   lastError?: string;
@@ -99,6 +111,8 @@ export interface VoiceResponseSink {
   startModelTurn(): void;
   push(delta: string): Promise<boolean>;
   finish(finalText: string): Promise<{ visible: boolean; memoryText: string; malformed: boolean }>;
+  isAudible(): boolean;
+  requestInterruption(userId: string, username: string): void;
   abort(userId?: string, username?: string): void;
 }
 
@@ -116,6 +130,15 @@ type PendingPresenceAction = {
   | { kind: "move"; channelId: string }
 );
 
+interface VoiceOpportunity {
+  trigger: VoiceTranscriptRecord;
+  source: VoiceTurnOpportunityContext["source"];
+  openedAt: number;
+  owner?: { userId: string; username: string };
+  instruction?: VoiceInstructionRecord;
+  recentInterrupters: Array<{ userId: string; username: string; at: number }>;
+}
+
 interface ActiveSession {
   id: string;
   channel: VoiceBasedChannel;
@@ -127,18 +150,21 @@ interface ActiveSession {
   sttController: AbortController;
   transcriptionQueue: Promise<void>;
   pendingTranscriptions: number;
-  latestQueuedTrigger?: VoiceTranscriptRecord;
   attentionUntil: number;
+  attentionOwner?: { userId: string; username: string };
   lastTriggerReason: VoiceRuntimeSnapshot["attention"]["lastTriggerReason"];
   lastWakeWord?: string;
   lastTriggerSegmentId?: number;
   pendingTurnSegmentId?: number;
   currentTurnSegmentId?: number;
   speaking: Set<string>;
+  speakingSince: Map<string, number>;
   subscriptions: Set<string>;
+  opportunity?: VoiceOpportunity;
   pendingTurn?: ReturnType<typeof setTimeout>;
   emptyTimer?: ReturnType<typeof setTimeout>;
   turnController?: AbortController;
+  deferredTurnController?: AbortController;
   currentSink?: VoiceResponseSinkImpl;
   pendingPresenceAction?: PendingPresenceAction;
 }
@@ -210,6 +236,12 @@ export class VoiceRuntime {
         ...(active?.pendingTurnSegmentId !== undefined
           ? { pendingSegmentId: active.pendingTurnSegmentId }
           : {}),
+        ...(active?.attentionOwner === undefined
+          ? {}
+          : {
+            ownerUserId: active.attentionOwner.userId,
+            ownerUsername: active.attentionOwner.username,
+          }),
       },
       ...(currentOutput !== undefined ? { currentOutput } : {}),
       ...(this.lastError !== undefined ? { lastError: this.lastError } : {}),
@@ -275,6 +307,7 @@ export class VoiceRuntime {
         attentionUntil: 0,
         lastTriggerReason: "none",
         speaking: new Set(),
+        speakingSince: new Map(),
         subscriptions: new Set(),
       };
       this.active = active;
@@ -320,6 +353,7 @@ export class VoiceRuntime {
     if (active.pendingTurn !== undefined) clearTimeout(active.pendingTurn);
     if (active.emptyTimer !== undefined) clearTimeout(active.emptyTimer);
     active.turnController?.abort(new Error(reason));
+    active.deferredTurnController = undefined;
     active.sttController.abort(new Error(reason));
     active.currentSink?.abort();
     active.player.stop(true);
@@ -423,7 +457,7 @@ export class VoiceRuntime {
     const active = this.active;
     if (active === undefined) throw new Error("2B is not connected to a voice channel.");
     const instruction = this.deps.repository.createInstruction({ ...input, targetSessionId: active.id });
-    void this.runInstruction(instruction);
+    this.scheduleNextQueuedInstruction(active);
     this.emit();
     return instruction;
   }
@@ -442,6 +476,9 @@ export class VoiceRuntime {
       abortTurn: (userId) => {
         const controller = active.turnController;
         if (controller !== undefined && !controller.signal.aborted) {
+          if (active.opportunity?.instruction !== undefined) {
+            active.deferredTurnController = controller;
+          }
           controller.abort(new Error(`Voice turn interrupted by ${userId}`));
         }
       },
@@ -451,6 +488,7 @@ export class VoiceRuntime {
       onInstructionIgnored: (id) => this.deps.repository.updateInstruction(id, "ignored"),
       triggerSegmentId,
       instructionId,
+      yieldBoundaryMaxWaitMs: active.voiceConfig.yieldBoundaryMaxWaitMs,
     });
     active.currentSink = sink;
     this.emit();
@@ -524,11 +562,14 @@ export class VoiceRuntime {
     let lastDecodedAt = Date.now();
     let speakingSafetyTimer: ReturnType<typeof setTimeout> | undefined;
     let decoderFinalized = false;
+    let speechConfirmed = false;
     const clearSpeaking = (): void => {
       if (speakingSafetyTimer !== undefined) {
         clearTimeout(speakingSafetyTimer);
         speakingSafetyTimer = undefined;
       }
+      active.speakingSince.delete(userId);
+      speechConfirmed = false;
       if (active.speaking.delete(userId)) this.emit();
     };
     const armSpeakingSafety = (): void => {
@@ -537,6 +578,8 @@ export class VoiceRuntime {
       speakingSafetyTimer = setTimeout(() => {
         speakingSafetyTimer = undefined;
         if (active.speaking.delete(userId)) {
+          active.speakingSince.delete(userId);
+          speechConfirmed = false;
           this.deps.log.warn("cleared stale voice speaking state after receive inactivity", {
             userId,
             timeoutMs,
@@ -566,30 +609,22 @@ export class VoiceRuntime {
       const result = segmenter.push(Buffer.from(chunk));
       if (result.speechStarted) {
         active.speaking.add(userId);
-        if (active.currentSink !== undefined) {
-          active.currentSink.abort(userId, member.user.username);
-        } else if (active.currentTurnSegmentId !== undefined) {
-          this.deps.repository.addRuntimeEvent({
-            sessionId: active.id,
-            triggerSegmentId: active.currentTurnSegmentId,
-            phase: "interrupted",
-            occurredAt: Date.now(),
-            detail: {
-              userId,
-              username: member.user.username,
-              audibleCharacters: 0,
-            },
-          });
-        }
-        const controller = active.turnController;
-        if (controller !== undefined && !controller.signal.aborted) {
-          controller.abort(new Error(`Voice turn interrupted by @${member.user.username}`));
-        }
-        if (active.player.state.status !== AudioPlayerStatus.Idle) active.player.stop(true);
+        speechConfirmed = false;
       }
       if (segmenter.isSpeaking) {
         active.speaking.add(userId);
         armSpeakingSafety();
+        if (
+          !speechConfirmed
+          && segmenter.activeSpeechMs >= active.voiceConfig.stt.minUtteranceMs
+        ) {
+          speechConfirmed = true;
+          active.speakingSince.set(
+            userId,
+            Date.now() - segmenter.activeSpeechMs,
+          );
+          this.onConfirmedSpeech(active, userId, member.user.username);
+        }
       } else {
         clearSpeaking();
       }
@@ -627,6 +662,35 @@ export class VoiceRuntime {
       if (!decoder.writableEnded) decoder.end();
     });
     opus.pipe(decoder);
+  }
+
+  private onConfirmedSpeech(active: ActiveSession, userId: string, username: string): void {
+    if (this.active !== active) return;
+    const opportunity = active.opportunity;
+    if (opportunity !== undefined) {
+      opportunity.recentInterrupters.push({ userId, username, at: Date.now() });
+      if (opportunity.recentInterrupters.length > 8) {
+        opportunity.recentInterrupters.splice(0, opportunity.recentInterrupters.length - 8);
+      }
+    }
+    const sink = active.currentSink;
+    if (sink?.isAudible() === true) {
+      sink.requestInterruption(userId, username);
+      return;
+    }
+    const controller = active.turnController;
+    if (
+      controller !== undefined
+      && !controller.signal.aborted
+      && opportunity?.owner?.userId === userId
+    ) {
+      // The person 2B was attending to resumed before she became audible, so
+      // the draft is stale rather than "interrupted" and must be reconsidered.
+      active.deferredTurnController = controller;
+      controller.abort(new Error(`Attention owner @${username} resumed speaking.`));
+      return;
+    }
+    if (opportunity !== undefined) this.scheduleOpportunity(active);
   }
 
   private enqueueTranscription(
@@ -673,10 +737,12 @@ export class VoiceRuntime {
           });
         } finally {
           active.pendingTranscriptions = Math.max(0, active.pendingTranscriptions - 1);
-          if (active.pendingTranscriptions === 0) {
-            const trigger = active.latestQueuedTrigger;
-            delete active.latestQueuedTrigger;
-            if (trigger !== undefined && this.active === active) this.scheduleTurn(trigger);
+          if (
+            active.pendingTranscriptions === 0
+            && active.opportunity !== undefined
+            && this.active === active
+          ) {
+            this.scheduleOpportunity(active);
           }
         }
       })
@@ -699,8 +765,11 @@ export class VoiceRuntime {
   }): Promise<VoiceTranscriptRecord> {
     const active = this.active;
     if (active === undefined) throw new Error("Voice session ended before transcript finalization.");
-    const instruction = this.deps.repository.listOpenInstructions(active.id)
-      .find((candidate) => candidate.status === "active" || candidate.status === "waiting");
+    const openInstructions = this.deps.repository.listOpenInstructions(active.id);
+    // A newly activated request owns the current exchange; older waiting
+    // requests remain durable but must not absorb unrelated room speech.
+    const instruction = openInstructions.find((candidate) => candidate.status === "active")
+      ?? openInstructions.find((candidate) => candidate.status === "waiting");
     const record = this.deps.repository.addTranscript({
       sessionId: active.id,
       ...(instruction !== undefined ? { instructionId: instruction.id } : {}),
@@ -740,13 +809,22 @@ export class VoiceRuntime {
     const decisionAt = Date.now();
     const decision = decideVoiceTrigger({
       text: record.normalizedText,
+      userId: record.userId,
       humanCount: humans,
       wakeWords: active.voiceConfig.wakeWords,
       now: decisionAt,
       lingeringAttentionMs: active.voiceConfig.lingeringAttentionMs,
-      state: { attentionUntil: active.attentionUntil },
+      state: {
+        attentionUntil: active.attentionUntil,
+        ...(active.attentionOwner === undefined
+          ? {}
+          : { attentionOwnerUserId: active.attentionOwner.userId }),
+      },
     });
     active.attentionUntil = decision.attentionUntil;
+    if (decision.attentionOwnerUserId === record.userId) {
+      active.attentionOwner = { userId: record.userId, username: record.username };
+    }
     active.lastTriggerReason = decision.reason;
     if (decision.wakeWord === undefined) {
       delete active.lastWakeWord;
@@ -764,14 +842,37 @@ export class VoiceRuntime {
         humanCount: humans,
         shouldConsider: decision.shouldConsider,
         attentionUntil: decision.attentionUntil,
+        attentionOwnerUserId: decision.attentionOwnerUserId ?? null,
         wakeWord: decision.wakeWord ?? null,
       },
     });
-    if (decision.shouldConsider) {
-      if (input.deferTurn === true) {
-        active.latestQueuedTrigger = record;
-      } else {
-        this.scheduleTurn(record);
+    if (decision.shouldConsider || instruction !== undefined) {
+      const source = instruction === undefined
+        ? decision.reason
+        : "instruction";
+      if (source !== "none") {
+        const previousOpportunity = active.opportunity;
+        const continuesOpportunity = previousOpportunity !== undefined && (
+          (
+            instruction !== undefined
+            && previousOpportunity.instruction?.id === instruction.id
+          )
+          || (
+            instruction === undefined
+            && previousOpportunity.instruction === undefined
+            && previousOpportunity.owner?.userId === record.userId
+          )
+        );
+        this.queueOpportunity(active, {
+          trigger: record,
+          source,
+          openedAt: continuesOpportunity ? previousOpportunity.openedAt : decisionAt,
+          owner: { userId: record.userId, username: record.username },
+          ...(instruction === undefined ? {} : { instruction }),
+          recentInterrupters: continuesOpportunity
+            ? previousOpportunity.recentInterrupters
+            : [],
+        }, input.deferTurn === true);
       }
     }
     this.maybeRunMaintenance(record.id);
@@ -779,45 +880,109 @@ export class VoiceRuntime {
     return Promise.resolve(record);
   }
 
-  private scheduleTurn(trigger: VoiceTranscriptRecord): void {
-    const active = this.active;
-    if (active === undefined) return;
-    if (active.pendingTurn !== undefined) clearTimeout(active.pendingTurn);
-    active.pendingTurnSegmentId = trigger.id;
-    this.deps.repository.addRuntimeEvent({
-      sessionId: active.id,
-      triggerSegmentId: trigger.id,
-      phase: "debounce_scheduled",
-      occurredAt: Date.now(),
-      durationMs: active.voiceConfig.roomQuietMs,
-    });
-    this.armTurnTimer(active, trigger);
+  private queueOpportunity(
+    active: ActiveSession,
+    opportunity: VoiceOpportunity,
+    deferForTranscription: boolean,
+  ): void {
+    const previous = active.opportunity;
+    active.opportunity = opportunity;
+    active.pendingTurnSegmentId = opportunity.trigger.id;
+    if (
+      active.turnController !== undefined
+      && active.currentSink?.isAudible() !== true
+      && (
+        opportunity.source === "wake_word"
+        || previous?.owner?.userId === opportunity.owner?.userId
+      )
+    ) {
+      active.deferredTurnController = active.turnController;
+      active.turnController.abort(new Error("Voice response opportunity changed before playback."));
+    }
+    if (!deferForTranscription && active.pendingTranscriptions === 0) {
+      this.scheduleOpportunity(active);
+    }
   }
 
-  private armTurnTimer(active: ActiveSession, trigger: VoiceTranscriptRecord): void {
+  private scheduleOpportunity(active: ActiveSession): void {
+    const opportunity = active.opportunity;
+    if (opportunity === undefined || this.active !== active) return;
+    if (active.pendingTurn !== undefined) clearTimeout(active.pendingTurn);
+    active.pendingTurn = undefined;
+    if (active.turnController !== undefined || active.pendingTranscriptions > 0) return;
+    if (
+      opportunity.owner !== undefined
+      && active.speaking.has(opportunity.owner.userId)
+    ) return;
+    const now = Date.now();
+    const otherSpeakerStarts = [...active.speakingSince.entries()]
+      .filter(([userId]) => userId !== opportunity.owner?.userId)
+      .map(([, startedAt]) => startedAt);
+    const otherSpeakerDelay = otherSpeakerStarts.length === 0
+      ? 0
+      : Math.max(0, active.voiceConfig.otherSpeakerGraceMs - (now - Math.min(...otherSpeakerStarts)));
+    const delayMs = Math.max(active.voiceConfig.roomQuietMs, otherSpeakerDelay);
+    this.deps.repository.addRuntimeEvent({
+      sessionId: active.id,
+      triggerSegmentId: opportunity.trigger.id,
+      phase: "debounce_scheduled",
+      occurredAt: now,
+      durationMs: delayMs,
+      detail: {
+        attentionOwnerUserId: opportunity.owner?.userId ?? null,
+        activeOtherSpeakers: otherSpeakerStarts.length,
+      },
+    });
     active.pendingTurn = setTimeout(() => {
       active.pendingTurn = undefined;
-      if (active.speaking.size > 0) {
-        this.armTurnTimer(active, trigger);
+      const current = active.opportunity;
+      if (current !== opportunity || this.active !== active) return;
+      if (
+        current.owner !== undefined
+        && active.speaking.has(current.owner.userId)
+      ) {
+        return;
+      }
+      const currentNow = Date.now();
+      const unconfirmedOtherSpeaker = [...active.speaking]
+        .some((userId) =>
+          userId !== current.owner?.userId
+          && !active.speakingSince.has(userId)
+        );
+      const unexpiredOtherSpeaker = [...active.speakingSince.entries()]
+        .filter(([userId]) => userId !== current.owner?.userId)
+        .some(([, startedAt]) =>
+          currentNow - startedAt < active.voiceConfig.otherSpeakerGraceMs
+        );
+      if (
+        unconfirmedOtherSpeaker
+        || unexpiredOtherSpeaker
+        || active.pendingTranscriptions > 0
+      ) {
+        this.scheduleOpportunity(active);
         return;
       }
       active.pendingTurnSegmentId = undefined;
       this.deps.repository.addRuntimeEvent({
         sessionId: active.id,
-        triggerSegmentId: trigger.id,
+        triggerSegmentId: current.trigger.id,
         phase: "debounce_fired",
-        occurredAt: Date.now(),
+        occurredAt: currentNow,
       });
-      void this.runTurn(trigger);
-    }, active.voiceConfig.roomQuietMs);
+      void this.runTurn(current);
+    }, delayMs);
   }
 
-  private async runTurn(trigger: VoiceTranscriptRecord, instruction?: VoiceInstructionRecord): Promise<void> {
+  private async runTurn(opportunity: VoiceOpportunity): Promise<void> {
     const active = this.active;
-    if (active === undefined) return;
-    active.turnController?.abort(new Error("Superseded by a newer voice turn"));
+    if (
+      active === undefined
+      || active.opportunity !== opportunity
+      || active.turnController !== undefined
+    ) return;
     const controller = new AbortController();
     active.turnController = controller;
+    const { trigger, instruction } = opportunity;
     active.currentTurnSegmentId = trigger.id;
     this.deps.repository.addRuntimeEvent({
       sessionId: active.id,
@@ -844,6 +1009,17 @@ export class VoiceRuntime {
           ? { handoff: this.deps.repository.getSession(active.id)?.handoff }
           : {}),
         ...(instruction !== undefined ? { instruction } : {}),
+        opportunity: {
+          source: opportunity.source,
+          openedAt: opportunity.openedAt,
+          ...(opportunity.owner === undefined ? {} : { owner: opportunity.owner }),
+          currentSpeakers: [...active.speakingSince.entries()].map(([userId, startedAt]) => ({
+            userId,
+            username: active.channel.members.get(userId)?.user.username ?? userId,
+            speakingForMs: Math.max(0, Date.now() - startedAt),
+          })),
+          recentInterrupters: [...opportunity.recentInterrupters],
+        },
         abortSignal: controller.signal,
       });
       if (instruction !== undefined) {
@@ -856,6 +1032,8 @@ export class VoiceRuntime {
       if (!controller.signal.aborted) this.fail(error);
     } finally {
       const ownsTurn = active.turnController === controller;
+      const retainOpportunity = active.deferredTurnController === controller;
+      if (retainOpportunity) active.deferredTurnController = undefined;
       if (ownsTurn) {
         active.turnController = undefined;
         active.currentTurnSegmentId = undefined;
@@ -864,6 +1042,10 @@ export class VoiceRuntime {
         ? active.pendingPresenceAction
         : undefined;
       if (pending !== undefined) active.pendingPresenceAction = undefined;
+      if (active.opportunity === opportunity && !retainOpportunity) {
+        active.opportunity = undefined;
+        active.pendingTurnSegmentId = undefined;
+      }
       this.emit();
       if (
         ownsTurn
@@ -873,12 +1055,17 @@ export class VoiceRuntime {
       ) {
         await this.applyPresenceAction(active, pending);
       }
+      if (ownsTurn && this.active === active) {
+        if (active.opportunity === undefined) {
+          this.scheduleNextQueuedInstruction(active);
+        } else {
+          this.scheduleOpportunity(active);
+        }
+      }
     }
   }
 
-  private async runInstruction(instruction: VoiceInstructionRecord): Promise<void> {
-    const active = this.active;
-    if (active === undefined) return;
+  private activateInstruction(active: ActiveSession, instruction: VoiceInstructionRecord): void {
     this.deps.repository.updateInstruction(instruction.id, "active");
     const synthetic = this.deps.repository.addTranscript({
       sessionId: active.id,
@@ -894,7 +1081,24 @@ export class VoiceRuntime {
       source: "test_injection",
       synthetic: true,
     });
-    await this.runTurn(synthetic, instruction);
+    this.queueOpportunity(active, {
+      trigger: synthetic,
+      source: "instruction",
+      openedAt: Date.now(),
+      instruction,
+      recentInterrupters: [],
+    }, false);
+  }
+
+  private scheduleNextQueuedInstruction(active: ActiveSession): void {
+    if (
+      this.active !== active
+      || active.opportunity !== undefined
+      || active.turnController !== undefined
+    ) return;
+    const instruction = this.deps.repository.listOpenInstructions(active.id)
+      .find((candidate) => candidate.status === "queued");
+    if (instruction !== undefined) this.activateInstruction(active, instruction);
   }
 
   private maybeRunMaintenance(latestSegmentId: number): void {
@@ -1035,10 +1239,15 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
   private plannedText = "";
   private audibleText = "";
   private interruptedByUserId: string | undefined;
+  private aborted = false;
   private visible = false;
   private speechQueued = false;
   private firstPhraseRecorded = false;
   private firstDeltaRecorded = false;
+  private readonly yieldBoundaries: number[] = [];
+  private pendingInterruption: { userId: string; username: string } | undefined;
+  private interruptionDeadline?: ReturnType<typeof setTimeout>;
+  private boundaryStopTimer?: ReturnType<typeof setTimeout>;
 
   constructor(private readonly deps: {
     active: ActiveSession;
@@ -1053,6 +1262,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
     onInstructionIgnored: (id: string) => void;
     triggerSegmentId: number;
     instructionId?: string;
+    yieldBoundaryMaxWaitMs: number;
   }) {
     this.turnId = deps.repository.createOutputTurn(
       deps.active.id,
@@ -1079,7 +1289,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
   }
 
   async push(delta: string): Promise<boolean> {
-    if (this.interruptedByUserId !== undefined) return false;
+    if (this.aborted) return false;
     if (!this.firstDeltaRecorded && delta !== "") {
       this.firstDeltaRecorded = true;
       this.deps.repository.addRuntimeEvent({
@@ -1097,7 +1307,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
   }
 
   async finish(finalText: string): Promise<{ visible: boolean; memoryText: string; malformed: boolean }> {
-    if (this.interruptedByUserId === undefined && finalText !== this.rawText) {
+    if (!this.aborted && finalText !== this.rawText) {
       const hadStreamedText = this.rawText !== "";
       this.rawText = finalText;
       if (!hadStreamedText) {
@@ -1107,6 +1317,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
     }
     const result = await this.parser.finish();
     this.plannedText = result.plannedSpeech;
+    this.recordYieldBoundary(this.plannedText.length);
     if (this.tts !== undefined && this.speechQueued) {
       await this.tts.finish();
       try {
@@ -1142,6 +1353,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
       this.audibleText,
       this.interruptedByUserId,
     );
+    this.clearInterruptionTimers();
     this.deps.emit();
     return {
       visible: this.visible,
@@ -1150,12 +1362,46 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
     };
   }
 
+  isAudible(): boolean {
+    return this.visible
+      && !this.aborted
+      && this.deps.active.player.state.status !== AudioPlayerStatus.Idle;
+  }
+
+  requestInterruption(userId: string, username: string): void {
+    if (!this.isAudible() || this.pendingInterruption !== undefined) return;
+    this.pendingInterruption = { userId, username };
+    this.interruptionDeadline = setTimeout(() => {
+      this.interruptionDeadline = undefined;
+      this.forceAbort(userId, username);
+    }, this.deps.yieldBoundaryMaxWaitMs);
+    this.maybeScheduleBoundaryStop();
+  }
+
   abort(userId?: string, username?: string): void {
-    if (this.interruptedByUserId !== undefined) return;
-    this.interruptedByUserId = userId ?? "unknown";
+    if (this.aborted) return;
+    if (!this.visible) {
+      this.aborted = true;
+      this.tts?.abort();
+      this.clearInterruptionTimers();
+      this.deps.repository.finishOutputTurn(this.turnId, this.plannedText, this.audibleText);
+      this.deps.emit();
+      return;
+    }
+    this.forceAbort(userId ?? "unknown", username);
+  }
+
+  private forceAbort(userId: string, username?: string): void {
+    if (this.aborted) return;
+    this.aborted = true;
+    this.interruptedByUserId = userId;
     this.refreshAudibleText();
     this.tts?.abort();
-    if (userId !== undefined) {
+    if (this.deps.active.player.state.status !== AudioPlayerStatus.Idle) {
+      this.deps.active.player.stop(true);
+    }
+    this.clearInterruptionTimers();
+    if (userId !== "unknown") {
       this.deps.repository.addRuntimeEvent({
         sessionId: this.deps.active.id,
         triggerSegmentId: this.deps.triggerSegmentId,
@@ -1171,6 +1417,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
     }
     this.deps.repository.finishOutputTurn(this.turnId, this.plannedText, this.audibleText, this.interruptedByUserId);
     this.deps.emit();
+    this.deps.abortTurn(userId);
   }
 
   snapshot(): { turnId: string; plannedText: string; audibleText: string; interrupted: boolean } {
@@ -1185,7 +1432,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
   private createParser(): VoiceResponseParser {
     return new VoiceResponseParser({
       onSpeech: async (text) => {
-        if (this.interruptedByUserId !== undefined) return;
+        if (this.aborted) return;
         this.plannedText = `${this.plannedText} ${text}`.trim();
         if (!this.firstPhraseRecorded) {
           this.firstPhraseRecorded = true;
@@ -1197,12 +1444,6 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
             occurredAt: Date.now(),
             detail: { characters: text.length },
           });
-        }
-        const activeSpeaker = this.deps.active.speaking.values().next().value;
-        if (activeSpeaker !== undefined) {
-          this.abort(activeSpeaker);
-          this.deps.abortTurn(activeSpeaker);
-          return;
         }
         const preset = this.deps.preset;
         const apiKey = this.deps.apiKey;
@@ -1233,6 +1474,9 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
           });
         }
         await this.tts.push(text, /[.!?…]$/.test(text));
+      },
+      onYieldBoundary: (characterOffset) => {
+        this.recordYieldBoundary(characterOffset);
       },
       onMessage: async (message) => {
         const result = await this.deps.sendMessage(message);
@@ -1284,6 +1528,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
       },
       onAlignment: () => {
         this.refreshAudibleText();
+        this.maybeScheduleBoundaryStop();
         this.deps.emit();
       },
     });
@@ -1304,5 +1549,45 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
       ? undefined
       : this.deps.active.player.state.resource;
     this.audibleText = this.tts?.audibleTextAt(resource?.playbackDuration ?? 0) ?? this.audibleText;
+  }
+
+  private recordYieldBoundary(characterOffset: number): void {
+    if (
+      characterOffset <= 0
+      || this.yieldBoundaries.at(-1) === characterOffset
+    ) return;
+    this.yieldBoundaries.push(characterOffset);
+    this.maybeScheduleBoundaryStop();
+  }
+
+  private maybeScheduleBoundaryStop(): void {
+    if (
+      this.pendingInterruption === undefined
+      || this.boundaryStopTimer !== undefined
+      || this.tts === undefined
+      || this.deps.active.player.state.status === AudioPlayerStatus.Idle
+    ) return;
+    const playbackMs = this.deps.active.player.state.resource.playbackDuration;
+    for (const boundary of this.yieldBoundaries) {
+      const boundaryMs = this.tts.alignedEndMsAtCharacterOffset(boundary);
+      if (boundaryMs === undefined || boundaryMs <= playbackMs) continue;
+      const pending = this.pendingInterruption;
+      this.boundaryStopTimer = setTimeout(() => {
+        this.boundaryStopTimer = undefined;
+        this.forceAbort(pending.userId, pending.username);
+      }, boundaryMs - playbackMs);
+      return;
+    }
+  }
+
+  private clearInterruptionTimers(): void {
+    if (this.interruptionDeadline !== undefined) {
+      clearTimeout(this.interruptionDeadline);
+      this.interruptionDeadline = undefined;
+    }
+    if (this.boundaryStopTimer !== undefined) {
+      clearTimeout(this.boundaryStopTimer);
+      this.boundaryStopTimer = undefined;
+    }
   }
 }

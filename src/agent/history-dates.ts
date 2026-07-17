@@ -37,7 +37,7 @@ export function formatRelativeAgo(timestampMs: number, nowMs?: number): string {
 export function formatDateStamp(
   timestampMs: number,
   timezone: string,
-  options: { nowMs?: number; includeRelativeAgo?: boolean } = {},
+  options: { nowMs?: number; includeRelativeAgo?: boolean; includeSeconds?: boolean } = {},
 ): string {
   const tz = isValidTimezone(timezone) ? timezone : "UTC";
   const date = new Date(timestampMs);
@@ -50,6 +50,7 @@ export function formatDateStamp(
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    ...(options.includeSeconds === true ? { second: "2-digit" } : {}),
     hour12: false,
   }).formatToParts(date);
 
@@ -61,11 +62,12 @@ export function formatDateStamp(
   const dd = get("day");
   const hh = get("hour");
   const min = get("minute");
+  const seconds = options.includeSeconds === true ? `:${get("second")}` : "";
 
   const relative = options.includeRelativeAgo === true && options.nowMs !== undefined
     ? `, ${formatRelativeAgo(timestampMs, options.nowMs)}`
     : "";
-  return `[${yyyy}-${mm}-${dd} ${hh}:${min}${relative}]`;
+  return `[${yyyy}-${mm}-${dd} ${hh}:${min}${seconds}${relative}]`;
 }
 
 /**
@@ -89,7 +91,7 @@ function isValidTimezone(tz: string): boolean {
 export function insertDateStamps(
   messages: HistoryMessage[],
   timezone: string,
-  options: { minGapMs?: number; nowMs?: number; includeRelativeAgo?: boolean } = {},
+  options: { minGapMs?: number; nowMs?: number; includeRelativeAgo?: boolean; includeSeconds?: boolean } = {},
 ): Array<{ type: "date"; text: string } | { type: "index"; index: number }> {
   if (messages.length === 0) return [];
 

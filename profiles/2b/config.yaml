@@ -357,6 +357,8 @@ voice:
     wakeWords: ["2b", "туби"]
     lingeringAttentionMs: 45000
     roomQuietMs: 180
+    otherSpeakerGraceMs: 3000
+    yieldBoundaryMaxWaitMs: 1500
     emptyChannelGraceMs: 120000
     recentSessionContextMs: 21600000
     summaryEverySegments: 30

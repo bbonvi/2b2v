@@ -45,9 +45,10 @@ describe("VoiceUtteranceSegmenter", () => {
     const segmenter = new VoiceUtteranceSegmenter(config);
     segmenter.push(pcm(100, 100));
     const started = segmenter.push(pcm(200, 3_000));
+    expect(started.speechStarted).toBe(true);
+    expect(segmenter.activeSpeechMs).toBe(200);
     const ended = segmenter.push(pcm(220, 100));
 
-    expect(started.speechStarted).toBe(true);
     expect(ended.utterances).toHaveLength(1);
     expect(ended.utterances[0]?.speechMs).toBe(200);
     expect(segmenter.isSpeaking).toBe(false);

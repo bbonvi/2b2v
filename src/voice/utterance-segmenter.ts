@@ -76,6 +76,11 @@ export class VoiceUtteranceSegmenter {
     return this.activeFrames.length > 0;
   }
 
+  /** Cumulative speech-energy duration in the active utterance. */
+  get activeSpeechMs(): number {
+    return this.speechMs;
+  }
+
   push(chunk: Buffer): SegmenterPushResult {
     this.pending = this.pending.length === 0 ? chunk : Buffer.concat([this.pending, chunk]);
     const utterances: VoiceUtterance[] = [];

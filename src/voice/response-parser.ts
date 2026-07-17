@@ -7,6 +7,7 @@ export interface VoiceMessageDirective {
 
 export interface VoiceResponseParserCallbacks {
   onSpeech: (text: string) => void | Promise<void>;
+  onYieldBoundary?: (plannedCharacterOffset: number) => void | Promise<void>;
   onMessage: (message: VoiceMessageDirective) => void | Promise<void>;
   onIgnore: (instructionId?: string) => void | Promise<void>;
 }
@@ -37,8 +38,8 @@ function phraseBoundary(text: string, includeTrailingPunctuation = false): numbe
 }
 
 /**
- * Incrementally separates spoken text from private Discord message directives.
- * Incomplete or malformed reserved tags are held and never spoken.
+ * Incrementally separates spoken text, silent yield boundaries, and private
+ * Discord directives. Incomplete or malformed reserved markup is never spoken.
  */
 export class VoiceResponseParser {
   private buffer = "";
@@ -90,13 +91,19 @@ export class VoiceResponseParser {
 
       if (tagStart > 0) {
         const plain = this.buffer.slice(0, tagStart);
-        const boundary = final ? plain.length : phraseBoundary(plain, idle);
+        const explicitYield = this.buffer.startsWith("<|>", tagStart);
+        const boundary = final || explicitYield ? plain.length : phraseBoundary(plain, idle);
         if (boundary <= 0) return malformed;
         await this.emitSpeech(plain.slice(0, boundary));
         this.buffer = plain.slice(boundary) + this.buffer.slice(tagStart);
         continue;
       }
 
+      if (this.buffer.startsWith("<|>")) {
+        this.buffer = this.buffer.slice("<|>".length);
+        await this.callbacks.onYieldBoundary?.(this.plannedSpeech.join(" ").trim().length);
+        continue;
+      }
       if (lower.startsWith("<voice>")) {
         this.buffer = this.buffer.slice("<voice>".length);
         continue;
@@ -135,7 +142,7 @@ export class VoiceResponseParser {
         return malformed;
       }
 
-      if (!final && ["<voice", "</voice", "<message", "<ignore"].some((prefix) => prefix.startsWith(lower))) {
+      if (!final && ["<|>", "<voice", "</voice", "<message", "<ignore"].some((prefix) => prefix.startsWith(lower))) {
         return malformed;
       }
       malformed = true;

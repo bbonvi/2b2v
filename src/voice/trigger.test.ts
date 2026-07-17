@@ -5,6 +5,7 @@ describe("decideVoiceTrigger", () => {
   test("considers every meaningful utterance with one human", () => {
     const decision = decideVoiceTrigger({
       text: "Are you there?",
+      userId: "alice",
       humanCount: 1,
       wakeWords: ["2b", "туби"],
       now: 100,
@@ -19,6 +20,7 @@ describe("decideVoiceTrigger", () => {
     const common = {
       humanCount: 3,
       wakeWords: ["2b", "туби"],
+      userId: "alice",
       now: 100,
       lingeringAttentionMs: 45_000,
       state: { attentionUntil: 0 },
@@ -34,12 +36,27 @@ describe("decideVoiceTrigger", () => {
   test("keeps bounded lingering attention", () => {
     const decision = decideVoiceTrigger({
       text: "And after that?",
+      userId: "alice",
       humanCount: 2,
       wakeWords: ["2b"],
       now: 500,
       lingeringAttentionMs: 45_000,
-      state: { attentionUntil: 1_000 },
+      state: { attentionUntil: 1_000, attentionOwnerUserId: "alice" },
     });
     expect(decision.reason).toBe("lingering");
+  });
+
+  test("does not transfer lingering attention to another participant", () => {
+    const decision = decideVoiceTrigger({
+      text: "Unrelated continuation.",
+      userId: "bob",
+      humanCount: 3,
+      wakeWords: ["2b"],
+      now: 500,
+      lingeringAttentionMs: 45_000,
+      state: { attentionUntil: 1_000, attentionOwnerUserId: "alice" },
+    });
+    expect(decision.shouldConsider).toBe(false);
+    expect(decision.attentionOwnerUserId).toBe("alice");
   });
 });

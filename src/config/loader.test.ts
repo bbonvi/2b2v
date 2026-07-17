@@ -224,6 +224,19 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultVoice?.stt.threads).toBe(4);
   });
 
+  test("reads and validates live voice turn timing", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "voice:\n  otherSpeakerGraceMs: 2400\n  yieldBoundaryMaxWaitMs: 900\n");
+    const cfg = loadGlobalConfig(BASE_ENV, file);
+    expect(cfg.defaultVoice?.otherSpeakerGraceMs).toBe(2_400);
+    expect(cfg.defaultVoice?.yieldBoundaryMaxWaitMs).toBe(900);
+
+    writeFileSync(file, "voice:\n  otherSpeakerGraceMs: 0\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
+      "voice.otherSpeakerGraceMs must be a positive integer",
+    );
+  });
+
   test("reads and validates the live voice service tier", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, "voice:\n  serviceTier: priority\n");

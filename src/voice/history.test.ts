@@ -44,12 +44,57 @@ test("renders user ASR and only the audible portion of 2B's reply", () => {
   ];
 
   expect(renderVoiceHistory(history, "UTC")).toBe([
-    "[1970-01-01 00:00]",
-    "[@alice]: Привет",
-    "[@2B (interrupted)]: Привет.",
+    "[1970-01-01 00:00:01] [@alice]: Привет",
+    "[1970-01-01 00:00:02] [@2B (interrupted)]: Привет.",
   ].join("\n"));
   expect(renderVoiceHistory(history, "UTC")).not.toContain("(user)");
   expect(renderVoiceHistory(history, "UTC")).not.toContain("T00:00");
+});
+
+test("timestamps every voice event even when speech is only seconds apart", () => {
+  const history: VoiceHistoryRecord[] = [
+    {
+      kind: "transcript",
+      startedAt: Date.UTC(2026, 6, 17, 12, 30, 4),
+      transcript: {
+        id: 1,
+        sessionId: "session",
+        userId: "alice",
+        username: "alice",
+        startedAt: Date.UTC(2026, 6, 17, 12, 30, 4),
+        endedAt: Date.UTC(2026, 6, 17, 12, 30, 5),
+        rawText: "One",
+        normalizedText: "One",
+        language: "en",
+        sttModel: "small",
+        source: "stt",
+        synthetic: false,
+      },
+    },
+    {
+      kind: "transcript",
+      startedAt: Date.UTC(2026, 6, 17, 12, 30, 7),
+      transcript: {
+        id: 2,
+        sessionId: "session",
+        userId: "bob",
+        username: "bob",
+        startedAt: Date.UTC(2026, 6, 17, 12, 30, 7),
+        endedAt: Date.UTC(2026, 6, 17, 12, 30, 8),
+        rawText: "Two",
+        normalizedText: "Two",
+        language: "en",
+        sttModel: "small",
+        source: "stt",
+        synthetic: false,
+      },
+    },
+  ];
+
+  expect(renderVoiceHistory(history, "UTC").split("\n")).toEqual([
+    "[2026-07-17 12:30:04] [@alice]: One",
+    "[2026-07-17 12:30:07] [@bob]: Two",
+  ]);
 });
 
 test("renders session and participant boundaries inline", () => {

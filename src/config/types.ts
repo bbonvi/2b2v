@@ -475,6 +475,10 @@ export interface VoiceConfig {
   wakeWords: string[];
   lingeringAttentionMs: number;
   roomQuietMs: number;
+  /** Maximum time another participant may postpone an owned response opportunity. */
+  otherSpeakerGraceMs: number;
+  /** Maximum audible delay before a pending interruption forces a cutoff. */
+  yieldBoundaryMaxWaitMs: number;
   emptyChannelGraceMs: number;
   recentSessionContextMs: number;
   summaryEverySegments: number;

@@ -1000,9 +1000,27 @@ async function voiceAssembledContext(
       "## Live Voice Room",
       `GuildID: ${request.guildId}`,
       `Voice ChannelID: ${request.channelId}`,
-      "The sections below are chronological and may span recent visits to this channel. [room] lines mark presence boundaries; user speech is fallible ASR output; 2B lines are words previously audible in the room, and [interrupted] marks a partial reply.",
+      "The sections below are chronological and may span recent visits to this channel. Every line begins with its local event or audible-speech start time precise to seconds. [room] lines mark presence boundaries; user speech is fallible ASR output; 2B lines are words previously audible in the room, and [interrupted] marks a partial reply.",
       earlierHistory === "" ? "" : `## Earlier Voice Room Context\n${earlierHistory}`,
       `## Immediate Voice Exchange\n${immediateExchange}`,
+      [
+        "## Current Voice Opportunity",
+        `Source: ${request.opportunity.source}`,
+        request.opportunity.owner === undefined
+          ? "Attention owner: none; this is a room-level or external instruction opportunity."
+          : `Attention owner: @${request.opportunity.owner.username} (${request.opportunity.owner.userId})`,
+        `OpenedAt: ${new Date(request.opportunity.openedAt).toISOString()}`,
+        request.opportunity.currentSpeakers.length === 0
+          ? "Currently speaking: nobody."
+          : `Currently speaking: ${request.opportunity.currentSpeakers.map((speaker) =>
+            `@${speaker.username} (${speaker.userId}) for ${speaker.speakingForMs}ms`
+          ).join(", ")}`,
+        request.opportunity.recentInterrupters.length === 0
+          ? "Recent interrupters in this opportunity: none."
+          : `Recent interrupters: ${request.opportunity.recentInterrupters.map((speaker) =>
+            `@${speaker.username} (${speaker.userId})`
+          ).join(", ")}`,
+      ].join("\n"),
       instruction === undefined
         ? ""
         : [
@@ -1195,6 +1213,7 @@ async function runVoiceAgentTurn(request: VoiceTurnRequest): Promise<void> {
     eventContent: [
       "The room is available for your next action. Base it on the latest coherent exchange in Immediate Voice Exchange, including recent speech from all participants and your last audible reply.",
       "The final ASR segment merely caused this turn to run; it is not a privileged standalone message and may be inaccurate, incomplete, incidental, or addressed to someone else. Do not answer it in isolation. Respond to what is socially current in the room, or remain silent when no response is appropriate.",
+      "Speech only seconds apart is likely part of one exchange, including quick replies and interruptions, but timing is evidence rather than proof; syntax, addressee, topic, and room context remain authoritative.",
     ].join("\n\n"),
     eventPrompt: {
       metadataHeading: "Voice Turn Metadata",

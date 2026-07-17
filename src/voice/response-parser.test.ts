@@ -49,6 +49,35 @@ describe("VoiceResponseParser", () => {
     expect(ignored).toBe("vi2");
   });
 
+  test("strips yield markers and reports natural interruption boundaries", async () => {
+    const speech: string[] = [];
+    const boundaries: number[] = [];
+    const parser = new VoiceResponseParser({
+      onSpeech: (text) => { speech.push(text); },
+      onYieldBoundary: (offset) => { boundaries.push(offset); },
+      onMessage: () => {},
+      onIgnore: () => {},
+    });
+
+    await parser.push("I checked it. <");
+    await parser.push("|> The restart is at seven thirty, not seven.<|> Optional detail.");
+    const result = await parser.finish();
+
+    expect(speech).toEqual([
+      "I checked it.",
+      "The restart is at seven thirty, not seven.",
+      "Optional detail.",
+    ]);
+    expect(boundaries).toEqual([
+      "I checked it.".length,
+      "I checked it. The restart is at seven thirty, not seven.".length,
+    ]);
+    expect(result.plannedSpeech).toBe(
+      "I checked it. The restart is at seven thirty, not seven. Optional detail.",
+    );
+    expect(result.malformed).toBe(false);
+  });
+
   test("commits trailing sentence punctuation after a short stream idle", async () => {
     const speech: string[] = [];
     const parser = new VoiceResponseParser({
