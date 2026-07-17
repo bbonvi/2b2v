@@ -236,9 +236,22 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
     "ALTER TABLE dice_rolls ADD COLUMN trait TEXT",
     "ALTER TABLE dice_rolls ADD COLUMN lang TEXT NOT NULL DEFAULT 'en' CHECK(lang IN ('en', 'ru'))",
     "ALTER TABLE dice_rolls ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0 CHECK(is_private IN (0, 1))",
+    "ALTER TABLE voice_participants ADD COLUMN present_at_start INTEGER NOT NULL DEFAULT 0 CHECK(present_at_start IN (0, 1))",
+    "ALTER TABLE voice_output_turns ADD COLUMN trigger_segment_id INTEGER REFERENCES voice_transcript_segments(id)",
+    "ALTER TABLE voice_sessions ADD COLUMN handoff_json TEXT",
   ]) {
     ignoreExistingColumn(raw, sql);
   }
+
+  raw.run(`UPDATE voice_output_turns AS output
+    SET trigger_segment_id = (
+      SELECT segment.id FROM voice_transcript_segments AS segment
+      WHERE segment.session_id = output.session_id
+        AND segment.started_at <= output.started_at
+      ORDER BY segment.started_at DESC, segment.id DESC
+      LIMIT 1
+    )
+    WHERE output.trigger_segment_id IS NULL`);
 
   raw.run("DROP TABLE IF EXISTS images");
 

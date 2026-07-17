@@ -438,6 +438,54 @@ export interface ExternalImagesConfig {
   maxPageImages: number;
 }
 
+/** Local speech recognition used for finalized Discord voice utterances. */
+export interface VoiceSttConfig {
+  command: string;
+  modelPath: string;
+  language: string;
+  initialPrompt: string;
+  serverPort: number;
+  threads: number;
+  timeoutMs: number;
+  minUtteranceMs: number;
+  maxUtteranceMs: number;
+  speechPauseMs: number;
+  speechPreRollMs: number;
+  speechRmsThreshold: number;
+}
+
+/** Restricted synthetic-input controls used by /voice-test and the dashboard. */
+export interface VoiceTestingConfig {
+  enabled: boolean;
+  guildIds: string[];
+  userIds: string[];
+  includeSyntheticInMaintenance: boolean;
+}
+
+/** Live Discord voice agent behavior. */
+export interface VoiceConfig {
+  enabled: boolean;
+  provider?: LlmProvider;
+  model: string;
+  modelParams: Record<string, unknown>;
+  thinkingLevel?: ThinkingLevel;
+  wakeWords: string[];
+  lingeringAttentionMs: number;
+  roomQuietMs: number;
+  emptyChannelGraceMs: number;
+  recentSessionContextMs: number;
+  summaryEverySegments: number;
+  summaryEveryMs: number;
+  maintenanceEverySegments: number;
+  stt: VoiceSttConfig;
+  testing: VoiceTestingConfig;
+}
+
+export type VoiceConfigYaml = Partial<Omit<VoiceConfig, "stt" | "testing">> & {
+  stt?: Partial<VoiceSttConfig>;
+  testing?: Partial<VoiceTestingConfig>;
+};
+
 /** Per-guild configuration. Source of truth is the YAML file. */
 export interface GuildConfig {
   guildId: string;
@@ -490,6 +538,8 @@ export interface GuildConfig {
   memoryExtraction: MemoryExtractionConfig;
   /** Durable relationship-profile behavior. */
   relationships?: RelationshipConfig;
+  /** Live Discord voice agent behavior. */
+  voice?: VoiceConfig;
 }
 
 /** Global configuration loaded from file + env. */
@@ -554,6 +604,8 @@ export interface GlobalConfig {
   defaultMemoryExtraction: MemoryExtractionConfig;
   /** Default durable relationship-profile behavior. */
   defaultRelationships?: RelationshipConfig;
+  /** Default live Discord voice agent behavior. */
+  defaultVoice?: VoiceConfig;
   /** Profile-local timed persona modes and presentation state. */
   personaModes?: PersonaModesConfig;
 }
@@ -592,6 +644,7 @@ export interface GuildConfigYaml {
   tts?: Partial<TtsConfig> & {
     voices?: {
       normal?: Partial<VoicePreset>;
+      voiceChannel?: Partial<VoicePreset>;
       /** Obsolete; ignored by runtime and kept only while old YAML is migrated away. */
       whisper?: Partial<VoicePreset>;
     };
@@ -632,6 +685,7 @@ export interface GuildConfigYaml {
   ambientAttention?: AmbientAttentionConfigYaml;
   ambientInitiative?: AmbientInitiativeConfigYaml;
   relationships?: RelationshipConfigYaml;
+  voice?: VoiceConfigYaml;
   replyLoop?: {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;
@@ -682,6 +736,7 @@ export interface MainConfigYaml {
   tts?: Partial<TtsConfig> & {
     voices?: {
       normal?: Partial<VoicePreset>;
+      voiceChannel?: Partial<VoicePreset>;
       /** Obsolete; ignored by runtime and kept only while old YAML is migrated away. */
       whisper?: Partial<VoicePreset>;
     };
@@ -728,6 +783,7 @@ export interface MainConfigYaml {
   ambientAttention?: AmbientAttentionConfigYaml;
   ambientInitiative?: AmbientInitiativeConfigYaml;
   relationships?: RelationshipConfigYaml;
+  voice?: VoiceConfigYaml;
   personaModes?: PersonaModesConfigYaml;
   replyLoop?: {
     maxToolCalls?: number;

@@ -58,6 +58,14 @@ docker compose -f docker-compose.dev.yml exec bot bun run codex:login -- --auth 
 
 Treat Codex auth JSON as a secret. See `.env.example` and `.env.prod.example` for optional keys and infrastructure settings.
 
+## Live Voice
+
+The 2B profile can keep one global Discord voice presence. It receives account-attributed Opus streams, splits utterances on a configurable local speech-energy pause, transcribes them through a persistent pinned whisper.cpp server, runs short Luna turns, and streams ElevenLabs Flash audio back to Discord. Final text transcripts, summaries, audible output prefixes, and cross-channel instructions are durable; raw audio is discarded after transcription. Luna receives a six-hour, 160-event buffer from recent visits to the same channel, with 2B and participant join/leave boundaries rendered inline.
+
+Enable the Discord `GuildVoiceStates` intent and give the bot Connect/Speak permissions. `ELEVENLABS_API_KEY` is required. The Voice dashboard exposes connection health, participants, chronological room history, output/interruption state, the exact outbound Luna request context, durable instructions, join/leave controls, and gated synthetic input. The test-only `/voice text:...` command is registered only in `voice.testing.guildIds`.
+
+`list_channels` includes voice rooms and their current members. Text turns can call `join_voice_channel`, `leave_voice_channel`, and `instruct_voice_channel`; the instruction result is asynchronous and closes through a reply to the original text message. Live voice turns can move or leave their own single presence after the current spoken turn, while a persisted private handoff carries only bounded source-room continuity into the destination. They can also start image jobs, which are delivered to the guild's default text channel and remain visible to the originating voice context through job status. Only the 2B profile enables this runtime by default.
+
 ## Profiles
 
 Each profile owns its configuration, guild overrides, and persona-specific instructions. Shared runtime instructions live alongside them:

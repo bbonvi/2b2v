@@ -237,6 +237,14 @@ export type MessageSender = (
 /** Resolves stored chat asset IDs into Discord-ready file attachments. */
 export type AssetAttachmentResolver = (assetIds: number[]) => Promise<OutboundAttachment[]>;
 
+/** Optional streamed response transport used by live voice instead of Discord text dispatch. */
+export interface ExternalResponseSink {
+  startModelTurn: () => void;
+  push: (delta: string) => Promise<boolean>;
+  finish: (finalText: string) => Promise<{ visible: boolean; memoryText: string; malformed: boolean }>;
+  abort: (userId?: string) => void;
+}
+
 /** Dependencies injected into the handler. No direct discord.js coupling. */
 export interface HandlerDeps {
   globalConfig: GlobalConfig;
@@ -285,6 +293,10 @@ export interface HandlerDeps {
   resolveAssetAttachments?: AssetAttachmentResolver;
   /** Disable streamed Discord sends so callers can re-check state before final delivery. */
   disableLiveOutput?: boolean;
+  /** Replace normal text/voice directive dispatch with a live external stream. */
+  externalResponseSink?: ExternalResponseSink;
+  /** Optional caller cancellation, used for voice barge-in and session departure. */
+  abortSignal?: AbortSignal;
   /** Override default first-message Discord reply anchoring. */
   replyFirstOverride?: boolean;
   /** Called immediately before final visible sends; false drops the reply as stale. */
@@ -2705,6 +2717,12 @@ export async function handleMessage(
     });
 
     const wallController = new AbortController();
+    const onCallerAbort = (): void => wallController.abort(deps.abortSignal?.reason);
+    if (deps.abortSignal?.aborted === true) {
+      wallController.abort(deps.abortSignal.reason);
+    } else {
+      deps.abortSignal?.addEventListener("abort", onCallerAbort, { once: true });
+    }
     const wallTimeout = setTimeout(() => {
       wallController.abort(new AgentTimeBudgetExceededError(deps.guildConfig.replyLoop.wallClockTimeoutMs));
     }, deps.guildConfig.replyLoop.wallClockTimeoutMs);
@@ -2831,8 +2849,12 @@ export async function handleMessage(
         agentTimeBudgetMs: deps.guildConfig.replyLoop.wallClockTimeoutMs,
         llmOutputTimeoutMs: deps.guildConfig.replyLoop.llmOutputTimeoutMs,
         requestLog: reqLog,
-        sendIntermediateText: deps.disableLiveOutput === true ? undefined : sendIntermediateStatus,
-        streamFinalText: deps.disableLiveOutput === true
+        sendIntermediateText: deps.externalResponseSink !== undefined || deps.disableLiveOutput === true
+          ? undefined
+          : sendIntermediateStatus,
+        streamFinalText: deps.externalResponseSink !== undefined
+          ? async (delta) => await deps.externalResponseSink?.push(delta) ?? false
+          : deps.disableLiveOutput === true
           ? undefined
           : async (delta, destinationChannelId) => {
             const dispatcher = liveDispatcherFor(destinationChannelId);
@@ -2843,6 +2865,7 @@ export async function handleMessage(
             return sent;
           },
         onModelTurnStart: (destinationChannelId) => {
+          deps.externalResponseSink?.startModelTurn();
           liveDispatchers.get(destinationChannelId ?? "")?.startModelTurn();
         },
         onStillWorking: deps.onStillWorking,
@@ -2875,6 +2898,7 @@ export async function handleMessage(
       mainReplyProviderNativeContent = latestProviderNativeContent(mainMessages);
     } finally {
       clearTimeout(wallTimeout);
+      deps.abortSignal?.removeEventListener("abort", onCallerAbort);
     }
 
     if (finalStopReason === "length") {
@@ -2885,6 +2909,25 @@ export async function handleMessage(
           || [...liveDispatchers.values()].some((dispatcher) => dispatcher.sentCount() > 0),
       });
       return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
+    }
+
+    if (deps.externalResponseSink !== undefined) {
+      const external = await deps.externalResponseSink.finish(finalText);
+      if (external.malformed) {
+        deps.log?.warn("external response blocked after malformed private output", {
+          outputLength: finalText.length,
+        });
+      }
+      scheduleMemoryPass(external.memoryText, external.visible);
+      return {
+        triggered: true,
+        triggerResult,
+        agentRan: true,
+        responseText: external.memoryText,
+        maintenanceTranscript,
+        availableTools: tools,
+        promptContext: maintenancePromptContext,
+      };
     }
 
     const parsedResponse = parseResponseDirectives(finalText);

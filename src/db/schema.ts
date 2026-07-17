@@ -269,6 +269,106 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_agent_jobs_status
     ON agent_jobs(status, created_at);
 
+  CREATE TABLE IF NOT EXISTS voice_sessions (
+    id                         TEXT PRIMARY KEY,
+    guild_id                   TEXT NOT NULL,
+    channel_id                 TEXT NOT NULL,
+    state                      TEXT NOT NULL CHECK(state IN ('connecting', 'active', 'ended', 'failed')),
+    started_at                 INTEGER NOT NULL,
+    ended_at                   INTEGER,
+    rolling_summary            TEXT NOT NULL DEFAULT '',
+    summary_through_segment_id INTEGER,
+    final_summary              TEXT NOT NULL DEFAULT '',
+    handoff_json               TEXT,
+    error                      TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_voice_sessions_scope_time
+    ON voice_sessions(guild_id, channel_id, started_at);
+
+  CREATE TABLE IF NOT EXISTS voice_participants (
+    session_id      TEXT NOT NULL REFERENCES voice_sessions(id) ON DELETE CASCADE,
+    user_id         TEXT NOT NULL,
+    username        TEXT NOT NULL,
+    joined_at       INTEGER NOT NULL,
+    left_at         INTEGER,
+    present_at_start INTEGER NOT NULL DEFAULT 0 CHECK(present_at_start IN (0, 1)),
+    PRIMARY KEY(session_id, user_id, joined_at)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_voice_participants_user
+    ON voice_participants(user_id, joined_at);
+
+  CREATE TABLE IF NOT EXISTS voice_instructions (
+    id                      TEXT PRIMARY KEY,
+    status                  TEXT NOT NULL CHECK(status IN ('queued', 'active', 'waiting', 'resolved', 'ignored', 'interrupted', 'failed')),
+    instruction             TEXT NOT NULL,
+    source_guild_id         TEXT NOT NULL,
+    source_channel_id       TEXT NOT NULL,
+    source_message_id       TEXT NOT NULL,
+    source_message_text     TEXT NOT NULL,
+    requester_id            TEXT NOT NULL,
+    requester_username      TEXT NOT NULL,
+    target_session_id       TEXT NOT NULL REFERENCES voice_sessions(id),
+    created_at              INTEGER NOT NULL,
+    activated_at            INTEGER,
+    last_progress_at        INTEGER,
+    resolved_at             INTEGER,
+    result_summary          TEXT,
+    report_message_id       TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_voice_instructions_session_status
+    ON voice_instructions(target_session_id, status, created_at);
+
+  CREATE TABLE IF NOT EXISTS voice_transcript_segments (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id      TEXT NOT NULL REFERENCES voice_sessions(id) ON DELETE CASCADE,
+    instruction_id  TEXT REFERENCES voice_instructions(id),
+    user_id         TEXT NOT NULL,
+    username        TEXT NOT NULL,
+    started_at      INTEGER NOT NULL,
+    ended_at        INTEGER NOT NULL,
+    raw_text        TEXT NOT NULL,
+    normalized_text TEXT NOT NULL,
+    language        TEXT NOT NULL,
+    confidence      REAL,
+    stt_model       TEXT NOT NULL,
+    source          TEXT NOT NULL CHECK(source IN ('stt', 'test_injection')),
+    synthetic       INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_voice_segments_session_time
+    ON voice_transcript_segments(session_id, started_at);
+
+  CREATE INDEX IF NOT EXISTS idx_voice_segments_speaker_time
+    ON voice_transcript_segments(user_id, started_at);
+
+  CREATE TABLE IF NOT EXISTS voice_output_turns (
+    id                     TEXT PRIMARY KEY,
+    session_id             TEXT NOT NULL REFERENCES voice_sessions(id) ON DELETE CASCADE,
+    instruction_id         TEXT REFERENCES voice_instructions(id),
+    trigger_segment_id     INTEGER REFERENCES voice_transcript_segments(id),
+    planned_text           TEXT NOT NULL,
+    audible_text           TEXT NOT NULL DEFAULT '',
+    started_at             INTEGER NOT NULL,
+    ended_at               INTEGER,
+    interrupted_at         INTEGER,
+    interrupted_by_user_id TEXT,
+    cutoff                 INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_voice_output_turns_session_time
+    ON voice_output_turns(session_id, started_at);
+
+  CREATE TABLE IF NOT EXISTS voice_maintenance_checkpoints (
+    session_id        TEXT NOT NULL REFERENCES voice_sessions(id) ON DELETE CASCADE,
+    kind              TEXT NOT NULL CHECK(kind IN ('summary', 'memory', 'relationship')),
+    through_segment_id INTEGER NOT NULL DEFAULT 0,
+    last_run_at       INTEGER NOT NULL,
+    PRIMARY KEY(session_id, kind)
+  );
+
   CREATE TABLE IF NOT EXISTS message_assets (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id            TEXT NOT NULL,

@@ -23,6 +23,10 @@ memoryExtraction:
 ambientAttention:
   enabled: false
 
+# Schema-compatible but deliberately disabled for the Delamain profile.
+voice:
+  enabled: false
+
 promptTransport:
     openaiCodex:
         mode: split-input # (send stable sections as separate cacheable input messages)

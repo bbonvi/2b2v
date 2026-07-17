@@ -1,0 +1,1 @@
+Queue a durable request for 2B's current live voice presence. The return value acknowledges delivery, not completion. Reuse `continue_instruction_id` only for a real clarification to an already-open instruction; do not redispatch repeated questions.

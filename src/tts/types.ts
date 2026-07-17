@@ -20,6 +20,8 @@ export interface TtsConfig {
   enabled: boolean;
   voices: {
     normal: VoicePreset;
+    /** Dedicated low-latency preset for live Discord voice channels. */
+    voiceChannel?: VoicePreset;
   };
 }
 

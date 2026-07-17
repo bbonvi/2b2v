@@ -332,13 +332,53 @@ tts:
             seed: 1 # (best-effort consistency seed)
             similarityBoost: 0.70 # (how strongly to preserve selected voice identity)
             model: eleven_v3
-        # whisper is obsolete and ignored. Use Eleven v3 tags like [whispers] inside <voice>...</voice>.
-        # whisper:
-        #     voiceId: WAhoMTNdLdMoq1j3wf3I
-        #     # speed: 1.05
-        #     # stability: 0.5
-        #     # similarityBoost: 0.4
-        #     model: eleven_v3
+        voiceChannel:
+            voiceId: WAhoMTNdLdMoq1j3wf3I
+            stability: 0.65
+            applyTextNormalization: "auto"
+            outputFormat: opus_48000_64
+            speed: 1.12
+            style: 0.0
+            seed: 1
+            similarityBoost: 0.70
+            useSpeakerBoost: false
+            model: eleven_multilingual_v2
+
+# One global live Discord voice presence. Finalized transcripts are retained in SQLite;
+# raw audio is used only for local inference and discarded.
+voice:
+    enabled: true
+    provider: openai-codex
+    model: gpt-5.6-sol
+    modelParams:
+        textVerbosity: low
+    thinkingLevel: minimal
+    wakeWords: ["2b", "туби"]
+    lingeringAttentionMs: 45000
+    roomQuietMs: 180
+    emptyChannelGraceMs: 120000
+    recentSessionContextMs: 21600000
+    summaryEverySegments: 30
+    summaryEveryMs: 300000
+    maintenanceEverySegments: 60
+    stt:
+        command: whisper-server
+        modelPath: /opt/whisper/models/ggml-small.bin
+        language: ru
+        initialPrompt: "Туби, 2B. Разговорная русская речь."
+        serverPort: 18080
+        threads: 6
+        timeoutMs: 20000
+        minUtteranceMs: 180
+        maxUtteranceMs: 15000
+        speechPauseMs: 450
+        speechPreRollMs: 160
+        speechRmsThreshold: 0.015
+    testing:
+        enabled: true
+        guildIds: ["610536610487861291", "1075346959298199564"]
+        userIds: []
+        includeSyntheticInMaintenance: false
 
 # Max seconds between messages to merge consecutive same-author messages
 mergeMessageGapSeconds: 90 # (gap threshold for merging same-author history messages)

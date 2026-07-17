@@ -95,11 +95,12 @@ import {
   type RelationshipMutationResult,
 } from "./relationships";
 import { listUpcomingForContext } from "./db/schedule-repository";
-import { registerSlashCommands } from "./commands/registry";
+import { registerGuildSlashCommands, registerSlashCommands } from "./commands/registry";
 import { statusCommandDefinition } from "./commands/status";
 import { scheduleCommandDefinition } from "./commands/schedule";
 import { memoryWipeCommandDefinition } from "./commands/memory-wipe";
 import { vpnCommandDefinition } from "./commands/vpn";
+import { voiceTestCommandDefinition } from "./commands/voice-test.ts";
 import { createVpnClient, type VpnClient } from "./vpn/api-client";
 import { createSessionStore, type SessionStore } from "./vpn/session";
 import { loadInstructionBundle, type PromptBundle } from "./config/instruction-bundle";
@@ -117,6 +118,13 @@ import { join } from "path";
 import { mkdirSync, existsSync, readdirSync, statSync, watch, type FSWatcher } from "fs";
 import type { Database } from "./db/database";
 import { ActivityType, ChannelType, PermissionFlagsBits, type Client, type Guild, type GuildBasedChannel, type GuildMember, type Message, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
+import { renderVoiceHistory, renderVoiceMoveHandoff } from "./voice/history.ts";
+import {
+  VoiceRepository,
+  type VoiceHistoryRecord,
+} from "./voice/repository.ts";
+import { VoiceRuntime, type VoiceTurnRequest } from "./voice/runtime.ts";
+import { createVoiceTools } from "./voice/tools.ts";
 
 const pkg = await Bun.file(new URL("../package.json", import.meta.url).pathname).json() as { version?: string };
 const CONTEXT_IMAGE_MAX_DIMENSION = 1024;
@@ -893,6 +901,492 @@ function getRelationshipConfig(guildConfig: GuildConfig): RelationshipConfig {
   return config;
 }
 
+const voiceRepository = new VoiceRepository(db);
+const voiceMaintenanceBusy = new Set<string>();
+
+function getVoiceConfig(guildConfig: GuildConfig) {
+  const voice = guildConfig.voice ?? globalConfig.defaultVoice;
+  if (voice === undefined) throw new Error("voice configuration is unavailable");
+  return voice;
+}
+
+function voiceGuildConfig(guildConfig: GuildConfig): GuildConfig {
+  const voice = getVoiceConfig(guildConfig);
+  return {
+    ...guildConfig,
+    llmProvider: voice.provider ?? guildConfig.llmProvider,
+    model: voice.model,
+    modelParams: voice.modelParams,
+    thinkingLevel: voice.thinkingLevel,
+    reasoningContinuation: { ...guildConfig.reasoningContinuation, enabled: false },
+    backgroundLlm: {
+      ...guildConfig.backgroundLlm,
+      provider: voice.provider ?? guildConfig.backgroundLlm.provider,
+      model: voice.model,
+      modelParams: voice.modelParams,
+      thinkingLevel: voice.thinkingLevel,
+    },
+  };
+}
+
+async function voiceAssembledContext(
+  request: VoiceTurnRequest,
+  guild: Guild,
+  guildConfig: GuildConfig,
+): Promise<AssembledContext> {
+  const instruction = request.instruction;
+  const transcript = renderVoiceHistory(request.history, guildConfig.timezone);
+  const latestUserMessage: HistoryMessage = {
+    id: `voice:${request.sessionId}:${request.trigger.id}`,
+    author: request.trigger.username,
+    authorDisplayName: guild.members.cache.get(request.trigger.userId)?.displayName,
+    authorId: request.trigger.userId,
+    content: request.trigger.normalizedText,
+    isBot: false,
+    timestamp: request.trigger.startedAt,
+    replyToId: null,
+    hasEmbeds: false,
+    isSynthetic: request.trigger.synthetic,
+    relatedThreadId: null,
+  };
+  const replyFallbackDeps = createDiscordReplyFallbackDeps({
+    db,
+    clientChannelsFetch: (channelId) => client.channels.fetch(channelId),
+    guild,
+    guildId: request.guildId,
+    channelId: request.channelId,
+    guildConfig,
+  });
+  const base = await buildContext(
+    request.guildId,
+    request.channelId,
+    guild,
+    guildConfig,
+    request.trigger.normalizedText,
+    latestUserMessage,
+    replyFallbackDeps,
+    false,
+    {
+      timestamp: request.trigger.startedAt,
+      messageId: latestUserMessage.id,
+    },
+    "live",
+    undefined,
+    {
+      appendLatestToHistory: false,
+      additionalVisibleUserIds: request.transcript
+        .filter((segment) => !segment.synthetic)
+        .map((segment) => segment.userId),
+    },
+  );
+  const voiceSection = {
+    label: "Live Voice Room",
+    text: [
+      "## Live Voice Room",
+      `GuildID: ${request.guildId}`,
+      `Voice ChannelID: ${request.channelId}`,
+      "The history below is chronological and may span recent visits to this channel. [room] lines mark presence boundaries; user speech is fallible ASR output; 2B lines are words previously audible in the room, and [interrupted] marks a partial reply.",
+      transcript,
+      instruction === undefined
+        ? ""
+        : [
+          "",
+          "## Open Voice Instruction",
+          `InstructionID: ${instruction.id}`,
+          `Status: ${instruction.status}`,
+          `Requester: @${instruction.requesterUsername} (${instruction.requesterId})`,
+          `Source GuildID: ${instruction.sourceGuildId}`,
+          `Source ChannelID: ${instruction.sourceChannelId}`,
+          `Source MsgID: ${instruction.sourceMessageId}`,
+          `Original asking message: ${instruction.sourceMessageText}`,
+          `Instruction: ${instruction.instruction}`,
+        ].join("\n"),
+    ].filter((part) => part !== "").join("\n"),
+    cached: false,
+    role: "developer" as const,
+  };
+  const handoffSection = request.handoff === undefined
+    ? undefined
+    : {
+      label: "Voice Move Handoff",
+      text: renderVoiceMoveHandoff(request.handoff, guildConfig.timezone),
+      cached: false,
+      role: "developer" as const,
+    };
+  const currentContextIndex = base.sections.findIndex((section) => section.label === "Current Context");
+  const insertAt = currentContextIndex === -1 ? base.sections.length : currentContextIndex;
+  return {
+    ...base,
+    sections: [
+      ...base.sections.slice(0, insertAt),
+      ...(handoffSection === undefined ? [] : [handoffSection]),
+      voiceSection,
+      ...base.sections.slice(insertAt),
+    ],
+    userMessage: request.trigger.normalizedText,
+  };
+}
+
+async function resolveDefaultVoiceTextChannel(guildId: string): Promise<SendableGuildChannel | null> {
+  const guild = await resolveClientGuild(guildId);
+  if (guild === null) return null;
+  const configured = getGuildConfig(guildId).ambientInitiative?.mainChannelId;
+  if (configured !== undefined && configured !== "") {
+    const channel = client.channels.cache.get(configured) ?? await client.channels.fetch(configured).catch(() => null);
+    if (channel !== null && isSendableGuildChannel(channel)) return channel;
+  }
+  if (guild.systemChannel !== null && isSendableGuildChannel(guild.systemChannel)) return guild.systemChannel;
+  const row = db.raw.prepare(`SELECT channel_id FROM messages
+    WHERE guild_id = ? AND is_bot = 0 AND deleted_at IS NULL
+    GROUP BY channel_id ORDER BY COUNT(*) DESC LIMIT 1`).get(guildId) as { channel_id: string } | null;
+  if (row !== null) {
+    const channel = client.channels.cache.get(row.channel_id) ?? await client.channels.fetch(row.channel_id).catch(() => null);
+    if (channel !== null && isSendableGuildChannel(channel)) return channel;
+  }
+  return null;
+}
+
+async function sendVoiceTextDirective(message: {
+  channelId?: string;
+  replyTo?: string;
+  resolvesInstruction?: string;
+  text: string;
+}): Promise<{ sentMessageId: string }> {
+  const snapshot = voiceRuntime.snapshot();
+  const instruction = message.resolvesInstruction === undefined
+    ? undefined
+    : voiceRepository.getInstruction(message.resolvesInstruction);
+  const guildId = instruction?.sourceGuildId ?? snapshot.guildId;
+  const explicit = message.channelId ?? instruction?.sourceChannelId;
+  let channel: SendableGuildChannel | null = null;
+  if (explicit !== undefined) {
+    const fetched = client.channels.cache.get(explicit) ?? await client.channels.fetch(explicit).catch(() => null);
+    if (fetched !== null && isSendableGuildChannel(fetched)) channel = fetched;
+  } else if (guildId !== undefined) {
+    channel = await resolveDefaultVoiceTextChannel(guildId);
+  }
+  if (channel === null) throw new Error("No sendable default text channel is available for the voice message.");
+  let sent: Message | undefined;
+  if (message.replyTo !== undefined && "messages" in channel) {
+    const target = await channel.messages.fetch(message.replyTo).catch(() => null);
+    if (target !== null) {
+      sent = await target.reply({
+        content: message.text,
+        allowedMentions: { repliedUser: true, users: instruction === undefined ? [] : [instruction.requesterId] },
+      });
+    }
+  }
+  if (sent === undefined) {
+    const fallback = instruction === undefined || message.text.includes(`<@${instruction.requesterId}>`)
+      ? message.text
+      : `<@${instruction.requesterId}> ${message.text}`;
+    sent = await channel.send({
+      content: fallback,
+      allowedMentions: { users: instruction === undefined ? [] : [instruction.requesterId] },
+    });
+  }
+  return { sentMessageId: sent.id };
+}
+
+async function runVoiceAgentTurn(request: VoiceTurnRequest): Promise<void> {
+  const runtime = voiceRuntime;
+  const guild = await resolveClientGuild(request.guildId);
+  if (guild === null) throw new Error(`Voice guild ${request.guildId} is unavailable.`);
+  const baseConfig = getGuildConfig(request.guildId);
+  const guildConfig = voiceGuildConfig(baseConfig);
+  const context = await voiceAssembledContext(request, guild, guildConfig);
+  const origin = request.instruction === undefined
+    ? {
+      requesterId: request.trigger.userId,
+      requesterUsername: request.trigger.username,
+      sourceMessageId: `voice:${request.sessionId}:${request.trigger.id}`,
+      sourceQuote: request.trigger.normalizedText,
+    }
+    : {
+      requesterId: request.instruction.requesterId,
+      requesterUsername: request.instruction.requesterUsername,
+      sourceMessageId: request.instruction.sourceMessageId,
+      sourceQuote: request.instruction.sourceMessageText,
+    };
+  const allowedToolNames = new Set([
+    "list_channels",
+    "list_memories",
+    "read_asset",
+    "search_asset",
+    "read_user_avatar",
+    "fetch_images",
+    "fetch_url",
+    "web_search",
+    "search_images",
+    "summarize_video",
+    "join_voice_channel",
+    "leave_voice_channel",
+    "codex_generate_image",
+    "cancel_agent_job",
+    "list_agent_jobs",
+    "read_agent_job",
+  ]);
+  const imageDeliveryChannel = await resolveDefaultVoiceTextChannel(request.guildId);
+  const tools = buildAgentTools(
+    request.guildId,
+    request.channelId,
+    guildConfig,
+    guild,
+    undefined,
+    undefined,
+    origin,
+    {
+      includeImageGenerationTools: imageDeliveryChannel !== null,
+      voiceToolSurface: "voice",
+      ...(imageDeliveryChannel === null
+        ? {}
+        : {
+          imageDelivery: {
+            guildId: imageDeliveryChannel.guildId,
+            channelId: imageDeliveryChannel.id,
+          },
+        }),
+    },
+  ).filter((tool) => allowedToolNames.has(tool.name));
+  const sink = runtime.createResponseSink(request.trigger.id, request.instruction?.id);
+  const requestLog = new RequestLog(request.guildId, request.channelId, requestLogStore);
+  requestLog.setAuthor(request.trigger.username);
+  requestLog.setTrigger({
+    type: "voice_turn",
+    sessionId: request.sessionId,
+    segmentId: request.trigger.id,
+    instructionId: request.instruction?.id,
+  });
+  requestLog.setAgentRan(true);
+  const runtimePrompts = {
+    ...promptBundle.runtime,
+    reply: promptBundle.runtime.voice?.runtime ?? "",
+    finalActionInstruction: promptBundle.runtime.voice?.finalActionInstruction ?? "",
+  };
+  const incoming: IncomingMessage = {
+    content: request.trigger.normalizedText,
+    guildId: request.guildId,
+    guildName: guild.name,
+    channelId: request.channelId,
+    channelName: voiceRuntime.snapshot().channelName ?? request.channelId,
+    authorId: request.trigger.userId,
+    authorUsername: request.trigger.username,
+    authorIsBot: false,
+    botUserId: client.user?.id ?? "",
+    mentionedUserIds: [],
+    translatedContent: request.trigger.normalizedText,
+    messageId: `voice:${request.sessionId}:${request.trigger.id}`,
+  };
+  try {
+    await handleMessage(incoming, createHandlerDeps({
+      guildId: request.guildId,
+      guildConfig,
+      context,
+      currentChannelId: request.channelId,
+      sender: () => Promise.resolve({ sentMessageId: `voice:${crypto.randomUUID()}` }),
+      extraTools: tools,
+      log: log.child({ component: "voice-agent", sessionId: request.sessionId }),
+      requestLog,
+      modeLifecycle: false,
+      overrides: {
+        forceTrigger: true,
+        systemPrompt: promptBundle.systemPrompt,
+        personaPrompt: promptBundle.corePrompt,
+        runtimePrompts,
+        externalResponseSink: sink,
+        abortSignal: request.abortSignal,
+        afterReply: undefined,
+      },
+    }));
+  } catch (error) {
+    sink.abort();
+    throw error;
+  } finally {
+    runtime.releaseResponseSink(sink);
+    requestLog.emit(log);
+  }
+}
+
+async function runVoiceSummary(
+  sessionId: string,
+  guild: Guild,
+  guildConfig: GuildConfig,
+  history: VoiceHistoryRecord[],
+  final: boolean,
+): Promise<string> {
+  let summary = "";
+  const context: AssembledContext = {
+    sections: [{
+      label: "Current Context",
+      text: `## Voice History\n${renderVoiceHistory(history, guildConfig.timezone)}`,
+      cached: false,
+      role: "developer",
+    }],
+    userMessage: final
+      ? "Write the final concise room summary."
+      : "Refresh the concise rolling room summary.",
+    visibleUserIds: [...new Set(history.flatMap((entry) =>
+      entry.kind === "transcript" ? [entry.transcript.userId] : []
+    ))],
+  };
+  const incoming: IncomingMessage = {
+    content: context.userMessage,
+    guildId: guild.id,
+    guildName: guild.name,
+    channelId: `voice-summary:${sessionId}`,
+    channelName: "voice-summary",
+    authorId: "voice_summary",
+    authorUsername: "voice_summary",
+    authorIsBot: false,
+    botUserId: client.user?.id ?? "",
+    mentionedUserIds: [],
+    translatedContent: context.userMessage,
+    messageId: `voice-summary:${sessionId}:${Date.now()}`,
+  };
+  const summaryRuntime = {
+    ...promptBundle.runtime,
+    reply: "Summarize the voice room in 3-6 factual sentences. Preserve important decisions, requests, relationships, and unresolved points. Do not include a raw transcript or XML tags.",
+    finalActionInstruction: "Output only the summary.",
+  };
+  const requestLog = new RequestLog(guild.id, `voice-summary:${sessionId}`, requestLogStore);
+  await handleMessage(incoming, createHandlerDeps({
+    guildId: guild.id,
+    guildConfig,
+    context,
+    currentChannelId: `voice-summary:${sessionId}`,
+    sender: (text) => {
+      summary = `${summary}\n${text}`.trim();
+      return Promise.resolve({ sentMessageId: `voice-summary:${crypto.randomUUID()}` });
+    },
+    extraTools: [],
+    log: log.child({ component: "voice-summary", sessionId }),
+    requestLog,
+    modeLifecycle: false,
+    overrides: {
+      forceTrigger: true,
+      systemPrompt: "You maintain compact private context for a live Discord voice room.",
+      personaPrompt: "",
+      runtimePrompts: summaryRuntime,
+      disableLiveOutput: true,
+      afterReply: undefined,
+    },
+  }));
+  requestLog.emit(log);
+  return summary.trim();
+}
+
+async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<void> {
+  if (voiceMaintenanceBusy.has(sessionId)) return;
+  const session = voiceRepository.getSession(sessionId);
+  if (session === undefined) return;
+  const guild = await resolveClientGuild(session.guildId);
+  if (guild === null) return;
+  const baseConfig = getGuildConfig(session.guildId);
+  const guildConfig = voiceGuildConfig(baseConfig);
+  const includeSynthetic = getVoiceConfig(baseConfig).testing.includeSyntheticInMaintenance;
+  const maintenanceChannel = client.channels.cache.get(session.channelId)
+    ?? await client.channels.fetch(session.channelId).catch(() => null);
+  const maintenanceChannelName = maintenanceChannel !== null
+    && "name" in maintenanceChannel
+    && typeof maintenanceChannel.name === "string"
+    ? maintenanceChannel.name
+    : session.channelId;
+  const history = voiceRepository.listHistory(sessionId, 1_000).filter((entry) =>
+    entry.kind !== "transcript" || includeSynthetic || !entry.transcript.synthetic
+  );
+  const segments = history.flatMap((entry) => entry.kind === "transcript" ? [entry.transcript] : []);
+  if (segments.length === 0) return;
+  voiceMaintenanceBusy.add(sessionId);
+  try {
+    const summary = await runVoiceSummary(sessionId, guild, guildConfig, history, final);
+    const latestId = segments.at(-1)?.id ?? 0;
+    voiceRepository.updateSession(sessionId, {
+      rollingSummary: summary,
+      summaryThroughSegmentId: latestId,
+      ...(final ? { finalSummary: summary } : {}),
+    });
+    voiceRepository.setCheckpoint(sessionId, "summary", latestId);
+
+    const transcriptText = renderVoiceHistory(history, guildConfig.timezone);
+    const userIds = [...new Set(segments.map((segment) => segment.userId))];
+    const last = segments.at(-1);
+    if (last === undefined) return;
+    const context: AssembledContext = {
+      sections: [{ label: "Current Context", text: `## Voice Transcript Maintenance\n${transcriptText}`, cached: false, role: "developer" }],
+      userMessage: transcriptText,
+      visibleUserIds: userIds,
+    };
+    const memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0] = {
+      sourceMessageId: `voice:${sessionId}:${latestId}`,
+      userMessage: transcriptText,
+      assistantReply: "",
+      recentContext: transcriptText,
+      context,
+      incomingMessage: {
+        content: transcriptText,
+        guildId: session.guildId,
+        guildName: guild.name,
+        channelId: session.channelId,
+        channelName: maintenanceChannelName,
+        authorId: last.userId,
+        authorUsername: last.username,
+        authorIsBot: false,
+        botUserId: client.user?.id ?? "",
+        mentionedUserIds: [],
+        translatedContent: transcriptText,
+        messageId: `voice:${sessionId}:${latestId}`,
+      },
+      visibleReplySent: false,
+    };
+    await runMemoryPostReplyExtraction({
+      guildConfig,
+      memoryRequest,
+      guild,
+      channel: maintenanceChannelName,
+      sourceRequestId: sessionId,
+      source: "voice_session",
+      currentUserId: last.userId,
+      currentUsername: last.username,
+    });
+    voiceRepository.setCheckpoint(sessionId, "memory", latestId);
+    for (const userId of userIds) {
+      const speaker = segments.findLast((segment) => segment.userId === userId);
+      if (speaker === undefined) continue;
+      await runRelationshipPostReplyExtraction({
+        guildConfig,
+        memoryRequest: {
+          ...memoryRequest,
+          incomingMessage: {
+            ...memoryRequest.incomingMessage,
+            authorId: speaker.userId,
+            authorUsername: speaker.username,
+          },
+        },
+        guild,
+        channel: maintenanceChannelName,
+        source: "voice_session",
+        sourceRequestId: sessionId,
+        currentUserId: speaker.userId,
+        currentUsername: speaker.username,
+      });
+    }
+    voiceRepository.setCheckpoint(sessionId, "relationship", latestId);
+  } finally {
+    voiceMaintenanceBusy.delete(sessionId);
+  }
+}
+
+const voiceRuntime = new VoiceRuntime({
+  client,
+  repository: voiceRepository,
+  getGuildConfig,
+  elevenLabsApiKey: globalConfig.elevenLabsApiKey,
+  log: log.child({ component: "voice" }),
+  onTurn: runVoiceAgentTurn,
+  sendMessage: sendVoiceTextDirective,
+  onMaintenance: runVoiceMaintenance,
+});
+
 const SCHEDULED_ATTENTION_COOLDOWN_MS = 30_000;
 const scheduledAttentionBusy = new Map<string, number>();
 
@@ -989,6 +1483,28 @@ if (botUser !== null) {
       ],
     });
     log.info("slash commands registered", { count: commandCount });
+    const voiceTestGuildIds = [...new Set([
+      ...(globalConfig.defaultVoice?.testing.guildIds ?? []),
+      ...[...guildConfigs.values()]
+        .filter((config) => config.voice?.enabled === true && config.voice.testing.enabled)
+        .flatMap((config) => config.voice?.testing.guildIds ?? []),
+    ])];
+    if (profile === "2b" && globalConfig.defaultVoice?.enabled === true && globalConfig.defaultVoice.testing.enabled && voiceTestGuildIds.length > 0) {
+      const accessibleGuildIds = voiceTestGuildIds.filter((guildId) => client.guilds.cache.has(guildId));
+      const skippedGuildIds = voiceTestGuildIds.filter((guildId) => !client.guilds.cache.has(guildId));
+      if (accessibleGuildIds.length > 0) {
+        const voiceCommandCount = await registerGuildSlashCommands({
+          token: globalConfig.discordToken,
+          clientId: botUser.id,
+          guildIds: accessibleGuildIds,
+          commands: [voiceTestCommandDefinition.toJSON()],
+        });
+        log.info("voice test slash command registered", { guilds: accessibleGuildIds.length, count: voiceCommandCount });
+      }
+      if (skippedGuildIds.length > 0) {
+        log.warn("voice test slash command skipped inaccessible guilds", { guildIds: skippedGuildIds });
+      }
+    }
   } catch (err) {
     log.error("failed to register slash commands", {
       error: err instanceof Error ? err.message : String(err),
@@ -1007,6 +1523,7 @@ registerInteractionRuntime({
   vpnEnabled,
   startTime,
   log,
+  voiceRuntime,
   isAcceptingEvents: () => acceptingDiscordMessages,
   trackTask: (task) => {
     void backgroundTasks.track(task);
@@ -1565,6 +2082,7 @@ async function buildContext(
   historyOptions: {
     appendLatestToHistory?: boolean;
     triggerMessageIds?: readonly string[];
+    additionalVisibleUserIds?: readonly string[];
   } = {},
 ): Promise<AssembledContext> {
   // Chat history via the full processing pipeline
@@ -1594,7 +2112,7 @@ async function buildContext(
       ...agentJobs.annotationForMessage(latestUserMessage.id, guildId, channelId),
     ],
   };
-  const { olderText, newerText, visibleUserIds } = await processHistory(
+  const { olderText, newerText, visibleUserIds: historyVisibleUserIds } = await processHistory(
     historyWithoutLatest,
     appendLatestToHistory ? annotatedLatestUserMessage : null,
     {
@@ -1606,6 +2124,10 @@ async function buildContext(
     },
     replyFallbackDeps,
   );
+  const visibleUserIds = [...new Set([
+    ...historyVisibleUserIds,
+    ...(historyOptions.additionalVisibleUserIds ?? []),
+  ])];
 
   const memories = buildMemoryContext({
     db,
@@ -1812,7 +2334,9 @@ async function buildContext(
       parentPreContext,
       olderHistory: olderText,
       newerHistory: newerText,
-      currentContext: [currentContext, relationshipsContext].filter((part) => part !== "").join("\n\n"),
+      currentContext: [currentContext, relationshipsContext, voiceRuntime.presenceContext()]
+        .filter((part) => part !== "")
+        .join("\n\n"),
       personaMode: personaModeRuntime.renderPromptContext(guildId),
       responseInstruction: "",
       userMessage,
@@ -2079,6 +2603,11 @@ function buildAgentTools(
   },
   options: {
     includeImageGenerationTools?: boolean;
+    voiceToolSurface?: "text" | "voice";
+    imageDelivery?: {
+      guildId: string;
+      channelId: string;
+    };
     currentRequest?: {
       requesterId: string;
       requesterUsername: string;
@@ -2197,6 +2726,10 @@ function buildAgentTools(
         const permissions = botChannelPermissions(client, channel);
         const parentName = channel.isThread() ? channel.parent?.name : undefined;
         const categoryName = channel.isThread() ? channel.parent?.parent?.name : channel.parent?.name;
+        const isVoice = channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildStageVoice;
+        const voicePermissions = isVoice && targetGuild.members.me !== null
+          ? channel.permissionsFor(targetGuild.members.me)
+          : undefined;
         return {
           guildId: targetGuild.id,
           guildName: targetGuild.name,
@@ -2208,6 +2741,17 @@ function buildAgentTools(
           isCurrent: channel.id === channelId,
           ...(categoryName !== undefined ? { categoryName } : {}),
           ...(parentName !== undefined ? { parentName } : {}),
+          ...(isVoice
+            ? {
+              canConnect: voicePermissions?.has(PermissionFlagsBits.Connect) === true,
+              canSpeak: voicePermissions?.has(PermissionFlagsBits.Speak) === true,
+              isVoiceConnected: voiceRuntime.snapshot().channelId === channel.id,
+              voiceMembers: [...channel.members.values()]
+                .filter((member) => !member.user.bot)
+                .map((member) => `@${member.user.username} (${member.id})`),
+              userLimit: channel.userLimit,
+            }
+            : {}),
         };
       });
     },
@@ -2559,10 +3103,11 @@ function buildAgentTools(
       resolveAvatarReference: (userId, signal) => loadGuildAvatarReference(guild, userId, signal),
       onGeneratedImage: onGeneratedImage ?? (() => {}),
       ...(effectiveCurrentRequest === undefined ? {} : { enqueueImageJob: (input) => {
-        const deliveryChannelId = channelId;
-        const deliveryGuildId = client.channels.cache.get(deliveryChannelId) !== undefined && isSendableGuildChannel(client.channels.cache.get(deliveryChannelId))
-          ? (client.channels.cache.get(deliveryChannelId) as SendableGuildChannel).guildId
-          : guildId;
+        const deliveryChannelId = options.imageDelivery?.channelId ?? channelId;
+        const deliveryGuildId = options.imageDelivery?.guildId
+          ?? (client.channels.cache.get(deliveryChannelId) !== undefined && isSendableGuildChannel(client.channels.cache.get(deliveryChannelId))
+            ? (client.channels.cache.get(deliveryChannelId) as SendableGuildChannel).guildId
+            : guildId);
         const result = agentJobs.enqueueImageJob({
           guildId,
           channelId,
@@ -2600,6 +3145,20 @@ function buildAgentTools(
   if (globalConfig.braveApiKey !== undefined && globalConfig.braveApiKey !== "") {
     tools.push(createBraveSearchTool({ apiKey: globalConfig.braveApiKey }));
     tools.push(createBraveImageSearchTool({ apiKey: globalConfig.braveApiKey }));
+  }
+  if (effectiveCurrentRequest !== undefined && guildConfig.voice?.enabled === true) {
+    tools.push(...createVoiceTools({
+      runtime: voiceRuntime,
+      origin: {
+        guildId,
+        channelId,
+        sourceMessageId: effectiveCurrentRequest.sourceMessageId,
+        sourceMessageText: effectiveCurrentRequest.sourceQuote,
+        requesterId: effectiveCurrentRequest.requesterId,
+        requesterUsername: effectiveCurrentRequest.requesterUsername,
+      },
+      surface: options.voiceToolSurface ?? "text",
+    }));
   }
 
   const toolPromptVariables: ToolPromptVariables = {
@@ -3676,6 +4235,39 @@ const dashboardManagement = {
     getGlobalConfig: () => globalConfig,
     getGuildConfig: () => resolveGuildConfig(globalConfig, { guildId: "dashboard", slug: "dashboard" }),
   }),
+  voice: {
+      getSnapshot: () => voiceRuntime.snapshot(),
+      subscribe: (listener: (snapshot: object) => void) => voiceRuntime.subscribe(listener),
+      listChannels: () => ({
+        channels: [...client.guilds.cache.values()].flatMap((guild) => [...guild.channels.cache.values()]
+          .filter((channel) => channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildStageVoice)
+          .map((channel) => ({
+            id: channel.id,
+            name: channel.name,
+            guildId: guild.id,
+            guildName: guild.name,
+            members: [...channel.members.values()]
+              .filter((member) => !member.user.bot)
+              .map((member) => member.user.username),
+          }))),
+      }),
+      join: async (channelId: string) => await voiceRuntime.join(channelId),
+      leave: async () => {
+        await voiceRuntime.leave("Voice session ended from the dashboard.");
+        return voiceRuntime.snapshot();
+      },
+      inject: async (text: string) => {
+        const snapshot = voiceRuntime.snapshot();
+        if (snapshot.guildId === undefined) throw new Error("2B is not connected to a voice channel.");
+        return await voiceRuntime.inject({
+          guildId: snapshot.guildId,
+          userId: "dashboard",
+          username: "dashboard",
+          text,
+          trusted: true,
+        });
+      },
+    },
 };
 let dashboardServer: ReturnType<typeof startDashboard> | undefined;
 if (bypassDashboardAuth) {
@@ -3717,6 +4309,7 @@ async function shutdown(signal: string): Promise<void> {
   await inboundMessageTasks.drain();
   await Promise.all([...dispatchers.values()].map((dispatcher) => dispatcher.drain()));
   await scheduler.drain();
+  await voiceRuntime.shutdown();
   await dashboardStop;
   while (imageJobTasks.activeCount() > 0 || backgroundTasks.activeCount() > 0) {
     await Promise.all([imageJobTasks.drain(), backgroundTasks.drain()]);

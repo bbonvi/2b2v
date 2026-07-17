@@ -1,0 +1,1 @@
+Join the specified Discord voice channel as 2B. Use `list_channels` first when the exact ID is unknown. There is one global voice presence: calling this while connected moves it after the current live turn, with only private scoped continuity from the source room.

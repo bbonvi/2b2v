@@ -25,6 +25,7 @@
     "typescript-eslint": "^8.54.0"
   },
   "dependencies": {
+    "@discordjs/voice": "^0.19.2",
     "@earendil-works/pi-agent-core": "^0.80.6",
     "@earendil-works/pi-ai": "^0.80.6",
     "@js-temporal/polyfill": "^0.5.1",
@@ -34,6 +35,8 @@
     "discord.js": "^14.25.1",
     "fflate": "^0.8.2",
     "linkedom": "^0.18.12",
+    "opusscript": "^0.1.1",
+    "prism-media": "^1.3.5",
     "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

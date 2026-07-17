@@ -74,6 +74,8 @@ import type {
   AssetReadingConfig,
   AssetReadingConfigYaml,
   ExternalImagesConfig,
+  VoiceConfig,
+  VoiceConfigYaml,
 } from "./types.ts";
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
 import { resolvePersonaModesConfig } from "../modes/config.ts";
@@ -176,13 +178,103 @@ function resolveTtsConfig(
 
   const normalVoice = resolveVoicePreset(partial.voices?.normal);
   if (normalVoice === undefined) return undefined;
+  const voiceChannel = resolveVoicePreset(partial.voices?.voiceChannel);
 
   return {
     enabled: true,
     voices: {
       normal: normalVoice,
+      ...(voiceChannel !== undefined ? { voiceChannel } : {}),
     },
   };
+}
+
+const DEFAULT_VOICE_CONFIG: VoiceConfig = {
+  enabled: false,
+  provider: "openai-codex",
+  model: "gpt-5.6-luna",
+  modelParams: { textVerbosity: "low" },
+  thinkingLevel: "minimal",
+  wakeWords: ["2b", "туби"],
+  lingeringAttentionMs: 45_000,
+  roomQuietMs: 700,
+  emptyChannelGraceMs: 120_000,
+  recentSessionContextMs: 6 * 60 * 60 * 1000,
+  summaryEverySegments: 30,
+  summaryEveryMs: 5 * 60 * 1000,
+  maintenanceEverySegments: 60,
+  stt: {
+    command: "whisper-server",
+    modelPath: "/opt/whisper/models/ggml-small.bin",
+    language: "ru",
+    initialPrompt: "Туби, 2B. Разговорная русская речь.",
+    serverPort: 18_080,
+    threads: 6,
+    timeoutMs: 20_000,
+    minUtteranceMs: 180,
+    maxUtteranceMs: 15_000,
+    speechPauseMs: 450,
+    speechPreRollMs: 160,
+    speechRmsThreshold: 0.015,
+  },
+  testing: {
+    enabled: false,
+    guildIds: [],
+    userIds: [],
+    includeSyntheticInMaintenance: false,
+  },
+};
+
+function positiveVoiceInteger(value: number, path: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${path} must be a positive integer`);
+  return value;
+}
+
+/** Resolve profile or guild voice configuration without enabling it implicitly. */
+function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYaml | undefined): VoiceConfig {
+  const resolved: VoiceConfig = {
+    ...defaults,
+    ...partial,
+    modelParams: { ...defaults.modelParams, ...partial?.modelParams },
+    wakeWords: partial?.wakeWords !== undefined ? [...partial.wakeWords] : [...defaults.wakeWords],
+    stt: { ...defaults.stt, ...partial?.stt },
+    testing: {
+      ...defaults.testing,
+      ...partial?.testing,
+      guildIds: partial?.testing?.guildIds !== undefined
+        ? [...partial.testing.guildIds]
+        : [...defaults.testing.guildIds],
+      userIds: partial?.testing?.userIds !== undefined
+        ? [...partial.testing.userIds]
+        : [...defaults.testing.userIds],
+    },
+  };
+  if (resolved.model.trim() === "") throw new Error("voice.model must not be empty");
+  if (resolved.stt.command.trim() === "") throw new Error("voice.stt.command must not be empty");
+  if (resolved.stt.modelPath.trim() === "") throw new Error("voice.stt.modelPath must not be empty");
+  if (resolved.wakeWords.some((word) => word.trim() === "")) throw new Error("voice.wakeWords must contain non-empty strings");
+  positiveVoiceInteger(resolved.lingeringAttentionMs, "voice.lingeringAttentionMs");
+  positiveVoiceInteger(resolved.roomQuietMs, "voice.roomQuietMs");
+  positiveVoiceInteger(resolved.emptyChannelGraceMs, "voice.emptyChannelGraceMs");
+  positiveVoiceInteger(resolved.recentSessionContextMs, "voice.recentSessionContextMs");
+  positiveVoiceInteger(resolved.summaryEverySegments, "voice.summaryEverySegments");
+  positiveVoiceInteger(resolved.summaryEveryMs, "voice.summaryEveryMs");
+  positiveVoiceInteger(resolved.maintenanceEverySegments, "voice.maintenanceEverySegments");
+  positiveVoiceInteger(resolved.stt.timeoutMs, "voice.stt.timeoutMs");
+  positiveVoiceInteger(resolved.stt.minUtteranceMs, "voice.stt.minUtteranceMs");
+  positiveVoiceInteger(resolved.stt.maxUtteranceMs, "voice.stt.maxUtteranceMs");
+  positiveVoiceInteger(resolved.stt.serverPort, "voice.stt.serverPort");
+  positiveVoiceInteger(resolved.stt.threads, "voice.stt.threads");
+  positiveVoiceInteger(resolved.stt.speechPauseMs, "voice.stt.speechPauseMs");
+  positiveVoiceInteger(resolved.stt.speechPreRollMs, "voice.stt.speechPreRollMs");
+  if (resolved.stt.serverPort > 65_535) throw new Error("voice.stt.serverPort must be <= 65535");
+  if (!Number.isFinite(resolved.stt.speechRmsThreshold) || resolved.stt.speechRmsThreshold <= 0 || resolved.stt.speechRmsThreshold >= 1) {
+    throw new Error("voice.stt.speechRmsThreshold must be between 0 and 1");
+  }
+  if (resolved.stt.maxUtteranceMs < resolved.stt.minUtteranceMs) {
+    throw new Error("voice.stt.maxUtteranceMs must be >= voice.stt.minUtteranceMs");
+  }
+  return resolved;
 }
 
 /**
@@ -996,6 +1088,7 @@ export function loadGlobalConfig(
   const defaultAmbientAttention = resolveAmbientAttentionConfig(undefined, yaml.ambientAttention);
   const defaultAmbientInitiative = resolveAmbientInitiativeConfig(undefined, yaml.ambientInitiative);
   const defaultRelationships = resolveRelationshipConfig(undefined, yaml.relationships);
+  const defaultVoice = resolveVoiceConfig(DEFAULT_VOICE_CONFIG, yaml.voice);
   const personaModes = resolvePersonaModesConfig(yaml.personaModes, dirname(configPath));
   const openrouterApiKey = env.OPENROUTER_API_KEY;
   const usesOpenRouter = defaultLlmProvider === "openrouter"
@@ -1079,6 +1172,7 @@ export function loadGlobalConfig(
     defaultReasoningContinuation: resolveGlobalReasoningContinuation(yaml.reasoningContinuation),
     defaultMemoryExtraction: resolveGlobalMemoryExtraction(yaml.memoryExtraction),
     defaultRelationships,
+    defaultVoice,
     personaModes,
   };
 }
@@ -1184,6 +1278,7 @@ export function resolveGuildConfig(
     reasoningContinuation: resolveGuildReasoningContinuation(global.defaultReasoningContinuation, partial.reasoningContinuation),
     memoryExtraction: resolveGuildMemoryExtraction(global.defaultMemoryExtraction, partial.memoryExtraction),
     relationships: resolveRelationshipConfig(global.defaultRelationships, partial.relationships),
+    voice: resolveVoiceConfig(global.defaultVoice ?? DEFAULT_VOICE_CONFIG, partial.voice),
   };
 }
 
@@ -1269,6 +1364,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     backgroundLlm: config.backgroundLlm,
     ambientAttention: config.ambientAttention,
     relationships: config.relationships,
+    voice: config.voice,
     replyLoop: config.replyLoop,
     reasoningContinuation: config.reasoningContinuation,
     memoryExtraction: config.memoryExtraction,

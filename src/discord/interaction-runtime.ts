@@ -12,6 +12,8 @@ import { getVpnLocale } from "../vpn/i18n";
 import { handleVpnCommand, handleVpnComponent, type VpnHandlerDeps } from "../vpn/handler";
 import type { VpnClient } from "../vpn/api-client";
 import type { SessionStore } from "../vpn/session";
+import { handleVoiceTestCommand } from "../commands/voice-test.ts";
+import type { VoiceRuntime } from "../voice/runtime.ts";
 
 type CommandHandler = (interaction: ChatInputCommandInteraction) => Promise<void>;
 
@@ -26,6 +28,7 @@ export function registerInteractionRuntime(input: {
   vpnEnabled: boolean;
   startTime: number;
   log: Logger;
+  voiceRuntime?: VoiceRuntime;
   isAcceptingEvents?: () => boolean;
   trackTask?: (task: Promise<void>) => void;
 }): void {
@@ -93,6 +96,24 @@ export function registerInteractionRuntime(input: {
       }
 
       if (!interaction.isChatInputCommand()) return;
+
+      if (interaction.commandName === "voice" && input.voiceRuntime !== undefined) {
+        try {
+          await handleVoiceTestCommand(interaction, input.voiceRuntime);
+        } catch (err) {
+          input.log.error("voice test command error", {
+            guildId: interaction.guildId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({
+              content: err instanceof Error ? err.message : "Voice test failed.",
+              flags: MessageFlags.Ephemeral,
+            }).catch(() => {});
+          }
+        }
+        return;
+      }
 
       if (interaction.commandName === "vpn") {
         try {

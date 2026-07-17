@@ -50,6 +50,14 @@ interface DashboardManagementApi {
     getOverview: (input?: { userId?: string }) => AwaitableDashboardManagementResult;
     reset: (input?: { userId?: string }) => AwaitableDashboardManagementResult;
   };
+  voice?: {
+    getSnapshot: () => AwaitableDashboardManagementResult;
+    subscribe: (listener: (snapshot: object) => void) => () => void;
+    listChannels: () => AwaitableDashboardManagementResult;
+    join: (channelId: string) => AwaitableDashboardManagementResult;
+    leave: () => AwaitableDashboardManagementResult;
+    inject: (text: string) => AwaitableDashboardManagementResult;
+  };
 }
 
 function generateToken(): string {
@@ -364,6 +372,7 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
 
   const server = Bun.serve({
     port,
+    idleTimeout: 255,
     routes: {
       "/login": (req) => {
         if (isAuthBypassed(req)) return Response.redirect("/", 302);
@@ -710,6 +719,105 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
           const url = new URL(req.url);
           return json(management.relationships.reset({ userId: optionalStringParam(url, "userId") }));
         },
+      },
+
+      "/api/voice": async (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        if (management?.voice === undefined) return json({ error: "Live voice is unavailable" }, 404);
+        return json(await management.voice.getSnapshot());
+      },
+
+      "/api/voice/channels": async (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        if (management?.voice === undefined) return json({ error: "Live voice is unavailable" }, 404);
+        return json(await management.voice.listChannels());
+      },
+
+      "/api/voice/live": (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        if (management?.voice === undefined) return json({ error: "Live voice is unavailable" }, 404);
+        let unsubscribe = (): void => {};
+        let heartbeat: ReturnType<typeof setInterval> | undefined;
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            const encoder = new TextEncoder();
+            const send = (snapshot: object): void => {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(snapshot)}\n\n`));
+            };
+            const voice = management.voice;
+            if (voice === undefined) return;
+            void Promise.resolve(voice.getSnapshot()).then((snapshot) => send(snapshot));
+            unsubscribe = voice.subscribe(send);
+            heartbeat = setInterval(() => {
+              controller.enqueue(encoder.encode(": keepalive\n\n"));
+            }, 15_000);
+          },
+          cancel() {
+            unsubscribe();
+            if (heartbeat !== undefined) clearInterval(heartbeat);
+          },
+        });
+        return new Response(stream, {
+          headers: {
+            "content-type": "text/event-stream",
+            "cache-control": "no-cache",
+            connection: "keep-alive",
+          },
+        });
+      },
+
+      "/api/voice/join": {
+        POST: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management?.voice === undefined) return json({ error: "Live voice is unavailable" }, 404);
+          try {
+            const body = await readJsonObject(req);
+            const channelId = typeof body.channelId === "string" ? body.channelId.trim() : "";
+            if (channelId === "") return json({ error: "channelId is required" }, 400);
+            return json(await management.voice.join(channelId));
+          } catch (error) {
+            return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+          }
+        },
+      },
+
+      "/api/voice/leave": {
+        POST: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management?.voice === undefined) return json({ error: "Live voice is unavailable" }, 404);
+          try {
+            return json(await management.voice.leave());
+          } catch (error) {
+            return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+          }
+        },
+      },
+
+      "/api/voice/inject": {
+        POST: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management?.voice === undefined) return json({ error: "Live voice is unavailable" }, 404);
+          try {
+            const body = await readJsonObject(req);
+            const text = typeof body.text === "string" ? body.text.trim() : "";
+            if (text === "") return json({ error: "text is required" }, 400);
+            return json(await management.voice.inject(text));
+          } catch (error) {
+            return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+          }
+        },
+      },
+
+      "/assets/voice-tab.js": async (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        return dashboardAssetResponse("./voice-tab.tsx", "Voice tab");
       },
 
       "/assets/relationships-lab.js": async (req) => {

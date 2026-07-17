@@ -13,6 +13,11 @@ export interface ChannelInfo {
   isDm?: boolean;
   categoryName?: string;
   parentName?: string;
+  voiceMembers?: string[];
+  canConnect?: boolean;
+  canSpeak?: boolean;
+  isVoiceConnected?: boolean;
+  userLimit?: number;
 }
 
 export interface ChannelListToolDeps {
@@ -74,7 +79,7 @@ export function createChannelListTool(deps: ChannelListToolDeps): AgentTool {
 export function formatChannelList(channels: readonly ChannelInfo[], guild?: { guildId: string; guildName: string }): string {
   const lines = [
     ...(guild !== undefined ? [`Guild: ${guild.guildName} (${guild.guildId})`] : []),
-    "Legend: * = current channel/thread; id = channel_id for <message channel_id=\"...\">; mention = Discord channel mention; send=yes means bot can send there; DMs unsupported.",
+    "Legend: * = current channel/thread; id = channel_id for routing or join_voice_channel; mention = Discord channel mention; send=yes means bot can send there; connect/speak apply to voice; DMs unsupported.",
     ...channels.map(formatChannel),
   ];
   return lines.join("\n");
@@ -83,7 +88,10 @@ export function formatChannelList(channels: readonly ChannelInfo[], guild?: { gu
 function formatChannel(channel: ChannelInfo): string {
   const current = channel.isCurrent ? "*" : " ";
   const context = formatChannelContext(channel);
-  return `${current} #${channel.name} | id=${channel.id} | mention=<#${channel.id}> | ${context} | send=${channel.canSend ? "yes" : "no"}`;
+  const voice = channel.canConnect === undefined
+    ? ""
+    : ` | connect=${channel.canConnect ? "yes" : "no"} | speak=${channel.canSpeak === true ? "yes" : "no"} | connected=${channel.isVoiceConnected === true ? "yes" : "no"} | members=${channel.voiceMembers?.join(", ") ?? "none"}${channel.userLimit !== undefined && channel.userLimit > 0 ? ` | limit=${channel.userLimit}` : ""}`;
+  return `${current} #${channel.name} | id=${channel.id} | mention=<#${channel.id}> | ${context} | send=${channel.canSend ? "yes" : "no"}${voice}`;
 }
 
 function formatChannelContext(channel: ChannelInfo): string {

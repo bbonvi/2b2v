@@ -1,0 +1,1 @@
+Leave the current voice channel after the current live turn. Do not leave arbitrarily while people are still engaged; use this when asked, when departure is socially appropriate, or for an operational need.

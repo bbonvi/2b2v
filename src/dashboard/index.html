@@ -1813,6 +1813,7 @@
     <button class="tab-btn" id="tab-management">Management</button>
     <button class="tab-btn" id="tab-memories">Memories</button>
     <button class="tab-btn" id="tab-relationships">Relationship Lab</button>
+    <button class="tab-btn" id="tab-voice">Voice</button>
   </div>
   <div class="topbar-sep"></div>
   <div class="status-badge" id="status-badge">
@@ -1899,6 +1900,10 @@
   <div id="relationships-lab-root"></div>
 </div>
 
+<div class="content" id="voice-view" hidden>
+  <div id="voice-tab-root"></div>
+</div>
+
 <div class="modal-overlay" id="modal-overlay" style="display:none">
   <div class="modal">
     <div class="modal-header">
@@ -1929,11 +1934,13 @@
   const tabManagement = document.getElementById('tab-management');
   const tabMemories = document.getElementById('tab-memories');
   const tabRelationship = document.getElementById('tab-relationships');
+  const tabVoice = document.getElementById('tab-voice');
   const logFilters = document.getElementById('log-filters');
   const logView = document.getElementById('log-view');
   const managementView = document.getElementById('management-view');
   const memoriesView = document.getElementById('memories-view');
   const relationshipsView = document.getElementById('relationships-view');
+  const voiceView = document.getElementById('voice-view');
   const mGuild = document.getElementById('m-guild');
   const mChannel = document.getElementById('m-channel');
   const mRefresh = document.getElementById('m-refresh');
@@ -1954,7 +1961,7 @@
   const labReport = document.getElementById('lab-report');
   const managementStateKey = '2b2v.dashboard.management.v1';
   const promptLabSenderStateKey = '2b2v.dashboard.promptLab.sender.v1';
-  let activeTab = location.hash === '#management' ? 'management' : location.hash === '#memories' ? 'memories' : location.hash === '#relationships' ? 'relationships' : 'logs';
+  let activeTab = location.hash === '#management' ? 'management' : location.hash === '#memories' ? 'memories' : location.hash === '#relationships' ? 'relationships' : location.hash === '#voice' ? 'voice' : 'logs';
   modeRail.style.display = activeTab === 'logs' ? '' : 'none';
   let managementDirectory = { guilds: [], channels: [], users: [] };
   let managementMessages = [];
@@ -2876,13 +2883,15 @@
     tabManagement.classList.toggle('active', tab === 'management');
     tabMemories.classList.toggle('active', tab === 'memories');
     tabRelationship.classList.toggle('active', tab === 'relationships');
+    tabVoice.classList.toggle('active', tab === 'voice');
     logView.hidden = tab !== 'logs';
     managementView.hidden = tab !== 'management';
     memoriesView.hidden = tab !== 'memories';
     relationshipsView.hidden = tab !== 'relationships';
+    voiceView.hidden = tab !== 'voice';
     modeRail.style.display = tab === 'logs' ? '' : 'none';
     logFilters.style.display = tab === 'logs' ? 'flex' : 'none';
-    location.hash = tab === 'management' ? 'management' : tab === 'memories' ? 'memories' : tab === 'relationships' ? 'relationships' : 'logs';
+    location.hash = tab === 'management' ? 'management' : tab === 'memories' ? 'memories' : tab === 'relationships' ? 'relationships' : tab === 'voice' ? 'voice' : 'logs';
     if (tab === 'management') {
       refreshManagement();
       if (logPollingActive && managementPollTimer === null) pollManagement();
@@ -3445,6 +3454,7 @@
   tabManagement.addEventListener('click', () => { setTab('management'); });
   tabMemories.addEventListener('click', () => { setTab('memories'); });
   tabRelationship.addEventListener('click', () => { setTab('relationships'); });
+  tabVoice.addEventListener('click', () => { setTab('voice'); });
   mRefresh.addEventListener('click', () => { refreshManagement(true); });
   mDeleteSelected.addEventListener('click', () => { deleteSelectedManagementMessages(); });
   mDeleteLast.addEventListener('click', () => { deleteLatestManagementMessages(); });
@@ -3690,5 +3700,6 @@
 </script>
 <script type="module" src="/assets/relationships-lab.js"></script>
 <script type="module" src="/assets/memories-tab.js"></script>
+<script type="module" src="/assets/voice-tab.js"></script>
 </body>
 </html>

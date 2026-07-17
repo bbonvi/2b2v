@@ -78,6 +78,11 @@ export interface RuntimePromptBundle {
   relationships: {
     context: string;
   };
+  /** Specialized live voice prompt loaded only for voice turns. */
+  voice?: {
+    runtime: string;
+    finalActionInstruction: string;
+  };
   /** On-demand instruction skills. */
   skills: PromptSkillBundle;
 }
@@ -381,6 +386,14 @@ export function loadInstructionBundle(profilesDir: string, profile: string, log:
       },
       relationships: {
         context: loadRuntimeDocuments(instructionRoots, "relationships/context", log, "runtime.relationships.context"),
+      },
+      voice: {
+        runtime: loadLayeredDocuments(instructionRoots, join("runtime", "voice", "reply"), log, "runtime.voice.reply")
+          .map((doc) => doc.text)
+          .join("\n\n"),
+        finalActionInstruction: loadLayeredDocuments(instructionRoots, join("runtime", "voice", "final-action"), log, "runtime.voice.final-action")
+          .map((doc) => doc.text)
+          .join("\n\n"),
       },
       skills,
     },
