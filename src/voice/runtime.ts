@@ -883,7 +883,7 @@ export class VoiceRuntime {
         }, input.deferTurn === true);
       }
     }
-    this.maybeRunMaintenance(record.id);
+    this.maybeRunMaintenance();
     this.emit();
     return Promise.resolve(record);
   }
@@ -1109,10 +1109,16 @@ export class VoiceRuntime {
     if (instruction !== undefined) this.activateInstruction(active, instruction);
   }
 
-  private maybeRunMaintenance(latestSegmentId: number): void {
+  private maybeRunMaintenance(): void {
     const active = this.active;
     if (active === undefined) return;
-    if (latestSegmentId % active.voiceConfig.summaryEverySegments !== 0) return;
+    const checkpoint = this.deps.repository.getCheckpoint(active.id, "memory");
+    const afterSegmentId = checkpoint?.throughSegmentId ?? 0;
+    const newSegments = this.deps.repository.countTranscriptAfter(active.id, afterSegmentId);
+    if (newSegments < active.voiceConfig.maintenanceEverySegments) return;
+    const sessionStartedAt = this.deps.repository.getSession(active.id)?.startedAt ?? Date.now();
+    const lastRunAt = checkpoint?.lastRunAt ?? sessionStartedAt;
+    if (Date.now() - lastRunAt < active.voiceConfig.maintenanceMinIntervalMs) return;
     void this.deps.onMaintenance(active.id, false).catch((error: unknown) => {
       this.deps.log.warn("voice periodic maintenance failed", {
         error: error instanceof Error ? error.message : String(error),

@@ -74,6 +74,49 @@ describe("VoiceRepository", () => {
     db.close();
   });
 
+  test("reads incremental maintenance history and checkpoints", () => {
+    const db = createDatabase(":memory:");
+    const repository = new VoiceRepository(db);
+    const session = repository.createSession("g1", "v1");
+    const segments = ["one", "two", "three", "four"].map((text, index) =>
+      repository.addTranscript({
+        sessionId: session.id,
+        userId: "u1",
+        username: "alice",
+        startedAt: index * 1_000 + 1,
+        endedAt: index * 1_000 + 500,
+        rawText: text,
+        normalizedText: text,
+        language: "en",
+        sttModel: "test",
+        source: "stt",
+        synthetic: false,
+      })
+    );
+    const third = segments[2];
+    if (third === undefined) throw new Error("Expected third segment");
+    const outputId = repository.createOutputTurn(session.id, third.id);
+    repository.markOutputPlaybackStarted(outputId, third.startedAt + 600);
+    repository.finishOutputTurn(outputId, "reply", "reply");
+
+    const second = segments[1];
+    if (second === undefined) throw new Error("Expected second segment");
+    expect(repository.countTranscriptAfter(session.id, second.id)).toBe(2);
+    const history = repository.listMaintenanceHistory(session.id, second.id, 10, 1);
+    expect(history.filter((entry) => entry.kind === "transcript").map((entry) =>
+      entry.transcript.normalizedText
+    )).toEqual(["two", "three", "four"]);
+    expect(history.some((entry) => entry.kind === "output" && entry.output.audibleText === "reply")).toBe(true);
+
+    repository.setCheckpoint(session.id, "memory", third.id);
+    expect(repository.getCheckpoint(session.id, "memory")).toMatchObject({
+      sessionId: session.id,
+      kind: "memory",
+      throughSegmentId: third.id,
+    });
+    db.close();
+  });
+
   test("carries bounded same-channel history across voice sessions", () => {
     const db = createDatabase(":memory:");
     const repository = new VoiceRepository(db);

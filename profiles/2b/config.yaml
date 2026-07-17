@@ -361,9 +361,10 @@ voice:
     yieldBoundaryMaxWaitMs: 1500
     emptyChannelGraceMs: 120000
     recentSessionContextMs: 21600000
-    summaryEverySegments: 30
-    summaryEveryMs: 300000
-    maintenanceEverySegments: 60
+    maintenanceEverySegments: 120
+    maintenanceMinIntervalMs: 900000
+    maintenanceMaxTurns: 48
+    maintenanceMaxChars: 12000
     stt:
         command: faster-whisper-server
         modelPath: /opt/faster-whisper/models/small

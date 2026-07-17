@@ -481,9 +481,10 @@ export interface VoiceConfig {
   yieldBoundaryMaxWaitMs: number;
   emptyChannelGraceMs: number;
   recentSessionContextMs: number;
-  summaryEverySegments: number;
-  summaryEveryMs: number;
   maintenanceEverySegments: number;
+  maintenanceMinIntervalMs: number;
+  maintenanceMaxTurns: number;
+  maintenanceMaxChars: number;
   stt: VoiceSttConfig;
   testing: VoiceTestingConfig;
 }

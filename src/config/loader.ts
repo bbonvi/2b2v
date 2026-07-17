@@ -202,9 +202,10 @@ const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   yieldBoundaryMaxWaitMs: 1_500,
   emptyChannelGraceMs: 120_000,
   recentSessionContextMs: 6 * 60 * 60 * 1000,
-  summaryEverySegments: 30,
-  summaryEveryMs: 5 * 60 * 1000,
-  maintenanceEverySegments: 60,
+  maintenanceEverySegments: 120,
+  maintenanceMinIntervalMs: 15 * 60 * 1000,
+  maintenanceMaxTurns: 48,
+  maintenanceMaxChars: 12_000,
   stt: {
     command: "faster-whisper-server",
     modelPath: "/opt/faster-whisper/models/small",
@@ -265,9 +266,10 @@ function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYaml | un
   positiveVoiceInteger(resolved.yieldBoundaryMaxWaitMs, "voice.yieldBoundaryMaxWaitMs");
   positiveVoiceInteger(resolved.emptyChannelGraceMs, "voice.emptyChannelGraceMs");
   positiveVoiceInteger(resolved.recentSessionContextMs, "voice.recentSessionContextMs");
-  positiveVoiceInteger(resolved.summaryEverySegments, "voice.summaryEverySegments");
-  positiveVoiceInteger(resolved.summaryEveryMs, "voice.summaryEveryMs");
   positiveVoiceInteger(resolved.maintenanceEverySegments, "voice.maintenanceEverySegments");
+  positiveVoiceInteger(resolved.maintenanceMinIntervalMs, "voice.maintenanceMinIntervalMs");
+  positiveVoiceInteger(resolved.maintenanceMaxTurns, "voice.maintenanceMaxTurns");
+  positiveVoiceInteger(resolved.maintenanceMaxChars, "voice.maintenanceMaxChars");
   positiveVoiceInteger(resolved.stt.timeoutMs, "voice.stt.timeoutMs");
   positiveVoiceInteger(resolved.stt.minUtteranceMs, "voice.stt.minUtteranceMs");
   positiveVoiceInteger(resolved.stt.maxUtteranceMs, "voice.stt.maxUtteranceMs");

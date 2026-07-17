@@ -102,6 +102,13 @@ export interface VoiceRuntimeEventRecord {
   detail?: Record<string, string | number | boolean | null>;
 }
 
+export interface VoiceMaintenanceCheckpoint {
+  sessionId: string;
+  kind: "summary" | "memory" | "relationship";
+  throughSegmentId: number;
+  lastRunAt: number;
+}
+
 export interface VoiceParticipantRecord {
   sessionId: string;
   userId: string;
@@ -481,6 +488,65 @@ export class VoiceRepository {
     return rows.map(mapSegment);
   }
 
+  /** Count transcript segments not yet covered by a maintenance checkpoint. */
+  countTranscriptAfter(sessionId: string, afterSegmentId: number): number {
+    const row = this.db.raw.prepare(`SELECT COUNT(*) AS count
+      FROM voice_transcript_segments
+      WHERE session_id = ? AND id > ?`).get(sessionId, afterSegmentId) as { count: number };
+    return row.count;
+  }
+
+  /**
+   * Return a bounded incremental maintenance window plus a small preceding
+   * transcript context. Presence events are intentionally excluded.
+   */
+  listMaintenanceHistory(
+    sessionId: string,
+    afterSegmentId: number,
+    limit: number,
+    precedingSegments = 2,
+  ): VoiceHistoryRecord[] {
+    const contextRows = afterSegmentId <= 0 || precedingSegments <= 0
+      ? []
+      : this.db.raw.prepare(`SELECT * FROM (
+          SELECT * FROM voice_transcript_segments
+          WHERE session_id = ? AND id <= ?
+          ORDER BY id DESC LIMIT ?
+        ) ORDER BY id ASC`).all(sessionId, afterSegmentId, precedingSegments) as SegmentRow[];
+    const newRows = this.db.raw.prepare(`SELECT * FROM voice_transcript_segments
+      WHERE session_id = ? AND id > ?
+      ORDER BY id ASC LIMIT ?`).all(sessionId, afterSegmentId, limit) as SegmentRow[];
+    const transcript = [...contextRows, ...newRows].map(mapSegment);
+    const first = transcript[0];
+    const last = transcript.at(-1);
+    if (first === undefined || last === undefined) return [];
+    const outputs = (this.db.raw.prepare(`SELECT * FROM voice_output_turns
+      WHERE session_id = ?
+        AND trigger_segment_id BETWEEN ? AND ?
+        AND audible_text <> ''
+      ORDER BY started_at ASC`).all(sessionId, first.id, last.id) as OutputTurnRow[])
+      .map(mapOutputTurn);
+    const history: VoiceHistoryRecord[] = [
+      ...transcript.map((entry) => ({
+        kind: "transcript" as const,
+        startedAt: entry.startedAt,
+        transcript: entry,
+      })),
+      ...outputs.map((entry) => ({
+        kind: "output" as const,
+        startedAt: entry.startedAt,
+        output: entry,
+      })),
+    ];
+    history.sort((left, right) => {
+      const timeDifference = left.startedAt - right.startedAt;
+      if (timeDifference !== 0) return timeDifference;
+      if (left.kind === right.kind) return 0;
+      return left.kind === "transcript" ? -1 : 1;
+    });
+    return history;
+  }
+
   listOutputTurns(sessionId: string, limit = 300): VoiceOutputTurnRecord[] {
     const rows = this.db.raw.prepare(`SELECT * FROM (
       SELECT * FROM voice_output_turns
@@ -692,5 +758,26 @@ export class VoiceRepository {
         through_segment_id = excluded.through_segment_id,
         last_run_at = excluded.last_run_at`)
       .run(sessionId, kind, throughSegmentId, Date.now());
+  }
+
+  getCheckpoint(
+    sessionId: string,
+    kind: VoiceMaintenanceCheckpoint["kind"],
+  ): VoiceMaintenanceCheckpoint | undefined {
+    const row = this.db.raw.prepare(`SELECT session_id, kind, through_segment_id, last_run_at
+      FROM voice_maintenance_checkpoints
+      WHERE session_id = ? AND kind = ?`).get(sessionId, kind) as {
+        session_id: string;
+        kind: VoiceMaintenanceCheckpoint["kind"];
+        through_segment_id: number;
+        last_run_at: number;
+      } | null;
+    if (row === null) return undefined;
+    return {
+      sessionId: row.session_id,
+      kind: row.kind,
+      throughSegmentId: row.through_segment_id,
+      lastRunAt: row.last_run_at,
+    };
   }
 }

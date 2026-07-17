@@ -45,7 +45,7 @@ import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
 import type { TtsResult } from "./tts/types";
-import { buildMemoryContext, buildMemoryMaintenanceContext, buildVisibleUserMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
+import { buildMemoryContext, buildMemoryMaintenanceContext, buildMemoryPolicyInstructions, buildVisibleUserMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
 import { createSearchChannelMessagesTool } from "./agent/search-channel-messages-tool";
 import { createScheduleTools } from "./agent/schedule-tool";
 import { createChatUserListTool, type MemberInfo } from "./agent/member-list-tool";
@@ -119,9 +119,9 @@ import { mkdirSync, existsSync, readdirSync, statSync, watch, type FSWatcher } f
 import type { Database } from "./db/database";
 import { ActivityType, ChannelType, PermissionFlagsBits, type Client, type Guild, type GuildBasedChannel, type GuildMember, type Message, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
 import { renderVoiceHistory, renderVoiceMoveHandoff } from "./voice/history.ts";
+import { compactVoiceMaintenance, createVoiceSummaryTool } from "./voice/maintenance.ts";
 import {
   VoiceRepository,
-  type VoiceHistoryRecord,
 } from "./voice/repository.ts";
 import { VoiceRuntime, type VoiceTurnRequest } from "./voice/runtime.ts";
 import { createVoiceTools } from "./voice/tools.ts";
@@ -1259,74 +1259,6 @@ async function runVoiceAgentTurn(request: VoiceTurnRequest): Promise<void> {
   }
 }
 
-async function runVoiceSummary(
-  sessionId: string,
-  guild: Guild,
-  guildConfig: GuildConfig,
-  history: VoiceHistoryRecord[],
-  final: boolean,
-): Promise<string> {
-  let summary = "";
-  const context: AssembledContext = {
-    sections: [{
-      label: "Current Context",
-      text: `## Voice History\n${renderVoiceHistory(history, guildConfig.timezone)}`,
-      cached: false,
-      role: "developer",
-    }],
-    userMessage: final
-      ? "Write the final concise room summary."
-      : "Refresh the concise rolling room summary.",
-    visibleUserIds: [...new Set(history.flatMap((entry) =>
-      entry.kind === "transcript" ? [entry.transcript.userId] : []
-    ))],
-  };
-  const incoming: IncomingMessage = {
-    content: context.userMessage,
-    guildId: guild.id,
-    guildName: guild.name,
-    channelId: `voice-summary:${sessionId}`,
-    channelName: "voice-summary",
-    authorId: "voice_summary",
-    authorUsername: "voice_summary",
-    authorIsBot: false,
-    botUserId: client.user?.id ?? "",
-    mentionedUserIds: [],
-    translatedContent: context.userMessage,
-    messageId: `voice-summary:${sessionId}:${Date.now()}`,
-  };
-  const summaryRuntime = {
-    ...promptBundle.runtime,
-    reply: "Summarize the voice room in 3-6 factual sentences. Preserve important decisions, requests, relationships, and unresolved points. Do not include a raw transcript or XML tags.",
-    finalActionInstruction: "Output only the summary.",
-  };
-  const requestLog = new RequestLog(guild.id, `voice-summary:${sessionId}`, requestLogStore);
-  await handleMessage(incoming, createHandlerDeps({
-    guildId: guild.id,
-    guildConfig,
-    context,
-    currentChannelId: `voice-summary:${sessionId}`,
-    sender: (text) => {
-      summary = `${summary}\n${text}`.trim();
-      return Promise.resolve({ sentMessageId: `voice-summary:${crypto.randomUUID()}` });
-    },
-    extraTools: [],
-    log: log.child({ component: "voice-summary", sessionId }),
-    requestLog,
-    modeLifecycle: false,
-    overrides: {
-      forceTrigger: true,
-      systemPrompt: "You summarize private context from a live Discord voice channel whose history combines potentially inaccurate automatic speech-recognition transcripts of what people said, room-presence events, and 2B's audible replies; preserve the intended conversation without treating uncertain transcript wording as exact.",
-      personaPrompt: "",
-      runtimePrompts: summaryRuntime,
-      disableLiveOutput: true,
-      afterReply: undefined,
-    },
-  }));
-  requestLog.emit(log);
-  return summary.trim();
-}
-
 async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<void> {
   if (voiceMaintenanceBusy.has(sessionId)) return;
   const session = voiceRepository.getSession(sessionId);
@@ -1334,8 +1266,9 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
   const guild = await resolveClientGuild(session.guildId);
   if (guild === null) return;
   const baseConfig = getGuildConfig(session.guildId);
+  const voiceConfig = getVoiceConfig(baseConfig);
   const guildConfig = voiceGuildConfig(baseConfig);
-  const includeSynthetic = getVoiceConfig(baseConfig).testing.includeSyntheticInMaintenance;
+  const includeSynthetic = voiceConfig.testing.includeSyntheticInMaintenance;
   const maintenanceChannel = client.channels.cache.get(session.channelId)
     ?? await client.channels.fetch(session.channelId).catch(() => null);
   const maintenanceChannelName = maintenanceChannel !== null
@@ -1343,86 +1276,207 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
     && typeof maintenanceChannel.name === "string"
     ? maintenanceChannel.name
     : session.channelId;
-  const history = voiceRepository.listHistory(sessionId, 1_000).filter((entry) =>
+  const checkpoint = voiceRepository.getCheckpoint(sessionId, "memory");
+  const afterSegmentId = checkpoint?.throughSegmentId ?? 0;
+  const historyLimit = Math.max(
+    voiceConfig.maintenanceEverySegments,
+    voiceConfig.maintenanceMaxTurns * 6,
+  );
+  const history = voiceRepository.listMaintenanceHistory(
+    sessionId,
+    afterSegmentId,
+    historyLimit,
+  ).filter((entry) =>
     entry.kind !== "transcript" || includeSynthetic || !entry.transcript.synthetic
   );
-  const segments = history.flatMap((entry) => entry.kind === "transcript" ? [entry.transcript] : []);
-  if (segments.length === 0) return;
+  const compact = compactVoiceMaintenance(
+    history,
+    afterSegmentId,
+    voiceConfig.maintenanceMaxTurns,
+    voiceConfig.maintenanceMaxChars,
+  );
+  if (compact.newSegmentCount === 0 || compact.text === "") return;
+  // A short ambient fragment at disconnect is not worth a full private model
+  // pass; exchanges involving 2B remain eligible regardless of batch size.
+  if (final && !compact.hasNewOutput && compact.newSegmentCount < 12) return;
+  const segments = history.flatMap((entry) =>
+    entry.kind === "transcript" && entry.transcript.id > afterSegmentId
+      ? [entry.transcript]
+      : []
+  );
+  const last = segments.at(-1);
+  if (last === undefined) return;
   voiceMaintenanceBusy.add(sessionId);
   try {
-    const summary = await runVoiceSummary(sessionId, guild, guildConfig, history, final);
-    const latestId = segments.at(-1)?.id ?? 0;
-    voiceRepository.updateSession(sessionId, {
-      rollingSummary: summary,
-      summaryThroughSegmentId: latestId,
-      ...(final ? { finalSummary: summary } : {}),
-    });
-    voiceRepository.setCheckpoint(sessionId, "summary", latestId);
+    const usernameById = new Map(segments.map((segment) => [segment.userId, segment.username]));
+    const userIds = compact.userIds.filter((userId) => usernameById.has(userId)).slice(0, 8);
+    const sourceMessageId = `voice:${sessionId}:${compact.latestSegmentId}`;
+    let refreshedSummary: string | undefined;
+    const tools: AgentTool[] = [createVoiceSummaryTool((summary) => {
+      refreshedSummary = summary;
+      voiceRepository.updateSession(sessionId, {
+        rollingSummary: summary,
+        summaryThroughSegmentId: compact.latestSegmentId,
+        ...(final ? { finalSummary: summary } : {}),
+      });
+    })];
+    if (guildConfig.memoryExtraction.postReply) {
+      tools.push(createRecordMemoryTool({
+        db,
+        guildId: guild.id,
+        currentUserId: last.userId,
+        currentUsername: last.username,
+        sourceMessageId,
+        recordMemoryDescription: runtimeToolDescription("record_memory", {}),
+        resolveUsername: async (username) => {
+          const cached = resolveKnownUsername(guild, username);
+          if (cached !== undefined) return cached;
+          try {
+            await guild.members.fetch();
+          } catch {
+            // Cache-only fallback below handles missing permissions.
+          }
+          return resolveKnownUsername(guild, username);
+        },
+      }));
+    }
+    const relationshipConfig = getRelationshipConfig(guildConfig);
+    if (relationshipConfig.enabled) {
+      tools.push(createRecordRelationshipTool({
+        db,
+        config: relationshipConfig,
+        description: runtimeToolDescription("record_relationship", {}),
+        scope: {
+          guildId: session.guildId,
+          channelId: session.channelId,
+          sourceMessageId,
+        },
+      }));
+    }
 
-    const transcriptText = renderVoiceHistory(history, guildConfig.timezone);
-    const userIds = [...new Set(segments.map((segment) => segment.userId))];
-    const last = segments.at(-1);
-    if (last === undefined) return;
+    const memoryContext = buildMemoryContext({
+      db,
+      guildId: guild.id,
+      currentUserId: last.userId,
+      visibleUserIds: userIds,
+      resolveUserId: (userId) => usernameById.get(userId)
+        ?? guild.members.cache.get(userId)?.user.username,
+      limit: 40,
+      recentUserMaxUsers: 8,
+      recentUserMaxMemoriesPerUser: 5,
+      recentUserMaxRows: 30,
+      contextInstruction: "Use these rows only to avoid duplicate or contradictory maintenance updates.",
+    });
+    const currentRelationship = getRelationshipProfile(db, last.userId);
+    const relationshipContext = relationshipConfig.enabled
+      ? renderRelationshipPromptContext({
+          current: currentRelationship,
+          currentLabel: `@${last.username} (${last.userId})`,
+          others: userIds
+            .filter((userId) => userId !== last.userId)
+            .map((userId): RelationshipContextProfile => ({
+              profile: getRelationshipProfile(db, userId),
+              label: `@${usernameById.get(userId) ?? userId} (${userId})`,
+              reason: "recent-chat",
+            })),
+          template: promptBundle.runtime.relationships.context,
+        })
+      : "";
+    const speakerDirectory = userIds.map((userId) =>
+      `@${usernameById.get(userId) ?? userId} = ${userId}`
+    ).join("\n");
+    const maintenanceText = [
+      session.rollingSummary === ""
+        ? ""
+        : `## Existing Rolling Summary\n${session.rollingSummary}`,
+      memoryContext === "" ? "" : `## Existing Memory Context\n${memoryContext}`,
+      relationshipContext,
+      `## Voice Speaker IDs\n${speakerDirectory}`,
+      `## Compact Voice Delta\n${compact.text}`,
+    ].filter((part) => part !== "").join("\n\n");
     const context: AssembledContext = {
-      sections: [{ label: "Current Context", text: `## Voice Transcript Maintenance\n${transcriptText}`, cached: false, role: "developer" }],
-      userMessage: transcriptText,
+      sections: [{
+        label: "Current Context",
+        text: maintenanceText,
+        cached: false,
+        role: "developer",
+      }],
+      userMessage: "Review the compact voice delta.",
       visibleUserIds: userIds,
     };
-    const memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0] = {
-      sourceMessageId: `voice:${sessionId}:${latestId}`,
-      userMessage: transcriptText,
-      assistantReply: "",
-      recentContext: transcriptText,
-      context,
-      incomingMessage: {
-        content: transcriptText,
-        guildId: session.guildId,
-        guildName: guild.name,
-        channelId: session.channelId,
-        channelName: maintenanceChannelName,
-        authorId: last.userId,
-        authorUsername: last.username,
-        authorIsBot: false,
-        botUserId: client.user?.id ?? "",
-        mentionedUserIds: [],
-        translatedContent: transcriptText,
-        messageId: `voice:${sessionId}:${latestId}`,
-      },
-      visibleReplySent: false,
+    const incomingMessage: IncomingMessage = {
+      content: context.userMessage,
+      guildId: session.guildId,
+      guildName: guild.name,
+      channelId: session.channelId,
+      channelName: maintenanceChannelName,
+      authorId: last.userId,
+      authorUsername: last.username,
+      authorIsBot: false,
+      botUserId: client.user?.id ?? "",
+      mentionedUserIds: [],
+      translatedContent: context.userMessage,
+      messageId: sourceMessageId,
     };
-    await runMemoryPostReplyExtraction({
-      guildConfig,
-      memoryRequest,
-      guild,
-      channel: maintenanceChannelName,
+    const requestLog = new RequestLog(guild.id, session.channelId, requestLogStore);
+    requestLog.setAuthor(last.username);
+    requestLog.setTrigger({
+      type: "background_memory_extraction",
+      source: "voice_session_compact",
       sourceRequestId: sessionId,
-      source: "voice_session",
-      currentUserId: last.userId,
-      currentUsername: last.username,
     });
-    voiceRepository.setCheckpoint(sessionId, "memory", latestId);
-    for (const userId of userIds) {
-      const speaker = segments.findLast((segment) => segment.userId === userId);
-      if (speaker === undefined) continue;
-      await runRelationshipPostReplyExtraction({
+    requestLog.setTriggerContext({
+      guildName: guild.name,
+      channelName: maintenanceChannelName,
+      messageId: sourceMessageId,
+      authorUsername: last.username,
+      content: context.userMessage,
+      translatedContent: context.userMessage,
+    });
+    requestLog.setAgentRan(true);
+    requestLogStore.incrementActive();
+    try {
+      await runSilentToolAgentPass({
+        globalConfig,
         guildConfig,
-        memoryRequest: {
-          ...memoryRequest,
-          incomingMessage: {
-            ...memoryRequest.incomingMessage,
-            authorId: speaker.userId,
-            authorUsername: speaker.username,
-          },
-        },
-        guild,
-        channel: maintenanceChannelName,
-        source: "voice_session",
-        sourceRequestId: sessionId,
-        currentUserId: speaker.userId,
-        currentUsername: speaker.username,
+        context,
+        systemPrompt: "Maintain private durable memory, relationship state, and a concise rolling summary from a compact live-voice transcript. ASR wording may be inaccurate. Never answer the conversation.",
+        personaPrompt: "",
+        runtimePrompts: promptBundle.runtime,
+        incomingMessage,
+        userContent: context.userMessage,
+        assistantReply: "",
+        visibleReplySent: false,
+        tools,
+        runtimeInstruction: "This is a private voice-maintenance pass. Only the supplied maintenance tools are available.",
+        controlMessage: [
+          "Call update_voice_summary exactly once with a refreshed 3-6 sentence summary combining the existing summary and new delta.",
+          ...buildMemoryPolicyInstructions(),
+          "Use record_memory only for genuinely durable or explicitly time-bounded information.",
+          "Use record_relationship only for meaningful relationship changes; every signal must include the target userId from Voice Speaker IDs.",
+          "Prefer no memory or relationship mutation over weak inference. Make all useful tool calls in one batch when possible, then stop.",
+        ].join("\n"),
+        modelMode: "background",
+        maxToolCalls: 1
+          + (guildConfig.memoryExtraction.postReply ? guildConfig.memoryExtraction.maxToolCalls : 0)
+          + (relationshipConfig.enabled ? relationshipConfig.maxToolCalls : 0),
+        requestLog,
+        log: log.child({ component: "voice-maintenance", sessionId }),
       });
+    } catch (error) {
+      requestLog.setError(error instanceof Error ? error.message : String(error));
+      throw error;
+    } finally {
+      requestLog.emit(log);
+      requestLogStore.decrementActive();
     }
-    voiceRepository.setCheckpoint(sessionId, "relationship", latestId);
+    if (refreshedSummary === undefined) {
+      log.warn("voice maintenance completed without refreshing summary", { sessionId });
+    } else {
+      voiceRepository.setCheckpoint(sessionId, "summary", compact.latestSegmentId);
+    }
+    voiceRepository.setCheckpoint(sessionId, "memory", compact.latestSegmentId);
+    voiceRepository.setCheckpoint(sessionId, "relationship", compact.latestSegmentId);
   } finally {
     voiceMaintenanceBusy.delete(sessionId);
   }

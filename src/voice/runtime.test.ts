@@ -93,6 +93,70 @@ describe("VoiceRuntime shutdown", () => {
   });
 });
 
+describe("VoiceRuntime maintenance cadence", () => {
+  test("uses incremental segment count and minimum interval instead of row-id modulo", async () => {
+    const db = createDatabase(":memory:");
+    const repository = new VoiceRepository(db);
+    const session = repository.createSession("guild", "voice");
+    let maintenanceCalls = 0;
+    const log: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      logTokenUsage: () => {},
+      child: () => log,
+    };
+    const client = { on: () => {} } as unknown as Client;
+    const runtime = new VoiceRuntime({
+      client,
+      repository,
+      getGuildConfig: () => ({}) as GuildConfig,
+      log,
+      onTurn: () => Promise.resolve(),
+      sendMessage: () => Promise.resolve({ sentMessageId: "message" }),
+      onMaintenance: () => {
+        maintenanceCalls += 1;
+        return Promise.resolve();
+      },
+    });
+    const voiceConfig = {
+      maintenanceEverySegments: 2,
+      maintenanceMinIntervalMs: 1,
+    } as VoiceConfig;
+    const internals = runtime as unknown as {
+      active: { id: string; voiceConfig: VoiceConfig };
+      maybeRunMaintenance: () => void;
+    };
+    internals.active = { id: session.id, voiceConfig };
+    await Bun.sleep(2);
+    for (const [index, text] of ["one", "two"].entries()) {
+      repository.addTranscript({
+        sessionId: session.id,
+        userId: "alice",
+        username: "alice",
+        startedAt: index + 1,
+        endedAt: index + 1,
+        rawText: text,
+        normalizedText: text,
+        language: "en",
+        sttModel: "test",
+        source: "stt",
+        synthetic: false,
+      });
+    }
+
+    internals.maybeRunMaintenance();
+    expect(maintenanceCalls).toBe(1);
+    const latest = repository.listTranscript(session.id).at(-1);
+    if (latest === undefined) throw new Error("Expected transcript");
+    repository.setCheckpoint(session.id, "memory", latest.id);
+    internals.maybeRunMaintenance();
+    expect(maintenanceCalls).toBe(1);
+    db.close();
+  });
+});
+
 describe("VoiceRuntime response opportunities", () => {
   test("waits for the attention owner but bounds delay from another speaker", async () => {
     const db = createDatabase(":memory:");
