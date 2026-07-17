@@ -2320,6 +2320,14 @@ async function buildContext(
     ...historyWithoutLatest.map((m) => m.id),
     ...(appendLatestToHistory ? [annotatedLatestUserMessage.id] : []),
   ]));
+  // Discord voice channels are also text-based, but this context describes the
+  // concurrent voice room and must not be fed back into that room's own turn.
+  const voicePresenceContext = liveChannel !== null
+    && liveChannel.type !== ChannelType.GuildVoice
+    && liveChannel.type !== ChannelType.GuildStageVoice
+    && liveChannel.isTextBased()
+    ? voiceRuntime.presenceContext()
+    : "";
 
   const assembled = assembleContext({
       toolInstructions: "",
@@ -2334,7 +2342,11 @@ async function buildContext(
       parentPreContext,
       olderHistory: olderText,
       newerHistory: newerText,
-      currentContext: [currentContext, relationshipsContext, voiceRuntime.presenceContext()]
+      currentContext: [
+        currentContext,
+        relationshipsContext,
+        voicePresenceContext,
+      ]
         .filter((part) => part !== "")
         .join("\n\n"),
       personaMode: personaModeRuntime.renderPromptContext(guildId),
