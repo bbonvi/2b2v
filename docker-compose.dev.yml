@@ -3,7 +3,7 @@ services:
     build:
       context: .
       target: deps-dev
-    command: ["bun", "run", "dev"]
+    command: ["bun", "--watch", "src/index.ts"]
     env_file: .env
     environment:
       DATA_DIR: /app/data
