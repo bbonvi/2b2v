@@ -12,6 +12,7 @@ import type {
   PromptTransportSectionConfig,
   PromptTransportSectionId,
   ProviderPromptTransportConfig,
+  ServiceTier,
   TriggerInstructions,
 } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
@@ -301,6 +302,8 @@ export interface HandlerDeps {
   disableLiveOutput?: boolean;
   /** Replace normal text/voice directive dispatch with a live external stream. */
   externalResponseSink?: ExternalResponseSink;
+  /** Optional service tier for this visible reply loop; maintenance does not inherit it. */
+  serviceTier?: ServiceTier;
   /** Optional caller cancellation, used for voice barge-in and session departure. */
   abortSignal?: AbortSignal;
   /** Override default first-message Discord reply anchoring. */
@@ -2629,7 +2632,7 @@ export async function handleMessage(
   const context = deps.context;
 
   const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
-  const baseStreamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig);
+  const baseStreamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig, deps.serviceTier);
   const providerParams: Record<string, unknown> = { ...baseStreamOptions };
   delete providerParams.apiKey;
   delete providerParams.signal;

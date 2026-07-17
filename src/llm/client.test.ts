@@ -459,6 +459,15 @@ describe("buildStreamOptions", () => {
     expect(opts.transport).toBe("sse");
   });
 
+  test("maps a per-turn service tier for each provider", () => {
+    expect(buildStreamOptions(GLOBAL, GUILD, "priority").service_tier).toBe("priority");
+    expect(buildStreamOptions(GLOBAL, {
+      ...GUILD,
+      llmProvider: "openai-codex",
+      model: "gpt-5.6-sol",
+    }, "priority").serviceTier).toBe("priority");
+  });
+
   test("does not let modelParams override configured Codex transport", () => {
     const opts = buildStreamOptions(
       { ...GLOBAL, codexTransport: "websocket" },

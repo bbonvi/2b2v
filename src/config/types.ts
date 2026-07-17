@@ -470,6 +470,8 @@ export interface VoiceConfig {
   model: string;
   modelParams: Record<string, unknown>;
   thinkingLevel?: ThinkingLevel;
+  /** Optional service tier for latency-sensitive live voice turns only. */
+  serviceTier?: ServiceTier;
   wakeWords: string[];
   lingeringAttentionMs: number;
   roomQuietMs: number;

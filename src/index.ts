@@ -1109,6 +1109,7 @@ async function runVoiceAgentTurn(request: VoiceTurnRequest): Promise<void> {
   const guild = await resolveClientGuild(request.guildId);
   if (guild === null) throw new Error(`Voice guild ${request.guildId} is unavailable.`);
   const baseConfig = getGuildConfig(request.guildId);
+  const voiceConfig = getVoiceConfig(baseConfig);
   const guildConfig = voiceGuildConfig(baseConfig);
   const context = await voiceAssembledContext(request, guild, guildConfig);
   const origin = request.instruction === undefined
@@ -1225,6 +1226,7 @@ async function runVoiceAgentTurn(request: VoiceTurnRequest): Promise<void> {
         personaPrompt: promptBundle.corePrompt,
         runtimePrompts,
         externalResponseSink: sink,
+        ...(voiceConfig.serviceTier !== undefined ? { serviceTier: voiceConfig.serviceTier } : {}),
         abortSignal: request.abortSignal,
         afterReply: undefined,
       },

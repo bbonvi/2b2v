@@ -440,6 +440,7 @@ describe("handleMessage", () => {
       expect(request.provider).toBe("openai-codex");
       expect(request.apiKey).toBe("");
       expect(request.providerParams?.codexAuthPath).toBe("data/codex-auth.json");
+      expect(request.providerParams?.serviceTier).toBe("priority");
       return Promise.resolve({
         text: "codex reply",
         toolCalls: [],
@@ -462,6 +463,7 @@ describe("handleMessage", () => {
           imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
           imageGeneration: { quality: "auto" },
         }),
+        serviceTier: "priority",
         completeChat,
       }),
     );

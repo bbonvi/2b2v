@@ -233,10 +233,12 @@ function positiveVoiceInteger(value: number, path: string): number {
 
 /** Resolve profile or guild voice configuration without enabling it implicitly. */
 function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYaml | undefined): VoiceConfig {
+  const serviceTier = parseServiceTier(partial?.serviceTier, "voice") ?? defaults.serviceTier;
   const resolved: VoiceConfig = {
     ...defaults,
     ...partial,
     modelParams: { ...defaults.modelParams, ...partial?.modelParams },
+    ...(serviceTier !== undefined ? { serviceTier } : {}),
     wakeWords: partial?.wakeWords !== undefined ? [...partial.wakeWords] : [...defaults.wakeWords],
     stt: { ...defaults.stt, ...partial?.stt },
     testing: {

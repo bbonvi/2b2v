@@ -1,6 +1,6 @@
 import type { Model } from "@earendil-works/pi-ai";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
-import type { GlobalConfig, GuildConfig, LlmProvider, ThinkingLevel } from "../config/types.ts";
+import type { GlobalConfig, GuildConfig, LlmProvider, ServiceTier, ThinkingLevel } from "../config/types.ts";
 
 /** Shape of a pi-ai Model object used by this bot. */
 export interface LlmModel extends Model<"openai-completions" | "openai-codex-responses"> {
@@ -195,7 +195,8 @@ export async function fetchOpenRouterModelMetadata(input: {
 /** Build stream options for a pi-ai call, merging API key and guild params. */
 export function buildStreamOptions(
   global: GlobalConfig,
-  guild: GuildConfig
+  guild: GuildConfig,
+  serviceTier?: ServiceTier,
 ): Record<string, unknown> & { apiKey: string } {
   const provider = resolveGuildLlmProvider(global, guild);
   const params = withThinkingLevelParams(provider, guild.modelParams ?? {}, guild.thinkingLevel);
@@ -204,6 +205,7 @@ export function buildStreamOptions(
       apiKey: "",
       codexAuthPath: global.codexAuthPath,
       ...params,
+      ...(serviceTier !== undefined ? { serviceTier } : {}),
       transport: global.codexTransport,
     };
   }
@@ -213,6 +215,7 @@ export function buildStreamOptions(
   return {
     apiKey: global.openrouterApiKey,
     ...params,
+    ...(serviceTier !== undefined ? { service_tier: serviceTier } : {}),
   };
 }
 

@@ -224,6 +224,17 @@ describe("loadGlobalConfig", () => {
     expect(cfg.defaultVoice?.stt.threads).toBe(4);
   });
 
+  test("reads and validates the live voice service tier", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "voice:\n  serviceTier: priority\n");
+    expect(loadGlobalConfig(BASE_ENV, file).defaultVoice?.serviceTier).toBe("priority");
+
+    writeFileSync(file, "voice:\n  serviceTier: fast\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
+      'voice.serviceTier must be "flex" or "priority"',
+    );
+  });
+
   test("reads lazy asset limits", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, "assetReading:\n  maxCharsPerRead: 50000\n  videoPreviewTimesSeconds: [0, 2]\n  timeoutSeconds:\n    audio: 120\n");
