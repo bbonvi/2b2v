@@ -23,7 +23,10 @@ describe("decideVoiceTrigger", () => {
       lingeringAttentionMs: 45_000,
       state: { attentionUntil: 0 },
     };
-    expect(decideVoiceTrigger({ ...common, text: "2B, what do you think?" }).reason).toBe("wake_word");
+    expect(decideVoiceTrigger({ ...common, text: "2B, what do you think?" })).toMatchObject({
+      reason: "wake_word",
+      wakeWord: "2b",
+    });
     expect(decideVoiceTrigger({ ...common, text: "Туби, ты здесь?" }).reason).toBe("wake_word");
     expect(decideVoiceTrigger({ ...common, text: "I want to be precise." }).shouldConsider).toBe(false);
   });

@@ -48,4 +48,19 @@ describe("VoiceResponseParser", () => {
     expect((await parser.finish()).ignored).toBe(true);
     expect(ignored).toBe("vi2");
   });
+
+  test("commits trailing sentence punctuation after a short stream idle", async () => {
+    const speech: string[] = [];
+    const parser = new VoiceResponseParser({
+      onSpeech: (text) => { speech.push(text); },
+      onMessage: () => {},
+      onIgnore: () => {},
+    });
+
+    await parser.push("Короткий ответ.");
+    await Bun.sleep(80);
+
+    expect(speech).toEqual(["Короткий ответ."]);
+    expect((await parser.finish()).plannedSpeech).toBe("Короткий ответ.");
+  });
 });

@@ -361,6 +361,20 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_voice_output_turns_session_time
     ON voice_output_turns(session_id, started_at);
 
+  CREATE TABLE IF NOT EXISTS voice_runtime_events (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id         TEXT NOT NULL REFERENCES voice_sessions(id) ON DELETE CASCADE,
+    trigger_segment_id INTEGER REFERENCES voice_transcript_segments(id),
+    output_turn_id     TEXT REFERENCES voice_output_turns(id) ON DELETE CASCADE,
+    phase              TEXT NOT NULL,
+    occurred_at        INTEGER NOT NULL,
+    duration_ms        INTEGER,
+    detail_json        TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_voice_runtime_events_session_time
+    ON voice_runtime_events(session_id, occurred_at, id);
+
   CREATE TABLE IF NOT EXISTS voice_maintenance_checkpoints (
     session_id        TEXT NOT NULL REFERENCES voice_sessions(id) ON DELETE CASCADE,
     kind              TEXT NOT NULL CHECK(kind IN ('summary', 'memory', 'relationship')),

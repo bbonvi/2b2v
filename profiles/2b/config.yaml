@@ -349,10 +349,11 @@ tts:
 voice:
     enabled: true
     provider: openai-codex
-    model: gpt-5.6-sol
+    model: gpt-5.6-terra
     modelParams:
         textVerbosity: low
-    thinkingLevel: minimal
+        serviceTier: priority
+    thinkingLevel: medium
     wakeWords: ["2b", "туби"]
     lingeringAttentionMs: 45000
     roomQuietMs: 180
@@ -371,7 +372,7 @@ voice:
         timeoutMs: 20000
         minUtteranceMs: 180
         maxUtteranceMs: 15000
-        speechPauseMs: 450
+        speechPauseMs: 350
         speechPreRollMs: 160
         speechRmsThreshold: 0.015
     testing:

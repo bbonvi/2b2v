@@ -1264,7 +1264,7 @@ async function runVoiceSummary(
     modeLifecycle: false,
     overrides: {
       forceTrigger: true,
-      systemPrompt: "You maintain compact private context for a live Discord voice room.",
+      systemPrompt: "You summarize private context from a live Discord voice channel whose history combines potentially inaccurate automatic speech-recognition transcripts of what people said, room-presence events, and 2B's audible replies; preserve the intended conversation without treating uncertain transcript wording as exact.",
       personaPrompt: "",
       runtimePrompts: summaryRuntime,
       disableLiveOutput: true,

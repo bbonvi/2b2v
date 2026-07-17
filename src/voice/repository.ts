@@ -70,6 +70,38 @@ export interface VoiceOutputTurnRecord {
   cutoff: boolean;
 }
 
+export type VoiceRuntimePhase =
+  | "speech_started"
+  | "speech_ended"
+  | "vad_finalized"
+  | "stt_queued"
+  | "stt_started"
+  | "stt_completed"
+  | "trigger_decided"
+  | "debounce_scheduled"
+  | "debounce_fired"
+  | "agent_turn_started"
+  | "model_turn_started"
+  | "model_first_delta"
+  | "tts_socket_started"
+  | "tts_socket_opened"
+  | "tts_first_phrase"
+  | "tts_first_audio"
+  | "playback_started"
+  | "interrupted"
+  | "playback_completed";
+
+export interface VoiceRuntimeEventRecord {
+  id: number;
+  sessionId: string;
+  triggerSegmentId?: number;
+  outputTurnId?: string;
+  phase: VoiceRuntimePhase;
+  occurredAt: number;
+  durationMs?: number;
+  detail?: Record<string, string | number | boolean | null>;
+}
+
 export interface VoiceParticipantRecord {
   sessionId: string;
   userId: string;
@@ -156,6 +188,17 @@ interface OutputTurnRow {
   cutoff: number;
 }
 
+interface RuntimeEventRow {
+  id: number;
+  session_id: string;
+  trigger_segment_id: number | null;
+  output_turn_id: string | null;
+  phase: VoiceRuntimePhase;
+  occurred_at: number;
+  duration_ms: number | null;
+  detail_json: string | null;
+}
+
 interface ParticipantRow {
   session_id: string;
   user_id: string;
@@ -222,6 +265,21 @@ function mapSegment(row: SegmentRow): VoiceTranscriptRecord {
     sttModel: row.stt_model,
     source: row.source,
     synthetic: row.synthetic === 1,
+  };
+}
+
+function mapRuntimeEvent(row: RuntimeEventRow): VoiceRuntimeEventRecord {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    triggerSegmentId: optional(row.trigger_segment_id),
+    outputTurnId: optional(row.output_turn_id),
+    phase: row.phase,
+    occurredAt: row.occurred_at,
+    durationMs: optional(row.duration_ms),
+    detail: row.detail_json === null
+      ? undefined
+      : JSON.parse(row.detail_json) as Record<string, string | number | boolean | null>,
   };
 }
 
@@ -544,8 +602,32 @@ export class VoiceRepository {
         interruptedByUserId === undefined ? null : now,
         interruptedByUserId ?? null,
         interruptedByUserId === undefined ? 0 : 1,
-        id,
-      );
+      id,
+    );
+  }
+
+  /** Persist one phase in the live voice latency waterfall. */
+  addRuntimeEvent(input: Omit<VoiceRuntimeEventRecord, "id">): VoiceRuntimeEventRecord {
+    const result = this.db.raw.prepare(`INSERT INTO voice_runtime_events
+      (session_id, trigger_segment_id, output_turn_id, phase, occurred_at, duration_ms, detail_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+      input.sessionId,
+      input.triggerSegmentId ?? null,
+      input.outputTurnId ?? null,
+      input.phase,
+      input.occurredAt,
+      input.durationMs ?? null,
+      input.detail === undefined ? null : JSON.stringify(input.detail),
+    );
+    return { ...input, id: Number(result.lastInsertRowid) };
+  }
+
+  listRuntimeEvents(sessionId: string, limit = 300): VoiceRuntimeEventRecord[] {
+    const rows = this.db.raw.prepare(`SELECT * FROM (
+      SELECT * FROM voice_runtime_events
+      WHERE session_id = ? ORDER BY occurred_at DESC, id DESC LIMIT ?
+    ) ORDER BY occurred_at ASC, id ASC`).all(sessionId, limit) as RuntimeEventRow[];
+    return rows.map(mapRuntimeEvent);
   }
 
   createInstruction(input: Omit<VoiceInstructionRecord, "id" | "status" | "createdAt">): VoiceInstructionRecord {

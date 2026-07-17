@@ -6,6 +6,7 @@ export interface VoiceTriggerDecision {
   shouldConsider: boolean;
   attentionUntil: number;
   reason: "single_human" | "wake_word" | "lingering" | "none";
+  wakeWord?: string;
 }
 
 function normalizedWords(text: string): string[] {
@@ -30,15 +31,16 @@ export function decideVoiceTrigger(input: {
   }
 
   const words = new Set(normalizedWords(input.text));
-  const wake = input.wakeWords.some((word) => {
+  const wakeWord = input.wakeWords.find((word) => {
     const parts = normalizedWords(word);
     return parts.length === 1 && words.has(parts[0] ?? "");
   });
-  if (wake) {
+  if (wakeWord !== undefined) {
     return {
       shouldConsider: true,
       attentionUntil: input.now + input.lingeringAttentionMs,
       reason: "wake_word",
+      wakeWord,
     };
   }
   if (input.state.attentionUntil >= input.now) {

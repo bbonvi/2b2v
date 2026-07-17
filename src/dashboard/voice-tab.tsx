@@ -31,12 +31,33 @@ interface Snapshot {
   channelName?: string;
   participants: Array<{ userId: string; username: string }>;
   speakingUserIds: string[];
+  attention: {
+    humanCount: number;
+    active: boolean;
+    until: number;
+    remainingMs: number;
+    lastTriggerReason: "single_human" | "wake_word" | "lingering" | "none";
+    lastWakeWord?: string;
+    lastTriggerSegmentId?: number;
+    pendingSegmentId?: number;
+  };
   currentOutput?: { turnId: string; plannedText: string; audibleText: string; interrupted: boolean };
   lastError?: string;
   dependencyReport: string;
   transcript: Transcript[];
   history: VoiceHistoryRecord[];
   instructions: Instruction[];
+  runtimeEvents: RuntimeEvent[];
+}
+
+interface RuntimeEvent {
+  id: number;
+  triggerSegmentId?: number;
+  outputTurnId?: string;
+  phase: string;
+  occurredAt: number;
+  durationMs?: number;
+  detail?: Record<string, string | number | boolean | null>;
 }
 
 interface VoiceTurnTrigger {
@@ -102,6 +123,29 @@ function time(value: number): string {
   return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+function duration(value: number): string {
+  if (value < 1_000) return `${Math.round(value)} ms`;
+  return `${(value / 1_000).toFixed(2)} s`;
+}
+
+function phaseLabel(value: string): string {
+  return value.replaceAll("_", " ");
+}
+
+function eventDetail(event: RuntimeEvent): string {
+  if (event.phase === "trigger_decided" && typeof event.detail?.reason === "string") {
+    return `${event.detail.reason.replaceAll("_", " ")} · ${event.detail.humanCount ?? "?"} humans`;
+  }
+  if (event.phase === "interrupted") {
+    const username = event.detail?.username;
+    return typeof username === "string" ? `by @${username}` : "before completion";
+  }
+  if (event.phase === "tts_first_phrase" && typeof event.detail?.characters === "number") {
+    return `${event.detail.characters} chars`;
+  }
+  return "";
+}
+
 function voiceTurnTrigger(value: unknown): VoiceTurnTrigger | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const trigger = value as Record<string, unknown>;
@@ -129,6 +173,7 @@ function VoiceTab(): React.JSX.Element {
   const [selectedRequest, setSelectedRequest] = useState<RequestDetail | null>(null);
   const [selectedCallId, setSelectedCallId] = useState("");
   const [contextError, setContextError] = useState("");
+  const [clock, setClock] = useState(() => Date.now());
   const busy = snapshot?.state === "connecting" || snapshot?.state === "leaving";
 
   useEffect(() => {
@@ -147,6 +192,11 @@ function VoiceTab(): React.JSX.Element {
     };
     events.onerror = () => setError("Live voice event stream disconnected; reconnecting.");
     return () => events.close();
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setClock(Date.now()), 500);
+    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -220,6 +270,27 @@ function VoiceTab(): React.JSX.Element {
   const selected = useMemo(() => channels.find((channel) => channel.id === channelId), [channels, channelId]);
   const selectedCall = selectedRequest?.llmCalls.find((call) => call.id === selectedCallId);
   const displayHistory = sortVoiceHistoryNewestFirst(snapshot?.history ?? []);
+  const runtimeTurns = useMemo(() => {
+    const grouped = new Map<number, RuntimeEvent[]>();
+    for (const event of snapshot?.runtimeEvents ?? []) {
+      if (event.triggerSegmentId === undefined) continue;
+      const events = grouped.get(event.triggerSegmentId) ?? [];
+      events.push(event);
+      grouped.set(event.triggerSegmentId, events);
+    }
+    return [...grouped.entries()]
+      .map(([segmentId, events]) => ({
+        segmentId,
+        events: [...events].sort((left, right) => {
+          const occurredDifference = left.occurredAt - right.occurredAt;
+          return occurredDifference !== 0 ? occurredDifference : left.id - right.id;
+        }),
+        latestAt: Math.max(...events.map((event) => event.occurredAt)),
+      }))
+      .sort((left, right) => right.latestAt - left.latestAt)
+      .slice(0, 6);
+  }, [snapshot?.runtimeEvents]);
+  const attentionRemaining = snapshot === null ? 0 : Math.max(0, snapshot.attention.until - clock);
   const rawPayload = selectedCall?.requestPayload === undefined
     ? ""
     : JSON.stringify(selectedCall.requestPayload, null, 2);
@@ -269,6 +340,15 @@ function VoiceTab(): React.JSX.Element {
       .voice-output strong{display:block;color:var(--v-accent);margin-bottom:5px;font:600 10px "JetBrains Mono",monospace;text-transform:uppercase}
       .voice-instruction{padding:9px 0;border-bottom:1px solid rgba(255,255,255,.055);font-size:11px;line-height:1.5}
       .voice-instruction code{color:var(--v-cyan)}
+      .voice-attention{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+      .voice-stat{padding:9px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.055);border-radius:6px}
+      .voice-stat strong{display:block;margin-top:4px;color:var(--text);font:500 13px "JetBrains Mono",monospace}
+      .voice-waterfalls{display:grid;gap:10px;max-height:520px;overflow:auto}
+      .voice-waterfall{padding:10px;border:1px solid rgba(255,255,255,.06);border-radius:7px;background:rgba(0,0,0,.12)}
+      .voice-waterfall-head{display:flex;justify-content:space-between;gap:8px;margin-bottom:8px;color:var(--v-cyan);font:600 10px "JetBrains Mono",monospace}
+      .voice-phase{display:grid;grid-template-columns:95px minmax(0,1fr) 70px;gap:8px;padding:3px 0;color:var(--text-dim);font:9px/1.35 "JetBrains Mono",monospace}
+      .voice-phase span:nth-child(2){color:var(--text)}
+      .voice-phase span:last-child{text-align:right}
       .voice-deps{max-height:240px;overflow:auto;white-space:pre-wrap;color:var(--text-dim);font:10px/1.5 "JetBrains Mono",monospace}
       .voice-context{display:grid;gap:12px}
       .voice-context-controls{display:grid;grid-template-columns:minmax(220px,1fr) minmax(180px,.55fr) auto;gap:8px}
@@ -354,6 +434,18 @@ function VoiceTab(): React.JSX.Element {
       </div>
       <aside className="voice-side">
         <div className="voice-panel">
+          <div className="voice-title"><span>Attention</span><span>{attentionRemaining > 0 ? "open" : "idle"}</span></div>
+          <div className="voice-attention">
+            <div className="voice-stat"><span className="voice-kicker">Trigger</span><strong>{snapshot?.attention.lastTriggerReason.replaceAll("_", " ") ?? "none"}</strong></div>
+            <div className="voice-stat"><span className="voice-kicker">Remaining</span><strong>{attentionRemaining > 0 ? duration(attentionRemaining) : "—"}</strong></div>
+            <div className="voice-stat"><span className="voice-kicker">Humans</span><strong>{snapshot?.attention.humanCount ?? 0}</strong></div>
+            <div className="voice-stat"><span className="voice-kicker">Wake token</span><strong>{snapshot?.attention.lastWakeWord ?? "—"}</strong></div>
+          </div>
+          <div className="voice-kicker" style={{ marginTop: 10 }}>
+            segment {snapshot?.attention.lastTriggerSegmentId ?? "—"} · pending {snapshot?.attention.pendingSegmentId ?? "—"}
+          </div>
+        </div>
+        <div className="voice-panel">
           <div className="voice-title"><span>Current output</span><span>{snapshot?.currentOutput?.interrupted === true ? "cut off" : "stream"}</span></div>
           <div className="voice-output"><strong>Audible</strong>{snapshot?.currentOutput?.audibleText !== undefined && snapshot.currentOutput.audibleText !== "" ? snapshot.currentOutput.audibleText : "—"}</div>
           <div className="voice-output" style={{ marginTop: 12 }}><strong>Planned</strong>{snapshot?.currentOutput?.plannedText !== undefined && snapshot.currentOutput.plannedText !== "" ? snapshot.currentOutput.plannedText : "—"}</div>
@@ -369,6 +461,27 @@ function VoiceTab(): React.JSX.Element {
           <pre className="voice-deps">{snapshot?.dependencyReport ?? "Loading…"}</pre>
         </div>
       </aside>
+    </section>
+    <section className="voice-panel">
+      <div className="voice-title"><span>Latency waterfall</span><span>Latest {runtimeTurns.length} turns</span></div>
+      <div className="voice-waterfalls">
+        {runtimeTurns.map((turn) => {
+          const origin = turn.events[0]?.occurredAt ?? turn.latestAt;
+          const total = turn.latestAt - origin;
+          return <div className="voice-waterfall" key={turn.segmentId}>
+            <div className="voice-waterfall-head">
+              <span>segment {turn.segmentId}</span>
+              <span>{duration(total)} observed</span>
+            </div>
+            {turn.events.map((event) => <div className="voice-phase" key={event.id}>
+              <span>+{duration(event.occurredAt - origin)}</span>
+              <span>{phaseLabel(event.phase)}{eventDetail(event) === "" ? "" : ` · ${eventDetail(event)}`}</span>
+              <span>{event.durationMs === undefined ? "" : duration(event.durationMs)}</span>
+            </div>)}
+          </div>;
+        })}
+        {runtimeTurns.length === 0 ? <div className="voice-kicker">Timing events will appear after the next utterance.</div> : null}
+      </div>
     </section>
     <section className="voice-panel voice-context">
       <div className="voice-title"><span>Raw Luna context</span><span>Exact request payload</span></div>

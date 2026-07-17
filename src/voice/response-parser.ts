@@ -22,12 +22,15 @@ function attributes(tag: string): Record<string, string> {
   return result;
 }
 
-function phraseBoundary(text: string): number {
+const IDLE_PHRASE_COMMIT_MS = 60;
+
+function phraseBoundary(text: string, includeTrailingPunctuation = false): number {
   let best = -1;
   for (const match of text.matchAll(/[.!?…](?:["')\]]*)\s+/g)) {
     best = match.index + match[0].length;
   }
   if (best >= 0) return best;
+  if (includeTrailingPunctuation && /[.!?…](?:["')\]]*)$/.test(text.trimEnd())) return text.length;
   if (text.length < 180) return -1;
   const comma = text.lastIndexOf(" ", 160);
   return comma >= 60 ? comma + 1 : 160;
@@ -41,28 +44,44 @@ export class VoiceResponseParser {
   private buffer = "";
   private ignored = false;
   private readonly plannedSpeech: string[] = [];
+  private idleCommit?: ReturnType<typeof setTimeout>;
+  private serial: Promise<void> = Promise.resolve();
+  private deferredError: unknown;
+  private finished = false;
 
   constructor(private readonly callbacks: VoiceResponseParserCallbacks) {}
 
   async push(delta: string): Promise<void> {
-    if (delta === "" || this.ignored) return;
-    this.buffer += delta;
-    await this.drain(false);
+    if (delta === "" || this.ignored || this.finished) return;
+    this.cancelIdleCommit();
+    await this.enqueue(async () => {
+      const deferredError = this.deferredErrorValue();
+      if (deferredError !== undefined) throw deferredError;
+      this.buffer += delta;
+      await this.drain(false);
+      this.scheduleIdleCommit();
+    });
   }
 
   async finish(): Promise<{ plannedSpeech: string; ignored: boolean; malformed: boolean }> {
-    if (this.ignored) return { plannedSpeech: "", ignored: true, malformed: false };
-    const malformed = await this.drain(true);
-    return { plannedSpeech: this.plannedSpeech.join(" ").trim(), ignored: this.ignored, malformed };
+    this.finished = true;
+    this.cancelIdleCommit();
+    return await this.enqueue(async () => {
+      const deferredError = this.deferredErrorValue();
+      if (deferredError !== undefined) throw deferredError;
+      if (this.ignored) return { plannedSpeech: "", ignored: true, malformed: false };
+      const malformed = await this.drain(true);
+      return { plannedSpeech: this.plannedSpeech.join(" ").trim(), ignored: this.ignored, malformed };
+    });
   }
 
-  private async drain(final: boolean): Promise<boolean> {
+  private async drain(final: boolean, idle = false): Promise<boolean> {
     let malformed = false;
     for (;;) {
       const lower = this.buffer.toLowerCase();
       const tagStart = this.buffer.indexOf("<");
       if (tagStart === -1) {
-        const boundary = final ? this.buffer.length : phraseBoundary(this.buffer);
+        const boundary = final ? this.buffer.length : phraseBoundary(this.buffer, idle);
         if (boundary <= 0) return malformed;
         await this.emitSpeech(this.buffer.slice(0, boundary));
         this.buffer = this.buffer.slice(boundary);
@@ -71,7 +90,7 @@ export class VoiceResponseParser {
 
       if (tagStart > 0) {
         const plain = this.buffer.slice(0, tagStart);
-        const boundary = final ? plain.length : phraseBoundary(plain);
+        const boundary = final ? plain.length : phraseBoundary(plain, idle);
         if (boundary <= 0) return malformed;
         await this.emitSpeech(plain.slice(0, boundary));
         this.buffer = plain.slice(boundary) + this.buffer.slice(tagStart);
@@ -123,6 +142,43 @@ export class VoiceResponseParser {
       this.buffer = "";
       return malformed;
     }
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const pending = this.serial.then(operation);
+    this.serial = pending.then(() => undefined, () => undefined);
+    return pending;
+  }
+
+  private scheduleIdleCommit(): void {
+    if (
+      this.finished
+      || this.ignored
+      || this.buffer.includes("<")
+      || !/[.!?…](?:["')\]]*)$/.test(this.buffer.trimEnd())
+    ) return;
+    this.idleCommit = setTimeout(() => {
+      this.idleCommit = undefined;
+      void this.enqueue(async () => {
+        if (this.finished || this.ignored) return;
+        await this.drain(false, true);
+      }).catch((error: unknown) => {
+        this.deferredError = error;
+      });
+    }, IDLE_PHRASE_COMMIT_MS);
+  }
+
+  private cancelIdleCommit(): void {
+    if (this.idleCommit === undefined) return;
+    clearTimeout(this.idleCommit);
+    this.idleCommit = undefined;
+  }
+
+  private deferredErrorValue(): Error | undefined {
+    if (this.deferredError === undefined) return undefined;
+    return this.deferredError instanceof Error
+      ? this.deferredError
+      : new Error("Deferred voice phrase commit failed");
   }
 
   private async emitSpeech(text: string): Promise<void> {

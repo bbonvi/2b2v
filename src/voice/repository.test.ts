@@ -34,6 +34,15 @@ describe("VoiceRepository", () => {
     });
     repository.updateInstruction(instruction.id, "waiting");
     const outputId = repository.createOutputTurn(session.id, segment.id, instruction.id);
+    const timing = repository.addRuntimeEvent({
+      sessionId: session.id,
+      triggerSegmentId: segment.id,
+      outputTurnId: outputId,
+      phase: "playback_started",
+      occurredAt: 3,
+      durationMs: 2,
+      detail: { reason: "test" },
+    });
     repository.markOutputPlaybackStarted(outputId, 3);
     repository.finishOutputTurn(outputId, "Are you ready?", "Are you", "u1");
 
@@ -60,6 +69,7 @@ describe("VoiceRepository", () => {
     expect(output.output.cutoff).toBe(true);
     expect(repository.listOpenInstructions(session.id)[0]?.status).toBe("waiting");
     expect(repository.getInstruction(instruction.id)?.sourceMessageId).toBe("m2");
+    expect(repository.listRuntimeEvents(session.id)).toEqual([timing]);
     expect(repository.latestSessions(1)[0]?.state).toBe("active");
     db.close();
   });

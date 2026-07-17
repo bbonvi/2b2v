@@ -29,6 +29,8 @@ import type {
   VoiceInstructionRecord,
   VoiceMoveHandoff,
   VoiceRepository,
+  VoiceRuntimeEventRecord,
+  VoiceRuntimePhase,
   VoiceTranscriptRecord,
 } from "./repository.ts";
 import { VoiceResponseParser, type VoiceMessageDirective } from "./response-parser.ts";
@@ -74,19 +76,30 @@ export interface VoiceRuntimeSnapshot {
   channelName?: string;
   participants: Array<{ userId: string; username: string }>;
   speakingUserIds: string[];
+  attention: {
+    humanCount: number;
+    active: boolean;
+    until: number;
+    remainingMs: number;
+    lastTriggerReason: "single_human" | "wake_word" | "lingering" | "none";
+    lastWakeWord?: string;
+    lastTriggerSegmentId?: number;
+    pendingSegmentId?: number;
+  };
   currentOutput?: { turnId: string; plannedText: string; audibleText: string; interrupted: boolean };
   lastError?: string;
   dependencyReport: string;
   transcript: VoiceTranscriptRecord[];
   history: VoiceHistoryRecord[];
   instructions: VoiceInstructionRecord[];
+  runtimeEvents: VoiceRuntimeEventRecord[];
 }
 
 export interface VoiceResponseSink {
   startModelTurn(): void;
   push(delta: string): Promise<boolean>;
   finish(finalText: string): Promise<{ visible: boolean; memoryText: string; malformed: boolean }>;
-  abort(userId?: string): void;
+  abort(userId?: string, username?: string): void;
 }
 
 export interface VoicePresenceActionOrigin {
@@ -113,7 +126,14 @@ interface ActiveSession {
   transcriber: WhisperServerTranscriber;
   sttController: AbortController;
   transcriptionQueue: Promise<void>;
+  pendingTranscriptions: number;
+  latestQueuedTrigger?: VoiceTranscriptRecord;
   attentionUntil: number;
+  lastTriggerReason: VoiceRuntimeSnapshot["attention"]["lastTriggerReason"];
+  lastWakeWord?: string;
+  lastTriggerSegmentId?: number;
+  pendingTurnSegmentId?: number;
+  currentTurnSegmentId?: number;
   speaking: Set<string>;
   subscriptions: Set<string>;
   pendingTurn?: ReturnType<typeof setTimeout>;
@@ -121,6 +141,15 @@ interface ActiveSession {
   turnController?: AbortController;
   currentSink?: VoiceResponseSinkImpl;
   pendingPresenceAction?: PendingPresenceAction;
+}
+
+interface VoiceTranscriptTiming {
+  speechStartedAt: number;
+  speechEndedAt: number;
+  vadFinalizedAt: number;
+  sttQueuedAt: number;
+  sttStartedAt: number;
+  sttCompletedAt: number;
 }
 
 /** Global single-connection Discord voice coordinator. */
@@ -144,6 +173,8 @@ export class VoiceRuntime {
 
   snapshot(): VoiceRuntimeSnapshot {
     const active = this.active;
+    const now = Date.now();
+    const latestSessionId = active?.id ?? this.deps.repository.latestSessions(1)[0]?.id;
     const participants = active === undefined
       ? []
       : [...active.channel.members.values()]
@@ -166,6 +197,20 @@ export class VoiceRuntime {
         : {}),
       participants,
       speakingUserIds: active === undefined ? [] : [...active.speaking],
+      attention: {
+        humanCount: participants.length,
+        active: active !== undefined && active.attentionUntil >= now,
+        until: active?.attentionUntil ?? 0,
+        remainingMs: active === undefined ? 0 : Math.max(0, active.attentionUntil - now),
+        lastTriggerReason: active?.lastTriggerReason ?? "none",
+        ...(active?.lastWakeWord !== undefined ? { lastWakeWord: active.lastWakeWord } : {}),
+        ...(active?.lastTriggerSegmentId !== undefined
+          ? { lastTriggerSegmentId: active.lastTriggerSegmentId }
+          : {}),
+        ...(active?.pendingTurnSegmentId !== undefined
+          ? { pendingSegmentId: active.pendingTurnSegmentId }
+          : {}),
+      },
       ...(currentOutput !== undefined ? { currentOutput } : {}),
       ...(this.lastError !== undefined ? { lastError: this.lastError } : {}),
       dependencyReport: generateDependencyReport(),
@@ -182,6 +227,9 @@ export class VoiceRuntime {
       instructions: active === undefined
         ? this.deps.repository.recentInstructions(30)
         : this.deps.repository.listOpenInstructions(active.id),
+      runtimeEvents: latestSessionId === undefined
+        ? []
+        : this.deps.repository.listRuntimeEvents(latestSessionId, 300),
     };
   }
 
@@ -223,7 +271,9 @@ export class VoiceRuntime {
         transcriber: this.transcriber,
         sttController: new AbortController(),
         transcriptionQueue: Promise.resolve(),
+        pendingTranscriptions: 0,
         attentionUntil: 0,
+        lastTriggerReason: "none",
         speaking: new Set(),
         subscriptions: new Set(),
       };
@@ -388,6 +438,12 @@ export class VoiceRuntime {
       repository: this.deps.repository,
       sendMessage: this.deps.sendMessage,
       emit: () => this.emit(),
+      abortTurn: (userId) => {
+        const controller = active.turnController;
+        if (controller !== undefined && !controller.signal.aborted) {
+          controller.abort(new Error(`Voice turn interrupted by ${userId}`));
+        }
+      },
       onInstructionResolved: (id, summary, messageId) => {
         this.deps.repository.updateInstruction(id, "resolved", summary, messageId);
       },
@@ -463,18 +519,77 @@ export class VoiceRuntime {
     });
     const decoder = new prism.opus.Decoder({ rate: 48_000, channels: 2, frameSize: 960 });
     let lastDecodedAt = Date.now();
+    let speakingSafetyTimer: ReturnType<typeof setTimeout> | undefined;
+    let decoderFinalized = false;
+    const clearSpeaking = (): void => {
+      if (speakingSafetyTimer !== undefined) {
+        clearTimeout(speakingSafetyTimer);
+        speakingSafetyTimer = undefined;
+      }
+      if (active.speaking.delete(userId)) this.emit();
+    };
+    const armSpeakingSafety = (): void => {
+      if (speakingSafetyTimer !== undefined) clearTimeout(speakingSafetyTimer);
+      const timeoutMs = Math.max(1_500, active.voiceConfig.stt.speechPauseMs * 4);
+      speakingSafetyTimer = setTimeout(() => {
+        speakingSafetyTimer = undefined;
+        if (active.speaking.delete(userId)) {
+          this.deps.log.warn("cleared stale voice speaking state after receive inactivity", {
+            userId,
+            timeoutMs,
+          });
+          this.emit();
+        }
+      }, timeoutMs);
+    };
+    const finalizeDecoder = (): void => {
+      if (decoderFinalized) return;
+      decoderFinalized = true;
+      active.subscriptions.delete(userId);
+      clearSpeaking();
+      for (const utterance of segmenter.flush()) {
+        this.enqueueTranscription(
+          active,
+          member.user.username,
+          userId,
+          anchorUtteranceToWallClock(utterance, lastDecodedAt),
+          utterance,
+        );
+      }
+    };
     decoder.on("data", (chunk: Buffer | Uint8Array) => {
       lastDecodedAt = Date.now();
       const wasSpeaking = segmenter.isSpeaking;
       const result = segmenter.push(Buffer.from(chunk));
       if (result.speechStarted) {
         active.speaking.add(userId);
-        if (active.player.state.status !== AudioPlayerStatus.Idle) {
-          active.currentSink?.abort(userId);
-          active.player.stop(true);
+        if (active.currentSink !== undefined) {
+          active.currentSink.abort(userId, member.user.username);
+        } else if (active.currentTurnSegmentId !== undefined) {
+          this.deps.repository.addRuntimeEvent({
+            sessionId: active.id,
+            triggerSegmentId: active.currentTurnSegmentId,
+            phase: "interrupted",
+            occurredAt: Date.now(),
+            detail: {
+              userId,
+              username: member.user.username,
+              audibleCharacters: 0,
+            },
+          });
         }
+        const controller = active.turnController;
+        if (controller !== undefined && !controller.signal.aborted) {
+          controller.abort(new Error(`Voice turn interrupted by @${member.user.username}`));
+        }
+        if (active.player.state.status !== AudioPlayerStatus.Idle) active.player.stop(true);
       }
-      if (!segmenter.isSpeaking) active.speaking.delete(userId);
+      if (segmenter.isSpeaking) {
+        active.speaking.add(userId);
+        armSpeakingSafety();
+      } else {
+        clearSpeaking();
+      }
       if (wasSpeaking !== segmenter.isSpeaking || result.speechStarted) this.emit();
       for (const utterance of result.utterances) {
         this.enqueueTranscription(
@@ -486,21 +601,29 @@ export class VoiceRuntime {
         );
       }
     });
-    opus.pipe(decoder);
-    decoder.once("end", () => {
-      active.subscriptions.delete(userId);
-      active.speaking.delete(userId);
-      this.emit();
-      for (const utterance of segmenter.flush()) {
-        this.enqueueTranscription(
-          active,
-          member.user.username,
-          userId,
-          anchorUtteranceToWallClock(utterance, lastDecodedAt),
-          utterance,
-        );
-      }
+    decoder.once("end", finalizeDecoder);
+    decoder.once("close", finalizeDecoder);
+    decoder.once("error", (error: Error) => {
+      this.deps.log.warn("Discord voice decoder stream failed", {
+        userId,
+        error: error.message,
+      });
+      finalizeDecoder();
     });
+    opus.once("end", clearSpeaking);
+    opus.once("close", () => {
+      clearSpeaking();
+      if (!decoder.writableEnded) decoder.end();
+    });
+    opus.once("error", (error: Error) => {
+      this.deps.log.warn("Discord voice receive stream failed", {
+        userId,
+        error: error.message,
+      });
+      clearSpeaking();
+      if (!decoder.writableEnded) decoder.end();
+    });
+    opus.pipe(decoder);
   }
 
   private enqueueTranscription(
@@ -510,26 +633,49 @@ export class VoiceRuntime {
     timing: VoiceUtteranceWallClock,
     utterance: VoiceUtterance,
   ): void {
+    const finalizedAt = Date.now();
     this.deps.log.debug("voice utterance finalized", {
       userId,
       audioMs: utterance.endedOffsetMs - utterance.startedOffsetMs,
       speechMs: utterance.speechMs,
     });
+    const queuedAt = Date.now();
+    active.pendingTranscriptions += 1;
     active.transcriptionQueue = active.transcriptionQueue
       .then(async () => {
-        if (active.sttController.signal.aborted) return;
-        const result = await active.transcriber.transcribe(utterance.pcm, active.sttController.signal);
-        if (result.text === "" || this.active !== active) return;
-        await this.finalizeTranscript({
-          userId,
-          username,
-          text: result.text,
-          startedAt: timing.startedAt,
-          endedAt: timing.endedAt,
-          language: result.language,
-          model: result.model,
-          synthetic: false,
-        });
+        try {
+          if (active.sttController.signal.aborted) return;
+          const sttStartedAt = Date.now();
+          const result = await active.transcriber.transcribe(utterance.pcm, active.sttController.signal);
+          const sttCompletedAt = Date.now();
+          if (result.text === "" || this.active !== active) return;
+          await this.finalizeTranscript({
+            userId,
+            username,
+            text: result.text,
+            startedAt: timing.startedAt,
+            endedAt: timing.endedAt,
+            language: result.language,
+            model: result.model,
+            synthetic: false,
+            deferTurn: true,
+            timing: {
+              speechStartedAt: timing.startedAt,
+              speechEndedAt: timing.endedAt,
+              vadFinalizedAt: finalizedAt,
+              sttQueuedAt: queuedAt,
+              sttStartedAt,
+              sttCompletedAt,
+            },
+          });
+        } finally {
+          active.pendingTranscriptions = Math.max(0, active.pendingTranscriptions - 1);
+          if (active.pendingTranscriptions === 0) {
+            const trigger = active.latestQueuedTrigger;
+            delete active.latestQueuedTrigger;
+            if (trigger !== undefined && this.active === active) this.scheduleTurn(trigger);
+          }
+        }
       })
       .catch((error: unknown) => {
         if (!active.sttController.signal.aborted) this.fail(error);
@@ -545,6 +691,8 @@ export class VoiceRuntime {
     language: string;
     model: string;
     synthetic: boolean;
+    deferTurn?: boolean;
+    timing?: VoiceTranscriptTiming;
   }): Promise<VoiceTranscriptRecord> {
     const active = this.active;
     if (active === undefined) throw new Error("Voice session ended before transcript finalization.");
@@ -564,17 +712,65 @@ export class VoiceRuntime {
       source: input.synthetic ? "test_injection" : "stt",
       synthetic: input.synthetic,
     });
+    if (input.timing !== undefined) {
+      const event = (
+        phase: VoiceRuntimePhase,
+        occurredAt: number,
+        durationMs?: number,
+      ): void => {
+        this.deps.repository.addRuntimeEvent({
+          sessionId: active.id,
+          triggerSegmentId: record.id,
+          phase,
+          occurredAt,
+          ...(durationMs === undefined ? {} : { durationMs }),
+        });
+      };
+      event("speech_started", input.timing.speechStartedAt);
+      event("speech_ended", input.timing.speechEndedAt);
+      event("vad_finalized", input.timing.vadFinalizedAt, input.timing.vadFinalizedAt - input.timing.speechEndedAt);
+      event("stt_queued", input.timing.sttQueuedAt);
+      event("stt_started", input.timing.sttStartedAt, input.timing.sttStartedAt - input.timing.sttQueuedAt);
+      event("stt_completed", input.timing.sttCompletedAt, input.timing.sttCompletedAt - input.timing.sttStartedAt);
+    }
     const humans = [...active.channel.members.values()].filter((member) => !member.user.bot).length;
+    const decisionAt = Date.now();
     const decision = decideVoiceTrigger({
       text: record.normalizedText,
       humanCount: humans,
       wakeWords: active.voiceConfig.wakeWords,
-      now: Date.now(),
+      now: decisionAt,
       lingeringAttentionMs: active.voiceConfig.lingeringAttentionMs,
       state: { attentionUntil: active.attentionUntil },
     });
     active.attentionUntil = decision.attentionUntil;
-    if (decision.shouldConsider) this.scheduleTurn(record);
+    active.lastTriggerReason = decision.reason;
+    if (decision.wakeWord === undefined) {
+      delete active.lastWakeWord;
+    } else {
+      active.lastWakeWord = decision.wakeWord;
+    }
+    active.lastTriggerSegmentId = record.id;
+    this.deps.repository.addRuntimeEvent({
+      sessionId: active.id,
+      triggerSegmentId: record.id,
+      phase: "trigger_decided",
+      occurredAt: decisionAt,
+      detail: {
+        reason: decision.reason,
+        humanCount: humans,
+        shouldConsider: decision.shouldConsider,
+        attentionUntil: decision.attentionUntil,
+        wakeWord: decision.wakeWord ?? null,
+      },
+    });
+    if (decision.shouldConsider) {
+      if (input.deferTurn === true) {
+        active.latestQueuedTrigger = record;
+      } else {
+        this.scheduleTurn(record);
+      }
+    }
     this.maybeRunMaintenance(record.id);
     this.emit();
     return Promise.resolve(record);
@@ -584,12 +780,31 @@ export class VoiceRuntime {
     const active = this.active;
     if (active === undefined) return;
     if (active.pendingTurn !== undefined) clearTimeout(active.pendingTurn);
+    active.pendingTurnSegmentId = trigger.id;
+    this.deps.repository.addRuntimeEvent({
+      sessionId: active.id,
+      triggerSegmentId: trigger.id,
+      phase: "debounce_scheduled",
+      occurredAt: Date.now(),
+      durationMs: active.voiceConfig.roomQuietMs,
+    });
+    this.armTurnTimer(active, trigger);
+  }
+
+  private armTurnTimer(active: ActiveSession, trigger: VoiceTranscriptRecord): void {
     active.pendingTurn = setTimeout(() => {
       active.pendingTurn = undefined;
       if (active.speaking.size > 0) {
-        this.scheduleTurn(trigger);
+        this.armTurnTimer(active, trigger);
         return;
       }
+      active.pendingTurnSegmentId = undefined;
+      this.deps.repository.addRuntimeEvent({
+        sessionId: active.id,
+        triggerSegmentId: trigger.id,
+        phase: "debounce_fired",
+        occurredAt: Date.now(),
+      });
       void this.runTurn(trigger);
     }, active.voiceConfig.roomQuietMs);
   }
@@ -600,6 +815,14 @@ export class VoiceRuntime {
     active.turnController?.abort(new Error("Superseded by a newer voice turn"));
     const controller = new AbortController();
     active.turnController = controller;
+    active.currentTurnSegmentId = trigger.id;
+    this.deps.repository.addRuntimeEvent({
+      sessionId: active.id,
+      triggerSegmentId: trigger.id,
+      phase: "agent_turn_started",
+      occurredAt: Date.now(),
+      detail: { instruction: instruction !== undefined },
+    });
     try {
       await this.deps.onTurn({
         sessionId: active.id,
@@ -630,7 +853,10 @@ export class VoiceRuntime {
       if (!controller.signal.aborted) this.fail(error);
     } finally {
       const ownsTurn = active.turnController === controller;
-      if (ownsTurn) active.turnController = undefined;
+      if (ownsTurn) {
+        active.turnController = undefined;
+        active.currentTurnSegmentId = undefined;
+      }
       const pending = active.pendingPresenceAction?.controller === controller
         ? active.pendingPresenceAction
         : undefined;
@@ -807,6 +1033,9 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
   private audibleText = "";
   private interruptedByUserId: string | undefined;
   private visible = false;
+  private speechQueued = false;
+  private firstPhraseRecorded = false;
+  private firstDeltaRecorded = false;
 
   constructor(private readonly deps: {
     active: ActiveSession;
@@ -816,6 +1045,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
     repository: VoiceRepository;
     sendMessage: VoiceRuntimeDeps["sendMessage"];
     emit: () => void;
+    abortTurn: (userId: string) => void;
     onInstructionResolved: (id: string, summary: string, messageId: string) => void;
     onInstructionIgnored: (id: string) => void;
     triggerSegmentId: number;
@@ -827,16 +1057,36 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
       deps.instructionId,
     );
     this.parser = this.createParser();
+    this.prepareTts();
   }
 
   startModelTurn(): void {
-    if (this.rawText === "") return;
-    this.rawText = "";
-    this.parser = this.createParser();
+    this.deps.repository.addRuntimeEvent({
+      sessionId: this.deps.active.id,
+      triggerSegmentId: this.deps.triggerSegmentId,
+      outputTurnId: this.turnId,
+      phase: "model_turn_started",
+      occurredAt: Date.now(),
+    });
+    this.firstDeltaRecorded = false;
+    if (this.rawText !== "") {
+      this.rawText = "";
+      this.parser = this.createParser();
+    }
   }
 
   async push(delta: string): Promise<boolean> {
     if (this.interruptedByUserId !== undefined) return false;
+    if (!this.firstDeltaRecorded && delta !== "") {
+      this.firstDeltaRecorded = true;
+      this.deps.repository.addRuntimeEvent({
+        sessionId: this.deps.active.id,
+        triggerSegmentId: this.deps.triggerSegmentId,
+        outputTurnId: this.turnId,
+        phase: "model_first_delta",
+        occurredAt: Date.now(),
+      });
+    }
     this.rawText += delta;
     const before = this.visible;
     await this.parser.push(delta);
@@ -854,7 +1104,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
     }
     const result = await this.parser.finish();
     this.plannedText = result.plannedSpeech;
-    if (this.tts !== undefined) {
+    if (this.tts !== undefined && this.speechQueued) {
       await this.tts.finish();
       try {
         await entersState(this.deps.active.player, AudioPlayerStatus.Idle, 20_000);
@@ -872,6 +1122,15 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
       });
       if (metrics.audioBytes === 0) throw new Error("ElevenLabs returned no live voice audio.");
       if (!this.visible) throw new Error("Discord audio player never entered the playing state.");
+      this.deps.repository.addRuntimeEvent({
+        sessionId: this.deps.active.id,
+        triggerSegmentId: this.deps.triggerSegmentId,
+        outputTurnId: this.turnId,
+        phase: "playback_completed",
+        occurredAt: Date.now(),
+      });
+    } else {
+      this.tts?.abort();
     }
     this.refreshAudibleText();
     this.deps.repository.finishOutputTurn(
@@ -888,11 +1147,25 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
     };
   }
 
-  abort(userId?: string): void {
+  abort(userId?: string, username?: string): void {
     if (this.interruptedByUserId !== undefined) return;
     this.interruptedByUserId = userId ?? "unknown";
     this.refreshAudibleText();
     this.tts?.abort();
+    if (userId !== undefined) {
+      this.deps.repository.addRuntimeEvent({
+        sessionId: this.deps.active.id,
+        triggerSegmentId: this.deps.triggerSegmentId,
+        outputTurnId: this.turnId,
+        phase: "interrupted",
+        occurredAt: Date.now(),
+        detail: {
+          userId,
+          username: username ?? null,
+          audibleCharacters: this.audibleText.length,
+        },
+      });
+    }
     this.deps.repository.finishOutputTurn(this.turnId, this.plannedText, this.audibleText, this.interruptedByUserId);
     this.deps.emit();
   }
@@ -910,28 +1183,52 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
     return new VoiceResponseParser({
       onSpeech: async (text) => {
         if (this.interruptedByUserId !== undefined) return;
+        this.plannedText = `${this.plannedText} ${text}`.trim();
+        if (!this.firstPhraseRecorded) {
+          this.firstPhraseRecorded = true;
+          this.deps.repository.addRuntimeEvent({
+            sessionId: this.deps.active.id,
+            triggerSegmentId: this.deps.triggerSegmentId,
+            outputTurnId: this.turnId,
+            phase: "tts_first_phrase",
+            occurredAt: Date.now(),
+            detail: { characters: text.length },
+          });
+        }
+        const activeSpeaker = this.deps.active.speaking.values().next().value;
+        if (activeSpeaker !== undefined) {
+          this.abort(activeSpeaker);
+          this.deps.abortTurn(activeSpeaker);
+          return;
+        }
         const preset = this.deps.preset;
         const apiKey = this.deps.apiKey;
         if (preset === undefined || apiKey === undefined || apiKey === "") {
           throw new Error("Live voice TTS is unavailable.");
         }
-        if (this.tts === undefined) {
-          this.tts = new ElevenLabsVoiceStream(apiKey, preset, () => {
-            this.refreshAudibleText();
-            this.deps.emit();
-          });
+        this.prepareTts();
+        if (this.tts === undefined) throw new Error("Live voice TTS did not initialize.");
+        if (!this.speechQueued) {
+          this.speechQueued = true;
           const inputType = preset.outputFormat?.startsWith("opus_") === true
             ? StreamType.OggOpus
             : StreamType.Arbitrary;
           const resource = createAudioResource(this.tts.audio, { inputType });
           this.deps.active.player.play(resource);
           this.deps.active.player.once(AudioPlayerStatus.Playing, () => {
-            this.deps.repository.markOutputPlaybackStarted(this.turnId);
+            const startedAt = Date.now();
+            this.deps.repository.markOutputPlaybackStarted(this.turnId, startedAt);
+            this.deps.repository.addRuntimeEvent({
+              sessionId: this.deps.active.id,
+              triggerSegmentId: this.deps.triggerSegmentId,
+              outputTurnId: this.turnId,
+              phase: "playback_started",
+              occurredAt: startedAt,
+            });
             this.visible = true;
             this.deps.emit();
           });
         }
-        this.plannedText = `${this.plannedText} ${text}`.trim();
         await this.tts.push(text, /[.!?…]$/.test(text));
       },
       onMessage: async (message) => {
@@ -943,6 +1240,48 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
       onIgnore: (instructionId) => {
         const id = instructionId ?? this.deps.instructionId;
         if (id !== undefined) this.deps.onInstructionIgnored(id);
+      },
+    });
+  }
+
+  private prepareTts(): void {
+    if (this.tts !== undefined) return;
+    const preset = this.deps.preset;
+    const apiKey = this.deps.apiKey;
+    if (preset === undefined || apiKey === undefined || apiKey === "") return;
+    const startedAt = Date.now();
+    this.deps.repository.addRuntimeEvent({
+      sessionId: this.deps.active.id,
+      triggerSegmentId: this.deps.triggerSegmentId,
+      outputTurnId: this.turnId,
+      phase: "tts_socket_started",
+      occurredAt: startedAt,
+    });
+    this.tts = new ElevenLabsVoiceStream(apiKey, preset, {
+      onOpen: () => {
+        this.deps.repository.addRuntimeEvent({
+          sessionId: this.deps.active.id,
+          triggerSegmentId: this.deps.triggerSegmentId,
+          outputTurnId: this.turnId,
+          phase: "tts_socket_opened",
+          occurredAt: Date.now(),
+          durationMs: Date.now() - startedAt,
+        });
+        this.deps.emit();
+      },
+      onFirstAudio: () => {
+        this.deps.repository.addRuntimeEvent({
+          sessionId: this.deps.active.id,
+          triggerSegmentId: this.deps.triggerSegmentId,
+          outputTurnId: this.turnId,
+          phase: "tts_first_audio",
+          occurredAt: Date.now(),
+        });
+        this.deps.emit();
+      },
+      onAlignment: () => {
+        this.refreshAudibleText();
+        this.deps.emit();
       },
     });
   }

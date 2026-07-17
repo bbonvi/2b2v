@@ -243,6 +243,19 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
     ignoreExistingColumn(raw, sql);
   }
 
+  raw.run(`CREATE TABLE IF NOT EXISTS voice_runtime_events (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id         TEXT NOT NULL REFERENCES voice_sessions(id) ON DELETE CASCADE,
+    trigger_segment_id INTEGER REFERENCES voice_transcript_segments(id),
+    output_turn_id     TEXT REFERENCES voice_output_turns(id) ON DELETE CASCADE,
+    phase              TEXT NOT NULL,
+    occurred_at        INTEGER NOT NULL,
+    duration_ms        INTEGER,
+    detail_json        TEXT
+  )`);
+  raw.run(`CREATE INDEX IF NOT EXISTS idx_voice_runtime_events_session_time
+    ON voice_runtime_events(session_id, occurred_at, id)`);
+
   raw.run(`UPDATE voice_output_turns AS output
     SET trigger_segment_id = (
       SELECT segment.id FROM voice_transcript_segments AS segment

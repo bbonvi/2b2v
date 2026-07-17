@@ -12,6 +12,12 @@ interface ElevenLabsOutput {
   message?: unknown;
 }
 
+export interface ElevenLabsVoiceStreamCallbacks {
+  onOpen?: () => void;
+  onFirstAudio?: () => void;
+  onAlignment?: (text: string) => void;
+}
+
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
@@ -31,6 +37,7 @@ export class ElevenLabsVoiceStream {
   private resolveDone: (() => void) | undefined;
   private rejectDone: ((error: Error) => void) | undefined;
   private closed = false;
+  private aborted = false;
   private opened = false;
   private finalized = false;
   private readonly createdAt = Date.now();
@@ -44,7 +51,7 @@ export class ElevenLabsVoiceStream {
   constructor(
     apiKey: string,
     private readonly preset: VoicePreset,
-    private readonly onAlignment?: (text: string) => void,
+    private readonly callbacks: ElevenLabsVoiceStreamCallbacks = {},
   ) {
     this.ready = new Promise<void>((resolve, reject) => {
       this.resolveReady = resolve;
@@ -54,16 +61,26 @@ export class ElevenLabsVoiceStream {
       this.resolveDone = resolve;
       this.rejectDone = reject;
     });
+    // Promise rejection carries transport failures to the caller. This listener
+    // only prevents an unattached prewarmed stream from becoming process-fatal.
+    this.audio.on("error", () => {});
     const url = new URL(`wss://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(preset.voiceId)}/stream-input`);
     url.searchParams.set("model_id", preset.model);
     url.searchParams.set("output_format", preset.outputFormat ?? "mp3_44100_128");
     url.searchParams.set("sync_alignment", "true");
     url.searchParams.set("auto_mode", "true");
+    // A voice turn may use tools before speaking; keep the pre-opened socket
+    // alive long enough to overlap setup without expiring mid-turn.
+    url.searchParams.set("inactivity_timeout", "180");
     url.searchParams.set("apply_text_normalization", preset.applyTextNormalization ?? "auto");
     if (preset.seed !== undefined) url.searchParams.set("seed", String(preset.seed));
     const socket = new WebSocket(url);
     this.socket = socket;
     socket.addEventListener("open", () => {
+      if (this.aborted) {
+        socket.close();
+        return;
+      }
       this.opened = true;
       socket.send(JSON.stringify({
         text: " ",
@@ -77,14 +94,21 @@ export class ElevenLabsVoiceStream {
         },
       }));
       this.resolveReady?.();
+      this.callbacks.onOpen?.();
     });
     socket.addEventListener("message", (event) => this.onMessage(event.data));
     socket.addEventListener("error", () => {
+      if (this.aborted) return;
       this.fail(new Error("ElevenLabs live voice WebSocket failed"));
     });
     socket.addEventListener("close", (event) => {
       this.closed = true;
       this.audio.end();
+      if (this.aborted) {
+        this.resolveReady?.();
+        this.resolveDone?.();
+        return;
+      }
       if (!this.opened) this.rejectReady?.(new Error(`ElevenLabs live voice WebSocket closed before opening (${event.code})`));
       if (this.finalized || event.code === 1000) {
         this.resolveDone?.();
@@ -118,9 +142,12 @@ export class ElevenLabsVoiceStream {
   }
 
   abort(): void {
+    if (this.aborted) return;
+    this.aborted = true;
     this.closed = true;
     this.socket?.close();
     this.audio.end();
+    this.resolveReady?.();
     this.resolveDone?.();
   }
 
@@ -143,6 +170,7 @@ export class ElevenLabsVoiceStream {
   }
 
   private onMessage(data: unknown): void {
+    if (this.aborted) return;
     if (typeof data !== "string") return;
     let output: ElevenLabsOutput;
     try {
@@ -157,7 +185,10 @@ export class ElevenLabsVoiceStream {
     }
     if (typeof output.audio === "string" && output.audio !== "") {
       const audio = Buffer.from(output.audio, "base64");
-      this.firstAudioAt ??= Date.now();
+      if (this.firstAudioAt === undefined) {
+        this.firstAudioAt = Date.now();
+        this.callbacks.onFirstAudio?.();
+      }
       this.audioBytes += audio.length;
       this.audio.write(audio);
     }
@@ -179,7 +210,7 @@ export class ElevenLabsVoiceStream {
       if (typeof lastStart === "number" && typeof lastDuration === "number") {
         this.alignmentOffsetMs += lastStart + lastDuration;
       }
-      this.onAlignment?.(this.alignedText);
+      this.callbacks.onAlignment?.(this.alignedText);
     }
     if (output.isFinal === true) {
       this.finalized = true;
@@ -191,6 +222,7 @@ export class ElevenLabsVoiceStream {
   }
 
   private fail(error: Error): void {
+    if (this.closed || this.aborted) return;
     this.closed = true;
     this.rejectReady?.(error);
     this.rejectDone?.(error);
