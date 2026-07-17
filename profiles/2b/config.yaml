@@ -107,7 +107,7 @@ personaModes:
         - id: normal
           avatar:
             rotation:
-              minInterval: 3h
+              minInterval: 2h
               maxInterval: 6h
           instructions: >-
               This is 2B's normal mode. This mode rotates several 2B avatars. If asked, she does it on her own because she wants to.
