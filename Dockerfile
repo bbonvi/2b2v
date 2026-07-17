@@ -21,18 +21,25 @@ FROM base AS voice-base
 COPY --link --from=faster-whisper-builder /opt/faster-whisper /opt/faster-whisper
 COPY --chmod=755 scripts/faster_whisper_server.py /usr/local/bin/faster-whisper-server
 
+# @discordjs/opus falls back to a source build when a matching libc prebuild is
+# unavailable, while the compiled addon itself does not need this toolchain.
+FROM voice-base AS dependency-builder
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install standalone yt-dlp without pulling Python into the runtime image.
 FROM scratch AS yt-dlp
 ARG YT_DLP_URL=https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux
 ADD --chmod=755 ${YT_DLP_URL} /yt-dlp
 
 # --- Install dependencies ---
-FROM voice-base AS deps
+FROM dependency-builder AS deps
 COPY --link package.json bun.lock ./
 RUN bun install --frozen-lockfile --production --omit=peer
 
 # --- Dev dependencies (for type-checking in CI) ---
-FROM voice-base AS deps-dev
+FROM dependency-builder AS deps-dev
 COPY --link package.json bun.lock ./
 RUN bun install --frozen-lockfile
 

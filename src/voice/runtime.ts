@@ -272,6 +272,14 @@ export class VoiceRuntime {
     if (this.active !== undefined) {
       throw new Error(`Already connected to voice channel ${this.active.channel.name} (${this.active.channel.id}). Leave it before joining another.`);
     }
+    // opusscript's shared WASM decoder can abort the entire process on a bad
+    // packet. Require the native decoder before admitting a voice session.
+    const decoderProbe = new prism.opus.Decoder({ rate: 48_000, channels: 2, frameSize: 960 });
+    const decoderType = prism.opus.Decoder.type;
+    decoderProbe.destroy();
+    if (decoderType !== "@discordjs/opus") {
+      throw new Error(`Native Discord Opus decoder unavailable (loaded ${decoderType}).`);
+    }
     const { channel, config, voiceConfig } = await this.resolveJoinTarget(channelId);
     this.transcriber ??= new FasterWhisperTranscriber(
       voiceConfig.stt,
