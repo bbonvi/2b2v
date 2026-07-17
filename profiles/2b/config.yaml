@@ -352,7 +352,7 @@ voice:
     model: gpt-5.6-sol
     modelParams:
         textVerbosity: low
-    thinkingLevel: minimum
+    thinkingLevel: minimal
     serviceTier: priority
     wakeWords: ["2b", "туби"]
     lingeringAttentionMs: 45000
