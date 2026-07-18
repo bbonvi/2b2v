@@ -571,6 +571,7 @@ function createTtsGenerator(guildConfig: GuildConfig): {
         seed: preset.seed,
         applyTextNormalization: preset.applyTextNormalization,
         outputFormat: preset.outputFormat,
+        languageCode: preset.languageCode,
         voiceSettings: {
           stability: preset.stability,
           similarityBoost: preset.similarityBoost,

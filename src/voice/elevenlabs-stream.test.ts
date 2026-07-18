@@ -31,9 +31,11 @@ class AbortErrorWebSocket {
 
 class AlignmentWebSocket {
   static latest: AlignmentWebSocket | undefined;
+  readonly url: string;
   private readonly listeners = new Map<string, Array<(event: FakeSocketEvent) => void>>();
 
-  constructor() {
+  constructor(url: string | URL) {
+    this.url = String(url);
     AlignmentWebSocket.latest = this;
   }
 
@@ -57,6 +59,7 @@ class AlignmentWebSocket {
 const PRESET: VoicePreset = {
   voiceId: "voice",
   model: "model",
+  languageCode: "ru",
   speed: 1,
   stability: 0.5,
   similarityBoost: 0.75,
@@ -85,6 +88,7 @@ describe("ElevenLabsVoiceStream", () => {
       const stream = new ElevenLabsVoiceStream("token", PRESET);
       const socket = AlignmentWebSocket.latest;
       if (socket === undefined) throw new Error("Expected alignment socket");
+      expect(new URL(socket.url).searchParams.get("language_code")).toBe("ru");
       socket.emit("open", {});
       socket.emit("message", {
         data: JSON.stringify({

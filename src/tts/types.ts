@@ -12,6 +12,8 @@ export interface VoicePreset {
   seed?: number;
   applyTextNormalization?: TextNormalizationMode;
   outputFormat?: string;
+  /** Optional ISO 639-1 override passed to ElevenLabs for this preset. */
+  languageCode?: string;
   model: string; // e.g., "eleven_v3"
 }
 

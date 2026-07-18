@@ -162,6 +162,9 @@ function resolveVoicePreset(partial: Partial<VoicePreset> | undefined): VoicePre
     ...(partial.outputFormat !== undefined && partial.outputFormat.trim() !== ""
       ? { outputFormat: partial.outputFormat.trim() }
       : {}),
+    ...(partial.languageCode !== undefined && partial.languageCode.trim() !== ""
+      ? { languageCode: partial.languageCode.trim() }
+      : {}),
     model: partial.model ?? DEFAULT_VOICE_PRESET.model,
   };
 }
@@ -210,6 +213,7 @@ const DEFAULT_VOICE_CONFIG: VoiceConfig = {
     provider: "elevenlabs",
     model: "scribe_v2_realtime",
     previousText: "2B. Туби.",
+    filterBackgroundAudio: false,
     monthlyAudioLimitSeconds: 36_000,
     estimatedPricePerAudioHourUsd: 0.39,
     vadCommand: "silero-vad-server",

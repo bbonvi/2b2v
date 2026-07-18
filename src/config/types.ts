@@ -443,6 +443,8 @@ export interface VoiceSttConfig {
   provider: "elevenlabs";
   model: string;
   previousText: string;
+  /** Ask Scribe to suppress nearby speech and ambient background audio. */
+  filterBackgroundAudio: boolean;
   monthlyAudioLimitSeconds: number;
   estimatedPricePerAudioHourUsd: number;
   vadCommand: string;

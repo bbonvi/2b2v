@@ -199,6 +199,7 @@ describe("loadGlobalConfig", () => {
       modelPath: "/opt/faster-whisper/models/small",
       computeType: "int8",
       language: "ru",
+      filterBackgroundAudio: false,
       threads: 8,
     });
     expect(cfg.defaultRelationships?.enabled).toBe(true);
@@ -222,6 +223,12 @@ describe("loadGlobalConfig", () => {
     const cfg = loadGlobalConfig(BASE_ENV, file);
     expect(cfg.defaultVoice?.stt.computeType).toBe("int8_float32");
     expect(cfg.defaultVoice?.stt.threads).toBe(4);
+  });
+
+  test("reads Scribe background-audio filtering", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "voice:\n  stt:\n    filterBackgroundAudio: true\n");
+    expect(loadGlobalConfig(BASE_ENV, file).defaultVoice?.stt.filterBackgroundAudio).toBe(true);
   });
 
   test("reads and validates live voice turn timing", () => {
@@ -286,12 +293,14 @@ describe("loadGlobalConfig", () => {
       "      voiceId: voice-123",
       "      applyTextNormalization: on",
       "      outputFormat: mp3_44100_128",
+      "      languageCode: ru",
       "      model: eleven_v3",
     ].join("\n"));
     const cfg = loadGlobalConfig(BASE_ENV, file);
 
     expect(cfg.defaultTts?.voices.normal.applyTextNormalization).toBe("on");
     expect(cfg.defaultTts?.voices.normal.outputFormat).toBe("mp3_44100_128");
+    expect(cfg.defaultTts?.voices.normal.languageCode).toBe("ru");
   });
 
   test("rejects invalid TTS text normalization mode", () => {

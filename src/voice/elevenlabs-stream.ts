@@ -67,6 +67,9 @@ export class ElevenLabsVoiceStream {
     const url = new URL(`wss://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(preset.voiceId)}/stream-input`);
     url.searchParams.set("model_id", preset.model);
     url.searchParams.set("output_format", preset.outputFormat ?? "mp3_44100_128");
+    if (preset.languageCode !== undefined && preset.languageCode.trim() !== "") {
+      url.searchParams.set("language_code", preset.languageCode.trim());
+    }
     url.searchParams.set("sync_alignment", "true");
     url.searchParams.set("auto_mode", "true");
     // A voice turn may use tools before speaking; keep the pre-opened socket

@@ -8,6 +8,7 @@ const testParams: GenerateSpeechParams = {
   seed: 1,
   applyTextNormalization: "on",
   outputFormat: "mp3_44100_128",
+  languageCode: "ru",
   voiceSettings: {
     stability: 0.8,
     similarityBoost: 0.75,
@@ -56,7 +57,7 @@ describe("createElevenLabsClient", () => {
         throw new Error("Expected ElevenLabs request URL");
       }
       expect(capturedUrl.toString()).toBe(
-        "https://api.elevenlabs.io/v1/text-to-speech/test-voice-id?output_format=mp3_44100_128"
+        "https://api.elevenlabs.io/v1/text-to-speech/test-voice-id?output_format=mp3_44100_128&language_code=ru"
       );
       expect(capturedOptions?.method).toBe("POST");
       expect(capturedOptions?.headers).toEqual({

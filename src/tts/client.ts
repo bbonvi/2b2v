@@ -19,6 +19,7 @@ export interface GenerateSpeechParams {
   seed?: number;
   applyTextNormalization?: TextNormalizationMode;
   outputFormat?: string;
+  languageCode?: string;
   voiceSettings: {
     stability: number;
     similarityBoost: number;
@@ -96,10 +97,22 @@ export function createElevenLabsClient(deps: ElevenLabsClientDeps): ElevenLabsCl
 
   return {
     async generate(params: GenerateSpeechParams): Promise<TtsResult> {
-      const { text, voiceId, model, seed, applyTextNormalization, outputFormat, voiceSettings } = params;
+      const {
+        text,
+        voiceId,
+        model,
+        seed,
+        applyTextNormalization,
+        outputFormat,
+        languageCode,
+        voiceSettings,
+      } = params;
       const url = new URL(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`);
       if (outputFormat !== undefined && outputFormat.trim() !== "") {
         url.searchParams.set("output_format", outputFormat.trim());
+      }
+      if (languageCode !== undefined && languageCode.trim() !== "") {
+        url.searchParams.set("language_code", languageCode.trim());
       }
 
       const body = JSON.stringify({

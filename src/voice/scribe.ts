@@ -58,6 +58,7 @@ export class ElevenLabsScribeSession {
     url.searchParams.set("include_timestamps", "false");
     url.searchParams.set("include_language_detection", "false");
     url.searchParams.set("no_verbatim", "false");
+    url.searchParams.set("filter_background_audio", String(config.filterBackgroundAudio));
     const ScribeWebSocket = WebSocket as unknown as {
       new(url: string | URL, options: Bun.WebSocketOptions): WebSocket;
     };

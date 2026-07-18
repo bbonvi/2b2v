@@ -40,6 +40,7 @@ const config = {
   model: "scribe_v2_realtime",
   language: "ru",
   previousText: "2B. Туби.",
+  filterBackgroundAudio: true,
   timeoutMs: 1_000,
 } as VoiceSttConfig;
 
@@ -52,6 +53,7 @@ describe("ElevenLabsScribeSession", () => {
       const socket = FakeWebSocket.latest;
       if (socket === undefined) throw new Error("Expected Scribe socket");
       expect(socket.options).toEqual({ headers: { "xi-api-key": "secret" } });
+      expect(new URL(socket.url).searchParams.get("filter_background_audio")).toBe("true");
       socket.emit("message", { data: JSON.stringify({ message_type: "session_started" }) });
       await session.push(Buffer.alloc(3_200));
       const committed = session.commit(Buffer.alloc(1_600));
