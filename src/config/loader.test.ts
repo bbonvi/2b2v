@@ -104,6 +104,7 @@ describe("model profile resolution", () => {
       quality: "auto",
       modelProfile: "main",
     });
+    expect(config.defaultVoice?.playback.volume).toBe(1);
   });
 
   test("resolves complete per-workload profiles and voice maintenance references", () => {
@@ -208,6 +209,21 @@ describe("model profile resolution", () => {
     ].join("\n"));
     expect(() => loadGlobalConfig({ DISCORD_TOKEN: "test" }, path))
       .toThrow("OPENROUTER_API_KEY is required");
+  });
+
+  test("accepts positive voice playback volume and rejects invalid values", () => {
+    const configured = loadGlobalConfig(BASE_ENV, writeConfig([
+      "voice:",
+      "  playback:",
+      "    volume: 2.5",
+    ].join("\n")));
+    expect(configured.defaultVoice?.playback.volume).toBe(2.5);
+
+    expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+      "voice:",
+      "  playback:",
+      "    volume: 0",
+    ].join("\n")))).toThrow("voice.playback.volume must be a positive number");
   });
 });
 

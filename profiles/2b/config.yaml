@@ -398,6 +398,7 @@ voice:
             maxTurns: 48
             maxChars: 15000
     playback:
+        volume: 3.0 # source gain before Discord playback; 1.0 is unchanged
         prebufferMs: 30
         initialSilenceFrames: 2 # 20 ms per Opus frame
         trailingSilenceFrames: 3 # 20 ms per Opus frame

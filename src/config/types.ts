@@ -462,6 +462,8 @@ export interface VoiceTestingConfig {
 
 /** Discord playback buffering and Opus silence padding for live TTS. */
 export interface VoicePlaybackConfig {
+  /** Linear source-volume multiplier applied before Discord encoding. */
+  volume: number;
   prebufferMs: number;
   initialSilenceFrames: number;
   trailingSilenceFrames: number;

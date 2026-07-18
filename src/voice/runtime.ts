@@ -1849,6 +1849,8 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
         if (this.tts === undefined) throw new Error("Live voice TTS did not initialize.");
         if (!this.speechQueued) {
           this.speechQueued = true;
+          const playbackVolume = this.deps.active.voiceConfig.playback.volume;
+          const useInlineVolume = playbackVolume !== 1;
           const inputType = preset.outputFormat?.startsWith("opus_") === true
             ? StreamType.OggOpus
             : StreamType.Arbitrary;
@@ -1857,6 +1859,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
             const prefixedPackets = new PassThrough({ objectMode: true });
             this.pendingPlaybackResource = createAudioResource(prefixedPackets, {
               inputType: StreamType.Opus,
+              inlineVolume: useInlineVolume,
               silencePaddingFrames: this.deps.active.voiceConfig.playback.trailingSilenceFrames,
             });
             for (let frame = 0; frame < this.deps.active.voiceConfig.playback.initialSilenceFrames; frame += 1) {
@@ -1867,9 +1870,11 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
           } else {
             this.pendingPlaybackResource = createAudioResource(this.tts.audio, {
               inputType,
+              inlineVolume: useInlineVolume,
               silencePaddingFrames: this.deps.active.voiceConfig.playback.trailingSilenceFrames,
             });
           }
+          this.pendingPlaybackResource.volume?.setVolume(playbackVolume);
         }
         // auto_mode can begin complete phrases immediately; forcing every
         // sentence creates isolated micro-generations and audible seams.

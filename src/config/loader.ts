@@ -218,6 +218,7 @@ const DEFAULT_VOICE_CONFIG: VoiceConfig = {
     },
   },
   playback: {
+    volume: 1,
     prebufferMs: 30,
     initialSilenceFrames: 2,
     trailingSilenceFrames: 3,
@@ -311,6 +312,9 @@ function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYaml | un
   positiveVoiceInteger(resolved.maintenance.extraction.minIntervalMs, "voice.maintenance.extraction.minIntervalMs");
   positiveVoiceInteger(resolved.maintenance.extraction.maxTurns, "voice.maintenance.extraction.maxTurns");
   positiveVoiceInteger(resolved.maintenance.extraction.maxChars, "voice.maintenance.extraction.maxChars");
+  if (!Number.isFinite(resolved.playback.volume) || resolved.playback.volume <= 0) {
+    throw new Error("voice.playback.volume must be a positive number");
+  }
   nonNegativeVoiceInteger(resolved.playback.prebufferMs, "voice.playback.prebufferMs");
   nonNegativeVoiceInteger(resolved.playback.initialSilenceFrames, "voice.playback.initialSilenceFrames");
   nonNegativeVoiceInteger(resolved.playback.trailingSilenceFrames, "voice.playback.trailingSilenceFrames");
