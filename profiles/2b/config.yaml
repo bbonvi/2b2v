@@ -1,21 +1,41 @@
 # 2B profile configuration.
 # All fields are optional. Missing values use hardcoded defaults.
 
-# LLM model (OpenRouter model ID)
-llmProvider: "openai-codex"
-model: "gpt-5.6-sol"
-modelParams: {}
-    # maxTokens: 200000
-    # textVerbosity: "medium" # (Codex output verbosity; low keeps replies compact)
-
-thinkingLevel: "medium" # (main model reasoning effort)
-codexTransport: "websocket-cached" # (Codex API transport; cached keeps stable prompt reuse)
-
-# OpenRouter prompt caching control.
-# When enabled, stable prompt sections are marked with cache_control breakpoints.
-# OpenRouter/provider routing decides whether the selected provider uses them.
-promptCaching:
-    enabled: true # (enable provider prompt-cache hints/session routing)
+modelProfiles:
+    main:
+        provider: openai-codex
+        model: gpt-5.6-sol
+        modelParams: {}
+        thinkingLevel: medium
+        codexTransport: websocket-cached
+        promptCaching: { enabled: true }
+    evaluator:
+        provider: openai-codex
+        model: gpt-5.3-codex-spark
+        modelParams: { textVerbosity: low }
+        thinkingLevel: minimal
+        codexTransport: websocket-cached
+        promptCaching: { enabled: true }
+    realtimeVoice:
+        provider: openai-codex
+        model: gpt-5.6-terra
+        thinkingLevel: minimal
+        serviceTier: priority
+        codexTransport: websocket-cached
+        promptCaching: { enabled: true }
+    voiceSummary:
+        provider: openai-codex
+        model: gpt-5.6-terra
+        thinkingLevel: minimal
+        codexTransport: websocket-cached
+        promptCaching: { enabled: true }
+    vision:
+        provider: openai-codex
+        model: gpt-5.5
+        thinkingLevel: minimal
+        codexTransport: websocket-cached
+        promptCaching: { enabled: true }
+modelProfile: main
 
 reasoningContinuation:
     enabled: true
@@ -154,6 +174,7 @@ trim:
 
 # Background memory extraction
 memoryExtraction:
+    modelProfile: main
     postReply: true # (run a silent memory pass after visible bot replies)
     maxToolCalls: 5 # (max record_memory calls per maintenance pass)
     ambient:
@@ -171,6 +192,7 @@ schedulePressure:
 
 # Durable per-user relationship profiles.
 relationships:
+    modelProfile: main
     enabled: true
     promptInjection: true
     maxAxisDeltaPerSignal: 4
@@ -179,12 +201,8 @@ relationships:
 ambientAttention:
     enabled: true # (enable delayed non-trigger attention candidates)
     evaluator:
-        provider: openai-codex
-        model: gpt-5.3-codex-spark
-        thinkingLevel: minimal # (fast evaluator reasoning; it only decides speak/silence)
+        modelProfile: evaluator
         llmOutputTimeoutMs: 8000 # (timeout for one evaluator decision)
-        modelParams:
-            textVerbosity: low # (keep evaluator JSON terse)
     historyLimit: 50 # (recent messages shown to evaluator)
     busyWindowMs: 60000 # (activity window used for busy-channel gate)
     busyMessageLimit: 6 # (human messages in busyWindowMs above this drop ambient)
@@ -257,12 +275,8 @@ ambientInitiative:
     minMainChannelHumanMessages: 20 # (minimum 7-day human messages for auto main channel)
     mainChannelLookbackDays: 7 # (auto main-channel activity lookback)
     evaluator:
-        provider: openai-codex
-        model: gpt-5.3-codex-spark
-        thinkingLevel: minimal # (fast first-pass decision only)
+        modelProfile: evaluator
         llmOutputTimeoutMs: 8000 # (timeout for evaluator JSON)
-        modelParams:
-            textVerbosity: low # (keep evaluator output compact)
     selfExpression:
         enabled: true # (allow non-targeted incomplete thought dumps)
         basePressure: 0.28 # (starting chance pressure before room signals)
@@ -362,10 +376,7 @@ tts:
 # raw audio remains in bounded memory only until remote commit or local fallback.
 voice:
     enabled: true
-    provider: openai-codex
-    model: gpt-5.6-terra
-    thinkingLevel: minimal
-    serviceTier: priority
+    modelProfile: realtimeVoice
     wakeWords: ["2b", "туби"]
     lingeringAttentionMs: 45000
     roomQuietMs: 100
@@ -373,10 +384,19 @@ voice:
     yieldBoundaryMaxWaitMs: 900
     emptyChannelGraceMs: 120000
     recentSessionContextMs: 7200000
-    maintenanceEverySegments: 120
-    maintenanceMinIntervalMs: 1200000
-    maintenanceMaxTurns: 48
-    maintenanceMaxChars: 15000
+    maintenance:
+        summary:
+            modelProfile: voiceSummary
+            everySegments: 40
+            minIntervalMs: 300000
+            maxTurns: 48
+            maxChars: 15000
+        extraction:
+            modelProfile: main
+            everySegments: 120
+            minIntervalMs: 1200000
+            maxTurns: 48
+            maxChars: 15000
     playback:
         prebufferMs: 30
         initialSilenceFrames: 2 # 20 ms per Opus frame
@@ -448,13 +468,13 @@ assetReading:
 # Codex image generation request settings
 imageGeneration:
     quality: "high" # (Codex image generation quality hint)
+    modelProfile: main
 
 # If the main model cannot read image input, describe images with this vision model
 # and return that description from image tools instead.
 imageReading:
     fallbackEnabled: true # (use separate vision model when main model cannot read images)
-    fallbackProvider: "openai-codex"
-    fallbackModel: "gpt-5.5"
+    fallbackModelProfile: vision
 
 # Log level: debug | info | warn | error
 logLevel: debug # (runtime log verbosity)

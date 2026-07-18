@@ -1,15 +1,20 @@
 import type { GlobalConfig, GuildConfig } from "../config/types";
 import type { Logger } from "../logger";
-import { fetchOpenRouterModelMetadata, imageInputSupportFromMetadata, resolveGuildModelKey, resolveModel, type ModelImageInputSupport } from "./client";
+import {
+  fetchOpenRouterModelMetadata,
+  imageInputSupportFromMetadata,
+  resolveModel,
+  resolveModelProfileKey,
+  type ModelImageInputSupport,
+} from "./client";
 
 const MODEL_METADATA_TIMEOUT_MS = 10_000;
 
-function collectEffectiveModelIds(global: GlobalConfig, guilds: ReadonlyMap<string, GuildConfig>): string[] {
+function collectEffectiveModelIds(global: GlobalConfig, _guilds: ReadonlyMap<string, GuildConfig>): string[] {
   const ids = new Set<string>();
-  for (const guildConfig of guilds.values()) {
-    ids.add(resolveGuildModelKey(global, guildConfig));
+  for (const profileId of Object.keys(global.modelProfiles)) {
+    ids.add(resolveModelProfileKey(global, profileId));
   }
-  if (ids.size === 0) ids.add(`${global.defaultLlmProvider}:${global.defaultModel}`);
   return [...ids].sort((a, b) => a.localeCompare(b));
 }
 
@@ -17,7 +22,7 @@ export function createModelImageSupportStore(input: {
   log: Logger;
 }): {
   refresh: (global: GlobalConfig, guilds: ReadonlyMap<string, GuildConfig>, reason: "startup" | "hot_reload") => Promise<void>;
-  get: (global: GlobalConfig, guildConfig: GuildConfig) => ModelImageInputSupport;
+  get: (global: GlobalConfig, profileId: string) => ModelImageInputSupport;
 } {
   const modelImageInputSupport = new Map<string, ModelImageInputSupport>();
 
@@ -87,6 +92,6 @@ export function createModelImageSupportStore(input: {
         modelImageInputSupport.set(modelId, support);
       }
     },
-    get: (global, guildConfig) => modelImageInputSupport.get(resolveGuildModelKey(global, guildConfig)) ?? "unknown",
+    get: (global, profileId) => modelImageInputSupport.get(resolveModelProfileKey(global, profileId)) ?? "unknown",
   };
 }

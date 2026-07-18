@@ -12,11 +12,15 @@ import type {
   PromptTransportSectionConfig,
   PromptTransportSectionId,
   ProviderPromptTransportConfig,
-  ServiceTier,
   TriggerInstructions,
 } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
-import { resolveGuildLlmProvider, resolveGuildModel, resolveGuildModelId, buildStreamOptions, buildBackgroundStreamOptions, buildImageReadingStreamOptions, type ModelImageInputSupport } from "../llm/client.ts";
+import {
+  buildModelProfileStreamOptions,
+  resolveModelProfile,
+  resolveModelProfileModel,
+  type ModelImageInputSupport,
+} from "../llm/client.ts";
 import type { GlobalConfig, GuildConfig } from "../config/types.ts";
 import type { Logger, RequestLog } from "../logger.ts";
 import { completeLlmChat } from "../llm/chat.ts";
@@ -178,7 +182,8 @@ export interface SilentToolAgentInput {
   tools: AgentTool[];
   runtimeInstruction: string;
   controlMessage: string;
-  modelMode?: "main" | "background";
+  /** Named model execution policy for this private maintenance pass. */
+  modelProfile?: string;
   maxToolCalls?: number;
   terminateAfterSuccessfulToolNames?: readonly string[];
   transcript?: OpenRouterMessage[];
@@ -290,7 +295,7 @@ export interface HandlerDeps {
   trackBackgroundTask?: (task: Promise<void>) => void;
   /** Persists prompt-only assistant traces such as ignored replies. */
   onIgnoredReply?: (request: IgnoredReplyRequest) => void | Promise<void>;
-  /** Live OpenRouter metadata result for the selected main model. Unknown means try native image input first. */
+  /** Live metadata result for the selected model profile. Unknown means try native image input first. */
   modelImageInputSupport?: ModelImageInputSupport;
   /** Consume generated image attachments by opaque IDs returned from image tools. */
   consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
@@ -302,8 +307,8 @@ export interface HandlerDeps {
   disableLiveOutput?: boolean;
   /** Replace normal text/voice directive dispatch with a live external stream. */
   externalResponseSink?: ExternalResponseSink;
-  /** Optional service tier for this visible reply loop; maintenance does not inherit it. */
-  serviceTier?: ServiceTier;
+  /** Named model execution policy override for specialized visible turns such as live voice. */
+  modelProfile?: string;
   /** Optional caller cancellation, used for voice barge-in and session departure. */
   abortSignal?: AbortSignal;
   /** Override default first-message Discord reply anchoring. */
@@ -2409,30 +2414,6 @@ function messageWantsTyping(segments: ResponseSegment[]): boolean {
   return false;
 }
 
-function silentToolProvider(input: SilentToolAgentInput): LlmProvider {
-  return input.modelMode === "main"
-    ? resolveGuildLlmProvider(input.globalConfig, input.guildConfig)
-    : input.guildConfig.backgroundLlm.provider ?? resolveGuildLlmProvider(input.globalConfig, input.guildConfig);
-}
-
-function silentToolModel(input: SilentToolAgentInput): string {
-  return input.modelMode === "main"
-    ? resolveGuildModelId(input.globalConfig, input.guildConfig)
-    : input.guildConfig.backgroundLlm.model;
-}
-
-function silentToolStreamOptions(input: SilentToolAgentInput): Record<string, unknown> & { apiKey: string } {
-  return input.modelMode === "main"
-    ? buildStreamOptions(input.globalConfig, input.guildConfig)
-    : buildBackgroundStreamOptions(input.globalConfig, input.guildConfig);
-}
-
-function silentToolPromptCaching(input: SilentToolAgentInput) {
-  return input.modelMode === "main"
-    ? input.guildConfig.promptCaching
-    : input.guildConfig.backgroundLlm.promptCaching;
-}
-
 function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
   const now = Date.now();
   const passKind = input.passKind ?? "post_reply";
@@ -2496,19 +2477,23 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
 
   const complete = input.completeChat ?? completeLlmChat;
   const inheritedPrompt = input.promptContext;
-  const provider = inheritedPrompt?.provider ?? silentToolProvider(input);
-  const transport = inheritedPrompt?.transport ?? promptTransportForProvider(input.guildConfig.promptTransport, provider);
-  const streamOptions = inheritedPrompt !== undefined
-    ? buildStreamOptions(input.globalConfig, input.guildConfig)
-    : silentToolStreamOptions(input);
+  const profileId = input.modelProfile ?? input.guildConfig.modelProfile;
+  const profile = resolveModelProfile(input.globalConfig, profileId);
+  const model = resolveModelProfileModel(input.globalConfig, profileId);
+  const provider = profile.provider;
+  const inheritedPromptCompatible = inheritedPrompt?.provider === provider
+    && inheritedPrompt.model === model.id;
+  const transport = inheritedPromptCompatible
+    ? inheritedPrompt.transport
+    : promptTransportForProvider(input.guildConfig.promptTransport, provider);
+  const streamOptions = buildModelProfileStreamOptions(input.globalConfig, profileId);
   const providerParams: Record<string, unknown> = { ...streamOptions };
   delete providerParams.apiKey;
   delete providerParams.signal;
   delete providerParams.onPayload;
-  const model = inheritedPrompt?.model ?? silentToolModel(input);
-  const promptCaching = inheritedPrompt?.promptCaching ?? silentToolPromptCaching(input);
+  const promptCaching = profile.promptCaching;
 
-  const stableSections = inheritedPrompt?.stableSections ?? sectionsForStablePrompt(
+  const stableSections = inheritedPromptCompatible ? inheritedPrompt.stableSections : sectionsForStablePrompt(
     input.systemPrompt ?? "",
     input.personaPrompt ?? "",
     "",
@@ -2517,11 +2502,15 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
     input.runtimeInstruction,
     transport,
   );
-  const sessionId = inheritedPrompt?.sessionId ?? buildPromptCacheSessionId(input.requestLog, `${provider}:${model}`);
+  const sessionId = inheritedPromptCompatible
+    ? inheritedPrompt.sessionId
+    : buildPromptCacheSessionId(input.requestLog, `${provider}:${model.id}`);
   const currentMessageWithoutImages: IncomingMessage = { ...input.incomingMessage, imageInputs: undefined };
   const volatileMessages = buildVolatileTurnMessages(input.context);
-  const initialRoles = inheritedPrompt?.initialRoles ?? initialMessageRoles(transport, volatileMessages);
-  const messages = input.transcript ?? buildInitialMessages(
+  const initialRoles = inheritedPromptCompatible
+    ? inheritedPrompt.initialRoles
+    : initialMessageRoles(transport, volatileMessages);
+  const messages = (inheritedPromptCompatible ? input.transcript : undefined) ?? buildInitialMessages(
     input.userContent,
     volatileMessages,
     currentMessageWithoutImages,
@@ -2539,7 +2528,7 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
       requestBase: {
         provider,
         apiKey: streamOptions.apiKey,
-        model,
+        model: model.id,
         systemPrompt: provider === "openai-codex" ? codexSystemPromptForStableSections(stableSections, transport) : "",
         providerParams,
         sessionId,
@@ -2549,7 +2538,7 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
               payload,
               stableSections,
               promptCaching,
-              model,
+              model.id,
             );
           } else if (transport.mode === "split-input") {
             prependStableSectionsToCodexPayload(payload, stableSections, initialRoles);
@@ -2591,7 +2580,7 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
     ...input,
     runtimeInstruction: buildRuntimeInstruction(input.runtimePrompts),
     controlMessage: memoryPassControlMessage(input),
-    modelMode: "background",
+    modelProfile: input.guildConfig.memoryExtraction.modelProfile,
     maxToolCalls: input.guildConfig.memoryExtraction.maxToolCalls,
   });
 }
@@ -2631,14 +2620,23 @@ export async function handleMessage(
   const triggerInstruction = deps.triggerInstructions?.[triggerResult.reason];
   const context = deps.context;
 
-  const model = resolveGuildModel(deps.globalConfig, deps.guildConfig);
-  const baseStreamOptions = buildStreamOptions(deps.globalConfig, deps.guildConfig, deps.serviceTier);
+  const profileId = deps.modelProfile ?? deps.guildConfig.modelProfile;
+  const profile = resolveModelProfile(deps.globalConfig, profileId);
+  const model = resolveModelProfileModel(deps.globalConfig, profileId);
+  const baseStreamOptions = buildModelProfileStreamOptions(deps.globalConfig, profileId);
   const providerParams: Record<string, unknown> = { ...baseStreamOptions };
   delete providerParams.apiKey;
   delete providerParams.signal;
   delete providerParams.onPayload;
+  const imageProfile = resolveModelProfile(
+    deps.globalConfig,
+    deps.guildConfig.imageReading.fallbackModelProfile,
+  );
   const imageStreamOptions = deps.guildConfig.imageReading.fallbackEnabled
-    ? buildImageReadingStreamOptions(deps.globalConfig, deps.guildConfig)
+    ? buildModelProfileStreamOptions(
+      deps.globalConfig,
+      deps.guildConfig.imageReading.fallbackModelProfile,
+    )
     : { apiKey: "" };
   const imageProviderParams: Record<string, unknown> = { ...imageStreamOptions };
   delete imageProviderParams.apiKey;
@@ -2686,7 +2684,7 @@ export async function handleMessage(
     stableSections,
     initialRoles,
     ...(sessionId !== undefined ? { sessionId } : {}),
-    promptCaching: deps.guildConfig.promptCaching,
+    promptCaching: profile.promptCaching,
   };
   const startedAt = Date.now();
   let maintenanceTranscript: OpenRouterMessage[] | undefined;
@@ -2843,7 +2841,7 @@ export async function handleMessage(
           sessionId,
           onPayload: (payload: unknown) => {
             if (model.llmProvider === "openrouter") {
-              prependStableSectionsToPayload(payload, stableSections, deps.guildConfig.promptCaching, model.id);
+              prependStableSectionsToPayload(payload, stableSections, profile.promptCaching, model.id);
             } else if (transport.mode === "split-input") {
               prependStableSectionsToCodexPayload(payload, stableSections, initialRoles);
             }
@@ -2885,8 +2883,8 @@ export async function handleMessage(
         log: deps.log,
         imageFallback: {
           enabled: deps.guildConfig.imageReading.fallbackEnabled,
-          model: deps.guildConfig.imageReading.fallbackModel,
-          provider: deps.guildConfig.imageReading.fallbackProvider ?? "openrouter",
+          model: imageProfile.model,
+          provider: imageProfile.provider,
           apiKey: imageStreamOptions.apiKey,
           providerParams: imageProviderParams,
           complete,

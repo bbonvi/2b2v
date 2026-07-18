@@ -38,7 +38,6 @@ import type {
   VpnConfig,
   TypingSimulationConfig,
   AgentJobsConfig,
-  PromptCachingConfig,
   PromptTransportConfig,
   PromptTransportConfigYaml,
   ProviderPromptTransportConfigYaml,
@@ -47,8 +46,8 @@ import type {
   PromptTransportSectionConfig,
   PromptTransportSectionId,
   PromptTransportTarget,
-  BackgroundLlmConfig,
-  BackgroundLlmDefaults,
+  ModelProfileConfig,
+  ModelProfileConfigYaml,
   ImageReadingConfig,
   ImageGenerationConfig,
   ImageGenerationQuality,
@@ -194,10 +193,7 @@ function resolveTtsConfig(
 
 const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   enabled: false,
-  provider: "openai-codex",
-  model: "gpt-5.6-luna",
-  modelParams: { textVerbosity: "low" },
-  thinkingLevel: "minimal",
+  modelProfile: "main",
   wakeWords: ["2b", "туби"],
   lingeringAttentionMs: 45_000,
   roomQuietMs: 700,
@@ -205,10 +201,22 @@ const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   yieldBoundaryMaxWaitMs: 1_500,
   emptyChannelGraceMs: 120_000,
   recentSessionContextMs: 6 * 60 * 60 * 1000,
-  maintenanceEverySegments: 120,
-  maintenanceMinIntervalMs: 15 * 60 * 1000,
-  maintenanceMaxTurns: 48,
-  maintenanceMaxChars: 12_000,
+  maintenance: {
+    summary: {
+      modelProfile: "main",
+      everySegments: 40,
+      minIntervalMs: 5 * 60 * 1000,
+      maxTurns: 48,
+      maxChars: 12_000,
+    },
+    extraction: {
+      modelProfile: "main",
+      everySegments: 120,
+      minIntervalMs: 20 * 60 * 1000,
+      maxTurns: 48,
+      maxChars: 12_000,
+    },
+  },
   playback: {
     prebufferMs: 30,
     initialSilenceFrames: 2,
@@ -259,13 +267,14 @@ function nonNegativeVoiceInteger(value: number, path: string): number {
 
 /** Resolve profile or guild voice configuration without enabling it implicitly. */
 function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYaml | undefined): VoiceConfig {
-  const serviceTier = parseServiceTier(partial?.serviceTier, "voice") ?? defaults.serviceTier;
   const resolved: VoiceConfig = {
     ...defaults,
     ...partial,
-    modelParams: { ...defaults.modelParams, ...partial?.modelParams },
-    ...(serviceTier !== undefined ? { serviceTier } : {}),
     wakeWords: partial?.wakeWords !== undefined ? [...partial.wakeWords] : [...defaults.wakeWords],
+    maintenance: {
+      summary: { ...defaults.maintenance.summary, ...partial?.maintenance?.summary },
+      extraction: { ...defaults.maintenance.extraction, ...partial?.maintenance?.extraction },
+    },
     playback: { ...defaults.playback, ...partial?.playback },
     stt: { ...defaults.stt, ...partial?.stt },
     testing: {
@@ -279,7 +288,7 @@ function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYaml | un
         : [...defaults.testing.userIds],
     },
   };
-  if (resolved.model.trim() === "") throw new Error("voice.model must not be empty");
+  if (resolved.modelProfile.trim() === "") throw new Error("voice.modelProfile must not be empty");
   if (resolved.stt.model.trim() === "") throw new Error("voice.stt.model must not be empty");
   if (resolved.stt.previousText.length > 50) throw new Error("voice.stt.previousText must be at most 50 characters");
   if (resolved.stt.vadCommand.trim() === "") throw new Error("voice.stt.vadCommand must not be empty");
@@ -294,10 +303,14 @@ function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYaml | un
   positiveVoiceInteger(resolved.yieldBoundaryMaxWaitMs, "voice.yieldBoundaryMaxWaitMs");
   positiveVoiceInteger(resolved.emptyChannelGraceMs, "voice.emptyChannelGraceMs");
   positiveVoiceInteger(resolved.recentSessionContextMs, "voice.recentSessionContextMs");
-  positiveVoiceInteger(resolved.maintenanceEverySegments, "voice.maintenanceEverySegments");
-  positiveVoiceInteger(resolved.maintenanceMinIntervalMs, "voice.maintenanceMinIntervalMs");
-  positiveVoiceInteger(resolved.maintenanceMaxTurns, "voice.maintenanceMaxTurns");
-  positiveVoiceInteger(resolved.maintenanceMaxChars, "voice.maintenanceMaxChars");
+  positiveVoiceInteger(resolved.maintenance.summary.everySegments, "voice.maintenance.summary.everySegments");
+  positiveVoiceInteger(resolved.maintenance.summary.minIntervalMs, "voice.maintenance.summary.minIntervalMs");
+  positiveVoiceInteger(resolved.maintenance.summary.maxTurns, "voice.maintenance.summary.maxTurns");
+  positiveVoiceInteger(resolved.maintenance.summary.maxChars, "voice.maintenance.summary.maxChars");
+  positiveVoiceInteger(resolved.maintenance.extraction.everySegments, "voice.maintenance.extraction.everySegments");
+  positiveVoiceInteger(resolved.maintenance.extraction.minIntervalMs, "voice.maintenance.extraction.minIntervalMs");
+  positiveVoiceInteger(resolved.maintenance.extraction.maxTurns, "voice.maintenance.extraction.maxTurns");
+  positiveVoiceInteger(resolved.maintenance.extraction.maxChars, "voice.maintenance.extraction.maxChars");
   nonNegativeVoiceInteger(resolved.playback.prebufferMs, "voice.playback.prebufferMs");
   nonNegativeVoiceInteger(resolved.playback.initialSilenceFrames, "voice.playback.initialSilenceFrames");
   nonNegativeVoiceInteger(resolved.playback.trailingSilenceFrames, "voice.playback.trailingSilenceFrames");
@@ -352,14 +365,6 @@ export function validateVpnConfig(vpn: VpnConfig | undefined): void {
   if (vpn === undefined || !vpn.enabled) return;
   if (vpn.apiUrl === "") throw new Error("vpn.apiUrl required when vpn.enabled");
   if (vpn.vpnPeer === "") throw new Error("vpn.vpnPeer required when vpn.enabled");
-}
-
-function resolveGlobalPromptCaching(
-  partial: MainConfigYaml["promptCaching"] | undefined
-): PromptCachingConfig {
-  return {
-    enabled: partial?.enabled ?? DEFAULT_PROMPT_CACHING.enabled,
-  };
 }
 
 function clonePromptTransport(config: PromptTransportConfig): PromptTransportConfig {
@@ -472,10 +477,7 @@ function resolveGlobalImageReading(
 ): ImageReadingConfig {
   return {
     fallbackEnabled: partial?.fallbackEnabled ?? DEFAULT_IMAGE_READING.fallbackEnabled,
-    fallbackProvider: parseLlmProvider(partial?.fallbackProvider, "imageReading.fallbackProvider")
-      ?? DEFAULT_IMAGE_READING.fallbackProvider,
-    fallbackModel: partial?.fallbackModel ?? DEFAULT_IMAGE_READING.fallbackModel,
-    fallbackModelParams: partial?.fallbackModelParams ?? {},
+    fallbackModelProfile: partial?.fallbackModelProfile ?? DEFAULT_IMAGE_READING.fallbackModelProfile,
   };
 }
 
@@ -485,12 +487,7 @@ function resolveGuildImageReading(
 ): ImageReadingConfig {
   return {
     fallbackEnabled: partial?.fallbackEnabled ?? global.fallbackEnabled,
-    fallbackProvider: parseLlmProvider(partial?.fallbackProvider, "imageReading.fallbackProvider") ?? global.fallbackProvider,
-    fallbackModel: partial?.fallbackModel ?? global.fallbackModel,
-    fallbackModelParams: {
-      ...global.fallbackModelParams,
-      ...partial?.fallbackModelParams,
-    },
+    fallbackModelProfile: partial?.fallbackModelProfile ?? global.fallbackModelProfile,
   };
 }
 
@@ -506,6 +503,7 @@ function resolveGlobalImageGeneration(
   return {
     quality: parseImageGenerationQuality(partial?.quality, "imageGeneration.quality")
       ?? DEFAULT_IMAGE_GENERATION.quality,
+    modelProfile: partial?.modelProfile ?? DEFAULT_IMAGE_GENERATION.modelProfile,
   };
 }
 
@@ -515,15 +513,7 @@ function resolveGuildImageGeneration(
 ): ImageGenerationConfig {
   return {
     quality: parseImageGenerationQuality(partial?.quality, "imageGeneration.quality") ?? global.quality,
-  };
-}
-
-function resolveGuildPromptCaching(
-  global: PromptCachingConfig,
-  partial: GuildConfigYaml["promptCaching"] | undefined
-): PromptCachingConfig {
-  return {
-    enabled: partial?.enabled ?? global.enabled,
+    modelProfile: partial?.modelProfile ?? global.modelProfile,
   };
 }
 
@@ -562,55 +552,58 @@ function parseServiceTier(value: unknown, keyPrefix: string): ServiceTier | unde
   throw new Error(`${keyPrefix}.serviceTier must be "flex" or "priority"`);
 }
 
-function resolveBackgroundPromptCaching(
-  fallback: PromptCachingConfig,
-  partial: { enabled?: boolean } | undefined,
-): PromptCachingConfig {
-  return { enabled: partial?.enabled ?? fallback.enabled };
-}
-
-function resolveGlobalBackgroundLlm(
-  partial: MainConfigYaml["backgroundLlm"] | undefined,
-): BackgroundLlmDefaults {
-  return {
-    provider: parseLlmProvider(partial?.provider, "backgroundLlm.provider"),
-    model: partial?.model,
-    modelParams: partial?.modelParams ?? {},
-    thinkingLevel: parseThinkingLevel(partial?.thinkingLevel, "backgroundLlm.thinkingLevel"),
-    serviceTier: parseServiceTier(partial?.serviceTier, "backgroundLlm"),
-    promptCaching: partial?.promptCaching !== undefined
-      ? resolveBackgroundPromptCaching(DEFAULT_PROMPT_CACHING, partial.promptCaching)
-      : undefined,
-  };
-}
-
-function resolveGuildBackgroundLlm(
-  global: GlobalConfig,
-  partial: GuildConfigYaml & { guildId: string; slug: string },
-  mainPromptCaching: PromptCachingConfig,
-): BackgroundLlmConfig {
-  const globalBackground = global.defaultBackgroundLlm;
-  const guildBackground = partial.backgroundLlm;
-  const mainModelParams = { ...global.defaultModelParams, ...partial.modelParams };
-  const promptCachingFallback = globalBackground.promptCaching ?? mainPromptCaching;
-  const mainProvider = parseLlmProvider(partial.llmProvider, "llmProvider") ?? global.defaultLlmProvider;
-  return {
-    provider: parseLlmProvider(guildBackground?.provider, "backgroundLlm.provider")
-      ?? globalBackground.provider
-      ?? mainProvider,
-    model: guildBackground?.model ?? globalBackground.model ?? partial.model ?? global.defaultModel,
-    modelParams: {
-      ...mainModelParams,
-      ...globalBackground.modelParams,
-      ...guildBackground?.modelParams,
+function resolveModelProfiles(
+  partial: Record<string, ModelProfileConfigYaml> | undefined,
+): Record<string, ModelProfileConfig> {
+  const source = partial ?? {
+    main: {
+      provider: DEFAULT_LLM_PROVIDER,
+      model: "moonshotai/kimi-k2.5",
+      codexTransport: "websocket-cached",
     },
-    thinkingLevel: parseThinkingLevel(guildBackground?.thinkingLevel, "backgroundLlm.thinkingLevel")
-      ?? globalBackground.thinkingLevel
-      ?? parseThinkingLevel(partial.thinkingLevel, "thinkingLevel")
-      ?? global.defaultThinkingLevel,
-    serviceTier: parseServiceTier(guildBackground?.serviceTier, "backgroundLlm") ?? globalBackground.serviceTier,
-    promptCaching: resolveBackgroundPromptCaching(promptCachingFallback, guildBackground?.promptCaching),
   };
+  const resolved: Record<string, ModelProfileConfig> = {};
+  for (const [id, profile] of Object.entries(source)) {
+    if (id.trim() === "") throw new Error("modelProfiles keys must not be empty");
+    const provider = parseLlmProvider(profile.provider, `modelProfiles.${id}.provider`);
+    if (provider === undefined) throw new Error(`modelProfiles.${id}.provider is required`);
+    if (typeof profile.model !== "string" || profile.model.trim() === "") {
+      throw new Error(`modelProfiles.${id}.model must not be empty`);
+    }
+    resolved[id] = {
+      provider,
+      model: profile.model,
+      modelParams: { ...profile.modelParams },
+      thinkingLevel: parseThinkingLevel(profile.thinkingLevel, `modelProfiles.${id}.thinkingLevel`),
+      serviceTier: parseServiceTier(profile.serviceTier, `modelProfiles.${id}`),
+      codexTransport: parseCodexTransport(profile.codexTransport, `modelProfiles.${id}.codexTransport`)
+        ?? "websocket-cached",
+      promptCaching: {
+        enabled: profile.promptCaching?.enabled ?? DEFAULT_PROMPT_CACHING.enabled,
+      },
+    };
+  }
+  if (Object.keys(resolved).length === 0) throw new Error("modelProfiles must define at least one profile");
+  return resolved;
+}
+
+function requireModelProfile(
+  profiles: Record<string, ModelProfileConfig>,
+  id: string,
+  path: string,
+): string {
+  if (id.trim() === "") throw new Error(`${path} must not be empty`);
+  if (profiles[id] === undefined) throw new Error(`${path} references unknown model profile "${id}"`);
+  return id;
+}
+
+function validateModelProfileReferences(
+  profiles: Record<string, ModelProfileConfig>,
+  references: ReadonlyArray<readonly [id: string, path: string]>,
+): void {
+  for (const [id, path] of references) {
+    requireModelProfile(profiles, id, path);
+  }
 }
 
 function clampProbabilityConfig(value: number, key: string): void {
@@ -624,14 +617,9 @@ function resolveAmbientEvaluatorConfig(
   partial: Partial<AmbientAttentionEvaluatorConfig> | undefined,
 ): AmbientAttentionEvaluatorConfig {
   const resolved = {
-    provider: parseLlmProvider(partial?.provider, "ambientAttention.evaluator.provider") ?? defaults.provider,
-    model: partial?.model ?? defaults.model,
-    modelParams: { ...defaults.modelParams, ...partial?.modelParams },
-    thinkingLevel: parseThinkingLevel(partial?.thinkingLevel, "ambientAttention.evaluator.thinkingLevel") ?? defaults.thinkingLevel,
-    serviceTier: parseServiceTier(partial?.serviceTier, "ambientAttention.evaluator") ?? defaults.serviceTier,
+    modelProfile: partial?.modelProfile ?? defaults.modelProfile,
     llmOutputTimeoutMs: partial?.llmOutputTimeoutMs ?? defaults.llmOutputTimeoutMs,
   };
-  if (resolved.model === "") throw new Error("ambientAttention.evaluator.model must not be empty");
   if (!Number.isFinite(resolved.llmOutputTimeoutMs) || resolved.llmOutputTimeoutMs < 1000) {
     throw new Error("ambientAttention.evaluator.llmOutputTimeoutMs must be >= 1000");
   }
@@ -643,14 +631,12 @@ function resolveAmbientInitiativeEvaluatorConfig(
   partial: Partial<AmbientInitiativeEvaluatorConfig> | undefined,
 ): AmbientInitiativeEvaluatorConfig {
   const resolved: AmbientInitiativeEvaluatorConfig = {
-    provider: parseLlmProvider(partial?.provider, "ambientInitiative.evaluator.provider") ?? defaults.provider,
-    model: partial?.model ?? defaults.model,
-    modelParams: { ...defaults.modelParams, ...partial?.modelParams },
-    thinkingLevel: parseThinkingLevel(partial?.thinkingLevel, "ambientInitiative.evaluator.thinkingLevel") ?? defaults.thinkingLevel,
-    serviceTier: parseServiceTier(partial?.serviceTier, "ambientInitiative.evaluator") ?? defaults.serviceTier,
+    modelProfile: partial?.modelProfile ?? defaults.modelProfile,
     llmOutputTimeoutMs: partial?.llmOutputTimeoutMs ?? defaults.llmOutputTimeoutMs,
   };
-  if (resolved.model === "") throw new Error("ambientInitiative.evaluator.model must not be empty");
+  if (resolved.modelProfile.trim() === "") {
+    throw new Error("ambientInitiative.evaluator.modelProfile must not be empty");
+  }
   if (!Number.isFinite(resolved.llmOutputTimeoutMs) || resolved.llmOutputTimeoutMs < 1000) {
     throw new Error("ambientInitiative.evaluator.llmOutputTimeoutMs must be >= 1000");
   }
@@ -927,6 +913,7 @@ function resolveGlobalMemoryExtraction(
   partial: MainConfigYaml["memoryExtraction"] | undefined,
 ): MemoryExtractionConfig {
   const resolved = {
+    modelProfile: partial?.modelProfile ?? DEFAULT_MEMORY_EXTRACTION.modelProfile,
     postReply: partial?.postReply ?? DEFAULT_MEMORY_EXTRACTION.postReply,
     maxToolCalls: partial?.maxToolCalls ?? DEFAULT_MEMORY_EXTRACTION.maxToolCalls,
     ambient: {
@@ -945,6 +932,7 @@ function resolveGuildMemoryExtraction(
   partial: GuildConfigYaml["memoryExtraction"] | undefined,
 ): MemoryExtractionConfig {
   const resolved = {
+    modelProfile: partial?.modelProfile ?? global.modelProfile,
     postReply: partial?.postReply ?? global.postReply,
     maxToolCalls: partial?.maxToolCalls ?? global.maxToolCalls,
     ambient: {
@@ -959,6 +947,9 @@ function resolveGuildMemoryExtraction(
 }
 
 function validateMemoryExtractionConfig(config: MemoryExtractionConfig, keyPrefix: string): void {
+  if (config.modelProfile.trim() === "") {
+    throw new Error(`${keyPrefix}.modelProfile must not be empty`);
+  }
   if (!Number.isInteger(config.maxToolCalls) || config.maxToolCalls < 1) {
     throw new Error(`${keyPrefix}.maxToolCalls must be >= 1`);
   }
@@ -979,6 +970,7 @@ function resolveRelationshipConfig(
 ): RelationshipConfig {
   const base = defaults ?? DEFAULT_RELATIONSHIPS;
   const resolved: RelationshipConfig = {
+    modelProfile: partial?.modelProfile ?? base.modelProfile,
     enabled: partial?.enabled ?? base.enabled,
     promptInjection: partial?.promptInjection ?? base.promptInjection,
     maxAxisDeltaPerSignal: partial?.maxAxisDeltaPerSignal ?? base.maxAxisDeltaPerSignal,
@@ -1132,20 +1124,38 @@ export function loadGlobalConfig(
   const yaml = loadMainConfig(configPath);
   assertNoDeprecatedReplyLoopKey(yaml, "global");
   const dataDir = yaml.dataDir ?? "data";
-  const defaultLlmProvider = parseLlmProvider(yaml.llmProvider, "llmProvider") ?? DEFAULT_LLM_PROVIDER;
+  const modelProfiles = resolveModelProfiles(yaml.modelProfiles);
+  const defaultModelProfile = requireModelProfile(
+    modelProfiles,
+    yaml.modelProfile ?? "main",
+    "modelProfile",
+  );
   const defaultImageReading = resolveGlobalImageReading(yaml.imageReading);
   const defaultImageGeneration = resolveGlobalImageGeneration(yaml.imageGeneration);
   const defaultAmbientAttention = resolveAmbientAttentionConfig(undefined, yaml.ambientAttention);
   const defaultAmbientInitiative = resolveAmbientInitiativeConfig(undefined, yaml.ambientInitiative);
+  const defaultMemoryExtraction = resolveGlobalMemoryExtraction(yaml.memoryExtraction);
   const defaultRelationships = resolveRelationshipConfig(undefined, yaml.relationships);
   const defaultVoice = resolveVoiceConfig(DEFAULT_VOICE_CONFIG, yaml.voice);
   const personaModes = resolvePersonaModesConfig(yaml.personaModes, dirname(configPath));
+  validateModelProfileReferences(modelProfiles, [
+    [defaultModelProfile, "modelProfile"],
+    [defaultImageReading.fallbackModelProfile, "imageReading.fallbackModelProfile"],
+    [defaultImageGeneration.modelProfile, "imageGeneration.modelProfile"],
+    [defaultMemoryExtraction.modelProfile, "memoryExtraction.modelProfile"],
+    [defaultRelationships.modelProfile, "relationships.modelProfile"],
+    [defaultVoice.modelProfile, "voice.modelProfile"],
+    [defaultVoice.maintenance.summary.modelProfile, "voice.maintenance.summary.modelProfile"],
+    [defaultVoice.maintenance.extraction.modelProfile, "voice.maintenance.extraction.modelProfile"],
+    ...(defaultAmbientAttention !== undefined
+      ? [[defaultAmbientAttention.evaluator.modelProfile, "ambientAttention.evaluator.modelProfile"] as const]
+      : []),
+    ...(defaultAmbientInitiative !== undefined
+      ? [[defaultAmbientInitiative.evaluator.modelProfile, "ambientInitiative.evaluator.modelProfile"] as const]
+      : []),
+  ]);
   const openrouterApiKey = env.OPENROUTER_API_KEY;
-  const usesOpenRouter = defaultLlmProvider === "openrouter"
-    || yaml.backgroundLlm?.provider === "openrouter"
-    || (defaultImageReading.fallbackEnabled && defaultImageReading.fallbackProvider === "openrouter")
-    || (defaultAmbientAttention?.enabled === true && defaultAmbientAttention.evaluator.provider === "openrouter")
-    || (defaultAmbientInitiative?.enabled === true && defaultAmbientInitiative.evaluator.provider === "openrouter");
+  const usesOpenRouter = Object.values(modelProfiles).some((profile) => profile.provider === "openrouter");
   if (usesOpenRouter && (openrouterApiKey === undefined || openrouterApiKey === "")) {
     throw new Error("OPENROUTER_API_KEY is required when any OpenRouter LLM backend is enabled");
   }
@@ -1154,13 +1164,10 @@ export function loadGlobalConfig(
     discordToken,
     ...(openrouterApiKey !== undefined && openrouterApiKey !== "" ? { openrouterApiKey } : {}),
     codexAuthPath: env.CODEX_AUTH_PATH ?? `${dataDir}/codex-auth.json`,
-    codexTransport: parseCodexTransport(yaml.codexTransport, "codexTransport") ?? "websocket-cached",
     braveApiKey: env.BRAVE_API_KEY,
     externalImages: resolveExternalImagesConfig(yaml.externalImages),
-    defaultLlmProvider,
-    defaultModel: yaml.model ?? "moonshotai/kimi-k2.5",
-    defaultModelParams: yaml.modelParams ?? {},
-    defaultThinkingLevel: parseThinkingLevel(yaml.thinkingLevel, "thinkingLevel"),
+    modelProfiles,
+    defaultModelProfile,
     defaultTimezone: yaml.timezone ?? "UTC",
     defaultTrim: {
       trimTrigger: yaml.trim?.trimTrigger ?? DEFAULT_TRIM.trimTrigger,
@@ -1213,14 +1220,12 @@ export function loadGlobalConfig(
     defaultTypingSimulation: resolveTypingSimulationConfig(DEFAULT_TYPING_SIMULATION, yaml.typingSimulation),
     defaultAgentJobs: resolveGlobalAgentJobs(yaml.agentJobs),
     defaultSchedulePressure: resolveSchedulePressure(DEFAULT_SCHEDULE_PRESSURE, yaml.schedulePressure, "schedulePressure"),
-    defaultPromptCaching: resolveGlobalPromptCaching(yaml.promptCaching),
     defaultPromptTransport: resolveGlobalPromptTransport(yaml.promptTransport),
-    defaultBackgroundLlm: resolveGlobalBackgroundLlm(yaml.backgroundLlm),
     defaultAmbientAttention,
     defaultAmbientInitiative,
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
     defaultReasoningContinuation: resolveGlobalReasoningContinuation(yaml.reasoningContinuation),
-    defaultMemoryExtraction: resolveGlobalMemoryExtraction(yaml.memoryExtraction),
+    defaultMemoryExtraction,
     defaultRelationships,
     defaultVoice,
     personaModes,
@@ -1257,9 +1262,7 @@ export function resolveGuildConfig(
   partial: GuildConfigYaml & { guildId: string; slug: string }
 ): GuildConfig {
   const instructions = resolveInstructions(partial.instructions, partial.instructionsPath);
-  const promptCaching = resolveGuildPromptCaching(global.defaultPromptCaching, partial.promptCaching);
-
-  return {
+  const config: GuildConfig = {
     guildId: partial.guildId,
     slug: partial.slug,
     triggers: {
@@ -1281,10 +1284,11 @@ export function resolveGuildConfig(
       follow_up: partial.triggerInstructions?.follow_up ?? global.defaultTriggerInstructions.follow_up,
       ambient_initiative: partial.triggerInstructions?.ambient_initiative ?? global.defaultTriggerInstructions.ambient_initiative,
     },
-    llmProvider: parseLlmProvider(partial.llmProvider, "llmProvider") ?? global.defaultLlmProvider,
-    model: partial.model,
-    modelParams: { ...global.defaultModelParams, ...partial.modelParams },
-    thinkingLevel: parseThinkingLevel(partial.thinkingLevel, "thinkingLevel") ?? global.defaultThinkingLevel,
+    modelProfile: requireModelProfile(
+      global.modelProfiles,
+      partial.modelProfile ?? global.defaultModelProfile,
+      "modelProfile",
+    ),
     timezone: partial.timezone ?? global.defaultTimezone,
     trim: {
       trimTrigger: partial.trim?.trimTrigger ?? global.defaultTrim.trimTrigger,
@@ -1319,9 +1323,7 @@ export function resolveGuildConfig(
     typingSimulation: resolveTypingSimulationConfig(global.defaultTypingSimulation, partial.typingSimulation),
     agentJobs: resolveGuildAgentJobs(global.defaultAgentJobs, partial.agentJobs),
     schedulePressure: resolveSchedulePressure(global.defaultSchedulePressure, partial.schedulePressure, "schedulePressure"),
-    promptCaching,
     promptTransport: resolveGuildPromptTransport(global.defaultPromptTransport, partial.promptTransport),
-    backgroundLlm: resolveGuildBackgroundLlm(global, partial, promptCaching),
     ambientAttention: resolveAmbientAttentionConfig(global.defaultAmbientAttention, partial.ambientAttention),
     ambientInitiative: resolveAmbientInitiativeConfig(global.defaultAmbientInitiative, partial.ambientInitiative),
     replyLoop: resolveGuildReplyLoop(global.defaultReplyLoop, partial.replyLoop),
@@ -1330,6 +1332,29 @@ export function resolveGuildConfig(
     relationships: resolveRelationshipConfig(global.defaultRelationships, partial.relationships),
     voice: resolveVoiceConfig(global.defaultVoice ?? DEFAULT_VOICE_CONFIG, partial.voice),
   };
+  validateModelProfileReferences(global.modelProfiles, [
+    [config.modelProfile, "modelProfile"],
+    [config.imageReading.fallbackModelProfile, "imageReading.fallbackModelProfile"],
+    [config.imageGeneration.modelProfile, "imageGeneration.modelProfile"],
+    [config.memoryExtraction.modelProfile, "memoryExtraction.modelProfile"],
+    ...(config.relationships !== undefined
+      ? [[config.relationships.modelProfile, "relationships.modelProfile"] as const]
+      : []),
+    ...(config.voice !== undefined
+      ? [
+        [config.voice.modelProfile, "voice.modelProfile"] as const,
+        [config.voice.maintenance.summary.modelProfile, "voice.maintenance.summary.modelProfile"] as const,
+        [config.voice.maintenance.extraction.modelProfile, "voice.maintenance.extraction.modelProfile"] as const,
+      ]
+      : []),
+    ...(config.ambientAttention !== undefined
+      ? [[config.ambientAttention.evaluator.modelProfile, "ambientAttention.evaluator.modelProfile"] as const]
+      : []),
+    ...(config.ambientInitiative !== undefined
+      ? [[config.ambientInitiative.evaluator.modelProfile, "ambientInitiative.evaluator.modelProfile"] as const]
+      : []),
+  ]);
+  return config;
 }
 
 /** Validate trim config invariants. Throws on violation. */
@@ -1345,17 +1370,6 @@ export function validateTrimConfig(trim: TrimConfig): void {
   }
 }
 
-function validateGuildLlmCredentials(global: GlobalConfig, guild: GuildConfig): void {
-  const usesOpenRouter = guild.llmProvider === "openrouter"
-    || guild.backgroundLlm.provider === "openrouter"
-    || (guild.imageReading.fallbackEnabled && guild.imageReading.fallbackProvider === "openrouter")
-    || (guild.ambientAttention?.enabled === true && guild.ambientAttention.evaluator.provider === "openrouter");
-  if (!usesOpenRouter) return;
-  if (global.openrouterApiKey === undefined || global.openrouterApiKey === "") {
-    throw new Error(`OPENROUTER_API_KEY is required by guild ${guild.guildId} OpenRouter LLM configuration`);
-  }
-}
-
 /** Load all guild configs from a directory, resolved against global defaults. */
 export function loadGuildConfigs(
   guildsDir: string,
@@ -1368,7 +1382,6 @@ export function loadGuildConfigs(
   for (const file of files) {
     const partial = loadGuildConfigFile(join(guildsDir, file));
     const resolved = resolveGuildConfig(global, partial);
-    validateGuildLlmCredentials(global, resolved);
     result.set(partial.guildId, resolved);
   }
   return result;
@@ -1391,10 +1404,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
   const yaml: GuildConfigYaml = {
     triggers: config.triggers,
     triggerInstructions: hasTriggerInstructions(config.triggerInstructions) ? config.triggerInstructions : undefined,
-    llmProvider: config.llmProvider,
-    model: config.model,
-    modelParams: config.modelParams,
-    thinkingLevel: config.thinkingLevel,
+    modelProfile: config.modelProfile,
     timezone: config.timezone,
     trim: config.trim,
     adminUserIds: config.adminUserIds.length > 0 ? config.adminUserIds : undefined,
@@ -1409,9 +1419,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     members: config.members,
     dispatcher: config.dispatcher,
     typingSimulation: config.typingSimulation,
-    promptCaching: config.promptCaching,
     promptTransport: config.promptTransport,
-    backgroundLlm: config.backgroundLlm,
     ambientAttention: config.ambientAttention,
     relationships: config.relationships,
     voice: config.voice,

@@ -1476,13 +1476,22 @@ export class VoiceRuntime {
   private maybeRunMaintenance(): void {
     const active = this.active;
     if (active === undefined) return;
-    const checkpoint = this.deps.repository.getCheckpoint(active.id, "memory");
-    const afterSegmentId = checkpoint?.throughSegmentId ?? 0;
-    const newSegments = this.deps.repository.countTranscriptAfter(active.id, afterSegmentId);
-    if (newSegments < active.voiceConfig.maintenanceEverySegments) return;
     const sessionStartedAt = this.deps.repository.getSession(active.id)?.startedAt ?? Date.now();
-    const lastRunAt = checkpoint?.lastRunAt ?? sessionStartedAt;
-    if (Date.now() - lastRunAt < active.voiceConfig.maintenanceMinIntervalMs) return;
+    const due = (
+      checkpointKind: "summary" | "memory",
+      config: { everySegments: number; minIntervalMs: number },
+    ): boolean => {
+      const checkpoint = this.deps.repository.getCheckpoint(active.id, checkpointKind);
+      const afterSegmentId = checkpoint?.throughSegmentId ?? 0;
+      const newSegments = this.deps.repository.countTranscriptAfter(active.id, afterSegmentId);
+      const lastRunAt = checkpoint?.lastRunAt ?? sessionStartedAt;
+      return newSegments >= config.everySegments
+        && Date.now() - lastRunAt >= config.minIntervalMs;
+    };
+    if (
+      !due("summary", active.voiceConfig.maintenance.summary)
+      && !due("memory", active.voiceConfig.maintenance.extraction)
+    ) return;
     void this.deps.onMaintenance(active.id, false).catch((error: unknown) => {
       this.deps.log.warn("voice periodic maintenance failed", {
         error: error instanceof Error ? error.message : String(error),

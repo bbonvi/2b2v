@@ -1,6 +1,14 @@
 import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 import type { AssetKind } from "../db/asset-repository.ts";
 import type { PersonaModesConfig, PersonaModesConfigYaml } from "../modes/types.ts";
+import type {
+  RelationshipConfig,
+  RelationshipConfigYaml,
+} from "../relationships/types.ts";
+export type {
+  RelationshipConfig,
+  RelationshipConfigYaml,
+} from "../relationships/types.ts";
 
 /** UI language for VPN panel. */
 export type UiLang = "en" | "ru";
@@ -139,29 +147,25 @@ export type ServiceTier = "flex" | "priority";
 /** OpenAI Codex Responses transport. */
 export type CodexTransport = "sse" | "websocket" | "websocket-cached" | "auto";
 
-/** Dedicated background LLM configuration. */
-export interface BackgroundLlmConfig {
-  /** Provider used for background LLM work. */
-  provider?: LlmProvider;
-  /** Effective model id for background LLM work. */
+/** Complete named model execution policy shared by LLM workloads. */
+export interface ModelProfileConfig {
+  provider: LlmProvider;
   model: string;
-  /** Effective provider request parameters for background LLM work. */
   modelParams: Record<string, unknown>;
-  /** Optional reasoning effort requested for background LLM work. */
   thinkingLevel?: ThinkingLevel;
-  /** Optional service tier. Undefined means no provider service tier is sent. */
   serviceTier?: ServiceTier;
-  /** Prompt caching controls for background LLM work. */
+  codexTransport: CodexTransport;
   promptCaching: PromptCachingConfig;
 }
 
-/** Global defaults for background LLM configuration. Missing fields inherit main model settings per guild. */
-export interface BackgroundLlmDefaults {
-  provider?: LlmProvider;
-  model?: string;
-  modelParams: Record<string, unknown>;
+/** YAML shape for one named model execution policy. */
+export interface ModelProfileConfigYaml {
+  provider: LlmProvider;
+  model: string;
+  modelParams?: Record<string, unknown>;
   thinkingLevel?: ThinkingLevel;
   serviceTier?: ServiceTier;
+  codexTransport?: CodexTransport;
   promptCaching?: PromptCachingConfig;
 }
 
@@ -171,11 +175,7 @@ export type AmbientInitiativeAudience = "humans" | "bots";
 
 /** Shared evaluator model used by ambient attention candidate checks. */
 export interface AmbientAttentionEvaluatorConfig {
-  provider?: LlmProvider;
-  model: string;
-  modelParams: Record<string, unknown>;
-  thinkingLevel?: ThinkingLevel;
-  serviceTier?: ServiceTier;
+  modelProfile: string;
   llmOutputTimeoutMs: number;
 }
 
@@ -238,11 +238,7 @@ export type AmbientAttentionConfigYaml = Partial<Omit<
 
 /** Shared evaluator model used by ambient initiative opportunity checks. */
 export interface AmbientInitiativeEvaluatorConfig {
-  provider?: LlmProvider;
-  model: string;
-  modelParams: Record<string, unknown>;
-  thinkingLevel?: ThinkingLevel;
-  serviceTier?: ServiceTier;
+  modelProfile: string;
   llmOutputTimeoutMs: number;
 }
 
@@ -313,12 +309,8 @@ export type AmbientInitiativeConfigYaml = Partial<Omit<
 export interface ImageReadingConfig {
   /** Whether to describe images with a separate vision model when the main model cannot read them. */
   fallbackEnabled: boolean;
-  /** Provider used for fallback image descriptions. */
-  fallbackProvider?: LlmProvider;
-  /** Model id used for fallback image descriptions. */
-  fallbackModel: string;
-  /** Provider request parameters for fallback image description calls. */
-  fallbackModelParams: Record<string, unknown>;
+  /** Named model profile used for fallback image descriptions. */
+  fallbackModelProfile: string;
 }
 
 /** Quality sent to Codex image generation. */
@@ -328,6 +320,8 @@ export type ImageGenerationQuality = "auto" | "low" | "medium" | "high";
 export interface ImageGenerationConfig {
   /** Quality passed to the backend image_generation tool. Default auto. */
   quality: ImageGenerationQuality;
+  /** Named Codex model profile used to orchestrate image generation. */
+  modelProfile: string;
 }
 
 /** Native reply/tool loop runtime limits. */
@@ -386,6 +380,8 @@ export interface TrimConfig {
 
 /** Automatic background memory extraction controls. */
 export interface MemoryExtractionConfig {
+  /** Named model profile used by post-reply and ambient memory maintenance. */
+  modelProfile: string;
   /** Run the existing silent memory pass after visible replies. */
   postReply: boolean;
   /** Maximum record_memory calls per silent maintenance pass. */
@@ -401,17 +397,6 @@ export interface MemoryExtractionConfig {
     minIntervalSeconds: number;
   };
 }
-
-/** Durable relationship-profile controls. */
-export interface RelationshipConfig {
-  enabled: boolean;
-  promptInjection: boolean;
-  maxAxisDeltaPerSignal: number;
-  /** Maximum record_relationship calls per silent maintenance pass. */
-  maxToolCalls: number;
-}
-
-export type RelationshipConfigYaml = Partial<RelationshipConfig>;
 
 /** Limits for lazy message-asset reading and extraction. */
 export interface AssetReadingConfig {
@@ -482,15 +467,35 @@ export interface VoicePlaybackConfig {
   trailingSilenceFrames: number;
 }
 
+/** Periodic rolling-summary maintenance for live voice sessions. */
+export interface VoiceSummaryMaintenanceConfig {
+  modelProfile: string;
+  everySegments: number;
+  minIntervalMs: number;
+  maxTurns: number;
+  maxChars: number;
+}
+
+/** Less frequent durable memory and relationship extraction from voice. */
+export interface VoiceExtractionMaintenanceConfig {
+  modelProfile: string;
+  everySegments: number;
+  minIntervalMs: number;
+  maxTurns: number;
+  maxChars: number;
+}
+
+/** Independent live voice maintenance workloads. */
+export interface VoiceMaintenanceConfig {
+  summary: VoiceSummaryMaintenanceConfig;
+  extraction: VoiceExtractionMaintenanceConfig;
+}
+
 /** Live Discord voice agent behavior. */
 export interface VoiceConfig {
   enabled: boolean;
-  provider?: LlmProvider;
-  model: string;
-  modelParams: Record<string, unknown>;
-  thinkingLevel?: ThinkingLevel;
-  /** Optional service tier for latency-sensitive live voice turns only. */
-  serviceTier?: ServiceTier;
+  /** Named model profile used only for immediate conversational voice turns. */
+  modelProfile: string;
   wakeWords: string[];
   lingeringAttentionMs: number;
   roomQuietMs: number;
@@ -500,16 +505,17 @@ export interface VoiceConfig {
   yieldBoundaryMaxWaitMs: number;
   emptyChannelGraceMs: number;
   recentSessionContextMs: number;
-  maintenanceEverySegments: number;
-  maintenanceMinIntervalMs: number;
-  maintenanceMaxTurns: number;
-  maintenanceMaxChars: number;
+  maintenance: VoiceMaintenanceConfig;
   playback: VoicePlaybackConfig;
   stt: VoiceSttConfig;
   testing: VoiceTestingConfig;
 }
 
-export type VoiceConfigYaml = Partial<Omit<VoiceConfig, "playback" | "stt" | "testing">> & {
+export type VoiceConfigYaml = Partial<Omit<VoiceConfig, "maintenance" | "playback" | "stt" | "testing">> & {
+  maintenance?: {
+    summary?: Partial<VoiceSummaryMaintenanceConfig>;
+    extraction?: Partial<VoiceExtractionMaintenanceConfig>;
+  };
   playback?: Partial<VoicePlaybackConfig>;
   stt?: Partial<VoiceSttConfig>;
   testing?: Partial<VoiceTestingConfig>;
@@ -521,10 +527,7 @@ export interface GuildConfig {
   slug: string;
   triggers: TriggerConfig;
   triggerInstructions: TriggerInstructions;
-  llmProvider?: LlmProvider;
-  model?: string;
-  modelParams?: Record<string, unknown>;
-  thinkingLevel?: ThinkingLevel;
+  modelProfile: string;
   timezone: string;
   trim: TrimConfig;
   adminUserIds: string[];
@@ -549,12 +552,8 @@ export interface GuildConfig {
   agentJobs: AgentJobsConfig;
   /** Non-admin recurring scheduled-task pressure caps. */
   schedulePressure: SchedulePressureConfig;
-  /** Prompt caching controls for supported provider requests. */
-  promptCaching: PromptCachingConfig;
   /** Provider role/target placement for logical prompt sections. */
   promptTransport: PromptTransportConfig;
-  /** Dedicated background LLM configuration. */
-  backgroundLlm: BackgroundLlmConfig;
   /** Optional ambient attention engine configuration. */
   ambientAttention?: AmbientAttentionConfig;
   /** Optional ambient initiative engine configuration. */
@@ -576,14 +575,12 @@ export interface GlobalConfig {
   discordToken: string;
   openrouterApiKey?: string;
   codexAuthPath: string;
-  /** Default OpenAI Codex transport. */
-  codexTransport: CodexTransport;
   braveApiKey?: string;
   externalImages?: ExternalImagesConfig;
-  defaultLlmProvider: LlmProvider;
-  defaultModel: string;
-  defaultModelParams: Record<string, unknown>;
-  defaultThinkingLevel?: ThinkingLevel;
+  /** Named model execution policies available to all guilds and workloads. */
+  modelProfiles: Record<string, ModelProfileConfig>;
+  /** Default profile used by normal visible agent turns. */
+  defaultModelProfile: string;
   defaultTimezone: string;
   defaultTrim: TrimConfig;
   defaultTriggers: TriggerConfig;
@@ -615,12 +612,8 @@ export interface GlobalConfig {
   defaultAgentJobs: AgentJobsConfig;
   /** Default non-admin recurring scheduled-task pressure caps. */
   defaultSchedulePressure: SchedulePressureConfig;
-  /** Default prompt caching controls. */
-  defaultPromptCaching: PromptCachingConfig;
   /** Default provider role/target placement for logical prompt sections. */
   defaultPromptTransport: PromptTransportConfig;
-  /** Default background LLM overrides. Missing fields inherit main model settings per guild. */
-  defaultBackgroundLlm: BackgroundLlmDefaults;
   /** Default ambient attention behavior. */
   defaultAmbientAttention?: AmbientAttentionConfig;
   /** Default ambient initiative behavior. */
@@ -649,10 +642,7 @@ export interface AppConfig {
 export interface GuildConfigYaml {
   triggers?: Partial<TriggerConfig>;
   triggerInstructions?: Partial<TriggerInstructions>;
-  llmProvider?: LlmProvider;
-  model?: string;
-  modelParams?: Record<string, unknown>;
-  thinkingLevel?: ThinkingLevel;
+  modelProfile?: string;
   timezone?: string;
   trim?: Partial<TrimConfig>;
   adminUserIds?: string[];
@@ -660,12 +650,11 @@ export interface GuildConfigYaml {
   imageReferenceMaxPerCall?: number;
   imageReading?: {
     fallbackEnabled?: boolean;
-    fallbackProvider?: LlmProvider;
-    fallbackModel?: string;
-    fallbackModelParams?: Record<string, unknown>;
+    fallbackModelProfile?: string;
   };
   imageGeneration?: {
     quality?: ImageGenerationQuality;
+    modelProfile?: string;
   };
   assetReading?: AssetReadingConfigYaml;
   instructions?: string;
@@ -697,20 +686,7 @@ export interface GuildConfigYaml {
     maxImageReplacements?: number;
   };
   schedulePressure?: SchedulePressureConfigYaml;
-  promptCaching?: {
-    enabled?: boolean;
-  };
   promptTransport?: PromptTransportConfigYaml;
-  backgroundLlm?: {
-    provider?: LlmProvider;
-    model?: string;
-    modelParams?: Record<string, unknown>;
-    thinkingLevel?: ThinkingLevel;
-    serviceTier?: ServiceTier;
-    promptCaching?: {
-      enabled?: boolean;
-    };
-  };
   ambientAttention?: AmbientAttentionConfigYaml;
   ambientInitiative?: AmbientInitiativeConfigYaml;
   relationships?: RelationshipConfigYaml;
@@ -725,6 +701,7 @@ export interface GuildConfigYaml {
     maxAgeMs?: number;
   };
   memoryExtraction?: {
+    modelProfile?: string;
     postReply?: boolean;
     maxToolCalls?: number;
     ambient?: {
@@ -738,11 +715,8 @@ export interface GuildConfigYaml {
 
 /** Raw shape of a profile's config YAML file. All optional. */
 export interface MainConfigYaml {
-  llmProvider?: LlmProvider;
-  model?: string;
-  modelParams?: Record<string, unknown>;
-  thinkingLevel?: ThinkingLevel;
-  codexTransport?: CodexTransport;
+  modelProfiles?: Record<string, ModelProfileConfigYaml>;
+  modelProfile?: string;
   timezone?: string;
   trim?: Partial<TrimConfig>;
   triggers?: Partial<TriggerConfig>;
@@ -751,12 +725,11 @@ export interface MainConfigYaml {
   imageReferenceMaxPerCall?: number;
   imageReading?: {
     fallbackEnabled?: boolean;
-    fallbackProvider?: LlmProvider;
-    fallbackModel?: string;
-    fallbackModelParams?: Record<string, unknown>;
+    fallbackModelProfile?: string;
   };
   imageGeneration?: {
     quality?: ImageGenerationQuality;
+    modelProfile?: string;
   };
   externalImages?: Partial<ExternalImagesConfig>;
   assetReading?: AssetReadingConfigYaml;
@@ -795,20 +768,7 @@ export interface MainConfigYaml {
     maxImageReplacements?: number;
   };
   schedulePressure?: SchedulePressureConfigYaml;
-  promptCaching?: {
-    enabled?: boolean;
-  };
   promptTransport?: PromptTransportConfigYaml;
-  backgroundLlm?: {
-    provider?: LlmProvider;
-    model?: string;
-    modelParams?: Record<string, unknown>;
-    thinkingLevel?: ThinkingLevel;
-    serviceTier?: ServiceTier;
-    promptCaching?: {
-      enabled?: boolean;
-    };
-  };
   ambientAttention?: AmbientAttentionConfigYaml;
   ambientInitiative?: AmbientInitiativeConfigYaml;
   relationships?: RelationshipConfigYaml;
@@ -824,6 +784,7 @@ export interface MainConfigYaml {
     maxAgeMs?: number;
   };
   memoryExtraction?: {
+    modelProfile?: string;
     postReply?: boolean;
     maxToolCalls?: number;
     ambient?: {

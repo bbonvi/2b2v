@@ -2,19 +2,50 @@
 # Start with PROFILE=delamain and a separate environment/token.
 dataDir: data/delamain
 
-llmProvider: openai-codex
-model: gpt-5.6-sol
-thinkingLevel: medium
-codexTransport: websocket-cached
+modelProfiles:
+  main:
+    provider: openai-codex
+    model: gpt-5.6-sol
+    modelParams: { textVerbosity: low }
+    thinkingLevel: medium
+    codexTransport: websocket-cached
+    promptCaching: { enabled: true }
+  evaluator:
+    provider: openai-codex
+    model: gpt-5.3-codex-spark
+    modelParams: { textVerbosity: low }
+    thinkingLevel: minimal
+    codexTransport: websocket-cached
+    promptCaching: { enabled: true }
+  realtimeVoice:
+    provider: openai-codex
+    model: gpt-5.6-terra
+    thinkingLevel: minimal
+    serviceTier: priority
+    codexTransport: websocket-cached
+    promptCaching: { enabled: true }
+  voiceSummary:
+    provider: openai-codex
+    model: gpt-5.6-terra
+    thinkingLevel: minimal
+    codexTransport: websocket-cached
+    promptCaching: { enabled: true }
+  vision:
+    provider: openai-codex
+    model: gpt-5.5
+    thinkingLevel: minimal
+    codexTransport: websocket-cached
+    promptCaching: { enabled: true }
+modelProfile: main
 timezone: Europe/Moscow
-modelParams:
-    textVerbosity: "low"
 
 relationships:
+  modelProfile: main
   enabled: false
   promptInjection: false
 
 memoryExtraction:
+  modelProfile: main
   postReply: true
   maxToolCalls: 3
   ambient:
@@ -26,6 +57,12 @@ ambientAttention:
 # Schema-compatible but deliberately disabled for the Delamain profile.
 voice:
   enabled: false
+  modelProfile: realtimeVoice
+  maintenance:
+    summary:
+      modelProfile: voiceSummary
+    extraction:
+      modelProfile: main
 
 promptTransport:
     openaiCodex:
@@ -186,12 +223,8 @@ ambientInitiative:
     minMainChannelHumanMessages: 20 # (minimum 7-day human messages for auto main channel)
     mainChannelLookbackDays: 7 # (auto main-channel activity lookback)
     evaluator:
-        provider: openai-codex
-        model: gpt-5.3-codex-spark
-        thinkingLevel: minimal # (fast first-pass decision only)
+        modelProfile: evaluator
         llmOutputTimeoutMs: 8000 # (timeout for evaluator JSON)
-        modelParams:
-            textVerbosity: low # (keep evaluator output compact)
     selfExpression:
         enabled: true # (allow spontaneous remarks directed to the configured bot audience)
         basePressure: 0.28 # (starting chance pressure before room signals)
@@ -218,9 +251,6 @@ triggers:
   mention: true
   keywords: [delamain, деламейн, дэл]
   randomChance: 0
-
-promptCaching:
-  enabled: true
 
 # Max ordered references per image-generation request
 imageReferenceMaxPerCall: 10
@@ -253,12 +283,12 @@ assetReading:
 # Codex image generation request settings
 imageGeneration:
     quality: "high"
+    modelProfile: main
 
 # If the main model cannot read image input, describe images with this vision model.
 imageReading:
     fallbackEnabled: true
-    fallbackProvider: "openai-codex"
-    fallbackModel: "gpt-5.5"
+    fallbackModelProfile: vision
 
 tts:
     enabled: true # (allow <voice>/<audio> output as ElevenLabs attachment)

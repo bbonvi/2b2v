@@ -117,18 +117,24 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     discordToken: "test-token",
     openrouterApiKey: "test-key",
     codexAuthPath: "data/codex-auth.json",
-    codexTransport: "websocket-cached",
-    defaultLlmProvider: "openrouter",
-    defaultModel: "moonshotai/kimi-k2.5",
-    defaultModelParams: {},
+    modelProfiles: {
+      main: {
+        provider: "openrouter",
+        model: "moonshotai/kimi-k2.5",
+        modelParams: {},
+        codexTransport: "websocket-cached",
+        promptCaching: { enabled: true },
+      },
+    },
+    defaultModelProfile: "main",
     defaultTimezone: "UTC",
     defaultTrim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
     defaultTriggers: { mention: true, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingResumeGraceMs: 3000, typingMaxWaitMs: 15000 },
     defaultTriggerInstructions: {},
     defaultMergeMessageGapSeconds: 120,
     defaultImageReferenceMaxPerCall: 10,
-    defaultImageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
-    defaultImageGeneration: { quality: "auto" },
+    defaultImageReading: { fallbackEnabled: false, fallbackModelProfile: "main" },
+    defaultImageGeneration: { quality: "auto", modelProfile: "main" },
     logLevel: "info",
     dataDir: "./data",
     uiLang: "en",
@@ -138,12 +144,11 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultTypingSimulation: { enabled: false, inputReadingWpm: 450, inputMinDelayMs: 300, inputMaxDelayMs: 3500, outputTypingWpm: 180, outputMinHoldMs: 700, outputMaxHoldMs: 3500 },
     defaultAgentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
     defaultSchedulePressure: { maxRequesterRunsPerHour: 120, maxRequesterRunsPerDay: 500, maxGuildRunsPerHour: 600, maxGuildRunsPerDay: 3000 },
-    defaultPromptCaching: { enabled: true },
     defaultPromptTransport: makePromptTransportConfig(),
-    defaultBackgroundLlm: { modelParams: {} },
     defaultReplyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
     defaultReasoningContinuation: { enabled: true, maxAgeMs: 30 * 60 * 1000 },
     defaultMemoryExtraction: {
+      modelProfile: "main",
       postReply: true,
       maxToolCalls: 5,
       ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
@@ -152,19 +157,61 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
   };
 }
 
+function makeCodexGlobal(
+  profileOverrides: Partial<GlobalConfig["modelProfiles"][string]> = {},
+): GlobalConfig {
+  return makeGlobalConfig({
+    modelProfiles: {
+      main: {
+        provider: "openai-codex",
+        model: "gpt-5.5",
+        modelParams: {},
+        codexTransport: "websocket-cached",
+        promptCaching: { enabled: true },
+        ...profileOverrides,
+      },
+    },
+  });
+}
+
+function makeImageGlobal(
+  mainModel: string,
+  fallbackParams: Record<string, unknown> = {},
+): GlobalConfig {
+  return makeGlobalConfig({
+    modelProfiles: {
+      main: {
+        provider: "openrouter",
+        model: mainModel,
+        modelParams: {},
+        codexTransport: "websocket-cached",
+        promptCaching: { enabled: true },
+      },
+      imageFallback: {
+        provider: "openrouter",
+        model: "moonshotai/kimi-k2.5",
+        modelParams: fallbackParams,
+        codexTransport: "websocket-cached",
+        promptCaching: { enabled: true },
+      },
+    },
+  });
+}
+
 function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
   return {
     guildId: "guild-1",
     slug: "test",
     triggers: { mention: true, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingResumeGraceMs: 3000, typingMaxWaitMs: 15000 },
     triggerInstructions: {},
+    modelProfile: "main",
     timezone: "UTC",
     trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
     adminUserIds: [],
     mergeMessageGapSeconds: 120,
     imageReferenceMaxPerCall: 10,
-    imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
-    imageGeneration: { quality: "auto" },
+    imageReading: { fallbackEnabled: false, fallbackModelProfile: "main" },
+    imageGeneration: { quality: "auto", modelProfile: "main" },
     instructions: "",
     emotes: { include: false },
     members: { include: true },
@@ -172,16 +219,11 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     typingSimulation: { enabled: false, inputReadingWpm: 450, inputMinDelayMs: 300, inputMaxDelayMs: 3500, outputTypingWpm: 180, outputMinHoldMs: 700, outputMaxHoldMs: 3500 },
     agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, maxImageReplacements: 2 },
     schedulePressure: { maxRequesterRunsPerHour: 120, maxRequesterRunsPerDay: 500, maxGuildRunsPerHour: 600, maxGuildRunsPerDay: 3000 },
-    promptCaching: { enabled: true },
     promptTransport: makePromptTransportConfig(),
-    backgroundLlm: {
-      model: "moonshotai/kimi-k2.5",
-      modelParams: {},
-      promptCaching: { enabled: true },
-    },
     replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
     reasoningContinuation: { enabled: true, maxAgeMs: 30 * 60 * 1000 },
     memoryExtraction: {
+      modelProfile: "main",
       postReply: true,
       maxToolCalls: 5,
       ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
@@ -452,18 +494,14 @@ describe("handleMessage", () => {
     const result = await handleMessage(
       makeMessage({ mentionedUserIds: ["bot-1"] }),
       makeDeps({
-        globalConfig: makeGlobalConfig({
+        globalConfig: {
+          ...makeCodexGlobal({ serviceTier: "priority" }),
           openrouterApiKey: undefined,
-          defaultLlmProvider: "openai-codex",
-          defaultModel: "gpt-5.5",
-        }),
+        },
         guildConfig: makeGuildConfig({
-          llmProvider: "openai-codex",
-          model: "gpt-5.5",
-          imageReading: { fallbackEnabled: false, fallbackModel: "moonshotai/kimi-k2.5", fallbackModelParams: {} },
-          imageGeneration: { quality: "auto" },
+          imageReading: { fallbackEnabled: false, fallbackModelProfile: "main" },
+          imageGeneration: { quality: "auto", modelProfile: "main" },
         }),
-        serviceTier: "priority",
         completeChat,
       }),
     );
@@ -731,7 +769,7 @@ describe("handleMessage", () => {
       makeDeps({
         completeChat,
         systemPrompt: "Top-level policy.",
-        guildConfig: makeGuildConfig({ llmProvider: "openai-codex", model: "gpt-5.5" }),
+        globalConfig: makeCodexGlobal(),
       }),
     );
   });
@@ -767,7 +805,8 @@ describe("handleMessage", () => {
       makeMessage({ mentionedUserIds: ["bot-1"] }),
       makeDeps({
         completeChat,
-        guildConfig: makeGuildConfig({ llmProvider: "openai-codex", model: "gpt-5.5", promptTransport: transport }),
+        globalConfig: makeCodexGlobal(),
+        guildConfig: makeGuildConfig({ promptTransport: transport }),
       }),
     );
 
@@ -877,11 +916,7 @@ describe("handleMessage", () => {
       makeMessage({ mentionedUserIds: ["bot-1"] }),
       makeDeps({
         completeChat,
-        globalConfig: makeGlobalConfig({ defaultLlmProvider: "openai-codex", defaultModel: "gpt-5.5" }),
-        guildConfig: makeGuildConfig({
-          llmProvider: "openai-codex",
-          model: "gpt-5.5",
-        }),
+        globalConfig: makeCodexGlobal(),
         requestLog: new RequestLog("1075346959298199564", "1080016551471743046"),
       }),
     );
@@ -1957,8 +1992,7 @@ describe("handleMessage", () => {
       makeMessage({ mentionedUserIds: ["bot-1"] }),
       makeDeps({
         completeChat,
-        globalConfig: makeGlobalConfig({ defaultLlmProvider: "openai-codex", defaultModel: "gpt-5.5" }),
-        guildConfig: makeGuildConfig({ llmProvider: "openai-codex", model: "gpt-5.5" }),
+        globalConfig: makeCodexGlobal(),
       }),
     );
 
@@ -2273,11 +2307,7 @@ describe("handleMessage", () => {
       makeDeps({
         extraTools: [tool],
         completeChat,
-        globalConfig: makeGlobalConfig({ defaultLlmProvider: "openai-codex", defaultModel: "gpt-5.5" }),
-        guildConfig: makeGuildConfig({
-          llmProvider: "openai-codex",
-          model: "gpt-5.5",
-        }),
+        globalConfig: makeCodexGlobal(),
       }),
     );
 
@@ -2319,7 +2349,7 @@ describe("handleMessage", () => {
       makeMessage({ guildId: "guild-1", channelId: "channel-1", mentionedUserIds: ["bot-1"] }),
       makeDeps({
         completeChat,
-        guildConfig: makeGuildConfig({ llmProvider: "openai-codex", model: "gpt-5.5" }),
+        globalConfig: makeCodexGlobal(),
         nativeReasoningContinuation: {
           load: (input) => {
             expect(input).toMatchObject({
@@ -2371,7 +2401,7 @@ describe("handleMessage", () => {
       makeMessage({ guildId: "guild-1", channelId: "channel-1" }),
       makeDeps({
         completeChat,
-        guildConfig: makeGuildConfig({ llmProvider: "openai-codex", model: "gpt-5.5" }),
+        globalConfig: makeCodexGlobal(),
         triggerOverride: { reason: "ambient_initiative" },
         nativeReasoningContinuation: { load, save },
       }),
@@ -3232,12 +3262,11 @@ describe("handleMessage", () => {
         extraTools: [tool],
         completeChat,
         modelImageInputSupport: "supported",
+        globalConfig: makeImageGlobal("new-vendor/vision-model-not-in-registry"),
         guildConfig: makeGuildConfig({
-          model: "new-vendor/vision-model-not-in-registry",
           imageReading: {
             fallbackEnabled: true,
-            fallbackModel: "moonshotai/kimi-k2.5",
-            fallbackModelParams: {},
+            fallbackModelProfile: "imageFallback",
           },
         }),
       }),
@@ -3299,7 +3328,7 @@ describe("handleMessage", () => {
       makeDeps({
         extraTools: [tool],
         completeChat,
-        guildConfig: makeGuildConfig({ model: "deepseek/deepseek-v4-pro:price" }),
+        globalConfig: makeImageGlobal("deepseek/deepseek-v4-pro:price"),
       }),
     );
 
@@ -3379,12 +3408,14 @@ describe("handleMessage", () => {
       makeDeps({
         extraTools: [tool],
         completeChat,
+        globalConfig: makeImageGlobal(
+          "deepseek/deepseek-v4-pro:price",
+          { temperature: 0 },
+        ),
         guildConfig: makeGuildConfig({
-          model: "deepseek/deepseek-v4-pro:price",
           imageReading: {
             fallbackEnabled: true,
-            fallbackModel: "moonshotai/kimi-k2.5",
-            fallbackModelParams: { temperature: 0 },
+            fallbackModelProfile: "imageFallback",
           },
         }),
       }),
@@ -3522,11 +3553,11 @@ describe("handleMessage", () => {
       makeDeps({
         extraTools: [tool],
         completeChat,
+        globalConfig: makeImageGlobal("moonshotai/kimi-k2.5"),
         guildConfig: makeGuildConfig({
           imageReading: {
             fallbackEnabled: true,
-            fallbackModel: "moonshotai/kimi-k2.5",
-            fallbackModelParams: {},
+            fallbackModelProfile: "imageFallback",
           },
         }),
       }),
@@ -3777,6 +3808,7 @@ describe("handleMessage", () => {
       globalConfig: makeGlobalConfig(),
       guildConfig: makeGuildConfig({
         memoryExtraction: {
+          modelProfile: "main",
           postReply: true,
           maxToolCalls: 2,
           ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },

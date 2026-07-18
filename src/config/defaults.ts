@@ -54,6 +54,7 @@ export const DEFAULT_EXTERNAL_IMAGES: ExternalImagesConfig = {
 };
 
 export const DEFAULT_MEMORY_EXTRACTION: MemoryExtractionConfig = {
+  modelProfile: "main",
   postReply: true,
   maxToolCalls: 5,
   ambient: {
@@ -65,6 +66,7 @@ export const DEFAULT_MEMORY_EXTRACTION: MemoryExtractionConfig = {
 };
 
 export const DEFAULT_RELATIONSHIPS: RelationshipConfig = {
+  modelProfile: "main",
   enabled: true,
   promptInjection: true,
   maxAxisDeltaPerSignal: 4,
@@ -88,10 +90,7 @@ export const DEFAULT_AMBIENT_ATTENTION_MODE: AmbientAttentionModeConfig = {
 export const DEFAULT_AMBIENT_ATTENTION: AmbientAttentionConfig = {
   enabled: false,
   evaluator: {
-    provider: "openai-codex",
-    model: "gpt-5.3-codex-spark",
-    modelParams: { textVerbosity: "low" },
-    thinkingLevel: "minimal",
+    modelProfile: "main",
     llmOutputTimeoutMs: 8_000,
   },
   historyLimit: 40,
@@ -173,10 +172,7 @@ export const DEFAULT_AMBIENT_INITIATIVE: AmbientInitiativeConfig = {
   minMainChannelHumanMessages: 20,
   mainChannelLookbackDays: 7,
   evaluator: {
-    provider: "openai-codex",
-    model: "gpt-5.3-codex-spark",
-    modelParams: { textVerbosity: "low" },
-    thinkingLevel: "minimal",
+    modelProfile: "main",
     llmOutputTimeoutMs: 8_000,
   },
   selfExpression: {
@@ -270,13 +266,12 @@ export const DEFAULT_LLM_PROVIDER: LlmProvider = "openrouter";
 
 export const DEFAULT_IMAGE_READING: ImageReadingConfig = {
   fallbackEnabled: false,
-  fallbackProvider: "openrouter",
-  fallbackModel: "moonshotai/kimi-k2.5",
-  fallbackModelParams: {},
+  fallbackModelProfile: "main",
 };
 
 export const DEFAULT_IMAGE_GENERATION: ImageGenerationConfig = {
   quality: "auto",
+  modelProfile: "main",
 };
 
 export const DEFAULT_REPLY_LOOP: ReplyLoopConfig = {

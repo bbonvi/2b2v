@@ -132,9 +132,11 @@ describe("VoiceRuntime maintenance cadence", () => {
       },
     });
     const voiceConfig = {
-      maintenanceEverySegments: 2,
-      maintenanceMinIntervalMs: 1,
-    } as VoiceConfig;
+      maintenance: {
+        summary: { everySegments: 2, minIntervalMs: 1 },
+        extraction: { everySegments: 10, minIntervalMs: 60_000 },
+      },
+    } as unknown as VoiceConfig;
     const internals = runtime as unknown as {
       active: { id: string; voiceConfig: VoiceConfig };
       maybeRunMaintenance: () => void;
@@ -161,7 +163,7 @@ describe("VoiceRuntime maintenance cadence", () => {
     expect(maintenanceCalls).toBe(1);
     const latest = repository.listTranscript(session.id).at(-1);
     if (latest === undefined) throw new Error("Expected transcript");
-    repository.setCheckpoint(session.id, "memory", latest.id);
+    repository.setCheckpoint(session.id, "summary", latest.id);
     internals.maybeRunMaintenance();
     expect(maintenanceCalls).toBe(1);
     db.close();

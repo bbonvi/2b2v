@@ -65,6 +65,8 @@ export interface RelationshipSignalInput {
 }
 
 export interface RelationshipConfig {
+  /** Named model profile used by relationship maintenance. */
+  modelProfile: string;
   enabled: boolean;
   promptInjection: boolean;
   maxAxisDeltaPerSignal: number;

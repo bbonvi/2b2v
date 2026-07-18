@@ -20,7 +20,10 @@ import type { PromptLabDraftMessage, PromptLabDryRun, PromptLabRunResult } from 
 import { buildComputedContactContextForUser } from "../agent/contact-context";
 import { shouldRespond } from "../agent/triggers";
 import { translateInbound } from "../discord/translation";
-import { buildAmbientAttentionStreamOptions, buildAmbientInitiativeStreamOptions, resolveGuildLlmProvider } from "../llm/client";
+import {
+  buildModelProfileStreamOptions,
+  resolveModelProfile,
+} from "../llm/client";
 import { completeLlmChat } from "../llm/chat";
 import type { OpenRouterMessage } from "../llm/types";
 import { getChannelHumanActivityBuckets, getHistoryMessages, getMessageById } from "../db/message-repository";
@@ -870,10 +873,12 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     history: HistoryMessage[],
     requestLog?: RequestLog,
   ): Promise<AmbientDecision | null> {
-    const streamOptions = buildAmbientAttentionStreamOptions(getGlobalConfig(), getGuildConfig(candidate.guildId));
+    const globalConfig = getGlobalConfig();
+    const profile = resolveModelProfile(globalConfig, config.evaluator.modelProfile);
+    const streamOptions = buildModelProfileStreamOptions(globalConfig, config.evaluator.modelProfile);
     const providerParams: Record<string, unknown> = { ...streamOptions };
     delete providerParams.apiKey;
-    const provider = config.evaluator.provider ?? resolveGuildLlmProvider(getGlobalConfig(), getGuildConfig(candidate.guildId));
+    const provider = profile.provider;
     const mode = ambientModeConfig(config, candidate.kind);
     const system = [
       ambientEvaluatorPolicyForKind(candidate.kind),
@@ -913,7 +918,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       const result = await completeLlmChat({
         provider,
         apiKey: streamOptions.apiKey,
-        model: config.evaluator.model,
+        model: profile.model,
         systemPrompt: system,
         messages,
         providerParams,
@@ -1605,10 +1610,15 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     history: HistoryMessage[];
     requestLog: RequestLog;
   }): Promise<AmbientInitiativeDecision | null> {
-    const streamOptions = buildAmbientInitiativeStreamOptions(getGlobalConfig(), input.guildConfig);
+    const globalConfig = getGlobalConfig();
+    const profile = resolveModelProfile(globalConfig, input.config.evaluator.modelProfile);
+    const streamOptions = buildModelProfileStreamOptions(
+      globalConfig,
+      input.config.evaluator.modelProfile,
+    );
     const providerParams: Record<string, unknown> = { ...streamOptions };
     delete providerParams.apiKey;
-    const provider = input.config.evaluator.provider ?? resolveGuildLlmProvider(getGlobalConfig(), input.guildConfig);
+    const provider = profile.provider;
     const system = [
       initiativeEvaluatorPolicyForKind(input.candidate.kind),
       "Return only compact JSON with should_initiate, initiate_probability, kind, target_user_id, source, anchor, required_shape, avoid, confidence, reason.",
@@ -1644,7 +1654,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       const result = await completeLlmChat({
         provider,
         apiKey: streamOptions.apiKey,
-        model: input.config.evaluator.model,
+        model: profile.model,
         systemPrompt: system,
         messages: [{ role: "user", content: user }],
         providerParams,

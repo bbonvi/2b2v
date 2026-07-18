@@ -1,6 +1,11 @@
 import type { Model } from "@earendil-works/pi-ai";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
-import type { GlobalConfig, GuildConfig, LlmProvider, ServiceTier, ThinkingLevel } from "../config/types.ts";
+import type {
+  GlobalConfig,
+  LlmProvider,
+  ModelProfileConfig,
+  ThinkingLevel,
+} from "../config/types.ts";
 
 /** Shape of a pi-ai Model object used by this bot. */
 export interface LlmModel extends Model<"openai-completions" | "openai-codex-responses"> {
@@ -86,24 +91,25 @@ function resolveCodexModel(modelId: string): LlmModel {
   };
 }
 
-/** Resolve the effective model for a guild (override or global default). */
-export function resolveGuildModel(global: GlobalConfig, guild: GuildConfig): LlmModel {
-  return resolveModel(guild.model ?? global.defaultModel, resolveGuildLlmProvider(global, guild));
+/** Resolve a named model execution policy, failing before an LLM request can drift to a default. */
+export function resolveModelProfile(global: GlobalConfig, profileId: string): ModelProfileConfig {
+  const profile = global.modelProfiles[profileId];
+  if (profile === undefined) {
+    throw new Error(`Unknown model profile "${profileId}"`);
+  }
+  return profile;
 }
 
-/** Return the effective model id for a guild. */
-export function resolveGuildModelId(global: GlobalConfig, guild: GuildConfig): string {
-  return guild.model ?? global.defaultModel;
+/** Resolve the pi-ai model selected by a named profile. */
+export function resolveModelProfileModel(global: GlobalConfig, profileId: string): LlmModel {
+  const profile = resolveModelProfile(global, profileId);
+  return resolveModel(profile.model, profile.provider);
 }
 
-/** Return the effective main LLM provider for a guild. */
-export function resolveGuildLlmProvider(global: GlobalConfig, guild: GuildConfig): LlmProvider {
-  return guild.llmProvider ?? global.defaultLlmProvider;
-}
-
-/** Return the effective provider-qualified model key for cache maps and logs. */
-export function resolveGuildModelKey(global: GlobalConfig, guild: GuildConfig): string {
-  return `${resolveGuildLlmProvider(global, guild)}:${resolveGuildModelId(global, guild)}`;
+/** Return the provider-qualified model key selected by a named profile. */
+export function resolveModelProfileKey(global: GlobalConfig, profileId: string): string {
+  const profile = resolveModelProfile(global, profileId);
+  return `${profile.provider}:${profile.model}`;
 }
 
 /** Convert OpenRouter model metadata into the image-input support state used by the agent loop. */
@@ -192,21 +198,24 @@ export async function fetchOpenRouterModelMetadata(input: {
   return null;
 }
 
-/** Build stream options for a pi-ai call, merging API key and guild params. */
-export function buildStreamOptions(
+/** Build provider request options from one complete named model execution policy. */
+export function buildModelProfileStreamOptions(
   global: GlobalConfig,
-  guild: GuildConfig,
-  serviceTier?: ServiceTier,
+  profileId: string,
 ): Record<string, unknown> & { apiKey: string } {
-  const provider = resolveGuildLlmProvider(global, guild);
-  const params = withThinkingLevelParams(provider, guild.modelParams ?? {}, guild.thinkingLevel);
-  if (provider === "openai-codex") {
+  const profile = resolveModelProfile(global, profileId);
+  const params = withThinkingLevelParams(
+    profile.provider,
+    profile.modelParams,
+    profile.thinkingLevel,
+  );
+  if (profile.provider === "openai-codex") {
     return {
       apiKey: "",
       codexAuthPath: global.codexAuthPath,
       ...params,
-      ...(serviceTier !== undefined ? { serviceTier } : {}),
-      transport: global.codexTransport,
+      ...(profile.serviceTier !== undefined ? { serviceTier: profile.serviceTier } : {}),
+      transport: profile.codexTransport,
     };
   }
   if (global.openrouterApiKey === undefined || global.openrouterApiKey === "") {
@@ -215,115 +224,6 @@ export function buildStreamOptions(
   return {
     apiKey: global.openrouterApiKey,
     ...params,
-    ...(serviceTier !== undefined ? { service_tier: serviceTier } : {}),
-  };
-}
-
-/** Build OpenRouter options for background LLM calls. */
-export function buildBackgroundStreamOptions(
-  global: GlobalConfig,
-  guild: GuildConfig
-): Record<string, unknown> & { apiKey: string } {
-  const provider = guild.backgroundLlm.provider ?? resolveGuildLlmProvider(global, guild);
-  const params = withThinkingLevelParams(provider, guild.backgroundLlm.modelParams, guild.backgroundLlm.thinkingLevel);
-  if (provider === "openai-codex") {
-    return {
-      apiKey: "",
-      codexAuthPath: global.codexAuthPath,
-      ...params,
-      transport: global.codexTransport,
-      ...(guild.backgroundLlm.serviceTier !== undefined ? { serviceTier: guild.backgroundLlm.serviceTier } : {}),
-    };
-  }
-  if (global.openrouterApiKey === undefined || global.openrouterApiKey === "") {
-    throw new Error("OPENROUTER_API_KEY is required for OpenRouter background LLM requests");
-  }
-  return {
-    apiKey: global.openrouterApiKey,
-    ...params,
-    ...(guild.backgroundLlm.serviceTier !== undefined ? { service_tier: guild.backgroundLlm.serviceTier } : {}),
-  };
-}
-
-/** Build provider options for ambient attention evaluator calls. */
-export function buildAmbientAttentionStreamOptions(
-  global: GlobalConfig,
-  guild: GuildConfig,
-): Record<string, unknown> & { apiKey: string } {
-  const ambient = guild.ambientAttention;
-  if (ambient === undefined) {
-    throw new Error("ambientAttention is not configured for this guild");
-  }
-  const provider = ambient.evaluator.provider ?? resolveGuildLlmProvider(global, guild);
-  const params = withThinkingLevelParams(provider, ambient.evaluator.modelParams, ambient.evaluator.thinkingLevel);
-  if (provider === "openai-codex") {
-    return {
-      apiKey: "",
-      codexAuthPath: global.codexAuthPath,
-      ...params,
-      transport: global.codexTransport,
-      ...(ambient.evaluator.serviceTier !== undefined ? { serviceTier: ambient.evaluator.serviceTier } : {}),
-    };
-  }
-  if (global.openrouterApiKey === undefined || global.openrouterApiKey === "") {
-    throw new Error("OPENROUTER_API_KEY is required for OpenRouter ambient attention requests");
-  }
-  return {
-    apiKey: global.openrouterApiKey,
-    ...params,
-    ...(ambient.evaluator.serviceTier !== undefined ? { service_tier: ambient.evaluator.serviceTier } : {}),
-  };
-}
-
-/** Build provider options for ambient initiative evaluator calls. */
-export function buildAmbientInitiativeStreamOptions(
-  global: GlobalConfig,
-  guild: GuildConfig,
-): Record<string, unknown> & { apiKey: string } {
-  const initiative = guild.ambientInitiative;
-  if (initiative === undefined) {
-    throw new Error("ambientInitiative is not configured for this guild");
-  }
-  const provider = initiative.evaluator.provider ?? resolveGuildLlmProvider(global, guild);
-  const params = withThinkingLevelParams(provider, initiative.evaluator.modelParams, initiative.evaluator.thinkingLevel);
-  if (provider === "openai-codex") {
-    return {
-      apiKey: "",
-      codexAuthPath: global.codexAuthPath,
-      ...params,
-      transport: global.codexTransport,
-      ...(initiative.evaluator.serviceTier !== undefined ? { serviceTier: initiative.evaluator.serviceTier } : {}),
-    };
-  }
-  if (global.openrouterApiKey === undefined || global.openrouterApiKey === "") {
-    throw new Error("OPENROUTER_API_KEY is required for OpenRouter ambient initiative requests");
-  }
-  return {
-    apiKey: global.openrouterApiKey,
-    ...params,
-    ...(initiative.evaluator.serviceTier !== undefined ? { service_tier: initiative.evaluator.serviceTier } : {}),
-  };
-}
-
-/** Build OpenRouter options for fallback image-description calls. */
-export function buildImageReadingStreamOptions(
-  global: GlobalConfig,
-  guild: GuildConfig,
-): Record<string, unknown> & { apiKey: string } {
-  const provider = guild.imageReading.fallbackProvider ?? "openrouter";
-  if (provider === "openai-codex") {
-    return {
-      apiKey: "",
-      codexAuthPath: global.codexAuthPath,
-      ...guild.imageReading.fallbackModelParams,
-      transport: global.codexTransport,
-    };
-  }
-  if (global.openrouterApiKey === undefined || global.openrouterApiKey === "") {
-    throw new Error("OPENROUTER_API_KEY is required for OpenRouter image fallback LLM requests");
-  }
-  return {
-    apiKey: global.openrouterApiKey,
-    ...guild.imageReading.fallbackModelParams,
+    ...(profile.serviceTier !== undefined ? { service_tier: profile.serviceTier } : {}),
   };
 }

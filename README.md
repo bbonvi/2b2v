@@ -42,9 +42,9 @@ Do not run multiple stacks with the same Discord bot token unless they should co
 
 ## Environment
 
-Required: `DISCORD_TOKEN` and credentials for the selected LLM provider.
+Required: `DISCORD_TOKEN` and credentials for every provider declared in `modelProfiles`.
 
-The default provider is OpenRouter via `OPENROUTER_API_KEY`. `llmProvider: openai-codex` uses ChatGPT subscription OAuth from `CODEX_AUTH_PATH` or `data/codex-auth.json`:
+OpenRouter profiles use `OPENROUTER_API_KEY`. Profiles with `provider: openai-codex` use ChatGPT subscription OAuth from `CODEX_AUTH_PATH` or `data/codex-auth.json`:
 
 ```bash
 bun run codex:login -- --auth data/codex-auth.json
@@ -60,7 +60,7 @@ Treat Codex auth JSON as a secret. See `.env.example` and `.env.prod.example` fo
 
 ## Live Voice
 
-The 2B profile can keep one global Discord voice presence. It receives account-attributed Opus streams, converts them once to 16 kHz mono, and uses local stateful Silero VAD to forward only confirmed speech to ElevenLabs Scribe Realtime. Silence and ending pauses remain local; a monthly forwarded-audio cap switches cleanly to a lazily loaded faster-whisper `small` INT8 fallback. Short Luna turns then stream ElevenLabs Flash audio back to Discord; `voice.playback` controls the initial receive prebuffer and the leading/trailing Opus silence frames. Final text transcripts, summaries, audible output prefixes, STT usage, and cross-channel instructions are durable; raw microphone audio is never persisted. Luna receives a six-hour, 160-event buffer from recent visits to the same channel, with second-precision event times and 2B and participant join/leave boundaries rendered inline. Multi-person attention remains owned by the person who addressed 2B, while bounded non-owner chatter cannot indefinitely starve her response opportunity; silent `<|>` yield boundaries let an interruption stop at a coherent point rather than an arbitrary word. `voice.serviceTier` applies only to latency-sensitive live voice turns, not summaries or maintenance.
+The 2B profile can keep one global Discord voice presence. It receives account-attributed Opus streams, converts them once to 16 kHz mono, and uses local stateful Silero VAD to forward only confirmed speech to ElevenLabs Scribe Realtime. Silence and ending pauses remain local; a monthly forwarded-audio cap switches cleanly to a lazily loaded faster-whisper `small` INT8 fallback. Short turns from `voice.modelProfile` then stream ElevenLabs Flash audio back to Discord; `voice.playback` controls the initial receive prebuffer and the leading/trailing Opus silence frames. Final text transcripts, summaries, audible output prefixes, STT usage, and cross-channel instructions are durable; raw microphone audio is never persisted. The voice model receives a six-hour, 160-event buffer from recent visits to the same channel, with second-precision event times and 2B and participant join/leave boundaries rendered inline. Multi-person attention remains owned by the person who addressed 2B, while bounded non-owner chatter cannot indefinitely starve her response opportunity; silent `<|>` yield boundaries let an interruption stop at a coherent point rather than an arbitrary word. Rolling summaries and durable memory/relationship extraction use their independent `voice.maintenance.*.modelProfile` policies and cadences.
 
 Enable the Discord `GuildVoiceStates` intent and give the bot Connect/Speak permissions. `ELEVENLABS_API_KEY` is required. The Voice dashboard exposes connection health, participants, chronological room history, output/interruption state, the exact outbound Luna request context, durable instructions, join/leave controls, and gated synthetic input. The test-only `/voice text:...` command is registered only in `voice.testing.guildIds`.
 
@@ -89,13 +89,12 @@ Minimal guild config:
 triggers:
   mention: true
   keywords: [2b]
-llmProvider: openrouter
-model: moonshotai/kimi-k2.5
+modelProfile: main
 timezone: UTC
 adminUserIds: []
 ```
 
-All config fields are optional unless the matching feature needs credentials or IDs. `PROFILE` selects configuration and instructions together.
+Top-level `modelProfiles` entries are complete execution policies: provider, model, model parameters, reasoning level, service tier, Codex transport, and prompt-caching behavior. Workloads and guilds select one by name through `modelProfile`; live voice, voice summary, voice extraction, ambient evaluators, memory, relationships, image reading, and image generation may each select different profiles. All config fields are optional unless the matching feature needs credentials or IDs. `PROFILE` selects configuration and instructions together.
 
 Profiles may define ordered `personaModes`. Later active modes override earlier ones, while `default` names the always-available global fallback regardless of its list position. Modes are `global` by default; `scope: guild` gives every guild an independent episode plan, active state, aftermath, and server avatar override. Guild-scoped modes cannot set presence because Discord presence is account-wide. A mode can use a daily local-time `scheduledWindow` or a preplanned `triggeredEpisode`; episodes activate only on a natural agent turn during their persisted opportunity and never force a message. Durations accept `ms`, `s`, `m`, `h`, or `d` units, such as `100s`, `30m`, or `7d`.
 
