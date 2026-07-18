@@ -1848,7 +1848,9 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
             this.deps.emit();
           });
         }
-        await this.tts.push(text, /[.!?…]$/.test(text));
+        // auto_mode can begin complete phrases immediately; forcing every
+        // sentence creates isolated micro-generations and audible seams.
+        await this.tts.push(text);
       },
       onYieldBoundary: (characterOffset) => {
         this.recordYieldBoundary(characterOffset);

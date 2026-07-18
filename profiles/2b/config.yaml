@@ -333,28 +333,29 @@ tts:
             model: eleven_v3
 
         # multilang 2
+        voiceChannel:
+            voiceId: WAhoMTNdLdMoq1j3wf3I
+            stability: 0.90
+            similarityBoost: 0.15
+            speed: 1.05
+            style: 0.0
+            applyTextNormalization: "auto"
+            outputFormat: opus_48000_32
+            useSpeakerBoost: false
+            languageCode: ru
+            # model: eleven_flash_v2_5
+            model: eleven_multilingual_v2
         # voiceChannel:
         #     voiceId: WAhoMTNdLdMoq1j3wf3I
         #     stability: 0.90
         #     similarityBoost: 0.35
-        #     speed: 1.14
+        #     speed: 1.08
         #     style: 0.0
         #     applyTextNormalization: "auto"
         #     outputFormat: opus_48000_32
+        #     languageCode: ru
         #     useSpeakerBoost: false
-        #     # model: eleven_flash_v2_5
-        #     model: eleven_multilingual_v2
-        voiceChannel:
-            voiceId: WAhoMTNdLdMoq1j3wf3I
-            stability: 0.90
-            similarityBoost: 0.35
-            speed: 1.14
-            style: 0.0
-            applyTextNormalization: "auto"
-            outputFormat: opus_48000_32
-            languageCode: ru
-            useSpeakerBoost: false
-            model: eleven_flash_v2_5
+        #     model: eleven_flash_v2_5
             
 
 # One global live Discord voice presence. Finalized transcripts and usage are retained;
@@ -363,7 +364,7 @@ voice:
     enabled: true
     provider: openai-codex
     model: gpt-5.6-terra
-    thinkingLevel: medium
+    thinkingLevel: low
     serviceTier: priority
     wakeWords: ["2b", "туби"]
     lingeringAttentionMs: 45000

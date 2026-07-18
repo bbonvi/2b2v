@@ -23,12 +23,16 @@ function attributes(tag: string): Record<string, string> {
   return result;
 }
 
-const IDLE_PHRASE_COMMIT_MS = 60;
+// Most live replies are only one or two terse sentences. Briefly preserve both
+// so TTS receives enough context for stable prosody without delaying long turns.
+const MIN_STREAMING_SPEECH_CHARS = 80;
+const IDLE_PHRASE_COMMIT_MS = 200;
 
 function phraseBoundary(text: string, includeTrailingPunctuation = false): number {
   let best = -1;
   for (const match of text.matchAll(/[.!?…](?:["')\]]*)\s+/g)) {
-    best = match.index + match[0].length;
+    const boundary = match.index + match[0].length;
+    if (boundary >= MIN_STREAMING_SPEECH_CHARS) best = boundary;
   }
   if (best >= 0) return best;
   if (includeTrailingPunctuation && /[.!?…](?:["')\]]*)$/.test(text.trimEnd())) return text.length;

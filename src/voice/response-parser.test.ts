@@ -78,7 +78,24 @@ describe("VoiceResponseParser", () => {
     expect(result.malformed).toBe(false);
   });
 
-  test("commits trailing sentence punctuation after a short stream idle", async () => {
+  test("coalesces short sentences into one TTS phrase", async () => {
+    const speech: string[] = [];
+    const parser = new VoiceResponseParser({
+      onSpeech: (text) => { speech.push(text); },
+      onMessage: () => {},
+      onIgnore: () => {},
+    });
+
+    await parser.push("Персики купила. ");
+    expect(speech).toEqual([]);
+    await parser.push("Уже слишком мягкие.");
+
+    expect(speech).toEqual([]);
+    expect((await parser.finish()).plannedSpeech).toBe("Персики купила. Уже слишком мягкие.");
+    expect(speech).toEqual(["Персики купила. Уже слишком мягкие."]);
+  });
+
+  test("commits a short trailing phrase after a bounded stream idle", async () => {
     const speech: string[] = [];
     const parser = new VoiceResponseParser({
       onSpeech: (text) => { speech.push(text); },
@@ -87,9 +104,24 @@ describe("VoiceResponseParser", () => {
     });
 
     await parser.push("Короткий ответ.");
-    await Bun.sleep(80);
+    await Bun.sleep(250);
 
     expect(speech).toEqual(["Короткий ответ."]);
     expect((await parser.finish()).plannedSpeech).toBe("Короткий ответ.");
+  });
+
+  test("continues streaming longer speech before the turn finishes", async () => {
+    const speech: string[] = [];
+    const parser = new VoiceResponseParser({
+      onSpeech: (text) => { speech.push(text); },
+      onMessage: () => {},
+      onIgnore: () => {},
+    });
+
+    const longerPhrase = "Первую короткую мысль лучше связать со второй, чтобы голос получил достаточно контекста. ";
+    await parser.push(longerPhrase);
+
+    expect(speech).toEqual([longerPhrase.trim()]);
+    expect((await parser.finish()).plannedSpeech).toBe(longerPhrase.trim());
   });
 });
