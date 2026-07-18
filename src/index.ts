@@ -1155,6 +1155,9 @@ async function runVoiceAgentTurn(request: VoiceTurnRequest): Promise<void> {
     "web_search",
     "search_images",
     "summarize_video",
+    // Live image generation remains skill-gated, so its prerequisite loader
+    // must survive the otherwise restrictive voice-tool allowlist.
+    "load_skill",
     "join_voice_channel",
     "leave_voice_channel",
     "codex_generate_image",
