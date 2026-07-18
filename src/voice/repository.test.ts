@@ -74,6 +74,44 @@ describe("VoiceRepository", () => {
     db.close();
   });
 
+  test("tracks exact remote audio attempts separately from local fallback", () => {
+    const db = createDatabase(":memory:");
+    const repository = new VoiceRepository(db);
+    const session = repository.createSession("g1", "v1");
+    repository.addSttUsage({
+      sessionId: session.id,
+      userId: "u1",
+      provider: "elevenlabs",
+      model: "scribe_v2_realtime",
+      startedAt: 100,
+      audioMs: 1_250,
+      outcome: "failed",
+      error: "socket closed",
+    });
+    repository.addSttUsage({
+      sessionId: session.id,
+      userId: "u1",
+      provider: "faster-whisper",
+      model: "small",
+      startedAt: 200,
+      audioMs: 1_250,
+      outcome: "committed",
+    });
+
+    expect(repository.summarizeSttUsage(0, "elevenlabs")).toEqual({
+      audioMs: 1_250,
+      attempts: 1,
+      failures: 1,
+    });
+    expect(repository.summarizeSttUsage(0, "faster-whisper", session.id)).toEqual({
+      audioMs: 1_250,
+      attempts: 1,
+      failures: 0,
+    });
+    expect(repository.listSttUsage(session.id)).toHaveLength(2);
+    db.close();
+  });
+
   test("reads incremental maintenance history and checkpoints", () => {
     const db = createDatabase(":memory:");
     const repository = new VoiceRepository(db);

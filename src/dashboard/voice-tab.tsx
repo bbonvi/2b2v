@@ -48,6 +48,26 @@ interface Snapshot {
   history: VoiceHistoryRecord[];
   instructions: Instruction[];
   runtimeEvents: RuntimeEvent[];
+  stt: {
+    provider: "elevenlabs";
+    model: string;
+    partials: Array<{ userId: string; username: string; text: string; vadProbability?: number }>;
+    sessionAudioMs: number;
+    monthlyAudioMs: number;
+    monthlyAudioLimitMs: number;
+    monthlyAttempts: number;
+    monthlyFailures: number;
+    estimatedMonthlyCostUsd: number;
+    recentAttempts: Array<{
+      id: number;
+      provider: "elevenlabs" | "faster-whisper";
+      model: string;
+      startedAt: number;
+      audioMs: number;
+      outcome: "committed" | "failed";
+      error?: string;
+    }>;
+  };
 }
 
 interface RuntimeEvent {
@@ -128,6 +148,14 @@ function duration(value: number): string {
   return `${(value / 1_000).toFixed(2)} s`;
 }
 
+function audioDuration(value: number): string {
+  const seconds = Math.round(value / 1_000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
 function phaseLabel(value: string): string {
   return value.replaceAll("_", " ");
 }
@@ -142,6 +170,9 @@ function eventDetail(event: RuntimeEvent): string {
   }
   if (event.phase === "tts_first_phrase" && typeof event.detail?.characters === "number") {
     return `${event.detail.characters} chars`;
+  }
+  if (event.phase === "stt_completed" && typeof event.detail?.provider === "string") {
+    return `${event.detail.provider} · ${event.detail.model ?? "unknown model"}`;
   }
   return "";
 }
@@ -444,6 +475,26 @@ function VoiceTab(): React.JSX.Element {
           <div className="voice-kicker" style={{ marginTop: 10 }}>
             segment {snapshot?.attention.lastTriggerSegmentId ?? "—"} · pending {snapshot?.attention.pendingSegmentId ?? "—"}
           </div>
+        </div>
+        <div className="voice-panel">
+          <div className="voice-title"><span>Speech recognition</span><span>{snapshot?.stt.model ?? "loading"}</span></div>
+          <div className="voice-attention">
+            <div className="voice-stat"><span className="voice-kicker">This room</span><strong>{audioDuration(snapshot?.stt.sessionAudioMs ?? 0)}</strong></div>
+            <div className="voice-stat"><span className="voice-kicker">This month</span><strong>{audioDuration(snapshot?.stt.monthlyAudioMs ?? 0)}</strong></div>
+            <div className="voice-stat"><span className="voice-kicker">Audio cap</span><strong>{audioDuration(snapshot?.stt.monthlyAudioLimitMs ?? 0)}</strong></div>
+            <div className="voice-stat"><span className="voice-kicker">Est. cost</span><strong>${(snapshot?.stt.estimatedMonthlyCostUsd ?? 0).toFixed(3)}</strong></div>
+          </div>
+          <div className="voice-kicker" style={{ marginTop: 10 }}>
+            {snapshot?.stt.monthlyAttempts ?? 0} attempts · {snapshot?.stt.monthlyFailures ?? 0} failed
+          </div>
+          {(snapshot?.stt.partials ?? []).map((partial) => <div className="voice-instruction" key={partial.userId}>
+            <code>@{partial.username} · VAD {partial.vadProbability?.toFixed(2) ?? "—"}</code><br />
+            {partial.text === "" ? "Listening…" : partial.text}
+          </div>)}
+          {(snapshot?.stt.recentAttempts ?? []).slice(0, 6).map((attempt) => <div className="voice-instruction" key={attempt.id}>
+            <code>{time(attempt.startedAt)} · {attempt.provider} · {attempt.outcome} · {audioDuration(attempt.audioMs)}</code>
+            {attempt.error === undefined ? null : <><br />{attempt.error}</>}
+          </div>)}
         </div>
         <div className="voice-panel">
           <div className="voice-title"><span>Current output</span><span>{snapshot?.currentOutput?.interrupted === true ? "cut off" : "stream"}</span></div>

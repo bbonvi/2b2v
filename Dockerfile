@@ -10,16 +10,22 @@ RUN apt-get update \
 FROM base AS faster-whisper-builder
 ARG FASTER_WHISPER_VERSION=1.2.1
 ARG FASTER_WHISPER_MODEL_REVISION=536b0662742c02347bc0e980a01041f333bce120
+ARG SILERO_VAD_REVISION=be95df9152c0d7618fa1edfeb296fc3dae32376f
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
 RUN python3 -m venv /opt/faster-whisper \
     && /opt/faster-whisper/bin/pip install --no-cache-dir "faster-whisper==${FASTER_WHISPER_VERSION}" \
-    && /opt/faster-whisper/bin/python -c "from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-small', revision='${FASTER_WHISPER_MODEL_REVISION}', local_dir='/opt/faster-whisper/models/small')"
+    && /opt/faster-whisper/bin/python -c "from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-small', revision='${FASTER_WHISPER_MODEL_REVISION}', local_dir='/opt/faster-whisper/models/small')" \
+    && mkdir -p /opt/faster-whisper/models/silero-vad
+ADD --checksum=sha256:1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3 \
+    https://raw.githubusercontent.com/snakers4/silero-vad/${SILERO_VAD_REVISION}/src/silero_vad/data/silero_vad.onnx \
+    /opt/faster-whisper/models/silero-vad/silero_vad.onnx
 
 FROM base AS voice-base
 COPY --link --from=faster-whisper-builder /opt/faster-whisper /opt/faster-whisper
 COPY --chmod=755 scripts/faster_whisper_server.py /usr/local/bin/faster-whisper-server
+COPY --chmod=755 scripts/silero_vad_server.py /usr/local/bin/silero-vad-server
 
 # @discordjs/opus falls back to a source build when a matching libc prebuild is
 # unavailable, while the compiled addon itself does not need this toolchain.

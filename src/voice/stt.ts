@@ -1,5 +1,6 @@
 import type { VoiceSttConfig } from "../config/types.ts";
 import type { Logger } from "../logger.ts";
+import { LocalVoiceService } from "./local-service.ts";
 
 export interface TranscriptionResult {
   text: string;
@@ -29,17 +30,32 @@ function transcriptionResult(value: unknown): TranscriptionResult | undefined {
  * local and is posted directly from memory, never retained.
  */
 export class FasterWhisperTranscriber {
-  private child: ReturnType<typeof Bun.spawn> | undefined;
-  private ready: Promise<void> | undefined;
+  private readonly service: LocalVoiceService;
 
   constructor(
     private readonly config: VoiceSttConfig,
     private readonly log: Logger,
-  ) {}
+  ) {
+    this.service = new LocalVoiceService(
+      "persistent voice transcription server",
+      [
+        config.command,
+        "--host", "127.0.0.1",
+        "--port", String(config.serverPort),
+        "--model", config.modelPath,
+        "--language", config.language,
+        "--threads", String(config.threads),
+        "--prompt", config.initialPrompt,
+        "--compute-type", config.computeType,
+      ],
+      config.serverPort,
+      Math.min(config.timeoutMs, 20_000),
+      log,
+    );
+  }
 
   async start(): Promise<void> {
-    this.ready ??= this.startServer();
-    await this.ready;
+    await this.service.start();
   }
 
   async transcribe(pcm: Buffer, signal?: AbortSignal): Promise<TranscriptionResult> {
@@ -70,7 +86,7 @@ export class FasterWhisperTranscriber {
       const text = result.text.replace(/\[[^\]]+\]/g, "").replace(/\s+/g, " ").trim();
       this.log.info("voice transcription completed", {
         durationMs: Date.now() - startedAt,
-        audioMs: Math.round(pcm.length / (48_000 * 2 * 2) * 1_000),
+        audioMs: Math.round(pcm.length / (16_000 * 2) * 1_000),
         characters: text.length,
         language: result.language,
       });
@@ -86,54 +102,6 @@ export class FasterWhisperTranscriber {
   }
 
   shutdown(): void {
-    this.child?.kill();
-    this.child = undefined;
-    this.ready = undefined;
-  }
-
-  private async startServer(): Promise<void> {
-    const startedAt = Date.now();
-    const child = Bun.spawn([
-      this.config.command,
-      "--host", "127.0.0.1",
-      "--port", String(this.config.serverPort),
-      "--model", this.config.modelPath,
-      "--language", this.config.language,
-      "--threads", String(this.config.threads),
-      "--prompt", this.config.initialPrompt,
-      "--compute-type", this.config.computeType,
-    ], {
-      stdin: "ignore",
-      stdout: "ignore",
-      stderr: "inherit",
-    });
-    this.child = child;
-    const deadline = Date.now() + Math.min(this.config.timeoutMs, 20_000);
-    while (Date.now() < deadline) {
-      if (child.exitCode !== null) {
-        throw new Error(`faster-whisper server exited during startup (${child.exitCode})`);
-      }
-      try {
-        const response = await fetch(`http://127.0.0.1:${this.config.serverPort}/health`, {
-          signal: AbortSignal.timeout(500),
-        });
-        if (response.ok) {
-          await response.body?.cancel();
-          this.log.info("persistent voice transcription server ready", {
-            durationMs: Date.now() - startedAt,
-            model: this.config.modelPath,
-            computeType: this.config.computeType,
-            language: this.config.language,
-            threads: this.config.threads,
-          });
-          return;
-        }
-      } catch {
-        // Model loading keeps the loopback port unavailable until the server is ready.
-      }
-      await Bun.sleep(100);
-    }
-    child.kill();
-    throw new Error("faster-whisper server did not become ready before the startup timeout");
+    this.service.shutdown();
   }
 }

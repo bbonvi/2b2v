@@ -56,6 +56,24 @@ export interface VoiceTranscriptRecord {
   synthetic: boolean;
 }
 
+export interface VoiceSttUsageRecord {
+  id: number;
+  sessionId: string;
+  userId: string;
+  provider: "elevenlabs" | "faster-whisper";
+  model: string;
+  startedAt: number;
+  audioMs: number;
+  outcome: "committed" | "failed";
+  error?: string;
+}
+
+export interface VoiceSttUsageSummary {
+  audioMs: number;
+  attempts: number;
+  failures: number;
+}
+
 export interface VoiceOutputTurnRecord {
   id: string;
   sessionId: string;
@@ -181,6 +199,18 @@ interface SegmentRow {
   synthetic: number;
 }
 
+interface SttUsageRow {
+  id: number;
+  session_id: string;
+  user_id: string;
+  provider: VoiceSttUsageRecord["provider"];
+  model: string;
+  started_at: number;
+  audio_ms: number;
+  outcome: VoiceSttUsageRecord["outcome"];
+  error: string | null;
+}
+
 interface OutputTurnRow {
   id: string;
   session_id: string;
@@ -272,6 +302,20 @@ function mapSegment(row: SegmentRow): VoiceTranscriptRecord {
     sttModel: row.stt_model,
     source: row.source,
     synthetic: row.synthetic === 1,
+  };
+}
+
+function mapSttUsage(row: SttUsageRow): VoiceSttUsageRecord {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    userId: row.user_id,
+    provider: row.provider,
+    model: row.model,
+    startedAt: row.started_at,
+    audioMs: row.audio_ms,
+    outcome: row.outcome,
+    error: optional(row.error),
   };
 }
 
@@ -479,6 +523,49 @@ export class VoiceRepository {
         input.synthetic ? 1 : 0,
       );
     return { ...input, id: Number(result.lastInsertRowid) };
+  }
+
+  addSttUsage(input: Omit<VoiceSttUsageRecord, "id">): VoiceSttUsageRecord {
+    const result = this.db.raw.prepare(`INSERT INTO voice_stt_usage
+      (session_id, user_id, provider, model, started_at, audio_ms, outcome, error)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      input.sessionId,
+      input.userId,
+      input.provider,
+      input.model,
+      input.startedAt,
+      input.audioMs,
+      input.outcome,
+      input.error ?? null,
+    );
+    return { ...input, id: Number(result.lastInsertRowid) };
+  }
+
+  summarizeSttUsage(since: number, provider?: VoiceSttUsageRecord["provider"], sessionId?: string): VoiceSttUsageSummary {
+    const conditions = ["started_at >= ?"];
+    const values: Array<string | number> = [since];
+    if (provider !== undefined) {
+      conditions.push("provider = ?");
+      values.push(provider);
+    }
+    if (sessionId !== undefined) {
+      conditions.push("session_id = ?");
+      values.push(sessionId);
+    }
+    const row = this.db.raw.prepare(`SELECT
+      COALESCE(SUM(audio_ms), 0) AS audio_ms,
+      COUNT(*) AS attempts,
+      COALESCE(SUM(CASE WHEN outcome = 'failed' THEN 1 ELSE 0 END), 0) AS failures
+      FROM voice_stt_usage WHERE ${conditions.join(" AND ")}`)
+      .get(...values) as { audio_ms: number; attempts: number; failures: number };
+    return { audioMs: row.audio_ms, attempts: row.attempts, failures: row.failures };
+  }
+
+  listSttUsage(sessionId: string, limit = 100): VoiceSttUsageRecord[] {
+    const rows = this.db.raw.prepare(`SELECT * FROM voice_stt_usage
+      WHERE session_id = ? ORDER BY started_at DESC, id DESC LIMIT ?`)
+      .all(sessionId, limit) as SttUsageRow[];
+    return rows.map(mapSttUsage);
   }
 
   listTranscript(sessionId: string, limit = 300): VoiceTranscriptRecord[] {

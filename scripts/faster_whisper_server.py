@@ -16,20 +16,13 @@ import numpy as np
 from faster_whisper import WhisperModel
 
 MAX_PCM_BYTES = 16 * 1024 * 1024
-INPUT_SAMPLE_RATE = 48_000
-INPUT_CHANNELS = 2
-OUTPUT_SAMPLE_RATE = 16_000
-SAMPLES_PER_OUTPUT = INPUT_SAMPLE_RATE // OUTPUT_SAMPLE_RATE * INPUT_CHANNELS
+INPUT_SAMPLE_RATE = 16_000
+INPUT_CHANNELS = 1
 
 
-def decode_discord_pcm(payload: bytes) -> np.ndarray:
-    """Downmix 48 kHz stereo signed PCM and box-filter it to 16 kHz mono."""
-    samples = np.frombuffer(payload, dtype="<i2")
-    usable_samples = samples.size - samples.size % SAMPLES_PER_OUTPUT
-    if usable_samples == 0:
-        return np.empty(0, dtype=np.float32)
-    frames = samples[:usable_samples].reshape(-1, SAMPLES_PER_OUTPUT)
-    return frames.mean(axis=1, dtype=np.float32) / 32768.0
+def decode_pcm(payload: bytes) -> np.ndarray:
+    """Convert 16 kHz mono signed PCM to the float representation Whisper expects."""
+    return np.frombuffer(payload, dtype="<i2").astype(np.float32) / 32768.0
 
 
 class TranscriptionService:
@@ -66,11 +59,11 @@ class TranscriptionService:
 
     def transcribe(self, payload: bytes) -> dict[str, str]:
         """Transcribe one finalized Discord utterance without retaining its audio."""
-        audio = decode_discord_pcm(payload)
+        audio = decode_pcm(payload)
         if audio.size == 0:
             return {"text": "", "language": self.language, "model": self.model_path}
 
-        max_new_tokens = min(160, max(24, math.ceil(audio.size / OUTPUT_SAMPLE_RATE * 10)))
+        max_new_tokens = min(160, max(24, math.ceil(audio.size / INPUT_SAMPLE_RATE * 10)))
         with self.lock:
             segments, info = self.model.transcribe(
                 audio,

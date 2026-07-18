@@ -59,7 +59,15 @@ describe("VoiceRuntime shutdown", () => {
       id: session.id,
       channel,
       config: {} as GuildConfig,
-      voiceConfig: { enabled: true, recentSessionContextMs: 0 } as VoiceConfig,
+      voiceConfig: {
+        enabled: true,
+        recentSessionContextMs: 0,
+        stt: {
+          model: "scribe_v2_realtime",
+          monthlyAudioLimitSeconds: 1,
+          estimatedPricePerAudioHourUsd: 0.39,
+        },
+      } as VoiceConfig,
       connection: {
         destroy: () => {
           connectionDestroyed = true;
@@ -74,6 +82,9 @@ describe("VoiceRuntime shutdown", () => {
       sttController: new AbortController(),
       transcriptionQueue: Promise.resolve(),
       pendingTranscriptions: 0,
+      elevenLabsAudioMs: 0,
+      sessionElevenLabsAudioMs: 0,
+      scribePartials: new Map(),
       attentionUntil: 0,
       lastTriggerReason: "none",
       speaking: new Set(),
@@ -208,6 +219,11 @@ describe("VoiceRuntime response opportunities", () => {
       recentSessionContextMs: 60_000,
       roomQuietMs: 5,
       otherSpeakerGraceMs: 25,
+      stt: {
+        model: "scribe_v2_realtime",
+        monthlyAudioLimitSeconds: 1,
+        estimatedPricePerAudioHourUsd: 0.39,
+      },
     } as VoiceConfig;
     const trigger = repository.addTranscript({
       sessionId: session.id,
@@ -233,6 +249,9 @@ describe("VoiceRuntime response opportunities", () => {
       sttController: new AbortController(),
       transcriptionQueue: Promise.resolve(),
       pendingTranscriptions: 0,
+      elevenLabsAudioMs: 0,
+      sessionElevenLabsAudioMs: 0,
+      scribePartials: new Map(),
       attentionUntil: Date.now() + 45_000,
       attentionOwner: { userId: "alice", username: "alice" },
       lastTriggerReason: "wake_word",

@@ -344,6 +344,24 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_voice_segments_speaker_time
     ON voice_transcript_segments(user_id, started_at);
 
+  CREATE TABLE IF NOT EXISTS voice_stt_usage (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT NOT NULL REFERENCES voice_sessions(id) ON DELETE CASCADE,
+    user_id     TEXT NOT NULL,
+    provider    TEXT NOT NULL CHECK(provider IN ('elevenlabs', 'faster-whisper')),
+    model       TEXT NOT NULL,
+    started_at  INTEGER NOT NULL,
+    audio_ms    INTEGER NOT NULL CHECK(audio_ms >= 0),
+    outcome     TEXT NOT NULL CHECK(outcome IN ('committed', 'failed')),
+    error       TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_voice_stt_usage_provider_time
+    ON voice_stt_usage(provider, started_at);
+
+  CREATE INDEX IF NOT EXISTS idx_voice_stt_usage_session_time
+    ON voice_stt_usage(session_id, started_at);
+
   CREATE TABLE IF NOT EXISTS voice_output_turns (
     id                     TEXT PRIMARY KEY,
     session_id             TEXT NOT NULL REFERENCES voice_sessions(id) ON DELETE CASCADE,

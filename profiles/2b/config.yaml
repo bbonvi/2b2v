@@ -336,36 +336,49 @@ tts:
             voiceId: WAhoMTNdLdMoq1j3wf3I
             stability: 0.65
             applyTextNormalization: "auto"
-            outputFormat: opus_48000_64
+            outputFormat: opus_48000_32
             speed: 1.12
             style: 0.0
             seed: 1
             similarityBoost: 0.70
             useSpeakerBoost: false
-            model: eleven_flash_v2_5
+            # model: eleven_flash_v2_5
+            model: eleven_multilingual_v2
+            
 
-# One global live Discord voice presence. Finalized transcripts are retained in SQLite;
-# raw audio is used only for local inference and discarded.
+# One global live Discord voice presence. Finalized transcripts and usage are retained;
+# raw audio remains in bounded memory only until remote commit or local fallback.
 voice:
     enabled: true
     provider: openai-codex
     model: gpt-5.6-terra
-    modelParams:
-        textVerbosity: low
-    thinkingLevel: minimal
+    thinkingLevel: medium
     serviceTier: priority
     wakeWords: ["2b", "туби"]
     lingeringAttentionMs: 45000
-    roomQuietMs: 180
-    otherSpeakerGraceMs: 3000
-    yieldBoundaryMaxWaitMs: 1500
+    roomQuietMs: 100
+    otherSpeakerGraceMs: 1500
+    yieldBoundaryMaxWaitMs: 900
     emptyChannelGraceMs: 120000
-    recentSessionContextMs: 21600000
+    recentSessionContextMs: 7200000
     maintenanceEverySegments: 120
-    maintenanceMinIntervalMs: 900000
+    maintenanceMinIntervalMs: 1200000
     maintenanceMaxTurns: 48
-    maintenanceMaxChars: 12000
+    maintenanceMaxChars: 15000
     stt:
+        provider: elevenlabs
+        model: scribe_v2_realtime
+        previousText: "2B. Туби."
+        # Exact PCM duration sent to Scribe, reset at the start of each UTC month.
+        monthlyAudioLimitSeconds: 72000
+        estimatedPricePerAudioHourUsd: 0.39
+        vadCommand: silero-vad-server
+        vadModelPath: /opt/faster-whisper/models/silero-vad/silero_vad.onnx
+        vadServerPort: 18081
+        vadThreshold: 0.5
+        vadBatchFrames: 3
+
+        # Loaded only when Scribe is unavailable or the monthly audio cap is reached.
         command: faster-whisper-server
         modelPath: /opt/faster-whisper/models/small
         computeType: int8
@@ -374,14 +387,13 @@ voice:
         serverPort: 18080
         threads: 8
         timeoutMs: 20000
-        minUtteranceMs: 180
-        maxUtteranceMs: 15000
-        speechPauseMs: 350
+        minUtteranceMs: 128
+        maxUtteranceMs: 20000
+        speechPauseMs: 288
         speechPreRollMs: 160
-        speechRmsThreshold: 0.015
     testing:
         enabled: true
-        guildIds: ["610536610487861291", "1075346959298199564"]
+        guildIds: ["610536610487861291"]
         userIds: []
         includeSyntheticInMaintenance: false
 

@@ -2,21 +2,21 @@ import { describe, expect, test } from "bun:test";
 import {
   anchorUtteranceToWallClock,
   VoiceUtteranceSegmenter,
+  VOICE_VAD_FRAME_BYTES,
 } from "./utterance-segmenter.ts";
 
 const config = {
-  minUtteranceMs: 100,
+  minUtteranceMs: 96,
   maxUtteranceMs: 2_000,
-  speechPauseMs: 200,
-  speechPreRollMs: 100,
-  speechRmsThreshold: 0.015,
+  speechPauseMs: 192,
+  speechPreRollMs: 96,
+  vadThreshold: 0.5,
 };
 
-function pcm(ms: number, amplitude: number): Buffer {
-  const samples = ms * 48 * 2;
-  const output = Buffer.alloc(samples * 2);
-  for (let index = 0; index < samples; index += 1) {
-    output.writeInt16LE(index % 2 === 0 ? amplitude : -amplitude, index * 2);
+function frame(amplitude = 100): Buffer {
+  const output = Buffer.alloc(VOICE_VAD_FRAME_BYTES);
+  for (let offset = 0; offset < output.length; offset += 2) {
+    output.writeInt16LE(amplitude, offset);
   }
   return output;
 }
@@ -31,42 +31,43 @@ describe("VoiceUtteranceSegmenter", () => {
       startedAt: 98_800,
       endedAt: 99_800,
     });
-    expect(anchorUtteranceToWallClock({
-      startedOffsetMs: 2_000,
-      endedOffsetMs: 3_000,
-      finalizationLagMs: 200,
-    }, 120_000)).toEqual({
-      startedAt: 118_800,
-      endedAt: 119_800,
-    });
   });
 
-  test("finishes on a speech-energy pause even while quiet PCM packets continue", () => {
+  test("streams only after confirmation and holds possible ending silence locally", () => {
     const segmenter = new VoiceUtteranceSegmenter(config);
-    segmenter.push(pcm(100, 100));
-    const started = segmenter.push(pcm(200, 3_000));
-    expect(started.speechStarted).toBe(true);
-    expect(segmenter.activeSpeechMs).toBe(200);
-    const ended = segmenter.push(pcm(220, 100));
+    segmenter.push(frame(), 0.01);
+    segmenter.push(frame(), 0.01);
+    expect(segmenter.push(frame(3_000), 0.9).streamPcm).toEqual([]);
+    expect(segmenter.push(frame(3_000), 0.9).streamPcm).toEqual([]);
+    const confirmed = segmenter.push(frame(3_000), 0.9);
+    expect(confirmed.speechConfirmed).toBe(true);
+    expect(confirmed.streamPcm).toHaveLength(5);
 
-    expect(ended.utterances).toHaveLength(1);
-    expect(ended.utterances[0]?.speechMs).toBe(200);
+    const held = segmenter.push(frame(), 0.01);
+    expect(held.streamPcm).toEqual([]);
+    const resumed = segmenter.push(frame(3_000), 0.9);
+    expect(resumed.streamPcm).toHaveLength(2);
+  });
+
+  test("finalizes after a Silero-confirmed pause and retains only trailing context", () => {
+    const segmenter = new VoiceUtteranceSegmenter(config);
+    for (let index = 0; index < 3; index += 1) segmenter.push(frame(3_000), 0.9);
+    let result = segmenter.push(frame(), 0.01);
+    for (let index = 0; index < 5; index += 1) result = segmenter.push(frame(), 0.01);
+
+    expect(result.utterances).toHaveLength(1);
+    expect(result.utterances[0]?.speechMs).toBe(96);
+    expect(result.streamPcm).toHaveLength(1);
+    expect(result.streamPcm[0]).toHaveLength(VOICE_VAD_FRAME_BYTES * 3);
     expect(segmenter.isSpeaking).toBe(false);
   });
 
-  test("does not treat constant low-level microphone noise as speech", () => {
+  test("discards clicks that never reach the minimum speech duration", () => {
     const segmenter = new VoiceUtteranceSegmenter(config);
-    const result = segmenter.push(pcm(1_000, 200));
-    expect(result.speechStarted).toBe(false);
+    segmenter.push(frame(3_000), 0.9);
+    let result = segmenter.push(frame(), 0.01);
+    for (let index = 0; index < 5; index += 1) result = segmenter.push(frame(), 0.01);
     expect(result.utterances).toEqual([]);
-    expect(segmenter.flush()).toEqual([]);
-  });
-
-  test("keeps bounded pre-roll and discards clicks shorter than the minimum", () => {
-    const segmenter = new VoiceUtteranceSegmenter(config);
-    segmenter.push(pcm(500, 100));
-    segmenter.push(pcm(40, 3_000));
-    const result = segmenter.push(pcm(220, 100));
-    expect(result.utterances).toEqual([]);
+    expect(result.streamPcm).toEqual([]);
   });
 });

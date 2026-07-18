@@ -207,6 +207,16 @@ const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   maintenanceMaxTurns: 48,
   maintenanceMaxChars: 12_000,
   stt: {
+    provider: "elevenlabs",
+    model: "scribe_v2_realtime",
+    previousText: "2B. Туби.",
+    monthlyAudioLimitSeconds: 36_000,
+    estimatedPricePerAudioHourUsd: 0.39,
+    vadCommand: "silero-vad-server",
+    vadModelPath: "/opt/faster-whisper/models/silero-vad/silero_vad.onnx",
+    vadServerPort: 18_081,
+    vadThreshold: 0.5,
+    vadBatchFrames: 3,
     command: "faster-whisper-server",
     modelPath: "/opt/faster-whisper/models/small",
     computeType: "int8",
@@ -219,7 +229,6 @@ const DEFAULT_VOICE_CONFIG: VoiceConfig = {
     maxUtteranceMs: 15_000,
     speechPauseMs: 450,
     speechPreRollMs: 160,
-    speechRmsThreshold: 0.015,
   },
   testing: {
     enabled: false,
@@ -256,6 +265,10 @@ function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYaml | un
     },
   };
   if (resolved.model.trim() === "") throw new Error("voice.model must not be empty");
+  if (resolved.stt.model.trim() === "") throw new Error("voice.stt.model must not be empty");
+  if (resolved.stt.previousText.length > 50) throw new Error("voice.stt.previousText must be at most 50 characters");
+  if (resolved.stt.vadCommand.trim() === "") throw new Error("voice.stt.vadCommand must not be empty");
+  if (resolved.stt.vadModelPath.trim() === "") throw new Error("voice.stt.vadModelPath must not be empty");
   if (resolved.stt.command.trim() === "") throw new Error("voice.stt.command must not be empty");
   if (resolved.stt.modelPath.trim() === "") throw new Error("voice.stt.modelPath must not be empty");
   if (resolved.stt.computeType.trim() === "") throw new Error("voice.stt.computeType must not be empty");
@@ -274,12 +287,21 @@ function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYaml | un
   positiveVoiceInteger(resolved.stt.minUtteranceMs, "voice.stt.minUtteranceMs");
   positiveVoiceInteger(resolved.stt.maxUtteranceMs, "voice.stt.maxUtteranceMs");
   positiveVoiceInteger(resolved.stt.serverPort, "voice.stt.serverPort");
+  positiveVoiceInteger(resolved.stt.vadServerPort, "voice.stt.vadServerPort");
+  positiveVoiceInteger(resolved.stt.vadBatchFrames, "voice.stt.vadBatchFrames");
   positiveVoiceInteger(resolved.stt.threads, "voice.stt.threads");
   positiveVoiceInteger(resolved.stt.speechPauseMs, "voice.stt.speechPauseMs");
   positiveVoiceInteger(resolved.stt.speechPreRollMs, "voice.stt.speechPreRollMs");
   if (resolved.stt.serverPort > 65_535) throw new Error("voice.stt.serverPort must be <= 65535");
-  if (!Number.isFinite(resolved.stt.speechRmsThreshold) || resolved.stt.speechRmsThreshold <= 0 || resolved.stt.speechRmsThreshold >= 1) {
-    throw new Error("voice.stt.speechRmsThreshold must be between 0 and 1");
+  if (resolved.stt.vadServerPort > 65_535) throw new Error("voice.stt.vadServerPort must be <= 65535");
+  if (!Number.isFinite(resolved.stt.monthlyAudioLimitSeconds) || resolved.stt.monthlyAudioLimitSeconds < 0) {
+    throw new Error("voice.stt.monthlyAudioLimitSeconds must be a non-negative number");
+  }
+  if (!Number.isFinite(resolved.stt.estimatedPricePerAudioHourUsd) || resolved.stt.estimatedPricePerAudioHourUsd < 0) {
+    throw new Error("voice.stt.estimatedPricePerAudioHourUsd must be a non-negative number");
+  }
+  if (!Number.isFinite(resolved.stt.vadThreshold) || resolved.stt.vadThreshold <= 0.15 || resolved.stt.vadThreshold >= 1) {
+    throw new Error("voice.stt.vadThreshold must be between 0.15 and 1");
   }
   if (resolved.stt.maxUtteranceMs < resolved.stt.minUtteranceMs) {
     throw new Error("voice.stt.maxUtteranceMs must be >= voice.stt.minUtteranceMs");

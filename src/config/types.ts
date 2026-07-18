@@ -438,8 +438,19 @@ export interface ExternalImagesConfig {
   maxPageImages: number;
 }
 
-/** Local speech recognition used for finalized Discord voice utterances. */
+/** Realtime speech recognition with local voice detection and a lazy local fallback. */
 export interface VoiceSttConfig {
+  provider: "elevenlabs";
+  model: string;
+  previousText: string;
+  monthlyAudioLimitSeconds: number;
+  estimatedPricePerAudioHourUsd: number;
+  vadCommand: string;
+  vadModelPath: string;
+  vadServerPort: number;
+  vadThreshold: number;
+  vadBatchFrames: number;
+  /** Local faster-whisper fallback. It is not started while Scribe is healthy. */
   command: string;
   modelPath: string;
   computeType: string;
@@ -452,7 +463,6 @@ export interface VoiceSttConfig {
   maxUtteranceMs: number;
   speechPauseMs: number;
   speechPreRollMs: number;
-  speechRmsThreshold: number;
 }
 
 /** Restricted synthetic-input controls used by /voice-test and the dashboard. */
