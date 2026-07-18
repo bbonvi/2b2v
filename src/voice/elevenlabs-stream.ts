@@ -1,5 +1,3 @@
-import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
-import { dirname } from "node:path";
 import { PassThrough } from "node:stream";
 import type { VoicePreset } from "../tts/types.ts";
 
@@ -18,7 +16,6 @@ export interface ElevenLabsVoiceStreamCallbacks {
   onOpen?: () => void;
   onFirstAudio?: () => void;
   onAlignment?: (text: string) => void;
-  capturePath?: string;
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -50,7 +47,6 @@ export class ElevenLabsVoiceStream {
   private readonly alignedChars: string[] = [];
   private readonly alignedCharacterEndsMs: number[] = [];
   private alignmentOffsetMs = 0;
-  private capture: WriteStream | undefined;
 
   constructor(
     apiKey: string,
@@ -68,10 +64,6 @@ export class ElevenLabsVoiceStream {
     // Promise rejection carries transport failures to the caller. This listener
     // only prevents an unattached prewarmed stream from becoming process-fatal.
     this.audio.on("error", () => {});
-    if (callbacks.capturePath !== undefined) {
-      mkdirSync(dirname(callbacks.capturePath), { recursive: true });
-      this.capture = createWriteStream(callbacks.capturePath);
-    }
     const url = new URL(`wss://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(preset.voiceId)}/stream-input`);
     url.searchParams.set("model_id", preset.model);
     url.searchParams.set("output_format", preset.outputFormat ?? "mp3_44100_128");
@@ -115,7 +107,6 @@ export class ElevenLabsVoiceStream {
     socket.addEventListener("close", (event) => {
       this.closed = true;
       this.audio.end();
-      this.endCapture();
       if (this.aborted) {
         this.resolveReady?.();
         this.resolveDone?.();
@@ -159,7 +150,6 @@ export class ElevenLabsVoiceStream {
     this.closed = true;
     this.socket?.close();
     this.audio.end();
-    this.endCapture();
     this.resolveReady?.();
     this.resolveDone?.();
   }
@@ -209,7 +199,6 @@ export class ElevenLabsVoiceStream {
         this.callbacks.onFirstAudio?.();
       }
       this.audioBytes += audio.length;
-      this.capture?.write(audio);
       this.audio.write(audio);
     }
     const chars = output.normalizedAlignment?.chars;
@@ -236,7 +225,6 @@ export class ElevenLabsVoiceStream {
       this.finalized = true;
       this.closed = true;
       this.audio.end();
-      this.endCapture();
       this.resolveDone?.();
       this.socket?.close();
     }
@@ -247,12 +235,6 @@ export class ElevenLabsVoiceStream {
     this.closed = true;
     this.rejectReady?.(error);
     this.rejectDone?.(error);
-    this.endCapture();
     this.audio.destroy(error);
-  }
-
-  private endCapture(): void {
-    this.capture?.end();
-    this.capture = undefined;
   }
 }

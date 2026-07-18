@@ -10,13 +10,11 @@ services:
       LOG_DIR: /tmp
       LOG_LEVEL: debug
       UNSAFELY_BYPASS_DASHBOARD_AUTH: "true"
-      VOICE_TTS_CAPTURE_DIR: /app/tmp/voice-tts
     volumes:
       - ./src:/app/src
       - ./profiles:/app/profiles:ro
       - ./package.json:/app/package.json
       - ./tsconfig.json:/app/tsconfig.json
-      - ./tmp:/app/tmp
       - dev-data:/app/data
     ports:
       - "127.0.0.1:${DASHBOARD_PORT:-31457}:3000"

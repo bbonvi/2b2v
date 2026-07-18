@@ -12,5 +12,4 @@ data/codex-auth.json
 dist/
 *.tsbuildinfo
 model-cache/
-tmp/
 .claude

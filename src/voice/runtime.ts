@@ -1896,11 +1896,6 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
       occurredAt: startedAt,
     });
     this.tts = new ElevenLabsVoiceStream(apiKey, preset, {
-      ...(process.env.VOICE_TTS_CAPTURE_DIR === undefined
-        ? {}
-        : {
-            capturePath: `${process.env.VOICE_TTS_CAPTURE_DIR}/${new Date().toISOString().replaceAll(":", "-")}-${this.turnId}.ogg`,
-          }),
       onOpen: () => {
         this.deps.repository.addRuntimeEvent({
           sessionId: this.deps.active.id,
