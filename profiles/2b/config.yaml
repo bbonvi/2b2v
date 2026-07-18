@@ -337,7 +337,7 @@ tts:
             voiceId: WAhoMTNdLdMoq1j3wf3I
             stability: 0.90
             similarityBoost: 0.15
-            speed: 1.05
+            speed: 1.08
             style: 0.0
             applyTextNormalization: "auto"
             outputFormat: opus_48000_32
@@ -364,7 +364,7 @@ voice:
     enabled: true
     provider: openai-codex
     model: gpt-5.6-terra
-    thinkingLevel: low
+    thinkingLevel: minimal
     serviceTier: priority
     wakeWords: ["2b", "туби"]
     lingeringAttentionMs: 45000
@@ -377,6 +377,10 @@ voice:
     maintenanceMinIntervalMs: 1200000
     maintenanceMaxTurns: 48
     maintenanceMaxChars: 15000
+    playback:
+        prebufferMs: 30
+        initialSilenceFrames: 2 # 20 ms per Opus frame
+        trailingSilenceFrames: 3 # 20 ms per Opus frame
     stt:
         provider: elevenlabs
         model: scribe_v2_realtime

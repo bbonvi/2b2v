@@ -475,6 +475,13 @@ export interface VoiceTestingConfig {
   includeSyntheticInMaintenance: boolean;
 }
 
+/** Discord playback buffering and Opus silence padding for live TTS. */
+export interface VoicePlaybackConfig {
+  prebufferMs: number;
+  initialSilenceFrames: number;
+  trailingSilenceFrames: number;
+}
+
 /** Live Discord voice agent behavior. */
 export interface VoiceConfig {
   enabled: boolean;
@@ -497,11 +504,13 @@ export interface VoiceConfig {
   maintenanceMinIntervalMs: number;
   maintenanceMaxTurns: number;
   maintenanceMaxChars: number;
+  playback: VoicePlaybackConfig;
   stt: VoiceSttConfig;
   testing: VoiceTestingConfig;
 }
 
-export type VoiceConfigYaml = Partial<Omit<VoiceConfig, "stt" | "testing">> & {
+export type VoiceConfigYaml = Partial<Omit<VoiceConfig, "playback" | "stt" | "testing">> & {
+  playback?: Partial<VoicePlaybackConfig>;
   stt?: Partial<VoiceSttConfig>;
   testing?: Partial<VoiceTestingConfig>;
 };

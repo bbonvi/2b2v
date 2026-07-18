@@ -209,6 +209,11 @@ const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   maintenanceMinIntervalMs: 15 * 60 * 1000,
   maintenanceMaxTurns: 48,
   maintenanceMaxChars: 12_000,
+  playback: {
+    prebufferMs: 30,
+    initialSilenceFrames: 2,
+    trailingSilenceFrames: 3,
+  },
   stt: {
     provider: "elevenlabs",
     model: "scribe_v2_realtime",
@@ -247,6 +252,11 @@ function positiveVoiceInteger(value: number, path: string): number {
   return value;
 }
 
+function nonNegativeVoiceInteger(value: number, path: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${path} must be a non-negative integer`);
+  return value;
+}
+
 /** Resolve profile or guild voice configuration without enabling it implicitly. */
 function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYaml | undefined): VoiceConfig {
   const serviceTier = parseServiceTier(partial?.serviceTier, "voice") ?? defaults.serviceTier;
@@ -256,6 +266,7 @@ function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYaml | un
     modelParams: { ...defaults.modelParams, ...partial?.modelParams },
     ...(serviceTier !== undefined ? { serviceTier } : {}),
     wakeWords: partial?.wakeWords !== undefined ? [...partial.wakeWords] : [...defaults.wakeWords],
+    playback: { ...defaults.playback, ...partial?.playback },
     stt: { ...defaults.stt, ...partial?.stt },
     testing: {
       ...defaults.testing,
@@ -287,6 +298,9 @@ function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYaml | un
   positiveVoiceInteger(resolved.maintenanceMinIntervalMs, "voice.maintenanceMinIntervalMs");
   positiveVoiceInteger(resolved.maintenanceMaxTurns, "voice.maintenanceMaxTurns");
   positiveVoiceInteger(resolved.maintenanceMaxChars, "voice.maintenanceMaxChars");
+  nonNegativeVoiceInteger(resolved.playback.prebufferMs, "voice.playback.prebufferMs");
+  nonNegativeVoiceInteger(resolved.playback.initialSilenceFrames, "voice.playback.initialSilenceFrames");
+  nonNegativeVoiceInteger(resolved.playback.trailingSilenceFrames, "voice.playback.trailingSilenceFrames");
   positiveVoiceInteger(resolved.stt.timeoutMs, "voice.stt.timeoutMs");
   positiveVoiceInteger(resolved.stt.minUtteranceMs, "voice.stt.minUtteranceMs");
   positiveVoiceInteger(resolved.stt.maxUtteranceMs, "voice.stt.maxUtteranceMs");

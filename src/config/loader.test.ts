@@ -244,6 +244,22 @@ describe("loadGlobalConfig", () => {
     );
   });
 
+  test("reads and validates live voice playback buffering", () => {
+    const file = join(TEST_DIR, "config.yaml");
+    writeFileSync(file, "voice:\n  playback:\n    prebufferMs: 30\n    initialSilenceFrames: 2\n    trailingSilenceFrames: 3\n");
+    const playback = loadGlobalConfig(BASE_ENV, file).defaultVoice?.playback;
+    expect(playback).toEqual({
+      prebufferMs: 30,
+      initialSilenceFrames: 2,
+      trailingSilenceFrames: 3,
+    });
+
+    writeFileSync(file, "voice:\n  playback:\n    prebufferMs: -1\n");
+    expect(() => loadGlobalConfig(BASE_ENV, file)).toThrow(
+      "voice.playback.prebufferMs must be a non-negative integer",
+    );
+  });
+
   test("reads and validates the live voice service tier", () => {
     const file = join(TEST_DIR, "config.yaml");
     writeFileSync(file, "voice:\n  serviceTier: priority\n");

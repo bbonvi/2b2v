@@ -1,3 +1,4 @@
+import { PassThrough } from "node:stream";
 import {
   AudioPlayerStatus,
   EndBehaviorType,
@@ -47,6 +48,8 @@ import {
   type VoiceUtterance,
   type VoiceUtteranceWallClock,
 } from "./utterance-segmenter.ts";
+
+const OPUS_SILENCE_FRAME = Buffer.from([0xf8, 0xff, 0xfe]);
 
 export interface VoiceTurnRequest {
   sessionId: string;
@@ -1623,6 +1626,11 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
   private pendingInterruption: { userId: string; username: string } | undefined;
   private interruptionDeadline?: ReturnType<typeof setTimeout>;
   private boundaryStopTimer?: ReturnType<typeof setTimeout>;
+  private pendingPlaybackResource: ReturnType<typeof createAudioResource> | undefined;
+  private playbackStartTimer?: ReturnType<typeof setTimeout>;
+  private playbackStartPromise: Promise<void> | undefined;
+  private resolvePlaybackStart: (() => void) | undefined;
+  private initialPlaybackSilenceMs = 0;
 
   constructor(private readonly deps: {
     active: ActiveSession;
@@ -1695,6 +1703,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
     this.recordYieldBoundary(this.plannedText.length);
     if (this.tts !== undefined && this.speechQueued) {
       await this.tts.finish();
+      await this.playbackStartPromise;
       try {
         await entersState(this.deps.active.player, AudioPlayerStatus.Idle, 20_000);
       } catch (error) {
@@ -1758,6 +1767,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
     if (!this.visible) {
       this.aborted = true;
       this.tts?.abort();
+      this.cancelPendingPlayback();
       this.clearInterruptionTimers();
       this.deps.repository.finishOutputTurn(this.turnId, this.plannedText, this.audibleText);
       this.deps.emit();
@@ -1772,6 +1782,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
     this.interruptedByUserId = userId;
     this.refreshAudibleText();
     this.tts?.abort();
+    this.cancelPendingPlayback();
     if (this.deps.active.player.state.status !== AudioPlayerStatus.Idle) {
       this.deps.active.player.stop(true);
     }
@@ -1832,21 +1843,24 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
           const inputType = preset.outputFormat?.startsWith("opus_") === true
             ? StreamType.OggOpus
             : StreamType.Arbitrary;
-          const resource = createAudioResource(this.tts.audio, { inputType });
-          this.deps.active.player.play(resource);
-          this.deps.active.player.once(AudioPlayerStatus.Playing, () => {
-            const startedAt = Date.now();
-            this.deps.repository.markOutputPlaybackStarted(this.turnId, startedAt);
-            this.deps.repository.addRuntimeEvent({
-              sessionId: this.deps.active.id,
-              triggerSegmentId: this.deps.triggerSegmentId,
-              outputTurnId: this.turnId,
-              phase: "playback_started",
-              occurredAt: startedAt,
+          if (inputType === StreamType.OggOpus) {
+            const opusPackets = this.tts.audio.pipe(new prism.opus.OggDemuxer());
+            const prefixedPackets = new PassThrough({ objectMode: true });
+            this.pendingPlaybackResource = createAudioResource(prefixedPackets, {
+              inputType: StreamType.Opus,
+              silencePaddingFrames: this.deps.active.voiceConfig.playback.trailingSilenceFrames,
             });
-            this.visible = true;
-            this.deps.emit();
-          });
+            for (let frame = 0; frame < this.deps.active.voiceConfig.playback.initialSilenceFrames; frame += 1) {
+              prefixedPackets.write(OPUS_SILENCE_FRAME);
+            }
+            opusPackets.pipe(prefixedPackets);
+            this.initialPlaybackSilenceMs = this.deps.active.voiceConfig.playback.initialSilenceFrames * 20;
+          } else {
+            this.pendingPlaybackResource = createAudioResource(this.tts.audio, {
+              inputType,
+              silencePaddingFrames: this.deps.active.voiceConfig.playback.trailingSilenceFrames,
+            });
+          }
         }
         // auto_mode can begin complete phrases immediately; forcing every
         // sentence creates isolated micro-generations and audible seams.
@@ -1882,6 +1896,11 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
       occurredAt: startedAt,
     });
     this.tts = new ElevenLabsVoiceStream(apiKey, preset, {
+      ...(process.env.VOICE_TTS_CAPTURE_DIR === undefined
+        ? {}
+        : {
+            capturePath: `${process.env.VOICE_TTS_CAPTURE_DIR}/${new Date().toISOString().replaceAll(":", "-")}-${this.turnId}.ogg`,
+          }),
       onOpen: () => {
         this.deps.repository.addRuntimeEvent({
           sessionId: this.deps.active.id,
@@ -1894,6 +1913,7 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
         this.deps.emit();
       },
       onFirstAudio: () => {
+        this.schedulePlaybackStart();
         this.deps.repository.addRuntimeEvent({
           sessionId: this.deps.active.id,
           triggerSegmentId: this.deps.triggerSegmentId,
@@ -1911,6 +1931,50 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
     });
   }
 
+  private schedulePlaybackStart(): void {
+    if (
+      this.aborted
+      || this.pendingPlaybackResource === undefined
+      || this.playbackStartPromise !== undefined
+    ) return;
+    this.playbackStartPromise = new Promise<void>((resolve) => {
+      this.resolvePlaybackStart = resolve;
+      this.playbackStartTimer = setTimeout(() => {
+        this.playbackStartTimer = undefined;
+        const resource = this.pendingPlaybackResource;
+        this.pendingPlaybackResource = undefined;
+        if (!this.aborted && resource !== undefined) {
+          this.deps.active.player.once(AudioPlayerStatus.Playing, () => {
+            const startedAt = Date.now();
+            this.deps.repository.markOutputPlaybackStarted(this.turnId, startedAt);
+            this.deps.repository.addRuntimeEvent({
+              sessionId: this.deps.active.id,
+              triggerSegmentId: this.deps.triggerSegmentId,
+              outputTurnId: this.turnId,
+              phase: "playback_started",
+              occurredAt: startedAt,
+            });
+            this.visible = true;
+            this.deps.emit();
+          });
+          this.deps.active.player.play(resource);
+        }
+        this.resolvePlaybackStart?.();
+        this.resolvePlaybackStart = undefined;
+      }, this.deps.active.voiceConfig.playback.prebufferMs);
+    });
+  }
+
+  private cancelPendingPlayback(): void {
+    if (this.playbackStartTimer !== undefined) {
+      clearTimeout(this.playbackStartTimer);
+      this.playbackStartTimer = undefined;
+    }
+    this.pendingPlaybackResource = undefined;
+    this.resolvePlaybackStart?.();
+    this.resolvePlaybackStart = undefined;
+  }
+
   private refreshAudibleText(): void {
     if (
       this.tts !== undefined
@@ -1925,7 +1989,11 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
     const resource = this.deps.active.player.state.status === AudioPlayerStatus.Idle
       ? undefined
       : this.deps.active.player.state.resource;
-    this.audibleText = this.tts?.audibleTextAt(resource?.playbackDuration ?? 0) ?? this.audibleText;
+    const audioPlaybackMs = Math.max(
+      0,
+      (resource?.playbackDuration ?? 0) - this.initialPlaybackSilenceMs,
+    );
+    this.audibleText = this.tts?.audibleTextAt(audioPlaybackMs) ?? this.audibleText;
   }
 
   private recordYieldBoundary(characterOffset: number): void {
@@ -1944,7 +2012,10 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
       || this.tts === undefined
       || this.deps.active.player.state.status === AudioPlayerStatus.Idle
     ) return;
-    const playbackMs = this.deps.active.player.state.resource.playbackDuration;
+    const playbackMs = Math.max(
+      0,
+      this.deps.active.player.state.resource.playbackDuration - this.initialPlaybackSilenceMs,
+    );
     for (const boundary of this.yieldBoundaries) {
       const boundaryMs = this.tts.alignedEndMsAtCharacterOffset(boundary);
       if (boundaryMs === undefined || boundaryMs <= playbackMs) continue;
