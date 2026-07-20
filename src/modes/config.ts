@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
+import { stripMarkdownComments } from "../config/instruction-text.ts";
 import { parseDurationMs } from "./duration.ts";
 import type {
   PersonaMode,
@@ -73,7 +74,7 @@ function instructionSource(
     return inlineText;
   }
   if (hasFile) {
-    const fileText = readFileSync(conventionalPath, "utf8").trim();
+    const fileText = stripMarkdownComments(readFileSync(conventionalPath, "utf8")).trim();
     if (!allowEmpty && fileText === "") throw new Error(`${conventionalPath} must not be empty`);
     return fileText;
   }

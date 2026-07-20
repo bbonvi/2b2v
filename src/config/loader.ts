@@ -74,6 +74,7 @@ import type {
 } from "./types.ts";
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
 import { resolvePersonaModesConfig } from "../modes/config.ts";
+import { stripMarkdownComments } from "./instruction-text.ts";
 
 function resolveAssetReadingConfig(input: AssetReadingConfigYaml | undefined, fallback: AssetReadingConfig = DEFAULT_ASSET_READING): AssetReadingConfig {
   const positive = (value: number | undefined, fallback: number, name: string): number => {
@@ -1026,7 +1027,7 @@ export function loadMainConfig(configPath: string): MainConfigYaml {
 export function readInstructionsFile(filePath: string): string {
   if (filePath === "") return "";
   if (!existsSync(filePath)) return "";
-  return readFileSync(filePath, "utf-8").trim();
+  return stripMarkdownComments(readFileSync(filePath, "utf-8")).trim();
 }
 
 /**

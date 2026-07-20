@@ -73,7 +73,7 @@ describe("instructions", () => {
 
   test("prefers a non-empty instruction file and otherwise uses inline text", () => {
     const path = join(TEST_DIR, "instructions.md");
-    writeFileSync(path, "  file content  \n");
+    writeFileSync(path, "  file <!-- hidden\ninstruction -->content  \n");
     expect(resolveInstructions("inline", path)).toBe("file content");
     expect(resolveInstructions("inline", join(TEST_DIR, "missing.md"))).toBe("inline");
     expect(resolveInstructions(undefined, undefined)).toBe("");

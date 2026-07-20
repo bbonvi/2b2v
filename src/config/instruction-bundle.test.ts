@@ -47,7 +47,7 @@ describe("loadInstructionBundle", () => {
   afterEach(teardown);
 
   test("loads core instruction markdown deterministically before runtime instructions", () => {
-    writeFileSync(join(TEST_DIR, "system", "00-top-level.md"), "# Top Level\ntop");
+    writeFileSync(join(TEST_DIR, "system", "00-top-level.md"), "<!-- hidden heading -->\n# Top Level\ntop");
     writeFileSync(join(TEST_DIR, "core", "10-style.md"), "# Style\nstyle");
     writeFileSync(join(TEST_DIR, "core", "nested", "05-additional-instructions.md"), "extra");
     writeFileSync(join(TEST_DIR, "core", "00-persona.md"), "# Persona\npersona");
@@ -56,7 +56,7 @@ describe("loadInstructionBundle", () => {
     writeFileSync(join(TEST_DIR, "runtime", "reply", "10-core.md"), "# Core Runtime\ncore");
     writeFileSync(join(TEST_DIR, "runtime", "reply", "tools", "search.md"), "# Search Runtime\nsearch");
     writeFileSync(join(TEST_DIR, "runtime", "memory", "context", "current.md"), "Memory context.");
-    writeFileSync(join(TEST_DIR, "runtime", "tools", "web_search.md"), "Search with {{provider}}.");
+    writeFileSync(join(TEST_DIR, "runtime", "tools", "web_search.md"), "Search <!-- hidden\nruntime policy -->with {{provider}}.");
     writeFileSync(join(TEST_DIR, "runtime", "tool-parameters", "web_search", "query.md"), "Query for {{provider}}.");
     writeFileSync(join(TEST_DIR, "runtime", "context", "active-image-jobs.md"), "Active jobs.");
     writeFileSync(join(TEST_DIR, "runtime", "context", "relationship-pass-decision.md"), "Relationship decision.");
@@ -78,12 +78,13 @@ describe("loadInstructionBundle", () => {
       "",
     ].join("\n"));
     writeFileSync(join(TEST_DIR, "skills", "image_generation", "00-runtime.md"), "# Runtime\nruntime");
-    writeFileSync(join(TEST_DIR, "skills", "image_generation", "10-prompting.md"), "prompting");
+    writeFileSync(join(TEST_DIR, "skills", "image_generation", "10-prompting.md"), "<!-- hidden skill policy -->\nprompting");
 
     const bundle = loadInstructionBundle(TEST_ROOT, "test", makeLogger());
 
     expect(bundle.systemDocuments.map((doc) => doc.source.endsWith("00-top-level.md"))).toEqual([true]);
     expect(bundle.systemPrompt).toContain("# Top Level\ntop");
+    expect(bundle.systemPrompt).not.toContain("hidden heading");
     const sourceNames = bundle.coreDocuments.map((doc) => {
       if (doc.source.endsWith("00-persona.md")) return "persona";
       if (doc.source.endsWith("10-style.md")) return "style";
@@ -119,6 +120,7 @@ describe("loadInstructionBundle", () => {
     expect(imageSkill).toBeDefined();
     const imageSkillContent = imageSkill?.content ?? "";
     expect(imageSkillContent).toContain("# Skill: Image Generation");
+    expect(imageSkillContent).not.toContain("hidden skill policy");
     expect(imageSkillContent.indexOf("# Runtime")).toBeLessThan(imageSkillContent.indexOf("# Prompting"));
     expect(renderPromptTemplate(bundle.runtime.toolDescriptions.web_search ?? "", { provider: "Brave" })).toBe("Search with Brave.");
     expect(() => renderPromptTemplate(bundle.runtime.toolDescriptions.web_search ?? "")).toThrow("Missing prompt template variable: provider");

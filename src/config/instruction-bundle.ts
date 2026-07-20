@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "fs";
 import { basename, isAbsolute, join, normalize, relative, sep } from "path";
 import { parse as parseYaml } from "yaml";
 import type { Logger } from "../logger.ts";
+import { stripMarkdownComments } from "./instruction-text.ts";
 import { validateProfileName } from "./profile.ts";
 
 /** One markdown instruction file loaded into the stable system prompt. */
@@ -120,7 +121,7 @@ function ensureHeading(text: string, filename: string): string {
 }
 
 function renderInstructionDocument(path: string): PromptDocument | null {
-  const raw = readFileSync(path, "utf-8");
+  const raw = stripMarkdownComments(readFileSync(path, "utf-8"));
   const text = ensureHeading(raw, basename(path));
   if (text === "") return null;
   const source = instructionSourceLabel(path);
@@ -192,7 +193,7 @@ function loadRuntimeTextMap(instructionRoots: string[], relativePath: string, lo
     const baseDir = join(root, "runtime", relativePath);
     for (const path of recursiveMarkdownFiles(baseDir)) {
       const key = normalizePath(relative(baseDir, path)).replace(/\.md$/i, "");
-      const text = readFileSync(path, "utf-8").trim();
+      const text = stripMarkdownComments(readFileSync(path, "utf-8")).trim();
       if (text === "") continue;
       entries[key] = text;
       log.info("runtime instruction text loaded", { group, key, source: instructionSourceLabel(path), length: text.length });
