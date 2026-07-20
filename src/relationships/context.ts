@@ -105,22 +105,33 @@ export function renderRelationshipPromptContext(input: {
   computedContact?: string;
   others?: RelationshipContextProfile[];
   template?: string;
+  includeCurrent?: boolean;
 }): string {
   const policy = input.template !== undefined && input.template.trim() !== ""
     ? stripHeading(input.template)
     : "Relationship state is private durable context. Use it quietly as background stance.";
+  const includeCurrent = input.includeCurrent ?? true;
+  const otherProfiles = input.others !== undefined && input.others.length > 0
+    ? ["Other relevant relationship profiles:", ...input.others.map(compactProfileLine)].join("\n")
+    : "";
+  if (!includeCurrent) {
+    if (otherProfiles === "") return "";
+    return [
+      "## Relationships",
+      policy,
+      otherProfiles,
+    ].join("\n");
+  }
   const current = input.current;
   if (current === undefined || !hasRelationshipData(current)) {
     return [
-      "## Relationship With Current User",
+      "## Relationships",
       policy,
       `Subject: ${input.currentLabel}.`,
       "This is your stored relationship stance toward this user.",
       input.computedContact !== undefined ? `Computed contact: ${input.computedContact}` : "",
       "No stored relationship profile yet.",
-      input.others !== undefined && input.others.length > 0
-        ? ["", "Other relevant relationship profiles:", ...input.others.map(compactProfileLine)].join("\n")
-        : "",
+      otherProfiles !== "" ? `\n${otherProfiles}` : "",
     ].filter((line) => line !== "").join("\n");
   }
   const notes = joinPromptItems(current.notes.slice(-4));
@@ -128,7 +139,7 @@ export function renderRelationshipPromptContext(input: {
   const loops = joinPromptItems(current.openLoops.slice(-3));
   const recent = joinPromptItems(current.recent.slice(-3).map((item) => item.summary));
   return [
-    "## Relationship With Current User",
+    "## Relationships",
     policy,
     `Subject: ${input.currentLabel}.`,
     "This is your stored relationship stance toward this user.",
@@ -138,8 +149,6 @@ export function renderRelationshipPromptContext(input: {
     boundaries !== "" ? `Boundaries: ${boundaries}.` : "",
     loops !== "" ? `Open loops: ${loops}.` : "",
     recent !== "" ? `Recent signals: ${recent}.` : "",
-    input.others !== undefined && input.others.length > 0
-      ? ["", "Other relevant relationship profiles:", ...input.others.map(compactProfileLine)].join("\n")
-      : "",
+    otherProfiles !== "" ? `\n${otherProfiles}` : "",
   ].filter((line) => line !== "").join("\n");
 }

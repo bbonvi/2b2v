@@ -44,7 +44,7 @@ describe("renderRelationshipPromptContext", () => {
       others: [{ profile: other, label: "@bob / u2", reason: "high-score" }],
     });
 
-    expect(rendered).toContain("## Relationship With Current User");
+    expect(rendered).toContain("## Relationships");
     expect(rendered).toContain("This is your stored relationship stance toward this user.");
     expect(rendered).toContain("Computed contact: observed history with this user; familiarity.");
     expect(rendered).toContain("Subject: @alice / u1.");
@@ -60,5 +60,33 @@ describe("renderRelationshipPromptContext", () => {
     expect(rendered).not.toContain("Axes:");
     expect(rendered).not.toContain("trust +12");
     expect(rendered).not.toContain("Active speaker");
+  });
+
+  test("omits the current subject during autonomous turns while retaining other profiles", () => {
+    const other = emptyRelationshipProfile("u2", 1);
+    other.axes.trust = 12;
+
+    const rendered = renderRelationshipPromptContext({
+      current: undefined,
+      currentLabel: "@2B / bot",
+      others: [{ profile: other, label: "@bob / u2", reason: "recent-chat" }],
+      includeCurrent: false,
+    });
+
+    expect(rendered).toContain("## Relationships");
+    expect(rendered).toContain("Other relevant relationship profiles:");
+    expect(rendered).toContain("- @bob / u2: The persona trusts them.");
+    expect(rendered).not.toContain("@2B");
+    expect(rendered).not.toContain("Subject:");
+    expect(rendered).not.toContain("No stored relationship profile yet.");
+    expect(rendered).not.toContain("current user");
+  });
+
+  test("omits an empty relationship section when an autonomous turn has no relevant profiles", () => {
+    expect(renderRelationshipPromptContext({
+      current: undefined,
+      currentLabel: "@2B / bot",
+      includeCurrent: false,
+    })).toBe("");
   });
 });

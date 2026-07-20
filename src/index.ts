@@ -2083,7 +2083,6 @@ function buildRelationshipPromptContext(input: {
 }): string {
   const config = getRelationshipConfig(input.guildConfig);
   if (!config.enabled || !config.promptInjection) return "";
-  void input.mode;
   const currentUserId = input.latestUserMessage.authorId;
   const visible = input.visibleUserIds
     .filter((userId) => userId !== currentUserId)
@@ -2115,6 +2114,7 @@ function buildRelationshipPromptContext(input: {
     computedContact: input.contactContext,
     others: [...visible, ...highScore].slice(0, 5),
     template: promptBundle.runtime.relationships.context,
+    includeCurrent: input.mode !== "virtual" || !input.latestUserMessage.isBot,
   });
 }
 
