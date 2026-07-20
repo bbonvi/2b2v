@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import { markReadOnlyTool } from "./tool-effects.ts";
 
 export interface ChannelInfo {
   guildId: string;
@@ -37,7 +38,7 @@ const ListChannelsParams = Type.Object({
 export function createChannelListTool(deps: ChannelListToolDeps): AgentTool {
   const { currentGuildId, fetchChannels } = deps;
 
-  return {
+  return markReadOnlyTool({
     name: "list_channels",
     label: "list_channels",
     description: "List visible Discord guild channels and threads.",
@@ -73,7 +74,7 @@ export function createChannelListTool(deps: ChannelListToolDeps): AgentTool {
         details: { guildId, count: visible.length },
       };
     },
-  };
+  });
 }
 
 export function formatChannelList(channels: readonly ChannelInfo[], guild?: { guildId: string; guildName: string }): string {

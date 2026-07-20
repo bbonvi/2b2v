@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import { markReadOnlyTool } from "./tool-effects.ts";
 
 const AVATAR_SIZE_VALUES = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096] as const;
 export type AvatarSize = typeof AVATAR_SIZE_VALUES[number];
@@ -43,7 +44,7 @@ type ReadUserAvatarDetails =
 
 /** Create a read-only tool that fetches a guild member's current display avatar without persisting it. */
 export function createReadUserAvatarTool(deps: ReadUserAvatarToolDeps): AgentTool {
-  return {
+  return markReadOnlyTool({
     name: "read_user_avatar",
     label: "read_user_avatar",
     description: "Read a guild member's current Discord avatar.",
@@ -130,7 +131,7 @@ export function createReadUserAvatarTool(deps: ReadUserAvatarToolDeps): AgentToo
         },
       };
     },
-  };
+  });
 }
 
 function normalizeAvatarSize(size: number | undefined): AvatarSize | undefined {

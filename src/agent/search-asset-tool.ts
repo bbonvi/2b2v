@@ -3,6 +3,7 @@ import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { AssetIdSchema, parseAssetId } from "./asset-id.ts";
 import { formatAssetOrigin, loadAssetTextView, type AssetOrigin, type ReadAssetToolDeps } from "./read-asset-tool.ts";
 import { runRipgrep as runRipgrepProcess } from "./ripgrep.ts";
+import { markReadOnlyTool } from "./tool-effects.ts";
 
 const SearchAssetParams = Type.Object({
   asset_id: AssetIdSchema,
@@ -13,7 +14,7 @@ const SearchAssetParams = Type.Object({
 
 /** Search the textual view of one lazy asset with ripgrep regex syntax. */
 export function createSearchAssetTool(deps: ReadAssetToolDeps): AgentTool {
-  return {
+  return markReadOnlyTool({
     name: "search_asset",
     label: "Search Asset",
     description: "Regex-search a text attachment or cached/new audio or video transcript and return line-numbered context.",
@@ -49,7 +50,7 @@ export function createSearchAssetTool(deps: ReadAssetToolDeps): AgentTool {
         details: { assetId: asset.id, origin, matched: result !== null },
       };
     },
-  };
+  });
 }
 
 async function runRipgrep(

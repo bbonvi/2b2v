@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import { markReadOnlyTool } from "./tool-effects.ts";
 
 export interface BraveSearchResult {
   title: string;
@@ -48,7 +49,7 @@ export function createBraveSearchTool(deps: BraveSearchToolDeps): AgentTool {
   const fetchResults = deps.fetchResults ?? ((query: string, count: number, signal?: AbortSignal) =>
     fetchBraveResults(apiKey, query, count, signal));
 
-  return {
+  return markReadOnlyTool({
     name: "web_search",
     label: "web_search",
     description: "Search the web using Brave Search.",
@@ -89,7 +90,7 @@ export function createBraveSearchTool(deps: BraveSearchToolDeps): AgentTool {
         details: { count: results.length },
       };
     },
-  };
+  });
 }
 
 /** Create a Brave-backed image discovery tool that returns URLs without loading image bytes. */
@@ -97,7 +98,7 @@ export function createBraveImageSearchTool(deps: BraveImageSearchToolDeps): Agen
   const timeoutMs = deps.timeoutMs ?? 15_000;
   const fetchResults = deps.fetchResults ?? ((query: string, count: number, signal?: AbortSignal) =>
     fetchBraveImageResults(deps.apiKey, query, count, signal));
-  return {
+  return markReadOnlyTool({
     name: "search_images",
     label: "search_images",
     description: "Search the web for images using Brave Image Search.",
@@ -122,7 +123,7 @@ export function createBraveImageSearchTool(deps: BraveImageSearchToolDeps): Agen
         timeout.cleanup();
       }
     },
-  };
+  });
 }
 
 async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {

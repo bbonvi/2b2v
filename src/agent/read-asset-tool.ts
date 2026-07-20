@@ -5,6 +5,7 @@ import type { AssetReadingConfig } from "../config/types.ts";
 import type { MessageAsset } from "../db/asset-repository.ts";
 import type { StagedAsset } from "../db/staged-asset-repository.ts";
 import { AssetRefSchema, parseAssetRef } from "./asset-id.ts";
+import { markReadOnlyTool } from "./tool-effects.ts";
 
 const ReadAssetParams = Type.Object({
   asset_id: AssetRefSchema,
@@ -64,7 +65,7 @@ export function formatAssetOrigin(origin: AssetOrigin): string {
 /** Read one lazy message asset, using line ranges for textual content. */
 export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
   const fetchFn = deps.fetchFn ?? fetch;
-  return {
+  return markReadOnlyTool({
     name: "read_asset",
     label: "Read Asset",
     description: "Read an image, GIF, audio, video, text, or file referenced by a permanent asset ID or staged handle.",
@@ -179,7 +180,7 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
       content.push({ type: "text", text: "Content reading is unsupported for this file type; metadata and reposting remain available." });
       return { content, details: { assetId: asset.id, origin } };
     },
-  };
+  });
 }
 
 /** Materialize the searchable textual view of a text, audio, or video asset. */

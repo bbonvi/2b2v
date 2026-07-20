@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import { markReadOnlyTool } from "./tool-effects.ts";
 import { extractWithSummarizeCore, type AgentFetchLike } from "./summarize-content.ts";
 
 type FetchLike = AgentFetchLike;
@@ -22,7 +23,7 @@ export function createSummarizeVideoTool(deps: SummarizeVideoToolDeps = {}): Age
   const timeoutMs = deps.timeoutMs ?? 30000;
   const fetchFn = deps.fetchFn ?? fetch;
 
-  return {
+  return markReadOnlyTool({
     name: "summarize_video",
     label: "summarize_video",
     description: "Extract video or audio content for summarization.",
@@ -80,7 +81,7 @@ export function createSummarizeVideoTool(deps: SummarizeVideoToolDeps = {}): Age
         request.cleanup();
       }
     },
-  };
+  });
 }
 
 function parseHttpUrl(url: string): URL {

@@ -4,6 +4,7 @@ import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { DEFAULT_EXTERNAL_IMAGES } from "../config/defaults.ts";
 import type { ExternalImagesConfig } from "../config/types.ts";
 import { loadExternalImage, type ExternalImageLoaderDeps } from "./external-image.ts";
+import { markReadOnlyTool } from "./tool-effects.ts";
 
 export interface FetchImagesToolDeps extends ExternalImageLoaderDeps, Partial<ExternalImagesConfig> {}
 
@@ -33,7 +34,7 @@ export function createFetchImagesTool(deps: FetchImagesToolDeps = {}): AgentTool
     maxDimension: deps.maxDimension ?? DEFAULT_EXTERNAL_IMAGES.maxDimension,
     maxPageImages: deps.maxPageImages ?? DEFAULT_EXTERNAL_IMAGES.maxPageImages,
   };
-  return {
+  return markReadOnlyTool({
     name: "fetch_images",
     label: "Fetch Images",
     description: "Fetch external images by URL for visual inspection.",
@@ -73,5 +74,5 @@ export function createFetchImagesTool(deps: FetchImagesToolDeps = {}): AgentTool
       const fetched = results.filter(({ success }) => success).length;
       return { content, details: { fetched, failed: results.length - fetched, results } };
     },
-  };
+  });
 }

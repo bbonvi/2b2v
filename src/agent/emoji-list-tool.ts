@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { EmojiEntry } from "../discord/emoji-cache.ts";
+import { markReadOnlyTool } from "./tool-effects.ts";
 
 export interface EmojiListToolDeps {
   guildId: string;
@@ -36,7 +37,7 @@ export function buildEmojiListOutput(emojis: EmojiEntry[]): string {
 export function createEmojiListTool(deps: EmojiListToolDeps): AgentTool {
   const { guildId, getCachedEmojis, shouldRefresh, refreshEmojis } = deps;
 
-  return {
+  return markReadOnlyTool({
     name: "list_emojis",
     label: "list_emojis",
     description: "Discover this server's custom emojis.",
@@ -68,5 +69,5 @@ export function createEmojiListTool(deps: EmojiListToolDeps): AgentTool {
         details: { count: sorted.length },
       };
     },
-  };
+  });
 }

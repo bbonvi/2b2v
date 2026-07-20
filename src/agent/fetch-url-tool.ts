@@ -4,6 +4,7 @@ import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
 import { extractWithSummarizeCore, type AgentFetchLike } from "./summarize-content.ts";
+import { markReadOnlyTool } from "./tool-effects.ts";
 
 /** Minimal fetch-like function signature for testability. */
 type FetchLike = AgentFetchLike;
@@ -53,7 +54,7 @@ export function createFetchUrlTool(deps: FetchUrlToolDeps = {}): AgentTool {
     codeBlockStyle: "fenced",
   });
 
-  return {
+  return markReadOnlyTool({
     name: "fetch_url",
     label: "fetch_url",
     description: "Fetch readable webpage content.",
@@ -126,7 +127,7 @@ export function createFetchUrlTool(deps: FetchUrlToolDeps = {}): AgentTool {
         request.cleanup();
       }
     },
-  };
+  });
 }
 
 async function fetchPageImageReferences(

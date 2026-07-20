@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import { markReadOnlyTool } from "./tool-effects.ts";
 
 export interface MemberInfo {
   userId: string;
@@ -28,7 +29,7 @@ const ListMembersParams = Type.Object({
 export function createChatUserListTool(deps: MemberListToolDeps): AgentTool {
   const { guildId, fetchMembers, getMemoryCounts, adminUserIds } = deps;
 
-  return {
+  return markReadOnlyTool({
     name: "list_chat_users",
     label: "list_chat_users",
     description: "List relevant current-guild chat users.",
@@ -69,7 +70,7 @@ export function createChatUserListTool(deps: MemberListToolDeps): AgentTool {
         details: { count: members.length },
       };
     },
-  };
+  });
 }
 
 function formatMember(m: MemberInfo, memoryCount: number, isConfiguredAdmin: boolean): string {

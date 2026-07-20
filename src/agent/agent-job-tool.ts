@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { renderImageGenerationInput, shortQuote } from "./generated-image-runtime.ts";
 import type { AgentJob, AgentJobStore } from "./job-runtime.ts";
+import { markReadOnlyTool } from "./tool-effects.ts";
 
 const ListAgentJobsParams = Type.Object({
   state: Type.Optional(Type.Union([
@@ -62,7 +63,7 @@ export function createAgentJobInspectionTools(input: {
   channelId: string;
   onDismiss?: (jobId: string) => void | Promise<void>;
 }): AgentTool[] {
-  const listTool: AgentTool = {
+  const listTool: AgentTool = markReadOnlyTool({
     name: "list_agent_jobs",
     label: "List Jobs",
     description: "List active or recent async jobs visible in this channel.",
@@ -88,9 +89,9 @@ export function createAgentJobInspectionTools(input: {
         details: { jobIds: jobs.map((job) => job.id) },
       });
     },
-  };
+  });
 
-  const readTool: AgentTool = {
+  const readTool: AgentTool = markReadOnlyTool({
     name: "read_agent_job",
     label: "Read Job",
     description: "Read the complete input, lifecycle, result, and asset provenance for one visible async job.",
@@ -104,7 +105,7 @@ export function createAgentJobInspectionTools(input: {
         details: { jobId: job.id },
       });
     },
-  };
+  });
 
   const dismissTool: AgentTool = {
     name: "dismiss_agent_job",

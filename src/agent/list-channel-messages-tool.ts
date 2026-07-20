@@ -4,6 +4,7 @@ import { formatLocalWallClock } from "../time/agent-time.ts";
 import type { HistoryMessage } from "./history-types.ts";
 import { formatMessageLine } from "./history-formatting.ts";
 import { resolveReplies } from "./history-replies.ts";
+import { markReadOnlyTool } from "./tool-effects.ts";
 
 export type ListChannelMessage = HistoryMessage;
 
@@ -38,7 +39,7 @@ const ListChannelMessagesParams = Type.Object({
 export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps): AgentTool {
   const { timezone, fetchMessages } = deps;
 
-  return {
+  return markReadOnlyTool({
     name: "list_channel_messages",
     label: "list_channel_messages",
     description: "Fetch recent messages from an accessible guild channel or thread.",
@@ -133,5 +134,5 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
         },
       };
     },
-  };
+  });
 }

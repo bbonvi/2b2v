@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Database } from "../db/database";
 import { countMemories, listMemories, type MemoryRow } from "../db/memory-repository";
+import { markReadOnlyTool } from "./tool-effects.ts";
 
 export interface MemoryListToolDeps {
   db: Database;
@@ -78,7 +79,7 @@ function formatUserHeaderLabel(label: string, userId: string): string {
 export function createMemoryListTool(deps: MemoryListToolDeps): AgentTool {
   const { db, currentGuildId, resolveUsername } = deps;
 
-  return {
+  return markReadOnlyTool({
     name: "list_memories",
     label: "list_memories",
     description: "Retrieve bot memories.",
@@ -181,7 +182,7 @@ export function createMemoryListTool(deps: MemoryListToolDeps): AgentTool {
         details: { target, userId, count: rows.length, total },
       };
     },
-  };
+  });
 }
 
 export function createUserMemoryTool(deps: UserMemoryToolDeps): AgentTool {

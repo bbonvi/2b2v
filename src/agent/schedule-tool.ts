@@ -11,6 +11,7 @@ import {
 import { formatLocalWallClock, parseLocalDateTimeToEpoch } from "../time/agent-time.ts";
 import type { SchedulePressureConfig } from "../config/types.ts";
 import { DEFAULT_SCHEDULE_PRESSURE } from "../config/defaults.ts";
+import { markReadOnlyTool } from "./tool-effects.ts";
 
 export interface ScheduleToolDeps {
   db: Database;
@@ -111,7 +112,7 @@ export function createScheduleTaskTool(deps: ScheduleToolDeps): AgentTool {
 export function createListScheduledTasksTool(deps: ScheduleToolDeps): AgentTool {
   const { db, guildId, channelId, timezone } = deps;
 
-  return {
+  return markReadOnlyTool({
     name: "list_scheduled_tasks",
     label: "list_scheduled_tasks",
     description: "List pending scheduled tasks in the current channel.",
@@ -144,7 +145,7 @@ export function createListScheduledTasksTool(deps: ScheduleToolDeps): AgentTool 
         details: { count: visible.length, total: schedules.length },
       });
     },
-  };
+  });
 }
 
 /** Delete a pending scheduled task in the current guild and channel. */

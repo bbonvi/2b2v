@@ -75,6 +75,10 @@ import { createCloseThreadTool, createStartThreadTool } from "./agent/start-thre
 import { createReactToMessageTool } from "./agent/react-to-message-tool";
 import { createDiceRollTool, type DiceRollDelivery } from "./agent/dice-roll-tool";
 import { applyRuntimeToolPrompts, type ToolPromptVariables } from "./agent/runtime-tool-prompts";
+import {
+  isToolAllowedInMaintenance,
+  type MaintenanceWriteToolName,
+} from "./agent/tool-effects.ts";
 import { createModelImageSupportStore } from "./llm/model-image-support";
 import { resolveModelProfile } from "./llm/client";
 import { createAmbientRuntime } from "./ambient/runtime";
@@ -2114,14 +2118,7 @@ function latestHumanIdentity(guildId: string, channelId: string): {
 function toolsForMaintenancePass(
   visibleTools: AgentTool[] | undefined,
   maintenanceTools: AgentTool[],
-  allowedNames: readonly (
-    "record_memory"
-    | "record_relationship"
-    | "record_inner_threads"
-    | "list_memories"
-    | "list_inner_threads"
-    | "read_asset"
-  )[],
+  allowedWriteName: MaintenanceWriteToolName,
   passLabel: string,
 ): AgentTool[] {
   const byName = new Map<string, AgentTool>();
@@ -2131,17 +2128,16 @@ function toolsForMaintenancePass(
   for (const tool of applyRuntimeToolPrompts(maintenanceTools, promptBundle.runtime)) {
     byName.set(tool.name, tool);
   }
-  const allowed = new Set<string>(allowedNames);
-  return [...byName.values()].map((tool) => allowed.has(tool.name)
+  return [...byName.values()].map((tool) => isToolAllowedInMaintenance(tool, allowedWriteName)
     ? tool
     : {
         ...tool,
         execute: (_toolCallId: string, _params: unknown): Promise<AgentToolResult<unknown>> => Promise.resolve({
           content: [{
             type: "text",
-            text: `Blocked: ${passLabel} may only use ${allowedNames.join(" and ")}. Do not call ${tool.name} in this pass.`,
+            text: `Blocked: ${passLabel} may use read-only tools and ${allowedWriteName}, but ${tool.name} may change state.`,
           }],
-          details: { blocked: true, pass: passLabel, allowedTools: allowedNames, tool: tool.name },
+          details: { blocked: true, pass: passLabel, allowedWriteTool: allowedWriteName, tool: tool.name },
         }),
       });
 }
@@ -2301,7 +2297,7 @@ async function runMemoryPostReplyExtraction(input: {
       tools: toolsForMaintenancePass(
         input.memoryRequest.availableTools,
         maintenanceTools,
-        ["record_memory", "list_memories", "read_asset"],
+        "record_memory",
         "silent memory pass",
       ),
       transcript: input.memoryRequest.maintenanceTranscript,
@@ -2406,7 +2402,7 @@ async function runRelationshipPostReplyExtraction(input: {
       { maxToolCalls: config.maxToolCalls },
       [
         "## Execution Mode: Relationship Maintenance",
-        "Private relationship maintenance is active. Only record_relationship is available; relevant relationship state is already supplied in context.",
+        "Private relationship maintenance is active. Read-only tools are optionally available when they would materially reduce uncertainty; record_relationship is the only state-changing tool available, and relevant relationship state is already supplied.",
         `You may call record_relationship up to ${config.maxToolCalls} times; make one focused relationship update per call and stop when no useful relationship work remains.`,
       ].join("\n"),
     );
@@ -2421,7 +2417,7 @@ async function runRelationshipPostReplyExtraction(input: {
       userContent: input.memoryRequest.userMessage,
       assistantReply: input.memoryRequest.assistantReply,
       visibleReplySent: input.memoryRequest.visibleReplySent,
-      tools: toolsForMaintenancePass(input.memoryRequest.availableTools, maintenanceTools, ["record_relationship"], "silent relationships pass"),
+      tools: toolsForMaintenancePass(input.memoryRequest.availableTools, maintenanceTools, "record_relationship", "silent relationships pass"),
       runtimeInstruction: promptBundle.runtime.reply,
       controlMessage: [
         executionMode,
@@ -2507,7 +2503,7 @@ async function runInnerThreadPostReplyExtraction(input: {
       tools: toolsForMaintenancePass(
         input.memoryRequest.availableTools,
         maintenanceTools,
-        ["record_inner_threads", "list_inner_threads"],
+        "record_inner_threads",
         "silent inner-thread pass",
       ),
       runtimeInstruction: promptBundle.runtime.reply,
@@ -2515,7 +2511,7 @@ async function runInnerThreadPostReplyExtraction(input: {
         runtimeContextTemplate(
           "inner-thread-maintenance-execution-mode",
           {},
-          "Private inner-thread maintenance is active. Use record_inner_threads for changes and list_inner_threads when a retrospective duplicate check is needed.",
+          "Private inner-thread maintenance is active. Read-only tools are available for material uncertainty; record_inner_threads is the only state-changing tool available.",
         ),
         "Current time:",
         currentLocalContext(input.guildConfig.timezone),

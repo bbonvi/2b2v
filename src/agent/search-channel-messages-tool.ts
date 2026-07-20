@@ -12,6 +12,7 @@ import { AssetIdSchema, parseAssetId } from "./asset-id.ts";
 import { formatMessageLine } from "./history-formatting.ts";
 import { resolveReplies } from "./history-replies.ts";
 import { runRipgrep } from "./ripgrep.ts";
+import { markReadOnlyTool } from "./tool-effects.ts";
 
 const ASSET_KINDS = ["image", "gif", "audio", "video", "text", "file"] as const;
 const SEARCH_SCOPES = ["current_channel", "current_guild", "all_guilds"] as const;
@@ -52,7 +53,7 @@ export function normalizeUsername(raw: string): string {
 /** Create a local indexed Discord message and attachment discovery tool. */
 export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolDeps): AgentTool {
   const { db, guildId, currentChannelId, timezone } = deps;
-  return {
+  return markReadOnlyTool({
     name: "search_channel_messages",
     label: "Search Channel Messages",
     description: "Regex-search stored Discord messages and indexed attachment metadata in the current channel, current guild, or all accessible guilds.",
@@ -188,7 +189,7 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
         })}`)];
       return { content: [{ type: "text", text: lines.join("\n\n") }], details: { count: messages.length } };
     },
-  };
+  });
 }
 
 function parseDateFilter(value: string | undefined, name: string, timezone: string): number | string | undefined {

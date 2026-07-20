@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Database } from "../db/database.ts";
+import { markReadOnlyTool } from "./tool-effects.ts";
 import {
   createInnerThread,
   deleteInnerThread,
@@ -318,7 +319,7 @@ export function createListInnerThreadsTool(input: {
   resolveUserId?: (userId: string) => string | undefined;
   resolveGuildId?: (guildId: string) => string | undefined;
 }): AgentTool {
-  return {
+  return markReadOnlyTool({
     name: "list_inner_threads",
     label: "List Inner Threads",
     description: input.description,
@@ -354,7 +355,7 @@ export function createListInnerThreadsTool(input: {
         details: { count: threads.length, threads },
       });
     },
-  };
+  });
 }
 
 /** Render compact trusted context for automatically applicable inner threads. */

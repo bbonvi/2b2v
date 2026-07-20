@@ -2380,7 +2380,7 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
     { maxToolCalls },
     [
       "## Execution Mode: Memory Maintenance",
-      "Private memory maintenance is active. record_memory changes memory; list_memories and read_asset provide bounded supporting inspection. No other tools are available.",
+      "Private memory maintenance is active. Read-only tools are optionally available when they would materially reduce uncertainty; record_memory is the only state-changing tool available.",
       `The pass has up to ${maxToolCalls} tool calls total. Make all useful focused edits before stopping; batch related writes in one record_memory call when possible.`,
       "If there are no memory changes, do not call record_memory; output nothing.",
     ].join("\n"),
