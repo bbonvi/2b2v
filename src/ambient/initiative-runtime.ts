@@ -91,6 +91,14 @@ export type AmbientInitiativeSignals = {
   visibleUserIds: string[];
 };
 
+export function formatBotContacts(guild: Guild, botContactIds: readonly string[]): string {
+  return botContactIds.map((id) => {
+    const username = guild.members.cache.get(id)?.user.username
+      ?? guild.client.users.cache.get(id)?.username;
+    return username === undefined ? id : `@${username} (${id})`;
+  }).join(", ");
+}
+
 export type AmbientInitiativePressure = {
   rawValue: number;
   value: number;
@@ -659,7 +667,7 @@ export function createGenericAmbientInitiativeRuntime(
       opportunityTemplate,
       {
         botContactsLine: input.config.botContactIds.length > 0
-          ? `Known bot contacts available in this guild: ${input.config.botContactIds.join(", ")}. They are optional participants, not targets; choose freely whether anyone should be addressed.\n\n`
+          ? `Known bot contacts available in this guild: ${formatBotContacts(input.guild, input.config.botContactIds)}. They are optional participants, not targets; choose freely whether anyone should be addressed.\n\n`
           : "",
         reconsiderationBlock: input.reconsideration === undefined
           ? ""

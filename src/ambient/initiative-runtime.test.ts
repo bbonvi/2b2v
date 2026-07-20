@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import type { Guild } from "discord.js";
 import { DEFAULT_AMBIENT_INITIATIVE } from "../config/defaults.ts";
 import type { AmbientInitiativeConfig } from "../config/types.ts";
 import {
   applyAmbientInitiativeResistance,
   calculateAmbientInitiativePressure,
+  formatBotContacts,
   type AmbientInitiativeSignals,
 } from "./initiative-runtime.ts";
 
@@ -36,6 +38,30 @@ function signals(overrides: Partial<AmbientInitiativeSignals> = {}): AmbientInit
     ...overrides,
   };
 }
+
+function guildWithUsers(users: ReadonlyArray<{ id: string; username: string }>): Guild {
+  const cache = new Map(users.map(({ id, username }) => [id, { user: { username } }]));
+  return {
+    members: { cache },
+    client: { users: { cache: new Map() } },
+  } as unknown as Guild;
+}
+
+describe("Ambient Initiative contact context", () => {
+  test("formats known bot contacts with usernames and IDs", () => {
+    const guild = guildWithUsers([{ id: "1398275457857622128", username: "pod_042" }]);
+
+    expect(formatBotContacts(guild, ["1398275457857622128"])).toBe(
+      "@pod_042 (1398275457857622128)",
+    );
+  });
+
+  test("falls back to the ID when a contact is not cached", () => {
+    expect(formatBotContacts(guildWithUsers([]), ["1398275457857622128"])).toBe(
+      "1398275457857622128",
+    );
+  });
+});
 
 describe("Ambient Initiative pressure", () => {
   test("lets nominal pressure probabilistically reach the evaluator without an inner thread", () => {
