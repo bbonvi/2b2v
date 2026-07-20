@@ -86,6 +86,14 @@ describe("memory extraction checkpoints", () => {
         lastMessageCreatedAt: 1000,
       });
       expect(getMemoryExtractionCheckpoint(db, "g1", "c1")?.maintenanceCursorId).toBe(42);
+
+      expect(markMemoryExtractionCheckpointAtMessage(db, {
+        guildId: "g1",
+        channelId: "c1",
+        messageId: "m1",
+        maintenanceCursorId: 84,
+      })).toBe(true);
+      expect(getMemoryExtractionCheckpoint(db, "g1", "c1")?.maintenanceCursorId).toBe(84);
     } finally {
       db.close();
     }

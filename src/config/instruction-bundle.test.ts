@@ -144,15 +144,18 @@ describe("loadInstructionBundle", () => {
     mkdirSync(join(shared, "system"), { recursive: true });
     mkdirSync(join(shared, "runtime", "reply"), { recursive: true });
     mkdirSync(join(shared, "runtime", "tools"), { recursive: true });
+    mkdirSync(join(shared, "runtime", "tool-parameters", "record_memory"), { recursive: true });
     mkdirSync(join(shared, "skills", "image_generation"), { recursive: true });
     mkdirSync(join(persona, "core"), { recursive: true });
     mkdirSync(join(persona, "runtime", "reply"), { recursive: true });
     mkdirSync(join(persona, "runtime", "tools"), { recursive: true });
+    mkdirSync(join(persona, "runtime", "tool-parameters", "record_memory"), { recursive: true });
     mkdirSync(join(persona, "skills", "image_generation"), { recursive: true });
 
     writeFileSync(join(shared, "system", "00-base.md"), "# Shared System\nshared");
     writeFileSync(join(shared, "runtime", "reply", "00-core.md"), "# Shared Reply\nshared reply");
     writeFileSync(join(shared, "runtime", "tools", "web_search.md"), "Shared search.");
+    writeFileSync(join(shared, "runtime", "tool-parameters", "record_memory", "actions.md"), "Shared memory actions.");
     writeFileSync(join(shared, "skills", "image_generation", "skill.yaml"), [
       "id: image_generation",
       "title: Shared Image",
@@ -165,6 +168,7 @@ describe("loadInstructionBundle", () => {
     writeFileSync(join(persona, "core", "00-persona.md"), "# Delamain\npersona");
     writeFileSync(join(persona, "runtime", "reply", "00-core.md"), "# Persona Reply\npersona reply");
     writeFileSync(join(persona, "runtime", "tools", "web_search.md"), "Persona search.");
+    writeFileSync(join(persona, "runtime", "tool-parameters", "record_memory", "actions.md"), "Persona memory actions.");
     writeFileSync(join(persona, "skills", "image_generation", "skill.yaml"), [
       "id: image_generation",
       "title: Persona Image",
@@ -181,6 +185,7 @@ describe("loadInstructionBundle", () => {
     expect(bundle.runtime.reply).toContain("Persona Reply");
     expect(bundle.runtime.reply).not.toContain("Shared Reply");
     expect(bundle.runtime.toolDescriptions.web_search).toBe("Persona search.");
+    expect(bundle.runtime.toolParameterDescriptions["record_memory/actions"]).toBe("Persona memory actions.");
     expect(bundle.runtime.skills.byId.image_generation?.title).toBe("Persona Image");
     expect(bundle.runtime.skills.byId.image_generation?.content).toContain("persona skill");
     expect(() => loadInstructionBundle(TEST_ROOT, "missing", makeLogger())).toThrow('Profile "missing" instructions not found');

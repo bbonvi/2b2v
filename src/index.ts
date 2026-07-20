@@ -45,7 +45,7 @@ import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
 import type { TtsResult } from "./tts/types";
-import { buildMemoryContext, buildMemoryMaintenanceContext, buildMemoryPolicyInstructions, buildVisibleUserMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
+import { buildMemoryContext, buildMemoryMaintenanceContext, buildVisibleUserMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
 import { createSearchChannelMessagesTool } from "./agent/search-channel-messages-tool";
 import { createScheduleTools } from "./agent/schedule-tool";
 import { createChatUserListTool, type MemberInfo } from "./agent/member-list-tool";
@@ -1550,13 +1550,16 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
             userContent: context.userMessage,
             assistantReply: "",
             visibleReplySent: false,
-            tools,
+            tools: applyRuntimeToolPrompts(tools, promptBundle.runtime),
             runtimeInstruction: "This is private voice extraction. Only the supplied maintenance tools are available.",
             controlMessage: [
-              ...buildMemoryPolicyInstructions(),
-              "Use record_memory only for genuinely durable or explicitly time-bounded information.",
+              runtimeContextTemplate(
+                "memory-pass-decision",
+                {},
+                "Decide silently whether durable memory should be updated.",
+              ),
               "Use record_relationship only for meaningful relationship changes; every signal must include the target userId from Voice Speaker IDs.",
-              "Prefer no mutation over weak inference. Make all useful tool calls in one batch when possible, then stop.",
+              "Make all useful tool calls in one batch when possible, then stop.",
             ].join("\n"),
             modelProfile: voiceConfig.maintenance.extraction.modelProfile,
             maxToolCalls: (guildConfig.memoryExtraction.postReply
@@ -1987,7 +1990,9 @@ function toolsForMaintenancePass(
   for (const tool of visibleTools ?? []) {
     if (!maintenanceToolNames.has(tool.name)) byName.set(tool.name, tool);
   }
-  for (const tool of maintenanceTools) byName.set(tool.name, tool);
+  for (const tool of applyRuntimeToolPrompts(maintenanceTools, promptBundle.runtime)) {
+    byName.set(tool.name, tool);
+  }
   return blockToolsExcept([...byName.values()], allowedName, passLabel);
 }
 
@@ -2105,6 +2110,17 @@ async function runMemoryPostReplyExtraction(input: {
     resolveUserId: (userId) => input.guild.members.cache.get(userId)?.user.username,
     contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
   });
+  const checkpoint = getMemoryExtractionCheckpoint(db, guildId, channelId);
+  const maintenance = buildMemoryMaintenanceContext({
+    db,
+    guildId,
+    afterId: checkpoint?.maintenanceCursorId ?? 0,
+    limit: MEMORY_MAINTENANCE_BATCH_SIZE,
+    resolveUserId: (userId) => client.users.cache.get(userId)?.username,
+  });
+  const broadMemoryContext = [visibleUserMemoryContext, maintenance.text]
+    .filter((part) => part !== "")
+    .join("\n\n");
   try {
     await runSilentMemoryAgentPass({
       globalConfig,
@@ -2117,7 +2133,7 @@ async function runMemoryPostReplyExtraction(input: {
       userContent: input.memoryRequest.userMessage,
       assistantReply: input.memoryRequest.assistantReply,
       visibleReplySent: input.memoryRequest.visibleReplySent,
-      visibleUserMemoryContext,
+      visibleUserMemoryContext: broadMemoryContext,
       tools: toolsForMaintenancePass(input.memoryRequest.availableTools, maintenanceTools, "record_memory", "silent memory pass"),
       transcript: input.memoryRequest.maintenanceTranscript,
       promptContext: input.memoryRequest.promptContext,
@@ -2129,6 +2145,7 @@ async function runMemoryPostReplyExtraction(input: {
         guildId,
         channelId,
         messageId: sourceMessageId,
+        maintenanceCursorId: maintenance.nextCursorId,
       });
       if (!checkpointMarked) {
         markMemoryExtractionCheckpointFromContext({
@@ -2136,6 +2153,7 @@ async function runMemoryPostReplyExtraction(input: {
           channelId,
           contextMessageIds: input.memoryRequest.context.contextMessageIds,
           fallbackMessageId: input.memoryRequest.sourceMessageId,
+          maintenanceCursorId: maintenance.nextCursorId,
         });
       }
     }
@@ -2578,7 +2596,7 @@ async function buildContext(
 }
 
 const ambientMemoryPasses = new Set<string>();
-const AMBIENT_MEMORY_MAINTENANCE_BATCH_SIZE = 12;
+const MEMORY_MAINTENANCE_BATCH_SIZE = 12;
 
 function collectHumanUserIds(messages: HistoryMessage[]): string[] {
   const recency = new Map<string, true>();
@@ -2676,7 +2694,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       db,
       guildId,
       afterId: checkpoint?.maintenanceCursorId ?? 0,
-      limit: AMBIENT_MEMORY_MAINTENANCE_BATCH_SIZE,
+      limit: MEMORY_MAINTENANCE_BATCH_SIZE,
       resolveUserId: (userId) => client.users.cache.get(userId)?.username,
     });
     const context: AssembledContext = {
@@ -2698,7 +2716,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       contextMessageIds: batch.map((item) => item.id),
       visibleUserIds,
     };
-    const recordMemoryTool = createRecordMemoryTool({
+    const unpromptedRecordMemoryTool = createRecordMemoryTool({
       db,
       guildId,
       currentUserId: lastMessage.authorId,
@@ -2716,6 +2734,10 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
         return resolveKnownUsername(guild, username);
       },
     });
+    const recordMemoryTool = applyRuntimeToolPrompts(
+      [unpromptedRecordMemoryTool],
+      promptBundle.runtime,
+    )[0] ?? unpromptedRecordMemoryTool;
     const incoming: IncomingMessage = {
       content: "",
       guildId,
@@ -2780,6 +2802,7 @@ function markMemoryExtractionCheckpointFromContext(input: {
   channelId: string;
   contextMessageIds: readonly string[] | undefined;
   fallbackMessageId?: string;
+  maintenanceCursorId?: number;
 }): boolean {
   const ids = [
     ...(input.contextMessageIds ?? []),
@@ -2792,6 +2815,7 @@ function markMemoryExtractionCheckpointFromContext(input: {
       guildId: input.guildId,
       channelId: input.channelId,
       messageId: id,
+      maintenanceCursorId: input.maintenanceCursorId,
     })) {
       return true;
     }

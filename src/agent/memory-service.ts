@@ -285,7 +285,7 @@ function formatMemoryRow(
   return `- ${row.id} [about:${aboutLabel(row, resolveUserId)}] [in:${recallLocationLabel(row, currentGuildId)}] [when:${recallTriggerLabel(row, resolveUserId)}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${expiry} ${row.content}`;
 }
 
-/** Build one rotating stored-memory slice for ambient corpus maintenance. */
+/** Build one rotating stored-memory slice for corpus maintenance. */
 export function buildMemoryMaintenanceContext(input: MemoryMaintenanceContextInput): {
   text: string;
   nextCursorId: number;

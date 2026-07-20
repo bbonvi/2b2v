@@ -62,6 +62,7 @@ export function markMemoryExtractionCheckpointAtMessage(
     guildId: string;
     channelId: string;
     messageId: string;
+    maintenanceCursorId?: number;
     now?: number;
   },
 ): boolean {
@@ -79,6 +80,7 @@ export function markMemoryExtractionCheckpointAtMessage(
     channelId: input.channelId,
     lastMessageId: message.id,
     lastMessageCreatedAt: message.created_at,
+    maintenanceCursorId: input.maintenanceCursorId,
     now: input.now,
   });
   return true;

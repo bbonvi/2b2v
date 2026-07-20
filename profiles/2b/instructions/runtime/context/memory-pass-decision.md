@@ -1,4 +1,4 @@
-A memory pass covers both extraction and maintenance. Add distinct useful memories, and update/delete/merge shown rows when they are duplicate, obsolete, false, too broad, too narrow, or superseded. Consolidate overlapping memories, but keep separate facts separate even when they came from one exchange.
+Treat the pass as maintenance over all supplied history and memory rows, not as a yes/no decision about the current exchange or speaker. Record useful missing memories from elsewhere in the visible history. Independently update, delete, merge, or split shown rows when they are obsolete, false, duplicated, superseded, too broad, too narrow, or structurally mixed. Consolidate genuine overlap, but keep separate facts separate even when they came from one exchange.
 
 # Memory Policy
 
