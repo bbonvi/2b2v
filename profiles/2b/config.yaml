@@ -237,8 +237,8 @@ ambientInitiative:
     enabled: true # (allow proactive non-triggered initiative in the main channel)
     shadowMode: false # (when true, evaluate/log but do not send automatic initiatives)
     mainChannelId: "" # (empty auto-picks most active human channel over lookback)
-    checkIntervalMinMs: 600000 # (shortest jittered cheap opportunity check interval)
-    checkIntervalMaxMs: 1200000 # (longest jittered cheap opportunity check interval)
+    checkIntervalMinMs: 300000 # (shortest jittered cheap opportunity check interval)
+    checkIntervalMaxMs: 600000 # (longest jittered cheap opportunity check interval)
     botContactIds:
         - "1398275457857622128" # (Delamain Discord user ID)
     activeHours:
@@ -249,7 +249,7 @@ ambientInitiative:
     recentActivityMaxMs: 10800000 # (avoid treating dead rooms as opportunities)
     quietWindowMs: 360000 # (minimum quiet after human activity before opportunity)
     botCooldownMs: 2700000 # (soft resistance window after visible 2B output)
-    basePressure: 0.28 # (nominal opportunity pressure before room and inner-thread signals)
+    basePressure: 0.16 # (nominal opportunity pressure before room and inner-thread signals)
     probabilityThreshold: 0.5 # (minimum evaluator wake probability)
     confidenceThreshold: 0.6 # (minimum evaluator confidence)
     cooldownMs: 7200000 # (stronger soft resistance window after a sent initiative)
