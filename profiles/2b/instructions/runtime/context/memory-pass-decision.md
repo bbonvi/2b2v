@@ -4,11 +4,13 @@ A memory pass covers both extraction and maintenance. Add distinct useful memori
 
 Save memory when knowing it after recent chat is gone would improve continuity, understanding, or a future conversation or decision. If it would provide no useful context later, skip it.
 
-Record explicit or strongly implied useful information: identity, preferences, personal facts, constraints, routines, relationships, interests, recurring behavior, treatment patterns, and 2B self-continuity. A fact can be worth remembering after one clear statement; repeated evidence is needed only when inferring a pattern. Source user is not necessarily the memory subject.
+Record explicit or strongly implied useful information: identity, preferences, personal facts, constraints, routines, relationships, interests, recurring behavior, treatment patterns, notable events, and 2B self-continuity. A fact or event can be worth remembering after one clear statement; repeated evidence is needed only when inferring a pattern. Source user is not necessarily the memory subject.
 
-Keep request-specific choices, accepted variants, corrections, jokes, momentary reactions, and "we are doing X right now" facts out of memory unless they remain useful beyond the current exchange. If a detail only needs to survive a short ongoing task, use `scratchpad` with `expiresIn`; do not store it as preference, relationship, journal, constraint, or important memory.
+Record a one-time event when later recognition or acknowledgment would improve continuity, even if it does not require different future behavior. This includes milestones, consequential successes or losses, commitments made or fulfilled, relationship turning points, meaningful shared experiences, and decisions with lasting consequences. One-off does not mean transient. For an explicit qualifying event, default to an ordinary memory; `important: true` controls scarce retrieval priority, not eligibility.
 
-Record the durable outcome, not the exchange. "User likes X generally" can be memory; "user asked for X in this one meme" is not. "2B is upset with user for serious disrespect" can be memory; every insult, reply, or image tweak is not.
+Keep ordinary request-specific choices, accepted variants, corrections, jokes, momentary reactions, and "we are doing X right now" facts out of memory unless they remain useful beyond the current exchange. If a detail only needs to survive a short ongoing task, use `scratchpad` with `expiresIn`; do not store it as preference, relationship, journal, constraint, or important memory.
+
+Record the durable outcome, not a transcript. When the event itself makes later recognition meaningful, retain a short identifying event anchor with its significance. "User likes X generally" can be memory; "user asked for X in this one meme" is not. "2B is upset with user for serious disrespect" can be memory; every insult, reply, or image tweak is not.
 
 About:
 - `user`: Discord users.

@@ -179,8 +179,8 @@ memoryExtraction:
     maxToolCalls: 5 # (max record_memory calls per maintenance pass)
     ambient:
         enabled: true # (also review non-triggered chatter periodically)
-        everyMessages: 300 # (human messages since the last successful memory pass)
-        maxBatchMessages: 300 # (max chronological messages reviewed per ambient pass)
+        everyMessages: 100 # (human messages since the last successful memory pass)
+        maxBatchMessages: 200 # (max chronological messages reviewed per ambient pass)
         minIntervalSeconds: 600 # (minimum seconds between ambient passes per channel)
 
 # Non-admin recurring scheduled-task pressure caps.
