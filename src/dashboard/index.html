@@ -2951,6 +2951,29 @@
     return hit ? '#' + hit.name : id;
   }
 
+  function labelForUser(id, includeId) {
+    const hit = managementDirectory.users.find(user => user.id === id);
+    if (!hit) return id;
+    return '@' + hit.name + (includeId ? ' (' + id + ')' : '');
+  }
+
+  function innerThreadSalienceLabel(value) {
+    if (value < 0.2) return 'slight';
+    if (value < 0.45) return 'modest';
+    if (value <= 0.7) return 'meaningful';
+    if (value < 0.9) return 'important';
+    return 'core';
+  }
+
+  function innerThreadPressureLabel(value) {
+    if (value === 0) return 'dormant';
+    if (value < 0.25) return 'low';
+    if (value < 0.5) return 'present';
+    if (value < 0.75) return 'strong';
+    if (value < 0.9) return 'high';
+    return 'urgent';
+  }
+
   function syncManagementDeleteButtons() {
     const hasExactChannel = mGuild.value !== '' && mChannel.value !== '';
     mDeleteLast.disabled = !hasExactChannel;
@@ -3206,19 +3229,25 @@
     itList.innerHTML = threads.length === 0
       ? '<div class="empty-state">No matching inner threads.</div>'
       : threads.map(thread => {
-          const scope = thread.recallScope === 'anywhere' ? 'anywhere' : 'guild ' + thread.recallGuildId;
-          const users = thread.recallMode === 'always' ? 'always' : 'with ' + (thread.recallUserIds || []).join(', ');
+          const pressure = Number(thread.pressure);
+          const salience = Number(thread.salience);
+          const scope = thread.recallScope === 'anywhere'
+            ? 'anywhere'
+            : 'guild ' + labelForGuild(thread.recallGuildId) + ' (' + thread.recallGuildId + ')';
+          const users = thread.recallMode === 'always'
+            ? 'always'
+            : 'with ' + (thread.recallUserIds || []).map(id => labelForUser(id, false)).join(', ');
           return '<div class="management-row">'
             + '<div><div class="management-meta">'
               + '<span>' + esc(thread.status.toUpperCase()) + '</span>'
-              + '<span>pressure ' + Number(thread.pressure).toFixed(2) + '</span>'
-              + '<span>salience ' + Number(thread.salience).toFixed(2) + '</span>'
+              + '<span>pressure ' + esc(innerThreadPressureLabel(pressure)) + ' [' + pressure.toFixed(2) + ']</span>'
+              + '<span>salience ' + esc(innerThreadSalienceLabel(salience)) + ' [' + salience.toFixed(2) + ']</span>'
               + '<span>' + esc(scope) + '</span>'
               + '<span>' + esc(users) + '</span>'
               + '<span>updated ' + esc(fmtDateTime(thread.updatedAt)) + '</span>'
             + '</div><div class="management-content">' + esc(thread.content) + '</div>'
             + '<div class="management-meta"><span>about ' + esc(thread.aboutType) + '</span>'
-              + (thread.aboutUserId ? '<span>user ' + esc(thread.aboutUserId) + '</span>' : '')
+              + (thread.aboutUserId ? '<span>user ' + esc(labelForUser(thread.aboutUserId, true)) + '</span>' : '')
               + '<span>id ' + esc(thread.id) + '</span></div></div>'
           + '</div>';
         }).join('');

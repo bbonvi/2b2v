@@ -1614,6 +1614,8 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
                   guildId: guild.id,
                   visibleUserIds: userIds,
                   limit: 30,
+                  resolveUserId: (userId) => usernameById.get(userId)
+                    ?? guild.members.cache.get(userId)?.user.username,
                 }),
                 `## Voice Speaker IDs\n${userIds.map((userId) =>
                   `@${usernameById.get(userId) ?? userId} = ${userId}`
@@ -2073,7 +2075,8 @@ function buildRelationshipPromptContext(input: {
 }
 
 function blockToolsExcept(tools: AgentTool[], allowedName: string, passLabel: string): AgentTool[] {
-  return tools.map((tool) => tool.name === allowedName
+  const allowedNames = new Set([allowedName]);
+  return tools.map((tool) => allowedNames.has(tool.name)
     ? tool
     : {
         ...tool,
@@ -2111,7 +2114,7 @@ function latestHumanIdentity(guildId: string, channelId: string): {
 function toolsForMaintenancePass(
   visibleTools: AgentTool[] | undefined,
   maintenanceTools: AgentTool[],
-  allowedName: "record_memory" | "record_relationship" | "record_inner_threads",
+  allowedNames: readonly ("record_memory" | "record_relationship" | "record_inner_threads" | "list_inner_threads")[],
   passLabel: string,
 ): AgentTool[] {
   const byName = new Map<string, AgentTool>();
@@ -2121,7 +2124,19 @@ function toolsForMaintenancePass(
   for (const tool of applyRuntimeToolPrompts(maintenanceTools, promptBundle.runtime)) {
     byName.set(tool.name, tool);
   }
-  return blockToolsExcept([...byName.values()], allowedName, passLabel);
+  const allowed = new Set<string>(allowedNames);
+  return [...byName.values()].map((tool) => allowed.has(tool.name)
+    ? tool
+    : {
+        ...tool,
+        execute: (_toolCallId: string, _params: unknown): Promise<AgentToolResult<unknown>> => Promise.resolve({
+          content: [{
+            type: "text",
+            text: `Blocked: ${passLabel} may only use ${allowedNames.join(" and ")}. Do not call ${tool.name} in this pass.`,
+          }],
+          details: { blocked: true, pass: passLabel, allowedTools: allowedNames, tool: tool.name },
+        }),
+      });
 }
 
 function promptLabMemoryDryRunTool(tool: AgentTool, dryRuns: Array<{ tool: string; args: unknown }> | undefined): AgentTool {
@@ -2276,7 +2291,7 @@ async function runMemoryPostReplyExtraction(input: {
       visibleReplySent: input.memoryRequest.visibleReplySent,
       passKind: input.passKind,
       visibleUserMemoryContext: broadMemoryContext,
-      tools: toolsForMaintenancePass(input.memoryRequest.availableTools, maintenanceTools, "record_memory", "silent memory pass"),
+      tools: toolsForMaintenancePass(input.memoryRequest.availableTools, maintenanceTools, ["record_memory"], "silent memory pass"),
       transcript: input.memoryRequest.maintenanceTranscript,
       promptContext: input.memoryRequest.promptContext,
       requestLog: memoryLog,
@@ -2394,7 +2409,7 @@ async function runRelationshipPostReplyExtraction(input: {
       userContent: input.memoryRequest.userMessage,
       assistantReply: input.memoryRequest.assistantReply,
       visibleReplySent: input.memoryRequest.visibleReplySent,
-      tools: toolsForMaintenancePass(input.memoryRequest.availableTools, maintenanceTools, "record_relationship", "silent relationships pass"),
+      tools: toolsForMaintenancePass(input.memoryRequest.availableTools, maintenanceTools, ["record_relationship"], "silent relationships pass"),
       runtimeInstruction: promptBundle.runtime.reply,
       controlMessage: [
         executionMode,
@@ -2480,7 +2495,7 @@ async function runInnerThreadPostReplyExtraction(input: {
       tools: toolsForMaintenancePass(
         input.memoryRequest.availableTools,
         maintenanceTools,
-        "record_inner_threads",
+        ["record_inner_threads", "list_inner_threads"],
         "silent inner-thread pass",
       ),
       runtimeInstruction: promptBundle.runtime.reply,
@@ -2488,7 +2503,7 @@ async function runInnerThreadPostReplyExtraction(input: {
         runtimeContextTemplate(
           "inner-thread-maintenance-execution-mode",
           {},
-          "Private inner-thread maintenance is active. Only record_inner_threads is available.",
+          "Private inner-thread maintenance is active. Use record_inner_threads for changes and list_inner_threads when a retrospective duplicate check is needed.",
         ),
         "Current time:",
         currentLocalContext(input.guildConfig.timezone),
@@ -2806,6 +2821,8 @@ async function buildContext(
     db,
     guildId,
     visibleUserIds,
+    resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username
+      ?? client.users.cache.get(userId)?.username,
   });
   if (innerThreadsText !== "") {
     const memoryIndex = assembled.sections.findIndex((section) => section.label === "Memories");
@@ -3352,6 +3369,9 @@ function buildAgentTools(
     guildId,
     visibleUserIds: options.visibleUserIds ?? [],
     description: runtimeToolDescription("list_inner_threads", {}) ?? "Privately inspect durable inner threads.",
+    resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username
+      ?? client.users.cache.get(userId)?.username,
+    resolveGuildId: (targetGuildId) => client.guilds.cache.get(targetGuildId)?.name,
   });
 
   const listChannelMessagesTool = createListChannelMessagesTool({

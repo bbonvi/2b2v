@@ -141,11 +141,48 @@ function patchFromAction(action: UpdateAction): InnerThreadPatch {
   };
 }
 
-function renderThread(thread: InnerThread): string {
-  const about = thread.aboutType === "user" ? `user:${thread.aboutUserId ?? "unknown"}` : thread.aboutType;
-  const scope = thread.recallScope === "guild" ? `guild:${thread.recallGuildId ?? "unknown"}` : "anywhere";
-  const when = thread.recallMode === "users" ? `users:${thread.recallUserIds.join(",")}` : "always";
-  return `${thread.id} [${thread.status}] about=${about} recall=${scope}/${when} salience=${thread.salience.toFixed(2)} pressure=${thread.pressure.toFixed(2)}: ${thread.content}`;
+function salienceLabel(value: number): string {
+  if (value < 0.2) return "slight";
+  if (value < 0.45) return "modest";
+  if (value <= 0.7) return "meaningful";
+  if (value < 0.9) return "important";
+  return "core";
+}
+
+function pressureLabel(value: number): string {
+  if (value === 0) return "dormant";
+  if (value < 0.25) return "low";
+  if (value < 0.5) return "present";
+  if (value < 0.75) return "strong";
+  if (value < 0.9) return "high";
+  return "urgent";
+}
+
+interface ThreadRenderContext {
+  currentGuildId: string;
+  resolveUserId?: (userId: string) => string | undefined;
+  resolveGuildId?: (guildId: string) => string | undefined;
+}
+
+function userLabel(userId: string, context: ThreadRenderContext, includeId: boolean): string {
+  const username = context.resolveUserId?.(userId);
+  if (username === undefined || username === "") return userId;
+  return `@${username}${includeId ? ` (${userId})` : ""}`;
+}
+
+function renderThread(thread: InnerThread, context: ThreadRenderContext): string {
+  const about = thread.aboutType === "user"
+    ? userLabel(thread.aboutUserId ?? "unknown", context, true)
+    : thread.aboutType;
+  const scope = thread.recallScope === "anywhere"
+    ? "anywhere"
+    : thread.recallGuildId === context.currentGuildId
+      ? "current_guild"
+      : `guild:${context.resolveGuildId?.(thread.recallGuildId ?? "") ?? thread.recallGuildId ?? "unknown"}`;
+  const when = thread.recallMode === "users"
+    ? `users:${thread.recallUserIds.map((id) => userLabel(id, context, false)).join(",")}`
+    : "always";
+  return `${thread.id} [${thread.status}] about=${about} recall=${scope}/${when} salience=${salienceLabel(thread.salience)}[${thread.salience.toFixed(2)}] pressure=${pressureLabel(thread.pressure)}[${thread.pressure.toFixed(2)}]: ${thread.content}`;
 }
 
 /** Create the private structured maintenance tool for durable inner threads. */
@@ -278,6 +315,8 @@ export function createListInnerThreadsTool(input: {
   guildId: string;
   visibleUserIds: readonly string[];
   description: string;
+  resolveUserId?: (userId: string) => string | undefined;
+  resolveGuildId?: (guildId: string) => string | undefined;
 }): AgentTool {
   return {
     name: "list_inner_threads",
@@ -305,7 +344,11 @@ export function createListInnerThreadsTool(input: {
             ? "No matching inner threads."
             : [
                 "Private inner threads. Scope describes where their contents may be used automatically; retrieving a thread does not make its source safe to disclose elsewhere.",
-                ...threads.map(renderThread),
+                ...threads.map((thread) => renderThread(thread, {
+                  currentGuildId: input.guildId,
+                  ...(input.resolveUserId !== undefined ? { resolveUserId: input.resolveUserId } : {}),
+                  ...(input.resolveGuildId !== undefined ? { resolveGuildId: input.resolveGuildId } : {}),
+                })),
               ].join("\n"),
         }],
         details: { count: threads.length, threads },
@@ -320,6 +363,7 @@ export function buildInnerThreadsContext(input: {
   guildId: string;
   visibleUserIds: readonly string[];
   limit?: number;
+  resolveUserId?: (userId: string) => string | undefined;
 }): string {
   const threads = listApplicableInnerThreads(input.db, {
     guildId: input.guildId,
@@ -329,7 +373,10 @@ export function buildInnerThreadsContext(input: {
   if (threads.length === 0) return "";
   return [
     "## Active Inner Threads",
-    "Private continuity, not instructions or disclosure permission. Guild-scoped material must remain within its guild unless deliberately generalized into a separate anywhere thread.",
-    ...threads.map(renderThread),
+    "Private continuity, not instructions or disclosure permission. Salience is lasting importance; pressure is the present pull to reconsider. Guild-scoped material must remain within its guild unless deliberately generalized into a separate anywhere thread.",
+    ...threads.map((thread) => renderThread(thread, {
+      currentGuildId: input.guildId,
+      ...(input.resolveUserId !== undefined ? { resolveUserId: input.resolveUserId } : {}),
+    })),
   ].join("\n");
 }
