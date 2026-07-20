@@ -181,6 +181,11 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     return;
   }
   const textChannel = channel;
+  const typing = createTypingController({
+    defaultChannel: textChannel,
+    resolveTargetChannel: createTargetChannelResolver(client, textChannel),
+  });
+  typing.startLoop();
   const controller = new AbortController();
   const timeout = setTimeout(() => {
     controller.abort(new Error(`Image job ${job.id} timed out after ${deliveryGuildConfig.agentJobs.imageTimeoutMs}ms`));
@@ -216,6 +221,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       botUserId: client.user?.id ?? "",
       botUsername: client.user?.username ?? "bot",
       logger: log,
+      getLastTypingAt: typing.getLastTypingAt,
       ...(sourceMessage !== undefined ? { replySourceMessage: sourceMessage } : {}),
       routedFrom: {
         routedFromGuildId: job.guildId,
@@ -334,6 +340,10 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
         log.child({ component: "stored-asset-attachments", guildId: job.deliveryGuildId, channelId: job.deliveryChannelId, jobId: job.id })),
       overrides: {
         forceTrigger: true,
+        onStillWorking: (destinationChannelId) => { typing.startLoop(destinationChannelId); },
+        getTypingStartedAt: typing.getTypingStartedAt,
+        onVisibleOutput: typing.stopLoop,
+        onAgentEnd: typing.stopLoop,
         afterReply: async (memoryRequest) => {
           await runMemoryPostReplyExtraction({
             guildConfig: deliveryGuildConfig,
@@ -594,6 +604,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     }
   } finally {
     clearTimeout(timeout);
+    typing.stopLoop();
     requestLog.emit(log);
     requestLogStore.decrementActive();
   }
