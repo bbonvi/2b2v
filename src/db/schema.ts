@@ -55,6 +55,23 @@ export function memorySchemaHasCurrentChecks(sql: string | undefined): boolean {
     && sql.includes("CHECK(length(trim(content)) > 0)");
 }
 
+/** Build the current staged-output table for fresh databases and legacy table-copy migrations. */
+export function stagedAssetsTableSql(tableName: string, ifNotExists = false): string {
+  return `CREATE TABLE ${ifNotExists ? "IF NOT EXISTS " : ""}${tableName} (
+    ref                  TEXT PRIMARY KEY,
+    job_id               TEXT NOT NULL UNIQUE REFERENCES agent_jobs(id) ON DELETE CASCADE,
+    owner_guild_id       TEXT NOT NULL,
+    owner_channel_id     TEXT NOT NULL,
+    filename             TEXT NOT NULL,
+    content_type         TEXT NOT NULL,
+    storage_path         TEXT NOT NULL,
+    created_at           INTEGER NOT NULL,
+    expires_at           INTEGER NOT NULL,
+    delivered_message_id TEXT,
+    permanent_asset_id   INTEGER REFERENCES message_assets(id)
+  )`;
+}
+
 export const SCHEMA_SQL = `
   ${memoriesTableSql("memories", true)};
 
@@ -301,19 +318,7 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_agent_jobs_status
     ON agent_jobs(status, created_at);
 
-  CREATE TABLE IF NOT EXISTS staged_assets (
-    ref                  TEXT PRIMARY KEY,
-    job_id               TEXT NOT NULL UNIQUE REFERENCES agent_jobs(id) ON DELETE CASCADE,
-    owner_guild_id       TEXT NOT NULL,
-    owner_channel_id     TEXT NOT NULL,
-    filename             TEXT NOT NULL,
-    content_type         TEXT NOT NULL,
-    storage_path         TEXT NOT NULL,
-    created_at           INTEGER NOT NULL,
-    expires_at           INTEGER NOT NULL,
-    delivered_message_id TEXT,
-    permanent_asset_id   INTEGER REFERENCES message_assets(id)
-  );
+  ${stagedAssetsTableSql("staged_assets", true)};
 
   CREATE INDEX IF NOT EXISTS idx_staged_assets_owner
     ON staged_assets(owner_guild_id, owner_channel_id, created_at);

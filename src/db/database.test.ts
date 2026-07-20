@@ -4,6 +4,7 @@ import { Database as BunDatabase } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createMemory, getMemory } from "./memory-repository";
+import { createStagedAsset, getStagedAsset } from "./staged-asset-repository.ts";
 
 let db: Database;
 let tmpDir: string;
@@ -121,6 +122,89 @@ describe("database initialization", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('agent_jobs', 'agent_job_assets')")
       .all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name).sort()).toEqual(["agent_job_assets", "agent_jobs"]);
+  });
+
+  test("migrates legacy staged asset room ownership without losing outputs", () => {
+    const dbPath = path.join(tmpDir, "legacy-staged-assets.db");
+    const existing = createDatabase(dbPath);
+    existing.raw.run(`INSERT INTO agent_jobs
+      (id, kind, guild_id, channel_id, delivery_guild_id, delivery_channel_id,
+       requester_id, requester_username, source_message_id, source_quote, status,
+       input_json, created_at, replacement_count)
+      VALUES ('img-old', 'image_generation', 'g1', 'c1', 'g1', 'c1',
+       'u1', 'alice', 'm1', 'quote', 'ready', '{}', 1, 0)`);
+    createStagedAsset(existing, {
+      ref: "job_imgold",
+      jobId: "img-old",
+      ownerGuildId: "g1",
+      ownerChannelId: "c1",
+      filename: "old.webp",
+      contentType: "image/webp",
+      storagePath: "/tmp/old.webp",
+      createdAt: 10,
+      expiresAt: 20,
+    });
+    existing.close();
+
+    const legacy = new BunDatabase(dbPath);
+    legacy.run(`CREATE TABLE staged_assets_legacy (
+      ref TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL UNIQUE REFERENCES agent_jobs(id) ON DELETE CASCADE,
+      owner_room_kind TEXT NOT NULL CHECK(owner_room_kind IN ('text', 'voice')),
+      owner_guild_id TEXT NOT NULL,
+      owner_channel_id TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      content_type TEXT NOT NULL,
+      storage_path TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      delivered_message_id TEXT,
+      permanent_asset_id INTEGER REFERENCES message_assets(id),
+      dismissed_at INTEGER
+    )`);
+    legacy.run(`INSERT INTO staged_assets_legacy
+      SELECT ref, job_id, 'text', owner_guild_id, owner_channel_id, filename,
+       content_type, storage_path, created_at, expires_at, delivered_message_id,
+       permanent_asset_id, NULL
+      FROM staged_assets`);
+    legacy.run("DROP TABLE staged_assets");
+    legacy.run("ALTER TABLE staged_assets_legacy RENAME TO staged_assets");
+    legacy.close();
+
+    const migrated = createDatabase(dbPath);
+    try {
+      const columns = migrated.raw.prepare("PRAGMA table_info(staged_assets)").all() as Array<{ name: string }>;
+      expect(columns.some((column) => column.name === "owner_room_kind")).toBe(false);
+      expect(columns.some((column) => column.name === "dismissed_at")).toBe(false);
+      expect(getStagedAsset(migrated, "job_imgold")).toMatchObject({
+        jobId: "img-old",
+        ownerGuildId: "g1",
+        ownerChannelId: "c1",
+        storagePath: "/tmp/old.webp",
+      });
+
+      migrated.raw.run(`INSERT INTO agent_jobs
+        (id, kind, guild_id, channel_id, delivery_guild_id, delivery_channel_id,
+         requester_id, requester_username, source_message_id, source_quote, status,
+         input_json, created_at, replacement_count)
+        VALUES ('img-new', 'image_generation', 'g1', 'c1', 'g1', 'c1',
+         'u1', 'alice', 'm2', 'quote', 'ready', '{}', 2, 0)`);
+      createStagedAsset(migrated, {
+        ref: "job_imgnew",
+        jobId: "img-new",
+        ownerGuildId: "g1",
+        ownerChannelId: "c1",
+        filename: "new.webp",
+        contentType: "image/webp",
+        storagePath: "/tmp/new.webp",
+        createdAt: 30,
+        expiresAt: 40,
+      });
+      expect(getStagedAsset(migrated, "job_imgnew")?.jobId).toBe("img-new");
+      expect(migrated.raw.prepare("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
+    } finally {
+      migrated.close();
+    }
   });
 
   test("creates memory extraction checkpoints table", () => {

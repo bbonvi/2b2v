@@ -1,7 +1,7 @@
 import type { Database as BunDatabase } from "bun:sqlite";
 import { sanitizeMemoryContent } from "./memory-content";
 import { MEMORY_KIND_SQL_VALUES } from "./memory-kinds";
-import { memoriesTableSql, memorySchemaHasCurrentChecks } from "./schema";
+import { memoriesTableSql, memorySchemaHasCurrentChecks, stagedAssetsTableSql } from "./schema";
 
 type TableColumn = { name: string; type: string };
 
@@ -206,6 +206,38 @@ function createMemoryIndexes(raw: BunDatabase): void {
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_recall_guild ON memories(recall_scope, recall_guild_id, deleted_at, updated_at)");
 }
 
+function createStagedAssetIndexes(raw: BunDatabase): void {
+  raw.run("CREATE INDEX IF NOT EXISTS idx_staged_assets_owner ON staged_assets(owner_guild_id, owner_channel_id, created_at)");
+  raw.run("CREATE INDEX IF NOT EXISTS idx_staged_assets_expiry ON staged_assets(expires_at)");
+}
+
+/** Remove retired room ownership columns whose legacy NOT NULL constraint blocks current inserts. */
+function migrateStagedAssets(raw: BunDatabase): void {
+  const columns = tableColumns(raw, "staged_assets");
+  if (!hasColumn(columns, "owner_room_kind") && !hasColumn(columns, "dismissed_at")) {
+    createStagedAssetIndexes(raw);
+    return;
+  }
+  const expectedCount = (raw.prepare("SELECT COUNT(*) AS count FROM staged_assets").get() as { count: number }).count;
+  runInTransaction(raw, () => {
+    raw.run("DROP TABLE IF EXISTS staged_assets_new");
+    raw.run(stagedAssetsTableSql("staged_assets_new"));
+    raw.run(`INSERT INTO staged_assets_new
+      (ref, job_id, owner_guild_id, owner_channel_id, filename, content_type,
+       storage_path, created_at, expires_at, delivered_message_id, permanent_asset_id)
+      SELECT ref, job_id, owner_guild_id, owner_channel_id, filename, content_type,
+       storage_path, created_at, expires_at, delivered_message_id, permanent_asset_id
+      FROM staged_assets`);
+    const copiedCount = (raw.prepare("SELECT COUNT(*) AS count FROM staged_assets_new").get() as { count: number }).count;
+    if (copiedCount !== expectedCount) {
+      throw new Error(`Staged asset migration copied ${copiedCount} of ${expectedCount} rows.`);
+    }
+    raw.run("DROP TABLE staged_assets");
+    raw.run("ALTER TABLE staged_assets_new RENAME TO staged_assets");
+    createStagedAssetIndexes(raw);
+  });
+}
+
 /** Apply idempotent migrations needed by databases created by older bot versions. */
 export function runDatabaseMigrations(raw: BunDatabase): void {
   for (const sql of [
@@ -289,4 +321,5 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
   createMemoryIndexes(raw);
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_priority_active ON memories(priority, deleted_at, updated_at)");
   sanitizeExistingMemoryRows(raw);
+  migrateStagedAssets(raw);
 }
