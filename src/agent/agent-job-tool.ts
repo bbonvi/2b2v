@@ -16,6 +16,11 @@ const ReadAgentJobParams = Type.Object({
   job_id: Type.String({ description: "Visible async job id." }),
 });
 
+const DismissAgentJobParams = Type.Object({
+  job_id: Type.String({ description: "Visible ready job id." }),
+  reason: Type.String({ description: "Private reason for deliberately abandoning the result." }),
+});
+
 /** Render complete image-job provenance for private inspection and asset reads. */
 export function renderAgentJobDetails(
   job: AgentJob,
@@ -55,6 +60,7 @@ export function createAgentJobInspectionTools(input: {
   store: AgentJobStore;
   guildId: string;
   channelId: string;
+  onDismiss?: (jobId: string) => void | Promise<void>;
 }): AgentTool[] {
   const listTool: AgentTool = {
     name: "list_agent_jobs",
@@ -100,5 +106,31 @@ export function createAgentJobInspectionTools(input: {
     },
   };
 
-  return [listTool, readTool];
+  const dismissTool: AgentTool = {
+    name: "dismiss_agent_job",
+    label: "Dismiss Job",
+    description: "Deliberately abandon a visible ready job without Discord delivery.",
+    parameters: DismissAgentJobParams,
+    async execute(_toolCallId, params): Promise<AgentToolResult<{ jobId: string; dismissed: boolean }>> {
+      const parsed = params as { job_id: string; reason: string };
+      const job = input.store.getVisible(parsed.job_id, input.guildId, input.channelId);
+      if (job === undefined) {
+        throw new Error(`Job ${parsed.job_id} was not found or is not visible in this channel.`);
+      }
+      if (job.status !== "ready") {
+        throw new Error(`Job ${job.id} is ${job.status}; only ready jobs can be dismissed here.`);
+      }
+      const result = input.store.cancel(job.id, {
+        reason: parsed.reason,
+        mode: "explicit_cancel",
+      });
+      if (result.ok) await input.onDismiss?.(job.id);
+      return {
+        content: [{ type: "text", text: result.message }],
+        details: { jobId: job.id, dismissed: result.ok },
+      };
+    },
+  };
+
+  return [listTool, readTool, dismissTool];
 }

@@ -121,7 +121,7 @@ describe("AgentJobStore", () => {
     });
 
     expect(cancelled.ok).toBe(true);
-    expect(store.get(first.job.id)?.status).toBe("cancelled");
+    expect(store.get(first.job.id)?.status).toBe("dismissed");
   });
 
   test("keeps terminal jobs durable after the prompt visibility ttl", () => {
@@ -157,7 +157,9 @@ describe("AgentJobStore", () => {
     const assetId = (db.raw.prepare("SELECT id FROM message_assets WHERE message_id = 'sent-1'").get() as { id: number }).id;
 
     store.linkAsset(job.id, assetId);
-    store.markSent(job.id, "sent-1", { filename: "generated.webp" }, 2_000);
+    store.start(job.id, undefined, 1_500);
+    store.markReady(job.id, { filename: "generated.webp" }, 1_900);
+    store.markDelivered(job.id, "sent-1", { filename: "generated.webp" }, 2_000);
     const restartedStore = new AgentJobStore(db, config);
 
     expect(restartedStore.getForAsset(assetId)).toMatchObject({
@@ -166,7 +168,7 @@ describe("AgentJobStore", () => {
     });
     expect(getHistoryMessagesByIds(db, ["sent-1"])[0]?.assets?.[0]?.jobId).toBe(job.id);
     expect(restartedStore.cleanup(31 * 24 * 60 * 60 * 1000)).toBe(0);
-    expect(restartedStore.get(job.id)?.status).toBe("sent");
+    expect(restartedStore.get(job.id)?.status).toBe("delivered");
   });
 
   test("removes unlinked terminal jobs after 30 days", () => {

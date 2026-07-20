@@ -11,10 +11,6 @@ triggers:
   typingIdleMs: 10000      # Treat typingStart from the triggering user as active for this long
   typingMaxWaitMs: 15000   # Hard cap for typing-aware keyword/mention waits
 
-# Trigger-specific instructions (overrides global defaults per-key).
-# triggerInstructions:
-#   random: "In this server, unprompted replies should be playful."
-
 # Named execution policy from the profile-level modelProfiles catalog.
 modelProfile: main
 
@@ -58,11 +54,9 @@ trim:
 #   followUp:
 #     enabled: false
 
-# Optional bot targets for ordinary initiative; use audience: bots to exclude human-facing initiative.
+# Optional known bot contacts available to the actor during ordinary initiative.
 # ambientInitiative:
-#   botTargetIds: ["000000000000000000"]
-#   botPressure: 0.15 # signed additive bias, from -1 to 1
-#   audience: bots
+#   botContactIds: ["000000000000000000"]
 
 # Discord user IDs with admin access to bot commands
 adminUserIds: []
@@ -108,10 +102,6 @@ members:
 #   maxToolCalls: 64
 #   wallClockTimeoutMs: 240000
 #   llmOutputTimeoutMs: 60000 # retried up to 3 total attempts
-
-# reasoningContinuation:
-#   enabled: true
-#   maxAgeMs: 1800000 # latest encrypted Codex continuation for same guild/channel/user
 
 # Channel dispatcher (overrides global defaults)
 # dispatcher:

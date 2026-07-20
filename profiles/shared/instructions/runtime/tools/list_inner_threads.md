@@ -1,0 +1,1 @@
+Privately inspect durable inner threads: unresolved curiosities, intentions, commitments, personal projects, social impulses, conflicts, and postures. Scope and provenance remain binding after retrieval; knowledge from one guild is not permission to reveal it in another.

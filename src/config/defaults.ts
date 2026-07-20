@@ -4,7 +4,6 @@ import type {
   AmbientAttentionConfig,
   AmbientAttentionModeConfig,
   AmbientInitiativeConfig,
-  AmbientInitiativeKindConfig,
   DispatcherConfig,
   EmotesConfig,
   ExternalImagesConfig,
@@ -16,7 +15,6 @@ import type {
   PromptCachingConfig,
   PromptTransportConfig,
   PromptTransportSectionId,
-  ReasoningContinuationConfig,
   RelationshipConfig,
   ReplyLoopConfig,
   SchedulePressureConfig,
@@ -84,7 +82,6 @@ export const DEFAULT_AMBIENT_ATTENTION_MODE: AmbientAttentionModeConfig = {
   maxRepliesPerUserPerHour: 4,
   maxRepliesPerChannelPerHour: 8,
   randomJitter: 0.04,
-  defaultReply: false,
 };
 
 export const DEFAULT_AMBIENT_ATTENTION: AmbientAttentionConfig = {
@@ -118,7 +115,6 @@ export const DEFAULT_AMBIENT_ATTENTION: AmbientAttentionConfig = {
     typingActiveMs: 1_000,
     maxRepliesPerUserPerHour: 24,
     maxRepliesPerChannelPerHour: 48,
-    defaultReply: true,
     strongWindowMs: 45_000,
     weakWindowMs: 180_000,
     typingExtensionMs: 30_000,
@@ -139,24 +135,12 @@ export const DEFAULT_AMBIENT_ATTENTION: AmbientAttentionConfig = {
   },
 };
 
-export const DEFAULT_AMBIENT_INITIATIVE_KIND: AmbientInitiativeKindConfig = {
-  enabled: false,
-  basePressure: 0.12,
-  pressureThreshold: 0.72,
-  probabilityThreshold: 0.72,
-  confidenceThreshold: 0.6,
-  cooldownMs: 2 * 60 * 60 * 1000,
-  maxPerDay: 2,
-};
-
 export const DEFAULT_AMBIENT_INITIATIVE: AmbientInitiativeConfig = {
   enabled: false,
-  audience: "humans",
-  botTargetIds: [],
-  botPressure: 0,
+  botContactIds: [],
   shadowMode: false,
-  checkIntervalMinMs: 12 * 60 * 1000,
-  checkIntervalMaxMs: 45 * 60 * 1000,
+  checkIntervalMinMs: 10 * 60 * 1000,
+  checkIntervalMaxMs: 20 * 60 * 1000,
   activeHours: {
     start: "10:00",
     end: "01:00",
@@ -165,31 +149,17 @@ export const DEFAULT_AMBIENT_INITIATIVE: AmbientInitiativeConfig = {
   recentActivityMinMs: 5 * 60 * 1000,
   recentActivityMaxMs: 3 * 60 * 60 * 1000,
   quietWindowMs: 6 * 60 * 1000,
-  typingActiveMs: 10_000,
   botCooldownMs: 45 * 60 * 1000,
-  fatigueAfterAnyMs: 60 * 60 * 1000,
+  basePressure: 0.18,
+  probabilityThreshold: 0.55,
+  confidenceThreshold: 0.6,
+  cooldownMs: 2 * 60 * 60 * 1000,
   maxPerDay: 5,
   minMainChannelHumanMessages: 20,
   mainChannelLookbackDays: 7,
   evaluator: {
     modelProfile: "main",
     llmOutputTimeoutMs: 8_000,
-  },
-  selfExpression: {
-    ...DEFAULT_AMBIENT_INITIATIVE_KIND,
-    enabled: true,
-    basePressure: 0.18,
-    maxPerDay: 3,
-    cooldownMs: 3 * 60 * 60 * 1000,
-  },
-  targetedCheckin: {
-    ...DEFAULT_AMBIENT_INITIATIVE_KIND,
-    enabled: true,
-    basePressure: 0.16,
-    maxPerDay: 3,
-    cooldownMs: 2 * 60 * 60 * 1000,
-    maxPerUserPerDay: 1,
-    openLoopMaxAgeMs: 48 * 60 * 60 * 1000,
   },
 };
 
@@ -278,11 +248,6 @@ export const DEFAULT_REPLY_LOOP: ReplyLoopConfig = {
   maxToolCalls: 64,
   wallClockTimeoutMs: 45_000,
   llmOutputTimeoutMs: 12_000,
-};
-
-export const DEFAULT_REASONING_CONTINUATION: ReasoningContinuationConfig = {
-  enabled: true,
-  maxAgeMs: 30 * 60 * 1000,
 };
 
 export const PROMPT_TRANSPORT_SECTION_IDS: readonly PromptTransportSectionId[] = [

@@ -76,9 +76,7 @@ describe("repository profile layout", () => {
     expect(loadMainConfig(twoBPath)).not.toHaveProperty("persona");
     expect(loadMainConfig(delamainPath)).not.toHaveProperty("persona");
     expect(twoB.defaultRelationships?.enabled).toBe(true);
-    expect(twoB.defaultAmbientInitiative?.audience).toBe("humans");
-    expect(twoB.defaultAmbientInitiative?.botTargetIds).toEqual(["1398275457857622128"]);
-    expect(twoB.defaultAmbientInitiative?.botPressure).toBeGreaterThan(0);
+    expect(twoB.defaultAmbientInitiative?.botContactIds).toEqual(["1398275457857622128"]);
     expect(twoB.vpn?.enabled).toBe(true);
     expect(twoB.personaModes?.modes.map((mode) => mode.id)).toEqual(["normal", "sleeping"]);
     expect(twoB.personaModes?.modes.every((mode) => mode.avatars.length > 0)).toBe(true);
@@ -87,9 +85,7 @@ describe("repository profile layout", () => {
     expect(delamain.defaultMemoryExtraction.ambient.enabled).toBe(false);
     expect(delamain.defaultAmbientAttention?.enabled).toBe(false);
     expect(delamain.defaultAmbientInitiative?.enabled).toBe(true);
-    expect(delamain.defaultAmbientInitiative?.audience).toBe("bots");
-    expect(delamain.defaultAmbientInitiative?.botTargetIds).toEqual(["1130796465049042954"]);
-    expect(delamain.defaultAmbientInitiative?.botPressure).toBeGreaterThan(0);
+    expect(delamain.defaultAmbientInitiative?.botContactIds).toEqual(["1130796465049042954"]);
     expect(delamain.personaModes?.modes.map((mode) => mode.id)).toEqual(["normal", "sleeping", "rogue"]);
     expect(delamain.personaModes?.modes.find((mode) => mode.id === "rogue")?.avatars).toHaveLength(2);
     expect(delamain.vpn).toBeUndefined();

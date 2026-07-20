@@ -148,6 +148,14 @@ export function createPromptLabRunner(input: {
     currentUsername?: string;
     onResult?: (result: { accepted: unknown[]; rejected: unknown[] }, candidates: unknown[]) => void;
   }) => Promise<void>;
+  runInnerThreadPostReplyExtraction: (input: {
+    guildConfig: GuildConfig;
+    memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0];
+    guild: Guild;
+    channel: unknown;
+    sourceRequestId: string;
+    dryRun?: boolean;
+  }) => Promise<void>;
   promptLabUserFromGuild: (guild: Guild, userId: string) => { id: string; username: string; displayName?: string; globalName?: string };
 }): (runInput: { guildId: string; channelId: string; userId: string; content: string; runToken?: string }) => Promise<PromptLabRunResult> {
   function promptLabRelationshipContext(guildConfig: GuildConfig, userId: string): string | undefined {
@@ -454,7 +462,6 @@ export function createPromptLabRunner(input: {
           resolveAssetAttachments: () => Promise.resolve([]),
           overrides: {
             triggerOverride: { reason: "mention" },
-            triggerInstructions: guildConfig.triggerInstructions,
             liveMessageTypingHoldMs: 0,
             consumeGeneratedAttachments: () => [],
           },
@@ -488,6 +495,25 @@ export function createPromptLabRunner(input: {
         maintenanceTranscript: result.maintenanceTranscript,
         availableTools: maintenanceVisibleTools,
         promptContext: result.promptContext,
+      });
+      await input.runInnerThreadPostReplyExtraction({
+        guildConfig,
+        guild,
+        channel,
+        sourceRequestId: requestLog.requestId,
+        dryRun: true,
+        memoryRequest: {
+          sourceMessageId: incomingMessage.messageId,
+          userMessage: translatedContent,
+          assistantReply,
+          recentContext: context.sections.map((section) => section.text).join("\n\n"),
+          context,
+          incomingMessage,
+          visibleReplySent: true,
+          maintenanceTranscript: result.maintenanceTranscript,
+          availableTools: maintenanceVisibleTools,
+          promptContext: result.promptContext,
+        },
       });
       const relationshipsContext = promptLabRelationshipContext(guildConfig, labUser.id);
       const summary = promptLabSummary(requestLog.toEntry());

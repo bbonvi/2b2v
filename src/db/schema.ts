@@ -67,6 +67,54 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_memory_recall_users_user
     ON memory_recall_users(user_id, memory_id);
 
+  CREATE TABLE IF NOT EXISTS inner_threads (
+    id                      TEXT PRIMARY KEY,
+    content                 TEXT NOT NULL CHECK(length(trim(content)) > 0),
+    about_type              TEXT NOT NULL CHECK(about_type IN ('community', 'user', 'self')),
+    about_user_id           TEXT,
+    recall_scope            TEXT NOT NULL CHECK(recall_scope IN ('anywhere', 'guild')),
+    recall_guild_id         TEXT,
+    recall_mode             TEXT NOT NULL CHECK(recall_mode IN ('always', 'users')),
+    salience                REAL NOT NULL CHECK(salience >= 0 AND salience <= 1),
+    pressure                REAL NOT NULL CHECK(pressure >= 0 AND pressure <= 1),
+    source_message_ids_json TEXT NOT NULL DEFAULT '[]',
+    source_guild_id         TEXT,
+    source_channel_id       TEXT,
+    status                  TEXT NOT NULL CHECK(status IN ('active', 'resolved')),
+    created_at              INTEGER NOT NULL,
+    updated_at              INTEGER NOT NULL,
+    expires_at              INTEGER,
+    CHECK((about_type = 'user' AND about_user_id IS NOT NULL) OR (about_type IN ('self', 'community') AND about_user_id IS NULL)),
+    CHECK((recall_scope = 'anywhere' AND recall_guild_id IS NULL) OR (recall_scope = 'guild' AND recall_guild_id IS NOT NULL))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_inner_threads_scope_status
+    ON inner_threads(recall_scope, recall_guild_id, status, pressure, updated_at);
+
+  CREATE TABLE IF NOT EXISTS inner_thread_recall_users (
+    thread_id TEXT NOT NULL REFERENCES inner_threads(id) ON DELETE CASCADE,
+    user_id   TEXT NOT NULL,
+    PRIMARY KEY (thread_id, user_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_inner_thread_recall_users_user
+    ON inner_thread_recall_users(user_id, thread_id);
+
+  CREATE TABLE IF NOT EXISTS inner_thread_events (
+    id                TEXT PRIMARY KEY,
+    thread_id         TEXT NOT NULL,
+    action            TEXT NOT NULL CHECK(action IN ('create', 'update', 'resolve', 'delete')),
+    request_id        TEXT,
+    guild_id          TEXT,
+    channel_id        TEXT,
+    before_json       TEXT,
+    after_json        TEXT,
+    created_at        INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_inner_thread_events_created
+    ON inner_thread_events(created_at, thread_id);
+
   CREATE TABLE IF NOT EXISTS messages (
     id                  TEXT PRIMARY KEY,
     guild_id            TEXT NOT NULL,
@@ -139,22 +187,6 @@ export const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_message_reactions_message
     ON message_reactions(message_id);
-
-  CREATE TABLE IF NOT EXISTS codex_reasoning_continuations (
-    guild_id          TEXT NOT NULL,
-    channel_id        TEXT NOT NULL,
-    user_id           TEXT NOT NULL,
-    provider          TEXT NOT NULL,
-    model             TEXT NOT NULL,
-    session_id        TEXT NOT NULL,
-    source_message_id TEXT,
-    payload_json      TEXT NOT NULL,
-    created_at        INTEGER NOT NULL,
-    PRIMARY KEY (guild_id, channel_id, user_id, provider, model, session_id)
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_codex_reasoning_continuations_created
-    ON codex_reasoning_continuations(created_at);
 
   CREATE TABLE IF NOT EXISTS restart_recovery (
     singleton   INTEGER PRIMARY KEY CHECK(singleton = 1),
@@ -268,6 +300,26 @@ export const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_agent_jobs_status
     ON agent_jobs(status, created_at);
+
+  CREATE TABLE IF NOT EXISTS staged_assets (
+    ref                  TEXT PRIMARY KEY,
+    job_id               TEXT NOT NULL UNIQUE REFERENCES agent_jobs(id) ON DELETE CASCADE,
+    owner_guild_id       TEXT NOT NULL,
+    owner_channel_id     TEXT NOT NULL,
+    filename             TEXT NOT NULL,
+    content_type         TEXT NOT NULL,
+    storage_path         TEXT NOT NULL,
+    created_at           INTEGER NOT NULL,
+    expires_at           INTEGER NOT NULL,
+    delivered_message_id TEXT,
+    permanent_asset_id   INTEGER REFERENCES message_assets(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_staged_assets_owner
+    ON staged_assets(owner_guild_id, owner_channel_id, created_at);
+
+  CREATE INDEX IF NOT EXISTS idx_staged_assets_expiry
+    ON staged_assets(expires_at);
 
   CREATE TABLE IF NOT EXISTS voice_sessions (
     id                         TEXT PRIMARY KEY,

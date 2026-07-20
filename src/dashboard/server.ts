@@ -40,7 +40,9 @@ interface DashboardManagementApi {
     content: string;
     runToken?: string;
   }) => AwaitableDashboardManagementResult;
-  runPromptLabAmbientInitiative: (input: { guildId: string; channelId: string; kind: "self_expression" | "targeted_checkin"; force?: boolean; runToken?: string }) => AwaitableDashboardManagementResult;
+  runPromptLabAmbientInitiative: (input: { guildId: string; channelId: string; force?: boolean; runToken?: string }) => AwaitableDashboardManagementResult;
+  listInnerThreads: (filter: { guildId?: string; status?: "active" | "resolved"; limit?: number }) => AwaitableDashboardManagementResult;
+  listStagedAssets: (filter: { guildId?: string; channelId?: string; unresolvedOnly?: boolean; limit?: number }) => AwaitableDashboardManagementResult;
   listMemories: (filter: ManagementMemoryFilter) => AwaitableDashboardManagementResult;
   createMemory: (input: ManagementMemoryCreateInput) => AwaitableDashboardManagementResult;
   editMemory: (input: ManagementMemoryEditInput) => AwaitableDashboardManagementResult;
@@ -592,22 +594,50 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
             const body = await readJsonObject(req);
             const guildId = typeof body.guildId === "string" ? body.guildId.trim() : "";
             const channelId = typeof body.channelId === "string" ? body.channelId.trim() : "";
-            const kind = typeof body.kind === "string" ? body.kind.trim() : "";
             const force = body.force === true;
             const runToken = typeof body.runToken === "string" ? body.runToken.trim() : "";
-            if (guildId === "" || channelId === "" || (kind !== "self_expression" && kind !== "targeted_checkin")) {
-              return json({ error: "guildId, channelId, and valid initiative kind are required." }, 400);
+            if (guildId === "" || channelId === "") {
+              return json({ error: "guildId and channelId are required." }, 400);
             }
             return json(await management.runPromptLabAmbientInitiative({
               guildId,
               channelId,
-              kind,
               force,
               ...(runToken !== "" ? { runToken } : {}),
             }));
           } catch (err) {
             return json({ error: err instanceof Error ? err.message : String(err) }, 400);
           }
+        },
+      },
+
+      "/api/management/inner-threads": {
+        GET: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          const url = new URL(req.url);
+          const status = optionalStringParam(url, "status");
+          return json(await management.listInnerThreads({
+            guildId: optionalStringParam(url, "guildId"),
+            ...(status === "active" || status === "resolved" ? { status } : {}),
+            limit: optionalNumberParam(url, "limit"),
+          }));
+        },
+      },
+
+      "/api/management/staged-assets": {
+        GET: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          const url = new URL(req.url);
+          return json(await management.listStagedAssets({
+            guildId: optionalStringParam(url, "guildId"),
+            channelId: optionalStringParam(url, "channelId"),
+            unresolvedOnly: url.searchParams.get("unresolvedOnly") !== "false",
+            limit: optionalNumberParam(url, "limit"),
+          }));
         },
       },
 

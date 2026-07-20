@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/database.ts";
+import type { AssetRef } from "./asset-id.ts";
 import {
   createAgentJobRecord,
   deleteExpiredUnlinkedAgentJobs,
@@ -17,11 +18,18 @@ import {
 } from "../db/agent-job-repository.ts";
 
 export type AgentJobKind = "image_generation";
-export type AgentJobStatus = "queued" | "running" | "cancelling" | "cancelled" | "sent" | "failed" | "timed_out";
+export type AgentJobStatus =
+  | "queued"
+  | "running"
+  | "ready"
+  | "delivered"
+  | "dismissed"
+  | "expired"
+  | "failed";
 export type CancelMode = "replacement" | "explicit_cancel";
 
 export type ImageReference =
-  | { type: "asset"; assetId: number }
+  | { type: "asset"; assetId: AssetRef }
   | { type: "url"; url: string }
   | { type: "avatar"; userId: string };
 
@@ -34,6 +42,7 @@ export interface ImageGenerationJobInput {
 }
 
 export interface ImageGenerationJobResult {
+  stagedAssetRef?: string;
   attachmentId?: string;
   filename?: string;
   contentType?: string;
@@ -101,8 +110,8 @@ export interface EnqueueImageJobResult {
   reason: "created" | "replacement_limit";
 }
 
-const ACTIVE_STATUSES = new Set<AgentJobStatus>(["queued", "running", "cancelling"]);
-const TERMINAL_STATUSES = new Set<AgentJobStatus>(["cancelled", "sent", "failed", "timed_out"]);
+const ACTIVE_STATUSES = new Set<AgentJobStatus>(["queued", "running", "ready"]);
+const TERMINAL_STATUSES = new Set<AgentJobStatus>(["delivered", "dismissed", "expired", "failed"]);
 const UNLINKED_TERMINAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Durable agent-job store with process-local cancellation handles for active workers. */
@@ -203,16 +212,27 @@ export class AgentJobStore {
     return this.get(id);
   }
 
-  markSent(id: string, sentMessageId: string, result: ImageGenerationJobResult, now = Date.now()): AgentJob | undefined {
+  markReady(id: string, result: ImageGenerationJobResult, now = Date.now()): AgentJob | undefined {
     const job = this.get(id);
-    if (job === undefined || !this.isActive(job)) return job;
+    if (job === undefined || job.status !== "running") return job;
     updateAgentJobRecord(this.db, id, {
-      status: "sent",
+      status: "ready",
+      completedAt: now,
+      resultJson: JSON.stringify(result),
+    });
+    this.aborts.delete(id);
+    return this.get(id);
+  }
+
+  markDelivered(id: string, sentMessageId: string, result: ImageGenerationJobResult, now = Date.now()): AgentJob | undefined {
+    const job = this.get(id);
+    if (job === undefined || job.status !== "ready") return job;
+    updateAgentJobRecord(this.db, id, {
+      status: "delivered",
       completedAt: now,
       sentMessageId,
       resultJson: JSON.stringify(result),
     });
-    this.aborts.delete(id);
     return this.get(id);
   }
 
@@ -224,11 +244,14 @@ export class AgentJobStore {
     return this.get(id);
   }
 
-  markTimedOut(id: string, error: string, now = Date.now()): AgentJob | undefined {
+  markExpired(id: string, now = Date.now()): AgentJob | undefined {
     const job = this.get(id);
-    if (job === undefined || TERMINAL_STATUSES.has(job.status)) return job;
-    updateAgentJobRecord(this.db, id, { status: "timed_out", completedAt: now, error });
-    this.aborts.delete(id);
+    if (job === undefined || job.status !== "ready") return job;
+    updateAgentJobRecord(this.db, id, {
+      status: "expired",
+      completedAt: now,
+      error: "Staged output expired before delivery.",
+    });
     return this.get(id);
   }
 
@@ -246,7 +269,7 @@ export class AgentJobStore {
     }
 
     updateAgentJobRecord(this.db, id, {
-      status: "cancelled",
+      status: "dismissed",
       completedAt: now,
       cancelReason: input.reason,
     });
@@ -379,22 +402,24 @@ const CancelAgentJobParams = Type.Object({
 /** Create the narrow cancellation tool for cancellable async jobs. */
 export function createCancelAgentJobTool(deps: {
   store: AgentJobStore;
+  onCancelled?: (jobId: string) => void | Promise<void>;
 }): AgentTool {
   return {
     name: "cancel_agent_job",
     label: "Cancel Job",
     description: "Cancel a visible async job.",
     parameters: CancelAgentJobParams,
-    execute: (_toolCallId, params): Promise<AgentToolResult<{ jobId: string; cancelled: boolean }>> => {
+    async execute(_toolCallId, params): Promise<AgentToolResult<{ jobId: string; cancelled: boolean }>> {
       const p = params as { job_id: string; reason: string; mode: CancelMode };
       const result = deps.store.cancel(p.job_id, {
         reason: p.reason,
         mode: p.mode,
       });
-      return Promise.resolve({
+      if (result.ok) await deps.onCancelled?.(p.job_id);
+      return {
         content: [{ type: "text", text: result.message }],
         details: { jobId: p.job_id, cancelled: result.ok },
-      });
+      };
     },
   };
 }

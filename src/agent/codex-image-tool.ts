@@ -9,7 +9,7 @@ import type { EnqueueImageJobResult, ImageReference } from "./job-runtime.ts";
 import type { ImageGenerationQuality } from "../config/types.ts";
 import { renderPromptTemplate, type PromptTemplateVariables } from "../config/prompt-template.ts";
 import { imageExtensionForMime, imageMimeFromBuffer } from "./image-buffer.ts";
-import { AssetIdSchema, parseAssetId } from "./asset-id.ts";
+import { AssetRefSchema, parseAssetRef, type AssetRef } from "./asset-id.ts";
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_IMAGES_GENERATIONS_URL = "https://chatgpt.com/backend-api/codex/images/generations";
@@ -36,7 +36,7 @@ const CodexGenerateImageParams = Type.Object({
   reference_images: Type.Optional(Type.Array(Type.Union([
     Type.Object({
       type: Type.Literal("asset"),
-      asset_id: AssetIdSchema,
+      asset_id: AssetRefSchema,
     }, { additionalProperties: false }),
     Type.Object({
       type: Type.Literal("url"),
@@ -98,7 +98,7 @@ export interface CodexGenerateImageToolDeps {
   logger?: Logger;
   imageReferenceMaxPerCall: number;
   imageGenerationQuality: ImageGenerationQuality;
-  resolveReferenceImage?: (id: number) => Promise<ReferenceImageInput | null>;
+  resolveReferenceImage?: (id: AssetRef) => Promise<ReferenceImageInput | null>;
   resolveExternalReference?: (url: string, signal?: AbortSignal) => Promise<ReferenceImageInput>;
   resolveAvatarReference?: (userId: string, signal?: AbortSignal) => Promise<ReferenceImageInput | null>;
   onGeneratedImage: (attachment: GeneratedImageAttachment) => void;
@@ -959,8 +959,8 @@ function parseImageReferences(value: unknown): ImageReference[] {
     }
     let reference: ImageReference;
     if (item.type === "asset") {
-      const assetId = parseAssetId(item.asset_id);
-      if (assetId === null) throw new Error("Asset references require a positive asset_id, optionally prefixed with #.");
+      const assetId = parseAssetRef(item.asset_id);
+      if (assetId === null) throw new Error("Asset references require a permanent asset ID or staged handle.");
       reference = { type: "asset", assetId };
     } else if (item.type === "url") {
       if (typeof item.url !== "string") throw new Error("URL references require a URL string.");

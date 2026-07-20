@@ -136,10 +136,6 @@ agentJobs:
     terminalVisibleMs: 600000 # (how long completed/failed jobs stay visible in prompt context)
     maxImageReplacements: 2 # (max times one image request may be replaced)
 
-reasoningContinuation:
-    enabled: true
-    maxAgeMs: 1800000 # Replay latest encrypted Codex native continuation for same guild/channel/user within 30 minutes
-
 personaModes:
     default: normal
     modes:
@@ -201,14 +197,12 @@ trim:
 
 ambientInitiative:
     enabled: true # (allow proactive non-triggered initiative in the main channel)
-    audience: bots # (direct automatic initiative only to configured bot targets)
-    botTargetIds:
+    botContactIds:
         - "1130796465049042954" # (2B production Discord user ID)
-    botPressure: 0.01 # (signed additive pressure bias for bot-directed initiative)
     shadowMode: false # (when true, evaluate/log but do not send automatic initiatives)
     mainChannelId: "" # (empty auto-picks most active human channel over lookback)
-    checkIntervalMinMs: 720000 # (shortest jittered opportunity check interval)
-    checkIntervalMaxMs: 2700000 # (longest jittered opportunity check interval)
+    checkIntervalMinMs: 600000 # (shortest jittered cheap opportunity check interval)
+    checkIntervalMaxMs: 1200000 # (longest jittered cheap opportunity check interval)
     activeHours:
         start: "08:00" # (local start of proactive-speaking window)
         end: "00:00" # (local end; may cross midnight)
@@ -216,33 +210,17 @@ ambientInitiative:
     recentActivityMinMs: 300000 # (avoid speaking immediately after fresh human activity)
     recentActivityMaxMs: 10800000 # (avoid treating dead rooms as opportunities)
     quietWindowMs: 360000 # (minimum quiet after human activity before opportunity)
-    typingActiveMs: 10000 # (typing-start window that blocks initiative)
-    botCooldownMs: 2700000 # (minimum time after visible Delamain output)
-    fatigueAfterAnyMs: 3600000 # (shared chance reduction after any initiative)
+    botCooldownMs: 2700000 # (soft resistance window after visible Delamain output)
+    basePressure: 0.28 # (nominal opportunity pressure before room and inner-thread signals)
+    probabilityThreshold: 0.5 # (minimum evaluator wake probability)
+    confidenceThreshold: 0.6 # (minimum evaluator confidence)
+    cooldownMs: 7200000 # (stronger soft resistance window after a sent initiative)
     maxPerDay: 5 # (shared sent-initiative cap per main channel)
     minMainChannelHumanMessages: 20 # (minimum 7-day human messages for auto main channel)
     mainChannelLookbackDays: 7 # (auto main-channel activity lookback)
     evaluator:
         modelProfile: evaluator
         llmOutputTimeoutMs: 8000 # (timeout for evaluator JSON)
-    selfExpression:
-        enabled: true # (allow spontaneous remarks directed to the configured bot audience)
-        basePressure: 0.28 # (starting chance pressure before room signals)
-        pressureThreshold: 0.5 # (minimum pressure before evaluator spend)
-        probabilityThreshold: 0.5 # (minimum evaluator initiative probability)
-        confidenceThreshold: 0.6 # (minimum evaluator confidence)
-        cooldownMs: 10800000 # (per-kind cooldown after sent self-expression)
-        maxPerDay: 3 # (sent self-expression cap per main channel)
-    targetedCheckin:
-        enabled: true # (inherited human-audience setting; automatic bot audience uses self-expression)
-        basePressure: 0.10 # (starting pressure before open-loop signals)
-        pressureThreshold: 0.5 # (minimum pressure before evaluator spend)
-        probabilityThreshold: 0.75 # (minimum evaluator initiative probability)
-        confidenceThreshold: 0.75 # (minimum evaluator confidence)
-        cooldownMs: 7200000 # (per-kind cooldown after sent targeted follow-up)
-        maxPerDay: 3 # (sent targeted follow-up cap per main channel)
-        maxPerUserPerDay: 1 # (same target user daily cap)
-        openLoopMaxAgeMs: 172800000 # (oldest memory/open-loop anchor allowed)
 
 vpn:
   enabled: false

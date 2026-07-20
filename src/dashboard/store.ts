@@ -466,6 +466,7 @@ function requestLogOutcome(entry: RequestLogEntry): RequestLogOutcome {
     const structured = isRecord(payload?.structuredContent) ? payload.structuredContent : undefined;
     if (tool.tool === "record_memory" && typeof details?.applied === "number" && details.applied > 0) return "effective";
     if (tool.tool === "record_relationship" && Array.isArray(details?.accepted) && details.accepted.length > 0) return "effective";
+    if (tool.tool === "record_inner_threads" && typeof details?.applied === "number" && details.applied > 0) return "effective";
     if (tool.tool === "ambient_decision" && structured?.status === "selected") return "effective";
   }
   return "default";

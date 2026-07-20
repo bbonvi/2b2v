@@ -299,7 +299,8 @@
   .event-ambient-initiative { color: #2dd4bf; }
   .event-ambient-attention-evaluator { color: #38bdf8; }
   .event-ambient-initiative-evaluator { color: #2dd4bf; }
-  .event-background-memory-extraction { color: #34d399; }
+  .event-background-memory-extraction,
+  .event-inner-thread-maintenance { color: #34d399; }
   .event-async-image-generation { color: #fb7185; }
   .event-prompt-lab { color: #c084fc; }
   .event-custom { color: #e5e7eb; }
@@ -1812,6 +1813,7 @@
     <button class="tab-btn active" id="tab-logs">Logs</button>
     <button class="tab-btn" id="tab-management">Management</button>
     <button class="tab-btn" id="tab-memories">Memories</button>
+    <button class="tab-btn" id="tab-inner-threads">Inner Threads</button>
     <button class="tab-btn" id="tab-relationships">Relationship Lab</button>
     <button class="tab-btn" id="tab-voice">Voice</button>
   </div>
@@ -1875,8 +1877,7 @@
     <div class="prompt-lab-run">
       <button class="btn primary" id="lab-run">Run as mention</button>
       <div class="prompt-lab-initiative">
-        <button class="btn" data-initiative-kind="self_expression">Draft self-expression</button>
-        <button class="btn" data-initiative-kind="targeted_checkin">Draft targeted follow-up</button>
+        <button class="btn" id="lab-initiative">Draft cognitive opportunity</button>
         <label><input type="checkbox" id="lab-initiative-force"> force</label>
       </div>
       <div class="prompt-lab-status" id="lab-status">dry-run writes</div>
@@ -1894,6 +1895,28 @@
 
 <div class="content" id="memories-view" hidden>
   <div id="memories-tab-root"></div>
+</div>
+
+<div class="content" id="inner-threads-view" hidden>
+  <div class="management-toolbar">
+    <select id="it-guild"><option value="">All guild scopes</option></select>
+    <select id="it-status">
+      <option value="active">Active</option>
+      <option value="resolved">Resolved</option>
+      <option value="">All states</option>
+    </select>
+    <button class="btn" id="it-refresh">Refresh</button>
+  </div>
+  <div class="management-section-title">
+    <span>Durable private continuity</span>
+    <span id="it-count"></span>
+  </div>
+  <div class="management-list" id="it-list"></div>
+  <div class="management-section-title">
+    <span>Unresolved staged assets</span>
+    <span>ready async outputs awaiting a decision</span>
+  </div>
+  <div class="management-list" id="it-assets"></div>
 </div>
 
 <div class="content" id="relationships-view" hidden>
@@ -1933,12 +1956,14 @@
   const tabLogs = document.getElementById('tab-logs');
   const tabManagement = document.getElementById('tab-management');
   const tabMemories = document.getElementById('tab-memories');
+  const tabInnerThreads = document.getElementById('tab-inner-threads');
   const tabRelationship = document.getElementById('tab-relationships');
   const tabVoice = document.getElementById('tab-voice');
   const logFilters = document.getElementById('log-filters');
   const logView = document.getElementById('log-view');
   const managementView = document.getElementById('management-view');
   const memoriesView = document.getElementById('memories-view');
+  const innerThreadsView = document.getElementById('inner-threads-view');
   const relationshipsView = document.getElementById('relationships-view');
   const voiceView = document.getElementById('voice-view');
   const mGuild = document.getElementById('m-guild');
@@ -1955,13 +1980,19 @@
   const labUser = document.getElementById('lab-user');
   const labPrompt = document.getElementById('lab-prompt');
   const labRun = document.getElementById('lab-run');
-  const labInitiativeButtons = Array.from(document.querySelectorAll('[data-initiative-kind]'));
+  const labInitiativeButton = document.getElementById('lab-initiative');
   const labInitiativeForce = document.getElementById('lab-initiative-force');
   const labStatus = document.getElementById('lab-status');
   const labReport = document.getElementById('lab-report');
   const managementStateKey = '2b2v.dashboard.management.v1';
   const promptLabSenderStateKey = '2b2v.dashboard.promptLab.sender.v1';
-  let activeTab = location.hash === '#management' ? 'management' : location.hash === '#memories' ? 'memories' : location.hash === '#relationships' ? 'relationships' : location.hash === '#voice' ? 'voice' : 'logs';
+  const itGuild = document.getElementById('it-guild');
+  const itStatus = document.getElementById('it-status');
+  const itRefresh = document.getElementById('it-refresh');
+  const itCount = document.getElementById('it-count');
+  const itList = document.getElementById('it-list');
+  const itAssets = document.getElementById('it-assets');
+  let activeTab = location.hash === '#management' ? 'management' : location.hash === '#memories' ? 'memories' : location.hash === '#inner-threads' ? 'inner-threads' : location.hash === '#relationships' ? 'relationships' : location.hash === '#voice' ? 'voice' : 'logs';
   modeRail.style.display = activeTab === 'logs' ? '' : 'none';
   let managementDirectory = { guilds: [], channels: [], users: [] };
   let managementMessages = [];
@@ -2156,6 +2187,7 @@
     const kind = triggerKind(t);
     if (kind === 'background_memory_extraction') return 'memory extraction';
     if (kind === 'relationships_extraction') return 'relationships extraction';
+    if (kind === 'inner_thread_maintenance') return 'inner-thread maintenance';
     if (kind === 'async_image_generation') return 'async image';
     if (kind === 'prompt_lab') return 'prompt lab';
     if (kind === 'ambient_attention_evaluator') return 'ambient eval';
@@ -2882,19 +2914,23 @@
     tabLogs.classList.toggle('active', tab === 'logs');
     tabManagement.classList.toggle('active', tab === 'management');
     tabMemories.classList.toggle('active', tab === 'memories');
+    tabInnerThreads.classList.toggle('active', tab === 'inner-threads');
     tabRelationship.classList.toggle('active', tab === 'relationships');
     tabVoice.classList.toggle('active', tab === 'voice');
     logView.hidden = tab !== 'logs';
     managementView.hidden = tab !== 'management';
     memoriesView.hidden = tab !== 'memories';
+    innerThreadsView.hidden = tab !== 'inner-threads';
     relationshipsView.hidden = tab !== 'relationships';
     voiceView.hidden = tab !== 'voice';
     modeRail.style.display = tab === 'logs' ? '' : 'none';
     logFilters.style.display = tab === 'logs' ? 'flex' : 'none';
-    location.hash = tab === 'management' ? 'management' : tab === 'memories' ? 'memories' : tab === 'relationships' ? 'relationships' : tab === 'voice' ? 'voice' : 'logs';
+    location.hash = tab === 'management' ? 'management' : tab === 'memories' ? 'memories' : tab === 'inner-threads' ? 'inner-threads' : tab === 'relationships' ? 'relationships' : tab === 'voice' ? 'voice' : 'logs';
     if (tab === 'management') {
       refreshManagement();
       if (logPollingActive && managementPollTimer === null) pollManagement();
+    } else if (tab === 'inner-threads') {
+      refreshInnerThreads();
     } else if (managementPollTimer !== null) {
       clearTimeout(managementPollTimer);
       managementPollTimer = null;
@@ -2924,7 +2960,7 @@
       : 'Delete selected (' + selectedManagementMessages.size + ')';
     promptLab.classList.toggle('active', hasExactChannel);
     labRun.disabled = !hasExactChannel || labUser.value === '' || labPrompt.value.trim() === '';
-    labInitiativeButtons.forEach(btn => { btn.disabled = !hasExactChannel; });
+    labInitiativeButton.disabled = !hasExactChannel;
   }
 
   function renderPromptLabUsers() {
@@ -3143,6 +3179,59 @@
     syncManagementDeleteButtons();
   }
 
+  async function refreshInnerThreads() {
+    if (activeTab !== 'inner-threads') return;
+    await fetchManagementDirectory(true);
+    const selectedGuild = itGuild.value;
+    itGuild.innerHTML = '<option value="">All guild scopes</option>'
+      + (managementDirectory.guilds || []).map(guild =>
+        optionHtml(guild.id, guild.name + ' · ' + guild.id, guild.id === selectedGuild ? ' selected' : '')
+      ).join('');
+    const params = new URLSearchParams({ limit: '200' });
+    if (itGuild.value !== '') params.set('guildId', itGuild.value);
+    if (itStatus.value !== '') params.set('status', itStatus.value);
+    const assetParams = new URLSearchParams({ unresolvedOnly: 'true', limit: '100' });
+    if (itGuild.value !== '') assetParams.set('guildId', itGuild.value);
+    const [threadRes, assetRes] = await Promise.all([
+      fetch('/api/management/inner-threads?' + params.toString()),
+      fetch('/api/management/staged-assets?' + assetParams.toString())
+    ]);
+    if (threadRes.status === 401 || assetRes.status === 401) { location.href = '/login'; return; }
+    if (!threadRes.ok || !assetRes.ok) throw new Error('Unable to load inner continuity state');
+    const threadBody = await threadRes.json();
+    const assetBody = await assetRes.json();
+    const threads = threadBody.threads || [];
+    const assets = assetBody.assets || [];
+    itCount.textContent = threads.length + (threads.length === 1 ? ' thread' : ' threads');
+    itList.innerHTML = threads.length === 0
+      ? '<div class="empty-state">No matching inner threads.</div>'
+      : threads.map(thread => {
+          const scope = thread.recallScope === 'anywhere' ? 'anywhere' : 'guild ' + thread.recallGuildId;
+          const users = thread.recallMode === 'always' ? 'always' : 'with ' + (thread.recallUserIds || []).join(', ');
+          return '<div class="management-row">'
+            + '<div><div class="management-meta">'
+              + '<span>' + esc(thread.status.toUpperCase()) + '</span>'
+              + '<span>pressure ' + Number(thread.pressure).toFixed(2) + '</span>'
+              + '<span>salience ' + Number(thread.salience).toFixed(2) + '</span>'
+              + '<span>' + esc(scope) + '</span>'
+              + '<span>' + esc(users) + '</span>'
+              + '<span>updated ' + esc(fmtDateTime(thread.updatedAt)) + '</span>'
+            + '</div><div class="management-content">' + esc(thread.content) + '</div>'
+            + '<div class="management-meta"><span>about ' + esc(thread.aboutType) + '</span>'
+              + (thread.aboutUserId ? '<span>user ' + esc(thread.aboutUserId) + '</span>' : '')
+              + '<span>id ' + esc(thread.id) + '</span></div></div>'
+          + '</div>';
+        }).join('');
+    itAssets.innerHTML = assets.length === 0
+      ? '<div class="empty-state">No unresolved staged assets.</div>'
+      : assets.map(asset => '<div class="management-row"><div>'
+          + '<div class="management-meta"><span>' + esc(asset.ref) + '</span><span>job ' + esc(asset.jobId) + '</span>'
+          + '<span>guild ' + esc(asset.ownerGuildId) + ' / channel ' + esc(asset.ownerChannelId) + '</span>'
+          + '<span>expires ' + esc(fmtDateTime(asset.expiresAt)) + '</span></div>'
+          + '<div class="management-content">' + esc(asset.filename) + ' · ' + esc(asset.contentType) + '</div>'
+        + '</div></div>').join('');
+  }
+
   async function fetchManagementData(forceDomUpdate) {
     const messageQuery = managementParams().toString();
     const messagesRes = await fetch('/api/management/messages?' + messageQuery);
@@ -3280,7 +3369,7 @@
     }
   }
 
-  async function runPromptLabAmbientInitiative(kind) {
+  async function runPromptLabAmbientInitiative() {
     const guildId = mGuild.value;
     const channelId = mChannel.value;
     if (guildId === '' || channelId === '') return;
@@ -3288,7 +3377,7 @@
     promptLabPollSeq += 1;
     const pollSeq = promptLabPollSeq;
     labRun.disabled = true;
-    labInitiativeButtons.forEach(btn => { btn.disabled = true; });
+    labInitiativeButton.disabled = true;
     labStatus.textContent = 'RUNNING';
     labStatus.classList.add('running');
     labStatus.classList.remove('error');
@@ -3308,7 +3397,7 @@
       const r = await fetch('/api/management/prompt-lab/ambient-initiative', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ guildId, channelId, kind, force: labInitiativeForce.checked, runToken })
+        body: JSON.stringify({ guildId, channelId, force: labInitiativeForce.checked, runToken })
       });
       promptLabPollSeq += 1;
       if (r.status === 401) { location.href = '/login'; return; }
@@ -3453,8 +3542,12 @@
   tabLogs.addEventListener('click', () => { setTab('logs'); });
   tabManagement.addEventListener('click', () => { setTab('management'); });
   tabMemories.addEventListener('click', () => { setTab('memories'); });
+  tabInnerThreads.addEventListener('click', () => { setTab('inner-threads'); });
   tabRelationship.addEventListener('click', () => { setTab('relationships'); });
   tabVoice.addEventListener('click', () => { setTab('voice'); });
+  itRefresh.addEventListener('click', () => { refreshInnerThreads(); });
+  itGuild.addEventListener('change', () => { refreshInnerThreads(); });
+  itStatus.addEventListener('change', () => { refreshInnerThreads(); });
   mRefresh.addEventListener('click', () => { refreshManagement(true); });
   mDeleteSelected.addEventListener('click', () => { deleteSelectedManagementMessages(); });
   mDeleteLast.addEventListener('click', () => { deleteLatestManagementMessages(); });
@@ -3484,12 +3577,7 @@
     }
   });
   labRun.addEventListener('click', () => { runPromptLab(); });
-  labInitiativeButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const kind = btn.getAttribute('data-initiative-kind');
-      if (kind) runPromptLabAmbientInitiative(kind);
-    });
-  });
+  labInitiativeButton.addEventListener('click', () => { runPromptLabAmbientInitiative(); });
 
   async function refreshStatus() {
     try {

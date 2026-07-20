@@ -210,7 +210,7 @@ describe("RequestLogStore", () => {
     expect(opts.usernames.sort()).toEqual(["alice", "bob"]);
   });
 
-  test("groups reply, memory, relationship, and ambient phases by source message", () => {
+  test("groups reply, memory, relationship, inner-thread, and ambient phases by source message", () => {
     const store = new RequestLogStore();
     const context = { messageId: "m1", authorUsername: "alice", content: "hello" };
     store.push(makeEntry({ requestId: "reply", triggerContext: context, timestamp: "2026-06-17T00:00:01.000Z" }));
@@ -239,10 +239,22 @@ describe("RequestLogStore", () => {
       }],
     }));
     store.push(makeEntry({
+      requestId: "inner-thread",
+      trigger: { type: "inner_thread_maintenance", sourceRequestId: "reply" },
+      triggerContext: context,
+      timestamp: "2026-06-17T00:00:04.000Z",
+      tools: [{
+        tool: "record_inner_threads",
+        args: { actions: [{ action: "create" }] },
+        status: "completed",
+        resultPayload: { details: { applied: 1, errors: [] } },
+      }],
+    }));
+    store.push(makeEntry({
       requestId: "ambient",
       trigger: { type: "ambient_attention_evaluator", kind: "ambient_pickup" },
       triggerContext: context,
-      timestamp: "2026-06-17T00:00:04.000Z",
+      timestamp: "2026-06-17T00:00:05.000Z",
       tools: [{
         tool: "ambient_decision",
         args: {},
@@ -254,12 +266,12 @@ describe("RequestLogStore", () => {
     const groups = store.queryGroups();
     expect(groups).toHaveLength(1);
     expect(groups[0]?.groupId).toBe("message:g1:c1:m1");
-    expect(groups[0]?.requests.map((request) => request.requestId)).toEqual(["reply", "memory", "relationship", "ambient"]);
+    expect(groups[0]?.requests.map((request) => request.requestId)).toEqual(["reply", "memory", "relationship", "inner-thread", "ambient"]);
     expect(groups[0]?.outcome).toBe("effective");
-    expect(groups[0]?.requests.map((request) => request.outcome)).toEqual(["default", "effective", "effective", "effective"]);
+    expect(groups[0]?.requests.map((request) => request.outcome)).toEqual(["default", "effective", "effective", "effective", "effective"]);
 
     const detail = store.getSanitizedGroup("message:g1:c1:m1");
-    expect(detail?.entries.map((item) => item.entry.requestId)).toEqual(["reply", "memory", "relationship", "ambient"]);
+    expect(detail?.entries.map((item) => item.entry.requestId)).toEqual(["reply", "memory", "relationship", "inner-thread", "ambient"]);
   });
 
   test("groups synthetic scheduled-task phases without treating them as messages", () => {

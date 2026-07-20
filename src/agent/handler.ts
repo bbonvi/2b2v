@@ -2,7 +2,7 @@ import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { validateToolArguments, type ToolCall } from "@earendil-works/pi-ai";
 import { createHash } from "node:crypto";
 import { shouldRespond, type TriggerInput, type TriggerResult } from "./triggers.ts";
-import { type AssembledContext, type ContextSection } from "./context-assembly.ts";
+import type { AssembledContext } from "./context-assembly.ts";
 import { wrapToolsWithTiming, type TimingState } from "./tool-timing.ts";
 import type {
   LlmProvider,
@@ -12,7 +12,6 @@ import type {
   PromptTransportSectionConfig,
   PromptTransportSectionId,
   ProviderPromptTransportConfig,
-  TriggerInstructions,
 } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
 import {
@@ -33,7 +32,6 @@ import type {
   OpenRouterTextPart,
   OpenRouterToolCall,
   OpenRouterToolDefinition,
-  ProviderNativeAssistantContent,
 } from "../llm/types.ts";
 import {
   getStablePromptSections,
@@ -54,6 +52,7 @@ import { createLoadSkillTool } from "./load-skill-tool.ts";
 import { typingSimulationDelayMs } from "./typing-simulation.ts";
 import { formatAssetMeta } from "./history-formatting.ts";
 import type { HistoryAsset } from "./history-types.ts";
+import type { AssetRef } from "./asset-id.ts";
 
 /** Minimal abstraction over a Discord message for the handler. */
 export interface IncomingMessage {
@@ -70,6 +69,8 @@ export interface IncomingMessage {
   botUserId: string;
   mentionedUserIds: string[];
   translatedContent: string;
+  /** The canonical chat-history section already contains this Discord content. */
+  currentContentInHistory?: boolean;
   /** Full visible current-turn event text, including debounced same-author followups. */
   eventContent?: string;
   /** Voice and other non-message turns can replace Discord-message prompt headings. */
@@ -101,23 +102,8 @@ export interface MaintenancePromptContext {
   initialRoles: PromptTransportRole[];
   sessionId?: string;
   promptCaching: PromptCachingConfig;
-}
-
-export interface NativeReasoningContinuationKey {
-  guildId: string;
-  channelId: string;
-  userId: string;
-  provider: LlmProvider;
-  model: string;
-  sessionId?: string;
-}
-
-export interface NativeReasoningContinuationStore {
-  load(input: NativeReasoningContinuationKey & { maxAgeMs: number }): ProviderNativeAssistantContent[] | undefined;
-  save(input: NativeReasoningContinuationKey & {
-    sourceMessageId?: string;
-    providerNativeContent: ProviderNativeAssistantContent[];
-  }): void;
+  /** Exact provider-visible tool contract from the actor turn that maintenance must preserve. */
+  toolContractSignature?: string;
 }
 
 export interface MemoryExtractionRequest {
@@ -247,7 +233,7 @@ export type MessageSender = (
 ) => Promise<{ sentMessageId: string; warnings?: string[] }>;
 
 /** Resolves stored chat asset IDs into Discord-ready file attachments. */
-export type AssetAttachmentResolver = (assetIds: number[]) => Promise<OutboundAttachment[]>;
+export type AssetAttachmentResolver = (assetIds: AssetRef[]) => Promise<OutboundAttachment[]>;
 
 /** Optional streamed response transport used by live voice instead of Discord text dispatch. */
 export interface ExternalResponseSink {
@@ -288,7 +274,6 @@ export interface HandlerDeps {
   generateSpeech?: (text: string) => Promise<TtsResult>;
   forceTrigger?: boolean;
   triggerOverride?: NonNullable<TriggerResult>;
-  triggerInstructions?: TriggerInstructions;
   completeChat?: ChatCompleteFn;
   afterReply?: (request: MemoryExtractionRequest) => Promise<void>;
   /** Registers fire-and-forget maintenance so coordinated shutdown can await it. */
@@ -299,8 +284,6 @@ export interface HandlerDeps {
   modelImageInputSupport?: ModelImageInputSupport;
   /** Consume generated image attachments by opaque IDs returned from image tools. */
   consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
-  /** Attachments already produced before this reply loop; sent with the first visible message. */
-  initialPendingAttachments?: OutboundAttachment[];
   /** Resolves asset_ids on <message> envelopes into outgoing Discord attachments. */
   resolveAssetAttachments?: AssetAttachmentResolver;
   /** Disable streamed Discord sends so callers can re-check state before final delivery. */
@@ -311,12 +294,8 @@ export interface HandlerDeps {
   modelProfile?: string;
   /** Optional caller cancellation, used for voice barge-in and session departure. */
   abortSignal?: AbortSignal;
-  /** Override default first-message Discord reply anchoring. */
-  replyFirstOverride?: boolean;
   /** Called immediately before final visible sends; false drops the reply as stale. */
-  preSendCheck?: () => boolean | Promise<boolean>;
-  /** Opaque Codex native continuation storage for cross-run reasoning replay. */
-  nativeReasoningContinuation?: NativeReasoningContinuationStore;
+  preSendCheck?: (draftText: string) => boolean | Promise<boolean>;
   scheduledTaskRun?: boolean;
 }
 
@@ -343,28 +322,6 @@ type DispatchSegment =
 
 const DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS = 2000;
 const MAX_INTERNAL_SKILL_LOADS_PER_LOOP = 8;
-
-/**
- * Inject a trigger-specific instruction into context sections.
- * Inserts before the volatile response instruction section if present.
- * @internal Exported for testing.
- */
-export function injectTriggerInstruction(
-  sections: ContextSection[],
-  instruction: string
-): ContextSection[] {
-  const newSection: ContextSection = {
-    label: "Trigger Instruction",
-    text: `## Trigger Context\n${instruction}`,
-    cached: false,
-    role: "developer",
-  };
-  const lateIdx = sections.findIndex((s) => s.label === "Response Instruction");
-  if (lateIdx === -1) {
-    return [...sections, newSection];
-  }
-  return [...sections.slice(0, lateIdx), newSection, ...sections.slice(lateIdx)];
-}
 
 class ModelOutputTimeoutError extends Error {
   constructor(timeoutMs: number) {
@@ -658,6 +615,12 @@ function toolToOpenRouterTool(tool: AgentTool): OpenRouterToolDefinition {
   };
 }
 
+function toolContractSignature(tools: readonly AgentTool[]): string {
+  return createHash("sha256")
+    .update(JSON.stringify(tools.map(toolToOpenRouterTool)))
+    .digest("hex");
+}
+
 function parseToolArguments(call: OpenRouterToolCall): Record<string, unknown> {
   let parsed: unknown;
   try {
@@ -803,12 +766,11 @@ function buildSkillsInstruction(runtimePrompts: RuntimePromptBundle | undefined)
   return runtimePrompts?.skills.indexPrompt.trim() ?? "";
 }
 
-function buildFinalActionInstruction(runtimePrompts: RuntimePromptBundle | undefined, triggerInstruction?: string, scheduledTaskRun = false): string {
+function buildFinalActionInstruction(runtimePrompts: RuntimePromptBundle | undefined, scheduledTaskRun = false): string {
   const base = runtimePrompts?.finalActionInstruction.trim() ?? "";
   const instruction = base !== ""
     ? base
     : "## Final Action Instruction\nContinue the Discord room in character. Emit only your next runtime action: visible speech, silence, voice, or private action. Do not explain the choice.";
-  const trigger = triggerInstruction?.trim() ?? "";
   const modeKey = scheduledTaskRun ? "scheduled-task-execution-mode" : "visible-reply-execution-mode";
   const externalMode = runtimePrompts?.contextTemplates[modeKey]?.trim() ?? "";
   const mode = externalMode !== ""
@@ -817,8 +779,7 @@ function buildFinalActionInstruction(runtimePrompts: RuntimePromptBundle | undef
       ? "## Scheduled Task Context\nRun the scheduled task privately. Produce visible Discord output only when useful or requested; otherwise output <ignore>. Do not call record_memory or record_relationship here."
       : "## Execution Mode: Visible Reply\nProduce your visible Discord action. Do not call record_memory or record_relationship in this mode.";
   const withMode = `${mode}\n\n${instruction}`;
-  if (trigger === "") return withMode;
-  return `${withMode}\n\n## Trigger Context\n${trigger}`;
+  return withMode;
 }
 
 function promptTransportForProvider(
@@ -889,6 +850,7 @@ const VOLATILE_SECTION_IDS_BY_LABEL: Readonly<Record<string, PromptTransportSect
   "Discord Context": "discordContext",
   "Upcoming Schedules": "upcomingSchedules",
   "Memories": "memories",
+  "Inner Threads": "memories",
   "Chat History — Newer": "recentHistory",
   "Server Members": "serverMembers",
   "Threads In This Channel": "threadsInChannel",
@@ -959,25 +921,25 @@ function codexSystemPromptForStableSections(
 
 function buildCurrentMessageMetadata(msg: IncomingMessage, runtimePrompts?: RuntimePromptBundle): string {
   const lines = [
-    ...(msg.guildId !== undefined ? [`Trigger GuildID: ${msg.guildId}`] : []),
-    ...(msg.guildName !== undefined && msg.guildName !== "" ? [`Trigger GuildName: ${msg.guildName}`] : []),
-    ...(msg.channelId !== undefined ? [`Trigger ChannelID: ${msg.channelId}`] : []),
-    ...(msg.channelName !== undefined && msg.channelName !== "" ? [`Trigger ChannelName: ${msg.channelName}`] : []),
-    `Trigger MsgID: ${msg.messageId ?? "unknown"}`,
-    `Trigger Author: @${msg.authorUsername}`,
-    `Trigger AuthorID: ${msg.authorId}`,
+    ...(msg.guildId !== undefined ? [`GuildID: ${msg.guildId}`] : []),
+    ...(msg.guildName !== undefined && msg.guildName !== "" ? [`GuildName: ${msg.guildName}`] : []),
+    ...(msg.channelId !== undefined ? [`ChannelID: ${msg.channelId}`] : []),
+    ...(msg.channelName !== undefined && msg.channelName !== "" ? [`ChannelName: ${msg.channelName}`] : []),
+    `MsgID: ${msg.messageId ?? "unknown"}`,
+    `Author: @${msg.authorUsername}`,
+    `AuthorID: ${msg.authorId}`,
   ];
   if (msg.authorDisplayName !== undefined && msg.authorDisplayName !== "" && msg.authorDisplayName !== msg.authorUsername) {
-    lines.push(`Trigger DisplayName: ${msg.authorDisplayName}`);
+    lines.push(`DisplayName: ${msg.authorDisplayName}`);
   }
   if (msg.authorGlobalName !== undefined && msg.authorGlobalName !== "" && msg.authorGlobalName !== msg.authorUsername && msg.authorGlobalName !== msg.authorDisplayName) {
-    lines.push(`Trigger GlobalName: ${msg.authorGlobalName}`);
+    lines.push(`GlobalName: ${msg.authorGlobalName}`);
   }
   if (msg.authorIsBot !== undefined) {
-    lines.push(`Trigger AuthorIsBot: ${msg.authorIsBot ? "true" : "false"}`);
+    lines.push(`AuthorIsBot: ${msg.authorIsBot ? "true" : "false"}`);
   }
   if (msg.replyToMessageId !== undefined) {
-    lines.push(`Trigger ReplyToMsgID: ${msg.replyToMessageId}`);
+    lines.push(`ReplyToMsgID: ${msg.replyToMessageId}`);
   }
   if (msg.assets !== undefined) lines.push(...formatAssetMeta("", msg.assets));
   if (msg.repliedToBotRouteSource !== undefined) {
@@ -1020,7 +982,7 @@ function buildInitialMessages(
 ): OpenRouterMessage[] {
   const roleAt = (index: number): PromptTransportRole => roles[index] ?? "user";
   const currentMessageMetadata = [
-    `## ${msg.eventPrompt?.metadataHeading ?? "Discord Event Metadata"}`,
+    `## ${msg.eventPrompt?.metadataHeading ?? "Current Discord Message Metadata"}`,
     msg.eventPrompt?.metadataText ?? buildCurrentMessageMetadata(msg, runtimePrompts),
   ].join("\n");
 
@@ -1040,10 +1002,12 @@ function buildInitialMessages(
   }
 
   const text = [
-      currentMessageMetadata,
+      msg.currentContentInHistory === true
+        ? "## Current Discord State\nThe newest entries in Chat History contain the current Discord activity."
+        : currentMessageMetadata,
       imageMetadata !== "" ? `## Event Images\n${imageMetadata}` : "",
-      `## ${msg.eventPrompt?.contentHeading ?? "New Discord Event"}`,
-      msg.eventContent ?? userContent,
+      msg.currentContentInHistory === true ? "" : `## ${msg.eventPrompt?.contentHeading ?? "Current Discord Message"}`,
+      msg.currentContentInHistory === true ? "" : msg.eventContent ?? userContent,
   ].filter((part) => part !== "").join("\n\n");
   const images = imagePartsFromCurrentTurn(msg);
   messages.push({
@@ -1068,25 +1032,6 @@ function assistantMessageFromResult(result: OpenRouterChatResult): OpenRouterMes
       ? { providerNativeContent: result.providerNativeContent }
       : {}),
   };
-}
-
-function assistantMessageFromNativeContinuation(providerNativeContent: ProviderNativeAssistantContent[]): OpenRouterMessage {
-  return {
-    role: "assistant",
-    content: null,
-    providerNativeContent,
-  };
-}
-
-function latestProviderNativeContent(messages: readonly OpenRouterMessage[]): ProviderNativeAssistantContent[] | undefined {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message?.role !== "assistant") continue;
-    if (message.providerNativeContent !== undefined && message.providerNativeContent.length > 0) {
-      return message.providerNativeContent;
-    }
-  }
-  return undefined;
 }
 
 function toolMessage(call: OpenRouterToolCall, content: string): OpenRouterMessage {
@@ -1847,14 +1792,6 @@ function parseToolArgumentsSafe(call: OpenRouterToolCall): Record<string, unknow
   }
 }
 
-function chooseReplyMode(trigger: NonNullable<TriggerResult>): boolean {
-  return trigger.reason === "mention" || trigger.reason === "keyword" || trigger.reason === "lingering_attention";
-}
-
-function allowsReasoningContinuation(trigger: NonNullable<TriggerResult>): boolean {
-  return trigger.reason === "mention" || trigger.reason === "keyword" || trigger.reason === "random";
-}
-
 function assertSentMessageId(result: { sentMessageId: string }): void {
   if (result.sentMessageId === "") {
     throw new Error("Failed to send final Discord message: no sent message ID returned.");
@@ -2494,6 +2431,11 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
   delete providerParams.signal;
   delete providerParams.onPayload;
   const promptCaching = profile.promptCaching;
+  if (inheritedPromptCompatible
+    && inheritedPrompt.toolContractSignature !== undefined
+    && inheritedPrompt.toolContractSignature !== toolContractSignature(input.tools)) {
+    throw new Error("Maintenance tool contract diverged from the actor turn; refusing a cache-breaking continuation.");
+  }
 
   const stableSections = inheritedPromptCompatible ? inheritedPrompt.stableSections : sectionsForStablePrompt(
     input.systemPrompt ?? "",
@@ -2619,7 +2561,6 @@ export async function handleMessage(
 
   deps.onTriggered?.(triggerResult);
 
-  const triggerInstruction = deps.triggerInstructions?.[triggerResult.reason];
   const context = deps.context;
 
   const profileId = deps.modelProfile ?? deps.guildConfig.modelProfile;
@@ -2664,21 +2605,10 @@ export async function handleMessage(
   );
   const userContent = context.userMessage !== "" ? context.userMessage : msg.translatedContent;
   const volatileMessages = buildVolatileTurnMessages(context);
-  const finalActionInstruction = buildFinalActionInstruction(deps.runtimePrompts, triggerInstruction, deps.scheduledTaskRun === true);
+  const finalActionInstruction = buildFinalActionInstruction(deps.runtimePrompts, deps.scheduledTaskRun === true);
   const initialRoles = initialMessageRoles(transport, volatileMessages, finalActionInstruction !== "");
   const reqLog = deps.requestLog;
   const sessionId = buildPromptCacheSessionId(reqLog, `${model.llmProvider}:${model.id}`);
-  const reasoningContinuationEnabled = model.llmProvider === "openai-codex"
-    && deps.guildConfig.reasoningContinuation.enabled
-    && allowsReasoningContinuation(triggerResult);
-  const continuationKey: NativeReasoningContinuationKey = {
-    guildId: msg.guildId ?? deps.guildConfig.guildId,
-    channelId: msg.channelId ?? deps.currentChannelId ?? "",
-    userId: msg.authorId,
-    provider: model.llmProvider,
-    model: model.id,
-    ...(sessionId !== undefined ? { sessionId } : {}),
-  };
   const maintenancePromptContext: MaintenancePromptContext = {
     provider: model.llmProvider,
     model: model.id,
@@ -2687,12 +2617,12 @@ export async function handleMessage(
     initialRoles,
     ...(sessionId !== undefined ? { sessionId } : {}),
     promptCaching: profile.promptCaching,
+    toolContractSignature: toolContractSignature(tools),
   };
   const startedAt = Date.now();
   let maintenanceTranscript: OpenRouterMessage[] | undefined;
   let finalText = "";
   let finalStopReason: string | undefined;
-  let mainReplyProviderNativeContent: ProviderNativeAssistantContent[] | undefined;
   const scheduleMemoryPass = (assistantReply: string, visibleReplySent: boolean): void => {
     const task = deps.afterReply?.({
       sourceMessageId: msg.messageId,
@@ -2736,10 +2666,10 @@ export async function handleMessage(
       wallController.abort(new AgentTimeBudgetExceededError(deps.guildConfig.replyLoop.wallClockTimeoutMs));
     }, deps.guildConfig.replyLoop.wallClockTimeoutMs);
 
-    const pendingAttachments: OutboundAttachment[] = [...(deps.initialPendingAttachments ?? [])];
+    const pendingAttachments: OutboundAttachment[] = [];
     const intermediateStatus = { sent: false, sendCount: 0 };
     const hasVisibleOutput = (): boolean => intermediateStatus.sent || deps.hasExternalVisibleOutput?.() === true;
-    const replyFirst = deps.replyFirstOverride ?? chooseReplyMode(triggerResult);
+    const replyFirst = false;
     const liveMessageTypingHoldMs = deps.liveMessageTypingHoldMs ?? DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS;
     const typingHoldMsForSegment = deps.guildConfig.typingSimulation.enabled
       ? (segment: DispatchSegment): number => typingSimulationDelayMs(
@@ -2817,18 +2747,6 @@ export async function handleMessage(
         model.llmProvider === "openai-codex" ? [] : initialRoles,
         finalActionInstruction,
       );
-      if (
-        reasoningContinuationEnabled
-        && continuationKey.channelId !== ""
-      ) {
-        const providerNativeContent = deps.nativeReasoningContinuation?.load({
-          ...continuationKey,
-          maxAgeMs: deps.guildConfig.reasoningContinuation.maxAgeMs,
-        });
-        if (providerNativeContent !== undefined && providerNativeContent.length > 0) {
-          mainMessages.splice(volatileMessages.length, 0, assistantMessageFromNativeContinuation(providerNativeContent));
-        }
-      }
       maintenanceTranscript = mainMessages;
       const result = await runNativeToolLoop({
         complete,
@@ -2904,7 +2822,6 @@ export async function handleMessage(
       });
       finalText = result.text;
       finalStopReason = result.stopReason;
-      mainReplyProviderNativeContent = latestProviderNativeContent(mainMessages);
     } finally {
       clearTimeout(wallTimeout);
       deps.abortSignal?.removeEventListener("abort", onCallerAbort);
@@ -2970,7 +2887,7 @@ export async function handleMessage(
       deps.log?.debug("native_reply_empty_after_directives", { durationMs: Date.now() - startedAt });
       return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
     }
-    if (deps.preSendCheck !== undefined && !await deps.preSendCheck()) {
+    if (deps.preSendCheck !== undefined && !await deps.preSendCheck(finalText)) {
       deps.log?.debug("native_reply_dropped_before_send", { durationMs: Date.now() - startedAt });
       return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
     }
@@ -2998,18 +2915,6 @@ export async function handleMessage(
     }
 
     const memoryReply = renderSegmentsForMemory(parsedResponse.segments);
-    if (
-      reasoningContinuationEnabled
-      && continuationKey.channelId !== ""
-      && mainReplyProviderNativeContent !== undefined
-      && mainReplyProviderNativeContent.length > 0
-    ) {
-      deps.nativeReasoningContinuation?.save({
-        ...continuationKey,
-        sourceMessageId: msg.messageId,
-        providerNativeContent: mainReplyProviderNativeContent,
-      });
-    }
     scheduleMemoryPass(memoryReply, true);
 
     deps.log?.debug("native_reply_loop_end", {

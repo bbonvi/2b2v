@@ -16,7 +16,6 @@ import {
   DEFAULT_MEMORY_EXTRACTION,
   DEFAULT_PROMPT_CACHING,
   DEFAULT_PROMPT_TRANSPORT,
-  DEFAULT_REASONING_CONTINUATION,
   DEFAULT_RELATIONSHIPS,
   DEFAULT_REPLY_LOOP,
   DEFAULT_SCHEDULE_PRESSURE,
@@ -32,7 +31,6 @@ import type {
   GuildConfigYaml,
   MainConfigYaml,
   TrimConfig,
-  TriggerInstructions,
   ThinkingLevel,
   UiLang,
   VpnConfig,
@@ -52,7 +50,6 @@ import type {
   ImageGenerationConfig,
   ImageGenerationQuality,
   ReplyLoopConfig,
-  ReasoningContinuationConfig,
   MemoryExtractionConfig,
   ServiceTier,
   LlmProvider,
@@ -62,9 +59,7 @@ import type {
   AmbientAttentionEvaluatorConfig,
   AmbientAttentionConfigYaml,
   AmbientInitiativeConfig,
-  AmbientInitiativeAudience,
   AmbientInitiativeEvaluatorConfig,
-  AmbientInitiativeKindConfig,
   AmbientInitiativeConfigYaml,
   RelationshipConfig,
   RelationshipConfigYaml,
@@ -678,38 +673,19 @@ function resolveAmbientAttentionConfig(
   return resolved;
 }
 
-function resolveAmbientInitiativeKindConfig<T extends AmbientInitiativeKindConfig>(
-  defaults: T,
-  partial: Partial<T> | undefined,
-  keyPrefix: string,
-): T {
-  const resolved = {
-    ...defaults,
-    ...partial,
-  };
-  validateAmbientInitiativeKindConfig(resolved, keyPrefix);
-  return resolved;
-}
-
-function parseAmbientInitiativeAudience(value: unknown, fallback: AmbientInitiativeAudience): AmbientInitiativeAudience {
-  if (value === undefined) return fallback;
-  if (value === "humans" || value === "bots") return value;
-  throw new Error("ambientInitiative.audience must be humans or bots");
-}
-
-function parseAmbientInitiativeBotTargetIds(value: unknown, fallback: readonly string[]): string[] {
+function parseAmbientInitiativeBotContactIds(value: unknown, fallback: readonly string[]): string[] {
   if (value === undefined) return [...fallback];
   if (!Array.isArray(value)) {
-    throw new Error("ambientInitiative.botTargetIds must contain non-empty Discord user IDs");
+    throw new Error("ambientInitiative.botContactIds must contain non-empty Discord user IDs");
   }
-  const targetIds: string[] = [];
-  for (const targetId of value as unknown[]) {
-    if (typeof targetId !== "string" || targetId.trim() === "") {
-      throw new Error("ambientInitiative.botTargetIds must contain non-empty Discord user IDs");
+  const contactIds: string[] = [];
+  for (const contactId of value as unknown[]) {
+    if (typeof contactId !== "string" || contactId.trim() === "") {
+      throw new Error("ambientInitiative.botContactIds must contain non-empty Discord user IDs");
     }
-    targetIds.push(targetId);
+    contactIds.push(contactId);
   }
-  return targetIds;
+  return contactIds;
 }
 
 function resolveAmbientInitiativeConfig(
@@ -721,15 +697,12 @@ function resolveAmbientInitiativeConfig(
   const resolved: AmbientInitiativeConfig = {
     ...base,
     ...partial,
-    audience: parseAmbientInitiativeAudience(partial?.audience, base.audience),
-    botTargetIds: parseAmbientInitiativeBotTargetIds(partial?.botTargetIds, base.botTargetIds),
+    botContactIds: parseAmbientInitiativeBotContactIds(partial?.botContactIds, base.botContactIds),
     activeHours: {
       ...base.activeHours,
       ...partial?.activeHours,
     },
     evaluator: resolveAmbientInitiativeEvaluatorConfig(base.evaluator, partial?.evaluator),
-    selfExpression: resolveAmbientInitiativeKindConfig(base.selfExpression, partial?.selfExpression, "ambientInitiative.selfExpression"),
-    targetedCheckin: resolveAmbientInitiativeKindConfig(base.targetedCheckin, partial?.targetedCheckin, "ambientInitiative.targetedCheckin"),
   };
   validateAmbientInitiativeConfig(resolved, "ambientInitiative");
   return resolved;
@@ -786,15 +759,6 @@ function validateAmbientAttentionConfig(config: AmbientAttentionConfig, keyPrefi
   }
 }
 
-function validateAmbientInitiativeKindConfig(config: AmbientInitiativeKindConfig, keyPrefix: string): void {
-  clampProbabilityConfig(config.basePressure, `${keyPrefix}.basePressure`);
-  clampProbabilityConfig(config.pressureThreshold, `${keyPrefix}.pressureThreshold`);
-  clampProbabilityConfig(config.probabilityThreshold, `${keyPrefix}.probabilityThreshold`);
-  clampProbabilityConfig(config.confidenceThreshold, `${keyPrefix}.confidenceThreshold`);
-  if (!Number.isFinite(config.cooldownMs) || config.cooldownMs < 0) throw new Error(`${keyPrefix}.cooldownMs must be >= 0`);
-  if (!Number.isInteger(config.maxPerDay) || config.maxPerDay < 0) throw new Error(`${keyPrefix}.maxPerDay must be >= 0`);
-}
-
 function validateClockTime(value: string, keyPrefix: string): void {
   if (!/^\d{2}:\d{2}$/.test(value)) throw new Error(`${keyPrefix} must use HH:mm`);
   const [hhRaw, mmRaw] = value.split(":");
@@ -806,14 +770,8 @@ function validateClockTime(value: string, keyPrefix: string): void {
 }
 
 function validateAmbientInitiativeConfig(config: AmbientInitiativeConfig, keyPrefix: string): void {
-  if (!Number.isFinite(config.botPressure) || config.botPressure < -1 || config.botPressure > 1) {
-    throw new Error(`${keyPrefix}.botPressure must be between -1 and 1`);
-  }
-  if (new Set(config.botTargetIds).size !== config.botTargetIds.length) {
-    throw new Error(`${keyPrefix}.botTargetIds must not contain duplicates`);
-  }
-  if (config.audience === "bots" && config.botTargetIds.length === 0) {
-    throw new Error(`${keyPrefix}.botTargetIds must not be empty when audience is bots`);
+  if (new Set(config.botContactIds).size !== config.botContactIds.length) {
+    throw new Error(`${keyPrefix}.botContactIds must not contain duplicates`);
   }
   if (!Number.isFinite(config.checkIntervalMinMs) || config.checkIntervalMinMs < 1000) {
     throw new Error(`${keyPrefix}.checkIntervalMinMs must be >= 1000`);
@@ -829,21 +787,17 @@ function validateAmbientInitiativeConfig(config: AmbientInitiativeConfig, keyPre
     throw new Error(`${keyPrefix}.recentActivityMaxMs must be >= recentActivityMinMs`);
   }
   if (!Number.isFinite(config.quietWindowMs) || config.quietWindowMs < 0) throw new Error(`${keyPrefix}.quietWindowMs must be >= 0`);
-  if (!Number.isFinite(config.typingActiveMs) || config.typingActiveMs < 0) throw new Error(`${keyPrefix}.typingActiveMs must be >= 0`);
   if (!Number.isFinite(config.botCooldownMs) || config.botCooldownMs < 0) throw new Error(`${keyPrefix}.botCooldownMs must be >= 0`);
-  if (!Number.isFinite(config.fatigueAfterAnyMs) || config.fatigueAfterAnyMs < 0) throw new Error(`${keyPrefix}.fatigueAfterAnyMs must be >= 0`);
+  clampProbabilityConfig(config.basePressure, `${keyPrefix}.basePressure`);
+  clampProbabilityConfig(config.probabilityThreshold, `${keyPrefix}.probabilityThreshold`);
+  clampProbabilityConfig(config.confidenceThreshold, `${keyPrefix}.confidenceThreshold`);
+  if (!Number.isFinite(config.cooldownMs) || config.cooldownMs < 0) throw new Error(`${keyPrefix}.cooldownMs must be >= 0`);
   if (!Number.isInteger(config.maxPerDay) || config.maxPerDay < 0) throw new Error(`${keyPrefix}.maxPerDay must be >= 0`);
   if (!Number.isInteger(config.minMainChannelHumanMessages) || config.minMainChannelHumanMessages < 0) {
     throw new Error(`${keyPrefix}.minMainChannelHumanMessages must be >= 0`);
   }
   if (!Number.isFinite(config.mainChannelLookbackDays) || config.mainChannelLookbackDays <= 0) {
     throw new Error(`${keyPrefix}.mainChannelLookbackDays must be > 0`);
-  }
-  if (!Number.isInteger(config.targetedCheckin.maxPerUserPerDay) || config.targetedCheckin.maxPerUserPerDay < 0) {
-    throw new Error(`${keyPrefix}.targetedCheckin.maxPerUserPerDay must be >= 0`);
-  }
-  if (!Number.isFinite(config.targetedCheckin.openLoopMaxAgeMs) || config.targetedCheckin.openLoopMaxAgeMs < 0) {
-    throw new Error(`${keyPrefix}.targetedCheckin.openLoopMaxAgeMs must be >= 0`);
   }
 }
 
@@ -881,35 +835,6 @@ function validateReplyLoopConfig(config: ReplyLoopConfig, keyPrefix: string): vo
   }
   if (!Number.isFinite(config.llmOutputTimeoutMs) || config.llmOutputTimeoutMs < 1000) {
     throw new Error(`${keyPrefix}.llmOutputTimeoutMs must be >= 1000`);
-  }
-}
-
-function resolveGlobalReasoningContinuation(
-  partial: MainConfigYaml["reasoningContinuation"] | undefined,
-): ReasoningContinuationConfig {
-  const resolved = {
-    enabled: partial?.enabled ?? DEFAULT_REASONING_CONTINUATION.enabled,
-    maxAgeMs: partial?.maxAgeMs ?? DEFAULT_REASONING_CONTINUATION.maxAgeMs,
-  };
-  validateReasoningContinuationConfig(resolved, "reasoningContinuation");
-  return resolved;
-}
-
-function resolveGuildReasoningContinuation(
-  global: ReasoningContinuationConfig,
-  partial: GuildConfigYaml["reasoningContinuation"] | undefined,
-): ReasoningContinuationConfig {
-  const resolved = {
-    enabled: partial?.enabled ?? global.enabled,
-    maxAgeMs: partial?.maxAgeMs ?? global.maxAgeMs,
-  };
-  validateReasoningContinuationConfig(resolved, "reasoningContinuation");
-  return resolved;
-}
-
-function validateReasoningContinuationConfig(config: ReasoningContinuationConfig, keyPrefix: string): void {
-  if (!Number.isFinite(config.maxAgeMs) || config.maxAgeMs < 0) {
-    throw new Error(`${keyPrefix}.maxAgeMs must be >= 0`);
   }
 }
 
@@ -1189,16 +1114,6 @@ export function loadGlobalConfig(
       typingResumeGraceMs: yaml.triggers?.typingResumeGraceMs ?? DEFAULT_TRIGGER.typingResumeGraceMs,
       typingMaxWaitMs: yaml.triggers?.typingMaxWaitMs ?? DEFAULT_TRIGGER.typingMaxWaitMs,
     },
-    defaultTriggerInstructions: {
-      mention: yaml.triggerInstructions?.mention,
-      keyword: yaml.triggerInstructions?.keyword,
-      random: yaml.triggerInstructions?.random,
-      scheduled: yaml.triggerInstructions?.scheduled,
-      ambient_pickup: yaml.triggerInstructions?.ambient_pickup,
-      lingering_attention: yaml.triggerInstructions?.lingering_attention,
-      follow_up: yaml.triggerInstructions?.follow_up,
-      ambient_initiative: yaml.triggerInstructions?.ambient_initiative,
-    },
     defaultMergeMessageGapSeconds: yaml.mergeMessageGapSeconds ?? 120,
     defaultImageReferenceMaxPerCall: resolveImageReferenceMaxPerCall(yaml.imageReferenceMaxPerCall, 10, "imageReferenceMaxPerCall"),
     defaultImageReading,
@@ -1228,7 +1143,6 @@ export function loadGlobalConfig(
     defaultAmbientAttention,
     defaultAmbientInitiative,
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
-    defaultReasoningContinuation: resolveGlobalReasoningContinuation(yaml.reasoningContinuation),
     defaultMemoryExtraction,
     defaultRelationships,
     defaultVoice,
@@ -1278,16 +1192,6 @@ export function resolveGuildConfig(
       typingResumeGraceMs: partial.triggers?.typingResumeGraceMs ?? global.defaultTriggers.typingResumeGraceMs,
       typingMaxWaitMs: partial.triggers?.typingMaxWaitMs ?? global.defaultTriggers.typingMaxWaitMs,
     },
-    triggerInstructions: {
-      mention: partial.triggerInstructions?.mention ?? global.defaultTriggerInstructions.mention,
-      keyword: partial.triggerInstructions?.keyword ?? global.defaultTriggerInstructions.keyword,
-      random: partial.triggerInstructions?.random ?? global.defaultTriggerInstructions.random,
-      scheduled: partial.triggerInstructions?.scheduled ?? global.defaultTriggerInstructions.scheduled,
-      ambient_pickup: partial.triggerInstructions?.ambient_pickup ?? global.defaultTriggerInstructions.ambient_pickup,
-      lingering_attention: partial.triggerInstructions?.lingering_attention ?? global.defaultTriggerInstructions.lingering_attention,
-      follow_up: partial.triggerInstructions?.follow_up ?? global.defaultTriggerInstructions.follow_up,
-      ambient_initiative: partial.triggerInstructions?.ambient_initiative ?? global.defaultTriggerInstructions.ambient_initiative,
-    },
     modelProfile: requireModelProfile(
       global.modelProfiles,
       partial.modelProfile ?? global.defaultModelProfile,
@@ -1331,7 +1235,6 @@ export function resolveGuildConfig(
     ambientAttention: resolveAmbientAttentionConfig(global.defaultAmbientAttention, partial.ambientAttention),
     ambientInitiative: resolveAmbientInitiativeConfig(global.defaultAmbientInitiative, partial.ambientInitiative),
     replyLoop: resolveGuildReplyLoop(global.defaultReplyLoop, partial.replyLoop),
-    reasoningContinuation: resolveGuildReasoningContinuation(global.defaultReasoningContinuation, partial.reasoningContinuation),
     memoryExtraction: resolveGuildMemoryExtraction(global.defaultMemoryExtraction, partial.memoryExtraction),
     relationships: resolveRelationshipConfig(global.defaultRelationships, partial.relationships),
     voice: resolveVoiceConfig(global.defaultVoice ?? DEFAULT_VOICE_CONFIG, partial.voice),
@@ -1391,23 +1294,11 @@ export function loadGuildConfigs(
   return result;
 }
 
-/** Check if a TriggerInstructions object has any non-empty values. */
-function hasTriggerInstructions(ti: TriggerInstructions): boolean {
-  return (ti.mention !== undefined && ti.mention !== "") ||
-    (ti.keyword !== undefined && ti.keyword !== "") ||
-    (ti.random !== undefined && ti.random !== "") ||
-    (ti.scheduled !== undefined && ti.scheduled !== "") ||
-    (ti.ambient_pickup !== undefined && ti.ambient_pickup !== "") ||
-    (ti.lingering_attention !== undefined && ti.lingering_attention !== "") ||
-    (ti.follow_up !== undefined && ti.follow_up !== "");
-}
-
 /** Persist a resolved guild config back to its YAML file (source of truth). */
 export function saveGuildConfig(filePath: string, config: GuildConfig): void {
   // Write only the per-guild fields (not guildId/slug — those are in the filename)
   const yaml: GuildConfigYaml = {
     triggers: config.triggers,
-    triggerInstructions: hasTriggerInstructions(config.triggerInstructions) ? config.triggerInstructions : undefined,
     modelProfile: config.modelProfile,
     timezone: config.timezone,
     trim: config.trim,
@@ -1428,7 +1319,6 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     relationships: config.relationships,
     voice: config.voice,
     replyLoop: config.replyLoop,
-    reasoningContinuation: config.reasoningContinuation,
     memoryExtraction: config.memoryExtraction,
   };
 

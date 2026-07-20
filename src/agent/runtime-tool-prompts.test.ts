@@ -24,16 +24,7 @@ function runtimePrompts(): RuntimePromptBundle {
       followUp: "",
     },
     ambientInitiative: {
-      evaluator: {
-        shared: "",
-        selfExpression: "",
-        targetedCheckin: "",
-      },
-      generation: {
-        shared: "",
-        selfExpression: "",
-        targetedCheckin: "",
-      },
+      evaluator: "",
     },
     relationships: {
       context: "",

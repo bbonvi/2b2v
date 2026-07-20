@@ -37,10 +37,6 @@ modelProfiles:
         promptCaching: { enabled: true }
 modelProfile: main
 
-reasoningContinuation:
-    enabled: true
-    maxAgeMs: 1800000 # Replay latest encrypted Codex native continuation for same guild/channel/user within 30 minutes
-
 # Prompt transport controls where logical prompt sections land. Defaults shown here
 # are cache-friendly: stable sections first, volatile/current turn last.
 # Roles: system | developer | user. Targets: input | instructions (Codex only).
@@ -153,18 +149,6 @@ personaModes:
           presence:
               status: dnd
 
-# Trigger-specific instructions injected when bot responds to each trigger type.
-# Provides behavioral context for how the bot should behave in each scenario.
-triggerInstructions:
-    mention: "The event directly caught 2B's attention. Choose the next scene beat."
-    keyword: "This was a keyword match and may be accidental. Silence is allowed if it is the truthful beat. Do not inject yourself into conversation unprompted. Only reply if a user genuanely meant to mention 2B."
-    random: "2B is entering unprompted. Keep the beat small or stay silent."
-    scheduled: "This is a private scheduled task. Use context and tools as needed, stay silent by default, and notify only when useful, requested, or closing the loop. If the task should stop, complete it and speak naturally only when the user needs to know."
-    ambient_pickup: "2B noticed a quiet unaddressed message. Prefer a normal channel message, keep it small, and stay silent if the moment passed or 2B dislikes the user. If addressing a specific user message, prefer to use reply_to."
-    lingering_attention: "2B is still lightly attentive after a recent exchange with this user. Reply only if the new beat naturally belongs to that exchange and if it is addressed to 2B in any way. Stay silent if clearly not addressed to 2B. Prefer to use reply_to sometimes."
-    follow_up: "2B may add one small follow-up after silence, but most of the time she should stay silent unless there is a concrete natural intent. Might use reply_to if there is some relevant message still visible."
-    ambient_initiative: "2B is speaking proactively. Stay silent if the initiative feels forced, stale, performative, or creepy. Use reply_to if addressing specific message."
-
 trim:
     trimTrigger: 1200 # Start trimming when history exceeds this many messages
     trimTarget: 600 # Trim down to this many messages
@@ -219,7 +203,6 @@ ambientAttention:
         maxRepliesPerUserPerHour: 4 # (pickup budget per user)
         maxRepliesPerChannelPerHour: 8 # (pickup budget per channel)
         randomJitter: 0.04 # (small score wobble, not primary decision)
-        defaultReply: false # (send normal channel message unless model explicitly anchors)
         minQuietMs: 80000 # (minimum silence after trigger before pickup can pass)
     lingering:
         enabled: true # (keep temporary attention after 2B replies)
@@ -229,7 +212,6 @@ ambientAttention:
         confidenceThreshold: 0.55 # (confidence threshold during strong window)
         cooldownMs: 0 # (lingering uses burst debounce + lease instead of cooldown)
         randomJitter: 0.04 # (small score wobble, not primary decision)
-        defaultReply: false # (first lingering message replies by default)
         strongWindowMs: 60000 # (lower-threshold attention window after 2B reply)
         weakWindowMs: 180000 # (lease expiry; weak window gates harder)
         typingActiveMs: 2000 # (short typing block for conversational continuation)
@@ -248,7 +230,6 @@ ambientAttention:
         maxRepliesPerUserPerHour: 2 # (follow-up budget per user)
         maxRepliesPerChannelPerHour: 4 # (follow-up budget per channel)
         randomJitter: 0.03 # (small score wobble, not primary decision)
-        defaultReply: true # (send normal channel message unless anchoring is needed)
         silenceMs: 12000 # (required silence after 2B reply)
         maxPerExchange: 1 # (hard cap on follow-ups per exchange)
 
@@ -256,11 +237,10 @@ ambientInitiative:
     enabled: true # (allow proactive non-triggered initiative in the main channel)
     shadowMode: false # (when true, evaluate/log but do not send automatic initiatives)
     mainChannelId: "" # (empty auto-picks most active human channel over lookback)
-    checkIntervalMinMs: 720000 # (shortest jittered opportunity check interval)
-    checkIntervalMaxMs: 2700000 # (longest jittered opportunity check interval)
-    botTargetIds:
+    checkIntervalMinMs: 600000 # (shortest jittered cheap opportunity check interval)
+    checkIntervalMaxMs: 1200000 # (longest jittered cheap opportunity check interval)
+    botContactIds:
         - "1398275457857622128" # (Delamain Discord user ID)
-    botPressure: 0.08
     activeHours:
         start: "10:00" # (local start of proactive-speaking window)
         end: "23:00" # (local end; may cross midnight)
@@ -268,33 +248,17 @@ ambientInitiative:
     recentActivityMinMs: 300000 # (avoid speaking immediately after fresh human activity)
     recentActivityMaxMs: 10800000 # (avoid treating dead rooms as opportunities)
     quietWindowMs: 360000 # (minimum quiet after human activity before opportunity)
-    typingActiveMs: 10000 # (typing-start window that blocks initiative)
-    botCooldownMs: 2700000 # (minimum time after visible 2B output)
-    fatigueAfterAnyMs: 3600000 # (shared chance reduction after any initiative)
+    botCooldownMs: 2700000 # (soft resistance window after visible 2B output)
+    basePressure: 0.28 # (nominal opportunity pressure before room and inner-thread signals)
+    probabilityThreshold: 0.5 # (minimum evaluator wake probability)
+    confidenceThreshold: 0.6 # (minimum evaluator confidence)
+    cooldownMs: 7200000 # (stronger soft resistance window after a sent initiative)
     maxPerDay: 5 # (shared sent-initiative cap per main channel)
     minMainChannelHumanMessages: 20 # (minimum 7-day human messages for auto main channel)
     mainChannelLookbackDays: 7 # (auto main-channel activity lookback)
     evaluator:
         modelProfile: evaluator
         llmOutputTimeoutMs: 8000 # (timeout for evaluator JSON)
-    selfExpression:
-        enabled: true # (allow non-targeted incomplete thought dumps)
-        basePressure: 0.28 # (starting chance pressure before room signals)
-        pressureThreshold: 0.5 # (minimum pressure before evaluator spend)
-        probabilityThreshold: 0.5 # (minimum evaluator initiative probability)
-        confidenceThreshold: 0.6 # (minimum evaluator confidence)
-        cooldownMs: 10800000 # (per-kind cooldown after sent self-expression)
-        maxPerDay: 3 # (sent self-expression cap per main channel)
-    targetedCheckin:
-        enabled: true # (allow anchored user follow-ups/check-ins)
-        basePressure: 0.10 # (starting pressure before open-loop signals)
-        pressureThreshold: 0.5 # (minimum pressure before evaluator spend)
-        probabilityThreshold: 0.7 # (minimum evaluator initiative probability)
-        confidenceThreshold: 0.75 # (minimum evaluator confidence)
-        cooldownMs: 7200000 # (per-kind cooldown after sent targeted follow-up)
-        maxPerDay: 3 # (sent targeted follow-up cap per main channel)
-        maxPerUserPerDay: 1 # (same target user daily cap)
-        openLoopMaxAgeMs: 172800000 # (oldest memory/open-loop anchor allowed)
 # Default trigger settings (guilds can override)
 triggers:
     mention: true # (respond when @mentioned)

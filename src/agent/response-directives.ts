@@ -1,4 +1,4 @@
-import { parseAssetId } from "./asset-id.ts";
+import { parseAssetRef, type AssetRef } from "./asset-id.ts";
 
 export type ResponseSegment =
   | { kind: "text"; text: string }
@@ -11,7 +11,7 @@ export interface MessageDelivery {
   reply?: boolean;
   replyTo?: string;
   keepTyping?: boolean;
-  assetIds?: number[];
+  assetIds?: AssetRef[];
 }
 
 export interface ParsedResponseDirectives {
@@ -169,14 +169,14 @@ function parseMessageDelivery(attrs: string): MessageDelivery | undefined {
     : undefined;
 }
 
-function parseAssetIdsAttribute(attrs: string): number[] | undefined {
+function parseAssetIdsAttribute(attrs: string): AssetRef[] | undefined {
   const match = /\sasset_ids\s*=\s*(?:"([^"]*)"|'([^']*)'|(\[[^\]]*\]))/i.exec(attrs);
   if (match === null) return undefined;
   const raw = unescapeAttributeValue(match[1] ?? match[2] ?? match[3] ?? "").trim();
   if (!raw.startsWith("[") || !raw.endsWith("]")) return undefined;
   const inner = raw.slice(1, -1).trim();
   if (inner === "") return [];
-  const ids = inner.split(",").map((part) => parseAssetId(part.trim()));
+  const ids = inner.split(",").map((part) => parseAssetRef(part.trim()));
   return ids.every((id) => id !== null) ? ids : undefined;
 }
 

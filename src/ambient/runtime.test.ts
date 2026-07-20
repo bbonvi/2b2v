@@ -4,8 +4,6 @@ import { DEFAULT_AMBIENT_ATTENTION } from "../config/defaults.ts";
 import { createDatabase, type Database } from "../db/database.ts";
 import {
   ambientPendingKey,
-  applyAmbientInitiativeBotPressure,
-  ensureAmbientInitiativeBotMention,
   renderAmbientHistory,
   resolveLocalChannelShape,
   shouldDeferAmbientCandidateForTyping,
@@ -116,23 +114,6 @@ describe("renderAmbientHistory", () => {
     });
 
     expect(text).toContain("removed text [deleted]");
-  });
-});
-
-describe("bot-audience ambient initiative", () => {
-  test("applies signed bot pressure only to bot-directed initiative", () => {
-    expect(applyAmbientInitiativeBotPressure(0.5, true, 0.2)).toBe(0.7);
-    expect(applyAmbientInitiativeBotPressure(0.5, true, -0.3)).toBe(0.2);
-    expect(applyAmbientInitiativeBotPressure(0.5, false, 0.2)).toBe(0.5);
-    expect(applyAmbientInitiativeBotPressure(0.9, true, 0.5)).toBe(1);
-    expect(applyAmbientInitiativeBotPressure(0.1, true, -0.5)).toBe(0);
-  });
-
-  test("adds exactly one explicit Discord mention for the target bot", () => {
-    expect(ensureAmbientInitiativeBotMention("A thought.", "123")).toBe("<@123> A thought.");
-    expect(ensureAmbientInitiativeBotMention("<@123> A thought.", "123")).toBe("<@123> A thought.");
-    expect(ensureAmbientInitiativeBotMention("<@!123> A thought.", "123")).toBe("<@!123> A thought.");
-    expect(ensureAmbientInitiativeBotMention("", "123")).toBe("<@123>");
   });
 });
 

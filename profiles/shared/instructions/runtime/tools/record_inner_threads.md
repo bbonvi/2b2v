@@ -1,0 +1,1 @@
+Privately create, revise, resolve, or delete durable inner threads during inner-thread maintenance. Preserve the persona's actual unresolved inner life without turning conversation into a task queue or engagement backlog.

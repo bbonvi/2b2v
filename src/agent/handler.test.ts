@@ -1,8 +1,9 @@
 import { describe, expect, mock, test } from "bun:test";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { handleMessage, hasMaintenanceMaterial, injectTriggerInstruction, runSilentMemoryAgentPass, runSilentToolAgentPass, type ChatCompleteFn, type HandlerDeps, type IncomingMessage, type MessageSender, type VoiceAttachment } from "./handler.ts";
-import type { AssembledContext, ContextSection } from "./context-assembly.ts";
+import { createHash } from "node:crypto";
+import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type ChatCompleteFn, type HandlerDeps, type IncomingMessage, type MessageSender, type VoiceAttachment } from "./handler.ts";
+import type { AssembledContext } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig, PromptTransportConfig } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
 import { RequestLog } from "../logger.ts";
@@ -35,16 +36,7 @@ const TEST_RUNTIME_PROMPTS = {
     followUp: "Follow up.",
   },
   ambientInitiative: {
-    evaluator: {
-      shared: "Initiative evaluator shared.",
-      selfExpression: "Initiative evaluator self.",
-      targetedCheckin: "Initiative evaluator checkin.",
-    },
-    generation: {
-      shared: "Initiative generation shared.",
-      selfExpression: "Initiative generation self.",
-      targetedCheckin: "Initiative generation checkin.",
-    },
+    evaluator: "Initiative wake evaluator.",
   },
   relationships: { context: "Relationship context." },
   skills: {
@@ -130,7 +122,6 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultTimezone: "UTC",
     defaultTrim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
     defaultTriggers: { mention: true, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingResumeGraceMs: 3000, typingMaxWaitMs: 15000 },
-    defaultTriggerInstructions: {},
     defaultMergeMessageGapSeconds: 120,
     defaultImageReferenceMaxPerCall: 10,
     defaultImageReading: { fallbackEnabled: false, fallbackModelProfile: "main" },
@@ -146,7 +137,6 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     defaultSchedulePressure: { maxRequesterRunsPerHour: 120, maxRequesterRunsPerDay: 500, maxGuildRunsPerHour: 600, maxGuildRunsPerDay: 3000 },
     defaultPromptTransport: makePromptTransportConfig(),
     defaultReplyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
-    defaultReasoningContinuation: { enabled: true, maxAgeMs: 30 * 60 * 1000 },
     defaultMemoryExtraction: {
       modelProfile: "main",
       postReply: true,
@@ -203,7 +193,6 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     guildId: "guild-1",
     slug: "test",
     triggers: { mention: true, keywords: [], randomChance: 0, keywordDebounceMs: 2500, typingIdleMs: 10000, typingResumeGraceMs: 3000, typingMaxWaitMs: 15000 },
-    triggerInstructions: {},
     modelProfile: "main",
     timezone: "UTC",
     trim: { trimTrigger: 200, trimTarget: 150, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 },
@@ -221,7 +210,6 @@ function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConfig {
     schedulePressure: { maxRequesterRunsPerHour: 120, maxRequesterRunsPerDay: 500, maxGuildRunsPerHour: 600, maxGuildRunsPerDay: 3000 },
     promptTransport: makePromptTransportConfig(),
     replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
-    reasoningContinuation: { enabled: true, maxAgeMs: 30 * 60 * 1000 },
     memoryExtraction: {
       modelProfile: "main",
       postReply: true,
@@ -378,7 +366,7 @@ describe("handleMessage", () => {
     );
 
     expect(result.responseText).toBe("hello user");
-    expect(senderCalls).toEqual([{ text: "hello user", reply: true, channelId: undefined }]);
+    expect(senderCalls).toEqual([{ text: "hello user", reply: false, channelId: undefined }]);
   });
 
   test("routes individual message envelopes by channel_id", async () => {
@@ -406,7 +394,7 @@ describe("handleMessage", () => {
     );
 
     expect(senderCalls).toEqual([
-      { text: "here", reply: true, channelId: undefined, replyTo: undefined },
+      { text: "here", reply: false, channelId: undefined, replyTo: undefined },
       { text: "there", reply: false, channelId: "thread-1", replyTo: "msg-9" },
     ]);
   });
@@ -429,7 +417,7 @@ describe("handleMessage", () => {
       makeDeps({ sender, completeChat, currentChannelId: "channel-1" }),
     );
 
-    expect(senderCalls).toEqual([{ text: "same channel", reply: true, channelId: "channel-1" }]);
+    expect(senderCalls).toEqual([{ text: "same channel", reply: false, channelId: "channel-1" }]);
   });
 
   test("cross-channel routed messages without reply_to default to normal sends", async () => {
@@ -473,7 +461,7 @@ describe("handleMessage", () => {
 
     expect(senderCalls).toEqual([
       { text: "thread message", reply: false, channelId: "thread-1" },
-      { text: "current message", reply: true, channelId: undefined },
+      { text: "current message", reply: false, channelId: undefined },
     ]);
   });
 
@@ -526,7 +514,7 @@ describe("handleMessage", () => {
       }),
     );
 
-    expect(senderCalls).toEqual([{ text: "hello user", reply: true, channelId: undefined }]);
+    expect(senderCalls).toEqual([{ text: "hello user", reply: false, channelId: undefined }]);
   });
 
   test("includes loaded runtime prompts before volatile turn context", async () => {
@@ -584,22 +572,22 @@ describe("handleMessage", () => {
       expect(findMessageContent(messages, "## Memory")).toContain("- 1 [@user] [preference] concise");
       expect(findMessageContent(messages, "## Server Members")).toContain("@user");
       expect(findMessageContent(messages, "Guild: g1")).toBe("Guild: g1");
-      const currentTurn = findMessageContent(messages, "## New Discord Event");
-      expect(currentTurn).toContain("## Discord Event Metadata");
-      expect(currentTurn).toContain("Trigger MsgID: msg-1");
-      expect(currentTurn).toContain("Trigger Author: @testuser");
-      expect(currentTurn).toContain("Trigger AuthorID: user-1");
-      expect(currentTurn).toContain("Trigger DisplayName: Test Nick");
-      expect(currentTurn).toContain("Trigger GlobalName: Test Global");
-      expect(currentTurn).toContain("Trigger AuthorIsBot: false");
-      expect(currentTurn).toContain("Trigger ReplyToMsgID: parent-msg");
+      const currentTurn = findMessageContent(messages, "## Current Discord Message");
+      expect(currentTurn).toContain("## Current Discord Message Metadata");
+      expect(currentTurn).toContain("MsgID: msg-1");
+      expect(currentTurn).toContain("Author: @testuser");
+      expect(currentTurn).toContain("AuthorID: user-1");
+      expect(currentTurn).toContain("DisplayName: Test Nick");
+      expect(currentTurn).toContain("GlobalName: Test Global");
+      expect(currentTurn).toContain("AuthorIsBot: false");
+      expect(currentTurn).toContain("ReplyToMsgID: parent-msg");
       expect(currentTurn).toContain("Audio: #29 chunk_08.wav");
       expect(currentTurn).toContain("Reply Context: The current event replies to a message you previously sent here from another channel.");
       expect(currentTurn).toContain("Source GuildID: source-guild");
       expect(currentTurn).toContain("Source ChannelID: source-channel");
       expect(currentTurn).toContain("Source MsgID: source-msg");
       expect(currentTurn).toContain("hello bot");
-      const currentTurnIndex = messages.findIndex((message) => contentText(message.content).includes("## New Discord Event"));
+      const currentTurnIndex = messages.findIndex((message) => contentText(message.content).includes("## Current Discord Message"));
       expect(messages[currentTurnIndex + 1]?.role).toBe("user");
       const finalAction = contentText(messages[currentTurnIndex + 1]?.content);
       expect(finalAction).toStartWith("## Execution Mode: Visible Reply");
@@ -644,7 +632,7 @@ describe("handleMessage", () => {
   test("uses full debounced current-turn event content when provided", async () => {
     let currentTurn = "";
     const completeChat: ChatCompleteFn = (request) => {
-      currentTurn = findMessageContent(request.messages, "## New Discord Event") ?? "";
+      currentTurn = findMessageContent(request.messages, "## Current Discord Message") ?? "";
       return Promise.resolve({
         text: "ok",
         toolCalls: [],
@@ -662,8 +650,51 @@ describe("handleMessage", () => {
       makeDeps({ completeChat }),
     );
 
-    expect(currentTurn).toContain("Trigger MsgID: msg-1");
+    expect(currentTurn).toContain("MsgID: msg-1");
     expect(currentTurn).toContain("first trigger [msg-break] latest followup");
+  });
+
+  test("does not duplicate current Discord content already rendered in canonical history", async () => {
+    let promptText = "";
+    const completeChat: ChatCompleteFn = (request) => {
+      promptText = request.messages.map((message) => contentText(message.content)).join("\n");
+      return Promise.resolve({
+        text: "ok",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: {
+          role: "assistant",
+          usage: { input: 1, output: 1, totalTokens: 2 },
+          content: [],
+        },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({
+        translatedContent: "unique-current-message",
+        currentContentInHistory: true,
+        mentionedUserIds: ["bot-1"],
+      }),
+      makeDeps({
+        completeChat,
+        context: makeContext({
+          userMessage: "unique-current-message",
+          sections: [
+            {
+              label: "Chat History — Newer",
+              text: "## Chat History\n[@testuser (MsgID: msg-1)]: unique-current-message",
+              cached: false,
+              role: "developer",
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(promptText.match(/unique-current-message/g)).toHaveLength(1);
+    expect(promptText).toContain("## Current Discord State");
+    expect(promptText).not.toContain("## Current Discord Message Metadata");
   });
 
   test("uses caller-provided headings for a non-message current turn", async () => {
@@ -694,15 +725,15 @@ describe("handleMessage", () => {
     expect(currentTurn).toContain("## Voice Turn Metadata");
     expect(currentTurn).toContain("Voice ChannelID: voice-1");
     expect(currentTurn).toContain("Use the immediate exchange.");
-    expect(currentTurn).not.toContain("## Discord Event Metadata");
-    expect(currentTurn).not.toContain("## New Discord Event");
-    expect(currentTurn).not.toContain("Trigger Author:");
+    expect(currentTurn).not.toContain("## Current Discord Message Metadata");
+    expect(currentTurn).not.toContain("## Current Discord Message");
+    expect(currentTurn).not.toContain("Author:");
   });
 
   test("marks an external bot author in current event metadata", async () => {
     let currentTurn = "";
     const completeChat: ChatCompleteFn = (request) => {
-      currentTurn = findMessageContent(request.messages, "## New Discord Event") ?? "";
+      currentTurn = findMessageContent(request.messages, "## Current Discord Message") ?? "";
       return Promise.resolve({
         text: "ok",
         toolCalls: [],
@@ -720,7 +751,7 @@ describe("handleMessage", () => {
       makeDeps({ completeChat }),
     );
 
-    expect(currentTurn).toContain("Trigger AuthorIsBot: true");
+    expect(currentTurn).toContain("AuthorIsBot: true");
   });
 
   test("splits Codex stable prompt into input messages", async () => {
@@ -745,10 +776,10 @@ describe("handleMessage", () => {
         item.type === "message" && item.role === "user" && item.content.includes("## Memory")
       )).toBe(true);
       expect(payload.input.some((item) =>
-        item.type === "message" && item.role === "user" && item.content.includes("## New Discord Event")
+        item.type === "message" && item.role === "user" && item.content.includes("## Current Discord Message")
       )).toBe(true);
       const currentTurnIndex = payload.input.findIndex((item) =>
-        item.type === "message" && item.content.includes("## New Discord Event")
+        item.type === "message" && item.content.includes("## Current Discord Message")
       );
       expect(payload.input[currentTurnIndex + 1]).toMatchObject({
         type: "message",
@@ -1019,7 +1050,7 @@ describe("handleMessage", () => {
       { name: "fetch_url", params: { url: "https://example.com/post" } },
     ]);
     expect(senderCalls).toEqual([
-      { text: "I'll check, one sec.", reply: true },
+      { text: "I'll check, one sec.", reply: false },
       { text: "Fetched summary [source](https://example.com/post)", reply: false },
     ]);
     expect(onStillWorking).toHaveBeenCalledTimes(1);
@@ -1049,7 +1080,7 @@ describe("handleMessage", () => {
     );
 
     expect(senderCalls).toEqual([
-      { text: "first line", reply: true },
+      { text: "first line", reply: false },
       { text: "second line", reply: false },
     ]);
     expect(afterReplyCalls[0]).toMatchObject({
@@ -1189,7 +1220,7 @@ describe("handleMessage", () => {
 
     expect(events.indexOf("sent:first")).toBeLessThan(events.indexOf("after-first-delta"));
     expect(senderCalls).toEqual([
-      { text: "first", reply: true },
+      { text: "first", reply: false },
       { text: "second", reply: false },
     ]);
     expect(onStillWorking).toHaveBeenCalled();
@@ -1231,7 +1262,7 @@ describe("handleMessage", () => {
 
     expect(events.indexOf("sent:first normal")).toBeLessThan(events.indexOf("after-first-delta"));
     expect(senderCalls).toEqual([
-      { text: "first normal", reply: true },
+      { text: "first normal", reply: false },
       { text: "second normal", reply: false },
     ]);
     expect(result.responseText).toBe("first normal\n[msg-break]\nsecond normal");
@@ -1261,7 +1292,7 @@ describe("handleMessage", () => {
     );
 
     expect(senderCalls).toEqual([
-      { text: "first", reply: true },
+      { text: "first", reply: false },
       { text: "second", reply: false },
     ]);
     expect(onIgnoredReply).toHaveBeenCalledTimes(0);
@@ -1483,7 +1514,7 @@ describe("handleMessage", () => {
     );
 
     expect(senderCalls).toEqual([
-      { text: "be right back", reply: true },
+      { text: "be right back", reply: false },
       { text: finalText, reply: false },
     ]);
     expect(result.responseText).toBe(finalText);
@@ -1515,7 +1546,7 @@ describe("handleMessage", () => {
     expect(senderCalls).toEqual([
       {
         text: "Text first\ntext after",
-        reply: true,
+        reply: false,
         voice: true,
         historyText: "Text first\n<voice>[whispers] quiet line</voice>\ntext after",
       },
@@ -1548,7 +1579,7 @@ describe("handleMessage", () => {
     );
 
     expect(senderCalls).toEqual([
-      { text: "text first", reply: true, voice: false, historyText: undefined },
+      { text: "text first", reply: false, voice: false, historyText: undefined },
       { text: "", reply: false, voice: true, historyText: "<voice>spoken second</voice>" },
     ]);
     expect(speechTexts).toEqual(["spoken second"]);
@@ -2315,100 +2346,47 @@ describe("handleMessage", () => {
     expect(calls).toBe(2);
   });
 
-  test("replays and saves Codex native reasoning continuation across runs", async () => {
-    const priorProviderNativeContent = [{
-      type: "thinking" as const,
-      thinking: "",
-      thinkingSignature: "{\"type\":\"reasoning\",\"id\":\"rs_old\",\"encrypted_content\":\"old\"}",
-    }];
-    const finalProviderNativeContent = [{
-      type: "thinking" as const,
-      thinking: "",
-      thinkingSignature: "{\"type\":\"reasoning\",\"id\":\"rs_new\",\"encrypted_content\":\"new\"}",
-    }, {
-      type: "text" as const,
-      text: "hello user",
-      textSignature: "msg_new",
-    }];
-    const saved: unknown[] = [];
+  test("does not carry Codex provider-native content across separate Discord turns", async () => {
+    const requestHadNativeContent: boolean[] = [];
     const completeChat: ChatCompleteFn = (request) => {
-      const replayed = request.messages.find((message) =>
-        message.role === "assistant" && message.providerNativeContent === priorProviderNativeContent
+      requestHadNativeContent.push(
+        request.messages.some((message) => message.providerNativeContent !== undefined),
       );
-      expect(replayed).toBeDefined();
       return Promise.resolve({
         text: "hello user",
         toolCalls: [],
-        providerNativeContent: finalProviderNativeContent,
+        providerNativeContent: [{
+          type: "thinking",
+          thinking: "",
+          thinkingSignature: "{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"sealed\"}",
+        }, {
+          type: "text",
+          text: "hello user",
+          textSignature: "msg_1",
+        }],
         rawResponse: {},
-        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "hello user" }] },
-      });
-    };
-
-    await handleMessage(
-      makeMessage({ guildId: "guild-1", channelId: "channel-1", mentionedUserIds: ["bot-1"] }),
-      makeDeps({
-        completeChat,
-        globalConfig: makeCodexGlobal(),
-        nativeReasoningContinuation: {
-          load: (input) => {
-            expect(input).toMatchObject({
-              guildId: "guild-1",
-              channelId: "channel-1",
-              userId: "user-1",
-              provider: "openai-codex",
-              model: "gpt-5.5",
-              maxAgeMs: 30 * 60 * 1000,
-            });
-            return priorProviderNativeContent;
-          },
-          save: (input) => { saved.push(input); },
+        messageForLogs: {
+          role: "assistant",
+          usage: { input: 1, output: 1, totalTokens: 2 },
+          content: [{ type: "text", text: "hello user" }],
         },
-      }),
-    );
-
-    expect(saved).toHaveLength(1);
-    expect(saved[0]).toMatchObject({
-      guildId: "guild-1",
-      channelId: "channel-1",
-      userId: "user-1",
-      provider: "openai-codex",
-      model: "gpt-5.5",
-      sourceMessageId: "msg-1",
-      providerNativeContent: finalProviderNativeContent,
-    });
-  });
-
-  test("does not use Codex native reasoning continuation for ambient runs", async () => {
-    const load = mock(() => [{
-      type: "thinking" as const,
-      thinking: "",
-      thinkingSignature: "{\"type\":\"reasoning\",\"id\":\"rs_old\",\"encrypted_content\":\"old\"}",
-    }]);
-    const save = mock(() => {});
-    const completeChat: ChatCompleteFn = (request) => {
-      expect(request.messages.some((message) => message.role === "assistant" && message.providerNativeContent !== undefined)).toBe(false);
-      return Promise.resolve({
-        text: "ambient reply",
-        toolCalls: [],
-        providerNativeContent: [{ type: "text", text: "ambient reply", textSignature: "msg_new" }],
-        rawResponse: {},
-        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "ambient reply" }] },
       });
     };
+    const deps = makeDeps({
+      completeChat,
+      globalConfig: makeCodexGlobal(),
+    });
 
     await handleMessage(
-      makeMessage({ guildId: "guild-1", channelId: "channel-1" }),
-      makeDeps({
-        completeChat,
-        globalConfig: makeCodexGlobal(),
-        triggerOverride: { reason: "ambient_initiative" },
-        nativeReasoningContinuation: { load, save },
-      }),
+      makeMessage({ messageId: "msg-1", translatedContent: "first", mentionedUserIds: ["bot-1"] }),
+      deps,
+    );
+    await handleMessage(
+      makeMessage({ messageId: "msg-2", translatedContent: "second", mentionedUserIds: ["bot-1"] }),
+      deps,
     );
 
-    expect(load).toHaveBeenCalledTimes(0);
-    expect(save).toHaveBeenCalledTimes(0);
+    expect(requestHadNativeContent).toEqual([false, false]);
   });
 
   test("sends visible text attached to a load_skill tool turn", async () => {
@@ -2645,69 +2623,6 @@ describe("handleMessage", () => {
     expect(result.responseText).toBeUndefined();
     expect(calls).toBe(2);
     expect(sender).toHaveBeenCalledTimes(0);
-  });
-
-  test("async completion sends pending attachment without current image input", async () => {
-    let sawImageInput = false;
-    let sawNormalTurnText = false;
-    const completeChat: ChatCompleteFn = (request) => {
-      const currentTurnMessage = request.messages.find((message) => contentText(message.content).includes("## New Discord Event"));
-      const content = currentTurnMessage?.content;
-      if (Array.isArray(content)) {
-        sawImageInput = content.some((part) => part.type === "image_url");
-        sawNormalTurnText = content.some((part) =>
-          part.type === "text"
-          && part.text.includes("[Async Image Job Ready]")
-          && part.text.includes("## New Discord Event")
-        );
-      } else {
-        sawNormalTurnText = contentText(content).includes("[Async Image Job Ready]")
-          && contentText(content).includes("## New Discord Event");
-      }
-      return Promise.resolve({
-        text: '<message reply="true" reply_to="source-1"></message>',
-        toolCalls: [],
-        rawResponse: {},
-        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: '<message reply="true" reply_to="source-1"></message>' }] },
-      });
-    };
-
-    const sentMessages: Array<{ text: string; replyToMessageId: string | undefined; attachmentIds: string[] }> = [];
-    const sender: MessageSender = (text, _reply, _channelId, _voice, _signal, replyToMessageId, attachments) => {
-      sentMessages.push({
-        text,
-        replyToMessageId,
-        attachmentIds: attachments?.map((attachment) => attachment.id) ?? [],
-      });
-      return Promise.resolve({ sentMessageId: "sent-1" });
-    };
-
-    await handleMessage(
-      makeMessage({
-        content: "[Async Image Job Ready] Job img-1 generated an image.",
-        translatedContent: "[Async Image Job Ready] Job img-1 generated an image.",
-      }),
-      makeDeps({
-        forceTrigger: true,
-        context: makeContext({ userMessage: "[Async Image Job Ready] Job img-1 generated an image." }),
-        completeChat,
-        sender,
-        initialPendingAttachments: [{
-          id: "img-1",
-          buffer: Buffer.from("fake-image"),
-          filename: "img-1.png",
-          contentType: "image/png",
-        }],
-      }),
-    );
-
-    expect(sawImageInput).toBe(false);
-    expect(sawNormalTurnText).toBe(true);
-    expect(sentMessages).toEqual([{
-      text: "",
-      replyToMessageId: "source-1",
-      attachmentIds: ["img-1"],
-    }]);
   });
 
   test("does not resend a streamed explicit final message after generated image tool output", async () => {
@@ -3465,7 +3380,7 @@ describe("handleMessage", () => {
       )).toBe(false);
       const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_asset");
       expect(toolMessage?.content).toContain("current LLM endpoint cannot read image input");
-      expect(request.messages.some((m) => m.role === "user" && contentText(m.content).includes("## New Discord Event"))).toBe(true);
+      expect(request.messages.some((m) => m.role === "user" && contentText(m.content).includes("## Current Discord Message"))).toBe(true);
 
       return Promise.resolve({
         text: "cannot inspect image",
@@ -3538,7 +3453,7 @@ describe("handleMessage", () => {
       const toolMessage = request.messages.find((m) => m.role === "tool" && m.name === "read_asset");
       expect(toolMessage?.content).toContain("Native image reading was unavailable");
       expect(toolMessage?.content).toContain("Fallback saw a small square test image.");
-      expect(request.messages.some((m) => m.role === "user" && contentText(m.content).includes("## New Discord Event"))).toBe(true);
+      expect(request.messages.some((m) => m.role === "user" && contentText(m.content).includes("## Current Discord Message"))).toBe(true);
 
       return Promise.resolve({
         text: "described image answer",
@@ -3608,7 +3523,7 @@ describe("handleMessage", () => {
       makeDeps({ extraTools: [threadTool], completeChat, sender }),
     );
 
-    expect(senderCalls).toEqual([{ text: "thread answer", reply: true, channelId: undefined }]);
+    expect(senderCalls).toEqual([{ text: "thread answer", reply: false, channelId: undefined }]);
   });
 
   test("after start_thread the model sends inside the thread only with explicit channel_id", async () => {
@@ -3694,7 +3609,7 @@ describe("handleMessage", () => {
       makeDeps({ extraTools: [closeTool], completeChat, sender }),
     );
 
-    expect(senderCalls).toEqual([{ text: "closed", reply: true, channelId: undefined }]);
+    expect(senderCalls).toEqual([{ text: "closed", reply: false, channelId: undefined }]);
   });
 
   test("close_thread suppresses a later plain final answer after closing the current thread", async () => {
@@ -3864,11 +3779,16 @@ describe("handleMessage", () => {
     const maintenanceRequest = afterReplyCalls[0] as {
       maintenanceTranscript?: Array<{ role: string; content?: unknown }>;
       availableTools?: Array<{ name: string }>;
-      promptContext?: { sessionId?: string; stableSections: Array<{ text: string }> };
+      promptContext?: {
+        sessionId?: string;
+        stableSections: Array<{ text: string }>;
+        toolContractSignature?: string;
+      };
     };
     expect(maintenanceRequest.maintenanceTranscript?.some((message) => message.role === "assistant" && message.content === "hello user")).toBe(true);
     expect(maintenanceRequest.availableTools).toBeDefined();
     expect(maintenanceRequest.promptContext).toBeDefined();
+    expect(maintenanceRequest.promptContext?.toolContractSignature).toMatch(/^[a-f0-9]{64}$/);
     expect(maintenanceRequest.promptContext?.stableSections.some((section) => section.text === TEST_RUNTIME_PROMPTS.reply.trim())).toBe(true);
     expect(JSON.stringify(maintenanceRequest.promptContext?.stableSections)).not.toContain("Silent Memory Pass");
   });
@@ -3879,7 +3799,7 @@ describe("handleMessage", () => {
     expect(hasMaintenanceMaterial({ userMessage: "", assistantReply: "" })).toBe(false);
   });
 
-  test("silent maintenance passes preserve prior tool results", async () => {
+  test("silent maintenance passes continue one cached transcript and tool contract", async () => {
     const transcript: OpenRouterMessage[] = [
       { role: "user", content: "hello bot" },
       { role: "assistant", content: "hello user" },
@@ -3898,12 +3818,35 @@ describe("handleMessage", () => {
       parameters: Type.Object({}),
       execute: () => Promise.resolve({ content: [{ type: "text", text: "relationship recorded" }], details: {} }),
     };
-    let sawMemoryToolResult = false;
+    const recordInnerThreadsTool: AgentTool = {
+      name: "record_inner_threads",
+      label: "record_inner_threads",
+      description: "Record inner threads",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({ content: [{ type: "text", text: "inner thread recorded" }], details: {} }),
+    };
+    const maintenanceTools = [recordMemoryTool, recordRelationshipTool, recordInnerThreadsTool];
+    const maintenanceToolContractSignature = createHash("sha256")
+      .update(JSON.stringify(maintenanceTools.map((tool) => ({
+        type: "function",
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        },
+      }))))
+      .digest("hex");
+    let relationshipSawMemoryResult = false;
+    let innerThreadsSawPriorResults = false;
     const promptPayloads: unknown[] = [];
+    const sessionIds: Array<string | undefined> = [];
+    const toolNameSets: string[][] = [];
     const completeChat: ChatCompleteFn = (request) => {
       const payload = { messages: request.messages.map((message) => ({ role: message.role, content: message.content })) };
       request.onPayload?.(payload);
       promptPayloads.push(payload);
+      sessionIds.push(request.sessionId);
+      toolNameSets.push(request.tools?.map((tool) => tool.function.name) ?? []);
       const last = request.messages[request.messages.length - 1];
       const control = typeof last?.content === "string" ? last.content : "";
       if (control.includes("Memory Maintenance")) {
@@ -3914,7 +3857,26 @@ describe("handleMessage", () => {
           messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
         });
       }
-      sawMemoryToolResult = JSON.stringify(request.messages).includes("memory recorded");
+      if (control.includes("Relationship Maintenance")) {
+        relationshipSawMemoryResult = JSON.stringify(request.messages).includes("memory recorded");
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{ id: "relationship-call", type: "function", function: { name: "record_relationship", arguments: "{}" } }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      if (control.includes("Inner Thread Maintenance")) {
+        const serialized = JSON.stringify(request.messages);
+        innerThreadsSawPriorResults = serialized.includes("memory recorded")
+          && serialized.includes("relationship recorded");
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{ id: "inner-thread-call", type: "function", function: { name: "record_inner_threads", arguments: "{}" } }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
       return Promise.resolve({
         text: "",
         toolCalls: [],
@@ -3941,36 +3903,37 @@ describe("handleMessage", () => {
         initialRoles: ["user" as const],
         sessionId: "same-visible-session",
         promptCaching: { enabled: true },
+        toolContractSignature: maintenanceToolContractSignature,
       },
       completeChat,
     };
 
-    await runSilentMemoryAgentPass({ ...common, tools: [recordMemoryTool] });
+    await runSilentMemoryAgentPass({ ...common, tools: maintenanceTools });
     await runSilentToolAgentPass({
       ...common,
-      tools: [recordRelationshipTool],
+      tools: maintenanceTools,
       runtimeInstruction: "## Silent Relationship Pass",
       controlMessage: "## Execution Mode: Relationship Maintenance\nPrivate relationship maintenance is active.",
       terminateAfterSuccessfulToolNames: ["record_relationship"],
     });
+    await runSilentToolAgentPass({
+      ...common,
+      tools: maintenanceTools,
+      runtimeInstruction: "## Silent Inner Thread Pass",
+      controlMessage: "## Execution Mode: Inner Thread Maintenance\nPrivate inner-thread maintenance is active.",
+      terminateAfterSuccessfulToolNames: ["record_inner_threads"],
+    });
 
-    expect(sawMemoryToolResult).toBe(true);
+    expect(relationshipSawMemoryResult).toBe(true);
+    expect(innerThreadsSawPriorResults).toBe(true);
+    expect(new Set(sessionIds)).toEqual(new Set(["same-visible-session"]));
+    expect(toolNameSets).toEqual(toolNameSets.map(() => [
+      "record_memory",
+      "record_relationship",
+      "record_inner_threads",
+    ]));
     expect(JSON.stringify(promptPayloads)).toContain("VISIBLE STABLE PROMPT");
     expect(JSON.stringify(promptPayloads)).not.toContain("Silent Memory Pass");
   });
 
-  test("injectTriggerInstruction inserts before response instruction", () => {
-    const sections: ContextSection[] = [
-      { label: "Current Context", text: "ctx", cached: false, role: "developer" },
-      { label: "Response Instruction", text: "respond", cached: false, role: "developer" },
-    ];
-
-    const result = injectTriggerInstruction(sections, "Mentioned directly.");
-
-    expect(result.map((section) => section.label)).toEqual([
-      "Current Context",
-      "Trigger Instruction",
-      "Response Instruction",
-    ]);
-  });
 });

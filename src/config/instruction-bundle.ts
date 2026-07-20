@@ -61,18 +61,9 @@ export interface RuntimePromptBundle {
     lingeringAttention: string;
     followUp: string;
   };
-  /** Compact evaluator policies and final generation policies for ambient initiative. */
+  /** Compact policy for deciding whether an ambient cognitive opportunity should wake the actor. */
   ambientInitiative: {
-    evaluator: {
-      shared: string;
-      selfExpression: string;
-      targetedCheckin: string;
-    };
-    generation: {
-      shared: string;
-      selfExpression: string;
-      targetedCheckin: string;
-    };
+    evaluator: string;
   };
   /** Relationship engine instruction policies. */
   relationships: {
@@ -373,16 +364,12 @@ export function loadInstructionBundle(profilesDir: string, profile: string, log:
         followUp: loadRuntimeDocuments(instructionRoots, "ambient-attention/evaluator/follow-up", log, "runtime.ambient-attention.evaluator.follow-up"),
       },
       ambientInitiative: {
-        evaluator: {
-          shared: loadRuntimeDocuments(instructionRoots, "ambient-initiative/evaluator/shared", log, "runtime.ambient-initiative.evaluator.shared"),
-          selfExpression: loadRuntimeDocuments(instructionRoots, "ambient-initiative/evaluator/self-expression", log, "runtime.ambient-initiative.evaluator.self-expression"),
-          targetedCheckin: loadRuntimeDocuments(instructionRoots, "ambient-initiative/evaluator/targeted-checkin", log, "runtime.ambient-initiative.evaluator.targeted-checkin"),
-        },
-        generation: {
-          shared: loadRuntimeDocuments(instructionRoots, "ambient-initiative/generation/shared", log, "runtime.ambient-initiative.generation.shared"),
-          selfExpression: loadRuntimeDocuments(instructionRoots, "ambient-initiative/generation/self-expression", log, "runtime.ambient-initiative.generation.self-expression"),
-          targetedCheckin: loadRuntimeDocuments(instructionRoots, "ambient-initiative/generation/targeted-checkin", log, "runtime.ambient-initiative.generation.targeted-checkin"),
-        },
+        evaluator: loadRuntimeDocuments(
+          instructionRoots,
+          "ambient-initiative/evaluator/generic",
+          log,
+          "runtime.ambient-initiative.evaluator.generic",
+        ),
       },
       relationships: {
         context: loadRuntimeDocuments(instructionRoots, "relationships/context", log, "runtime.relationships.context"),

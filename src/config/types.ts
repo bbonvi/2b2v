@@ -170,8 +170,6 @@ export interface ModelProfileConfigYaml {
 }
 
 export type AmbientAttentionKind = "ambient_pickup" | "lingering_attention" | "follow_up";
-export type AmbientInitiativeKind = "self_expression" | "targeted_checkin";
-export type AmbientInitiativeAudience = "humans" | "bots";
 
 /** Shared evaluator model used by ambient attention candidate checks. */
 export interface AmbientAttentionEvaluatorConfig {
@@ -191,7 +189,6 @@ export interface AmbientAttentionModeConfig {
   maxRepliesPerUserPerHour: number;
   maxRepliesPerChannelPerHour: number;
   randomJitter: number;
-  defaultReply: boolean;
 }
 
 /** Ambient attention behavior for quiet pickup, lingering attention, and follow-ups. */
@@ -249,26 +246,11 @@ export interface AmbientInitiativeActiveHoursConfig {
   end: string;
 }
 
-/** Per-kind proactive initiative pressure, budget, and timing controls. */
-export interface AmbientInitiativeKindConfig {
-  enabled: boolean;
-  basePressure: number;
-  pressureThreshold: number;
-  probabilityThreshold: number;
-  confidenceThreshold: number;
-  cooldownMs: number;
-  maxPerDay: number;
-}
-
-/** Ambient initiative behavior for proactive self-expression and check-ins. */
+/** Generic Ambient Initiative opportunity behavior. */
 export interface AmbientInitiativeConfig {
   enabled: boolean;
-  /** Audience eligible for proactive initiative. Bot audience uses self-expression directed at an allowlisted bot. */
-  audience: AmbientInitiativeAudience;
-  /** Discord bot user IDs eligible for bot-audience initiative. */
-  botTargetIds: string[];
-  /** Additive pressure bias applied only to bot-audience initiative. */
-  botPressure: number;
+  /** Known Discord bot contacts the actor may choose to address. */
+  botContactIds: string[];
   shadowMode: boolean;
   mainChannelId?: string;
   checkIntervalMinMs: number;
@@ -278,31 +260,23 @@ export interface AmbientInitiativeConfig {
   recentActivityMinMs: number;
   recentActivityMaxMs: number;
   quietWindowMs: number;
-  typingActiveMs: number;
   botCooldownMs: number;
-  fatigueAfterAnyMs: number;
+  basePressure: number;
+  probabilityThreshold: number;
+  confidenceThreshold: number;
+  cooldownMs: number;
   maxPerDay: number;
   minMainChannelHumanMessages: number;
   mainChannelLookbackDays: number;
   evaluator: AmbientInitiativeEvaluatorConfig;
-  selfExpression: AmbientInitiativeKindConfig;
-  targetedCheckin: AmbientInitiativeKindConfig & {
-    maxPerUserPerDay: number;
-    openLoopMaxAgeMs: number;
-  };
 }
 
 export type AmbientInitiativeConfigYaml = Partial<Omit<
   AmbientInitiativeConfig,
-  "evaluator" | "activeHours" | "selfExpression" | "targetedCheckin"
+  "evaluator" | "activeHours"
 >> & {
   activeHours?: Partial<AmbientInitiativeActiveHoursConfig>;
   evaluator?: Partial<AmbientInitiativeEvaluatorConfig>;
-  selfExpression?: Partial<AmbientInitiativeKindConfig>;
-  targetedCheckin?: Partial<AmbientInitiativeKindConfig & {
-    maxPerUserPerDay: number;
-    openLoopMaxAgeMs: number;
-  }>;
 };
 
 /** Dedicated image-reading fallback configuration. */
@@ -334,14 +308,6 @@ export interface ReplyLoopConfig {
   llmOutputTimeoutMs: number;
 }
 
-/** Opaque Codex Responses continuation carried across nearby Discord turns. */
-export interface ReasoningContinuationConfig {
-  /** Whether to replay the latest encrypted Codex native continuation for the same user/channel. */
-  enabled: boolean;
-  /** Maximum age for a saved continuation before it is ignored. */
-  maxAgeMs: number;
-}
-
 /** Trigger configuration per guild. All independently toggleable. */
 export interface TriggerConfig {
   mention: boolean;
@@ -355,18 +321,6 @@ export interface TriggerConfig {
   typingResumeGraceMs: number;
   /** Maximum extra wait after a keyword/mention trigger, even if typing keeps refreshing. */
   typingMaxWaitMs: number;
-}
-
-/** Per-trigger-type custom instructions injected into agent context. */
-export interface TriggerInstructions {
-  mention?: string;
-  keyword?: string;
-  random?: string;
-  scheduled?: string;
-  ambient_pickup?: string;
-  lingering_attention?: string;
-  follow_up?: string;
-  ambient_initiative?: string;
 }
 
 /** Context window trimming thresholds (message count). */
@@ -528,7 +482,6 @@ export interface GuildConfig {
   guildId: string;
   slug: string;
   triggers: TriggerConfig;
-  triggerInstructions: TriggerInstructions;
   modelProfile: string;
   timezone: string;
   trim: TrimConfig;
@@ -562,8 +515,6 @@ export interface GuildConfig {
   ambientInitiative?: AmbientInitiativeConfig;
   /** Native reply/tool loop runtime limits. */
   replyLoop: ReplyLoopConfig;
-  /** Opaque Codex reasoning continuation across nearby user turns. */
-  reasoningContinuation: ReasoningContinuationConfig;
   /** Background memory extraction behavior. */
   memoryExtraction: MemoryExtractionConfig;
   /** Durable relationship-profile behavior. */
@@ -586,7 +537,6 @@ export interface GlobalConfig {
   defaultTimezone: string;
   defaultTrim: TrimConfig;
   defaultTriggers: TriggerConfig;
-  defaultTriggerInstructions: TriggerInstructions;
   defaultMergeMessageGapSeconds: number;
   defaultImageReferenceMaxPerCall: number;
   /** Default fallback for image tool results when the main model cannot read image input. */
@@ -622,8 +572,6 @@ export interface GlobalConfig {
   defaultAmbientInitiative?: AmbientInitiativeConfig;
   /** Default native reply/tool loop runtime limits. */
   defaultReplyLoop: ReplyLoopConfig;
-  /** Default opaque Codex reasoning continuation behavior. */
-  defaultReasoningContinuation: ReasoningContinuationConfig;
   /** Default background memory extraction behavior. */
   defaultMemoryExtraction: MemoryExtractionConfig;
   /** Default durable relationship-profile behavior. */
@@ -643,7 +591,6 @@ export interface AppConfig {
 /** Raw shape of a guild YAML file (partial, all fields optional). */
 export interface GuildConfigYaml {
   triggers?: Partial<TriggerConfig>;
-  triggerInstructions?: Partial<TriggerInstructions>;
   modelProfile?: string;
   timezone?: string;
   trim?: Partial<TrimConfig>;
@@ -698,10 +645,6 @@ export interface GuildConfigYaml {
     wallClockTimeoutMs?: number;
     llmOutputTimeoutMs?: number;
   };
-  reasoningContinuation?: {
-    enabled?: boolean;
-    maxAgeMs?: number;
-  };
   memoryExtraction?: {
     modelProfile?: string;
     postReply?: boolean;
@@ -722,7 +665,6 @@ export interface MainConfigYaml {
   timezone?: string;
   trim?: Partial<TrimConfig>;
   triggers?: Partial<TriggerConfig>;
-  triggerInstructions?: Partial<TriggerInstructions>;
   mergeMessageGapSeconds?: number;
   imageReferenceMaxPerCall?: number;
   imageReading?: {
@@ -780,10 +722,6 @@ export interface MainConfigYaml {
     maxToolCalls?: number;
     wallClockTimeoutMs?: number;
     llmOutputTimeoutMs?: number;
-  };
-  reasoningContinuation?: {
-    enabled?: boolean;
-    maxAgeMs?: number;
   };
   memoryExtraction?: {
     modelProfile?: string;

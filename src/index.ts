@@ -53,6 +53,8 @@ import { createChannelListTool, type ChannelInfo } from "./agent/channel-list-to
 import { createEmojiListTool } from "./agent/emoji-list-tool";
 import { createDiscordTimeoutTools, MAX_DISCORD_TIMEOUT_SECONDS, type TimeoutMember, type TimeoutMemberResolution } from "./agent/timeout-user-tool";
 import { createMemoryListTool } from "./agent/user-memory-tool";
+import { buildInnerThreadsContext, createListInnerThreadsTool, createRecordInnerThreadsTool } from "./agent/inner-thread-service";
+import { listInnerThreads } from "./db/inner-thread-repository";
 import { createListChannelMessagesTool } from "./agent/list-channel-messages-tool";
 import { createOwnMessageTools } from "./agent/own-message-tool";
 import { createBraveImageSearchTool, createBraveSearchTool } from "./agent/brave-search-tool";
@@ -66,7 +68,7 @@ import { AgentJobStore, createCancelAgentJobTool, isActiveJobStatus, type ImageG
 import { createAgentJobInspectionTools, renderAgentJobDetails } from "./agent/agent-job-tool";
 import { annotateHistoryJobs, createGeneratedImageRuntime, imageReferencesForToolInput, renderAgentJobsContext, renderImageGenerationInput, shortQuote, type GeneratedImageRuntime } from "./agent/generated-image-runtime";
 import { createStoredAssetAttachmentResolver } from "./agent/stored-asset-attachments";
-import { loadAssetReferenceImage } from "./agent/asset-reference-image";
+import { loadAssetReferenceImage, loadStagedAssetReferenceImage } from "./agent/asset-reference-image";
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
 import { createSummarizeVideoTool } from "./agent/summarize-video-tool";
 import { createCloseThreadTool, createStartThreadTool } from "./agent/start-thread-tool";
@@ -79,10 +81,17 @@ import { createAmbientRuntime } from "./ambient/runtime";
 import { createPersonaModeRuntime } from "./modes/runtime";
 import type { PersonaModeActivityType } from "./modes/types";
 import { cacheAssetExtraction, getAssetById, getAssetsByMessageId, syncMessageAssets } from "./db/asset-repository";
+import {
+  createStagedAsset,
+  deleteStagedAsset,
+  getStagedAsset,
+  getStagedAssetForJob,
+  listStagedAssets,
+  reconcileStagedAsset,
+} from "./db/staged-asset-repository";
 import { upsertThread, updateThreadActivity, markThreadArchived, listThreadsForContext, getThreadMetadata, getThread } from "./db/thread-repository";
 import { prepareImageBufferForContext } from "./agent/image-buffer";
 import { deleteExpiredMemories, countUserMemoriesByUser } from "./db/memory-repository";
-import { deleteExpiredCodexReasoningContinuations, getCodexReasoningContinuation, upsertCodexReasoningContinuation } from "./db/codex-reasoning-continuation-repository";
 import { createRelationshipsManagementApi } from "./dashboard/relationships-management";
 import { createDashboardManagementRuntime, dashboardTriggerLocation } from "./dashboard/management-runtime";
 import { createPromptLabRunner, promptLabDryRunTools, promptLabSummary, promptLabSyntheticId } from "./dashboard/prompt-lab-runtime";
@@ -117,6 +126,7 @@ import { AsyncTaskTracker } from "./runtime/async-task-tracker";
 import { DEFAULT_ASSET_READING, DEFAULT_EXTERNAL_IMAGES } from "./config/defaults";
 import { join } from "path";
 import { mkdirSync, existsSync, readdirSync, statSync, watch, type FSWatcher } from "fs";
+import { unlink } from "fs/promises";
 import type { Database } from "./db/database";
 import { ActivityType, ChannelType, PermissionFlagsBits, type Client, type Guild, type GuildBasedChannel, type GuildMember, type Message, type TextChannel, type ThreadChannel, type Typing } from "discord.js";
 import { renderVoiceHistory, renderVoiceMoveHandoff } from "./voice/history.ts";
@@ -171,12 +181,6 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
   const timeout = setTimeout(() => {
     controller.abort(new Error(`Image job ${job.id} timed out after ${deliveryGuildConfig.agentJobs.imageTimeoutMs}ms`));
   }, deliveryGuildConfig.agentJobs.imageTimeoutMs);
-  const typingTimer = setInterval(() => {
-    void textChannel.sendTyping().catch(() => {});
-  }, TYPING_INTERVAL_MS);
-  void textChannel.sendTyping().catch(() => {});
-  agentJobs.start(job.id, () => controller.abort(new Error(`Image job ${job.id} cancelled.`)));
-
   const requestLog = new RequestLog(job.deliveryGuildId, job.deliveryChannelId, requestLogStore);
   requestLog.setAuthor(job.requesterUsername);
   requestLog.setTriggerContext({
@@ -195,7 +199,6 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
   const runAsyncImageStatusTurn = async (input: {
     event: "ready" | "failed";
     instruction: string;
-    attachment?: OutboundAttachment;
   }): Promise<string | undefined> => {
     let sourceMessage: Message | undefined;
     try {
@@ -203,10 +206,6 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     } catch {
       sourceMessage = undefined;
     }
-    const completionTyping = createTypingController({
-      defaultChannel: textChannel,
-      resolveTargetChannel: createTargetChannelResolver(client, textChannel),
-    });
     const sender = createBotDiscordMessageSender({
       defaultChannel: textChannel,
       resolveTargetChannel: createTargetChannelResolver(client, textChannel),
@@ -214,7 +213,6 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       botUsername: client.user?.username ?? "bot",
       logger: log,
       ...(sourceMessage !== undefined ? { replySourceMessage: sourceMessage } : {}),
-      getLastTypingAt: completionTyping.getLastTypingAt,
       routedFrom: {
         routedFromGuildId: job.guildId,
         routedFromChannelId: job.channelId,
@@ -233,10 +231,10 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     });
     const syntheticLatestMessage: HistoryMessage = {
       id: `async-image-${input.event}-${job.id}`,
-      author: "async_image_generation",
-      authorId: "async_image_generation",
+      author: client.user?.username ?? "bot",
+      authorId: client.user?.id ?? "",
       content: input.instruction,
-      isBot: false,
+      isBot: true,
       timestamp: Date.now(),
       replyToId: job.sourceMessageId,
       hasEmbeds: false,
@@ -252,6 +250,10 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       syntheticLatestMessage,
       replyFallbackDeps,
       textChannel.isThread(),
+      { timestamp: Date.now(), messageId: `async-image-${input.event}-${job.id}` },
+      "virtual",
+      undefined,
+      { appendLatestToHistory: false, additionalVisibleUserIds: [job.requesterId] },
     );
     const extraTools = buildAgentTools(
       job.deliveryGuildId,
@@ -263,14 +265,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       undefined,
       {
         includeImageGenerationTools: input.event === "failed",
-        ...(input.event === "failed" ? {
-          currentRequest: {
-            requesterId: job.requesterId,
-            requesterUsername: job.requesterUsername,
-            sourceMessageId: job.sourceMessageId,
-            sourceQuote: job.sourceQuote,
-          },
-        } : {}),
+        visibleUserIds: context.visibleUserIds ?? [],
       },
     );
     let sentMessageId: string | undefined;
@@ -280,25 +275,47 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       return sent;
     };
     const tts = createTtsGenerator(deliveryGuildConfig);
-    const attachment = input.attachment;
     const completionIncoming: IncomingMessage = {
       content: input.instruction,
       guildId: job.deliveryGuildId,
       guildName: guild.name,
       channelId: job.deliveryChannelId,
       channelName: channelDisplayName(textChannel),
-      authorId: "async_image_generation",
-      authorUsername: "async_image_generation",
+      authorId: client.user?.id ?? "",
+      authorUsername: client.user?.username ?? "bot",
+      authorIsBot: true,
       botUserId: client.user?.id ?? "",
       mentionedUserIds: [],
       translatedContent: input.instruction,
       messageId: syntheticLatestMessage.id,
       replyToMessageId: job.sourceMessageId,
+      eventPrompt: {
+        metadataHeading: input.event === "ready" ? "Async Job Ready" : "Async Job Failed",
+        contentHeading: "Job Event",
+        metadataText: "This is factual runtime state. The original requester is provenance, not the owner of this turn or a default reply target.",
+      },
       // Do not feed finished generated images back into the chat model by default.
       // The Codex subscription Responses backend accepts some `input_image` URLs but
       // is unreliable with base64 data URLs, while this turn only needs to send the
       // already-generated Discord attachment and short delivery text.
     };
+    extraTools.push(...blockToolsExcept(createPostReplyMaintenanceTools({
+      guild,
+      guildConfig: deliveryGuildConfig,
+      memoryRequest: {
+        sourceMessageId: syntheticLatestMessage.id,
+        userMessage: input.instruction,
+        assistantReply: "",
+        recentContext: "",
+        context,
+        incomingMessage: completionIncoming,
+        visibleReplySent: false,
+      },
+      currentUserId: job.requesterId,
+      currentUsername: job.requesterUsername,
+      sourceMessageId: syntheticLatestMessage.id,
+      sourceRequestId: requestLog.requestId,
+    }), "", "visible reply mode"));
     const completionResult = await handleMessage(completionIncoming, createHandlerDeps({
       guildId: job.deliveryGuildId,
       guildConfig: deliveryGuildConfig,
@@ -312,14 +329,36 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       resolveAssetAttachments: createAssetAttachmentResolver(job.deliveryGuildId, deliveryGuildConfig,
         log.child({ component: "stored-asset-attachments", guildId: job.deliveryGuildId, channelId: job.deliveryChannelId, jobId: job.id })),
       overrides: {
-        ...(attachment !== undefined ? { initialPendingAttachments: [attachment] } : {}),
         forceTrigger: true,
-        triggerInstructions: deliveryGuildConfig.triggerInstructions,
-        onTriggered: () => { completionTyping.startLoop(); },
-        onStillWorking: (destinationChannelId) => { completionTyping.startLoop(destinationChannelId); },
-        getTypingStartedAt: completionTyping.getTypingStartedAt,
-        onVisibleOutput: completionTyping.stopLoop,
-        onAgentEnd: completionTyping.stopLoop,
+        afterReply: async (memoryRequest) => {
+          await runMemoryPostReplyExtraction({
+            guildConfig: deliveryGuildConfig,
+            memoryRequest,
+            guild,
+            channel: textChannel,
+            sourceRequestId: requestLog.requestId,
+            source: `async_image_${input.event}`,
+            currentUserId: job.requesterId,
+            currentUsername: job.requesterUsername,
+          });
+          await runRelationshipPostReplyExtraction({
+            guildConfig: deliveryGuildConfig,
+            memoryRequest,
+            guild,
+            channel: textChannel,
+            sourceRequestId: requestLog.requestId,
+            source: `async_image_${input.event}`,
+            currentUserId: job.requesterId,
+            currentUsername: job.requesterUsername,
+          });
+          await runInnerThreadPostReplyExtraction({
+            guildConfig: deliveryGuildConfig,
+            memoryRequest,
+            guild,
+            channel: textChannel,
+            sourceRequestId: requestLog.requestId,
+          });
+        },
         onIgnoredReply: ({ channelId: destinationChannelId, historyText }) => {
           persistIgnoredBotReply({
             guildId: job.deliveryGuildId,
@@ -337,6 +376,26 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
   }
 
   try {
+    if (job.status === "ready") {
+      const staged = getStagedAssetForJob(db, job.id);
+      if (staged === null) {
+        agentJobs.markFailed(job.id, "Ready job has no durable staged asset.");
+        return;
+      }
+      await runAsyncImageStatusTurn({
+        event: "ready",
+        instruction: [
+          `[Async Image Job Ready] Job ${job.id} remains ready after restart.`,
+          `Staged asset ref: ${staged.ref}.`,
+          `Original requester: @${job.requesterUsername} (${job.requesterId}).`,
+          `Source: guild ${job.guildId}, channel ${job.channelId}, MsgID ${job.sourceMessageId}; quote: ${JSON.stringify(job.sourceQuote)}.`,
+          `Intended delivery room: guild ${job.deliveryGuildId}, channel ${job.deliveryChannelId}.`,
+          "This event does not instruct you to send it. You may inspect it, deliver it explicitly, defer it, or dismiss the job deliberately.",
+        ].join("\n"),
+      });
+      return;
+    }
+    agentJobs.start(job.id, () => controller.abort(new Error(`Image job ${job.id} cancelled.`)));
     const generated = createGeneratedImageRuntime();
     const imageProfile = resolveModelProfile(
       globalConfig,
@@ -364,6 +423,16 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       asyncJobAlreadyActiveTemplate: promptBundle.runtime.contextTemplates["codex-image-job-existing"],
       asyncJobStartedTemplate: promptBundle.runtime.contextTemplates["codex-image-job-started"],
       resolveReferenceImage: async (id) => {
+        if (typeof id === "string") {
+          const staged = getStagedAsset(db, id);
+          return staged === null
+            ? null
+            : await loadStagedAssetReferenceImage({
+                asset: staged,
+                maxBytes: sourceGuildConfig.assetReading?.maxDownloadBytes
+                  ?? DEFAULT_ASSET_READING.maxDownloadBytes,
+              });
+        }
         const asset = getAssetById(db, id);
         if (asset === null) return null;
         const source = await jobAssetSource(asset);
@@ -418,48 +487,24 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     if (latest === undefined || !isActiveJobStatus(latest.status)) return;
     const generationInput = renderImageGenerationInput(job.input);
     const outboundAttachment: OutboundAttachment = attachment;
-
-    const completionInstruction = runtimeContextTemplate("async-image-ready", {
+    const stagedRef = `job_${job.id.replace(/[^A-Za-z0-9]/g, "")}`;
+    const stagedDirectory = join(globalConfig.dataDir, "staged-assets", stagedRef);
+    mkdirSync(stagedDirectory, { recursive: true });
+    const stagedPath = join(stagedDirectory, outboundAttachment.filename);
+    await Bun.write(stagedPath, outboundAttachment.buffer);
+    createStagedAsset(db, {
+      ref: stagedRef,
       jobId: job.id,
-      requesterUsername: job.requesterUsername,
-      is4k: job.input.is4k ? "yes" : "no",
-      transportLine: details?.transport !== undefined ? `Transport: ${details.transport}\n` : "",
-      requestedSizeLine: details?.requestedSize !== undefined ? `Requested size: ${details.requestedSize}\n` : "",
-      actualSizeLine: details?.actualSize !== undefined ? `Actual size: ${details.actualSize}\n` : "",
-      sourceMessageId: job.sourceMessageId,
-      sourceQuote: job.sourceQuote,
-      generationInput,
-      revisedPromptLine: typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}\n` : "",
-    }, `[Async Image Job Ready] Job ${job.id} generated an image.`);
-    const sentMessageId = await runAsyncImageStatusTurn({
-      event: "ready",
-      instruction: completionInstruction,
-      attachment: outboundAttachment,
+      ownerGuildId: job.deliveryGuildId,
+      ownerChannelId: job.deliveryChannelId,
+      filename: outboundAttachment.filename,
+      contentType: outboundAttachment.contentType,
+      storagePath: stagedPath,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
     });
-    if (sentMessageId === undefined) {
-      throw new Error("Async image completion did not send a Discord message.");
-    }
-    const deliveredAsset = getAssetsByMessageId(db, sentMessageId)
-      .find((asset) => asset.filename === outboundAttachment.filename && (asset.kind === "image" || asset.kind === "gif"));
-    if (deliveredAsset === undefined) {
-      log.warn("generated image asset provenance could not be linked", {
-        jobId: job.id,
-        sentMessageId,
-        filename: outboundAttachment.filename,
-      });
-    } else {
-      agentJobs.linkAsset(job.id, deliveredAsset.id);
-    }
-    ambientRuntime.noteAmbientBotReply({
-      guildId: job.deliveryGuildId,
-      channelId: job.deliveryChannelId,
-      userId: job.requesterId,
-      sourceMessageId: job.sourceMessageId,
-      botMessageId: sentMessageId,
-      allowLease: true,
-      allowFollowUp: false,
-    });
-    agentJobs.markSent(job.id, sentMessageId, {
+    agentJobs.markReady(job.id, {
+      stagedAssetRef: stagedRef,
       attachmentId: outboundAttachment.id,
       filename: outboundAttachment.filename,
       contentType: outboundAttachment.contentType,
@@ -469,6 +514,45 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       ...(details?.actualSize !== undefined ? { actualSize: details.actualSize } : {}),
       ...(typeof details?.revisedPrompt === "string" ? { revisedPrompt: details.revisedPrompt } : {}),
     } satisfies ImageGenerationJobResult);
+
+    const completionInstruction = runtimeContextTemplate("async-image-ready", {
+      jobId: job.id,
+      stagedAssetRef: stagedRef,
+      requesterUsername: job.requesterUsername,
+      requesterId: job.requesterId,
+      is4k: job.input.is4k ? "yes" : "no",
+      transportLine: details?.transport !== undefined ? `Transport: ${details.transport}\n` : "",
+      requestedSizeLine: details?.requestedSize !== undefined ? `Requested size: ${details.requestedSize}\n` : "",
+      actualSizeLine: details?.actualSize !== undefined ? `Actual size: ${details.actualSize}\n` : "",
+      sourceMessageId: job.sourceMessageId,
+      sourceQuote: job.sourceQuote,
+      generationInput,
+      revisedPromptLine: typeof details?.revisedPrompt === "string" ? `Revised prompt: ${details.revisedPrompt}\n` : "",
+      deliveryGuildId: job.deliveryGuildId,
+      deliveryChannelId: job.deliveryChannelId,
+    }, [
+      `[Async Image Job Ready] Job ${job.id} generated an image.`,
+      `Staged asset ref: ${stagedRef}.`,
+      `Original requester: @${job.requesterUsername} (${job.requesterId}).`,
+      `Source: guild ${job.guildId}, channel ${job.channelId}, MsgID ${job.sourceMessageId}; quote: ${JSON.stringify(job.sourceQuote)}.`,
+      `Intended delivery room: guild ${job.deliveryGuildId}, channel ${job.deliveryChannelId}.`,
+      "This event does not instruct you to send it. You may inspect it, deliver it with an explicit message asset_ids reference, defer it, or dismiss the job deliberately.",
+    ].join("\n"));
+    const sentMessageId = await runAsyncImageStatusTurn({
+      event: "ready",
+      instruction: completionInstruction,
+    });
+    if (sentMessageId !== undefined && agentJobs.get(job.id)?.status === "delivered") {
+      ambientRuntime.noteAmbientBotReply({
+        guildId: job.deliveryGuildId,
+        channelId: job.deliveryChannelId,
+        userId: job.requesterId,
+        sourceMessageId: job.sourceMessageId,
+        botMessageId: sentMessageId,
+        allowLease: true,
+        allowFollowUp: false,
+      });
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     requestLog.setError(message);
@@ -478,19 +562,15 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       });
       imageToolEnded = true;
     }
-    if (controller.signal.aborted && agentJobs.get(job.id)?.status === "cancelled") return;
+    if (controller.signal.aborted && agentJobs.get(job.id)?.status === "dismissed") return;
     const timedOut = controller.signal.aborted && message.includes("timed out");
-    if (timedOut) {
-      agentJobs.markTimedOut(job.id, message);
-    } else {
-      agentJobs.markFailed(job.id, message);
-    }
+    agentJobs.markFailed(job.id, timedOut ? `Timed out: ${message}` : message);
     const latest = agentJobs.get(job.id);
-    if (latest?.status === "failed" || latest?.status === "timed_out") {
+    if (latest?.status === "failed") {
       try {
         const failureInstruction = runtimeContextTemplate("async-image-failed", {
           jobId: job.id,
-          statusText: latest.status === "timed_out" ? "timed out" : "failed",
+          statusText: timedOut ? "timed out" : "failed",
           requesterUsername: job.requesterUsername,
           sourceMessageId: job.sourceMessageId,
           sourceQuote: job.sourceQuote,
@@ -510,7 +590,6 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     }
   } finally {
     clearTimeout(timeout);
-    clearInterval(typingTimer);
     requestLog.emit(log);
     requestLogStore.decrementActive();
   }
@@ -539,10 +618,42 @@ function persistIgnoredBotReply(input: {
 function createBotDiscordMessageSender(
   input: Omit<Parameters<typeof createDiscordMessageSender>[0], "db" | "buildOutboundResolvers">,
 ): MessageSender {
+  const callerOnDelivered = input.onDelivered;
   return createDiscordMessageSender({
     db,
     buildOutboundResolvers,
     ...input,
+    onDelivered: async (delivery) => {
+      await callerOnDelivered?.(delivery);
+      for (const attachment of delivery.attachments) {
+        if (!attachment.id.startsWith("staged-")) continue;
+        const ref = attachment.id.slice("staged-".length);
+        const staged = getStagedAsset(db, ref);
+        if (staged === null || staged.deliveredMessageId !== undefined) continue;
+        const permanent = getAssetsByMessageId(db, delivery.messageId)
+          .find((asset) => asset.filename === staged.filename);
+        const reconciled = reconcileStagedAsset(db, {
+          ref,
+          deliveredMessageId: delivery.messageId,
+          ...(permanent !== undefined ? { permanentAssetId: permanent.id } : {}),
+        });
+        if (!reconciled) continue;
+        if (permanent !== undefined) agentJobs.linkAsset(staged.jobId, permanent.id);
+        const job = agentJobs.get(staged.jobId);
+        if (job?.status === "ready") {
+          agentJobs.markDelivered(staged.jobId, delivery.messageId, {
+            ...(job.result ?? {}),
+            stagedAssetRef: ref,
+          });
+        }
+        await unlink(staged.storagePath).catch((error: unknown) => {
+          log.warn("delivered staged asset cleanup failed", {
+            ref,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+    },
   });
 }
 
@@ -634,27 +745,6 @@ function createHandlerDeps(input: {
       ? { consumeGeneratedAttachments: input.generatedImages.consumeGeneratedAttachments }
       : {}),
     ...(input.resolveAssetAttachments !== undefined ? { resolveAssetAttachments: input.resolveAssetAttachments } : {}),
-    nativeReasoningContinuation: {
-      load: (continuationInput) => {
-        try {
-          return getCodexReasoningContinuation(db, continuationInput)?.providerNativeContent;
-        } catch (error) {
-          input.log.warn("codex reasoning continuation load failed", {
-            error: error instanceof Error ? error.message : String(error),
-          });
-          return undefined;
-        }
-      },
-      save: (continuationInput) => {
-        try {
-          upsertCodexReasoningContinuation(db, continuationInput);
-        } catch (error) {
-          input.log.warn("codex reasoning continuation save failed", {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      },
-    },
     trackBackgroundTask: (task) => {
       void backgroundTasks.track(task);
     },
@@ -685,6 +775,7 @@ function createAssetAttachmentResolver(_guildId: string, guildConfig: GuildConfi
   });
   return createStoredAssetAttachmentResolver({
     db,
+    stagedGuildId: _guildId,
     maxDownloadBytes: guildConfig.assetReading?.maxDownloadBytes ?? DEFAULT_ASSET_READING.maxDownloadBytes,
     resolveSource,
     logger,
@@ -1126,10 +1217,7 @@ async function runVoiceAgentTurn(request: VoiceTurnRequest): Promise<void> {
   if (guild === null) throw new Error(`Voice guild ${request.guildId} is unavailable.`);
   const baseConfig = getGuildConfig(request.guildId);
   const voiceConfig = getVoiceConfig(baseConfig);
-  const guildConfig: GuildConfig = {
-    ...baseConfig,
-    reasoningContinuation: { ...baseConfig.reasoningContinuation, enabled: false },
-  };
+  const guildConfig = baseConfig;
   const context = await voiceAssembledContext(request, guild, guildConfig);
   const origin = request.instruction === undefined
     ? {
@@ -1476,6 +1564,14 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
             },
           }));
         }
+        tools.push(createRecordInnerThreadsTool({
+          db,
+          guildId: guild.id,
+          channelId: session.channelId,
+          requestId: sessionId,
+          description: runtimeToolDescription("record_inner_threads", {})
+            ?? "Privately maintain durable inner threads.",
+        }));
         if (tools.length > 0) {
           const memoryContext = buildMemoryContext({
             db,
@@ -1513,6 +1609,12 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
                   : `## Existing Rolling Summary\n${session.rollingSummary}`,
                 memoryContext === "" ? "" : `## Existing Memory Context\n${memoryContext}`,
                 relationshipContext,
+                buildInnerThreadsContext({
+                  db,
+                  guildId: guild.id,
+                  visibleUserIds: userIds,
+                  limit: 30,
+                }),
                 `## Voice Speaker IDs\n${userIds.map((userId) =>
                   `@${usernameById.get(userId) ?? userId} = ${userId}`
                 ).join("\n")}`,
@@ -1559,13 +1661,19 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
                 "Decide silently whether durable memory should be updated.",
               ),
               "Use record_relationship only for meaningful relationship changes; every signal must include the target userId from Voice Speaker IDs.",
+              runtimeContextTemplate(
+                "inner-thread-pass-decision",
+                {},
+                "Update inner threads only for unresolved attention, intention, curiosity, conflict, expectation, or commitment that should remain cognitively live.",
+              ),
               "Make all useful tool calls in one batch when possible, then stop.",
             ].join("\n"),
             modelProfile: voiceConfig.maintenance.extraction.modelProfile,
             maxToolCalls: (guildConfig.memoryExtraction.postReply
               ? guildConfig.memoryExtraction.maxToolCalls
               : 0)
-              + (relationshipConfig.enabled ? relationshipConfig.maxToolCalls : 0),
+              + (relationshipConfig.enabled ? relationshipConfig.maxToolCalls : 0)
+              + 3,
             requestLog,
             log: log.child({ component: "voice-extraction-maintenance", sessionId }),
           });
@@ -1637,6 +1745,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
     runLoggedAgentTurn,
     runMemoryPostReplyExtraction,
     runRelationshipPostReplyExtraction,
+    runInnerThreadPostReplyExtraction,
     onScheduleCompleted: (id) => scheduler.removeSchedule(id),
     markScheduledAttentionBusy,
     preparePersonaModeTurn: (guildId) => personaModeRuntime.prepareNaturalTurn(guildId),
@@ -1653,13 +1762,15 @@ const memoryCleanupTimer = setInterval(() => {
   if (deleted > 0) {
     log.info("expired memories cleaned", { deleted });
   }
-  const continuationTtl = Math.max(
-    globalConfig.defaultReasoningContinuation.maxAgeMs,
-    ...[...guildConfigs.values()].map((guildConfig) => guildConfig.reasoningContinuation.maxAgeMs),
-  );
-  const deletedContinuations = deleteExpiredCodexReasoningContinuations(db, continuationTtl);
-  if (deletedContinuations > 0) {
-    log.info("expired codex reasoning continuations cleaned", { deleted: deletedContinuations });
+  const expiredStaged = listStagedAssets(db, { unresolvedOnly: true, limit: 500 })
+    .filter((asset) => asset.expiresAt <= Date.now());
+  for (const staged of expiredStaged) {
+    agentJobs.markExpired(staged.jobId);
+    void unlink(staged.storagePath).catch(() => {});
+    deleteStagedAsset(db, staged.ref);
+  }
+  if (expiredStaged.length > 0) {
+    log.info("expired staged assets cleaned", { deleted: expiredStaged.length });
   }
   const deletedAgentJobs = agentJobs.cleanup();
   if (deletedAgentJobs > 0) {
@@ -1978,12 +2089,12 @@ function blockToolsExcept(tools: AgentTool[], allowedName: string, passLabel: st
 	      });
 }
 
-const maintenanceToolNames = new Set(["record_memory", "record_relationship"]);
+const maintenanceToolNames = new Set(["record_memory", "record_relationship", "record_inner_threads"]);
 
 function toolsForMaintenancePass(
   visibleTools: AgentTool[] | undefined,
   maintenanceTools: AgentTool[],
-  allowedName: "record_memory" | "record_relationship",
+  allowedName: "record_memory" | "record_relationship" | "record_inner_threads",
   passLabel: string,
 ): AgentTool[] {
   const byName = new Map<string, AgentTool>();
@@ -2017,6 +2128,7 @@ function createPostReplyMaintenanceTools(input: {
   dryRun?: boolean;
   dryRuns?: Array<{ tool: string; args: unknown }>;
   onRelationshipResult?: (result: RelationshipMutationResult, candidates: unknown[]) => void;
+  sourceRequestId?: string;
 }): AgentTool[] {
   const recordMemoryTool = createRecordMemoryTool({
     db,
@@ -2051,11 +2163,20 @@ function createPostReplyMaintenanceTools(input: {
     },
     onResult: (result, candidates) => input.onRelationshipResult?.(result, candidates),
   });
+  const recordInnerThreadsTool = createRecordInnerThreadsTool({
+    db,
+    guildId: input.guild.id,
+    channelId: input.memoryRequest.incomingMessage.channelId ?? "",
+    requestId: input.sourceRequestId,
+    description: runtimeToolDescription("record_inner_threads", {}) ?? "Privately maintain durable inner threads.",
+    dryRun: input.dryRun,
+  });
   // Visible turns receive blocked versions of these tools before maintenance
   // reuses them. Prompt the shared schemas here so both requests remain cache-identical.
   return applyRuntimeToolPrompts([
     promptLabMemoryDryRunTool(recordMemoryTool, input.dryRuns),
     recordRelationshipTool,
+    recordInnerThreadsTool,
   ], promptBundle.runtime);
 }
 
@@ -2066,6 +2187,7 @@ async function runMemoryPostReplyExtraction(input: {
   channel: unknown;
   sourceRequestId: string;
   source?: string;
+  passKind?: "post_reply" | "ambient";
   currentUserId: string;
   currentUsername?: string;
   dryRun?: boolean;
@@ -2135,6 +2257,7 @@ async function runMemoryPostReplyExtraction(input: {
       userContent: input.memoryRequest.userMessage,
       assistantReply: input.memoryRequest.assistantReply,
       visibleReplySent: input.memoryRequest.visibleReplySent,
+      passKind: input.passKind,
       visibleUserMemoryContext: broadMemoryContext,
       tools: toolsForMaintenancePass(input.memoryRequest.availableTools, maintenanceTools, "record_memory", "silent memory pass"),
       transcript: input.memoryRequest.maintenanceTranscript,
@@ -2284,6 +2407,93 @@ async function runRelationshipPostReplyExtraction(input: {
       relationshipsLog.emit(log);
       requestLogStore.decrementActive();
     }
+  }
+}
+
+async function runInnerThreadPostReplyExtraction(input: {
+  guildConfig: GuildConfig;
+  memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0];
+  guild: Guild;
+  channel: unknown;
+  sourceRequestId: string;
+  dryRun?: boolean;
+}): Promise<void> {
+  if (!hasMaintenanceMaterial(input.memoryRequest)) return;
+  const guildId = input.memoryRequest.incomingMessage.guildId ?? input.guild.id;
+  const channelId = input.memoryRequest.incomingMessage.channelId ?? "";
+  const sourceMessageId = input.memoryRequest.sourceMessageId ?? promptLabSyntheticId();
+  const requestLog = new RequestLog(guildId, channelId, requestLogStore);
+  requestLog.setAuthor(input.memoryRequest.incomingMessage.authorUsername);
+  requestLog.setTrigger({
+    type: "inner_thread_maintenance",
+    sourceRequestId: input.sourceRequestId,
+    ...(input.dryRun === true ? { dryRun: true } : {}),
+  });
+  requestLog.setTriggerContext({
+    ...dashboardTriggerLocation(input.guild, input.channel),
+    messageId: sourceMessageId,
+    authorUsername: input.memoryRequest.incomingMessage.authorUsername,
+    content: input.memoryRequest.userMessage,
+    translatedContent: input.memoryRequest.userMessage,
+  });
+  requestLog.setAgentRan(true);
+  requestLogStore.incrementActive();
+  const maintenanceTools = createPostReplyMaintenanceTools({
+    guild: input.guild,
+    guildConfig: input.guildConfig,
+    memoryRequest: input.memoryRequest,
+    currentUserId: input.memoryRequest.incomingMessage.authorId,
+    currentUsername: input.memoryRequest.incomingMessage.authorUsername,
+    sourceMessageId,
+    sourceRequestId: input.sourceRequestId,
+    dryRun: input.dryRun,
+  });
+  try {
+    await runSilentToolAgentPass({
+      globalConfig,
+      guildConfig: input.guildConfig,
+      context: input.memoryRequest.context,
+      systemPrompt: promptBundle.systemPrompt,
+      personaPrompt: promptBundle.corePrompt,
+      runtimePrompts: promptBundle.runtime,
+      incomingMessage: input.memoryRequest.incomingMessage,
+      userContent: input.memoryRequest.userMessage,
+      assistantReply: input.memoryRequest.assistantReply,
+      visibleReplySent: input.memoryRequest.visibleReplySent,
+      tools: toolsForMaintenancePass(
+        input.memoryRequest.availableTools,
+        maintenanceTools,
+        "record_inner_threads",
+        "silent inner-thread pass",
+      ),
+      runtimeInstruction: promptBundle.runtime.reply,
+      controlMessage: [
+        runtimeContextTemplate(
+          "inner-thread-maintenance-execution-mode",
+          {},
+          "Private inner-thread maintenance is active. Only record_inner_threads is available.",
+        ),
+        "Current time:",
+        currentLocalContext(input.guildConfig.timezone),
+        runtimeContextTemplate(
+          "inner-thread-pass-decision",
+          {},
+          "Decide silently whether durable inner threads should change.",
+        ),
+      ].filter((part) => part !== "").join("\n\n"),
+      modelProfile: input.guildConfig.memoryExtraction.modelProfile,
+      maxToolCalls: 3,
+      transcript: input.memoryRequest.maintenanceTranscript,
+      promptContext: input.memoryRequest.promptContext,
+      requestLog,
+      log: log.child({ guildId, channelId, requestId: requestLog.requestId, component: "inner-thread-pass" }),
+    });
+  } catch (error) {
+    requestLog.setError(error instanceof Error ? error.message : String(error));
+    throw error;
+  } finally {
+    requestLog.emit(log);
+    requestLogStore.decrementActive();
   }
 }
 
@@ -2572,8 +2782,22 @@ async function buildContext(
       personaMode: personaModeRuntime.renderPromptContext(guildId),
       responseInstruction: "",
       userMessage,
-    });
+  });
   assembled.visibleUserIds = visibleUserIds;
+  const innerThreadsText = buildInnerThreadsContext({
+    db,
+    guildId,
+    visibleUserIds,
+  });
+  if (innerThreadsText !== "") {
+    const memoryIndex = assembled.sections.findIndex((section) => section.label === "Memories");
+    const insertAt = memoryIndex === -1 ? 0 : memoryIndex + 1;
+    assembled.sections = [
+      ...assembled.sections.slice(0, insertAt),
+      { label: "Inner Threads", text: innerThreadsText, cached: false, role: "developer" as const },
+      ...assembled.sections.slice(insertAt),
+    ];
+  }
   const activeJobsText = renderAgentJobsContext(
     visibleJobs,
     runtimeContextTemplate("active-image-jobs", {}, "Image generation is asynchronous."),
@@ -2853,6 +3077,7 @@ function buildAgentTools(
       sourceQuote: string;
     };
     deliverDiceRoll?: (input: DiceRollDelivery) => Promise<{ sentMessageId: string }>;
+    visibleUserIds?: readonly string[];
   } = {},
 ) {
   const includeImageGenerationTools = options.includeImageGenerationTools ?? true;
@@ -3103,6 +3328,12 @@ function buildAgentTools(
       }
     },
   });
+  const innerThreadListTool = createListInnerThreadsTool({
+    db,
+    guildId,
+    visibleUserIds: options.visibleUserIds ?? [],
+    description: runtimeToolDescription("list_inner_threads", {}) ?? "Privately inspect durable inner threads.",
+  });
 
   const listChannelMessagesTool = createListChannelMessagesTool({
     guildId,
@@ -3187,6 +3418,10 @@ function buildAgentTools(
     config: guildConfig.assetReading ?? { ...DEFAULT_ASSET_READING, videoPreviewTimesSeconds: [...DEFAULT_ASSET_READING.videoPreviewTimesSeconds] },
     elevenLabsApiKey: globalConfig.elevenLabsApiKey,
     getAsset: (id) => getAssetById(db, id),
+    getStagedAsset: (ref) => {
+      const staged = getStagedAsset(db, ref);
+      return staged?.ownerGuildId === guildId ? staged : null;
+    },
     getProvenance: (id) => {
       const linked = agentJobs.getForAsset(id);
       return linked === undefined
@@ -3310,8 +3545,18 @@ function buildAgentTools(
         },
       });
 
-  const jobInspectionTools = createAgentJobInspectionTools({ store: agentJobs, guildId, channelId });
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memoryListTool, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, ...jobInspectionTools, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const jobInspectionTools = createAgentJobInspectionTools({
+    store: agentJobs,
+    guildId,
+    channelId,
+    onDismiss: async (jobId) => {
+      const staged = getStagedAssetForJob(db, jobId);
+      if (staged === null) return;
+      await unlink(staged.storagePath).catch(() => {});
+      deleteStagedAsset(db, staged.ref);
+    },
+  });
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memoryListTool, innerThreadListTool, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, ...jobInspectionTools, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (diceRollTool !== undefined) tools.push(diceRollTool);
   if (includeImageGenerationTools) {
     const imageProfile = resolveModelProfile(
@@ -3334,6 +3579,15 @@ function buildAgentTools(
       asyncJobAlreadyActiveTemplate: promptBundle.runtime.contextTemplates["codex-image-job-existing"],
       asyncJobStartedTemplate: promptBundle.runtime.contextTemplates["codex-image-job-started"],
       resolveReferenceImage: async (id) => {
+        if (typeof id === "string") {
+          const staged = getStagedAsset(db, id);
+          if (staged === null || staged.ownerGuildId !== guildId) return null;
+          return await loadStagedAssetReferenceImage({
+            asset: staged,
+            maxBytes: guildConfig.assetReading?.maxDownloadBytes
+              ?? DEFAULT_ASSET_READING.maxDownloadBytes,
+          });
+        }
         const asset = getAssetById(db, id);
         if (asset === null) return null;
         const source = await resolveAssetSource(asset);
@@ -3382,6 +3636,12 @@ function buildAgentTools(
 
     const cancelJobTool = createCancelAgentJobTool({
       store: agentJobs,
+      onCancelled: async (jobId) => {
+        const staged = getStagedAssetForJob(db, jobId);
+        if (staged === null) return;
+        await unlink(staged.storagePath).catch(() => {});
+        deleteStagedAsset(db, staged.ref);
+      },
     });
     tools.push(codexGenerateImageTool, cancelJobTool);
   }
@@ -3446,7 +3706,6 @@ const ambientRuntime = createAmbientRuntime({
   promptLabSummary,
   resolveClientGuild,
   fetchAccessibleGuildChannel,
-  promptLabUserFromGuild,
   createBotDiscordMessageSender,
   createHandlerDeps,
   processTriggeredMessage,
@@ -3455,6 +3714,58 @@ const ambientRuntime = createAmbientRuntime({
   },
   isAutonomousAttentionBusy: isScheduledAttentionBusy,
   preparePersonaModeTurn: (guildId) => personaModeRuntime.prepareNaturalTurn(guildId),
+  runMaintenance: async ({
+    guildConfig,
+    request,
+    guild,
+    channel,
+    sourceRequestId,
+    dryRun,
+    dryRuns,
+  }) => {
+    const latestHuman = db.raw.prepare(
+      `SELECT user_id, author_username
+       FROM messages
+       WHERE guild_id = ? AND channel_id = ? AND is_bot = 0
+         AND is_synthetic = 0 AND is_prompt_only = 0
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+    ).get(guild.id, channel.id) as { user_id: string; author_username: string } | null;
+    const currentUserId = latestHuman?.user_id ?? client.user?.id ?? "";
+    const currentUsername = latestHuman?.author_username ?? client.user?.username ?? "bot";
+    await runMemoryPostReplyExtraction({
+      guildConfig,
+      memoryRequest: request,
+      guild,
+      channel,
+      sourceRequestId,
+      source: "ambient_initiative",
+      passKind: "ambient",
+      currentUserId,
+      currentUsername,
+      dryRun,
+      dryRuns,
+    });
+    await runRelationshipPostReplyExtraction({
+      guildConfig,
+      memoryRequest: request,
+      guild,
+      channel,
+      sourceRequestId,
+      source: "ambient_initiative",
+      currentUserId,
+      currentUsername,
+      dryRun,
+      dryRuns,
+    });
+    await runInnerThreadPostReplyExtraction({
+      guildConfig,
+      memoryRequest: request,
+      guild,
+      channel,
+      sourceRequestId,
+      dryRun,
+    });
+  },
 });
 
 // --- 21. Channel dispatcher ---
@@ -3514,14 +3825,12 @@ async function processTriggeredMessage(
   currentTurnMessages: readonly Message[] = [message],
   options: {
     disableLiveOutput?: boolean;
-    defaultReply?: boolean;
-    triggerInstruction?: string;
     currentTurnOverride?: {
       messageId: string;
       timestamp: number;
       content: string;
     };
-    preSendCheck?: () => boolean | Promise<boolean>;
+    preSendCheck?: (draftText: string) => boolean | Promise<boolean>;
     onWriteToolStart?: (toolName: string) => void;
   } = {},
 ): Promise<DispatchOutcome> {
@@ -3678,7 +3987,6 @@ async function processTriggeredMessage(
       options.currentTurnOverride !== undefined ? currentTurnMessageIds : undefined,
       {
         appendLatestToHistory: options.currentTurnOverride !== undefined,
-        triggerMessageIds: currentTurnMessageIds,
       },
     );
 
@@ -3769,6 +4077,7 @@ async function processTriggeredMessage(
         sourceQuote: shortQuote(translatedContent),
       },
       {
+        visibleUserIds: context.visibleUserIds ?? [],
         deliverDiceRoll: async (input) => {
           const result = await sender(
             input.text,
@@ -3814,6 +4123,7 @@ async function processTriggeredMessage(
       mentionedUserIds: [...message.mentions.users.keys()],
       translatedContent: options.currentTurnOverride?.content ?? translatedContent,
       eventContent: currentTurnEventContent !== "" ? currentTurnEventContent : translatedContent,
+      currentContentInHistory: options.currentTurnOverride === undefined,
       messageId: options.currentTurnOverride?.messageId ?? message.id,
       replyToMessageId: message.reference?.messageId,
       repliedToBot: messageRepliesToOwnBot(message),
@@ -3843,6 +4153,7 @@ async function processTriggeredMessage(
       currentUserId: message.author.id,
       currentUsername: message.author.username,
       sourceMessageId: options.currentTurnOverride?.messageId ?? message.id,
+      sourceRequestId: requestLog.requestId,
     }), "", "visible reply mode");
 
     const tts = createTtsGenerator(guildConfig);
@@ -3870,11 +4181,7 @@ async function processTriggeredMessage(
         hasExternalVisibleOutput: () => rollVisibleOutputSent,
         onAgentEnd: typing.stopLoop,
         triggerOverride,
-        triggerInstructions: options.triggerInstruction !== undefined && triggerOverride !== undefined
-          ? { ...guildConfig.triggerInstructions, [triggerOverride.reason]: options.triggerInstruction }
-          : guildConfig.triggerInstructions,
         disableLiveOutput: options.disableLiveOutput,
-        replyFirstOverride: options.defaultReply,
         preSendCheck: options.preSendCheck,
         onIgnoredReply: ({ channelId: destinationChannelId, historyText }) => {
           persistIgnoredBotReply({
@@ -3907,6 +4214,13 @@ async function processTriggeredMessage(
             source: "post_reply",
             currentUserId: message.author.id,
             currentUsername: message.author.username,
+          });
+          await runInnerThreadPostReplyExtraction({
+            guildConfig,
+            memoryRequest,
+            guild,
+            channel: message.channel,
+            sourceRequestId: requestLog.requestId,
           });
         },
       },
@@ -4406,6 +4720,16 @@ void backgroundTasks.track(backfillMessageAssets({
   log.warn("asset history backfill stopped", { error: error instanceof Error ? error.message : String(error) });
 });
 ambientRuntime.startAmbientInitiativeLoops();
+for (const row of db.raw.prepare(
+  "SELECT id FROM agent_jobs WHERE status = 'ready' ORDER BY completed_at ASC, created_at ASC",
+).all() as Array<{ id: string }>) {
+  void imageJobTasks.track(runImageGenerationJob(row.id)).catch((error: unknown) => {
+    log.error("ready staged image recovery failed", {
+      jobId: row.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
 
 // --- Start dashboard ---
 
@@ -4447,6 +4771,7 @@ const runPromptLab = createPromptLabRunner({
   createHandlerDeps,
   runMemoryPostReplyExtraction,
   runRelationshipPostReplyExtraction,
+  runInnerThreadPostReplyExtraction,
   promptLabUserFromGuild,
 });
 
@@ -4474,6 +4799,12 @@ const dashboardManagement = {
   deleteLatestMessages: dashboardManagementRuntime.deleteLatestMessages,
   runPromptLab,
   runPromptLabAmbientInitiative: ambientRuntime.runPromptLabAmbientInitiative,
+  listInnerThreads: (filter: { guildId?: string; status?: "active" | "resolved"; limit?: number }) => ({
+    threads: listInnerThreads(db, filter),
+  }),
+  listStagedAssets: (filter: { guildId?: string; channelId?: string; unresolvedOnly?: boolean; limit?: number }) => ({
+    assets: listStagedAssets(db, filter),
+  }),
   listMemories: dashboardManagementRuntime.listMemories,
   createMemory: dashboardManagementRuntime.createMemory,
   editMemory: dashboardManagementRuntime.editMemory,

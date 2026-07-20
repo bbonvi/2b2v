@@ -121,6 +121,18 @@ describe("parseResponseDirectives", () => {
     });
   });
 
+  test("parses staged asset handles alongside permanent ids", () => {
+    expect(parseResponseDirectives(
+      '<message asset_ids=["job_7K3M", #12]>ready</message>',
+    ).segments).toEqual([
+      {
+        kind: "messageBreak",
+        delivery: { assetIds: ["job_7K3M", 12] },
+      },
+      { kind: "text", text: "ready" },
+    ]);
+  });
+
   test("preserves asset-only message directives", () => {
     expect(parseResponseDirectives("<message asset_ids=[12]></message>")).toEqual({
       ignored: false,

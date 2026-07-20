@@ -38,7 +38,7 @@ export interface AgentJobRecordPatch {
   cancelReason?: string | null;
 }
 
-const ACTIVE_JOB_STATUSES = ["queued", "running", "cancelling"] as const;
+const ACTIVE_JOB_STATUSES = ["queued", "running", "ready"] as const;
 
 /** Insert a newly accepted agent job before its worker starts. */
 export function createAgentJobRecord(db: Database, record: AgentJobRecord): void {
@@ -143,8 +143,8 @@ export function listAgentJobRecords(db: Database, input: {
 export function failInterruptedAgentJobs(db: Database, now = Date.now()): number {
   const result = db.raw.prepare(`UPDATE agent_jobs
     SET status = 'failed', completed_at = ?, error = ?
-    WHERE status IN (${ACTIVE_JOB_STATUSES.map(() => "?").join(", ")})`)
-    .run(now, "Interrupted before completion by a process restart.", ...ACTIVE_JOB_STATUSES);
+    WHERE status IN ('queued', 'running')`)
+    .run(now, "Interrupted before completion by a process restart.");
   return result.changes;
 }
 

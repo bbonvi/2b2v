@@ -3,10 +3,11 @@ import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { AssetReadingConfig } from "../config/types.ts";
 import type { MessageAsset } from "../db/asset-repository.ts";
-import { AssetIdSchema, parseAssetId } from "./asset-id.ts";
+import type { StagedAsset } from "../db/staged-asset-repository.ts";
+import { AssetRefSchema, parseAssetRef } from "./asset-id.ts";
 
 const ReadAssetParams = Type.Object({
-  asset_id: AssetIdSchema,
+  asset_id: AssetRefSchema,
   start_line: Type.Optional(Type.Integer({ minimum: 1, description: "First line to read from textual content." })),
   line_count: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000, description: "Maximum lines to read." })),
 });
@@ -31,6 +32,8 @@ export interface ReadAssetToolDeps {
   config: AssetReadingConfig;
   elevenLabsApiKey?: string;
   getAsset: (id: number) => MessageAsset | null;
+  /** Resolve a durable generated output that has not yet become a Discord asset. */
+  getStagedAsset?: (ref: string) => StagedAsset | null;
   /** Render private producer metadata for generated assets, when available. */
   getProvenance?: (id: number) => string | null;
   /** Resolve visible origin metadata and confirm the bot can still access the source channel. */
@@ -64,12 +67,44 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
   return {
     name: "read_asset",
     label: "Read Asset",
-    description: "Read an image, GIF, audio, video, text, or file referenced by a typed chat asset ID.",
+    description: "Read an image, GIF, audio, video, text, or file referenced by a permanent asset ID or staged handle.",
     parameters: ReadAssetParams,
-    async execute(_toolCallId, params, signal): Promise<AgentToolResult<{ assetId: number; origin: AssetOrigin; startLine?: number; endLine?: number; totalLines?: number }>> {
+    async execute(_toolCallId, params, signal): Promise<AgentToolResult<
+      | { assetId: number; origin: AssetOrigin; startLine?: number; endLine?: number; totalLines?: number }
+      | { assetRef: string; jobId: string }
+    >> {
       const input = params as { asset_id: unknown; start_line?: number; line_count?: number };
-      const assetId = parseAssetId(input.asset_id);
-      if (assetId === null) throw new Error("asset_id must be a positive integer, optionally prefixed with #");
+      const assetRef = parseAssetRef(input.asset_id);
+      if (assetRef === null) {
+        throw new Error("asset_id must be a positive integer or staged asset handle");
+      }
+      if (typeof assetRef === "string") {
+        const staged = deps.getStagedAsset?.(assetRef) ?? null;
+        if (staged === null) throw new Error(`Staged asset ${assetRef} was not found.`);
+        const timeoutSignal = AbortSignal.timeout(deps.config.timeoutSeconds.image * 1000);
+        const readSignal = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
+        const file = Bun.file(staged.storagePath);
+        if (!await file.exists()) throw new Error(`Staged asset ${assetRef} file is unavailable.`);
+        if (file.size > deps.config.maxDownloadBytes) {
+          throw new Error(`Staged asset ${assetRef} exceeds the configured read limit.`);
+        }
+        const image = await deps.prepareImage(
+          Buffer.from(await file.arrayBuffer()),
+          staged.contentType,
+        );
+        readSignal.throwIfAborted();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Staged asset: ${staged.ref} — ${staged.filename}\nJob: ${staged.jobId}\nOwner room: guild ${staged.ownerGuildId}, channel ${staged.ownerChannelId}\nExpires: ${new Date(staged.expiresAt).toISOString()}`,
+            },
+            { type: "image", data: image.data.toString("base64"), mimeType: image.mime },
+          ],
+          details: { assetRef: staged.ref, jobId: staged.jobId },
+        };
+      }
+      const assetId = assetRef;
       const asset = deps.getAsset(assetId);
       if (asset === null) throw new Error(`Asset ${assetId} was not found.`);
       const origin = await deps.resolveOrigin(asset);

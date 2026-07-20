@@ -275,6 +275,12 @@ export function createDiscordMessageSender(input: {
   replySourceMessage?: Message;
   getLastTypingAt?: () => number;
   routedFrom?: RoutedMessageSource;
+  onDelivered?: (input: {
+    messageId: string;
+    guildId: string;
+    channelId: string;
+    attachments: readonly OutboundAttachment[];
+  }) => void | Promise<void>;
 }): MessageSender {
   const storeBotMessage = createBotMessageStore({
     db: input.db,
@@ -422,6 +428,12 @@ export function createDiscordMessageSender(input: {
       }
       storeBotMessage(sent.id, targetGuildId, targetChannelId, voiceRawContent(firstChunk), voice.historyText ?? text, sentReplyToId);
       storeBotAssets(sent);
+      await input.onDelivered?.({
+        messageId: sent.id,
+        guildId: targetGuildId,
+        channelId: targetChannelId,
+        attachments: attachments ?? [],
+      });
       for (let i = 1; i < chunks.length; i++) {
         const chunk = chunks[i] as string;
         const followup = await sendToTargetChannel(buildAttachmentPayload(
@@ -489,6 +501,14 @@ export function createDiscordMessageSender(input: {
       if (i === 0) firstId = sent.id;
       storeBotMessage(sent.id, targetGuildId, targetChannelId, chunk, i === 0 ? text : chunk, sentReplyToId);
       storeBotAssets(sent);
+      if (i === 0) {
+        await input.onDelivered?.({
+          messageId: sent.id,
+          guildId: targetGuildId,
+          channelId: targetChannelId,
+          attachments: attachments ?? [],
+        });
+      }
     }
     noteThreadActivity(firstId);
     return { sentMessageId: firstId, warnings: unresolvedEmojiWarnings(warnings) };
