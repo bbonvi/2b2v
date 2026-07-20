@@ -54,11 +54,11 @@ promptTransport:
                     cacheGroup: stable-context,
                 } # (less volatile contextual prefix)
             olderHistory: { role: user, target: input, cacheGroup: older-history } # (cached older chat history)
-            serverMembers: { role: user, target: input, cacheGroup: members } # (visible member/display-name context)
-            threadsInChannel: { role: user, target: input, cacheGroup: threads } # (thread list/metadata context)
+            serverMembers: { role: developer, target: input, cacheGroup: members } # (visible member/display-name context)
+            threadsInChannel: { role: developer, target: input, cacheGroup: threads } # (thread list/metadata context)
             discordContext: { role: user, target: input, cacheGroup: context } # (current guild/channel navigation context)
-            upcomingSchedules: { role: user, target: input, cacheGroup: shcedules } # (pending schedule summary)
-            memories: { role: user, target: input, cacheGroup: memories } # (selected memory context)
+            upcomingSchedules: { role: developer, target: input, cacheGroup: shcedules } # (pending schedule summary)
+            memories: { role: developer, target: input, cacheGroup: memories } # (selected memory context)
             recentHistory: { role: user, target: input, cacheGroup: recent } # (uncached recent chat history)
             currentContext: {
                     role: user,
