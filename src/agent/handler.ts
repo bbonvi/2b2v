@@ -173,7 +173,8 @@ export interface SilentToolAgentInput {
   /** Named model execution policy for this private maintenance pass. */
   modelProfile?: string;
   maxToolCalls?: number;
-  terminateAfterSuccessfulToolNames?: readonly string[];
+  /** End after a complete tool round containing these mutations unless any tool result needs repair. */
+  terminateAfterSuccessfulToolRoundNames?: readonly string[];
   transcript?: OpenRouterMessage[];
   promptContext?: MaintenancePromptContext;
   log?: Logger;
@@ -1277,6 +1278,20 @@ function asyncImageJobCreatedFromToolResult(result: AgentToolResult<unknown>): b
   return details?.asyncJobCreated === true;
 }
 
+function toolResultNeedsRepair(result: AgentToolResult<unknown>): boolean {
+  const details = isRecord(result.details) ? result.details : undefined;
+  if (details === undefined) return false;
+  if (details.error !== undefined && details.error !== false && details.error !== null && details.error !== "") {
+    return true;
+  }
+  if (Array.isArray(details.errors) && details.errors.length > 0) return true;
+  return Array.isArray(details.rejected) && details.rejected.length > 0;
+}
+
+function toolExecutionNeedsRepair(execution: ExecutedToolCall): boolean {
+  return execution.result === undefined || toolResultNeedsRepair(execution.result);
+}
+
 function didCloseCurrentChannel(input: {
   tool: AgentTool;
   result: AgentToolResult<unknown>;
@@ -1296,7 +1311,7 @@ async function executeToolCallForLoop(input: {
   input.requestLog?.recordToolStart(input.call.id, input.tool.name, parseToolArgumentsSafe(input.call));
   try {
     const result = await executeNativeToolCall(input.tool, input.call, input.signal);
-    input.requestLog?.recordToolEnd(input.call.id, false, result);
+    input.requestLog?.recordToolEnd(input.call.id, toolResultNeedsRepair(result), result);
     return { call: input.call, tool: input.tool, result };
   } catch (error) {
     const errorText = makeToolErrorText(error);
@@ -1405,11 +1420,11 @@ async function runNativeToolLoop(input: {
   signal?: AbortSignal;
   allowEmptyFinalResponse?: boolean | (() => boolean);
   stopOnAgentTimeBudget?: boolean;
-  terminateAfterSuccessfulToolNames?: readonly string[];
+  terminateAfterSuccessfulToolRoundNames?: readonly string[];
 }): Promise<{ text: string; stopReason?: string }> {
   const toolsByName = new Map(input.tools.map((tool) => [tool.name, tool]));
   const loadedSkills = new Set<string>();
-  const terminateAfterSuccessfulToolNames = new Set(input.terminateAfterSuccessfulToolNames ?? []);
+  const terminateAfterSuccessfulToolRoundNames = new Set(input.terminateAfterSuccessfulToolRoundNames ?? []);
   const imageFollowUpSources = new Map<OpenRouterMessage, ImageFollowUpSource>();
   let toolCalls = 0;
   let toolRounds = 0;
@@ -1615,6 +1630,7 @@ async function runNativeToolLoop(input: {
         );
         input.messages.push(toolMessage(call, toolBudgetExhaustedMessage("rounds", input.runtimePrompts)));
       }
+      if (terminateAfterSuccessfulToolRoundNames.size > 0) return { text: "" };
       return await completeFinalWithoutTools();
     }
 
@@ -1622,6 +1638,18 @@ async function runNativeToolLoop(input: {
 
     const imageMessages: OpenRouterMessage[] = [];
     const pendingParallelCalls: Array<{ call: OpenRouterToolCall; tool: AgentTool }> = [];
+    const toolRoundState = {
+      sawTerminatingToolCall: false,
+      needsRepair: false,
+    };
+    const noteToolExecution = (execution: ExecutedToolCall): void => {
+      if (terminateAfterSuccessfulToolRoundNames.has(execution.tool.name)) {
+        toolRoundState.sawTerminatingToolCall = true;
+      }
+      if (toolExecutionNeedsRepair(execution)) {
+        toolRoundState.needsRepair = true;
+      }
+    };
     const flushParallelCalls = async (): Promise<void> => {
       if (pendingParallelCalls.length === 0) return;
       input.requestLog?.beginToolBatch(pendingParallelCalls.map(({ call }) => call.id), "parallel");
@@ -1636,6 +1664,7 @@ async function runNativeToolLoop(input: {
       pendingParallelCalls.length = 0;
 
       for (const execution of executions) {
+        noteToolExecution(execution);
         if (execution.tool.name === "load_skill" && execution.result !== undefined) {
           const skillId = loadedSkillIdFromResult(execution.result);
           if (skillId !== undefined) loadedSkills.add(skillId);
@@ -1708,6 +1737,7 @@ async function runNativeToolLoop(input: {
           input.messages.push(toolMessage(skippedCall, toolBudgetExhaustedMessage("calls", input.runtimePrompts)));
         }
         input.messages.push(...imageMessages);
+        if (terminateAfterSuccessfulToolRoundNames.size > 0) return { text: "" };
         return await completeFinalWithoutTools();
       } else {
         toolCalls += 1;
@@ -1753,6 +1783,7 @@ async function runNativeToolLoop(input: {
         signal: input.signal,
         requestLog: input.requestLog,
       });
+      noteToolExecution(execution);
       if (execution.tool.name === "load_skill" && execution.result !== undefined) {
         const skillId = loadedSkillIdFromResult(execution.result);
         if (skillId !== undefined) loadedSkills.add(skillId);
@@ -1768,9 +1799,6 @@ async function runNativeToolLoop(input: {
       });
       if (rendered.asyncImageJobCreated) asyncImageJobCreated = true;
       input.messages.push(toolMessage(call, rendered.resultText));
-      if (execution.result !== undefined && terminateAfterSuccessfulToolNames.has(tool.name)) {
-        return { text: "" };
-      }
       if (execution.result !== undefined && didCloseCurrentChannel({
         tool,
         result: execution.result,
@@ -1787,6 +1815,9 @@ async function runNativeToolLoop(input: {
     await flushParallelCalls();
     input.messages.push(...imageMessages);
     if (hasOperationalToolCall) toolRounds += 1;
+    if (toolRoundState.sawTerminatingToolCall && !toolRoundState.needsRepair) {
+      return { text: "" };
+    }
     if (asyncImageJobCreated) {
       return { text: "" };
     }
@@ -2381,7 +2412,7 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
     [
       "## Execution Mode: Memory Maintenance",
       "Private memory maintenance is active. Read-only tools are optionally available when they would materially reduce uncertainty; record_memory is the only state-changing tool available.",
-      `The pass has up to ${maxToolCalls} tool calls total. Make all useful focused edits before stopping; batch related writes in one record_memory call when possible.`,
+      "Submit every useful memory edit as one complete record_memory action list. Retry only if the tool reports an error, and retry only the failed work.",
       "If there are no memory changes, do not call record_memory; output nothing.",
     ].join("\n"),
   );
@@ -2544,7 +2575,7 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
       signal: wallController.signal,
       allowEmptyFinalResponse: true,
       stopOnAgentTimeBudget: true,
-      terminateAfterSuccessfulToolNames: input.terminateAfterSuccessfulToolNames,
+      terminateAfterSuccessfulToolRoundNames: input.terminateAfterSuccessfulToolRoundNames,
     });
   } finally {
     clearTimeout(wallTimeout);
@@ -2562,6 +2593,7 @@ export async function runSilentMemoryAgentPass(input: SilentMemoryAgentInput): P
     controlMessage: memoryPassControlMessage(input),
     modelProfile: input.guildConfig.memoryExtraction.modelProfile,
     maxToolCalls: input.guildConfig.memoryExtraction.maxToolCalls,
+    terminateAfterSuccessfulToolRoundNames: ["record_memory"],
   });
 }
 

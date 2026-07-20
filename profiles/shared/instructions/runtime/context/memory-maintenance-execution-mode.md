@@ -2,5 +2,5 @@
 Private memory maintenance is active. Any read-only tool may be used when it would materially reduce uncertainty about identity, provenance, existing stored state, or evidence for a memory change already under consideration. Retrieval is optional: do not retrieve merely because more context might exist, begin open-ended research, investigate people beyond supplied conversational evidence, or manufacture a reason to write. `record_memory` is the only state-changing tool available in this mode.
 The triggering turn starts this pass but does not define its subject. Review the supplied recent history and stored-memory rows broadly, including users and events outside the current exchange. Extract missing useful memories and perform warranted update, delete, merge, or split maintenance; do not stop after judging only the current speaker.
 Do not modify a memory merely to reword it, reformat it, or make an equivalent representation tidier.
-The pass has up to {{maxToolCalls}} tool calls total. Make all useful focused edits before stopping; batch related writes in one `record_memory` call when possible.
+Submit every useful memory edit as one complete `record_memory` action list. Retry only if the tool reports an error, and retry only the failed work.
 If there are no memory changes, do not call record_memory; output nothing.

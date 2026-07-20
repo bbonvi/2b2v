@@ -3862,8 +3862,9 @@ describe("handleMessage", () => {
     expect(calls).toBe(1);
   });
 
-  test("silent memory pass honors configured maintenance tool-call cap", async () => {
+  test("silent memory pass stops after one successful mutation batch", async () => {
     const toolCalls: unknown[] = [];
+    let llmCalls = 0;
     const recordMemoryTool: AgentTool = {
       name: "record_memory",
       label: "record_memory",
@@ -3877,14 +3878,79 @@ describe("handleMessage", () => {
         });
       },
     };
-    const completeChat: ChatCompleteFn = (request) => Promise.resolve({
-      text: "",
-      toolCalls: request.tools?.length === 0
-        ? []
-        : [{ id: `call-${toolCalls.length + 1}`, type: "function", function: { name: "record_memory", arguments: "{}" } }],
-      rawResponse: {},
-      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    const completeChat: ChatCompleteFn = () => {
+      llmCalls += 1;
+      return Promise.resolve({
+        text: "",
+        toolCalls: [{ id: "call-1", type: "function", function: { name: "record_memory", arguments: "{}" } }],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await runSilentMemoryAgentPass({
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig({
+        memoryExtraction: {
+          modelProfile: "main",
+          postReply: true,
+          maxToolCalls: 2,
+          ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
+        },
+      }),
+      context: makeContext(),
+      personaPrompt: "You are a test bot.",
+      runtimePrompts: TEST_RUNTIME_PROMPTS,
+      incomingMessage: makeMessage(),
+      userContent: "remember I like concise answers",
+      assistantReply: "got it",
+      visibleReplySent: true,
+      tools: [recordMemoryTool],
+      completeChat,
     });
+
+    expect(toolCalls).toHaveLength(1);
+    expect(llmCalls).toBe(1);
+  });
+
+  test("silent memory pass retries after a tool-reported error", async () => {
+    const toolCalls: unknown[] = [];
+    const recordMemoryTool: AgentTool = {
+      name: "record_memory",
+      label: "record_memory",
+      description: "Record memory",
+      parameters: Type.Object({}),
+      execute: (_id, params) => {
+        toolCalls.push(params);
+        return Promise.resolve(toolCalls.length === 1
+          ? {
+              content: [{ type: "text" as const, text: "Memory update rejected: invalid target." }],
+              details: { error: true as const },
+            }
+          : {
+              content: [{ type: "text" as const, text: "Memory update complete." }],
+              details: { applied: 1, requested: 1 },
+            });
+      },
+    };
+    let llmCalls = 0;
+    let retrySawError = false;
+    const completeChat: ChatCompleteFn = (request) => {
+      llmCalls += 1;
+      if (llmCalls === 2) {
+        retrySawError = JSON.stringify(request.messages).includes("Memory update rejected: invalid target.");
+      }
+      return Promise.resolve({
+        text: "",
+        toolCalls: [{
+          id: `call-${llmCalls}`,
+          type: "function",
+          function: { name: "record_memory", arguments: "{}" },
+        }],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
 
     await runSilentMemoryAgentPass({
       globalConfig: makeGlobalConfig(),
@@ -3908,6 +3974,59 @@ describe("handleMessage", () => {
     });
 
     expect(toolCalls).toHaveLength(2);
+    expect(llmCalls).toBe(2);
+    expect(retrySawError).toBe(true);
+  });
+
+  test("silent maintenance executes the full successful mutation round before stopping", async () => {
+    const executed: string[] = [];
+    const makeTool = (name: string): AgentTool => ({
+      name,
+      label: name,
+      description: name,
+      parameters: Type.Object({}),
+      execute: () => {
+        executed.push(name);
+        return Promise.resolve({
+          content: [{ type: "text", text: `${name} complete.` }],
+          details: { applied: 1 },
+        });
+      },
+    });
+    let llmCalls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      llmCalls += 1;
+      return Promise.resolve({
+        text: "",
+        toolCalls: [
+          { id: "memory-call", type: "function", function: { name: "record_memory", arguments: "{}" } },
+          { id: "thread-call", type: "function", function: { name: "record_inner_threads", arguments: "{}" } },
+        ],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await runSilentToolAgentPass({
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig(),
+      context: makeContext(),
+      personaPrompt: "You are a test bot.",
+      runtimePrompts: TEST_RUNTIME_PROMPTS,
+      incomingMessage: makeMessage(),
+      userContent: "maintenance",
+      assistantReply: "",
+      visibleReplySent: false,
+      tools: [makeTool("record_memory"), makeTool("record_inner_threads")],
+      runtimeInstruction: "Private maintenance.",
+      controlMessage: "Apply all useful maintenance.",
+      maxToolCalls: 2,
+      terminateAfterSuccessfulToolRoundNames: ["record_memory", "record_inner_threads"],
+      completeChat,
+    });
+
+    expect(executed).toEqual(["record_memory", "record_inner_threads"]);
+    expect(llmCalls).toBe(1);
   });
 
   test("calls background memory extraction after send", async () => {
@@ -4081,18 +4200,19 @@ describe("handleMessage", () => {
       tools: maintenanceTools,
       runtimeInstruction: "## Silent Relationship Pass",
       controlMessage: "## Execution Mode: Relationship Maintenance\nPrivate relationship maintenance is active.",
-      terminateAfterSuccessfulToolNames: ["record_relationship"],
+      terminateAfterSuccessfulToolRoundNames: ["record_relationship"],
     });
     await runSilentToolAgentPass({
       ...common,
       tools: maintenanceTools,
       runtimeInstruction: "## Silent Inner Thread Pass",
       controlMessage: "## Execution Mode: Inner Thread Maintenance\nPrivate inner-thread maintenance is active.",
-      terminateAfterSuccessfulToolNames: ["record_inner_threads"],
+      terminateAfterSuccessfulToolRoundNames: ["record_inner_threads"],
     });
 
     expect(relationshipSawMemoryResult).toBe(true);
     expect(innerThreadsSawPriorResults).toBe(true);
+    expect(sessionIds).toHaveLength(3);
     expect(new Set(sessionIds)).toEqual(new Set(["same-visible-session"]));
     expect(toolNameSets).toEqual(toolNameSets.map(() => [
       "record_memory",

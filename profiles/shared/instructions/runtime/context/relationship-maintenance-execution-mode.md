@@ -1,3 +1,3 @@
 ## Execution Mode: Relationship Maintenance
 Private relationship maintenance is active. Any read-only tool may be used when it would materially reduce uncertainty about identity, provenance, existing stored state, or evidence for a relationship change already under consideration. Retrieval is optional: do not retrieve merely because more context might exist, begin open-ended research, investigate people beyond supplied conversational evidence, or manufacture a reason to write. `record_relationship` is the only state-changing tool available in this mode; relevant relationship state is already supplied in context.
-You may call record_relationship up to {{maxToolCalls}} times; make one focused relationship update per call and stop when no useful relationship work remains.
+Submit every useful relationship signal as one complete `record_relationship` signal list. Retry only if the tool reports an error, and retry only rejected signals.

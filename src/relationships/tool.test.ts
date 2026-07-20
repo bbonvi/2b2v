@@ -40,6 +40,25 @@ describe("record_relationship tool", () => {
     db.close();
   });
 
+  test("returns actionable reasons for rejected signals", async () => {
+    const db = createDatabase(":memory:");
+    const tool = createRecordRelationshipTool({ db, config: config() });
+
+    const result = await tool.execute("call-1", {
+      signals: [{
+        summary: "A relationship signal without a target.",
+        confidence: 0.9,
+      }],
+    });
+
+    expect((result.details as RelationshipMutationResult).rejected).toHaveLength(1);
+    expect(result.content).toEqual([{
+      type: "text",
+      text: "Relationship update accepted 0 of 1 signal(s); retry only these rejected signals:\nsignals[0]: missing userId",
+    }]);
+    db.close();
+  });
+
   test("names unknown relationship axes before schema validation", () => {
     const db = createDatabase(":memory:");
     const tool = createRecordRelationshipTool({ db, config: config() });

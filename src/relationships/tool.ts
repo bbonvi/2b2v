@@ -81,8 +81,16 @@ export function createRecordRelationshipTool(deps: RecordRelationshipToolDeps): 
         dryRun: deps.dryRun,
       });
       deps.onResult?.(result, signals);
+      const rejected = result.rejected
+        .map(({ signal, reason }, index) => `signals[${signals.indexOf(signal) >= 0 ? signals.indexOf(signal) : index}]: ${reason}`)
+        .join("\n");
       return Promise.resolve({
-        content: [{ type: "text", text: `Relationship update complete; accepted ${result.accepted.length} of ${signals.length} signal(s).` }],
+        content: [{
+          type: "text",
+          text: rejected === ""
+            ? `Relationship update complete; accepted ${result.accepted.length} of ${signals.length} signal(s).`
+            : `Relationship update accepted ${result.accepted.length} of ${signals.length} signal(s); retry only these rejected signals:\n${rejected}`,
+        }],
         details: result,
       });
     },

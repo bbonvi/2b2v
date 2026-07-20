@@ -1512,9 +1512,10 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
             });
           })],
           runtimeInstruction: "This is private voice-summary maintenance. Only update_voice_summary is available.",
-          controlMessage: "Call update_voice_summary exactly once with a refreshed 3-6 sentence summary combining the existing summary and new delta, then stop.",
+          controlMessage: "Call update_voice_summary once with a refreshed 3-6 sentence summary combining the existing summary and new delta. Retry only if the tool reports an error.",
           modelProfile: voiceConfig.maintenance.summary.modelProfile,
-          maxToolCalls: 1,
+          maxToolCalls: 2,
+          terminateAfterSuccessfulToolRoundNames: ["update_voice_summary"],
           requestLog,
           log: log.child({ component: "voice-summary-maintenance", sessionId }),
         });
@@ -1672,7 +1673,7 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
                 {},
                 "Update inner threads only for unresolved attention, intention, curiosity, conflict, expectation, or commitment that should remain cognitively live.",
               ),
-              "Make all useful tool calls in one batch when possible, then stop.",
+              "Call each useful maintenance tool at most once with its complete list of changes. Retry only calls whose results report errors.",
             ].join("\n"),
             modelProfile: voiceConfig.maintenance.extraction.modelProfile,
             maxToolCalls: (guildConfig.memoryExtraction.postReply
@@ -1680,6 +1681,7 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
               : 0)
               + (relationshipConfig.enabled ? relationshipConfig.maxToolCalls : 0)
               + 3,
+            terminateAfterSuccessfulToolRoundNames: tools.map((tool) => tool.name),
             requestLog,
             log: log.child({ component: "voice-extraction-maintenance", sessionId }),
           });
@@ -2403,7 +2405,7 @@ async function runRelationshipPostReplyExtraction(input: {
       [
         "## Execution Mode: Relationship Maintenance",
         "Private relationship maintenance is active. Read-only tools are optionally available when they would materially reduce uncertainty; record_relationship is the only state-changing tool available, and relevant relationship state is already supplied.",
-        `You may call record_relationship up to ${config.maxToolCalls} times; make one focused relationship update per call and stop when no useful relationship work remains.`,
+        "Submit every useful relationship signal as one complete record_relationship signal list. Retry only if the tool reports an error, and retry only rejected signals.",
       ].join("\n"),
     );
     await runSilentToolAgentPass({
@@ -2434,6 +2436,7 @@ async function runRelationshipPostReplyExtraction(input: {
       ].join("\n"),
       modelProfile: config.modelProfile,
       maxToolCalls: config.maxToolCalls,
+      terminateAfterSuccessfulToolRoundNames: ["record_relationship"],
       transcript: input.memoryRequest.maintenanceTranscript,
       promptContext: input.memoryRequest.promptContext,
       requestLog: relationshipsLog,
@@ -2523,6 +2526,7 @@ async function runInnerThreadPostReplyExtraction(input: {
       ].filter((part) => part !== "").join("\n\n"),
       modelProfile: input.guildConfig.memoryExtraction.modelProfile,
       maxToolCalls: 3,
+      terminateAfterSuccessfulToolRoundNames: ["record_inner_threads"],
       transcript: input.memoryRequest.maintenanceTranscript,
       promptContext: input.memoryRequest.promptContext,
       requestLog,
