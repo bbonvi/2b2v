@@ -221,6 +221,7 @@ export type AmbientRuntimeDeps = {
   processTriggeredMessage: (message: Message, triggerResult?: NonNullable<TriggerResult>, currentTurnMessages?: readonly Message[], options?: { disableLiveOutput?: boolean; currentTurnOverride?: { messageId: string; timestamp: number; content: string }; preSendCheck?: () => boolean; onWriteToolStart?: (toolName: string) => void }) => Promise<unknown>;
   trackBackgroundTask?: (task: Promise<unknown>) => void;
   isAutonomousAttentionBusy?: (guildId: string, channelId: string) => boolean;
+  waitForSemanticMaintenance?: () => Promise<void>;
   preparePersonaModeTurn?: (guildId: string) => void;
   runMaintenance?: (input: {
     guildConfig: GuildConfig;
@@ -1102,6 +1103,9 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
       return count;
     },
     isAutonomousAttentionBusy,
+    ...(input.waitForSemanticMaintenance !== undefined
+      ? { waitForSemanticMaintenance: input.waitForSemanticMaintenance }
+      : {}),
     ...(preparePersonaModeTurn !== undefined ? { preparePersonaModeTurn } : {}),
     ...(input.runMaintenance !== undefined ? { runMaintenance: input.runMaintenance } : {}),
   });

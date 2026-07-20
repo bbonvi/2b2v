@@ -212,6 +212,7 @@ export type GenericAmbientInitiativeDeps = {
   createHandlerDeps: (input: CreateHandlerDepsInput) => HandlerDeps;
   pendingAmbientCandidatesInChannel: (guildId: string, channelId: string) => number;
   isAutonomousAttentionBusy: (guildId: string, channelId: string) => boolean;
+  waitForSemanticMaintenance?: () => Promise<void>;
   preparePersonaModeTurn?: (guildId: string) => void;
   runMaintenance?: (input: {
     guildConfig: GuildConfig;
@@ -921,6 +922,7 @@ export function createGenericAmbientInitiativeRuntime(
     }
     running.add(lockKey);
     try {
+      await deps.waitForSemanticMaintenance?.();
       const signals = buildSignals(input.guild, input.channel.id, guildConfig, config);
       const gate = hardGate({
         guildId: input.candidate.guildId,

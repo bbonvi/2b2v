@@ -83,14 +83,15 @@ export function createScheduledTaskRunner(input: {
   }) => HandlerDeps;
   resolveAssetAttachments: (guildId: string, guildConfig: GuildConfig, logger: Logger) => AssetAttachmentResolver;
   runLoggedAgentTurn: (input: { incoming: IncomingMessage; deps: HandlerDeps; requestLog: RequestLog; logger: Logger; afterSuccess?: (result: HandleResult) => void | Promise<void>; onFinally?: (result: HandleResult | undefined) => void }) => Promise<HandleResult>;
-  runMemoryPostReplyExtraction: (input: { guildConfig: GuildConfig; memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]; guild: Guild; channel: unknown; sourceRequestId: string; source?: string; currentUserId: string; currentUsername?: string }) => Promise<unknown>;
-  runRelationshipPostReplyExtraction: (input: { guildConfig: GuildConfig; memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0]; guild?: Guild; channel?: unknown; source?: string; sourceRequestId?: string; currentUserId: string; currentUsername?: string }) => Promise<void>;
-  runInnerThreadPostReplyExtraction: (input: {
+  runPostReplySemanticMaintenance: (input: {
     guildConfig: GuildConfig;
     memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0];
     guild: Guild;
     channel: unknown;
     sourceRequestId: string;
+    source?: string;
+    currentUserId: string;
+    currentUsername?: string;
   }) => Promise<void>;
   onScheduleCompleted?: (scheduleId: string) => void;
   markScheduledAttentionBusy?: (guildId: string, channelId: string) => () => void;
@@ -246,7 +247,7 @@ export function createScheduledTaskRunner(input: {
           disableLiveOutput: true,
           scheduledTaskRun: true,
           afterReply: async (memoryRequest) => {
-            await input.runMemoryPostReplyExtraction({
+            await input.runPostReplySemanticMaintenance({
               guildConfig,
               memoryRequest,
               guild,
@@ -255,23 +256,6 @@ export function createScheduledTaskRunner(input: {
               source: "scheduled",
               currentUserId: "scheduler",
               currentUsername: "scheduler",
-            });
-            await input.runRelationshipPostReplyExtraction({
-              guildConfig,
-              memoryRequest,
-              guild,
-              channel: textChannel,
-              sourceRequestId: requestLog.requestId,
-              source: "scheduled",
-              currentUserId: "scheduler",
-              currentUsername: "scheduler",
-            });
-            await input.runInnerThreadPostReplyExtraction({
-              guildConfig,
-              memoryRequest,
-              guild,
-              channel: textChannel,
-              sourceRequestId: requestLog.requestId,
             });
           },
         },

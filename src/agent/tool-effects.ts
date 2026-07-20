@@ -42,7 +42,10 @@ export function isReadOnlyTool(tool: AgentTool): boolean {
 /** Whether a tool may execute during one semantic maintenance mode. */
 export function isToolAllowedInMaintenance(
   tool: AgentTool,
-  allowedWriteName: MaintenanceWriteToolName,
+  allowedWriteNames: MaintenanceWriteToolName | ReadonlySet<MaintenanceWriteToolName>,
 ): boolean {
-  return tool.name === allowedWriteName || isReadOnlyTool(tool);
+  const writeAllowed = typeof allowedWriteNames === "string"
+    ? tool.name === allowedWriteNames
+    : allowedWriteNames.has(tool.name as MaintenanceWriteToolName);
+  return writeAllowed || isReadOnlyTool(tool);
 }

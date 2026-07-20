@@ -79,6 +79,12 @@ import {
   isToolAllowedInMaintenance,
   type MaintenanceWriteToolName,
 } from "./agent/tool-effects.ts";
+import {
+  commitStagedMaintenanceCalls,
+  SemanticMaintenanceCoordinator,
+  stageMaintenanceTools,
+  type StagedMaintenanceCall,
+} from "./agent/semantic-maintenance-coordinator.ts";
 import { createModelImageSupportStore } from "./llm/model-image-support";
 import { resolveModelProfile } from "./llm/client";
 import { createAmbientRuntime } from "./ambient/runtime";
@@ -345,7 +351,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
         onVisibleOutput: typing.stopLoop,
         onAgentEnd: typing.stopLoop,
         afterReply: async (memoryRequest) => {
-          await runMemoryPostReplyExtraction({
+          await runPostReplySemanticMaintenance({
             guildConfig: deliveryGuildConfig,
             memoryRequest,
             guild,
@@ -354,23 +360,6 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
             source: `async_image_${input.event}`,
             currentUserId: job.requesterId,
             currentUsername: job.requesterUsername,
-          });
-          await runRelationshipPostReplyExtraction({
-            guildConfig: deliveryGuildConfig,
-            memoryRequest,
-            guild,
-            channel: textChannel,
-            sourceRequestId: requestLog.requestId,
-            source: `async_image_${input.event}`,
-            currentUserId: job.requesterId,
-            currentUsername: job.requesterUsername,
-          });
-          await runInnerThreadPostReplyExtraction({
-            guildConfig: deliveryGuildConfig,
-            memoryRequest,
-            guild,
-            channel: textChannel,
-            sourceRequestId: requestLog.requestId,
           });
         },
         onIgnoredReply: ({ channelId: destinationChannelId, historyText }) => {
@@ -980,6 +969,18 @@ function runtimeContextTemplate(
   return template === undefined ? fallback : renderPromptTemplate(template, variables);
 }
 
+function defaultPersonaModeForMaintenance(): {
+  id: string;
+  instructions: string;
+} {
+  const config = globalConfig.personaModes;
+  const mode = config?.modes.find((candidate) => candidate.id === config.defaultModeId);
+  return {
+    id: config?.defaultModeId ?? "default",
+    instructions: mode?.instructions ?? "",
+  };
+}
+
 // --- 9. Emoji cache ---
 const emojiCache = new EmojiCache();
 const EMOJI_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -1547,47 +1548,58 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
         const userIds = batch.compact.userIds.filter((userId) => usernameById.has(userId)).slice(0, 8);
         const sourceMessageId = `voice:${sessionId}:${batch.compact.latestSegmentId}:extraction`;
         const relationshipConfig = getRelationshipConfig(guildConfig);
-        const tools: AgentTool[] = [];
-        if (guildConfig.memoryExtraction.postReply) {
-          tools.push(createRecordMemoryTool({
+        const createVoiceExtractionTools = (dryRun: boolean): AgentTool[] => {
+          const tools: AgentTool[] = [];
+          if (guildConfig.memoryExtraction.postReply) {
+            tools.push(createRecordMemoryTool({
+              db,
+              guildId: guild.id,
+              currentUserId: last.userId,
+              currentUsername: last.username,
+              sourceMessageId,
+              dryRun,
+              recordMemoryDescription: runtimeToolDescription("record_memory", {}),
+              resolveUsername: async (username) => {
+                const cached = resolveKnownUsername(guild, username);
+                if (cached !== undefined) return cached;
+                try {
+                  await guild.members.fetch();
+                } catch {
+                  // Cache-only fallback below handles missing permissions.
+                }
+                return resolveKnownUsername(guild, username);
+              },
+            }));
+          }
+          if (relationshipConfig.enabled) {
+            tools.push(createRecordRelationshipTool({
+              db,
+              config: relationshipConfig,
+              dryRun,
+              description: runtimeToolDescription("record_relationship", {}),
+              scope: {
+                guildId: session.guildId,
+                channelId: session.channelId,
+                sourceMessageId,
+              },
+            }));
+          }
+          tools.push(createRecordInnerThreadsTool({
             db,
             guildId: guild.id,
-            currentUserId: last.userId,
-            currentUsername: last.username,
-            sourceMessageId,
-            recordMemoryDescription: runtimeToolDescription("record_memory", {}),
-            resolveUsername: async (username) => {
-              const cached = resolveKnownUsername(guild, username);
-              if (cached !== undefined) return cached;
-              try {
-                await guild.members.fetch();
-              } catch {
-                // Cache-only fallback below handles missing permissions.
-              }
-              return resolveKnownUsername(guild, username);
-            },
+            channelId: session.channelId,
+            requestId: sessionId,
+            description: runtimeToolDescription("record_inner_threads", {})
+              ?? "Privately maintain durable inner threads.",
+            dryRun,
           }));
-        }
-        if (relationshipConfig.enabled) {
-          tools.push(createRecordRelationshipTool({
-            db,
-            config: relationshipConfig,
-            description: runtimeToolDescription("record_relationship", {}),
-            scope: {
-              guildId: session.guildId,
-              channelId: session.channelId,
-              sourceMessageId,
-            },
-          }));
-        }
-        tools.push(createRecordInnerThreadsTool({
-          db,
-          guildId: guild.id,
-          channelId: session.channelId,
-          requestId: sessionId,
-          description: runtimeToolDescription("record_inner_threads", {})
-            ?? "Privately maintain durable inner threads.",
-        }));
+          return applyRuntimeToolPrompts(tools, promptBundle.runtime);
+        };
+        const validationTools = createVoiceExtractionTools(true);
+        const commitTools = createVoiceExtractionTools(false);
+        const stagedCalls: StagedMaintenanceCall[] = [];
+        const stagedToolNames = new Set(validationTools.map((tool) => tool.name));
+        const tools = stageMaintenanceTools(validationTools, stagedCalls, stagedToolNames);
         if (tools.length > 0) {
           const memoryContext = buildMemoryContext({
             db,
@@ -1659,43 +1671,60 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
             messageId: sourceMessageId,
           };
           const requestLog = createMaintenanceLog("extraction", last, sourceMessageId, context);
-          await runLoggedPass(requestLog, {
-            globalConfig,
-            guildConfig,
-            context,
-            systemPrompt: "Maintain private durable memory and relationship state from a compact live-voice transcript. ASR wording may be inaccurate. Never answer the conversation.",
-            personaPrompt: "",
-            runtimePrompts: promptBundle.runtime,
-            incomingMessage,
-            userContent: context.userMessage,
-            assistantReply: "",
-            visibleReplySent: false,
-            tools: applyRuntimeToolPrompts(tools, promptBundle.runtime),
-            runtimeInstruction: "This is private voice extraction. Only the supplied maintenance tools are available.",
-            controlMessage: [
-              runtimeContextTemplate(
-                "memory-pass-decision",
-                {},
-                "Decide silently whether durable memory should be updated.",
-              ),
-              "Use record_relationship only for meaningful relationship changes; every signal must include the target userId from Voice Speaker IDs.",
-              runtimeContextTemplate(
-                "inner-thread-pass-decision",
-                {},
-                "Update inner threads only for unresolved attention, intention, curiosity, conflict, expectation, or commitment that should remain cognitively live.",
-              ),
-              "Call each useful maintenance tool at most once with its complete list of changes. Retry only calls whose results report errors.",
-            ].join("\n"),
-            modelProfile: voiceConfig.maintenance.extraction.modelProfile,
-            maxToolCalls: (guildConfig.memoryExtraction.postReply
-              ? guildConfig.memoryExtraction.maxToolCalls
-              : 0)
-              + (relationshipConfig.enabled ? relationshipConfig.maxToolCalls : 0)
-              + 3,
-            terminateAfterSuccessfulToolRoundNames: tools.map((tool) => tool.name),
-            requestLog,
-            log: log.child({ component: "voice-extraction-maintenance", sessionId }),
-          });
+          const ticket = semanticMaintenanceCoordinator.reserve();
+          const defaultMode = defaultPersonaModeForMaintenance();
+          try {
+            await runLoggedPass(requestLog, {
+              globalConfig,
+              guildConfig,
+              context,
+              systemPrompt: [
+                promptBundle.systemPrompt,
+                "Maintain private durable semantic state from a compact live-voice transcript. ASR wording may be inaccurate. Never answer the conversation.",
+              ].filter((part) => part !== "").join("\n\n"),
+              personaPrompt: promptBundle.corePrompt,
+              runtimePrompts: promptBundle.runtime,
+              incomingMessage,
+              userContent: context.userMessage,
+              assistantReply: "",
+              visibleReplySent: false,
+              tools,
+              runtimeInstruction: promptBundle.runtime.reply,
+              controlMessage: [
+                runtimeContextTemplate(
+                  "semantic-maintenance-execution-mode",
+                  {
+                    defaultPersonaModeId: defaultMode.id,
+                    defaultPersonaModeInstructions: defaultMode.instructions,
+                  },
+                ),
+                "Voice transcripts may contain ASR errors; require clear evidence before mutation.",
+                "Every relationship signal must include the target userId from Voice Speaker IDs.",
+                guildConfig.memoryExtraction.postReply
+                  ? runtimeContextTemplate("memory-pass-decision")
+                  : "",
+                relationshipConfig.enabled
+                  ? runtimeContextTemplate("relationship-pass-decision")
+                  : "",
+                runtimeContextTemplate("inner-thread-pass-decision"),
+              ].filter((part) => part !== "").join("\n\n"),
+              modelProfile: voiceConfig.maintenance.extraction.modelProfile,
+              maxToolCalls: (guildConfig.memoryExtraction.postReply
+                ? guildConfig.memoryExtraction.maxToolCalls
+                : 0)
+                + (relationshipConfig.enabled ? relationshipConfig.maxToolCalls : 0)
+                + 3,
+              terminateAfterSuccessfulToolRoundNames: tools.map((tool) => tool.name),
+              requestLog,
+              log: log.child({ component: "voice-extraction-maintenance", sessionId }),
+            });
+            await ticket.commit(async () => {
+              await commitStagedMaintenanceCalls({ calls: stagedCalls, tools: commitTools });
+            });
+          } catch (error) {
+            ticket.skip();
+            throw error;
+          }
         }
         voiceRepository.setCheckpoint(sessionId, "memory", batch.compact.latestSegmentId);
         voiceRepository.setCheckpoint(sessionId, "relationship", batch.compact.latestSegmentId);
@@ -1762,9 +1791,7 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
     createHandlerDeps,
     resolveAssetAttachments: createAssetAttachmentResolver,
     runLoggedAgentTurn,
-    runMemoryPostReplyExtraction,
-    runRelationshipPostReplyExtraction,
-    runInnerThreadPostReplyExtraction,
+    runPostReplySemanticMaintenance,
     onScheduleCompleted: (id) => scheduler.removeSchedule(id),
     markScheduledAttentionBusy,
     preparePersonaModeTurn: (guildId) => personaModeRuntime.prepareNaturalTurn(guildId),
@@ -2110,6 +2137,7 @@ function blockToolsExcept(tools: AgentTool[], allowedName: string, passLabel: st
 }
 
 const maintenanceToolNames = new Set(["record_memory", "record_relationship", "record_inner_threads"]);
+const semanticMaintenanceCoordinator = new SemanticMaintenanceCoordinator();
 
 function latestHumanIdentity(guildId: string, channelId: string): {
   userId: string;
@@ -2131,7 +2159,7 @@ function latestHumanIdentity(guildId: string, channelId: string): {
 function toolsForMaintenancePass(
   visibleTools: AgentTool[] | undefined,
   maintenanceTools: AgentTool[],
-  allowedWriteName: MaintenanceWriteToolName,
+  allowedWriteNames: MaintenanceWriteToolName | ReadonlySet<MaintenanceWriteToolName>,
   passLabel: string,
 ): AgentTool[] {
   const byName = new Map<string, AgentTool>();
@@ -2141,16 +2169,19 @@ function toolsForMaintenancePass(
   for (const tool of applyRuntimeToolPrompts(maintenanceTools, promptBundle.runtime)) {
     byName.set(tool.name, tool);
   }
-  return [...byName.values()].map((tool) => isToolAllowedInMaintenance(tool, allowedWriteName)
+  const allowedWriteLabel = typeof allowedWriteNames === "string"
+    ? allowedWriteNames
+    : [...allowedWriteNames].join(", ");
+  return [...byName.values()].map((tool) => isToolAllowedInMaintenance(tool, allowedWriteNames)
     ? tool
     : {
         ...tool,
         execute: (_toolCallId: string, _params: unknown): Promise<AgentToolResult<unknown>> => Promise.resolve({
           content: [{
             type: "text",
-            text: `Blocked: ${passLabel} may use read-only tools and ${allowedWriteName}, but ${tool.name} may change state.`,
+            text: `Blocked: ${passLabel} may use read-only tools and ${allowedWriteLabel}, but ${tool.name} may change state.`,
           }],
-          details: { blocked: true, pass: passLabel, allowedWriteTool: allowedWriteName, tool: tool.name },
+          details: { blocked: true, pass: passLabel, allowedWriteTools: allowedWriteLabel, tool: tool.name },
         }),
       });
 }
@@ -2226,6 +2257,241 @@ function createPostReplyMaintenanceTools(input: {
     recordRelationshipTool,
     recordInnerThreadsTool,
   ], promptBundle.runtime);
+}
+
+async function runPostReplySemanticMaintenance(input: {
+  guildConfig: GuildConfig;
+  memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0];
+  guild: Guild;
+  channel: unknown;
+  sourceRequestId: string;
+  source?: string;
+  passKind?: "post_reply" | "ambient";
+  currentUserId: string;
+  currentUsername?: string;
+  dryRun?: boolean;
+  dryRuns?: Array<{ tool: string; args: unknown }>;
+}): Promise<void> {
+  if (!hasMaintenanceMaterial(input.memoryRequest)) return;
+
+  const relationshipConfig = getRelationshipConfig(input.guildConfig);
+  const enabledWrites = new Set<MaintenanceWriteToolName>(["record_inner_threads"]);
+  if (input.guildConfig.memoryExtraction.postReply) enabledWrites.add("record_memory");
+  if (relationshipConfig.enabled) enabledWrites.add("record_relationship");
+
+  const guildId = input.memoryRequest.incomingMessage.guildId ?? input.guild.id;
+  const channelId = input.memoryRequest.incomingMessage.channelId ?? "";
+  const sourceMessageId = input.memoryRequest.sourceMessageId ?? promptLabSyntheticId();
+  const stagedCalls: StagedMaintenanceCall[] = [];
+  const validationTools = createPostReplyMaintenanceTools({
+    guild: input.guild,
+    guildConfig: input.guildConfig,
+    memoryRequest: input.memoryRequest,
+    currentUserId: input.currentUserId,
+    currentUsername: input.currentUsername,
+    sourceMessageId,
+    sourceRequestId: input.sourceRequestId,
+    dryRun: true,
+  });
+  const commitTools = createPostReplyMaintenanceTools({
+    guild: input.guild,
+    guildConfig: input.guildConfig,
+    memoryRequest: input.memoryRequest,
+    currentUserId: input.currentUserId,
+    currentUsername: input.currentUsername,
+    sourceMessageId,
+    sourceRequestId: input.sourceRequestId,
+  });
+  const tools = stageMaintenanceTools(
+    toolsForMaintenancePass(
+      input.memoryRequest.availableTools,
+      validationTools,
+      enabledWrites,
+      "semantic maintenance pass",
+    ),
+    stagedCalls,
+    enabledWrites,
+  );
+
+  const visibleUserMemoryContext = input.guildConfig.memoryExtraction.postReply
+    ? buildVisibleUserMemoryContext({
+        db,
+        guildId,
+        currentUserId: input.currentUserId,
+        visibleUserIds: input.memoryRequest.context.visibleUserIds ?? [],
+        resolveUserId: (userId) => input.guild.members.cache.get(userId)?.user.username,
+        contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
+      })
+    : "";
+  const checkpoint = input.guildConfig.memoryExtraction.postReply
+    ? getMemoryExtractionCheckpoint(db, guildId, channelId)
+    : undefined;
+  const maintenance = input.guildConfig.memoryExtraction.postReply
+    ? buildMemoryMaintenanceContext({
+        db,
+        guildId,
+        afterId: checkpoint?.maintenanceCursorId ?? 0,
+        limit: MEMORY_MAINTENANCE_BATCH_SIZE,
+        resolveUserId: (userId) => client.users.cache.get(userId)?.username,
+      })
+    : { text: "", nextCursorId: 0 };
+  const broadMemoryContext = [visibleUserMemoryContext, maintenance.text]
+    .filter((part) => part !== "")
+    .join("\n\n");
+  const defaultMode = defaultPersonaModeForMaintenance();
+  const ticket = input.dryRun === true ? undefined : semanticMaintenanceCoordinator.reserve();
+  const requestLog = new RequestLog(guildId, channelId, requestLogStore);
+  requestLog.setAuthor(input.memoryRequest.incomingMessage.authorUsername);
+  requestLog.setTrigger({
+    type: "semantic_maintenance",
+    sourceRequestId: input.sourceRequestId,
+    source: input.source ?? "post_reply",
+    ...(input.dryRun === true ? { dryRun: true } : {}),
+    ...(ticket !== undefined ? { sequence: ticket.sequence } : {}),
+  });
+  requestLog.setTriggerContext({
+    ...dashboardTriggerLocation(input.guild, input.channel),
+    messageId: sourceMessageId,
+    authorUsername: input.memoryRequest.incomingMessage.authorUsername,
+    content: input.memoryRequest.userMessage,
+    translatedContent: input.memoryRequest.userMessage,
+  });
+  requestLog.setAgentRan(true);
+  requestLogStore.incrementActive();
+
+  try {
+    await runSilentToolAgentPass({
+      globalConfig,
+      guildConfig: input.guildConfig,
+      context: input.memoryRequest.context,
+      systemPrompt: promptBundle.systemPrompt,
+      personaPrompt: promptBundle.corePrompt,
+      runtimePrompts: promptBundle.runtime,
+      incomingMessage: input.memoryRequest.incomingMessage,
+      userContent: input.memoryRequest.userMessage,
+      assistantReply: input.memoryRequest.assistantReply,
+      visibleReplySent: input.memoryRequest.visibleReplySent,
+      tools,
+      runtimeInstruction: promptBundle.runtime.reply,
+      controlMessage: [
+        broadMemoryContext,
+        runtimeContextTemplate(
+          "semantic-maintenance-execution-mode",
+          {
+            defaultPersonaModeId: defaultMode.id,
+            defaultPersonaModeInstructions: defaultMode.instructions,
+          },
+          [
+            "## Execution Mode: Semantic Maintenance",
+            `Use only the default persona mode '${defaultMode.id}' for these private judgments.`,
+            defaultMode.instructions,
+            "Evaluate memory, relationship, and inner-thread maintenance independently. Call each useful maintenance tool at most once.",
+          ].filter((part) => part !== "").join("\n\n"),
+        ),
+        input.guildConfig.memoryExtraction.postReply
+          ? runtimeContextTemplate(
+              "memory-pass-decision",
+              {},
+              "Decide silently whether durable memory should be updated.",
+            )
+          : "",
+        input.passKind === "ambient"
+          ? runtimeContextTemplate(
+              "memory-pass-ambient-review",
+              {},
+              "Review the supplied ambient history as periodic semantic maintenance.",
+            )
+          : "",
+        relationshipConfig.enabled
+          ? runtimeContextTemplate(
+              "relationship-pass-decision",
+              {},
+              "Decide silently whether relationships should be updated.",
+            )
+          : "",
+        runtimeContextTemplate(
+          "inner-thread-pass-decision",
+          {},
+          "Decide silently whether durable inner threads should change.",
+        ),
+        "Current time:",
+        currentLocalContext(input.guildConfig.timezone),
+      ].filter((part) => part !== "").join("\n\n"),
+      modelProfile: input.guildConfig.memoryExtraction.modelProfile,
+      maxToolCalls: input.guildConfig.memoryExtraction.maxToolCalls
+        + relationshipConfig.maxToolCalls
+        + 3,
+      terminateAfterSuccessfulToolRoundNames: [...enabledWrites],
+      transcript: input.memoryRequest.maintenanceTranscript,
+      promptContext: input.memoryRequest.promptContext,
+      requestLog,
+      log: log.child({
+        guildId,
+        channelId,
+        requestId: requestLog.requestId,
+        component: "semantic-maintenance",
+        ...(ticket !== undefined ? { maintenanceSequence: ticket.sequence } : {}),
+      }),
+    });
+
+    if (input.dryRun === true) {
+      for (const call of stagedCalls) input.dryRuns?.push({ tool: call.toolName, args: call.params });
+      return;
+    }
+    if (ticket === undefined) throw new Error("Semantic maintenance commit ticket was not reserved.");
+
+    await ticket.commit(async () => {
+      // Inference intentionally uses the actor's cached semantic snapshot. Ordered
+      // commits prevent interleaving, but two independently valid judgments can
+      // still target the same row. Eliminating that semantic race generally would
+      // require rebasing or rerunning model judgments against every preceding
+      // commit—immense over-engineering for an exceptionally narrow failure mode.
+      await commitStagedMaintenanceCalls({
+        calls: stagedCalls,
+        tools: commitTools,
+        onResult: (call, result) => {
+          const details = result.details;
+          if (details !== null && typeof details === "object") {
+            const record = details as Record<string, unknown>;
+            const failed = (record.error !== undefined && record.error !== false)
+              || (Array.isArray(record.errors) && record.errors.length > 0)
+              || (Array.isArray(record.rejected) && record.rejected.length > 0);
+            if (failed) {
+              log.warn("ordered semantic maintenance commit reported rejected work", {
+                sequence: ticket.sequence,
+                tool: call.toolName,
+                details,
+              });
+            }
+          }
+        },
+      });
+      if (input.guildConfig.memoryExtraction.postReply) {
+        const checkpointMarked = markMemoryExtractionCheckpointAtMessage(db, {
+          guildId,
+          channelId,
+          messageId: sourceMessageId,
+          maintenanceCursorId: maintenance.nextCursorId,
+        });
+        if (!checkpointMarked) {
+          markMemoryExtractionCheckpointFromContext({
+            guildId,
+            channelId,
+            contextMessageIds: input.memoryRequest.context.contextMessageIds,
+            fallbackMessageId: input.memoryRequest.sourceMessageId,
+            maintenanceCursorId: maintenance.nextCursorId,
+          });
+        }
+      }
+    });
+  } catch (error) {
+    ticket?.skip();
+    requestLog.setError(error instanceof Error ? error.message : String(error));
+    throw error;
+  } finally {
+    requestLog.emit(log);
+    requestLogStore.decrementActive();
+  }
 }
 
 async function runMemoryPostReplyExtraction(input: {
@@ -3001,28 +3267,38 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       contextMessageIds: batch.map((item) => item.id),
       visibleUserIds,
     };
-    const unpromptedRecordMemoryTool = createRecordMemoryTool({
-      db,
-      guildId,
-      currentUserId: lastMessage.authorId,
-      currentUsername: lastMessage.author,
-      sourceMessageId: lastMessage.id,
-      recordMemoryDescription: runtimeToolDescription("record_memory", {}),
-      resolveUsername: async (username) => {
-        const cached = resolveKnownUsername(guild, username);
-        if (cached !== undefined) return cached;
-        try {
-          await guild.members.fetch();
-        } catch {
-          // Cache-only fallback below handles missing permissions.
-        }
-        return resolveKnownUsername(guild, username);
-      },
-    });
-    const recordMemoryTool = applyRuntimeToolPrompts(
-      [unpromptedRecordMemoryTool],
-      promptBundle.runtime,
-    )[0] ?? unpromptedRecordMemoryTool;
+    const createAmbientRecordMemoryTool = (dryRun: boolean): AgentTool => {
+      const unprompted = createRecordMemoryTool({
+        db,
+        guildId,
+        currentUserId: lastMessage.authorId,
+        currentUsername: lastMessage.author,
+        sourceMessageId: lastMessage.id,
+        dryRun,
+        recordMemoryDescription: runtimeToolDescription("record_memory", {}),
+        resolveUsername: async (username) => {
+          const cached = resolveKnownUsername(guild, username);
+          if (cached !== undefined) return cached;
+          try {
+            await guild.members.fetch();
+          } catch {
+            // Cache-only fallback below handles missing permissions.
+          }
+          return resolveKnownUsername(guild, username);
+        },
+      });
+      return applyRuntimeToolPrompts([unprompted], promptBundle.runtime)[0] ?? unprompted;
+    };
+    const validationTool = createAmbientRecordMemoryTool(true);
+    const commitTool = createAmbientRecordMemoryTool(false);
+    const stagedCalls: StagedMaintenanceCall[] = [];
+    const stagedTool = stageMaintenanceTools(
+      [validationTool],
+      stagedCalls,
+      new Set(["record_memory"]),
+    )[0];
+    if (stagedTool === undefined) throw new Error("Ambient memory staging tool is unavailable.");
+    const ticket = semanticMaintenanceCoordinator.reserve();
     const incoming: IncomingMessage = {
       content: "",
       guildId,
@@ -3053,18 +3329,22 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
         visibleReplySent: false,
         passKind: "ambient",
         visibleUserMemoryContext,
-        tools: [recordMemoryTool],
+        tools: [stagedTool],
         requestLog: memoryLog,
         log: log.child({ guildId, channelId, requestId: memoryLog.requestId }),
       });
-      markMemoryExtractionCheckpoint(db, {
-        guildId,
-        channelId,
-        lastMessageId: lastMessage.id,
-        lastMessageCreatedAt: lastMessage.timestamp,
-        maintenanceCursorId: maintenance.nextCursorId,
+      await ticket.commit(async () => {
+        await commitStagedMaintenanceCalls({ calls: stagedCalls, tools: [commitTool] });
+        markMemoryExtractionCheckpoint(db, {
+          guildId,
+          channelId,
+          lastMessageId: lastMessage.id,
+          lastMessageCreatedAt: lastMessage.timestamp,
+          maintenanceCursorId: maintenance.nextCursorId,
+        });
       });
     } catch (err) {
+      ticket.skip();
       memoryLog.setError(err instanceof Error ? err.message : String(err));
       throw err;
     } finally {
@@ -3795,6 +4075,7 @@ const ambientRuntime = createAmbientRuntime({
     void backgroundTasks.track(task);
   },
   isAutonomousAttentionBusy: isScheduledAttentionBusy,
+  waitForSemanticMaintenance: () => semanticMaintenanceCoordinator.barrier(),
   preparePersonaModeTurn: (guildId) => personaModeRuntime.prepareNaturalTurn(guildId),
   runMaintenance: async ({
     guildConfig,
@@ -3806,7 +4087,7 @@ const ambientRuntime = createAmbientRuntime({
     dryRuns,
   }) => {
     const latestHuman = latestHumanIdentity(guild.id, channel.id);
-    await runMemoryPostReplyExtraction({
+    await runPostReplySemanticMaintenance({
       guildConfig,
       memoryRequest: request,
       guild,
@@ -3818,26 +4099,6 @@ const ambientRuntime = createAmbientRuntime({
       currentUsername: latestHuman.username,
       dryRun,
       dryRuns,
-    });
-    await runRelationshipPostReplyExtraction({
-      guildConfig,
-      memoryRequest: request,
-      guild,
-      channel,
-      sourceRequestId,
-      source: "ambient_initiative",
-      currentUserId: latestHuman.userId,
-      currentUsername: latestHuman.username,
-      dryRun,
-      dryRuns,
-    });
-    await runInnerThreadPostReplyExtraction({
-      guildConfig,
-      memoryRequest: request,
-      guild,
-      channel,
-      sourceRequestId,
-      dryRun,
     });
   },
 });
@@ -4270,7 +4531,7 @@ async function processTriggeredMessage(
           ambientRuntime.clearAmbientLeaseForUser(guildId, destinationChannelId ?? channelId, message.author.id);
         },
         afterReply: async (memoryRequest) => {
-          await runMemoryPostReplyExtraction({
+          await runPostReplySemanticMaintenance({
             guildConfig,
             memoryRequest,
             guild,
@@ -4278,23 +4539,6 @@ async function processTriggeredMessage(
             sourceRequestId: requestLog.requestId,
             currentUserId: message.author.id,
             currentUsername: message.author.username,
-          });
-          await runRelationshipPostReplyExtraction({
-            guildConfig,
-            memoryRequest,
-            guild,
-            channel: message.channel,
-            sourceRequestId: requestLog.requestId,
-            source: "post_reply",
-            currentUserId: message.author.id,
-            currentUsername: message.author.username,
-          });
-          await runInnerThreadPostReplyExtraction({
-            guildConfig,
-            memoryRequest,
-            guild,
-            channel: message.channel,
-            sourceRequestId: requestLog.requestId,
           });
         },
       },

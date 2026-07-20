@@ -44,6 +44,14 @@ describe("runtime tool effects", () => {
     expect(isToolAllowedInMaintenance(testTool("record_relationship"), "record_memory")).toBe(false);
   });
 
+  test("allows a combined set of maintenance write tools", () => {
+    const combined = new Set(["record_memory", "record_inner_threads"] as const);
+
+    expect(isToolAllowedInMaintenance(testTool("record_memory"), combined)).toBe(true);
+    expect(isToolAllowedInMaintenance(testTool("record_inner_threads"), combined)).toBe(true);
+    expect(isToolAllowedInMaintenance(testTool("record_relationship"), combined)).toBe(false);
+  });
+
   test("keeps agent-state tools blocked", () => {
     const tool = withRuntimeToolEffect(testTool("load_skill"), "agent_state");
 
