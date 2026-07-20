@@ -2051,10 +2051,12 @@ function createPostReplyMaintenanceTools(input: {
     },
     onResult: (result, candidates) => input.onRelationshipResult?.(result, candidates),
   });
-  return [
+  // Visible turns receive blocked versions of these tools before maintenance
+  // reuses them. Prompt the shared schemas here so both requests remain cache-identical.
+  return applyRuntimeToolPrompts([
     promptLabMemoryDryRunTool(recordMemoryTool, input.dryRuns),
     recordRelationshipTool,
-  ];
+  ], promptBundle.runtime);
 }
 
 async function runMemoryPostReplyExtraction(input: {

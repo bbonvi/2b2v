@@ -84,5 +84,11 @@ describe("applyRuntimeToolPrompts", () => {
     expect(queryDescription(tool.parameters)).toBe("External query description for runtime.");
     expect(original.description).toBe("Short fallback.");
     expect(queryDescription(original.parameters)).toBe("Fallback query.");
+
+    const [reapplied] = applyRuntimeToolPrompts([tool], runtimePrompts(), {
+      demo_tool: { name: "runtime" },
+    });
+    expect(reapplied?.description).toBe(tool.description);
+    expect(reapplied?.parameters).toEqual(tool.parameters);
   });
 });
