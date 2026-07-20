@@ -14,6 +14,19 @@ describe("inner thread prompt context", () => {
     db.close();
   });
 
+  test("renders an explicit empty applicable set", () => {
+    const context = buildInnerThreadsContext({
+      db,
+      guildId: "guild-1",
+      visibleUserIds: ["user-1"],
+    });
+
+    expect(context).toBe([
+      "## Active Inner Threads",
+      "No active inner threads are currently applicable.",
+    ].join("\n"));
+  });
+
   test("renders exact identities with readable current-guild recall and pressure labels", () => {
     createInnerThread(db, {
       content: "keep sharing small details without turning the exchange into an interview",

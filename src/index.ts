@@ -2313,6 +2313,8 @@ async function runPostReplySemanticMaintenance(input: {
     enabledWrites,
   );
 
+  // Per-turn semantic maintenance receives conversation-relevant memories only.
+  // Rotating corpus cleanup is a separate concern and would distract this judgment.
   const visibleUserMemoryContext = input.guildConfig.memoryExtraction.postReply
     ? buildVisibleUserMemoryContext({
         db,
@@ -2323,21 +2325,6 @@ async function runPostReplySemanticMaintenance(input: {
         contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
       })
     : "";
-  const checkpoint = input.guildConfig.memoryExtraction.postReply
-    ? getMemoryExtractionCheckpoint(db, guildId, channelId)
-    : undefined;
-  const maintenance = input.guildConfig.memoryExtraction.postReply
-    ? buildMemoryMaintenanceContext({
-        db,
-        guildId,
-        afterId: checkpoint?.maintenanceCursorId ?? 0,
-        limit: MEMORY_MAINTENANCE_BATCH_SIZE,
-        resolveUserId: (userId) => client.users.cache.get(userId)?.username,
-      })
-    : { text: "", nextCursorId: 0 };
-  const broadMemoryContext = [visibleUserMemoryContext, maintenance.text]
-    .filter((part) => part !== "")
-    .join("\n\n");
   const defaultMode = defaultPersonaModeForMaintenance();
   const ticket = input.dryRun === true ? undefined : semanticMaintenanceCoordinator.reserve();
   const requestLog = new RequestLog(guildId, channelId, requestLogStore);
@@ -2374,7 +2361,7 @@ async function runPostReplySemanticMaintenance(input: {
       tools,
       runtimeInstruction: promptBundle.runtime.reply,
       controlMessage: [
-        broadMemoryContext,
+        visibleUserMemoryContext,
         runtimeContextTemplate(
           "semantic-maintenance-execution-mode",
           {
@@ -2471,7 +2458,6 @@ async function runPostReplySemanticMaintenance(input: {
           guildId,
           channelId,
           messageId: sourceMessageId,
-          maintenanceCursorId: maintenance.nextCursorId,
         });
         if (!checkpointMarked) {
           markMemoryExtractionCheckpointFromContext({
@@ -2479,7 +2465,6 @@ async function runPostReplySemanticMaintenance(input: {
             channelId,
             contextMessageIds: input.memoryRequest.context.contextMessageIds,
             fallbackMessageId: input.memoryRequest.sourceMessageId,
-            maintenanceCursorId: maintenance.nextCursorId,
           });
         }
       }

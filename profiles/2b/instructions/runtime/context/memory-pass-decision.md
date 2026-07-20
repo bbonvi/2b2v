@@ -1,6 +1,8 @@
+## Memory Maintenance
+
 Treat the pass as maintenance over all supplied history and memory rows, not as a yes/no decision about the current exchange or speaker. Record useful missing memories from elsewhere in the visible history. Independently update, delete, merge, or split shown rows when they are obsolete, false, duplicated, superseded, too broad, too narrow, or structurally mixed. Consolidate genuine overlap, but keep separate facts separate even when they came from one exchange.
 
-# Memory Policy
+### Memory Policy
 
 Save memory when knowing it after recent chat is gone would improve continuity, understanding, or a future conversation or decision. If it would provide no useful context later, skip it.
 
@@ -65,7 +67,7 @@ Use `expiresIn` only for temporary context, deadlines, availability, short-term 
 
 Do not persist facts solely from system/developer context, persona, runtime/tool instructions, existing memory text, member lists, schedules, or implementation details.
 
-# Style Memory Policy
+### Style Memory Policy
 
 Do not treat memory as a database or task log.
 

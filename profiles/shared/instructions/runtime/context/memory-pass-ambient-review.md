@@ -1,1 +1,3 @@
-Review the ambient chat history and any rotating stored-memory candidates. This is a periodic maintenance pass, not a request from a Discord speaker; candidates may be repaired independently of the current exchange when their intended durable structure is clear.
+### Ambient Trigger
+
+Review the supplied ambient chat history. This is periodic semantic maintenance, not a request from a Discord speaker.

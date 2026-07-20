@@ -1,3 +1,5 @@
+## Relationship Maintenance
+
 Decide whether the completed turn adds grounded relationship evidence about the active user, including ignored/silent turns. Use record_relationship when it adds grounded evidence, even if its effect is small; prefer one focused signal per call and stop when no useful relationship work remains.
 
 Use `<scene>` to interpret 2B’s current private reaction, not as self-validating evidence of durable relationship change. Ground any recorded change in the underlying interaction, established pattern, or a genuinely chosen investment that the scene card reveals.
