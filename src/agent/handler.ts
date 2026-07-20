@@ -773,14 +773,14 @@ function buildFinalActionInstruction(runtimePrompts: RuntimePromptBundle | undef
   const base = runtimePrompts?.finalActionInstruction.trim() ?? "";
   const instruction = base !== ""
     ? base
-    : "## Final Action Instruction\nContinue the Discord room in character. Emit only your next runtime action: visible speech, silence, voice, or private action. Do not explain the choice.";
+    : "## Action Boundary\nChoose the persona's actual next move. The latest activity is context, not an assignment or mandatory subject. Emit only the chosen runtime output, without explanation.";
   const modeKey = scheduledTaskRun ? "scheduled-task-execution-mode" : "visible-reply-execution-mode";
   const externalMode = runtimePrompts?.contextTemplates[modeKey]?.trim() ?? "";
   const mode = externalMode !== ""
     ? externalMode
     : scheduledTaskRun
       ? "## Scheduled Task Context\nRun the scheduled task privately. Produce visible Discord output only when useful or requested; otherwise output <ignore>. Do not call record_memory or record_relationship here."
-      : "## Execution Mode: Visible Reply\nProduce your visible Discord action. Do not call record_memory or record_relationship in this mode.";
+      : "## Actor Turn\nNormal Discord actions and private tools are available. Semantic maintenance runs separately; do not call record_memory, record_relationship, or record_inner_threads here.";
   const withMode = `${mode}\n\n${instruction}`;
   return withMode;
 }
@@ -1022,7 +1022,7 @@ function buildInitialMessages(
 
   const text = [
       msg.currentContentInHistory === true
-        ? "## Current Discord State\nThe newest entries in Chat History contain the current Discord activity."
+        ? "## Context Boundary\nThe latest available Discord activity is already included in Chat History."
         : currentMessageMetadata,
       imageMetadata !== "" ? `## Event Images\n${imageMetadata}` : "",
       msg.currentContentInHistory === true ? "" : `## ${msg.eventPrompt?.contentHeading ?? "Current Discord Message"}`,
@@ -2380,8 +2380,8 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
     { maxToolCalls },
     [
       "## Execution Mode: Memory Maintenance",
-      "Private memory maintenance is active. Other tool calls are not available in this mode.",
-      `You may call record_memory up to ${maxToolCalls} times. Make all useful focused edits before stopping; a single call may include multiple actions when they belong to the same pass.`,
+      "Private memory maintenance is active. record_memory changes memory; list_memories and read_asset provide bounded supporting inspection. No other tools are available.",
+      `The pass has up to ${maxToolCalls} tool calls total. Make all useful focused edits before stopping; batch related writes in one record_memory call when possible.`,
       "If there are no memory changes, do not call record_memory; output nothing.",
     ].join("\n"),
   );

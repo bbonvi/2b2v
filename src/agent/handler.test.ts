@@ -695,7 +695,7 @@ describe("handleMessage", () => {
     );
 
     expect(promptText.match(/unique-current-message/g)).toHaveLength(1);
-    expect(promptText).toContain("## Current Discord State");
+    expect(promptText).toContain("## Context Boundary");
     expect(promptText).not.toContain("## Current Discord Message Metadata");
   });
 

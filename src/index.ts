@@ -2084,7 +2084,7 @@ function blockToolsExcept(tools: AgentTool[], allowedName: string, passLabel: st
           content: [{
             type: "text",
             text: allowedName === ""
-              ? `Blocked: ${passLabel} cannot use ${tool.name}. record_memory and record_relationship are not available in this mode.`
+              ? `Blocked: ${passLabel} cannot use ${tool.name}. record_memory, record_relationship, and record_inner_threads are not available in this mode.`
               : `Blocked: ${passLabel} may only use ${allowedName}. Do not call ${tool.name} in this pass.`,
           }],
           details: { blocked: true, pass: passLabel, allowedTool: allowedName, tool: tool.name },
@@ -2114,7 +2114,14 @@ function latestHumanIdentity(guildId: string, channelId: string): {
 function toolsForMaintenancePass(
   visibleTools: AgentTool[] | undefined,
   maintenanceTools: AgentTool[],
-  allowedNames: readonly ("record_memory" | "record_relationship" | "record_inner_threads" | "list_inner_threads")[],
+  allowedNames: readonly (
+    "record_memory"
+    | "record_relationship"
+    | "record_inner_threads"
+    | "list_memories"
+    | "list_inner_threads"
+    | "read_asset"
+  )[],
   passLabel: string,
 ): AgentTool[] {
   const byName = new Map<string, AgentTool>();
@@ -2291,7 +2298,12 @@ async function runMemoryPostReplyExtraction(input: {
       visibleReplySent: input.memoryRequest.visibleReplySent,
       passKind: input.passKind,
       visibleUserMemoryContext: broadMemoryContext,
-      tools: toolsForMaintenancePass(input.memoryRequest.availableTools, maintenanceTools, ["record_memory"], "silent memory pass"),
+      tools: toolsForMaintenancePass(
+        input.memoryRequest.availableTools,
+        maintenanceTools,
+        ["record_memory", "list_memories", "read_asset"],
+        "silent memory pass",
+      ),
       transcript: input.memoryRequest.maintenanceTranscript,
       promptContext: input.memoryRequest.promptContext,
       requestLog: memoryLog,
@@ -2394,7 +2406,7 @@ async function runRelationshipPostReplyExtraction(input: {
       { maxToolCalls: config.maxToolCalls },
       [
         "## Execution Mode: Relationship Maintenance",
-        "Private relationships maintenance is active. Other tool calls are not available in this mode.",
+        "Private relationship maintenance is active. Only record_relationship is available; relevant relationship state is already supplied in context.",
         `You may call record_relationship up to ${config.maxToolCalls} times; make one focused relationship update per call and stop when no useful relationship work remains.`,
       ].join("\n"),
     );
