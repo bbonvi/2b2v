@@ -72,8 +72,10 @@ export interface OpenRouterChatRequest {
   systemPrompt: string;
   messages: OpenRouterMessage[];
   providerParams?: Record<string, unknown>;
-  /** OpenRouter sticky routing key for keeping prompt caches warm across turns. */
+  /** Provider session identity used for routing and stateful transport continuation. */
   sessionId?: string;
+  /** OpenAI prompt-cache routing key, independent from the stateful transport session; empty removes the provider default. */
+  promptCacheKey?: string;
   responseFormat?: Record<string, unknown>;
   tools?: OpenRouterToolDefinition[];
   toolChoice?: "auto" | "none";

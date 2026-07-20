@@ -27,8 +27,8 @@
   "dependencies": {
     "@discordjs/opus": "^0.10.0",
     "@discordjs/voice": "^0.19.2",
-    "@earendil-works/pi-agent-core": "^0.80.6",
-    "@earendil-works/pi-ai": "^0.80.6",
+    "@earendil-works/pi-agent-core": "^0.80.10",
+    "@earendil-works/pi-ai": "^0.80.10",
     "@js-temporal/polyfill": "^0.5.1",
     "@mozilla/readability": "^0.6.0",
     "@steipete/summarize-core": "^0.16.3",

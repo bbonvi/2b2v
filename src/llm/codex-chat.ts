@@ -399,6 +399,15 @@ function providerParamsWithoutInternalFields(params: Record<string, unknown> | u
   return result;
 }
 
+function applyPromptCacheKey(payload: unknown, promptCacheKey: string | undefined): void {
+  if (promptCacheKey === undefined || !isRecord(payload)) return;
+  if (promptCacheKey === "") {
+    delete payload.prompt_cache_key;
+    return;
+  }
+  payload.prompt_cache_key = promptCacheKey;
+}
+
 /** Complete a bot chat turn using ChatGPT subscription-backed OpenAI Codex. */
 export async function completeCodexChat(request: OpenRouterChatRequest): Promise<OpenRouterChatResult> {
   const model = resolveModel(request.model, "openai-codex");
@@ -409,7 +418,10 @@ export async function completeCodexChat(request: OpenRouterChatRequest): Promise
     sessionId: request.sessionId,
     transport: "websocket-cached" as const,
     signal: request.signal,
-    onPayload: request.onPayload,
+    onPayload: (payload: unknown) => {
+      applyPromptCacheKey(payload, request.promptCacheKey);
+      request.onPayload?.(payload);
+    },
     ...providerParamsWithoutInternalFields(request.providerParams),
   };
   if (request.onTextDelta !== undefined) {

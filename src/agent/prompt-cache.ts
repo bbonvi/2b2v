@@ -5,6 +5,7 @@ export interface StablePromptSection {
   role: PromptTransportRole;
   text: string;
   cacheGroup?: string;
+  cacheScope?: "global" | "channel";
   target?: PromptTransportTarget;
 }
 
@@ -12,6 +13,11 @@ interface PromptTextPart {
   type: "text";
   text: string;
   cache_control?: { type: "ephemeral" };
+}
+
+export interface CodexPromptCachingOptions {
+  enabled: boolean;
+  promptCacheKey?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -42,6 +48,7 @@ function stableSectionGroups(stableSections: StablePromptSection[]): StablePromp
       && first !== undefined
       && first.role === section.role
       && (first.cacheGroup ?? "") === (section.cacheGroup ?? "")
+      && first.cacheScope === section.cacheScope
     ) {
       last.push(section);
       continue;
@@ -117,6 +124,7 @@ export function getStablePromptSections(
         text: section.text,
         target: placement.target,
         cacheGroup: placement.cacheGroup,
+        cacheScope: "channel",
       };
     });
 }
@@ -167,12 +175,23 @@ export function prependStableSectionsToCodexPayload(
   payload: unknown,
   stableSections: StablePromptSection[],
   currentInputRoles: readonly PromptTransportRole[],
+  promptCaching?: CodexPromptCachingOptions,
 ): void {
   if (!isRecord(payload)) return;
   const input = payload.input;
   if (!Array.isArray(input)) return;
 
   applyInputRoleOverrides(input, currentInputRoles);
+
+  // ChatGPT's subscription-backed Codex endpoint accepts prompt_cache_key but
+  // rejects the public Responses API's explicit-cache options and breakpoints.
+  if (promptCaching?.enabled === true
+    && promptCaching.promptCacheKey !== undefined
+    && promptCaching.promptCacheKey !== "") {
+    payload.prompt_cache_key = promptCaching.promptCacheKey;
+  } else if (promptCaching?.enabled === false) {
+    delete payload.prompt_cache_key;
+  }
 
   const toInsert = stableInputItems(stableSections);
   if (toInsert.length > 0) {

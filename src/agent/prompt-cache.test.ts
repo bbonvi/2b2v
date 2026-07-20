@@ -169,4 +169,74 @@ describe("prependStableSectionsToCodexPayload", () => {
     expect(body.instructions).toBe("response format");
     expect(body.input).toEqual([{ role: "developer", content: [{ type: "input_text", text: "runtime" }] }]);
   });
+
+  test("uses an independent cache key without unsupported Codex explicit-cache controls", () => {
+    const body: {
+      prompt_cache_key: string;
+      input: Array<Record<string, unknown>>;
+      prompt_cache_options?: unknown;
+    } = {
+      prompt_cache_key: "channel-session",
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "volatile context" }] },
+        { type: "message", role: "user", content: [{ type: "input_text", text: "current turn" }] },
+        { type: "function_call", call_id: "call-1", name: "lookup", arguments: "{}" },
+      ],
+    };
+    const sections: StablePromptSection[] = [
+      { role: "developer", text: "persona", target: "input", cacheGroup: "core", cacheScope: "global" },
+      { role: "developer", text: "runtime", target: "input", cacheGroup: "runtime", cacheScope: "global" },
+      { role: "user", text: "older history", target: "input", cacheGroup: "older-history", cacheScope: "channel" },
+    ];
+
+    prependStableSectionsToCodexPayload(body, sections, ["developer", "user"], {
+      enabled: true,
+      promptCacheKey: "shared-prompt",
+    });
+
+    expect(body.prompt_cache_key).toBe("shared-prompt");
+    expect(body.prompt_cache_options).toBeUndefined();
+    expect(body.input[0]).toEqual({
+      role: "developer",
+      content: [{ type: "input_text", text: "persona" }],
+    });
+    expect(body.input[1]).toEqual({
+      role: "developer",
+      content: [{ type: "input_text", text: "runtime" }],
+    });
+    expect(body.input[2]).toEqual({
+      role: "user",
+      content: [{ type: "input_text", text: "older history" }],
+    });
+    expect(body.input[4]).toEqual({
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text: "current turn" }],
+    });
+  });
+
+  test("removes the Codex cache routing key when prompt caching is disabled", () => {
+    const body: {
+      prompt_cache_key?: string;
+      prompt_cache_options?: unknown;
+      input: Array<Record<string, unknown>>;
+    } = {
+      prompt_cache_key: "channel-session",
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "current" }] }],
+    };
+
+    prependStableSectionsToCodexPayload(body, [], [], {
+      enabled: false,
+      promptCacheKey: "shared-prompt",
+    });
+
+    expect(body.prompt_cache_key).toBeUndefined();
+    expect(body.prompt_cache_options).toBeUndefined();
+    expect(body.input[0]).toEqual({
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text: "current" }],
+    });
+  });
+
 });

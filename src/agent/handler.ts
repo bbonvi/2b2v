@@ -101,6 +101,7 @@ export interface MaintenancePromptContext {
   stableSections: StablePromptSection[];
   initialRoles: PromptTransportRole[];
   sessionId?: string;
+  promptCacheKey?: string;
   promptCaching: PromptCachingConfig;
   /** Exact provider-visible tool contract from the actor turn that maintenance must preserve. */
   toolContractSignature?: string;
@@ -151,6 +152,7 @@ export interface SilentMemoryAgentInput {
   requestLog?: RequestLog;
   completeChat?: ChatCompleteFn;
   signal?: AbortSignal;
+  /** Cache the current pass input because another maintenance pass will consume it. */
 }
 
 export interface SilentToolAgentInput {
@@ -178,6 +180,7 @@ export interface SilentToolAgentInput {
   requestLog?: RequestLog;
   completeChat?: ChatCompleteFn;
   signal?: AbortSignal;
+  /** Cache the current pass input because another maintenance pass will consume it. */
 }
 
 /** Attachment data for a generated voice message. */
@@ -800,6 +803,7 @@ function stableSection(
   sectionId: PromptTransportSectionId,
   text: string,
   transport: ProviderPromptTransportConfig,
+  cacheScope: StablePromptSection["cacheScope"],
 ): StablePromptSection {
   const placement = sectionPlacement(transport, sectionId);
   return {
@@ -807,6 +811,7 @@ function stableSection(
     text,
     target: placement.target,
     cacheGroup: placement.cacheGroup,
+    cacheScope,
   };
 }
 
@@ -820,11 +825,11 @@ function sectionsForStablePrompt(
   transport: ProviderPromptTransportConfig,
 ): StablePromptSection[] {
   const stable: StablePromptSection[] = [];
-  if (systemPrompt !== "") stable.push(stableSection("system", systemPrompt, transport));
-  if (personaPrompt !== "") stable.push(stableSection("core", personaPrompt, transport));
-  if (stylePrompt !== "") stable.push(stableSection("core", stylePrompt, transport));
-  if (skillsInstruction !== "") stable.push(stableSection("skills", skillsInstruction, transport));
-  if (runtimeInstruction !== "") stable.push(stableSection("runtime", runtimeInstruction, transport));
+  if (systemPrompt !== "") stable.push(stableSection("system", systemPrompt, transport, "global"));
+  if (personaPrompt !== "") stable.push(stableSection("core", personaPrompt, transport, "global"));
+  if (stylePrompt !== "") stable.push(stableSection("core", stylePrompt, transport, "global"));
+  if (skillsInstruction !== "") stable.push(stableSection("skills", skillsInstruction, transport, "global"));
+  if (runtimeInstruction !== "") stable.push(stableSection("runtime", runtimeInstruction, transport, "global"));
   stable.push(...getStablePromptSections(
     context,
     sectionPlacement(transport, "stableContext"),
@@ -833,12 +838,32 @@ function sectionsForStablePrompt(
   return stable;
 }
 
-/** Build a stable provider session id so provider routing can keep caches warm. */
-function buildPromptCacheSessionId(requestLog: RequestLog | undefined, modelId: string): string | undefined {
+/** Build a channel-isolated provider session id for transport continuation. */
+function buildProviderSessionId(requestLog: RequestLog | undefined, modelId: string): string | undefined {
   if (requestLog === undefined) return undefined;
   const sessionId = `2b2v:${requestLog.guildId}:${requestLog.channelId}:${modelId}`;
   if (sessionId.length <= 64) return sessionId;
   return `2b2v:${createHash("sha256").update(sessionId).digest("hex").slice(0, 58)}`;
+}
+
+/** Build a shared cache key from only globally compatible prompt and tool content. */
+function buildCodexPromptCacheKey(
+  modelId: string,
+  stableSections: readonly StablePromptSection[],
+  toolSignature: string,
+): string {
+  const globalPrompt = stableSections
+    .filter((section) => section.cacheScope === "global")
+    .map((section) => ({
+      role: section.role,
+      target: section.target ?? "input",
+      cacheGroup: section.cacheGroup,
+      text: section.text,
+    }));
+  const fingerprint = createHash("sha256")
+    .update(JSON.stringify({ modelId, globalPrompt, toolSignature }))
+    .digest("hex");
+  return `2b2v:prompt:${fingerprint.slice(0, 48)}`;
 }
 
 interface VolatilePromptMessage {
@@ -2431,9 +2456,10 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
   delete providerParams.signal;
   delete providerParams.onPayload;
   const promptCaching = profile.promptCaching;
+  const maintenanceToolSignature = toolContractSignature(input.tools);
   if (inheritedPromptCompatible
     && inheritedPrompt.toolContractSignature !== undefined
-    && inheritedPrompt.toolContractSignature !== toolContractSignature(input.tools)) {
+    && inheritedPrompt.toolContractSignature !== maintenanceToolSignature) {
     throw new Error("Maintenance tool contract diverged from the actor turn; refusing a cache-breaking continuation.");
   }
 
@@ -2448,7 +2474,14 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
   );
   const sessionId = inheritedPromptCompatible
     ? inheritedPrompt.sessionId
-    : buildPromptCacheSessionId(input.requestLog, `${provider}:${model.id}`);
+    : buildProviderSessionId(input.requestLog, `${provider}:${model.id}`);
+  const promptCacheKey = inheritedPromptCompatible
+    ? inheritedPrompt.promptCacheKey
+    : provider === "openai-codex"
+      ? promptCaching.enabled
+        ? buildCodexPromptCacheKey(model.id, stableSections, maintenanceToolSignature)
+        : ""
+      : undefined;
   const currentMessageWithoutImages: IncomingMessage = { ...input.incomingMessage, imageInputs: undefined };
   const volatileMessages = buildVolatileTurnMessages(input.context);
   const initialRoles = inheritedPromptCompatible
@@ -2476,6 +2509,7 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
         systemPrompt: provider === "openai-codex" ? codexSystemPromptForStableSections(stableSections, transport) : "",
         providerParams,
         sessionId,
+        promptCacheKey,
         onPayload: (payload: unknown) => {
           if (provider === "openrouter") {
             prependStableSectionsToPayload(
@@ -2485,7 +2519,10 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
               model.id,
             );
           } else if (transport.mode === "split-input") {
-            prependStableSectionsToCodexPayload(payload, stableSections, initialRoles);
+            prependStableSectionsToCodexPayload(payload, stableSections, initialRoles, {
+              enabled: promptCaching.enabled,
+              promptCacheKey,
+            });
           }
           input.requestLog?.recordLLMRequest(payload);
           input.log?.debug("memory_llm_request_payload", { payload });
@@ -2608,7 +2645,13 @@ export async function handleMessage(
   const finalActionInstruction = buildFinalActionInstruction(deps.runtimePrompts, deps.scheduledTaskRun === true);
   const initialRoles = initialMessageRoles(transport, volatileMessages, finalActionInstruction !== "");
   const reqLog = deps.requestLog;
-  const sessionId = buildPromptCacheSessionId(reqLog, `${model.llmProvider}:${model.id}`);
+  const visibleToolSignature = toolContractSignature(tools);
+  const sessionId = buildProviderSessionId(reqLog, `${model.llmProvider}:${model.id}`);
+  const promptCacheKey = model.llmProvider === "openai-codex"
+    ? profile.promptCaching.enabled
+      ? buildCodexPromptCacheKey(model.id, stableSections, visibleToolSignature)
+      : ""
+    : undefined;
   const maintenancePromptContext: MaintenancePromptContext = {
     provider: model.llmProvider,
     model: model.id,
@@ -2616,8 +2659,9 @@ export async function handleMessage(
     stableSections,
     initialRoles,
     ...(sessionId !== undefined ? { sessionId } : {}),
+    ...(promptCacheKey !== undefined ? { promptCacheKey } : {}),
     promptCaching: profile.promptCaching,
-    toolContractSignature: toolContractSignature(tools),
+    toolContractSignature: visibleToolSignature,
   };
   const startedAt = Date.now();
   let maintenanceTranscript: OpenRouterMessage[] | undefined;
@@ -2759,11 +2803,15 @@ export async function handleMessage(
             : "",
           providerParams,
           sessionId,
+          promptCacheKey,
           onPayload: (payload: unknown) => {
             if (model.llmProvider === "openrouter") {
               prependStableSectionsToPayload(payload, stableSections, profile.promptCaching, model.id);
             } else if (transport.mode === "split-input") {
-              prependStableSectionsToCodexPayload(payload, stableSections, initialRoles);
+            prependStableSectionsToCodexPayload(payload, stableSections, initialRoles, {
+              enabled: profile.promptCaching.enabled,
+              promptCacheKey,
+            });
             }
             reqLog?.recordLLMRequest(payload);
             deps.log?.debug("llm_request_payload", { payload });

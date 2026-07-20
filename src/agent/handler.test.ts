@@ -956,6 +956,95 @@ describe("handleMessage", () => {
     expect(sessionIds[0]?.length).toBeLessThanOrEqual(64);
   });
 
+  test("shares Codex prompt cache keys without sharing channel transport sessions", async () => {
+    const requests: Array<{ sessionId?: string; promptCacheKey?: string; payloadKey?: unknown }> = [];
+    const completeChat: ChatCompleteFn = (request) => {
+      const payload: Record<string, unknown> = {
+        prompt_cache_key: request.sessionId,
+        input: [{
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "current" }],
+        }],
+      };
+      request.onPayload?.(payload);
+      requests.push({
+        ...(request.sessionId !== undefined ? { sessionId: request.sessionId } : {}),
+        ...(request.promptCacheKey !== undefined ? { promptCacheKey: request.promptCacheKey } : {}),
+        payloadKey: payload.prompt_cache_key,
+      });
+      return Promise.resolve({
+        text: "ok",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+    const globalConfig = makeCodexGlobal({ model: "gpt-5.6-sol" });
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        globalConfig,
+        requestLog: new RequestLog("guild-1", "channel-1"),
+      }),
+    );
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"], channelId: "channel-2" }),
+      makeDeps({
+        completeChat,
+        globalConfig,
+        requestLog: new RequestLog("guild-1", "channel-2"),
+      }),
+    );
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.sessionId).not.toBe(requests[1]?.sessionId);
+    expect(requests[0]?.promptCacheKey).toBe(requests[1]?.promptCacheKey);
+    expect(requests[0]?.promptCacheKey).toMatch(/^2b2v:prompt:[a-f0-9]{48}$/);
+    expect(requests.map((request) => request.payloadKey)).toEqual([
+      requests[0]?.promptCacheKey,
+      requests[1]?.promptCacheKey,
+    ]);
+  });
+
+  test("removes the Codex prompt cache key when prompt caching is disabled", async () => {
+    let requestCacheKey: string | undefined;
+    let payloadCacheKey: unknown = "not-called";
+    const completeChat: ChatCompleteFn = (request) => {
+      const payload: Record<string, unknown> = {
+        prompt_cache_key: request.sessionId,
+        input: [{
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "current" }],
+        }],
+      };
+      request.onPayload?.(payload);
+      requestCacheKey = request.promptCacheKey;
+      payloadCacheKey = payload.prompt_cache_key;
+      return Promise.resolve({
+        text: "ok",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        globalConfig: makeCodexGlobal({ model: "gpt-5.6-sol", promptCaching: { enabled: false } }),
+        requestLog: new RequestLog("guild-1", "channel-1"),
+      }),
+    );
+
+    expect(requestCacheKey).toBe("");
+    expect(payloadCacheKey).toBeUndefined();
+  });
+
   test("chains web search then fetch and sends one intermediate status", async () => {
     const toolCalls: Array<{ name: string; params: unknown }> = [];
     const webSearch: AgentTool = {

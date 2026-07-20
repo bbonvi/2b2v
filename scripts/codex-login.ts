@@ -3,7 +3,8 @@ import { chmodSync, mkdirSync, writeFileSync } from "fs";
 import { dirname } from "path";
 import { createInterface } from "readline/promises";
 import { stdin as input, stdout as output } from "process";
-import { loginOpenAICodex } from "@earendil-works/pi-ai/oauth";
+import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai";
+import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 
 function argValue(name: string): string | undefined {
   const idx = process.argv.indexOf(name);
@@ -14,28 +15,58 @@ function argValue(name: string): string | undefined {
 const authPath = argValue("--auth") ?? process.env.CODEX_AUTH_PATH ?? "data/codex-auth.json";
 const rl = createInterface({ input, output });
 
+async function answerPrompt(prompt: AuthPrompt): Promise<string> {
+  if (prompt.type === "select") {
+    console.log(`\n${prompt.message}`);
+    prompt.options.forEach((option, index) => {
+      console.log(`${index + 1}. ${option.label}`);
+    });
+    const answer = await rl.question("Selection: ");
+    const index = Number(answer) - 1;
+    const selected = prompt.options[index];
+    if (selected === undefined) {
+      throw new Error("Invalid login method selection");
+    }
+    return selected.id;
+  }
+  return await rl.question(`${prompt.message}: `);
+}
+
+function notify(event: AuthEvent): void {
+  if (event.type === "auth_url") {
+    console.log("\nOpen this URL to authorize OpenAI Codex:");
+    console.log(event.url);
+    if (event.instructions !== undefined && event.instructions !== "") {
+      console.log(`\n${event.instructions}`);
+    }
+    return;
+  }
+  if (event.type === "device_code") {
+    console.log(`\nOpen ${event.verificationUri} and enter code ${event.userCode}`);
+    return;
+  }
+  console.log(event.message);
+  if (event.type === "info") {
+    for (const link of event.links ?? []) {
+      console.log(`${link.label ?? "More information"}: ${link.url}`);
+    }
+  }
+}
+
 try {
-  const credentials = await loginOpenAICodex({
-    onAuth: (info) => {
-      console.log("\nOpen this URL to authorize OpenAI Codex:");
-      console.log(info.url);
-      if (info.instructions !== undefined && info.instructions !== "") {
-        console.log(`\n${info.instructions}`);
-      }
-    },
-    onPrompt: async (prompt) => {
-      const suffix = prompt.allowEmpty === true ? " (optional)" : "";
-      return await rl.question(`${prompt.message}${suffix}: `);
-    },
-    onProgress: (message) => console.log(message),
-    onManualCodeInput: async () => await rl.question("Paste the authorization code here if the browser callback does not complete: "),
-    originator: "2b2v",
+  const oauth = openaiCodexProvider().auth.oauth;
+  if (oauth === undefined) {
+    throw new Error("OpenAI Codex OAuth is unavailable");
+  }
+  const credentials = await oauth.login({
+    prompt: answerPrompt,
+    notify,
   });
 
   mkdirSync(dirname(authPath), { recursive: true });
   writeFileSync(
     authPath,
-    `${JSON.stringify({ "openai-codex": { type: "oauth", ...credentials } }, null, 2)}\n`,
+    `${JSON.stringify({ "openai-codex": credentials }, null, 2)}\n`,
     { mode: 0o600 },
   );
   chmodSync(authPath, 0o600);
