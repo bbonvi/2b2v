@@ -22,20 +22,20 @@ describe("formatDateStamp", () => {
     // 2026-02-02 14:05 UTC
     const ts = Date.UTC(2026, 1, 2, 14, 5, 0);
     const result = formatDateStamp(ts, "UTC");
-    expect(result).toBe("[2026-02-02 14:05]");
+    expect(result).toBe("[2026-02-02]\n[14:05]");
   });
 
   test("formats with timezone offset", () => {
     // 2026-02-02 14:05 UTC → 2026-02-02 23:05 in Asia/Tokyo (+09:00)
     const ts = Date.UTC(2026, 1, 2, 14, 5, 0);
     const result = formatDateStamp(ts, "Asia/Tokyo");
-    expect(result).toBe("[2026-02-02 23:05]");
+    expect(result).toBe("[2026-02-02]\n[23:05]");
   });
 
   test("falls back to UTC for invalid timezone", () => {
     const ts = Date.UTC(2026, 1, 2, 14, 5, 0);
     const result = formatDateStamp(ts, "Invalid/Zone");
-    expect(result).toBe("[2026-02-02 14:05]");
+    expect(result).toBe("[2026-02-02]\n[14:05]");
   });
 
   test("deterministic for identical inputs", () => {
@@ -49,14 +49,12 @@ describe("formatDateStamp", () => {
     const ts = Date.UTC(2026, 1, 2, 14, 5, 0);
     const result = formatDateStamp(ts, "America/New_York");
     // Feb in NYC is EST = -05:00, but offset is no longer shown
-    expect(result).toBe("[2026-02-02 09:05]");
+    expect(result).toBe("[2026-02-02]\n[09:05]");
   });
 
-  test("can include relative age when requested", () => {
+  test("contains no clock-relative age", () => {
     const ts = Date.UTC(2026, 1, 2, 14, 5, 0);
-    const nowMs = ts + 2 * 60 * 60_000;
-    const result = formatDateStamp(ts, "UTC", { nowMs, includeRelativeAgo: true });
-    expect(result).toBe("[2026-02-02 14:05, 2h ago]");
+    expect(formatDateStamp(ts, "UTC")).not.toContain("ago");
   });
 });
 
@@ -121,6 +119,30 @@ describe("insertDateStamps", () => {
     expect(result[1]).toEqual({ type: "index", index: 0 });
     expect(result[2]?.type).toBe("date");
     expect(result[3]).toEqual({ type: "index", index: 1 });
+  });
+
+  test("local day changes force a date and time marker before the normal gap", () => {
+    const msgs = [
+      msg("1", Date.UTC(2026, 6, 20, 23, 59, 30)),
+      msg("2", Date.UTC(2026, 6, 21, 0, 0, 10)),
+    ];
+    const result = insertDateStamps(msgs, "UTC");
+    expect(result).toEqual([
+      { type: "date", text: "[2026-07-20]\n[23:59]" },
+      { type: "index", index: 0 },
+      { type: "date", text: "[2026-07-21]\n[00:00]" },
+      { type: "index", index: 1 },
+    ]);
+  });
+
+  test("same-day gap markers repeat only local time", () => {
+    const base = Date.UTC(2026, 6, 20, 12, 0, 0);
+    const result = insertDateStamps([
+      msg("1", base),
+      msg("2", base + 5 * 60_000),
+    ], "UTC");
+    expect(result[0]).toEqual({ type: "date", text: "[2026-07-20]\n[12:00]" });
+    expect(result[2]).toEqual({ type: "date", text: "[12:05]" });
   });
 
   test("deterministic for identical inputs", () => {

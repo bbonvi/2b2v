@@ -1,1 +1,1 @@
-Optional public name for the resolved actor. Strongly prefer providing a concise, vivid name grounded in how people address them, the current role-play context, or a recognizable part of their display name; use the stable username only when no credible contextual name exists. Preserve established nicknames, but do not copy transient display-name jokes or moods blindly.
+Public actor name; follow the required dice skill's naming policy.

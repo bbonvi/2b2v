@@ -51,6 +51,7 @@ import type {
   ImageGenerationQuality,
   ReplyLoopConfig,
   MemoryExtractionConfig,
+  MemoryContextConfig,
   ServiceTier,
   LlmProvider,
   CodexTransport,
@@ -893,6 +894,19 @@ function validateMemoryExtractionConfig(config: MemoryExtractionConfig, keyPrefi
   }
 }
 
+function resolveMemoryContext(
+  base: MemoryContextConfig | undefined,
+  partial: Partial<MemoryContextConfig> | undefined,
+): MemoryContextConfig {
+  const resolved = {
+    maxRows: partial?.maxRows ?? base?.maxRows ?? 80,
+  };
+  if (!Number.isInteger(resolved.maxRows) || resolved.maxRows < 1 || resolved.maxRows > 500) {
+    throw new Error("memoryContext.maxRows must be an integer from 1 to 500");
+  }
+  return resolved;
+}
+
 function resolveRelationshipConfig(
   defaults: RelationshipConfig | undefined,
   partial: RelationshipConfigYaml | undefined,
@@ -1051,6 +1065,10 @@ export function loadGlobalConfig(
   if (discordToken === undefined || discordToken === "") throw new Error("DISCORD_TOKEN is required");
 
   const yaml = loadMainConfig(configPath);
+  const configuredRuntimeProfileId = env.PROFILE?.trim();
+  const runtimeProfileId = configuredRuntimeProfileId !== undefined && configuredRuntimeProfileId !== ""
+    ? configuredRuntimeProfileId
+    : basename(dirname(configPath));
   assertNoDeprecatedReplyLoopKey(yaml, "global");
   const dataDir = yaml.dataDir ?? "data";
   const modelProfiles = resolveModelProfiles(yaml.modelProfiles);
@@ -1064,6 +1082,7 @@ export function loadGlobalConfig(
   const defaultAmbientAttention = resolveAmbientAttentionConfig(undefined, yaml.ambientAttention);
   const defaultAmbientInitiative = resolveAmbientInitiativeConfig(undefined, yaml.ambientInitiative);
   const defaultMemoryExtraction = resolveGlobalMemoryExtraction(yaml.memoryExtraction);
+  const defaultMemoryContext = resolveMemoryContext(undefined, yaml.memoryContext);
   const defaultRelationships = resolveRelationshipConfig(undefined, yaml.relationships);
   const defaultVoice = resolveVoiceConfig(DEFAULT_VOICE_CONFIG, yaml.voice);
   const personaModes = resolvePersonaModesConfig(yaml.personaModes, dirname(configPath));
@@ -1090,6 +1109,7 @@ export function loadGlobalConfig(
   }
 
   return {
+    runtimeProfileId,
     discordToken,
     ...(openrouterApiKey !== undefined && openrouterApiKey !== "" ? { openrouterApiKey } : {}),
     codexAuthPath: env.CODEX_AUTH_PATH ?? `${dataDir}/codex-auth.json`,
@@ -1144,6 +1164,7 @@ export function loadGlobalConfig(
     defaultAmbientInitiative,
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
     defaultMemoryExtraction,
+    defaultMemoryContext,
     defaultRelationships,
     defaultVoice,
     personaModes,
@@ -1236,6 +1257,7 @@ export function resolveGuildConfig(
     ambientInitiative: resolveAmbientInitiativeConfig(global.defaultAmbientInitiative, partial.ambientInitiative),
     replyLoop: resolveGuildReplyLoop(global.defaultReplyLoop, partial.replyLoop),
     memoryExtraction: resolveGuildMemoryExtraction(global.defaultMemoryExtraction, partial.memoryExtraction),
+    memoryContext: resolveMemoryContext(global.defaultMemoryContext, partial.memoryContext),
     relationships: resolveRelationshipConfig(global.defaultRelationships, partial.relationships),
     voice: resolveVoiceConfig(global.defaultVoice ?? DEFAULT_VOICE_CONFIG, partial.voice),
   };
@@ -1320,6 +1342,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     voice: config.voice,
     replyLoop: config.replyLoop,
     memoryExtraction: config.memoryExtraction,
+    memoryContext: config.memoryContext,
   };
 
   // Strip undefined keys before serializing

@@ -1,5 +1,5 @@
 import { formatMessageLine } from "../agent/history-formatting.ts";
-import { formatDateStamp } from "../agent/history-dates.ts";
+import { formatDateTimeStamp } from "../agent/history-dates.ts";
 import type { HistoryMessage } from "../agent/history-types.ts";
 import type { VoiceHistoryRecord, VoiceMoveHandoff } from "./repository.ts";
 
@@ -10,7 +10,7 @@ export function renderVoiceMoveHandoff(
 ): string {
   return [
     "## Voice Move Handoff",
-    `${formatDateStamp(handoff.movedAt, timezone)} You moved here from voice channel ${handoff.sourceChannelName} (${handoff.sourceChannelId}) in guild ${handoff.sourceGuildName} (${handoff.sourceGuildId}).`,
+    `${formatDateTimeStamp(handoff.movedAt, timezone)} You moved here from voice channel ${handoff.sourceChannelName} (${handoff.sourceChannelId}) in guild ${handoff.sourceGuildName} (${handoff.sourceGuildId}).`,
     `@${handoff.requestedByUsername} asked: ${handoff.reason}`,
     "This is private continuity from the source room. People in the current room did not hear it; use it to understand why you moved, but do not expose sensitive source-room details.",
     handoff.priorSummary === "" ? "" : `Source-room summary: ${handoff.priorSummary}`,
@@ -84,7 +84,7 @@ export function renderVoiceHistory(
     };
   });
   return messages.map((message) =>
-    `${formatDateStamp(message.timestamp, timezone, { includeSeconds: true })} ${formatMessageLine({
+    `${formatDateTimeStamp(message.timestamp, timezone, true)} ${formatMessageLine({
       message,
       reply: null,
     })}`

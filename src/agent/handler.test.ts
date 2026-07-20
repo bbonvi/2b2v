@@ -71,6 +71,7 @@ function makePromptTransportConfig(): PromptTransportConfig {
         discordContext: { role: "user", target: "input" },
         upcomingSchedules: { role: "user", target: "input" },
         memories: { role: "user", target: "input" },
+        innerThreads: { role: "developer", target: "input" },
         recentHistory: { role: "user", target: "input" },
         currentContext: { role: "user", target: "input" },
         personaMode: { role: "developer", target: "input" },
@@ -93,6 +94,7 @@ function makePromptTransportConfig(): PromptTransportConfig {
         discordContext: { role: "user", target: "input" },
         upcomingSchedules: { role: "user", target: "input" },
         memories: { role: "user", target: "input" },
+        innerThreads: { role: "developer", target: "input" },
         recentHistory: { role: "user", target: "input" },
         currentContext: { role: "user", target: "input" },
         personaMode: { role: "developer", target: "input" },
@@ -883,6 +885,41 @@ describe("handleMessage", () => {
     );
   });
 
+  test("orders append-oriented recent history before rewrite-heavy private context", async () => {
+    const completeChat: ChatCompleteFn = (request) => {
+      const content = request.messages.map((message) => contentText(message.content));
+      const recentIndex = content.findIndex((text) => text.includes("recent marker"));
+      const memoriesIndex = content.findIndex((text) => text.includes("memory marker"));
+      const threadsIndex = content.findIndex((text) => text.includes("inner marker"));
+      const schedulesIndex = content.findIndex((text) => text.includes("schedule marker"));
+      expect(recentIndex).toBeGreaterThanOrEqual(0);
+      expect(memoriesIndex).toBeGreaterThan(recentIndex);
+      expect(threadsIndex).toBeGreaterThan(memoriesIndex);
+      expect(schedulesIndex).toBeGreaterThan(threadsIndex);
+      return Promise.resolve({
+        text: "done",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        context: makeContext({
+          sections: [
+            { label: "Upcoming Schedules", text: "schedule marker", cached: false, role: "developer" },
+            { label: "Inner Threads", text: "inner marker", cached: false, role: "developer" },
+            { label: "Memories", text: "memory marker", cached: false, role: "developer" },
+            { label: "Chat History — Newer", text: "recent marker", cached: false, role: "developer" },
+          ],
+        }),
+      }),
+    );
+  });
+
   test("uses a stable OpenRouter session id across native tool turns", async () => {
     const tool: AgentTool = {
       name: "lookup",
@@ -1007,6 +1044,47 @@ describe("handleMessage", () => {
       requests[0]?.promptCacheKey,
       requests[1]?.promptCacheKey,
     ]);
+  });
+
+  test("keeps the Codex cache-family key stable across prompt and tool-contract edits", async () => {
+    const keys: Array<string | undefined> = [];
+    const completeChat: ChatCompleteFn = (request) => {
+      keys.push(request.promptCacheKey);
+      return Promise.resolve({
+        text: "ok",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+    const firstTool: AgentTool = {
+      name: "lookup",
+      label: "Lookup",
+      description: "First contract wording",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: () => Promise.resolve({ content: [], details: {} }),
+    };
+    const secondTool: AgentTool = {
+      ...firstTool,
+      description: "Changed contract wording",
+    };
+    const common = {
+      completeChat,
+      globalConfig: makeCodexGlobal({ model: "gpt-5.6-sol" }),
+      requestLog: new RequestLog("guild-1", "channel-1"),
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ ...common, systemPrompt: "first prompt", extraTools: [firstTool] }),
+    );
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ ...common, systemPrompt: "changed prompt", extraTools: [secondTool] }),
+    );
+
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
   });
 
   test("removes the Codex prompt cache key when prompt caching is disabled", async () => {

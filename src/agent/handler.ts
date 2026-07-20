@@ -846,22 +846,15 @@ function buildProviderSessionId(requestLog: RequestLog | undefined, modelId: str
   return `2b2v:${createHash("sha256").update(sessionId).digest("hex").slice(0, 58)}`;
 }
 
-/** Build a shared cache key from only globally compatible prompt and tool content. */
+/** Build a stable cache-routing key for one prompt family. */
 function buildCodexPromptCacheKey(
+  runtimeProfileId: string,
+  modelProfileId: string,
   modelId: string,
-  stableSections: readonly StablePromptSection[],
-  toolSignature: string,
+  surface: "discord-actor",
 ): string {
-  const globalPrompt = stableSections
-    .filter((section) => section.cacheScope === "global")
-    .map((section) => ({
-      role: section.role,
-      target: section.target ?? "input",
-      cacheGroup: section.cacheGroup,
-      text: section.text,
-    }));
   const fingerprint = createHash("sha256")
-    .update(JSON.stringify({ modelId, globalPrompt, toolSignature }))
+    .update(JSON.stringify({ runtimeProfileId, modelProfileId, modelId, surface }))
     .digest("hex");
   return `2b2v:prompt:${fingerprint.slice(0, 48)}`;
 }
@@ -875,7 +868,7 @@ const VOLATILE_SECTION_IDS_BY_LABEL: Readonly<Record<string, PromptTransportSect
   "Discord Context": "discordContext",
   "Upcoming Schedules": "upcomingSchedules",
   "Memories": "memories",
-  "Inner Threads": "memories",
+  "Inner Threads": "innerThreads",
   "Chat History — Newer": "recentHistory",
   "Server Members": "serverMembers",
   "Threads In This Channel": "threadsInChannel",
@@ -886,9 +879,10 @@ const VOLATILE_SECTION_IDS_BY_LABEL: Readonly<Record<string, PromptTransportSect
 
 const VOLATILE_SECTION_ORDER: readonly PromptTransportSectionId[] = [
   "discordContext",
-  "upcomingSchedules",
-  "memories",
   "recentHistory",
+  "memories",
+  "innerThreads",
+  "upcomingSchedules",
   "serverMembers",
   "threadsInChannel",
   "currentContext",
@@ -2479,7 +2473,12 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
     ? inheritedPrompt.promptCacheKey
     : provider === "openai-codex"
       ? promptCaching.enabled
-        ? buildCodexPromptCacheKey(model.id, stableSections, maintenanceToolSignature)
+        ? buildCodexPromptCacheKey(
+            input.globalConfig.runtimeProfileId ?? "default",
+            profileId,
+            model.id,
+            "discord-actor",
+          )
         : ""
       : undefined;
   const currentMessageWithoutImages: IncomingMessage = { ...input.incomingMessage, imageInputs: undefined };
@@ -2649,7 +2648,12 @@ export async function handleMessage(
   const sessionId = buildProviderSessionId(reqLog, `${model.llmProvider}:${model.id}`);
   const promptCacheKey = model.llmProvider === "openai-codex"
     ? profile.promptCaching.enabled
-      ? buildCodexPromptCacheKey(model.id, stableSections, visibleToolSignature)
+      ? buildCodexPromptCacheKey(
+          deps.globalConfig.runtimeProfileId ?? "default",
+          profileId,
+          model.id,
+          "discord-actor",
+        )
       : ""
     : undefined;
   const maintenancePromptContext: MaintenancePromptContext = {

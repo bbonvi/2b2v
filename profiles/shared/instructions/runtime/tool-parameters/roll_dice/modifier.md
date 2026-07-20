@@ -1,1 +1,1 @@
-Integer added to the kept dice total. Defaults to 0.
+Integer added to the kept total; default 0.

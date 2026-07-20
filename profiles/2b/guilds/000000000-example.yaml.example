@@ -37,6 +37,10 @@ trim:
 #     maxBatchMessages: 300
 #     minIntervalSeconds: 600
 
+# Optional per-guild cap for durable memory rows injected into ordinary actor turns
+# memoryContext:
+#   maxRows: 60
+
 # Optional per-guild relationships override
 # relationships:
 #   modelProfile: main

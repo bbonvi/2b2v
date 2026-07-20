@@ -2581,6 +2581,7 @@ async function buildContext(
     guildId,
     currentUserId: latestUserMessage.authorId,
     visibleUserIds,
+    limit: guildConfig.memoryContext?.maxRows ?? 80,
     resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
     contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
   });
@@ -2930,6 +2931,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       db,
       guildId,
       currentUserId: lastMessage.authorId,
+      limit: guildConfig.memoryContext?.maxRows ?? 80,
       resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
       contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
     });

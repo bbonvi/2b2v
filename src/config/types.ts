@@ -100,6 +100,7 @@ export type PromptTransportSectionId =
   | "discordContext"
   | "upcomingSchedules"
   | "memories"
+  | "innerThreads"
   | "recentHistory"
   | "currentContext"
   | "personaMode"
@@ -352,6 +353,11 @@ export interface MemoryExtractionConfig {
   };
 }
 
+/** Maximum stored memory rows injected into an ordinary actor prompt. */
+export interface MemoryContextConfig {
+  maxRows: number;
+}
+
 /** Limits for lazy message-asset reading and extraction. */
 export interface AssetReadingConfig {
   maxCharsPerRead: number;
@@ -517,6 +523,8 @@ export interface GuildConfig {
   replyLoop: ReplyLoopConfig;
   /** Background memory extraction behavior. */
   memoryExtraction: MemoryExtractionConfig;
+  /** Bounded durable memory context for ordinary actor turns. */
+  memoryContext?: MemoryContextConfig;
   /** Durable relationship-profile behavior. */
   relationships?: RelationshipConfig;
   /** Live Discord voice agent behavior. */
@@ -525,6 +533,8 @@ export interface GuildConfig {
 
 /** Global configuration loaded from file + env. */
 export interface GlobalConfig {
+  /** Active bot profile family used for cache routing and diagnostics. */
+  runtimeProfileId?: string;
   discordToken: string;
   openrouterApiKey?: string;
   codexAuthPath: string;
@@ -574,6 +584,7 @@ export interface GlobalConfig {
   defaultReplyLoop: ReplyLoopConfig;
   /** Default background memory extraction behavior. */
   defaultMemoryExtraction: MemoryExtractionConfig;
+  defaultMemoryContext?: MemoryContextConfig;
   /** Default durable relationship-profile behavior. */
   defaultRelationships?: RelationshipConfig;
   /** Default live Discord voice agent behavior. */
@@ -656,6 +667,7 @@ export interface GuildConfigYaml {
       minIntervalSeconds?: number;
     };
   };
+  memoryContext?: Partial<MemoryContextConfig>;
 }
 
 /** Raw shape of a profile's config YAML file. All optional. */
@@ -734,6 +746,7 @@ export interface MainConfigYaml {
       minIntervalSeconds?: number;
     };
   };
+  memoryContext?: Partial<MemoryContextConfig>;
 }
 
 /** Raw prompt transport YAML shape. */

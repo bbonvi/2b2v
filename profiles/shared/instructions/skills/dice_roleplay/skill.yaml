@@ -1,0 +1,9 @@
+id: dice_roleplay
+title: Dice And Roll-Driven Roleplay
+description: Required for roll_dice; governs when to roll, checks and difficulty, hidden rolls, actor labels, and post-roll scene narration.
+required_for_tools:
+  - roll_dice
+instructions:
+  - 00-rolling-policy.md
+  - 10-fields-and-privacy.md
+  - 20-post-roll-narration.md

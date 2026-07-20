@@ -59,6 +59,7 @@ promptTransport:
             discordContext: { role: user, target: input, cacheGroup: context } # (current guild/channel navigation context)
             upcomingSchedules: { role: developer, target: input, cacheGroup: shcedules } # (pending schedule summary)
             memories: { role: developer, target: input, cacheGroup: memories } # (selected memory context)
+            innerThreads: { role: developer, target: input, cacheGroup: inner-threads } # (private active inner threads)
             recentHistory: { role: user, target: input, cacheGroup: recent } # (uncached recent chat history)
             currentContext: {
                     role: user,
@@ -93,7 +94,8 @@ promptTransport:
             threadsInChannel: { role: user, target: input } # (thread list/metadata context)
             discordContext: { role: user, target: input } # (current guild/channel navigation context)
             upcomingSchedules: { role: user, target: input } # (pending schedule summary)
-            memories: { role: user, target: input } # (selected memory context)
+            memories: { role: developer, target: input, cacheGroup: memories } # (selected memory context)
+            innerThreads: { role: developer, target: input, cacheGroup: inner-threads } # (private active inner threads)
             recentHistory: { role: user, target: input } # (uncached recent chat history)
             currentContext: { role: user, target: input } # (time/contact/current-turn metadata)
             personaMode: { role: developer, target: input } # (volatile active persona mode overlay)
@@ -166,6 +168,10 @@ memoryExtraction:
         everyMessages: 100 # (human messages since the last successful memory pass)
         maxBatchMessages: 200 # (max chronological messages reviewed per ambient pass)
         minIntervalSeconds: 600 # (minimum seconds between ambient passes per channel)
+
+# Maximum selected durable memory rows injected into ordinary actor turns.
+memoryContext:
+    maxRows: 60
 
 # Non-admin recurring scheduled-task pressure caps.
 schedulePressure:

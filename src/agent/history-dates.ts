@@ -29,20 +29,15 @@ export function formatRelativeAgo(timestampMs: number, nowMs?: number): string {
   return `${Math.floor(elapsed / YEAR_MS)}y ago`;
 }
 
-/**
- * Format a timestamp as a deterministic time marker: `[YYYY-MM-DD HH:mm]`
- * Uses the guild timezone with UTC fallback if invalid. No offset suffix,
- * timezone is communicated once via the Current Context block.
- */
-export function formatDateStamp(
-  timestampMs: number,
-  timezone: string,
-  options: { nowMs?: number; includeRelativeAgo?: boolean; includeSeconds?: boolean } = {},
-): string {
+interface LocalDateTimeParts {
+  date: string;
+  time: string;
+  seconds: string;
+}
+
+function localDateTimeParts(timestampMs: number, timezone: string): LocalDateTimeParts {
   const tz = isValidTimezone(timezone) ? timezone : "UTC";
   const date = new Date(timestampMs);
-
-  // Use Intl for deterministic, locale-agnostic parts
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: tz,
     year: "numeric",
@@ -50,24 +45,30 @@ export function formatDateStamp(
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    ...(options.includeSeconds === true ? { second: "2-digit" } : {}),
+    second: "2-digit",
     hour12: false,
   }).formatToParts(date);
 
-  const get = (type: string): string =>
-    parts.find((p) => p.type === type)?.value ?? "00";
-
+  const get = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value ?? "00";
   const yyyy = get("year");
   const mm = get("month");
   const dd = get("day");
   const hh = get("hour");
   const min = get("minute");
-  const seconds = options.includeSeconds === true ? `:${get("second")}` : "";
+  return { date: `${yyyy}-${mm}-${dd}`, time: `${hh}:${min}`, seconds: get("second") };
+}
 
-  const relative = options.includeRelativeAgo === true && options.nowMs !== undefined
-    ? `, ${formatRelativeAgo(timestampMs, options.nowMs)}`
-    : "";
-  return `[${yyyy}-${mm}-${dd} ${hh}:${min}${seconds}${relative}]`;
+/** Format the self-contained first marker for a history slice. */
+export function formatDateStamp(timestampMs: number, timezone: string): string {
+  const parts = localDateTimeParts(timestampMs, timezone);
+  return `[${parts.date}]\n[${parts.time}]`;
+}
+
+/** Format a compact full local timestamp for non-chat-history event streams. */
+export function formatDateTimeStamp(timestampMs: number, timezone: string, includeSeconds = false): string {
+  const parts = localDateTimeParts(timestampMs, timezone);
+  return `[${parts.date} ${parts.time}${includeSeconds ? `:${parts.seconds}` : ""}]`;
 }
 
 /**
@@ -83,31 +84,41 @@ function isValidTimezone(tz: string): boolean {
 }
 
 /**
- * Insert date stamps into the older slice.
- * - First message always gets a date stamp.
- * - Subsequent stamps only when >= 5 minutes since last insertion.
+ * Insert local calendar/time markers into a history slice.
+ * - The first message always gets a date marker followed by a time marker.
+ * - Subsequent time markers appear after the configured gap.
+ * - A local calendar-day transition always gets a date and time marker.
  * Returns an array of strings: interleaved date stamps and message indices.
  */
 export function insertDateStamps(
   messages: HistoryMessage[],
   timezone: string,
-  options: { minGapMs?: number; nowMs?: number; includeRelativeAgo?: boolean; includeSeconds?: boolean } = {},
+  options: { minGapMs?: number } = {},
 ): Array<{ type: "date"; text: string } | { type: "index"; index: number }> {
   if (messages.length === 0) return [];
 
   const result: Array<{ type: "date"; text: string } | { type: "index"; index: number }> = [];
   let lastDateTs = -Infinity;
+  let lastCalendarDate: string | undefined;
   const minGapMs = options.minGapMs ?? FIVE_MINUTES_MS;
 
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
     if (m === undefined) continue;
+    const local = localDateTimeParts(m.timestamp, timezone);
     const elapsed = m.timestamp - lastDateTs;
+    const calendarChanged = lastCalendarDate !== undefined && local.date !== lastCalendarDate;
 
-    if (i === 0 || elapsed >= minGapMs) {
-      result.push({ type: "date", text: formatDateStamp(m.timestamp, timezone, options) });
+    if (i === 0 || calendarChanged || elapsed >= minGapMs) {
+      result.push({
+        type: "date",
+        text: i === 0 || calendarChanged
+          ? `[${local.date}]\n[${local.time}]`
+          : `[${local.time}]`,
+      });
       lastDateTs = m.timestamp;
     }
+    lastCalendarDate = local.date;
 
     result.push({ type: "index", index: i });
   }

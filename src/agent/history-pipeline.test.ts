@@ -329,11 +329,9 @@ describe("processHistory", () => {
 
     const result = await processHistory([m1, m2], latest, defaultConfig, deps);
 
-    // Should have date stamps in newer slice (>= 5 min gaps)
-    expect(result.newerText).toContain("[1970-01-01");
-    // Count date stamps - should be 3 (one for each message with >= 5 min gap)
-    const dateMatches = result.newerText.match(/\[1970-01-01/g);
-    expect(dateMatches?.length).toBe(3);
+    expect(result.newerText).toContain("[1970-01-01]");
+    const timeMatches = result.newerText.match(/\[\d{2}:\d{2}\]/g);
+    expect(timeMatches?.length).toBe(3);
   });
 
   test("newer slice stamps minute-scale temporal gaps", async () => {
@@ -344,20 +342,21 @@ describe("processHistory", () => {
 
     const result = await processHistory([m1, m2], latest, defaultConfig, deps);
 
-    // Should have one date stamp per message because each gap is >= 1 min.
-    expect(result.newerText).toContain("[1970-01-01");
-    const dateMatches = result.newerText.match(/\[1970-01-01/g);
-    expect(dateMatches?.length).toBe(3);
+    // Should have one time marker per message because each gap is >= 1 min.
+    expect(result.newerText).toContain("[1970-01-01]");
+    const timeMatches = result.newerText.match(/\[\d{2}:\d{2}\]/g);
+    expect(timeMatches?.length).toBe(3);
   });
 
-  test("newer slice date stamps include relative age", async () => {
+  test("newer slice uses standalone date and time markers without relative age", async () => {
     const base = Date.UTC(2026, 0, 1, 12, 0, 0);
     const m1 = msg({ id: "1", content: "first", timestamp: base });
     const latest = msg({ id: "100", content: "last", timestamp: base + 10 * 60 * 60_000 });
 
     const result = await processHistory([m1], latest, defaultConfig, deps, latest.timestamp);
 
-    expect(result.newerText).toContain("[2026-01-01 12:00, 10h ago]");
-    expect(result.newerText).toContain("[2026-01-01 22:00, <1m ago]");
+    expect(result.newerText).toContain("[2026-01-01]\n[12:00]");
+    expect(result.newerText).toContain("[22:00]");
+    expect(result.newerText).not.toContain("ago]");
   });
 });

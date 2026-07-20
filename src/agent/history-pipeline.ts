@@ -27,7 +27,7 @@ export async function processHistory(
   latestUserMessage: HistoryMessage | null,
   config: HistoryProcessingConfig & { replyQuoteChars: number },
   replyFallbackDeps: ReplyFallbackDeps,
-  nowMs = Date.now(),
+  _nowMs = Date.now(),
 ): Promise<ProcessedHistory> {
   // 1. Sort deterministically
   const sorted = sortMessages(applyDisplayNames(messages, config.displayNamesByUserId));
@@ -107,8 +107,6 @@ export async function processHistory(
   if (newerMessages.length > 0) {
     const newerDateEntries = insertDateStamps(newerMessages, config.timezone, {
       minGapMs: RECENT_HISTORY_DATE_STAMP_GAP_MS,
-      nowMs,
-      includeRelativeAgo: true,
     });
     const lines: string[] = [
       NEWER_LEGEND,

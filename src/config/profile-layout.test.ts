@@ -48,6 +48,8 @@ describe("repository profile layout", () => {
       }
       expect(Object.keys(bundle.runtime.contextTemplates).length).toBeGreaterThan(0);
       expect(bundle.runtime.skills.byId.image_generation).toBeDefined();
+      expect(bundle.runtime.skills.byId.dice_roleplay).toBeDefined();
+      expect(bundle.runtime.skills.requiredByTool.roll_dice).toBe("dice_roleplay");
     }
   });
 
@@ -75,7 +77,9 @@ describe("repository profile layout", () => {
 
     expect(loadMainConfig(twoBPath)).not.toHaveProperty("persona");
     expect(loadMainConfig(delamainPath)).not.toHaveProperty("persona");
+    expect(twoB.runtimeProfileId).toBe("2b");
     expect(twoB.defaultRelationships?.enabled).toBe(true);
+    expect(twoB.defaultMemoryContext?.maxRows).toBe(60);
     expect(twoB.defaultAmbientInitiative?.botContactIds).toEqual(["1398275457857622128"]);
     expect(twoB.vpn?.enabled).toBe(true);
     expect(twoB.personaModes?.modes.map((mode) => mode.id)).toEqual(["normal", "sleeping"]);
