@@ -2091,6 +2091,23 @@ function blockToolsExcept(tools: AgentTool[], allowedName: string, passLabel: st
 
 const maintenanceToolNames = new Set(["record_memory", "record_relationship", "record_inner_threads"]);
 
+function latestHumanIdentity(guildId: string, channelId: string): {
+  userId: string;
+  username: string;
+} {
+  const latestHuman = db.raw.prepare(
+    `SELECT user_id, author_username
+     FROM messages
+     WHERE guild_id = ? AND channel_id = ? AND is_bot = 0
+       AND is_synthetic = 0 AND is_prompt_only = 0
+     ORDER BY created_at DESC, id DESC LIMIT 1`,
+  ).get(guildId, channelId) as { user_id: string; author_username: string } | null;
+  return {
+    userId: latestHuman?.user_id ?? client.user?.id ?? "",
+    username: latestHuman?.author_username ?? client.user?.username ?? "bot",
+  };
+}
+
 function toolsForMaintenancePass(
   visibleTools: AgentTool[] | undefined,
   maintenanceTools: AgentTool[],
@@ -3701,6 +3718,26 @@ const ambientRuntime = createAmbientRuntime({
   createSyntheticReplyFallbackDeps,
   buildContext,
   buildAgentTools,
+  createVisibleMaintenanceTools: ({
+    guild,
+    guildConfig,
+    memoryRequest,
+    sourceRequestId,
+  }) => {
+    const latestHuman = latestHumanIdentity(
+      guild.id,
+      memoryRequest.incomingMessage.channelId ?? "",
+    );
+    return blockToolsExcept(createPostReplyMaintenanceTools({
+      guild,
+      guildConfig,
+      memoryRequest,
+      currentUserId: latestHuman.userId,
+      currentUsername: latestHuman.username,
+      sourceMessageId: memoryRequest.sourceMessageId ?? promptLabSyntheticId(),
+      sourceRequestId,
+    }), "", "visible reply mode");
+  },
   promptLabDryRunTools,
   promptLabSyntheticId,
   promptLabSummary,
@@ -3723,15 +3760,7 @@ const ambientRuntime = createAmbientRuntime({
     dryRun,
     dryRuns,
   }) => {
-    const latestHuman = db.raw.prepare(
-      `SELECT user_id, author_username
-       FROM messages
-       WHERE guild_id = ? AND channel_id = ? AND is_bot = 0
-         AND is_synthetic = 0 AND is_prompt_only = 0
-       ORDER BY created_at DESC, id DESC LIMIT 1`,
-    ).get(guild.id, channel.id) as { user_id: string; author_username: string } | null;
-    const currentUserId = latestHuman?.user_id ?? client.user?.id ?? "";
-    const currentUsername = latestHuman?.author_username ?? client.user?.username ?? "bot";
+    const latestHuman = latestHumanIdentity(guild.id, channel.id);
     await runMemoryPostReplyExtraction({
       guildConfig,
       memoryRequest: request,
@@ -3740,8 +3769,8 @@ const ambientRuntime = createAmbientRuntime({
       sourceRequestId,
       source: "ambient_initiative",
       passKind: "ambient",
-      currentUserId,
-      currentUsername,
+      currentUserId: latestHuman.userId,
+      currentUsername: latestHuman.username,
       dryRun,
       dryRuns,
     });
@@ -3752,8 +3781,8 @@ const ambientRuntime = createAmbientRuntime({
       channel,
       sourceRequestId,
       source: "ambient_initiative",
-      currentUserId,
-      currentUsername,
+      currentUserId: latestHuman.userId,
+      currentUsername: latestHuman.username,
       dryRun,
       dryRuns,
     });

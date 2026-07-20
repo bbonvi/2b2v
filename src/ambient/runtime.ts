@@ -211,6 +211,12 @@ export type AmbientRuntimeDeps = {
     botUsername: string;
     logger: Logger;
   }) => MessageSender;
+  createVisibleMaintenanceTools: (input: {
+    guild: Guild;
+    guildConfig: GuildConfig;
+    memoryRequest: MemoryExtractionRequest;
+    sourceRequestId: string;
+  }) => AgentTool[];
   createHandlerDeps: (input: CreateHandlerDepsInput) => HandlerDeps;
   processTriggeredMessage: (message: Message, triggerResult?: NonNullable<TriggerResult>, currentTurnMessages?: readonly Message[], options?: { disableLiveOutput?: boolean; currentTurnOverride?: { messageId: string; timestamp: number; content: string }; preSendCheck?: () => boolean; onWriteToolStart?: (toolName: string) => void }) => Promise<unknown>;
   trackBackgroundTask?: (task: Promise<unknown>) => void;
@@ -1086,6 +1092,7 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     fetchAccessibleGuildChannel,
     createSyntheticReplyFallbackDeps,
     createBotDiscordMessageSender,
+    createVisibleMaintenanceTools: input.createVisibleMaintenanceTools,
     createHandlerDeps,
     pendingAmbientCandidatesInChannel: (guildId, channelId) => {
       let count = 0;

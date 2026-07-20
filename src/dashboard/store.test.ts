@@ -274,6 +274,55 @@ describe("RequestLogStore", () => {
     expect(detail?.entries.map((item) => item.entry.requestId)).toEqual(["reply", "memory", "relationship", "inner-thread", "ambient"]);
   });
 
+  test("groups ambient initiative maintenance under its synthetic parent request", () => {
+    const store = new RequestLogStore();
+    const messageId = "ambient-initiative:run-1";
+    store.push(makeEntry({
+      requestId: "initiative",
+      authorUsername: "ambient-initiative",
+      trigger: { type: "ambient_initiative_evaluator", kind: "generic", status: "evaluating" },
+      triggerContext: {
+        messageId,
+        authorUsername: "ambient-initiative",
+        content: "autonomous cognitive opportunity",
+      },
+      timestamp: "2026-07-20T00:00:01.000Z",
+      llmCalls: [{
+        model: "test",
+        promptTokens: 1,
+        completionTokens: 1,
+        totalTokens: 2,
+        stopReason: "stop",
+        contentTypes: ["text"],
+        status: "completed",
+      }],
+    }));
+    store.push(makeEntry({
+      requestId: "initiative-memory",
+      authorUsername: "2B",
+      trigger: {
+        type: "background_memory_extraction",
+        sourceRequestId: "initiative",
+        source: "ambient_initiative",
+      },
+      triggerContext: {
+        messageId,
+        authorUsername: "2B",
+        content: "autonomous cognitive opportunity",
+      },
+      timestamp: "2026-07-20T00:00:02.000Z",
+    }));
+
+    const groups = store.queryGroups();
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.groupId).toBe(`trigger:g1:c1:${messageId}`);
+    expect(groups[0]?.scope).toBe("trigger");
+    expect(groups[0]?.requests.map((request) => request.requestId)).toEqual([
+      "initiative",
+      "initiative-memory",
+    ]);
+  });
+
   test("groups synthetic scheduled-task phases without treating them as messages", () => {
     const store = new RequestLogStore();
     const context = { messageId: "scheduled:daily", authorUsername: "scheduler", content: "daily task" };

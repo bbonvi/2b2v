@@ -392,8 +392,9 @@ function toSummary(entry: RequestLogEntry): RequestLogSummary {
 
 function groupRequestLogs(entries: RequestLogEntry[]): RequestLogGroupSummary[] {
   const grouped = new Map<string, RequestLogEntry[]>();
+  const entriesByRequestId = new Map(entries.map((entry) => [entry.requestId, entry]));
   for (const entry of entries) {
-    const key = requestLogGroupKey(entry);
+    const key = requestLogGroupKey(entry, entriesByRequestId);
     const current = grouped.get(key.groupId) ?? [];
     current.push(entry);
     grouped.set(key.groupId, current);
@@ -404,7 +405,7 @@ function groupRequestLogs(entries: RequestLogEntry[]): RequestLogGroupSummary[] 
     const requests = orderedEntries.map((entry) => toSummary(entry));
     const primary = orderedEntries.find((entry) => entry.triggerContext?.content?.trim() !== "") ?? orderedEntries[0];
     if (primary === undefined) throw new Error(`Dashboard group ${groupId} has no entries.`);
-    const key = requestLogGroupKey(primary);
+    const key = requestLogGroupKey(primary, entriesByRequestId);
     const estimatedCost = requests.reduce((total, request) => total + (request.estimatedCostUsd ?? 0), 0);
     return {
       groupId,
@@ -427,12 +428,27 @@ function groupRequestLogs(entries: RequestLogEntry[]): RequestLogGroupSummary[] 
   }).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
 
-function requestLogGroupKey(entry: RequestLogEntry): {
+function requestLogGroupKey(
+  entry: RequestLogEntry,
+  entriesByRequestId: ReadonlyMap<string, RequestLogEntry>,
+  visitedRequestIds: ReadonlySet<string> = new Set(),
+): {
   groupId: string;
   scope: "message" | "trigger";
   sourceMessageId?: string;
 } {
   const trigger = isRecord(entry.trigger) ? entry.trigger : undefined;
+  const sourceRequestId = typeof trigger?.sourceRequestId === "string" ? trigger.sourceRequestId : undefined;
+  if (sourceRequestId !== undefined && !visitedRequestIds.has(sourceRequestId)) {
+    const sourceEntry = entriesByRequestId.get(sourceRequestId);
+    if (sourceEntry !== undefined) {
+      return requestLogGroupKey(
+        sourceEntry,
+        entriesByRequestId,
+        new Set([...visitedRequestIds, entry.requestId]),
+      );
+    }
+  }
   const triggerSourceMessageId = typeof trigger?.sourceMessageId === "string" ? trigger.sourceMessageId : undefined;
   const sourceMessageId = entry.triggerContext?.messageId
     ?? entry.triggerContext?.sourceMessageId

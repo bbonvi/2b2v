@@ -195,6 +195,12 @@ export type GenericAmbientInitiativeDeps = {
     botUsername: string;
     logger: Logger;
   }) => MessageSender;
+  createVisibleMaintenanceTools: (input: {
+    guild: Guild;
+    guildConfig: GuildConfig;
+    memoryRequest: MemoryExtractionRequest;
+    sourceRequestId: string;
+  }) => AgentTool[];
   createHandlerDeps: (input: CreateHandlerDepsInput) => HandlerDeps;
   pendingAmbientCandidatesInChannel: (guildId: string, channelId: string) => number;
   isAutonomousAttentionBusy: (guildId: string, channelId: string) => boolean;
@@ -700,6 +706,25 @@ export function createGenericAmbientInitiativeRuntime(
     );
     if (input.draft === undefined) deps.preparePersonaModeTurn?.(input.candidate.guildId);
     const generatedImages = createGeneratedImageRuntime();
+    const incoming: IncomingMessage = {
+      content: opportunityText,
+      guildId: input.candidate.guildId,
+      guildName: input.guild.name,
+      channelId: input.candidate.channelId,
+      channelName: channelDisplayName(input.channel),
+      authorId: botUserId,
+      authorUsername: botUsername,
+      authorIsBot: true,
+      botUserId,
+      mentionedUserIds: [],
+      translatedContent: opportunityText,
+      messageId: input.candidate.id,
+      eventPrompt: {
+        metadataHeading: "Autonomous Opportunity",
+        contentHeading: "Private Opportunity",
+        metadataText: "No Discord message caused this invocation. Activation diagnostics are not actor instructions.",
+      },
+    };
     const baseTools = deps.buildAgentTools(
       input.candidate.guildId,
       input.candidate.channelId,
@@ -710,9 +735,24 @@ export function createGenericAmbientInitiativeRuntime(
       undefined,
       { visibleUserIds: context.visibleUserIds ?? [] },
     );
+    const visibleMaintenanceTools = deps.createVisibleMaintenanceTools({
+      guild: input.guild,
+      guildConfig: input.guildConfig,
+      memoryRequest: {
+        sourceMessageId: input.candidate.id,
+        userMessage: opportunityText,
+        assistantReply: "",
+        recentContext: "",
+        context,
+        incomingMessage: incoming,
+        visibleReplySent: false,
+      },
+      sourceRequestId: input.requestLog.requestId,
+    });
+    const actorTools = [...baseTools, ...visibleMaintenanceTools];
     const tools = input.draft === undefined
-      ? baseTools
-      : deps.promptLabDryRunTools(baseTools, input.draft.dryRuns);
+      ? actorTools
+      : deps.promptLabDryRunTools(actorTools, input.draft.dryRuns);
     const baseSender = deps.createBotDiscordMessageSender({
       defaultChannel: input.channel,
       resolveTargetChannel: createTargetChannelResolver(deps.client, input.channel),
@@ -757,26 +797,15 @@ export function createGenericAmbientInitiativeRuntime(
       return { sentMessageId: id };
     };
     let rejectedDraft = "";
+    input.requestLog.setTriggerContext({
+      ...deps.dashboardTriggerLocation(input.guild, input.channel),
+      messageId: input.candidate.id,
+      authorUsername: "ambient-initiative",
+      content: opportunityText,
+      translatedContent: opportunityText,
+    });
     const result = await handleMessage(
-      {
-        content: opportunityText,
-        guildId: input.candidate.guildId,
-        guildName: input.guild.name,
-        channelId: input.candidate.channelId,
-        channelName: channelDisplayName(input.channel),
-        authorId: botUserId,
-        authorUsername: botUsername,
-        authorIsBot: true,
-        botUserId,
-        mentionedUserIds: [],
-        translatedContent: opportunityText,
-        messageId: input.candidate.id,
-        eventPrompt: {
-          metadataHeading: "Autonomous Opportunity",
-          contentHeading: "Private Opportunity",
-          metadataText: "No Discord message caused this invocation. Activation diagnostics are not actor instructions.",
-        },
-      } satisfies IncomingMessage,
+      incoming,
       deps.createHandlerDeps({
         guildId: input.candidate.guildId,
         guildConfig: input.guildConfig,
