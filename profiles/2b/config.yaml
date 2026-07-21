@@ -5,6 +5,16 @@ modelProfiles:
     main:
         provider: openai-codex
         model: gpt-5.6-sol
+        # provider: openrouter
+        # model: deepseek/deepseek-v4-pro
+        # modelParams: {}
+        modelParams: { textVerbosity: medium }
+        thinkingLevel: medium
+        codexTransport: websocket-cached
+        promptCaching: { enabled: true }
+    imageGeneration:
+        provider: openai-codex
+        model: gpt-5.6-sol
         modelParams: {}
         thinkingLevel: medium
         codexTransport: websocket-cached
@@ -80,7 +90,7 @@ promptTransport:
                 } # (last instruction before action)
     openrouter:
         sections:
-            system: { role: developer, target: input, cacheGroup: core } # (system prompt section in OpenRouter messages)
+            system: { role: system, target: input, cacheGroup: core } # (system prompt section in OpenRouter messages)
             core: { role: developer, target: input, cacheGroup: core } # (stable persona/style prompt)
             skills: { role: developer, target: input, cacheGroup: runtime } # (stable available-skill index)
             runtime: { role: developer, target: input, cacheGroup: runtime } # (stable runtime behavior policy)
@@ -94,12 +104,12 @@ promptTransport:
             threadsInChannel: { role: user, target: input } # (thread list/metadata context)
             discordContext: { role: user, target: input } # (current guild/channel navigation context)
             upcomingSchedules: { role: user, target: input } # (pending schedule summary)
-            memories: { role: developer, target: input, cacheGroup: memories } # (selected memory context)
-            innerThreads: { role: developer, target: input, cacheGroup: inner-threads } # (private active inner threads)
+            memories: { role: user, target: input, cacheGroup: memories } # (selected memory context)
+            innerThreads: { role: user, target: input, cacheGroup: inner-threads } # (private active inner threads)
             recentHistory: { role: user, target: input } # (uncached recent chat history)
             currentContext: { role: user, target: input } # (time/contact/current-turn metadata)
-            personaMode: { role: developer, target: input } # (volatile active persona mode overlay)
-            responseInstruction: { role: developer, target: input } # (reply-loop behavior instruction)
+            personaMode: { role: user, target: input } # (volatile active persona mode overlay)
+            responseInstruction: { role: user, target: input } # (reply-loop behavior instruction)
             currentTurn: { role: user, target: input } # (new Discord event text)
             finalActionInstruction: { role: user, target: input } # (last instruction before action)
 
@@ -439,7 +449,7 @@ assetReading:
 # Codex image generation request settings
 imageGeneration:
     quality: "high" # (Codex image generation quality hint)
-    modelProfile: main
+    modelProfile: imageGeneration
 
 # If the main model cannot read image input, describe images with this vision model
 # and return that description from image tools instead.
