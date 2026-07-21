@@ -942,7 +942,7 @@ describe("createRecordMemoryTool", () => {
     expect(getMemory(db, scratchpad)?.expiresAt).toBe(expiresAt);
   });
 
-  test("rejects scratchpad creates without an expiry through a real tool", async () => {
+  test("accepts scratchpad expiry up to seven days and rejects invalid expiry through a real tool", async () => {
     const tool = createRecordMemoryTool({
       db,
       guildId: "g1",
@@ -951,7 +951,22 @@ describe("createRecordMemoryTool", () => {
       sourceMessageId: "m1",
     });
 
-    await tool.execute("call-1", {
+    const accepted = await tool.execute("call-1", {
+      actions: [{
+        action: "create",
+        about: "user", recall_in: "anywhere",
+        username: "@alice",
+        recall_when: { users_present: ["@alice"] },
+        kind: "scratchpad",
+        content: "Valid for one week.",
+        expiresIn: { amount: 1, unit: "weeks" },
+      }],
+    });
+
+    expect(accepted.details).toEqual({ applied: 1, requested: 1 });
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" })).toHaveLength(1);
+
+    const rejected = await tool.execute("call-2", {
       actions: [
         {
           action: "create",
@@ -977,12 +992,17 @@ describe("createRecordMemoryTool", () => {
           recall_when: { users_present: ["@alice"] },
           kind: "scratchpad",
           content: "Too long.",
-          expiresIn: { amount: 2, unit: "days" },
+          expiresIn: { amount: 8, unit: "days" },
         },
       ],
     });
 
-    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" })).toHaveLength(0);
+    expect(rejected.details).toEqual({ error: true });
+    expect(rejected.content[0]).toEqual({
+      type: "text",
+      text: "Memory update rejected: Scratchpad memories require expiresIn of at most seven days.",
+    });
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" })).toHaveLength(1);
   });
 
   test("rejects explicit legacy project kind through a real tool", async () => {

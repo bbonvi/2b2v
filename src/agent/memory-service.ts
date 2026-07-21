@@ -115,7 +115,7 @@ interface MemoryMutationInput {
 type MemoryRecallInInput = "anywhere" | "current_guild";
 type MemoryRecallWhenInput = "always" | { users_present: string[] };
 type ExpiresInUnit = "minutes" | "hours" | "days" | "weeks" | "months";
-const MAX_SCRATCHPAD_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_SCRATCHPAD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_RECENT_USER_MAX_USERS = 3;
 const DEFAULT_RECENT_USER_MAX_MEMORIES = 2;
 const DEFAULT_RECENT_USER_MAX_ROWS = 6;
@@ -952,7 +952,7 @@ async function prepareMemoryActions(
     if (target.about === "community" && recallIn !== "current_guild") {
       throw new Error("Community memories must be recalled in the current guild.");
     }
-    if (!scratchpadExpiryIsValid(action, existing)) throw new Error("Scratchpad memories require expiresIn of at most one day.");
+    if (!scratchpadExpiryIsValid(action, existing)) throw new Error("Scratchpad memories require expiresIn of at most seven days.");
     const expiresAt = action.expiresIn === undefined
       ? undefined
       : action.expiresIn === null

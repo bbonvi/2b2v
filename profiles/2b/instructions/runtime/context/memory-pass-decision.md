@@ -61,7 +61,7 @@ Kinds:
 - `constraint`: hard boundaries, privacy limits, standing requirements, do-not-do rules.
 - `interest`: hobbies, tastes, media, and activities.
 - `journal`: concise self continuity.
-- `scratchpad`: immediate working context only; requires `expiresIn`, max 1 day.
+- `scratchpad`: immediate working context only; requires `expiresIn`, max 7 days.
 
 Use `expiresIn` only for temporary context, deadlines, availability, short-term preferences, plans, moods, or scratchpad. During maintenance, clear expiry from durable facts or stances that remain valid, extend temporary context only when current evidence supports a new useful window, and otherwise let it expire.
 
