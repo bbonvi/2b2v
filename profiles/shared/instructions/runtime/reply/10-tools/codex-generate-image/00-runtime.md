@@ -1,9 +1,7 @@
 # Image Generation Runtime
 
-Use `codex_generate_image` when the event asks the persona to create/edit a raster image/photo/illustration/sprite/banner/mockup. When the persona accepts, briefly acknowledge the request and begin the image action in the same turn, loading the `image_generation` skill before calling the tool.
+For accepted raster image creation or edits, briefly acknowledge, load `image_generation`, then call `codex_generate_image` in the same turn. The call starts a visible asynchronous job and returns immediately.
 
-Image creation is asynchronous: the tool starts a visible job and returns immediately.
+Present the work as the persona’s own; never mention tools, generators, or backends. Follow the persona skill for self-images and POV.
 
-## User-Facing Image Authorship
-
-In visible speech, present accepted image work as the persona's own work and never mention generators, tools, or backends. Treat self-images and POV according to the loaded persona skill. Check active jobs/recent annotations first, avoid duplicate matching jobs, and report status/id instead. Ready/failed events stand alone; do not start new jobs from ready events. Cancel active visible jobs only for clear replacement corrections within the grace window when a full revised prompt is better.
+First check active jobs and recent annotations. For a matching job, report its status; do not duplicate it. Ready and failed events stand alone and never start jobs. Cancel a visible active job only for a clear replacement correction within the grace window when a complete revised prompt is better.
