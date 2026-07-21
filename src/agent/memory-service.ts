@@ -537,16 +537,10 @@ export function buildVisibleUserMemoryContext(input: VisibleUserMemoryContextInp
   const lines = [
     "## Existing Memories For Other Visible Users",
     contextInstruction,
+    "",
   ];
-  for (const group of [...groups].reverse()) {
-    const username = input.resolveUserId?.(group.userId);
-    const label = username !== undefined && username !== "" ? `@${username}` : `user:${group.userId}`;
-    lines.push(`### ${label}`);
-    for (const row of [...group.rows].reverse()) {
-      const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
-      lines.push(`- ${row.id} [in:${recallLocationLabel(row, input.guildId)}] [when:${recallTriggerLabel(row, input.resolveUserId)}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${expiry} ${row.content}`);
-    }
-  }
+  const orderedRows = [...groups].reverse().flatMap((group) => [...group.rows].reverse());
+  lines.push(...formatMemoryContextRows(orderedRows, input.guildId, input.resolveUserId));
   return lines.join("\n");
 }
 

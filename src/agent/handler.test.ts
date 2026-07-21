@@ -3913,6 +3913,47 @@ describe("handleMessage", () => {
     expect(llmCalls).toBe(1);
   });
 
+  test("silent memory pass keeps optional visible-user memories separate without blank gaps", async () => {
+    const recordMemoryTool: AgentTool = {
+      name: "record_memory",
+      label: "record_memory",
+      description: "Record memory",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({ content: [], details: {} }),
+    };
+    let controlMessage = "";
+    const completeChat: ChatCompleteFn = (request) => {
+      const last = request.messages[request.messages.length - 1];
+      controlMessage = typeof last?.content === "string" ? last.content : "";
+      return Promise.resolve({
+        text: "",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await runSilentMemoryAgentPass({
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig(),
+      context: makeContext(),
+      personaPrompt: "You are a test bot.",
+      runtimePrompts: TEST_RUNTIME_PROMPTS,
+      incomingMessage: makeMessage(),
+      userContent: "remember that Bob likes tea",
+      assistantReply: "understood",
+      visibleReplySent: true,
+      visibleUserMemoryContext: "## Existing Memories For Other Visible Users\n### @bob\n- Likes tea.",
+      tools: [recordMemoryTool],
+      completeChat,
+    });
+
+    expect(controlMessage.startsWith("## Existing Memories For Other Visible Users\n")).toBe(true);
+    expect(controlMessage).toContain("\n\n## Execution Mode: Memory Maintenance\n");
+    expect(controlMessage.match(/Current time for expiresIn decisions:/g)).toHaveLength(1);
+    expect(controlMessage).not.toContain("\n\n\n");
+  });
+
   test("silent memory pass retries after a tool-reported error", async () => {
     const toolCalls: unknown[] = [];
     const recordMemoryTool: AgentTool = {

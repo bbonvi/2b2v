@@ -2416,18 +2416,17 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
       "If there are no memory changes, do not call record_memory; output nothing.",
     ].join("\n"),
   );
-  return [
-    ...(input.visibleUserMemoryContext !== undefined && input.visibleUserMemoryContext.trim() !== ""
-      ? [input.visibleUserMemoryContext.trim(), ""]
-      : []),
-    executionMode,
-    "",
+  const triggerContext = [
     passKind === "ambient"
       ? "## Memory Maintenance Review — Periodic Trigger"
       : "## Memory Maintenance Review — Post-Reply Trigger",
     "Current time for expiresIn decisions:",
     currentLocalContext(input.guildConfig.timezone, now),
-    "",
+  ].join("\n");
+  return [
+    input.visibleUserMemoryContext?.trim() ?? "",
+    executionMode,
+    triggerContext,
     passKind === "ambient"
       ? runtimeContextTemplate(
         input.runtimePrompts,
@@ -2436,14 +2435,13 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
         "Review ambient chat history for durable memory.",
       )
       : "",
-    "",
     runtimeContextTemplate(
       input.runtimePrompts,
       "memory-pass-decision",
       {},
       "Decide silently whether durable memory should be updated.",
     ),
-  ].join("\n");
+  ].filter((part) => part !== "").join("\n\n");
 }
 
 /** Run a hidden post-reply maintenance loop with private tools and no Discord output hooks. */

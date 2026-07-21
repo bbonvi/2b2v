@@ -301,16 +301,17 @@ describe("buildVisibleUserMemoryContext", () => {
     });
 
     expect(context).toContain("## Existing Memories For Other Visible Users");
-    expect(context).toContain("### @new");
+    expect(context).toContain("### @new | anywhere | any(@new)");
+    expect(context).toContain("#### fact\n\n2 | Middle visible-user memory.\n1 | Newest visible-user memory.");
     expect(context).toContain("Newest visible-user memory.");
     expect(context).toContain("Middle visible-user memory.");
     expect(context).not.toContain("Oldest visible-user memory.");
-    expect(context).toContain("### @mid");
+    expect(context).toContain("### @mid | anywhere | any(@mid)\n\n4 interest | Mid user memory.");
     expect(context).toContain("Mid user memory.");
-    expect(context).not.toContain("### @old");
+    expect(context).not.toContain("### @old |");
     expect(context).not.toContain("Current user memory.");
     expect(context).not.toContain("Global memory.");
-    expect(context.indexOf("### @mid")).toBeLessThan(context.indexOf("### @new"));
+    expect(context.indexOf("### @mid |")).toBeLessThan(context.indexOf("### @new |"));
     expect(context.indexOf("Middle visible-user memory.")).toBeLessThan(context.indexOf("Newest visible-user memory."));
   });
 });

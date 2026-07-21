@@ -351,7 +351,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
         onVisibleOutput: typing.stopLoop,
         onAgentEnd: typing.stopLoop,
         afterReply: async (memoryRequest) => {
-          await runPostReplySemanticMaintenance({
+          await runMemoryPostReplyExtraction({
             guildConfig: deliveryGuildConfig,
             memoryRequest,
             guild,
@@ -360,6 +360,23 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
             source: `async_image_${input.event}`,
             currentUserId: job.requesterId,
             currentUsername: job.requesterUsername,
+          });
+          await runRelationshipPostReplyExtraction({
+            guildConfig: deliveryGuildConfig,
+            memoryRequest,
+            guild,
+            channel: textChannel,
+            sourceRequestId: requestLog.requestId,
+            source: `async_image_${input.event}`,
+            currentUserId: job.requesterId,
+            currentUsername: job.requesterUsername,
+          });
+          await runInnerThreadPostReplyExtraction({
+            guildConfig: deliveryGuildConfig,
+            memoryRequest,
+            guild,
+            channel: textChannel,
+            sourceRequestId: requestLog.requestId,
           });
         },
         onIgnoredReply: ({ channelId: destinationChannelId, historyText }) => {
@@ -1791,7 +1808,9 @@ const scheduler: SchedulerEngine = createSchedulerEngine({
     createHandlerDeps,
     resolveAssetAttachments: createAssetAttachmentResolver,
     runLoggedAgentTurn,
-    runPostReplySemanticMaintenance,
+    runMemoryPostReplyExtraction,
+    runRelationshipPostReplyExtraction,
+    runInnerThreadPostReplyExtraction,
     onScheduleCompleted: (id) => scheduler.removeSchedule(id),
     markScheduledAttentionBusy,
     preparePersonaModeTurn: (guildId) => personaModeRuntime.prepareNaturalTurn(guildId),
@@ -2267,226 +2286,6 @@ function createPostReplyMaintenanceTools(input: {
   ], promptBundle.runtime);
 }
 
-async function runPostReplySemanticMaintenance(input: {
-  guildConfig: GuildConfig;
-  memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0];
-  guild: Guild;
-  channel: unknown;
-  sourceRequestId: string;
-  source?: string;
-  passKind?: "post_reply" | "ambient";
-  currentUserId: string;
-  currentUsername?: string;
-  dryRun?: boolean;
-  dryRuns?: Array<{ tool: string; args: unknown }>;
-}): Promise<void> {
-  if (!hasMaintenanceMaterial(input.memoryRequest)) return;
-
-  const relationshipConfig = getRelationshipConfig(input.guildConfig);
-  const enabledWrites = new Set<MaintenanceWriteToolName>(["record_inner_threads"]);
-  if (input.guildConfig.memoryExtraction.postReply) enabledWrites.add("record_memory");
-  if (relationshipConfig.enabled) enabledWrites.add("record_relationship");
-
-  const guildId = input.memoryRequest.incomingMessage.guildId ?? input.guild.id;
-  const channelId = input.memoryRequest.incomingMessage.channelId ?? "";
-  const sourceMessageId = input.memoryRequest.sourceMessageId ?? promptLabSyntheticId();
-  const stagedCalls: StagedMaintenanceCall[] = [];
-  const validationTools = createPostReplyMaintenanceTools({
-    guild: input.guild,
-    guildConfig: input.guildConfig,
-    memoryRequest: input.memoryRequest,
-    currentUserId: input.currentUserId,
-    currentUsername: input.currentUsername,
-    sourceMessageId,
-    sourceRequestId: input.sourceRequestId,
-    dryRun: true,
-  });
-  const commitTools = createPostReplyMaintenanceTools({
-    guild: input.guild,
-    guildConfig: input.guildConfig,
-    memoryRequest: input.memoryRequest,
-    currentUserId: input.currentUserId,
-    currentUsername: input.currentUsername,
-    sourceMessageId,
-    sourceRequestId: input.sourceRequestId,
-  });
-  const tools = stageMaintenanceTools(
-    toolsForMaintenancePass(
-      input.memoryRequest.availableTools,
-      validationTools,
-      enabledWrites,
-      "semantic maintenance pass",
-    ),
-    stagedCalls,
-    enabledWrites,
-  );
-
-  // Per-turn semantic maintenance receives conversation-relevant memories only.
-  // Rotating corpus cleanup is a separate concern and would distract this judgment.
-  const visibleUserMemoryContext = input.guildConfig.memoryExtraction.postReply
-    ? buildVisibleUserMemoryContext({
-        db,
-        guildId,
-        currentUserId: input.currentUserId,
-        visibleUserIds: input.memoryRequest.context.visibleUserIds ?? [],
-        resolveUserId: (userId) => resolvePromptUsername(input.guild, userId),
-        contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
-      })
-    : "";
-  const defaultMode = defaultPersonaModeForMaintenance();
-  const ticket = input.dryRun === true ? undefined : semanticMaintenanceCoordinator.reserve();
-  const requestLog = new RequestLog(guildId, channelId, requestLogStore);
-  requestLog.setAuthor(input.memoryRequest.incomingMessage.authorUsername);
-  requestLog.setTrigger({
-    type: "semantic_maintenance",
-    sourceRequestId: input.sourceRequestId,
-    source: input.source ?? "post_reply",
-    ...(input.dryRun === true ? { dryRun: true } : {}),
-    ...(ticket !== undefined ? { sequence: ticket.sequence } : {}),
-  });
-  requestLog.setTriggerContext({
-    ...dashboardTriggerLocation(input.guild, input.channel),
-    messageId: sourceMessageId,
-    authorUsername: input.memoryRequest.incomingMessage.authorUsername,
-    content: input.memoryRequest.userMessage,
-    translatedContent: input.memoryRequest.userMessage,
-  });
-  requestLog.setAgentRan(true);
-  requestLogStore.incrementActive();
-
-  try {
-    await runSilentToolAgentPass({
-      globalConfig,
-      guildConfig: input.guildConfig,
-      context: input.memoryRequest.context,
-      systemPrompt: promptBundle.systemPrompt,
-      personaPrompt: promptBundle.corePrompt,
-      runtimePrompts: promptBundle.runtime,
-      incomingMessage: input.memoryRequest.incomingMessage,
-      userContent: input.memoryRequest.userMessage,
-      assistantReply: input.memoryRequest.assistantReply,
-      visibleReplySent: input.memoryRequest.visibleReplySent,
-      tools,
-      runtimeInstruction: promptBundle.runtime.reply,
-      controlMessage: [
-        visibleUserMemoryContext,
-        runtimeContextTemplate(
-          "semantic-maintenance-execution-mode",
-          {
-            defaultPersonaModeId: defaultMode.id,
-            defaultPersonaModeInstructions: defaultMode.instructions,
-          },
-          [
-            "## Execution Mode: Semantic Maintenance",
-            `Use only the default persona mode '${defaultMode.id}' for these private judgments.`,
-            defaultMode.instructions,
-            "Evaluate memory, relationship, and inner-thread maintenance independently. Call each useful maintenance tool at most once.",
-          ].filter((part) => part !== "").join("\n\n"),
-        ),
-        input.guildConfig.memoryExtraction.postReply
-          ? runtimeContextTemplate(
-              "memory-pass-decision",
-              {},
-              "Decide silently whether durable memory should be updated.",
-            )
-          : "",
-        input.passKind === "ambient"
-          ? runtimeContextTemplate(
-              "memory-pass-ambient-review",
-              {},
-              "Review the supplied ambient history as periodic semantic maintenance.",
-            )
-          : "",
-        relationshipConfig.enabled
-          ? runtimeContextTemplate(
-              "relationship-pass-decision",
-              {},
-              "Decide silently whether relationships should be updated.",
-            )
-          : "",
-        runtimeContextTemplate(
-          "inner-thread-pass-decision",
-          {},
-          "Decide silently whether durable inner threads should change.",
-        ),
-        "Current time:",
-        currentLocalContext(input.guildConfig.timezone),
-        "Before ending, independently evaluate memory, relationship, and inner-thread maintenance. A useful change in one domain does not complete the other two decisions.",
-      ].filter((part) => part !== "").join("\n\n"),
-      modelProfile: input.guildConfig.memoryExtraction.modelProfile,
-      maxToolCalls: input.guildConfig.memoryExtraction.maxToolCalls
-        + relationshipConfig.maxToolCalls
-        + 3,
-      transcript: input.memoryRequest.maintenanceTranscript,
-      promptContext: input.memoryRequest.promptContext,
-      requestLog,
-      log: log.child({
-        guildId,
-        channelId,
-        requestId: requestLog.requestId,
-        component: "semantic-maintenance",
-        ...(ticket !== undefined ? { maintenanceSequence: ticket.sequence } : {}),
-      }),
-    });
-
-    if (input.dryRun === true) {
-      for (const call of stagedCalls) input.dryRuns?.push({ tool: call.toolName, args: call.params });
-      return;
-    }
-    if (ticket === undefined) throw new Error("Semantic maintenance commit ticket was not reserved.");
-
-    await ticket.commit(async () => {
-      // Inference intentionally uses the actor's cached semantic snapshot. Ordered
-      // commits prevent interleaving, but two independently valid judgments can
-      // still target the same row. Eliminating that semantic race generally would
-      // require rebasing or rerunning model judgments against every preceding
-      // commit—immense over-engineering for an exceptionally narrow failure mode.
-      await commitStagedMaintenanceCalls({
-        calls: stagedCalls,
-        tools: commitTools,
-        onResult: (call, result) => {
-          const details = result.details;
-          if (details !== null && typeof details === "object") {
-            const record = details as Record<string, unknown>;
-            const failed = (record.error !== undefined && record.error !== false)
-              || (Array.isArray(record.errors) && record.errors.length > 0)
-              || (Array.isArray(record.rejected) && record.rejected.length > 0);
-            if (failed) {
-              log.warn("ordered semantic maintenance commit reported rejected work", {
-                sequence: ticket.sequence,
-                tool: call.toolName,
-                details,
-              });
-            }
-          }
-        },
-      });
-      if (input.guildConfig.memoryExtraction.postReply) {
-        const checkpointMarked = markMemoryExtractionCheckpointAtMessage(db, {
-          guildId,
-          channelId,
-          messageId: sourceMessageId,
-        });
-        if (!checkpointMarked) {
-          markMemoryExtractionCheckpointFromContext({
-            guildId,
-            channelId,
-            contextMessageIds: input.memoryRequest.context.contextMessageIds,
-            fallbackMessageId: input.memoryRequest.sourceMessageId,
-          });
-        }
-      }
-    });
-  } catch (error) {
-    ticket?.skip();
-    requestLog.setError(error instanceof Error ? error.message : String(error));
-    throw error;
-  } finally {
-    requestLog.emit(log);
-    requestLogStore.decrementActive();
-  }
-}
-
 async function runMemoryPostReplyExtraction(input: {
   guildConfig: GuildConfig;
   memoryRequest: Parameters<NonNullable<HandlerDeps["afterReply"]>>[0];
@@ -2541,17 +2340,6 @@ async function runMemoryPostReplyExtraction(input: {
     resolveUserId: (userId) => resolvePromptUsername(input.guild, userId),
     contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
   });
-  const checkpoint = getMemoryExtractionCheckpoint(db, guildId, channelId);
-  const maintenance = buildMemoryMaintenanceContext({
-    db,
-    guildId,
-    afterId: checkpoint?.maintenanceCursorId ?? 0,
-    limit: MEMORY_MAINTENANCE_BATCH_SIZE,
-    resolveUserId: (userId) => client.users.cache.get(userId)?.username,
-  });
-  const broadMemoryContext = [visibleUserMemoryContext, maintenance.text]
-    .filter((part) => part !== "")
-    .join("\n\n");
   try {
     await runSilentMemoryAgentPass({
       globalConfig,
@@ -2565,7 +2353,7 @@ async function runMemoryPostReplyExtraction(input: {
       assistantReply: input.memoryRequest.assistantReply,
       visibleReplySent: input.memoryRequest.visibleReplySent,
       passKind: input.passKind,
-      visibleUserMemoryContext: broadMemoryContext,
+      visibleUserMemoryContext,
       tools: toolsForMaintenancePass(
         input.memoryRequest.availableTools,
         maintenanceTools,
@@ -2582,7 +2370,6 @@ async function runMemoryPostReplyExtraction(input: {
         guildId,
         channelId,
         messageId: sourceMessageId,
-        maintenanceCursorId: maintenance.nextCursorId,
       });
       if (!checkpointMarked) {
         markMemoryExtractionCheckpointFromContext({
@@ -2590,7 +2377,6 @@ async function runMemoryPostReplyExtraction(input: {
           channelId,
           contextMessageIds: input.memoryRequest.context.contextMessageIds,
           fallbackMessageId: input.memoryRequest.sourceMessageId,
-          maintenanceCursorId: maintenance.nextCursorId,
         });
       }
     }
@@ -2693,17 +2479,13 @@ async function runRelationshipPostReplyExtraction(input: {
       runtimeInstruction: promptBundle.runtime.reply,
       controlMessage: [
         executionMode,
-        "",
         "## Post-Reply Relationship Consideration",
-        "Current time:",
-        currentLocalContext(input.guildConfig.timezone),
-        "",
         runtimeContextTemplate(
           "relationship-pass-decision",
           {},
           "Decide silently whether relationships should be updated. Use record_relationship only if an update is useful.",
         ),
-      ].join("\n"),
+      ].filter((part) => part !== "").join("\n\n"),
       modelProfile: config.modelProfile,
       maxToolCalls: config.maxToolCalls,
       terminateAfterSuccessfulToolRoundNames: ["record_relationship"],
@@ -2786,8 +2568,6 @@ async function runInnerThreadPostReplyExtraction(input: {
           {},
           "Private inner-thread maintenance is active. Read-only tools are available for material uncertainty; record_inner_threads is the only state-changing tool available.",
         ),
-        "Current time:",
-        currentLocalContext(input.guildConfig.timezone),
         runtimeContextTemplate(
           "inner-thread-pass-decision",
           {},
@@ -4080,7 +3860,7 @@ const ambientRuntime = createAmbientRuntime({
     dryRuns,
   }) => {
     const latestHuman = latestHumanIdentity(guild.id, channel.id);
-    await runPostReplySemanticMaintenance({
+    await runMemoryPostReplyExtraction({
       guildConfig,
       memoryRequest: request,
       guild,
@@ -4092,6 +3872,26 @@ const ambientRuntime = createAmbientRuntime({
       currentUsername: latestHuman.username,
       dryRun,
       dryRuns,
+    });
+    await runRelationshipPostReplyExtraction({
+      guildConfig,
+      memoryRequest: request,
+      guild,
+      channel,
+      sourceRequestId,
+      source: "ambient_initiative",
+      currentUserId: latestHuman.userId,
+      currentUsername: latestHuman.username,
+      dryRun,
+      dryRuns,
+    });
+    await runInnerThreadPostReplyExtraction({
+      guildConfig,
+      memoryRequest: request,
+      guild,
+      channel,
+      sourceRequestId,
+      dryRun,
     });
   },
 });
@@ -4524,7 +4324,7 @@ async function processTriggeredMessage(
           ambientRuntime.clearAmbientLeaseForUser(guildId, destinationChannelId ?? channelId, message.author.id);
         },
         afterReply: async (memoryRequest) => {
-          await runPostReplySemanticMaintenance({
+          await runMemoryPostReplyExtraction({
             guildConfig,
             memoryRequest,
             guild,
@@ -4532,6 +4332,23 @@ async function processTriggeredMessage(
             sourceRequestId: requestLog.requestId,
             currentUserId: message.author.id,
             currentUsername: message.author.username,
+          });
+          await runRelationshipPostReplyExtraction({
+            guildConfig,
+            memoryRequest,
+            guild,
+            channel: message.channel,
+            sourceRequestId: requestLog.requestId,
+            source: "post_reply",
+            currentUserId: message.author.id,
+            currentUsername: message.author.username,
+          });
+          await runInnerThreadPostReplyExtraction({
+            guildConfig,
+            memoryRequest,
+            guild,
+            channel: message.channel,
+            sourceRequestId: requestLog.requestId,
           });
         },
       },
