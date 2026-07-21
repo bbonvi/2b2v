@@ -2403,12 +2403,12 @@ async function runPostReplySemanticMaintenance(input: {
         ),
         "Current time:",
         currentLocalContext(input.guildConfig.timezone),
+        "Before ending, independently evaluate memory, relationship, and inner-thread maintenance. A useful change in one domain does not complete the other two decisions.",
       ].filter((part) => part !== "").join("\n\n"),
       modelProfile: input.guildConfig.memoryExtraction.modelProfile,
       maxToolCalls: input.guildConfig.memoryExtraction.maxToolCalls
         + relationshipConfig.maxToolCalls
         + 3,
-      terminateAfterSuccessfulToolRoundNames: [...enabledWrites],
       transcript: input.memoryRequest.maintenanceTranscript,
       promptContext: input.memoryRequest.promptContext,
       requestLog,
