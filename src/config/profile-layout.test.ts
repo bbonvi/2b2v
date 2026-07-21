@@ -79,6 +79,7 @@ describe("repository profile layout", () => {
     expect(loadMainConfig(delamainPath)).not.toHaveProperty("persona");
     expect(twoB.runtimeProfileId).toBe("2b");
     expect(twoB.defaultRelationships?.enabled).toBe(true);
+    expect(twoB.defaultInnerThreads?.enabled).toBe(true);
     expect(twoB.defaultMemoryContext?.maxRows).toBe(60);
     expect(twoB.defaultAmbientInitiative?.botContactIds).toEqual(["1398275457857622128"]);
     expect(twoB.vpn?.enabled).toBe(true);
@@ -86,6 +87,7 @@ describe("repository profile layout", () => {
     expect(twoB.personaModes?.modes.every((mode) => mode.avatars.length > 0)).toBe(true);
     expect(twoB.personaModes?.modes.every((mode) => mode.scope === "global")).toBe(true);
     expect(delamain.defaultRelationships?.enabled).toBe(false);
+    expect(delamain.defaultInnerThreads?.enabled).toBe(false);
     expect(delamain.defaultMemoryExtraction.ambient.enabled).toBe(false);
     expect(delamain.defaultAmbientAttention?.enabled).toBe(false);
     expect(delamain.defaultAmbientInitiative?.enabled).toBe(true);

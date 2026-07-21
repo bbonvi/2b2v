@@ -358,6 +358,14 @@ export interface MemoryContextConfig {
   maxRows: number;
 }
 
+/** Durable private inner-thread behavior. */
+export interface InnerThreadsConfig {
+  /** Enable prompt context, retrieval, and maintenance. */
+  enabled: boolean;
+}
+
+export type InnerThreadsConfigYaml = Partial<InnerThreadsConfig>;
+
 /** Limits for lazy message-asset reading and extraction. */
 export interface AssetReadingConfig {
   maxCharsPerRead: number;
@@ -527,6 +535,8 @@ export interface GuildConfig {
   memoryContext?: MemoryContextConfig;
   /** Durable relationship-profile behavior. */
   relationships?: RelationshipConfig;
+  /** Durable private inner-thread behavior. */
+  innerThreads?: InnerThreadsConfig;
   /** Live Discord voice agent behavior. */
   voice?: VoiceConfig;
 }
@@ -587,6 +597,8 @@ export interface GlobalConfig {
   defaultMemoryContext?: MemoryContextConfig;
   /** Default durable relationship-profile behavior. */
   defaultRelationships?: RelationshipConfig;
+  /** Default durable private inner-thread behavior. */
+  defaultInnerThreads?: InnerThreadsConfig;
   /** Default live Discord voice agent behavior. */
   defaultVoice?: VoiceConfig;
   /** Profile-local timed persona modes and presentation state. */
@@ -650,6 +662,7 @@ export interface GuildConfigYaml {
   ambientAttention?: AmbientAttentionConfigYaml;
   ambientInitiative?: AmbientInitiativeConfigYaml;
   relationships?: RelationshipConfigYaml;
+  innerThreads?: InnerThreadsConfigYaml;
   voice?: VoiceConfigYaml;
   replyLoop?: {
     maxToolCalls?: number;
@@ -728,6 +741,7 @@ export interface MainConfigYaml {
   ambientAttention?: AmbientAttentionConfigYaml;
   ambientInitiative?: AmbientInitiativeConfigYaml;
   relationships?: RelationshipConfigYaml;
+  innerThreads?: InnerThreadsConfigYaml;
   voice?: VoiceConfigYaml;
   personaModes?: PersonaModesConfigYaml;
   replyLoop?: {

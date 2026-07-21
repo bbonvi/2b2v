@@ -9,6 +9,7 @@ import type {
   ExternalImagesConfig,
   ImageGenerationConfig,
   ImageReadingConfig,
+  InnerThreadsConfig,
   LlmProvider,
   MembersConfig,
   MemoryExtractionConfig,
@@ -69,6 +70,10 @@ export const DEFAULT_RELATIONSHIPS: RelationshipConfig = {
   promptInjection: true,
   maxAxisDeltaPerSignal: 4,
   maxToolCalls: 5,
+};
+
+export const DEFAULT_INNER_THREADS: InnerThreadsConfig = {
+  enabled: true,
 };
 
 export const DEFAULT_AMBIENT_ATTENTION_MODE: AmbientAttentionModeConfig = {

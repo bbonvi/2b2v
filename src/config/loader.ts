@@ -11,6 +11,7 @@ import {
   DEFAULT_EXTERNAL_IMAGES,
   DEFAULT_IMAGE_GENERATION,
   DEFAULT_IMAGE_READING,
+  DEFAULT_INNER_THREADS,
   DEFAULT_LLM_PROVIDER,
   DEFAULT_MEMBERS,
   DEFAULT_MEMORY_EXTRACTION,
@@ -49,6 +50,8 @@ import type {
   ImageReadingConfig,
   ImageGenerationConfig,
   ImageGenerationQuality,
+  InnerThreadsConfig,
+  InnerThreadsConfigYaml,
   ReplyLoopConfig,
   MemoryExtractionConfig,
   MemoryContextConfig,
@@ -929,6 +932,16 @@ function resolveRelationshipConfig(
   return resolved;
 }
 
+function resolveInnerThreadsConfig(
+  defaults: InnerThreadsConfig | undefined,
+  partial: InnerThreadsConfigYaml | undefined,
+): InnerThreadsConfig {
+  const base = defaults ?? DEFAULT_INNER_THREADS;
+  return {
+    enabled: partial?.enabled ?? base.enabled,
+  };
+}
+
 function resolveTypingSimulationConfig(
   defaults: TypingSimulationConfig,
   partial: Partial<TypingSimulationConfig> | undefined,
@@ -1085,6 +1098,7 @@ export function loadGlobalConfig(
   const defaultMemoryExtraction = resolveGlobalMemoryExtraction(yaml.memoryExtraction);
   const defaultMemoryContext = resolveMemoryContext(undefined, yaml.memoryContext);
   const defaultRelationships = resolveRelationshipConfig(undefined, yaml.relationships);
+  const defaultInnerThreads = resolveInnerThreadsConfig(undefined, yaml.innerThreads);
   const defaultVoice = resolveVoiceConfig(DEFAULT_VOICE_CONFIG, yaml.voice);
   const personaModes = resolvePersonaModesConfig(yaml.personaModes, dirname(configPath));
   validateModelProfileReferences(modelProfiles, [
@@ -1167,6 +1181,7 @@ export function loadGlobalConfig(
     defaultMemoryExtraction,
     defaultMemoryContext,
     defaultRelationships,
+    defaultInnerThreads,
     defaultVoice,
     personaModes,
   };
@@ -1260,6 +1275,7 @@ export function resolveGuildConfig(
     memoryExtraction: resolveGuildMemoryExtraction(global.defaultMemoryExtraction, partial.memoryExtraction),
     memoryContext: resolveMemoryContext(global.defaultMemoryContext, partial.memoryContext),
     relationships: resolveRelationshipConfig(global.defaultRelationships, partial.relationships),
+    innerThreads: resolveInnerThreadsConfig(global.defaultInnerThreads, partial.innerThreads),
     voice: resolveVoiceConfig(global.defaultVoice ?? DEFAULT_VOICE_CONFIG, partial.voice),
   };
   validateModelProfileReferences(global.modelProfiles, [
@@ -1340,6 +1356,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     promptTransport: config.promptTransport,
     ambientAttention: config.ambientAttention,
     relationships: config.relationships,
+    innerThreads: config.innerThreads,
     voice: config.voice,
     replyLoop: config.replyLoop,
     memoryExtraction: config.memoryExtraction,

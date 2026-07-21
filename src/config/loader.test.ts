@@ -253,6 +253,22 @@ describe("guild resolution and persistence", () => {
     }).modelProfile).toBe("fast");
   });
 
+  test("inherits and overrides the inner-thread feature switch", () => {
+    const global = loadGlobalConfig(BASE_ENV, writeConfig([
+      configText,
+      "innerThreads:",
+      "  enabled: false",
+    ].join("\n")));
+    expect(global.defaultInnerThreads).toEqual({ enabled: false });
+    expect(resolveGuildConfig(global, { guildId: "1", slug: "" }).innerThreads)
+      .toEqual({ enabled: false });
+    expect(resolveGuildConfig(global, {
+      guildId: "2",
+      slug: "",
+      innerThreads: { enabled: true },
+    }).innerThreads).toEqual({ enabled: true });
+  });
+
   test("rejects an unknown guild profile reference", () => {
     const global = loadGlobalConfig(BASE_ENV, writeConfig(configText));
     expect(() => resolveGuildConfig(global, {
@@ -284,6 +300,7 @@ describe("guild resolution and persistence", () => {
     expect(loadGuildConfigFile(path)).toMatchObject({
       modelProfile: "fast",
       instructions: "Guild instructions",
+      innerThreads: { enabled: true },
     });
   });
 });

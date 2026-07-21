@@ -1042,6 +1042,10 @@ function getRelationshipConfig(guildConfig: GuildConfig): RelationshipConfig {
   return config;
 }
 
+function innerThreadsEnabled(guildConfig: GuildConfig): boolean {
+  return (guildConfig.innerThreads ?? globalConfig.defaultInnerThreads)?.enabled !== false;
+}
+
 const voiceRepository = new VoiceRepository(db);
 const voiceMaintenanceBusy = new Set<string>();
 
@@ -1565,6 +1569,7 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
         const userIds = batch.compact.userIds.filter((userId) => usernameById.has(userId)).slice(0, 8);
         const sourceMessageId = `voice:${sessionId}:${batch.compact.latestSegmentId}:extraction`;
         const relationshipConfig = getRelationshipConfig(guildConfig);
+        const enableInnerThreads = innerThreadsEnabled(guildConfig);
         const createVoiceExtractionTools = (dryRun: boolean): AgentTool[] => {
           const tools: AgentTool[] = [];
           if (guildConfig.memoryExtraction.postReply) {
@@ -1601,15 +1606,17 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
               },
             }));
           }
-          tools.push(createRecordInnerThreadsTool({
-            db,
-            guildId: guild.id,
-            channelId: session.channelId,
-            requestId: sessionId,
-            description: runtimeToolDescription("record_inner_threads", {})
-              ?? "Privately maintain durable inner threads.",
-            dryRun,
-          }));
+          if (enableInnerThreads) {
+            tools.push(createRecordInnerThreadsTool({
+              db,
+              guildId: guild.id,
+              channelId: session.channelId,
+              requestId: sessionId,
+              description: runtimeToolDescription("record_inner_threads", {})
+                ?? "Privately maintain durable inner threads.",
+              dryRun,
+            }));
+          }
           return applyRuntimeToolPrompts(tools, promptBundle.runtime);
         };
         const validationTools = createVoiceExtractionTools(true);
@@ -1654,14 +1661,16 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
                   : `## Existing Rolling Summary\n${session.rollingSummary}`,
                 memoryContext === "" ? "" : `## Existing Memory Context\n${memoryContext}`,
                 relationshipContext,
-                buildInnerThreadsContext({
-                  db,
-                  guildId: guild.id,
-                  visibleUserIds: userIds,
-                  limit: 30,
-                  resolveUserId: (userId) => usernameById.get(userId)
-                    ?? guild.members.cache.get(userId)?.user.username,
-                }),
+                enableInnerThreads
+                  ? buildInnerThreadsContext({
+                      db,
+                      guildId: guild.id,
+                      visibleUserIds: userIds,
+                      limit: 30,
+                      resolveUserId: (userId) => usernameById.get(userId)
+                        ?? guild.members.cache.get(userId)?.user.username,
+                    })
+                  : "",
                 `## Voice Speaker IDs\n${userIds.map((userId) =>
                   `@${usernameById.get(userId) ?? userId} = ${userId}`
                 ).join("\n")}`,
@@ -1723,14 +1732,16 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
                 relationshipConfig.enabled
                   ? runtimeContextTemplate("relationship-pass-decision")
                   : "",
-                runtimeContextTemplate("inner-thread-pass-decision"),
+                enableInnerThreads
+                  ? runtimeContextTemplate("inner-thread-pass-decision")
+                  : "",
               ].filter((part) => part !== "").join("\n\n"),
               modelProfile: voiceConfig.maintenance.extraction.modelProfile,
               maxToolCalls: (guildConfig.memoryExtraction.postReply
                 ? guildConfig.memoryExtraction.maxToolCalls
                 : 0)
                 + (relationshipConfig.enabled ? relationshipConfig.maxToolCalls : 0)
-                + 3,
+                + (enableInnerThreads ? 3 : 0),
               terminateAfterSuccessfulToolRoundNames: tools.map((tool) => tool.name),
               requestLog,
               log: log.child({ component: "voice-extraction-maintenance", sessionId }),
@@ -2269,20 +2280,22 @@ function createPostReplyMaintenanceTools(input: {
     },
     onResult: (result, candidates) => input.onRelationshipResult?.(result, candidates),
   });
-  const recordInnerThreadsTool = createRecordInnerThreadsTool({
-    db,
-    guildId: input.guild.id,
-    channelId: input.memoryRequest.incomingMessage.channelId ?? "",
-    requestId: input.sourceRequestId,
-    description: runtimeToolDescription("record_inner_threads", {}) ?? "Privately maintain durable inner threads.",
-    dryRun: input.dryRun,
-  });
+  const innerThreadTools = innerThreadsEnabled(input.guildConfig)
+    ? [createRecordInnerThreadsTool({
+        db,
+        guildId: input.guild.id,
+        channelId: input.memoryRequest.incomingMessage.channelId ?? "",
+        requestId: input.sourceRequestId,
+        description: runtimeToolDescription("record_inner_threads", {}) ?? "Privately maintain durable inner threads.",
+        dryRun: input.dryRun,
+      })]
+    : [];
   // Visible turns receive blocked versions of these tools before maintenance
   // reuses them. Prompt the shared schemas here so both requests remain cache-identical.
   return applyRuntimeToolPrompts([
     promptLabMemoryDryRunTool(recordMemoryTool, input.dryRuns),
     recordRelationshipTool,
-    recordInnerThreadsTool,
+    ...innerThreadTools,
   ], promptBundle.runtime);
 }
 
@@ -2513,7 +2526,7 @@ async function runInnerThreadPostReplyExtraction(input: {
   sourceRequestId: string;
   dryRun?: boolean;
 }): Promise<void> {
-  if (!hasMaintenanceMaterial(input.memoryRequest)) return;
+  if (!innerThreadsEnabled(input.guildConfig) || !hasMaintenanceMaterial(input.memoryRequest)) return;
   const guildId = input.memoryRequest.incomingMessage.guildId ?? input.guild.id;
   const channelId = input.memoryRequest.incomingMessage.channelId ?? "";
   const sourceMessageId = input.memoryRequest.sourceMessageId ?? promptLabSyntheticId();
@@ -2879,13 +2892,15 @@ async function buildContext(
       userMessage,
   });
   assembled.visibleUserIds = visibleUserIds;
-  const innerThreadsText = buildInnerThreadsContext({
-    db,
-    guildId,
-    visibleUserIds,
-    resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username
-      ?? client.users.cache.get(userId)?.username,
-  });
+  const innerThreadsText = innerThreadsEnabled(guildConfig)
+    ? buildInnerThreadsContext({
+        db,
+        guildId,
+        visibleUserIds,
+        resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username
+          ?? client.users.cache.get(userId)?.username,
+      })
+    : "";
   if (innerThreadsText !== "") {
     const memoryIndex = assembled.sections.findIndex((section) => section.label === "Memories");
     const insertAt = memoryIndex === -1 ? 0 : memoryIndex + 1;
@@ -3440,15 +3455,17 @@ function buildAgentTools(
       }
     },
   });
-  const innerThreadListTool = createListInnerThreadsTool({
-    db,
-    guildId,
-    visibleUserIds: options.visibleUserIds ?? [],
-    description: runtimeToolDescription("list_inner_threads", {}) ?? "Privately inspect durable inner threads.",
-    resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username
-      ?? client.users.cache.get(userId)?.username,
-    resolveGuildId: (targetGuildId) => client.guilds.cache.get(targetGuildId)?.name,
-  });
+  const innerThreadTools = innerThreadsEnabled(guildConfig)
+    ? [createListInnerThreadsTool({
+        db,
+        guildId,
+        visibleUserIds: options.visibleUserIds ?? [],
+        description: runtimeToolDescription("list_inner_threads", {}) ?? "Privately inspect durable inner threads.",
+        resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username
+          ?? client.users.cache.get(userId)?.username,
+        resolveGuildId: (targetGuildId) => client.guilds.cache.get(targetGuildId)?.name,
+      })]
+    : [];
 
   const listChannelMessagesTool = createListChannelMessagesTool({
     guildId,
@@ -3671,7 +3688,7 @@ function buildAgentTools(
       deleteStagedAsset(db, staged.ref);
     },
   });
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memoryListTool, innerThreadListTool, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, ...jobInspectionTools, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memoryListTool, ...innerThreadTools, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, ...jobInspectionTools, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (diceRollTool !== undefined) tools.push(diceRollTool);
   if (includeImageGenerationTools) {
     const imageProfile = resolveModelProfile(
