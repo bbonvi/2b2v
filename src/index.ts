@@ -1607,7 +1607,7 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
             currentUserId: last.userId,
             visibleUserIds: userIds,
             resolveUserId: (userId) => usernameById.get(userId)
-              ?? guild.members.cache.get(userId)?.user.username,
+              ?? resolvePromptUsername(guild, userId),
             limit: 40,
             recentUserMaxUsers: 8,
             recentUserMaxMemoriesPerUser: 5,
@@ -1947,6 +1947,14 @@ function resolveKnownUsername(guild: Guild, username: string): string | undefine
   const normalized = username.trim().replace(/^@+/, "").trim().toLowerCase();
   if (normalized === "") return undefined;
   return client.users.cache.find((user) => user.username.toLowerCase() === normalized)?.id;
+}
+
+/** Resolve a user ID for prompt labels from live Discord state or stored message history. */
+function resolvePromptUsername(guild: Guild, userId: string): string | undefined {
+  const live = guild.members.cache.get(userId)?.user.username ?? client.users.cache.get(userId)?.username;
+  if (live !== undefined && live !== "") return live;
+  const stored = dashboardManagementRuntime.userName(userId);
+  return stored !== userId && stored !== "" ? stored : undefined;
 }
 
 /** Resolve a guild member by raw mention, user ID, username, or @username. */
@@ -2321,7 +2329,7 @@ async function runPostReplySemanticMaintenance(input: {
         guildId,
         currentUserId: input.currentUserId,
         visibleUserIds: input.memoryRequest.context.visibleUserIds ?? [],
-        resolveUserId: (userId) => input.guild.members.cache.get(userId)?.user.username,
+        resolveUserId: (userId) => resolvePromptUsername(input.guild, userId),
         contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
       })
     : "";
@@ -2530,7 +2538,7 @@ async function runMemoryPostReplyExtraction(input: {
     guildId,
     currentUserId: input.currentUserId,
     visibleUserIds: input.memoryRequest.context.visibleUserIds ?? [],
-    resolveUserId: (userId) => input.guild.members.cache.get(userId)?.user.username,
+    resolveUserId: (userId) => resolvePromptUsername(input.guild, userId),
     contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
   });
   const checkpoint = getMemoryExtractionCheckpoint(db, guildId, channelId);
@@ -2871,7 +2879,7 @@ async function buildContext(
     currentUserId: latestUserMessage.authorId,
     visibleUserIds,
     limit: guildConfig.memoryContext?.maxRows ?? 80,
-    resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
+    resolveUserId: (userId) => resolvePromptUsername(guild, userId),
     contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
   });
 
@@ -3215,7 +3223,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       guildId,
       currentUserId: lastMessage.authorId,
       visibleUserIds,
-      resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
+      resolveUserId: (userId) => resolvePromptUsername(guild, userId),
       contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
     });
     const currentUserMemories = buildMemoryContext({
@@ -3223,7 +3231,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       guildId,
       currentUserId: lastMessage.authorId,
       limit: guildConfig.memoryContext?.maxRows ?? 80,
-      resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username,
+      resolveUserId: (userId) => resolvePromptUsername(guild, userId),
       contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
     });
     const maintenance = buildMemoryMaintenanceContext({

@@ -26,10 +26,8 @@ describe("buildMemoryContext", () => {
       resolveUserId: (id) => id === "u1" ? "alice" : undefined,
     });
 
-    expect(context).toContain("Showing 2/2 memories.");
-    expect(context).toContain("Use memory as background context.");
-    expect(context).toContain("[about:community] [in:this-guild] [when:always] [0.7] [note] Global note");
-    expect(context).toContain("[about:@alice] [in:anywhere] [when:any(@alice)] [0.8] [preference] Likes concise answers");
+    expect(context).toContain("## Normal\n\n### community | this-guild | always\n\n1 note | Global note");
+    expect(context).toContain("### @alice | anywhere | any(@alice)\n\n2 preference | Likes concise answers");
     expect(context).not.toContain("Other user fact");
   });
 
@@ -44,8 +42,7 @@ describe("buildMemoryContext", () => {
       currentUserId: "u1",
     });
 
-    expect(context).toContain("Showing 3/3 memories (2/2 community/user, 1/1 self).");
-    expect(context).toContain("[about:self] [in:anywhere] [when:always] [0.7] [journal] Privately decided the server is worth returning to.");
+    expect(context).toContain("### self | anywhere | always\n\n3 journal | Privately decided the server is worth returning to.");
   });
 
   test("loads targeted self memories only when a recall user is visible", () => {
@@ -69,7 +66,7 @@ describe("buildMemoryContext", () => {
 
     expect(withoutBob).toContain("General continuity.");
     expect(withoutBob).not.toContain("Bob starts baiting");
-    expect(withBob).toContain("[about:self] [in:anywhere] [when:any(@bob)]");
+    expect(withBob).toContain("### self | anywhere | any(@bob)");
     expect(withBob).toContain("Bob starts baiting");
   });
 
@@ -97,6 +94,32 @@ describe("buildMemoryContext", () => {
     expect(target).toContain("specifically around Target");
   });
 
+  test("omits cross-subject memories whose subject cannot be resolved", () => {
+    createMemory(db, {
+      guildId: "g1",
+      aboutUserId: "u-owner",
+      recallWhen: "always",
+      kind: "constraint",
+      content: "Owner requires direct permission before use.",
+    });
+
+    const unresolved = buildMemoryContext({
+      db,
+      guildId: "g1",
+      currentUserId: "u-other",
+      resolveUserId: () => undefined,
+    });
+    const resolved = buildMemoryContext({
+      db,
+      guildId: "g1",
+      currentUserId: "u-other",
+      resolveUserId: (userId) => userId === "u-owner" ? "owner" : undefined,
+    });
+
+    expect(unresolved).toBe("");
+    expect(resolved).toContain("### @owner | anywhere | always\n\n1 constraint | Owner requires direct permission before use.");
+  });
+
   test("renders future expiry relatively", () => {
     createMemory(db, {
       guildId: "g1",
@@ -112,7 +135,7 @@ describe("buildMemoryContext", () => {
       currentUserId: "u1",
     });
 
-    expect(context).toContain("[scratchpad] [expires in 3 days] Alice is temporarily focused on launch prep.");
+    expect(context).toContain("scratchpad [expires in 3 days] | Alice is temporarily focused on launch prep.");
     expect(context).not.toContain("expiresAt");
   });
 
@@ -128,8 +151,18 @@ describe("buildMemoryContext", () => {
       currentUserId: "u1",
     });
 
-    expect(context).toContain("Showing 2/2 memories.");
     expect(context.indexOf("Older memory.")).toBeLessThan(context.indexOf("Fresh memory."));
+    expect(context).toContain("#### fact\n\n1 | Older memory.\n2 | Fresh memory.");
+  });
+
+  test("keeps singleton kinds inline before repeated kind subgroups", () => {
+    createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "Fact one." });
+    createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "preference", content: "One preference." });
+    createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "Fact two." });
+
+    const context = buildMemoryContext({ db, guildId: "g1", currentUserId: "u1" });
+
+    expect(context).toContain("### user:u1 | anywhere | any(user:u1)\n\n2 preference | One preference.\n\n#### fact\n\n1 | Fact one.\n3 | Fact two.");
   });
 
   test("shows visible memories out of total when capped", () => {
@@ -145,7 +178,7 @@ describe("buildMemoryContext", () => {
       limit: 1,
     });
 
-    expect(context).toContain("Showing 1/2 memories.");
+    expect(context).toContain("1/2 shown.");
     expect(context).toContain("Fresh memory.");
     expect(context).not.toContain("Older memory.");
   });
@@ -171,10 +204,10 @@ describe("buildMemoryContext", () => {
       limit: 2,
     });
 
-    expect(context).toContain("Showing 2/3 memories.");
+    expect(context).toContain("2/3 shown.");
     expect(context).toContain("Newest normal memory.");
-    expect(context).toContain("[IMPORTANT] Old important memory.");
-    expect(context.indexOf("Newest normal memory.")).toBeLessThan(context.indexOf("[IMPORTANT] Old important memory."));
+    expect(context).toContain("## Important\n\n### user:u1 | anywhere | any(user:u1)\n\n1 fact | Old important memory.");
+    expect(context.indexOf("Newest normal memory.")).toBeLessThan(context.indexOf("Old important memory."));
     expect(context).not.toContain("Fresh normal memory.");
   });
 
@@ -191,8 +224,8 @@ describe("buildMemoryContext", () => {
       limit: 3,
     });
 
-    expect(context).toContain("Showing 3/4 memories");
-    expect(context.match(/^- /gm)).toHaveLength(3);
+    expect(context).toContain("3/4 shown.");
+    expect(context.match(/^\d+ /gm)).toHaveLength(3);
   });
 
   test("reserves a bounded slice for recent visible speakers", () => {
@@ -230,13 +263,13 @@ describe("buildMemoryContext", () => {
       recentUserMaxRows: 3,
     });
 
-    expect(context).toContain("Showing 5/6 memories (2/2 community/current user, 0/0 self, 3/4 recent speakers, 0/0 cross-subject relevant).");
-    expect(context.match(/^- /gm)).toHaveLength(5);
+    expect(context).toContain("5/6 shown.");
+    expect(context.match(/^\d+ /gm)).toHaveLength(5);
     expect(context).toContain("Current memory two.");
-    expect(context).toContain("[about:@recent] [in:anywhere] [when:any(@recent)] [0.7] [preference] [IMPORTANT] Recent important memory.");
-    expect(context).toContain("[about:@recent] [in:anywhere] [when:any(@recent)] [0.7] [fact] Recent newest memory.");
+    expect(context).toContain("## Important\n\n### @recent | anywhere | any(@recent)\n\n3 preference | Recent important memory.");
+    expect(context).toContain("### @recent | anywhere | any(@recent)\n\n5 fact | Recent newest memory.");
     expect(context).not.toContain("Recent middle memory.");
-    expect(context).toContain("[about:@second] [in:anywhere] [when:any(@second)] [0.7] [interest] Second speaker memory.");
+    expect(context).toContain("### @second | anywhere | any(@second)\n\n6 interest | Second speaker memory.");
     expect(context).not.toContain("Excluded speaker memory.");
     expect(context.indexOf("Second speaker memory.")).toBeLessThan(context.indexOf("Recent important memory."));
   });

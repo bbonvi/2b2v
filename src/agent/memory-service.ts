@@ -285,6 +285,69 @@ function formatMemoryRow(
   return `- ${row.id} [about:${aboutLabel(row, resolveUserId)}] [in:${recallLocationLabel(row, currentGuildId)}] [when:${recallTriggerLabel(row, resolveUserId)}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${expiry} ${row.content}`;
 }
 
+interface MemoryContextGroup {
+  about: string;
+  recallLocation: string;
+  recallTrigger: string;
+  rows: MemoryRow[];
+}
+
+/** Render selected actor memories with shared recall metadata grouped once. */
+function formatMemoryContextRows(
+  orderedRows: readonly MemoryRow[],
+  currentGuildId: string,
+  resolveUserId?: (userId: string) => string | undefined,
+): string[] {
+  const bands = [
+    { label: "Normal", rows: orderedRows.filter((row) => row.priority <= 0) },
+    { label: "Important", rows: orderedRows.filter((row) => row.priority > 0) },
+  ].filter((band) => band.rows.length > 0);
+  const lines: string[] = [];
+
+  for (const band of bands) {
+    if (lines.length > 0) lines.push("");
+    lines.push(`## ${band.label}`);
+    const groups = new Map<string, MemoryContextGroup>();
+    for (const row of band.rows) {
+      const about = aboutLabel(row, resolveUserId);
+      const recallLocation = recallLocationLabel(row, currentGuildId);
+      const recallTrigger = recallTriggerLabel(row, resolveUserId);
+      const key = `${about}\u0000${recallLocation}\u0000${recallTrigger}`;
+      const existing = groups.get(key);
+      if (existing !== undefined) {
+        existing.rows.push(row);
+        continue;
+      }
+      groups.set(key, { about, recallLocation, recallTrigger, rows: [row] });
+    }
+
+    for (const group of groups.values()) {
+      lines.push("", `### ${group.about} | ${group.recallLocation} | ${group.recallTrigger}`, "");
+      const kindCounts = new Map<string, number>();
+      for (const row of group.rows) kindCounts.set(row.kind, (kindCounts.get(row.kind) ?? 0) + 1);
+
+      for (const row of group.rows.filter((candidate) => kindCounts.get(candidate.kind) === 1)) {
+        const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
+        lines.push(`${row.id} ${row.kind}${expiry} | ${row.content}`);
+      }
+
+      const repeatedKinds = [...new Set(group.rows
+        .filter((row) => (kindCounts.get(row.kind) ?? 0) > 1)
+        .map((row) => row.kind))];
+      for (const kind of repeatedKinds) {
+        if (lines.at(-1) !== "") lines.push("");
+        lines.push(`#### ${kind}`, "");
+        for (const row of group.rows.filter((candidate) => candidate.kind === kind)) {
+          const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
+          lines.push(`${row.id}${expiry} | ${row.content}`);
+        }
+      }
+    }
+  }
+
+  return lines;
+}
+
 /** Build one rotating stored-memory slice for corpus maintenance. */
 export function buildMemoryMaintenanceContext(input: MemoryMaintenanceContextInput): {
   text: string;
@@ -344,21 +407,27 @@ export function buildMemoryContext(input: MemoryContextInput): string {
     Math.max(0, limit - recentRows.length - 1),
   );
   const excludedCrossSubjects = [input.currentUserId, ...(input.visibleUserIds ?? [])];
-  const crossSubjectTotal = countMemories(input.db, {
+  const crossSubjectFilter = {
     guildId: input.guildId,
-    about: "user",
+    about: "user" as const,
     relevantUserIds,
     excludeAboutUserIds: excludedCrossSubjects,
-  });
-  const crossSubjectRows = crossSubjectLimit > 0
+  };
+  const unfilteredCrossSubjectTotal = countMemories(input.db, crossSubjectFilter);
+  const crossSubjectCandidates = crossSubjectLimit > 0
     ? listMemories(input.db, {
-        guildId: input.guildId,
-        about: "user",
-        relevantUserIds,
-        excludeAboutUserIds: excludedCrossSubjects,
-        limit: crossSubjectLimit,
+        ...crossSubjectFilter,
+        ...(input.resolveUserId === undefined ? { limit: crossSubjectLimit } : {}),
       })
     : [];
+  const eligibleCrossSubjectRows = input.resolveUserId === undefined
+    ? crossSubjectCandidates
+    : crossSubjectCandidates.filter((row) => row.aboutUserId !== null
+      && input.resolveUserId?.(row.aboutUserId) !== undefined);
+  const crossSubjectRows = eligibleCrossSubjectRows.slice(0, crossSubjectLimit);
+  const crossSubjectTotal = input.resolveUserId === undefined
+    ? unfilteredCrossSubjectTotal
+    : eligibleCrossSubjectRows.length;
   const primaryLimit = Math.max(0, limit - recentRows.length - crossSubjectRows.length);
   const maxSelfLimit = Math.min(primaryLimit, 30);
   const selfTotal = countMemories(input.db, {
@@ -399,28 +468,20 @@ export function buildMemoryContext(input: MemoryContextInput): string {
 
   if (rows.length === 0 && recentRows.length === 0) return "";
 
-  const lines = rows.map((row) => formatMemoryRow(row, input.guildId, input.resolveUserId));
-  const recentLines = [...recentGroups].reverse().flatMap((group) => [...group.rows]
-    .reverse()
-    .map((row) => formatMemoryRow(row, input.guildId, input.resolveUserId)));
-  const showingLine = recentTotal > 0 || crossSubjectTotal > 0
-    ? `Showing ${rows.length + recentRows.length}/${total} memories (${conversationalRows.length}/${conversationalTotal} community/current user, ${selfRows.length}/${selfTotal} self, ${recentRows.length}/${recentTotal} recent speakers, ${crossSubjectRows.length}/${crossSubjectTotal} cross-subject relevant).`
-    : selfTotal > 0
-    ? `Showing ${rows.length}/${total} memories (${conversationalRows.length}/${conversationalTotal} community/user, ${selfRows.length}/${selfTotal} self).`
-    : `Showing ${rows.length}/${total} memories.`;
-  const contextInstruction = input.contextInstruction?.trim() !== ""
-    ? input.contextInstruction ?? "Use memory as background context."
-    : "Use memory as background context.";
-  return [
+  const orderedRecentRows = [...recentGroups].reverse().flatMap((group) => [...group.rows].reverse());
+  const orderedRows = [...rows, ...orderedRecentRows];
+  const lines = formatMemoryContextRows(orderedRows, input.guildId, input.resolveUserId);
+  const shown = orderedRows.length;
+  const showingLine = shown < total ? `${shown}/${total} shown.` : "";
+  const contextInstruction = input.contextInstruction?.trim() ?? "";
+  const prefix = [
     showingLine,
     contextInstruction,
+  ].filter((line) => line !== "");
+  return [
+    ...prefix,
+    ...(prefix.length > 0 ? [""] : []),
     ...lines,
-    ...(recentGroups.length > 0
-      ? [
-          "Recent speaker memories apply only to their named subject; use them when relevant and do not spill person-specific context onto others.",
-          ...recentLines,
-        ]
-      : []),
   ].join("\n");
 }
 
