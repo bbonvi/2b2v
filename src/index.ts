@@ -2879,7 +2879,6 @@ async function buildContext(
   const visibleJobs = agentJobs.listVisible(guildId, channelId);
   const displayNamesByUserId = buildCurrentDisplayNameMap(guild);
   const appendLatestToHistory = historyOptions.appendLatestToHistory ?? true;
-  const triggerMessageIds = new Set(historyOptions.triggerMessageIds ?? []);
   const loadedHistoryMessages = historyOptions.includeHistory === false
     ? []
     : getContextHistoryMessages(
@@ -2888,13 +2887,9 @@ async function buildContext(
         guildConfig.trim,
         appendLatestToHistory ? (excludeMessageIds ?? latestUserMessage.id) : excludeMessageIds,
       );
-  const historyMessages = (historyOptions.historyLimit === undefined
+  const historyMessages = historyOptions.historyLimit === undefined
     ? loadedHistoryMessages
-    : loadedHistoryMessages.slice(-historyOptions.historyLimit)
-  ).map((message) => triggerMessageIds.has(message.id)
-    ? { ...message, historyAnnotations: [...(message.historyAnnotations ?? []), "<trigger>"] }
-    : message
-  );
+    : loadedHistoryMessages.slice(-historyOptions.historyLimit);
   const historyWithoutLatest = annotateHistoryJobs(
     historyMessages,
     guildId,
@@ -2916,6 +2911,7 @@ async function buildContext(
       mergeMessageGapSeconds: guildConfig.mergeMessageGapSeconds,
       timezone: guildConfig.timezone,
       replyQuoteChars: guildConfig.trim.replyQuoteChars,
+      triggerMessageIds: historyOptions.triggerMessageIds,
       displayNamesByUserId,
     },
     replyFallbackDeps,
@@ -4295,6 +4291,14 @@ function evaluateMessageTrigger(message: Message, guildConfig: GuildConfig, deli
 }
 
 /** Process a triggered message through the full handler pipeline. */
+function isMessageBackedTrigger(trigger: NonNullable<TriggerResult>): boolean {
+  return trigger.reason === "mention"
+    || trigger.reason === "keyword"
+    || trigger.reason === "random"
+    || trigger.reason === "ambient_pickup"
+    || trigger.reason === "lingering_attention";
+}
+
 async function processTriggeredMessage(
   message: Message,
   triggerOverride?: NonNullable<TriggerResult>,
@@ -4467,6 +4471,9 @@ async function processTriggeredMessage(
       options.currentTurnOverride !== undefined ? currentTurnMessageIds : undefined,
       {
         appendLatestToHistory: options.currentTurnOverride !== undefined,
+        ...(triggerOverride !== undefined && isMessageBackedTrigger(triggerOverride)
+          ? { triggerMessageIds: currentTurnMessageIds }
+          : {}),
       },
     );
 

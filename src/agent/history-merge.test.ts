@@ -54,6 +54,19 @@ describe("mergeConsecutiveMessages", () => {
     expect(result[0]?.content).toBe("content-1 [msg-break] content-2 [msg-break] content-3");
   });
 
+  test("merges messages inside one trigger span but not across its boundary", () => {
+    const msgs = [
+      msg("1", 1000),
+      msg("2", 2000),
+      msg("3", 3000),
+    ];
+    const result = mergeConsecutiveMessages(msgs, GAP, new Set(["2", "3"]));
+
+    expect(result).toHaveLength(2);
+    expect(result[0]?.content).toBe("content-1");
+    expect(result[1]?.content).toBe("content-2 [msg-break] content-3");
+  });
+
   test("does not merge messages from different authors", () => {
     const msgs = [
       msg("1", 1000),

@@ -66,6 +66,8 @@ export interface HistoryProcessingConfig {
   trim: TrimConfig;
   mergeMessageGapSeconds: number;
   timezone: string;
+  /** Discord message IDs that form the stable input span for the current actor turn. */
+  triggerMessageIds?: readonly string[];
   /** Current Discord display names keyed by user ID. Used only for volatile recent history. */
   displayNamesByUserId?: ReadonlyMap<string, string>;
 }

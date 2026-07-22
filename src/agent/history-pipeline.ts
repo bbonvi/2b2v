@@ -29,14 +29,19 @@ export async function processHistory(
   replyFallbackDeps: ReplyFallbackDeps,
   _nowMs = Date.now(),
 ): Promise<ProcessedHistory> {
+  const triggerMessageIds = new Set(config.triggerMessageIds ?? []);
+
   // 1. Sort deterministically
   const sorted = sortMessages(applyDisplayNames(messages, config.displayNamesByUserId));
   const latestWithDisplayName = latestUserMessage !== null
-    ? applyDisplayName(latestUserMessage, config.displayNamesByUserId)
+    ? annotateTriggerMessage(applyDisplayName(latestUserMessage, config.displayNamesByUserId), triggerMessageIds)
     : null;
 
   // 2. Merge consecutive plain messages by same author
-  const merged = mergeConsecutiveMessages(sorted, config.mergeMessageGapSeconds);
+  const merged = annotateTriggerSpan(
+    mergeConsecutiveMessages(sorted, config.mergeMessageGapSeconds, triggerMessageIds),
+    triggerMessageIds,
+  );
 
   // 3. Build normalized content map (pre-trim content for quote extraction)
   const normalizedContentMap = new Map<string, string>();
@@ -138,6 +143,25 @@ export async function processHistory(
     newerText,
     visibleUserIds: collectVisibleUserIds([...olderTrimmed, ...newerMessages]),
   };
+}
+
+function annotateTriggerSpan(
+  messages: HistoryMessage[],
+  triggerMessageIds: ReadonlySet<string>,
+): HistoryMessage[] {
+  if (triggerMessageIds.size === 0) return messages;
+  return messages.map((message) => annotateTriggerMessage(message, triggerMessageIds));
+}
+
+function annotateTriggerMessage(
+  message: HistoryMessage,
+  triggerMessageIds: ReadonlySet<string>,
+): HistoryMessage {
+  const representedIds = message.mergedMessageIds ?? [message.id];
+  if (!representedIds.some((id) => triggerMessageIds.has(id))) return message;
+  const annotations = message.historyAnnotations ?? [];
+  if (annotations.includes("<trigger>")) return message;
+  return { ...message, historyAnnotations: [...annotations, "<trigger>"] };
 }
 
 function collectVisibleUserIds(messages: HistoryMessage[]): string[] {

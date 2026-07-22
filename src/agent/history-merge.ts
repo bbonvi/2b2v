@@ -23,9 +23,11 @@ function canMerge(
   prev: HistoryMessage,
   curr: HistoryMessage,
   mergeMessageGapSeconds: number,
+  triggerMessageIds: ReadonlySet<string>,
 ): boolean {
   if (prev.authorId !== curr.authorId) return false;
   if (!isPlain(prev) || !isPlain(curr)) return false;
+  if (triggerMessageIds.has(prev.id) !== triggerMessageIds.has(curr.id)) return false;
   const gapMs = curr.timestamp - prev.timestamp;
   return gapMs <= mergeMessageGapSeconds * 1000;
 }
@@ -51,6 +53,7 @@ function messageIds(message: HistoryMessage): string[] {
 export function mergeConsecutiveMessages(
   messages: HistoryMessage[],
   mergeMessageGapSeconds: number,
+  triggerMessageIds: ReadonlySet<string> = new Set(),
 ): HistoryMessage[] {
   if (messages.length === 0) return [];
 
@@ -62,7 +65,7 @@ export function mergeConsecutiveMessages(
   for (let i = 1; i < messages.length; i++) {
     const next = messages[i];
     if (next === undefined) continue;
-    if (canMerge(current, next, mergeMessageGapSeconds)) {
+    if (canMerge(current, next, mergeMessageGapSeconds, triggerMessageIds)) {
       current = {
         ...current,
         content: `${current.content} [msg-break] ${normalizeContent(next.content)}`,

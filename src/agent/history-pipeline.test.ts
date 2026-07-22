@@ -87,6 +87,38 @@ describe("processHistory", () => {
     expect(result.newerText).toContain("[@bob (MsgID: b; <trigger>)]: second ping");
   });
 
+  test("marks a merged current-turn span without removing message breaks", async () => {
+    const messages = [
+      msg({ id: "a", content: "first chunk", timestamp: 1000 }),
+      msg({ id: "b", content: "second chunk", timestamp: 2000 }),
+    ];
+    const result = await processHistory(messages, null, {
+      ...defaultConfig,
+      triggerMessageIds: ["a", "b"],
+    }, deps);
+
+    expect(result.newerText).toContain(
+      "[@alice (MsgIDs: [a, b]; <trigger>)]: first chunk [msg-break] second chunk",
+    );
+  });
+
+  test("does not merge a trigger span into adjacent non-trigger history", async () => {
+    const messages = [
+      msg({ id: "before", content: "earlier message", timestamp: 1000 }),
+      msg({ id: "a", content: "first trigger chunk", timestamp: 2000 }),
+      msg({ id: "b", content: "second trigger chunk", timestamp: 3000 }),
+    ];
+    const result = await processHistory(messages, null, {
+      ...defaultConfig,
+      triggerMessageIds: ["a", "b"],
+    }, deps);
+
+    expect(result.newerText).toContain("[@alice (MsgID: before)]: earlier message");
+    expect(result.newerText).toContain(
+      "[@alice (MsgIDs: [a, b]; <trigger>)]: first trigger chunk [msg-break] second trigger chunk",
+    );
+  });
+
   test("newer slice includes current display names for authors and reply targets", async () => {
     const m1 = msg({ id: "1", author: "alice", authorId: "uid-alice", content: "first", timestamp: 1000 });
     const latest = msg({
