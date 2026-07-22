@@ -85,9 +85,12 @@ describe("repository profile layout", () => {
     expect(twoB.runtimeProfileId).toBe("2b");
     expect(twoB.defaultRelationships?.enabled).toBe(true);
     expect(twoB.defaultInnerThreads?.enabled).toBe(true);
+    expect(twoB.defaultInnerThreads?.modelProfile).toBe("maintenance");
     expect(twoB.defaultMemoryContext?.maxRows).toBe(60);
     expect(twoB.defaultAmbientInitiative?.botContactIds).toEqual(["1398275457857622128"]);
     expect(twoB.privateLife?.enabled).toBe(true);
+    expect(twoB.privateLife?.modelProfile).toBe("main");
+    expect(twoB.privateLife?.maintenance.modelProfile).toBe("maintenance");
     expect(twoB.privateLife?.opportunitiesPerDay).toBe(50);
     expect(twoB.privateLife?.actionScopeWeights["reflect-only"]).toBe(0.55);
     expect(twoB.privateLife?.actionScopeWeights["social-opportunity"]).toBe(0.02);

@@ -128,6 +128,11 @@ describe("model profile resolution", () => {
       "  modelProfile: main",
       "relationships:",
       "  modelProfile: main",
+      "innerThreads:",
+      "  modelProfile: fast",
+      "privateLife:",
+      "  maintenance:",
+      "    modelProfile: fast",
       "voice:",
       "  modelProfile: fast",
       "  maintenance:",
@@ -160,6 +165,8 @@ describe("model profile resolution", () => {
       modelProfile: "main",
       everySegments: 80,
     });
+    expect(config.defaultInnerThreads?.modelProfile).toBe("fast");
+    expect(config.privateLife?.maintenance.modelProfile).toBe("fast");
     expect(config.defaultAmbientAttention?.evaluator.modelProfile).toBe("fast");
   });
 
@@ -173,6 +180,19 @@ describe("model profile resolution", () => {
       "  modelProfile: missing",
     ].join("\n")))).toThrow(
       'voice.modelProfile references unknown model profile "missing"',
+    );
+    expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+      "innerThreads:",
+      "  modelProfile: missing",
+    ].join("\n")))).toThrow(
+      'innerThreads.modelProfile references unknown model profile "missing"',
+    );
+    expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+      "privateLife:",
+      "  maintenance:",
+      "    modelProfile: missing",
+    ].join("\n")))).toThrow(
+      'privateLife.maintenance.modelProfile references unknown model profile "missing"',
     );
   });
 
@@ -236,6 +256,8 @@ describe("model profile resolution", () => {
       "  recentResidueHistoryLimit: 31",
       "  recentResidueMaxAgeHours: 36",
       "  visibleOutputCooldownMinutes: 12",
+      "  maintenance:",
+      "    modelProfile: main",
       "  originWeights:",
       "    spontaneous: 2",
       "    continue-inner-thread: 0",
@@ -253,6 +275,9 @@ describe("model profile resolution", () => {
       recentResidueHistoryLimit: 31,
       recentResidueMaxAgeHours: 36,
       visibleOutputCooldownMinutes: 12,
+      maintenance: {
+        modelProfile: "main",
+      },
       originWeights: {
         spontaneous: 2,
         "continue-inner-thread": 0,
@@ -312,20 +337,21 @@ describe("guild resolution and persistence", () => {
     }).modelProfile).toBe("fast");
   });
 
-  test("inherits and overrides the inner-thread feature switch", () => {
+  test("inherits and overrides inner-thread maintenance configuration", () => {
     const global = loadGlobalConfig(BASE_ENV, writeConfig([
       configText,
       "innerThreads:",
       "  enabled: false",
+      "  modelProfile: fast",
     ].join("\n")));
-    expect(global.defaultInnerThreads).toEqual({ enabled: false });
+    expect(global.defaultInnerThreads).toEqual({ enabled: false, modelProfile: "fast" });
     expect(resolveGuildConfig(global, { guildId: "1", slug: "" }).innerThreads)
-      .toEqual({ enabled: false });
+      .toEqual({ enabled: false, modelProfile: "fast" });
     expect(resolveGuildConfig(global, {
       guildId: "2",
       slug: "",
-      innerThreads: { enabled: true },
-    }).innerThreads).toEqual({ enabled: true });
+      innerThreads: { enabled: true, modelProfile: "main" },
+    }).innerThreads).toEqual({ enabled: true, modelProfile: "main" });
   });
 
   test("rejects an unknown guild profile reference", () => {
@@ -359,7 +385,7 @@ describe("guild resolution and persistence", () => {
     expect(loadGuildConfigFile(path)).toMatchObject({
       modelProfile: "fast",
       instructions: "Guild instructions",
-      innerThreads: { enabled: true },
+      innerThreads: { enabled: true, modelProfile: "main" },
     });
   });
 });

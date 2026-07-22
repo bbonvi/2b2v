@@ -363,6 +363,8 @@ export interface MemoryContextConfig {
 export interface InnerThreadsConfig {
   /** Enable prompt context, retrieval, and maintenance. */
   enabled: boolean;
+  /** Named model profile used by inner-thread maintenance. */
+  modelProfile: string;
 }
 
 export type InnerThreadsConfigYaml = Partial<InnerThreadsConfig>;

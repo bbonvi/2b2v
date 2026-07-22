@@ -26,6 +26,13 @@ modelProfiles:
         thinkingLevel: minimal
         codexTransport: websocket-cached
         promptCaching: { enabled: true }
+    maintenance:
+        provider: openai-codex
+        model: gpt-5.6-sol
+        modelParams: { textVerbosity: low }
+        thinkingLevel: minimal
+        codexTransport: websocket-cached
+        promptCaching: { enabled: true }
     realtimeVoice:
         provider: openai-codex
         model: gpt-5.6-sol
@@ -51,6 +58,8 @@ modelProfile: main
 privateLife:
     enabled: true
     modelProfile: main
+    maintenance:
+        modelProfile: maintenance
     opportunitiesPerDay: 50
     intervalJitter: 0.45
     lateNightStart: "22:30"
@@ -220,7 +229,7 @@ trim:
 
 # Background memory extraction
 memoryExtraction:
-    modelProfile: main
+    modelProfile: maintenance
     postReply: true # (run a silent memory pass after visible bot replies)
     maxToolCalls: 5 # (max record_memory calls per maintenance pass)
     ambient:
@@ -242,11 +251,16 @@ schedulePressure:
 
 # Durable per-user relationship profiles.
 relationships:
-    modelProfile: main
+    modelProfile: maintenance
     enabled: true
     promptInjection: true
     maxAxisDeltaPerSignal: 4
     maxToolCalls: 5
+
+# Durable private inner-thread maintenance.
+innerThreads:
+    enabled: true
+    modelProfile: maintenance
 
 ambientAttention:
     enabled: true # (enable delayed non-trigger attention candidates)
@@ -422,7 +436,7 @@ voice:
             maxTurns: 48
             maxChars: 15000
         extraction:
-            modelProfile: main
+            modelProfile: maintenance
             everySegments: 120
             minIntervalMs: 1200000
             maxTurns: 48
@@ -498,7 +512,7 @@ assetReading:
 
 # Codex image generation request settings
 imageGeneration:
-    quality: "high" # (Codex image generation quality hint)
+    quality: "auto" # (Codex image generation quality hint)
     modelProfile: imageGeneration
 
 # If the main model cannot read image input, describe images with this vision model

@@ -751,6 +751,10 @@ function resolvePrivateLifeConfig(partial: PrivateLifeConfigYaml | undefined): P
   const resolved: PrivateLifeConfig = {
     ...DEFAULT_PRIVATE_LIFE,
     ...partial,
+    maintenance: {
+      ...DEFAULT_PRIVATE_LIFE.maintenance,
+      ...partial?.maintenance,
+    },
     originWeights: resolvePrivateLifeWeights(
       PRIVATE_LIFE_ATTENTION_ORIGINS,
       DEFAULT_PRIVATE_LIFE.originWeights,
@@ -822,6 +826,9 @@ function resolvePrivateLifeConfig(partial: PrivateLifeConfigYaml | undefined): P
     throw new Error("privateLife.thoughtRetentionDays must be between 0 and 365");
   }
   if (resolved.modelProfile.trim() === "") throw new Error("privateLife.modelProfile must not be empty");
+  if (resolved.maintenance.modelProfile.trim() === "") {
+    throw new Error("privateLife.maintenance.modelProfile must not be empty");
+  }
   return resolved;
 }
 
@@ -1051,6 +1058,7 @@ function resolveInnerThreadsConfig(
   const base = defaults ?? DEFAULT_INNER_THREADS;
   return {
     enabled: partial?.enabled ?? base.enabled,
+    modelProfile: partial?.modelProfile ?? base.modelProfile,
   };
 }
 
@@ -1220,6 +1228,7 @@ export function loadGlobalConfig(
     [defaultImageGeneration.modelProfile, "imageGeneration.modelProfile"],
     [defaultMemoryExtraction.modelProfile, "memoryExtraction.modelProfile"],
     [defaultRelationships.modelProfile, "relationships.modelProfile"],
+    [defaultInnerThreads.modelProfile, "innerThreads.modelProfile"],
     [defaultVoice.modelProfile, "voice.modelProfile"],
     [defaultVoice.maintenance.summary.modelProfile, "voice.maintenance.summary.modelProfile"],
     [defaultVoice.maintenance.extraction.modelProfile, "voice.maintenance.extraction.modelProfile"],
@@ -1230,6 +1239,7 @@ export function loadGlobalConfig(
       ? [[defaultAmbientInitiative.evaluator.modelProfile, "ambientInitiative.evaluator.modelProfile"] as const]
       : []),
     [privateLife.modelProfile, "privateLife.modelProfile"],
+    [privateLife.maintenance.modelProfile, "privateLife.maintenance.modelProfile"],
   ]);
   const openrouterApiKey = env.OPENROUTER_API_KEY;
   const usesOpenRouter = Object.values(modelProfiles).some((profile) => profile.provider === "openrouter");
@@ -1400,6 +1410,9 @@ export function resolveGuildConfig(
     [config.memoryExtraction.modelProfile, "memoryExtraction.modelProfile"],
     ...(config.relationships !== undefined
       ? [[config.relationships.modelProfile, "relationships.modelProfile"] as const]
+      : []),
+    ...(config.innerThreads !== undefined
+      ? [[config.innerThreads.modelProfile, "innerThreads.modelProfile"] as const]
       : []),
     ...(config.voice !== undefined
       ? [

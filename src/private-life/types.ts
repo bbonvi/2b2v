@@ -45,9 +45,16 @@ export type PrivateLifeTerritory = typeof PRIVATE_LIFE_TERRITORIES[number];
 
 export type PrivateLifeWeights<T extends string> = Record<T, number>;
 
+export interface PrivateLifeMaintenanceConfig {
+  modelProfile: string;
+}
+
 export interface PrivateLifeConfig {
   enabled: boolean;
+  /** Named model profile used by private-life actor turns. */
   modelProfile: string;
+  /** Hidden episode-summary maintenance policy. */
+  maintenance: PrivateLifeMaintenanceConfig;
   opportunitiesPerDay: number;
   intervalJitter: number;
   lateNightStart: string;
@@ -74,8 +81,9 @@ type PartialWeights<T extends string> = Partial<Record<T, number>>;
 
 export type PrivateLifeConfigYaml = Partial<Omit<
   PrivateLifeConfig,
-  "originWeights" | "modeWeights" | "territoryWeights" | "actionScopeWeights"
+  "maintenance" | "originWeights" | "modeWeights" | "territoryWeights" | "actionScopeWeights"
 >> & {
+  maintenance?: Partial<PrivateLifeMaintenanceConfig>;
   originWeights?: PartialWeights<PrivateLifeAttentionOrigin>;
   modeWeights?: PartialWeights<PrivateLifeCuriosityMode>;
   territoryWeights?: PartialWeights<PrivateLifeTerritory>;

@@ -2668,7 +2668,7 @@ async function runInnerThreadPostReplyExtraction(input: {
           "Decide silently whether durable inner threads should change.",
         ),
       ].filter((part) => part !== "").join("\n\n"),
-      modelProfile: input.guildConfig.memoryExtraction.modelProfile,
+      modelProfile: input.guildConfig.innerThreads?.modelProfile ?? input.guildConfig.modelProfile,
       maxToolCalls: 3,
       terminateAfterSuccessfulToolRoundNames: ["record_inner_threads"],
       transcript: input.memoryRequest.maintenanceTranscript,
@@ -2805,7 +2805,7 @@ async function runPrivateLifeEpisodeSummary(input: {
         .filter((part) => part.trim() !== "")
         .join("\n\n"),
       controlMessage: runtimeContextTemplate("private-life-maintenance"),
-      modelProfile: globalConfig.privateLife?.modelProfile ?? input.guildConfig.modelProfile,
+      modelProfile: globalConfig.privateLife?.maintenance.modelProfile ?? input.guildConfig.modelProfile,
       maxToolCalls: 3,
       terminateAfterSuccessfulToolRoundNames: ["record_private_life_episode"],
       transcript: input.request.maintenanceTranscript,

@@ -75,6 +75,7 @@ export const DEFAULT_RELATIONSHIPS: RelationshipConfig = {
 
 export const DEFAULT_INNER_THREADS: InnerThreadsConfig = {
   enabled: true,
+  modelProfile: "main",
 };
 
 export const DEFAULT_AMBIENT_ATTENTION_MODE: AmbientAttentionModeConfig = {
@@ -172,6 +173,9 @@ export const DEFAULT_AMBIENT_INITIATIVE: AmbientInitiativeConfig = {
 export const DEFAULT_PRIVATE_LIFE: PrivateLifeConfig = {
   enabled: false,
   modelProfile: "main",
+  maintenance: {
+    modelProfile: "main",
+  },
   opportunitiesPerDay: 50,
   intervalJitter: 0.45,
   lateNightStart: "22:30",
