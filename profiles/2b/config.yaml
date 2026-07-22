@@ -29,8 +29,8 @@ modelProfiles:
     maintenance:
         provider: openai-codex
         model: gpt-5.6-sol
-        modelParams: { textVerbosity: low }
-        thinkingLevel: minimal
+        modelParams: { textVerbosity: medium }
+        thinkingLevel: medium
         codexTransport: websocket-cached
         promptCaching: { enabled: true }
     realtimeVoice:
