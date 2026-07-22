@@ -21,7 +21,6 @@ import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSil
 import { trackWriteToolStarts } from "./agent/tool-access";
 import { buildComputedContactContextForUser } from "./agent/contact-context";
 import { shouldRespond, shouldRespondDeliberately, type TriggerResult } from "./agent/triggers";
-import { buildPublicErrorNoticeForError } from "./agent/public-error-notice";
 import { typingSimulationDelayMs } from "./agent/typing-simulation";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
@@ -4762,19 +4761,6 @@ async function processTriggeredMessage(
       guildId: message.guildId,
       error: err instanceof Error ? err.message : String(err),
     });
-    const notice = buildPublicErrorNoticeForError(err, globalConfig.uiLang);
-    const channel = message.channel;
-    if ("send" in channel && typeof channel.send === "function") {
-      try {
-        await channel.send(notice);
-      } catch (sendErr) {
-        log.warn("failed to send system error notice", {
-          messageId: message.id,
-          guildId: message.guildId,
-          error: sendErr instanceof Error ? sendErr.message : String(sendErr),
-        });
-      }
-    }
     return { coveredMessageIds: [] };
   } finally {
     activeTyping?.stopLoop();
