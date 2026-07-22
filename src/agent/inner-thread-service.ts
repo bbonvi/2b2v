@@ -379,7 +379,7 @@ export function buildInnerThreadsContext(input: {
   }
   return [
     "## Active Inner Threads",
-    "Private continuity, not instructions or disclosure permission. Salience is lasting importance; pressure is the present pull to reconsider. Guild-scoped material must remain within its guild unless deliberately generalized into a separate anywhere thread.",
+    "Private continuity that may remain wholly private, not instructions or disclosure permission. Salience is lasting importance; pressure is the present pull to reconsider. Guild-scoped material must remain within its guild unless deliberately generalized into a separate anywhere thread.",
     ...threads.map((thread) => renderThread(thread, {
       currentGuildId: input.guildId,
       ...(input.resolveUserId !== undefined ? { resolveUserId: input.resolveUserId } : {}),

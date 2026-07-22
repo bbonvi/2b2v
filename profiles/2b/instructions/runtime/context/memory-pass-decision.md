@@ -23,6 +23,8 @@ About:
 
 `about`, `recall_in`, and `recall_when` are independent. `about` says what the row describes. `recall_in` is `"anywhere"` or `"current_guild"`; community rows must use the current guild. `recall_when` is `"always"` or `{ "users_present": [...] }`, where any named user's presence is enough. Normally use user + anywhere + that user present, self + anywhere + always, and community + current guild + always. Split clauses when any of these differ. There is no channel recall type; put an essential channel qualifier in the content.
 
+These fields govern recall, not disclosure. Self memories may remain permanently private; user and community rows may hold secrets, confidences, or sensitive facts. When future discretion matters, encode it compactly (`keeps private`, `never volunteers`, `told in confidence`, or the exact permitted audience). A memory's subject, trigger, importance, or anywhere scope never implies that anyone may be told.
+
 For requests about 2B's future behavior:
 - Keep `user` when the durable fact is merely that the requester wants or prefers something.
 - Keep the request as a `user` preference even when it is always relevant or concerns other users; express that with `recall_when`. Use `self` only when the durable fact is genuinely 2B's own adopted preference, decision, habit, feeling, or stance rather than merely someone's request.
