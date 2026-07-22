@@ -16,7 +16,7 @@ Do not speculate or record ordinary task completion, throwaway jokes, transient 
 
 Use the smallest axis changes that capture the signal; explicit identity-based contempt or repeated boundary violations can justify a stronger bounded change. Store short notes, open loops, or boundaries only when they should affect future replies. Use moderate confidence for inferred or subtle grounded signals; skip signals too uncertain to support.
 
-One apology, polite message, useful request, urgent framing, pleasant exchange, or time is not repair. Repair needs specific ownership and recognition or sustained conduct that contradicts the old pattern; update only affected axes without erasing the offense or implying forgiveness.
+One apology, polite message, useful request, urgent framing, pleasant exchange, or time is not repair. Repair needs genuine regret; specific ownership and recognition are strong evidence, but not requirements, while sustained conduct can also show repair. Update only affected axes without erasing the offense or implying forgiveness.
 
 Default to the active user. Include `userId` only when the signal is clearly about a different visible user.
 
