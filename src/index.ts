@@ -51,7 +51,7 @@ import { createChatUserListTool, type MemberInfo } from "./agent/member-list-too
 import { createChannelListTool, type ChannelInfo } from "./agent/channel-list-tool";
 import { createEmojiListTool } from "./agent/emoji-list-tool";
 import { createDiscordTimeoutTools, MAX_DISCORD_TIMEOUT_SECONDS, type TimeoutMember, type TimeoutMemberResolution } from "./agent/timeout-user-tool";
-import { createMemoryListTool } from "./agent/user-memory-tool";
+import { createSearchMemoriesTool } from "./agent/search-memories-tool";
 import { buildInnerThreadsContext, createListInnerThreadsTool, createRecordInnerThreadsTool } from "./agent/inner-thread-service";
 import { listInnerThreads } from "./db/inner-thread-repository";
 import { createListChannelMessagesTool } from "./agent/list-channel-messages-tool";
@@ -1280,7 +1280,7 @@ async function runVoiceAgentTurn(request: VoiceTurnRequest): Promise<void> {
     };
   const allowedToolNames = new Set([
     "list_channels",
-    "list_memories",
+    "search_memories",
     "read_asset",
     "search_asset",
     "read_user_avatar",
@@ -3716,7 +3716,7 @@ function buildAgentTools(
     },
   });
 
-  const memoryListTool = createMemoryListTool({
+  const memorySearchTool = createSearchMemoriesTool({
     db,
     currentGuildId: guildId,
     resolveUsername: resolveUsernameInGuild,
@@ -3969,7 +3969,7 @@ function buildAgentTools(
       deleteStagedAsset(db, staged.ref);
     },
   });
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memoryListTool, ...innerThreadTools, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, ...jobInspectionTools, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memorySearchTool, ...innerThreadTools, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, ...jobInspectionTools, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (diceRollTool !== undefined) tools.push(diceRollTool);
   if (includeImageGenerationTools) {
     const imageProfile = resolveModelProfile(

@@ -321,6 +321,17 @@ function formatMemoryRow(
   return `- ${row.id} [about:${aboutLabel(row, resolveUserId)}] [in:${recallLocationLabel(row, currentGuildId)}] [when:${recallTriggerLabel(row, resolveUserId)}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${age}${expiry} ${row.content}`;
 }
 
+/** Render one self-contained memory search result without internal confidence. */
+export function formatMemorySearchRow(
+  row: MemoryRow,
+  currentGuildId: string,
+  resolveUserId?: (userId: string) => string | undefined,
+): string {
+  const age = ` [${formatMemoryAge(row.updatedAt)}]`;
+  const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
+  return `- ${row.id} [about:${aboutLabel(row, resolveUserId)}] [in:${recallLocationLabel(row, currentGuildId)}] [when:${recallTriggerLabel(row, resolveUserId)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${age}${expiry} ${row.content}`;
+}
+
 interface MemoryContextGroup {
   about: string;
   recallLocation: string;

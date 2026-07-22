@@ -42,7 +42,11 @@ describe("repository profile layout", () => {
       expect(Object.keys(bundle.runtime.toolDescriptions).length).toBeGreaterThan(0);
       expect(Object.keys(bundle.runtime.toolParameterDescriptions).length).toBeGreaterThan(0);
       expect(bundle.runtime.toolDescriptions.roll_dice).toBeDefined();
+      expect(bundle.runtime.toolDescriptions.search_memories).toBeDefined();
       expect(bundle.runtime.toolParameterDescriptions["record_memory/actions"]).toBeDefined();
+      for (const parameter of ["pattern", "user", "guild_id", "limit", "cursor"]) {
+        expect(bundle.runtime.toolParameterDescriptions[`search_memories/${parameter}`]).toBeDefined();
+      }
       for (const parameter of ["count", "sides", "modifier", "target", "mode", "label", "actor"]) {
         expect(bundle.runtime.toolParameterDescriptions[`roll_dice/${parameter}`]).toBeDefined();
       }

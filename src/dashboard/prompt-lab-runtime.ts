@@ -33,7 +33,7 @@ const PROMPT_LAB_READ_TOOL_NAMES = new Set([
   "list_chat_users",
   "list_channels",
   "list_emojis",
-  "list_memories",
+  "search_memories",
   "list_channel_messages",
   "read_user_avatar",
   "fetch_images",
