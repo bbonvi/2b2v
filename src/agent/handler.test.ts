@@ -2105,6 +2105,47 @@ describe("handleMessage", () => {
     expect(afterReply).toHaveBeenCalledTimes(0);
   });
 
+  test("continues maintenance when Discord rejects a send for missing permissions", async () => {
+    const afterReplyCalls: MemoryExtractionRequest[] = [];
+    const afterReply = mock((request: MemoryExtractionRequest) => {
+      afterReplyCalls.push(request);
+      return Promise.resolve();
+    });
+    const permissionError = Object.assign(new Error("Missing Permissions"), { code: 50013 });
+    const sender: MessageSender = () => Promise.reject(permissionError);
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ sender, afterReply }),
+    );
+
+    expect(result.responseText).toBe("hello user");
+    expect(afterReplyCalls).toHaveLength(1);
+    expect(afterReplyCalls[0]).toMatchObject({
+      assistantReply: "hello user",
+      visibleReplySent: false,
+    });
+  });
+
+  test("still throws unrelated Discord send errors", async () => {
+    const afterReply = mock(() => Promise.resolve());
+    const validationError = Object.assign(new Error("Invalid Form Body"), { code: 50035 });
+    const sender: MessageSender = () => Promise.reject(validationError);
+
+    let thrown: unknown;
+    try {
+      await handleMessage(
+        makeMessage({ mentionedUserIds: ["bot-1"] }),
+        makeDeps({ sender, afterReply }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(validationError);
+    expect(afterReply).toHaveBeenCalledTimes(0);
+  });
+
   test("retries LLM output timeouts before sending final response", async () => {
     let calls = 0;
     const completeChat: ChatCompleteFn = () => {

@@ -356,6 +356,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
 
+function isDiscordSendPermissionError(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  return error.code === 50001 || error.code === 50013;
+}
+
 function summarizeToolResult(result: AgentToolResult<unknown>): string {
   const textContent = result.content
     .filter((part): part is { type: "text"; text: string } => part.type === "text")
@@ -2096,6 +2101,7 @@ async function sendOneSegment(input: {
     input.requestLog?.recordToolEnd(input.sendId, true, {
       content: [{ type: "text", text: errorText }],
     });
+    if (isDiscordSendPermissionError(error)) return;
     throw error;
   }
 }
@@ -2780,7 +2786,12 @@ export async function handleMessage(
 
     const pendingAttachments: OutboundAttachment[] = [];
     const intermediateStatus = { sent: false, sendCount: 0 };
-    const hasVisibleOutput = (): boolean => intermediateStatus.sent || deps.hasExternalVisibleOutput?.() === true;
+    let visibleOutputDelivered = false;
+    const noteVisibleOutput = (): void => {
+      visibleOutputDelivered = true;
+      deps.onVisibleOutput?.();
+    };
+    const hasVisibleOutput = (): boolean => visibleOutputDelivered || deps.hasExternalVisibleOutput?.() === true;
     const replyFirst = false;
     const liveMessageTypingHoldMs = deps.liveMessageTypingHoldMs ?? DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS;
     const typingHoldMsForSegment = deps.guildConfig.typingSimulation.enabled
@@ -2806,7 +2817,7 @@ export async function handleMessage(
         log: deps.log,
         onStillWorking: deps.onStillWorking,
         getTypingStartedAt: deps.getTypingStartedAt,
-        onVisibleOutput: deps.onVisibleOutput,
+        onVisibleOutput: noteVisibleOutput,
         typingHoldMs: liveMessageTypingHoldMs,
         typingHoldMsForSegment,
         signal: wallController.signal,
@@ -2834,7 +2845,7 @@ export async function handleMessage(
           log: deps.log,
           onStillWorking: deps.onStillWorking,
           getTypingStartedAt: deps.getTypingStartedAt,
-          onVisibleOutput: deps.onVisibleOutput,
+          onVisibleOutput: noteVisibleOutput,
           sendIdPrefix: "tool-status",
           typingHoldMs: liveMessageTypingHoldMs,
           typingHoldMsForSegment,
@@ -3045,7 +3056,7 @@ export async function handleMessage(
         log: deps.log,
         onStillWorking: deps.onStillWorking,
         getTypingStartedAt: deps.getTypingStartedAt,
-        onVisibleOutput: deps.onVisibleOutput,
+        onVisibleOutput: noteVisibleOutput,
         typingHoldMs: liveMessageTypingHoldMs,
         typingHoldMsForSegment,
         signal: wallController.signal.aborted ? undefined : wallController.signal,
@@ -3055,7 +3066,7 @@ export async function handleMessage(
     }
 
     const memoryReply = renderSegmentsForMemory(parsedResponse.segments);
-    scheduleMemoryPass(memoryReply, true);
+    scheduleMemoryPass(memoryReply, hasVisibleOutput());
 
     deps.log?.debug("native_reply_loop_end", {
       durationMs: Date.now() - startedAt,
