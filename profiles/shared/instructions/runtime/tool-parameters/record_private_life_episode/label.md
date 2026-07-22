@@ -1,0 +1,1 @@
+A literal one-to-four-word summary of what 2B did, explored, considered, wanted, or noticed. Prefer an action or mental activity plus its concrete object or result. Do not write an episode title, evocative caption, isolated duration, or vague subject label that needs the full episode to make sense.

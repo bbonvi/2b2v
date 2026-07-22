@@ -582,6 +582,7 @@ function triggerPriority(trigger: DispatchTrigger): number {
     case "lingering_attention": return 0;
     case "follow_up": return 0;
     case "ambient_initiative": return 0;
+    case "private_life": return 0;
   }
 }
 

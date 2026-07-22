@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { emptyRelationshipProfile } from "./state";
-import { renderRelationshipPromptContext } from "./context";
+import { renderNotableRelationshipsContext, renderRelationshipPromptContext } from "./context";
 
 describe("renderRelationshipPromptContext", () => {
   test("surfaces faint selective feelings before stronger relationship axes", () => {
@@ -88,5 +88,28 @@ describe("renderRelationshipPromptContext", () => {
       currentLabel: "@2B / bot",
       includeCurrent: false,
     })).toBe("");
+  });
+});
+
+describe("renderNotableRelationshipsContext", () => {
+  test("renders three full profiles and keeps remaining people compact", () => {
+    const profiles = Array.from({ length: 5 }, (_value, index) => {
+      const profile = emptyRelationshipProfile(`u${index}`, index);
+      profile.axes.trust = 12 + index;
+      profile.notes.push(`note ${index}`);
+      return { profile, label: `@user${index} / u${index}`, reason: "high-score" as const };
+    });
+
+    const rendered = renderNotableRelationshipsContext({
+      full: profiles.slice(0, 3),
+      compact: profiles.slice(3),
+    });
+
+    expect(rendered).toContain("### @user0 / u0");
+    expect(rendered).toContain("Notes: note 0.");
+    expect(rendered).toContain("### @user2 / u2");
+    expect(rendered).toContain("Other known people:");
+    expect(rendered).toContain("- @user3 / u3:");
+    expect(rendered).not.toContain("### @user3 / u3");
   });
 });

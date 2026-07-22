@@ -105,6 +105,12 @@ export interface ChannelActivityBucket {
   messageCount: number;
 }
 
+export interface BotChannelUsage {
+  guildId: string;
+  channelId: string;
+  messageCount: number;
+}
+
 interface MessageSearchRow {
   id: string;
   channel_id: string;
@@ -113,6 +119,33 @@ interface MessageSearchRow {
   translated_content: string;
   created_at: number;
   reply_to_id: string | null;
+}
+
+/** List channels where one bot identity has sent the most real visible messages. */
+export function listBotChannelUsage(
+  db: Database,
+  botUserId: string,
+  limit: number,
+): BotChannelUsage[] {
+  const boundedLimit = Math.max(1, Math.min(limit, 100));
+  const rows = db.raw.prepare(
+    `SELECT guild_id, channel_id, COUNT(*) AS message_count, MAX(created_at) AS latest_at
+     FROM messages
+     WHERE user_id = ? AND is_bot = 1 AND is_synthetic = 0 AND is_prompt_only = 0
+       AND deleted_at IS NULL
+     GROUP BY guild_id, channel_id
+     ORDER BY message_count DESC, latest_at DESC, channel_id ASC
+     LIMIT ?`,
+  ).all(botUserId, boundedLimit) as Array<{
+    guild_id: string;
+    channel_id: string;
+    message_count: number;
+  }>;
+  return rows.map((row) => ({
+    guildId: row.guild_id,
+    channelId: row.channel_id,
+    messageCount: row.message_count,
+  }));
 }
 
 interface HistoryRow {

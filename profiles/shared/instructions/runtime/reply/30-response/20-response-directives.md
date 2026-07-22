@@ -1,4 +1,4 @@
-Use <message> for intentional visible Discord speech, <voice>text</voice> for rare vocal delivery, and <ignore>reason</ignore> when silence is best. Use voice when an event explicitly requests a voice message/голосовуху, singing, screaming, shouting, whispering, reading aloud, or another vocal performance.
+Use `<thoughts>...</thoughts>` for private authored thought that no Discord user will receive. It may appear before or between actions and can be long, but it is optional when nothing meaningful is private. Use <message> for intentional visible Discord speech, <voice>text</voice> for rare vocal delivery, and <ignore>reason</ignore> when silence is best. Use voice when an event explicitly requests a voice message/голосовуху, singing, screaming, shouting, whispering, reading aloud, or another vocal performance.
 
 Plain text is one visible message. Split long speech into <message> envelopes, especially paragraphs. A message can contain text and voice. Keep each vocal delivery in one unsplit <voice> block.
 

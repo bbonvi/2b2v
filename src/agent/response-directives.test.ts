@@ -59,6 +59,34 @@ describe("parseResponseDirectives", () => {
     });
   });
 
+  test("extracts private thoughts and removes them from visible output", () => {
+    expect(parseResponseDirectives("<thoughts>private choice</thoughts><message>visible</message>")).toEqual({
+      ignored: false,
+      privateThoughts: ["private choice"],
+      segments: [{ kind: "text", text: "visible" }],
+    });
+    expect(parseResponseDirectives("before <thoughts>one</thoughts> between <thoughts>two</thoughts> after")).toEqual({
+      ignored: false,
+      privateThoughts: ["one", "two"],
+      segments: [{ kind: "text", text: "before  between  after" }],
+    });
+  });
+
+  test("blocks malformed private thoughts instead of exposing them as text", () => {
+    for (const response of [
+      "<thoughts>private",
+      "<thoughts>outer<thoughts>inner</thoughts><message>visible</message>",
+      "</thoughts><message>visible</message>",
+      "<thoughts>private</scene><message>visible</message>",
+    ]) {
+      expect(parseResponseDirectives(response)).toEqual({
+        ignored: false,
+        malformedPrivateOutput: true,
+        segments: [],
+      });
+    }
+  });
+
   test("parses audio as a voice directive alias", () => {
     expect(parseResponseDirectives("Text <audio>hello</audio>")).toEqual({
       ignored: false,

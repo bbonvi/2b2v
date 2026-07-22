@@ -1,35 +1,33 @@
-import { ChannelType, type Client, type Guild, type GuildBasedChannel } from "discord.js";
-import type { ChannelInfo } from "../agent/channel-list-tool";
+import type { Client, GuildBasedChannel, ThreadChannel } from "discord.js";
 import { botChannelPermissions, channelTypeLabel } from "./message-sender";
 
 const DISCORD_CONTEXT_MAX_GUILDS = 12;
+const DISCORD_CONTEXT_POPULAR_CHANNELS = 5;
 
-function isMainDiscordContextChannel(channel: GuildBasedChannel): boolean {
-  return channel.type === ChannelType.GuildText
-    || channel.type === ChannelType.GuildAnnouncement
-    || channel.type === ChannelType.GuildForum
-    || channel.type === ChannelType.GuildMedia;
+export interface PopularDiscordChannelUsage {
+  guildId: string;
+  channelId: string;
+  messageCount: number;
 }
 
-function systemDiscordContextChannel(client: Client, guild: Guild, currentChannelId: string): ChannelInfo | null {
-  if (guild.systemChannelId === null) return null;
-  const channel = guild.channels.cache.get(guild.systemChannelId);
-  if (channel === undefined || !isMainDiscordContextChannel(channel)) return null;
-
-  const permissions = botChannelPermissions(client, channel);
-  if (!permissions.canView) return null;
-  const categoryName = channel.parent?.name;
-  return {
-    guildId: guild.id,
-    guildName: guild.name,
-    id: channel.id,
-    name: channel.name,
-    type: channelTypeLabel(channel),
-    canView: permissions.canView,
-    canSend: permissions.canSend,
-    isCurrent: channel.id === currentChannelId,
-    ...(categoryName !== undefined ? { categoryName } : {}),
-  };
+function popularChannelLines(input: {
+  client: Client;
+  currentChannelId: string;
+  popularChannels: readonly PopularDiscordChannelUsage[];
+}): string[] {
+  const lines: string[] = [];
+  for (const usage of input.popularChannels) {
+    if (lines.length >= DISCORD_CONTEXT_POPULAR_CHANNELS) break;
+    const cached = input.client.channels.cache.get(usage.channelId);
+    if (cached === undefined || cached.isDMBased() || !("guildId" in cached) || cached.guildId !== usage.guildId) continue;
+    const channel = cached as GuildBasedChannel | ThreadChannel;
+    const permissions = botChannelPermissions(input.client, channel);
+    if (!permissions.canView) continue;
+    const guildName = input.client.guilds.cache.get(usage.guildId)?.name ?? usage.guildId;
+    const current = usage.channelId === input.currentChannelId ? " current" : "";
+    lines.push(`- ${guildName} / #${channel.name} | guild_id=${usage.guildId} | channel_id=${usage.channelId} | type=${channelTypeLabel(channel)} | send=${permissions.canSend ? "yes" : "no"} | 2B_messages=${usage.messageCount}${current}`);
+  }
+  return lines;
 }
 
 export function buildDiscordContext(input: {
@@ -39,6 +37,7 @@ export function buildDiscordContext(input: {
   currentChannelId: string;
   currentChannelName?: string;
   navigationTemplate: string;
+  popularChannels?: readonly PopularDiscordChannelUsage[];
 }): string {
   const guilds = [...input.client.guilds.cache.values()]
     .sort((a, b) => {
@@ -54,19 +53,21 @@ export function buildDiscordContext(input: {
     `Current guild: ${input.currentGuildName} (${input.currentGuildId})`,
     `Current channel/thread: ${currentChannel}`,
     ...input.navigationTemplate.split(/\r?\n/),
+    "Guilds in 2B's Discord life:",
   ];
 
   for (const guild of guilds) {
     const current = guild.id === input.currentGuildId ? " current" : "";
     lines.push(`- ${guild.name} | guild_id=${guild.id}${current}`);
-    const channel = systemDiscordContextChannel(input.client, guild, input.currentChannelId);
-    if (channel === null) {
-      lines.push("  system_channel: (none cached/visible; use list_channels with guild_id if needed)");
-      continue;
-    }
-    const marker = channel.isCurrent ? " *" : "";
-    lines.push(`  system_channel: #${channel.name} | channel_id=${channel.id} | type=${channel.type} | send=${channel.canSend ? "yes" : "no"}${marker}`);
   }
+
+  const popular = popularChannelLines({
+    client: input.client,
+    currentChannelId: input.currentChannelId,
+    popularChannels: input.popularChannels ?? [],
+  });
+  lines.push("2B's five most-used accessible channels, ranked by her real visible message count:");
+  lines.push(...(popular.length > 0 ? popular : ["- none recorded"]));
 
   return lines.join("\n");
 }

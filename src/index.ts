@@ -17,7 +17,7 @@ import { botChannelPermissions, channelDisplayName, channelTypeLabel, createDisc
 import { registerReactionSyncRuntime } from "./discord/reaction-sync-runtime";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { createScheduledTaskRunner } from "./scheduler/scheduled-task-runtime";
-import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type HandleResult, type AssetAttachmentResolver, type IncomingMessage, type HandlerDeps, type MessageSender, type OutboundAttachment } from "./agent/handler";
+import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type HandleResult, type AssetAttachmentResolver, type IncomingMessage, type HandlerDeps, type MemoryExtractionRequest, type MessageSender, type OutboundAttachment } from "./agent/handler";
 import { trackWriteToolStarts } from "./agent/tool-access";
 import { buildComputedContactContextForUser } from "./agent/contact-context";
 import { shouldRespond, shouldRespondDeliberately, type TriggerResult } from "./agent/triggers";
@@ -26,7 +26,7 @@ import { typingSimulationDelayMs } from "./agent/typing-simulation";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
-import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listChannelMessages, getRoutedMessageSource, getLatestMessageActivityBefore, type MessageActivity } from "./db/message-repository";
+import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listBotChannelUsage, listChannelMessages, getRoutedMessageSource, getLatestMessageActivityBefore, type MessageActivity } from "./db/message-repository";
 import { cleanupDeletedDiscordMessage } from "./db/message-cleanup";
 import {
   countMessagesSinceMemoryExtraction,
@@ -45,7 +45,7 @@ import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
 import type { TtsResult } from "./tts/types";
-import { buildMemoryContext, buildMemoryMaintenanceContext, buildVisibleUserMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
+import { buildMemoryContext, buildMemoryMaintenanceContext, buildPrivateLifeMemoryContext, buildVisibleUserMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
 import { createSearchChannelMessagesTool } from "./agent/search-channel-messages-tool";
 import { createScheduleTools } from "./agent/schedule-tool";
 import { createChatUserListTool, type MemberInfo } from "./agent/member-list-tool";
@@ -88,6 +88,15 @@ import {
 import { createModelImageSupportStore } from "./llm/model-image-support";
 import { resolveModelProfile } from "./llm/client";
 import { createAmbientRuntime } from "./ambient/runtime";
+import { createPrivateLifeRuntime } from "./private-life/runtime.ts";
+import { createPrivateLifeSummaryTool } from "./private-life/summary-tool.ts";
+import {
+  PRIVATE_LIFE_ACTION_SCOPES,
+  PRIVATE_LIFE_ATTENTION_ORIGINS,
+  PRIVATE_LIFE_CURIOSITY_MODES,
+  PRIVATE_LIFE_TERRITORIES,
+} from "./private-life/types.ts";
+import { clearExpiredPrivateLifeThoughts } from "./db/private-life-repository.ts";
 import { createPersonaModeRuntime } from "./modes/runtime";
 import type { PersonaModeActivityType } from "./modes/types";
 import { cacheAssetExtraction, getAssetById, getAssetsByMessageId, syncMessageAssets } from "./db/asset-repository";
@@ -109,6 +118,7 @@ import {
   createRecordRelationshipTool,
   getRelationshipProfile,
   listRelationshipProfiles,
+  renderNotableRelationshipsContext,
   renderRelationshipPromptContext,
   type RelationshipContextProfile,
   type RelationshipConfig,
@@ -1838,6 +1848,14 @@ const memoryCleanupTimer = setInterval(() => {
   if (deleted > 0) {
     log.info("expired memories cleaned", { deleted });
   }
+  const thoughtRetentionDays = globalConfig.privateLife?.thoughtRetentionDays ?? 0;
+  const clearedThoughts = clearExpiredPrivateLifeThoughts(
+    db,
+    Date.now() - thoughtRetentionDays * 86_400_000,
+  );
+  if (clearedThoughts > 0) {
+    log.info("expired private-life thoughts cleared", { clearedThoughts, thoughtRetentionDays });
+  }
   const expiredStaged = listStagedAssets(db, { unresolvedOnly: true, limit: 500 })
     .filter((asset) => asset.expiresAt <= Date.now());
   for (const staged of expiredStaged) {
@@ -2109,7 +2127,30 @@ function buildTemporalContext(input: {
   ].join("\n");
 }
 
-type RelationshipContextRunMode = "live" | "virtual";
+type RelationshipContextRunMode = "live" | "virtual" | "private-life";
+
+function notableRelationshipProfiles(): RelationshipContextProfile[] {
+  return listRelationshipProfiles(db, 100)
+    .filter((profile) => Object.values(profile.axes).some((value) => value !== 0)
+      || profile.notes.length > 0
+      || profile.boundaries.length > 0
+      || profile.openLoops.length > 0
+      || profile.recent.length > 0)
+    .map((profile) => ({
+      profile,
+      score: Object.values(profile.axes).reduce((sum, value) => sum + Math.abs(value), 0)
+        + profile.notes.length * 3
+        + profile.boundaries.length * 2
+        + profile.openLoops.length * 4
+        + profile.recent.length * 2,
+    }))
+    .sort((a, b) => {
+      const scoreDifference = b.score - a.score;
+      return scoreDifference !== 0 ? scoreDifference : b.profile.updatedAt - a.profile.updatedAt;
+    })
+    .slice(0, 13)
+    .map(({ profile }) => ({ profile, label: profile.userId, reason: "high-score" }));
+}
 
 function buildRelationshipPromptContext(input: {
   guildConfig: GuildConfig;
@@ -2118,9 +2159,18 @@ function buildRelationshipPromptContext(input: {
   resolveUserLabel: (userId: string) => string;
   contactContext?: string;
   mode: RelationshipContextRunMode;
+  notable?: RelationshipContextProfile[];
 }): string {
   const config = getRelationshipConfig(input.guildConfig);
   if (!config.enabled || !config.promptInjection) return "";
+  if (input.mode === "private-life") {
+    const notable = input.notable ?? [];
+    return renderNotableRelationshipsContext({
+      full: notable.slice(0, 3),
+      compact: notable.slice(3, 13),
+      template: promptBundle.runtime.relationships.context,
+    });
+  }
   const currentUserId = input.latestUserMessage.authorId;
   const visible = input.visibleUserIds
     .filter((userId) => userId !== currentUserId)
@@ -2174,7 +2224,12 @@ function blockToolsExcept(tools: AgentTool[], allowedName: string, passLabel: st
 	      });
 }
 
-const maintenanceToolNames = new Set(["record_memory", "record_relationship", "record_inner_threads"]);
+const maintenanceToolNames = new Set([
+  "record_memory",
+  "record_relationship",
+  "record_inner_threads",
+  "record_private_life_episode",
+]);
 const semanticMaintenanceCoordinator = new SemanticMaintenanceCoordinator();
 
 function latestHumanIdentity(guildId: string, channelId: string): {
@@ -2235,6 +2290,23 @@ function promptLabMemoryDryRunTool(tool: AgentTool, dryRuns: Array<{ tool: strin
   };
 }
 
+function promptLabMaintenanceDryRunTools(
+  tools: AgentTool[],
+  allowedToolName: MaintenanceWriteToolName,
+  dryRuns: Array<{ tool: string; args: unknown }> | undefined,
+): AgentTool[] {
+  if (dryRuns === undefined) return tools;
+  return tools.map((tool) => tool.name === allowedToolName
+    ? {
+        ...tool,
+        execute: async (toolCallId: string, params: unknown, signal?: AbortSignal): Promise<AgentToolResult<unknown>> => {
+          dryRuns.push({ tool: tool.name, args: params });
+          return await tool.execute(toolCallId, params, signal);
+        },
+      }
+    : tool);
+}
+
 function createPostReplyMaintenanceTools(input: {
   guild: Guild;
   guildConfig: GuildConfig;
@@ -2244,6 +2316,8 @@ function createPostReplyMaintenanceTools(input: {
   sourceMessageId: string;
   dryRun?: boolean;
   dryRuns?: Array<{ tool: string; args: unknown }>;
+  /** Null requires each relationship signal to name its own target user. */
+  relationshipUserId?: string | null;
   onRelationshipResult?: (result: RelationshipMutationResult, candidates: unknown[]) => void;
   sourceRequestId?: string;
 }): AgentTool[] {
@@ -2275,7 +2349,9 @@ function createPostReplyMaintenanceTools(input: {
     scope: {
       guildId: input.memoryRequest.incomingMessage.guildId,
       channelId: input.memoryRequest.incomingMessage.channelId,
-      userId: input.memoryRequest.incomingMessage.authorId,
+      ...(input.relationshipUserId === null
+        ? {}
+        : { userId: input.relationshipUserId ?? input.memoryRequest.incomingMessage.authorId }),
       sourceMessageId: input.memoryRequest.sourceMessageId,
     },
     onResult: (result, candidates) => input.onRelationshipResult?.(result, candidates),
@@ -2311,6 +2387,7 @@ async function runMemoryPostReplyExtraction(input: {
   currentUsername?: string;
   dryRun?: boolean;
   dryRuns?: Array<{ tool: string; args: unknown }>;
+  maintenanceTools?: AgentTool[];
 }): Promise<{ requestId?: string; enabled: boolean; ran: boolean; error?: string }> {
   if (!input.guildConfig.memoryExtraction.postReply || !hasMaintenanceMaterial(input.memoryRequest)) {
     return { enabled: input.guildConfig.memoryExtraction.postReply, ran: false };
@@ -2335,7 +2412,7 @@ async function runMemoryPostReplyExtraction(input: {
   });
   memoryLog.setAgentRan(true);
   requestLogStore.incrementActive();
-  const maintenanceTools = createPostReplyMaintenanceTools({
+  const maintenanceTools = input.maintenanceTools ?? createPostReplyMaintenanceTools({
     guild: input.guild,
     guildConfig: input.guildConfig,
     memoryRequest: input.memoryRequest,
@@ -2418,6 +2495,8 @@ async function runRelationshipPostReplyExtraction(input: {
   currentUsername?: string;
   dryRuns?: Array<{ tool: string; args: unknown }>;
   onResult?: (result: RelationshipMutationResult, candidates: unknown[]) => void;
+  maintenanceTools?: AgentTool[];
+  additionalDecisionInstruction?: string;
 }): Promise<void> {
   const config = getRelationshipConfig(input.guildConfig);
   if (!config.enabled || !hasMaintenanceMaterial(input.memoryRequest)) return;
@@ -2442,7 +2521,7 @@ async function runRelationshipPostReplyExtraction(input: {
     relationshipsLog.setAgentRan(true);
     requestLogStore.incrementActive();
   }
-  const maintenanceTools = input.guild === undefined
+  const maintenanceTools = input.maintenanceTools ?? (input.guild === undefined
     ? [createRecordRelationshipTool({
         db,
         config,
@@ -2466,7 +2545,7 @@ async function runRelationshipPostReplyExtraction(input: {
         dryRun: input.dryRun,
         dryRuns: input.dryRuns,
         onRelationshipResult: input.onResult,
-      });
+      }));
   try {
     const executionMode = runtimeContextTemplate(
       "relationship-maintenance-execution-mode",
@@ -2498,6 +2577,7 @@ async function runRelationshipPostReplyExtraction(input: {
           {},
           "Decide silently whether relationships should be updated. Use record_relationship only if an update is useful.",
         ),
+        input.additionalDecisionInstruction ?? "",
       ].filter((part) => part !== "").join("\n\n"),
       modelProfile: config.modelProfile,
       maxToolCalls: config.maxToolCalls,
@@ -2525,6 +2605,7 @@ async function runInnerThreadPostReplyExtraction(input: {
   channel: unknown;
   sourceRequestId: string;
   dryRun?: boolean;
+  maintenanceTools?: AgentTool[];
 }): Promise<void> {
   if (!innerThreadsEnabled(input.guildConfig) || !hasMaintenanceMaterial(input.memoryRequest)) return;
   const guildId = input.memoryRequest.incomingMessage.guildId ?? input.guild.id;
@@ -2546,7 +2627,7 @@ async function runInnerThreadPostReplyExtraction(input: {
   });
   requestLog.setAgentRan(true);
   requestLogStore.incrementActive();
-  const maintenanceTools = createPostReplyMaintenanceTools({
+  const maintenanceTools = input.maintenanceTools ?? createPostReplyMaintenanceTools({
     guild: input.guild,
     guildConfig: input.guildConfig,
     memoryRequest: input.memoryRequest,
@@ -2602,6 +2683,177 @@ async function runInnerThreadPostReplyExtraction(input: {
     requestLog.emit(log);
     requestLogStore.decrementActive();
   }
+}
+
+async function runPrivateLifeMaintenance(input: {
+  episodeId: string;
+  guild: Guild;
+  channel: SendableGuildChannel;
+  guildConfig: GuildConfig;
+  request: MemoryExtractionRequest;
+  sourceRequestId: string;
+  dryRun: boolean;
+  dryRuns: Array<{ tool: string; args: unknown }>;
+}): Promise<void> {
+  const privateMaintenanceTools = (allowedToolName: MaintenanceWriteToolName): AgentTool[] =>
+    promptLabMaintenanceDryRunTools(
+      createPrivateLifeMaintenanceTools({
+        episodeId: input.episodeId,
+        guild: input.guild,
+        guildConfig: input.guildConfig,
+        memoryRequest: input.request,
+        sourceRequestId: input.sourceRequestId,
+        dryRun: input.dryRun,
+      }),
+      allowedToolName,
+      input.dryRun ? input.dryRuns : undefined,
+    );
+
+  await runPrivateLifeEpisodeSummary({
+    ...input,
+    maintenanceTools: privateMaintenanceTools("record_private_life_episode"),
+  });
+
+  const latestHuman = latestHumanIdentity(input.guild.id, input.channel.id);
+  await runMemoryPostReplyExtraction({
+    guildConfig: input.guildConfig,
+    memoryRequest: input.request,
+    guild: input.guild,
+    channel: input.channel,
+    sourceRequestId: input.sourceRequestId,
+    source: "private_life",
+    currentUserId: latestHuman.userId,
+    currentUsername: latestHuman.username,
+    dryRun: input.dryRun,
+    maintenanceTools: privateMaintenanceTools("record_memory"),
+  });
+  await runRelationshipPostReplyExtraction({
+    guildConfig: input.guildConfig,
+    memoryRequest: input.request,
+    guild: input.guild,
+    channel: input.channel,
+    sourceRequestId: input.sourceRequestId,
+    source: "private_life",
+    currentUserId: latestHuman.userId,
+    currentUsername: latestHuman.username,
+    dryRun: input.dryRun,
+    maintenanceTools: privateMaintenanceTools("record_relationship"),
+    additionalDecisionInstruction: [
+      "## Private-Life Relationship Scope",
+      "No human speaker caused this private-life turn. Do not default to the synthetic author or latest active user. Every relationship signal must name a grounded known Discord user ID; otherwise do nothing.",
+    ].join("\n"),
+  });
+  await runInnerThreadPostReplyExtraction({
+    guildConfig: input.guildConfig,
+    memoryRequest: input.request,
+    guild: input.guild,
+    channel: input.channel,
+    sourceRequestId: input.sourceRequestId,
+    dryRun: input.dryRun,
+    maintenanceTools: privateMaintenanceTools("record_inner_threads"),
+  });
+}
+
+async function runPrivateLifeEpisodeSummary(input: {
+  episodeId: string;
+  guild: Guild;
+  channel: SendableGuildChannel;
+  guildConfig: GuildConfig;
+  request: MemoryExtractionRequest;
+  sourceRequestId: string;
+  dryRun: boolean;
+  maintenanceTools: AgentTool[];
+}): Promise<void> {
+  const guildId = input.guild.id;
+  const channelId = input.channel.id;
+  const maintenanceLog = new RequestLog(guildId, channelId, requestLogStore);
+  maintenanceLog.setAuthor("private-life-summary");
+  maintenanceLog.setTrigger({
+    type: "private_life_summary",
+    sourceRequestId: input.sourceRequestId,
+    episodeId: input.episodeId,
+    ...(input.dryRun ? { dryRun: true } : {}),
+  });
+  maintenanceLog.setTriggerContext({
+    ...dashboardTriggerLocation(input.guild, input.channel),
+    messageId: input.episodeId,
+    authorUsername: "private-life",
+    content: input.request.userMessage,
+    translatedContent: input.request.userMessage,
+  });
+  maintenanceLog.setAgentRan(true);
+  requestLogStore.incrementActive();
+  try {
+    await runSilentToolAgentPass({
+      globalConfig,
+      guildConfig: input.guildConfig,
+      context: input.request.context,
+      systemPrompt: promptBundle.systemPrompt,
+      personaPrompt: promptBundle.corePrompt,
+      runtimePrompts: promptBundle.runtime,
+      incomingMessage: input.request.incomingMessage,
+      userContent: input.request.userMessage,
+      assistantReply: input.request.assistantReply,
+      visibleReplySent: input.request.visibleReplySent,
+      tools: toolsForMaintenancePass(
+        input.request.availableTools,
+        input.maintenanceTools,
+        "record_private_life_episode",
+        "private-life episode summary pass",
+      ),
+      runtimeInstruction: [promptBundle.runtime.reply, promptBundle.runtime.privateLife ?? ""]
+        .filter((part) => part.trim() !== "")
+        .join("\n\n"),
+      controlMessage: runtimeContextTemplate("private-life-maintenance"),
+      modelProfile: globalConfig.privateLife?.modelProfile ?? input.guildConfig.modelProfile,
+      maxToolCalls: 3,
+      terminateAfterSuccessfulToolRoundNames: ["record_private_life_episode"],
+      transcript: input.request.maintenanceTranscript,
+      promptContext: input.request.promptContext,
+      requestLog: maintenanceLog,
+      log: log.child({ component: "private-life-summary", episodeId: input.episodeId }),
+    });
+  } catch (error) {
+    maintenanceLog.setError(error instanceof Error ? error.message : String(error));
+    throw error;
+  } finally {
+    maintenanceLog.emit(log);
+    requestLogStore.decrementActive();
+  }
+}
+
+function createPrivateLifeMaintenanceTools(input: {
+  episodeId: string;
+  guild: Guild;
+  guildConfig: GuildConfig;
+  memoryRequest: MemoryExtractionRequest;
+  sourceRequestId: string;
+  dryRun: boolean;
+}): AgentTool[] {
+  const latestHuman = latestHumanIdentity(
+    input.guild.id,
+    input.memoryRequest.incomingMessage.channelId ?? "",
+  );
+  return applyRuntimeToolPrompts([
+    ...createPostReplyMaintenanceTools({
+      guild: input.guild,
+      guildConfig: input.guildConfig,
+      memoryRequest: input.memoryRequest,
+      currentUserId: latestHuman.userId,
+      currentUsername: latestHuman.username,
+      sourceMessageId: input.episodeId,
+      sourceRequestId: input.sourceRequestId,
+      dryRun: input.dryRun,
+      relationshipUserId: null,
+    }),
+    createPrivateLifeSummaryTool({
+      db,
+      episodeId: input.episodeId,
+      description: runtimeToolDescription("record_private_life_episode")
+        ?? "Record one compact private-life episode label.",
+      dryRun: input.dryRun,
+    }),
+  ], promptBundle.runtime);
 }
 
 async function buildContext(
@@ -2666,15 +2918,37 @@ async function buildContext(
     ...(historyOptions.additionalVisibleUserIds ?? []),
   ])];
 
-  const memories = buildMemoryContext({
-    db,
-    guildId,
-    currentUserId: latestUserMessage.authorId,
-    visibleUserIds,
-    limit: guildConfig.memoryContext?.maxRows ?? 80,
-    resolveUserId: (userId) => resolvePromptUsername(guild, userId),
-    contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
-  });
+  const notable = relationshipsMode === "private-life"
+    ? notableRelationshipProfiles().map((entry) => ({
+        ...entry,
+        label: (() => {
+          const member = guild.members.cache.get(entry.profile.userId);
+          const username = member?.user.username ?? entry.profile.userId;
+          const displayName = member?.displayName;
+          return displayName !== undefined && displayName !== username
+            ? `@${username} (${displayName}) / ${entry.profile.userId}`
+            : `@${username} / ${entry.profile.userId}`;
+        })(),
+      }))
+    : [];
+  const memories = relationshipsMode === "private-life"
+    ? buildPrivateLifeMemoryContext({
+        db,
+        guildId,
+        notableUserIds: notable.slice(0, 3).map((entry) => entry.profile.userId),
+        limit: guildConfig.memoryContext?.maxRows ?? 80,
+        resolveUserId: (userId) => resolvePromptUsername(guild, userId),
+        contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
+      })
+    : buildMemoryContext({
+        db,
+        guildId,
+        currentUserId: latestUserMessage.authorId,
+        visibleUserIds,
+        limit: guildConfig.memoryContext?.maxRows ?? 80,
+        resolveUserId: (userId) => resolvePromptUsername(guild, userId),
+        contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
+      });
 
   const pendingSchedules = listUpcomingForContext(db, guildId, channelId);
   const oneOffCount = pendingSchedules.filter((s) => s.type === "one_off").length;
@@ -2693,6 +2967,7 @@ async function buildContext(
     currentChannelId: channelId,
     currentChannelName,
     navigationTemplate: runtimeContextTemplate("discord-navigation", {}, "Guild shortlist for navigation context only."),
+    popularChannels: client.user?.id === undefined ? [] : listBotChannelUsage(db, client.user.id, 25),
   });
 
   // Emoji cache refresh (always needed for outbound translation)
@@ -2759,6 +3034,7 @@ async function buildContext(
     },
     contactContext,
     mode: relationshipsMode,
+    notable,
   });
 
   if (liveChannel !== null && isSendableGuildChannel(liveChannel) && liveChannel.isThread()) {
@@ -3913,6 +4189,52 @@ const ambientRuntime = createAmbientRuntime({
   },
 });
 
+const privateLifeRuntime = createPrivateLifeRuntime({
+  db,
+  client,
+  log,
+  requestLogStore,
+  getPromptBundle: () => promptBundle,
+  getGlobalConfig: () => globalConfig,
+  getGuildConfig,
+  resolveClientGuild,
+  fetchAccessibleGuildChannel,
+  createSyntheticReplyFallbackDeps,
+  buildContext,
+  buildAgentTools,
+  createVisibleMaintenanceTools: ({
+    episodeId,
+    guild,
+    guildConfig,
+    memoryRequest,
+    sourceRequestId,
+  }) => blockToolsExcept(createPrivateLifeMaintenanceTools({
+    episodeId,
+    guild,
+    guildConfig,
+    memoryRequest,
+    sourceRequestId,
+    dryRun: true,
+  }), "", "private-life actor mode"),
+  createBotDiscordMessageSender,
+  createHandlerDeps,
+  promptLabDryRunTools,
+  promptLabSyntheticId,
+  promptLabSummary,
+  runMaintenance: runPrivateLifeMaintenance,
+  isBusy: (guildId, channelId) => isScheduledAttentionBusy(guildId, channelId)
+    || requestLogStore.getActiveCount() > 0,
+  activeRequestCount: () => requestLogStore.getActiveCount(),
+  hasRecentVisibleOutput: (since) => {
+    const botUserId = client.user?.id;
+    if (botUserId === undefined) return true;
+    return db.raw.prepare(`SELECT 1 FROM messages
+      WHERE user_id = ? AND is_bot = 1 AND is_synthetic = 0
+        AND is_prompt_only = 0 AND deleted_at IS NULL AND created_at >= ?
+      LIMIT 1`).get(botUserId, since) !== null;
+  },
+});
+
 // --- 21. Channel dispatcher ---
 const dispatchers = new Map<string, ChannelDispatcher>();
 
@@ -4797,7 +5119,9 @@ async function reloadConfigs(): Promise<void> {
     dispatchers.clear();
     ambientRuntime.clearAmbientAttentionState();
     ambientRuntime.clearAmbientInitiativeState();
+    privateLifeRuntime.clear();
     ambientRuntime.startAmbientInitiativeLoops();
+    privateLifeRuntime.start();
     await Promise.all(previousDispatchers.map(async (dispatcher) => {
       await dispatcher.drain();
       dispatcher.dispose();
@@ -4865,6 +5189,7 @@ void backgroundTasks.track(backfillMessageAssets({
   log.warn("asset history backfill stopped", { error: error instanceof Error ? error.message : String(error) });
 });
 ambientRuntime.startAmbientInitiativeLoops();
+privateLifeRuntime.start();
 for (const row of db.raw.prepare(
   "SELECT id FROM agent_jobs WHERE status = 'ready' ORDER BY completed_at ASC, created_at ASC",
 ).all() as Array<{ id: string }>) {
@@ -4944,6 +5269,32 @@ const dashboardManagement = {
   deleteLatestMessages: dashboardManagementRuntime.deleteLatestMessages,
   runPromptLab,
   runPromptLabAmbientInitiative: ambientRuntime.runPromptLabAmbientInitiative,
+  runPromptLabPrivateLife: (input: {
+    guildId: string;
+    channelId: string;
+    origin?: string;
+    mode?: string;
+    territory?: string;
+    actionScope?: string;
+  }) => {
+    const origin = PRIVATE_LIFE_ATTENTION_ORIGINS.find((candidate) => candidate === input.origin);
+    const mode = PRIVATE_LIFE_CURIOSITY_MODES.find((candidate) => candidate === input.mode);
+    const territory = PRIVATE_LIFE_TERRITORIES.find((candidate) => candidate === input.territory);
+    const actionScope = PRIVATE_LIFE_ACTION_SCOPES.find((candidate) => candidate === input.actionScope);
+    if (input.origin !== undefined && origin === undefined) throw new Error(`Unknown private-life origin: ${input.origin}`);
+    if (input.mode !== undefined && mode === undefined) throw new Error(`Unknown private-life mode: ${input.mode}`);
+    if (input.territory !== undefined && territory === undefined) throw new Error(`Unknown private-life territory: ${input.territory}`);
+    if (input.actionScope !== undefined && actionScope === undefined) throw new Error(`Unknown private-life action scope: ${input.actionScope}`);
+    return privateLifeRuntime.runPromptLab({
+      guildId: input.guildId,
+      channelId: input.channelId,
+      ...(origin !== undefined ? { origin } : {}),
+      ...(mode !== undefined ? { mode } : {}),
+      ...(territory !== undefined ? { territory } : {}),
+      ...(actionScope !== undefined ? { actionScope } : {}),
+    });
+  },
+  listPrivateLifeEpisodes: (limit?: number) => ({ episodes: privateLifeRuntime.listEpisodes(limit) }),
   listInnerThreads: (filter: { guildId?: string; status?: "active" | "resolved"; limit?: number }) => ({
     threads: listInnerThreads(db, filter),
   }),
@@ -5029,6 +5380,7 @@ async function shutdown(signal: string): Promise<void> {
   for (const watcher of configWatchers) watcher.close();
   ambientRuntime.clearAmbientAttentionState();
   ambientRuntime.clearAmbientInitiativeState();
+  privateLifeRuntime.clear();
   scheduler.stop();
   personaModeRuntime.stop();
   assetBackfillController.abort(new Error("Asset backfill stopped for shutdown."));
@@ -5044,6 +5396,7 @@ async function shutdown(signal: string): Promise<void> {
 
   ambientRuntime.clearAmbientAttentionState();
   ambientRuntime.clearAmbientInitiativeState();
+  privateLifeRuntime.clear();
   for (const dispatcher of dispatchers.values()) dispatcher.dispose();
   dispatchers.clear();
   await client.destroy();

@@ -17,6 +17,8 @@ export interface MessageDelivery {
 export interface ParsedResponseDirectives {
   ignored: boolean;
   ignoredText?: string;
+  /** Authored private monologue removed from every user-visible transport. */
+  privateThoughts?: string[];
   malformedPrivateOutput?: boolean;
   segments: ResponseSegment[];
 }
@@ -35,9 +37,8 @@ interface ParseResult {
 
 const RESERVED_TAG_RE = /<\s*\/?\s*(?:voice|audio|message|ignore)(?=[\s/>])/i;
 const FENCE_RE = /```[ \t]*(?:[a-zA-Z0-9_-]+)?[ \t]*\n?([\s\S]*?)```/g;
-const SCENE_RE = /<\s*scene\b[^>]*>[\s\S]*?<\s*\/\s*scene\s*>/gi;
-const SCENE_CLOSE_RE = /<\s*\/\s*scene\s*>$/i;
-const SCENE_TAG_RE = /<\s*\/?\s*scene(?=[\s/>])/i;
+const PRIVATE_TAG_RE = /<\s*(\/?)\s*(scene|thoughts)(?=[\s/>])([^>]*)>/gi;
+const PRIVATE_TAG_PREFIX_RE = /<\s*\/?\s*(?:scene|thoughts)(?=[\s/>]|$)/i;
 const TAG_RE = /<\s*(\/?)\s*(voice|audio|message|ignore)(?=[\s/>])([^>]*)>/gi;
 const USERNAME_PATTERN = "[A-Za-z0-9_](?:[A-Za-z0-9_.]{0,30}[A-Za-z0-9_])?";
 const CHANNEL_PATTERN = "#[A-Za-z0-9_][\\w-]{0,99}";
@@ -53,15 +54,57 @@ function unwrapDirectiveFences(text: string): string {
   );
 }
 
-function stripSceneCards(text: string): { text: string; malformed: boolean } {
-  const cards = text.match(SCENE_RE) ?? [];
-  const malformed = cards.some((card) => {
-    const openingEnd = card.indexOf(">");
-    const body = card.slice(openingEnd + 1).replace(SCENE_CLOSE_RE, "");
-    return SCENE_TAG_RE.test(body);
-  });
-  const stripped = text.replace(SCENE_RE, "").trim();
-  return { text: stripped, malformed: malformed || SCENE_TAG_RE.test(stripped) };
+function stripPrivateBlocks(text: string): {
+  text: string;
+  thoughts: string[];
+  malformed: boolean;
+} {
+  const visible: string[] = [];
+  const thoughts: string[] = [];
+  const tagRe = new RegExp(PRIVATE_TAG_RE.source, "gi");
+  let cursor = 0;
+  let active: { tag: "scene" | "thoughts"; bodyStart: number } | undefined;
+
+  for (;;) {
+    const match = tagRe.exec(text);
+    if (match === null) break;
+    const closing = match[1] === "/";
+    const rawTag = match[2];
+    if (rawTag === undefined) continue;
+    const tag = rawTag.toLowerCase() as "scene" | "thoughts";
+    const attrs = match[3] ?? "";
+    const selfClosing = /\/\s*$/.test(attrs);
+
+    if (active === undefined) {
+      if (closing) return { text: "", thoughts: [], malformed: true };
+      visible.push(text.slice(cursor, match.index));
+      if (selfClosing) {
+        cursor = tagRe.lastIndex;
+        continue;
+      }
+      active = { tag, bodyStart: tagRe.lastIndex };
+      continue;
+    }
+
+    if (!closing || tag !== active.tag || selfClosing) {
+      return { text: "", thoughts: [], malformed: true };
+    }
+    if (active.tag === "thoughts") {
+      const body = text.slice(active.bodyStart, match.index).trim();
+      if (body !== "") thoughts.push(body);
+    }
+    cursor = tagRe.lastIndex;
+    active = undefined;
+  }
+
+  if (active !== undefined) return { text: "", thoughts: [], malformed: true };
+  visible.push(text.slice(cursor));
+  const stripped = visible.join("").trim();
+  return {
+    text: stripped,
+    thoughts,
+    malformed: PRIVATE_TAG_PREFIX_RE.test(stripped),
+  };
 }
 
 function pushTextSegment(segments: ResponseSegment[], rawText: string): void {
@@ -305,14 +348,15 @@ function parseRange(
 }
 
 export function parseResponseDirectives(response: string): ParsedResponseDirectives {
-  const sceneResult = stripSceneCards(unwrapDirectiveFences(response));
-  if (sceneResult.malformed) {
+  const privateResult = stripPrivateBlocks(unwrapDirectiveFences(response));
+  if (privateResult.malformed) {
     return { ignored: false, malformedPrivateOutput: true, segments: [] };
   }
-  const parsed = parseRange(sceneResult.text, 0, { kind: "text" }, null);
+  const parsed = parseRange(privateResult.text, 0, { kind: "text" }, null);
   return {
     ignored: parsed.ignored,
     ...(parsed.ignoredText !== undefined ? { ignoredText: parsed.ignoredText } : {}),
+    ...(privateResult.thoughts.length > 0 ? { privateThoughts: privateResult.thoughts } : {}),
     segments: parsed.ignored ? [] : normalizeMessageBreaks(parsed.segments),
   };
 }

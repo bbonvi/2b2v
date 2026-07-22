@@ -39,6 +39,10 @@ modelProfiles:
 modelProfile: main
 timezone: Europe/Moscow
 
+# Delamain has no private-life scheduler, selector, episodes, or maintenance.
+privateLife:
+  enabled: false
+
 relationships:
   modelProfile: main
   enabled: false

@@ -308,6 +308,8 @@ export interface HandleResult {
   triggerResult: TriggerResult;
   agentRan: boolean;
   responseText?: string;
+  /** Authored private monologue from complete `<thoughts>` blocks. */
+  privateThoughts?: string[];
   maintenanceTranscript?: OpenRouterMessage[];
   availableTools?: AgentTool[];
   promptContext?: MaintenancePromptContext;
@@ -484,6 +486,28 @@ function textFromMessageParts(message: OpenRouterMessage): string {
     .map((part) => part.text)
     .join("\n")
     .trim();
+}
+
+function portableActorTurnEvidence(
+  transcript: readonly OpenRouterMessage[] | undefined,
+  assistantReply: string,
+): string {
+  const evidence = (transcript ?? []).flatMap((message): string[] => {
+    if (message.role !== "assistant" && message.role !== "tool") return [];
+    const text = textFromMessageParts(message);
+    const calls = (message.tool_calls ?? []).map((call) =>
+      `${call.function.name}(${call.function.arguments})`
+    );
+    const parts = [
+      ...(text !== "" ? [text] : []),
+      ...(calls.length > 0 ? [`Tool calls:\n${calls.join("\n")}`] : []),
+    ];
+    if (parts.length === 0) return [];
+    const source = message.role === "tool" ? `tool:${message.name ?? "unknown"}` : "assistant";
+    return [`[${source}]\n${parts.join("\n")}`];
+  });
+  if (evidence.length > 0) return evidence.join("\n\n");
+  return assistantReply.trim();
 }
 
 async function describeImagesWithFallback(input: {
@@ -875,6 +899,7 @@ const VOLATILE_SECTION_IDS_BY_LABEL: Readonly<Record<string, PromptTransportSect
   "Threads In This Channel": "threadsInChannel",
   "Current Context": "currentContext",
   "Persona Mode": "personaMode",
+  "Private-Life Instruction": "responseInstruction",
   "Response Instruction": "responseInstruction",
 };
 
@@ -2522,6 +2547,15 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
     input.runtimePrompts,
     provider === "openai-codex" ? [] : initialRoles,
   );
+  if (!inheritedPromptCompatible) {
+    const actorEvidence = portableActorTurnEvidence(input.transcript, input.assistantReply);
+    if (actorEvidence !== "") {
+      messages.push({
+        role: "user",
+        content: `## Completed Actor Turn Evidence\n${actorEvidence}`,
+      });
+    }
+  }
   messages.push({ role: "user", content: input.controlMessage });
 
   const { tools: timedTools, state: timingState } = wrapToolsWithTiming(input.tools);
@@ -2962,16 +2996,40 @@ export async function handleMessage(
       }
       scheduleMemoryPass(parsedResponse.ignoredText ?? finalText, hasVisibleOutput());
       deps.log?.debug("native_reply_ignored", { durationMs: Date.now() - startedAt });
-      return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
+      return {
+        triggered: true,
+        triggerResult,
+        agentRan: true,
+        ...(parsedResponse.privateThoughts !== undefined ? { privateThoughts: parsedResponse.privateThoughts } : {}),
+        maintenanceTranscript,
+        availableTools: tools,
+        promptContext: maintenancePromptContext,
+      };
     }
     if (parsedResponse.segments.length === 0) {
       scheduleMemoryPass("", hasVisibleOutput());
       deps.log?.debug("native_reply_empty_after_directives", { durationMs: Date.now() - startedAt });
-      return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
+      return {
+        triggered: true,
+        triggerResult,
+        agentRan: true,
+        ...(parsedResponse.privateThoughts !== undefined ? { privateThoughts: parsedResponse.privateThoughts } : {}),
+        maintenanceTranscript,
+        availableTools: tools,
+        promptContext: maintenancePromptContext,
+      };
     }
     if (deps.preSendCheck !== undefined && !await deps.preSendCheck(finalText)) {
       deps.log?.debug("native_reply_dropped_before_send", { durationMs: Date.now() - startedAt });
-      return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
+      return {
+        triggered: true,
+        triggerResult,
+        agentRan: true,
+        ...(parsedResponse.privateThoughts !== undefined ? { privateThoughts: parsedResponse.privateThoughts } : {}),
+        maintenanceTranscript,
+        availableTools: tools,
+        promptContext: maintenancePromptContext,
+      };
     }
 
     const liveSent = await (liveDispatchers.get("")?.finish(finalText) ?? Promise.resolve(0));
@@ -3003,7 +3061,16 @@ export async function handleMessage(
       durationMs: Date.now() - startedAt,
       outputLength: memoryReply.length,
     });
-    return { triggered: true, triggerResult, agentRan: true, responseText: memoryReply, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
+    return {
+      triggered: true,
+      triggerResult,
+      agentRan: true,
+      responseText: memoryReply,
+      ...(parsedResponse.privateThoughts !== undefined ? { privateThoughts: parsedResponse.privateThoughts } : {}),
+      maintenanceTranscript,
+      availableTools: tools,
+      promptContext: maintenancePromptContext,
+    };
   } finally {
     deps.onAgentEnd?.();
   }

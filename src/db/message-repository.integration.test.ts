@@ -1,6 +1,6 @@
 import { test, expect, beforeEach, describe } from "bun:test";
 import { createDatabase, type Database } from "./database";
-import { getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listChannelMessages, markDiscordMessageDeleted } from "./message-repository";
+import { getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listBotChannelUsage, listChannelMessages, markDiscordMessageDeleted } from "./message-repository";
 
 let db: Database;
 
@@ -48,6 +48,25 @@ function insertMessage(
 
 beforeEach(() => {
   db = createDatabase(":memory:");
+});
+
+describe("listBotChannelUsage", () => {
+  test("ranks channels by real visible messages from the selected bot", () => {
+    insertMessage("b1", { guildId: "g1", channelId: "c1", userId: "bot", isBot: true, createdAt: now });
+    insertMessage("b2", { guildId: "g1", channelId: "c1", userId: "bot", isBot: true, createdAt: now + 1 });
+    insertMessage("b3", { guildId: "g2", channelId: "c2", userId: "bot", isBot: true, createdAt: now + 2 });
+    insertMessage("other-bot", { guildId: "g3", channelId: "c3", userId: "other", isBot: true });
+    insertMessage("human", { guildId: "g3", channelId: "c3", userId: "human" });
+    insertMessage("synthetic", { guildId: "g3", channelId: "c4", userId: "bot", isBot: true, isSynthetic: true });
+    insertMessage("prompt-only", { guildId: "g3", channelId: "c4", userId: "bot", isBot: true, isPromptOnly: true });
+    insertMessage("deleted", { guildId: "g3", channelId: "c4", userId: "bot", isBot: true });
+    markDiscordMessageDeleted(db, { id: "deleted", guildId: "g3", botUserId: "bot" });
+
+    expect(listBotChannelUsage(db, "bot", 5)).toEqual([
+      { guildId: "g1", channelId: "c1", messageCount: 2 },
+      { guildId: "g2", channelId: "c2", messageCount: 1 },
+    ]);
+  });
 });
 
 describe("getLatestMessageActivityBefore", () => {

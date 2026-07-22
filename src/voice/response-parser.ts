@@ -116,6 +116,24 @@ export class VoiceResponseParser {
         this.buffer = this.buffer.slice("</voice>".length);
         continue;
       }
+      if (lower.startsWith("<thoughts")) {
+        const openEnd = this.buffer.indexOf(">");
+        if (openEnd === -1) return final;
+        const openingTag = this.buffer.slice(0, openEnd + 1);
+        if (/\/\s*>$/.test(openingTag)) {
+          this.buffer = this.buffer.slice(openEnd + 1);
+          continue;
+        }
+        const closeStart = lower.indexOf("</thoughts>", openEnd + 1);
+        if (closeStart === -1) return final;
+        const body = this.buffer.slice(openEnd + 1, closeStart);
+        if (/<\s*\/?\s*thoughts(?=[\s/>]|$)/i.test(body)) {
+          this.buffer = "";
+          return true;
+        }
+        this.buffer = this.buffer.slice(closeStart + "</thoughts>".length);
+        continue;
+      }
       if (lower.startsWith("<message")) {
         const openEnd = this.buffer.indexOf(">");
         if (openEnd === -1) return final;
@@ -146,7 +164,7 @@ export class VoiceResponseParser {
         return malformed;
       }
 
-      if (!final && ["<|>", "<voice", "</voice", "<message", "<ignore"].some((prefix) => prefix.startsWith(lower))) {
+      if (!final && ["<|>", "<voice", "</voice", "<message", "<ignore", "<thoughts", "</thoughts"].some((prefix) => prefix.startsWith(lower))) {
         return malformed;
       }
       malformed = true;

@@ -36,6 +36,15 @@ export interface MemoryContextInput {
   contextInstruction?: string;
 }
 
+export interface PrivateLifeMemoryContextInput {
+  db: Database;
+  guildId: string;
+  notableUserIds: readonly string[];
+  resolveUserId?: (userId: string) => string | undefined;
+  limit?: number;
+  contextInstruction?: string;
+}
+
 interface VisibleUserMemorySelectionInput {
   db: Database;
   guildId: string;
@@ -482,6 +491,55 @@ export function buildMemoryContext(input: MemoryContextInput): string {
     ...prefix,
     ...(prefix.length > 0 ? [""] : []),
     ...lines,
+  ].join("\n");
+}
+
+/** Build a broad private-life memory slice without using recent chat speakers. */
+export function buildPrivateLifeMemoryContext(input: PrivateLifeMemoryContextInput): string {
+  const limit = Math.max(1, input.limit ?? 80);
+  const notableUserIds = [...new Set(input.notableUserIds)].slice(0, 3);
+  const recentRows = listMemories(input.db, {
+    guildId: input.guildId,
+    about: "any",
+    relevantUserIds: notableUserIds,
+    order: "recent",
+    limit: Math.min(16, limit),
+  });
+  const selected = new Map<number, MemoryRow>(recentRows.map((row) => [row.id, row]));
+
+  for (const userId of notableUserIds) {
+    if (selected.size >= limit) break;
+    const rows = listMemories(input.db, {
+      guildId: input.guildId,
+      aboutUserId: userId,
+      relevantUserIds: notableUserIds,
+      limit: Math.min(6, limit - selected.size),
+    });
+    for (const row of rows) selected.set(row.id, row);
+  }
+
+  if (selected.size < limit) {
+    const selfRows = listMemories(input.db, {
+      guildId: input.guildId,
+      about: "self",
+      relevantUserIds: notableUserIds,
+      limit: limit - selected.size,
+    });
+    for (const row of selfRows) selected.set(row.id, row);
+  }
+
+  const rows = [...selected.values()]
+    .sort((a, b) => {
+      const updatedDifference = a.updatedAt - b.updatedAt;
+      return updatedDifference !== 0 ? updatedDifference : a.id - b.id;
+    })
+    .slice(0, limit);
+  if (rows.length === 0) return "";
+  const contextInstruction = input.contextInstruction?.trim() ?? "";
+  return [
+    contextInstruction,
+    ...(contextInstruction !== "" ? [""] : []),
+    ...formatMemoryContextRows(rows, input.guildId, input.resolveUserId),
   ].join("\n");
 }
 

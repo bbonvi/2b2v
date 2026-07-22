@@ -24,6 +24,7 @@ import type {
   TypingSimulationConfig,
 } from "./types.ts";
 import type { VoicePreset } from "../tts/types.ts";
+import type { PrivateLifeConfig } from "../private-life/types.ts";
 
 export const DEFAULT_TRIGGER: TriggerConfig = {
   mention: true,
@@ -165,6 +166,58 @@ export const DEFAULT_AMBIENT_INITIATIVE: AmbientInitiativeConfig = {
   evaluator: {
     modelProfile: "main",
     llmOutputTimeoutMs: 8_000,
+  },
+};
+
+export const DEFAULT_PRIVATE_LIFE: PrivateLifeConfig = {
+  enabled: false,
+  modelProfile: "main",
+  opportunitiesPerDay: 50,
+  intervalJitter: 0.45,
+  lateNightStart: "22:30",
+  sleepStart: "23:30",
+  sleepEnd: "07:55",
+  lateNightRateMultiplier: 0.45,
+  sleepRateMultiplier: 0.04,
+  allowVisibleOutput: true,
+  maxVisiblePerDay: 3,
+  visibleOutputCooldownMinutes: 20,
+  maxToolCalls: 20,
+  recentThemeLimit: 24,
+  candidateCount: 5,
+  thoughtRetentionDays: 14,
+  originWeights: {
+    spontaneous: 0.55,
+    "continue-inner-thread": 0.30,
+    "recent-residue": 0.15,
+  },
+  modeWeights: {
+    unstructured: 0.20,
+    investigate: 0.19,
+    "make-or-change": 0.12,
+    "imagine-possibility": 0.18,
+    "offscreen-event-candidate": 0.09,
+    "social-impulse": 0.08,
+    "observe-or-collect": 0.14,
+  },
+  territoryWeights: {
+    open: 0.20,
+    external: 0.12,
+    "technical-material": 0.12,
+    "creative-aesthetic": 0.09,
+    "mundane-private": 0.10,
+    embodied: 0.09,
+    sexual: 0.06,
+    "social-personal": 0.08,
+    community: 0.03,
+    "transgressive-ugly": 0.04,
+    "playful-absurd": 0.07,
+  },
+  actionScopeWeights: {
+    "reflect-only": 0.55,
+    "quiet-exploration": 0.30,
+    "private-action": 0.13,
+    "social-opportunity": 0.02,
   },
 };
 

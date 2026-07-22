@@ -81,7 +81,7 @@ PROFILE=2b bun run dev
 PROFILE=delamain bun run dev
 ```
 
-The Delamain profile disables relationships, inner threads, ambient memory extraction, ambient attention, and VPN. Ambient initiative gives the normal actor a general autonomous opportunity; configured `botContactIds` are available contacts, not mandatory targets or a separate bot-only mode. Profile-specific instruction files override shared files at the same relative path; skill packs override by manifest ID.
+The Delamain profile disables private life, relationships, inner threads, ambient memory extraction, ambient attention, and VPN. Ambient initiative gives the normal actor a general autonomous opportunity; configured `botContactIds` are available contacts, not mandatory targets or a separate bot-only mode. Profile-specific instruction files override shared files at the same relative path; skill packs override by manifest ID.
 
 Minimal guild config:
 
@@ -97,6 +97,8 @@ adminUserIds: []
 Top-level `modelProfiles` entries are complete execution policies: provider, model, model parameters, reasoning level, service tier, Codex transport, and prompt-caching behavior. Workloads and guilds select one by name through `modelProfile`; live voice, voice summary, voice extraction, ambient evaluators, memory, relationships, image reading, and image generation may each select different profiles. All config fields are optional unless the matching feature needs credentials or IDs. `PROFILE` selects configuration and instructions together.
 
 `innerThreads.enabled` defaults to `true` and can be overridden per guild. Set it to `false` to remove inner-thread prompt context and tools and to skip inner-thread maintenance.
+
+Top-level `privateLife.enabled` controls one profile-wide private curiosity loop. Its cadence, night rates, visible-output budget and cooldown, tool budget, novelty window, selector weights, action-scope weights, and retained private-thought duration are configurable under `privateLife`. Action scopes independently weight reflection, quiet exploration, private action, and social opportunity; social output is disabled during sleep and after recent visible bot activity. It uses the selected guild's local time and runs much less often during the sleep window. Set `enabled: false` to disable its scheduler, selector, episode storage, and maintenance. The universal `<thoughts>` response block is separate: it remains available in ordinary turns and is always removed from visible output. Malformed private blocks fail closed.
 
 Profiles may define ordered `personaModes`. Later active modes override earlier ones, while `default` names the always-available global fallback regardless of its list position. Modes are `global` by default; `scope: guild` gives every guild an independent episode plan, active state, aftermath, and server avatar override. Guild-scoped modes cannot set presence because Discord presence is account-wide. A mode can use a daily local-time `scheduledWindow` or a preplanned `triggeredEpisode`; episodes activate only on a natural agent turn during their persisted opportunity and never force a message. Durations accept `ms`, `s`, `m`, `h`, or `d` units, such as `100s`, `30m`, or `7d`.
 

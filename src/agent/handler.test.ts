@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createHash } from "node:crypto";
-import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type ChatCompleteFn, type HandlerDeps, type IncomingMessage, type MessageSender, type VoiceAttachment } from "./handler.ts";
+import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type ChatCompleteFn, type HandlerDeps, type IncomingMessage, type MemoryExtractionRequest, type MessageSender, type VoiceAttachment } from "./handler.ts";
 import type { AssembledContext } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig, PromptTransportConfig } from "../config/types.ts";
 import type { TtsResult } from "../tts/types.ts";
@@ -730,6 +730,49 @@ describe("handleMessage", () => {
     expect(currentTurn).not.toContain("## Current Discord Message Metadata");
     expect(currentTurn).not.toContain("## Current Discord Message");
     expect(currentTurn).not.toContain("Author:");
+  });
+
+  test("places a private-life instruction immediately before its synthetic event", async () => {
+    let promptMessages: string[] = [];
+    const completeChat: ChatCompleteFn = (request) => {
+      promptMessages = request.messages.map((message) => typeof message.content === "string" ? message.content : "");
+      return Promise.resolve({
+        text: "<ignore>",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({
+        eventPrompt: {
+          metadataHeading: "Private-Life Runtime",
+          contentHeading: "Private-Life Opportunity",
+          metadataText: "No Discord user caused this private opportunity.",
+        },
+        content: "Current local date and time: Wednesday 22 July 2026 at 09:25 GMT+03:00",
+        translatedContent: "Current local date and time: Wednesday 22 July 2026 at 09:25 GMT+03:00",
+        mentionedUserIds: ["bot-1"],
+      }),
+      makeDeps({
+        completeChat,
+        context: makeContext({
+          sections: [{
+            label: "Private-Life Instruction",
+            text: "# Private Life Opportunity\n\nPrivate policy.",
+            cached: false,
+            role: "developer",
+          }],
+        }),
+      }),
+    );
+
+    const privateInstructionIndex = promptMessages.findIndex((message) => message.includes("# Private Life Opportunity"));
+    const eventIndex = promptMessages.findIndex((message) => message.includes("## Private-Life Runtime"));
+    expect(privateInstructionIndex).toBeGreaterThanOrEqual(0);
+    expect(eventIndex).toBeGreaterThan(privateInstructionIndex);
+    expect(promptMessages[eventIndex]?.match(/## Private-Life Opportunity/g)).toHaveLength(1);
   });
 
   test("marks an external bot author in current event metadata", async () => {
@@ -1926,6 +1969,71 @@ describe("handleMessage", () => {
 
     expect(result.agentRan).toBe(true);
     expect(result.responseText).toBeUndefined();
+    expect(sender).toHaveBeenCalledTimes(0);
+    expect(afterReply).toHaveBeenCalledTimes(0);
+  });
+
+  test("keeps complete thoughts private and makes them available to maintenance", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<thoughts>I want to inspect the broken seal later.</thoughts><message>The seal is worn.</message>",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: {
+        role: "assistant",
+        stopReason: "stop",
+        usage: { input: 1, output: 1, totalTokens: 2 },
+        content: [{ type: "text", text: "<thoughts>I want to inspect the broken seal later.</thoughts><message>The seal is worn.</message>" }],
+      },
+    });
+    const sentTexts: string[] = [];
+    const sender: MessageSender = mock((text: string) => {
+      sentTexts.push(text);
+      return Promise.resolve({ sentMessageId: "sent-1" });
+    });
+    const afterReplyCalls: MemoryExtractionRequest[] = [];
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        sender,
+        afterReply: (request) => {
+          afterReplyCalls.push(request);
+          return Promise.resolve();
+        },
+      }),
+    );
+
+    expect(sender).toHaveBeenCalledTimes(1);
+    expect(sentTexts).toEqual(["The seal is worn."]);
+    expect(result.responseText).toBe("The seal is worn.");
+    expect(result.privateThoughts).toEqual(["I want to inspect the broken seal later."]);
+    expect(afterReplyCalls[0]?.assistantReply).toBe("The seal is worn.");
+    expect(JSON.stringify(afterReplyCalls[0]?.maintenanceTranscript)).toContain("inspect the broken seal later");
+  });
+
+  test("blocks malformed thoughts without sending or scheduling maintenance", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: "<thoughts>private text that must not leak",
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: {
+        role: "assistant",
+        stopReason: "stop",
+        usage: { input: 1, output: 1, totalTokens: 2 },
+        content: [],
+      },
+    });
+    const sender = mock(() => Promise.resolve({ sentMessageId: "sent-1" }));
+    const afterReply = mock(() => Promise.resolve());
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender, afterReply }),
+    );
+
+    expect(result.responseText).toBeUndefined();
+    expect(result.privateThoughts).toBeUndefined();
     expect(sender).toHaveBeenCalledTimes(0);
     expect(afterReply).toHaveBeenCalledTimes(0);
   });
@@ -4262,6 +4370,70 @@ describe("handleMessage", () => {
     ]));
     expect(JSON.stringify(promptPayloads)).toContain("VISIBLE STABLE PROMPT");
     expect(JSON.stringify(promptPayloads)).not.toContain("Silent Memory Pass");
+  });
+
+  test("incompatible maintenance models receive portable raw actor evidence", async () => {
+    let capturedMessages: OpenRouterMessage[] = [];
+    const transcript: OpenRouterMessage[] = [
+      { role: "user", content: "private opportunity" },
+      {
+        role: "assistant",
+        content: "<thoughts>I want to keep studying this mechanism.</thoughts>",
+        tool_calls: [{
+          id: "search-call",
+          type: "function",
+          function: { name: "web_search", arguments: "{\"query\":\"mechanism\"}" },
+        }],
+      },
+      { role: "tool", name: "web_search", tool_call_id: "search-call", content: "A useful result." },
+    ];
+    const maintenanceTool: AgentTool = {
+      name: "record_memory",
+      label: "record_memory",
+      description: "Record memory",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({ content: [{ type: "text", text: "recorded" }], details: {} }),
+    };
+
+    await runSilentToolAgentPass({
+      globalConfig: makeGlobalConfig(),
+      guildConfig: makeGuildConfig(),
+      context: makeContext(),
+      personaPrompt: "You are a test bot.",
+      runtimePrompts: TEST_RUNTIME_PROMPTS,
+      incomingMessage: makeMessage(),
+      userContent: "private opportunity",
+      assistantReply: "visible reply only",
+      visibleReplySent: true,
+      transcript,
+      promptContext: {
+        provider: "openrouter",
+        model: "different/model",
+        transport: makePromptTransportConfig().openrouter,
+        stableSections: [],
+        initialRoles: ["user"],
+        promptCaching: { enabled: true },
+      },
+      tools: [maintenanceTool],
+      runtimeInstruction: "Private maintenance.",
+      controlMessage: "Decide memory changes.",
+      completeChat: (request) => {
+        capturedMessages = request.messages;
+        return Promise.resolve({
+          text: "",
+          toolCalls: [],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      },
+    });
+
+    const serialized = JSON.stringify(capturedMessages);
+    expect(serialized).toContain("## Completed Actor Turn Evidence");
+    expect(serialized).toContain("<thoughts>I want to keep studying this mechanism.</thoughts>");
+    expect(serialized).toContain("web_search({\\\"query\\\":\\\"mechanism\\\"})");
+    expect(serialized).toContain("A useful result.");
+    expect(capturedMessages.some((message) => message.content === "Decide memory changes.")).toBe(true);
   });
 
 });

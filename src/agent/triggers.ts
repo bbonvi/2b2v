@@ -21,6 +21,7 @@ export type TriggerResult =
   | { reason: "lingering_attention" }
   | { reason: "follow_up" }
   | { reason: "ambient_initiative" }
+  | { reason: "private_life" }
   | null;
 
 /**

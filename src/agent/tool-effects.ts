@@ -3,7 +3,11 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 const runtimeToolEffect = Symbol("runtimeToolEffect");
 
 export type RuntimeToolEffect = "read" | "write" | "agent_state";
-export type MaintenanceWriteToolName = "record_memory" | "record_relationship" | "record_inner_threads";
+export type MaintenanceWriteToolName =
+  | "record_memory"
+  | "record_relationship"
+  | "record_inner_threads"
+  | "record_private_life_episode";
 
 type ClassifiedAgentTool = AgentTool & {
   [runtimeToolEffect]?: RuntimeToolEffect;

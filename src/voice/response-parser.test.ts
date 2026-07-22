@@ -37,6 +37,32 @@ describe("VoiceResponseParser", () => {
     expect(speech).toEqual([]);
   });
 
+  test("withholds complete and malformed private thoughts", async () => {
+    const speech: string[] = [];
+    const parser = new VoiceResponseParser({
+      onSpeech: (text) => { speech.push(text); },
+      onMessage: () => {},
+      onIgnore: () => {},
+    });
+    await parser.push("<thoughts>private ");
+    await parser.push("reaction</thoughts>Spoken answer.");
+    expect(await parser.finish()).toEqual({
+      plannedSpeech: "Spoken answer.",
+      ignored: false,
+      malformed: false,
+    });
+    expect(speech).toEqual(["Spoken answer."]);
+
+    const malformedParser = new VoiceResponseParser({
+      onSpeech: (text) => { speech.push(text); },
+      onMessage: () => {},
+      onIgnore: () => {},
+    });
+    await malformedParser.push("<thoughts>never speak this");
+    expect((await malformedParser.finish()).malformed).toBe(true);
+    expect(speech).toEqual(["Spoken answer."]);
+  });
+
   test("supports instruction-aware ignore", async () => {
     let ignored = "";
     const parser = new VoiceResponseParser({

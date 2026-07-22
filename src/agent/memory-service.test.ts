@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "../db/database";
 import { createMemory, getMemory, listMemories } from "../db/memory-repository";
-import { buildMemoryContext, buildVisibleUserMemoryContext, createRecordMemoryTool, extractAndApplyMemories } from "./memory-service";
+import { buildMemoryContext, buildPrivateLifeMemoryContext, buildVisibleUserMemoryContext, createRecordMemoryTool, extractAndApplyMemories } from "./memory-service";
 
 let db: Database;
 
@@ -272,6 +272,32 @@ describe("buildMemoryContext", () => {
     expect(context).toContain("### @second | anywhere | any(@second)\n\n6 interest | Second speaker memory.");
     expect(context).not.toContain("Excluded speaker memory.");
     expect(context.indexOf("Second speaker memory.")).toBeLessThan(context.indexOf("Recent important memory."));
+  });
+});
+
+describe("buildPrivateLifeMemoryContext", () => {
+  test("combines recent memories, notable people, and stable self continuity", () => {
+    createMemory(db, { guildId: "g1", kind: "note", content: "Old unrelated community memory." });
+    for (let index = 0; index < 16; index += 1) {
+      createMemory(db, { guildId: "g1", kind: "note", content: `Recent community memory ${index}.` });
+    }
+    createMemory(db, { guildId: "g1", aboutUserId: "notable", kind: "fact", content: "Notable person memory." });
+    createMemory(db, { guildId: "g1", aboutUserId: "stranger", kind: "fact", content: "Unrelated person memory." });
+    createMemory(db, { guildId: "g1", about: "self", kind: "journal", content: "Stable self continuity." });
+
+    const context = buildPrivateLifeMemoryContext({
+      db,
+      guildId: "g1",
+      notableUserIds: ["notable"],
+      resolveUserId: (userId) => userId,
+      limit: 20,
+    });
+
+    expect(context).toContain("Recent community memory 15.");
+    expect(context).toContain("Notable person memory.");
+    expect(context).toContain("Stable self continuity.");
+    expect(context).not.toContain("Old unrelated community memory.");
+    expect(context).not.toContain("Unrelated person memory.");
   });
 });
 

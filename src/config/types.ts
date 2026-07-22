@@ -1,6 +1,7 @@
 import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 import type { AssetKind } from "../db/asset-repository.ts";
 import type { PersonaModesConfig, PersonaModesConfigYaml } from "../modes/types.ts";
+import type { PrivateLifeConfig, PrivateLifeConfigYaml } from "../private-life/types.ts";
 import type {
   RelationshipConfig,
   RelationshipConfigYaml,
@@ -590,6 +591,8 @@ export interface GlobalConfig {
   defaultAmbientAttention?: AmbientAttentionConfig;
   /** Default ambient initiative behavior. */
   defaultAmbientInitiative?: AmbientInitiativeConfig;
+  /** Profile-wide private curiosity runtime. */
+  privateLife?: PrivateLifeConfig;
   /** Default native reply/tool loop runtime limits. */
   defaultReplyLoop: ReplyLoopConfig;
   /** Default background memory extraction behavior. */
@@ -740,6 +743,7 @@ export interface MainConfigYaml {
   promptTransport?: PromptTransportConfigYaml;
   ambientAttention?: AmbientAttentionConfigYaml;
   ambientInitiative?: AmbientInitiativeConfigYaml;
+  privateLife?: PrivateLifeConfigYaml;
   relationships?: RelationshipConfigYaml;
   innerThreads?: InnerThreadsConfigYaml;
   voice?: VoiceConfigYaml;

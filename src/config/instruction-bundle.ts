@@ -66,6 +66,8 @@ export interface RuntimePromptBundle {
   ambientInitiative: {
     evaluator: string;
   };
+  /** Stable policy loaded only into profile-wide private-life actor turns. */
+  privateLife?: string;
   /** Relationship engine instruction policies. */
   relationships: {
     context: string;
@@ -372,6 +374,12 @@ export function loadInstructionBundle(profilesDir: string, profile: string, log:
           "runtime.ambient-initiative.evaluator.generic",
         ),
       },
+      privateLife: loadRuntimeDocuments(
+        instructionRoots,
+        "private-life",
+        log,
+        "runtime.private-life",
+      ),
       relationships: {
         context: loadRuntimeDocuments(instructionRoots, "relationships/context", log, "runtime.relationships.context"),
       },

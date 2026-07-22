@@ -17,6 +17,7 @@ import {
   DEFAULT_MEMORY_EXTRACTION,
   DEFAULT_PROMPT_CACHING,
   DEFAULT_PROMPT_TRANSPORT,
+  DEFAULT_PRIVATE_LIFE,
   DEFAULT_RELATIONSHIPS,
   DEFAULT_REPLY_LOOP,
   DEFAULT_SCHEDULE_PRESSURE,
@@ -75,6 +76,14 @@ import type {
   VoiceConfig,
   VoiceConfigYaml,
 } from "./types.ts";
+import {
+  PRIVATE_LIFE_ACTION_SCOPES,
+  PRIVATE_LIFE_ATTENTION_ORIGINS,
+  PRIVATE_LIFE_CURIOSITY_MODES,
+  PRIVATE_LIFE_TERRITORIES,
+  type PrivateLifeConfig,
+  type PrivateLifeConfigYaml,
+} from "../private-life/types.ts";
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
 import { resolvePersonaModesConfig } from "../modes/config.ts";
 import { stripMarkdownComments } from "./instruction-text.ts";
@@ -713,6 +722,105 @@ function resolveAmbientInitiativeConfig(
   return resolved;
 }
 
+function resolvePrivateLifeWeights<T extends string>(
+  keys: readonly T[],
+  defaults: Record<T, number>,
+  partial: Partial<Record<T, number>> | undefined,
+  keyPrefix: string,
+): Record<T, number> {
+  const resolved = { ...defaults };
+  for (const key of keys) {
+    const value = partial?.[key];
+    if (value !== undefined) resolved[key] = value;
+  }
+  let total = 0;
+  for (const [key, value] of Object.entries(resolved)) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      throw new Error(`${keyPrefix}.${key} must be a finite number >= 0`);
+    }
+    total += value;
+  }
+  if (total <= 0) throw new Error(`${keyPrefix} must contain at least one positive weight`);
+  return resolved;
+}
+
+function resolvePrivateLifeConfig(partial: PrivateLifeConfigYaml | undefined): PrivateLifeConfig {
+  const text = (value: string | undefined): string | undefined => {
+    const trimmed = value?.trim();
+    return trimmed !== undefined && trimmed !== "" ? trimmed : undefined;
+  };
+  const { guildId: _guildId, channelId: _channelId, ...values } = partial ?? {};
+  const guildId = text(_guildId);
+  const channelId = text(_channelId);
+  const resolved: PrivateLifeConfig = {
+    ...DEFAULT_PRIVATE_LIFE,
+    ...values,
+    ...(guildId !== undefined ? { guildId } : {}),
+    ...(channelId !== undefined ? { channelId } : {}),
+    originWeights: resolvePrivateLifeWeights(
+      PRIVATE_LIFE_ATTENTION_ORIGINS,
+      DEFAULT_PRIVATE_LIFE.originWeights,
+      partial?.originWeights,
+      "privateLife.originWeights",
+    ),
+    modeWeights: resolvePrivateLifeWeights(
+      PRIVATE_LIFE_CURIOSITY_MODES,
+      DEFAULT_PRIVATE_LIFE.modeWeights,
+      partial?.modeWeights,
+      "privateLife.modeWeights",
+    ),
+    territoryWeights: resolvePrivateLifeWeights(
+      PRIVATE_LIFE_TERRITORIES,
+      DEFAULT_PRIVATE_LIFE.territoryWeights,
+      partial?.territoryWeights,
+      "privateLife.territoryWeights",
+    ),
+    actionScopeWeights: resolvePrivateLifeWeights(
+      PRIVATE_LIFE_ACTION_SCOPES,
+      DEFAULT_PRIVATE_LIFE.actionScopeWeights,
+      partial?.actionScopeWeights,
+      "privateLife.actionScopeWeights",
+    ),
+  };
+  validateClockTime(resolved.lateNightStart, "privateLife.lateNightStart");
+  validateClockTime(resolved.sleepStart, "privateLife.sleepStart");
+  validateClockTime(resolved.sleepEnd, "privateLife.sleepEnd");
+  if (!Number.isFinite(resolved.opportunitiesPerDay) || resolved.opportunitiesPerDay <= 0 || resolved.opportunitiesPerDay > 500) {
+    throw new Error("privateLife.opportunitiesPerDay must be > 0 and <= 500");
+  }
+  if (!Number.isFinite(resolved.intervalJitter) || resolved.intervalJitter < 0 || resolved.intervalJitter > 1) {
+    throw new Error("privateLife.intervalJitter must be between 0 and 1");
+  }
+  for (const key of ["lateNightRateMultiplier", "sleepRateMultiplier"] as const) {
+    const value = resolved[key];
+    if (!Number.isFinite(value) || value <= 0 || value > 1) {
+      throw new Error(`privateLife.${key} must be > 0 and <= 1`);
+    }
+  }
+  if (!Number.isInteger(resolved.maxVisiblePerDay) || resolved.maxVisiblePerDay < 0) {
+    throw new Error("privateLife.maxVisiblePerDay must be >= 0");
+  }
+  if (!Number.isFinite(resolved.visibleOutputCooldownMinutes)
+    || resolved.visibleOutputCooldownMinutes < 0
+    || resolved.visibleOutputCooldownMinutes > 1_440) {
+    throw new Error("privateLife.visibleOutputCooldownMinutes must be between 0 and 1440");
+  }
+  if (!Number.isInteger(resolved.maxToolCalls) || resolved.maxToolCalls < 0) {
+    throw new Error("privateLife.maxToolCalls must be >= 0");
+  }
+  if (!Number.isInteger(resolved.recentThemeLimit) || resolved.recentThemeLimit < 1 || resolved.recentThemeLimit > 200) {
+    throw new Error("privateLife.recentThemeLimit must be between 1 and 200");
+  }
+  if (!Number.isInteger(resolved.candidateCount) || resolved.candidateCount < 2 || resolved.candidateCount > 12) {
+    throw new Error("privateLife.candidateCount must be between 2 and 12");
+  }
+  if (!Number.isInteger(resolved.thoughtRetentionDays) || resolved.thoughtRetentionDays < 0 || resolved.thoughtRetentionDays > 365) {
+    throw new Error("privateLife.thoughtRetentionDays must be between 0 and 365");
+  }
+  if (resolved.modelProfile.trim() === "") throw new Error("privateLife.modelProfile must not be empty");
+  return resolved;
+}
+
 function validateAmbientModeConfig(config: AmbientAttentionModeConfig, keyPrefix: string): void {
   if (!Number.isFinite(config.minDelayMs) || config.minDelayMs < 0) throw new Error(`${keyPrefix}.minDelayMs must be >= 0`);
   if (!Number.isFinite(config.maxDelayMs) || config.maxDelayMs < config.minDelayMs) {
@@ -1095,6 +1203,7 @@ export function loadGlobalConfig(
   const defaultImageGeneration = resolveGlobalImageGeneration(yaml.imageGeneration);
   const defaultAmbientAttention = resolveAmbientAttentionConfig(undefined, yaml.ambientAttention);
   const defaultAmbientInitiative = resolveAmbientInitiativeConfig(undefined, yaml.ambientInitiative);
+  const privateLife = resolvePrivateLifeConfig(yaml.privateLife);
   const defaultMemoryExtraction = resolveGlobalMemoryExtraction(yaml.memoryExtraction);
   const defaultMemoryContext = resolveMemoryContext(undefined, yaml.memoryContext);
   const defaultRelationships = resolveRelationshipConfig(undefined, yaml.relationships);
@@ -1116,6 +1225,7 @@ export function loadGlobalConfig(
     ...(defaultAmbientInitiative !== undefined
       ? [[defaultAmbientInitiative.evaluator.modelProfile, "ambientInitiative.evaluator.modelProfile"] as const]
       : []),
+    [privateLife.modelProfile, "privateLife.modelProfile"],
   ]);
   const openrouterApiKey = env.OPENROUTER_API_KEY;
   const usesOpenRouter = Object.values(modelProfiles).some((profile) => profile.provider === "openrouter");
@@ -1177,6 +1287,7 @@ export function loadGlobalConfig(
     defaultPromptTransport: resolveGlobalPromptTransport(yaml.promptTransport),
     defaultAmbientAttention,
     defaultAmbientInitiative,
+    privateLife,
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
     defaultMemoryExtraction,
     defaultMemoryContext,

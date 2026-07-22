@@ -132,6 +132,36 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_inner_thread_events_created
     ON inner_thread_events(created_at, thread_id);
 
+  CREATE TABLE IF NOT EXISTS private_life_episodes (
+    id                      TEXT PRIMARY KEY,
+    guild_id                TEXT NOT NULL,
+    channel_id              TEXT NOT NULL,
+    request_id              TEXT,
+    status                  TEXT NOT NULL CHECK(status IN ('running', 'complete', 'failed')),
+    day_phase               TEXT NOT NULL CHECK(day_phase IN ('day', 'late-night', 'sleep-window')),
+    origin                  TEXT NOT NULL,
+    mode                    TEXT NOT NULL,
+    territory               TEXT NOT NULL,
+    action_scope            TEXT NOT NULL,
+    candidate_seeds_json    TEXT NOT NULL DEFAULT '[]',
+    continued_thread_id     TEXT,
+    thoughts_text           TEXT,
+    summary_label           TEXT,
+    theme_key               TEXT,
+    facets_json             TEXT NOT NULL DEFAULT '[]',
+    visible_output          TEXT,
+    visible_delivered       INTEGER NOT NULL DEFAULT 0 CHECK(visible_delivered IN (0, 1)),
+    created_at              INTEGER NOT NULL,
+    completed_at            INTEGER,
+    error                   TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_private_life_episodes_created
+    ON private_life_episodes(created_at DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_private_life_episodes_theme
+    ON private_life_episodes(theme_key, created_at DESC);
+
   CREATE TABLE IF NOT EXISTS messages (
     id                  TEXT PRIMARY KEY,
     guild_id            TEXT NOT NULL,

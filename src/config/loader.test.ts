@@ -225,6 +225,57 @@ describe("model profile resolution", () => {
       "    volume: 0",
     ].join("\n")))).toThrow("voice.playback.volume must be a positive number");
   });
+
+  test("resolves and validates profile-wide private-life configuration", () => {
+    const configured = loadGlobalConfig(BASE_ENV, writeConfig([
+      "privateLife:",
+      "  enabled: true",
+      "  opportunitiesPerDay: 37",
+      "  sleepRateMultiplier: 0.02",
+      "  candidateCount: 7",
+      "  visibleOutputCooldownMinutes: 12",
+      "  originWeights:",
+      "    spontaneous: 2",
+      "    continue-inner-thread: 0",
+      "    recent-residue: 0",
+      "  actionScopeWeights:",
+      "    reflect-only: 4",
+      "    social-opportunity: 0.1",
+    ].join("\n")));
+
+    expect(configured.privateLife).toMatchObject({
+      enabled: true,
+      opportunitiesPerDay: 37,
+      sleepRateMultiplier: 0.02,
+      candidateCount: 7,
+      visibleOutputCooldownMinutes: 12,
+      originWeights: {
+        spontaneous: 2,
+        "continue-inner-thread": 0,
+        "recent-residue": 0,
+      },
+      actionScopeWeights: {
+        "reflect-only": 4,
+        "social-opportunity": 0.1,
+      },
+    });
+    expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+      "privateLife:",
+      "  enabled: true",
+      "  sleepRateMultiplier: 0",
+    ].join("\n")))).toThrow("privateLife.sleepRateMultiplier must be > 0 and <= 1");
+    expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+      "privateLife:",
+      "  originWeights:",
+      "    spontaneous: 0",
+      "    continue-inner-thread: 0",
+      "    recent-residue: 0",
+    ].join("\n")))).toThrow("privateLife.originWeights must contain at least one positive weight");
+    expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+      "privateLife:",
+      "  visibleOutputCooldownMinutes: 1441",
+    ].join("\n")))).toThrow("privateLife.visibleOutputCooldownMinutes must be between 0 and 1440");
+  });
 });
 
 describe("guild resolution and persistence", () => {

@@ -99,6 +99,41 @@ function compactProfileLine(entry: RelationshipContextProfile): string {
   ])}.`;
 }
 
+function fullProfileBlock(entry: RelationshipContextProfile): string {
+  const notes = joinPromptItems(entry.profile.notes.slice(-4));
+  const boundaries = joinPromptItems(entry.profile.boundaries.slice(-3));
+  const loops = joinPromptItems(entry.profile.openLoops.slice(-3));
+  const recent = joinPromptItems(entry.profile.recent.slice(-3).map((item) => item.summary));
+  return [
+    `### ${entry.label}`,
+    `Relationship stance: ${relationshipStance(entry.profile)}`,
+    notes !== "" ? `Notes: ${notes}.` : "",
+    boundaries !== "" ? `Boundaries: ${boundaries}.` : "",
+    loops !== "" ? `Open loops: ${loops}.` : "",
+    recent !== "" ? `Recent signals: ${recent}.` : "",
+  ].filter((line) => line !== "").join("\n");
+}
+
+/** Render notable people for private-life turns without pretending the bot is the current subject. */
+export function renderNotableRelationshipsContext(input: {
+  full: RelationshipContextProfile[];
+  compact: RelationshipContextProfile[];
+  template?: string;
+}): string {
+  if (input.full.length === 0 && input.compact.length === 0) return "";
+  const policy = input.template !== undefined && input.template.trim() !== ""
+    ? stripHeading(input.template)
+    : "Relationship state is private durable context. Use it quietly as background stance.";
+  return [
+    "## Relationships",
+    policy,
+    input.full.length > 0 ? "Notable people:" : "",
+    ...input.full.map(fullProfileBlock),
+    input.compact.length > 0 ? "Other known people:" : "",
+    ...input.compact.map(compactProfileLine),
+  ].filter((line) => line !== "").join("\n\n");
+}
+
 export function renderRelationshipPromptContext(input: {
   current: RelationshipProfile | undefined;
   currentLabel: string;

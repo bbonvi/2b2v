@@ -57,7 +57,7 @@ export interface UpdateMemoryInput {
 
 export interface ListMemoriesFilter {
   guildId: string;
-  about?: MemoryAbout;
+  about?: MemoryAbout | "any";
   aboutUserId?: string | null;
   includeCommunity?: boolean;
   includeSelf?: boolean;
@@ -65,10 +65,11 @@ export interface ListMemoriesFilter {
   /** Keep always-recalled rows plus rows triggered by at least one visible user. */
   relevantUserIds?: readonly string[];
   excludeAboutUserIds?: readonly string[];
+  order?: "priority" | "recent";
   limit?: number;
 }
 
-export type CountMemoriesFilter = Omit<ListMemoriesFilter, "limit">;
+export type CountMemoriesFilter = Omit<ListMemoriesFilter, "limit" | "order">;
 
 export interface MemoryMaintenanceBatch {
   rows: MemoryRow[];
@@ -171,7 +172,9 @@ function memoryFilterConditions(filter: CountMemoriesFilter): {
   conditions.push("(recall_scope = 'anywhere' OR recall_guild_id = ?)");
   params.push(filter.guildId);
 
-  if (filter.about === "self") {
+  if (filter.about === "any") {
+    // No subject restriction.
+  } else if (filter.about === "self") {
     conditions.push("about_type = 'self'");
   } else if (filter.about === "community") {
     conditions.push("about_type = 'community'");
@@ -387,7 +390,10 @@ export function getMemory(db: Database, id: number): MemoryRow | null {
 export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRow[] {
   const { conditions, params } = memoryFilterConditions(filter);
 
-  let sql = `SELECT * FROM memories WHERE ${conditions.join(" AND ")} ORDER BY priority DESC, updated_at DESC, id DESC`;
+  const order = filter.order === "recent"
+    ? "created_at DESC, id DESC"
+    : "priority DESC, updated_at DESC, id DESC";
+  let sql = `SELECT * FROM memories WHERE ${conditions.join(" AND ")} ORDER BY ${order}`;
   if (filter.limit !== undefined && filter.limit > 0) {
     sql += " LIMIT ?";
     params.push(filter.limit);

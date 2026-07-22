@@ -268,6 +268,7 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
     "ALTER TABLE dice_rolls ADD COLUMN trait TEXT",
     "ALTER TABLE dice_rolls ADD COLUMN lang TEXT NOT NULL DEFAULT 'en' CHECK(lang IN ('en', 'ru'))",
     "ALTER TABLE dice_rolls ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0 CHECK(is_private IN (0, 1))",
+    "ALTER TABLE private_life_episodes ADD COLUMN action_scope TEXT NOT NULL DEFAULT 'reflect-only'",
     "ALTER TABLE voice_participants ADD COLUMN present_at_start INTEGER NOT NULL DEFAULT 0 CHECK(present_at_start IN (0, 1))",
     "ALTER TABLE voice_output_turns ADD COLUMN trigger_segment_id INTEGER REFERENCES voice_transcript_segments(id)",
     "ALTER TABLE voice_sessions ADD COLUMN handoff_json TEXT",

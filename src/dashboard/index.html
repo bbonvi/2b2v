@@ -297,10 +297,12 @@
   .event-lingering-attention,
   .event-follow-up { color: #38bdf8; }
   .event-ambient-initiative { color: #2dd4bf; }
+  .event-private-life { color: #f472b6; }
   .event-ambient-attention-evaluator { color: #38bdf8; }
   .event-ambient-initiative-evaluator { color: #2dd4bf; }
   .event-background-memory-extraction,
-  .event-inner-thread-maintenance { color: #34d399; }
+  .event-inner-thread-maintenance,
+  .event-private-life-maintenance { color: #34d399; }
   .event-async-image-generation { color: #fb7185; }
   .event-prompt-lab { color: #c084fc; }
   .event-custom { color: #e5e7eb; }
@@ -1880,6 +1882,46 @@
         <button class="btn" id="lab-initiative">Draft cognitive opportunity</button>
         <label><input type="checkbox" id="lab-initiative-force"> force</label>
       </div>
+      <div class="prompt-lab-initiative">
+        <button class="btn" id="lab-private-life">Draft private life</button>
+        <select id="lab-private-action-scope" title="Action scope">
+          <option value="">scope: auto</option>
+          <option value="reflect-only">reflect only</option>
+          <option value="quiet-exploration">quiet exploration</option>
+          <option value="private-action">private action</option>
+          <option value="social-opportunity">social opportunity</option>
+        </select>
+        <select id="lab-private-origin" title="Attention origin">
+          <option value="">origin: auto</option>
+          <option value="spontaneous">spontaneous</option>
+          <option value="continue-inner-thread">inner thread</option>
+          <option value="recent-residue">recent residue</option>
+        </select>
+        <select id="lab-private-mode" title="Activity mode">
+          <option value="">mode: auto</option>
+          <option value="unstructured">unstructured</option>
+          <option value="investigate">investigate</option>
+          <option value="make-or-change">make/change</option>
+          <option value="imagine-possibility">imagine</option>
+          <option value="offscreen-event-candidate">offscreen event</option>
+          <option value="social-impulse">social impulse</option>
+          <option value="observe-or-collect">observe/collect</option>
+        </select>
+        <select id="lab-private-territory" title="Subject territory">
+          <option value="">territory: auto</option>
+          <option value="open">open</option>
+          <option value="external">external</option>
+          <option value="technical-material">technical/material</option>
+          <option value="creative-aesthetic">creative/aesthetic</option>
+          <option value="mundane-private">mundane/private</option>
+          <option value="embodied">embodied</option>
+          <option value="sexual">sexual</option>
+          <option value="social-personal">social/personal</option>
+          <option value="community">community</option>
+          <option value="transgressive-ugly">transgressive/ugly</option>
+          <option value="playful-absurd">playful/absurd</option>
+        </select>
+      </div>
       <div class="prompt-lab-status" id="lab-status">dry-run writes</div>
     </div>
   </div>
@@ -1982,6 +2024,11 @@
   const labRun = document.getElementById('lab-run');
   const labInitiativeButton = document.getElementById('lab-initiative');
   const labInitiativeForce = document.getElementById('lab-initiative-force');
+  const labPrivateLifeButton = document.getElementById('lab-private-life');
+  const labPrivateActionScope = document.getElementById('lab-private-action-scope');
+  const labPrivateOrigin = document.getElementById('lab-private-origin');
+  const labPrivateMode = document.getElementById('lab-private-mode');
+  const labPrivateTerritory = document.getElementById('lab-private-territory');
   const labStatus = document.getElementById('lab-status');
   const labReport = document.getElementById('lab-report');
   const managementStateKey = '2b2v.dashboard.management.v1';
@@ -2196,6 +2243,8 @@
     if (kind === 'lingering_attention') return 'lingering attention';
     if (kind === 'follow_up') return 'follow-up';
     if (kind === 'ambient_initiative') return 'ambient initiative';
+    if (kind === 'private_life') return 'private life';
+    if (kind === 'private_life_summary') return 'private-life summary';
     if (kind === 'scheduled') return 'schedule';
     if (kind === 'keyword') return 'keyword';
     return kind;
@@ -2984,6 +3033,7 @@
     promptLab.classList.toggle('active', hasExactChannel);
     labRun.disabled = !hasExactChannel || labUser.value === '' || labPrompt.value.trim() === '';
     labInitiativeButton.disabled = !hasExactChannel;
+    labPrivateLifeButton.disabled = !hasExactChannel;
   }
 
   function renderPromptLabUsers() {
@@ -3084,6 +3134,28 @@
     return '<div class="detail-label" style="margin-top:.7rem">Memory extraction dry-run</div>' + body;
   }
 
+  function renderPromptLabPrivateLife(result) {
+    const privateLife = result && result.privateLife;
+    if (!privateLife) return '';
+    const selection = privateLife.selection || {};
+    const seeds = selection.candidateSeeds || [];
+    const thoughts = privateLife.privateThoughts || [];
+    return '<div class="detail-label" style="margin-top:.7rem">Private-life draft</div>'
+      + '<div class="prompt-lab-summary">'
+        + '<span>phase:<span class="stat-val">' + esc(privateLife.dayPhase || '') + '</span></span>'
+        + '<span>origin:<span class="stat-val">' + esc(selection.origin || '') + '</span></span>'
+        + '<span>mode:<span class="stat-val">' + esc(selection.mode || '') + '</span></span>'
+        + '<span>territory:<span class="stat-val">' + esc(selection.territory || '') + '</span></span>'
+        + '<span>scope:<span class="stat-val">' + esc(selection.actionScope || '') + '</span></span>'
+      + '</div>'
+      + (thoughts.length > 0
+        ? '<div class="detail-label">Private thoughts</div>' + thoughts.map(value => '<div class="lab-live-output">' + esc(value) + '</div>').join('')
+        : '<div class="detail-state">No private thoughts were produced.</div>')
+      + (seeds.length > 0
+        ? '<div class="detail-label" style="margin-top:.7rem">Selector seeds</div>' + seeds.map(value => '<div class="dry-run-row">' + esc(value) + '</div>').join('')
+        : '');
+  }
+
   function renderPromptLabReport(result, detail) {
     if (result == null) {
       labReport.classList.remove('active');
@@ -3114,6 +3186,7 @@
       + renderPromptLabRelationshipContext(result)
       + renderPromptLabRelationship(result)
       + renderPromptLabMemory(result, dryRuns)
+      + renderPromptLabPrivateLife(result)
       + renderPromptLabLive(detail);
   }
 
@@ -3455,6 +3528,55 @@
     }
   }
 
+  async function runPromptLabPrivateLife() {
+    const guildId = mGuild.value;
+    const channelId = mChannel.value;
+    if (guildId === '' || channelId === '') return;
+    promptLabPollSeq += 1;
+    labRun.disabled = true;
+    labInitiativeButton.disabled = true;
+    labPrivateLifeButton.disabled = true;
+    labStatus.textContent = 'RUNNING';
+    labStatus.classList.add('running');
+    labStatus.classList.remove('error');
+    try {
+      const r = await fetch('/api/management/prompt-lab/private-life', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          guildId,
+          channelId,
+          origin: labPrivateOrigin.value,
+          mode: labPrivateMode.value,
+          territory: labPrivateTerritory.value,
+          actionScope: labPrivateActionScope.value
+        })
+      });
+      if (r.status === 401) { location.href = '/login'; return; }
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        labStatus.classList.add('error');
+        alert(body.error || 'Private-life draft failed');
+        return;
+      }
+      const finalDetail = body.requestId ? await fetch('/api/logs/' + encodeURIComponent(body.requestId)).then(res => res.ok ? res.json() : null).catch(() => null) : null;
+      renderPromptLabReport(body, finalDetail);
+      if (body.error) {
+        labStatus.classList.add('error');
+        labStatus.textContent = 'completed with error';
+      } else {
+        labStatus.textContent = 'complete';
+      }
+    } catch (err) {
+      labStatus.classList.add('error');
+      alert(err instanceof Error ? err.message : 'Private-life draft failed');
+    } finally {
+      labStatus.classList.remove('running');
+      syncManagementDeleteButtons();
+      if (labStatus.textContent === 'RUNNING') labStatus.textContent = 'dry-run writes';
+    }
+  }
+
   window.__toggleManagementMessage = function(messageId) {
     if (selectedManagementMessages.has(messageId)) selectedManagementMessages.delete(messageId);
     else selectedManagementMessages.add(messageId);
@@ -3607,6 +3729,7 @@
   });
   labRun.addEventListener('click', () => { runPromptLab(); });
   labInitiativeButton.addEventListener('click', () => { runPromptLabAmbientInitiative(); });
+  labPrivateLifeButton.addEventListener('click', () => { runPromptLabPrivateLife(); });
 
   async function refreshStatus() {
     try {

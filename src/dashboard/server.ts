@@ -41,6 +41,15 @@ interface DashboardManagementApi {
     runToken?: string;
   }) => AwaitableDashboardManagementResult;
   runPromptLabAmbientInitiative: (input: { guildId: string; channelId: string; force?: boolean; runToken?: string }) => AwaitableDashboardManagementResult;
+  runPromptLabPrivateLife: (input: {
+    guildId: string;
+    channelId: string;
+    origin?: string;
+    mode?: string;
+    territory?: string;
+    actionScope?: string;
+  }) => AwaitableDashboardManagementResult;
+  listPrivateLifeEpisodes: (limit?: number) => AwaitableDashboardManagementResult;
   listInnerThreads: (filter: { guildId?: string; status?: "active" | "resolved"; limit?: number }) => AwaitableDashboardManagementResult;
   listStagedAssets: (filter: { guildId?: string; channelId?: string; unresolvedOnly?: boolean; limit?: number }) => AwaitableDashboardManagementResult;
   listMemories: (filter: ManagementMemoryFilter) => AwaitableDashboardManagementResult;
@@ -608,6 +617,42 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
           } catch (err) {
             return json({ error: err instanceof Error ? err.message : String(err) }, 400);
           }
+        },
+      },
+
+      "/api/management/prompt-lab/private-life": {
+        POST: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          try {
+            const body = await readJsonObject(req);
+            const guildId = typeof body.guildId === "string" ? body.guildId.trim() : "";
+            const channelId = typeof body.channelId === "string" ? body.channelId.trim() : "";
+            if (guildId === "" || channelId === "") {
+              return json({ error: "guildId and channelId are required." }, 400);
+            }
+            return json(await management.runPromptLabPrivateLife({
+              guildId,
+              channelId,
+              ...(typeof body.origin === "string" && body.origin.trim() !== "" ? { origin: body.origin.trim() } : {}),
+              ...(typeof body.mode === "string" && body.mode.trim() !== "" ? { mode: body.mode.trim() } : {}),
+              ...(typeof body.territory === "string" && body.territory.trim() !== "" ? { territory: body.territory.trim() } : {}),
+              ...(typeof body.actionScope === "string" && body.actionScope.trim() !== "" ? { actionScope: body.actionScope.trim() } : {}),
+            }));
+          } catch (err) {
+            return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+          }
+        },
+      },
+
+      "/api/management/private-life": {
+        GET: (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          const limit = optionalNumberParam(new URL(req.url), "limit");
+          return Promise.resolve(management.listPrivateLifeEpisodes(limit)).then(json);
         },
       },
 
