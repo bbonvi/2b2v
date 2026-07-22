@@ -285,13 +285,40 @@ function formatExpiry(expiresAt: number, now = Date.now()): string {
   return `expires in ${units.value} ${units.label}${units.value === 1 ? "" : "s"}`;
 }
 
+const MEMORY_AGE_BUCKETS = [
+  { milliseconds: 60 * 1000, label: "1min" },
+  { milliseconds: 60 * 60 * 1000, label: "1h" },
+  { milliseconds: 6 * 60 * 60 * 1000, label: "6h" },
+  { milliseconds: 24 * 60 * 60 * 1000, label: "1d" },
+  { milliseconds: 3 * 24 * 60 * 60 * 1000, label: "3d" },
+  { milliseconds: 5 * 24 * 60 * 60 * 1000, label: "5d" },
+  { milliseconds: 7 * 24 * 60 * 60 * 1000, label: "1w" },
+  { milliseconds: 14 * 24 * 60 * 60 * 1000, label: "2w" },
+  { milliseconds: 30 * 24 * 60 * 60 * 1000, label: "1mo" },
+  { milliseconds: 60 * 24 * 60 * 60 * 1000, label: "2mo" },
+  { milliseconds: 90 * 24 * 60 * 60 * 1000, label: "3mo" },
+  { milliseconds: 180 * 24 * 60 * 60 * 1000, label: "6mo" },
+  { milliseconds: 365 * 24 * 60 * 60 * 1000, label: "1y" },
+  { milliseconds: 2 * 365 * 24 * 60 * 60 * 1000, label: "2y+" },
+] as const;
+
+function formatMemoryAge(updatedAt: number, now = Date.now()): string {
+  const elapsed = Math.max(0, now - updatedAt);
+  let closest: (typeof MEMORY_AGE_BUCKETS)[number] = MEMORY_AGE_BUCKETS[0];
+  for (const bucket of MEMORY_AGE_BUCKETS.slice(1)) {
+    if (Math.abs(elapsed - bucket.milliseconds) < Math.abs(elapsed - closest.milliseconds)) closest = bucket;
+  }
+  return closest.label;
+}
+
 function formatMemoryRow(
   row: MemoryRow,
   currentGuildId: string,
   resolveUserId?: (userId: string) => string | undefined,
 ): string {
+  const age = ` [${formatMemoryAge(row.updatedAt)}]`;
   const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
-  return `- ${row.id} [about:${aboutLabel(row, resolveUserId)}] [in:${recallLocationLabel(row, currentGuildId)}] [when:${recallTriggerLabel(row, resolveUserId)}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${expiry} ${row.content}`;
+  return `- ${row.id} [about:${aboutLabel(row, resolveUserId)}] [in:${recallLocationLabel(row, currentGuildId)}] [when:${recallTriggerLabel(row, resolveUserId)}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${age}${expiry} ${row.content}`;
 }
 
 interface MemoryContextGroup {
@@ -336,8 +363,9 @@ function formatMemoryContextRows(
       for (const row of group.rows) kindCounts.set(row.kind, (kindCounts.get(row.kind) ?? 0) + 1);
 
       for (const row of group.rows.filter((candidate) => kindCounts.get(candidate.kind) === 1)) {
+        const age = ` [${formatMemoryAge(row.updatedAt)}]`;
         const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
-        lines.push(`${row.id} ${row.kind}${expiry} | ${row.content}`);
+        lines.push(`${row.id} ${row.kind}${age}${expiry} | ${row.content}`);
       }
 
       const repeatedKinds = [...new Set(group.rows
@@ -347,8 +375,9 @@ function formatMemoryContextRows(
         if (lines.at(-1) !== "") lines.push("");
         lines.push(`#### ${kind}`, "");
         for (const row of group.rows.filter((candidate) => candidate.kind === kind)) {
+          const age = ` [${formatMemoryAge(row.updatedAt)}]`;
           const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
-          lines.push(`${row.id}${expiry} | ${row.content}`);
+          lines.push(`${row.id}${age}${expiry} | ${row.content}`);
         }
       }
     }

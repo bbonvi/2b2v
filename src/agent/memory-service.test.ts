@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "../db/database";
-import { createMemory, getMemory, listMemories } from "../db/memory-repository";
+import { createMemory, getMemory, listMemories, updateMemory } from "../db/memory-repository";
 import { buildMemoryContext, buildPrivateLifeMemoryContext, buildVisibleUserMemoryContext, createRecordMemoryTool, extractAndApplyMemories } from "./memory-service";
 
 let db: Database;
@@ -26,8 +26,8 @@ describe("buildMemoryContext", () => {
       resolveUserId: (id) => id === "u1" ? "alice" : undefined,
     });
 
-    expect(context).toContain("## Normal\n\n### community | this-guild | always\n\n1 note | Global note");
-    expect(context).toContain("### @alice | anywhere | any(@alice)\n\n2 preference | Likes concise answers");
+    expect(context).toContain("## Normal\n\n### community | this-guild | always\n\n1 note [1min] | Global note");
+    expect(context).toContain("### @alice | anywhere | any(@alice)\n\n2 preference [1min] | Likes concise answers");
     expect(context).not.toContain("Other user fact");
   });
 
@@ -42,7 +42,7 @@ describe("buildMemoryContext", () => {
       currentUserId: "u1",
     });
 
-    expect(context).toContain("### self | anywhere | always\n\n3 journal | Privately decided the server is worth returning to.");
+    expect(context).toContain("### self | anywhere | always\n\n3 journal [1min] | Privately decided the server is worth returning to.");
   });
 
   test("loads targeted self memories only when a recall user is visible", () => {
@@ -117,7 +117,7 @@ describe("buildMemoryContext", () => {
     });
 
     expect(unresolved).toBe("");
-    expect(resolved).toContain("### @owner | anywhere | always\n\n1 constraint | Owner requires direct permission before use.");
+    expect(resolved).toContain("### @owner | anywhere | always\n\n1 constraint [1min] | Owner requires direct permission before use.");
   });
 
   test("renders future expiry relatively", () => {
@@ -135,8 +135,52 @@ describe("buildMemoryContext", () => {
       currentUserId: "u1",
     });
 
-    expect(context).toContain("scratchpad [expires in 3 days] | Alice is temporarily focused on launch prep.");
+    expect(context).toContain("scratchpad [1min] [expires in 3 days] | Alice is temporarily focused on launch prep.");
     expect(context).not.toContain("expiresAt");
+  });
+
+  test("renders normalized age buckets from the last update time", () => {
+    const now = Date.now();
+    const minute = 60 * 1000;
+    const day = 24 * 60 * minute;
+    const cases = [
+      { ageMs: minute, label: "1min" },
+      { ageMs: 60 * minute, label: "1h" },
+      { ageMs: 6 * 60 * minute, label: "6h" },
+      { ageMs: day, label: "1d" },
+      { ageMs: 3 * day, label: "3d" },
+      { ageMs: 5 * day, label: "5d" },
+      { ageMs: 7 * day, label: "1w" },
+      { ageMs: 14 * day, label: "2w" },
+      { ageMs: 30 * day, label: "1mo" },
+      { ageMs: 60 * day, label: "2mo" },
+      { ageMs: 90 * day, label: "3mo" },
+      { ageMs: 180 * day, label: "6mo" },
+      { ageMs: 365 * day, label: "1y" },
+      { ageMs: 2 * 365 * day, label: "2y+" },
+    ] as const;
+
+    const ids = cases.map((entry) => {
+      const id = createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: `Age ${entry.label}.` });
+      db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(now - entry.ageMs, id);
+      return id;
+    });
+    const context = buildMemoryContext({ db, guildId: "g1", currentUserId: "u1" });
+
+    for (const [index, entry] of cases.entries()) {
+      expect(context).toContain(`${ids[index]} [${entry.label}] | Age ${entry.label}.`);
+    }
+  });
+
+  test("resets rendered age when a memory is updated", () => {
+    const id = createMemory(db, { guildId: "g1", aboutUserId: "u1", kind: "fact", content: "Old stance." });
+    const oldUpdatedAt = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(oldUpdatedAt, id);
+    expect(buildMemoryContext({ db, guildId: "g1", currentUserId: "u1" })).toContain("fact [1mo] | Old stance.");
+
+    expect(updateMemory(db, id, { content: "Reaffirmed stance." })).toBe(true);
+    expect(getMemory(db, id)?.updatedAt).toBeGreaterThan(oldUpdatedAt);
+    expect(buildMemoryContext({ db, guildId: "g1", currentUserId: "u1" })).toContain("fact [1min] | Reaffirmed stance.");
   });
 
   test("renders newest capped memories at the bottom", () => {
@@ -152,7 +196,7 @@ describe("buildMemoryContext", () => {
     });
 
     expect(context.indexOf("Older memory.")).toBeLessThan(context.indexOf("Fresh memory."));
-    expect(context).toContain("#### fact\n\n1 | Older memory.\n2 | Fresh memory.");
+    expect(context).toContain("#### fact\n\n1 [2y+] | Older memory.\n2 [2y+] | Fresh memory.");
   });
 
   test("keeps singleton kinds inline before repeated kind subgroups", () => {
@@ -162,7 +206,7 @@ describe("buildMemoryContext", () => {
 
     const context = buildMemoryContext({ db, guildId: "g1", currentUserId: "u1" });
 
-    expect(context).toContain("### user:u1 | anywhere | any(user:u1)\n\n2 preference | One preference.\n\n#### fact\n\n1 | Fact one.\n3 | Fact two.");
+    expect(context).toContain("### user:u1 | anywhere | any(user:u1)\n\n2 preference [1min] | One preference.\n\n#### fact\n\n1 [1min] | Fact one.\n3 [1min] | Fact two.");
   });
 
   test("shows visible memories out of total when capped", () => {
@@ -206,7 +250,7 @@ describe("buildMemoryContext", () => {
 
     expect(context).toContain("2/3 shown.");
     expect(context).toContain("Newest normal memory.");
-    expect(context).toContain("## Important\n\n### user:u1 | anywhere | any(user:u1)\n\n1 fact | Old important memory.");
+    expect(context).toContain("## Important\n\n### user:u1 | anywhere | any(user:u1)\n\n1 fact [2y+] | Old important memory.");
     expect(context.indexOf("Newest normal memory.")).toBeLessThan(context.indexOf("Old important memory."));
     expect(context).not.toContain("Fresh normal memory.");
   });
@@ -266,10 +310,10 @@ describe("buildMemoryContext", () => {
     expect(context).toContain("5/6 shown.");
     expect(context.match(/^\d+ /gm)).toHaveLength(5);
     expect(context).toContain("Current memory two.");
-    expect(context).toContain("## Important\n\n### @recent | anywhere | any(@recent)\n\n3 preference | Recent important memory.");
-    expect(context).toContain("### @recent | anywhere | any(@recent)\n\n5 fact | Recent newest memory.");
+    expect(context).toContain("## Important\n\n### @recent | anywhere | any(@recent)\n\n3 preference [2y+] | Recent important memory.");
+    expect(context).toContain("### @recent | anywhere | any(@recent)\n\n5 fact [2y+] | Recent newest memory.");
     expect(context).not.toContain("Recent middle memory.");
-    expect(context).toContain("### @second | anywhere | any(@second)\n\n6 interest | Second speaker memory.");
+    expect(context).toContain("### @second | anywhere | any(@second)\n\n6 interest [1min] | Second speaker memory.");
     expect(context).not.toContain("Excluded speaker memory.");
     expect(context.indexOf("Second speaker memory.")).toBeLessThan(context.indexOf("Recent important memory."));
   });
@@ -328,11 +372,11 @@ describe("buildVisibleUserMemoryContext", () => {
 
     expect(context).toContain("## Existing Memories For Other Visible Users");
     expect(context).toContain("### @new | anywhere | any(@new)");
-    expect(context).toContain("#### fact\n\n2 | Middle visible-user memory.\n1 | Newest visible-user memory.");
+    expect(context).toContain("#### fact\n\n2 [2y+] | Middle visible-user memory.\n1 [2y+] | Newest visible-user memory.");
     expect(context).toContain("Newest visible-user memory.");
     expect(context).toContain("Middle visible-user memory.");
     expect(context).not.toContain("Oldest visible-user memory.");
-    expect(context).toContain("### @mid | anywhere | any(@mid)\n\n4 interest | Mid user memory.");
+    expect(context).toContain("### @mid | anywhere | any(@mid)\n\n4 interest [2y+] | Mid user memory.");
     expect(context).toContain("Mid user memory.");
     expect(context).not.toContain("### @old |");
     expect(context).not.toContain("Current user memory.");
