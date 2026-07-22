@@ -60,7 +60,7 @@ privateLife:
     modelProfile: main
     maintenance:
         modelProfile: maintenance
-    opportunitiesPerDay: 50
+    opportunitiesPerDay: 24
     intervalJitter: 0.45
     lateNightStart: "22:30"
     sleepStart: "23:30"
@@ -85,7 +85,7 @@ privateLife:
         investigate: 0.19
         make-or-change: 0.12
         imagine-possibility: 0.18
-        offscreen-event-candidate: 0.09
+        offscreen-event-candidate: 0.08
         social-impulse: 0.08
         observe-or-collect: 0.14
     territoryWeights:
@@ -95,7 +95,7 @@ privateLife:
         creative-aesthetic: 0.09
         mundane-private: 0.10
         embodied: 0.09
-        sexual: 0.06
+        sexual: 0.05
         social-personal: 0.08
         community: 0.03
         transgressive-ugly: 0.04
