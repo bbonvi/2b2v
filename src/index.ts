@@ -3481,6 +3481,7 @@ function buildAgentTools(
     };
     deliverDiceRoll?: (input: DiceRollDelivery) => Promise<{ sentMessageId: string }>;
     visibleUserIds?: readonly string[];
+    onVisibleOutput?: () => void;
   } = {},
 ) {
   const includeImageGenerationTools = options.includeImageGenerationTools ?? true;
@@ -3886,6 +3887,7 @@ function buildAgentTools(
   const summarizeVideoTool = createSummarizeVideoTool();
   const reactToMessageTool = createReactToMessageTool({
     currentChannelId: channelId,
+    onVisibleOutput: options.onVisibleOutput,
     reactToMessage: async (input) => {
       const targetChannel = await fetchAccessibleGuildChannel(input.channelId);
       if (targetChannel === null || !("messages" in targetChannel)) {
@@ -4374,8 +4376,12 @@ async function processTriggeredMessage(
       }
       return result;
     };
-    let rollVisibleOutputSent = false;
-    let noteRollVisibleOutput = (): void => {};
+    let externalVisibleOutputSent = false;
+    let noteExternalVisibleOutput = (): void => {};
+    const markExternalVisibleOutput = (): void => {
+      externalVisibleOutputSent = true;
+      noteExternalVisibleOutput();
+    };
 
     const currentAssets = options.currentTurnOverride === undefined
       ? currentTurnMessages.flatMap((current) => getAssetsByMessageId(db, current.id))
@@ -4545,6 +4551,7 @@ async function processTriggeredMessage(
       },
       {
         visibleUserIds: context.visibleUserIds ?? [],
+        onVisibleOutput: markExternalVisibleOutput,
         deliverDiceRoll: async (input) => {
           const result = await sender(
             input.text,
@@ -4563,8 +4570,7 @@ async function processTriggeredMessage(
             },
           );
           if (result.sentMessageId === "") throw new Error("Discord did not return a roll result message ID.");
-          rollVisibleOutputSent = true;
-          noteRollVisibleOutput();
+          markExternalVisibleOutput();
           return { sentMessageId: result.sentMessageId };
         },
       },
@@ -4645,7 +4651,7 @@ async function processTriggeredMessage(
         onStillWorking: (destinationChannelId) => { typing.startLoop(destinationChannelId); },
         getTypingStartedAt: typing.getTypingStartedAt,
         onVisibleOutput: typing.stopLoop,
-        hasExternalVisibleOutput: () => rollVisibleOutputSent,
+        hasExternalVisibleOutput: () => externalVisibleOutputSent,
         onAgentEnd: typing.stopLoop,
         triggerOverride,
         disableLiveOutput: options.disableLiveOutput,
@@ -4692,7 +4698,7 @@ async function processTriggeredMessage(
         },
       },
     });
-    noteRollVisibleOutput = () => { deps.onVisibleOutput?.(); };
+    noteExternalVisibleOutput = () => { deps.onVisibleOutput?.(); };
 
     try {
       await runLoggedAgentTurn({

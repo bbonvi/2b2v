@@ -26,6 +26,7 @@ export type MessageReactor = (input: ReactToMessageRequest) => Promise<ReactToMe
 export interface ReactToMessageToolDeps {
   currentChannelId: string;
   reactToMessage: MessageReactor;
+  onVisibleOutput?: () => void;
 }
 
 /** Normalize react_to_message tool input and apply the current-channel default. */
@@ -66,6 +67,7 @@ export function createReactToMessageTool(deps: ReactToMessageToolDeps): AgentToo
 
       try {
         const details = await deps.reactToMessage(normalized);
+        deps.onVisibleOutput?.();
         return {
           content: [{
             type: "text",
