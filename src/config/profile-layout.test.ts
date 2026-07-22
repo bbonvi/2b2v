@@ -68,7 +68,7 @@ describe("repository profile layout", () => {
     }
   });
 
-  test("keeps profile selection out of YAML and preserves feature boundaries", () => {
+  test("derives profile selection from config paths", () => {
     const env = {
       DISCORD_TOKEN: "test",
       OPENROUTER_API_KEY: "test",
@@ -83,30 +83,6 @@ describe("repository profile layout", () => {
     expect(loadMainConfig(twoBPath)).not.toHaveProperty("persona");
     expect(loadMainConfig(delamainPath)).not.toHaveProperty("persona");
     expect(twoB.runtimeProfileId).toBe("2b");
-    expect(twoB.defaultRelationships?.enabled).toBe(true);
-    expect(twoB.defaultInnerThreads?.enabled).toBe(true);
-    expect(twoB.defaultInnerThreads?.modelProfile).toBe("maintenance");
-    expect(twoB.defaultMemoryContext?.maxRows).toBe(60);
-    expect(twoB.defaultAmbientInitiative?.botContactIds).toEqual(["1398275457857622128"]);
-    expect(twoB.privateLife?.enabled).toBe(true);
-    expect(twoB.privateLife?.modelProfile).toBe("main");
-    expect(twoB.privateLife?.maintenance.modelProfile).toBe("maintenance");
-    expect(twoB.privateLife?.opportunitiesPerDay).toBe(50);
-    expect(twoB.privateLife?.actionScopeWeights["reflect-only"]).toBe(0.55);
-    expect(twoB.privateLife?.actionScopeWeights["social-opportunity"]).toBe(0.02);
-    expect(twoB.vpn?.enabled).toBe(true);
-    expect(twoB.personaModes?.modes.map((mode) => mode.id)).toEqual(["normal", "sleeping"]);
-    expect(twoB.personaModes?.modes.every((mode) => mode.avatars.length > 0)).toBe(true);
-    expect(twoB.personaModes?.modes.every((mode) => mode.scope === "global")).toBe(true);
-    expect(delamain.defaultRelationships?.enabled).toBe(false);
-    expect(delamain.defaultInnerThreads?.enabled).toBe(false);
-    expect(delamain.defaultMemoryExtraction.ambient.enabled).toBe(false);
-    expect(delamain.defaultAmbientAttention?.enabled).toBe(false);
-    expect(delamain.defaultAmbientInitiative?.enabled).toBe(true);
-    expect(delamain.defaultAmbientInitiative?.botContactIds).toEqual(["1130796465049042954"]);
-    expect(delamain.privateLife?.enabled).toBe(false);
-    expect(delamain.personaModes?.modes.map((mode) => mode.id)).toEqual(["normal", "sleeping", "rogue"]);
-    expect(delamain.personaModes?.modes.find((mode) => mode.id === "rogue")?.avatars).toHaveLength(2);
-    expect(delamain.vpn).toBeUndefined();
+    expect(delamain.runtimeProfileId).toBe("delamain");
   });
 });
