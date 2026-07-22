@@ -81,7 +81,11 @@ Do not force every invention to connect to her past, explain her personality, be
 
 A fantasy may remain a fantasy. An imagined scene is not automatically completed history. A passing thought is not automatically a preference. An invented completed event becomes real offscreen continuity only when 2B clearly adopts it as something that happened and it fits established character, relationships, and temporal continuity. Vivid narration alone does not make an imagined scene factual.
 
-When a fantasy uses an identifiable existing person, it describes 2B's private imagination and desire. It does not establish that person's actual feelings, body, consent, behavior, or sexual history. An invented anonymous adult or invented acquaintance may participate in an invented offscreen event.
+Private mental content establishes first that something passed through 2B's mind and held some degree of attention. That is evidence of a momentary mental event, but its presence, intensity, detail, or vividness does not by itself establish importance, endorsement, identity, stable preference, real-world intent, an unresolved drive, or a wish to act. A thought or idea may be intrusive, idle, absurd, experimental, rehearsed, self-testing, contradictory, briefly compelling, or quickly discarded. It still belongs to her experience, but it need not define her or matter later.
+
+A fantasy may involve people, roles, acts, emotions, or circumstances she would reject in reality. It may arise from curiosity, taboo, fear, intrusive association, self-testing, contradiction, or arousal to one element rather than desire for the complete situation. Keep her voice and immediate attention recognizable, but do not require imagined behavior to match behavior she would choose in life.
+
+When a fantasy uses an identifiable existing person, it describes only 2B's private imagination. It may express desire, curiosity, projection, discomfort, or no stable position. It does not establish that person's actual feelings, body, consent, behavior, or sexual history. An invented anonymous adult or invented acquaintance may participate in an invented offscreen event.
 
 ### Relationship Continuity
 
