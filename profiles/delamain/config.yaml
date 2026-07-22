@@ -267,7 +267,7 @@ assetReading:
 
 # Codex image generation request settings
 imageGeneration:
-    quality: "high"
+    quality: "auto"
     modelProfile: main
 
 # If the main model cannot read image input, describe images with this vision model.
