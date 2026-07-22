@@ -29,7 +29,11 @@ import { createStoredAssetAttachmentResolver } from "../agent/stored-asset-attac
 import { createDiscordAssetSourceResolver } from "../discord/asset-resolver.ts";
 import { DEFAULT_ASSET_READING } from "../config/defaults.ts";
 import { isReadOnlyTool } from "../agent/tool-effects.ts";
-import { listInnerThreads } from "../db/inner-thread-repository.ts";
+import { listInnerThreads, type InnerThread } from "../db/inner-thread-repository.ts";
+import {
+  listBotChannelActivityUsage,
+  type BotChannelActivityUsage,
+} from "../db/message-repository.ts";
 import {
   completePrivateLifeEpisode,
   countPrivateLifeVisibleEpisodesSince,
@@ -41,9 +45,12 @@ import {
 } from "../db/private-life-repository.ts";
 import {
   privateLifeDayPhase,
+  hasPrivateLifeResidueChannel,
   privateLifeNextDelayMs,
   privateLifePhaseBoundaryDelayMs,
+  selectPrivateLifeAttention,
   selectPrivateLifeCuriosity,
+  selectPrivateLifeResidueChannel,
 } from "./selector.ts";
 import type {
   PrivateLifeConfig,
@@ -52,6 +59,20 @@ import type {
 } from "./types.ts";
 
 type RunMode = "automatic" | "draft";
+
+type PrivateLifeLocation = {
+  guild: Guild;
+  channel: SendableGuildChannel;
+  guildConfig: GuildConfig;
+};
+
+type PopularChannel = BotChannelActivityUsage & {
+  channel: SendableGuildChannel;
+};
+
+type LocatedAttention = PrivateLifeLocation & {
+  history: "none" | "full" | "recent-residue";
+};
 
 const PUBLIC_ACTION_TOOL_NAMES = new Set([
   "react_to_message",
@@ -150,7 +171,12 @@ export interface PrivateLifeRuntimeDeps {
     currentTurnBoundary?: { timestamp: number; messageId: string },
     relationshipsMode?: "live" | "virtual" | "private-life",
     excludeMessageIds?: readonly string[],
-    historyOptions?: { appendLatestToHistory?: boolean; additionalVisibleUserIds?: readonly string[] },
+    historyOptions?: {
+      appendLatestToHistory?: boolean;
+      additionalVisibleUserIds?: readonly string[];
+      includeHistory?: boolean;
+      historyLimit?: number;
+    },
   ) => Promise<AssembledContext>;
   buildAgentTools: (
     guildId: string,
@@ -273,13 +299,12 @@ function addPrivateLifeInstruction(context: AssembledContext, instruction: strin
   };
 }
 
-function restrictContext(context: AssembledContext, selection: PrivateLifeSelection): AssembledContext {
-  const social = selection.territory === "social-personal" || selection.territory === "community" || selection.mode === "social-impulse";
-  if (social) return context;
+function removeUngroundedRoomContext(context: AssembledContext): AssembledContext {
   const omitted = new Set([
-    "Server Members",
+    "Thread Metadata",
+    "Parent Pre-Context",
     "Threads In This Channel",
-    "Discord Context",
+    "Upcoming Schedules",
     "Chat History — Older",
     "Chat History — Newer",
   ]);
@@ -293,6 +318,7 @@ function opportunityText(input: {
   timezone: string;
   now: number;
   recentLabels: readonly string[];
+  roomHistory: LocatedAttention["history"];
 }): string {
   const sleepInstruction = input.phase === "sleep-window"
     ? "You are currently asleep. Usually remain asleep. A rare episode may be a dream fragment, discomfort, noise, or a brief waking thought. Do not perform external or visible actions."
@@ -305,6 +331,11 @@ function opportunityText(input: {
     sleepInstruction,
     "",
     `Attention origin: ${input.selection.origin}`,
+    input.roomHistory === "none"
+      ? "Room history: none. The execution channel is only a technical location and did not cause this opportunity."
+      : input.roomHistory === "recent-residue"
+        ? "Room history: a bounded recent window from the room that supplied this recent residue."
+        : "Room history: the grounded source room of the selected inner thread.",
     `Activity mode: ${input.selection.mode}`,
     `Subject territory: ${input.selection.territory}`,
     `Action scope: ${input.selection.actionScope}`,
@@ -339,32 +370,120 @@ export function createPrivateLifeRuntime(deps: PrivateLifeRuntimeDeps): PrivateL
     return deps.getGlobalConfig().privateLife;
   }
 
-  async function resolveLocation(overrides?: { guildId?: string; channelId?: string }): Promise<{
-    guild: Guild;
-    channel: SendableGuildChannel;
-    guildConfig: GuildConfig;
-  } | null> {
-    const current = config();
-    if (current === undefined) return null;
-    const guildId = overrides?.guildId ?? current.guildId ?? (() => {
-      const row = deps.db.raw.prepare(`SELECT guild_id FROM messages
-        WHERE is_bot = 0 AND deleted_at IS NULL
-        GROUP BY guild_id ORDER BY COUNT(*) DESC LIMIT 1`).get() as { guild_id: string } | null;
-      return row?.guild_id ?? deps.client.guilds.cache.first()?.id;
-    })();
-    if (guildId === undefined) return null;
-    const guild = await deps.resolveClientGuild(guildId);
+  async function locationForChannel(channel: SendableGuildChannel): Promise<PrivateLifeLocation | null> {
+    const guild = await deps.resolveClientGuild(channel.guildId);
     if (guild === null) return null;
-    const channelId = overrides?.channelId ?? current.channelId ?? (() => {
-      const row = deps.db.raw.prepare(`SELECT channel_id FROM messages
-        WHERE guild_id = ? AND is_bot = 0 AND deleted_at IS NULL
-        GROUP BY channel_id ORDER BY COUNT(*) DESC LIMIT 1`).get(guildId) as { channel_id: string } | null;
-      return row?.channel_id;
-    })();
-    if (channelId === undefined) return null;
-    const channel = await deps.fetchAccessibleGuildChannel(channelId);
-    if (channel === null || channel.guildId !== guildId) return null;
-    return { guild, channel, guildConfig: deps.getGuildConfig(guildId) };
+    return { guild, channel, guildConfig: deps.getGuildConfig(channel.guildId) };
+  }
+
+  async function explicitLocation(overrides?: {
+    guildId?: string;
+    channelId?: string;
+  }): Promise<PrivateLifeLocation | null> {
+    if (overrides?.guildId === undefined || overrides.channelId === undefined) return null;
+    const channel = await deps.fetchAccessibleGuildChannel(overrides.channelId);
+    if (channel === null || channel.guildId !== overrides.guildId) return null;
+    return await locationForChannel(channel);
+  }
+
+  async function accessiblePopularChannels(): Promise<PopularChannel[]> {
+    const botUserId = deps.client.user?.id;
+    if (botUserId === undefined) return [];
+    const usage = listBotChannelActivityUsage(deps.db, botUserId, 25);
+    const resolved = await Promise.all(usage.map(async (candidate): Promise<PopularChannel | null> => {
+      const channel = await deps.fetchAccessibleGuildChannel(candidate.channelId);
+      if (channel === null || channel.guildId !== candidate.guildId) return null;
+      return { ...candidate, channel };
+    }));
+    return resolved.filter((candidate): candidate is PopularChannel => candidate !== null).slice(0, 5);
+  }
+
+  async function dominantHumanLocation(preferredGuildId?: string): Promise<PrivateLifeLocation | null> {
+    const conditions = [
+      "is_bot = 0",
+      "is_synthetic = 0",
+      "is_prompt_only = 0",
+      "deleted_at IS NULL",
+    ];
+    const params: string[] = [];
+    if (preferredGuildId !== undefined) {
+      conditions.push("guild_id = ?");
+      params.push(preferredGuildId);
+    }
+    const rows = deps.db.raw.prepare(`SELECT guild_id, channel_id FROM messages
+      WHERE ${conditions.join(" AND ")}
+      GROUP BY guild_id, channel_id
+      ORDER BY COUNT(*) DESC, MAX(created_at) DESC
+      LIMIT 25`).all(...params) as Array<{ guild_id: string; channel_id: string }>;
+    for (const row of rows) {
+      const channel = await deps.fetchAccessibleGuildChannel(row.channel_id);
+      if (channel === null || channel.guildId !== row.guild_id) continue;
+      const location = await locationForChannel(channel);
+      if (location !== null) return location;
+    }
+    return null;
+  }
+
+  async function technicalLocation(
+    popular: readonly PopularChannel[],
+    preferredGuildId?: string,
+  ): Promise<PrivateLifeLocation | null> {
+    const preferred = preferredGuildId === undefined
+      ? popular[0]
+      : popular.find((candidate) => candidate.guildId === preferredGuildId);
+    if (preferred !== undefined) return await locationForChannel(preferred.channel);
+    const human = await dominantHumanLocation(preferredGuildId);
+    if (human !== null) return human;
+    if (preferredGuildId !== undefined) return await technicalLocation(popular);
+    const cached = deps.client.guilds.cache.first();
+    if (cached === undefined) return null;
+    return await dominantHumanLocation(cached.id);
+  }
+
+  async function groundedThreadLocation(thread: InnerThread): Promise<PrivateLifeLocation | null> {
+    if (thread.sourceGuildId === null || thread.sourceChannelId === null) return null;
+    const channel = await deps.fetchAccessibleGuildChannel(thread.sourceChannelId);
+    if (channel === null || channel.guildId !== thread.sourceGuildId) return null;
+    return await locationForChannel(channel);
+  }
+
+  async function locateAttention(input: {
+    mode: RunMode;
+    overrides?: { guildId?: string; channelId?: string };
+    attention: ReturnType<typeof selectPrivateLifeAttention>;
+    popular: readonly PopularChannel[];
+    residue?: PopularChannel;
+  }): Promise<LocatedAttention | null> {
+    const hasExplicitOverride = input.mode === "draft"
+      && input.overrides?.guildId !== undefined
+      && input.overrides.channelId !== undefined;
+    if (hasExplicitOverride) {
+      const explicit = await explicitLocation(input.overrides);
+      if (explicit === null) return null;
+      const threadMatches = input.attention.thread?.sourceGuildId === explicit.guild.id
+        && input.attention.thread.sourceChannelId === explicit.channel.id;
+      return {
+        ...explicit,
+        history: input.attention.origin === "recent-residue"
+          ? "recent-residue"
+          : threadMatches ? "full" : "none",
+      };
+    }
+    if (input.attention.origin === "recent-residue" && input.residue !== undefined) {
+      const location = await locationForChannel(input.residue.channel);
+      return location === null ? null : { ...location, history: "recent-residue" };
+    }
+    if (input.attention.origin === "continue-inner-thread" && input.attention.thread !== undefined) {
+      const grounded = await groundedThreadLocation(input.attention.thread);
+      if (grounded !== null) return { ...grounded, history: "full" };
+      const preferredGuildId = input.attention.thread.sourceGuildId
+        ?? input.attention.thread.recallGuildId
+        ?? undefined;
+      const fallback = await technicalLocation(input.popular, preferredGuildId);
+      return fallback === null ? null : { ...fallback, history: "none" };
+    }
+    const fallback = await technicalLocation(input.popular);
+    return fallback === null ? null : { ...fallback, history: "none" };
   }
 
   async function schedule(): Promise<void> {
@@ -373,7 +492,7 @@ export function createPrivateLifeRuntime(deps: PrivateLifeRuntimeDeps): PrivateL
     if (timer !== undefined) clearTimeout(timer);
     const current = config();
     if (current === undefined || !current.enabled) return;
-    const location = await resolveLocation();
+    const location = await technicalLocation(await accessiblePopularChannels());
     if (generation !== scheduleGeneration || current !== config()) return;
     const timezone = location?.guildConfig.timezone ?? deps.getGlobalConfig().defaultTimezone;
     const now = Date.now();
@@ -407,33 +526,65 @@ export function createPrivateLifeRuntime(deps: PrivateLifeRuntimeDeps): PrivateL
     const current = config();
     if (current === undefined || !current.enabled) return { error: "Private life is disabled." };
     if (running) return { error: "A private-life opportunity is already running." };
-    const location = await resolveLocation(overrides);
+    const now = Date.now();
+    const popular = await accessiblePopularChannels();
+    const residueAvailable = hasPrivateLifeResidueChannel({
+      candidates: popular,
+      maxAgeHours: current.recentResidueMaxAgeHours,
+      now,
+    });
+    const recent = listRecentPrivateLifeSummaries(deps.db, current.recentThemeLimit);
+    const threads = listInnerThreads(deps.db, { status: "active", limit: 50 })
+      .filter((thread) => thread.expiresAt === null || thread.expiresAt > now)
+      .filter((thread) => {
+        const guildId = thread.sourceGuildId ?? thread.recallGuildId;
+        return guildId === null || deps.getGuildConfig(guildId).innerThreads?.enabled !== false;
+      });
+    const promptLabHasLocation = mode === "draft"
+      && overrides?.guildId !== undefined
+      && overrides.channelId !== undefined;
+    const attention = selectPrivateLifeAttention({
+      config: current,
+      threads,
+      recentResidueAvailable: residueAvailable || promptLabHasLocation,
+      ...(overrides?.origin !== undefined ? { origin: overrides.origin } : {}),
+      now,
+    });
+    const selectedResidue = attention.origin === "recent-residue"
+      ? selectPrivateLifeResidueChannel({
+          candidates: popular,
+          maxAgeHours: current.recentResidueMaxAgeHours,
+          now,
+        })
+      : undefined;
+    const residue = selectedResidue === undefined
+      ? undefined
+      : popular.find((item) => item.channelId === selectedResidue.channelId);
+    const location = await locateAttention({
+      mode,
+      overrides,
+      attention,
+      popular,
+      ...(residue !== undefined ? { residue } : {}),
+    });
     if (location === null) return { error: "No private-life guild and channel are available." };
     if (mode === "automatic" && deps.isBusy?.(location.guild.id, location.channel.id) === true) {
       return { error: "The selected location is busy." };
     }
 
     running = true;
-    const now = Date.now();
     const phase = privateLifeDayPhase(current, location.guildConfig.timezone, now);
     const visibleOutputAvailableAtStart = deps.hasRecentVisibleOutput?.(
       now - current.visibleOutputCooldownMinutes * 60_000,
     ) !== true;
-    const recent = listRecentPrivateLifeSummaries(deps.db, current.recentThemeLimit);
-    const threads = location.guildConfig.innerThreads?.enabled === false
-      ? []
-      : listInnerThreads(deps.db, {
-          status: "active",
-          guildId: location.guild.id,
-          limit: 50,
-        }).filter((thread) => thread.expiresAt === null || thread.expiresAt > now);
     const selection = selectPrivateLifeCuriosity({
       config: current,
       phase,
       recent,
-      threads,
+      threads: attention.thread === undefined ? [] : [attention.thread],
+      origin: attention.origin,
+      recentResidueAvailable: attention.origin === "recent-residue",
       now,
-      ...(overrides?.origin !== undefined ? { origin: overrides.origin } : {}),
       ...(overrides?.mode !== undefined ? { mode: overrides.mode } : {}),
       ...(overrides?.territory !== undefined ? { territory: overrides.territory } : {}),
       ...(overrides?.actionScope !== undefined ? { actionScope: overrides.actionScope } : {}),
@@ -472,6 +623,7 @@ export function createPrivateLifeRuntime(deps: PrivateLifeRuntimeDeps): PrivateL
         timezone: location.guildConfig.timezone,
         now,
         recentLabels: recent.map((theme) => theme.label),
+        roomHistory: location.history,
       });
       const botUserId = deps.client.user?.id ?? "";
       const botUsername = deps.client.user?.username ?? "bot";
@@ -503,10 +655,16 @@ export function createPrivateLifeRuntime(deps: PrivateLifeRuntimeDeps): PrivateL
         { timestamp: now, messageId: episodeId },
         "private-life",
         undefined,
-        { appendLatestToHistory: false },
+        {
+          appendLatestToHistory: false,
+          includeHistory: location.history !== "none",
+          ...(location.history === "recent-residue"
+            ? { historyLimit: current.recentResidueHistoryLimit }
+            : {}),
+        },
       );
       const context = addPrivateLifeInstruction(
-        restrictContext(builtContext, selection),
+        location.history === "none" ? removeUngroundedRoomContext(builtContext) : builtContext,
         deps.getPromptBundle().runtime.privateLife ?? "",
       );
       const incoming: IncomingMessage = {

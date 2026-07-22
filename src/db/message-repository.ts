@@ -111,6 +111,10 @@ export interface BotChannelUsage {
   messageCount: number;
 }
 
+export interface BotChannelActivityUsage extends BotChannelUsage {
+  lastHumanActivityAt: number | null;
+}
+
 interface MessageSearchRow {
   id: string;
   channel_id: string;
@@ -145,6 +149,46 @@ export function listBotChannelUsage(
     guildId: row.guild_id,
     channelId: row.channel_id,
     messageCount: row.message_count,
+  }));
+}
+
+/** List the bot's most-used channels with their latest real human activity. */
+export function listBotChannelActivityUsage(
+  db: Database,
+  botUserId: string,
+  limit: number,
+): BotChannelActivityUsage[] {
+  const boundedLimit = Math.max(1, Math.min(limit, 100));
+  const rows = db.raw.prepare(
+    `WITH bot_usage AS (
+       SELECT guild_id, channel_id, COUNT(*) AS message_count, MAX(created_at) AS latest_at
+       FROM messages
+       WHERE user_id = ? AND is_bot = 1 AND is_synthetic = 0 AND is_prompt_only = 0
+         AND deleted_at IS NULL
+       GROUP BY guild_id, channel_id
+       ORDER BY message_count DESC, latest_at DESC, channel_id ASC
+       LIMIT ?
+     )
+     SELECT bot_usage.guild_id, bot_usage.channel_id, bot_usage.message_count, bot_usage.latest_at,
+       MAX(human.created_at) AS last_human_activity_at
+     FROM bot_usage
+     LEFT JOIN messages AS human
+       ON human.guild_id = bot_usage.guild_id AND human.channel_id = bot_usage.channel_id
+       AND human.is_bot = 0 AND human.is_synthetic = 0 AND human.is_prompt_only = 0
+       AND human.deleted_at IS NULL
+     GROUP BY bot_usage.guild_id, bot_usage.channel_id, bot_usage.message_count, bot_usage.latest_at
+     ORDER BY bot_usage.message_count DESC, bot_usage.latest_at DESC, bot_usage.channel_id ASC`,
+  ).all(botUserId, boundedLimit) as Array<{
+    guild_id: string;
+    channel_id: string;
+    message_count: number;
+    last_human_activity_at: number | null;
+  }>;
+  return rows.map((row) => ({
+    guildId: row.guild_id,
+    channelId: row.channel_id,
+    messageCount: row.message_count,
+    lastHumanActivityAt: row.last_human_activity_at,
   }));
 }
 

@@ -184,6 +184,8 @@ export const DEFAULT_PRIVATE_LIFE: PrivateLifeConfig = {
   visibleOutputCooldownMinutes: 20,
   maxToolCalls: 20,
   recentThemeLimit: 24,
+  recentResidueHistoryLimit: 30,
+  recentResidueMaxAgeHours: 48,
   candidateCount: 5,
   thoughtRetentionDays: 14,
   originWeights: {

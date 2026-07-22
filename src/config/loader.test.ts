@@ -233,6 +233,8 @@ describe("model profile resolution", () => {
       "  opportunitiesPerDay: 37",
       "  sleepRateMultiplier: 0.02",
       "  candidateCount: 7",
+      "  recentResidueHistoryLimit: 31",
+      "  recentResidueMaxAgeHours: 36",
       "  visibleOutputCooldownMinutes: 12",
       "  originWeights:",
       "    spontaneous: 2",
@@ -248,6 +250,8 @@ describe("model profile resolution", () => {
       opportunitiesPerDay: 37,
       sleepRateMultiplier: 0.02,
       candidateCount: 7,
+      recentResidueHistoryLimit: 31,
+      recentResidueMaxAgeHours: 36,
       visibleOutputCooldownMinutes: 12,
       originWeights: {
         spontaneous: 2,
@@ -275,6 +279,10 @@ describe("model profile resolution", () => {
       "privateLife:",
       "  visibleOutputCooldownMinutes: 1441",
     ].join("\n")))).toThrow("privateLife.visibleOutputCooldownMinutes must be between 0 and 1440");
+    expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+      "privateLife:",
+      "  guildId: guild-1",
+    ].join("\n")))).toThrow("location overrides belong to Prompt Lab");
   });
 });
 

@@ -2872,6 +2872,8 @@ async function buildContext(
     appendLatestToHistory?: boolean;
     triggerMessageIds?: readonly string[];
     additionalVisibleUserIds?: readonly string[];
+    includeHistory?: boolean;
+    historyLimit?: number;
   } = {},
 ): Promise<AssembledContext> {
   // Chat history via the full processing pipeline
@@ -2879,11 +2881,17 @@ async function buildContext(
   const displayNamesByUserId = buildCurrentDisplayNameMap(guild);
   const appendLatestToHistory = historyOptions.appendLatestToHistory ?? true;
   const triggerMessageIds = new Set(historyOptions.triggerMessageIds ?? []);
-  const historyMessages = getContextHistoryMessages(
-    db,
-    channelId,
-    guildConfig.trim,
-    appendLatestToHistory ? (excludeMessageIds ?? latestUserMessage.id) : excludeMessageIds,
+  const loadedHistoryMessages = historyOptions.includeHistory === false
+    ? []
+    : getContextHistoryMessages(
+        db,
+        channelId,
+        guildConfig.trim,
+        appendLatestToHistory ? (excludeMessageIds ?? latestUserMessage.id) : excludeMessageIds,
+      );
+  const historyMessages = (historyOptions.historyLimit === undefined
+    ? loadedHistoryMessages
+    : loadedHistoryMessages.slice(-historyOptions.historyLimit)
   ).map((message) => triggerMessageIds.has(message.id)
     ? { ...message, historyAnnotations: [...(message.historyAnnotations ?? []), "<trigger>"] }
     : message

@@ -745,18 +745,12 @@ function resolvePrivateLifeWeights<T extends string>(
 }
 
 function resolvePrivateLifeConfig(partial: PrivateLifeConfigYaml | undefined): PrivateLifeConfig {
-  const text = (value: string | undefined): string | undefined => {
-    const trimmed = value?.trim();
-    return trimmed !== undefined && trimmed !== "" ? trimmed : undefined;
-  };
-  const { guildId: _guildId, channelId: _channelId, ...values } = partial ?? {};
-  const guildId = text(_guildId);
-  const channelId = text(_channelId);
+  if (partial !== undefined && ("guildId" in partial || "channelId" in partial)) {
+    throw new Error("privateLife.guildId and privateLife.channelId are not supported; location overrides belong to Prompt Lab");
+  }
   const resolved: PrivateLifeConfig = {
     ...DEFAULT_PRIVATE_LIFE,
-    ...values,
-    ...(guildId !== undefined ? { guildId } : {}),
-    ...(channelId !== undefined ? { channelId } : {}),
+    ...partial,
     originWeights: resolvePrivateLifeWeights(
       PRIVATE_LIFE_ATTENTION_ORIGINS,
       DEFAULT_PRIVATE_LIFE.originWeights,
@@ -810,6 +804,16 @@ function resolvePrivateLifeConfig(partial: PrivateLifeConfigYaml | undefined): P
   }
   if (!Number.isInteger(resolved.recentThemeLimit) || resolved.recentThemeLimit < 1 || resolved.recentThemeLimit > 200) {
     throw new Error("privateLife.recentThemeLimit must be between 1 and 200");
+  }
+  if (!Number.isInteger(resolved.recentResidueHistoryLimit)
+    || resolved.recentResidueHistoryLimit < 1
+    || resolved.recentResidueHistoryLimit > 200) {
+    throw new Error("privateLife.recentResidueHistoryLimit must be between 1 and 200");
+  }
+  if (!Number.isFinite(resolved.recentResidueMaxAgeHours)
+    || resolved.recentResidueMaxAgeHours <= 0
+    || resolved.recentResidueMaxAgeHours > 720) {
+    throw new Error("privateLife.recentResidueMaxAgeHours must be > 0 and <= 720");
   }
   if (!Number.isInteger(resolved.candidateCount) || resolved.candidateCount < 2 || resolved.candidateCount > 12) {
     throw new Error("privateLife.candidateCount must be between 2 and 12");

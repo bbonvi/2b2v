@@ -48,8 +48,6 @@ export type PrivateLifeWeights<T extends string> = Record<T, number>;
 export interface PrivateLifeConfig {
   enabled: boolean;
   modelProfile: string;
-  guildId?: string;
-  channelId?: string;
   opportunitiesPerDay: number;
   intervalJitter: number;
   lateNightStart: string;
@@ -62,6 +60,8 @@ export interface PrivateLifeConfig {
   visibleOutputCooldownMinutes: number;
   maxToolCalls: number;
   recentThemeLimit: number;
+  recentResidueHistoryLimit: number;
+  recentResidueMaxAgeHours: number;
   candidateCount: number;
   thoughtRetentionDays: number;
   originWeights: PrivateLifeWeights<PrivateLifeAttentionOrigin>;

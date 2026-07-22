@@ -4,8 +4,11 @@ import {
   privateLifeDayPhase,
   privateLifeNextDelayMs,
   privateLifePhaseBoundaryDelayMs,
+  selectPrivateLifeAttention,
   selectPrivateLifeCuriosity,
+  selectPrivateLifeResidueChannel,
 } from "./selector.ts";
+import type { InnerThread } from "../db/inner-thread-repository.ts";
 
 function seededRandom(seed: number): () => number {
   let state = seed >>> 0;
@@ -81,6 +84,97 @@ describe("private-life curiosity selector", () => {
     });
 
     expect(selection.origin).toBe("spontaneous");
+  });
+
+  test("does not treat private episode summaries as room residue", () => {
+    const selection = selectPrivateLifeCuriosity({
+      config: {
+        ...DEFAULT_PRIVATE_LIFE,
+        originWeights: { spontaneous: 0, "continue-inner-thread": 0, "recent-residue": 1 },
+      },
+      phase: "day",
+      recent: [{
+        label: "old subject",
+        themeKey: "old:subject",
+        facets: [],
+        createdAt: 1,
+        territory: "open",
+        mode: "unstructured",
+      }],
+      threads: [],
+      recentResidueAvailable: false,
+      random: () => 0.5,
+    });
+
+    expect(selection.origin).toBe("spontaneous");
+  });
+
+  test("selects an inner thread globally before choosing its runtime room", () => {
+    const thread: InnerThread = {
+      id: "thread-1",
+      content: "Find out why this keeps happening.",
+      aboutType: "self",
+      aboutUserId: null,
+      recallScope: "guild",
+      recallGuildId: "guild-2",
+      recallMode: "always",
+      recallUserIds: [],
+      salience: 0.8,
+      pressure: 0.7,
+      sourceMessageIds: ["message-1"],
+      sourceGuildId: "guild-2",
+      sourceChannelId: "channel-2",
+      status: "active",
+      createdAt: 1,
+      updatedAt: 2,
+      expiresAt: null,
+    };
+    const attention = selectPrivateLifeAttention({
+      config: DEFAULT_PRIVATE_LIFE,
+      threads: [thread],
+      recentResidueAvailable: false,
+      origin: "continue-inner-thread",
+      random: () => 0.5,
+    });
+
+    expect(attention).toEqual({ origin: "continue-inner-thread", thread });
+  });
+
+  test("selects room residue only from recently active candidate rooms", () => {
+    const now = Date.UTC(2026, 6, 22, 12);
+    const selected = selectPrivateLifeResidueChannel({
+      candidates: [
+        { guildId: "g1", channelId: "old", messageCount: 100, lastHumanActivityAt: now - 49 * 3_600_000 },
+        { guildId: "g1", channelId: "none", messageCount: 100, lastHumanActivityAt: null },
+        { guildId: "g2", channelId: "recent", messageCount: 4, lastHumanActivityAt: now - 3_600_000 },
+      ],
+      maxAgeHours: 48,
+      now,
+      random: () => 0.5,
+    });
+
+    expect(selected?.channelId).toBe("recent");
+  });
+
+  test("balances softened popularity with human recency", () => {
+    const now = Date.UTC(2026, 6, 22, 12);
+    const random = seededRandom(91);
+    let recentCount = 0;
+    for (let index = 0; index < 2_000; index += 1) {
+      const selected = selectPrivateLifeResidueChannel({
+        candidates: [
+          { guildId: "g1", channelId: "popular-old", messageCount: 100, lastHumanActivityAt: now - 47 * 3_600_000 },
+          { guildId: "g2", channelId: "recent", messageCount: 4, lastHumanActivityAt: now },
+        ],
+        maxAgeHours: 48,
+        now,
+        random,
+      });
+      if (selected?.channelId === "recent") recentCount += 1;
+    }
+
+    expect(recentCount).toBeGreaterThan(700);
+    expect(recentCount).toBeLessThan(1_300);
   });
 
   test("builds candidate seeds from operator-selected dimensions", () => {

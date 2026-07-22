@@ -18,6 +18,18 @@ export interface RecentPrivateLifeTheme {
   mode: string;
 }
 
+export interface PrivateLifeResidueChannel {
+  guildId: string;
+  channelId: string;
+  messageCount: number;
+  lastHumanActivityAt: number | null;
+}
+
+export interface PrivateLifeAttention {
+  origin: PrivateLifeSelection["origin"];
+  thread?: InnerThread;
+}
+
 const SEED_SUBJECTS: Record<(typeof PRIVATE_LIFE_TERRITORIES)[number], readonly string[]> = {
   open: ["an overlooked object", "an unfamiliar practice", "a private contradiction", "a useless fact", "a small experiment", "an accidental pattern", "a specific irritation", "an improbable place", "a physical technique", "a minor mystery", "a bad idea", "a forgotten possession"],
   external: ["an animal behavior", "an obscure profession", "a remote settlement", "an unusual law", "a street ritual", "a weather mechanism", "a transport system", "a medical practice", "a niche community", "a failed expedition", "a material supply chain", "an unfamiliar language feature"],
@@ -197,6 +209,70 @@ function selectThread(threads: readonly InnerThread[], now: number, random: () =
   return threads.find((thread) => thread.id === id);
 }
 
+/** Select the attention source before a runtime channel is chosen. */
+export function selectPrivateLifeAttention(input: {
+  config: PrivateLifeConfig;
+  threads: readonly InnerThread[];
+  recentResidueAvailable: boolean;
+  origin?: PrivateLifeSelection["origin"];
+  now?: number;
+  random?: () => number;
+}): PrivateLifeAttention {
+  const random = input.random ?? Math.random;
+  const now = input.now ?? Date.now();
+  const origins = PRIVATE_LIFE_ATTENTION_ORIGINS.filter((origin) =>
+    origin !== "continue-inner-thread" || input.threads.length > 0
+  ).filter((origin) => origin !== "recent-residue" || input.recentResidueAvailable);
+  const origin = input.origin !== undefined && origins.includes(input.origin)
+    ? input.origin
+    : weightedChoice(origins, (value) => input.config.originWeights[value], random);
+  const thread = origin === "continue-inner-thread"
+    ? selectThread(input.threads, now, random)
+    : undefined;
+  return {
+    origin: thread === undefined && origin === "continue-inner-thread" ? "spontaneous" : origin,
+    ...(thread !== undefined ? { thread } : {}),
+  };
+}
+
+/** Report whether the candidate pool contains a recently active human room. */
+export function hasPrivateLifeResidueChannel(input: {
+  candidates: readonly PrivateLifeResidueChannel[];
+  maxAgeHours: number;
+  now?: number;
+}): boolean {
+  const now = input.now ?? Date.now();
+  const maxAgeMs = input.maxAgeHours * 3_600_000;
+  return input.candidates.some((candidate) => candidate.lastHumanActivityAt !== null
+    && now - candidate.lastHumanActivityAt >= 0
+    && now - candidate.lastHumanActivityAt <= maxAgeMs);
+}
+
+/** Choose one recent active room while softening raw message-count dominance. */
+export function selectPrivateLifeResidueChannel(input: {
+  candidates: readonly PrivateLifeResidueChannel[];
+  maxAgeHours: number;
+  now?: number;
+  random?: () => number;
+}): PrivateLifeResidueChannel | undefined {
+  const random = input.random ?? Math.random;
+  const now = input.now ?? Date.now();
+  const maxAgeMs = input.maxAgeHours * 3_600_000;
+  const eligible = input.candidates.filter((candidate) => candidate.lastHumanActivityAt !== null
+    && now - candidate.lastHumanActivityAt >= 0
+    && now - candidate.lastHumanActivityAt <= maxAgeMs);
+  if (eligible.length === 0) return undefined;
+  const indexes = eligible.map((_candidate, index) => String(index));
+  const selected = weightedChoice(indexes, (value) => {
+    const candidate = eligible[Number(value)];
+    if (candidate === undefined || candidate.lastHumanActivityAt === null) return 0;
+    const ageRatio = Math.min(1, (now - candidate.lastHumanActivityAt) / maxAgeMs);
+    const recency = 0.2 + 0.8 * (1 - ageRatio);
+    return Math.sqrt(Math.max(1, candidate.messageCount)) * recency;
+  }, random);
+  return eligible[Number(selected)];
+}
+
 function candidateSeeds(
   territory: PrivateLifeSelection["territory"],
   count: number,
@@ -227,15 +303,6 @@ function candidateSeeds(
   return [...candidates];
 }
 
-function selectRecentResidue(
-  recent: readonly RecentPrivateLifeTheme[],
-  random: () => number,
-): RecentPrivateLifeTheme | undefined {
-  const indexes = recent.map((_theme, index) => String(index));
-  const index = weightedChoice(indexes, (value) => 1 / (1 + Number(value) * 0.18), random);
-  return recent[Number(index)];
-}
-
 /** Select a broad lane and varied concrete seeds without treating the space as a checklist. */
 export function selectPrivateLifeCuriosity(input: {
   config: PrivateLifeConfig;
@@ -246,18 +313,22 @@ export function selectPrivateLifeCuriosity(input: {
   mode?: PrivateLifeSelection["mode"];
   territory?: PrivateLifeSelection["territory"];
   actionScope?: PrivateLifeSelection["actionScope"];
+  recentResidueAvailable?: boolean;
   socialOutputAvailable?: boolean;
   now?: number;
   random?: () => number;
 }): PrivateLifeSelection {
   const random = input.random ?? Math.random;
   const now = input.now ?? Date.now();
-  const origins = PRIVATE_LIFE_ATTENTION_ORIGINS.filter((origin) =>
-    origin !== "continue-inner-thread" || input.threads.length > 0
-  ).filter((origin) => origin !== "recent-residue" || input.recent.length > 0);
-  const origin = input.origin !== undefined && origins.includes(input.origin)
-    ? input.origin
-    : weightedChoice(origins, (value) => input.config.originWeights[value], random);
+  const attention = selectPrivateLifeAttention({
+    config: input.config,
+    threads: input.threads,
+    recentResidueAvailable: input.recentResidueAvailable ?? false,
+    ...(input.origin !== undefined ? { origin: input.origin } : {}),
+    now,
+    random,
+  });
+  const origin = attention.origin;
   const mode = input.mode ?? weightedChoice(
       PRIVATE_LIFE_CURIOSITY_MODES,
       (value) => input.config.modeWeights[value]
@@ -278,23 +349,14 @@ export function selectPrivateLifeCuriosity(input: {
       * (value === "social-opportunity" && input.socialOutputAvailable === false ? 0 : 1),
     random,
   );
-  const thread = origin === "continue-inner-thread"
-    ? selectThread(input.threads, now, random)
-    : undefined;
-  const residue = origin === "recent-residue" ? selectRecentResidue(input.recent, random) : undefined;
+  const thread = attention.thread;
   const freshSeeds = candidateSeeds(territory, input.config.candidateCount, input.recent, random);
-  const seeds = residue === undefined
-    ? freshSeeds
-    : [
-        `Prior private subject: "${residue.label}". Return only through a distinct concrete new hook.`,
-        ...freshSeeds,
-      ].slice(0, input.config.candidateCount);
   return {
     origin: thread === undefined && origin === "continue-inner-thread" ? "spontaneous" : origin,
     mode,
     territory,
     actionScope,
-    candidateSeeds: seeds,
+    candidateSeeds: freshSeeds,
     ...(thread !== undefined ? {
       continuedThreadId: thread.id,
       continuedThreadContent: thread.content,

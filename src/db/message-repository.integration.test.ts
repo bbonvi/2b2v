@@ -1,6 +1,6 @@
 import { test, expect, beforeEach, describe } from "bun:test";
 import { createDatabase, type Database } from "./database";
-import { getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listBotChannelUsage, listChannelMessages, markDiscordMessageDeleted } from "./message-repository";
+import { getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listBotChannelActivityUsage, listBotChannelUsage, listChannelMessages, markDiscordMessageDeleted } from "./message-repository";
 
 let db: Database;
 
@@ -55,6 +55,7 @@ describe("listBotChannelUsage", () => {
     insertMessage("b1", { guildId: "g1", channelId: "c1", userId: "bot", isBot: true, createdAt: now });
     insertMessage("b2", { guildId: "g1", channelId: "c1", userId: "bot", isBot: true, createdAt: now + 1 });
     insertMessage("b3", { guildId: "g2", channelId: "c2", userId: "bot", isBot: true, createdAt: now + 2 });
+    insertMessage("human-c1", { guildId: "g1", channelId: "c1", userId: "human", createdAt: now + 3 });
     insertMessage("other-bot", { guildId: "g3", channelId: "c3", userId: "other", isBot: true });
     insertMessage("human", { guildId: "g3", channelId: "c3", userId: "human" });
     insertMessage("synthetic", { guildId: "g3", channelId: "c4", userId: "bot", isBot: true, isSynthetic: true });
@@ -65,6 +66,10 @@ describe("listBotChannelUsage", () => {
     expect(listBotChannelUsage(db, "bot", 5)).toEqual([
       { guildId: "g1", channelId: "c1", messageCount: 2 },
       { guildId: "g2", channelId: "c2", messageCount: 1 },
+    ]);
+    expect(listBotChannelActivityUsage(db, "bot", 5)).toEqual([
+      { guildId: "g1", channelId: "c1", messageCount: 2, lastHumanActivityAt: now + 3 },
+      { guildId: "g2", channelId: "c2", messageCount: 1, lastHumanActivityAt: null },
     ]);
   });
 });
