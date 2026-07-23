@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { Database } from "../src/db/database.ts";
 import { validateProfileName } from "../src/config/profile.ts";
+import type { UpsertMessageAsset } from "../src/db/asset-repository.ts";
+import { syncMessageAssets } from "../src/db/asset-repository.ts";
+import { assetsFromDiscordMessageData } from "../src/discord/message-assets.ts";
+import { appendStickerTags, messageDisplayContentFromData } from "../src/discord/message-media.ts";
 
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const DEFAULT_PAGE_SIZE = 100;
@@ -34,14 +38,41 @@ interface DiscordUser {
   bot?: boolean;
 }
 
-interface DiscordMessage {
+export interface DiscordMessage {
   id: string;
   author: DiscordUser;
   content: string;
   timestamp: string;
+  message_reference?: {
+    message_id?: string | null;
+  } | null;
+  attachments?: Array<{
+    id: string;
+    filename: string;
+    content_type?: string | null;
+    size: number;
+    width?: number | null;
+    height?: number | null;
+    duration_secs?: number | null;
+  }>;
+  embeds?: Array<{
+    type?: string;
+    url?: string | null;
+    title?: string | null;
+    provider?: { name?: string | null } | null;
+    video?: { url?: string; width?: number | null; height?: number | null } | null;
+    image?: { url?: string; width?: number | null; height?: number | null } | null;
+    thumbnail?: { url?: string; width?: number | null; height?: number | null } | null;
+  }>;
+  sticker_items?: Array<{
+    id: string;
+    name: string;
+    format_type: number;
+  }>;
+  components?: unknown[];
 }
 
-interface ImportRow {
+export interface ImportRow {
   id: string;
   guildId: string;
   channelId: string;
@@ -50,6 +81,8 @@ interface ImportRow {
   content: string;
   isBot: boolean;
   createdAt: number;
+  replyToId: string | null;
+  assets: UpsertMessageAsset[];
 }
 
 interface FetchStats {
@@ -59,7 +92,8 @@ interface FetchStats {
   candidateRows: number;
   existingRows: number;
   changedRows: number;
-  skippedEmpty: number;
+  emptyContentRows: number;
+  assetRows: number;
   skippedInvalidDate: number;
   skippedOutsideRange: number;
   users: Map<string, number>;
@@ -100,7 +134,7 @@ Options:
   --data-dir <path>          Data dir fallback if --db is omitted.
   --quiet                    Suppress progress logs.
   --dry-run                  Fetch/validate/count only. Default.
-  --apply                    Insert missing rows.`);
+  --apply                    Insert missing rows and index their asset metadata.`);
   process.exit(2);
 }
 
@@ -437,6 +471,62 @@ async function fetchMessagePage(input: {
   );
 }
 
+/** Convert one Discord REST history message to the current SQLite history representation. */
+export function discordMessageToImportRow(input: {
+  message: DiscordMessage;
+  guildId: string;
+  channelId: string;
+  botUserId: string;
+  createdAt: number;
+}): ImportRow {
+  const { message } = input;
+  const content = appendStickerTags(
+    messageDisplayContentFromData(message.content, message.components ?? [], message.author.username),
+    message.sticker_items ?? [],
+  );
+  const assets = assetsFromDiscordMessageData({
+    id: message.id,
+    guildId: input.guildId,
+    channelId: input.channelId,
+    createdAt: input.createdAt,
+    attachments: (message.attachments ?? []).map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename,
+      contentType: attachment.content_type,
+      size: attachment.size,
+      width: attachment.width,
+      height: attachment.height,
+      durationSeconds: attachment.duration_secs,
+    })),
+    embeds: (message.embeds ?? []).map((embed) => ({
+      type: embed.type,
+      url: embed.url,
+      title: embed.title,
+      providerName: embed.provider?.name,
+      video: embed.video,
+      image: embed.image,
+      thumbnail: embed.thumbnail,
+    })),
+    stickers: (message.sticker_items ?? []).map((sticker) => ({
+      id: sticker.id,
+      name: sticker.name,
+      formatType: sticker.format_type,
+    })),
+  });
+  return {
+    id: message.id,
+    guildId: input.guildId,
+    channelId: input.channelId,
+    userId: message.author.id,
+    authorUsername: message.author.username,
+    content,
+    isBot: message.author.bot === true || message.author.id === input.botUserId,
+    createdAt: input.createdAt,
+    replyToId: message.message_reference?.message_id ?? null,
+    assets,
+  };
+}
+
 function makeEmptyStats(stopReason = "channel exhausted"): FetchStats {
   return {
     pages: 0,
@@ -445,7 +535,8 @@ function makeEmptyStats(stopReason = "channel exhausted"): FetchStats {
     candidateRows: 0,
     existingRows: 0,
     changedRows: 0,
-    skippedEmpty: 0,
+    emptyContentRows: 0,
+    assetRows: 0,
     skippedInvalidDate: 0,
     skippedOutsideRange: 0,
     users: new Map<string, number>(),
@@ -473,7 +564,8 @@ async function processHistory(input: {
   let candidateRows = 0;
   let existingRows = 0;
   let changedRows = 0;
-  let skippedEmpty = 0;
+  let emptyContentRows = 0;
+  let assetRows = 0;
   let skippedInvalidDate = 0;
   let skippedOutsideRange = 0;
   let botMessages = 0;
@@ -550,27 +642,20 @@ async function processHistory(input: {
           continue;
         }
 
-        const content = message.content.trim();
-        if (content === "") {
-          skippedEmpty++;
-          continue;
-        }
-
-        const isBot = message.author.bot === true || message.author.id === botUserId;
-        if (isBot) botMessages++;
+        const row = discordMessageToImportRow({
+          message,
+          guildId: args.guildId,
+          channelId: args.channelId,
+          botUserId,
+          createdAt,
+        });
+        if (row.content === "") emptyContentRows++;
+        assetRows += row.assets.length;
+        if (row.isBot) botMessages++;
         users.set(message.author.username, (users.get(message.author.username) ?? 0) + 1);
         minDate = minDate === undefined ? createdAt : Math.min(minDate, createdAt);
         maxDate = maxDate === undefined ? createdAt : Math.max(maxDate, createdAt);
-        pageCandidates.push({
-          id: message.id,
-          guildId: args.guildId,
-          channelId: args.channelId,
-          userId: message.author.id,
-          authorUsername: message.author.username,
-          content,
-          isBot,
-          createdAt,
-        });
+        pageCandidates.push(row);
       }
 
       const existing = db !== undefined ? getExisting(db, pageCandidates) : { existing: 0, missing: pageCandidates };
@@ -580,6 +665,12 @@ async function processHistory(input: {
       if (args.apply && existing.missing.length > 0) {
         if (writeDb === undefined) throw new Error("write database was not initialized");
         insertRows(writeDb, existing.missing);
+      }
+      if (args.apply && pageCandidates.length > 0) {
+        if (writeDb === undefined) throw new Error("write database was not initialized");
+        for (const row of pageCandidates) {
+          syncMessageAssets(writeDb, { messageId: row.id, assets: row.assets });
+        }
       }
 
       if (!args.quiet) {
@@ -609,7 +700,8 @@ async function processHistory(input: {
     candidateRows,
     existingRows,
     changedRows,
-    skippedEmpty,
+    emptyContentRows,
+    assetRows,
     skippedInvalidDate,
     skippedOutsideRange,
     users,
@@ -632,11 +724,11 @@ function getExisting(db: Pick<Database, "raw">, rows: ImportRow[]): ExistingResu
   return { existing, missing };
 }
 
-function insertRows(db: Database, rows: ImportRow[]): void {
+export function insertRows(db: Database, rows: ImportRow[]): void {
   const stmt = db.raw.prepare(
     `INSERT OR IGNORE INTO messages
       (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id, is_synthetic, related_thread_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
   );
 
   const insertMany = db.raw.transaction((items: ImportRow[]) => {
@@ -651,6 +743,7 @@ function insertRows(db: Database, rows: ImportRow[]): void {
         row.content,
         row.isBot ? 1 : 0,
         row.createdAt,
+        row.replyToId,
       );
     }
   });
@@ -680,7 +773,9 @@ function dryRun(runtime: RuntimePaths, stats: FetchStats): void {
   console.log(`Bot/self rows: ${stats.botMessages}`);
   console.log(`Existing rows: ${stats.existingRows}`);
   console.log(`Would insert: ${stats.changedRows}`);
-  console.log(`Skipped: empty=${stats.skippedEmpty}, invalid_date=${stats.skippedInvalidDate}, outside_range=${stats.skippedOutsideRange}, duplicate_ids=${stats.duplicateIds}`);
+  console.log(`Asset rows to index: ${stats.assetRows}`);
+  console.log(`Empty-content rows retained: ${stats.emptyContentRows}`);
+  console.log(`Skipped: invalid_date=${stats.skippedInvalidDate}, outside_range=${stats.skippedOutsideRange}, duplicate_ids=${stats.duplicateIds}`);
   console.log(`Stop reason: ${stats.stopReason}`);
 
   if (!existsSync(runtime.dbPath)) {
@@ -697,8 +792,10 @@ function printApplySummary(stats: FetchStats): void {
   console.log(`Candidate rows: ${stats.candidateRows}`);
   console.log(`Imported rows: ${stats.changedRows}`);
   console.log(`Skipped existing rows: ${stats.existingRows}`);
+  console.log(`Asset rows indexed: ${stats.assetRows}`);
+  console.log(`Empty-content rows retained: ${stats.emptyContentRows}`);
   console.log(`Candidate date range: ${formatDate(stats.minDate)} .. ${formatDate(stats.maxDate)}`);
-  console.log(`Skipped: empty=${stats.skippedEmpty}, invalid_date=${stats.skippedInvalidDate}, outside_range=${stats.skippedOutsideRange}, duplicate_ids=${stats.duplicateIds}`);
+  console.log(`Skipped: invalid_date=${stats.skippedInvalidDate}, outside_range=${stats.skippedOutsideRange}, duplicate_ids=${stats.duplicateIds}`);
   console.log(`Stop reason: ${stats.stopReason}`);
 }
 
@@ -735,15 +832,17 @@ async function main(): Promise<void> {
   else dryRun(runtime, stats);
 }
 
-try {
-  await main();
-  process.exit(0);
-} catch (err) {
-  const message = err instanceof Error ? err.message : String(err);
-  if (message === "Cancelled" || abortController.signal.aborted) {
-    console.error("Import cancelled.");
-    process.exit(130);
+if (import.meta.main) {
+  try {
+    await main();
+    process.exit(0);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message === "Cancelled" || abortController.signal.aborted) {
+      console.error("Import cancelled.");
+      process.exit(130);
+    }
+    console.error(`Import failed: ${message}`);
+    process.exit(1);
   }
-  console.error(`Import failed: ${message}`);
-  process.exit(1);
 }

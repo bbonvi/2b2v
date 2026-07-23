@@ -18,15 +18,15 @@ function collectTextDisplayContent(value: unknown, output: string[]): void {
   for (const component of record.components) collectTextDisplayContent(component, output);
 }
 
-/** Include Discord Components V2 text displays in the message text visible to history and other bots. */
-export function messageDisplayContent(
+/** Include raw Discord Components V2 text displays in stored message content. */
+export function messageDisplayContentFromData(
   content: string,
-  components: Iterable<SerializableMessageComponent>,
+  components: Iterable<unknown>,
   sourceUsername = "unknown",
 ): string {
   const parts = content.trim() === "" ? [] : [content];
   for (const component of components) {
-    const value = component.toJSON();
+    const value = component;
     if (content.trim() === "" && value !== null && typeof value === "object") {
       const record = value as Record<string, unknown>;
       const cardText: string[] = [];
@@ -39,6 +39,19 @@ export function messageDisplayContent(
     collectTextDisplayContent(value, parts);
   }
   return parts.join("\n");
+}
+
+/** Include Discord Components V2 text displays in the message text visible to history and other bots. */
+export function messageDisplayContent(
+  content: string,
+  components: Iterable<SerializableMessageComponent>,
+  sourceUsername = "unknown",
+): string {
+  return messageDisplayContentFromData(
+    content,
+    [...components].map((component) => component.toJSON()),
+    sourceUsername,
+  );
 }
 
 /** Build the prompt-visible sticker tags appended to message history content. */
