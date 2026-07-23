@@ -37,8 +37,8 @@ interface ParseResult {
 
 const RESERVED_TAG_RE = /<\s*\/?\s*(?:voice|audio|message|ignore)(?=[\s/>])/i;
 const FENCE_RE = /```[ \t]*(?:[a-zA-Z0-9_-]+)?[ \t]*\n?([\s\S]*?)```/g;
-const PRIVATE_TAG_RE = /<\s*(\/?)\s*(scene|thoughts)(?=[\s/>])([^>]*)>/gi;
-const PRIVATE_TAG_PREFIX_RE = /<\s*\/?\s*(?:scene|thoughts)(?=[\s/>]|$)/i;
+const PRIVATE_TAG_RE = /<\s*(\/?)\s*(scene|thoughts?)(?=[\s/>])([^>]*)>/gi;
+const PRIVATE_TAG_PREFIX_RE = /<\s*\/?\s*(?:scene|thoughts?)(?=[\s/>]|$)/i;
 const TAG_RE = /<\s*(\/?)\s*(voice|audio|message|ignore)(?=[\s/>])([^>]*)>/gi;
 const USERNAME_PATTERN = "[A-Za-z0-9_](?:[A-Za-z0-9_.]{0,30}[A-Za-z0-9_])?";
 const CHANNEL_PATTERN = "#[A-Za-z0-9_][\\w-]{0,99}";
@@ -63,7 +63,7 @@ function stripPrivateBlocks(text: string): {
   const thoughts: string[] = [];
   const tagRe = new RegExp(PRIVATE_TAG_RE.source, "gi");
   let cursor = 0;
-  let active: { tag: "scene" | "thoughts"; bodyStart: number } | undefined;
+  let active: { tag: "scene" | "thought" | "thoughts"; bodyStart: number } | undefined;
 
   for (;;) {
     const match = tagRe.exec(text);
@@ -71,7 +71,7 @@ function stripPrivateBlocks(text: string): {
     const closing = match[1] === "/";
     const rawTag = match[2];
     if (rawTag === undefined) continue;
-    const tag = rawTag.toLowerCase() as "scene" | "thoughts";
+    const tag = rawTag.toLowerCase() as "scene" | "thought" | "thoughts";
     const attrs = match[3] ?? "";
     const selfClosing = /\/\s*$/.test(attrs);
 
@@ -89,7 +89,7 @@ function stripPrivateBlocks(text: string): {
     if (!closing || tag !== active.tag || selfClosing) {
       return { text: "", thoughts: [], malformed: true };
     }
-    if (active.tag === "thoughts") {
+    if (active.tag === "thought" || active.tag === "thoughts") {
       const body = text.slice(active.bodyStart, match.index).trim();
       if (body !== "") thoughts.push(body);
     }

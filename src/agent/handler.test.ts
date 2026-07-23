@@ -1975,14 +1975,14 @@ describe("handleMessage", () => {
 
   test("keeps complete thoughts private and makes them available to maintenance", async () => {
     const completeChat: ChatCompleteFn = () => Promise.resolve({
-      text: "<thoughts>I want to inspect the broken seal later.</thoughts><message>The seal is worn.</message>",
+      text: "<thought>I want to inspect the broken seal later.</thought><message>The seal is worn.</message>",
       toolCalls: [],
       rawResponse: {},
       messageForLogs: {
         role: "assistant",
         stopReason: "stop",
         usage: { input: 1, output: 1, totalTokens: 2 },
-        content: [{ type: "text", text: "<thoughts>I want to inspect the broken seal later.</thoughts><message>The seal is worn.</message>" }],
+        content: [{ type: "text", text: "<thought>I want to inspect the broken seal later.</thought><message>The seal is worn.</message>" }],
       },
     });
     const sentTexts: string[] = [];

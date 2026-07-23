@@ -65,6 +65,11 @@ describe("parseResponseDirectives", () => {
       privateThoughts: ["private choice"],
       segments: [{ kind: "text", text: "visible" }],
     });
+    expect(parseResponseDirectives("<thought>singular private choice</thought><message>visible</message>")).toEqual({
+      ignored: false,
+      privateThoughts: ["singular private choice"],
+      segments: [{ kind: "text", text: "visible" }],
+    });
     expect(parseResponseDirectives("before <thoughts>one</thoughts> between <thoughts>two</thoughts> after")).toEqual({
       ignored: false,
       privateThoughts: ["one", "two"],
@@ -78,6 +83,9 @@ describe("parseResponseDirectives", () => {
       "<thoughts>outer<thoughts>inner</thoughts><message>visible</message>",
       "</thoughts><message>visible</message>",
       "<thoughts>private</scene><message>visible</message>",
+      "<thought>private",
+      "<thought>outer<thoughts>inner</thoughts></thought><message>visible</message>",
+      "<thought>private</thoughts><message>visible</message>",
     ]) {
       expect(parseResponseDirectives(response)).toEqual({
         ignored: false,

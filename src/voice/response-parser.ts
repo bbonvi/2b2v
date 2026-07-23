@@ -116,7 +116,8 @@ export class VoiceResponseParser {
         this.buffer = this.buffer.slice("</voice>".length);
         continue;
       }
-      if (lower.startsWith("<thoughts")) {
+      const privateThoughtTag = /^<(thoughts?)(?=[\s/>])/i.exec(this.buffer)?.[1]?.toLowerCase();
+      if (privateThoughtTag !== undefined) {
         const openEnd = this.buffer.indexOf(">");
         if (openEnd === -1) return final;
         const openingTag = this.buffer.slice(0, openEnd + 1);
@@ -124,14 +125,15 @@ export class VoiceResponseParser {
           this.buffer = this.buffer.slice(openEnd + 1);
           continue;
         }
-        const closeStart = lower.indexOf("</thoughts>", openEnd + 1);
+        const closingTag = `</${privateThoughtTag}>`;
+        const closeStart = lower.indexOf(closingTag, openEnd + 1);
         if (closeStart === -1) return final;
         const body = this.buffer.slice(openEnd + 1, closeStart);
-        if (/<\s*\/?\s*thoughts(?=[\s/>]|$)/i.test(body)) {
+        if (/<\s*\/?\s*thoughts?(?=[\s/>]|$)/i.test(body)) {
           this.buffer = "";
           return true;
         }
-        this.buffer = this.buffer.slice(closeStart + "</thoughts>".length);
+        this.buffer = this.buffer.slice(closeStart + closingTag.length);
         continue;
       }
       if (lower.startsWith("<message")) {
@@ -164,7 +166,17 @@ export class VoiceResponseParser {
         return malformed;
       }
 
-      if (!final && ["<|>", "<voice", "</voice", "<message", "<ignore", "<thoughts", "</thoughts"].some((prefix) => prefix.startsWith(lower))) {
+      if (!final && [
+        "<|>",
+        "<voice",
+        "</voice",
+        "<message",
+        "<ignore",
+        "<thought",
+        "</thought",
+        "<thoughts",
+        "</thoughts",
+      ].some((prefix) => prefix.startsWith(lower))) {
         return malformed;
       }
       malformed = true;
