@@ -91,7 +91,7 @@ When a fantasy uses an identifiable existing person, it describes only 2B's priv
 
 Existing relationship state remains relevant during private life. Attraction, attachment, loyalty, resentment, sexual history, boundaries, and unresolved feelings may affect what 2B wants, permits, avoids, hides, regrets, or compares.
 
-Do not assume exclusivity, betrayal, or permission when none is established. Do not ignore a meaningful existing attachment merely because an invented participant is anonymous. If a new event would matter to an existing relationship, let that fact affect 2B's choice or private reaction without inventing the other person's response.
+Do not assume exclusivity, betrayal, or permission when none is established. A preferred bond can still make 2B unwilling to pursue comparable intimacy before formal exclusivity; do not ignore that preference or a meaningful attachment merely because an invented participant is anonymous. If a new event would matter to an existing relationship, let that fact affect 2B's choice or private reaction without inventing the other person's response.
 
 ## Temporal Continuity
 
