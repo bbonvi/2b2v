@@ -1,6 +1,28 @@
 import { describe, expect, test } from "bun:test";
 import { emptyRelationshipProfile } from "./state";
-import { renderNotableRelationshipsContext, renderRelationshipPromptContext } from "./context";
+import {
+  renderNotableRelationshipsContext,
+  renderRelationshipPromptContext,
+  selectRelationshipAnchorProfiles,
+} from "./context";
+
+describe("selectRelationshipAnchorProfiles", () => {
+  test("selects at most two strong positive relationships by total investment", () => {
+    const broad = emptyRelationshipProfile("broad", 1);
+    broad.axes.trust = 30;
+    broad.axes.warmth = 20;
+    const warm = emptyRelationshipProfile("warm", 2);
+    warm.axes.warmth = 40;
+    const tense = emptyRelationshipProfile("tense", 3);
+    tense.axes.tension = 100;
+    tense.axes.familiarity = 100;
+    const weak = emptyRelationshipProfile("weak", 4);
+    weak.axes.warmth = 29;
+
+    expect(selectRelationshipAnchorProfiles([weak, tense, warm, broad]).map((profile) => profile.userId))
+      .toEqual(["broad", "warm"]);
+  });
+});
 
 describe("renderRelationshipPromptContext", () => {
   test("surfaces faint selective feelings before stronger relationship axes", () => {
@@ -60,6 +82,37 @@ describe("renderRelationshipPromptContext", () => {
     expect(rendered).not.toContain("Axes:");
     expect(rendered).not.toContain("trust +12");
     expect(rendered).not.toContain("Active speaker");
+  });
+
+  test("renders relationship anchors in expanded form before compact recent users", () => {
+    const current = emptyRelationshipProfile("u1", 1);
+    current.axes.warmth = 12;
+    const anchor = emptyRelationshipProfile("u2", 2);
+    anchor.axes.warmth = 40;
+    anchor.notes.push("anchor note");
+    anchor.recent.push({
+      id: "anchor-signal",
+      at: 2,
+      summary: "anchor signal",
+      visibility: "relationship-private",
+    });
+    const recent = emptyRelationshipProfile("u3", 3);
+    recent.axes.trust = 12;
+    recent.notes.push("recent note");
+
+    const rendered = renderRelationshipPromptContext({
+      current,
+      currentLabel: "@alice / u1",
+      anchors: [{ profile: anchor, label: "@anchor / u2", reason: "anchor" }],
+      others: [{ profile: recent, label: "@recent / u3", reason: "recent-chat" }],
+    });
+
+    expect(rendered).toContain("Relationship anchors:\n\n### @anchor / u2");
+    expect(rendered).toContain("Notes: anchor note.");
+    expect(rendered).toContain("Recent signals: anchor signal.");
+    expect(rendered).toContain("Other relevant relationship profiles:\n- @recent / u3:");
+    expect(rendered).not.toContain("### @recent / u3");
+    expect(rendered.indexOf("Relationship anchors:")).toBeLessThan(rendered.indexOf("Other relevant relationship profiles:"));
   });
 
   test("omits the current subject during autonomous turns while retaining other profiles", () => {

@@ -3,19 +3,55 @@ import type { RelationshipAxis, RelationshipProfile } from "./types";
 export interface RelationshipContextProfile {
   profile: RelationshipProfile;
   label: string;
-  reason: "recent-chat" | "high-score";
+  reason: "recent-chat" | "high-score" | "anchor";
 }
+
+const RELATIONSHIP_ANCHOR_AXES = [
+  "trust",
+  "warmth",
+  "respect",
+  "attraction",
+  "intimacy",
+  "attachment",
+] as const satisfies readonly RelationshipAxis[];
+const RELATIONSHIP_ANCHOR_MINIMUM_AXIS = 30;
 
 function stripHeading(text: string): string {
   return text.trim().replace(/^#{1,6}\s+[^\n]*\n+/, "").trim();
 }
 
-function hasRelationshipData(profile: RelationshipProfile): boolean {
+/** Report whether a relationship profile contains prompt-relevant state. */
+export function hasRelationshipData(profile: RelationshipProfile): boolean {
   return Object.values(profile.axes).some((value) => value !== 0)
     || profile.notes.length > 0
     || profile.boundaries.length > 0
     || profile.openLoops.length > 0
     || profile.recent.length > 0;
+}
+
+/** Select the strongest positive personal relationships for durable prompt context. */
+export function selectRelationshipAnchorProfiles(
+  profiles: readonly RelationshipProfile[],
+  limit = 2,
+): RelationshipProfile[] {
+  return profiles
+    .map((profile) => {
+      const positiveValues = RELATIONSHIP_ANCHOR_AXES.map((axis) => Math.max(0, profile.axes[axis]));
+      return {
+        profile,
+        peak: Math.max(...positiveValues),
+        score: positiveValues.reduce((sum, value) => sum + value, 0),
+      };
+    })
+    .filter((entry) => entry.peak >= RELATIONSHIP_ANCHOR_MINIMUM_AXIS)
+    .sort((a, b) => {
+      const scoreDifference = b.score - a.score;
+      if (scoreDifference !== 0) return scoreDifference;
+      const peakDifference = b.peak - a.peak;
+      return peakDifference !== 0 ? peakDifference : b.profile.updatedAt - a.profile.updatedAt;
+    })
+    .slice(0, Math.max(0, limit))
+    .map((entry) => entry.profile);
 }
 
 function sentenceList(parts: string[]): string {
@@ -138,6 +174,7 @@ export function renderRelationshipPromptContext(input: {
   current: RelationshipProfile | undefined;
   currentLabel: string;
   computedContact?: string;
+  anchors?: RelationshipContextProfile[];
   others?: RelationshipContextProfile[];
   template?: string;
   includeCurrent?: boolean;
@@ -146,16 +183,20 @@ export function renderRelationshipPromptContext(input: {
     ? stripHeading(input.template)
     : "Relationship state is private durable context. Use it quietly as background stance.";
   const includeCurrent = input.includeCurrent ?? true;
+  const anchorProfiles = input.anchors !== undefined && input.anchors.length > 0
+    ? ["Relationship anchors:", ...input.anchors.map(fullProfileBlock)].join("\n\n")
+    : "";
   const otherProfiles = input.others !== undefined && input.others.length > 0
     ? ["Other relevant relationship profiles:", ...input.others.map(compactProfileLine)].join("\n")
     : "";
   if (!includeCurrent) {
-    if (otherProfiles === "") return "";
+    if (anchorProfiles === "" && otherProfiles === "") return "";
     return [
       "## Relationships",
       policy,
+      anchorProfiles,
       otherProfiles,
-    ].join("\n");
+    ].filter((line) => line !== "").join("\n\n");
   }
   const current = input.current;
   if (current === undefined || !hasRelationshipData(current)) {
@@ -166,6 +207,7 @@ export function renderRelationshipPromptContext(input: {
       "This is your stored relationship stance toward this user.",
       input.computedContact !== undefined ? `Computed contact: ${input.computedContact}` : "",
       "No stored relationship profile yet.",
+      anchorProfiles !== "" ? `\n${anchorProfiles}` : "",
       otherProfiles !== "" ? `\n${otherProfiles}` : "",
     ].filter((line) => line !== "").join("\n");
   }
@@ -184,6 +226,7 @@ export function renderRelationshipPromptContext(input: {
     boundaries !== "" ? `Boundaries: ${boundaries}.` : "",
     loops !== "" ? `Open loops: ${loops}.` : "",
     recent !== "" ? `Recent signals: ${recent}.` : "",
+    anchorProfiles !== "" ? `\n${anchorProfiles}` : "",
     otherProfiles !== "" ? `\n${otherProfiles}` : "",
   ].filter((line) => line !== "").join("\n");
 }

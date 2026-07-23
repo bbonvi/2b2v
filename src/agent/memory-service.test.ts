@@ -317,6 +317,111 @@ describe("buildMemoryContext", () => {
     expect(context).not.toContain("Excluded speaker memory.");
     expect(context.indexOf("Second speaker memory.")).toBeLessThan(context.indexOf("Recent important memory."));
   });
+
+  test("reserves four cross-subject rows for relationship anchors", () => {
+    createMemory(db, { guildId: "g1", aboutUserId: "current", kind: "fact", content: "Current memory." });
+    const anchorImportant = createMemory(db, {
+      guildId: "g1",
+      aboutUserId: "anchor-a",
+      kind: "relationship",
+      content: "Anchor A important memory.",
+      priority: 1,
+    });
+    const anchorMiddle = createMemory(db, {
+      guildId: "g1",
+      aboutUserId: "anchor-a",
+      kind: "fact",
+      content: "Anchor A middle memory.",
+    });
+    const anchorNewest = createMemory(db, {
+      guildId: "g1",
+      aboutUserId: "anchor-a",
+      kind: "fact",
+      content: "Anchor A newest memory.",
+    });
+    const anchorBOldest = createMemory(db, {
+      guildId: "g1",
+      aboutUserId: "anchor-b",
+      kind: "fact",
+      content: "Anchor B oldest memory.",
+    });
+    const anchorBMiddle = createMemory(db, {
+      guildId: "g1",
+      aboutUserId: "anchor-b",
+      kind: "fact",
+      content: "Anchor B middle memory.",
+    });
+    const anchorBNewest = createMemory(db, {
+      guildId: "g1",
+      aboutUserId: "anchor-b",
+      kind: "fact",
+      content: "Anchor B newest memory.",
+    });
+    for (let index = 1; index <= 3; index += 1) {
+      createMemory(db, {
+        guildId: "g1",
+        aboutUserId: `general-${index}`,
+        recallWhen: "always",
+        kind: "fact",
+        content: `General cross-subject memory ${index}.`,
+      });
+    }
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, anchorImportant);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, anchorMiddle);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(300, anchorNewest);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, anchorBOldest);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, anchorBMiddle);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(300, anchorBNewest);
+
+    const context = buildMemoryContext({
+      db,
+      guildId: "g1",
+      currentUserId: "current",
+      relationshipAnchorUserIds: ["anchor-a", "anchor-b"],
+      resolveUserId: (userId) => userId,
+      limit: 8,
+    });
+
+    expect(context.match(/^\d+ /gm)).toHaveLength(8);
+    expect(context).toContain("Anchor A important memory.");
+    expect(context).toContain("Anchor A newest memory.");
+    expect(context).not.toContain("Anchor A middle memory.");
+    expect(context).toContain("Anchor B middle memory.");
+    expect(context).toContain("Anchor B newest memory.");
+    expect(context).not.toContain("Anchor B oldest memory.");
+    expect(context).toContain("General cross-subject memory 1.");
+    expect(context).toContain("General cross-subject memory 2.");
+    expect(context).toContain("General cross-subject memory 3.");
+  });
+
+  test("returns unused anchor memory capacity to general cross-subject rows", () => {
+    createMemory(db, { guildId: "g1", aboutUserId: "current", kind: "fact", content: "Current memory." });
+    createMemory(db, { guildId: "g1", aboutUserId: "anchor", kind: "relationship", content: "Only anchor memory." });
+    for (let index = 1; index <= 4; index += 1) {
+      createMemory(db, {
+        guildId: "g1",
+        aboutUserId: `general-${index}`,
+        recallWhen: "always",
+        kind: "fact",
+        content: `Available general memory ${index}.`,
+      });
+    }
+
+    const context = buildMemoryContext({
+      db,
+      guildId: "g1",
+      currentUserId: "current",
+      relationshipAnchorUserIds: ["anchor"],
+      resolveUserId: (userId) => userId,
+      limit: 6,
+    });
+
+    expect(context.match(/^\d+ /gm)).toHaveLength(6);
+    expect(context).toContain("Only anchor memory.");
+    for (let index = 1; index <= 4; index += 1) {
+      expect(context).toContain(`Available general memory ${index}.`);
+    }
+  });
 });
 
 describe("buildPrivateLifeMemoryContext", () => {

@@ -28,6 +28,8 @@ export interface MemoryContextInput {
   currentUserId: string;
   /** Human users visible in rendered history, newest visible activity first. */
   visibleUserIds?: readonly string[];
+  /** Strong positive relationship users whose memories remain relevant while absent. */
+  relationshipAnchorUserIds?: readonly string[];
   resolveUserId?: (userId: string) => string | undefined;
   limit?: number;
   recentUserMaxUsers?: number;
@@ -129,6 +131,9 @@ const DEFAULT_RECENT_USER_MAX_USERS = 3;
 const DEFAULT_RECENT_USER_MAX_MEMORIES = 2;
 const DEFAULT_RECENT_USER_MAX_ROWS = 6;
 const DEFAULT_CROSS_SUBJECT_RELEVANT_ROWS = 10;
+const DEFAULT_RELATIONSHIP_ANCHOR_MAX_USERS = 2;
+const DEFAULT_RELATIONSHIP_ANCHOR_MAX_MEMORIES = 2;
+const DEFAULT_RELATIONSHIP_ANCHOR_MAX_ROWS = 4;
 
 interface ExpiresIn {
   amount: number;
@@ -451,11 +456,32 @@ export function buildMemoryContext(input: MemoryContextInput): string {
       });
   const recentRows = recentGroups.flatMap((group) => group.rows);
   const recentTotal = recentGroups.reduce((total, group) => total + group.total, 0);
-  const crossSubjectLimit = Math.min(
+  const crossSubjectCapacity = Math.min(
     DEFAULT_CROSS_SUBJECT_RELEVANT_ROWS,
     Math.max(0, limit - recentRows.length - 1),
   );
-  const excludedCrossSubjects = [input.currentUserId, ...(input.visibleUserIds ?? [])];
+  const visibleUserIds = input.visibleUserIds ?? [];
+  const visibleUserIdSet = new Set([input.currentUserId, ...visibleUserIds]);
+  const relationshipAnchorUserIds = [...new Set(input.relationshipAnchorUserIds ?? [])]
+    .filter((userId) => !visibleUserIdSet.has(userId))
+    .slice(0, DEFAULT_RELATIONSHIP_ANCHOR_MAX_USERS);
+  const relationshipAnchorGroups = selectVisibleUserMemoryGroups({
+    db: input.db,
+    guildId: input.guildId,
+    currentUserId: input.currentUserId,
+    visibleUserIds: relationshipAnchorUserIds,
+    maxUsers: DEFAULT_RELATIONSHIP_ANCHOR_MAX_USERS,
+    maxMemoriesPerUser: DEFAULT_RELATIONSHIP_ANCHOR_MAX_MEMORIES,
+    maxRows: Math.min(DEFAULT_RELATIONSHIP_ANCHOR_MAX_ROWS, crossSubjectCapacity),
+  });
+  const relationshipAnchorRows = relationshipAnchorGroups.flatMap((group) => group.rows);
+  const relationshipAnchorTotal = relationshipAnchorGroups.reduce((total, group) => total + group.total, 0);
+  const crossSubjectLimit = Math.max(0, crossSubjectCapacity - relationshipAnchorRows.length);
+  const excludedCrossSubjects = [
+    input.currentUserId,
+    ...visibleUserIds,
+    ...relationshipAnchorUserIds,
+  ];
   const crossSubjectFilter = {
     guildId: input.guildId,
     about: "user" as const,
@@ -506,8 +532,8 @@ export function buildMemoryContext(input: MemoryContextInput): string {
         limit: conversationalLimit,
       }).filter((row) => row.content.trim() !== "")
     : [];
-  const total = conversationalTotal + selfTotal + recentTotal + crossSubjectTotal;
-  const rows = [...conversationalRows, ...selfRows, ...crossSubjectRows]
+  const total = conversationalTotal + selfTotal + recentTotal + relationshipAnchorTotal + crossSubjectTotal;
+  const rows = [...conversationalRows, ...selfRows, ...relationshipAnchorRows, ...crossSubjectRows]
     .sort((a, b) => {
       const priorityDiff = a.priority - b.priority;
       if (priorityDiff !== 0) return priorityDiff;

@@ -116,9 +116,11 @@ import { createPromptLabRunner, promptLabDryRunTools, promptLabSummary, promptLa
 import {
   createRecordRelationshipTool,
   getRelationshipProfile,
+  hasRelationshipData,
   listRelationshipProfiles,
   renderNotableRelationshipsContext,
   renderRelationshipPromptContext,
+  selectRelationshipAnchorProfiles,
   type RelationshipContextProfile,
   type RelationshipConfig,
   type RelationshipMutationResult,
@@ -2130,11 +2132,7 @@ type RelationshipContextRunMode = "live" | "virtual" | "private-life";
 
 function notableRelationshipProfiles(): RelationshipContextProfile[] {
   return listRelationshipProfiles(db, 100)
-    .filter((profile) => Object.values(profile.axes).some((value) => value !== 0)
-      || profile.notes.length > 0
-      || profile.boundaries.length > 0
-      || profile.openLoops.length > 0
-      || profile.recent.length > 0)
+    .filter(hasRelationshipData)
     .map((profile) => ({
       profile,
       score: Object.values(profile.axes).reduce((sum, value) => sum + Math.abs(value), 0)
@@ -2159,6 +2157,7 @@ function buildRelationshipPromptContext(input: {
   contactContext?: string;
   mode: RelationshipContextRunMode;
   notable?: RelationshipContextProfile[];
+  anchors?: RelationshipContextProfile[];
 }): string {
   const config = getRelationshipConfig(input.guildConfig);
   if (!config.enabled || !config.promptInjection) return "";
@@ -2171,35 +2170,23 @@ function buildRelationshipPromptContext(input: {
     });
   }
   const currentUserId = input.latestUserMessage.authorId;
+  const anchorUserIds = new Set((input.anchors ?? []).map((entry) => entry.profile.userId));
+  const anchors = (input.anchors ?? []).filter((entry) => entry.profile.userId !== currentUserId);
   const visible = input.visibleUserIds
     .filter((userId) => userId !== currentUserId)
-    .slice(0, 3)
     .map((userId): RelationshipContextProfile => ({
       profile: getRelationshipProfile(db, userId),
       label: input.resolveUserLabel(userId),
       reason: "recent-chat",
     }))
-    .filter((entry) => Object.values(entry.profile.axes).some((value) => value !== 0) || entry.profile.notes.length > 0 || entry.profile.openLoops.length > 0);
-  const used = new Set([currentUserId, ...visible.map((entry) => entry.profile.userId)]);
-  const highScore = listRelationshipProfiles(db, 50)
-    .filter((profile) => !used.has(profile.userId))
-    .map((profile) => ({
-      profile,
-      score: Math.max(...Object.values(profile.axes).map((value) => Math.abs(value))),
-    }))
-    .filter((entry) => entry.score >= 10)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
-    .map((entry): RelationshipContextProfile => ({
-      profile: entry.profile,
-      label: input.resolveUserLabel(entry.profile.userId),
-      reason: "high-score",
-    }));
+    .filter((entry) => hasRelationshipData(entry.profile) && !anchorUserIds.has(entry.profile.userId))
+    .slice(0, 3);
   return renderRelationshipPromptContext({
     current: getRelationshipProfile(db, currentUserId),
     currentLabel: input.resolveUserLabel(currentUserId),
     computedContact: input.contactContext,
-    others: [...visible, ...highScore].slice(0, 5),
+    anchors,
+    others: visible,
     template: promptBundle.runtime.relationships.context,
     includeCurrent: input.mode !== "virtual" || !input.latestUserMessage.isBot,
   });
@@ -2920,18 +2907,31 @@ async function buildContext(
     ...historyVisibleUserIds,
     ...(historyOptions.additionalVisibleUserIds ?? []),
   ])];
+  const resolveRelationshipUserLabel = (userId: string): string => {
+    const member = guild.members.cache.get(userId);
+    const username = member?.user.username ?? userId;
+    const displayName = member?.displayName;
+    return displayName !== undefined && displayName !== username
+      ? `@${username} (${displayName}) / ${userId}`
+      : `@${username} / ${userId}`;
+  };
+  const relationshipConfig = getRelationshipConfig(guildConfig);
+  const relationshipAnchors = relationshipsMode !== "private-life"
+    && relationshipConfig.enabled
+    && relationshipConfig.promptInjection
+    ? selectRelationshipAnchorProfiles(listRelationshipProfiles(db, 500)).map(
+        (profile): RelationshipContextProfile => ({
+          profile,
+          label: resolveRelationshipUserLabel(profile.userId),
+          reason: "anchor",
+        }),
+      )
+    : [];
 
   const notable = relationshipsMode === "private-life"
     ? notableRelationshipProfiles().map((entry) => ({
         ...entry,
-        label: (() => {
-          const member = guild.members.cache.get(entry.profile.userId);
-          const username = member?.user.username ?? entry.profile.userId;
-          const displayName = member?.displayName;
-          return displayName !== undefined && displayName !== username
-            ? `@${username} (${displayName}) / ${entry.profile.userId}`
-            : `@${username} / ${entry.profile.userId}`;
-        })(),
+        label: resolveRelationshipUserLabel(entry.profile.userId),
       }))
     : [];
   const memories = relationshipsMode === "private-life"
@@ -2948,6 +2948,7 @@ async function buildContext(
         guildId,
         currentUserId: latestUserMessage.authorId,
         visibleUserIds,
+        relationshipAnchorUserIds: relationshipAnchors.map((entry) => entry.profile.userId),
         limit: guildConfig.memoryContext?.maxRows ?? 80,
         resolveUserId: (userId) => resolvePromptUsername(guild, userId),
         contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
@@ -3027,17 +3028,11 @@ async function buildContext(
     guildConfig,
     latestUserMessage,
     visibleUserIds,
-    resolveUserLabel: (userId) => {
-      const member = guild.members.cache.get(userId);
-      const username = member?.user.username ?? userId;
-      const displayName = member?.displayName;
-      return displayName !== undefined && displayName !== username
-        ? `@${username} (${displayName}) / ${userId}`
-        : `@${username} / ${userId}`;
-    },
+    resolveUserLabel: resolveRelationshipUserLabel,
     contactContext,
     mode: relationshipsMode,
     notable,
+    anchors: relationshipAnchors,
   });
 
   if (liveChannel !== null && isSendableGuildChannel(liveChannel) && liveChannel.isThread()) {
