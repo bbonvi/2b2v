@@ -3321,6 +3321,11 @@
             + '</div><div class="management-content">' + esc(thread.content) + '</div>'
             + '<div class="management-meta"><span>about ' + esc(thread.aboutType) + '</span>'
               + (thread.aboutUserId ? '<span>user ' + esc(labelForUser(thread.aboutUserId, true)) + '</span>' : '')
+              + ((thread.sourceMessageIds || []).length > 0
+                ? '<span>source guild ' + esc(thread.sourceGuildId || 'unknown')
+                  + ' / channel ' + esc(thread.sourceChannelId || 'unknown')
+                  + ' / messages ' + esc(thread.sourceMessageIds.join(', ')) + '</span>'
+                : '')
               + '<span>id ' + esc(thread.id) + '</span></div></div>'
           + '</div>';
         }).join('');

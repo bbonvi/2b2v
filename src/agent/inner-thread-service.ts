@@ -183,7 +183,10 @@ function renderThread(thread: InnerThread, context: ThreadRenderContext): string
   const when = thread.recallMode === "users"
     ? `users:${thread.recallUserIds.map((id) => userLabel(id, context, false)).join(",")}`
     : "always";
-  return `${thread.id} [${thread.status}] about=${about} recall=${scope}/${when} salience=${salienceLabel(thread.salience)}[${thread.salience.toFixed(2)}] pressure=${pressureLabel(thread.pressure)}[${thread.pressure.toFixed(2)}]: ${thread.content}`;
+  const source = thread.sourceMessageIds.length === 0
+    ? ""
+    : ` source=guild:${thread.sourceGuildId ?? "unknown"}/channel:${thread.sourceChannelId ?? "unknown"}/messages:[${thread.sourceMessageIds.join(",")}]`;
+  return `${thread.id} [${thread.status}] about=${about} recall=${scope}/${when} salience=${salienceLabel(thread.salience)}[${thread.salience.toFixed(2)}] pressure=${pressureLabel(thread.pressure)}[${thread.pressure.toFixed(2)}]${source}: ${thread.content}`;
 }
 
 /** Create the private structured maintenance tool for durable inner threads. */
