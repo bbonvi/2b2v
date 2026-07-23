@@ -292,6 +292,14 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       undefined,
       {
         includeImageGenerationTools: input.event === "failed",
+        ...(input.event === "failed" ? {
+          currentRequest: {
+            requesterId: job.requesterId,
+            requesterUsername: job.requesterUsername,
+            sourceMessageId: job.sourceMessageId,
+            sourceQuote: job.sourceQuote,
+          },
+        } : {}),
         visibleUserIds: context.visibleUserIds ?? [],
       },
     );
