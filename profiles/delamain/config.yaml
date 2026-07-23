@@ -234,7 +234,7 @@ vpn:
 
 triggers:
   mention: true
-  keywords: [delamain, деламейн, дэл, тупой дебил, лысый]
+  keywords: [delamain, деламейн, дэл, дэл, тупой дебил, лысый]
   randomChance: 0
 
 # Max ordered references per image-generation request
