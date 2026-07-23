@@ -34,7 +34,10 @@ const ThreadFields = {
   recall: RecallParams,
   salience: Type.Number({ minimum: 0, maximum: 1 }),
   pressure: Type.Number({ minimum: 0, maximum: 1 }),
-  source_message_ids: Type.Optional(Type.Array(Type.String())),
+  source_message_ids: Type.Optional(Type.Union([
+    Type.Array(Type.String({ minLength: 1 }), { maxItems: 3 }),
+    Type.Null(),
+  ])),
   expires_at: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
 };
 
@@ -52,7 +55,7 @@ const RecordInnerThreadsParams = Type.Object({
       recall: Type.Optional(RecallParams),
       salience: Type.Optional(ThreadFields.salience),
       pressure: Type.Optional(ThreadFields.pressure),
-      source_message_ids: Type.Optional(Type.Array(Type.String())),
+      source_message_ids: ThreadFields.source_message_ids,
       expires_at: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
     }),
     Type.Object({
@@ -81,7 +84,7 @@ type CreateAction = {
   recall: RecallInput;
   salience: number;
   pressure: number;
-  source_message_ids?: string[];
+  source_message_ids?: string[] | null;
   expires_at?: number | null;
 };
 type UpdateAction = {
@@ -92,7 +95,7 @@ type UpdateAction = {
   recall?: RecallInput;
   salience?: number;
   pressure?: number;
-  source_message_ids?: string[];
+  source_message_ids?: string[] | null;
   expires_at?: number | null;
 };
 type ResolveAction = { action: "resolve"; id: string; pressure?: number };
@@ -137,7 +140,7 @@ function patchFromAction(action: UpdateAction): InnerThreadPatch {
     } : {}),
     ...(action.salience !== undefined ? { salience: action.salience } : {}),
     ...(action.pressure !== undefined ? { pressure: action.pressure } : {}),
-    ...(action.source_message_ids !== undefined ? { sourceMessageIds: action.source_message_ids } : {}),
+    ...(action.source_message_ids !== undefined ? { sourceMessageIds: action.source_message_ids ?? [] } : {}),
     ...(action.expires_at !== undefined ? { expiresAt: action.expires_at } : {}),
   };
 }
@@ -183,9 +186,10 @@ function renderThread(thread: InnerThread, context: ThreadRenderContext): string
   const when = thread.recallMode === "users"
     ? `users:${thread.recallUserIds.map((id) => userLabel(id, context, false)).join(",")}`
     : "always";
-  const source = thread.sourceMessageIds.length === 0
+  const sourceMessageIds = thread.sourceMessageIds.slice(0, 3);
+  const source = sourceMessageIds.length === 0
     ? ""
-    : ` source=guild:${thread.sourceGuildId ?? "unknown"}/channel:${thread.sourceChannelId ?? "unknown"}/messages:[${thread.sourceMessageIds.join(",")}]`;
+    : ` source_msgs=[${sourceMessageIds.join(",")}]`;
   return `${thread.id} [${thread.status}] about=${about} recall=${scope}/${when} salience=${salienceLabel(thread.salience)}[${thread.salience.toFixed(2)}] pressure=${pressureLabel(thread.pressure)}[${thread.pressure.toFixed(2)}]${source}: ${thread.content}`;
 }
 

@@ -47,7 +47,14 @@ describe("createSearchMemoriesTool", () => {
   test("lists all available memory subjects in flat rows without confidence", async () => {
     createMemory(db, { guildId: "g1", kind: "note", content: "Community note" });
     createMemory(db, { guildId: "g1", about: "self", kind: "journal", content: "Self note", confidence: 0.8 });
-    createMemory(db, { guildId: "g1", aboutUserId: ALICE_ID, kind: "preference", content: "User note", confidence: 0.9 });
+    createMemory(db, {
+      guildId: "g1",
+      aboutUserId: ALICE_ID,
+      kind: "preference",
+      content: "User note",
+      sourceMessageId: "123456789012345678",
+      confidence: 0.9,
+    });
 
     const result = await tool().execute("tc1", {}, AbortSignal.timeout(5000));
     const text = textOf(result);
@@ -56,6 +63,8 @@ describe("createSearchMemoriesTool", () => {
     expect(text).toContain("[about:community] [in:this-guild] [when:always] [note]");
     expect(text).toContain("[about:self] [in:anywhere] [when:always] [journal]");
     expect(text).toContain("[about:@alice] [in:anywhere] [when:any(@alice)] [preference]");
+    expect(text).toContain("Legend: a final bare [DiscordMsgID] is the optional source message.");
+    expect(text).toContain("[123456789012345678] User note");
     expect(text).not.toContain("[0.8]");
     expect(text).not.toContain("[0.9]");
     expect(result.details).toEqual({ guildId: "g1", count: 3, total: 3, hasMore: false });

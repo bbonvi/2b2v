@@ -1003,6 +1003,69 @@ describe("createRecordMemoryTool", () => {
     expect(memories[0]?.expiresAt).toBeLessThanOrEqual(after + 90 * 60 * 1000);
   });
 
+  test("uses only explicit source message IDs and supports preserve, replace, and clear", async () => {
+    const tool = createRecordMemoryTool({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      currentUsername: "alice",
+      sourceMessageId: "trigger-message",
+    });
+
+    await tool.execute("create", {
+      actions: [
+        {
+          action: "create",
+          about: "self",
+          recall_in: "anywhere",
+          recall_when: "always",
+          kind: "journal",
+          content: "Has no message evidence.",
+        },
+        {
+          action: "create",
+          about: "user",
+          username: "@alice",
+          recall_in: "anywhere",
+          recall_when: { users_present: ["@alice"] },
+          kind: "fact",
+          content: "Has explicit message evidence.",
+          source_message_id: "evidence-1",
+        },
+      ],
+    });
+
+    const noSource = listMemories(db, { guildId: "g1", about: "self" })[0];
+    const sourced = listMemories(db, { guildId: "g1", aboutUserId: "u1" })[0];
+    expect(noSource?.sourceMessageId).toBeNull();
+    expect(sourced?.sourceMessageId).toBe("evidence-1");
+    if (sourced === undefined) return;
+
+    const update = {
+      action: "update",
+      id: sourced.id,
+      about: "user",
+      username: "@alice",
+      recall_in: "anywhere",
+      recall_when: { users_present: ["@alice"] },
+      kind: "fact",
+      content: "Has explicit message evidence.",
+    } as const;
+
+    await tool.execute("preserve", { actions: [update] });
+    expect(getMemory(db, sourced.id)?.sourceMessageId).toBe("evidence-1");
+
+    await tool.execute("replace", {
+      actions: [{ ...update, source_message_id: "evidence-2" }],
+    });
+    expect(getMemory(db, sourced.id)?.sourceMessageId).toBe("evidence-2");
+
+    await tool.execute("clear", {
+      actions: [{ ...update, source_message_id: null }],
+    });
+    expect(getMemory(db, sourced.id)?.sourceMessageId).toBeNull();
+  });
+
   test("sanitizes copied memory metadata and raw guild id prefixes", async () => {
     const tool = createRecordMemoryTool({
       db,

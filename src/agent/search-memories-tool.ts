@@ -244,10 +244,13 @@ export function createSearchMemoriesTool(deps: SearchMemoriesToolDeps): AgentToo
       const footer = nextCursor === undefined
         ? "End of memories."
         : `More memories are available.\nnext_cursor=${nextCursor}`;
+      const sourceLegend = shown.some((row) => row.sourceMessageId !== null)
+        ? "\nLegend: a final bare [DiscordMsgID] is the optional source message."
+        : "";
       return {
         content: [{
           type: "text",
-          text: `Memory search${searchLabel} in ${guildLabel} — ${shown.length}/${total} shown.\n\n${shown.map(formatRow).join("\n")}\n\n${footer}`,
+          text: `Memory search${searchLabel} in ${guildLabel} — ${shown.length}/${total} shown.${sourceLegend}\n\n${shown.map(formatRow).join("\n")}\n\n${footer}`,
         }],
         details: {
           guildId,

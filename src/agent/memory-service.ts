@@ -171,6 +171,10 @@ const MemoryWriteProperties = {
   username: Type.Optional(Type.String({ minLength: 1, description: "Username for about=user." })),
   kind: Type.String({ enum: [...MEMORY_KINDS] }),
   content: Type.String({ minLength: 1 }),
+  source_message_id: Type.Optional(Type.Union([
+    Type.String({ minLength: 1 }),
+    Type.Null(),
+  ])),
   confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
   important: Type.Optional(Type.Boolean()),
   expiresIn: Type.Optional(Type.Union([ExpiresInSchema, Type.Null()], {
@@ -224,6 +228,7 @@ type MemoryExtraction = {
       recall_when?: MemoryRecallWhenInput;
       kind: MemoryKind;
       content: string;
+      source_message_id?: string | null;
       confidence?: number;
       important?: boolean;
       expiresIn?: ExpiresIn | null;
@@ -237,6 +242,7 @@ type MemoryExtraction = {
       recall_when: MemoryRecallWhenInput;
       kind: MemoryKind;
       content: string;
+      source_message_id?: string | null;
       confidence?: number;
       important?: boolean;
       expiresIn?: ExpiresIn | null;
@@ -334,7 +340,8 @@ export function formatMemorySearchRow(
 ): string {
   const age = ` [${formatMemoryAge(row.updatedAt)}]`;
   const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
-  return `- ${row.id} [about:${aboutLabel(row, resolveUserId)}] [in:${recallLocationLabel(row, currentGuildId)}] [when:${recallTriggerLabel(row, resolveUserId)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${age}${expiry} ${row.content}`;
+  const source = row.sourceMessageId === null ? "" : ` [${row.sourceMessageId}]`;
+  return `- ${row.id} [about:${aboutLabel(row, resolveUserId)}] [in:${recallLocationLabel(row, currentGuildId)}] [when:${recallTriggerLabel(row, resolveUserId)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${age}${expiry}${source} ${row.content}`;
 }
 
 interface MemoryContextGroup {
@@ -1089,6 +1096,7 @@ async function prepareMemoryActions(
       recallWhen,
       kind: action.kind,
       content: action.content.trim(),
+      ...(action.source_message_id !== undefined ? { sourceMessageId: action.source_message_id } : {}),
       confidence: action.confidence,
       ...(action.important !== undefined ? { priority: action.important ? 1 : 0 } : {}),
       ...(expiresAt !== undefined ? { expiresAt } : {}),
@@ -1103,13 +1111,6 @@ async function prepareMemoryActions(
         input: {
           guildId: input.guildId,
           ...common,
-          sourceMessageId: input.sourceMessageId,
-          provenance: {
-            sourceMessageIds: [input.sourceMessageId],
-            guildId: input.guildId,
-            userId: input.currentUserId,
-            capturedAt: Date.now(),
-          },
         },
       });
     }
