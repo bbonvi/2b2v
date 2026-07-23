@@ -1,6 +1,6 @@
 import { test, expect, beforeEach, describe } from "bun:test";
 import { createDatabase, type Database } from "./database";
-import { getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listBotChannelActivityUsage, listBotChannelUsage, listChannelMessages, markDiscordMessageDeleted } from "./message-repository";
+import { getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listBotChannelActivityUsage, listBotChannelUsage, listDiscordChannelUsage, listChannelMessages, markDiscordMessageDeleted } from "./message-repository";
 
 let db: Database;
 
@@ -71,6 +71,31 @@ describe("listBotChannelUsage", () => {
       { guildId: "g1", channelId: "c1", messageCount: 2, lastHumanActivityAt: now + 3 },
       { guildId: "g2", channelId: "c2", messageCount: 1, lastHumanActivityAt: null },
     ]);
+  });
+
+  test("adds recent bot activity and unique seven-day human posters", () => {
+    const day = 24 * hour;
+    insertMessage("recent-bot-1", { guildId: "g1", channelId: "c1", userId: "bot", isBot: true, createdAt: now - hour });
+    insertMessage("recent-bot-2", { guildId: "g1", channelId: "c1", userId: "bot", isBot: true, createdAt: now - 2 * hour });
+    insertMessage("old-bot", { guildId: "g1", channelId: "c1", userId: "bot", isBot: true, createdAt: now - 2 * day });
+    insertMessage("alice-1", { guildId: "g1", channelId: "c1", userId: "alice", createdAt: now - day });
+    insertMessage("alice-2", { guildId: "g1", channelId: "c1", userId: "alice", createdAt: now - 2 * day });
+    insertMessage("bob", { guildId: "g1", channelId: "c1", userId: "bob", createdAt: now - 6 * day });
+    insertMessage("old-human", { guildId: "g1", channelId: "c1", userId: "carol", createdAt: now - 8 * day });
+    insertMessage("synthetic-human", { guildId: "g1", channelId: "c1", userId: "dave", createdAt: now, isSynthetic: true });
+
+    expect(listDiscordChannelUsage(db, {
+      botUserId: "bot",
+      limit: 5,
+      recentBotSince: now - day,
+      activeHumanSince: now - 7 * day,
+    })).toEqual([{
+      guildId: "g1",
+      channelId: "c1",
+      messageCount: 3,
+      recentBotMessageCount: 2,
+      activeHumanPosterCount: 2,
+    }]);
   });
 });
 

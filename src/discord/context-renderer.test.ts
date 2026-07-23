@@ -3,20 +3,24 @@ import { ChannelType, type Client } from "discord.js";
 import { buildDiscordContext } from "./context-renderer.ts";
 
 function fakeClient(): Client {
+  const everyone = { id: "everyone" };
   const guilds = [
-    { id: "g1", name: "Alpha" },
-    { id: "g2", name: "Beta" },
+    { id: "g1", name: "Alpha", memberCount: 183, roles: { everyone } },
+    { id: "g2", name: "Beta", memberCount: 42, roles: { everyone } },
   ];
   const channels = Array.from({ length: 6 }, (_, index) => {
     const number = index + 1;
+    const guild = guilds[number <= 3 ? 0 : 1];
     return {
       id: `c${number}`,
-      guildId: number <= 3 ? "g1" : "g2",
+      guildId: guild?.id,
+      guild,
       name: `room-${number}`,
       type: ChannelType.GuildText,
       viewable: true,
       isDMBased: () => false,
       isThread: () => false,
+      permissionsFor: () => ({ has: () => true }),
     };
   });
   return {
@@ -39,14 +43,21 @@ describe("buildDiscordContext", () => {
         guildId: number <= 3 ? "g1" : "g2",
         channelId: `c${number}`,
         messageCount: 70 - number * 10,
+        recentBotMessageCount: number,
+        activeHumanPosterCount: number,
       })),
     });
 
-    expect(rendered).toContain("Guilds in 2B's Discord life:");
+    expect(rendered).toContain("Accessible guilds:");
+    expect(rendered).toContain("Alpha | guild_id=g1 | members=183");
     expect(rendered).toContain("Alpha / #room-1");
     expect(rendered).toContain("Beta / #room-5");
     expect(rendered).not.toContain("#room-6");
     expect(rendered.indexOf("#room-1")).toBeLessThan(rendered.indexOf("#room-5"));
+    expect(rendered).toContain("visibility=guild-wide");
+    expect(rendered).toContain("active_humans_7d=1");
+    expect(rendered).toContain("recent_2b_24h<=5");
+    expect(rendered).not.toContain("2B_messages");
     expect(rendered).not.toContain("system_channel");
   });
 });

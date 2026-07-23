@@ -25,7 +25,7 @@ import { typingSimulationDelayMs } from "./agent/typing-simulation";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
-import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listBotChannelUsage, listChannelMessages, getRoutedMessageSource, getLatestMessageActivityBefore, type MessageActivity } from "./db/message-repository";
+import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listDiscordChannelUsage, listChannelMessages, getRoutedMessageSource, getLatestMessageActivityBefore, type MessageActivity } from "./db/message-repository";
 import { cleanupDeletedDiscordMessage } from "./db/message-cleanup";
 import {
   countMessagesSinceMemoryExtraction,
@@ -2964,6 +2964,7 @@ async function buildContext(
   }, `Pending schedules in this channel: ${pendingSchedules.length}.`);
   const liveChannel = await client.channels.fetch(channelId).catch(() => guild.channels.cache.get(channelId) ?? null);
   const currentChannelName = channelDisplayName(liveChannel);
+  const discordActivityNow = Date.now();
   const discordContext = buildDiscordContext({
     client,
     currentGuildId: guildId,
@@ -2971,7 +2972,14 @@ async function buildContext(
     currentChannelId: channelId,
     currentChannelName,
     navigationTemplate: runtimeContextTemplate("discord-navigation", {}, "Guild shortlist for navigation context only."),
-    popularChannels: client.user?.id === undefined ? [] : listBotChannelUsage(db, client.user.id, 25),
+    popularChannels: client.user?.id === undefined
+      ? []
+      : listDiscordChannelUsage(db, {
+          botUserId: client.user.id,
+          limit: 25,
+          recentBotSince: discordActivityNow - 24 * 60 * 60 * 1000,
+          activeHumanSince: discordActivityNow - 7 * 24 * 60 * 60 * 1000,
+        }),
   });
 
   // Emoji cache refresh (always needed for outbound translation)
