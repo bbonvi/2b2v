@@ -53,6 +53,7 @@ import { typingSimulationDelayMs } from "./typing-simulation.ts";
 import { formatAssetMeta } from "./history-formatting.ts";
 import type { HistoryAsset } from "./history-types.ts";
 import type { AssetRef } from "./asset-id.ts";
+import { OutboundXmlTagError } from "../discord/outbound-xml-guard.ts";
 
 /** Minimal abstraction over a Discord message for the handler. */
 export interface IncomingMessage {
@@ -1182,6 +1183,7 @@ async function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
 
 function isRetriableModelTurnError(error: unknown): boolean {
   if (error instanceof ModelProviderError) return error.retryable;
+  if (error instanceof OutboundXmlTagError) return true;
   if (error instanceof EmptyModelResponseError) return true;
   if (error instanceof Error && error.name === "ModelOutputTimeoutError") return true;
   return isProviderTransientErrorMessage(makeToolErrorText(error));
@@ -1236,9 +1238,16 @@ async function completeModelTurnWithRetries(input: {
       return result;
     } catch (error) {
       const normalizedError = normalizeModelTurnError(error, input.request);
+      const outboundXmlRejected = normalizedError instanceof OutboundXmlTagError;
       const shouldRetry = attempt < maxAttempts
-        && input.hasCompletedVisibleMessage?.() !== true
+        && (outboundXmlRejected || input.hasCompletedVisibleMessage?.() !== true)
         && isRetriableModelTurnError(normalizedError);
+      if (shouldRetry && outboundXmlRejected) {
+        input.request.messages.push({
+          role: "system",
+          content: normalizedError.message,
+        });
+      }
       if (!isAgentTimeBudgetExceededError(normalizedError)) {
         input.requestLog?.recordLLMError(normalizedError);
       }

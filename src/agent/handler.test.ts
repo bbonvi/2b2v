@@ -10,6 +10,7 @@ import { RequestLog } from "../logger.ts";
 import type { RuntimePromptBundle } from "../config/instruction-bundle.ts";
 import type { OpenRouterMessage } from "../llm/types.ts";
 import { ModelProviderError } from "../llm/codex-chat.ts";
+import { assertSafeDiscordText } from "../discord/outbound-xml-guard.ts";
 
 const TEST_RUNTIME_PROMPTS = {
   reply: "# Runtime Core\nReserved action directives.",
@@ -1476,6 +1477,45 @@ describe("handleMessage", () => {
       { text: "second normal", reply: false },
     ]);
     expect(result.responseText).toBe("first normal\n[msg-break]\nsecond normal");
+  });
+
+  test("adds a rejected outbound XML error to the model conversation and retries", async () => {
+    let calls = 0;
+    let retryInstruction = "";
+    const completeChat: ChatCompleteFn = async (request) => {
+      calls += 1;
+      if (calls === 1) {
+        await request.onTextDelta?.(
+          "<message>first</message><message><internal>private</internal></message>",
+        );
+        throw new Error("The XML guard did not reject the streamed message.");
+      }
+      const lastMessage = request.messages.at(-1);
+      retryInstruction = typeof lastMessage?.content === "string" ? lastMessage.content : "";
+      await request.onTextDelta?.("<message>corrected second</message>");
+      return {
+        text: "<message>corrected second</message>",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      };
+    };
+    const sentTexts: string[] = [];
+    const sender: MessageSender = (text) => {
+      assertSafeDiscordText(text);
+      sentTexts.push(text);
+      return Promise.resolve({ sentMessageId: `sent-${sentTexts.length}` });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, sender }),
+    );
+
+    expect(calls).toBe(2);
+    expect(retryInstruction).toContain("was not sent");
+    expect(sentTexts).toEqual(["first", "corrected second"]);
+    expect(result.responseText).toBe("corrected second");
   });
 
   test("streaming consumes late ignore directives without dropping later messages", async () => {

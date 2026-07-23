@@ -10,6 +10,7 @@ import { syncMessageAssets } from "../db/asset-repository.ts";
 import { assetsFromDiscordMessage } from "./message-assets.ts";
 import { markBotParticipating, updateThreadActivity, upsertThread } from "../db/thread-repository";
 import type { RoutedMessageSource } from "../db/message-repository";
+import { assertSafeDiscordText } from "./outbound-xml-guard.ts";
 
 type AttachmentSendPayload = {
   content?: string;
@@ -450,6 +451,7 @@ export function createDiscordMessageSender(input: {
 
     const warnings: string[] = [];
     const translated = translateOutbound(text, outboundResolvers, warnings);
+    assertSafeDiscordText(translated);
     const imageAttachments = attachmentBuilders(attachments);
     if (presentation?.kind === "components_v2_card") {
       if (imageAttachments.length > 0) throw new Error("Components V2 cards cannot use legacy attachments through this sender.");
