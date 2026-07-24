@@ -68,7 +68,7 @@ describe("renderRelationshipPromptContext", () => {
 
     expect(rendered).toContain("## Relationships");
     expect(rendered).toContain("This is your stored relationship stance toward this user.");
-    expect(rendered).toContain("Computed contact: observed history with this user; familiarity.");
+    expect(rendered).toContain("Interaction history: observed history with this user; familiarity.");
     expect(rendered).toContain("Subject: @alice / u1.");
     expect(rendered).toContain("Relationship stance: The persona feels warm toward them, trusts them, and is slightly more personally open with them.");
     expect(rendered).toContain("Notes: first note; second note; third note.");

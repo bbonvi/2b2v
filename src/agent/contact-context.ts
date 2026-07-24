@@ -604,7 +604,7 @@ function renderContactContext(stats: UserContactStats, now: number, includeLocal
     [memoryImplication(stats), breadthImplication(stats), instrumentalImplication(stats), staleImplication(stats, now), rankClause(stats), includeLocality ? localityImplication(stats) : ""].filter((part) => part !== "").join(" "),
   ].filter((sentence) => sentence !== "");
 
-  return `Known contact: observed history with this user; familiarity. ${sentences.map(trimSentencePunctuation).join(". ")}.`;
+  return `Known interaction history: observed exchanges with this user; familiarity. ${sentences.map(trimSentencePunctuation).join(". ")}.`;
 }
 
 function trimSentencePunctuation(text: string): string {
@@ -613,7 +613,7 @@ function trimSentencePunctuation(text: string): string {
 
 function rapportImplication(stats: UserContactStats): string {
   const score = stats.familiarityScore;
-  if (score <= 10) return "Treat this as near-first contact; do not assume rapport.";
+  if (score <= 10) return "Treat this as almost no prior exchange; do not assume rapport.";
   if (score <= 25) return "You have very little direct history with them; avoid familiar shortcuts.";
   if (score <= 40) return "You may recognize them, but they are not important by default.";
   if (score <= 55) return "Some continuity exists, but closeness is not implied.";
@@ -629,7 +629,7 @@ function rapportImplication(stats: UserContactStats): string {
 
 function recencySummary(stats: UserContactStats, now: number): string {
   if (stats.lastContactAt === null) return "";
-  const lastContact = `Last direct contact was ${formatElapsedDuration(stats.lastContactAt, now)} ago`;
+  const lastContact = `Last direct exchange was ${formatElapsedDuration(stats.lastContactAt, now)} ago`;
   if (stats.lastUserToBotAt === null) return lastContact;
   if (stats.lastBotToUserAt === null) {
     return `${lastContact}; you have not clearly replied before`;
@@ -644,7 +644,7 @@ function dialogueImplication(stats: UserContactStats): string {
     return "Their history includes real back-and-forth, so continuity can matter.";
   }
   if (stats.multiTurnRunCount > 0) return "They have had some back-and-forth, but not deep continuity.";
-  if (stats.directContactEvents >= 5) return "Most prior contact is isolated or short; do not overread it.";
+  if (stats.directContactEvents >= 5) return "Most prior exchanges are isolated or short; do not overread them.";
   return "Direct exchange history is thin.";
 }
 
@@ -658,7 +658,7 @@ function salienceImplication(stats: UserContactStats, now: number): string {
   if (stats.salienceRank !== null && stats.salienceRank <= 15 && ageMs <= 3 * 24 * 60 * 60 * 1000) {
     return "Recent context matters, but they are not necessarily central.";
   }
-  if (ageMs <= 3 * 24 * 60 * 60 * 1000) return "Recent contact exists; use it lightly.";
+  if (ageMs <= 3 * 24 * 60 * 60 * 1000) return "They interacted recently; use that lightly.";
   if (ageMs <= 14 * 24 * 60 * 60 * 1000) return "History exists, but today's interaction should keep some distance.";
   return "History is stale enough that distance should reset somewhat.";
 }
@@ -666,8 +666,8 @@ function salienceImplication(stats: UserContactStats, now: number): string {
 function instrumentalImplication(stats: UserContactStats): string {
   if (stats.instrumentalBotReplies < 2) return "";
   const ratio = stats.instrumentalBotReplies / Math.max(1, stats.botToUserEvents);
-  if (ratio >= 0.5) return "Much of their contact produces links/images, so do not mistake service-like exchanges for rapport.";
-  if (ratio >= 0.25) return "Some contact is tool-like; do not treat that as closeness.";
+  if (ratio >= 0.5) return "Many of their exchanges produce links/images, so do not mistake service-like exchanges for rapport.";
+  if (ratio >= 0.25) return "Some exchanges are tool-like; do not treat that as closeness.";
   return "";
 }
 
@@ -692,7 +692,7 @@ function breadthImplication(stats: UserContactStats): string {
 function staleImplication(stats: UserContactStats, now: number): string {
   if (stats.lastContactAt === null) return "";
   const ageMs = Math.max(0, now - stats.lastContactAt);
-  if (ageMs > COLD_CONTACT_MS) return "Historical contact is cold now; treat them closer to recognizable than familiar.";
+  if (ageMs > COLD_CONTACT_MS) return "Their shared history is now distant; treat them closer to recognizable than familiar.";
   if (ageMs > STALE_CONTACT_MS) return "They may be historically familiar, but current rapport is stale.";
   return "";
 }
@@ -700,23 +700,23 @@ function staleImplication(stats: UserContactStats, now: number): string {
 function chatterImplication(stats: UserContactStats): string {
   const share = stats.directContactEvents / Math.max(1, stats.totalMessages);
   if (stats.totalMessages <= 10 && share >= 0.4) return "They do not talk much overall, but when they do, you are a meaningful target.";
-  if (stats.totalMessages >= 100 && share < 0.15) return "They talk a lot generally, so contact with you is only a small part of their room presence.";
+  if (stats.totalMessages >= 100 && share < 0.15) return "They talk a lot generally, so exchanges with you are only a small part of their room presence.";
   if (share >= 0.35) return "You are a frequent target of their chat presence.";
   return "";
 }
 
 function timeShapeClause(stats: UserContactStats): string {
   const activeDays = stats.activeContactDays.size;
-  if (activeDays <= 1 && stats.directContactEvents >= 8) return "Most contact came from one burst, so durable familiarity is capped.";
-  if (activeDays <= 1) return "Contact is same-day only.";
-  if (activeDays <= 3) return "Contact spans only a few days.";
-  if (activeDays <= 10) return "Contact spans multiple days.";
-  return "The contact is long-running.";
+  if (activeDays <= 1 && stats.directContactEvents >= 8) return "Most exchanges came from one burst, so durable familiarity is capped.";
+  if (activeDays <= 1) return "Their exchanges are from today only.";
+  if (activeDays <= 3) return "Their exchanges span only a few days.";
+  if (activeDays <= 10) return "Their exchanges span multiple days.";
+  return "Their exchange history is long-running.";
 }
 
 function rankClause(stats: UserContactStats): string {
-  if (stats.directRank !== null && stats.directRank <= 5 && stats.directContactEvents >= 10) return "They are among your most frequent direct contacts.";
-  if (stats.directRank !== null && stats.directRank <= 20 && stats.directContactEvents >= 5) return "They are among your more frequent direct contacts.";
+  if (stats.directRank !== null && stats.directRank <= 5 && stats.directContactEvents >= 10) return "They are among the people you exchange messages with most often.";
+  if (stats.directRank !== null && stats.directRank <= 20 && stats.directContactEvents >= 5) return "They are among the people you exchange messages with more often.";
   return "";
 }
 

@@ -64,7 +64,7 @@ describe("computed contact context", () => {
     expect(context?.directContactEvents).toBe(3);
     expect(context?.activeContactDays).toBe(2);
     expect(context?.lastContactAt).toBe(NOW - 60_000);
-    expect(context?.rendered).toContain("Known contact:");
+    expect(context?.rendered).toContain("Known interaction history:");
     expect(context?.rendered).toContain("you last replied");
   });
 
@@ -141,7 +141,7 @@ describe("computed contact context", () => {
 
     expect(burst?.rendered).toContain("one burst");
     expect(steady?.familiarityScore).toBeGreaterThan(burst?.familiarityScore ?? 0);
-    expect(steady?.rendered).toContain("Contact spans multiple days");
+    expect(steady?.rendered).toContain("exchanges span multiple days");
   });
 
   test("marks link and image bot replies as instrumental without inflating familiarity", () => {

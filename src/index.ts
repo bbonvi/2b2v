@@ -3056,7 +3056,7 @@ async function buildContext(
       currentChannelId: channelId,
       beforeCreatedAt: (currentTurnBoundary ?? { timestamp: latestUserMessage.timestamp }).timestamp,
       beforeMessageId: (currentTurnBoundary ?? { messageId: latestUserMessage.id }).messageId,
-    })?.rendered.replace(/^Known contact:\s*/u, "")
+    })?.rendered.replace(/^Known interaction history:\s*/u, "")
     : undefined;
   const relationshipsContext = buildRelationshipPromptContext({
     guildConfig,
