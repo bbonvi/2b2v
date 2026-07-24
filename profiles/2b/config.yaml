@@ -94,11 +94,11 @@ privateLife:
         technical-material: 0.12
         creative-aesthetic: 0.09
         mundane-private: 0.10
-        embodied: 0.09
-        sexual: 0.05
+        embodied: 0.08
+        sexual: 0.03
         social-personal: 0.08
         community: 0.03
-        transgressive-ugly: 0.04
+        transgressive-ugly: 0.03
         playful-absurd: 0.07
     actionScopeWeights:
         reflect-only: 0.55
