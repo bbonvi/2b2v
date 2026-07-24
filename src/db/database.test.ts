@@ -451,11 +451,38 @@ describe("messages table", () => {
     expect(insert).toThrow();
   });
 
-  test("guild_channel_time index supports efficient queries", () => {
-    const idx = db.raw
-      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_messages_guild_channel_time'")
-      .get() as { name: string } | undefined;
-    expect(idx?.name).toBe("idx_messages_guild_channel_time");
+  test("message time indexes support keyset search scopes", () => {
+    const indexes = db.raw
+      .prepare(`SELECT name, sql FROM sqlite_master WHERE type='index'
+        AND name IN ('idx_messages_time', 'idx_messages_guild_time', 'idx_messages_guild_channel_time')
+        ORDER BY name`)
+      .all() as Array<{ name: string; sql: string }>;
+    expect(indexes.map((index) => index.name)).toEqual([
+      "idx_messages_guild_channel_time",
+      "idx_messages_guild_time",
+      "idx_messages_time",
+    ]);
+    for (const index of indexes) {
+      expect(index.sql).toContain("created_at DESC, id DESC");
+    }
+  });
+
+  test("replaces the legacy channel-time index definition once", () => {
+    const dbPath = path.join(tmpDir, "legacy-message-index.db");
+    const existing = createDatabase(dbPath);
+    existing.raw.run("DROP INDEX idx_messages_guild_channel_time");
+    existing.raw.run("CREATE INDEX idx_messages_guild_channel_time ON messages(guild_id, channel_id, created_at)");
+    existing.close();
+
+    const migrated = createDatabase(dbPath);
+    try {
+      const index = migrated.raw.prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_guild_channel_time'",
+      ).get() as { sql: string };
+      expect(index.sql).toContain("created_at DESC, id DESC");
+    } finally {
+      migrated.close();
+    }
   });
 
   test("user_guild index supports per-user queries", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { getAssetsByMessageId, syncMessageAssets } from "../src/db/asset-repository.ts";
+import { getAssetsByMessageId, type UpsertMessageAsset } from "../src/db/asset-repository.ts";
 import { createDatabase } from "../src/db/database.ts";
-import { discordMessageToImportRow, insertRows } from "./import-legacy-channel-history.ts";
+import { discordMessageToImportRow, importPage } from "./import-legacy-channel-history.ts";
 
 describe("legacy channel history import", () => {
   test("converts current Discord history metadata", () => {
@@ -67,8 +67,7 @@ describe("legacy channel history import", () => {
       },
     });
 
-    insertRows(db, [row]);
-    syncMessageAssets(db, { messageId: row.id, assets: row.assets });
+    importPage(db, [row], [row]);
 
     expect(db.raw.prepare(
       "SELECT raw_content, translated_content, reply_to_id, assets_indexed_at FROM messages WHERE id = ?",
@@ -84,6 +83,41 @@ describe("legacy channel history import", () => {
       kind: "image",
       filename: "photo.png",
     }]);
+    db.close();
+  });
+
+  test("rolls back the whole page when asset indexing fails", () => {
+    const db = createDatabase(":memory:");
+    const row = discordMessageToImportRow({
+      guildId: "guild",
+      channelId: "channel",
+      botUserId: "bot",
+      createdAt: 123,
+      message: {
+        id: "message",
+        author: { id: "user", username: "A2" },
+        content: "hello",
+        timestamp: "2026-07-23T00:00:00.000Z",
+        attachments: [{
+          id: "attachment",
+          filename: "photo.png",
+          content_type: "image/png",
+          size: 42,
+        }],
+      },
+    });
+    const asset = row.assets[0];
+    if (asset === undefined) throw new Error("Expected imported attachment.");
+    const brokenRow = {
+      ...row,
+      assets: [{
+        ...asset,
+        kind: "invalid" as unknown as UpsertMessageAsset["kind"],
+      }],
+    };
+
+    expect(() => importPage(db, [row], [brokenRow])).toThrow();
+    expect(db.raw.prepare("SELECT id FROM messages WHERE id = ?").get(row.id)).toBeNull();
     db.close();
   });
 });

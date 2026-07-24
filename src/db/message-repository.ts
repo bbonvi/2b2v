@@ -68,12 +68,21 @@ export interface MessageSearchResult {
   replyToId: string | null;
 }
 
-export interface SearchMessageCandidate {
+export interface SearchMessageMatch {
   guildId: string;
   channelId: string;
   messageId: string;
+  createdAt: number;
+}
+
+export interface SearchMessageCandidate extends SearchMessageMatch {
   content: string;
   assetSearchText: string;
+}
+
+export interface MessageSearchCursor {
+  messageId: string;
+  createdAt: number;
 }
 
 export interface SearchMessageCandidatesFilter {
@@ -87,6 +96,7 @@ export interface SearchMessageCandidatesFilter {
   assetKind?: AssetKind;
   after?: number;
   before?: number;
+  cursor?: MessageSearchCursor;
   limit?: number;
 }
 
@@ -395,6 +405,10 @@ export function findMessageSearchCandidates(
     conditions.push("m.created_at < ?");
     params.push(filter.before);
   }
+  if (filter.cursor !== undefined) {
+    conditions.push("(m.created_at < ? OR (m.created_at = ? AND m.id < ?))");
+    params.push(filter.cursor.createdAt, filter.cursor.createdAt, filter.cursor.messageId);
+  }
   if (filter.assetId !== undefined) {
     conditions.push("EXISTS (SELECT 1 FROM message_assets a WHERE a.message_id = m.id AND a.id = ?)");
     params.push(filter.assetId);
@@ -408,7 +422,7 @@ export function findMessageSearchCandidates(
   }
   const limitClause = filter.limit === undefined ? "" : " LIMIT ?";
   if (filter.limit !== undefined) params.push(filter.limit);
-  const rows = db.raw.prepare(`SELECT m.id, m.guild_id, m.channel_id, m.translated_content,
+  const rows = db.raw.prepare(`SELECT m.id, m.guild_id, m.channel_id, m.translated_content, m.created_at,
       COALESCE((SELECT GROUP_CONCAT(COALESCE(a.filename, '') || CHAR(31) || COALESCE(a.content_type, ''), CHAR(30))
         FROM message_assets a WHERE a.message_id = m.id), '') AS asset_search_text
     FROM messages m
@@ -418,6 +432,7 @@ export function findMessageSearchCandidates(
       guild_id: string;
       channel_id: string;
       translated_content: string;
+      created_at: number;
       asset_search_text: string;
     }>;
   return rows.map((row) => ({
@@ -426,7 +441,39 @@ export function findMessageSearchCandidates(
     messageId: row.id,
     content: row.translated_content,
     assetSearchText: row.asset_search_text,
+    createdAt: row.created_at,
   }));
+}
+
+/** Resolve one stable message ID to its chronological search position. */
+export function getMessageSearchCursor(db: Database, messageId: string): MessageSearchCursor | null {
+  const row = db.raw.prepare("SELECT id, created_at FROM messages WHERE id = ?")
+    .get(messageId) as { id: string; created_at: number } | null;
+  return row === null ? null : { messageId: row.id, createdAt: row.created_at };
+}
+
+/** Resolve matched message IDs to locations while preserving match order. */
+export function getMessageSearchMatchesByIds(db: Database, messageIds: readonly string[]): SearchMessageMatch[] {
+  if (messageIds.length === 0) return [];
+  const placeholders = messageIds.map(() => "?").join(",");
+  const rows = db.raw.prepare(
+    `SELECT id, guild_id, channel_id, created_at FROM messages WHERE id IN (${placeholders})`,
+  ).all(...messageIds) as Array<{
+    id: string;
+    guild_id: string;
+    channel_id: string;
+    created_at: number;
+  }>;
+  const byId = new Map(rows.map((row) => [row.id, {
+    guildId: row.guild_id,
+    channelId: row.channel_id,
+    messageId: row.id,
+    createdAt: row.created_at,
+  }]));
+  return messageIds.flatMap((messageId) => {
+    const match = byId.get(messageId);
+    return match === undefined ? [] : [match];
+  });
 }
 
 function storedBotMessageFromRow(row: {

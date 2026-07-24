@@ -42,7 +42,8 @@ export function syncMessageAssets(db: Database, input: {
   return getAssetsByMessageId(db, input.messageId);
 }
 
-function syncMessageAssetsInTransaction(db: Database, input: {
+/** Replace one message's asset metadata inside a transaction owned by the caller. */
+export function syncMessageAssetsInTransaction(db: Database, input: {
   messageId: string;
   assets: readonly UpsertMessageAsset[];
   indexedAt?: number;

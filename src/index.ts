@@ -3518,6 +3518,7 @@ function buildAgentTools(
     guildId,
     currentChannelId: channelId,
     timezone: guildConfig.timezone,
+    logger: log.child({ component: "message-search" }),
     resolveChannel: async (targetChannelId) => {
       const channel = await fetchAccessibleGuildChannel(targetChannelId);
       return channel === null ? null : { guildId: channel.guildId, channelId: channel.id };

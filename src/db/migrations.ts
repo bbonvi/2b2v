@@ -211,6 +211,39 @@ function createStagedAssetIndexes(raw: BunDatabase): void {
   raw.run("CREATE INDEX IF NOT EXISTS idx_staged_assets_expiry ON staged_assets(expires_at)");
 }
 
+function normalizedSql(sql: string): string {
+  return sql.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function ensureIndex(raw: BunDatabase, name: string, sql: string): void {
+  const existing = raw.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?")
+    .get(name) as { sql: string | null } | null;
+  if (existing?.sql !== null && existing?.sql !== undefined
+      && normalizedSql(existing.sql) === normalizedSql(sql)) {
+    return;
+  }
+  raw.run(`DROP INDEX IF EXISTS ${name}`);
+  raw.run(sql);
+}
+
+function createMessageSearchIndexes(raw: BunDatabase): void {
+  ensureIndex(
+    raw,
+    "idx_messages_guild_channel_time",
+    "CREATE INDEX idx_messages_guild_channel_time ON messages(guild_id, channel_id, created_at DESC, id DESC)",
+  );
+  ensureIndex(
+    raw,
+    "idx_messages_guild_time",
+    "CREATE INDEX idx_messages_guild_time ON messages(guild_id, created_at DESC, id DESC)",
+  );
+  ensureIndex(
+    raw,
+    "idx_messages_time",
+    "CREATE INDEX idx_messages_time ON messages(created_at DESC, id DESC)",
+  );
+}
+
 /** Remove retired room ownership columns whose legacy NOT NULL constraint blocks current inserts. */
 function migrateStagedAssets(raw: BunDatabase): void {
   const columns = tableColumns(raw, "staged_assets");
@@ -321,6 +354,7 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
 
   createMemoryIndexes(raw);
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_priority_active ON memories(priority, deleted_at, updated_at)");
+  createMessageSearchIndexes(raw);
   sanitizeExistingMemoryRows(raw);
   migrateStagedAssets(raw);
 }

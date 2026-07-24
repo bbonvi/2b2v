@@ -6,7 +6,7 @@ import { parse as parseYaml } from "yaml";
 import type { Database } from "../src/db/database.ts";
 import { validateProfileName } from "../src/config/profile.ts";
 import type { UpsertMessageAsset } from "../src/db/asset-repository.ts";
-import { syncMessageAssets } from "../src/db/asset-repository.ts";
+import { syncMessageAssetsInTransaction } from "../src/db/asset-repository.ts";
 import { assetsFromDiscordMessageData } from "../src/discord/message-assets.ts";
 import { appendStickerTags, messageDisplayContentFromData } from "../src/discord/message-media.ts";
 
@@ -662,15 +662,9 @@ async function processHistory(input: {
       candidateRows += pageCandidates.length;
       existingRows += existing.existing;
       changedRows += existing.missing.length;
-      if (args.apply && existing.missing.length > 0) {
-        if (writeDb === undefined) throw new Error("write database was not initialized");
-        insertRows(writeDb, existing.missing);
-      }
       if (args.apply && pageCandidates.length > 0) {
         if (writeDb === undefined) throw new Error("write database was not initialized");
-        for (const row of pageCandidates) {
-          syncMessageAssets(writeDb, { messageId: row.id, assets: row.assets });
-        }
+        importPage(writeDb, existing.missing, pageCandidates);
       }
 
       if (!args.quiet) {
@@ -724,30 +718,47 @@ function getExisting(db: Pick<Database, "raw">, rows: ImportRow[]): ExistingResu
   return { existing, missing };
 }
 
-export function insertRows(db: Database, rows: ImportRow[]): void {
+function insertRowsInTransaction(db: Database, rows: ImportRow[]): void {
   const stmt = db.raw.prepare(
     `INSERT OR IGNORE INTO messages
       (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id, is_synthetic, related_thread_id)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
   );
 
-  const insertMany = db.raw.transaction((items: ImportRow[]) => {
-    for (const row of items) {
-      stmt.run(
-        row.id,
-        row.guildId,
-        row.channelId,
-        row.userId,
-        row.authorUsername,
-        row.content,
-        row.content,
-        row.isBot ? 1 : 0,
-        row.createdAt,
-        row.replyToId,
-      );
+  for (const row of rows) {
+    stmt.run(
+      row.id,
+      row.guildId,
+      row.channelId,
+      row.userId,
+      row.authorUsername,
+      row.content,
+      row.content,
+      row.isBot ? 1 : 0,
+      row.createdAt,
+      row.replyToId,
+    );
+  }
+}
+
+/** Atomically import one Discord page and refresh all asset metadata in it. */
+export function importPage(db: Database, missingRows: ImportRow[], pageRows: ImportRow[]): void {
+  db.raw.run("BEGIN TRANSACTION");
+  try {
+    insertRowsInTransaction(db, missingRows);
+    const indexedAt = Date.now();
+    for (const row of pageRows) {
+      syncMessageAssetsInTransaction(db, {
+        messageId: row.id,
+        assets: row.assets,
+        indexedAt,
+      });
     }
-  });
-  insertMany(rows);
+    db.raw.run("COMMIT");
+  } catch (error) {
+    db.raw.run("ROLLBACK");
+    throw error;
+  }
 }
 
 function formatDate(ms: number | undefined): string {

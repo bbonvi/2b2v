@@ -184,7 +184,13 @@ export const SCHEMA_SQL = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_messages_guild_channel_time
-    ON messages(guild_id, channel_id, created_at);
+    ON messages(guild_id, channel_id, created_at DESC, id DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_messages_guild_time
+    ON messages(guild_id, created_at DESC, id DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_messages_time
+    ON messages(created_at DESC, id DESC);
 
   CREATE INDEX IF NOT EXISTS idx_messages_user_guild
     ON messages(user_id, guild_id);

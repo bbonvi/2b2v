@@ -64,6 +64,20 @@ function text(result: Awaited<ReturnType<ReturnType<typeof tool>["execute"]>>): 
   return first?.type === "text" ? first.text : "";
 }
 
+function details(result: Awaited<ReturnType<ReturnType<typeof tool>["execute"]>>): {
+  count?: number;
+  has_more?: boolean;
+  next_before_message_id?: string;
+  candidates_scanned?: number;
+} {
+  return result.details as {
+    count?: number;
+    has_more?: boolean;
+    next_before_message_id?: string;
+    candidates_scanned?: number;
+  };
+}
+
 beforeEach(() => {
   db = createDatabase(":memory:");
 });
@@ -135,6 +149,75 @@ describe("search_channel_messages", () => {
     const output = text(result);
     expect(output).not.toContain("needle old");
     expect(output.indexOf("needle middle")).toBeLessThan(output.indexOf("needle new"));
+  });
+
+  test("streams candidate chunks and pages older matches without gaps", async () => {
+    insertMessage("m1", "needle one", { createdAt: baseTime });
+    insertMessage("m2", "needle two", { createdAt: baseTime + 1000 });
+    insertMessage("m3", "needle three", { createdAt: baseTime + 2000 });
+    insertMessage("m4", "needle four", { createdAt: baseTime + 3000 });
+    const search = tool({ candidateChunkSize: 2 });
+
+    const first = await search.execute("tc1", { pattern: "needle", limit: 2 }, AbortSignal.timeout(5000));
+    expect(text(first)).toContain("MsgID: m3");
+    expect(text(first)).toContain("MsgID: m4");
+    expect(text(first)).not.toContain("MsgID: m2");
+    expect(details(first)).toMatchObject({
+      count: 2,
+      has_more: true,
+      next_before_message_id: "m3",
+    });
+    expect(text(first)).toContain("next_before_message_id=m3");
+
+    const second = await search.execute("tc2", {
+      pattern: "needle",
+      limit: 2,
+      before_message_id: "m3",
+    }, AbortSignal.timeout(5000));
+    expect(text(second)).toContain("MsgID: m1");
+    expect(text(second)).toContain("MsgID: m2");
+    expect(text(second)).not.toContain("MsgID: m3");
+    expect(details(second)).toMatchObject({ count: 2, has_more: false });
+  });
+
+  test("uses message IDs to page stable timestamp ties", async () => {
+    insertMessage("m1", "needle one", { createdAt: baseTime });
+    insertMessage("m2", "needle two", { createdAt: baseTime });
+    insertMessage("m3", "needle three", { createdAt: baseTime });
+    const search = tool({ candidateChunkSize: 1 });
+
+    const first = await search.execute("tc1", { pattern: "needle", limit: 1 }, AbortSignal.timeout(5000));
+    expect(text(first)).toContain("MsgID: m3");
+    expect(details(first).next_before_message_id).toBe("m3");
+    const second = await search.execute("tc2", {
+      pattern: "needle",
+      limit: 1,
+      before_message_id: "m3",
+    }, AbortSignal.timeout(5000));
+    expect(text(second)).toContain("MsgID: m2");
+    expect(text(second)).not.toContain("MsgID: m3");
+  });
+
+  test("scans every candidate for a no-match regex across chunks", async () => {
+    insertMessage("m1", "one", { createdAt: baseTime });
+    insertMessage("m2", "two", { createdAt: baseTime + 1000 });
+    insertMessage("m3", "three", { createdAt: baseTime + 2000 });
+    const result = await tool({ candidateChunkSize: 2 }).execute(
+      "tc",
+      { pattern: "absent" },
+      AbortSignal.timeout(5000),
+    );
+    expect(text(result)).toContain("does not rule out another scope");
+    expect(details(result)).toMatchObject({ count: 0, has_more: false, candidates_scanned: 3 });
+  });
+
+  test("rejects a missing search cursor", async () => {
+    const result = await tool().execute(
+      "tc",
+      { pattern: "needle", before_message_id: "missing" },
+      AbortSignal.timeout(5000),
+    );
+    expect(text(result)).toContain("Cursor message 'missing' was not found");
   });
 
   test("adds location metadata for a broader accessible search", async () => {
