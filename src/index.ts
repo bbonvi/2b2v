@@ -296,7 +296,11 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       { timestamp: Date.now(), messageId: `async-image-${input.event}-${job.id}` },
       "virtual",
       undefined,
-      { appendLatestToHistory: false, additionalVisibleUserIds: [job.requesterId] },
+      {
+        appendLatestToHistory: false,
+        additionalVisibleUserIds: [job.requesterId],
+        memoryFocusUserId: job.requesterId,
+      },
     );
     const extraTools = buildAgentTools(
       job.deliveryGuildId,
@@ -2471,7 +2475,7 @@ async function runMemoryPostReplyExtraction(input: {
   const visibleUserMemoryContext = buildVisibleUserMemoryContext({
     db,
     guildId,
-    currentUserId: input.currentUserId,
+    currentUserId: input.memoryRequest.context.memoryFocusUserId ?? input.currentUserId,
     visibleUserIds: input.memoryRequest.context.visibleUserIds ?? [],
     resolveUserId: (userId) => resolvePromptUsername(input.guild, userId),
     contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
@@ -2920,6 +2924,7 @@ async function buildContext(
     additionalVisibleUserIds?: readonly string[];
     includeHistory?: boolean;
     historyLimit?: number;
+    memoryFocusUserId?: string;
   } = {},
 ): Promise<AssembledContext> {
   // Chat history via the full processing pipeline
@@ -2967,6 +2972,7 @@ async function buildContext(
     ...historyVisibleUserIds,
     ...(historyOptions.additionalVisibleUserIds ?? []),
   ])];
+  const memoryFocusUserId = historyOptions.memoryFocusUserId ?? latestUserMessage.authorId;
   const resolveRelationshipUserLabel = (userId: string): string => {
     const member = guild.members.cache.get(userId);
     const username = member?.user.username ?? userId;
@@ -3006,7 +3012,7 @@ async function buildContext(
     : buildMemoryContext({
         db,
         guildId,
-        currentUserId: latestUserMessage.authorId,
+        currentUserId: memoryFocusUserId,
         visibleUserIds,
         relationshipAnchorUserIds: relationshipAnchors.map((entry) => entry.profile.userId),
         limit: guildConfig.memoryContext?.maxRows ?? 80,
@@ -3233,6 +3239,7 @@ async function buildContext(
       responseInstruction: "",
       userMessage,
   });
+  assembled.memoryFocusUserId = memoryFocusUserId;
   assembled.visibleUserIds = visibleUserIds;
   const innerThreadsText = innerThreadsEnabled(guildConfig)
     ? buildInnerThreadsContext({
@@ -4266,6 +4273,8 @@ const ambientRuntime = createAmbientRuntime({
     dryRuns,
   }) => {
     const latestHuman = latestHumanIdentity(guild.id, channel.id);
+    const currentUserId = request.context.memoryFocusUserId ?? latestHuman.userId;
+    const currentUsername = resolvePromptUsername(guild, currentUserId) ?? latestHuman.username;
     await runMemoryPostReplyExtraction({
       guildConfig,
       memoryRequest: request,
@@ -4274,8 +4283,8 @@ const ambientRuntime = createAmbientRuntime({
       sourceRequestId,
       source: "ambient_initiative",
       passKind: "ambient",
-      currentUserId: latestHuman.userId,
-      currentUsername: latestHuman.username,
+      currentUserId,
+      currentUsername,
       dryRun,
       dryRuns,
     });
@@ -4286,8 +4295,8 @@ const ambientRuntime = createAmbientRuntime({
       channel,
       sourceRequestId,
       source: "ambient_initiative",
-      currentUserId: latestHuman.userId,
-      currentUsername: latestHuman.username,
+      currentUserId,
+      currentUsername,
       dryRun,
       dryRuns,
     });

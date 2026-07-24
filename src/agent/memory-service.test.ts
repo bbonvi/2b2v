@@ -318,6 +318,56 @@ describe("buildMemoryContext", () => {
     expect(context.indexOf("Second speaker memory.")).toBeLessThan(context.indexOf("Recent important memory."));
   });
 
+  test("reserves recent normal rows when important rows fill the visible-user cap", () => {
+    const oldImportant = createMemory(db, {
+      guildId: "g1",
+      aboutUserId: "u-visible",
+      kind: "constraint",
+      content: "Old important memory.",
+      priority: 1,
+    });
+    const newerImportant = createMemory(db, {
+      guildId: "g1",
+      aboutUserId: "u-visible",
+      kind: "preference",
+      content: "Newer important memory.",
+      priority: 1,
+    });
+    const recentNormal = createMemory(db, {
+      guildId: "g1",
+      aboutUserId: "u-visible",
+      kind: "fact",
+      content: "Recent normal memory.",
+    });
+    const oldNormal = createMemory(db, {
+      guildId: "g1",
+      aboutUserId: "u-visible",
+      kind: "fact",
+      content: "Old normal memory.",
+    });
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, oldImportant);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, newerImportant);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(300, recentNormal);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(50, oldNormal);
+
+    const context = buildMemoryContext({
+      db,
+      guildId: "g1",
+      currentUserId: "u-current",
+      visibleUserIds: ["u-visible"],
+      resolveUserId: (userId) => userId,
+      limit: 3,
+      recentUserMaxUsers: 1,
+      recentUserMaxMemoriesPerUser: 2,
+      recentUserMaxRows: 2,
+    });
+
+    expect(context).toContain("Newer important memory.");
+    expect(context).toContain("Recent normal memory.");
+    expect(context).not.toContain("Old important memory.");
+    expect(context).not.toContain("Old normal memory.");
+  });
+
   test("reserves four cross-subject rows for relationship anchors", () => {
     createMemory(db, { guildId: "g1", aboutUserId: "current", kind: "fact", content: "Current memory." });
     const anchorImportant = createMemory(db, {

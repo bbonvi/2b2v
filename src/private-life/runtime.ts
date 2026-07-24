@@ -174,6 +174,7 @@ export interface PrivateLifeRuntimeDeps {
       additionalVisibleUserIds?: readonly string[];
       includeHistory?: boolean;
       historyLimit?: number;
+      memoryFocusUserId?: string;
     },
   ) => Promise<AssembledContext>;
   buildAgentTools: (

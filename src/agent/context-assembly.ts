@@ -21,6 +21,8 @@ export interface AssembledContext {
   sections: ContextSection[];
   /** The formatted latest user message (role=user). */
   userMessage: string;
+  /** User whose primary memory set was selected for this context. */
+  memoryFocusUserId?: string;
   /** Message IDs already included in the prompt history/context. */
   contextMessageIds?: string[];
   /** Human user IDs visible in the rendered chat history, newest visible activity first. */

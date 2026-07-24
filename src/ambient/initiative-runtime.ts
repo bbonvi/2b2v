@@ -91,6 +91,13 @@ export type AmbientInitiativeSignals = {
   visibleUserIds: string[];
 };
 
+/** Use the newest visible human as the primary memory perspective for autonomous initiative. */
+export function ambientInitiativeMemoryFocusUserId(
+  signals: Pick<AmbientInitiativeSignals, "visibleUserIds">,
+): string | undefined {
+  return signals.visibleUserIds[0];
+}
+
 export function formatBotContacts(guild: Guild, botContactIds: readonly string[]): string {
   return botContactIds.map((id) => {
     const username = guild.members.cache.get(id)?.user.username
@@ -156,6 +163,7 @@ export type GenericAmbientInitiativeDeps = {
       appendLatestToHistory?: boolean;
       triggerMessageIds?: readonly string[];
       additionalVisibleUserIds?: readonly string[];
+      memoryFocusUserId?: string;
     },
   ) => Promise<AssembledContext>;
   buildAgentTools: (
@@ -647,6 +655,7 @@ export function createGenericAmbientInitiativeRuntime(
     config: AmbientInitiativeConfig;
     candidate: Candidate;
     requestLog: RequestLog;
+    memoryFocusUserId?: string;
     draft?: { drafts: PromptLabDraftMessage[]; dryRuns: PromptLabDryRun[] };
     reconsideration?: {
       rejectedDraft: string;
@@ -711,6 +720,9 @@ export function createGenericAmbientInitiativeRuntime(
       {
         appendLatestToHistory: false,
         additionalVisibleUserIds: input.reconsideration?.activity.map((item) => item.userId),
+        ...(input.memoryFocusUserId !== undefined
+          ? { memoryFocusUserId: input.memoryFocusUserId }
+          : {}),
       },
     );
     if (input.draft === undefined) deps.preparePersonaModeTurn?.(input.candidate.guildId);
@@ -983,6 +995,7 @@ export function createGenericAmbientInitiativeRuntime(
         },
       );
       if (decision === null || !selected) return { requestId: requestLog.requestId, sent: false };
+      const memoryFocusUserId = ambientInitiativeMemoryFocusUserId(signals);
       let generation = await generate({
         guild: input.guild,
         channel: input.channel,
@@ -990,6 +1003,9 @@ export function createGenericAmbientInitiativeRuntime(
         config,
         candidate: input.candidate,
         requestLog,
+        ...(memoryFocusUserId !== undefined
+          ? { memoryFocusUserId }
+          : {}),
         ...(input.draft !== undefined ? { draft: input.draft } : {}),
       });
       if (generation.preSendRejected && input.draft === undefined) {
@@ -1015,6 +1031,9 @@ export function createGenericAmbientInitiativeRuntime(
           config,
           candidate: input.candidate,
           requestLog,
+          ...(memoryFocusUserId !== undefined
+            ? { memoryFocusUserId }
+            : {}),
           reconsideration: {
             rejectedDraft: generation.rejectedDraft ?? "",
             activity,

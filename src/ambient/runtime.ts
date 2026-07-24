@@ -199,6 +199,7 @@ export type AmbientRuntimeDeps = {
       appendLatestToHistory?: boolean;
       triggerMessageIds?: readonly string[];
       additionalVisibleUserIds?: readonly string[];
+      memoryFocusUserId?: string;
     },
   ) => Promise<AssembledContext>;
   buildAgentTools: (guildId: string, channelId: string, guildConfig: GuildConfig, guild: Guild, contextMessageIds: string[], onGeneratedImage?: (attachment: GeneratedImageAttachment) => void, currentRequest?: { requesterId: string; requesterUsername: string; sourceMessageId: string; sourceQuote: string }, options?: Record<string, unknown>) => AgentTool[];

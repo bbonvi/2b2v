@@ -77,6 +77,32 @@ interface VisibleUserMemoryGroup {
   total: number;
 }
 
+/**
+ * Keep important rows visible without allowing them to hide every recently
+ * changed normal row for the same user.
+ */
+function selectReservedUserMemoryRows(rows: readonly MemoryRow[], limit: number): MemoryRow[] {
+  if (limit <= 0) return [];
+  if (limit === 1) return rows.slice(0, 1);
+
+  const importantLimit = Math.ceil(limit / 2);
+  const recentNormalLimit = Math.floor(limit / 2);
+  const selectedIds = new Set<number>();
+  const selected: MemoryRow[] = [];
+  const add = (row: MemoryRow): void => {
+    if (selectedIds.has(row.id) || selected.length >= limit) return;
+    selectedIds.add(row.id);
+    selected.push(row);
+  };
+
+  for (const row of rows.filter((candidate) => candidate.priority > 0).slice(0, importantLimit)) add(row);
+  for (const row of rows.filter((candidate) => candidate.priority <= 0).slice(0, recentNormalLimit)) add(row);
+  for (const row of rows) add(row);
+
+  const rank = new Map(rows.map((row, index) => [row.id, index]));
+  return selected.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+}
+
 export interface MemoryExtractionInput {
   db: Database;
   guildId: string;
@@ -128,8 +154,8 @@ type MemoryRecallWhenInput = "always" | { users_present: string[] };
 type ExpiresInUnit = "minutes" | "hours" | "days" | "weeks" | "months";
 const MAX_SCRATCHPAD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_RECENT_USER_MAX_USERS = 3;
-const DEFAULT_RECENT_USER_MAX_MEMORIES = 2;
-const DEFAULT_RECENT_USER_MAX_ROWS = 6;
+const DEFAULT_RECENT_USER_MAX_MEMORIES = 4;
+const DEFAULT_RECENT_USER_MAX_ROWS = 12;
 const DEFAULT_CROSS_SUBJECT_RELEVANT_ROWS = 10;
 const DEFAULT_RELATIONSHIP_ANCHOR_MAX_USERS = 2;
 const DEFAULT_RELATIONSHIP_ANCHOR_MAX_MEMORIES = 2;
@@ -634,12 +660,12 @@ function selectVisibleUserMemoryGroups(input: VisibleUserMemorySelectionInput): 
 
     const remainingRows = maxRows - rowCount;
     const rowLimit = Math.min(maxMemoriesPerUser, remainingRows);
-    const rows = listMemories(input.db, {
+    const availableRows = listMemories(input.db, {
       guildId: input.guildId,
       aboutUserId: userId,
       relevantUserIds: [input.currentUserId, ...input.visibleUserIds],
-      limit: rowLimit,
     });
+    const rows = selectReservedUserMemoryRows(availableRows, rowLimit);
     if (rows.length === 0) continue;
 
     groups.push({

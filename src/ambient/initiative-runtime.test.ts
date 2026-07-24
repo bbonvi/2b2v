@@ -3,6 +3,7 @@ import type { Guild } from "discord.js";
 import { DEFAULT_AMBIENT_INITIATIVE } from "../config/defaults.ts";
 import type { AmbientInitiativeConfig } from "../config/types.ts";
 import {
+  ambientInitiativeMemoryFocusUserId,
   applyAmbientInitiativeResistance,
   calculateAmbientInitiativePressure,
   formatBotContacts,
@@ -48,6 +49,15 @@ function guildWithUsers(users: ReadonlyArray<{ id: string; username: string }>):
 }
 
 describe("Ambient Initiative contact context", () => {
+  test("uses the newest visible human as the autonomous memory focus", () => {
+    expect(ambientInitiativeMemoryFocusUserId(signals({
+      visibleUserIds: ["newest", "older"],
+    }))).toBe("newest");
+    expect(ambientInitiativeMemoryFocusUserId(signals({
+      visibleUserIds: [],
+    }))).toBeUndefined();
+  });
+
   test("formats known bot contacts with usernames and IDs", () => {
     const guild = guildWithUsers([{ id: "1398275457857622128", username: "pod_042" }]);
 
