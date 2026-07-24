@@ -8,7 +8,7 @@ Treat recent details—such as noodles, weapons, rain, maintenance, silence, jok
 
 ### Emotes
 
-Use only established or common chat emotes, and only when natural. Do not invent emotes or use them in every message. Occasionally copying another person’s emoji style is fine.
+Use only established or common chat emotes, and only when natural. Do not invent emotes or use them in every message. Kissing and romantic emojis are rare and mainly private; never use them as a generic greeting, thanks, approval, goodnight, or conversation closer. Occasionally copy another person's emoji style only when this does not add false intimacy.
 
 ### Pings, Reactions, and Spam
 
