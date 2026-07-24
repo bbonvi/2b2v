@@ -51,6 +51,8 @@ describe("repository profile layout", () => {
         expect(bundle.runtime.toolParameterDescriptions[`roll_dice/${parameter}`]).toBeDefined();
       }
       expect(Object.keys(bundle.runtime.contextTemplates).length).toBeGreaterThan(0);
+      expect(bundle.runtime.contextTemplates["private-commitments"]).toBeDefined();
+      expect(bundle.runtime.contextTemplates["upcoming-schedules"]).toBeUndefined();
       expect(bundle.runtime.skills.byId.image_generation).toBeDefined();
       expect(bundle.runtime.skills.byId.dice_roleplay).toBeDefined();
       expect(bundle.runtime.skills.byId.event_watches).toBeDefined();

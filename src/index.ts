@@ -105,7 +105,12 @@ import { clearExpiredPrivateLifeThoughts } from "./db/private-life-repository.ts
 import { createPersonaModeRuntime } from "./modes/runtime";
 import type { PersonaModeActivityType } from "./modes/types";
 import { cacheAssetExtraction, getAssetById, getAssetsByMessageId, syncMessageAssets } from "./db/asset-repository";
-import { getEventWatch, listPendingWatchMessageIds, markWatchMessageProcessed } from "./db/event-watch-repository.ts";
+import {
+  getEventWatch,
+  listEventWatches,
+  listPendingWatchMessageIds,
+  markWatchMessageProcessed,
+} from "./db/event-watch-repository.ts";
 import { createWatchMatcher } from "./event-watch/matcher.ts";
 import { createEventWatchRuntime, type EventWatchTurn } from "./event-watch/runtime.ts";
 import { createUpdateCurrentEventWatchTool } from "./event-watch/current-watch-tool.ts";
@@ -3023,11 +3028,18 @@ async function buildContext(
   const pendingSchedules = listUpcomingForContext(db, guildId, channelId);
   const oneOffCount = pendingSchedules.filter((s) => s.type === "one_off").length;
   const cronCount = pendingSchedules.length - oneOffCount;
-  const upcomingSchedules = runtimeContextTemplate("upcoming-schedules", {
-    total: pendingSchedules.length,
+  const activeWatches = listEventWatches(db, {
+    guildId,
+    channelId,
+    scope: "current_channel",
+    enabledOnly: true,
+  });
+  const upcomingSchedules = runtimeContextTemplate("private-commitments", {
+    scheduleTotal: pendingSchedules.length,
     oneOffCount,
     cronCount,
-  }, `Pending schedules in this channel: ${pendingSchedules.length}.`);
+    watchCount: activeWatches.length,
+  }, `Private commitments in this channel: ${pendingSchedules.length} schedules, ${activeWatches.length} event watches.`);
   const liveChannel = await client.channels.fetch(channelId).catch(() => guild.channels.cache.get(channelId) ?? null);
   const currentChannelName = channelDisplayName(liveChannel);
   const discordActivityNow = Date.now();
