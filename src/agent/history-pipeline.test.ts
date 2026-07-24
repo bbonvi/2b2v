@@ -298,6 +298,67 @@ describe("processHistory", () => {
     expect(result.newerText).not.toContain("MissingTarget");
   });
 
+  test("latest reply to the last merged message omits its quote", async () => {
+    const messages = [
+      msg({ id: "bot-1", author: "bot", authorId: "bot-id", isBot: true, content: "first bot chunk", timestamp: 1000 }),
+      msg({ id: "bot-2", author: "bot", authorId: "bot-id", isBot: true, content: "second bot chunk", timestamp: 2000 }),
+    ];
+    const latest = msg({
+      id: "user-1",
+      author: "user",
+      authorId: "user-id",
+      content: "replying",
+      timestamp: 3000,
+      replyToId: "bot-2",
+    });
+
+    const result = await processHistory(messages, latest, defaultConfig, deps);
+
+    expect(result.newerText).toContain("[@user to @bot (MsgID: user-1)]: replying");
+    expect(result.newerText).not.toContain("Quote:");
+  });
+
+  test("latest reply to an earlier merged message quotes only that message", async () => {
+    const messages = [
+      msg({ id: "bot-1", author: "bot", authorId: "bot-id", isBot: true, content: "first bot chunk", timestamp: 1000 }),
+      msg({ id: "bot-2", author: "bot", authorId: "bot-id", isBot: true, content: "second bot chunk", timestamp: 2000 }),
+    ];
+    const latest = msg({
+      id: "user-1",
+      author: "user",
+      authorId: "user-id",
+      content: "replying",
+      timestamp: 3000,
+      replyToId: "bot-1",
+    });
+
+    const result = await processHistory(messages, latest, defaultConfig, deps);
+
+    expect(result.newerText).toContain('Quote: "first bot chunk"');
+    expect(result.newerText).not.toContain('Quote: "first bot chunk [msg-break]');
+  });
+
+  test("first newer reply to the last older message omits its quote", async () => {
+    const config = {
+      ...defaultConfig,
+      trim: { ...defaultConfig.trim, trimTarget: 5, windowSize: 2, trimTrigger: 20 },
+    };
+    const messages = [
+      msg({ id: "1", author: "one", authorId: "uid-one", content: "one", timestamp: 1000 }),
+      msg({ id: "2", author: "two", authorId: "uid-two", content: "target", timestamp: 2000 }),
+      msg({ id: "3", author: "three", authorId: "uid-three", content: "reply", timestamp: 3000, replyToId: "2" }),
+      msg({ id: "4", author: "four", authorId: "uid-four", content: "four", timestamp: 4000 }),
+      msg({ id: "5", author: "five", authorId: "uid-five", content: "five", timestamp: 5000 }),
+    ];
+    const latest = msg({ id: "100", content: "latest", timestamp: 6000 });
+
+    const result = await processHistory(messages, latest, config, deps);
+
+    expect(result.olderText).toContain("target");
+    expect(result.newerText).toContain("[@three to @two (MsgID: 3)]: reply");
+    expect(result.newerText).not.toContain('Quote: "target"');
+  });
+
   test("messages split correctly between older and newer with controlled config", async () => {
     // windowSize=2, trimTarget=5 → olderCount=3, complete older chunk=2
     // 5 messages → older gets 2, newer gets 3

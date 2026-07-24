@@ -14,6 +14,11 @@ export interface ResolveRepliesInput {
    * before messageCharLimit trimming is applied."
    */
   normalizedContentMap?: Map<string, string>;
+  /**
+   * Original Discord message ID → immediately previous Discord message ID.
+   * Use this when formatted rows can represent more than one message or cross slices.
+   */
+  previousMessageIdByMessageId?: ReadonlyMap<string, string | null>;
   /** Additional messages for lookup only (e.g. fetched reply targets). Not iterated for output. */
   extraLookup?: HistoryMessage[];
 }
@@ -84,6 +89,7 @@ function buildReplyContext(
   immediatelyPrevious: HistoryMessage | null,
   replyQuoteChars: number,
   normalizedContentMap: Map<string, string> | undefined,
+  previousMessageIdByMessageId: ReadonlyMap<string, string | null> | undefined,
 ): ReplyContext | null {
   if (message.replyToId === null) return null;
 
@@ -102,7 +108,10 @@ function buildReplyContext(
   let quote: string | null = null;
 
   if (!isOlderSlice) {
-    const isImmediatePrevious = immediatelyPrevious !== null && messageHasId(immediatelyPrevious, message.replyToId);
+    const originalPreviousId = previousMessageIdByMessageId?.get(message.id);
+    const isImmediatePrevious = originalPreviousId !== undefined
+      ? originalPreviousId === message.replyToId
+      : immediatelyPrevious !== null && messageHasId(immediatelyPrevious, message.replyToId);
     if (!isImmediatePrevious) {
       const raw = normalizedContentMap?.get(message.replyToId) ?? normalizedContentMap?.get(target.id) ?? target.content;
       const normalized = normalizeForQuote(raw);
@@ -131,12 +140,28 @@ function buildReplyContext(
  * - Quotes: derived from normalized content, truncated to replyQuoteChars.
  */
 export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult {
-  const { older, newer, latestUserMessage, replyQuoteChars, normalizedContentMap, extraLookup } = input;
+  const {
+    older,
+    newer,
+    latestUserMessage,
+    replyQuoteChars,
+    normalizedContentMap,
+    previousMessageIdByMessageId,
+    extraLookup,
+  } = input;
   const lookup = buildLookup(older, newer, latestUserMessage, extraLookup);
 
   const olderMap = new Map<string, ReplyContext>();
   for (const m of older) {
-    const ctx = buildReplyContext(m, lookup, true, null, replyQuoteChars, normalizedContentMap);
+    const ctx = buildReplyContext(
+      m,
+      lookup,
+      true,
+      null,
+      replyQuoteChars,
+      normalizedContentMap,
+      previousMessageIdByMessageId,
+    );
     if (ctx !== null) olderMap.set(m.id, ctx);
   }
 
@@ -145,7 +170,15 @@ export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult
     const m = newer[i];
     if (m === undefined) continue;
     const prev = i > 0 ? newer[i - 1] ?? null : null;
-    const ctx = buildReplyContext(m, lookup, false, prev, replyQuoteChars, normalizedContentMap);
+    const ctx = buildReplyContext(
+      m,
+      lookup,
+      false,
+      prev,
+      replyQuoteChars,
+      normalizedContentMap,
+      previousMessageIdByMessageId,
+    );
     if (ctx !== null) newerMap.set(m.id, ctx);
   }
 
@@ -159,6 +192,7 @@ export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult
       lastNewer,
       replyQuoteChars,
       normalizedContentMap,
+      previousMessageIdByMessageId,
     );
   }
 

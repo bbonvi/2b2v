@@ -37,28 +37,30 @@ export async function processHistory(
     ? annotateTriggerMessage(applyDisplayName(latestUserMessage, config.displayNamesByUserId), triggerMessageIds)
     : null;
 
+  // Preserve original message boundaries for exact reply quotes and adjacency.
+  const originalMessages = latestWithDisplayName !== null
+    ? [...sorted, latestWithDisplayName]
+    : sorted;
+  const normalizedContentMap = new Map<string, string>();
+  const previousMessageIdByMessageId = new Map<string, string | null>();
+  let previousMessageId: string | null = null;
+  for (const message of originalMessages) {
+    normalizedContentMap.set(message.id, message.content);
+    if (message.isSynthetic || message.isPromptOnly === true) continue;
+    previousMessageIdByMessageId.set(message.id, previousMessageId);
+    previousMessageId = message.id;
+  }
+
   // 2. Merge consecutive plain messages by same author
   const merged = annotateTriggerSpan(
     mergeConsecutiveMessages(sorted, config.mergeMessageGapSeconds, triggerMessageIds),
     triggerMessageIds,
   );
 
-  // 3. Build normalized content map (pre-trim content for quote extraction)
-  const normalizedContentMap = new Map<string, string>();
-  for (const m of merged) {
-    normalizedContentMap.set(m.id, m.content);
-    for (const id of m.mergedMessageIds ?? []) {
-      normalizedContentMap.set(id, m.content);
-    }
-  }
-  if (latestWithDisplayName !== null) {
-    normalizedContentMap.set(latestWithDisplayName.id, latestWithDisplayName.content);
-  }
-
-  // 4. Slice into older/newer
+  // 3. Slice into older/newer
   const { older, newer } = sliceHistory(merged, config.trim);
 
-  // 5. Trim older slice only (newer messages kept intact for recency)
+  // 4. Trim older slice only (newer messages kept intact for recency)
   const olderTrimmed = trimMessages(older, config.trim.messageCharLimit);
   const newerTrimmed = newer;
   const newerMessages = latestWithDisplayName !== null
@@ -66,28 +68,29 @@ export async function processHistory(
     : newerTrimmed;
   const oldestVisibleMessageId = [...olderTrimmed, ...newerTrimmed].find((m) => m.isPromptOnly !== true)?.id;
 
-  // 6. Fetch missing reply targets from Discord
+  // 5. Fetch missing reply targets from Discord
   const allForFallback = latestWithDisplayName !== null
     ? [...olderTrimmed, ...newerTrimmed, latestWithDisplayName]
     : [...olderTrimmed, ...newerTrimmed];
   const fetched = applyDisplayNames(await fetchMissingReplyTargets(replyFallbackDeps, allForFallback), config.displayNamesByUserId);
 
-  // 7. Add fetched messages to normalized content map
+  // 6. Add fetched messages to normalized content map
   for (const m of fetched) {
     normalizedContentMap.set(m.id, m.content);
   }
 
-  // 8. Resolve reply contexts
+  // 7. Resolve reply contexts
   const replyResult = resolveReplies({
     older: olderTrimmed,
     newer: newerTrimmed,
     latestUserMessage: latestWithDisplayName,
     replyQuoteChars: config.replyQuoteChars,
     normalizedContentMap,
+    previousMessageIdByMessageId,
     extraLookup: fetched,
   });
 
-  // 9. Format older slice with date stamps
+  // 8. Format older slice with date stamps
   let olderText = "";
   if (olderTrimmed.length > 0) {
     const dateEntries = insertDateStamps(olderTrimmed, config.timezone);
@@ -107,7 +110,7 @@ export async function processHistory(
     olderText = `## Chat History — Older\n${lines.join("\n")}`;
   }
 
-  // 10. Format newer slice with date stamps
+  // 9. Format newer slice with date stamps
   let newerText = "";
   if (newerMessages.length > 0) {
     const newerDateEntries = insertDateStamps(newerMessages, config.timezone, {

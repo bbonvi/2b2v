@@ -54,6 +54,60 @@ describe("resolveReplies", () => {
     expect(result.newer.get("3")).toMatchObject({ targetAuthor: "user-1", missingTarget: false });
   });
 
+  test("omits a quote only for the last message in a merged previous row", () => {
+    const target = message("1", {
+      content: "first [msg-break] second",
+      mergedMessageIds: ["1", "2"],
+    });
+    const result = resolveReplies({
+      older: [],
+      newer: [target, message("3", { replyToId: "2" })],
+      latestUserMessage: null,
+      replyQuoteChars: 100,
+      normalizedContentMap: new Map([
+        ["1", "first"],
+        ["2", "second"],
+      ]),
+      previousMessageIdByMessageId: new Map([["3", "2"]]),
+    });
+
+    expect(result.newer.get("3")).toMatchObject({ quote: null });
+  });
+
+  test("quotes only the selected earlier message from a merged previous row", () => {
+    const target = message("1", {
+      content: "first [msg-break] second",
+      mergedMessageIds: ["1", "2"],
+    });
+    const result = resolveReplies({
+      older: [],
+      newer: [target, message("3", { replyToId: "1" })],
+      latestUserMessage: null,
+      replyQuoteChars: 100,
+      normalizedContentMap: new Map([
+        ["1", "first"],
+        ["2", "second"],
+      ]),
+      previousMessageIdByMessageId: new Map([["3", "2"]]),
+    });
+
+    expect(result.newer.get("3")).toMatchObject({ quote: "first" });
+  });
+
+  test("omits a quote across the older and newer slice boundary", () => {
+    const target = message("1");
+    const reply = message("2", { replyToId: "1" });
+    const result = resolveReplies({
+      older: [target],
+      newer: [reply],
+      latestUserMessage: null,
+      replyQuoteChars: 100,
+      previousMessageIdByMessageId: new Map([["2", "1"]]),
+    });
+
+    expect(result.newer.get("2")).toMatchObject({ quote: null });
+  });
+
   test("marks unavailable targets", () => {
     const result = resolveReplies({
       older: [],
