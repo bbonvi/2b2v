@@ -20,9 +20,11 @@ export function parseAssetId(value: unknown): number | null {
 
 /** Accept either a permanent numeric chat asset or an opaque staged handle. */
 export function parseAssetRef(value: unknown): AssetRef | null {
-  const id = parseAssetId(value);
+  const normalized = typeof value === "string"
+    ? value.trim().replace(/^["']|["']$/g, "")
+    : value;
+  const id = parseAssetId(normalized);
   if (id !== null) return id;
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().replace(/^["']|["']$/g, "");
+  if (typeof normalized !== "string") return null;
   return /^[A-Za-z][A-Za-z0-9_-]{1,63}$/.test(normalized) ? normalized : null;
 }

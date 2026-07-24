@@ -1381,6 +1381,68 @@ describe("handleMessage", () => {
     ]);
   });
 
+  test("asks once for a corrected response after invalid message attributes", async () => {
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      return Promise.resolve({
+        text: calls === 1
+          ? '<message asset_id="12"></message>'
+          : '<message asset_ids="12"></message>',
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+    const senderCalls: Array<{ text: string; attachmentIds: string[] }> = [];
+    const sender: MessageSender = (text, _reply, _channelId, _voice, _signal, _replyToMessageId, attachments) => {
+      senderCalls.push({ text, attachmentIds: attachments?.map((attachment) => attachment.id) ?? [] });
+      return Promise.resolve({ sentMessageId: "sent-1" });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        sender,
+        resolveAssetAttachments: (assetIds) => Promise.resolve(assetIds.map((id) => ({
+          id: `chat-asset-${id}`,
+          buffer: Buffer.from("image"),
+          filename: `chat-asset-${id}.png`,
+          contentType: "image/png",
+        }))),
+      }),
+    );
+
+    expect(calls).toBe(2);
+    expect(senderCalls).toEqual([{ text: "", attachmentIds: ["chat-asset-12"] }]);
+  });
+
+  test("rejects an asset-only message when no referenced asset resolves", async () => {
+    const completeChat: ChatCompleteFn = () => Promise.resolve({
+      text: '<message asset_ids="12"></message>',
+      toolCalls: [],
+      rawResponse: {},
+      messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+    });
+
+    let thrown: unknown;
+    try {
+      await handleMessage(
+        makeMessage({ mentionedUserIds: ["bot-1"] }),
+        makeDeps({
+          completeChat,
+          resolveAssetAttachments: () => Promise.resolve([]),
+        }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("it has no text and no referenced asset resolved");
+  });
+
   test("streams final message envelopes as they close", async () => {
     const lookupTool: AgentTool = {
       name: "search_channel_messages",

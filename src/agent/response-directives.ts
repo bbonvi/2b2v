@@ -17,6 +17,8 @@ export interface MessageDelivery {
 export interface ParsedResponseDirectives {
   ignored: boolean;
   ignoredText?: string;
+  /** Invalid message-envelope attributes that prevent delivery. */
+  directiveErrors?: string[];
   /** Authored private monologue removed from every user-visible transport. */
   privateThoughts?: string[];
   malformedPrivateOutput?: boolean;
@@ -33,6 +35,15 @@ interface ParseResult {
   segments: ResponseSegment[];
   index: number;
   closed: boolean;
+}
+
+interface ParsedAttribute {
+  name: string;
+  value: string;
+}
+
+interface ParseContext {
+  directiveErrors: string[];
 }
 
 const RESERVED_TAG_RE = /<\s*\/?\s*(?:voice|audio|message|ignore)(?=[\s/>])/i;
@@ -180,47 +191,124 @@ function unescapeAttributeValue(value: string): string {
     .replace(/&amp;/g, "&");
 }
 
-function parseMessageDelivery(attrs: string): MessageDelivery | undefined {
+function parseAttributes(attrs: string): { attributes: ParsedAttribute[]; errors: string[] } {
+  const attributes: ParsedAttribute[] = [];
+  const errors: string[] = [];
+  let cursor = 0;
+
+  while (cursor < attrs.length) {
+    while (cursor < attrs.length && /\s/.test(attrs[cursor] ?? "")) cursor += 1;
+    if (cursor >= attrs.length || attrs[cursor] === "/") break;
+
+    const nameMatch = /^[A-Za-z_][A-Za-z0-9_-]*/.exec(attrs.slice(cursor));
+    if (nameMatch === null) {
+      errors.push(`Invalid <message> attribute syntax near "${attrs.slice(cursor).trim()}".`);
+      break;
+    }
+    const name = nameMatch[0].toLowerCase();
+    cursor += nameMatch[0].length;
+    while (cursor < attrs.length && /\s/.test(attrs[cursor] ?? "")) cursor += 1;
+    if (attrs[cursor] !== "=") {
+      errors.push(`Attribute "${name}" must have a value.`);
+      break;
+    }
+    cursor += 1;
+    while (cursor < attrs.length && /\s/.test(attrs[cursor] ?? "")) cursor += 1;
+
+    const first = attrs[cursor];
+    let rawValue = "";
+    if (first === "\"" || first === "'") {
+      const end = attrs.indexOf(first, cursor + 1);
+      if (end === -1) {
+        errors.push(`Attribute "${name}" has an unterminated quoted value.`);
+        break;
+      }
+      rawValue = attrs.slice(cursor + 1, end);
+      cursor = end + 1;
+    } else if (first === "[") {
+      const end = attrs.indexOf("]", cursor + 1);
+      if (end === -1) {
+        errors.push(`Attribute "${name}" has an unterminated array value.`);
+        break;
+      }
+      rawValue = attrs.slice(cursor, end + 1);
+      cursor = end + 1;
+    } else {
+      const valueMatch = /^[^\s"'>/]+/.exec(attrs.slice(cursor));
+      if (valueMatch === null) {
+        errors.push(`Attribute "${name}" must have a value.`);
+        break;
+      }
+      rawValue = valueMatch[0];
+      cursor += rawValue.length;
+    }
+    attributes.push({ name, value: unescapeAttributeValue(rawValue).trim() });
+  }
+
+  return { attributes, errors };
+}
+
+function parseMessageDelivery(attrs: string): { delivery?: MessageDelivery; errors: string[] } {
   const delivery: MessageDelivery = {};
-  const attrRe = /\s(channel_id|reply|reply_to|keep_typing)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/gi;
-  for (;;) {
-    const match = attrRe.exec(attrs);
-    if (match === null) break;
-    const rawName = match[1];
-    if (rawName === undefined) continue;
-    const value = unescapeAttributeValue(match[2] ?? match[3] ?? match[4] ?? "").trim();
-    if (rawName.toLowerCase() === "channel_id") {
-      if (value !== "") delivery.channelId = value;
-    } else if (rawName.toLowerCase() === "reply") {
-      if (value.toLowerCase() === "true") delivery.reply = true;
-      if (value.toLowerCase() === "false") delivery.reply = false;
-    } else if (rawName.toLowerCase() === "keep_typing") {
-      if (value.toLowerCase() === "true") delivery.keepTyping = true;
-      if (value.toLowerCase() === "false") delivery.keepTyping = false;
-    } else if (value !== "") {
-      delivery.replyTo = value;
+  const parsed = parseAttributes(attrs);
+  const errors = [...parsed.errors];
+  const seen = new Set<string>();
+  const supported = new Set(["channel_id", "reply", "reply_to", "keep_typing", "asset_ids"]);
+
+  for (const attribute of parsed.attributes) {
+    const { name, value } = attribute;
+    if (!supported.has(name)) {
+      errors.push(`Unknown <message> attribute "${name}".`);
+      continue;
+    }
+    if (seen.has(name)) {
+      errors.push(`Duplicate <message> attribute "${name}".`);
+      continue;
+    }
+    seen.add(name);
+
+    if (name === "channel_id") {
+      if (value === "") errors.push('Attribute "channel_id" must not be empty.');
+      else delivery.channelId = value;
+    } else if (name === "reply" || name === "keep_typing") {
+      const normalized = value.toLowerCase();
+      if (normalized !== "true" && normalized !== "false") {
+        errors.push(`Attribute "${name}" must be "true" or "false".`);
+      } else if (name === "reply") {
+        delivery.reply = normalized === "true";
+      } else {
+        delivery.keepTyping = normalized === "true";
+      }
+    } else if (name === "reply_to") {
+      if (value === "") errors.push('Attribute "reply_to" must not be empty.');
+      else delivery.replyTo = value;
+    } else {
+      const assetIds = parseAssetIdsValue(value);
+      if (assetIds === null) {
+        errors.push(`Attribute "asset_ids" contains an invalid asset reference: "${value}".`);
+      } else if (assetIds.length === 0) {
+        errors.push('Attribute "asset_ids" must contain at least one asset reference.');
+      } else {
+        delivery.assetIds = assetIds;
+      }
     }
   }
-  const assetIds = parseAssetIdsAttribute(attrs);
-  if (assetIds !== undefined && assetIds.length > 0) delivery.assetIds = assetIds;
-  return delivery.channelId !== undefined
+
+  const hasDelivery = delivery.channelId !== undefined
     || delivery.reply !== undefined
     || delivery.replyTo !== undefined
     || delivery.keepTyping !== undefined
-    || delivery.assetIds !== undefined
-    ? delivery
-    : undefined;
+    || delivery.assetIds !== undefined;
+  return { ...(hasDelivery ? { delivery } : {}), errors };
 }
 
-function parseAssetIdsAttribute(attrs: string): AssetRef[] | undefined {
-  const match = /\sasset_ids\s*=\s*(?:"([^"]*)"|'([^']*)'|(\[[^\]]*\]))/i.exec(attrs);
-  if (match === null) return undefined;
-  const raw = unescapeAttributeValue(match[1] ?? match[2] ?? match[3] ?? "").trim();
-  if (!raw.startsWith("[") || !raw.endsWith("]")) return undefined;
-  const inner = raw.slice(1, -1).trim();
+function parseAssetIdsValue(raw: string): AssetRef[] | null {
+  const isArray = raw.startsWith("[") && raw.endsWith("]");
+  const inner = isArray ? raw.slice(1, -1).trim() : raw.trim();
   if (inner === "") return [];
-  const ids = inner.split(",").map((part) => parseAssetRef(part.trim()));
-  return ids.every((id) => id !== null) ? ids : undefined;
+  const parts = isArray ? inner.split(",") : [inner];
+  const ids = parts.map((part) => parseAssetRef(part.trim()));
+  return ids.every((id) => id !== null) ? ids : null;
 }
 
 function renderIgnoredText(rawText: string): string {
@@ -254,6 +342,7 @@ function parseRange(
   start: number,
   mode: SegmentMode,
   stopTag: "voice" | "audio" | "message" | "ignore" | null,
+  context: ParseContext,
 ): ParseResult {
   const segments: ResponseSegment[] = [];
   let cursor = start;
@@ -307,8 +396,10 @@ function parseRange(
     }
 
     if (tag === "message") {
-      const delivery = parseMessageDelivery(attrs);
-      const nested = parseRange(text, tagEnd, { kind: "text" }, "message");
+      const parsedDelivery = parseMessageDelivery(attrs);
+      context.directiveErrors.push(...parsedDelivery.errors);
+      const delivery = parsedDelivery.delivery;
+      const nested = parseRange(text, tagEnd, { kind: "text" }, "message", context);
       if (nested.ignored) {
         if (hasOutputSegment(segments)) {
           cursor = closingTagEnd(text, "message", nested.index);
@@ -329,7 +420,7 @@ function parseRange(
       continue;
     }
 
-    const nested = parseRange(text, tagEnd, { kind: "voice" }, tag);
+    const nested = parseRange(text, tagEnd, { kind: "voice" }, tag, context);
     segments.push(...nested.segments);
     if (nested.ignored) {
       if (hasOutputSegment(segments)) {
@@ -352,12 +443,16 @@ export function parseResponseDirectives(response: string): ParsedResponseDirecti
   if (privateResult.malformed) {
     return { ignored: false, malformedPrivateOutput: true, segments: [] };
   }
-  const parsed = parseRange(privateResult.text, 0, { kind: "text" }, null);
+  const context: ParseContext = { directiveErrors: [] };
+  const parsed = parseRange(privateResult.text, 0, { kind: "text" }, null, context);
   return {
     ignored: parsed.ignored,
     ...(parsed.ignoredText !== undefined ? { ignoredText: parsed.ignoredText } : {}),
+    ...(context.directiveErrors.length > 0 ? { directiveErrors: context.directiveErrors } : {}),
     ...(privateResult.thoughts.length > 0 ? { privateThoughts: privateResult.thoughts } : {}),
-    segments: parsed.ignored ? [] : normalizeMessageBreaks(parsed.segments),
+    segments: parsed.ignored || context.directiveErrors.length > 0
+      ? []
+      : normalizeMessageBreaks(parsed.segments),
   };
 }
 

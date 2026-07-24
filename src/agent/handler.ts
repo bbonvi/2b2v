@@ -1461,6 +1461,7 @@ async function runNativeToolLoop(input: {
   log?: Logger;
   signal?: AbortSignal;
   allowEmptyFinalResponse?: boolean | (() => boolean);
+  correctInvalidMessageDirectives?: boolean;
   stopOnAgentTimeBudget?: boolean;
   terminateAfterSuccessfulToolRoundNames?: readonly string[];
 }): Promise<{ text: string; stopReason?: string }> {
@@ -1475,6 +1476,7 @@ async function runNativeToolLoop(input: {
   const streamingState = { visibleText: false };
   let agentTimeBudgetMarked = false;
   let asyncImageJobCreated = false;
+  let correctedInvalidMessageDirectives = false;
   const allowEmptyFinalResponse = (): boolean => typeof input.allowEmptyFinalResponse === "function"
     ? input.allowEmptyFinalResponse()
     : input.allowEmptyFinalResponse === true;
@@ -1637,6 +1639,25 @@ async function runNativeToolLoop(input: {
 
     if (result.toolCalls.length === 0) {
       const text = result.text.trim();
+      const parsedDirectives = input.correctInvalidMessageDirectives === true
+        ? parseResponseDirectives(text)
+        : undefined;
+      if (
+        parsedDirectives?.directiveErrors !== undefined
+        && !correctedInvalidMessageDirectives
+        && !streamingState.visibleText
+      ) {
+        correctedInvalidMessageDirectives = true;
+        input.messages.push(assistantMessageFromResult({ ...result, text }));
+        input.messages.push({
+          role: "system",
+          content: `Correct the invalid <message> directive and return the complete response again. ${parsedDirectives.directiveErrors.join(" ")}`,
+        });
+        input.log?.warn("retrying reply after invalid message directive", {
+          errors: parsedDirectives.directiveErrors,
+        });
+        continue;
+      }
       input.messages.push(assistantMessageFromResult({ ...result, text }));
       return { text, ...(stopReason !== undefined ? { stopReason } : {}) };
     }
@@ -2164,6 +2185,9 @@ async function sendResponseSegments(input: {
       ...(pendingAttachments ?? []),
       ...referencedAttachments,
     ];
+    if (segment.kind === "text" && segment.text === "" && attachments.length === 0) {
+      throw new Error("Cannot send <message>: it has no text and no referenced asset resolved.");
+    }
     const sendId = `${input.sendIdPrefix ?? "final-send"}-${sent}`;
     const ensureTypingHoldBeforeSend = async (): Promise<void> => {
       const typingHoldMs = input.typingHoldMsForSegment?.(segment) ?? 0;
@@ -2960,6 +2984,7 @@ export async function handleMessage(
         pendingAttachments,
         runtimePrompts: deps.runtimePrompts,
         allowEmptyFinalResponse: deps.hasExternalVisibleOutput,
+        correctInvalidMessageDirectives: true,
         signal: wallController.signal,
       });
       finalText = result.text;
@@ -2999,6 +3024,12 @@ export async function handleMessage(
     }
 
     const parsedResponse = parseResponseDirectives(finalText);
+    if (parsedResponse.directiveErrors !== undefined) {
+      deps.log?.warn("native reply blocked after invalid message directive", {
+        errors: parsedResponse.directiveErrors,
+      });
+      return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
+    }
     if (parsedResponse.malformedPrivateOutput === true) {
       deps.log?.warn("native reply blocked after malformed private output", {
         outputLength: finalText.length,

@@ -128,10 +128,11 @@ describe("parseResponseDirectives", () => {
     });
   });
 
-  test("ignores legacy chat_id delivery attributes", () => {
+  test("rejects legacy chat_id delivery attributes", () => {
     expect(parseResponseDirectives("<message chat_id=\"chan-2\">first</message>")).toEqual({
       ignored: false,
-      segments: [{ kind: "text", text: "first" }],
+      directiveErrors: ['Unknown <message> attribute "chat_id".'],
+      segments: [],
     });
   });
 
@@ -154,6 +155,45 @@ describe("parseResponseDirectives", () => {
         { kind: "messageBreak", delivery: { assetIds: [12, 13] } },
         { kind: "text", text: "again" },
       ],
+    });
+  });
+
+  test("normalizes singleton and quoted numeric asset references", () => {
+    expect(parseResponseDirectives(
+      '<message asset_ids="11276"></message><message asset_ids=["1276"]></message>',
+    )).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "emptyMessage", delivery: { assetIds: [11276] } },
+        { kind: "emptyMessage", delivery: { assetIds: [1276] } },
+      ],
+    });
+  });
+
+  test("normalizes staged asset singletons and mixed arrays", () => {
+    expect(parseResponseDirectives(
+      '<message asset_ids="job_7K3M"></message><message asset_ids=[11276, "job_8X"]></message>',
+    )).toEqual({
+      ignored: false,
+      segments: [
+        { kind: "emptyMessage", delivery: { assetIds: ["job_7K3M"] } },
+        { kind: "emptyMessage", delivery: { assetIds: [11276, "job_8X"] } },
+      ],
+    });
+  });
+
+  test("rejects unknown, duplicate, and invalid message attributes", () => {
+    expect(parseResponseDirectives(
+      '<message asset_id=12 asset_ids=[] reply="yes" reply="true">blocked</message>',
+    )).toEqual({
+      ignored: false,
+      directiveErrors: [
+        'Unknown <message> attribute "asset_id".',
+        'Attribute "asset_ids" must contain at least one asset reference.',
+        'Attribute "reply" must be "true" or "false".',
+        'Duplicate <message> attribute "reply".',
+      ],
+      segments: [],
     });
   });
 
