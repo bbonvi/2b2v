@@ -175,7 +175,7 @@ promptTransport:
 replyLoop:
     maxToolCalls: 48 # Hard cap on tool calls in one response run
     wallClockTimeoutMs: 300000 # Hard timeout per response run (milliseconds)
-    llmOutputTimeoutMs: 45000 # Timeout for one LLM turn (milliseconds)
+    llmOutputTimeoutMs: 80000 # Timeout for one LLM turn (milliseconds)
 
 agentJobs:
     imageTimeoutMs: 300000 # (max async image job runtime)
