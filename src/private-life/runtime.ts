@@ -678,6 +678,9 @@ export function createPrivateLifeRuntime(deps: PrivateLifeRuntimeDeps): PrivateL
         authorIsBot: true,
         botUserId,
         mentionedUserIds: [],
+        mentionedRoleIds: [],
+        botRoleIds: [],
+        mentionedEveryone: false,
         translatedContent: text,
         messageId: episodeId,
         eventPrompt: {

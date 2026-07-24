@@ -341,7 +341,7 @@ ambientInitiative:
         llmOutputTimeoutMs: 8000 # (timeout for evaluator JSON)
 # Default trigger settings (guilds can override)
 triggers:
-    mention: true # (respond when @mentioned)
+    mention: true # (respond to direct mentions, replies, assigned-role mentions, and @everyone)
     keywords:
         - "2b"
         - "тубишка"

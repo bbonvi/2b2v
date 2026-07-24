@@ -726,6 +726,9 @@ export function createGenericAmbientInitiativeRuntime(
       authorIsBot: true,
       botUserId,
       mentionedUserIds: [],
+      mentionedRoleIds: [],
+      botRoleIds: [],
+      mentionedEveryone: false,
       translatedContent: opportunityText,
       messageId: input.candidate.id,
       eventPrompt: {

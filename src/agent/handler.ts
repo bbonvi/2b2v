@@ -69,6 +69,9 @@ export interface IncomingMessage {
   authorIsBot?: boolean;
   botUserId: string;
   mentionedUserIds: string[];
+  mentionedRoleIds: string[];
+  botRoleIds: string[];
+  mentionedEveryone: boolean;
   translatedContent: string;
   /** The canonical chat-history section already contains this Discord content. */
   currentContentInHistory?: boolean;
@@ -2665,6 +2668,9 @@ export async function handleMessage(
       authorIsBot: msg.authorIsBot,
       botUserId: msg.botUserId,
       mentionedUserIds: msg.mentionedUserIds,
+      mentionedRoleIds: msg.mentionedRoleIds,
+      botRoleIds: msg.botRoleIds,
+      mentionedEveryone: msg.mentionedEveryone,
       repliedToBot: msg.repliedToBot,
     };
 

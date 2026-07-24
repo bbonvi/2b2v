@@ -20,7 +20,13 @@ import { createScheduledTaskRunner } from "./scheduler/scheduled-task-runtime";
 import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type HandleResult, type AssetAttachmentResolver, type IncomingMessage, type HandlerDeps, type MemoryExtractionRequest, type MessageSender, type OutboundAttachment } from "./agent/handler";
 import { trackWriteToolStarts } from "./agent/tool-access";
 import { buildComputedContactContextForUser } from "./agent/contact-context";
-import { shouldRespond, shouldRespondDeliberately, type TriggerResult } from "./agent/triggers";
+import {
+  contentMentionsEveryone,
+  shouldRespond,
+  shouldRespondDeliberately,
+  type TriggerInput,
+  type TriggerResult,
+} from "./agent/triggers";
 import { typingSimulationDelayMs } from "./agent/typing-simulation";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
@@ -321,6 +327,9 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       authorIsBot: true,
       botUserId: client.user?.id ?? "",
       mentionedUserIds: [],
+      mentionedRoleIds: [],
+      botRoleIds: [],
+      mentionedEveryone: false,
       translatedContent: input.instruction,
       messageId: syntheticLatestMessage.id,
       replyToMessageId: job.sourceMessageId,
@@ -1357,6 +1366,9 @@ async function runVoiceAgentTurn(request: VoiceTurnRequest): Promise<void> {
     authorIsBot: false,
     botUserId: client.user?.id ?? "",
     mentionedUserIds: [],
+    mentionedRoleIds: [],
+    botRoleIds: [],
+    mentionedEveryone: false,
     translatedContent: request.trigger.normalizedText,
     eventContent: [
       "The room is available for your next action. Base it on the latest coherent exchange in Immediate Voice Exchange, including recent speech from all participants and your last audible reply.",
@@ -1539,6 +1551,9 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
           authorIsBot: false,
           botUserId: client.user?.id ?? "",
           mentionedUserIds: [],
+          mentionedRoleIds: [],
+          botRoleIds: [],
+          mentionedEveryone: false,
           translatedContent: context.userMessage,
           messageId: sourceMessageId,
         };
@@ -1712,6 +1727,9 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
             authorIsBot: false,
             botUserId: client.user?.id ?? "",
             mentionedUserIds: [],
+            mentionedRoleIds: [],
+            botRoleIds: [],
+            mentionedEveryone: false,
             translatedContent: context.userMessage,
             messageId: sourceMessageId,
           };
@@ -3389,6 +3407,9 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       authorIsBot: false,
       botUserId: client.user.id,
       mentionedUserIds: [],
+      mentionedRoleIds: [],
+      botRoleIds: [],
+      mentionedEveryone: false,
       translatedContent: "",
       messageId: lastMessage.id,
     };
@@ -4288,13 +4309,27 @@ function messageRepliesToOwnBot(message: Message): boolean {
   return row !== null && row.user_id === botUserId && row.is_bot === 1;
 }
 
+function messageTriggerMentionFields(
+  message: Message,
+): Pick<TriggerInput, "mentionedUserIds" | "mentionedRoleIds" | "botRoleIds" | "mentionedEveryone"> {
+  const botMember = message.guild?.members.me;
+  return {
+    mentionedUserIds: [...message.mentions.users.keys()],
+    mentionedRoleIds: [...message.mentions.roles.keys()],
+    botRoleIds: botMember === null || botMember === undefined
+      ? []
+      : [...botMember.roles.cache.keys()],
+    mentionedEveryone: message.mentions.everyone && contentMentionsEveryone(message.content),
+  };
+}
+
 function evaluateMessageTrigger(message: Message, guildConfig: GuildConfig, deliberateOnly = false): TriggerResult {
   const triggerInput = {
     content: message.content,
     authorId: message.author.id,
     authorIsBot: message.author.bot,
     botUserId: client.user?.id ?? "",
-    mentionedUserIds: [...message.mentions.users.keys()],
+    ...messageTriggerMentionFields(message),
     repliedToBot: messageRepliesToOwnBot(message),
   };
   return deliberateOnly
@@ -4619,7 +4654,7 @@ async function processTriggeredMessage(
       authorGlobalName: message.author.globalName ?? message.author.displayName,
       authorIsBot: message.author.bot,
       botUserId: client.user?.id ?? "",
-      mentionedUserIds: [...message.mentions.users.keys()],
+      ...messageTriggerMentionFields(message),
       translatedContent: options.currentTurnOverride?.content ?? translatedContent,
       eventContent: currentTurnEventContent !== "" ? currentTurnEventContent : translatedContent,
       currentContentInHistory: options.currentTurnOverride === undefined,

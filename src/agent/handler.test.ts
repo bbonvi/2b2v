@@ -242,6 +242,9 @@ function makeMessage(overrides: Partial<IncomingMessage> = {}): IncomingMessage 
     authorUsername: "testuser",
     botUserId: "bot-1",
     mentionedUserIds: [],
+    mentionedRoleIds: [],
+    botRoleIds: [],
+    mentionedEveryone: false,
     translatedContent: "hello bot",
     messageId: "msg-1",
     ...overrides,
@@ -370,6 +373,19 @@ describe("handleMessage", () => {
 
     expect(result.responseText).toBe("hello user");
     expect(senderCalls).toEqual([{ text: "hello user", reply: false, channelId: undefined }]);
+  });
+
+  test("runs for a role assigned to the bot", async () => {
+    const result = await handleMessage(
+      makeMessage({
+        mentionedRoleIds: ["role-bot"],
+        botRoleIds: ["role-bot"],
+      }),
+      makeDeps(),
+    );
+
+    expect(result.triggered).toBe(true);
+    expect(result.triggerResult).toEqual({ reason: "mention" });
   });
 
   test("routes individual message envelopes by channel_id", async () => {

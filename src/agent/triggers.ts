@@ -8,6 +8,10 @@ export interface TriggerInput {
   authorIsBot?: boolean;
   botUserId: string;
   mentionedUserIds: string[];
+  mentionedRoleIds: string[];
+  botRoleIds: string[];
+  /** Whether the message contains an effective Discord @everyone mention. */
+  mentionedEveryone: boolean;
   /** Whether this Discord message directly replies to one of the bot's visible messages. */
   repliedToBot?: boolean;
 }
@@ -41,8 +45,19 @@ export function shouldRespond(
   // Never respond to self
   if (input.authorId === input.botUserId) return null;
 
-  // 1. Mention
-  if (triggers.mention && (input.mentionedUserIds.includes(input.botUserId) || input.repliedToBot === true)) {
+  // 1. Mention, reply, assigned-role mention, or @everyone
+  const assignedRoleMentioned = input.mentionedRoleIds.some((roleId) =>
+    input.botRoleIds.includes(roleId)
+  );
+  if (
+    triggers.mention
+    && (
+      input.mentionedUserIds.includes(input.botUserId)
+      || assignedRoleMentioned
+      || input.mentionedEveryone
+      || input.repliedToBot === true
+    )
+  ) {
     return { reason: "mention" };
   }
 
@@ -83,4 +98,9 @@ export function shouldRespondDeliberately(
 /** Escape literal text before interpolating it into a regular expression. */
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Detect the literal @everyone token without treating @here as equivalent. */
+export function contentMentionsEveryone(content: string): boolean {
+  return /(?<![\p{L}\p{N}_])@everyone(?![\p{L}\p{N}_])/iu.test(content);
 }

@@ -424,6 +424,9 @@ export function createPromptLabRunner(input: {
       authorIsBot: false,
       botUserId,
       mentionedUserIds: [botUserId],
+      mentionedRoleIds: [],
+      botRoleIds: [],
+      mentionedEveryone: false,
       translatedContent,
       messageId,
     };

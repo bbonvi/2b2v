@@ -1,5 +1,10 @@
 import { describe, test, expect } from "bun:test";
-import { shouldRespond, shouldRespondDeliberately, type TriggerInput } from "./triggers.ts";
+import {
+  contentMentionsEveryone,
+  shouldRespond,
+  shouldRespondDeliberately,
+  type TriggerInput,
+} from "./triggers.ts";
 import type { TriggerConfig } from "../config/types.ts";
 
 function makeTriggers(overrides: Partial<TriggerConfig> = {}): TriggerConfig {
@@ -21,6 +26,9 @@ function makeInput(overrides: Partial<TriggerInput> = {}): TriggerInput {
     authorId: "user-1",
     botUserId: "bot-1",
     mentionedUserIds: [],
+    mentionedRoleIds: [],
+    botRoleIds: [],
+    mentionedEveryone: false,
     ...overrides,
   };
 }
@@ -62,12 +70,52 @@ describe("shouldRespond", () => {
     expect(result).toEqual({ reason: "mention" });
   });
 
+  test("returns 'mention' when a role assigned to the bot is mentioned", () => {
+    expect(shouldRespond(
+      makeInput({
+        mentionedRoleIds: ["role-bot"],
+        botRoleIds: ["role-everyone", "role-bot"],
+      }),
+      makeTriggers(),
+    )).toEqual({ reason: "mention" });
+  });
+
+  test("does not trigger for a role that is not assigned to the bot", () => {
+    expect(shouldRespond(
+      makeInput({
+        mentionedRoleIds: ["role-other"],
+        botRoleIds: ["role-bot"],
+      }),
+      makeTriggers(),
+    )).toBeNull();
+  });
+
+  test("returns 'mention' for an effective @everyone mention", () => {
+    expect(shouldRespond(
+      makeInput({ content: "@everyone hello", mentionedEveryone: true }),
+      makeTriggers(),
+    )).toEqual({ reason: "mention" });
+  });
+
   test("returns null when bot is mentioned but mention trigger disabled", () => {
     const result = shouldRespond(
       makeInput({ mentionedUserIds: ["bot-1"] }),
       makeTriggers({ mention: false })
     );
     expect(result).toBeNull();
+  });
+
+  test("mention setting disables assigned-role and @everyone triggers", () => {
+    const triggers = makeTriggers({ mention: false });
+
+    expect(shouldRespond(
+      makeInput({ mentionedRoleIds: ["role-bot"], botRoleIds: ["role-bot"] }),
+      triggers,
+    )).toBeNull();
+    expect(shouldRespond(
+      makeInput({ content: "@everyone", mentionedEveryone: true }),
+      triggers,
+    )).toBeNull();
   });
 
   test("returns null when message replies to the bot but mention trigger disabled", () => {
@@ -199,13 +247,28 @@ describe("shouldRespond", () => {
   });
 });
 
+describe("contentMentionsEveryone", () => {
+  test("matches @everyone but not @here or longer words", () => {
+    expect(contentMentionsEveryone("@everyone hello")).toBe(true);
+    expect(contentMentionsEveryone("hello, @EVERYONE!")).toBe(true);
+    expect(contentMentionsEveryone("@here hello")).toBe(false);
+    expect(contentMentionsEveryone("email@everyone.example")).toBe(false);
+  });
+});
+
 describe("shouldRespondDeliberately", () => {
-  test("preserves mentions, replies, and keywords while suppressing random triggers", () => {
+  test("preserves deliberate triggers while suppressing random triggers", () => {
     const triggers = makeTriggers({ keywords: ["2b"], randomChance: 1 });
 
     expect(shouldRespondDeliberately(makeInput({ mentionedUserIds: ["bot-1"] }), triggers))
       .toEqual({ reason: "mention" });
     expect(shouldRespondDeliberately(makeInput({ repliedToBot: true }), triggers))
+      .toEqual({ reason: "mention" });
+    expect(shouldRespondDeliberately(
+      makeInput({ mentionedRoleIds: ["role-bot"], botRoleIds: ["role-bot"] }),
+      triggers,
+    )).toEqual({ reason: "mention" });
+    expect(shouldRespondDeliberately(makeInput({ mentionedEveryone: true }), triggers))
       .toEqual({ reason: "mention" });
     expect(shouldRespondDeliberately(makeInput({ content: "hello 2b" }), triggers))
       .toEqual({ reason: "keyword", keyword: "2b" });

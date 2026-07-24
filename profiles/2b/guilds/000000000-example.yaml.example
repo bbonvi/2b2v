@@ -4,7 +4,7 @@
 
 # Trigger settings — when should the bot respond?
 triggers:
-  mention: true            # Respond when @mentioned
+  mention: true            # Direct mentions, replies, assigned-role mentions, and @everyone
   keywords: [2b, yorha]   # Keywords that trigger a response
   randomChance: 0.02       # 0–1 probability of responding to any message
   keywordDebounceMs: 2500  # Wait after a keyword or typing-aware mention trigger before replying

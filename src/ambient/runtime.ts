@@ -5,7 +5,11 @@ import { RequestLog, type Logger } from "../logger";
 import type { RequestLogStore } from "../dashboard/store";
 import type { AmbientAttentionConfig, AmbientAttentionKind, AmbientAttentionModeConfig, GuildConfig } from "../config/types";
 import type { HistoryMessage } from "../agent/history-types";
-import type { TriggerResult } from "../agent/triggers";
+import {
+  contentMentionsEveryone,
+  shouldRespond,
+  type TriggerResult,
+} from "../agent/triggers";
 import type { AssembledContext } from "../agent/context-assembly";
 import type { HandlerDeps, MemoryExtractionRequest, MessageSender } from "../agent/handler";
 import { formatHistoryContent } from "../agent/history-formatting";
@@ -17,7 +21,6 @@ import type { ResolveTargetChannel, SendableGuildChannel } from "../discord/mess
 import type { ReplyFallbackDeps } from "../agent/reply-target-fallback";
 import type { PromptLabDryRun, PromptLabRunResult } from "../dashboard/prompt-lab-types";
 import { buildComputedContactContextForUser } from "../agent/contact-context";
-import { shouldRespond } from "../agent/triggers";
 import { translateInbound } from "../discord/translation";
 import {
   buildModelProfileStreamOptions,
@@ -458,6 +461,12 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
     return new RegExp(`<@!?${botUserId}>`).test(content);
   }
 
+  function mentionedRoleIds(content: string): string[] {
+    return [...content.matchAll(/<@&(\d+)>/g)].flatMap((match) =>
+      match[1] === undefined ? [] : [match[1]]
+    );
+  }
+
   function storedMessageRepliesToOwnBot(message: HistoryMessage, guildId: string): boolean {
     if (message.replyToId === null) return false;
     const botUserId = client.user?.id ?? "";
@@ -471,15 +480,22 @@ export function createAmbientRuntime(input: AmbientRuntimeDeps): AmbientRuntime 
   function deterministicHistoryTrigger(message: HistoryMessage, guildConfig: GuildConfig): TriggerResult {
     const botUserId = client.user?.id ?? "";
     const rawContent = rawStoredMessageContent(message.id, guildConfig.guildId) ?? message.content;
-    if (contentMentionsBot(rawContent, botUserId)) return { reason: "mention" };
-    if (storedMessageRepliesToOwnBot(message, guildConfig.guildId)) return { reason: "mention" };
+    const botMember = client.guilds.cache.get(guildConfig.guildId)?.members.me;
     return shouldRespond(
       {
         content: message.content,
         authorId: message.authorId,
         authorIsBot: message.isBot,
         botUserId,
-        mentionedUserIds: [],
+        mentionedUserIds: contentMentionsBot(rawContent, botUserId) ? [botUserId] : [],
+        mentionedRoleIds: mentionedRoleIds(rawContent),
+        botRoleIds: botMember === null || botMember === undefined
+          ? []
+          : [...botMember.roles.cache.keys()],
+        // Stored messages do not keep Discord's mention_everyone flag. A literal
+        // token is sufficient here because this path only suppresses stale ambient work.
+        mentionedEveryone: contentMentionsEveryone(rawContent),
+        repliedToBot: storedMessageRepliesToOwnBot(message, guildConfig.guildId),
       },
       { ...guildConfig.triggers, randomChance: 0 },
     );

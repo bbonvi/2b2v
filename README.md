@@ -87,7 +87,7 @@ Minimal guild config:
 
 ```yaml
 triggers:
-  mention: true
+  mention: true # Direct mentions, replies, assigned-role mentions, and @everyone
   keywords: [2b]
 modelProfile: main
 timezone: UTC

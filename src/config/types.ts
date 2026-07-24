@@ -312,6 +312,7 @@ export interface ReplyLoopConfig {
 
 /** Trigger configuration per guild. All independently toggleable. */
 export interface TriggerConfig {
+  /** Respond to direct mentions, replies, assigned-role mentions, and @everyone. */
   mention: boolean;
   keywords: string[];
   randomChance: number; // 0–1
