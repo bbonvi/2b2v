@@ -171,6 +171,7 @@ export const SCHEMA_SQL = `
     raw_content         TEXT NOT NULL,
     translated_content  TEXT NOT NULL,
     is_bot              INTEGER NOT NULL DEFAULT 0,
+    webhook_id          TEXT,
     created_at          INTEGER NOT NULL,
     reply_to_id         TEXT,
     is_synthetic        INTEGER NOT NULL DEFAULT 0,

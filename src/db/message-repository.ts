@@ -275,6 +275,7 @@ interface HistoryRow {
   user_id: string;
   translated_content: string;
   is_bot: number;
+  webhook_id: string | null;
   created_at: number;
   reply_to_id: string | null;
   is_synthetic: number;
@@ -338,6 +339,7 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
       authorId: r.user_id,
       content: r.translated_content,
       isBot: r.is_bot === 1,
+      ...(r.webhook_id !== null ? { webhookId: r.webhook_id } : {}),
       timestamp: r.created_at,
       replyToId: r.reply_to_id,
       ...(assets.length > 0 ? { assets } : {}),
@@ -355,7 +357,7 @@ function hydrateHistoryRows(db: Database, rows: HistoryRow[]): HistoryMessage[] 
 export function getHistoryMessagesByIds(db: Database, messageIds: readonly string[]): HistoryMessage[] {
   if (messageIds.length === 0) return [];
   const placeholders = messageIds.map(() => "?").join(",");
-  const rows = db.raw.prepare(`SELECT id, author_username, user_id, translated_content, is_bot, created_at,
+  const rows = db.raw.prepare(`SELECT id, author_username, user_id, translated_content, is_bot, webhook_id, created_at,
       reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
     FROM messages WHERE id IN (${placeholders})`).all(...messageIds) as HistoryRow[];
   const byId = new Map(hydrateHistoryRows(db, rows).map((message) => [message.id, message]));
@@ -994,7 +996,7 @@ export function getHistoryMessages(
 ): HistoryMessage[] {
   const rows = db.raw
     .prepare(
-      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
+      `SELECT id, author_username, user_id, translated_content, is_bot, webhook_id, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
        FROM messages
        WHERE channel_id = ?
        ORDER BY created_at DESC
@@ -1070,7 +1072,7 @@ export function getContextHistoryMessages(
 
   const rows = db.raw
     .prepare(
-      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
+      `SELECT id, author_username, user_id, translated_content, is_bot, webhook_id, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
        FROM messages
        WHERE channel_id = ?${excludeClause}
        ORDER BY created_at DESC
@@ -1180,7 +1182,7 @@ export function getParentPreContext(
 ): HistoryMessage[] {
   const rows = db.raw
     .prepare(
-      `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
+      `SELECT id, author_username, user_id, translated_content, is_bot, webhook_id, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
        FROM messages
        WHERE channel_id = ? AND created_at < ? AND is_synthetic = 0
        ORDER BY created_at DESC
@@ -1192,6 +1194,7 @@ export function getParentPreContext(
       user_id: string;
       translated_content: string;
       is_bot: number;
+      webhook_id: string | null;
       created_at: number;
       reply_to_id: string | null;
       is_synthetic: number;
@@ -1269,7 +1272,7 @@ export function listChannelMessages(
     if (options.beforeMessageId !== undefined && anchor !== null) {
       return db.raw
         .prepare(
-          `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id,
+          `SELECT id, author_username, user_id, translated_content, is_bot, webhook_id, created_at, reply_to_id,
               is_synthetic, is_prompt_only, deleted_at, related_thread_id
            FROM messages
            WHERE guild_id = ? AND channel_id = ? AND is_prompt_only = 0
@@ -1282,7 +1285,7 @@ export function listChannelMessages(
     if (options.afterMessageId !== undefined && anchor !== null) {
       return db.raw
         .prepare(
-          `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id,
+          `SELECT id, author_username, user_id, translated_content, is_bot, webhook_id, created_at, reply_to_id,
               is_synthetic, is_prompt_only, deleted_at, related_thread_id
            FROM messages
            WHERE guild_id = ? AND channel_id = ? AND is_prompt_only = 0
@@ -1294,7 +1297,7 @@ export function listChannelMessages(
     }
     return db.raw
       .prepare(
-        `SELECT id, author_username, user_id, translated_content, is_bot, created_at, reply_to_id,
+        `SELECT id, author_username, user_id, translated_content, is_bot, webhook_id, created_at, reply_to_id,
             is_synthetic, is_prompt_only, deleted_at, related_thread_id
          FROM messages
          WHERE guild_id = ? AND channel_id = ? AND is_prompt_only = 0

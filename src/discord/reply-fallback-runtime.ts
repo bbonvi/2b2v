@@ -6,6 +6,7 @@ import { upsertBotMessageContent } from "../db/message-repository";
 import type { ReplyFallbackDeps } from "../agent/reply-target-fallback";
 import { syncMessageAssets } from "../db/asset-repository.ts";
 import { assetsFromDiscordMessage } from "./message-assets.ts";
+import { messageDisplayContent } from "./message-media.ts";
 
 export function fetchedDiscordMessageToFallback(fetched: Message): Awaited<ReturnType<ReplyFallbackDeps["fetchDiscordMessage"]>> {
   return {
@@ -13,9 +14,10 @@ export function fetchedDiscordMessageToFallback(fetched: Message): Awaited<Retur
     authorId: fetched.author.id,
     authorUsername: fetched.author.username,
     authorDisplayName: fetched.member?.displayName ?? fetched.author.globalName ?? fetched.author.displayName,
-    content: fetched.content,
+    content: messageDisplayContent(fetched.content, fetched.components, fetched.author.username, fetched.embeds),
     timestamp: fetched.createdTimestamp,
     isBot: fetched.author.bot,
+    ...(fetched.webhookId !== null ? { webhookId: fetched.webhookId } : {}),
     replyToId: fetched.reference?.messageId ?? null,
     attachments: [...fetched.attachments.values()].map((attachment) => ({
       id: attachment.id,

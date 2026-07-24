@@ -406,7 +406,21 @@ describe("messages table", () => {
     expect(row.raw_content).toBe("Hello <@123>!");
     expect(row.translated_content).toBe("Hello @bob!");
     expect(row.is_bot).toBe(0);
+    expect(row.webhook_id).toBeNull();
     expect(row.deleted_at).toBeNull();
+  });
+
+  test("stores a Discord webhook ID", () => {
+    db.raw
+      .prepare(
+        `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, webhook_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run("msg-webhook", "guild-1", "ch-1", "webhook-1", "GitHub", "PR opened", "PR opened", 1, "webhook-1", Date.now());
+
+    expect(db.raw.prepare("SELECT webhook_id FROM messages WHERE id = ?").get("msg-webhook")).toEqual({
+      webhook_id: "webhook-1",
+    });
   });
 
   test("is_synthetic defaults to 0 for regular messages", () => {

@@ -31,6 +31,8 @@ export interface HistoryMessage {
   content: string;
   /** Whether the author is the bot. */
   isBot: boolean;
+  /** Discord webhook ID when the message was created by a webhook. */
+  webhookId?: string;
   /** Unix epoch ms. */
   timestamp: number;
   /** Reply target message ID, or null. */

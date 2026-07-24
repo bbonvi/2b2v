@@ -14,6 +14,7 @@ export interface FetchedDiscordMessage {
   /** Unix epoch ms. */
   timestamp: number;
   isBot: boolean;
+  webhookId?: string;
   replyToId: string | null;
   attachments: Array<{
     id?: string;
@@ -52,7 +53,7 @@ function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMess
   const placeholders = ids.map(() => "?").join(",");
   const rows = deps.db.raw
     .prepare(
-      `SELECT id, user_id, author_username, translated_content, is_bot, created_at, reply_to_id, is_synthetic, related_thread_id
+      `SELECT id, user_id, author_username, translated_content, is_bot, webhook_id, created_at, reply_to_id, is_synthetic, related_thread_id
        FROM messages
        WHERE guild_id = ? AND id IN (${placeholders})`
     )
@@ -62,6 +63,7 @@ function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMess
       author_username: string;
       translated_content: string;
       is_bot: number;
+      webhook_id: string | null;
       created_at: number;
       reply_to_id: string | null;
       is_synthetic: number;
@@ -82,6 +84,7 @@ function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMess
       authorId: row.user_id,
       content: row.translated_content,
       isBot: row.is_bot === 1,
+      ...(row.webhook_id !== null ? { webhookId: row.webhook_id } : {}),
       timestamp: row.created_at,
       replyToId: row.reply_to_id,
       ...(assets.length > 0 ? { assets: assets.map((asset) => ({
@@ -155,8 +158,8 @@ export async function fetchMissingReplyTargets(
     // Persist to SQLite
     deps.db.raw
       .prepare(
-        `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, webhook_id, created_at, reply_to_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         discordMsg.id,
@@ -167,6 +170,7 @@ export async function fetchMissingReplyTargets(
         visibleContent,
         visibleContent, // translated_content = raw for fetched messages (no translation context)
         discordMsg.isBot ? 1 : 0,
+        discordMsg.webhookId ?? null,
         discordMsg.timestamp,
         discordMsg.replyToId,
       );
@@ -181,6 +185,7 @@ export async function fetchMissingReplyTargets(
       authorId: discordMsg.authorId,
       content: visibleContent,
       isBot: discordMsg.isBot,
+      ...(discordMsg.webhookId !== undefined ? { webhookId: discordMsg.webhookId } : {}),
       timestamp: discordMsg.timestamp,
       replyToId: discordMsg.replyToId,
       ...(assets.length > 0 ? { assets: assets.map((asset) => ({

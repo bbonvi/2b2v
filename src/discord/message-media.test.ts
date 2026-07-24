@@ -25,6 +25,32 @@ describe("message media helpers", () => {
     expect(messageDisplayContent("prefix", components)).toBe("prefix\n## 🎲 Initiative\nResult: 20");
   });
 
+  test("extracts semantic embed text and its URL", () => {
+    const embeds = [{
+      author: { name: "bbonvi" },
+      title: "[doracloud/dora-client] Pull request opened: #11",
+      url: "https://github.com/doracloud/dora-client/pull/11",
+      description: "## Summary\n- Update uploads.",
+      fields: [{ name: "State", value: "Open" }],
+      footer: { text: "GitHub" },
+    }];
+
+    expect(messageDisplayContent("", [], "GitHub", embeds)).toBe([
+      "bbonvi",
+      "[doracloud/dora-client] Pull request opened: #11",
+      "https://github.com/doracloud/dora-client/pull/11",
+      "## Summary\n- Update uploads.",
+      "State: Open",
+      "GitHub",
+    ].join("\n"));
+  });
+
+  test("does not turn a media-only embed URL into message text", () => {
+    expect(messageDisplayContent("", [], "GitHub", [{
+      url: "https://example.com/media",
+    }])).toBe("");
+  });
+
   test("converts recognized dice cards to untranslated system history", () => {
     const components = [{
       toJSON: () => ({

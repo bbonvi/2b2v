@@ -17,6 +17,7 @@ function insertMessage(
     rawContent?: string;
     translatedContent?: string;
     isBot?: boolean;
+    webhookId?: string;
     createdAt?: number;
     replyToId?: string | null;
     isSynthetic?: boolean;
@@ -26,8 +27,8 @@ function insertMessage(
 ) {
   db.raw
     .prepare(
-      `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id, is_synthetic, is_prompt_only, related_thread_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, webhook_id, created_at, reply_to_id, is_synthetic, is_prompt_only, related_thread_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -38,6 +39,7 @@ function insertMessage(
       opts.rawContent ?? `raw ${id}`,
       opts.translatedContent ?? `translated ${id}`,
       opts.isBot === true ? 1 : 0,
+      opts.webhookId ?? null,
       opts.createdAt ?? now,
       opts.replyToId ?? null,
       opts.isSynthetic === true ? 1 : 0,
@@ -451,6 +453,20 @@ describe("getHistoryMessages", () => {
     for (const msg of results) {
       expect(msg.hasEmbeds).toBe(false);
     }
+  });
+
+  test("hydrates webhook identity", () => {
+    insertMessage("webhook-message", {
+      authorUsername: "GitHub",
+      userId: "webhook-1",
+      isBot: true,
+      webhookId: "webhook-1",
+    });
+
+    expect(getHistoryMessages(db, "c1", 10)[0]).toMatchObject({
+      author: "GitHub",
+      webhookId: "webhook-1",
+    });
   });
 });
 

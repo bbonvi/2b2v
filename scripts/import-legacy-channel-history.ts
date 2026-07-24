@@ -40,6 +40,7 @@ interface DiscordUser {
 
 export interface DiscordMessage {
   id: string;
+  webhook_id?: string;
   author: DiscordUser;
   content: string;
   timestamp: string;
@@ -59,6 +60,10 @@ export interface DiscordMessage {
     type?: string;
     url?: string | null;
     title?: string | null;
+    description?: string | null;
+    author?: { name?: string | null } | null;
+    fields?: Array<{ name?: string | null; value?: string | null }>;
+    footer?: { text?: string | null } | null;
     provider?: { name?: string | null } | null;
     video?: { url?: string; width?: number | null; height?: number | null } | null;
     image?: { url?: string; width?: number | null; height?: number | null } | null;
@@ -80,6 +85,7 @@ export interface ImportRow {
   authorUsername: string;
   content: string;
   isBot: boolean;
+  webhookId?: string;
   createdAt: number;
   replyToId: string | null;
   assets: UpsertMessageAsset[];
@@ -481,7 +487,7 @@ export function discordMessageToImportRow(input: {
 }): ImportRow {
   const { message } = input;
   const content = appendStickerTags(
-    messageDisplayContentFromData(message.content, message.components ?? [], message.author.username),
+    messageDisplayContentFromData(message.content, message.components ?? [], message.author.username, message.embeds ?? []),
     message.sticker_items ?? [],
   );
   const assets = assetsFromDiscordMessageData({
@@ -521,6 +527,7 @@ export function discordMessageToImportRow(input: {
     authorUsername: message.author.username,
     content,
     isBot: message.author.bot === true || message.author.id === input.botUserId,
+    ...(message.webhook_id !== undefined ? { webhookId: message.webhook_id } : {}),
     createdAt: input.createdAt,
     replyToId: message.message_reference?.message_id ?? null,
     assets,
@@ -721,8 +728,8 @@ function getExisting(db: Pick<Database, "raw">, rows: ImportRow[]): ExistingResu
 function insertRowsInTransaction(db: Database, rows: ImportRow[]): void {
   const stmt = db.raw.prepare(
     `INSERT OR IGNORE INTO messages
-      (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id, is_synthetic, related_thread_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
+      (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, webhook_id, created_at, reply_to_id, is_synthetic, related_thread_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
   );
 
   for (const row of rows) {
@@ -735,6 +742,7 @@ function insertRowsInTransaction(db: Database, rows: ImportRow[]): void {
       row.content,
       row.content,
       row.isBot ? 1 : 0,
+      row.webhookId ?? null,
       row.createdAt,
       row.replyToId,
     );

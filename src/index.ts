@@ -4377,14 +4377,14 @@ async function processTriggeredMessage(
   try {
     const guildConfig = getGuildConfig(guildId);
     const inboundResolvers = buildInboundResolvers(guild);
-    const displayContent = messageDisplayContent(message.content, message.components, message.author.username);
+    const displayContent = messageDisplayContent(message.content, message.components, message.author.username, message.embeds);
     const translatedContent = appendStickerTags(
       translateInbound(displayContent, inboundResolvers),
       message.stickers.values(),
     );
     const currentTurnEventContent = options.currentTurnOverride?.content ?? currentTurnMessages
       .map((current) => appendStickerTags(
-        translateInbound(messageDisplayContent(current.content, current.components, current.author.username), inboundResolvers),
+        translateInbound(messageDisplayContent(current.content, current.components, current.author.username, current.embeds), inboundResolvers),
         current.stickers.values(),
       ))
       .filter((content) => content !== "")
@@ -4475,6 +4475,7 @@ async function processTriggeredMessage(
       authorId: message.author.id,
       content: options.currentTurnOverride?.content ?? translatedContent,
       isBot: message.author.bot,
+      ...(message.webhookId !== null ? { webhookId: message.webhookId } : {}),
       timestamp: options.currentTurnOverride?.timestamp ?? message.createdTimestamp,
       replyToId: message.reference?.messageId ?? null,
       assets: currentAssets.map((asset) => ({
@@ -4888,8 +4889,8 @@ function persistInboundDiscordMessage(message: Message, rawContent: string, tran
   const now = Date.now();
   const inserted = db.raw
     .prepare(
-      `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT OR IGNORE INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, webhook_id, created_at, reply_to_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       message.id,
@@ -4900,6 +4901,7 @@ function persistInboundDiscordMessage(message: Message, rawContent: string, tran
       rawContent,
       translatedContent,
       message.author.bot ? 1 : 0,
+      message.webhookId,
       messageCreatedAt,
       message.reference?.messageId ?? null,
     );
@@ -4951,7 +4953,7 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
 
     // Build inbound resolvers and translate
     const inboundResolvers = buildInboundResolvers(guild);
-    const displayContent = messageDisplayContent(message.content, message.components, message.author.username);
+    const displayContent = messageDisplayContent(message.content, message.components, message.author.username, message.embeds);
     const translatedContent = appendStickerTags(
       translateInbound(displayContent, inboundResolvers),
       message.stickers.values(),
@@ -5028,7 +5030,7 @@ async function recoverMessagesAfterRestart(): Promise<void> {
       const recovered: Array<{ message: Message; triggerResult: TriggerResult }> = [];
       for (const message of fetched.messages) {
         if (message.author.id === client.user?.id || message.guild === null || message.guildId === null) continue;
-        const displayContent = messageDisplayContent(message.content, message.components, message.author.username);
+        const displayContent = messageDisplayContent(message.content, message.components, message.author.username, message.embeds);
         const translatedContent = appendStickerTags(
           translateInbound(displayContent, buildInboundResolvers(message.guild)),
           message.stickers.values(),

@@ -78,6 +78,9 @@ export function formatMessageLine(input: FormatInput): string {
   if (message.jobAnnotations !== undefined && message.jobAnnotations.length > 0) {
     metaParts.push(...message.jobAnnotations);
   }
+  if (message.webhookId !== undefined) {
+    metaParts.push("Webhook");
+  }
   if (message.historyAnnotations !== undefined && message.historyAnnotations.length > 0) {
     metaParts.push(...message.historyAnnotations);
   }
@@ -139,13 +142,13 @@ function formatDisplayNameSuffix(
 
 /** The legend block prepended to the newer slice. */
 export const NEWER_LEGEND = [
-  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImages/ReplyGIFs/ReplyAudio/ReplyVideo/ReplyText/ReplyFiles/Images/GIFs/Audio/Video/Text/Files/ImageJob/Reactions/<trigger>)]: content",
+  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImages/ReplyGIFs/ReplyAudio/ReplyVideo/ReplyText/ReplyFiles/Images/GIFs/Audio/Video/Text/Files/ImageJob/Webhook/Reactions/<trigger>)]: content",
   "Legend: [YYYY-MM-DD] sets the guild-local date and [HH:mm] sets the guild-local time for following messages; recent history repeats time after roughly 1+ minute gaps and date at each local day change.",
   "Legend: Parenthesized names are current Discord display names, not stable identity, and may contain jokes, moods, or temporary labels; use @username for exact pings.",
 ].join("\n");
 
 /** The legend block prepended to the older slice. */
 export const OLDER_LEGEND = [
-  "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImages/ReplyGIFs/ReplyAudio/ReplyVideo/ReplyText/ReplyFiles/Images/GIFs/Audio/Video/Text/Files/ImageJob)]: content",
+  "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImages/ReplyGIFs/ReplyAudio/ReplyVideo/ReplyText/ReplyFiles/Images/GIFs/Audio/Video/Text/Files/ImageJob/Webhook)]: content",
   "Legend: [YYYY-MM-DD] sets the guild-local date and [HH:mm] sets the guild-local time for following messages; older history repeats time after roughly 5+ minute gaps and date at each local day change. Newer history exposes MsgID for reply_to; merged messages use history-only [msg-break], search results expose MsgIDs for contextual browsing, and typed asset IDs use read_asset.",
 ].join("\n");

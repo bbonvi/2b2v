@@ -12,6 +12,7 @@ describe("legacy channel history import", () => {
       createdAt: 123,
       message: {
         id: "message",
+        webhook_id: "webhook",
         author: { id: "bot", username: "2B", bot: true },
         content: "",
         timestamp: "2026-07-23T00:00:00.000Z",
@@ -26,6 +27,8 @@ describe("legacy channel history import", () => {
         embeds: [{
           type: "gifv",
           url: "https://example.com/post",
+          title: "Pull request opened",
+          description: "Summary text",
           provider: { name: "Tenor" },
           thumbnail: { url: "https://example.com/preview.gif", width: 10, height: 20 },
         }],
@@ -33,9 +36,15 @@ describe("legacy channel history import", () => {
       },
     });
 
-    expect(row.content).toBe("component text <sticker>Wave</sticker>");
+    expect(row.content).toBe([
+      "component text",
+      "Pull request opened",
+      "https://example.com/post",
+      "Summary text <sticker>Wave</sticker>",
+    ].join("\n"));
     expect(row.replyToId).toBe("parent");
     expect(row.isBot).toBe(true);
+    expect(row.webhookId).toBe("webhook");
     expect(row.assets.map((asset) => [asset.sourceKind, asset.kind])).toEqual([
       ["attachment", "text"],
       ["embed", "gif"],

@@ -62,6 +62,14 @@ describe("formatMessageLine", () => {
     })).toBe('[@alice (Alice W) to @bob (Bob X) (MsgID: 1; Quote: "earlier text"; <trigger>)]: hello');
   });
 
+  test("marks webhook messages in existing history metadata", () => {
+    expect(formatMessageLine({
+      message: message({ id: "123", author: "GitHub", webhookId: "webhook-1" }),
+      reply: null,
+      includeMessageIds: true,
+    })).toBe("[@GitHub (MsgID: 123; Webhook)]: hello");
+  });
+
   test("groups lazy assets by type", () => {
     expect(formatMessageLine({
       message: message({ assets: [
@@ -95,5 +103,6 @@ describe("history legends", () => {
     expect(OLDER_LEGEND).toContain("read_asset");
     expect(NEWER_LEGEND).toContain("display name");
     expect(NEWER_LEGEND).toContain("Images/GIFs/Audio/Video/Text/Files");
+    expect(NEWER_LEGEND).toContain("Webhook");
   });
 });
