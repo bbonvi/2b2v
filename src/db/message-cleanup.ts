@@ -63,9 +63,13 @@ export function cleanupGuildData(input: {
   input.db.raw.prepare("DELETE FROM message_assets WHERE guild_id = ?").run(input.guildId);
   input.db.raw.prepare("DELETE FROM asset_backfill_checkpoints WHERE guild_id = ?").run(input.guildId);
   input.db.raw.prepare("DELETE FROM message_reactions WHERE guild_id = ?").run(input.guildId);
+  input.db.raw.prepare(
+    "DELETE FROM event_watches WHERE run_in_guild_id = ? OR source_guild_id = ?",
+  ).run(input.guildId, input.guildId);
   const messagesDeleted = (input.db.raw
-    .prepare("DELETE FROM messages WHERE guild_id = ?")
-    .run(input.guildId) as { changes: number }).changes;
+    .prepare("SELECT COUNT(*) AS count FROM messages WHERE guild_id = ?")
+    .get(input.guildId) as { count: number }).count;
+  input.db.raw.prepare("DELETE FROM messages WHERE guild_id = ?").run(input.guildId);
 
   return { memoriesDeleted, messagesDeleted };
 }

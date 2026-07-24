@@ -56,7 +56,7 @@ export interface UpdateScheduleInput {
 }
 
 export interface ListSchedulesFilter {
-  guildId: string;
+  guildId?: string;
   source?: ScheduleSource;
   enabled?: boolean;
   channelId?: string;
@@ -64,7 +64,7 @@ export interface ListSchedulesFilter {
 }
 
 export interface PendingSchedulesFilter {
-  guildId: string;
+  guildId?: string;
   channelId?: string;
   createdByUserId?: string;
 }
@@ -182,6 +182,7 @@ export function deleteScheduleForGuild(db: Database, id: string, guildId: string
 }
 
 export function deletePendingSchedule(db: Database, id: string, filter: PendingSchedulesFilter): boolean {
+  if (filter.guildId === undefined) return false;
   const conditions = [
     "id = ?",
     "guild_id = ?",
@@ -209,8 +210,13 @@ export function deletePendingSchedule(db: Database, id: string, filter: PendingS
 }
 
 export function listSchedules(db: Database, filter: ListSchedulesFilter): ScheduleRow[] {
-  const conditions = ["guild_id = ?"];
-  const params: (string | number | null)[] = [filter.guildId];
+  const conditions: string[] = [];
+  const params: (string | number | null)[] = [];
+
+  if (filter.guildId !== undefined) {
+    conditions.push("guild_id = ?");
+    params.push(filter.guildId);
+  }
 
   if (filter.source !== undefined) {
     conditions.push("source = ?");
@@ -225,7 +231,8 @@ export function listSchedules(db: Database, filter: ListSchedulesFilter): Schedu
     params.push(filter.channelId);
   }
 
-  const sql = `SELECT * FROM schedules WHERE ${conditions.join(" AND ")} ORDER BY created_at ASC`;
+  const where = conditions.length === 0 ? "" : `WHERE ${conditions.join(" AND ")}`;
+  const sql = `SELECT * FROM schedules ${where} ORDER BY created_at ASC`;
   const rows = db.raw.prepare(sql).all(...params) as Record<string, unknown>[];
   return rows.map(mapRow);
 }
@@ -233,14 +240,18 @@ export function listSchedules(db: Database, filter: ListSchedulesFilter): Schedu
 /** List pending schedules. Cron schedules are pending while enabled; one-offs must still be in the future. */
 export function listPendingSchedules(db: Database, filter: PendingSchedulesFilter): ScheduleRow[] {
   const conditions = [
-    "guild_id = ?",
     "enabled = 1",
     "(type = 'cron' OR (type = 'one_off' AND run_at IS NOT NULL AND run_at > ?))",
     "(expires_at IS NULL OR expires_at > ?)",
     "(max_fire_count IS NULL OR fire_count < max_fire_count)",
   ];
   const now = Date.now();
-  const params: (string | number)[] = [filter.guildId, now, now];
+  const params: (string | number)[] = [now, now];
+
+  if (filter.guildId !== undefined) {
+    conditions.unshift("guild_id = ?");
+    params.unshift(filter.guildId);
+  }
 
   if (filter.channelId !== undefined) {
     conditions.push("channel_id = ?");

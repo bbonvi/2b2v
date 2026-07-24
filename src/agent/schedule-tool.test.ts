@@ -83,6 +83,35 @@ describe("createScheduleTaskTool (schedule_task)", () => {
     expect(text).toContain("America/New_York");
   });
 
+  test("creates a schedule in an explicitly resolved destination channel", async () => {
+    const destinationTool = createScheduleTaskTool({
+      db,
+      guildId: "guild-1",
+      channelId: "ch-1",
+      timezone: "UTC",
+      resolveDestinationChannel: (channelId) => Promise.resolve(
+        channelId === "ch-2"
+          ? { guildId: "guild-2", channelId, timezone: "Europe/Helsinki" }
+          : null,
+      ),
+    });
+    await destinationTool.execute(
+      "destination",
+      {
+        mode: "in",
+        amount: 5,
+        unit: "minutes",
+        instructions: "Run there.",
+        channel_id: "ch-2",
+      },
+      new AbortController().signal,
+      () => {},
+    );
+    const schedule = listSchedules(db, { guildId: "guild-2" })[0];
+    expect(schedule?.channelId).toBe("ch-2");
+    expect(schedule?.timezone).toBe("Europe/Helsinki");
+  });
+
   test("defaults to mode: in when mode is omitted", async () => {
     const result = await tool.execute(
       "c-default",
@@ -437,7 +466,7 @@ describe("schedule list/delete tools", () => {
     expect(text).not.toContain(id);
   });
 
-  test("delete_scheduled_task deletes only pending schedules in current channel and guild", async () => {
+  test("delete_scheduled_task accepts an exact schedule ID outside the current channel", async () => {
     const id = createSchedule(db, {
       guildId: "guild-1",
       channelId: "ch-1",
@@ -458,13 +487,36 @@ describe("schedule list/delete tools", () => {
     });
 
     const deleteTool = createDeleteScheduledTaskTool(deps);
-    const miss = await deleteTool.execute("delete-miss", { scheduleId: otherChannelId }, new AbortController().signal, () => {});
-    expect((miss.content[0] as { text: string }).text).toContain("No pending");
-    expect(getSchedule(db, otherChannelId)).not.toBeNull();
+    const other = await deleteTool.execute("delete-other", { scheduleId: otherChannelId }, new AbortController().signal, () => {});
+    expect((other.content[0] as { text: string }).text).toContain("Deleted");
+    expect(getSchedule(db, otherChannelId)).toBeNull();
 
     const hit = await deleteTool.execute("delete-hit", { scheduleId: id }, new AbortController().signal, () => {});
     expect((hit.content[0] as { text: string }).text).toContain("Deleted");
     expect(getSchedule(db, id)).toBeNull();
-    expect(deletedIds).toEqual([id]);
+    expect(deletedIds).toEqual([otherChannelId, id]);
+  });
+
+  test("list_scheduled_tasks supports current guild and all guild scopes", async () => {
+    for (const [targetGuildId, targetChannelId] of [
+      ["guild-1", "ch-1"],
+      ["guild-1", "ch-2"],
+      ["guild-2", "ch-3"],
+    ] as const) {
+      createSchedule(db, {
+        guildId: targetGuildId,
+        channelId: targetChannelId,
+        source: "tool",
+        type: "one_off",
+        runAt: Date.now() + 60_000,
+        timezone: "UTC",
+        messageContent: `${targetGuildId}/${targetChannelId}`,
+      });
+    }
+    const listTool = createListScheduledTasksTool(deps);
+    const guild = await listTool.execute("guild", { scope: "current_guild" }, new AbortController().signal, () => {});
+    const all = await listTool.execute("all", { scope: "all_guilds" }, new AbortController().signal, () => {});
+    expect((guild.details as { total: number }).total).toBe(2);
+    expect((all.details as { total: number }).total).toBe(3);
   });
 });

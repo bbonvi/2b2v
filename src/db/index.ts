@@ -35,3 +35,24 @@ export {
   type ListSchedulesFilter,
   type PendingSchedulesFilter,
 } from "./schedule-repository";
+
+export {
+  claimEventWatchFire,
+  countActiveWatches,
+  createEventWatch,
+  deleteEventWatch,
+  eventWatchFirePressureAllowsExecution,
+  getEventWatch,
+  getEventWatchFire,
+  listCandidateEventWatches,
+  listEventWatches,
+  listPendingEventWatchFires,
+  listPendingWatchMessageIds,
+  markWatchMessageProcessed,
+  setEventWatchThresholdArmed,
+  updateEventWatch,
+  updateEventWatchFireState,
+  type CreateEventWatchInput,
+  type EventWatchFire,
+  type EventWatchScope,
+} from "./event-watch-repository.ts";

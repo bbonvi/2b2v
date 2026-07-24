@@ -14,7 +14,6 @@ import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-
 import { appendStickerTags, messageDisplayContent } from "./discord/message-media";
 import { assetsFromDiscordMessage } from "./discord/message-assets";
 import { botChannelPermissions, channelDisplayName, channelTypeLabel, createDiscordMessageSender, createTargetChannelResolver, createTypingController, fetchAccessibleGuildChannel as fetchAccessibleDiscordGuildChannel, isSendableGuildChannel, type SendableGuildChannel } from "./discord/message-sender";
-import { registerReactionSyncRuntime } from "./discord/reaction-sync-runtime";
 import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine";
 import { createScheduledTaskRunner } from "./scheduler/scheduled-task-runtime";
 import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type HandleResult, type AssetAttachmentResolver, type IncomingMessage, type HandlerDeps, type MemoryExtractionRequest, type MessageSender, type OutboundAttachment } from "./agent/handler";
@@ -28,7 +27,7 @@ import {
   type TriggerResult,
 } from "./agent/triggers";
 import { typingSimulationDelayMs } from "./agent/typing-simulation";
-import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
+import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, selectNormalDispatchTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import type { HistoryMessage } from "./agent/history-types";
 import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listDiscordChannelUsage, listChannelMessages, getRoutedMessageSource, getLatestMessageActivityBefore, type MessageActivity } from "./db/message-repository";
@@ -53,6 +52,7 @@ import type { TtsResult } from "./tts/types";
 import { buildMemoryContext, buildMemoryMaintenanceContext, buildPrivateLifeMemoryContext, buildVisibleUserMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
 import { createSearchChannelMessagesTool } from "./agent/search-channel-messages-tool";
 import { createScheduleTools } from "./agent/schedule-tool";
+import { createEventWatchTools } from "./agent/event-watch-tool.ts";
 import { createChatUserListTool, type MemberInfo } from "./agent/member-list-tool";
 import { createChannelListTool, type ChannelInfo } from "./agent/channel-list-tool";
 import { createEmojiListTool } from "./agent/emoji-list-tool";
@@ -105,6 +105,16 @@ import { clearExpiredPrivateLifeThoughts } from "./db/private-life-repository.ts
 import { createPersonaModeRuntime } from "./modes/runtime";
 import type { PersonaModeActivityType } from "./modes/types";
 import { cacheAssetExtraction, getAssetById, getAssetsByMessageId, syncMessageAssets } from "./db/asset-repository";
+import { getEventWatch, listPendingWatchMessageIds, markWatchMessageProcessed } from "./db/event-watch-repository.ts";
+import { createWatchMatcher } from "./event-watch/matcher.ts";
+import { createEventWatchRuntime, type EventWatchTurn } from "./event-watch/runtime.ts";
+import { createUpdateCurrentEventWatchTool } from "./event-watch/current-watch-tool.ts";
+import { DEFAULT_EVENT_WATCH_PRESSURE, type NormalizedWatchEvent } from "./event-watch/types.ts";
+import {
+  normalizeDiscordWatchMessage,
+  registerEventWatchDiscordAdapters,
+  type EventWatchDiscordAdapters,
+} from "./event-watch/discord-adapters.ts";
 import {
   createStagedAsset,
   deleteStagedAsset,
@@ -1835,6 +1845,28 @@ function isScheduledAttentionBusy(guildId: string, channelId: string): boolean {
 }
 
 // --- 12. Init scheduler ---
+const watchMatcher = createWatchMatcher({
+  db,
+  pressure: DEFAULT_EVENT_WATCH_PRESSURE,
+  getTimezone: (guildId) => getGuildConfig(guildId).timezone,
+  onMetrics: (metrics, event) => {
+    log.debug("event watch match complete", {
+      eventType: event.type,
+      eventKey: event.eventKey,
+      ...metrics,
+    });
+  },
+});
+
+const eventWatchRuntime = createEventWatchRuntime({
+  db,
+  matcher: watchMatcher,
+  pressure: DEFAULT_EVENT_WATCH_PRESSURE,
+  log: log.child({ component: "event-watch" }),
+  onFire: processEventWatchTurn,
+});
+let eventWatchDiscordAdapters: EventWatchDiscordAdapters | null = null;
+
 const scheduler: SchedulerEngine = createSchedulerEngine({
   db,
   onFire: createScheduledTaskRunner({
@@ -1902,6 +1934,8 @@ const memoryCleanupTimer = setInterval(() => {
 // --- 13. Wait for Discord client login ---
 await discordLoginPromise;
 personaModeRuntime.start();
+eventWatchRuntime.start();
+log.info("event watch runtime started");
 
 // --- 14. Register slash commands ---
 const botUser = client.user;
@@ -3565,6 +3599,47 @@ function buildAgentTools(
       && guildConfig.adminUserIds.includes(effectiveCurrentRequest.requesterId),
     onScheduleCreated: (id) => scheduler.addSchedule(id),
     onScheduleDeleted: (id) => scheduler.removeSchedule(id),
+    resolveDestinationChannel: async (targetChannelId) => {
+      const target = await fetchAccessibleGuildChannel(targetChannelId);
+      if (target === null) return null;
+      return {
+        guildId: target.guildId,
+        channelId: target.id,
+        timezone: getGuildConfig(target.guildId).timezone,
+        schedulePressure: getGuildConfig(target.guildId).schedulePressure,
+      };
+    },
+  });
+
+  const eventWatchTools = createEventWatchTools({
+    db,
+    matcher: watchMatcher,
+    guildId,
+    channelId,
+    timezone: guildConfig.timezone,
+    ...(effectiveCurrentRequest === undefined
+      ? {}
+      : {
+          currentRequest: {
+            requesterId: effectiveCurrentRequest.requesterId,
+            requesterUsername: effectiveCurrentRequest.requesterUsername,
+          },
+        }),
+    resolveChannel: async (targetChannelId) => {
+      const target = await fetchAccessibleGuildChannel(targetChannelId);
+      if (target === null) return null;
+      return {
+        guildId: target.guildId,
+        channelId: target.id,
+        timezone: getGuildConfig(target.guildId).timezone,
+      };
+    },
+    resolveGuild: async (targetGuildId) => {
+      const target = await resolveClientGuild(targetGuildId);
+      return target === null ? null : { guildId: target.id, timezone: getGuildConfig(target.id).timezone };
+    },
+    onWatchCreated: () => eventWatchDiscordAdapters?.reconcilePresenceStates(),
+    onWatchDeleted: (watchId) => eventWatchRuntime.cancelWatch(watchId),
   });
 
   const chatUserListTool = createChatUserListTool({
@@ -4002,7 +4077,7 @@ function buildAgentTools(
       deleteStagedAsset(db, staged.ref);
     },
   });
-  const tools = [searchTool, ...scheduleTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memorySearchTool, ...innerThreadTools, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, ...jobInspectionTools, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, ...eventWatchTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memorySearchTool, ...innerThreadTools, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, ...jobInspectionTools, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (diceRollTool !== undefined) tools.push(diceRollTool);
   if (includeImageGenerationTools) {
     const imageProfile = resolveModelProfile(
@@ -4292,7 +4367,20 @@ function getOrCreateDispatcher(guildId: string): ChannelDispatcher {
       if (selected === undefined) return { coveredMessageIds: [] };
       const currentTurnMessages = selectDispatchMessagesForTrigger(batch, trigger)
         .map((pending) => pending.message as Message);
-      return processTriggeredMessage(selected.message as Message, trigger.result, currentTurnMessages);
+      const matchedWatchIds = [...new Set(batch.flatMap((pending) =>
+        pending.authorId === trigger.message.authorId ? pending.matchedWatchIds ?? [] : []
+      ))];
+      const ordinaryTrigger = selectNormalDispatchTrigger(batch) ?? trigger.result;
+      if (matchedWatchIds.length > 0) {
+        return await processSettledWatchedMessage(
+          selected.message as Message,
+          matchedWatchIds,
+          ordinaryTrigger,
+          currentTurnMessages,
+        );
+      }
+      if (trigger.result === null) return { coveredMessageIds: [] };
+      return await processTriggeredMessage(selected.message as Message, trigger.result, currentTurnMessages);
     },
   });
   dispatchers.set(guildId, dispatcher);
@@ -4337,6 +4425,134 @@ function evaluateMessageTrigger(message: Message, guildConfig: GuildConfig, deli
     : shouldRespond(triggerInput, guildConfig.triggers);
 }
 
+function formatTriggerReason(trigger: NonNullable<TriggerResult>): string {
+  return trigger.reason === "keyword" ? `keyword "${trigger.keyword}"` : trigger.reason;
+}
+
+function normalizedWatchMessage(message: Message, content?: string): Extract<NormalizedWatchEvent, { type: "message" }> {
+  return normalizeDiscordWatchMessage({
+    db,
+    message,
+    ...(content === undefined ? {} : { content }),
+    botUserId: client.user?.id,
+  });
+}
+
+async function processEventWatchTurn(turn: EventWatchTurn): Promise<{ visibleOutput: boolean }> {
+  const watch = turn.watches[0];
+  if (watch === undefined) return { visibleOutput: false };
+  let message: Message | null = turn.sourceMessage instanceof Object
+    && "id" in turn.sourceMessage
+    ? turn.sourceMessage as Message
+    : null;
+  const sourceMatchesExecution = turn.event.guildId === watch.runInGuildId
+    && "channelId" in turn.event
+    && turn.event.channelId === watch.runInChannelId;
+  if (message === null && turn.event.type === "message") {
+    const sourceChannel = await fetchAccessibleGuildChannel(turn.event.channelId);
+    message = await sourceChannel?.messages.fetch(turn.event.messageId).catch(() => null) ?? null;
+  }
+  if (!sourceMatchesExecution || message === null) {
+    const targetChannel = await fetchAccessibleGuildChannel(watch.runInChannelId);
+    if (targetChannel === null || targetChannel.guildId !== watch.runInGuildId) {
+      throw new Error(`Watch execution channel ${watch.runInChannelId} is unavailable.`);
+    }
+    message = syntheticEventProxyMessage(
+      targetChannel,
+      `event-watch:${turn.fires.map((fire) => fire.id).join(":")}`,
+      turn.event.at,
+    );
+  }
+  const eventContent = turn.event.type === "message" && sourceMatchesExecution
+    ? undefined
+    : [
+        "Untrusted matched event data:",
+        JSON.stringify(turn.event),
+      ].join("\n");
+  const outcome = await processTriggeredMessage(
+    message,
+    turn.ordinaryTrigger,
+    [message],
+    {
+      eventWatchTurn: turn,
+      ...(eventContent === undefined
+        ? {}
+        : {
+            currentTurnOverride: {
+              messageId: `event-watch:${turn.fires.map((fire) => fire.id).join(":")}`,
+              timestamp: turn.event.at,
+              content: eventContent,
+            },
+          }),
+    },
+  );
+  return { visibleOutput: outcome.visibleOutputSent === true };
+}
+
+/** Minimal Discord message carrier for a synthetic event in an execution channel. */
+function syntheticEventProxyMessage(
+  channel: SendableGuildChannel,
+  id: string,
+  createdTimestamp: number,
+): Message {
+  const author = client.user;
+  if (author === null) throw new Error("Discord bot identity is unavailable.");
+  return {
+    id,
+    guildId: channel.guildId,
+    guild: channel.guild,
+    channelId: channel.id,
+    channel,
+    author,
+    member: channel.guild.members.me,
+    content: "",
+    components: [],
+    embeds: [],
+    stickers: { values: () => [][Symbol.iterator]() },
+    mentions: {
+      users: new Map(),
+      roles: new Map(),
+      everyone: false,
+    },
+    reference: null,
+    webhookId: null,
+    createdTimestamp,
+  } as unknown as Message;
+}
+
+async function processSettledWatchedMessage(
+  message: Message,
+  matchedWatchIds: readonly string[],
+  ordinaryTrigger: NonNullable<TriggerResult> | null,
+  currentTurnMessages: readonly Message[],
+): Promise<DispatchOutcome> {
+  const event = normalizedWatchMessage(message);
+  const groups = new Map<string, string[]>();
+  for (const watchId of matchedWatchIds) {
+    const watch = getEventWatch(db, watchId);
+    if (watch === null) continue;
+    const key = `${watch.runInGuildId}:${watch.runInChannelId}`;
+    const ids = groups.get(key) ?? [];
+    ids.push(watchId);
+    groups.set(key, ids);
+  }
+  let ordinaryHandled = false;
+  for (const [key, watchIds] of groups) {
+    const turn = eventWatchRuntime.claimMatched(watchIds, event);
+    if (turn === null) continue;
+    turn.sourceMessage = message;
+    if (key === `${message.guildId}:${message.channelId}` && ordinaryTrigger !== null) {
+      turn.ordinaryTrigger = ordinaryTrigger;
+      ordinaryHandled = true;
+    }
+    await eventWatchRuntime.executeClaimed(turn);
+  }
+  if (ordinaryTrigger !== null && !ordinaryHandled) {
+    return await processTriggeredMessage(message, ordinaryTrigger, currentTurnMessages);
+  }
+  return { coveredMessageIds: currentTurnMessages.map((current) => current.id) };
+}
+
 /** Process a triggered message through the full handler pipeline. */
 function isMessageBackedTrigger(trigger: NonNullable<TriggerResult>): boolean {
   return trigger.reason === "mention"
@@ -4359,6 +4575,7 @@ async function processTriggeredMessage(
     };
     preSendCheck?: (draftText: string) => boolean | Promise<boolean>;
     onWriteToolStart?: (toolName: string) => void;
+    eventWatchTurn?: EventWatchTurn;
   } = {},
 ): Promise<DispatchOutcome> {
   if (message.guild === null || message.guildId === null) return { coveredMessageIds: [] };
@@ -4415,7 +4632,7 @@ async function processTriggeredMessage(
       botUserId: client.user?.id ?? "",
       botUsername: client.user?.username ?? "bot",
       logger: log,
-      replySourceMessage: message,
+      ...(options.currentTurnOverride === undefined ? { replySourceMessage: message } : {}),
       getLastTypingAt: typing.getLastTypingAt,
       routedFrom: {
         routedFromGuildId: guildId,
@@ -4477,7 +4694,7 @@ async function processTriggeredMessage(
       isBot: message.author.bot,
       ...(message.webhookId !== null ? { webhookId: message.webhookId } : {}),
       timestamp: options.currentTurnOverride?.timestamp ?? message.createdTimestamp,
-      replyToId: message.reference?.messageId ?? null,
+      replyToId: options.currentTurnOverride === undefined ? message.reference?.messageId ?? null : null,
       assets: currentAssets.map((asset) => ({
         id: asset.id,
         kind: asset.kind,
@@ -4490,7 +4707,7 @@ async function processTriggeredMessage(
         durationSeconds: asset.durationSeconds,
       })),
       hasEmbeds: options.currentTurnOverride === undefined && message.embeds.length > 0,
-      isSynthetic: false,
+      isSynthetic: options.currentTurnOverride !== undefined,
       relatedThreadId: null,
     };
 
@@ -4524,6 +4741,25 @@ async function processTriggeredMessage(
           : {}),
       },
     );
+    if (options.eventWatchTurn !== undefined) {
+      const watchLines = options.eventWatchTurn.watches.flatMap((watch) => [
+        `Watch ${watch.id}: ${watch.instruction}`,
+        `Previous handoff: ${watch.handoffNote.trim() === "" ? "(none)" : watch.handoffNote.trim()}`,
+      ]);
+      context.sections.push({
+        label: "Event Watch",
+        role: "developer",
+        cached: false,
+        text: [
+          "## Event Watch",
+          runtimeContextTemplate("event-watch-execution-mode", {}, "Act on this matched watch only if it still matters."),
+          options.eventWatchTurn.ordinaryTrigger === undefined
+            ? ""
+            : `This watched message also triggered ordinary attention through ${formatTriggerReason(options.eventWatchTurn.ordinaryTrigger)}. Handle both reasons in this action turn.`,
+          ...watchLines,
+        ].filter((line) => line !== "").join("\n"),
+      });
+    }
 
     const startThreadTool = createStartThreadTool({
       guildId,
@@ -4598,6 +4834,19 @@ async function processTriggeredMessage(
       },
     });
     const generatedImages = createGeneratedImageRuntime();
+    const toolRequest = options.eventWatchTurn === undefined
+      ? {
+          requesterId: message.author.id,
+          requesterUsername: message.author.username,
+          sourceMessageId: message.id,
+          sourceQuote: shortQuote(translatedContent),
+        }
+      : {
+          requesterId: "event-watch",
+          requesterUsername: client.user?.username ?? "persona",
+          sourceMessageId: options.currentTurnOverride?.messageId ?? message.id,
+          sourceQuote: shortQuote(options.currentTurnOverride?.content ?? translatedContent),
+        };
     const agentTools = buildAgentTools(
       guildId,
       channelId,
@@ -4605,12 +4854,7 @@ async function processTriggeredMessage(
       guild,
       context.contextMessageIds,
       generatedImages.onGeneratedImage,
-      {
-        requesterId: message.author.id,
-        requesterUsername: message.author.username,
-        sourceMessageId: message.id,
-        sourceQuote: shortQuote(translatedContent),
-      },
+      toolRequest,
       {
         visibleUserIds: context.visibleUserIds ?? [],
         onVisibleOutput: markExternalVisibleOutput,
@@ -4637,8 +4881,17 @@ async function processTriggeredMessage(
         },
       },
     );
-    const threadTools = applyRuntimeToolPrompts([startThreadTool, closeThreadTool], promptBundle.runtime);
-    const baseExtraTools = [...agentTools, ...threadTools];
+    const threadTools = options.currentTurnOverride === undefined
+      ? applyRuntimeToolPrompts([startThreadTool, closeThreadTool], promptBundle.runtime)
+      : [];
+    const watchUpdateTool = options.eventWatchTurn === undefined
+      ? []
+      : [createUpdateCurrentEventWatchTool({
+          db,
+          watchIds: options.eventWatchTurn.watches.map((watch) => watch.id),
+          onCompleted: (watchId) => eventWatchRuntime.cancelWatch(watchId),
+        })];
+    const baseExtraTools = [...agentTools, ...threadTools, ...watchUpdateTool];
     const extraTools = options.onWriteToolStart !== undefined
       ? trackWriteToolStarts(baseExtraTools, options.onWriteToolStart)
       : baseExtraTools;
@@ -4660,8 +4913,12 @@ async function processTriggeredMessage(
       eventContent: currentTurnEventContent !== "" ? currentTurnEventContent : translatedContent,
       currentContentInHistory: options.currentTurnOverride === undefined,
       messageId: options.currentTurnOverride?.messageId ?? message.id,
-      replyToMessageId: message.reference?.messageId,
-      repliedToBot: messageRepliesToOwnBot(message),
+      ...(options.currentTurnOverride === undefined
+        ? {
+            replyToMessageId: message.reference?.messageId,
+            repliedToBot: messageRepliesToOwnBot(message),
+          }
+        : { repliedToBot: false }),
       assets: latestUserMessage.assets,
       ...(repliedToBotRouteSource !== null
         ? {
@@ -4716,6 +4973,7 @@ async function processTriggeredMessage(
         hasExternalVisibleOutput: () => externalVisibleOutputSent,
         onAgentEnd: typing.stopLoop,
         triggerOverride,
+        forceTrigger: options.eventWatchTurn !== undefined ? true : undefined,
         disableLiveOutput: options.disableLiveOutput,
         preSendCheck: options.preSendCheck,
         onIgnoredReply: ({ channelId: destinationChannelId, historyText }) => {
@@ -4731,6 +4989,7 @@ async function processTriggeredMessage(
           ambientRuntime.clearAmbientLeaseForUser(guildId, destinationChannelId ?? channelId, message.author.id);
         },
         afterReply: async (memoryRequest) => {
+          if (options.currentTurnOverride !== undefined && options.eventWatchTurn !== undefined) return;
           await runMemoryPostReplyExtraction({
             guildConfig,
             memoryRequest,
@@ -4804,6 +5063,7 @@ async function processTriggeredMessage(
     }
     return {
       coveredMessageIds: currentTurnMessageIds,
+      visibleOutputSent: sentBotMessageIds.length > 0 || externalVisibleOutputSent,
     };
   } catch (err) {
     if (!requestLogEmitted) {
@@ -4840,9 +5100,10 @@ client.on("typingStart", (typing: Typing) => {
   );
 });
 
-registerReactionSyncRuntime({
+eventWatchDiscordAdapters = registerEventWatchDiscordAdapters({
   client,
   db,
+  runtime: eventWatchRuntime,
   log,
   isAcceptingEvents: () => acceptingDiscordMessages,
   trackTask: (task) => {
@@ -4936,9 +5197,7 @@ function persistInboundDiscordMessage(message: Message, rawContent: string, tran
 // --- 23. messageCreate handler ---
 async function processDiscordMessageCreate(message: Message): Promise<void> {
   try {
-    // Never re-process this client's own Discord output. Other bots may use
-    // the normal deliberate trigger paths.
-    if (message.author.id === client.user?.id) return;
+    const authoredBySelf = message.author.id === client.user?.id;
     // Ignore DMs
     if (message.guild === null || message.guildId === null) return;
 
@@ -4958,24 +5217,33 @@ async function processDiscordMessageCreate(message: Message): Promise<void> {
       translateInbound(displayContent, inboundResolvers),
       message.stickers.values(),
     );
-    if (!persistInboundDiscordMessage(message, displayContent, translatedContent)) return;
+    const inserted = persistInboundDiscordMessage(message, displayContent, translatedContent);
+    const pendingWatchEvaluation = db.raw.prepare(
+      "SELECT 1 FROM event_watch_message_inbox WHERE message_id = ? AND state = 'pending'",
+    ).get(message.id) !== null;
+    if (!inserted && !pendingWatchEvaluation) return;
 
-    const triggerResult = evaluateMessageTrigger(message, guildConfig);
-    ambientRuntime.maybeScheduleAmbientAttention(message, triggerResult);
+    const triggerResult = authoredBySelf ? null : evaluateMessageTrigger(message, guildConfig);
+    const watchEvent = normalizedWatchMessage(message, translatedContent);
+    const matchedWatchIds = await eventWatchRuntime.matchMessage(watchEvent);
+    if (!authoredBySelf) ambientRuntime.maybeScheduleAmbientAttention(message, triggerResult);
 
     // Dispatch to handler: use channel dispatcher if enabled, otherwise call directly
     if (guildConfig.dispatcher.enabled) {
       getOrCreateDispatcher(guildId).enqueue(message, {
         authorId: message.author.id,
         triggerResult,
+        matchedWatchIds,
       });
-      if (triggerResult === null) {
+      if (!authoredBySelf && triggerResult === null && matchedWatchIds.length === 0) {
         void maybeRunAmbientMemoryExtraction(message, guildConfig);
       }
     } else {
-      if (triggerResult === null) {
+      if (matchedWatchIds.length > 0) {
+        await processSettledWatchedMessage(message, matchedWatchIds, triggerResult, [message]);
+      } else if (!authoredBySelf && triggerResult === null) {
         void maybeRunAmbientMemoryExtraction(message, guildConfig);
-      } else {
+      } else if (triggerResult !== null) {
         await processTriggeredMessage(message, triggerResult);
       }
     }
@@ -5027,7 +5295,7 @@ async function recoverMessagesAfterRestart(): Promise<void> {
         });
       }
 
-      const recovered: Array<{ message: Message; triggerResult: TriggerResult }> = [];
+      const recovered: Array<{ message: Message; triggerResult: TriggerResult; matchedWatchIds: string[] }> = [];
       for (const message of fetched.messages) {
         if (message.author.id === client.user?.id || message.guild === null || message.guildId === null) continue;
         const displayContent = messageDisplayContent(message.content, message.components, message.author.username, message.embeds);
@@ -5039,11 +5307,12 @@ async function recoverMessagesAfterRestart(): Promise<void> {
         claimedCount += 1;
         const guildConfig = getGuildConfig(message.guildId);
         const triggerResult = evaluateMessageTrigger(message, guildConfig, true);
+        const matchedWatchIds = await eventWatchRuntime.matchMessage(normalizedWatchMessage(message, translatedContent));
         if (triggerResult !== null) triggerCount += 1;
-        recovered.push({ message, triggerResult });
+        recovered.push({ message, triggerResult, matchedWatchIds });
       }
 
-      if (!recovered.some((entry) => entry.triggerResult !== null)) continue;
+      if (!recovered.some((entry) => entry.triggerResult !== null || entry.matchedWatchIds.length > 0)) continue;
       const guildConfig = getGuildConfig(knownChannel.guildId);
       for (const entry of recovered) {
         if (entry.triggerResult !== null) {
@@ -5054,7 +5323,10 @@ async function recoverMessagesAfterRestart(): Promise<void> {
           getOrCreateDispatcher(knownChannel.guildId).enqueue(entry.message, {
             authorId: entry.message.author.id,
             triggerResult: entry.triggerResult,
+            matchedWatchIds: entry.matchedWatchIds,
           });
+        } else if (entry.matchedWatchIds.length > 0) {
+          await processSettledWatchedMessage(entry.message, entry.matchedWatchIds, entry.triggerResult, [entry.message]);
         } else if (entry.triggerResult !== null) {
           await processTriggeredMessage(entry.message, entry.triggerResult);
         }
@@ -5076,6 +5348,41 @@ async function recoverMessagesAfterRestart(): Promise<void> {
     claimed: claimedCount,
     triggers: triggerCount,
   });
+}
+
+/** Finish watch evaluation for messages committed before an interrupted live evaluation. */
+async function recoverPendingWatchMessages(): Promise<void> {
+  let recovered = 0;
+  for (const messageId of listPendingWatchMessageIds(db)) {
+    const row = db.raw.prepare(
+      "SELECT guild_id, channel_id FROM messages WHERE id = ?",
+    ).get(messageId) as { guild_id: string; channel_id: string } | null;
+    if (row === null) continue;
+    try {
+      const channel = await fetchAccessibleGuildChannel(row.channel_id);
+      if (channel === null || channel.guildId !== row.guild_id) {
+        markWatchMessageProcessed(db, messageId);
+        continue;
+      }
+      const message = await channel.messages.fetch(messageId);
+      const displayContent = messageDisplayContent(message.content, message.components, message.author.username, message.embeds);
+      const translatedContent = appendStickerTags(
+        translateInbound(displayContent, buildInboundResolvers(message.guild)),
+        message.stickers.values(),
+      );
+      const matchedWatchIds = await eventWatchRuntime.matchMessage(normalizedWatchMessage(message, translatedContent));
+      if (matchedWatchIds.length > 0) {
+        await processSettledWatchedMessage(message, matchedWatchIds, null, [message]);
+      }
+      recovered += 1;
+    } catch (error) {
+      log.warn("pending watch message recovery failed", {
+        messageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (recovered > 0) log.info("pending watch messages recovered", { recovered });
 }
 
 client.on("messageUpdate", (_oldMessage, updatedMessage) => {
@@ -5228,6 +5535,7 @@ if (existsSync(sharedInstructionsDir)) {
 }
 
 // --- Health check summary ---
+await recoverPendingWatchMessages();
 await recoverMessagesAfterRestart();
 log.info("health check passed — all systems ready", {
   uptimeMs: Date.now() - startTime,
@@ -5431,6 +5739,7 @@ async function shutdown(signal: string): Promise<void> {
 
   clearInterval(memoryCleanupTimer);
   clearInterval(vpnSessionCleanupTimer);
+  eventWatchDiscordAdapters?.stop();
   if (configReloadPollTimer !== null) clearInterval(configReloadPollTimer);
   if (reloadTimer !== null) clearTimeout(reloadTimer);
   for (const watcher of configWatchers) watcher.close();
@@ -5438,12 +5747,14 @@ async function shutdown(signal: string): Promise<void> {
   ambientRuntime.clearAmbientInitiativeState();
   privateLifeRuntime.clear();
   scheduler.stop();
+  eventWatchRuntime.stop();
   personaModeRuntime.stop();
   assetBackfillController.abort(new Error("Asset backfill stopped for shutdown."));
 
   await inboundMessageTasks.drain();
   await Promise.all([...dispatchers.values()].map((dispatcher) => dispatcher.drain()));
   await scheduler.drain();
+  await eventWatchRuntime.drain();
   await voiceRuntime.shutdown();
   await dashboardStop;
   while (imageJobTasks.activeCount() > 0 || backgroundTasks.activeCount() > 0) {

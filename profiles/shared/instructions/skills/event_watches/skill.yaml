@@ -1,0 +1,8 @@
+id: event_watches
+title: Event Watches
+description: Required for create_event_watch; defines event filters, time gates, rolling counts, execution scope, and privacy.
+required_for_tools:
+  - create_event_watch
+instructions:
+  - 00-events.md
+  - 10-lifecycle.md

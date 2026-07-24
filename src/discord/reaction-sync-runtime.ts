@@ -1,4 +1,4 @@
-import type { Client, Message, MessageReaction, PartialMessage, PartialMessageReaction } from "discord.js";
+import type { Client, Message, MessageReaction, PartialMessage, PartialMessageReaction, User } from "discord.js";
 import type { Database } from "../db/database";
 import { deleteMessageEmojiReaction, deleteMessageReactions, upsertMessageReaction } from "../db/message-reactions";
 import type { Logger } from "../logger";
@@ -25,20 +25,26 @@ export function registerReactionSyncRuntime(input: {
   log: Logger;
   isAcceptingEvents?: () => boolean;
   trackTask?: (task: Promise<void>) => void;
+  onReaction?: (event: {
+    action: "add" | "remove";
+    reaction: MessageReaction | PartialMessageReaction;
+    user: User;
+    emoji: string;
+    count: number;
+  }) => void | Promise<void>;
 }): void {
   const { client, db, log } = input;
 
   async function processMessageReactionCount(
     reactionInput: MessageReaction | PartialMessageReaction,
     deleteOnFetchFailure = false,
-  ): Promise<void> {
+  ): Promise<MessageReaction | null> {
     const reaction = await fetchCompleteReaction(reactionInput);
     if (reaction === null && deleteOnFetchFailure) {
       processMessageReactionRemoveEmoji(reactionInput);
-      return;
+      return null;
     }
-    if (reaction === null) return;
-    if (reaction.message.guildId === null) return;
+    if (reaction === null || reaction.message.guildId === null) return null;
 
     const { key, label } = reactionEmojiIdentity(reaction);
     upsertMessageReaction(db, {
@@ -49,6 +55,7 @@ export function registerReactionSyncRuntime(input: {
       emojiLabel: label,
       count: reaction.count,
     });
+    return reaction;
   }
 
   function processMessageReactionRemoveEmoji(reaction: MessageReaction | PartialMessageReaction): void {
@@ -62,11 +69,20 @@ export function registerReactionSyncRuntime(input: {
     deleteMessageReactions(db, message.id, message.guildId);
   }
 
-  client.on("messageReactionAdd", (reaction) => {
+  client.on("messageReactionAdd", (reaction, user) => {
     if (input.isAcceptingEvents?.() === false) return;
     const task = (async () => {
       try {
-        await processMessageReactionCount(reaction);
+        const complete = await processMessageReactionCount(reaction);
+        if (complete !== null && !user.partial) {
+          await input.onReaction?.({
+            action: "add",
+            reaction: complete,
+            user,
+            emoji: reactionEmojiIdentity(complete).label,
+            count: complete.count,
+          });
+        }
       } catch (err) {
         log.error("messageReactionAdd handler error", {
           messageId: reaction.message.id,
@@ -78,11 +94,20 @@ export function registerReactionSyncRuntime(input: {
     void task;
   });
 
-  client.on("messageReactionRemove", (reaction) => {
+  client.on("messageReactionRemove", (reaction, user) => {
     if (input.isAcceptingEvents?.() === false) return;
     const task = (async () => {
       try {
-        await processMessageReactionCount(reaction, true);
+        const complete = await processMessageReactionCount(reaction, true);
+        if (!user.partial) {
+          await input.onReaction?.({
+            action: "remove",
+            reaction: complete ?? reaction,
+            user,
+            emoji: reactionEmojiIdentity(complete ?? reaction).label,
+            count: complete?.count ?? 0,
+          });
+        }
       } catch (err) {
         log.error("messageReactionRemove handler error", {
           messageId: reaction.message.id,

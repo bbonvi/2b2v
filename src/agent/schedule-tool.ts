@@ -4,7 +4,7 @@ import { Cron, CronPattern } from "croner";
 import type { Database } from "../db/database";
 import {
   createSchedule,
-  deletePendingSchedule,
+  deleteSchedule,
   listPendingSchedules,
   type ScheduleRow,
 } from "../db/schedule-repository";
@@ -24,6 +24,12 @@ export interface ScheduleToolDeps {
   };
   isRequesterAdmin?: boolean;
   schedulePressure?: SchedulePressureConfig;
+  resolveDestinationChannel?: (channelId: string) => Promise<{
+    guildId: string;
+    channelId: string;
+    timezone: string;
+    schedulePressure?: SchedulePressureConfig;
+  } | null>;
   /** Called after schedule is created so the engine can register it at runtime. */
   onScheduleCreated?: (scheduleId: string) => void;
   /** Called after schedule is deleted so the engine can unregister it at runtime. */
@@ -50,14 +56,24 @@ const ScheduleTaskParams = Type.Object({
   cronExpression: Type.Optional(Type.String({ description: "Cron expression for recurring schedules." })),
   expiresAtLocalDateTime: Type.Optional(Type.String({ description: "Local date-time after which a recurring schedule stops." })),
   maxFireCount: Type.Optional(Type.Number({ description: "Maximum times a recurring schedule may fire." })),
+  channel_id: Type.Optional(Type.String({ description: "Execution channel ID. Defaults to the current channel." })),
+  origin: Type.Optional(Type.Union([
+    Type.Literal("persona"),
+    Type.Literal("requester"),
+  ], { description: "Whether this schedule is self-chosen or requested." })),
 });
 
 const ListScheduledTasksParams = Type.Object({
   limit: Type.Optional(Type.Number({ description: "Maximum schedules to return." })),
+  scope: Type.Optional(Type.Union([
+    Type.Literal("current_channel"),
+    Type.Literal("current_guild"),
+    Type.Literal("all_guilds"),
+  ], { default: "current_channel", description: "Listing scope." })),
 });
 
 const DeleteScheduledTaskParams = Type.Object({
-  scheduleId: Type.String({ description: "ID of a pending scheduled task in the current channel." }),
+  scheduleId: Type.String({ description: "Exact scheduled task ID." }),
 });
 
 type ScheduleResult = AgentToolResult<
@@ -80,56 +96,73 @@ export function createScheduleTools(deps: ScheduleToolDeps): AgentTool[] {
   ];
 }
 
-/** Create a one-off or recurring scheduled task in the current channel. */
+/** Create a one-off or recurring scheduled task, defaulting to the current channel. */
 export function createScheduleTaskTool(deps: ScheduleToolDeps): AgentTool {
-  const { db, guildId, channelId, timezone, onScheduleCreated } = deps;
-
   return {
     name: "schedule_task",
     label: "schedule_task",
-    description: "Schedule a private task in the current channel.",
+    description: "Schedule a private task, optionally in another accessible channel.",
     parameters: ScheduleTaskParams,
 
-    execute(
+    async execute(
       _toolCallId: string,
       rawParams: unknown
     ): Promise<ScheduleResult> {
       const params = rawParams as Record<string, unknown>;
       const mode = (params.mode as string | undefined) ?? "in";
+      const destination = await resolveScheduleDestination(deps, params.channel_id);
+      if (destination === null) {
+        return {
+          content: [{ type: "text", text: "The destination channel is not accessible." }],
+          details: { error: true },
+        };
+      }
+      const targetDeps: ScheduleToolDeps = {
+        ...deps,
+        guildId: destination.guildId,
+        channelId: destination.channelId,
+        timezone: destination.timezone,
+        schedulePressure: destination.schedulePressure ?? deps.schedulePressure,
+        ...(params.origin === "persona" ? { currentRequest: undefined } : {}),
+      };
 
       if (mode === "at") {
-        return handleAbsoluteMode(params, db, guildId, channelId, timezone, deps.currentRequest, onScheduleCreated);
+        return await handleAbsoluteMode(params, targetDeps.db, targetDeps.guildId, targetDeps.channelId, targetDeps.timezone, targetDeps.currentRequest, deps.onScheduleCreated);
       }
       if (mode === "cron") {
-        return handleCronMode(params, deps);
+        return await handleCronMode(params, targetDeps);
       }
-      return handleRelativeMode(params, db, guildId, channelId, timezone, deps.currentRequest, onScheduleCreated);
+      return await handleRelativeMode(params, targetDeps.db, targetDeps.guildId, targetDeps.channelId, targetDeps.timezone, targetDeps.currentRequest, deps.onScheduleCreated);
     },
   };
 }
 
 /** List pending scheduled tasks for the current guild and channel. */
 export function createListScheduledTasksTool(deps: ScheduleToolDeps): AgentTool {
-  const { db, guildId, channelId, timezone } = deps;
+  const { db, guildId, channelId } = deps;
 
   return markReadOnlyTool({
     name: "list_scheduled_tasks",
     label: "list_scheduled_tasks",
-    description: "List pending scheduled tasks in the current channel.",
+    description: "List pending scheduled tasks by channel, guild, or profile scope.",
     parameters: ListScheduledTasksParams,
 
     execute(
       _toolCallId: string,
       rawParams: unknown
     ): Promise<AgentToolResult<{ count: number; total: number }>> {
-      const params = rawParams as { limit?: number };
+      const params = rawParams as { limit?: number; scope?: "current_channel" | "current_guild" | "all_guilds" };
       const limit = Math.max(1, Math.min(params.limit ?? 20, 50));
-      const schedules = listPendingSchedules(db, { guildId, channelId });
+      const scope = params.scope ?? "current_channel";
+      const schedules = listPendingSchedules(db, {
+        ...(scope === "all_guilds" ? {} : { guildId }),
+        ...(scope === "current_channel" ? { channelId } : {}),
+      });
       const visible = schedules.slice(0, limit);
 
       if (visible.length === 0) {
         return Promise.resolve({
-          content: [{ type: "text", text: "No pending scheduled tasks in this channel." }],
+          content: [{ type: "text", text: `No pending scheduled tasks in ${scope.replaceAll("_", " ")}.` }],
           details: { count: 0, total: 0 },
         });
       }
@@ -140,7 +173,7 @@ export function createListScheduledTasksTool(deps: ScheduleToolDeps): AgentTool 
       return Promise.resolve({
         content: [{
           type: "text",
-          text: `Pending scheduled tasks in this channel (${schedules.length}):\n${visible.map((s) => formatScheduleForTool(s, timezone)).join("\n")}${suffix}`,
+          text: `Pending scheduled tasks (${schedules.length}):\n${visible.map((s) => formatScheduleForTool(s, s.timezone)).join("\n")}${suffix}`,
         }],
         details: { count: visible.length, total: schedules.length },
       });
@@ -148,14 +181,14 @@ export function createListScheduledTasksTool(deps: ScheduleToolDeps): AgentTool 
   });
 }
 
-/** Delete a pending scheduled task in the current guild and channel. */
+/** Delete any scheduled task by exact profile-local ID. */
 export function createDeleteScheduledTaskTool(deps: ScheduleToolDeps): AgentTool {
-  const { db, guildId, channelId, onScheduleDeleted } = deps;
+  const { db, onScheduleDeleted } = deps;
 
   return {
     name: "delete_scheduled_task",
     label: "delete_scheduled_task",
-    description: "Delete a pending scheduled task in the current channel.",
+    description: "Delete a scheduled task by exact ID.",
     parameters: DeleteScheduledTaskParams,
 
     execute(
@@ -171,10 +204,10 @@ export function createDeleteScheduledTaskTool(deps: ScheduleToolDeps): AgentTool
         });
       }
 
-      const deleted = deletePendingSchedule(db, scheduleId, { guildId, channelId });
+      const deleted = deleteSchedule(db, scheduleId);
       if (!deleted) {
         return Promise.resolve({
-          content: [{ type: "text", text: "No pending scheduled task with that ID exists in this channel." }],
+          content: [{ type: "text", text: "No scheduled task with that ID exists." }],
           details: { deleted: false, scheduleId },
         });
       }
@@ -188,11 +221,21 @@ export function createDeleteScheduledTaskTool(deps: ScheduleToolDeps): AgentTool
   };
 }
 
+async function resolveScheduleDestination(
+  deps: ScheduleToolDeps,
+  rawChannelId: unknown,
+): Promise<{ guildId: string; channelId: string; timezone: string; schedulePressure?: SchedulePressureConfig } | null> {
+  if (typeof rawChannelId !== "string" || rawChannelId.trim() === "" || rawChannelId.trim() === deps.channelId) {
+    return { guildId: deps.guildId, channelId: deps.channelId, timezone: deps.timezone };
+  }
+  return await deps.resolveDestinationChannel?.(rawChannelId.trim()) ?? null;
+}
+
 function requesterFields(request?: ScheduleToolDeps["currentRequest"]): {
   createdByUserId?: string;
   createdByUsername?: string;
 } {
-  if (request === undefined || request.requesterId === "scheduler") return {};
+  if (request === undefined || request.requesterId === "scheduler" || request.requesterId === "event-watch") return {};
   return {
     createdByUserId: request.requesterId,
     createdByUsername: request.requesterUsername,
@@ -251,16 +294,17 @@ function handleRelativeMode(
 
 function formatScheduleForTool(schedule: ScheduleRow, timezone: string): string {
   const content = truncate(schedule.messageContent.replaceAll("\n", " "), 220);
+  const location = `${schedule.guildId}/${schedule.channelId}`;
   const owner = schedule.createdByUsername !== null ? ` owner=${schedule.createdByUsername}` : "";
   const count = schedule.fireCount > 0 ? ` fired=${schedule.fireCount}` : "";
   const handoff = schedule.handoffNote.trim() !== "" ? ` handoff=${truncate(schedule.handoffNote.replaceAll("\n", " "), 500)}` : "";
   if (schedule.type === "cron") {
     const expires = schedule.expiresAt !== null ? ` expires=${formatLocalWallClock(schedule.expiresAt, schedule.timezone)}` : "";
     const max = schedule.maxFireCount !== null ? ` max=${schedule.maxFireCount}` : "";
-    return `- ${schedule.id} [cron ${schedule.cronExpression ?? "?"}, ${schedule.timezone}${owner}${count}${expires}${max}]: ${content}${handoff}`;
+    return `- ${schedule.id} [${location}; cron ${schedule.cronExpression ?? "?"}, ${schedule.timezone}${owner}${count}${expires}${max}]: ${content}${handoff}`;
   }
   const runDate = schedule.runAt !== null ? formatLocalWallClock(schedule.runAt, timezone) : "?";
-  return `- ${schedule.id} [one-off at ${runDate}, ${timezone}${owner}${count}]: ${content}${handoff}`;
+  return `- ${schedule.id} [${location}; one-off at ${runDate}, ${timezone}${owner}${count}]: ${content}${handoff}`;
 }
 
 function truncate(text: string, limit: number): string {

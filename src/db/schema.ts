@@ -315,6 +315,93 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_schedules_guild_channel_enabled
     ON schedules(guild_id, channel_id, enabled);
 
+  CREATE TABLE IF NOT EXISTS event_watches (
+    id                    TEXT PRIMARY KEY,
+    source_scope          TEXT NOT NULL CHECK(source_scope IN ('channel', 'guild', 'all_guilds')),
+    source_guild_id       TEXT,
+    source_channel_id     TEXT,
+    run_in_guild_id       TEXT NOT NULL,
+    run_in_channel_id     TEXT NOT NULL,
+    timezone              TEXT NOT NULL,
+    event_type            TEXT NOT NULL CHECK(event_type IN ('message', 'presence_transition', 'presence_state', 'voice', 'member', 'reaction')),
+    selector_user_id      TEXT,
+    selector_webhook_id   TEXT,
+    event_json            TEXT NOT NULL,
+    after_value           TEXT,
+    occurrence_count      INTEGER,
+    occurrence_window_s   INTEGER,
+    threshold_armed       INTEGER NOT NULL DEFAULT 1 CHECK(threshold_armed IN (0, 1)),
+    instruction           TEXT NOT NULL,
+    handoff_note          TEXT NOT NULL DEFAULT '',
+    origin_json           TEXT NOT NULL,
+    once                  INTEGER NOT NULL DEFAULT 0 CHECK(once IN (0, 1)),
+    cooldown_seconds      INTEGER NOT NULL DEFAULT 0 CHECK(cooldown_seconds >= 0),
+    fire_count            INTEGER NOT NULL DEFAULT 0 CHECK(fire_count >= 0),
+    max_fire_count        INTEGER,
+    expires_at            INTEGER,
+    enabled               INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+    created_at            INTEGER NOT NULL,
+    updated_at            INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_event_watches_selector
+    ON event_watches(event_type, enabled, source_guild_id, source_channel_id, selector_user_id, selector_webhook_id);
+
+  CREATE INDEX IF NOT EXISTS idx_event_watches_execution
+    ON event_watches(run_in_guild_id, run_in_channel_id, enabled);
+
+  CREATE TABLE IF NOT EXISTS event_watch_fires (
+    id                TEXT PRIMARY KEY,
+    watch_id          TEXT NOT NULL REFERENCES event_watches(id) ON DELETE CASCADE,
+    event_key         TEXT NOT NULL,
+    source_guild_id   TEXT NOT NULL,
+    source_channel_id TEXT,
+    state             TEXT NOT NULL CHECK(state IN ('pending', 'running', 'silent', 'delivered', 'failed')),
+    event_json        TEXT NOT NULL,
+    suppressed_count INTEGER NOT NULL DEFAULT 0 CHECK(suppressed_count >= 0),
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL,
+    UNIQUE(watch_id, event_key)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_event_watch_fires_pending
+    ON event_watch_fires(state, created_at);
+
+  CREATE INDEX IF NOT EXISTS idx_event_watch_fires_pressure
+    ON event_watch_fires(watch_id, source_guild_id, created_at);
+
+  CREATE INDEX IF NOT EXISTS idx_event_watch_fires_guild_time
+    ON event_watch_fires(source_guild_id, created_at);
+
+  CREATE INDEX IF NOT EXISTS idx_event_watch_fires_time
+    ON event_watch_fires(created_at);
+
+  CREATE TABLE IF NOT EXISTS event_watch_observations (
+    watch_id    TEXT NOT NULL REFERENCES event_watches(id) ON DELETE CASCADE,
+    source_key  TEXT NOT NULL,
+    event_key   TEXT NOT NULL,
+    observed_at INTEGER NOT NULL,
+    PRIMARY KEY(watch_id, event_key)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_event_watch_observations_window
+    ON event_watch_observations(watch_id, source_key, observed_at);
+
+  CREATE TABLE IF NOT EXISTS event_watch_message_inbox (
+    message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    state      TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending', 'processed')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TRIGGER IF NOT EXISTS trg_event_watch_message_inbox
+  AFTER INSERT ON messages
+  WHEN NEW.is_synthetic = 0 AND NEW.is_prompt_only = 0
+  BEGIN
+    INSERT OR IGNORE INTO event_watch_message_inbox(message_id, state, created_at, updated_at)
+    VALUES (NEW.id, 'pending', NEW.created_at, NEW.created_at);
+  END;
+
   CREATE TABLE IF NOT EXISTS persona_mode_context_state (
     scope_key    TEXT PRIMARY KEY,
     state_json   TEXT NOT NULL,

@@ -15,11 +15,14 @@ export interface PendingMessage {
   authorId: string;
   /** Trigger result for this individual message, if any. */
   triggerResult: TriggerResult;
+  /** Watch candidates matched once at message intake. */
+  matchedWatchIds?: string[];
 }
 
 export interface SelectedDispatchTrigger {
-  result: DispatchTrigger;
+  result: DispatchTrigger | null;
   message: PendingMessage;
+  matchedWatchIds?: string[];
 }
 
 export interface DispatchOutcome {
@@ -28,6 +31,7 @@ export interface DispatchOutcome {
    * during the current run and should not be replayed as separate runs.
    */
   coveredMessageIds?: string[];
+  visibleOutputSent?: boolean;
 }
 
 /** Handler function that the dispatcher calls with accumulated messages. */
@@ -39,6 +43,7 @@ export type DispatchHandler = (
 export interface EnqueueOptions {
   authorId: string;
   triggerResult: TriggerResult;
+  matchedWatchIds?: string[];
 }
 
 type DispatcherDebugEvent =
@@ -85,25 +90,44 @@ export interface ChannelDispatcher {
 export function selectDispatchTrigger(messages: readonly PendingMessage[]): SelectedDispatchTrigger | null {
   let selected: SelectedDispatchTrigger | null = null;
   for (const message of messages) {
-    if (message.triggerResult === null) continue;
+    if (message.triggerResult === null && watchIds(message).length === 0) continue;
     if (
       selected === null ||
-      triggerPriority(message.triggerResult) > triggerPriority(selected.result) ||
+      attentionPriority(message) > attentionPriority(selected.message) ||
       (
-        triggerPriority(message.triggerResult) === triggerPriority(selected.result) &&
+        attentionPriority(message) === attentionPriority(selected.message) &&
         message.receivedAt >= selected.message.receivedAt
       )
     ) {
-      selected = { result: message.triggerResult, message };
+      selected = { result: message.triggerResult, message, matchedWatchIds: watchIds(message) };
     }
   }
   return selected;
 }
 
+/** Select the highest-priority ordinary trigger independently from watch attention. */
+export function selectNormalDispatchTrigger(messages: readonly PendingMessage[]): DispatchTrigger | null {
+  let selected: { result: DispatchTrigger; receivedAt: number } | null = null;
+  for (const message of messages) {
+    if (message.triggerResult === null) continue;
+    if (
+      selected === null
+      || triggerPriority(message.triggerResult) > triggerPriority(selected.result)
+      || (
+        triggerPriority(message.triggerResult) === triggerPriority(selected.result)
+        && message.receivedAt >= selected.receivedAt
+      )
+    ) {
+      selected = { result: message.triggerResult, receivedAt: message.receivedAt };
+    }
+  }
+  return selected?.result ?? null;
+}
+
 function selectNextDispatchTrigger(messages: readonly PendingMessage[]): SelectedDispatchTrigger | null {
   for (const message of messages) {
-    if (message.triggerResult !== null) {
-      return { result: message.triggerResult, message };
+    if (message.triggerResult !== null || watchIds(message).length > 0) {
+      return { result: message.triggerResult, message, matchedWatchIds: watchIds(message) };
     }
   }
   return null;
@@ -123,7 +147,7 @@ function sameAuthorFollowupEndIndex(
   trigger: SelectedDispatchTrigger,
   triggerIndex: number,
 ): number {
-  if (!allowsSameAuthorFollowup(trigger.result)) return triggerIndex;
+  if (!allowsSameAuthorFollowup(trigger)) return triggerIndex;
 
   const branchMessageIds = new Set([trigger.message.id]);
   const triggerReplyTargetId = messageReplyTargetId(trigger.message);
@@ -132,7 +156,19 @@ function sameAuthorFollowupEndIndex(
   let endIndex = triggerIndex;
   for (let i = triggerIndex + 1; i < batch.length; i += 1) {
     const message = batch[i];
-    if (message === undefined || message.triggerResult !== null) break;
+    if (message === undefined) break;
+    if (hasAttention(message)) {
+      if (
+        selectedWatchIds(trigger).length > 0
+        && message.authorId === trigger.message.authorId
+        && watchIds(message).length > 0
+      ) {
+        branchMessageIds.add(message.id);
+        endIndex = i;
+        continue;
+      }
+      break;
+    }
     if (message.authorId !== trigger.message.authorId) continue;
 
     const replyTargetId = messageReplyTargetId(message);
@@ -154,7 +190,7 @@ export function selectDispatchMessageForTrigger(
   batch: readonly PendingMessage[],
   trigger: SelectedDispatchTrigger,
 ): PendingMessage | undefined {
-  if (allowsSameAuthorFollowup(trigger.result)) {
+  if (selectedWatchIds(trigger).length === 0 && allowsSameAuthorFollowup(trigger)) {
     const triggerIndex = batch.findIndex((message) => message.id === trigger.message.id);
     if (triggerIndex === -1) return trigger.message;
     const endIndex = sameAuthorFollowupEndIndex(batch, trigger, triggerIndex);
@@ -179,7 +215,7 @@ export function selectDispatchMessagesForTrigger(
 ): PendingMessage[] {
   const selected = selectDispatchMessageForTrigger(batch, trigger);
   if (selected === undefined) return [];
-  if (!allowsSameAuthorFollowup(trigger.result)) return [trigger.message];
+  if (!allowsSameAuthorFollowup(trigger)) return [trigger.message];
 
   const triggerIndex = batch.findIndex((message) => message.id === trigger.message.id);
   if (triggerIndex === -1) return [selected];
@@ -188,7 +224,7 @@ export function selectDispatchMessagesForTrigger(
   let startIndex = triggerIndex;
   for (let i = triggerIndex - 1; i >= 0; i -= 1) {
     const message = batch[i];
-    if (message === undefined || message.triggerResult !== null || message.authorId !== trigger.message.authorId) break;
+    if (message === undefined || hasAttention(message) || message.authorId !== trigger.message.authorId) break;
     startIndex = i;
   }
 
@@ -290,10 +326,12 @@ export function createChannelDispatcher(opts: {
   }
 
   function getDebounceMs(trigger: SelectedDispatchTrigger | null): number {
-    if (trigger?.result.reason === "mention") {
+    if (trigger?.result?.reason === "mention") {
       return typingWaitEnabled() ? Math.max(0, triggers.keywordDebounceMs) : Math.max(0, config.mentionDebounceMs);
     }
-    if (trigger?.result.reason === "keyword") return Math.max(0, triggers.keywordDebounceMs);
+    if (trigger?.result?.reason === "keyword" || (trigger?.matchedWatchIds?.length ?? 0) > 0) {
+      return Math.max(0, triggers.keywordDebounceMs);
+    }
     return Math.max(0, config.defaultDebounceMs);
   }
 
@@ -319,7 +357,7 @@ export function createChannelDispatcher(opts: {
     messages: readonly PendingMessage[],
     trigger: SelectedDispatchTrigger | null,
   ): number {
-    if (trigger === null || !usesTypingWait(trigger.result)) return 0;
+    if (trigger === null || !usesTypingWait(trigger)) return 0;
     if (!typingWaitEnabled()) return 0;
 
     const userId = trigger.message.authorId;
@@ -410,7 +448,7 @@ export function createChannelDispatcher(opts: {
     debug?.("dispatcher_debounce_wait", {
       channelId,
       pendingCount: state.pending.length,
-      triggerReason: trigger?.result.reason ?? null,
+      triggerReason: trigger?.result?.reason ?? null,
       triggerMessageId: trigger?.message.id ?? null,
       triggerAuthorId: trigger?.message.authorId ?? null,
       lastTypingAt: trigger !== null ? state.typingByUser.get(trigger.message.authorId) ?? null : null,
@@ -432,7 +470,7 @@ export function createChannelDispatcher(opts: {
     debug?.("dispatcher_debounce_dispatch", {
       channelId,
       batchIds: batch.map((message) => message.id),
-      triggerReason: dispatchTrigger?.result.reason ?? null,
+      triggerReason: dispatchTrigger?.result?.reason ?? null,
       triggerMessageId: dispatchTrigger?.message.id ?? null,
       triggerAuthorId: dispatchTrigger?.message.authorId ?? null,
     });
@@ -478,6 +516,7 @@ export function createChannelDispatcher(opts: {
       receivedAt: timers.now(),
       authorId: options.authorId,
       triggerResult: options.triggerResult,
+      matchedWatchIds: [...new Set(options.matchedWatchIds ?? [])],
     };
 
     const existingTrigger = selectNextDispatchTrigger(state.pending);
@@ -491,9 +530,10 @@ export function createChannelDispatcher(opts: {
       if (
         typingWaitEnabled() &&
         existingTrigger !== null &&
-        usesTypingWait(existingTrigger.result) &&
+        usesTypingWait(existingTrigger) &&
         existingTrigger.message.authorId === options.authorId &&
         options.triggerResult === null &&
+        (options.matchedWatchIds?.length ?? 0) === 0 &&
         messageTimestamp(pending) - lastTypingAt <= triggers.typingIdleMs &&
         triggers.typingResumeGraceMs > 0
       ) {
@@ -511,7 +551,7 @@ export function createChannelDispatcher(opts: {
       pendingCount: state.pending.length,
       messageTimestamp: messageTimestamp(pending),
       receivedAt: pending.receivedAt,
-      existingTriggerReason: existingTrigger?.result.reason ?? null,
+      existingTriggerReason: existingTrigger?.result?.reason ?? null,
       existingTriggerMessageId: existingTrigger?.message.id ?? null,
       typingAction,
       lastTypingAt: state.typingByUser.get(options.authorId) ?? null,
@@ -586,10 +626,29 @@ function triggerPriority(trigger: DispatchTrigger): number {
   }
 }
 
-function allowsSameAuthorFollowup(trigger: DispatchTrigger): boolean {
-  return trigger.reason === "keyword" || trigger.reason === "mention";
+function hasAttention(message: PendingMessage): boolean {
+  return message.triggerResult !== null || watchIds(message).length > 0;
 }
 
-function usesTypingWait(trigger: DispatchTrigger): boolean {
-  return trigger.reason === "keyword" || trigger.reason === "mention";
+function attentionPriority(message: PendingMessage): number {
+  const normal = message.triggerResult === null ? 0 : triggerPriority(message.triggerResult);
+  return Math.max(normal, watchIds(message).length > 0 ? 3 : 0);
+}
+
+function watchIds(message: PendingMessage): string[] {
+  return message.matchedWatchIds ?? [];
+}
+
+function allowsSameAuthorFollowup(trigger: SelectedDispatchTrigger): boolean {
+  return selectedWatchIds(trigger).length > 0
+    || trigger.result?.reason === "keyword"
+    || trigger.result?.reason === "mention";
+}
+
+function usesTypingWait(trigger: SelectedDispatchTrigger): boolean {
+  return allowsSameAuthorFollowup(trigger);
+}
+
+function selectedWatchIds(trigger: SelectedDispatchTrigger): string[] {
+  return trigger.matchedWatchIds ?? [];
 }

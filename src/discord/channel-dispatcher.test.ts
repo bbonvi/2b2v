@@ -149,6 +149,39 @@ describe("createChannelDispatcher", () => {
     expect(selected?.id).toBe("m-followup");
   });
 
+  test("keeps the watched message as the reply target while collecting same-author followups", () => {
+    const watched = { ...makePending("m-watched", "user-1", null, 1000), matchedWatchIds: ["watch-1"] };
+    const followup = makePending("m-followup", "user-1", null, 1001);
+    const trigger = { result: null, message: watched, matchedWatchIds: ["watch-1"] };
+    expect(selectDispatchMessageForTrigger([watched, followup], trigger)?.id).toBe("m-watched");
+    expect(selectDispatchMessagesForTrigger([watched, followup], trigger).map((message) => message.id))
+      .toEqual(["m-watched", "m-followup"]);
+  });
+
+  test("dispatches a watch-only message once after the keyword debounce", async () => {
+    const calls: Array<{ result: TriggerResult; watchIds: string[] }> = [];
+    const dispatcher = createChannelDispatcher({
+      config: makeConfig(),
+      triggers: makeTriggers({ keywordDebounceMs: 80, typingIdleMs: 0 }),
+      handler: (_messages, trigger) => {
+        calls.push({
+          result: trigger?.result ?? null,
+          watchIds: trigger?.matchedWatchIds ?? [],
+        });
+        return Promise.resolve({ coveredMessageIds: ["m-watched"] });
+      },
+    });
+    dispatcher.enqueue(makeMessage("ch-1", "m-watched"), {
+      authorId: "user-1",
+      triggerResult: null,
+      matchedWatchIds: ["watch-1"],
+    });
+    await delay(79);
+    expect(calls).toHaveLength(0);
+    await delay(1);
+    expect(calls).toEqual([{ result: null, watchIds: ["watch-1"] }]);
+  });
+
   test("does not anchor a triggered reply to a same-author message in another reply branch", () => {
     const keyword = makePending("m-keyword", "user-1", { reason: "keyword", keyword: "2b" }, 1000);
     const otherBranch = makePending("m-other-branch", "user-1", null, 1001, "m-other-user");

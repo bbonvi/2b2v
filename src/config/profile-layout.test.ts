@@ -53,7 +53,9 @@ describe("repository profile layout", () => {
       expect(Object.keys(bundle.runtime.contextTemplates).length).toBeGreaterThan(0);
       expect(bundle.runtime.skills.byId.image_generation).toBeDefined();
       expect(bundle.runtime.skills.byId.dice_roleplay).toBeDefined();
+      expect(bundle.runtime.skills.byId.event_watches).toBeDefined();
       expect(bundle.runtime.skills.requiredByTool.roll_dice).toBe("dice_roleplay");
+      expect(bundle.runtime.skills.requiredByTool.create_event_watch).toBe("event_watches");
       if (profile === "2b") {
         expect(bundle.runtime.privateLife?.length).toBeGreaterThan(500);
       } else {

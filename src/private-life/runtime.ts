@@ -80,8 +80,6 @@ const PUBLIC_ACTION_TOOL_NAMES = new Set([
   "delete_own_message",
   "discord_set_user_timeout",
   "discord_remove_user_timeout",
-  "schedule_task",
-  "delete_scheduled_task",
   "start_thread",
   "close_thread",
   "join_voice_channel",
