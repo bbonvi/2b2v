@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/database.ts";
-import type { AssetRef } from "./asset-id.ts";
+import { parseAssetId, type AssetRef } from "./asset-id.ts";
 import {
   createAgentJobRecord,
   deleteExpiredUnlinkedAgentJobs,
@@ -104,11 +104,18 @@ export interface EnqueueImageJobInput {
   now?: number;
 }
 
-export interface EnqueueImageJobResult {
-  job: AgentJob;
-  created: boolean;
-  reason: "created" | "replacement_limit";
-}
+export type EnqueueImageJobResult =
+  | {
+    job: AgentJob;
+    created: true;
+    reason: "created";
+  }
+  | {
+    job: AgentJob;
+    created: false;
+    reason: "replacement_limit";
+    assetHistory: number[];
+  };
 
 const ACTIVE_STATUSES = new Set<AgentJobStatus>(["queued", "running", "ready"]);
 const TERMINAL_STATUSES = new Set<AgentJobStatus>(["delivered", "dismissed", "expired", "failed"]);
@@ -130,7 +137,12 @@ export class AgentJobStore {
     const now = input.now ?? Date.now();
     const replacement = input.replacesJobId !== undefined ? this.get(input.replacesJobId) : undefined;
     if (replacement !== undefined && replacement.replacementCount >= this.config.maxImageReplacements) {
-      return { job: replacement, created: false, reason: "replacement_limit" };
+      return {
+        job: replacement,
+        created: false,
+        reason: "replacement_limit",
+        assetHistory: this.replacementAssetHistory(replacement),
+      };
     }
 
     const id = this.createShortId("img");
@@ -308,6 +320,36 @@ export class AgentJobStore {
 
   private isActive(job: AgentJob): boolean {
     return ACTIVE_STATUSES.has(job.status);
+  }
+
+  private replacementAssetHistory(job: AgentJob): number[] {
+    const lineage: AgentJob[] = [];
+    const visitedJobs = new Set<string>();
+    let current: AgentJob | undefined = job;
+    while (current !== undefined && !visitedJobs.has(current.id)) {
+      lineage.push(current);
+      visitedJobs.add(current.id);
+      current = current.replacesJobId === undefined ? undefined : this.get(current.replacesJobId);
+    }
+
+    const assetHistory: number[] = [];
+    const visitedAssets = new Set<number>();
+    const append = (assetId: number): void => {
+      if (visitedAssets.has(assetId)) return;
+      visitedAssets.add(assetId);
+      assetHistory.push(assetId);
+    };
+    for (const item of lineage.reverse()) {
+      for (const reference of item.input.references) {
+        if (reference.type !== "asset") continue;
+        const assetId = parseAssetId(reference.assetId);
+        if (assetId !== null) append(assetId);
+      }
+      for (const asset of this.listAssets(item.id)) {
+        if (asset.role === "output") append(asset.assetId);
+      }
+    }
+    return assetHistory;
   }
 
   private createShortId(prefix: "img"): string {

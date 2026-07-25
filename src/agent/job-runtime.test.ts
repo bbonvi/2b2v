@@ -58,6 +58,61 @@ describe("AgentJobStore", () => {
     expect(second.job.id).not.toBe(first.job.id);
   });
 
+  test("returns ordered asset history when an edit chain reaches its quality limit", () => {
+    const assetIds: number[] = [];
+    for (const [index, messageId] of ["source", "root", "revision-1", "revision-2"].entries()) {
+      db.raw.prepare(`INSERT INTO messages
+        (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at)
+        VALUES (?, 'g1', 'c1', 'user', 'alice', '', '', 0, ?)`).run(messageId, index + 1);
+      db.raw.prepare(`INSERT INTO message_assets
+        (message_id, guild_id, channel_id, source_kind, source_key, kind, filename, created_at)
+        VALUES (?, 'g1', 'c1', 'attachment', ?, 'image', 'image.webp', ?)`)
+        .run(messageId, `asset-${index}`, index + 1);
+      const row = db.raw.prepare("SELECT id FROM message_assets WHERE message_id = ?").get(messageId) as { id: number };
+      assetIds.push(row.id);
+    }
+    const [sourceAssetId, rootAssetId, firstRevisionAssetId, secondRevisionAssetId] = assetIds;
+    expect(sourceAssetId).toBeDefined();
+    expect(rootAssetId).toBeDefined();
+    expect(firstRevisionAssetId).toBeDefined();
+    expect(secondRevisionAssetId).toBeDefined();
+    if (
+      sourceAssetId === undefined
+      || rootAssetId === undefined
+      || firstRevisionAssetId === undefined
+      || secondRevisionAssetId === undefined
+    ) {
+      throw new Error("Expected four persisted test assets.");
+    }
+
+    const root = enqueue(store, {
+      references: [{ type: "asset", assetId: sourceAssetId }],
+    }).job;
+    store.linkAsset(root.id, rootAssetId);
+    const firstRevision = enqueue(store, {
+      references: [{ type: "asset", assetId: rootAssetId }],
+      replacesJobId: root.id,
+    }).job;
+    store.linkAsset(firstRevision.id, firstRevisionAssetId);
+    const secondRevision = enqueue(store, {
+      references: [{ type: "asset", assetId: firstRevisionAssetId }],
+      replacesJobId: firstRevision.id,
+    }).job;
+    store.linkAsset(secondRevision.id, secondRevisionAssetId);
+
+    const blocked = enqueue(store, {
+      references: [{ type: "asset", assetId: secondRevisionAssetId }],
+      replacesJobId: secondRevision.id,
+    });
+
+    expect(blocked).toMatchObject({
+      created: false,
+      reason: "replacement_limit",
+      job: { id: secondRevision.id },
+      assetHistory: [sourceAssetId, rootAssetId, firstRevisionAssetId, secondRevisionAssetId],
+    });
+  });
+
   test("retains ordered image references for the worker", () => {
     const references = [
       { type: "avatar" as const, userId: "123456789012345678" },

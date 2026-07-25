@@ -128,6 +128,7 @@ type CodexGenerateImageDetails =
     asyncJobCreated: boolean;
     is4k: boolean;
     reason?: string;
+    assetHistory?: number[];
   };
 
 interface ParsedCodexResponse {
@@ -1053,14 +1054,18 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
           ...(replacesJobId !== undefined ? { replacesJobId } : {}),
         });
         if (!enqueueResult.created) {
+          const assetHistory = enqueueResult.assetHistory.length === 0
+            ? "(none available)"
+            : enqueueResult.assetHistory.map((assetId) => `#${assetId}`).join(" → ");
           const text = renderOptionalPromptTemplate(
             deps.asyncJobAlreadyActiveTemplate,
             {
               jobId: enqueueResult.job.id,
               jobStatus: enqueueResult.job.status,
               reason: enqueueResult.reason,
+              assetHistory,
             },
-            `No new image job was started because job ${enqueueResult.job.id} is ${enqueueResult.job.status}; reason: ${enqueueResult.reason}.`,
+            `Image edit quality limit reached. Edit history: ${assetHistory}. Continue from the best earlier asset. Use read_asset to inspect its image and generation prompt if needed. Apply all later accepted changes and the current request in one complete prompt. For a generated asset, use its linked job ID as replaces_job_id. For the original source or a new image, omit it.`,
           );
           return {
             content: [{
@@ -1073,6 +1078,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
               asyncJobCreated: false,
               is4k,
               reason: enqueueResult.reason,
+              assetHistory: enqueueResult.assetHistory,
             },
           };
         }

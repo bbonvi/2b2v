@@ -356,6 +356,51 @@ describe("createCodexGenerateImageTool", () => {
     expect(observed).toEqual({ outputFormat: "webp", is4k: false });
   });
 
+  test("renders replacement-limit asset history for private recovery", async () => {
+    const tool = createCodexGenerateImageTool({
+      codexAuthPath: "unused",
+      model: "gpt-5.5",
+      imageReferenceMaxPerCall: 2,
+      imageGenerationQuality: "auto",
+      asyncJobAlreadyActiveTemplate: "History: {{assetHistory}}",
+      onGeneratedImage: () => {},
+      enqueueImageJob: (input) => ({
+        created: false,
+        reason: "replacement_limit",
+        assetHistory: [11, 17, 23],
+        job: {
+          id: "img-latest",
+          kind: "image_generation",
+          guildId: "g1",
+          channelId: "c1",
+          deliveryGuildId: "g1",
+          deliveryChannelId: "c1",
+          requesterId: "u1",
+          requesterUsername: "alice",
+          sourceMessageId: "m1",
+          sourceQuote: "revise the image",
+          status: "delivered",
+          createdAt: 1,
+          input,
+          replacementCount: 2,
+        },
+      }),
+    });
+
+    const result = await tool.execute("call-1", {
+      prompt: "revise the image",
+      replaces_job_id: "img-latest",
+    });
+
+    expect(result.content).toEqual([{ type: "text", text: "History: #11 → #17 → #23" }]);
+    expect(result.details).toMatchObject({
+      asyncJobId: "img-latest",
+      asyncJobCreated: false,
+      reason: "replacement_limit",
+      assetHistory: [11, 17, 23],
+    });
+  });
+
   test("propagates explicit 4K async job requests", async () => {
     let observed: { outputFormat: string; is4k: boolean } | undefined;
     const tool = createCodexGenerateImageTool({
