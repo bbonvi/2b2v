@@ -4,12 +4,8 @@ import type { Database } from "../db/database";
 import { updateSchedule } from "../db/schedule-repository";
 
 const UpdateCurrentScheduledTaskParams = Type.Object({
-  handoffNote: Type.String({
-    description: "Complete concise handoff note for the next run, not just what changed.",
-  }),
-  complete: Type.Optional(Type.Boolean({
-    description: "Disable this recurring task after the current run.",
-  })),
+  handoffNote: Type.String(),
+  complete: Type.Optional(Type.Boolean()),
 });
 
 export function createUpdateCurrentScheduledTaskTool(input: {
@@ -20,7 +16,7 @@ export function createUpdateCurrentScheduledTaskTool(input: {
   return {
     name: "update_current_scheduled_task",
     label: "update_current_scheduled_task",
-    description: "Update the current scheduled task handoff note or complete it.",
+    description: "",
     parameters: UpdateCurrentScheduledTaskParams,
     execute(
       _toolCallId: string,

@@ -1,1 +1,1 @@
-The persona's cancellation mode. Use replacement only when the new event clearly corrects/replaces an active image request. Use explicit_cancel only when the event asks the persona to stop/cancel/never mind.
+Use `replacement` for a correction that will be resubmitted; use `explicit_cancel` when asked to stop.

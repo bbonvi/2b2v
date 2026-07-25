@@ -56,7 +56,7 @@ import { createEventWatchTools } from "./agent/event-watch-tool.ts";
 import { createChatUserListTool, type MemberInfo } from "./agent/member-list-tool";
 import { createChannelListTool, type ChannelInfo } from "./agent/channel-list-tool";
 import { createEmojiListTool } from "./agent/emoji-list-tool";
-import { createDiscordTimeoutTools, MAX_DISCORD_TIMEOUT_SECONDS, type TimeoutMember, type TimeoutMemberResolution } from "./agent/timeout-user-tool";
+import { createDiscordTimeoutTools, type TimeoutMember, type TimeoutMemberResolution } from "./agent/timeout-user-tool";
 import { createSearchMemoriesTool } from "./agent/search-memories-tool";
 import { buildInnerThreadsContext, createListInnerThreadsTool, createRecordInnerThreadsTool } from "./agent/inner-thread-service";
 import { listInnerThreads } from "./db/inner-thread-repository";
@@ -79,7 +79,7 @@ import { createSummarizeVideoTool } from "./agent/summarize-video-tool";
 import { createCloseThreadTool, createStartThreadTool } from "./agent/start-thread-tool";
 import { createReactToMessageTool } from "./agent/react-to-message-tool";
 import { createDiceRollTool, type DiceRollDelivery } from "./agent/dice-roll-tool";
-import { applyRuntimeToolPrompts, type ToolPromptVariables } from "./agent/runtime-tool-prompts";
+import { applyRuntimeToolPrompts } from "./agent/runtime-tool-prompts";
 import {
   isReadOnlyTool,
   isToolAllowedInMaintenance,
@@ -1020,10 +1020,8 @@ let promptBundle: PromptBundle = loadInstructionBundle(profilesDir, profile, log
 
 function runtimeToolDescription(
   toolName: string,
-  variables: Record<string, string | number | boolean | undefined> = {},
 ): string | undefined {
-  const template = promptBundle.runtime.toolDescriptions[toolName];
-  return template === undefined ? undefined : renderPromptTemplate(template, variables);
+  return promptBundle.runtime.toolDescriptions[toolName];
 }
 
 function runtimeContextTemplate(
@@ -1635,7 +1633,7 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
               currentUsername: last.username,
               sourceMessageId,
               dryRun,
-              recordMemoryDescription: runtimeToolDescription("record_memory", {}),
+              recordMemoryDescription: runtimeToolDescription("record_memory"),
               resolveUsername: async (username) => {
                 const cached = resolveKnownUsername(guild, username);
                 if (cached !== undefined) return cached;
@@ -1653,7 +1651,7 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
               db,
               config: relationshipConfig,
               dryRun,
-              description: runtimeToolDescription("record_relationship", {}),
+              description: runtimeToolDescription("record_relationship"),
               scope: {
                 guildId: session.guildId,
                 channelId: session.channelId,
@@ -1667,8 +1665,7 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
               guildId: guild.id,
               channelId: session.channelId,
               requestId: sessionId,
-              description: runtimeToolDescription("record_inner_threads", {})
-                ?? "Privately maintain durable inner threads.",
+              description: runtimeToolDescription("record_inner_threads"),
               dryRun,
             }));
           }
@@ -2397,7 +2394,7 @@ function createPostReplyMaintenanceTools(input: {
     currentUsername: input.currentUsername,
     sourceMessageId: input.sourceMessageId,
     dryRun: input.dryRun,
-    recordMemoryDescription: runtimeToolDescription("record_memory", {}),
+    recordMemoryDescription: runtimeToolDescription("record_memory"),
     resolveUsername: async (username) => {
       const cached = resolveKnownUsername(input.guild, username);
       if (cached !== undefined) return cached;
@@ -2414,7 +2411,7 @@ function createPostReplyMaintenanceTools(input: {
     db,
     config: relationshipsConfig,
     dryRun: input.dryRun,
-    description: runtimeToolDescription("record_relationship", {}),
+    description: runtimeToolDescription("record_relationship"),
     scope: {
       guildId: input.memoryRequest.incomingMessage.guildId,
       channelId: input.memoryRequest.incomingMessage.channelId,
@@ -2431,7 +2428,7 @@ function createPostReplyMaintenanceTools(input: {
         guildId: input.guild.id,
         channelId: input.memoryRequest.incomingMessage.channelId ?? "",
         requestId: input.sourceRequestId,
-        description: runtimeToolDescription("record_inner_threads", {}) ?? "Privately maintain durable inner threads.",
+        description: runtimeToolDescription("record_inner_threads"),
         dryRun: input.dryRun,
       })]
     : [];
@@ -2595,7 +2592,7 @@ async function runRelationshipPostReplyExtraction(input: {
         db,
         config,
         dryRun: input.dryRun,
-        description: runtimeToolDescription("record_relationship", {}),
+        description: runtimeToolDescription("record_relationship"),
         scope: {
           guildId: input.memoryRequest.incomingMessage.guildId,
           channelId: input.memoryRequest.incomingMessage.channelId,
@@ -2918,8 +2915,7 @@ function createPrivateLifeMaintenanceTools(input: {
     createPrivateLifeSummaryTool({
       db,
       episodeId: input.episodeId,
-      description: runtimeToolDescription("record_private_life_episode")
-        ?? "Record one compact private-life episode label.",
+      description: runtimeToolDescription("record_private_life_episode"),
       dryRun: input.dryRun,
     }),
   ], promptBundle.runtime);
@@ -3438,7 +3434,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
         currentUsername: lastMessage.author,
         sourceMessageId: lastMessage.id,
         dryRun,
-        recordMemoryDescription: runtimeToolDescription("record_memory", {}),
+        recordMemoryDescription: runtimeToolDescription("record_memory"),
         resolveUsername: async (username) => {
           const cached = resolveKnownUsername(guild, username);
           if (cached !== undefined) return cached;
@@ -3881,7 +3877,7 @@ function buildAgentTools(
         db,
         guildId,
         visibleUserIds: options.visibleUserIds ?? [],
-        description: runtimeToolDescription("list_inner_threads", {}) ?? "Privately inspect durable inner threads.",
+        description: runtimeToolDescription("list_inner_threads"),
         resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username
           ?? client.users.cache.get(userId)?.username,
         resolveGuildId: (targetGuildId) => client.guilds.cache.get(targetGuildId)?.name,
@@ -4220,24 +4216,7 @@ function buildAgentTools(
     }));
   }
 
-  const toolPromptVariables: ToolPromptVariables = {
-    fetch_images: {
-      maxImagesPerCall: (globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES).maxImagesPerCall,
-      maxDimension: (globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES).maxDimension,
-    },
-    codex_generate_image: {
-      imageReferenceMaxPerCall: guildConfig.imageReferenceMaxPerCall,
-      imageGenerationQuality: guildConfig.imageGeneration.quality,
-    },
-    schedule_task: {
-      timezone: guildConfig.timezone,
-    },
-    discord_set_user_timeout: {
-      maxTimeoutDays: MAX_DISCORD_TIMEOUT_SECONDS / 86_400,
-    },
-  };
-
-  return applyRuntimeToolPrompts(tools, promptBundle.runtime, toolPromptVariables);
+  return applyRuntimeToolPrompts(tools, promptBundle.runtime);
 }
 
 const ambientRuntime = createAmbientRuntime({

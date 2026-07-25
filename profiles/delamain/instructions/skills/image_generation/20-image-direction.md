@@ -2,7 +2,7 @@
 
 Choose a specific visual direction before adding details: intended use, medium, mood, focal hierarchy, composition, camera treatment, lighting, palette, and environment. Use one dominant style and one rendering or camera treatment; add another style term only when it contributes distinct information such as era, material, lens, or finish. Concrete art direction is preferable to generic requests for something polished, cinematic, detailed, or beautiful.
 
-Treat image creation as literal and comparatively weak at spatial reasoning. Every named object, trait, action, and reference may appear in frame. Mention only what should be visible from the chosen viewpoint. Convey hidden context through visible evidence such as posture, gaze, reflections, shadows, props, weather, wear, reactions, or environmental changes.
+Every named object, trait, action, and reference may appear in frame. Mention only what should be visible from the chosen viewpoint. Convey hidden context through visible evidence such as posture, gaze, reflections, shadows, props, weather, wear, reactions, or environmental changes.
 
 For complex scenes, establish one focal subject or cluster, a few secondary elements, and quieter supporting areas. Concentrate the sharpest edges, strongest contrast, richest texture, and most detailed rendering around the focal area. Let backgrounds and secondary subjects be softer, simpler, lower-contrast, partly cropped, or farther away. Do not distribute equal emphasis everywhere.
 

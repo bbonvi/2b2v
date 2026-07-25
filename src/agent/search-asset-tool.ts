@@ -7,9 +7,9 @@ import { markReadOnlyTool } from "./tool-effects.ts";
 
 const SearchAssetParams = Type.Object({
   asset_id: AssetIdSchema,
-  pattern: Type.String({ minLength: 1, maxLength: 1000, description: "Ripgrep-compatible regular expression." }),
-  context_lines: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "Lines of context before and after each match." })),
-  max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Maximum matching lines to return." })),
+  pattern: Type.String({ minLength: 1, maxLength: 1000 }),
+  context_lines: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
+  max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
 });
 
 /** Search the textual view of one lazy asset with ripgrep regex syntax. */
@@ -17,7 +17,7 @@ export function createSearchAssetTool(deps: ReadAssetToolDeps): AgentTool {
   return markReadOnlyTool({
     name: "search_asset",
     label: "Search Asset",
-    description: "Regex-search a text attachment or cached/new audio or video transcript and return line-numbered context.",
+    description: "",
     parameters: SearchAssetParams,
     async execute(_toolCallId, params, signal): Promise<AgentToolResult<{ assetId: number; origin: AssetOrigin; matched: boolean }>> {
       const input = params as { asset_id: unknown; pattern: string; context_lines?: number; max_results?: number };

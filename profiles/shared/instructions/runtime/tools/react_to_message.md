@@ -1,1 +1,0 @@
-Add a Discord reaction to a visible or retrievable guild message in an accessible guild text channel/thread. Use this for a small acknowledgement instead of visible speech when the task is already handled and no text is needed, especially after starting async image creation. Do not use in DMs.

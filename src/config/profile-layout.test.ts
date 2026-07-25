@@ -39,16 +39,46 @@ describe("repository profile layout", () => {
       expect(bundle.coreDocuments.length).toBeGreaterThan(0);
       expect(bundle.runtime.reply).not.toBe("");
       expect(bundle.runtime.finalActionInstruction).not.toBe("");
-      expect(Object.keys(bundle.runtime.toolDescriptions).length).toBeGreaterThan(0);
-      expect(Object.keys(bundle.runtime.toolParameterDescriptions).length).toBeGreaterThan(0);
-      expect(bundle.runtime.toolDescriptions.roll_dice).toBeDefined();
-      expect(bundle.runtime.toolDescriptions.search_memories).toBeDefined();
-      expect(bundle.runtime.toolParameterDescriptions["record_memory/actions"]).toBeDefined();
-      for (const parameter of ["pattern", "user", "guild_id", "limit", "cursor"]) {
-        expect(bundle.runtime.toolParameterDescriptions[`search_memories/${parameter}`]).toBeDefined();
+      const sharedToolDescriptions = [
+        "list_channel_messages",
+        "list_inner_threads",
+        "read_asset",
+        "search_asset",
+        "search_channel_messages",
+        "search_memories",
+        "search_tools",
+        "update_current_scheduled_task",
+      ];
+      const profileToolDescriptions = profile === "2b"
+        ? ["instruct_voice_channel", "join_voice_channel", "leave_voice_channel"]
+        : [];
+      expect(Object.keys(bundle.runtime.toolDescriptions).sort()).toEqual(
+        [...sharedToolDescriptions, ...profileToolDescriptions].sort(),
+      );
+
+      const sharedParameterDescriptions = [
+        "cancel_agent_job/mode",
+        "list_channel_messages/around_message_id",
+        "search_channel_messages/scope",
+        "update_current_event_watch/handoffNote",
+        "update_current_scheduled_task/handoffNote",
+      ];
+      const profileParameterDescriptions = profile === "2b"
+        ? ["instruct_voice_channel/instruction"]
+        : [];
+      expect(Object.keys(bundle.runtime.toolParameterDescriptions).sort()).toEqual(
+        [...sharedParameterDescriptions, ...profileParameterDescriptions].sort(),
+      );
+      for (const description of [
+        ...Object.values(bundle.runtime.toolDescriptions),
+        ...Object.values(bundle.runtime.toolParameterDescriptions),
+      ]) {
+        expect(description).not.toContain("{{");
       }
-      for (const parameter of ["count", "sides", "modifier", "target", "mode", "label", "actor"]) {
-        expect(bundle.runtime.toolParameterDescriptions[`roll_dice/${parameter}`]).toBeDefined();
+
+      for (const tool of ["codex_generate_image", "create_event_watch", "roll_dice", "schedule_task", "start_thread", "close_thread"]) {
+        expect(bundle.runtime.toolDescriptions[tool]).toBeUndefined();
+        expect(Object.keys(bundle.runtime.toolParameterDescriptions).some((key) => key.startsWith(`${tool}/`))).toBe(false);
       }
       expect(Object.keys(bundle.runtime.contextTemplates).length).toBeGreaterThan(0);
       expect(bundle.runtime.contextTemplates["private-commitments"]).toBeDefined();

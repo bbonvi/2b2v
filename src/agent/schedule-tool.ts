@@ -44,36 +44,37 @@ const UNIT_TO_MS: Record<string, number> = {
 const ScheduleTaskParams = Type.Object({
   mode: Type.Union(
     [Type.Literal("in"), Type.Literal("at"), Type.Literal("cron")],
-    { default: "in", description: "Schedule mode." },
+    { default: "in" },
   ),
-  instructions: Type.String({ description: "Instruction for the future scheduled turn." }),
-  amount: Type.Optional(Type.Number({ description: "How many units from now. Required when mode is \"in\"." })),
-  unit: Type.Optional(Type.Union(
-    [Type.Literal("seconds"), Type.Literal("minutes"), Type.Literal("hours")],
-    { description: "Time unit. Required when mode is \"in\"." },
-  )),
-  localDateTime: Type.Optional(Type.String({ description: "Local date-time for mode at." })),
-  cronExpression: Type.Optional(Type.String({ description: "Cron expression for recurring schedules." })),
-  expiresAtLocalDateTime: Type.Optional(Type.String({ description: "Local date-time after which a recurring schedule stops." })),
-  maxFireCount: Type.Optional(Type.Number({ description: "Maximum times a recurring schedule may fire." })),
-  channel_id: Type.Optional(Type.String({ description: "Execution channel ID. Defaults to the current channel." })),
+  instructions: Type.String(),
+  amount: Type.Optional(Type.Number()),
+  unit: Type.Optional(Type.Union([
+    Type.Literal("seconds"),
+    Type.Literal("minutes"),
+    Type.Literal("hours"),
+  ])),
+  localDateTime: Type.Optional(Type.String()),
+  cronExpression: Type.Optional(Type.String()),
+  expiresAtLocalDateTime: Type.Optional(Type.String()),
+  maxFireCount: Type.Optional(Type.Number()),
+  channel_id: Type.Optional(Type.String()),
   origin: Type.Optional(Type.Union([
     Type.Literal("persona"),
     Type.Literal("requester"),
-  ], { description: "Whether this schedule is self-chosen or requested." })),
+  ])),
 });
 
 const ListScheduledTasksParams = Type.Object({
-  limit: Type.Optional(Type.Number({ description: "Maximum schedules to return." })),
+  limit: Type.Optional(Type.Number()),
   scope: Type.Optional(Type.Union([
     Type.Literal("current_channel"),
     Type.Literal("current_guild"),
     Type.Literal("all_guilds"),
-  ], { default: "current_channel", description: "Listing scope." })),
+  ], { default: "current_channel" })),
 });
 
 const DeleteScheduledTaskParams = Type.Object({
-  scheduleId: Type.String({ description: "Exact scheduled task ID." }),
+  scheduleId: Type.String(),
 });
 
 type ScheduleResult = AgentToolResult<
@@ -101,7 +102,7 @@ export function createScheduleTaskTool(deps: ScheduleToolDeps): AgentTool {
   return {
     name: "schedule_task",
     label: "schedule_task",
-    description: "Schedule a private task, optionally in another accessible channel.",
+    description: "",
     parameters: ScheduleTaskParams,
 
     async execute(
@@ -144,7 +145,7 @@ export function createListScheduledTasksTool(deps: ScheduleToolDeps): AgentTool 
   return markReadOnlyTool({
     name: "list_scheduled_tasks",
     label: "list_scheduled_tasks",
-    description: "List pending scheduled tasks by channel, guild, or profile scope.",
+    description: "",
     parameters: ListScheduledTasksParams,
 
     execute(
@@ -188,7 +189,7 @@ export function createDeleteScheduledTaskTool(deps: ScheduleToolDeps): AgentTool
   return {
     name: "delete_scheduled_task",
     label: "delete_scheduled_task",
-    description: "Delete a scheduled task by exact ID.",
+    description: "",
     parameters: DeleteScheduledTaskParams,
 
     execute(

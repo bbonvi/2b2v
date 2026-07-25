@@ -1,1 +1,0 @@
-Privately read a guild member's current Discord display avatar/profile picture as image context without storing it. Accepts username, @username, raw mention, or user ID. Current-guild only; DMs are unsupported.

@@ -30,7 +30,6 @@ export interface ChannelListToolDeps {
 const ListChannelsParams = Type.Object({
   guild_id: Type.Optional(Type.String({
     minLength: 1,
-    description: "Guild ID to list channels for.",
   })),
 }, { additionalProperties: false });
 
@@ -41,7 +40,7 @@ export function createChannelListTool(deps: ChannelListToolDeps): AgentTool {
   return markReadOnlyTool({
     name: "list_channels",
     label: "list_channels",
-    description: "List visible Discord guild channels and threads.",
+    description: "",
     parameters: ListChannelsParams,
 
     async execute(_toolCallId: string, params: unknown): Promise<AgentToolResult<{ guildId: string; count: number } | { error: boolean }>> {

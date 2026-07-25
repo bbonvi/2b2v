@@ -23,13 +23,13 @@ function wordCount(value: string): number {
 export function createPrivateLifeSummaryTool(input: {
   db: Database;
   episodeId: string;
-  description: string;
+  description?: string;
   dryRun?: boolean;
 }): AgentTool {
   return {
     name: "record_private_life_episode",
     label: "Record Private-Life Episode",
-    description: input.description,
+    description: input.description ?? "",
     parameters: Params,
     execute: (_toolCallId, raw): Promise<AgentToolResult<{ recorded: boolean; error?: string }>> => {
       const params = raw as Params;

@@ -27,13 +27,11 @@ export interface ListChannelMessagesToolDeps {
 }
 
 const ListChannelMessagesParams = Type.Object({
-  channel_id: Type.String({ description: "Guild channel or thread ID." }),
-  limit: Type.Optional(
-    Type.Number({ description: "Maximum number of messages to retrieve." })
-  ),
-  before_message_id: Type.Optional(Type.String({ description: "Fetch messages older than this message ID." })),
-  after_message_id: Type.Optional(Type.String({ description: "Fetch messages newer than this message ID." })),
-  around_message_id: Type.Optional(Type.String({ description: "Fetch messages surrounding and including this message ID." })),
+  channel_id: Type.String(),
+  limit: Type.Optional(Type.Number()),
+  before_message_id: Type.Optional(Type.String()),
+  after_message_id: Type.Optional(Type.String()),
+  around_message_id: Type.Optional(Type.String()),
 });
 
 export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps): AgentTool {
@@ -42,7 +40,7 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
   return markReadOnlyTool({
     name: "list_channel_messages",
     label: "list_channel_messages",
-    description: "Fetch recent messages from an accessible guild channel or thread.",
+    description: "",
     parameters: ListChannelMessagesParams,
 
     async execute(

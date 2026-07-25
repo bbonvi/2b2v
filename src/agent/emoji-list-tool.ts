@@ -40,7 +40,7 @@ export function createEmojiListTool(deps: EmojiListToolDeps): AgentTool {
   return markReadOnlyTool({
     name: "list_emojis",
     label: "list_emojis",
-    description: "Discover this server's custom emojis.",
+    description: "",
     parameters: ListEmojisParams,
 
     async execute(_toolCallId: string): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {

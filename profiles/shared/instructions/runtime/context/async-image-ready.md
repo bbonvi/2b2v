@@ -6,4 +6,4 @@ Original requester: @{{requesterUsername}} ({{requesterId}})
 Original effective codex_generate_image input: {{generationInput}}
 {{revisedPromptLine}}Source guild/channel: {{deliveryGuildId}}/{{deliveryChannelId}}
 
-This is factual job state, not an instruction to deliver. The staged image is not automatically attached and is not visual input for this turn. Inspect it with `read_asset` if useful. You may deliver it explicitly with `asset_ids=["{{stagedAssetRef}}"]`, choose the destination, text, ping, and `reply_to`, defer it, or deliberately dismiss the job.
+The staged image is not attached or visible in this turn. Inspect it with `read_asset` if useful. Deliver it with `asset_ids=["{{stagedAssetRef}}"]`, defer it, or dismiss the job.

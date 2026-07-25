@@ -30,9 +30,7 @@ const MAX_DIAGNOSTIC_EVENTS = 80;
 const MAX_DIAGNOSTIC_STRING_LENGTH = 2000;
 
 const CodexGenerateImageParams = Type.Object({
-  prompt: Type.String({
-    description: "The final visual brief sent to Codex image generation.",
-  }),
+  prompt: Type.String(),
   reference_images: Type.Optional(Type.Array(Type.Union([
     Type.Object({
       type: Type.Literal("asset"),
@@ -46,23 +44,14 @@ const CodexGenerateImageParams = Type.Object({
       type: Type.Literal("avatar"),
       user_id: Type.String({ pattern: "^[0-9]{17,20}$" }),
     }, { additionalProperties: false }),
-  ]), {
-    description: "Ordered chat asset, inspected public URL, or guild user avatar references.",
-  })),
+  ]))),
   output_format: Type.Optional(Type.Union([
     Type.Literal("png"),
     Type.Literal("jpeg"),
     Type.Literal("webp"),
-  ], {
-    description: "Output image format.",
-  })),
-  "4k": Type.Optional(Type.Boolean({
-    description: "Request a 4K image.",
-  })),
-  replaces_job_id: Type.Optional(Type.String({
-    description:
-      "Cancelled job id being replaced.",
-  })),
+  ])),
+  "4k": Type.Optional(Type.Boolean()),
+  replaces_job_id: Type.Optional(Type.String()),
 });
 
 type OutputFormat = "png" | "jpeg" | "webp";
@@ -1029,7 +1018,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
   return {
     name: "codex_generate_image",
     label: "Codex Image",
-    description: "Start async image generation.",
+    description: "",
     parameters: CodexGenerateImageParams,
     async execute(
       _toolCallId: string,

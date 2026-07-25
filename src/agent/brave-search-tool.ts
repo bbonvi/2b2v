@@ -32,15 +32,13 @@ export interface BraveImageSearchToolDeps {
 }
 
 const WebSearchParams = Type.Object({
-  query: Type.String({ description: "The search query to execute." }),
-  count: Type.Optional(
-    Type.Number({ description: "Number of results to return." })
-  ),
+  query: Type.String(),
+  count: Type.Optional(Type.Number()),
 });
 
 const ImageSearchParams = Type.Object({
-  query: Type.String({ minLength: 1, maxLength: 400, description: "Image search query." }),
-  count: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Number of image results." })),
+  query: Type.String({ minLength: 1, maxLength: 400 }),
+  count: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
 });
 
 export function createBraveSearchTool(deps: BraveSearchToolDeps): AgentTool {
@@ -52,7 +50,7 @@ export function createBraveSearchTool(deps: BraveSearchToolDeps): AgentTool {
   return markReadOnlyTool({
     name: "web_search",
     label: "web_search",
-    description: "Search the web using Brave Search.",
+    description: "",
     parameters: WebSearchParams,
 
     async execute(
@@ -101,7 +99,7 @@ export function createBraveImageSearchTool(deps: BraveImageSearchToolDeps): Agen
   return markReadOnlyTool({
     name: "search_images",
     label: "search_images",
-    description: "Search the web for images using Brave Image Search.",
+    description: "",
     parameters: ImageSearchParams,
     async execute(_toolCallId, params, signal): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {
       const { query, count: requestedCount } = params as { query: string; count?: number };

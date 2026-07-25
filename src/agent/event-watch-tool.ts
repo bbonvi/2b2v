@@ -47,7 +47,7 @@ const EventSchema = Type.Union([
     type: Type.Literal("message"),
     userId: Type.Optional(Type.String()),
     webhookId: Type.Optional(Type.String()),
-    webhookMessageId: Type.Optional(Type.String({ description: "Stored message ID whose exact webhook identity should be used." })),
+    webhookMessageId: Type.Optional(Type.String()),
     pattern: Type.Optional(Type.String()),
     assetKind: Type.Optional(AssetKindSchema),
     includeSelf: Type.Optional(Type.Boolean()),
@@ -90,7 +90,7 @@ const CreateEventWatchParams = Type.Object({
   instruction: Type.String(),
   handoffNote: Type.Optional(Type.String()),
   run_in_channel_id: Type.Optional(Type.String()),
-  after: Type.Optional(Type.String({ description: "HH:mm or YYYY-MM-DD HH:mm in the watched guild timezone." })),
+  after: Type.Optional(Type.String()),
   occurrences: Type.Optional(Type.Object({
     count: Type.Integer({ minimum: 2 }),
     withinSeconds: Type.Integer({ minimum: 1 }),
@@ -102,7 +102,7 @@ const CreateEventWatchParams = Type.Object({
   origin: Type.Optional(Type.Union([
     Type.Literal("persona"),
     Type.Literal("requester"),
-  ], { description: "Whether this watch is self-chosen or requested." })),
+  ])),
 });
 
 const ListEventWatchesParams = Type.Object({
@@ -148,7 +148,7 @@ export function createEventWatchTool(deps: EventWatchToolDeps): AgentTool {
   return {
     name: "create_event_watch",
     label: "create_event_watch",
-    description: "Create a durable private event watch.",
+    description: "",
     parameters: CreateEventWatchParams,
     async execute(_toolCallId, rawParams, signal): Promise<AgentToolResult<{ watchId?: string; error?: boolean }>> {
       const params = rawParams as {
@@ -254,7 +254,7 @@ export function createListEventWatchesTool(deps: EventWatchToolDeps): AgentTool 
   return markReadOnlyTool({
     name: "list_event_watches",
     label: "list_event_watches",
-    description: "List active event watches by channel, guild, or profile scope.",
+    description: "",
     parameters: ListEventWatchesParams,
     execute(_toolCallId, rawParams): Promise<AgentToolResult<{ count: number; total: number }>> {
       const params = rawParams as { scope?: EventWatchScope; limit?: number };
@@ -284,7 +284,7 @@ export function createDeleteEventWatchTool(deps: EventWatchToolDeps): AgentTool 
   return {
     name: "delete_event_watch",
     label: "delete_event_watch",
-    description: "Delete an event watch by exact ID.",
+    description: "",
     parameters: DeleteEventWatchParams,
     execute(_toolCallId, rawParams): Promise<AgentToolResult<{ deleted: boolean; watchId?: string }>> {
       const watchId = (rawParams as { watchId?: string }).watchId?.trim();

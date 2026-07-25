@@ -9,8 +9,8 @@ import { markReadOnlyTool } from "./tool-effects.ts";
 
 const ReadAssetParams = Type.Object({
   asset_id: AssetRefSchema,
-  start_line: Type.Optional(Type.Integer({ minimum: 1, description: "First line to read from textual content." })),
-  line_count: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000, description: "Maximum lines to read." })),
+  start_line: Type.Optional(Type.Integer({ minimum: 1 })),
+  line_count: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000 })),
 });
 
 export interface ResolvedAssetSource {
@@ -68,7 +68,7 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
   return markReadOnlyTool({
     name: "read_asset",
     label: "Read Asset",
-    description: "Read an image, GIF, audio, video, text, or file referenced by a permanent asset ID or staged handle.",
+    description: "",
     parameters: ReadAssetParams,
     async execute(_toolCallId, params, signal): Promise<AgentToolResult<
       | { assetId: number; origin: AssetOrigin; startLine?: number; endLine?: number; totalLines?: number }

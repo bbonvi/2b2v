@@ -2,9 +2,9 @@ import { Type, type Static } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 
 const ReactToMessageParams = Type.Object({
-  message_id: Type.String({ description: "Discord message ID to react to." }),
-  channel_id: Type.Optional(Type.String({ description: "Guild text channel or thread ID containing the message." })),
-  emoji: Type.String({ description: "Reaction emoji to add." }),
+  message_id: Type.String(),
+  channel_id: Type.Optional(Type.String()),
+  emoji: Type.String(),
 });
 
 export type ReactToMessageInput = Static<typeof ReactToMessageParams>;
@@ -51,7 +51,7 @@ export function createReactToMessageTool(deps: ReactToMessageToolDeps): AgentToo
   return {
     name: "react_to_message",
     label: "React To Message",
-    description: "Add a Discord reaction to a guild message.",
+    description: "",
     parameters: ReactToMessageParams,
     execute: async (
       _toolCallId,

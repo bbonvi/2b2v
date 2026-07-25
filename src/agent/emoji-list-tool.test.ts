@@ -35,11 +35,11 @@ describe("buildEmojiListOutput", () => {
 });
 
 describe("createEmojiListTool", () => {
-  test("returns list_emojis AgentTool with discovery guidance", () => {
+  test("returns list_emojis AgentTool metadata", () => {
     const tool = createEmojiListTool(makeDeps());
 
     expect(tool.name).toBe("list_emojis");
-    expect(tool.description).toBe("Discover this server's custom emojis.");
+    expect(tool.description).toBe("");
   });
 
   test("sorts emoji rows by name", async () => {

@@ -42,9 +42,7 @@ export function createRecordRelationshipTool(deps: RecordRelationshipToolDeps): 
   return {
     name: "record_relationship",
     label: "record_relationship",
-    description: deps.description?.trim() !== ""
-      ? deps.description ?? "Record durable relationship state after a Discord turn."
-      : "Record durable relationship state after a Discord turn.",
+    description: deps.description?.trim() ?? "",
     parameters: RecordRelationshipSchema,
     prepareArguments: (params: unknown): RecordRelationshipParams => {
       if (params !== null && typeof params === "object" && !Array.isArray(params)) {

@@ -190,7 +190,7 @@ const TOOL_METADATA: Readonly<Record<string, Omit<ToolCatalogEntry, "tool">>> = 
   },
   roll_dice: {
     group: "roleplay",
-    summary: "Generate and persist a canonical dice result for roleplay.",
+    summary: "Resolve a dice outcome for roleplay.",
     aliases: ["dice roll", "skill check", "random roll"],
   },
   schedule_task: {
@@ -247,14 +247,10 @@ const TOOL_METADATA: Readonly<Record<string, Omit<ToolCatalogEntry, "tool">>> = 
 };
 
 const SearchToolsParams = Type.Object({
-  query: Type.String({
-    minLength: 1,
-    description: "Capability or concrete action to find.",
-  }),
+  query: Type.String({ minLength: 1 }),
   limit: Type.Optional(Type.Integer({
     minimum: 1,
     maximum: 10,
-    description: "Maximum matching capabilities. Default: 5.",
   })),
 });
 
@@ -432,7 +428,7 @@ export function createSearchToolsTool(input: {
   return markReadOnlyTool({
     name: "search_tools",
     label: "search_tools",
-    description: "Find and enable private capabilities that are not currently available. Search when a chosen action needs a missing tool.",
+    description: "",
     parameters: SearchToolsParams,
     execute: (_toolCallId, rawParams): Promise<AgentToolResult<ToolSearchDetails | { error: true }>> => {
       const params = rawParams as { query?: unknown; limit?: unknown };

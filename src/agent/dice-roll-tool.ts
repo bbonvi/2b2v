@@ -288,7 +288,7 @@ export function createDiceRollTool(deps: DiceRollToolDeps): AgentTool {
   return {
     name: "roll_dice",
     label: "Roll Dice",
-    description: "Roll dice with cryptographic randomness and record the canonical result.",
+    description: "",
     parameters: DiceRollParams,
     execute: async (toolCallId, params, signal): Promise<AgentToolResult<DiceRollRow | { error: string }>> => {
       const normalized = normalizeDiceRollInput(params as DiceRollInput);

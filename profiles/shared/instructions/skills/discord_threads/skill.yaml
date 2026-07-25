@@ -1,6 +1,6 @@
 id: discord_threads
 title: Discord Threads
-description: Use when explicitly asked to create or close a Discord thread; defines routing, ownership, and action order.
+description: Use for an explicit request to create or close a Discord thread.
 required_for_tools:
   - start_thread
   - close_thread

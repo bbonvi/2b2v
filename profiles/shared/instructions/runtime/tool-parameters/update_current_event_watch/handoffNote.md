@@ -1,1 +1,1 @@
-Complete concise context for the next match, not only the latest change.
+Complete replacement context for the next match, not a delta.

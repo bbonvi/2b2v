@@ -12,18 +12,14 @@ const UNIT_TO_SECONDS: Record<TimeoutUnit, number> = {
 const TimeoutUserParams = Type.Object({
   target: Type.String({
     minLength: 1,
-    description: "Target Discord guild member as a username, @mention, or raw user ID.",
   }),
-  duration: Type.Number({
-    description: "Timeout duration amount.",
-  }),
-  unit: Type.Union(
-    [Type.Literal("minutes"), Type.Literal("hours"), Type.Literal("days")],
-    { description: "Duration unit." },
-  ),
-  reason: Type.Optional(Type.String({
-    description: "Optional short reason for Discord's audit log.",
-  })),
+  duration: Type.Number(),
+  unit: Type.Union([
+    Type.Literal("minutes"),
+    Type.Literal("hours"),
+    Type.Literal("days"),
+  ]),
+  reason: Type.Optional(Type.String()),
 });
 
 export type TimeoutUserInput = Static<typeof TimeoutUserParams>;
@@ -32,11 +28,8 @@ type TimeoutUnit = TimeoutUserInput["unit"];
 const RemoveUserTimeoutParams = Type.Object({
   target: Type.String({
     minLength: 1,
-    description: "Target Discord guild member as a username, @mention, or raw user ID.",
   }),
-  reason: Type.Optional(Type.String({
-    description: "Optional short reason for Discord's audit log.",
-  })),
+  reason: Type.Optional(Type.String()),
 });
 
 export type RemoveUserTimeoutInput = Static<typeof RemoveUserTimeoutParams>;
@@ -90,7 +83,7 @@ export function createDiscordSetUserTimeoutTool(deps: TimeoutUserToolDeps): Agen
   return {
     name: "discord_set_user_timeout",
     label: "discord_set_user_timeout",
-    description: "Temporarily time out one Discord guild member.",
+    description: "",
     parameters: TimeoutUserParams,
 
     async execute(_toolCallId: string, params: unknown): Promise<TimeoutUserResult> {
@@ -146,7 +139,7 @@ export function createDiscordRemoveUserTimeoutTool(deps: TimeoutUserToolDeps): A
   return {
     name: "discord_remove_user_timeout",
     label: "discord_remove_user_timeout",
-    description: "Remove one Discord guild member timeout.",
+    description: "",
     parameters: RemoveUserTimeoutParams,
 
     async execute(_toolCallId: string, params: unknown): Promise<RemoveUserTimeoutResult> {

@@ -9,17 +9,17 @@ const ListAgentJobsParams = Type.Object({
     Type.Literal("active"),
     Type.Literal("recent"),
     Type.Literal("all"),
-  ], { description: "Which lifecycle group to list." })),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Maximum jobs to return." })),
+  ])),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
 });
 
 const ReadAgentJobParams = Type.Object({
-  job_id: Type.String({ description: "Visible async job id." }),
+  job_id: Type.String(),
 });
 
 const DismissAgentJobParams = Type.Object({
-  job_id: Type.String({ description: "Visible ready job id." }),
-  reason: Type.String({ description: "Private reason for deliberately abandoning the result." }),
+  job_id: Type.String(),
+  reason: Type.String(),
 });
 
 /** Render complete image-job provenance for private inspection and asset reads. */
@@ -66,7 +66,7 @@ export function createAgentJobInspectionTools(input: {
   const listTool: AgentTool = markReadOnlyTool({
     name: "list_agent_jobs",
     label: "List Jobs",
-    description: "List active or recent async jobs visible in this channel.",
+    description: "",
     parameters: ListAgentJobsParams,
     execute: (_toolCallId, params): Promise<AgentToolResult<{ jobIds: string[] }>> => {
       const parsed = params as { state?: "active" | "recent" | "all"; limit?: number };
@@ -94,7 +94,7 @@ export function createAgentJobInspectionTools(input: {
   const readTool: AgentTool = markReadOnlyTool({
     name: "read_agent_job",
     label: "Read Job",
-    description: "Read the complete input, lifecycle, result, and asset provenance for one visible async job.",
+    description: "",
     parameters: ReadAgentJobParams,
     execute: (_toolCallId, params): Promise<AgentToolResult<{ jobId: string }>> => {
       const parsed = params as { job_id: string };
@@ -110,7 +110,7 @@ export function createAgentJobInspectionTools(input: {
   const dismissTool: AgentTool = {
     name: "dismiss_agent_job",
     label: "Dismiss Job",
-    description: "Deliberately abandon a visible ready job without Discord delivery.",
+    description: "",
     parameters: DismissAgentJobParams,
     async execute(_toolCallId, params): Promise<AgentToolResult<{ jobId: string; dismissed: boolean }>> {
       const parsed = params as { job_id: string; reason: string };

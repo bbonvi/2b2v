@@ -21,10 +21,10 @@ const MEMBERS: MemberInfo[] = [
 ];
 
 describe("createChatUserListTool", () => {
-  test("returns list_chat_users AgentTool with correct metadata", () => {
+  test("returns list_chat_users AgentTool metadata", () => {
     const tool = createChatUserListTool(makeDeps(MEMBERS));
     expect(tool.label).toBe("list_chat_users");
-    expect(tool.description).toBe("List relevant current-guild chat users.");
+    expect(tool.description).toBe("");
     expect(tool.parameters).toBeDefined();
   });
 

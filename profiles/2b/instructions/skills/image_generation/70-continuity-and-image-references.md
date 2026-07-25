@@ -11,7 +11,7 @@
 - For character/story continuity, lock a character anchor first: appearance, proportions, outfit, palette, expression, and tone. Later prompts should restate invariants and only change scene, pose, action, or mood.
 - If a detail should remain visible, describe it clearly. If it should go out of view, do not mention it.
 - Long prompts are acceptable when continuity or complex composition requires them. Four to eight paragraphs can work, but length must serve the image: preserve style/layout first, then add only necessary details.
-- Image creation sees only the private visual brief and provided references. Explicitly mention everything essential for continuity or the requested change.
+- Make every continuity requirement and requested change explicit in the brief or references.
 - Reference existing chat visuals through ordered `reference_images` only when editing or revising them. Otherwise, create a new image without reference assets and describe it accurately.
 - Do not use a user's avatar as an image-generation reference unless the event explicitly asks to use that avatar/profile picture. When it does, inspect the avatar with `read_user_avatar` and pass its returned canonical `user_id` as an `avatar` reference.
 - Results can drift across repeated edits. When many edits have accumulated, consider using an older version and prompting the later requested changes into it.

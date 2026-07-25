@@ -37,21 +37,19 @@ export interface SearchChannelMessagesToolDeps {
 }
 
 const SearchChannelMessagesParams = Type.Object({
-  pattern: Type.Optional(Type.String({ minLength: 1, maxLength: 1000, description: "Ripgrep-compatible regular expression." })),
-  scope: Type.Optional(Type.Union(SEARCH_SCOPES.map((scope) => Type.Literal(scope)), {
-    description: "Search scope. Defaults to the current channel; all_guilds covers every accessible stored guild channel.",
-  })),
-  username: Type.Optional(Type.String({ description: "Stored historical Discord username." })),
-  user_id: Type.Optional(Type.String({ description: "Stable Discord user ID." })),
-  guild_id: Type.Optional(Type.String({ description: "Guild ID filter." })),
-  channel_id: Type.Optional(Type.String({ description: "Guild channel or thread filter." })),
+  pattern: Type.Optional(Type.String({ minLength: 1, maxLength: 1000 })),
+  scope: Type.Optional(Type.Union(SEARCH_SCOPES.map((scope) => Type.Literal(scope)))),
+  username: Type.Optional(Type.String()),
+  user_id: Type.Optional(Type.String()),
+  guild_id: Type.Optional(Type.String()),
+  channel_id: Type.Optional(Type.String()),
   asset_id: Type.Optional(AssetIdSchema),
-  has_assets: Type.Optional(Type.Boolean({ description: "Filter by whether a message has indexed assets." })),
-  asset_kind: Type.Optional(Type.Union(ASSET_KINDS.map((kind) => Type.Literal(kind)), { description: "Indexed asset type." })),
-  after: Type.Optional(Type.String({ description: "Local wall-clock lower bound, YYYY-MM-DD HH:mm." })),
-  before: Type.Optional(Type.String({ description: "Local wall-clock upper bound, YYYY-MM-DD HH:mm." })),
-  before_message_id: Type.Optional(Type.String({ description: "Search messages older than this result message ID." })),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Maximum results." })),
+  has_assets: Type.Optional(Type.Boolean()),
+  asset_kind: Type.Optional(Type.Union(ASSET_KINDS.map((kind) => Type.Literal(kind)))),
+  after: Type.Optional(Type.String()),
+  before: Type.Optional(Type.String()),
+  before_message_id: Type.Optional(Type.String()),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
 });
 
 interface SearchDetails {
@@ -75,7 +73,7 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
   return markReadOnlyTool({
     name: "search_channel_messages",
     label: "Search Channel Messages",
-    description: "Regex-search stored Discord messages and indexed attachment metadata in the current channel, current guild, or all accessible guilds.",
+    description: "",
     parameters: SearchChannelMessagesParams,
     async execute(_toolCallId, params, signal): Promise<AgentToolResult<SearchDetails | { error: boolean }>> {
       const startedAt = performance.now();

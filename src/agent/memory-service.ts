@@ -169,7 +169,6 @@ interface ExpiresIn {
 const ExpiresInSchema = Type.Object({
   amount: Type.Number({
     exclusiveMinimum: 0,
-    description: "Positive relative duration amount.",
   }),
   unit: Type.Union([
     Type.Literal("minutes"),
@@ -181,20 +180,15 @@ const ExpiresInSchema = Type.Object({
 }, { additionalProperties: false });
 
 const MemoryRecallWhenSchema = Type.Union([
-  Type.Literal("always", { description: "Relevant regardless of which users are present." }),
+  Type.Literal("always"),
   Type.Object({
-    users_present: Type.Array(Type.String({ minLength: 1 }), {
-      minItems: 1,
-      description: "Users whose presence makes this memory relevant; any match is sufficient.",
-    }),
+    users_present: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
   }, { additionalProperties: false }),
 ]);
 
 const MemoryWriteProperties = {
-  about: Type.Union([Type.Literal("community"), Type.Literal("user"), Type.Literal("self")], {
-    description: "What or whom the memory describes; independent from recall conditions.",
-  }),
-  username: Type.Optional(Type.String({ minLength: 1, description: "Username for about=user." })),
+  about: Type.Union([Type.Literal("community"), Type.Literal("user"), Type.Literal("self")]),
+  username: Type.Optional(Type.String({ minLength: 1 })),
   kind: Type.String({ enum: [...MEMORY_KINDS] }),
   content: Type.String({ minLength: 1 }),
   source_message_id: Type.Optional(Type.Union([
@@ -203,9 +197,7 @@ const MemoryWriteProperties = {
   ])),
   confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
   important: Type.Optional(Type.Boolean()),
-  expiresIn: Type.Optional(Type.Union([ExpiresInSchema, Type.Null()], {
-    description: "Relative duration for clearly temporary memories; null clears an existing expiry.",
-  })),
+  expiresIn: Type.Optional(Type.Union([ExpiresInSchema, Type.Null()])),
 };
 
 const MemoryWriteActionSchema = Type.Union([
@@ -1182,9 +1174,7 @@ export function createRecordMemoryTool(deps: RecordMemoryToolDeps): AgentTool {
   return {
     name: "record_memory",
     label: "record_memory",
-    description: description !== undefined && description !== ""
-      ? description
-      : "Record memory updates after a Discord turn.",
+    description: description?.trim() ?? "",
     parameters: RecordMemoryToolSchema,
 
     async execute(_toolCallId: string, params: unknown): Promise<RecordMemoryToolResult> {

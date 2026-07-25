@@ -29,9 +29,9 @@ export function createVoiceTools(input: {
   const join: AgentTool = {
     name: "join_voice_channel",
     label: "join_voice_channel",
-    description: "Join or move the single live Discord voice presence to one voice channel.",
+    description: "",
     parameters: Type.Object({
-      channel_id: Type.String({ minLength: 1, description: "Discord voice channel ID from list_channels." }),
+      channel_id: Type.String({ minLength: 1 }),
     }, { additionalProperties: false }),
     async execute(_id, params): Promise<AgentToolResult<Record<string, unknown>>> {
       const channelId = (params as { channel_id: string }).channel_id;
@@ -57,7 +57,7 @@ export function createVoiceTools(input: {
   const leave: AgentTool = {
     name: "leave_voice_channel",
     label: "leave_voice_channel",
-    description: "Leave the current voice channel when departure is actually appropriate.",
+    description: "",
     parameters: Type.Object({}, { additionalProperties: false }),
     async execute(): Promise<AgentToolResult<Record<string, unknown>>> {
       if (input.surface === "voice") {
@@ -72,7 +72,7 @@ export function createVoiceTools(input: {
   const instruct: AgentTool = {
     name: "instruct_voice_channel",
     label: "instruct_voice_channel",
-    description: "Send a durable request to 2B's current voice presence. It may take several room turns to resolve.",
+    description: "",
     parameters: Type.Object({
       instruction: Type.String({ minLength: 1, maxLength: 4000 }),
       continue_instruction_id: Type.Optional(Type.String({

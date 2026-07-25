@@ -1,1 +1,1 @@
-Privately inspect messages from an accessible Discord guild channel or thread. Use `around_message_id` for conversation surrounding a search result, or `before_message_id` and `after_message_id` to page. DMs are not supported.
+Read a channel around or before a known message.

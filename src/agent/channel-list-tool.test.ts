@@ -11,10 +11,10 @@ function makeDeps(channels: ChannelInfo[]): ChannelListToolDeps {
 }
 
 describe("createChannelListTool", () => {
-  test("returns list_channels AgentTool with expected metadata", () => {
+  test("returns list_channels AgentTool metadata", () => {
     const tool = createChannelListTool(makeDeps([]));
     expect(tool.label).toBe("list_channels");
-    expect(tool.description).toBe("List visible Discord guild channels and threads.");
+    expect(tool.description).toBe("");
     expect(tool.parameters).toBeDefined();
   });
 

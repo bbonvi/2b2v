@@ -388,15 +388,9 @@ function fromRecord(record: AgentJobRecord): AgentJob {
 }
 
 const CancelAgentJobParams = Type.Object({
-  job_id: Type.String({
-    description: "Visible async job id.",
-  }),
-  reason: Type.String({
-    description: "Short concrete cancellation reason.",
-  }),
-  mode: Type.Union([Type.Literal("replacement"), Type.Literal("explicit_cancel")], {
-    description: "Cancellation mode.",
-  }),
+  job_id: Type.String(),
+  reason: Type.String(),
+  mode: Type.Union([Type.Literal("replacement"), Type.Literal("explicit_cancel")]),
 });
 
 /** Create the narrow cancellation tool for cancellable async jobs. */
@@ -407,7 +401,7 @@ export function createCancelAgentJobTool(deps: {
   return {
     name: "cancel_agent_job",
     label: "Cancel Job",
-    description: "Cancel a visible async job.",
+    description: "",
     parameters: CancelAgentJobParams,
     async execute(_toolCallId, params): Promise<AgentToolResult<{ jobId: string; cancelled: boolean }>> {
       const p = params as { job_id: string; reason: string; mode: CancelMode };

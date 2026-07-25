@@ -1,1 +1,0 @@
-Generate and persist a canonical random dice result. Before every call, load the required `dice_roleplay` skill; it contains the complete policy for deciding when and how to roll, checks, privacy, actor labels, and post-roll narration.

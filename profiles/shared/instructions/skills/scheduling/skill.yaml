@@ -1,6 +1,6 @@
 id: scheduling
 title: Scheduling
-description: Use for requested or self-chosen delayed, timed, or recurring future actions and periodic external checks; no request is required.
+description: Use for requested or self-chosen time-based future actions and periodic external checks.
 required_for_tools:
   - schedule_task
 instructions:

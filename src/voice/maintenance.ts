@@ -30,7 +30,7 @@ export function createVoiceSummaryTool(
   return {
     name: "update_voice_summary",
     label: "update_voice_summary",
-    description: "Replace the private rolling voice-room summary with 3-6 concise factual sentences.",
+    description: "",
     parameters: VoiceSummarySchema,
     execute: (_toolCallId: string, params: unknown): Promise<AgentToolResult<{ updated: true } | { error: true }>> => {
       if (!Value.Check(VoiceSummarySchema, params)) {

@@ -9,11 +9,8 @@ export type AvatarSize = typeof AVATAR_SIZE_VALUES[number];
 const ReadUserAvatarParams = Type.Object({
   user: Type.String({
     minLength: 1,
-    description: "Discord user reference.",
   }),
-  size: Type.Optional(Type.Union(AVATAR_SIZE_VALUES.map((value) => Type.Literal(value)), {
-    description: "Optional Discord CDN avatar size.",
-  })),
+  size: Type.Optional(Type.Union(AVATAR_SIZE_VALUES.map((value) => Type.Literal(value)))),
 });
 
 export interface ResolvedUserAvatar {
@@ -47,7 +44,7 @@ export function createReadUserAvatarTool(deps: ReadUserAvatarToolDeps): AgentToo
   return markReadOnlyTool({
     name: "read_user_avatar",
     label: "read_user_avatar",
-    description: "Read a guild member's current Discord avatar.",
+    description: "",
     parameters: ReadUserAvatarParams,
 
     async execute(_toolCallId: string, params: unknown): Promise<AgentToolResult<ReadUserAvatarDetails>> {

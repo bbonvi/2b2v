@@ -1,1 +1,0 @@
-Free-form roll label.

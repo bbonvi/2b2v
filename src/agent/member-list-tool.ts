@@ -20,9 +20,7 @@ export interface MemberListToolDeps {
 }
 
 const ListMembersParams = Type.Object({
-  onlineOnly: Type.Optional(
-    Type.Boolean({ description: "Filter to online/idle/dnd members." })
-  ),
+  onlineOnly: Type.Optional(Type.Boolean()),
 });
 
 /** Create a compact current-guild user listing tool for channel identity and admin awareness. */
@@ -32,7 +30,7 @@ export function createChatUserListTool(deps: MemberListToolDeps): AgentTool {
   return markReadOnlyTool({
     name: "list_chat_users",
     label: "list_chat_users",
-    description: "List relevant current-guild chat users.",
+    description: "",
     parameters: ListMembersParams,
 
     async execute(_toolCallId: string, params: unknown): Promise<AgentToolResult<{ count: number } | { error: boolean }>> {

@@ -9,7 +9,7 @@ import { markReadOnlyTool } from "./tool-effects.ts";
 export interface FetchImagesToolDeps extends ExternalImageLoaderDeps, Partial<ExternalImagesConfig> {}
 
 const FetchImagesParams = Type.Object({
-  urls: Type.Array(Type.String(), { description: "Array of image URLs to fetch." }),
+  urls: Type.Array(Type.String()),
 });
 
 interface FetchResult {
@@ -37,7 +37,7 @@ export function createFetchImagesTool(deps: FetchImagesToolDeps = {}): AgentTool
   return markReadOnlyTool({
     name: "fetch_images",
     label: "Fetch Images",
-    description: "Fetch external images by URL for visual inspection.",
+    description: "",
     parameters: FetchImagesParams,
     async execute(_toolCallId, params, signal): Promise<AgentToolResult<{ fetched: number; failed: number; results: FetchResult[] }>> {
       const { urls } = params as { urls: string[] };

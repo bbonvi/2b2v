@@ -37,14 +37,14 @@ describe("normalizeReactToMessageInput", () => {
 });
 
 describe("createReactToMessageTool", () => {
-  test("returns react_to_message AgentTool with guidance metadata", () => {
+  test("returns react_to_message AgentTool metadata", () => {
     const tool = createReactToMessageTool({
       currentChannelId: "channel-1",
       reactToMessage: () => Promise.reject(new Error("unused")),
     });
 
     expect(tool.name).toBe("react_to_message");
-    expect(tool.description).toBe("Add a Discord reaction to a guild message.");
+    expect(tool.description).toBe("");
   });
 
   test("reacts through dependency and returns details", async () => {

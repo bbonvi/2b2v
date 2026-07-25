@@ -2,15 +2,11 @@ import { Type, type Static } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 
 const StartThreadParams = Type.Object({
-  name: Type.Optional(
-    Type.String({ description: "Thread title." })
-  ),
+  name: Type.Optional(Type.String()),
 });
 
 const CloseThreadParams = Type.Object({
-  channel_id: Type.Optional(
-    Type.String({ description: "Bot-created thread channel ID to archive." })
-  ),
+  channel_id: Type.Optional(Type.String()),
 });
 
 export type StartThreadInput = Static<typeof StartThreadParams>;
@@ -115,7 +111,7 @@ export function createStartThreadTool(deps: StartThreadToolDeps): AgentTool {
   return {
     name: "start_thread",
     label: "Start Thread",
-    description: "Create a new thread attached to the trigger message.",
+    description: "",
     parameters: StartThreadParams,
     execute: async (
       _toolCallId,
@@ -185,7 +181,7 @@ export function createCloseThreadTool(deps: CloseThreadToolDeps): AgentTool {
   return {
     name: "close_thread",
     label: "Close Thread",
-    description: "Archive a bot-created Discord thread.",
+    description: "",
     parameters: CloseThreadParams,
     execute: async (
       _toolCallId,

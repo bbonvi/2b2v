@@ -36,11 +36,11 @@ type SearchMemoriesToolResult = AgentToolResult<
 >;
 
 const SearchMemoriesParams = Type.Object({
-  pattern: Type.Optional(Type.String({ minLength: 1, maxLength: 1000, description: "Optional ripgrep regex." })),
-  user: Type.Optional(Type.String({ minLength: 1, description: "Optional username, mention, or Discord user ID." })),
-  guild_id: Type.Optional(Type.String({ minLength: 1, description: "Optional accessible guild override." })),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Page size." })),
-  cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 512, description: "Opaque page cursor." })),
+  pattern: Type.Optional(Type.String({ minLength: 1, maxLength: 1000 })),
+  user: Type.Optional(Type.String({ minLength: 1 })),
+  guild_id: Type.Optional(Type.String({ minLength: 1 })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+  cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
 });
 
 function error(text: string): SearchMemoriesToolResult {
@@ -141,7 +141,7 @@ export function createSearchMemoriesTool(deps: SearchMemoriesToolDeps): AgentToo
   return markReadOnlyTool({
     name: "search_memories",
     label: "search_memories",
-    description: "List or regex-search available memories.",
+    description: "",
     parameters: SearchMemoriesParams,
 
     async execute(_toolCallId: string, params: unknown, signal): Promise<SearchMemoriesToolResult> {

@@ -18,7 +18,7 @@ export function createUpdateCurrentEventWatchTool(input: {
   return {
     name: "update_current_event_watch",
     label: "update_current_event_watch",
-    description: "Replace one current watch handoff or complete that watch.",
+    description: "",
     parameters: UpdateCurrentEventWatchParams,
     execute(_toolCallId, rawParams): Promise<AgentToolResult<{ updated: boolean; complete: boolean }>> {
       const params = rawParams as { watchId?: string; handoffNote?: string; complete?: boolean };

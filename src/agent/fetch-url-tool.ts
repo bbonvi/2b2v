@@ -38,7 +38,7 @@ interface FetchUrlDetails {
 }
 
 const FetchUrlParams = Type.Object({
-  url: Type.String({ description: "The URL to fetch and extract content from." }),
+  url: Type.String(),
 });
 
 export function createFetchUrlTool(deps: FetchUrlToolDeps = {}): AgentTool {
@@ -57,7 +57,7 @@ export function createFetchUrlTool(deps: FetchUrlToolDeps = {}): AgentTool {
   return markReadOnlyTool({
     name: "fetch_url",
     label: "fetch_url",
-    description: "Fetch readable webpage content.",
+    description: "",
     parameters: FetchUrlParams,
 
     async execute(

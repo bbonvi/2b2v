@@ -15,7 +15,7 @@ export interface SummarizeVideoToolDeps {
 }
 
 const SummarizeVideoParams = Type.Object({
-  url: Type.String({ description: "The YouTube, direct video/audio, podcast, or page URL to extract transcript/video content from." }),
+  url: Type.String(),
 });
 
 export function createSummarizeVideoTool(deps: SummarizeVideoToolDeps = {}): AgentTool {
@@ -26,7 +26,7 @@ export function createSummarizeVideoTool(deps: SummarizeVideoToolDeps = {}): Age
   return markReadOnlyTool({
     name: "summarize_video",
     label: "summarize_video",
-    description: "Extract video or audio content for summarization.",
+    description: "",
     parameters: SummarizeVideoParams,
 
     async execute(

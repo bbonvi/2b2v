@@ -2,7 +2,7 @@
 
 Establish the image's intended use and visual direction first: background/scene, visual medium, mood, composition, camera feel, lighting, and environment. Then place the subjects inside that direction and add only the details needed for recognition, continuity, or the event's explicit request.
 
-Assume image creation is literal and weak at spatial reasoning: every object, trait, action, and reference in the brief may appear in frame. Mention only details visible from the chosen viewpoint; imply hidden context through posture, gaze, lighting, reflections, shadows, props, environment changes, reactions, or composition.
+Every object, trait, action, and reference in the brief may appear in frame. Mention only details visible from the chosen viewpoint; imply hidden context through posture, gaze, lighting, reflections, shadows, props, environment changes, reactions, or composition.
 
 Choose one dominant visual style and one camera/rendering treatment. Do not stack near-synonyms. Use extra style terms only when they add distinct information: medium, lighting, era, lens, or finish.
 

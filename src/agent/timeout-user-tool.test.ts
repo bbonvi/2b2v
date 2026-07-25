@@ -54,10 +54,10 @@ function text(result: Awaited<ReturnType<AgentTool["execute"]>>): string {
 }
 
 describe("createDiscordSetUserTimeoutTool", () => {
-  test("exposes constrained moderation instructions", () => {
+  test("exposes moderation schema without inline policy", () => {
     const tool = makeTool(makeMember());
     expect(tool.name).toBe("discord_set_user_timeout");
-    expect(tool.description).toBe("Temporarily time out one Discord guild member.");
+    expect(tool.description).toBe("");
   });
 
   test("rejects non-guild use", async () => {

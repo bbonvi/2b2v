@@ -2,14 +2,14 @@ import { Type, type Static } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 
 const EditOwnMessageParams = Type.Object({
-  message_id: Type.String({ description: "Discord message ID to edit." }),
-  content: Type.String({ description: "Replacement message content." }),
-  channel_id: Type.Optional(Type.String({ description: "Guild channel or thread containing the bot-authored message." })),
+  message_id: Type.String(),
+  content: Type.String(),
+  channel_id: Type.Optional(Type.String()),
 });
 
 const DeleteOwnMessageParams = Type.Object({
-  message_id: Type.String({ description: "Discord message ID to delete." }),
-  channel_id: Type.Optional(Type.String({ description: "Guild channel or thread containing the bot-authored message." })),
+  message_id: Type.String(),
+  channel_id: Type.Optional(Type.String()),
 });
 
 export type EditOwnMessageInput = Static<typeof EditOwnMessageParams>;
@@ -117,7 +117,7 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
     {
       name: "edit_own_message",
       label: "Edit Own Message",
-      description: "Edit a Discord message authored by this bot only.",
+      description: "",
       parameters: EditOwnMessageParams,
       execute: async (
         _toolCallId,
@@ -175,7 +175,7 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
     {
       name: "delete_own_message",
       label: "Delete Own Message",
-      description: "Delete a Discord message authored by this bot only.",
+      description: "",
       parameters: DeleteOwnMessageParams,
       execute: async (
         _toolCallId,

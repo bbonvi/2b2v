@@ -1,1 +1,1 @@
-Find and enable private capabilities that are not currently available. Search when the persona has chosen an action but its tool is unavailable; use the action name or intended capability, not a broad capability inventory request.
+Find and enable a missing capability for a chosen action.

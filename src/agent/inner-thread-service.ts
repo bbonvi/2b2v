@@ -199,13 +199,13 @@ export function createRecordInnerThreadsTool(input: {
   guildId: string;
   channelId: string;
   requestId?: string;
-  description: string;
+  description?: string;
   dryRun?: boolean;
 }): AgentTool {
   return {
     name: "record_inner_threads",
     label: "Record Inner Threads",
-    description: input.description,
+    description: input.description ?? "",
     parameters: RecordInnerThreadsParams,
     execute: (_toolCallId, params): Promise<AgentToolResult<{ applied: number; errors: string[] }>> => {
       const actions = (params as { actions: ThreadAction[] }).actions;
@@ -322,14 +322,14 @@ export function createListInnerThreadsTool(input: {
   db: Database;
   guildId: string;
   visibleUserIds: readonly string[];
-  description: string;
+  description?: string;
   resolveUserId?: (userId: string) => string | undefined;
   resolveGuildId?: (guildId: string) => string | undefined;
 }): AgentTool {
   return markReadOnlyTool({
     name: "list_inner_threads",
     label: "List Inner Threads",
-    description: input.description,
+    description: input.description ?? "",
     parameters: ListInnerThreadsParams,
     execute: (_toolCallId, params): Promise<AgentToolResult<{ count: number; threads: InnerThread[] }>> => {
       const p = params as { scope?: "applicable" | "all" | "current_guild"; status?: "active" | "resolved" | "all"; limit?: number };
