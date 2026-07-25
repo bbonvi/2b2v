@@ -9,6 +9,12 @@ import { createStagedAsset, getStagedAsset } from "./staged-asset-repository.ts"
 let db: Database;
 let tmpDir: string;
 
+function stagedAssetDeleteAction(database: Database): string | undefined {
+  const foreignKeys = database.raw.prepare("PRAGMA foreign_key_list(staged_assets)")
+    .all() as Array<{ from: string; on_delete: string }>;
+  return foreignKeys.find((foreignKey) => foreignKey.from === "permanent_asset_id")?.on_delete;
+}
+
 beforeEach(() => {
   tmpDir = fs.mkdtempSync("/tmp/2bv2-db-test-");
   db = createDatabase(path.join(tmpDir, "test.db"));
@@ -201,6 +207,80 @@ describe("database initialization", () => {
         expiresAt: 40,
       });
       expect(getStagedAsset(migrated, "job_imgnew")?.jobId).toBe("img-new");
+      expect(stagedAssetDeleteAction(migrated)).toBe("SET NULL");
+      expect(migrated.raw.prepare("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
+    } finally {
+      migrated.close();
+    }
+  });
+
+  test("migrates the staged asset delete action without losing rows", () => {
+    const dbPath = path.join(tmpDir, "legacy-staged-asset-reference.db");
+    const existing = createDatabase(dbPath);
+    existing.raw.run(`INSERT INTO agent_jobs
+      (id, kind, guild_id, channel_id, delivery_guild_id, delivery_channel_id,
+       requester_id, requester_username, source_message_id, source_quote, status,
+       input_json, created_at, replacement_count)
+      VALUES ('img-old-fk', 'image_generation', 'g1', 'c1', 'g1', 'c1',
+       'u1', 'alice', 'm1', 'quote', 'delivered', '{}', 1, 0)`);
+    existing.raw.run(`INSERT INTO messages
+      (id, guild_id, channel_id, user_id, author_username, raw_content,
+       translated_content, is_bot, created_at)
+      VALUES ('delivered-message', 'g1', 'c1', 'bot-1', '2b', 'done', 'done', 1, 1)`);
+    existing.raw.run(`INSERT INTO message_assets
+      (message_id, guild_id, channel_id, source_kind, source_key, kind, filename, created_at)
+      VALUES ('delivered-message', 'g1', 'c1', 'attachment', 'asset-1', 'image', 'old.webp', 1)`);
+    const permanentAsset = existing.raw.prepare(
+      "SELECT id FROM message_assets WHERE message_id = 'delivered-message'",
+    ).get() as { id: number };
+    createStagedAsset(existing, {
+      ref: "job_imgoldfk",
+      jobId: "img-old-fk",
+      ownerGuildId: "g1",
+      ownerChannelId: "c1",
+      filename: "old.webp",
+      contentType: "image/webp",
+      storagePath: "/tmp/old.webp",
+      createdAt: 10,
+      expiresAt: 20,
+      deliveredMessageId: "delivered-message",
+      permanentAssetId: permanentAsset.id,
+    });
+    existing.close();
+
+    const legacy = new BunDatabase(dbPath);
+    legacy.run("PRAGMA foreign_keys = OFF");
+    legacy.run(`CREATE TABLE staged_assets_legacy (
+      ref TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL UNIQUE REFERENCES agent_jobs(id) ON DELETE CASCADE,
+      owner_guild_id TEXT NOT NULL,
+      owner_channel_id TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      content_type TEXT NOT NULL,
+      storage_path TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      delivered_message_id TEXT,
+      permanent_asset_id INTEGER REFERENCES message_assets(id)
+    )`);
+    legacy.run(`INSERT INTO staged_assets_legacy
+      SELECT ref, job_id, owner_guild_id, owner_channel_id, filename, content_type,
+       storage_path, created_at, expires_at, delivered_message_id, permanent_asset_id
+      FROM staged_assets`);
+    legacy.run("DROP TABLE staged_assets");
+    legacy.run("ALTER TABLE staged_assets_legacy RENAME TO staged_assets");
+    legacy.close();
+
+    const migrated = createDatabase(dbPath);
+    try {
+      expect(getStagedAsset(migrated, "job_imgoldfk")).toMatchObject({
+        jobId: "img-old-fk",
+        deliveredMessageId: "delivered-message",
+        permanentAssetId: permanentAsset.id,
+      });
+      expect(stagedAssetDeleteAction(migrated)).toBe("SET NULL");
+      migrated.raw.prepare("DELETE FROM message_assets WHERE id = ?").run(permanentAsset.id);
+      expect(getStagedAsset(migrated, "job_imgoldfk")?.permanentAssetId).toBeUndefined();
       expect(migrated.raw.prepare("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
     } finally {
       migrated.close();

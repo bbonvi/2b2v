@@ -77,6 +77,42 @@ describe("message cleanup", () => {
     db.close();
   });
 
+  test("removes a delivered generated asset without deleting its job record", () => {
+    const db = createDatabase(":memory:");
+    insertMessage(db, "bot-message", { isBot: true, userId: "bot-1" });
+    db.raw.prepare(`INSERT INTO message_assets
+      (message_id, guild_id, channel_id, source_kind, source_key, kind, filename, created_at)
+      VALUES ('bot-message', 'g1', 'c1', 'attachment', 'a1', 'image', 'generated.png', 1)`).run();
+    const asset = db.raw.prepare("SELECT id FROM message_assets WHERE message_id = 'bot-message'")
+      .get() as { id: number };
+    db.raw.run(`INSERT INTO agent_jobs
+      (id, kind, guild_id, channel_id, delivery_guild_id, delivery_channel_id,
+       requester_id, requester_username, source_message_id, source_quote, status,
+       input_json, created_at, replacement_count)
+      VALUES ('img-1', 'image_generation', 'g1', 'c1', 'g1', 'c1',
+       'u1', 'alice', 'source-message', 'quote', 'delivered', '{}', 1, 0)`);
+    db.raw.prepare(`INSERT INTO staged_assets
+      (ref, job_id, owner_guild_id, owner_channel_id, filename, content_type,
+       storage_path, created_at, expires_at, delivered_message_id, permanent_asset_id)
+      VALUES ('job_img1', 'img-1', 'g1', 'c1', 'generated.png', 'image/png',
+       '/tmp/generated.png', 1, 2, 'bot-message', ?)`).run(asset.id);
+
+    const result = cleanupDeletedBotMessage({
+      db,
+      guildId: "g1",
+      channelId: "c1",
+      messageId: "bot-message",
+      botUserId: "bot-1",
+    });
+
+    expect(result).toEqual({ messagesDeleted: 1 });
+    expect(db.raw.prepare("SELECT COUNT(*) AS count FROM message_assets").get()).toEqual({ count: 0 });
+    expect(db.raw.prepare("SELECT permanent_asset_id FROM staged_assets WHERE ref = 'job_img1'").get())
+      .toEqual({ permanent_asset_id: null });
+    expect(db.raw.prepare("SELECT id FROM agent_jobs WHERE id = 'img-1'").get()).toEqual({ id: "img-1" });
+    db.close();
+  });
+
   test("marks a Discord message deleted with assets and reactions removed", () => {
     const db = createDatabase(":memory:");
     insertMessage(db, "m1");

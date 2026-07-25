@@ -92,6 +92,17 @@ describe("authorizeOwnMessageOperation", () => {
     if (result.ok) throw new Error("unreachable");
     expect(result.error).toBe("dm_not_supported");
   });
+
+  test("reports a missing message without blaming the channel type", async () => {
+    const deps = makeDeps({ fetchMessage: () => Promise.resolve(null) });
+    const result = await authorizeOwnMessageOperation(deps, { messageId: "missing" });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.error).toBe("message_not_found");
+    expect(result.message).toContain("may have been deleted");
+    expect(result.message).not.toContain("DM");
+  });
 });
 
 describe("createOwnMessageTools", () => {
@@ -136,6 +147,27 @@ describe("createOwnMessageTools", () => {
       guildId: "g1",
       channelId: "c1",
     }]);
+  });
+
+  test("reports Discord deletion as successful when local cleanup fails", async () => {
+    const deps = makeDeps({
+      afterDelete: () => Promise.reject(new Error("FOREIGN KEY constraint failed")),
+    });
+    const [, deleteTool] = createOwnMessageTools(deps);
+    if (deleteTool === undefined) throw new Error("missing delete tool");
+
+    const result = await deleteTool.execute("tc1", {
+      message_id: "m-bot",
+    }, AbortSignal.timeout(5000));
+
+    expect(textOf(result)).toContain("Deleted own message m-bot from Discord");
+    expect(textOf(result)).toContain("already gone");
+    expect(result.details).toEqual({
+      messageId: "m-bot",
+      channel_id: "c1",
+      warning: "FOREIGN KEY constraint failed",
+    });
+    expect(deps.deleted).toEqual(["m-bot"]);
   });
 
   test("does not call mutators for non-bot-authored messages", async () => {

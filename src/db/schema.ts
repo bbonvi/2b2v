@@ -68,7 +68,7 @@ export function stagedAssetsTableSql(tableName: string, ifNotExists = false): st
     created_at           INTEGER NOT NULL,
     expires_at           INTEGER NOT NULL,
     delivered_message_id TEXT,
-    permanent_asset_id   INTEGER REFERENCES message_assets(id)
+    permanent_asset_id   INTEGER REFERENCES message_assets(id) ON DELETE SET NULL
   )`;
 }
 

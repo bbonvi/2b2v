@@ -51,6 +51,12 @@ export interface OwnMessageToolsDeps {
   afterDelete: (input: OwnMessageStateInput) => Promise<void>;
 }
 
+interface OwnMessageMutationDetails {
+  messageId: string;
+  channel_id: string;
+  warning?: string;
+}
+
 interface AuthorizedOwnMessage {
   channelId: string;
   message: OwnMessageLookup & { guildId: string };
@@ -83,7 +89,7 @@ export async function authorizeOwnMessageOperation(
     return {
       ok: false,
       error: "message_not_found",
-      message: `Cannot access message ${messageId} in channel ${channelId}; use a guild text channel/thread ID because DMs are not supported.`,
+      message: `Message ${messageId} was not found in channel ${channelId}. It may have been deleted, or the channel may be inaccessible.`,
     };
   }
   if (message.guildId === null) {
@@ -122,7 +128,7 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
       execute: async (
         _toolCallId,
         params,
-      ): Promise<AgentToolResult<{ messageId: string; channel_id: string } | { error: string }>> => {
+      ): Promise<AgentToolResult<OwnMessageMutationDetails | { error: string }>> => {
         const p = params as EditOwnMessageInput;
         const content = p.content.trim();
         if (content === "") {
@@ -180,7 +186,7 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
       execute: async (
         _toolCallId,
         params,
-      ): Promise<AgentToolResult<{ messageId: string; channel_id: string } | { error: string }>> => {
+      ): Promise<AgentToolResult<OwnMessageMutationDetails | { error: string }>> => {
         const p = params as DeleteOwnMessageInput;
         const auth = await authorizeOwnMessageOperation(deps, {
           messageId: p.message_id,
@@ -203,15 +209,29 @@ export function createOwnMessageTools(deps: OwnMessageToolsDeps): AgentTool[] {
           };
         }
 
-        await deps.afterDelete({
-          messageId: auth.value.message.id,
-          guildId: auth.value.message.guildId,
-          channelId: auth.value.message.channelId,
-        });
+        let syncWarning: string | undefined;
+        try {
+          await deps.afterDelete({
+            messageId: auth.value.message.id,
+            guildId: auth.value.message.guildId,
+            channelId: auth.value.message.channelId,
+          });
+        } catch (err) {
+          syncWarning = err instanceof Error ? err.message : "Unknown error";
+        }
 
         return {
-          content: [{ type: "text", text: firstText("delete", auth.value.message.id) }],
-          details: { messageId: auth.value.message.id, channel_id: auth.value.channelId },
+          content: [{
+            type: "text",
+            text: syncWarning === undefined
+              ? firstText("delete", auth.value.message.id)
+              : `Deleted own message ${auth.value.message.id} from Discord, but local state cleanup failed: ${syncWarning}. The Discord message is already gone.`,
+          }],
+          details: {
+            messageId: auth.value.message.id,
+            channel_id: auth.value.channelId,
+            ...(syncWarning !== undefined ? { warning: syncWarning } : {}),
+          },
         };
       },
     },

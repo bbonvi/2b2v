@@ -4,6 +4,11 @@ import { MEMORY_KIND_SQL_VALUES } from "./memory-kinds";
 import { memoriesTableSql, memorySchemaHasCurrentChecks, stagedAssetsTableSql } from "./schema";
 
 type TableColumn = { name: string; type: string };
+type ForeignKey = {
+  table: string;
+  from: string;
+  on_delete: string;
+};
 
 const STRUCTURED_MEMORY_KIND_SQL = `CASE
   WHEN kind IN ('global_note', 'user_note') THEN 'note'
@@ -244,10 +249,23 @@ function createMessageSearchIndexes(raw: BunDatabase): void {
   );
 }
 
-/** Remove retired room ownership columns whose legacy NOT NULL constraint blocks current inserts. */
+function stagedAssetReferenceUsesSetNull(raw: BunDatabase): boolean {
+  const foreignKeys = raw.prepare("PRAGMA foreign_key_list(staged_assets)").all() as ForeignKey[];
+  return foreignKeys.some((foreignKey) =>
+    foreignKey.table === "message_assets"
+    && foreignKey.from === "permanent_asset_id"
+    && foreignKey.on_delete.toUpperCase() === "SET NULL"
+  );
+}
+
+/** Rebuild legacy staged assets without retired columns or blocking asset references. */
 function migrateStagedAssets(raw: BunDatabase): void {
   const columns = tableColumns(raw, "staged_assets");
-  if (!hasColumn(columns, "owner_room_kind") && !hasColumn(columns, "dismissed_at")) {
+  if (
+    !hasColumn(columns, "owner_room_kind")
+    && !hasColumn(columns, "dismissed_at")
+    && stagedAssetReferenceUsesSetNull(raw)
+  ) {
     createStagedAssetIndexes(raw);
     return;
   }
