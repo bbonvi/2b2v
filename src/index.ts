@@ -11,6 +11,7 @@ import { registerInteractionRuntime } from "./discord/interaction-runtime";
 import { translateInbound, translateOutbound, buildDisplayNameContext, type InboundResolvers, type OutboundResolvers } from "./discord/translation";
 import { splitMessage } from "./discord/split-message";
 import { EmojiCache, buildEmojiContext, type EmojiEntry } from "./discord/emoji-cache";
+import { guildEmojiEntries, registerEmojiCacheSync, syncGuildEmojiCache } from "./discord/emoji-cache-sync";
 import { appendStickerTags, messageDisplayContent } from "./discord/message-media";
 import { assetsFromDiscordMessage } from "./discord/message-assets";
 import { botChannelPermissions, channelDisplayName, channelTypeLabel, createDiscordMessageSender, createTargetChannelResolver, createTypingController, fetchAccessibleGuildChannel as fetchAccessibleDiscordGuildChannel, isSendableGuildChannel, type SendableGuildChannel } from "./discord/message-sender";
@@ -1049,6 +1050,7 @@ function defaultPersonaModeForMaintenance(): {
 // --- 9. Emoji cache ---
 const emojiCache = new EmojiCache();
 const EMOJI_TTL_MS = 10 * 60 * 1000; // 10 minutes
+registerEmojiCacheSync(client, emojiCache);
 
 // --- 9b. TTS client (optional) ---
 let ttsClient: ElevenLabsClient | undefined;
@@ -2105,22 +2107,14 @@ async function resolveGuildMemberReference(guild: Guild, reference: string): Pro
 }
 
 // --- 18. Refresh emoji cache for a guild ---
-function mapGuildEmojis(guild: Guild): EmojiEntry[] {
-  return guild.emojis.cache.map((e) => ({
-    name: e.name,
-    id: e.id,
-    animated: e.animated,
-  }));
-}
-
 function refreshEmojiCache(guild: Guild): void {
   if (!emojiCache.isStale(guild.id, EMOJI_TTL_MS)) return;
-  emojiCache.set(guild.id, mapGuildEmojis(guild));
+  syncGuildEmojiCache(emojiCache, guild);
 }
 
 async function fetchEmojiCache(guild: Guild): Promise<EmojiEntry[]> {
   await guild.emojis.fetch();
-  const emojis = mapGuildEmojis(guild);
+  const emojis = guildEmojiEntries(guild);
   emojiCache.set(guild.id, emojis);
   return emojis;
 }
