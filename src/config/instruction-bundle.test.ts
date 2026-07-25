@@ -10,20 +10,46 @@ const TEST_DIR = join(TEST_ROOT, "test", "instructions");
 const PROFILE_INSTRUCTIONS_DIR = TEST_DIR;
 
 function setup(): void {
-  mkdirSync(join(TEST_ROOT, "shared", "instructions"), { recursive: true });
-  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "system"), { recursive: true });
-  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "core", "nested"), { recursive: true });
-  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "runtime", "reply", "tools"), { recursive: true });
-  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "runtime", "memory", "context"), { recursive: true });
-  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "runtime", "tools"), { recursive: true });
-  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "runtime", "tool-parameters", "web_search"), { recursive: true });
-  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "runtime", "context"), { recursive: true });
-  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "runtime", "image-reading", "fallback-system"), { recursive: true });
-  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "runtime", "ambient-attention", "evaluator", "shared"), { recursive: true });
-  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "runtime", "ambient-attention", "evaluator", "ambient-pickup"), { recursive: true });
-  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "runtime", "ambient-attention", "evaluator", "lingering-attention"), { recursive: true });
-  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "runtime", "ambient-attention", "evaluator", "follow-up"), { recursive: true });
-  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "runtime", "ambient-initiative", "evaluator", "generic"), { recursive: true });
+  const shared = join(TEST_ROOT, "shared", "instructions");
+  const requiredFiles: Record<string, string> = {
+    "core/00-system/00-top-level.md": "# Shared System\nshared system",
+    "core/10-persona/00-persona.md": "# Shared Persona\nshared persona",
+    "core/20-style/00-style.md": "# Shared Style\nshared style",
+    "core/30-runtime/00-core.md": "# Shared Runtime\nshared runtime",
+    "surfaces/text/execution-mode.md": "Visible execution.",
+    "surfaces/text/final-action/00-core.md": "# Final Action\nact",
+    "surfaces/scheduled-task/execution-mode.md": "Scheduled execution.",
+    "surfaces/event-watch/execution-mode.md": "Watch execution.",
+    "surfaces/ambient-initiative/opportunity.md": "Initiative opportunity.",
+    "passes/memory/execution-mode.md": "Memory execution.",
+    "passes/memory/decision.md": "Memory decision.",
+    "passes/memory/ambient-review.md": "Memory ambient review.",
+    "passes/relationships/execution-mode.md": "Relationship execution.",
+    "passes/relationships/context/00-policy.md": "Relationship context.",
+    "passes/inner-threads/execution-mode.md": "Inner-thread execution.",
+    "passes/inner-threads/decision.md": "Inner-thread decision.",
+    "passes/semantic-maintenance/execution-mode.md": "Semantic execution.",
+    "passes/image-reading/fallback-system/00-system.md": "Describe images.",
+    "passes/ambient-attention/evaluator/shared/00-policy.md": "Ambient attention shared policy.",
+    "passes/ambient-attention/evaluator/ambient-pickup/00-policy.md": "Ambient pickup policy.",
+    "passes/ambient-attention/evaluator/lingering-attention/00-policy.md": "Lingering attention policy.",
+    "passes/ambient-attention/evaluator/follow-up/00-policy.md": "Follow-up policy.",
+    "passes/ambient-initiative/evaluator/generic/00-policy.md": "Initiative wake evaluator.",
+  };
+  for (const [relativePath, text] of Object.entries(requiredFiles)) {
+    const path = join(shared, relativePath);
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, text);
+  }
+
+  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "core", "00-system"), { recursive: true });
+  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "core", "10-persona", "nested"), { recursive: true });
+  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "core", "20-style"), { recursive: true });
+  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "core", "30-runtime", "tools"), { recursive: true });
+  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "context"), { recursive: true });
+  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "passes", "relationships"), { recursive: true });
+  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "tools", "descriptions"), { recursive: true });
+  mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "tools", "parameters", "web_search"), { recursive: true });
   mkdirSync(join(PROFILE_INSTRUCTIONS_DIR, "skills", "image_generation"), { recursive: true });
 }
 
@@ -47,25 +73,19 @@ describe("loadInstructionBundle", () => {
   afterEach(teardown);
 
   test("loads core instruction markdown deterministically before runtime instructions", () => {
-    writeFileSync(join(TEST_DIR, "system", "00-top-level.md"), "<!-- hidden heading -->\n# Top Level\ntop");
-    writeFileSync(join(TEST_DIR, "core", "10-style.md"), "# Style\nstyle");
-    writeFileSync(join(TEST_DIR, "core", "nested", "05-additional-instructions.md"), "extra");
-    writeFileSync(join(TEST_DIR, "core", "00-persona.md"), "# Persona\npersona");
+    writeFileSync(join(TEST_DIR, "core", "00-system", "00-top-level.md"), "<!-- hidden heading -->\n# Top Level\ntop");
+    writeFileSync(join(TEST_DIR, "core", "20-style", "00-style.md"), "# Style\nstyle");
+    writeFileSync(join(TEST_DIR, "core", "10-persona", "nested", "05-additional-instructions.md"), "extra");
+    writeFileSync(join(TEST_DIR, "core", "10-persona", "00-persona.md"), "# Persona\npersona");
     writeFileSync(join(TEST_DIR, "ignored-root.md"), "# Ignored\nignored");
-    writeFileSync(join(TEST_DIR, "runtime", "reply", "20-image.md"), "# Image Runtime\nimage");
-    writeFileSync(join(TEST_DIR, "runtime", "reply", "10-core.md"), "# Core Runtime\ncore");
-    writeFileSync(join(TEST_DIR, "runtime", "reply", "tools", "search.md"), "# Search Runtime\nsearch");
-    writeFileSync(join(TEST_DIR, "runtime", "memory", "context", "current.md"), "Memory context.");
-    writeFileSync(join(TEST_DIR, "runtime", "tools", "web_search.md"), "Search <!-- hidden\nruntime policy -->with {{provider}}.");
-    writeFileSync(join(TEST_DIR, "runtime", "tool-parameters", "web_search", "query.md"), "Query for {{provider}}.");
-    writeFileSync(join(TEST_DIR, "runtime", "context", "active-image-jobs.md"), "Active jobs.");
-    writeFileSync(join(TEST_DIR, "runtime", "context", "relationship-pass-decision.md"), "Relationship decision.");
-    writeFileSync(join(TEST_DIR, "runtime", "image-reading", "fallback-system", "00-system.md"), "Describe images.");
-    writeFileSync(join(TEST_DIR, "runtime", "ambient-attention", "evaluator", "shared", "00-policy.md"), "Ambient attention shared policy.");
-    writeFileSync(join(TEST_DIR, "runtime", "ambient-attention", "evaluator", "ambient-pickup", "00-policy.md"), "Ambient pickup policy.");
-    writeFileSync(join(TEST_DIR, "runtime", "ambient-attention", "evaluator", "lingering-attention", "00-policy.md"), "Lingering attention policy.");
-    writeFileSync(join(TEST_DIR, "runtime", "ambient-attention", "evaluator", "follow-up", "00-policy.md"), "Follow-up policy.");
-    writeFileSync(join(TEST_DIR, "runtime", "ambient-initiative", "evaluator", "generic", "00-policy.md"), "Initiative wake evaluator.");
+    writeFileSync(join(TEST_DIR, "core", "30-runtime", "20-image.md"), "# Image Runtime\nimage");
+    writeFileSync(join(TEST_DIR, "core", "30-runtime", "10-core.md"), "# Core Runtime\ncore");
+    writeFileSync(join(TEST_DIR, "core", "30-runtime", "tools", "search.md"), "# Search Runtime\nsearch");
+    writeFileSync(join(TEST_DIR, "context", "memory.md"), "Memory context.");
+    writeFileSync(join(TEST_DIR, "tools", "descriptions", "web_search.md"), "Search <!-- hidden\nruntime policy -->with {{provider}}.");
+    writeFileSync(join(TEST_DIR, "tools", "parameters", "web_search", "query.md"), "Query for {{provider}}.");
+    writeFileSync(join(TEST_DIR, "context", "active-image-jobs.md"), "Active jobs.");
+    writeFileSync(join(TEST_DIR, "passes", "relationships", "decision.md"), "Relationship decision.");
     writeFileSync(join(TEST_DIR, "skills", "image_generation", "skill.yaml"), [
       "id: image_generation",
       "title: Image Generation",
@@ -87,13 +107,13 @@ describe("loadInstructionBundle", () => {
     expect(bundle.systemPrompt).not.toContain("hidden heading");
     const sourceNames = bundle.coreDocuments.map((doc) => {
       if (doc.source.endsWith("00-persona.md")) return "persona";
-      if (doc.source.endsWith("10-style.md")) return "style";
+      if (doc.source.endsWith("00-style.md")) return "style";
       return "additional";
     });
     expect(sourceNames).toEqual([
       "persona",
-      "style",
       "additional",
+      "style",
     ]);
     expect(bundle.corePrompt).not.toContain("prompt-source");
     expect(bundle.corePrompt).not.toContain("# Top Level");
@@ -102,7 +122,7 @@ describe("loadInstructionBundle", () => {
     expect(bundle.corePrompt).not.toContain("# Ignored");
     expect(bundle.runtime.reply.indexOf("# Core Runtime")).toBeLessThan(bundle.runtime.reply.indexOf("# Image Runtime"));
     expect(bundle.runtime.reply.indexOf("# Image Runtime")).toBeLessThan(bundle.runtime.reply.indexOf("# Search Runtime"));
-    expect(bundle.runtime.memoryContextTemplates.current).toBe("Memory context.");
+    expect(bundle.runtime.contextTemplates.memory).toBe("Memory context.");
     expect(bundle.runtime.toolDescriptions.web_search).toBe("Search with {{provider}}.");
     expect(bundle.runtime.toolParameterDescriptions["web_search/query"]).toBe("Query for {{provider}}.");
     expect(bundle.runtime.contextTemplates["active-image-jobs"]).toBe("Active jobs.");
@@ -129,21 +149,17 @@ describe("loadInstructionBundle", () => {
   test("layers shared instructions with profile overrides", () => {
     const shared = join(TEST_ROOT, "shared", "instructions");
     const persona = join(TEST_ROOT, "delamain", "instructions");
-    mkdirSync(join(shared, "system"), { recursive: true });
-    mkdirSync(join(shared, "runtime", "reply"), { recursive: true });
-    mkdirSync(join(shared, "runtime", "tools"), { recursive: true });
-    mkdirSync(join(shared, "runtime", "tool-parameters", "record_memory"), { recursive: true });
+    mkdirSync(join(shared, "tools", "descriptions"), { recursive: true });
+    mkdirSync(join(shared, "tools", "parameters", "record_memory"), { recursive: true });
     mkdirSync(join(shared, "skills", "image_generation"), { recursive: true });
-    mkdirSync(join(persona, "core"), { recursive: true });
-    mkdirSync(join(persona, "runtime", "reply"), { recursive: true });
-    mkdirSync(join(persona, "runtime", "tools"), { recursive: true });
-    mkdirSync(join(persona, "runtime", "tool-parameters", "record_memory"), { recursive: true });
+    mkdirSync(join(persona, "core", "10-persona"), { recursive: true });
+    mkdirSync(join(persona, "core", "30-runtime"), { recursive: true });
+    mkdirSync(join(persona, "tools", "descriptions"), { recursive: true });
+    mkdirSync(join(persona, "tools", "parameters", "record_memory"), { recursive: true });
     mkdirSync(join(persona, "skills", "image_generation"), { recursive: true });
 
-    writeFileSync(join(shared, "system", "00-base.md"), "# Shared System\nshared");
-    writeFileSync(join(shared, "runtime", "reply", "00-core.md"), "# Shared Reply\nshared reply");
-    writeFileSync(join(shared, "runtime", "tools", "web_search.md"), "Shared search.");
-    writeFileSync(join(shared, "runtime", "tool-parameters", "record_memory", "actions.md"), "Shared memory actions.");
+    writeFileSync(join(shared, "tools", "descriptions", "web_search.md"), "Shared search.");
+    writeFileSync(join(shared, "tools", "parameters", "record_memory", "actions.md"), "Shared memory actions.");
     writeFileSync(join(shared, "skills", "image_generation", "skill.yaml"), [
       "id: image_generation",
       "title: Shared Image",
@@ -153,10 +169,10 @@ describe("loadInstructionBundle", () => {
     ].join("\n"));
     writeFileSync(join(shared, "skills", "image_generation", "00-runtime.md"), "shared skill");
 
-    writeFileSync(join(persona, "core", "00-persona.md"), "# Delamain\npersona");
-    writeFileSync(join(persona, "runtime", "reply", "00-core.md"), "# Persona Reply\npersona reply");
-    writeFileSync(join(persona, "runtime", "tools", "web_search.md"), "Persona search.");
-    writeFileSync(join(persona, "runtime", "tool-parameters", "record_memory", "actions.md"), "Persona memory actions.");
+    writeFileSync(join(persona, "core", "10-persona", "00-persona.md"), "# Delamain\npersona");
+    writeFileSync(join(persona, "core", "30-runtime", "00-core.md"), "# Persona Reply\npersona reply");
+    writeFileSync(join(persona, "tools", "descriptions", "web_search.md"), "Persona search.");
+    writeFileSync(join(persona, "tools", "parameters", "record_memory", "actions.md"), "Persona memory actions.");
     writeFileSync(join(persona, "skills", "image_generation", "skill.yaml"), [
       "id: image_generation",
       "title: Persona Image",

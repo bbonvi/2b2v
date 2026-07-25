@@ -1814,6 +1814,7 @@
   <div class="tabs">
     <button class="tab-btn active" id="tab-logs">Logs</button>
     <button class="tab-btn" id="tab-management">Management</button>
+    <button class="tab-btn" id="tab-prompts">Prompts</button>
     <button class="tab-btn" id="tab-memories">Memories</button>
     <button class="tab-btn" id="tab-inner-threads">Inner Threads</button>
     <button class="tab-btn" id="tab-relationships">Relationship Lab</button>
@@ -1939,6 +1940,10 @@
   <div id="memories-tab-root"></div>
 </div>
 
+<div class="content" id="prompts-view" hidden>
+  <div id="prompts-tab-root"></div>
+</div>
+
 <div class="content" id="inner-threads-view" hidden>
   <div class="management-toolbar">
     <select id="it-guild"><option value="">All guild scopes</option></select>
@@ -1997,6 +2002,7 @@
   const modePresentationValue = document.getElementById('mode-presentation-value');
   const tabLogs = document.getElementById('tab-logs');
   const tabManagement = document.getElementById('tab-management');
+  const tabPrompts = document.getElementById('tab-prompts');
   const tabMemories = document.getElementById('tab-memories');
   const tabInnerThreads = document.getElementById('tab-inner-threads');
   const tabRelationship = document.getElementById('tab-relationships');
@@ -2004,6 +2010,7 @@
   const logFilters = document.getElementById('log-filters');
   const logView = document.getElementById('log-view');
   const managementView = document.getElementById('management-view');
+  const promptsView = document.getElementById('prompts-view');
   const memoriesView = document.getElementById('memories-view');
   const innerThreadsView = document.getElementById('inner-threads-view');
   const relationshipsView = document.getElementById('relationships-view');
@@ -2039,7 +2046,7 @@
   const itCount = document.getElementById('it-count');
   const itList = document.getElementById('it-list');
   const itAssets = document.getElementById('it-assets');
-  let activeTab = location.hash === '#management' ? 'management' : location.hash === '#memories' ? 'memories' : location.hash === '#inner-threads' ? 'inner-threads' : location.hash === '#relationships' ? 'relationships' : location.hash === '#voice' ? 'voice' : 'logs';
+  let activeTab = location.hash === '#management' ? 'management' : location.hash === '#prompts' ? 'prompts' : location.hash === '#memories' ? 'memories' : location.hash === '#inner-threads' ? 'inner-threads' : location.hash === '#relationships' ? 'relationships' : location.hash === '#voice' ? 'voice' : 'logs';
   modeRail.style.display = activeTab === 'logs' ? '' : 'none';
   let managementDirectory = { guilds: [], channels: [], users: [] };
   let managementMessages = [];
@@ -2962,19 +2969,21 @@
     activeTab = tab;
     tabLogs.classList.toggle('active', tab === 'logs');
     tabManagement.classList.toggle('active', tab === 'management');
+    tabPrompts.classList.toggle('active', tab === 'prompts');
     tabMemories.classList.toggle('active', tab === 'memories');
     tabInnerThreads.classList.toggle('active', tab === 'inner-threads');
     tabRelationship.classList.toggle('active', tab === 'relationships');
     tabVoice.classList.toggle('active', tab === 'voice');
     logView.hidden = tab !== 'logs';
     managementView.hidden = tab !== 'management';
+    promptsView.hidden = tab !== 'prompts';
     memoriesView.hidden = tab !== 'memories';
     innerThreadsView.hidden = tab !== 'inner-threads';
     relationshipsView.hidden = tab !== 'relationships';
     voiceView.hidden = tab !== 'voice';
     modeRail.style.display = tab === 'logs' ? '' : 'none';
     logFilters.style.display = tab === 'logs' ? 'flex' : 'none';
-    location.hash = tab === 'management' ? 'management' : tab === 'memories' ? 'memories' : tab === 'inner-threads' ? 'inner-threads' : tab === 'relationships' ? 'relationships' : tab === 'voice' ? 'voice' : 'logs';
+    location.hash = tab === 'management' ? 'management' : tab === 'prompts' ? 'prompts' : tab === 'memories' ? 'memories' : tab === 'inner-threads' ? 'inner-threads' : tab === 'relationships' ? 'relationships' : tab === 'voice' ? 'voice' : 'logs';
     if (tab === 'management') {
       refreshManagement();
       if (logPollingActive && managementPollTimer === null) pollManagement();
@@ -3695,6 +3704,7 @@
   fUser.addEventListener('change', () => { refreshLogs(); });
   tabLogs.addEventListener('click', () => { setTab('logs'); });
   tabManagement.addEventListener('click', () => { setTab('management'); });
+  tabPrompts.addEventListener('click', () => { setTab('prompts'); });
   tabMemories.addEventListener('click', () => { setTab('memories'); });
   tabInnerThreads.addEventListener('click', () => { setTab('inner-threads'); });
   tabRelationship.addEventListener('click', () => { setTab('relationships'); });
@@ -3943,6 +3953,7 @@
 </script>
 <script type="module" src="/assets/relationships-lab.js"></script>
 <script type="module" src="/assets/memories-tab.js"></script>
+<script type="module" src="/assets/prompts-tab.js"></script>
 <script type="module" src="/assets/voice-tab.js"></script>
 </body>
 </html>

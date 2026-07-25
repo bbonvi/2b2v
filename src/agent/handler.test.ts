@@ -24,7 +24,6 @@ const TEST_RUNTIME_PROMPTS = {
     "visible-reply-execution-mode": "## Execution Mode: Visible Reply\nPersona-specific visible mode.",
     "scheduled-task-execution-mode": "## Scheduled Task Context\nPersona-specific scheduled mode.",
   },
-  memoryContextTemplates: {},
   imageDescriptionSystemPrompt: [
     "Describe images for another Discord chat model.",
     "Mention visible race/ethnicity/skin tone only when relevant.",

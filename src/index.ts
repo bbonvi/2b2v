@@ -158,6 +158,7 @@ import { voiceTestCommandDefinition } from "./commands/voice-test.ts";
 import { createVpnClient, type VpnClient } from "./vpn/api-client";
 import { createSessionStore, type SessionStore } from "./vpn/session";
 import { loadInstructionBundle, type PromptBundle } from "./config/instruction-bundle";
+import { inspectPromptScenario, type PromptScenarioId } from "./config/prompt-inspector";
 import { requireProfileConfigPath } from "./config/profile";
 import { renderPromptTemplate } from "./config/prompt-template";
 import { resolveReactionEmojiInput } from "./discord/reaction-emoji";
@@ -2494,7 +2495,7 @@ async function runMemoryPostReplyExtraction(input: {
     currentUserId: input.memoryRequest.context.memoryFocusUserId ?? input.currentUserId,
     visibleUserIds: input.memoryRequest.context.visibleUserIds ?? [],
     resolveUserId: (userId) => resolvePromptUsername(input.guild, userId),
-    contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
+    contextInstruction: promptBundle.runtime.contextTemplates["memory-other-visible-users"],
   });
   try {
     await runSilentMemoryAgentPass({
@@ -3022,7 +3023,7 @@ async function buildContext(
         notableUserIds: notable.slice(0, 3).map((entry) => entry.profile.userId),
         limit: guildConfig.memoryContext?.maxRows ?? 80,
         resolveUserId: (userId) => resolvePromptUsername(guild, userId),
-        contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
+        contextInstruction: promptBundle.runtime.contextTemplates.memory,
       })
     : buildMemoryContext({
         db,
@@ -3032,7 +3033,7 @@ async function buildContext(
         relationshipAnchorUserIds: relationshipAnchors.map((entry) => entry.profile.userId),
         limit: guildConfig.memoryContext?.maxRows ?? 80,
         resolveUserId: (userId) => resolvePromptUsername(guild, userId),
-        contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
+        contextInstruction: promptBundle.runtime.contextTemplates.memory,
       });
 
   const pendingSchedules = listUpcomingForContext(db, guildId, channelId);
@@ -3390,7 +3391,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       currentUserId: lastMessage.authorId,
       visibleUserIds,
       resolveUserId: (userId) => resolvePromptUsername(guild, userId),
-      contextInstruction: promptBundle.runtime.memoryContextTemplates["other-visible-users"],
+      contextInstruction: promptBundle.runtime.contextTemplates["memory-other-visible-users"],
     });
     const currentUserMemories = buildMemoryContext({
       db,
@@ -3398,7 +3399,7 @@ async function maybeRunAmbientMemoryExtraction(message: Message, guildConfig: Gu
       currentUserId: lastMessage.authorId,
       limit: guildConfig.memoryContext?.maxRows ?? 80,
       resolveUserId: (userId) => resolvePromptUsername(guild, userId),
-      contextInstruction: promptBundle.runtime.memoryContextTemplates.current,
+      contextInstruction: promptBundle.runtime.contextTemplates.memory,
     });
     const maintenance = buildMemoryMaintenanceContext({
       db,
@@ -5645,6 +5646,22 @@ const dashboardManagement = {
   editMessage: dashboardManagementRuntime.editMessage,
   deleteMessages: dashboardManagementRuntime.deleteMessages,
   deleteLatestMessages: dashboardManagementRuntime.deleteLatestMessages,
+  inspectPrompts: (input: {
+    scenario: PromptScenarioId;
+    provider: "openai-codex" | "openrouter";
+    guildId?: string;
+  }) => {
+    const guildConfig = input.guildId !== undefined
+      ? getGuildConfig(input.guildId)
+      : resolveGuildConfig(globalConfig, { guildId: "dashboard", slug: "dashboard" });
+    return inspectPromptScenario({
+      bundle: promptBundle,
+      profile,
+      scenario: input.scenario,
+      provider: input.provider,
+      transport: guildConfig.promptTransport,
+    });
+  },
   runPromptLab,
   runPromptLabAmbientInitiative: ambientRuntime.runPromptLabAmbientInitiative,
   runPromptLabPrivateLife: (input: {

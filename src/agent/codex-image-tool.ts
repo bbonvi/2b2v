@@ -10,6 +10,7 @@ import type { ImageGenerationQuality } from "../config/types.ts";
 import { renderPromptTemplate, type PromptTemplateVariables } from "../config/prompt-template.ts";
 import { imageExtensionForMime, imageMimeFromBuffer } from "./image-buffer.ts";
 import { AssetRefSchema, parseAssetRef, type AssetRef } from "./asset-id.ts";
+import { CODEX_IMAGE_GENERATION_INSTRUCTIONS } from "./codex-image-prompts.ts";
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_IMAGES_GENERATIONS_URL = "https://chatgpt.com/backend-api/codex/images/generations";
@@ -376,7 +377,7 @@ export function buildCodexImageRequestBody(input: {
     model: input.model,
     store: false,
     stream: true,
-    instructions: "You are an image generation assistant.",
+    instructions: CODEX_IMAGE_GENERATION_INSTRUCTIONS,
     input: [{
       role: "user",
       content,

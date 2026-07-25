@@ -288,3 +288,17 @@ describe("dashboard memory workspace", () => {
     expect(island).toContain('type="checkbox" checked={draft.important}');
   });
 });
+
+describe("dashboard prompt inspector", () => {
+  test("mounts the prompt inspector as its own dashboard island", () => {
+    const html = readFileSync("src/dashboard/index.html", "utf8");
+    const island = readFileSync("src/dashboard/prompts-tab.tsx", "utf8");
+
+    expect(html).toContain('id="tab-prompts"');
+    expect(html).toContain('id="prompts-tab-root"');
+    expect(html).toContain('src="/assets/prompts-tab.js"');
+    expect(island).toContain("Effective instruction inspector");
+    expect(island).toContain("/api/management/prompts");
+    expect(island).toContain("Dynamic sections");
+  });
+});

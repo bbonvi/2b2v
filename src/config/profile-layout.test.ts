@@ -26,8 +26,10 @@ describe("repository profile layout", () => {
 
     for (const profile of ["2b", "delamain"]) {
       expect(existsSync(join(PROFILES_DIR, profile, "config.yaml"))).toBe(true);
-      expect(existsSync(join(PROFILES_DIR, profile, "instructions", "system"))).toBe(true);
-      expect(existsSync(join(PROFILES_DIR, profile, "instructions", "core"))).toBe(true);
+      expect(existsSync(join(PROFILES_DIR, profile, "instructions", "core", "00-system"))).toBe(true);
+      expect(existsSync(join(PROFILES_DIR, profile, "instructions", "core", "10-persona"))).toBe(true);
+      expect(existsSync(join(PROFILES_DIR, profile, "instructions", "core", "20-style"))).toBe(true);
+      expect(existsSync(join(PROFILES_DIR, profile, "instructions", "core", "30-runtime"))).toBe(true);
     }
     expect(() => requireProfileConfigPath(PROFILES_DIR, "shared")).toThrow("config not found");
   });
@@ -113,7 +115,7 @@ describe("repository profile layout", () => {
   });
 
   test("loads shared bot conversation policy for every profile", () => {
-    const policyPath = join(PROFILES_DIR, "shared", "instructions", "runtime", "reply", "05-bot-conversations.md");
+    const policyPath = join(PROFILES_DIR, "shared", "instructions", "core", "30-runtime", "05-bot-conversations.md");
     const policy = readFileSync(policyPath, "utf-8").trim();
 
     for (const profile of ["2b", "delamain"]) {

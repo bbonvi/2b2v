@@ -1,6 +1,8 @@
 import { requestLogStore } from "./store";
 import type { Logger } from "../logger";
 import { isMemoryKind } from "../db/memory-repository";
+import { isPromptScenarioId } from "../config/prompt-inspector";
+import type { PromptScenarioId } from "../config/prompt-inspector";
 import dashboard from "./index.html";
 import type {
   ManagementDirectory,
@@ -33,6 +35,11 @@ interface DashboardManagementApi {
   editMessage: (input: { messageId: string; guildId: string; channelId: string; content: string }) => AwaitableDashboardManagementResult;
   deleteMessages: (input: { messageIds: string[]; guildId: string; channelId: string; deleteDiscord?: boolean }) => AwaitableDashboardManagementResult;
   deleteLatestMessages: (input: { guildId: string; channelId: string; count: number; deleteDiscord?: boolean }) => AwaitableDashboardManagementResult;
+  inspectPrompts: (input: {
+    scenario: PromptScenarioId;
+    provider: "openai-codex" | "openrouter";
+    guildId?: string;
+  }) => AwaitableDashboardManagementResult;
   runPromptLab: (input: {
     guildId: string;
     channelId: string;
@@ -458,6 +465,25 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
         if (denied !== null) return denied;
         if (management === undefined) return json({ error: "Management API is disabled" }, 404);
         return json(await management.getDirectory());
+      },
+
+      "/api/management/prompts": async (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+        const url = new URL(req.url);
+        const scenario = url.searchParams.get("scenario") ?? "discord";
+        const provider = url.searchParams.get("provider") ?? "openai-codex";
+        const guildId = optionalStringParam(url, "guildId");
+        if (!isPromptScenarioId(scenario)) return json({ error: `Unknown prompt scenario: ${scenario}` }, 400);
+        if (provider !== "openai-codex" && provider !== "openrouter") {
+          return json({ error: `Unknown provider: ${provider}` }, 400);
+        }
+        return json(await management.inspectPrompts({
+          scenario,
+          provider,
+          ...(guildId !== undefined ? { guildId } : {}),
+        }));
       },
 
       "/api/management/messages": async (req) => {
@@ -905,6 +931,12 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
         const denied = requireAuth(req);
         if (denied !== null) return denied;
         return dashboardAssetResponse("./memories-tab.tsx", "Memories tab");
+      },
+
+      "/assets/prompts-tab.js": async (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        return dashboardAssetResponse("./prompts-tab.tsx", "Prompts tab");
       },
 
       "/": {

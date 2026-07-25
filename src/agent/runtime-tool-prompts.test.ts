@@ -15,7 +15,6 @@ function runtimePrompts(): RuntimePromptBundle {
       "demo_tool/query": "External query description for {{name}}.",
     },
     contextTemplates: {},
-    memoryContextTemplates: {},
     imageDescriptionSystemPrompt: "",
     ambientAttentionEvaluator: {
       shared: "",

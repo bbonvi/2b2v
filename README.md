@@ -74,6 +74,24 @@ Each profile owns its configuration, guild overrides, and persona-specific instr
 - `profiles/delamain/config.yaml` and `profiles/delamain/instructions/`
 - `profiles/shared/instructions/`
 
+Instruction files use the same semantic layout in shared and profile roots:
+
+- `core/` — stable system, persona, style, and default actor runtime
+- `surfaces/` — call-specific actor modes such as text, scheduled tasks, event watches, private life, and voice
+- `passes/` — maintenance, evaluator, and fallback model calls
+- `context/` — flat templates rendered into dynamic model context
+- `tools/` — tool and parameter descriptions
+- `skills/` — manifest-backed instruction packs loaded on demand
+
+Profile files override shared files with the same path. To inspect the exact effective sources, override chain, transport placement, and assembled static prompt for any call surface, use the dashboard **Prompts** tab or the CLI:
+
+```bash
+bun run prompt:inspect -- --list
+bun run prompt:inspect -- --surface event-watch --format tree
+bun run prompt:inspect -- --surface voice-actor --provider openrouter --format assembled
+bun run prompt:inspect -- --surface scheduled-task --guild <GUILD_ID> --format json
+```
+
 Select the complete profile with one environment variable:
 
 ```bash
