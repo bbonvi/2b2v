@@ -55,7 +55,13 @@ describe("buildCodexContext", () => {
             function: { name: "lookup", arguments: "{\"query\":\"x\"}" },
           }],
         },
-        { role: "tool", tool_call_id: "call-1", name: "lookup", content: "tool result" },
+        {
+          role: "tool",
+          tool_call_id: "call-1",
+          name: "lookup",
+          content: "tool result",
+          addedToolNames: ["fetch_url"],
+        },
       ],
       tools: [{
         type: "function",
@@ -93,6 +99,7 @@ describe("buildCodexContext", () => {
       toolCallId: "call-1",
       toolName: "lookup",
       content: [{ type: "text", text: "tool result" }],
+      addedToolNames: ["fetch_url"],
     });
   });
 

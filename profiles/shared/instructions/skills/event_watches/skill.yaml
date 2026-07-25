@@ -1,6 +1,6 @@
 id: event_watches
 title: Event Watches
-description: Required for create_event_watch; defines event filters, time gates, rolling counts, execution scope, and privacy.
+description: Use for requested or self-chosen reactions to future Discord message, presence, voice, member, or reaction events; defines filters, lifecycle, and privacy.
 required_for_tools:
   - create_event_watch
 instructions:

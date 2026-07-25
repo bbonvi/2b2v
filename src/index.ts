@@ -81,9 +81,10 @@ import { createReactToMessageTool } from "./agent/react-to-message-tool";
 import { createDiceRollTool, type DiceRollDelivery } from "./agent/dice-roll-tool";
 import { applyRuntimeToolPrompts, type ToolPromptVariables } from "./agent/runtime-tool-prompts";
 import {
-  isToolAllowedInMaintenance,
+  isReadOnlyTool,
   type MaintenanceWriteToolName,
 } from "./agent/tool-effects.ts";
+import { createSearchToolsTool } from "./agent/tool-catalog.ts";
 import {
   commitStagedMaintenanceCalls,
   SemanticMaintenanceCoordinator,
@@ -2308,30 +2309,34 @@ function toolsForMaintenancePass(
   visibleTools: AgentTool[] | undefined,
   maintenanceTools: AgentTool[],
   allowedWriteNames: MaintenanceWriteToolName | ReadonlySet<MaintenanceWriteToolName>,
-  passLabel: string,
+  _passLabel: string,
 ): AgentTool[] {
-  const byName = new Map<string, AgentTool>();
+  const readOnlyByName = new Map<string, AgentTool>();
   for (const tool of visibleTools ?? []) {
-    if (!maintenanceToolNames.has(tool.name)) byName.set(tool.name, tool);
+    if (!maintenanceToolNames.has(tool.name) && isReadOnlyTool(tool)) {
+      readOnlyByName.set(tool.name, tool);
+    }
   }
-  for (const tool of applyRuntimeToolPrompts(maintenanceTools, promptBundle.runtime)) {
+  const allowedWriteTools = applyRuntimeToolPrompts(maintenanceTools, promptBundle.runtime)
+    .filter((tool) => typeof allowedWriteNames === "string"
+      ? tool.name === allowedWriteNames
+      : allowedWriteNames.has(tool.name as MaintenanceWriteToolName));
+  const readOnlyTools = [...readOnlyByName.values()];
+  const unpromptedSearchTool = createSearchToolsTool({
+    tools: readOnlyTools,
+    skills: promptBundle.runtime.skills,
+  });
+  const searchTool = applyRuntimeToolPrompts([unpromptedSearchTool], promptBundle.runtime)[0]
+    ?? unpromptedSearchTool;
+  const byName = new Map<string, AgentTool>();
+  byName.set(searchTool.name, searchTool);
+  for (const tool of allowedWriteTools) {
     byName.set(tool.name, tool);
   }
-  const allowedWriteLabel = typeof allowedWriteNames === "string"
-    ? allowedWriteNames
-    : [...allowedWriteNames].join(", ");
-  return [...byName.values()].map((tool) => isToolAllowedInMaintenance(tool, allowedWriteNames)
-    ? tool
-    : {
-        ...tool,
-        execute: (_toolCallId: string, _params: unknown): Promise<AgentToolResult<unknown>> => Promise.resolve({
-          content: [{
-            type: "text",
-            text: `Blocked: ${passLabel} may use read-only tools and ${allowedWriteLabel}, but ${tool.name} may change state.`,
-          }],
-          details: { blocked: true, pass: passLabel, allowedWriteTools: allowedWriteLabel, tool: tool.name },
-        }),
-      });
+  for (const tool of readOnlyTools) {
+    if (tool.name !== "search_tools") byName.set(tool.name, tool);
+  }
+  return [...byName.values()];
 }
 
 function promptLabMemoryDryRunTool(tool: AgentTool, dryRuns: Array<{ tool: string; args: unknown }> | undefined): AgentTool {
@@ -2421,8 +2426,8 @@ function createPostReplyMaintenanceTools(input: {
         dryRun: input.dryRun,
       })]
     : [];
-  // Visible turns receive blocked versions of these tools before maintenance
-  // reuses them. Prompt the shared schemas here so both requests remain cache-identical.
+  // The actor filters these maintenance-only tools before schema exposure; later
+  // maintenance passes reuse the prompted definitions.
   return applyRuntimeToolPrompts([
     promptLabMemoryDryRunTool(recordMemoryTool, input.dryRuns),
     recordRelationshipTool,

@@ -45,6 +45,8 @@ export interface OpenRouterMessage {
   tool_calls?: OpenRouterToolCall[];
   /** Internal provider-native assistant blocks for stateless continuation; never sent to OpenRouter. */
   providerNativeContent?: ProviderNativeAssistantContent[];
+  /** Tool definitions added after this result for native deferred loading; never sent to OpenRouter. */
+  addedToolNames?: string[];
 }
 
 export interface OpenRouterToolDefinition {

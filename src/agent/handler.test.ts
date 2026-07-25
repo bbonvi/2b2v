@@ -266,6 +266,8 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}): HandlerDeps {
     },
   });
 
+  const initialToolNames = overrides.initialToolNames
+    ?? overrides.extraTools?.map((tool) => tool.name);
   return {
     globalConfig: makeGlobalConfig(),
     guildConfig: makeGuildConfig(),
@@ -276,6 +278,7 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}): HandlerDeps {
     sender,
     completeChat,
     liveMessageTypingHoldMs: 0,
+    ...(initialToolNames !== undefined ? { initialToolNames } : {}),
     ...overrides,
   };
 }
@@ -1219,6 +1222,26 @@ describe("handleMessage", () => {
         return Promise.resolve({
           text: "I'll check, one sec.",
           toolCalls: [{
+            id: "call-discovery",
+            type: "function",
+            function: { name: "search_tools", arguments: "{\"query\":\"web search and fetch page\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      if (calls === 2) {
+        expect(request.tools?.map((tool) => tool.function.name)).toContain("web_search");
+        expect(request.tools?.map((tool) => tool.function.name)).toContain("fetch_url");
+        expect(request.messages.some((message) =>
+          message.role === "tool"
+          && message.name === "search_tools"
+          && message.addedToolNames?.includes("web_search") === true
+          && message.addedToolNames.includes("fetch_url")
+        )).toBe(true);
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
             id: "call-search",
             type: "function",
             function: { name: "web_search", arguments: "{\"query\":\"example\"}" },
@@ -1227,7 +1250,7 @@ describe("handleMessage", () => {
           messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
         });
       }
-      if (calls === 2) {
+      if (calls === 3) {
         expect(request.messages.some((m) =>
           m.role === "tool" && typeof m.content === "string" && m.content.includes("https://example.com/post"),
         )).toBe(true);
@@ -1264,6 +1287,7 @@ describe("handleMessage", () => {
       makeMessage({ mentionedUserIds: ["bot-1"] }),
       makeDeps({
         extraTools: [webSearch, fetchUrl],
+        initialToolNames: [],
         completeChat,
         sender,
         onStillWorking,
@@ -2882,7 +2906,7 @@ describe("handleMessage", () => {
     };
 
     let calls = 0;
-    const completeChat: ChatCompleteFn = () => {
+    const completeChat: ChatCompleteFn = (request) => {
       calls += 1;
       if (calls === 1) {
         return Promise.resolve({
@@ -2897,6 +2921,12 @@ describe("handleMessage", () => {
         });
       }
       if (calls === 2) {
+        expect(request.tools?.map((entry) => entry.function.name)).toContain("codex_generate_image");
+        expect(request.messages.some((message) =>
+          message.role === "tool"
+          && message.name === "load_skill"
+          && message.addedToolNames?.includes("codex_generate_image") === true
+        )).toBe(true);
         return Promise.resolve({
           text: "",
           toolCalls: [{
@@ -2926,6 +2956,7 @@ describe("handleMessage", () => {
       makeMessage({ mentionedUserIds: ["bot-1"] }),
       makeDeps({
         extraTools: [tool],
+        initialToolNames: [],
         completeChat,
         sender,
         consumeGeneratedAttachments: (ids) => ids.map((id) => ({
@@ -2947,7 +2978,159 @@ describe("handleMessage", () => {
     ]]);
   });
 
-  test("blocks codex_generate_image until image_generation skill is loaded", async () => {
+  test("does not execute a tool enabled earlier in the same model turn", async () => {
+    let executeCalls = 0;
+    const tool: AgentTool = {
+      name: "codex_generate_image",
+      label: "Codex Image",
+      description: "Generate image",
+      parameters: Type.Object({ prompt: Type.String() }),
+      execute: () => {
+        executeCalls += 1;
+        return Promise.resolve({
+          content: [{ type: "text", text: "Generated image queued." }],
+          details: {},
+        });
+      },
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls === 1) {
+        expect(request.tools?.some((entry) => entry.function.name === "codex_generate_image")).toBe(false);
+        return Promise.resolve({
+          text: "",
+          toolCalls: [
+            {
+              id: "call-load",
+              type: "function",
+              function: { name: "load_skill", arguments: "{\"skill\":\"image_generation\"}" },
+            },
+            {
+              id: "call-too-early",
+              type: "function",
+              function: { name: "codex_generate_image", arguments: "{\"prompt\":\"a blue house\"}" },
+            },
+          ],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      if (calls === 2) {
+        expect(executeCalls).toBe(0);
+        expect(request.tools?.some((entry) => entry.function.name === "codex_generate_image")).toBe(true);
+        expect(request.messages.some((message) =>
+          message.role === "tool"
+          && message.name === "codex_generate_image"
+          && typeof message.content === "string"
+          && message.content.includes("next model turn")
+        )).toBe(true);
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-image",
+            type: "function",
+            function: { name: "codex_generate_image", arguments: "{\"prompt\":\"a blue house\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      return Promise.resolve({
+        text: "done",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        initialToolNames: [],
+        completeChat,
+      }),
+    );
+
+    expect(result.responseText).toBe("done");
+    expect(executeCalls).toBe(1);
+    expect(calls).toBe(3);
+  });
+
+  test("does not execute a discovered tool in the discovery model turn", async () => {
+    let executeCalls = 0;
+    const tool: AgentTool = {
+      name: "fetch_url",
+      label: "Fetch URL",
+      description: "Fetch a webpage",
+      parameters: Type.Object({ url: Type.String() }),
+      execute: () => {
+        executeCalls += 1;
+        return Promise.resolve({ content: [{ type: "text", text: "page" }], details: {} });
+      },
+    };
+
+    let calls = 0;
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "",
+          toolCalls: [
+            {
+              id: "call-search-tools",
+              type: "function",
+              function: { name: "search_tools", arguments: "{\"query\":\"fetch webpage\"}" },
+            },
+            {
+              id: "call-too-early",
+              type: "function",
+              function: { name: "fetch_url", arguments: "{\"url\":\"https://example.com\"}" },
+            },
+          ],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      if (calls === 2) {
+        expect(executeCalls).toBe(0);
+        expect(request.tools?.some((entry) => entry.function.name === "fetch_url")).toBe(true);
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "call-fetch",
+            type: "function",
+            function: { name: "fetch_url", arguments: "{\"url\":\"https://example.com\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      return Promise.resolve({
+        text: "done",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        extraTools: [tool],
+        initialToolNames: [],
+        completeChat,
+      }),
+    );
+
+    expect(result.responseText).toBe("done");
+    expect(executeCalls).toBe(1);
+    expect(calls).toBe(3);
+  });
+
+  test("rejects an inactive skill-gated tool", async () => {
     let executeCalls = 0;
     const tool: AgentTool = {
       name: "codex_generate_image",
@@ -2964,7 +3147,7 @@ describe("handleMessage", () => {
     };
 
     let calls = 0;
-    let sawSkillError = false;
+    let sawInactiveError = false;
     const completeChat: ChatCompleteFn = (request) => {
       calls += 1;
       if (calls === 1) {
@@ -2979,11 +3162,11 @@ describe("handleMessage", () => {
           messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
         });
       }
-      sawSkillError = request.messages.some((message) =>
+      sawInactiveError = request.messages.some((message) =>
         message.role === "tool"
         && message.name === "codex_generate_image"
         && typeof message.content === "string"
-        && message.content.includes("requires the image_generation skill")
+        && message.content.includes("not active in this model turn")
       );
       return Promise.resolve({
         text: "ok",
@@ -2995,11 +3178,11 @@ describe("handleMessage", () => {
 
     const result = await handleMessage(
       makeMessage({ mentionedUserIds: ["bot-1"] }),
-      makeDeps({ extraTools: [tool], completeChat }),
+      makeDeps({ extraTools: [tool], initialToolNames: [], completeChat }),
     );
 
     expect(result.responseText).toBe("ok");
-    expect(sawSkillError).toBe(true);
+    expect(sawInactiveError).toBe(true);
     expect(executeCalls).toBe(0);
   });
 
@@ -3187,7 +3370,7 @@ describe("handleMessage", () => {
 
     const result = await handleMessage(
       makeMessage({ mentionedUserIds: ["bot-1"] }),
-      makeDeps({ extraTools: [fetchUrl], completeChat }),
+      makeDeps({ extraTools: [fetchUrl], completeChat, runtimePrompts: undefined }),
     );
 
     expect(result.responseText).toBe("parallel answer");
@@ -4040,7 +4223,7 @@ describe("handleMessage", () => {
 
     await handleMessage(
       makeMessage({ mentionedUserIds: ["bot-1"] }),
-      makeDeps({ extraTools: [closeTool], completeChat, sender }),
+      makeDeps({ extraTools: [closeTool], completeChat, sender, runtimePrompts: undefined }),
     );
 
     expect(senderCalls).toEqual([{ text: "closed", reply: false, channelId: undefined }]);
@@ -4083,7 +4266,13 @@ describe("handleMessage", () => {
 
     await handleMessage(
       makeMessage({ mentionedUserIds: ["bot-1"] }),
-      makeDeps({ extraTools: [closeTool], completeChat, sender, currentChannelId: "thread-1" }),
+      makeDeps({
+        extraTools: [closeTool],
+        completeChat,
+        sender,
+        currentChannelId: "thread-1",
+        runtimePrompts: undefined,
+      }),
     );
 
     expect(senderCalls).toEqual([]);

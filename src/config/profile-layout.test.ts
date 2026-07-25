@@ -55,15 +55,31 @@ describe("repository profile layout", () => {
       expect(bundle.runtime.contextTemplates["upcoming-schedules"]).toBeUndefined();
       expect(bundle.runtime.skills.byId.image_generation).toBeDefined();
       expect(bundle.runtime.skills.byId.dice_roleplay).toBeDefined();
+      expect(bundle.runtime.skills.byId.discord_threads).toBeDefined();
       expect(bundle.runtime.skills.byId.event_watches).toBeDefined();
+      expect(bundle.runtime.skills.byId.scheduling).toBeDefined();
       expect(bundle.runtime.skills.requiredByTool.roll_dice).toBe("dice_roleplay");
+      expect(bundle.runtime.skills.requiredByTool.start_thread).toBe("discord_threads");
+      expect(bundle.runtime.skills.requiredByTool.close_thread).toBe("discord_threads");
       expect(bundle.runtime.skills.requiredByTool.create_event_watch).toBe("event_watches");
+      expect(bundle.runtime.skills.requiredByTool.schedule_task).toBe("scheduling");
       if (profile === "2b") {
         expect(bundle.runtime.privateLife?.length).toBeGreaterThan(500);
       } else {
         expect(bundle.runtime.privateLife ?? "").toBe("");
       }
     }
+  });
+
+  test("shares commitment skills while preserving profile image overrides", () => {
+    const twoB = loadInstructionBundle(PROFILES_DIR, "2b", makeLogger());
+    const delamain = loadInstructionBundle(PROFILES_DIR, "delamain", makeLogger());
+
+    expect(twoB.runtime.skills.byId.scheduling?.content).toBe(delamain.runtime.skills.byId.scheduling?.content);
+    expect(twoB.runtime.skills.byId.event_watches?.content).toBe(delamain.runtime.skills.byId.event_watches?.content);
+    expect(twoB.runtime.skills.byId.discord_threads?.content).toBe(delamain.runtime.skills.byId.discord_threads?.content);
+    expect(twoB.runtime.skills.byId.image_generation?.content)
+      .not.toBe(delamain.runtime.skills.byId.image_generation?.content);
   });
 
   test("loads shared bot conversation policy for every profile", () => {

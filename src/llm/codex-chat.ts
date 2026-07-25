@@ -268,6 +268,9 @@ function messageToPiMessage(message: OpenRouterMessage, model: string): Message[
       toolName: message.name ?? "tool",
       content: [textPart(contentToText(message.content))],
       details: {},
+      ...(message.addedToolNames !== undefined && message.addedToolNames.length > 0
+        ? { addedToolNames: message.addedToolNames }
+        : {}),
       isError: false,
       timestamp,
     };

@@ -288,8 +288,14 @@ function normalizeProviderParams(rawParams: Record<string, unknown>): Record<str
   return params;
 }
 
-function openRouterMessageForPayload(message: OpenRouterMessage): Omit<OpenRouterMessage, "providerNativeContent"> {
-  const { providerNativeContent: _providerNativeContent, ...payloadMessage } = message;
+function openRouterMessageForPayload(
+  message: OpenRouterMessage,
+): Omit<OpenRouterMessage, "providerNativeContent" | "addedToolNames"> {
+  const {
+    providerNativeContent: _providerNativeContent,
+    addedToolNames: _addedToolNames,
+    ...payloadMessage
+  } = message;
   return payloadMessage;
 }
 

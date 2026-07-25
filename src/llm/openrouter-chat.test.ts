@@ -73,7 +73,7 @@ describe("completeOpenRouterChat", () => {
     fetchSpy.mockRestore();
   });
 
-  test("omits provider-native assistant content from OpenRouter payloads", async () => {
+  test("omits internal deferred-loading fields from OpenRouter payloads", async () => {
     const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
       makeResponse({
         model: "m",
@@ -102,6 +102,13 @@ describe("completeOpenRouterChat", () => {
             thinkingSignature: "{\"type\":\"reasoning\",\"id\":\"rs_1\"}",
           }],
         },
+        {
+          role: "tool",
+          tool_call_id: "call-1",
+          name: "lookup",
+          content: "done",
+          addedToolNames: ["fetch_url"],
+        },
       ],
       baseUrl: "https://example.com",
     });
@@ -111,6 +118,7 @@ describe("completeOpenRouterChat", () => {
     const bodyText = typeof bodyRaw === "string" ? bodyRaw : "";
     const body = JSON.parse(bodyText) as { messages?: Array<Record<string, unknown>> };
     expect(body.messages?.some((message) => "providerNativeContent" in message)).toBe(false);
+    expect(body.messages?.some((message) => "addedToolNames" in message)).toBe(false);
 
     fetchSpy.mockRestore();
   });
