@@ -82,6 +82,7 @@ import { createDiceRollTool, type DiceRollDelivery } from "./agent/dice-roll-too
 import { applyRuntimeToolPrompts, type ToolPromptVariables } from "./agent/runtime-tool-prompts";
 import {
   isReadOnlyTool,
+  isToolAllowedInMaintenance,
   type MaintenanceWriteToolName,
 } from "./agent/tool-effects.ts";
 import { createSearchToolsTool } from "./agent/tool-catalog.ts";
@@ -2309,32 +2310,40 @@ function toolsForMaintenancePass(
   visibleTools: AgentTool[] | undefined,
   maintenanceTools: AgentTool[],
   allowedWriteNames: MaintenanceWriteToolName | ReadonlySet<MaintenanceWriteToolName>,
-  _passLabel: string,
+  passLabel: string,
 ): AgentTool[] {
-  const readOnlyByName = new Map<string, AgentTool>();
-  for (const tool of visibleTools ?? []) {
-    if (!maintenanceToolNames.has(tool.name) && isReadOnlyTool(tool)) {
-      readOnlyByName.set(tool.name, tool);
-    }
-  }
-  const allowedWriteTools = applyRuntimeToolPrompts(maintenanceTools, promptBundle.runtime)
-    .filter((tool) => typeof allowedWriteNames === "string"
-      ? tool.name === allowedWriteNames
-      : allowedWriteNames.has(tool.name as MaintenanceWriteToolName));
-  const readOnlyTools = [...readOnlyByName.values()];
+  const visible = visibleTools ?? [];
+  const readOnlyTools = visible
+    .filter((tool) => tool.name !== "search_tools" && !maintenanceToolNames.has(tool.name) && isReadOnlyTool(tool));
   const unpromptedSearchTool = createSearchToolsTool({
     tools: readOnlyTools,
     skills: promptBundle.runtime.skills,
   });
-  const searchTool = applyRuntimeToolPrompts([unpromptedSearchTool], promptBundle.runtime)[0]
+  const promptedSearchTool = applyRuntimeToolPrompts([unpromptedSearchTool], promptBundle.runtime)[0]
     ?? unpromptedSearchTool;
+  const actorSearchTool = visible.find((tool) => tool.name === "search_tools");
+  const searchTool = actorSearchTool === undefined
+    ? promptedSearchTool
+    : { ...actorSearchTool, execute: promptedSearchTool.execute };
+  const blockedTool = (tool: AgentTool): AgentTool => isToolAllowedInMaintenance(tool, allowedWriteNames)
+    ? tool
+    : {
+        ...tool,
+        execute: (): Promise<AgentToolResult<unknown>> => Promise.resolve({
+          content: [{
+            type: "text",
+            text: `Blocked: ${passLabel} cannot use ${tool.name}.`,
+          }],
+          details: { blocked: true, pass: passLabel, tool: tool.name },
+        }),
+      };
   const byName = new Map<string, AgentTool>();
-  byName.set(searchTool.name, searchTool);
-  for (const tool of allowedWriteTools) {
-    byName.set(tool.name, tool);
+  for (const tool of visible) {
+    const maintenanceTool = tool.name === "search_tools" ? searchTool : tool;
+    byName.set(maintenanceTool.name, blockedTool(maintenanceTool));
   }
-  for (const tool of readOnlyTools) {
-    if (tool.name !== "search_tools") byName.set(tool.name, tool);
+  for (const tool of applyRuntimeToolPrompts(maintenanceTools, promptBundle.runtime)) {
+    byName.set(tool.name, blockedTool(tool));
   }
   return [...byName.values()];
 }

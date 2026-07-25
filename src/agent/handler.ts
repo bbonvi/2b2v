@@ -118,6 +118,8 @@ export interface MaintenancePromptContext {
   promptCaching: PromptCachingConfig;
   /** Exact provider-visible tool contract from the actor turn that maintenance must preserve. */
   toolContractSignature?: string;
+  /** Active tool names in provider order, including transcript-deferred additions. */
+  activeToolNames?: string[];
 }
 
 export interface MemoryExtractionRequest {
@@ -1107,6 +1109,21 @@ function assistantMessageFromResult(result: OpenRouterChatResult): OpenRouterMes
   };
 }
 
+function assistantMessageWithToolCalls(
+  result: OpenRouterChatResult,
+  toolCalls: readonly OpenRouterToolCall[],
+): OpenRouterMessage {
+  const allowedIds = new Set(toolCalls.map((call) => call.id));
+  const providerNativeContent = result.providerNativeContent?.filter((part) =>
+    part.type !== "toolCall" || allowedIds.has(part.id)
+  );
+  return assistantMessageFromResult({
+    ...result,
+    toolCalls: [...toolCalls],
+    ...(providerNativeContent !== undefined ? { providerNativeContent } : {}),
+  });
+}
+
 function toolMessage(
   call: OpenRouterToolCall,
   content: string,
@@ -1121,6 +1138,42 @@ function toolMessage(
       ? { addedToolNames: [...addedToolNames] }
       : {}),
   };
+}
+
+function appendDeferredMaintenanceTools(
+  messages: OpenRouterMessage[],
+  toolNames: readonly string[],
+): void {
+  if (toolNames.length === 0) return;
+  const fingerprint = createHash("sha256")
+    .update(JSON.stringify({ messageCount: messages.length, toolNames }))
+    .digest("hex")
+    .slice(0, 16);
+  const call: OpenRouterToolCall = {
+    id: `maintenance-tool-load-${fingerprint}`,
+    type: "function",
+    function: {
+      name: "search_tools",
+      arguments: JSON.stringify({
+        query: toolNames.join(" "),
+        limit: toolNames.length,
+      }),
+    },
+  };
+  messages.push({
+    role: "user",
+    content: "Load the private maintenance capability required for the next pass.",
+  });
+  messages.push({
+    role: "assistant",
+    content: null,
+    tool_calls: [call],
+  });
+  messages.push(toolMessage(
+    call,
+    `Enabled private maintenance tools: ${toolNames.join(", ")}`,
+    toolNames,
+  ));
 }
 
 function runtimeContextTemplate(
@@ -1491,12 +1544,14 @@ async function runNativeToolLoop(input: {
   correctInvalidMessageDirectives?: boolean;
   stopOnAgentTimeBudget?: boolean;
   terminateAfterSuccessfulToolRoundNames?: readonly string[];
+  onActiveToolsChanged?: (tools: readonly AgentTool[]) => void;
 }): Promise<{ text: string; stopReason?: string }> {
   const toolCatalog = new ToolCatalog(
     input.tools,
     input.initialToolNames ?? new Set(input.tools.map((tool) => tool.name)),
   );
   const loadedSkills = new Set<string>();
+  input.onActiveToolsChanged?.(toolCatalog.activeTools());
   const terminateAfterSuccessfulToolRoundNames = new Set(input.terminateAfterSuccessfulToolRoundNames ?? []);
   const imageFollowUpSources = new Map<OpenRouterMessage, ImageFollowUpSource>();
   let toolCalls = 0;
@@ -1713,12 +1768,33 @@ async function runNativeToolLoop(input: {
 
     const turnActiveToolNames = new Set(toolCatalog.activeTools().map((tool) => tool.name));
     const turnLoadedSkills = new Set(loadedSkills);
-    const hasOperationalToolCall = result.toolCalls.some((call) =>
+    const replayableToolCalls = result.toolCalls.filter((call) =>
+      turnActiveToolNames.has(call.function.name) && toolCatalog.registeredTool(call.function.name) !== undefined
+    );
+    const inactiveToolCalls = result.toolCalls
+      .filter((call) => !replayableToolCalls.includes(call))
+      .map((call) => {
+        const registeredTool = toolCatalog.registeredTool(call.function.name);
+        const requiredSkillId = input.runtimePrompts?.skills.requiredByTool[call.function.name];
+        const message = registeredTool === undefined
+          ? `Unknown tool: ${call.function.name}`
+          : requiredSkillId !== undefined
+            ? `${call.function.name} is not active in this model turn. Call load_skill with skill="${requiredSkillId}", then call ${call.function.name} in the next model turn.`
+            : `${call.function.name} is not active in this model turn. Call search_tools for this action, then call ${call.function.name} in the next model turn.`;
+        input.requestLog?.recordToolSkipped(
+          call.id,
+          call.function.name,
+          parseToolArgumentsSafe(call),
+          message,
+        );
+        return { call, message };
+      });
+    const hasOperationalToolCall = replayableToolCalls.some((call) =>
       call.function.name !== "load_skill" && call.function.name !== "search_tools"
     );
     if (hasOperationalToolCall && toolRounds >= input.maxToolRounds) {
-      input.messages.push(assistantMessageFromResult(result));
-      for (const call of result.toolCalls) {
+      input.messages.push(assistantMessageWithToolCalls(result, replayableToolCalls));
+      for (const call of replayableToolCalls) {
         input.requestLog?.recordToolSkipped(
           call.id,
           call.function.name,
@@ -1727,13 +1803,20 @@ async function runNativeToolLoop(input: {
         );
         input.messages.push(toolMessage(call, toolBudgetExhaustedMessage("rounds", input.runtimePrompts)));
       }
+      if (inactiveToolCalls.length > 0) {
+        input.messages.push({
+          role: "user",
+          content: [...new Set(inactiveToolCalls.map(({ message }) => message))].join("\n"),
+        });
+      }
       if (terminateAfterSuccessfulToolRoundNames.size > 0) return { text: "" };
       return await completeFinalWithoutTools();
     }
 
-    input.messages.push(assistantMessageFromResult(result));
+    input.messages.push(assistantMessageWithToolCalls(result, replayableToolCalls));
 
     const imageMessages: OpenRouterMessage[] = [];
+    const inactiveToolRecoveryMessages = inactiveToolCalls.map(({ message }) => message);
     const pendingParallelCalls: Array<{ call: OpenRouterToolCall; tool: AgentTool }> = [];
     const toolRoundState = {
       sawTerminatingToolCall: false,
@@ -1754,6 +1837,7 @@ async function runNativeToolLoop(input: {
       if (requested.length === 0) return;
       const added = toolCatalog.activate(requested);
       execution.result = withActivatedToolNames(execution.result, added);
+      if (added.length > 0) input.onActiveToolsChanged?.(toolCatalog.activeTools());
     };
     const flushParallelCalls = async (): Promise<void> => {
       if (pendingParallelCalls.length === 0) return;
@@ -1793,33 +1877,17 @@ async function runNativeToolLoop(input: {
       }
     };
 
-    for (let callIndex = 0; callIndex < result.toolCalls.length; callIndex += 1) {
-      const call = result.toolCalls[callIndex];
+    for (let callIndex = 0; callIndex < replayableToolCalls.length; callIndex += 1) {
+      const call = replayableToolCalls[callIndex];
       if (call === undefined) continue;
       if (isAgentTimeBudgetExceededSignal(input.signal)) {
         await flushParallelCalls();
-        appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex));
+        appendSkippedToolCallsForAgentTimeBudget(replayableToolCalls.slice(callIndex));
         input.messages.push(...imageMessages);
         return await finishAfterAgentTimeBudget();
       }
       const registeredTool = toolCatalog.registeredTool(call.function.name);
-      if (registeredTool === undefined || !turnActiveToolNames.has(call.function.name)) {
-        await flushParallelCalls();
-        const requiredSkillId = input.runtimePrompts?.skills.requiredByTool[call.function.name];
-        const message = registeredTool === undefined
-          ? `Unknown tool: ${call.function.name}`
-          : requiredSkillId !== undefined
-            ? `${call.function.name} is not active in this model turn. Call load_skill with skill="${requiredSkillId}", then call ${call.function.name} in the next model turn.`
-            : `${call.function.name} is not active in this model turn. Call search_tools for this action, then call ${call.function.name} in the next model turn.`;
-        input.requestLog?.recordToolSkipped(
-          call.id,
-          call.function.name,
-          parseToolArgumentsSafe(call),
-          message,
-        );
-        input.messages.push(toolMessage(call, message));
-        continue;
-      }
+      if (registeredTool === undefined) continue;
       const tool = registeredTool;
 
       if (tool.name === "load_skill" || tool.name === "search_tools") {
@@ -1840,11 +1908,11 @@ async function runNativeToolLoop(input: {
       } else if (toolCalls >= input.maxToolCalls) {
         await flushParallelCalls();
         if (isAgentTimeBudgetExceededSignal(input.signal)) {
-          appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex));
+          appendSkippedToolCallsForAgentTimeBudget(replayableToolCalls.slice(callIndex));
           input.messages.push(...imageMessages);
           return await finishAfterAgentTimeBudget();
         }
-        for (const skippedCall of result.toolCalls.slice(callIndex)) {
+        for (const skippedCall of replayableToolCalls.slice(callIndex)) {
           input.requestLog?.recordToolSkipped(
             skippedCall.id,
             skippedCall.function.name,
@@ -1925,13 +1993,19 @@ async function runNativeToolLoop(input: {
         return { text: "" };
       }
       if (isAgentTimeBudgetExceededSignal(input.signal)) {
-        appendSkippedToolCallsForAgentTimeBudget(result.toolCalls.slice(callIndex + 1));
+        appendSkippedToolCallsForAgentTimeBudget(replayableToolCalls.slice(callIndex + 1));
         input.messages.push(...imageMessages);
         return await finishAfterAgentTimeBudget();
       }
     }
     await flushParallelCalls();
     input.messages.push(...imageMessages);
+    if (inactiveToolRecoveryMessages.length > 0) {
+      input.messages.push({
+        role: "user",
+        content: [...new Set(inactiveToolRecoveryMessages)].join("\n"),
+      });
+    }
     if (hasOperationalToolCall) toolRounds += 1;
     if (toolRoundState.sawTerminatingToolCall && !toolRoundState.needsRepair) {
       return { text: "" };
@@ -2601,6 +2675,22 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
   delete providerParams.signal;
   delete providerParams.onPayload;
   const promptCaching = profile.promptCaching;
+  const { tools: timedTools, state: timingState } = wrapToolsWithTiming(input.tools);
+  const timedToolsByName = new Map(timedTools.map((tool) => [tool.name, tool]));
+  const inheritedActiveToolNames = inheritedPrompt?.activeToolNames ?? [];
+  const inheritedActiveTools = inheritedActiveToolNames
+    .map((name) => timedToolsByName.get(name))
+    .filter((tool): tool is AgentTool => tool !== undefined);
+  const canContinueActorToolSurface = provider === "openai-codex"
+    && inheritedPromptCompatible
+    && input.transcript !== undefined
+    && inheritedActiveToolNames.length > 0
+    && inheritedActiveTools.length === inheritedActiveToolNames.length
+    && inheritedPrompt.toolContractSignature !== undefined
+    && toolContractSignature(inheritedActiveTools) === inheritedPrompt.toolContractSignature
+    && inheritedActiveToolNames.includes("search_tools");
+  const canReuseInheritedTranscript = inheritedPromptCompatible
+    && (provider !== "openai-codex" || canContinueActorToolSurface);
 
   const stableSections = inheritedPromptCompatible ? inheritedPrompt.stableSections : sectionsForStablePrompt(
     input.systemPrompt ?? "",
@@ -2616,12 +2706,14 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
     : buildProviderSessionId(input.requestLog, `${provider}:${model.id}`);
   const promptCacheKey = provider === "openai-codex"
     ? promptCaching.enabled
-      ? buildCodexPromptCacheKey(
-          input.globalConfig.runtimeProfileId ?? "default",
-          profileId,
-          model.id,
-          maintenanceCacheSurface(input.tools),
-        )
+      ? canContinueActorToolSurface && inheritedPrompt.promptCacheKey !== undefined
+        ? inheritedPrompt.promptCacheKey
+        : buildCodexPromptCacheKey(
+            input.globalConfig.runtimeProfileId ?? "default",
+            profileId,
+            model.id,
+            maintenanceCacheSurface(input.tools),
+          )
       : ""
     : undefined;
   const currentMessageWithoutImages: IncomingMessage = { ...input.incomingMessage, imageInputs: undefined };
@@ -2629,14 +2721,14 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
   const initialRoles = inheritedPromptCompatible
     ? inheritedPrompt.initialRoles
     : initialMessageRoles(transport, volatileMessages);
-  const messages = (inheritedPromptCompatible ? input.transcript : undefined) ?? buildInitialMessages(
+  const messages = (canReuseInheritedTranscript ? input.transcript : undefined) ?? buildInitialMessages(
     input.userContent,
     volatileMessages,
     currentMessageWithoutImages,
     input.runtimePrompts,
     provider === "openai-codex" ? [] : initialRoles,
   );
-  if (!inheritedPromptCompatible) {
+  if (!canReuseInheritedTranscript) {
     const actorEvidence = portableActorTurnEvidence(input.transcript, input.assistantReply);
     if (actorEvidence !== "") {
       messages.push({
@@ -2645,12 +2737,26 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
       });
     }
   }
+  const maintenanceToolNames = (input.terminateAfterSuccessfulToolRoundNames ?? [])
+    .filter((name) => name.startsWith("record_") && timedToolsByName.has(name));
+  const hasMaintenanceSearchTool = timedTools.some((tool) => tool.name === "search_tools");
+  const fallbackMaintenanceInitialToolNames = maintenanceToolNames.length > 0 && hasMaintenanceSearchTool
+    ? new Set(timedTools
+        .map((tool) => tool.name)
+        .filter((name) => name === "search_tools" || maintenanceToolNames.includes(name)))
+    : hasMaintenanceSearchTool
+      ? initialMaintenanceToolNames(timedTools)
+      : new Set(timedTools.map((tool) => tool.name));
+  const maintenanceInitialToolNames = canContinueActorToolSurface
+    ? new Set([...inheritedActiveToolNames, ...maintenanceToolNames])
+    : fallbackMaintenanceInitialToolNames;
+  const newlyActiveMaintenanceTools = maintenanceToolNames
+    .filter((name) => !inheritedActiveToolNames.includes(name));
+  if (canContinueActorToolSurface) {
+    appendDeferredMaintenanceTools(messages, newlyActiveMaintenanceTools);
+  }
   messages.push({ role: "user", content: input.controlMessage });
 
-  const { tools: timedTools, state: timingState } = wrapToolsWithTiming(input.tools);
-  const maintenanceInitialToolNames = timedTools.some((tool) => tool.name === "search_tools")
-    ? initialMaintenanceToolNames(timedTools)
-    : new Set(timedTools.map((tool) => tool.name));
   const maxToolCalls = Math.max(1, input.maxToolCalls ?? input.tools.length);
   timingState.resetAgentLoopStart();
   try {
@@ -2701,6 +2807,12 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
       allowEmptyFinalResponse: true,
       stopOnAgentTimeBudget: true,
       terminateAfterSuccessfulToolRoundNames: input.terminateAfterSuccessfulToolRoundNames,
+      onActiveToolsChanged: canContinueActorToolSurface
+        ? (activeTools) => {
+            inheritedPrompt.activeToolNames = activeTools.map((tool) => tool.name);
+            inheritedPrompt.toolContractSignature = toolContractSignature(activeTools);
+          }
+        : undefined,
     });
   } finally {
     clearTimeout(wallTimeout);
@@ -2840,6 +2952,7 @@ export async function handleMessage(
     ...(promptCacheKey !== undefined ? { promptCacheKey } : {}),
     promptCaching: profile.promptCaching,
     toolContractSignature: visibleToolSignature,
+    activeToolNames: actorInitialTools.map((tool) => tool.name),
   };
   const startedAt = Date.now();
   let maintenanceTranscript: OpenRouterMessage[] | undefined;
@@ -3053,6 +3166,10 @@ export async function handleMessage(
         allowEmptyFinalResponse: deps.hasExternalVisibleOutput,
         correctInvalidMessageDirectives: true,
         signal: wallController.signal,
+        onActiveToolsChanged: (activeTools) => {
+          maintenancePromptContext.activeToolNames = activeTools.map((tool) => tool.name);
+          maintenancePromptContext.toolContractSignature = toolContractSignature(activeTools);
+        },
       });
       finalText = result.text;
       finalStopReason = result.stopReason;

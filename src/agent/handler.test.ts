@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { splitDeferredTools } from "../../node_modules/@earendil-works/pi-ai/dist/utils/deferred-tools.js";
 import { createHash } from "node:crypto";
 import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type ChatCompleteFn, type HandlerDeps, type IncomingMessage, type MemoryExtractionRequest, type MessageSender, type VoiceAttachment } from "./handler.ts";
 import type { AssembledContext } from "./context-assembly.ts";
@@ -9,7 +10,7 @@ import type { TtsResult } from "../tts/types.ts";
 import { RequestLog } from "../logger.ts";
 import type { RuntimePromptBundle } from "../config/instruction-bundle.ts";
 import type { OpenRouterMessage } from "../llm/types.ts";
-import { ModelProviderError } from "../llm/codex-chat.ts";
+import { buildCodexContext, ModelProviderError } from "../llm/codex-chat.ts";
 import { assertSafeDiscordText } from "../discord/outbound-xml-guard.ts";
 
 const TEST_RUNTIME_PROMPTS = {
@@ -3013,6 +3014,20 @@ describe("handleMessage", () => {
               function: { name: "codex_generate_image", arguments: "{\"prompt\":\"a blue house\"}" },
             },
           ],
+          providerNativeContent: [
+            {
+              type: "toolCall",
+              id: "call-load",
+              name: "load_skill",
+              arguments: { skill: "image_generation" },
+            },
+            {
+              type: "toolCall",
+              id: "call-too-early",
+              name: "codex_generate_image",
+              arguments: { prompt: "a blue house" },
+            },
+          ],
           rawResponse: {},
           messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
         });
@@ -3021,11 +3036,20 @@ describe("handleMessage", () => {
         expect(executeCalls).toBe(0);
         expect(request.tools?.some((entry) => entry.function.name === "codex_generate_image")).toBe(true);
         expect(request.messages.some((message) =>
-          message.role === "tool"
-          && message.name === "codex_generate_image"
+          message.role === "user"
           && typeof message.content === "string"
           && message.content.includes("next model turn")
         )).toBe(true);
+        expect(request.messages.some((message) =>
+          message.role === "assistant"
+          && message.tool_calls?.some((call) => call.id === "call-too-early") === true
+        )).toBe(false);
+        expect(request.messages.some((message) =>
+          message.role === "assistant"
+          && message.providerNativeContent?.some((part) =>
+            part.type === "toolCall" && part.id === "call-too-early"
+          ) === true
+        )).toBe(false);
         return Promise.resolve({
           text: "",
           toolCalls: [{
@@ -3163,11 +3187,14 @@ describe("handleMessage", () => {
         });
       }
       sawInactiveError = request.messages.some((message) =>
-        message.role === "tool"
-        && message.name === "codex_generate_image"
+        message.role === "user"
         && typeof message.content === "string"
         && message.content.includes("not active in this model turn")
       );
+      expect(request.messages.some((message) =>
+        message.role === "assistant"
+        && message.tool_calls?.some((call) => call.id === "call-1") === true
+      )).toBe(false);
       return Promise.resolve({
         text: "ok",
         toolCalls: [],
@@ -4718,6 +4745,134 @@ describe("handleMessage", () => {
     ]));
     expect(JSON.stringify(promptPayloads)).toContain("VISIBLE STABLE PROMPT");
     expect(JSON.stringify(promptPayloads)).not.toContain("Silent Memory Pass");
+  });
+
+  test("Codex maintenance extends the actor tool surface without changing its immediate prefix", async () => {
+    const makeMaintenanceTool = (name: string): AgentTool => ({
+      name,
+      label: name,
+      description: name,
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({ content: [{ type: "text", text: `${name} complete` }], details: {} }),
+    });
+    const searchTools = makeMaintenanceTool("search_tools");
+    const fetchUrl = makeMaintenanceTool("fetch_url");
+    const recordMemory = makeMaintenanceTool("record_memory");
+    const recordRelationship = makeMaintenanceTool("record_relationship");
+    const actorTools = [searchTools, fetchUrl];
+    const actorToolContractSignature = createHash("sha256")
+      .update(JSON.stringify(actorTools.map((tool) => ({
+        type: "function",
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        },
+      }))))
+      .digest("hex");
+    const transcript: OpenRouterMessage[] = [
+      { role: "user", content: "read the linked page" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: "actor-search",
+          type: "function",
+          function: { name: "search_tools", arguments: "{\"query\":\"fetch page\"}" },
+        }],
+      },
+      {
+        role: "tool",
+        name: "search_tools",
+        tool_call_id: "actor-search",
+        content: "Enabled private tools: fetch_url",
+        addedToolNames: ["fetch_url"],
+      },
+      { role: "assistant", content: "done" },
+    ];
+    const actorTranscript = structuredClone(transcript);
+    const promptContext = {
+      provider: "openai-codex" as const,
+      model: "gpt-5.6-sol",
+      transport: makePromptTransportConfig().openaiCodex,
+      stableSections: [{ role: "developer" as const, text: "STABLE ACTOR PROMPT", target: "input" as const }],
+      initialRoles: ["user" as const],
+      sessionId: "actor-session",
+      promptCacheKey: "actor-cache-key",
+      promptCaching: { enabled: true },
+      toolContractSignature: actorToolContractSignature,
+      activeToolNames: ["search_tools", "fetch_url"],
+    };
+    const placements: Array<{
+      promptCacheKey?: string;
+      immediate: string[];
+      deferred: string[];
+      messages: OpenRouterMessage[];
+    }> = [];
+    const completeChat: ChatCompleteFn = (request) => {
+      const placement = splitDeferredTools(buildCodexContext(request), true);
+      placements.push({
+        ...(request.promptCacheKey !== undefined ? { promptCacheKey: request.promptCacheKey } : {}),
+        immediate: placement.immediate.map((tool) => tool.name),
+        deferred: [...placement.deferred.keys()],
+        messages: structuredClone(request.messages),
+      });
+      return Promise.resolve({
+        text: "",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+    const common = {
+      globalConfig: makeCodexGlobal({ model: "gpt-5.6-sol" }),
+      guildConfig: makeGuildConfig(),
+      context: makeContext(),
+      personaPrompt: "You are a test bot.",
+      runtimePrompts: TEST_RUNTIME_PROMPTS,
+      incomingMessage: makeMessage(),
+      userContent: "hello bot",
+      assistantReply: "done",
+      visibleReplySent: true,
+      transcript,
+      promptContext,
+      runtimeInstruction: "Private maintenance.",
+      completeChat,
+    };
+
+    await runSilentToolAgentPass({
+      ...common,
+      tools: [searchTools, fetchUrl, recordMemory, recordRelationship],
+      controlMessage: "Memory Maintenance",
+      terminateAfterSuccessfulToolRoundNames: ["record_memory"],
+    });
+    await runSilentToolAgentPass({
+      ...common,
+      tools: [searchTools, fetchUrl, recordMemory, recordRelationship],
+      controlMessage: "Relationship Maintenance",
+      terminateAfterSuccessfulToolRoundNames: ["record_relationship"],
+    });
+
+    expect(placements).toHaveLength(2);
+    expect(placements.map((placement) => placement.promptCacheKey)).toEqual([
+      "actor-cache-key",
+      "actor-cache-key",
+    ]);
+    expect(placements[0]?.immediate).toEqual(["search_tools"]);
+    expect(placements[0]?.deferred).toEqual(["fetch_url", "record_memory"]);
+    expect(placements[1]?.immediate).toEqual(["search_tools"]);
+    expect(placements[1]?.deferred).toEqual([
+      "fetch_url",
+      "record_memory",
+      "record_relationship",
+    ]);
+    expect(placements[0]?.messages.slice(0, actorTranscript.length)).toEqual(actorTranscript);
+    expect(promptContext.activeToolNames).toEqual([
+      "search_tools",
+      "fetch_url",
+      "record_memory",
+      "record_relationship",
+    ]);
   });
 
   test("incompatible maintenance models receive portable raw actor evidence", async () => {
