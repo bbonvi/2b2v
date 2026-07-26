@@ -72,7 +72,7 @@ import { loadExternalImage } from "./agent/external-image";
 import { createCodexGenerateImageTool, type GeneratedImageAttachment, type ReferenceImageInput } from "./agent/codex-image-tool";
 import { AgentJobStore, createCancelAgentJobTool, isActiveJobStatus, type ImageGenerationJobResult } from "./agent/job-runtime";
 import { createAgentJobInspectionTools, renderAgentJobDetails } from "./agent/agent-job-tool";
-import { annotateHistoryJobs, createGeneratedImageRuntime, imageReferencesForToolInput, renderAgentJobsContext, renderImageGenerationInput, shortQuote, type GeneratedImageRuntime } from "./agent/generated-image-runtime";
+import { annotateHistoryJobs, buildAsyncImageReadyMetadata, createGeneratedImageRuntime, imageReferencesForToolInput, renderAgentJobsContext, renderImageGenerationInput, shortQuote, type GeneratedImageRuntime } from "./agent/generated-image-runtime";
 import { createStoredAssetAttachmentResolver } from "./agent/stored-asset-attachments";
 import { loadAssetReferenceImage, loadStagedAssetReferenceImage } from "./agent/asset-reference-image";
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
@@ -579,6 +579,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       attachmentId: outboundAttachment.id,
       filename: outboundAttachment.filename,
       contentType: outboundAttachment.contentType,
+      byteSize: outboundAttachment.buffer.length,
       is4k: job.input.is4k,
       ...(details?.transport !== undefined ? { transport: details.transport } : {}),
       ...(details?.requestedSize !== undefined ? { requestedSize: details.requestedSize } : {}),
@@ -586,15 +587,21 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       ...(typeof details?.revisedPrompt === "string" ? { revisedPrompt: details.revisedPrompt } : {}),
     } satisfies ImageGenerationJobResult);
 
+    const readyMetadata = buildAsyncImageReadyMetadata({
+      requestedSize: details?.requestedSize,
+      requestedFormat: job.input.outputFormat,
+      actualSize: details?.actualSize,
+      actualContentType: outboundAttachment.contentType,
+      byteSize: outboundAttachment.buffer.length,
+      transport: details?.transport,
+      is4k: job.input.is4k,
+    });
     const completionInstruction = runtimeContextTemplate("async-image-ready", {
       jobId: job.id,
       stagedAssetRef: stagedRef,
       requesterUsername: job.requesterUsername,
       requesterId: job.requesterId,
-      is4k: job.input.is4k ? "yes" : "no",
-      transportLine: details?.transport !== undefined ? `Transport: ${details.transport}\n` : "",
-      requestedSizeLine: details?.requestedSize !== undefined ? `Requested size: ${details.requestedSize}\n` : "",
-      actualSizeLine: details?.actualSize !== undefined ? `Actual size: ${details.actualSize}\n` : "",
+      ...readyMetadata,
       sourceMessageId: job.sourceMessageId,
       sourceQuote: job.sourceQuote,
       generationInput,
@@ -3965,6 +3972,10 @@ function buildAgentTools(
     getStagedAsset: (ref) => {
       const staged = getStagedAsset(db, ref);
       return staged?.ownerGuildId === guildId ? staged : null;
+    },
+    getStagedAssetMetadata: (jobId) => {
+      const result = agentJobs.get(jobId)?.result;
+      return result === undefined ? null : { actualSize: result.actualSize };
     },
     getProvenance: (id) => {
       const linked = agentJobs.getForAsset(id);

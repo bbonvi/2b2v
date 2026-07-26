@@ -1,8 +1,10 @@
 [Async Image Job Ready] Job {{jobId}} finished an image.
 Staged asset ref: {{stagedAssetRef}}
 Original requester: @{{requesterUsername}} ({{requesterId}})
-4K: {{is4k}}
-{{transportLine}}{{requestedSizeLine}}{{actualSizeLine}}Original request MsgID {{sourceMessageId}}: "{{sourceQuote}}"
+Requested: {{requestedMetadata}}
+Result: {{resultMetadata}}
+{{transportLine}}4K requested: {{is4k}}{{fourKNote}}
+Original request MsgID {{sourceMessageId}}: "{{sourceQuote}}"
 Original effective codex_generate_image input: {{generationInput}}
 {{revisedPromptLine}}Source guild/channel: {{deliveryGuildId}}/{{deliveryChannelId}}
 

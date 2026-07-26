@@ -46,6 +46,7 @@ export interface ImageGenerationJobResult {
   attachmentId?: string;
   filename?: string;
   contentType?: string;
+  byteSize?: number;
   revisedPrompt?: string;
   requestedSize?: string;
   actualSize?: string;

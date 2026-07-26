@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { renderAgentJobsContext, renderImageGenerationInput } from "./generated-image-runtime";
+import {
+  buildAsyncImageReadyMetadata,
+  renderAgentJobsContext,
+  renderImageGenerationInput,
+} from "./generated-image-runtime";
 
 test("renders the complete effective image generation input", () => {
   const rendered = renderImageGenerationInput({
@@ -24,6 +28,37 @@ test("renders the complete effective image generation input", () => {
     output_format: "webp",
     "4k": true,
     replaces_job_id: "img-old",
+  });
+});
+
+test("renders compact actual metadata and conditional 4K guidance", () => {
+  expect(buildAsyncImageReadyMetadata({
+    requestedSize: "3584x2240",
+    requestedFormat: "webp",
+    actualSize: "1586x992",
+    actualContentType: "image/png",
+    byteSize: 1_600_631,
+    transport: "direct-edits",
+    is4k: true,
+  })).toEqual({
+    requestedMetadata: "3584x2240, WebP",
+    resultMetadata: "1586x992, PNG, 1.5MB",
+    transportLine: "Transport: direct-edits\n",
+    is4k: "yes",
+    fourKNote: " (best-effort; the provider may return a smaller image)",
+  });
+
+  expect(buildAsyncImageReadyMetadata({
+    requestedFormat: "jpeg",
+    actualContentType: "image/jpeg",
+    byteSize: 900,
+    is4k: false,
+  })).toEqual({
+    requestedMetadata: "JPEG",
+    resultMetadata: "JPEG, 900B",
+    transportLine: "",
+    is4k: "no",
+    fourKNote: "",
   });
 });
 

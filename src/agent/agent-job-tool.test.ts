@@ -52,6 +52,24 @@ describe("agent job inspection tools", () => {
     expect(read.content[0]?.type === "text" && read.content[0].text).toContain(job.input.prompt);
   });
 
+  test("persists completed image byte metadata for inspection", async () => {
+    const job = enqueue();
+    store.start(job.id, undefined, 1_500);
+    store.markReady(job.id, {
+      actualSize: "1586x992",
+      contentType: "image/png",
+      byteSize: 1_600_631,
+    }, 2_000);
+    const [, readTool] = createAgentJobInspectionTools({ store, guildId: "g1", channelId: "c1" });
+    if (readTool === undefined) throw new Error("expected read tool");
+
+    const read = await readTool.execute("read", { job_id: job.id });
+    const text = read.content[0]?.type === "text" ? read.content[0].text : "";
+    expect(text).toContain('"actualSize":"1586x992"');
+    expect(text).toContain('"contentType":"image/png"');
+    expect(text).toContain('"byteSize":1600631');
+  });
+
   test("keeps older terminal jobs readable but rejects another channel", async () => {
     const job = enqueue();
     store.markFailed(job.id, "blocked", 2_000);

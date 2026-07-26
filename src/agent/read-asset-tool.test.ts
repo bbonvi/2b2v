@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type { AssetReadingConfig } from "../config/types.ts";
 import type { MessageAsset } from "../db/asset-repository.ts";
 import { createReadAssetTool, type AssetOrigin } from "./read-asset-tool.ts";
@@ -31,6 +34,45 @@ const origin: AssetOrigin = {
 };
 
 describe("read_asset", () => {
+  test("shows original metadata for a staged generated image", async () => {
+    const storagePath = join(tmpdir(), `2b2v-staged-read-${crypto.randomUUID()}.png`);
+    await Bun.write(storagePath, Buffer.from("png"));
+    try {
+      const tool = createReadAssetTool({
+        config,
+        getAsset: () => null,
+        getStagedAsset: () => ({
+          ref: "job_img123",
+          jobId: "img-123",
+          ownerGuildId: "g",
+          ownerChannelId: "c",
+          filename: "result.png",
+          contentType: "image/png",
+          storagePath,
+          createdAt: 1,
+          expiresAt: 2,
+        }),
+        getStagedAssetMetadata: () => ({ actualSize: "1586x992" }),
+        resolveOrigin: () => Promise.resolve(null),
+        resolveSource: () => Promise.resolve(null),
+        cacheExtraction: () => {},
+        prepareImage: (buffer) => Promise.resolve({
+          data: buffer,
+          mime: "image/png",
+          width: 1000,
+          height: 625,
+        }),
+      });
+
+      const result = await tool.execute("staged", { asset_id: "job_img123" });
+      const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+      expect(text).toContain("type: image/png; size: 3 bytes; dimensions: 1586x992");
+      expect(result.content.some((part) => part.type === "image")).toBeTrue();
+    } finally {
+      rmSync(storagePath, { force: true });
+    }
+  });
+
   test("includes durable generation provenance with an image", async () => {
     const tool = createReadAssetTool({
       config,

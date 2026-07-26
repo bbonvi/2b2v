@@ -2,6 +2,7 @@ import type { HistoryMessage } from "./history-types";
 import { isActiveJobStatus, type AgentJob, type ImageGenerationJobInput, type ImageReference } from "./job-runtime";
 import type { GeneratedImageAttachment } from "./codex-image-tool";
 import type { OutboundAttachment } from "./handler";
+import { formatFileSize } from "./format-file-size.ts";
 
 export const DEFAULT_CODEX_IMAGE_ROUTER_MODEL = "gpt-5.2";
 
@@ -53,6 +54,55 @@ export function renderImageGenerationInput(input: ImageGenerationJobInput): stri
     "4k": input.is4k,
     ...(input.replacesJobId !== undefined ? { replaces_job_id: input.replacesJobId } : {}),
   });
+}
+
+export interface AsyncImageReadyMetadataInput {
+  requestedSize?: string;
+  requestedFormat: ImageGenerationJobInput["outputFormat"];
+  actualSize?: string;
+  actualContentType: string;
+  byteSize: number;
+  transport?: string;
+  is4k: boolean;
+}
+
+export interface AsyncImageReadyMetadata {
+  requestedMetadata: string;
+  resultMetadata: string;
+  transportLine: string;
+  is4k: string;
+  fourKNote: string;
+}
+
+function imageFormatLabel(contentType: string): string {
+  const normalized = contentType.toLowerCase();
+  if (normalized === "image/png") return "PNG";
+  if (normalized === "image/jpeg") return "JPEG";
+  if (normalized === "image/webp") return "WebP";
+  return contentType;
+}
+
+/** Format byte-derived output facts for the async image completion context. */
+export function buildAsyncImageReadyMetadata(input: AsyncImageReadyMetadataInput): AsyncImageReadyMetadata {
+  const requestedContentType = input.requestedFormat === "jpeg"
+    ? "image/jpeg"
+    : `image/${input.requestedFormat}`;
+  return {
+    requestedMetadata: [
+      input.requestedSize,
+      imageFormatLabel(requestedContentType),
+    ].filter((value) => value !== undefined).join(", "),
+    resultMetadata: [
+      input.actualSize,
+      imageFormatLabel(input.actualContentType),
+      formatFileSize(input.byteSize),
+    ].filter((value) => value !== undefined).join(", "),
+    transportLine: input.transport !== undefined ? `Transport: ${input.transport}\n` : "",
+    is4k: input.is4k ? "yes" : "no",
+    fourKNote: input.is4k
+      ? " (best-effort; the provider may return a smaller image)"
+      : "",
+  };
 }
 
 /** Convert normalized references back to the public image-tool input shape. */
