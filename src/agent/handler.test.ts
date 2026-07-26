@@ -278,6 +278,7 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}): HandlerDeps {
     sender,
     completeChat,
     liveMessageTypingHoldMs: 0,
+    modelTurnRetryDelayMs: () => 0,
     ...(initialToolNames !== undefined ? { initialToolNames } : {}),
     ...overrides,
   };

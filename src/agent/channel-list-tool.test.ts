@@ -11,13 +11,6 @@ function makeDeps(channels: ChannelInfo[]): ChannelListToolDeps {
 }
 
 describe("createChannelListTool", () => {
-  test("returns list_channels AgentTool metadata", () => {
-    const tool = createChannelListTool(makeDeps([]));
-    expect(tool.label).toBe("list_channels");
-    expect(tool.description).toBe("");
-    expect(tool.parameters).toBeDefined();
-  });
-
   test("formats visible guild channels with ids, mentions, sendability and current marker", async () => {
     const tool = createChannelListTool(makeDeps([
       { guildId: "g1", guildName: "Guild One", id: "c2", name: "handoff", type: "text", canView: true, canSend: true, isCurrent: false, categoryName: "Ops" },

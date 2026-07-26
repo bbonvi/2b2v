@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, jest, test } from "bun:test";
 import { VoiceResponseParser, type VoiceMessageDirective } from "./response-parser.ts";
 
 describe("VoiceResponseParser", () => {
@@ -148,6 +148,7 @@ describe("VoiceResponseParser", () => {
   });
 
   test("commits a short trailing phrase after a bounded stream idle", async () => {
+    jest.useFakeTimers();
     const speech: string[] = [];
     const parser = new VoiceResponseParser({
       onSpeech: (text) => { speech.push(text); },
@@ -155,11 +156,17 @@ describe("VoiceResponseParser", () => {
       onIgnore: () => {},
     });
 
-    await parser.push("Короткий ответ.");
-    await Bun.sleep(250);
+    try {
+      await parser.push("Короткий ответ.");
+      jest.advanceTimersByTime(250);
+      await Promise.resolve();
+      await Promise.resolve();
 
-    expect(speech).toEqual(["Короткий ответ."]);
-    expect((await parser.finish()).plannedSpeech).toBe("Короткий ответ.");
+      expect(speech).toEqual(["Короткий ответ."]);
+      expect((await parser.finish()).plannedSpeech).toBe("Короткий ответ.");
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test("continues streaming longer speech before the turn finishes", async () => {

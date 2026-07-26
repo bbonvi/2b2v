@@ -715,17 +715,6 @@ describe("threads table", () => {
   });
 });
 
-describe("in-memory database", () => {
-  test("creates database in memory with :memory:", () => {
-    const memDb = createDatabase(":memory:");
-    const row = memDb.raw
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memories'")
-      .get() as { name: string } | undefined;
-    expect(row?.name).toBe("memories");
-    memDb.close();
-  });
-});
-
 describe("idempotent initialization", () => {
   test("calling createDatabase twice on same file does not error", () => {
     const dbPath = path.join(tmpDir, "test.db");

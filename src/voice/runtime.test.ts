@@ -1,10 +1,24 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, setSystemTime, test } from "bun:test";
 import type { Client, VoiceBasedChannel } from "discord.js";
 import type { GuildConfig, VoiceConfig } from "../config/types.ts";
 import { createDatabase } from "../db/database.ts";
 import type { Logger } from "../logger.ts";
 import { VoiceRepository } from "./repository.ts";
 import { VoiceRuntime, type VoiceTurnRequest } from "./runtime.ts";
+
+afterEach(() => {
+  jest.useRealTimers();
+  setSystemTime();
+});
+
+async function advanceTimersByTime(ms: number): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  jest.advanceTimersByTime(ms);
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
 
 describe("VoiceRuntime shutdown", () => {
   test("ends the session without starting final maintenance", async () => {
@@ -105,7 +119,7 @@ describe("VoiceRuntime shutdown", () => {
 });
 
 describe("VoiceRuntime maintenance cadence", () => {
-  test("uses incremental segment count and minimum interval instead of row-id modulo", async () => {
+  test("uses incremental segment count and minimum interval instead of row-id modulo", () => {
     const db = createDatabase(":memory:");
     const repository = new VoiceRepository(db);
     const session = repository.createSession("guild", "voice");
@@ -142,7 +156,7 @@ describe("VoiceRuntime maintenance cadence", () => {
       maybeRunMaintenance: () => void;
     };
     internals.active = { id: session.id, voiceConfig };
-    await Bun.sleep(2);
+    setSystemTime(Date.now() + 2);
     for (const [index, text] of ["one", "two"].entries()) {
       repository.addTranscript({
         sessionId: session.id,
@@ -172,6 +186,7 @@ describe("VoiceRuntime maintenance cadence", () => {
 
 describe("VoiceRuntime response opportunities", () => {
   test("waits for the attention owner but bounds delay from another speaker", async () => {
+    jest.useFakeTimers({ now: Date.now() });
     const db = createDatabase(":memory:");
     const repository = new VoiceRepository(db);
     const session = repository.createSession("guild", "voice");
@@ -276,13 +291,13 @@ describe("VoiceRuntime response opportunities", () => {
     internals.active = active;
 
     internals.scheduleOpportunity(active);
-    await Bun.sleep(15);
+    await advanceTimersByTime(15);
     expect(turns).toHaveLength(0);
 
     active.speaking = new Set();
     active.speakingSince = new Map();
     internals.scheduleOpportunity(active);
-    await Bun.sleep(15);
+    await advanceTimersByTime(15);
     expect(turns).toHaveLength(1);
 
     const secondTrigger = repository.addTranscript({
@@ -308,9 +323,9 @@ describe("VoiceRuntime response opportunities", () => {
       recentInterrupters: [{ userId: "bob", username: "bob", at: Date.now() }],
     };
     internals.scheduleOpportunity(active);
-    await Bun.sleep(10);
+    await advanceTimersByTime(10);
     expect(turns).toHaveLength(1);
-    await Bun.sleep(30);
+    await advanceTimersByTime(30);
     expect(turns).toHaveLength(2);
     expect(turns[1]?.opportunity.currentSpeakers[0]?.username).toBe("bob");
 
@@ -338,7 +353,7 @@ describe("VoiceRuntime response opportunities", () => {
     };
     blockNextTurn = true;
     internals.scheduleOpportunity(active);
-    await Bun.sleep(15);
+    await advanceTimersByTime(15);
     expect(turns).toHaveLength(3);
 
     const retargetedTrigger = repository.addTranscript({
@@ -361,7 +376,7 @@ describe("VoiceRuntime response opportunities", () => {
       owner: { userId: "bob", username: "bob" },
       recentInterrupters: [],
     }, false);
-    await Bun.sleep(15);
+    await advanceTimersByTime(15);
     expect(turns).toHaveLength(4);
     expect(turns[3]?.opportunity.owner?.username).toBe("bob");
 

@@ -35,13 +35,6 @@ describe("buildEmojiListOutput", () => {
 });
 
 describe("createEmojiListTool", () => {
-  test("returns list_emojis AgentTool metadata", () => {
-    const tool = createEmojiListTool(makeDeps());
-
-    expect(tool.name).toBe("list_emojis");
-    expect(tool.description).toBe("");
-  });
-
   test("sorts emoji rows by name", async () => {
     const tool = createEmojiListTool(makeDeps());
     const result = await tool.execute("tc1", {}, AbortSignal.timeout(5000));

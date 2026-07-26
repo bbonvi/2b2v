@@ -313,6 +313,8 @@ export interface HandlerDeps {
   externalResponseSink?: ExternalResponseSink;
   /** Named model execution policy override for specialized visible turns such as live voice. */
   modelProfile?: string;
+  /** Overrides model retry delays for deterministic tests. Production callers should omit this. */
+  modelTurnRetryDelayMs?: (attempt: number) => number;
   /** Optional caller cancellation, used for voice barge-in and session departure. */
   abortSignal?: AbortSignal;
   /** Called immediately before final visible sends; false drops the reply as stale. */
@@ -1290,6 +1292,7 @@ async function completeModelTurnWithRetries(input: {
   request: OpenRouterChatRequest;
   timeoutMs: number;
   maxAttempts?: number;
+  retryDelayMs?: (attempt: number) => number;
   validateResult?: (result: OpenRouterChatResult) => Error | undefined;
   onAttemptStart?: () => void;
   hasCompletedVisibleMessage?: () => boolean;
@@ -1314,7 +1317,7 @@ async function completeModelTurnWithRetries(input: {
           maxAttempts,
           error: makeToolErrorText(normalizedError),
         });
-        await sleepMs(retryBackoffMs(attempt), input.request.signal);
+        await sleepMs(input.retryDelayMs?.(attempt) ?? retryBackoffMs(attempt), input.request.signal);
         continue;
       }
       return result;
@@ -1341,7 +1344,7 @@ async function completeModelTurnWithRetries(input: {
         maxAttempts,
         error: makeToolErrorText(normalizedError),
       });
-      await sleepMs(retryBackoffMs(attempt), input.request.signal);
+      await sleepMs(input.retryDelayMs?.(attempt) ?? retryBackoffMs(attempt), input.request.signal);
     }
   }
 
@@ -1525,6 +1528,7 @@ async function runNativeToolLoop(input: {
   maxToolRounds: number;
   agentTimeBudgetMs: number;
   llmOutputTimeoutMs: number;
+  retryDelayMs?: (attempt: number) => number;
   requestLog?: RequestLog;
   sendIntermediateText?: (text: string, channelId: string | undefined) => Promise<boolean>;
   streamFinalText?: (delta: string, channelId: string | undefined) => Promise<boolean>;
@@ -1607,6 +1611,7 @@ async function runNativeToolLoop(input: {
         },
         timeoutMs: input.llmOutputTimeoutMs,
         maxAttempts,
+        retryDelayMs: input.retryDelayMs,
         validateResult: allowEmptyFinalResponse() ? undefined : requireTextResult(emptyResponseMessage),
         onAttemptStart: () => {
           completedVisibleMessage = false;
@@ -1688,6 +1693,7 @@ async function runNativeToolLoop(input: {
           signal: input.signal,
         },
         timeoutMs: input.llmOutputTimeoutMs,
+        retryDelayMs: input.retryDelayMs,
         validateResult: allowEmptyFinalResponse() ? undefined : requireTextUnlessToolCalls("Model produced an empty response."),
         onAttemptStart: () => {
           completedVisibleMessage = false;
@@ -3121,6 +3127,7 @@ export async function handleMessage(
         maxToolRounds: deps.guildConfig.replyLoop.maxToolCalls,
         agentTimeBudgetMs: deps.guildConfig.replyLoop.wallClockTimeoutMs,
         llmOutputTimeoutMs: deps.guildConfig.replyLoop.llmOutputTimeoutMs,
+        retryDelayMs: deps.modelTurnRetryDelayMs,
         requestLog: reqLog,
         sendIntermediateText: deps.externalResponseSink !== undefined || deps.disableLiveOutput === true
           ? undefined

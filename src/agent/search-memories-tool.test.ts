@@ -35,12 +35,10 @@ function tool(overrides: Partial<Parameters<typeof createSearchMemoriesTool>[0]>
 }
 
 describe("createSearchMemoriesTool", () => {
-  test("creates search_memories without inline policy", () => {
+  test("exposes the search parameter contract", () => {
     const search = tool();
     const parameters = search.parameters as { properties?: Record<string, unknown> };
 
-    expect(search.name).toBe("search_memories");
-    expect(search.description).toBe("");
     expect(Object.keys(parameters.properties ?? {})).toEqual(["pattern", "user", "guild_id", "limit", "cursor"]);
   });
 

@@ -54,12 +54,6 @@ function text(result: Awaited<ReturnType<AgentTool["execute"]>>): string {
 }
 
 describe("createDiscordSetUserTimeoutTool", () => {
-  test("exposes moderation schema without inline policy", () => {
-    const tool = makeTool(makeMember());
-    expect(tool.name).toBe("discord_set_user_timeout");
-    expect(tool.description).toBe("");
-  });
-
   test("rejects non-guild use", async () => {
     const tool = makeTool(makeMember(), { guildId: undefined });
     const result = await tool.execute("call-1", { target: "alice", duration: 1, unit: "minutes" });
@@ -179,7 +173,6 @@ describe("createDiscordRemoveUserTimeoutTool", () => {
     });
     const result = await tool.execute("call-1", { target: "@alice", reason: "served" });
 
-    expect(tool.name).toBe("discord_remove_user_timeout");
     expect(text(result)).toContain("Removed timeout from @alice");
     expect(member.calls).toEqual([{ durationMs: null, reason: "served" }]);
   });

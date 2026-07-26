@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
 import {
   EmojiCache,
   buildEmojiContext,
@@ -20,15 +20,15 @@ describe("EmojiCache", () => {
     cache = new EmojiCache();
   });
 
+  afterEach(() => {
+    setSystemTime();
+  });
+
   test("stores and retrieves emojis for a guild", () => {
     cache.set("guild1", makeEmojis());
     const result = cache.get("guild1");
     expect(result).toHaveLength(3);
-    expect(result).toBeDefined();
-    if (result === undefined) throw new Error("unreachable");
-    const first = result[0];
-    if (first === undefined) throw new Error("unreachable");
-    expect(first.name).toBe("thumbsup");
+    expect(result?.[0]?.name).toBe("thumbsup");
   });
 
   test("returns undefined for unknown guild", () => {
@@ -38,13 +38,8 @@ describe("EmojiCache", () => {
   test("overwrites existing guild emojis", () => {
     cache.set("guild1", makeEmojis());
     cache.set("guild1", [{ name: "new", id: "444", animated: false }]);
-    expect(cache.get("guild1")).toHaveLength(1);
     const updated = cache.get("guild1");
-    expect(updated).toBeDefined();
-    if (updated === undefined) throw new Error("unreachable");
-    const firstUpdated = updated[0];
-    if (firstUpdated === undefined) throw new Error("unreachable");
-    expect(firstUpdated.name).toBe("new");
+    expect(updated).toEqual([{ name: "new", id: "444", animated: false }]);
   });
 
   test("lookup finds emoji by name", () => {
@@ -78,9 +73,10 @@ describe("EmojiCache", () => {
   });
 
   test("isStale returns true after TTL expires", () => {
+    const now = Date.now();
+    setSystemTime(now);
     cache.set("guild1", makeEmojis());
-    // Manually backdate the timestamp
-    cache._setTimestamp("guild1", Date.now() - 120_000);
+    setSystemTime(now + 120_000);
     expect(cache.isStale("guild1", 60_000)).toBe(true);
   });
 });

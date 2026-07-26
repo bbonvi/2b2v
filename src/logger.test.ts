@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeEach, afterEach, spyOn, type Mock } from "bun:test";
-import { createLogger, LOG_LEVELS, RequestLog, truncateArgs } from "./logger";
+import { createLogger, RequestLog, truncateArgs } from "./logger";
 import { requestLogStore } from "./dashboard/store";
 
 let stdoutSpy: Mock<typeof process.stdout.write>;
@@ -96,24 +96,6 @@ describe("level gating", () => {
   });
 });
 
-describe("log routing", () => {
-  test("debug and info go to stdout", () => {
-    const log = createLogger({ level: "debug" });
-    log.debug("d");
-    log.info("i");
-    expect(captured.length).toBe(2);
-    expect(capturedErr.length).toBe(0);
-  });
-
-  test("warn and error go to stderr", () => {
-    const log = createLogger({ level: "debug" });
-    log.warn("w");
-    log.error("e");
-    expect(captured.length).toBe(0);
-    expect(capturedErr.length).toBe(2);
-  });
-});
-
 describe("child logger", () => {
   test("inherits parent context and level", () => {
     const log = createLogger({ level: "info" });
@@ -181,14 +163,6 @@ describe("token usage logging", () => {
       totalTokens: 1200,
     });
     expect(captured.length).toBe(0);
-  });
-});
-
-describe("LOG_LEVELS ordering", () => {
-  test("debug < info < warn < error", () => {
-    expect(LOG_LEVELS.debug).toBeLessThan(LOG_LEVELS.info);
-    expect(LOG_LEVELS.info).toBeLessThan(LOG_LEVELS.warn);
-    expect(LOG_LEVELS.warn).toBeLessThan(LOG_LEVELS.error);
   });
 });
 

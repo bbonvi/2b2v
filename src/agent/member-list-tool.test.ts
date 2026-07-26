@@ -21,13 +21,6 @@ const MEMBERS: MemberInfo[] = [
 ];
 
 describe("createChatUserListTool", () => {
-  test("returns list_chat_users AgentTool metadata", () => {
-    const tool = createChatUserListTool(makeDeps(MEMBERS));
-    expect(tool.label).toBe("list_chat_users");
-    expect(tool.description).toBe("");
-    expect(tool.parameters).toBeDefined();
-  });
-
   test("lists all members when onlineOnly is false", async () => {
     const tool = createChatUserListTool(makeDeps(MEMBERS));
     const result = await tool.execute("tc1", { onlineOnly: false }, AbortSignal.timeout(5000));

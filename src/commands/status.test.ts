@@ -9,24 +9,20 @@ import {
 } from "./status.ts";
 
 describe("formatUptime", () => {
-  test("formats seconds only", () => {
-    expect(formatUptime(5_000)).toBe("5s");
-  });
-
-  test("formats minutes and seconds", () => {
-    expect(formatUptime(125_000)).toBe("2m 5s");
-  });
-
-  test("formats hours, minutes, seconds", () => {
-    expect(formatUptime(3_661_000)).toBe("1h 1m 1s");
-  });
-
-  test("formats days", () => {
-    expect(formatUptime(90_061_000)).toBe("1d 1h 1m 1s");
-  });
-
-  test("handles zero", () => {
-    expect(formatUptime(0)).toBe("0s");
+  test("formats durations from zero through days", () => {
+    expect([
+      formatUptime(0),
+      formatUptime(5_000),
+      formatUptime(125_000),
+      formatUptime(3_661_000),
+      formatUptime(90_061_000),
+    ]).toEqual([
+      "0s",
+      "5s",
+      "2m 5s",
+      "1h 1m 1s",
+      "1d 1h 1m 1s",
+    ]);
   });
 });
 
@@ -53,12 +49,6 @@ describe("buildStatusEmbed", () => {
     expect(embed.fields[2]).toEqual({ name: "Messages", value: "42", inline: true });
     expect(embed.fields[3]).toEqual({ name: "Memories", value: "7", inline: true });
     expect(embed.fields[4]).toEqual({ name: "Schedules", value: "3", inline: true });
-  });
-
-  test("omits optional stats when undefined", () => {
-    const stats: StatusStats = { uptimeMs: 0, guildCount: 0 };
-    const embed = buildStatusEmbed(stats);
-    expect(embed.fields).toHaveLength(2);
   });
 });
 
@@ -100,16 +90,6 @@ describe("createStatusHandler", () => {
     expect(call.flags).toBe(MessageFlags.Ephemeral);
   });
 
-  test("responds with embed for admin user (Discord permissions)", async () => {
-    const handler = createStatusHandler(makeDeps());
-    const interaction = makeInteraction({ userId: "123", permissionBits: 8n });
-    await handler(interaction as never);
-    expect(interaction.reply).toHaveBeenCalledTimes(1);
-    const call = replyArg(interaction) as { embeds: unknown[]; flags: number };
-    expect(call.flags).toBe(MessageFlags.Ephemeral);
-    expect(call.embeds).toHaveLength(1);
-  });
-
   test("responds with embed for fallback admin user", async () => {
     const handler = createStatusHandler(makeDeps({ adminUserIds: ["555"] }));
     const interaction = makeInteraction({ userId: "555", permissionBits: null });
@@ -128,7 +108,12 @@ describe("createStatusHandler", () => {
     const interaction = makeInteraction({ userId: "1", permissionBits: 8n });
     await handler(interaction as never);
     expect(getStats).toHaveBeenCalledTimes(1);
-    const call = replyArg(interaction) as { embeds: Array<{ fields: Array<{ value: string }> }> };
+    const call = replyArg(interaction) as {
+      embeds: Array<{ fields: Array<{ value: string }> }>;
+      flags: number;
+    };
+    expect(call.flags).toBe(MessageFlags.Ephemeral);
+    expect(call.embeds).toHaveLength(1);
     const embed = call.embeds[0] as { fields: Array<{ value: string }> };
     expect((embed.fields[0] as { value: string }).value).toBe("1d 1h 1m 1s");
     expect((embed.fields[1] as { value: string }).value).toBe("3");

@@ -49,12 +49,6 @@ export class EmojiCache {
     if (!entry) return true;
     return Date.now() - entry.updatedAt > ttlMs;
   }
-
-  /** Test helper — backdate the cache timestamp. */
-  _setTimestamp(guildId: string, ts: number): void {
-    const entry = this.guilds.get(guildId);
-    if (entry) entry.updatedAt = ts;
-  }
 }
 
 /**

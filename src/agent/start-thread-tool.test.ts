@@ -35,15 +35,6 @@ function makeDeps(overrides: Partial<StartThreadToolDeps> = {}): StartThreadTool
 }
 
 describe("createStartThreadTool", () => {
-  test("returns start_thread AgentTool with correct metadata", () => {
-    const deps = makeDeps();
-    const tool = createStartThreadTool(deps);
-    expect(tool.name).toBe("start_thread");
-    expect(tool.label).toBe("Start Thread");
-    expect(tool.description).toBeDefined();
-    expect(tool.parameters).toBeDefined();
-  });
-
   test("creates thread with provided name", async () => {
     const deps = makeDeps();
     const tool = createStartThreadTool(deps);

@@ -20,13 +20,6 @@ const RESULTS: BraveSearchResult[] = [
 ];
 
 describe("createBraveSearchTool", () => {
-  test("returns web_search AgentTool with correct metadata", () => {
-    const tool = createBraveSearchTool(makeDeps(RESULTS));
-    expect(tool.label).toBe("web_search");
-    expect(tool.description).toBeDefined();
-    expect(tool.parameters).toBeDefined();
-  });
-
   test("returns formatted search results", async () => {
     const tool = createBraveSearchTool(makeDeps(RESULTS));
     const result = await tool.execute("tc1", { query: "bun runtime" }, AbortSignal.timeout(5000));

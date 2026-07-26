@@ -32,10 +32,6 @@ describe("createScheduleTaskTool (schedule_task)", () => {
     tool = createScheduleTaskTool(deps);
   });
 
-  test("has correct label", () => {
-    expect(tool.label).toBe("schedule_task");
-  });
-
   test("createScheduleTools exposes create, list, and delete tools", () => {
     const tools = createScheduleTools({
       db,

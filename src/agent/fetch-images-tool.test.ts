@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createFetchImagesTool, type FetchImagesToolDeps } from "./fetch-images-tool.ts";
 
@@ -77,12 +77,12 @@ function makeDeps(overrides?: Partial<FetchImagesToolDeps>): FetchImagesToolDeps
 describe("createFetchImagesTool", () => {
   let tool: AgentTool;
 
-  beforeEach(() => {
-    tool = createFetchImagesTool(makeDeps());
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
-  test("returns tool with correct name", () => {
-    expect(tool.name).toBe("fetch_images");
+  beforeEach(() => {
+    tool = createFetchImagesTool(makeDeps());
   });
 
   test("fetches and returns valid image", async () => {
@@ -203,6 +203,7 @@ describe("createFetchImagesTool", () => {
   });
 
   test("handles timeout gracefully", async () => {
+    jest.useFakeTimers();
     const abortingFetch: FetchImagesToolDeps["fetchFn"] = (_url, init) => new Promise((_resolve, reject) => {
       const signal = init?.signal;
       const reason = (): Error => signal?.reason instanceof Error ? signal.reason : new Error("Aborted");
@@ -211,7 +212,9 @@ describe("createFetchImagesTool", () => {
     });
 
     tool = createFetchImagesTool(makeDeps({ fetchFn: abortingFetch, timeoutMs: 100 }));
-    const result = await tool.execute("call-9", { urls: ["https://slow.com/image.jpg"] });
+    const resultPromise = tool.execute("call-9", { urls: ["https://slow.com/image.jpg"] });
+    jest.advanceTimersByTime(100);
+    const result = await resultPromise;
 
     const meta = JSON.parse((result.content[0] as { type: "text"; text: string }).text) as { error: string };
     expect(meta.error).toContain("timed out");

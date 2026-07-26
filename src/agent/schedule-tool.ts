@@ -385,18 +385,30 @@ function parseCronCeilings(params: Record<string, unknown>, timezone: string): {
 }
 
 function cronPressure(expression: string, timezone: string, now: number, ceilings: { expiresAt?: number; maxFireCount?: number }): CronPressure {
+  if (ceilings.maxFireCount !== undefined && ceilings.maxFireCount <= 0) {
+    return { hour: 0, day: 0 };
+  }
+
   const cron = new Cron(expression, { timezone, paused: true });
   const hourEnd = now + 60 * 60_000;
   const dayEnd = now + 24 * 60 * 60_000;
   const end = Math.min(dayEnd, ceilings.expiresAt ?? dayEnd);
-  const runs = cron.nextRuns(Math.max(ceilings.maxFireCount ?? 10_000, 1), new Date(now))
-    .map((date) => date.getTime())
-    .filter((time) => time <= end);
-  const limitedRuns = ceilings.maxFireCount !== undefined ? runs.slice(0, ceilings.maxFireCount) : runs;
-  return {
-    hour: limitedRuns.filter((time) => time <= hourEnd).length,
-    day: limitedRuns.length,
-  };
+  const runLimit = Math.max(ceilings.maxFireCount ?? 10_000, 1);
+  let cursor = new Date(now);
+  let hour = 0;
+  let day = 0;
+
+  while (day < runLimit) {
+    const next = cron.nextRun(cursor);
+    if (next === null) break;
+    const time = next.getTime();
+    if (time > end) break;
+    if (time <= hourEnd) hour += 1;
+    day += 1;
+    cursor = next;
+  }
+
+  return { hour, day };
 }
 
 function activeCronPressure(schedules: ScheduleRow[], now: number, forUserId?: string): CronPressure {

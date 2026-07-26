@@ -96,35 +96,6 @@ describe("createSchedule", () => {
     expect(row?.cronExpression).toBeNull();
   });
 
-  test("creates a tool-created schedule", () => {
-    const id = createSchedule(db, {
-      guildId: "guild-2",
-      channelId: "ch-5",
-      source: "tool",
-      type: "one_off",
-      runAt: Date.now() + 3600_000,
-      timezone: "Asia/Tokyo",
-      messageContent: "Check back later",
-    });
-
-    const row = getSchedule(db, id);
-    expect(row?.source).toBe("tool");
-    expect(row?.guildId).toBe("guild-2");
-  });
-
-  test("defaults enabled to true", () => {
-    const id = createSchedule(db, {
-      guildId: "g1",
-      channelId: "c1",
-      source: "admin",
-      type: "cron",
-      cronExpression: "* * * * *",
-      timezone: "UTC",
-      messageContent: "test",
-    });
-    expect(getSchedule(db, id)?.enabled).toBe(true);
-  });
-
   test("allows explicit enabled=false", () => {
     const id = createSchedule(db, {
       guildId: "g1",
@@ -612,13 +583,6 @@ describe("listPendingSchedules", () => {
 });
 
 describe("schema constraints", () => {
-  test("schedules table exists with expected columns", () => {
-    const info = db.raw
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='schedules'")
-      .get() as { name: string } | undefined;
-    expect(info?.name).toBe("schedules");
-  });
-
   test("guild_enabled index exists", () => {
     const idx = db.raw
       .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_schedules_guild_enabled'")

@@ -17,22 +17,6 @@ void mock.module("discord.js", () => ({
 }));
 
 describe("registerSlashCommands", () => {
-  test("returns count of registered commands from array result", async () => {
-    putMock.mockResolvedValueOnce([{ id: "cmd-1" }, { id: "cmd-2" }, { id: "cmd-3" }]);
-
-    const count = await registerSlashCommands({
-      token: "test-token",
-      clientId: "client-123",
-      commands: [
-        { name: "status", description: "Bot status" },
-        { name: "config", description: "Guild config" },
-        { name: "schedule", description: "Schedules" },
-      ],
-    });
-
-    expect(count).toBe(3);
-  });
-
   test("returns 0 when REST result is not an array", async () => {
     putMock.mockResolvedValueOnce({ message: "ok" } as unknown as { id: string }[]);
 
@@ -65,12 +49,13 @@ describe("registerSlashCommands", () => {
     ];
     putMock.mockResolvedValueOnce(commands.map((c) => ({ id: c.name })));
 
-    await registerSlashCommands({
+    const count = await registerSlashCommands({
       token: "test-token",
       clientId: "app-456",
       commands,
     });
 
+    expect(count).toBe(2);
     expect(putMock).toHaveBeenCalledWith("/applications/app-456/commands", {
       body: commands,
     });

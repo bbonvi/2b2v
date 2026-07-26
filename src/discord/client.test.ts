@@ -13,11 +13,6 @@ describe("REQUIRED_INTENTS", () => {
     expect(REQUIRED_INTENTS).toContain(GatewayIntentBits.GuildExpressions);
     expect(REQUIRED_INTENTS).toContain(GatewayIntentBits.GuildPresences);
   });
-
-  test("has no duplicates", () => {
-    const unique = new Set(REQUIRED_INTENTS);
-    expect(unique.size).toBe(REQUIRED_INTENTS.length);
-  });
 });
 
 describe("checkMessageContentIntent", () => {

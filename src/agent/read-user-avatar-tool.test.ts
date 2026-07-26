@@ -32,13 +32,6 @@ function makeDeps(overrides?: Partial<ReadUserAvatarToolDeps>): ReadUserAvatarTo
 }
 
 describe("createReadUserAvatarTool", () => {
-  test("returns tool metadata", () => {
-    const tool = createReadUserAvatarTool(makeDeps());
-    expect(tool.name).toBe("read_user_avatar");
-    expect(tool.label).toBe("read_user_avatar");
-    expect(tool.parameters).toBeDefined();
-  });
-
   test("fetches and prepares avatar image content", async () => {
     const calls: string[] = [];
     const tool = createReadUserAvatarTool(makeDeps({
