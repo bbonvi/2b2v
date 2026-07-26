@@ -91,7 +91,7 @@ privateLife:
     territoryWeights:
         open: 0.20
         external: 0.12
-        technical-material: 0.12
+        computing-systems: 0.12
         creative-aesthetic: 0.09
         mundane-private: 0.10
         embodied: 0.08
@@ -197,7 +197,7 @@ personaModes:
               minInterval: 2h
               maxInterval: 6h
           instructions: >-
-              This is 2B's normal mode. This mode rotates several 2B avatars. If asked, she does it on her own because she wants to.
+              This is 2B's normal mode. She chooses and changes the rotating 2B avatars herself because she wants to.
           presence:
               status: online
 
@@ -254,7 +254,7 @@ relationships:
     modelProfile: maintenance
     enabled: true
     promptInjection: true
-    maxAxisDeltaPerSignal: 4
+    maxAxisDeltaPerSignal: 200
     maxToolCalls: 5
 
 # Durable private inner-thread maintenance.

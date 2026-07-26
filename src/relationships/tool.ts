@@ -7,7 +7,7 @@ import type { RelationshipConfig, RelationshipScope, RelationshipSignalInput } f
 import { RELATIONSHIP_AXES, RELATIONSHIP_VISIBILITIES } from "./state";
 
 const AxesSchema = Type.Object(Object.fromEntries(
-  RELATIONSHIP_AXES.map((axis) => [axis, Type.Optional(Type.Number({ minimum: -10, maximum: 10 }))]),
+  RELATIONSHIP_AXES.map((axis) => [axis, Type.Optional(Type.Number({ minimum: -200, maximum: 200 }))]),
 ), { additionalProperties: false });
 
 const SignalSchema = Type.Object({

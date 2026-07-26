@@ -29,6 +29,40 @@ describe("record_relationship tool", () => {
     db.close();
   });
 
+  test("records a full-range relationship reversal when the profile allows it", async () => {
+    const db = createDatabase(":memory:");
+    const tool = createRecordRelationshipTool({
+      db,
+      config: { ...config(), maxAxisDeltaPerSignal: 200 },
+      scope: { userId: "u1" },
+    });
+
+    await tool.execute("call-1", {
+      signals: [{
+        summary: "A long-established bond created deep trust.",
+        confidence: 1,
+        axes: { trust: 80, warmth: 45, tension: -30, attachment: 70 },
+      }],
+    });
+    const result = await tool.execute("call-2", {
+      signals: [{
+        summary: "A confirmed turning point destroyed established trust.",
+        confidence: 1,
+        axes: { trust: -150, warmth: -90, tension: 90, attachment: -5 },
+        note: "2B considers the former bond ended.",
+      }],
+    });
+
+    expect((result.details as RelationshipMutationResult).accepted).toHaveLength(1);
+    expect(getRelationshipProfile(db, "u1").axes).toMatchObject({
+      trust: -70,
+      warmth: -45,
+      tension: 60,
+      attachment: 65,
+    });
+    db.close();
+  });
+
   test("rejects invalid schema", async () => {
     const db = createDatabase(":memory:");
     const tool = createRecordRelationshipTool({ db, config: config() });

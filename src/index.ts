@@ -144,6 +144,7 @@ import {
   hasRelationshipData,
   listRelationshipProfiles,
   renderNotableRelationshipsContext,
+  renderRelationshipAxisValues,
   renderRelationshipPromptContext,
   selectRelationshipAnchorProfiles,
   type RelationshipContextProfile,
@@ -1727,6 +1728,14 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
                 template: promptBundle.runtime.relationships.context,
               })
             : "";
+          const relationshipAxisContext = relationshipConfig.enabled
+            ? [
+                "## Current Relationship Axis Values",
+                ...userIds.map((userId) =>
+                  `- @${usernameById.get(userId) ?? userId} (${userId}): ${renderRelationshipAxisValues(getRelationshipProfile(db, userId))}`
+                ),
+              ].join("\n")
+            : "";
           const context: AssembledContext = {
             sections: [{
               label: "Current Context",
@@ -1736,6 +1745,7 @@ async function runVoiceMaintenance(sessionId: string, final: boolean): Promise<v
                   : `## Existing Rolling Summary\n${session.rollingSummary}`,
                 memoryContext === "" ? "" : `## Existing Memory Context\n${memoryContext}`,
                 relationshipContext,
+                relationshipAxisContext,
                 enableInnerThreads
                   ? buildInnerThreadsContext({
                       db,
@@ -2628,6 +2638,11 @@ async function runRelationshipPostReplyExtraction(input: {
         onRelationshipResult: input.onResult,
       }));
   try {
+    const currentRelationshipAxes = [
+      "## Current Relationship Axis Values",
+      `Subject: @${input.currentUsername ?? input.currentUserId} (${input.currentUserId}).`,
+      renderRelationshipAxisValues(getRelationshipProfile(db, input.currentUserId)),
+    ].join("\n");
     const executionMode = runtimeContextTemplate(
       "relationship-maintenance-execution-mode",
       { maxToolCalls: config.maxToolCalls },
@@ -2652,6 +2667,7 @@ async function runRelationshipPostReplyExtraction(input: {
       runtimeInstruction: promptBundle.runtime.reply,
       controlMessage: [
         executionMode,
+        currentRelationshipAxes,
         "## Post-Reply Relationship Consideration",
         runtimeContextTemplate(
           "relationship-pass-decision",
@@ -5724,6 +5740,7 @@ const dashboardManagement = {
   listInnerThreads: (filter: { guildId?: string; status?: "active" | "resolved"; limit?: number }) => ({
     threads: listInnerThreads(db, filter),
   }),
+  deleteInnerThread: dashboardManagementRuntime.deleteInnerThread,
   listStagedAssets: (filter: { guildId?: string; channelId?: string; unresolvedOnly?: boolean; limit?: number }) => ({
     assets: listStagedAssets(db, filter),
   }),

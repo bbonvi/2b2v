@@ -1,5 +1,6 @@
 import type { Client, Guild, GuildBasedChannel, ThreadChannel } from "discord.js";
 import type { Database } from "../db/database";
+import { deleteInnerThread } from "../db/inner-thread-repository";
 import { createMemory, deleteMemory, updateMemory } from "../db/memory-repository";
 import { channelTypeLabel, isSendableGuildChannel } from "../discord/message-sender";
 import {
@@ -53,6 +54,7 @@ export type DashboardManagementRuntime = {
     discordDeletion: DiscordManagementDeleteResult;
     scopedTo: { guildId: string; channelId: string };
   }>;
+  deleteInnerThread: (threadId: string) => { deleted: boolean; threadId: string };
   listMemories: (filter: ManagementMemoryFilter) => { memories: DecoratedManagementMemory[] };
   createMemory: (input: ManagementMemoryCreateInput) => { memory: DecoratedManagementMemory };
   editMemory: (input: ManagementMemoryEditInput) => { memory: DecoratedManagementMemory };
@@ -433,6 +435,7 @@ export function createDashboardManagementRuntime(input: {
     editMessage: editManagementMessageState,
     deleteMessages: deleteManagementMessageState,
     deleteLatestMessages: deleteLatestManagementMessages,
+    deleteInnerThread: (threadId) => ({ deleted: deleteInnerThread(input.db, threadId), threadId }),
     listMemories: (filter) => ({
       memories: listManagementMemories(input.db, filter).map(decorateManagementMemory),
     }),

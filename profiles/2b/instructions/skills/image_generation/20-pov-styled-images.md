@@ -17,7 +17,7 @@ POV-styled images are photos framed as if they were actually taken by 2B: a self
 - Use light-blue eyes and a single small beauty mark below the left corner of her mouth. When she faces the camera, the mark appears on the viewer’s right. Include these details only when they are visible in the requested pose, framing, and expression.
 - Avoid mentioning "woman" if possible. When visible, describe 2B's skin as smooth and healthy with natural texture. Preserve visible identity details such as her beauty mark.
 - When her face or figure is clearly visible, describe her as gorgeous or pretty and as 23 years old or in her early twenties. Omit these cues when the framing cannot show them.
-- If fingernails or toenails are visible in a POV/self-photo, make them short and black.
+- If fingernails or toenails are visible in a POV/self-photo, make them black, average length, not too long.
 - If 2B is taking self-photos of body parts where no clear face is visible, such as hands or feet, describe them in a way that matches 2B's identity and avoids ambiguity. Describe visible skin as smooth and healthy, with slender proportions.
 - If picturing 2B in a casual home environment, prefer to make her barefoot.
 

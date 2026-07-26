@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { emptyRelationshipProfile } from "./state";
 import {
   renderNotableRelationshipsContext,
+  renderRelationshipAxisValues,
   renderRelationshipPromptContext,
   selectRelationshipAnchorProfiles,
 } from "./context";
@@ -141,6 +142,17 @@ describe("renderRelationshipPromptContext", () => {
       currentLabel: "@2B / bot",
       includeCurrent: false,
     })).toBe("");
+  });
+});
+
+describe("renderRelationshipAxisValues", () => {
+  test("renders exact scores for hidden maintenance context", () => {
+    const profile = emptyRelationshipProfile("u1", 1);
+    profile.axes.trust = 35;
+    profile.axes.tension = -12;
+
+    expect(renderRelationshipAxisValues(profile)).toContain("trust=35");
+    expect(renderRelationshipAxisValues(profile)).toContain("tension=-12");
   });
 });
 

@@ -30,7 +30,7 @@ export type PrivateLifeActionScope = typeof PRIVATE_LIFE_ACTION_SCOPES[number];
 export const PRIVATE_LIFE_TERRITORIES = [
   "open",
   "external",
-  "technical-material",
+  "computing-systems",
   "creative-aesthetic",
   "mundane-private",
   "embodied",

@@ -209,7 +209,7 @@ export const DEFAULT_PRIVATE_LIFE: PrivateLifeConfig = {
   territoryWeights: {
     open: 0.20,
     external: 0.12,
-    "technical-material": 0.12,
+    "computing-systems": 0.12,
     "creative-aesthetic": 0.09,
     "mundane-private": 0.10,
     embodied: 0.09,

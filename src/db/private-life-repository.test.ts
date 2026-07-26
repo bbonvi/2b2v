@@ -30,16 +30,16 @@ describe("private-life episode repository", () => {
       selection: {
         origin: "spontaneous",
         mode: "investigate",
-        territory: "technical-material",
+        territory: "computing-systems",
         actionScope: "quiet-exploration",
-        candidateSeeds: ["a worn seal, through a concrete failure"],
+        candidateSeeds: ["an undocumented chip, through a concrete failure"],
       },
       createdAt: 100,
     });
     completePrivateLifeEpisode(db, {
       id: "episode-1",
       requestId: "request-1",
-      thoughts: "The seal failure is more interesting than expected.",
+      thoughts: "The undocumented chip is more interesting than expected.",
       visibleOutput: "I found something odd.",
       visibleDelivered: true,
       completedAt: 200,
@@ -50,26 +50,26 @@ describe("private-life episode repository", () => {
       description: "Record a compact label.",
     });
     await summaryTool.execute("call-1", {
-      label: "Worn seal failure",
-      theme_key: "technical:worn-seal",
-      facets: ["mechanism", "Failure", "mechanism"],
+      label: "Undocumented chip",
+      theme_key: "computing:undocumented-chip",
+      facets: ["hardware", "Investigation", "hardware"],
     });
 
     expect(getPrivateLifeEpisode(db, "episode-1")).toMatchObject({
       requestId: "request-1",
       status: "complete",
       selection: { actionScope: "quiet-exploration" },
-      thoughts: "The seal failure is more interesting than expected.",
+      thoughts: "The undocumented chip is more interesting than expected.",
       visibleDelivered: true,
       summary: {
-        label: "Worn seal failure",
-        themeKey: "technical:worn-seal",
-        facets: ["mechanism", "failure"],
+        label: "Undocumented chip",
+        themeKey: "computing:undocumented-chip",
+        facets: ["hardware", "investigation"],
       },
     });
     expect(listRecentPrivateLifeSummaries(db, 10)[0]).toMatchObject({
-      label: "Worn seal failure",
-      territory: "technical-material",
+      label: "Undocumented chip",
+      territory: "computing-systems",
       mode: "investigate",
     });
     expect(countPrivateLifeVisibleEpisodesSince(db, 99)).toBe(1);

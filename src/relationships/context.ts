@@ -1,4 +1,5 @@
 import type { RelationshipAxis, RelationshipProfile } from "./types";
+import { RELATIONSHIP_AXES } from "./state";
 
 export interface RelationshipContextProfile {
   profile: RelationshipProfile;
@@ -64,6 +65,11 @@ function joinPromptItems(items: string[]): string {
     .map((item) => item.trim().replace(/[.;。；]+$/u, ""))
     .filter((item) => item !== "")
     .join("; ");
+}
+
+/** Render exact axis values for hidden relationship-maintenance calls. */
+export function renderRelationshipAxisValues(profile: RelationshipProfile): string {
+  return RELATIONSHIP_AXES.map((axis) => `${axis}=${profile.axes[axis]}`).join(", ");
 }
 
 function axisPhrase(axis: RelationshipAxis, value: number): string | undefined {

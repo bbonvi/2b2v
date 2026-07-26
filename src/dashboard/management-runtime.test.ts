@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Collection } from "discord.js";
 import { createDatabase, type Database } from "../db/database";
+import { createInnerThread, getInnerThread } from "../db/inner-thread-repository";
 import { createDashboardManagementRuntime } from "./management-runtime";
 
 let db: Database;
@@ -140,5 +141,19 @@ describe("dashboard management runtime", () => {
     expect(runtime.listMemories({ status: "deleted" }).memories.map((memory) => memory.id)).toEqual([memoryId]);
     expect(runtime.restoreMemory(memoryId).memory.deletedAt).toBeNull();
     expect(runtime.listMemories({ status: "active" }).memories.map((memory) => memory.id)).toEqual([memoryId]);
+  });
+
+  test("deletes an inner thread", () => {
+    const thread = createInnerThread(db, {
+      content: "unfinished",
+      aboutType: "self",
+      recallScope: "anywhere",
+      recallMode: "always",
+      salience: 0.5,
+      pressure: 0.5,
+    });
+
+    expect(managementRuntime().deleteInnerThread(thread.id)).toEqual({ deleted: true, threadId: thread.id });
+    expect(getInnerThread(db, thread.id)).toBeNull();
   });
 });

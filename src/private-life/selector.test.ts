@@ -185,16 +185,16 @@ describe("private-life curiosity selector", () => {
       threads: [],
       origin: "spontaneous",
       mode: "investigate",
-      territory: "technical-material",
+      territory: "computing-systems",
       random: () => 0,
     });
 
     expect(selection).toMatchObject({
       origin: "spontaneous",
       mode: "investigate",
-      territory: "technical-material",
+      territory: "computing-systems",
     });
-    expect(selection.candidateSeeds[0]).toContain("worn mechanical seal");
+    expect(selection.candidateSeeds[0]).toContain("undocumented chip");
   });
 
   test("makes reflection common and suppresses social opportunities when output is unavailable", () => {

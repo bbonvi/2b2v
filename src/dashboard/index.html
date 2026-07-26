@@ -1912,7 +1912,7 @@
           <option value="">territory: auto</option>
           <option value="open">open</option>
           <option value="external">external</option>
-          <option value="technical-material">technical/material</option>
+          <option value="computing-systems">computing/systems</option>
           <option value="creative-aesthetic">creative/aesthetic</option>
           <option value="mundane-private">mundane/private</option>
           <option value="embodied">embodied</option>
@@ -3334,6 +3334,9 @@
                 ? '<span>source messages ' + esc(thread.sourceMessageIds.slice(0, 3).join(', ')) + '</span>'
                 : '')
               + '<span>id ' + esc(thread.id) + '</span></div></div>'
+            + '<div class="management-row-actions">'
+              + '<button class="btn btn-sm danger" onclick=\'window.__deleteInnerThread(' + jsStr(thread.id) + ')\'>Delete</button>'
+            + '</div>'
           + '</div>';
         }).join('');
     itAssets.innerHTML = assets.length === 0
@@ -3636,6 +3639,15 @@
       + '?guildId=' + encodeURIComponent(guildId)
       + '&channelId=' + encodeURIComponent(channelId)
       + '&deleteDiscord=' + encodeURIComponent(String(deleteDiscord)), { method: 'DELETE' }));
+  };
+
+  window.__deleteInnerThread = async function(threadId) {
+    if (!confirm('Delete inner thread ' + shortId(threadId) + '?')) return;
+    const r = await fetch('/api/management/inner-threads/' + encodeURIComponent(threadId), { method: 'DELETE' });
+    if (r.status === 401) { location.href = '/login'; return; }
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok || body.error) { alert(body.error || 'Unable to delete inner thread'); return; }
+    await refreshInnerThreads();
   };
 
   async function deleteSelectedManagementMessages() {

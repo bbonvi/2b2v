@@ -58,6 +58,7 @@ interface DashboardManagementApi {
   }) => AwaitableDashboardManagementResult;
   listPrivateLifeEpisodes: (limit?: number) => AwaitableDashboardManagementResult;
   listInnerThreads: (filter: { guildId?: string; status?: "active" | "resolved"; limit?: number }) => AwaitableDashboardManagementResult;
+  deleteInnerThread: (threadId: string) => AwaitableDashboardManagementResult;
   listStagedAssets: (filter: { guildId?: string; channelId?: string; unresolvedOnly?: boolean; limit?: number }) => AwaitableDashboardManagementResult;
   listMemories: (filter: ManagementMemoryFilter) => AwaitableDashboardManagementResult;
   createMemory: (input: ManagementMemoryCreateInput) => AwaitableDashboardManagementResult;
@@ -694,6 +695,17 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
             ...(status === "active" || status === "resolved" ? { status } : {}),
             limit: optionalNumberParam(url, "limit"),
           }));
+        },
+      },
+
+      "/api/management/inner-threads/:threadId": {
+        DELETE: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          const threadId = req.params.threadId.trim();
+          if (threadId === "") return json({ error: "Valid threadId is required." }, 400);
+          return json(await management.deleteInnerThread(threadId));
         },
       },
 
