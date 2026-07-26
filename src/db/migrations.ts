@@ -249,6 +249,63 @@ function createMessageSearchIndexes(raw: BunDatabase): void {
   );
 }
 
+function messageAssetsSupportLinks(raw: BunDatabase): boolean {
+  const row = raw.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_assets'")
+    .get() as { sql: string | null } | null;
+  const sql = row?.sql ?? "";
+  return sql.includes("'url'") && sql.includes("'link'");
+}
+
+/** Expand the checked asset unions while preserving stable IDs and child references. */
+function migrateMessageAssets(raw: BunDatabase): void {
+  if (messageAssetsSupportLinks(raw)) return;
+  const expectedCount = (raw.prepare("SELECT COUNT(*) AS count FROM message_assets").get() as { count: number }).count;
+  raw.run("PRAGMA foreign_keys = OFF");
+  try {
+    runInTransaction(raw, () => {
+      raw.run("DROP TABLE IF EXISTS message_assets_new");
+      raw.run(`CREATE TABLE message_assets_new (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id            TEXT NOT NULL,
+        guild_id              TEXT NOT NULL,
+        channel_id            TEXT NOT NULL,
+        source_kind           TEXT NOT NULL CHECK(source_kind IN ('attachment', 'embed', 'sticker', 'url')),
+        source_key            TEXT NOT NULL,
+        kind                  TEXT NOT NULL CHECK(kind IN ('image', 'gif', 'audio', 'video', 'text', 'file', 'link')),
+        filename              TEXT,
+        content_type          TEXT,
+        size                  INTEGER,
+        width                 INTEGER,
+        height                INTEGER,
+        duration_seconds      REAL,
+        extracted_text        TEXT,
+        extraction_provider   TEXT,
+        extracted_at          INTEGER,
+        created_at            INTEGER NOT NULL,
+        UNIQUE(message_id, source_kind, source_key)
+      )`);
+      raw.run(`INSERT INTO message_assets_new
+        (id, message_id, guild_id, channel_id, source_kind, source_key, kind, filename, content_type,
+         size, width, height, duration_seconds, extracted_text, extraction_provider, extracted_at, created_at)
+        SELECT id, message_id, guild_id, channel_id, source_kind, source_key, kind, filename, content_type,
+         size, width, height, duration_seconds, extracted_text, extraction_provider, extracted_at, created_at
+        FROM message_assets`);
+      const copiedCount = (raw.prepare("SELECT COUNT(*) AS count FROM message_assets_new").get() as { count: number }).count;
+      if (copiedCount !== expectedCount) {
+        throw new Error(`Message asset migration copied ${copiedCount} of ${expectedCount} rows.`);
+      }
+      raw.run("DROP TABLE message_assets");
+      raw.run("ALTER TABLE message_assets_new RENAME TO message_assets");
+      raw.run("CREATE INDEX idx_message_assets_message ON message_assets(message_id)");
+      raw.run("CREATE INDEX idx_message_assets_guild_channel ON message_assets(guild_id, channel_id)");
+    });
+  } finally {
+    raw.run("PRAGMA foreign_keys = ON");
+  }
+  const violation = raw.prepare("PRAGMA foreign_key_check").get();
+  if (violation !== null) throw new Error(`Message asset migration left a foreign-key violation: ${JSON.stringify(violation)}`);
+}
+
 function stagedAssetReferenceUsesSetNull(raw: BunDatabase): boolean {
   const foreignKeys = raw.prepare("PRAGMA foreign_key_list(staged_assets)").all() as ForeignKey[];
   return foreignKeys.some((foreignKey) =>
@@ -375,5 +432,6 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
   raw.run("CREATE INDEX IF NOT EXISTS idx_memories_priority_active ON memories(priority, deleted_at, updated_at)");
   createMessageSearchIndexes(raw);
   sanitizeExistingMemoryRows(raw);
+  migrateMessageAssets(raw);
   migrateStagedAssets(raw);
 }

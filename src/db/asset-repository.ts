@@ -1,7 +1,7 @@
 import type { Database } from "./database.ts";
 
-export type AssetSourceKind = "attachment" | "embed" | "sticker";
-export type AssetKind = "image" | "gif" | "audio" | "video" | "text" | "file";
+export type AssetSourceKind = "attachment" | "embed" | "sticker" | "url";
+export type AssetKind = "image" | "gif" | "audio" | "video" | "text" | "file" | "link";
 
 export interface MessageAsset {
   id: number;

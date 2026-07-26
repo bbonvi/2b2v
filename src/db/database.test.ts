@@ -287,6 +287,78 @@ describe("database initialization", () => {
     }
   });
 
+  test("expands legacy asset checks without changing IDs or child references", () => {
+    const dbPath = path.join(tmpDir, "legacy-message-assets.db");
+    const existing = createDatabase(dbPath);
+    existing.raw.run(`INSERT INTO agent_jobs
+      (id, kind, guild_id, channel_id, delivery_guild_id, delivery_channel_id,
+       requester_id, requester_username, source_message_id, source_quote, status,
+       input_json, created_at, replacement_count)
+      VALUES ('img-link-migration', 'image_generation', 'g1', 'c1', 'g1', 'c1',
+       'u1', 'alice', 'm1', 'quote', 'delivered', '{}', 1, 0)`);
+    existing.raw.run(`INSERT INTO messages
+      (id, guild_id, channel_id, user_id, author_username, raw_content,
+       translated_content, is_bot, created_at)
+      VALUES ('asset-message', 'g1', 'c1', 'u1', 'alice', 'image', 'image', 0, 1)`);
+    existing.raw.run(`INSERT INTO message_assets
+      (id, message_id, guild_id, channel_id, source_kind, source_key, kind, filename, created_at)
+      VALUES (42, 'asset-message', 'g1', 'c1', 'attachment', 'asset-1', 'image', 'old.webp', 1)`);
+    createStagedAsset(existing, {
+      ref: "job_linkmigration",
+      jobId: "img-link-migration",
+      ownerGuildId: "g1",
+      ownerChannelId: "c1",
+      filename: "old.webp",
+      contentType: "image/webp",
+      storagePath: "/tmp/old.webp",
+      createdAt: 1,
+      expiresAt: 2,
+      deliveredMessageId: "asset-message",
+      permanentAssetId: 42,
+    });
+    existing.close();
+
+    const legacy = new BunDatabase(dbPath);
+    legacy.run("PRAGMA foreign_keys = OFF");
+    legacy.run(`CREATE TABLE message_assets_legacy (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id TEXT NOT NULL,
+      guild_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      source_kind TEXT NOT NULL CHECK(source_kind IN ('attachment', 'embed', 'sticker')),
+      source_key TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('image', 'gif', 'audio', 'video', 'text', 'file')),
+      filename TEXT,
+      content_type TEXT,
+      size INTEGER,
+      width INTEGER,
+      height INTEGER,
+      duration_seconds REAL,
+      extracted_text TEXT,
+      extraction_provider TEXT,
+      extracted_at INTEGER,
+      created_at INTEGER NOT NULL,
+      UNIQUE(message_id, source_kind, source_key)
+    )`);
+    legacy.run("INSERT INTO message_assets_legacy SELECT * FROM message_assets");
+    legacy.run("DROP TABLE message_assets");
+    legacy.run("ALTER TABLE message_assets_legacy RENAME TO message_assets");
+    legacy.close();
+
+    const migrated = createDatabase(dbPath);
+    try {
+      expect(migrated.raw.prepare("SELECT id FROM message_assets").get()).toEqual({ id: 42 });
+      expect(getStagedAsset(migrated, "job_linkmigration")?.permanentAssetId).toBe(42);
+      migrated.raw.run(`INSERT INTO message_assets
+        (message_id, guild_id, channel_id, source_kind, source_key, kind, created_at)
+        VALUES ('asset-message', 'g1', 'c1', 'url', 'https://example.com/', 'link', 2)`);
+      expect(migrated.raw.prepare("PRAGMA foreign_key_check").get()).toBeNull();
+      expect(migrated.raw.prepare("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
+    } finally {
+      migrated.close();
+    }
+  });
+
   test("creates memory extraction checkpoints table", () => {
     const info = db.raw
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_extraction_checkpoints'")

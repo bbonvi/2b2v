@@ -13,7 +13,7 @@ const config: AssetReadingConfig = {
   videoPreviewMaxBytes: 1024,
   videoPreviewTimesSeconds: [0, 1],
   videoPreviewTimeoutSeconds: 1,
-  timeoutSeconds: { image: 1, gif: 1, audio: 1, video: 1, text: 1, file: 1 },
+  timeoutSeconds: { image: 1, gif: 1, audio: 1, video: 1, text: 1, file: 1, link: 1 },
 };
 
 function asset(kind: MessageAsset["kind"]): MessageAsset {
@@ -22,6 +22,18 @@ function asset(kind: MessageAsset["kind"]): MessageAsset {
     kind, filename: `${kind}.dat`, contentType: kind === "text" ? "text/plain" : "audio/ogg",
     size: 20, width: null, height: null, durationSeconds: 10,
     extractedText: null, extractionProvider: null, extractedAt: null, createdAt: 1,
+  };
+}
+
+function linkAsset(): MessageAsset {
+  return {
+    ...asset("link"),
+    sourceKind: "url",
+    sourceKey: "https://example.com/post",
+    filename: null,
+    contentType: null,
+    size: null,
+    durationSeconds: null,
   };
 }
 
@@ -107,6 +119,38 @@ describe("read_asset", () => {
     expect(result.content.some((part) => part.type === "text" && part.text.includes("Origin: Source Guild (source-guild) / #memes (source-channel); location: another guild"))).toBeTrue();
     expect(result.content.some((part) => part.type === "text" && part.text.includes("showing lines 2-3:\n2 | beta\n3 | gamma"))).toBeTrue();
     expect(result.details).toEqual({ assetId: 1, origin, startLine: 2, endLine: 3, totalLines: 3 });
+  });
+
+  test("reads raw ranges from a cached Link asset", async () => {
+    const tool = createReadAssetTool({
+      config,
+      getAsset: () => linkAsset(),
+      resolveOrigin: () => Promise.resolve(origin),
+      resolveSource: () => Promise.resolve({ url: "https://example.com/post", contentType: null, filename: null }),
+      resolveLink: (input) => Promise.resolve({
+        cacheMode: input.cacheMode ?? "prefer",
+        cacheStatus: "hit",
+        content: {
+          kind: "page",
+          requestedUrl: input.url,
+          finalUrl: input.url,
+          contentType: "text/html",
+          fetchedAt: 1,
+          title: "Post",
+          readableText: "alpha\nbeta",
+          rawText: "<h1>alpha</h1>\n<p>needle</p>",
+          images: [],
+        },
+      }),
+      cacheExtraction: () => {},
+      prepareImage: () => Promise.reject(new Error("unused")),
+    });
+
+    const result = await tool.execute("link", { asset_id: 1, raw: true, start_line: 2 });
+    const output = result.content.map((part) => part.type === "text" ? part.text : "").join("\n");
+    expect(output).toContain("Cache: hit");
+    expect(output).toContain("2 | <p>needle</p>");
+    expect(result.details).toMatchObject({ assetId: 1, resolvedKind: "page", cacheStatus: "hit", raw: true });
   });
 
   test("caches timestamped transcripts as numbered lines", async () => {

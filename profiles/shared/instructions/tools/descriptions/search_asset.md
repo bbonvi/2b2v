@@ -1,1 +1,1 @@
-Regex-search a text asset or media transcript.
+Regex-search text available from an asset.

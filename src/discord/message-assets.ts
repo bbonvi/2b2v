@@ -8,6 +8,7 @@ export interface DiscordMessageAssetData {
   guildId: string;
   channelId: string;
   createdAt: number;
+  content: string;
   attachments: Iterable<{
     id: string;
     filename: string;
@@ -53,6 +54,7 @@ export function assetsFromDiscordMessageData(message: DiscordMessageAssetData): 
     channelId: message.channelId,
     createdAt: message.createdAt,
   };
+  const embeds = [...message.embeds];
   const assets: UpsertMessageAsset[] = [];
   for (const attachment of message.attachments) {
     assets.push({
@@ -69,16 +71,23 @@ export function assetsFromDiscordMessageData(message: DiscordMessageAssetData): 
     });
   }
   let embedIndex = 0;
-  for (const embed of message.embeds) {
+  for (const embed of embeds) {
     const url = embed.video?.url ?? embed.image?.url ?? embed.thumbnail?.url;
     if (url !== undefined) {
       const provider = embed.providerName?.toLowerCase();
       const gifLike = embed.type === "gifv" || provider === "tenor" || provider === "giphy";
+      const kind: AssetKind = gifLike
+        ? "gif"
+        : embed.video !== null && embed.video !== undefined
+          ? "video"
+          : embed.image !== null && embed.image !== undefined || embed.thumbnail !== null && embed.thumbnail !== undefined
+            ? "image"
+            : classifyAsset(null, embed.url ?? url);
       assets.push({
         ...base,
         sourceKind: "embed",
         sourceKey: String(embedIndex),
-        kind: classifyAsset(embed.video !== null && embed.video !== undefined ? "video/mp4" : null, embed.url ?? url, gifLike),
+        kind,
         filename: embed.title ?? null,
         contentType: embed.video !== null && embed.video !== undefined ? "video/mp4" : null,
         size: null,
@@ -107,6 +116,29 @@ export function assetsFromDiscordMessageData(message: DiscordMessageAssetData): 
       durationSeconds: null,
     });
   }
+  const mediaTargets = new Set<string>();
+  for (const embed of embeds) {
+    if (embed.url === null || embed.url === undefined) continue;
+    if (embed.type === "image" || embed.type === "gifv" || embed.type === "video") {
+      const normalized = normalizeHttpUrl(embed.url);
+      if (normalized !== null) mediaTargets.add(normalized);
+    }
+  }
+  for (const url of extractMessageUrls(message.content)) {
+    if (mediaTargets.has(url)) continue;
+    assets.push({
+      ...base,
+      sourceKind: "url",
+      sourceKey: url,
+      kind: "link",
+      filename: null,
+      contentType: null,
+      size: null,
+      width: null,
+      height: null,
+      durationSeconds: null,
+    });
+  }
   return assets;
 }
 
@@ -118,6 +150,7 @@ export function assetsFromDiscordMessage(message: Message): UpsertMessageAsset[]
     guildId: message.guildId,
     channelId: message.channelId,
     createdAt: message.createdTimestamp,
+    content: message.content,
     attachments: [...message.attachments.values()].map((attachment) => ({
       id: attachment.id,
       filename: attachment.name,
@@ -142,4 +175,37 @@ export function assetsFromDiscordMessage(message: Message): UpsertMessageAsset[]
       formatType: sticker.format,
     })),
   });
+}
+
+const URL_PATTERN = /https?:\/\/[^\s<>"']+/giu;
+
+/** Extract stable HTTP(S) targets from one Discord message without fetching them. */
+export function extractMessageUrls(content: string): string[] {
+  const urls = new Set<string>();
+  for (const match of content.matchAll(URL_PATTERN)) {
+    const normalized = normalizeHttpUrl(trimUrlPunctuation(match[0]));
+    if (normalized !== null) urls.add(normalized);
+  }
+  return [...urls];
+}
+
+function normalizeHttpUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function trimUrlPunctuation(value: string): string {
+  let result = value;
+  while (/[.,!?;:]$/u.test(result)) result = result.slice(0, -1);
+  while (result.endsWith(")") && count(result, ")") > count(result, "(")) result = result.slice(0, -1);
+  while (result.endsWith("]") && count(result, "]") > count(result, "[")) result = result.slice(0, -1);
+  return result;
+}
+
+function count(value: string, token: string): number {
+  return value.split(token).length - 1;
 }

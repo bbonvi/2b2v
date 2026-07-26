@@ -85,6 +85,101 @@ describe("stored asset attachments", () => {
     expect(await resolver([asset.id])).toEqual([]);
   });
 
+  test("reposts a Link asset only when it resolves to media", async () => {
+    const [asset] = syncMessageAssets(db, {
+      messageId: "link-message",
+      assets: [{
+        messageId: "link-message",
+        guildId: "g",
+        channelId: "c",
+        sourceKind: "url",
+        sourceKey: "https://example.com/cat.png",
+        kind: "link",
+        filename: null,
+        contentType: null,
+        size: null,
+        width: null,
+        height: null,
+        durationSeconds: null,
+        createdAt: 1,
+      }],
+    });
+    if (asset === undefined) throw new Error("test asset was not created");
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+    const resolver = createStoredAssetAttachmentResolver({
+      db,
+      maxDownloadBytes: 1024,
+      resolveSource: () => Promise.resolve({ url: asset.sourceKey, contentType: null, filename: null }),
+      resolveLink: (input) => Promise.resolve({
+        cacheMode: "prefer",
+        cacheStatus: "hit",
+        content: {
+          kind: "image",
+          requestedUrl: input.url,
+          finalUrl: input.url,
+          contentType: "image/png",
+          fetchedAt: 1,
+          preview: png,
+          previewMimeType: "image/png",
+          width: 1,
+          height: 1,
+          images: [],
+        },
+      }),
+      logger: createLogger({ level: "error" }),
+      fetchFn: (() => Promise.resolve(new Response(png))) as unknown as typeof fetch,
+    });
+
+    const attachments = await resolver([asset.id]);
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]).toMatchObject({ contentType: "image/png", filename: `link-${asset.id}` });
+  });
+
+  test("does not repost a Link asset that resolves to a page", async () => {
+    const [asset] = syncMessageAssets(db, {
+      messageId: "page-message",
+      assets: [{
+        messageId: "page-message",
+        guildId: "g",
+        channelId: "c",
+        sourceKind: "url",
+        sourceKey: "https://example.com/post",
+        kind: "link",
+        filename: null,
+        contentType: null,
+        size: null,
+        width: null,
+        height: null,
+        durationSeconds: null,
+        createdAt: 1,
+      }],
+    });
+    if (asset === undefined) throw new Error("test asset was not created");
+    const resolver = createStoredAssetAttachmentResolver({
+      db,
+      maxDownloadBytes: 1024,
+      resolveSource: () => Promise.resolve({ url: asset.sourceKey, contentType: null, filename: null }),
+      resolveLink: (input) => Promise.resolve({
+        cacheMode: "prefer",
+        cacheStatus: "hit",
+        content: {
+          kind: "page",
+          requestedUrl: input.url,
+          finalUrl: input.url,
+          contentType: "text/html",
+          fetchedAt: 1,
+          title: "Post",
+          readableText: "post",
+          rawText: "<p>post</p>",
+          images: [],
+        },
+      }),
+      logger: createLogger({ level: "error" }),
+    });
+
+    expect(await resolver([asset.id])).toEqual([]);
+  });
+
   test("loads an in-scope staged handle from durable storage", async () => {
     const storagePath = `/tmp/2b2v-staged-${crypto.randomUUID()}.webp`;
     await Bun.write(storagePath, Buffer.from("staged-image"));

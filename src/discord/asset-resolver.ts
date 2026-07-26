@@ -9,6 +9,19 @@ export interface DiscordAssetResolverDeps {
 /** Resolve metadata-only asset references into a fresh live Discord or external URL. */
 export function createDiscordAssetSourceResolver(deps: DiscordAssetResolverDeps): (asset: MessageAsset) => Promise<ResolvedAssetSource | null> {
   return async (asset) => {
+    if (asset.sourceKind === "url") {
+      try {
+        const pathname = new URL(asset.sourceKey).pathname;
+        const segment = pathname.split("/").filter((value) => value !== "").at(-1);
+        return {
+          url: asset.sourceKey,
+          contentType: asset.contentType,
+          filename: segment === undefined ? null : decodeURIComponent(segment),
+        };
+      } catch {
+        return null;
+      }
+    }
     const message = await deps.fetchMessage(asset.channelId, asset.messageId);
     if (message === null) return null;
     if (asset.sourceKind === "attachment") {

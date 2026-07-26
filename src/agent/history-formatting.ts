@@ -107,12 +107,14 @@ export function formatAssetMeta(prefix: "Reply" | "", assets: readonly HistoryAs
     video: "Video",
     text: "Text",
     file: "Files",
+    link: "Links",
   } as const;
   const parts: string[] = [];
-  for (const kind of ["image", "gif", "audio", "video", "text", "file"] as const) {
+  for (const kind of ["image", "gif", "audio", "video", "text", "file", "link"] as const) {
     const matching = assets.filter((asset) => asset.kind === kind);
     if (matching.length === 0) continue;
-    const values = matching.map((asset) => {
+    const shown = kind === "link" ? matching.slice(0, 5) : matching;
+    const values = shown.map((asset) => {
       const name = asset.filename?.replace(/[\t\n\r,;()[\]]+/g, " ").trim();
       let detail = "";
       if ((kind === "text" || kind === "file") && asset.size !== null) detail = formatFileSize(asset.size);
@@ -124,7 +126,8 @@ export function formatAssetMeta(prefix: "Reply" | "", assets: readonly HistoryAs
       }
       return `#${asset.id}${name !== undefined && name !== "" ? ` ${name}` : ""}${detail !== "" ? ` (${detail})` : ""}${asset.jobId !== undefined ? ` [Job ${asset.jobId}]` : ""}`;
     });
-    parts.push(`${prefix}${labels[kind]}: ${values.join(", ")}`);
+    const omitted = matching.length - shown.length;
+    parts.push(`${prefix}${labels[kind]}: ${values.join(", ")}${omitted > 0 ? `, +${omitted} more` : ""}`);
   }
   return parts;
 }
@@ -142,13 +145,13 @@ function formatDisplayNameSuffix(
 
 /** The legend block prepended to the newer slice. */
 export const NEWER_LEGEND = [
-  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImages/ReplyGIFs/ReplyAudio/ReplyVideo/ReplyText/ReplyFiles/Images/GIFs/Audio/Video/Text/Files/ImageJob/Webhook/Reactions/<trigger>)]: content",
+  "Legend: [@author (display name) to @target (display name) (MsgID/MsgIDs/Quote/ReplyImages/ReplyGIFs/ReplyAudio/ReplyVideo/ReplyText/ReplyFiles/ReplyLinks/Images/GIFs/Audio/Video/Text/Files/Links/ImageJob/Webhook/Reactions/<trigger>)]: content",
   "Legend: [YYYY-MM-DD] sets the guild-local date and [HH:mm] sets the guild-local time for following messages; recent history repeats time after roughly 1+ minute gaps and date at each local day change.",
   "Legend: Parenthesized names are current Discord display names, not stable identity, and may contain jokes, moods, or temporary labels; use @username for exact pings.",
 ].join("\n");
 
 /** The legend block prepended to the older slice. */
 export const OLDER_LEGEND = [
-  "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImages/ReplyGIFs/ReplyAudio/ReplyVideo/ReplyText/ReplyFiles/Images/GIFs/Audio/Video/Text/Files/ImageJob/Webhook)]: content",
+  "Legend: [@author to @target (MsgID/MsgIDs/Quote/ReplyImages/ReplyGIFs/ReplyAudio/ReplyVideo/ReplyText/ReplyFiles/ReplyLinks/Images/GIFs/Audio/Video/Text/Files/Links/ImageJob/Webhook)]: content",
   "Legend: [YYYY-MM-DD] sets the guild-local date and [HH:mm] sets the guild-local time for following messages; older history repeats time after roughly 5+ minute gaps and date at each local day change. Newer history exposes MsgID for reply_to; merged messages use history-only [msg-break], search results expose MsgIDs for contextual browsing, and typed asset IDs use read_asset.",
 ].join("\n");

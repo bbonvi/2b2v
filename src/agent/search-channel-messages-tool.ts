@@ -20,7 +20,7 @@ import { resolveReplies } from "./history-replies.ts";
 import { runRipgrepChunks } from "./ripgrep.ts";
 import { markReadOnlyTool } from "./tool-effects.ts";
 
-const ASSET_KINDS = ["image", "gif", "audio", "video", "text", "file"] as const;
+const ASSET_KINDS = ["image", "gif", "audio", "video", "text", "file", "link"] as const;
 const SEARCH_SCOPES = ["current_channel", "current_guild", "all_guilds"] as const;
 const DEFAULT_CANDIDATE_CHUNK_SIZE = 10_000;
 

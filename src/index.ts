@@ -74,8 +74,9 @@ import { AgentJobStore, createCancelAgentJobTool, isActiveJobStatus, type ImageG
 import { createAgentJobInspectionTools, renderAgentJobDetails } from "./agent/agent-job-tool";
 import { annotateHistoryJobs, buildAsyncImageReadyMetadata, createGeneratedImageRuntime, imageReferencesForToolInput, renderAgentJobsContext, renderImageGenerationInput, shortQuote, type GeneratedImageRuntime } from "./agent/generated-image-runtime";
 import { createStoredAssetAttachmentResolver } from "./agent/stored-asset-attachments";
-import { loadAssetReferenceImage, loadStagedAssetReferenceImage } from "./agent/asset-reference-image";
+import { loadAssetReferenceImage, loadStagedAssetReferenceImage, resolvedLinkReferenceImage } from "./agent/asset-reference-image";
 import { createFetchUrlTool } from "./agent/fetch-url-tool";
+import { LinkContentCache, resolveLinkContent } from "./agent/link-content.ts";
 import { createSummarizeVideoTool } from "./agent/summarize-video-tool";
 import { createCloseThreadTool, createStartThreadTool } from "./agent/start-thread-tool";
 import { createReactToMessageTool } from "./agent/react-to-message-tool";
@@ -508,6 +509,13 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
         if (asset === null) return null;
         const source = await jobAssetSource(asset);
         if (source === null) return null;
+        if (asset.kind === "link") {
+          const resolved = await resolveLinkContent({
+            cache: linkContentCache,
+            externalImages: globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES,
+          }, { url: source.url });
+          return resolvedLinkReferenceImage(asset.id, resolved.content);
+        }
         return await loadAssetReferenceImage({
           asset,
           source,
@@ -857,6 +865,10 @@ function createAssetAttachmentResolver(_guildId: string, guildConfig: GuildConfi
     stagedGuildId: _guildId,
     maxDownloadBytes: guildConfig.assetReading?.maxDownloadBytes ?? DEFAULT_ASSET_READING.maxDownloadBytes,
     resolveSource,
+    resolveLink: async (input, signal) => await resolveLinkContent({
+      cache: linkContentCache,
+      externalImages: globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES,
+    }, input, signal),
     logger,
   });
 }
@@ -950,6 +962,7 @@ if (!existsSync(globalConfig.dataDir)) {
 // --- 3. Init SQLite ---
 const dbPath = join(globalConfig.dataDir, "bot.db");
 const db: Database = createDatabase(dbPath);
+const linkContentCache = new LinkContentCache();
 log.info("database ready", { path: dbPath });
 
 function discordActivityType(type: PersonaModeActivityType): ActivityType {
@@ -4002,6 +4015,10 @@ function buildAgentTools(
     cacheExtraction: (id, text, provider) => cacheAssetExtraction(db, id, text, provider),
     prepareImage: (buffer, mimeType) => prepareImageBufferForContext(buffer, mimeType, CONTEXT_IMAGE_MAX_DIMENSION),
     extractVideoFrame: extractRemoteVideoFrame,
+    resolveLink: async (input, signal) => await resolveLinkContent({
+      cache: linkContentCache,
+      externalImages: globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES,
+    }, input, signal),
   } satisfies ReadAssetToolDeps;
   const readAssetTool = createReadAssetTool(assetToolDeps);
   const searchAssetTool = createSearchAssetTool(assetToolDeps);
@@ -4029,6 +4046,8 @@ function buildAgentTools(
 
   const fetchUrlTool = createFetchUrlTool({
     maxPageImages: (globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES).maxPageImages,
+    externalImages: globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES,
+    cache: linkContentCache,
   });
   const summarizeVideoTool = createSummarizeVideoTool();
   const reactToMessageTool = createReactToMessageTool({
@@ -4148,6 +4167,13 @@ function buildAgentTools(
         if (asset === null) return null;
         const source = await resolveAssetSource(asset);
         if (source === null) return null;
+        if (asset.kind === "link") {
+          const resolved = await resolveLinkContent({
+            cache: linkContentCache,
+            externalImages: globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES,
+          }, { url: source.url });
+          return resolvedLinkReferenceImage(asset.id, resolved.content);
+        }
         return await loadAssetReferenceImage({
           asset,
           source,

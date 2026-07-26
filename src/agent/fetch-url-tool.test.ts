@@ -1,339 +1,129 @@
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { createFetchUrlTool } from "./fetch-url-tool.ts";
+import { LinkContentCache } from "./link-content.ts";
 
-interface FetchUrlDetails {
-  url: string;
-  title: string;
-  contentLength: number;
-  method: string;
-  images: Array<{ url: string; alt: string }>;
+function text(result: Awaited<ReturnType<ReturnType<typeof createFetchUrlTool>["execute"]>>): string {
+  return result.content
+    .filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
+    .map((part) => part.text)
+    .join("\n");
 }
 
-/** Extract text from first content block (for test assertions). */
-function getContentText(result: { content: Array<{ type: string; text?: string }> }): string {
-  const first = result.content[0];
-  if (first?.type === "text" && typeof first.text === "string") {
-    return first.text;
-  }
-  return "";
-}
+const article = `<!doctype html><html><head><title>Example</title></head><body><article>
+  <h1>Example</h1><p>alpha</p><p>beta</p><p>gamma</p><p>delta</p>
+</article></body></html>`;
 
-describe("createFetchUrlTool", () => {
-  test("uses Jina when available", async () => {
+describe("fetch_url", () => {
+  test("paginates one cached fetch", async () => {
+    let calls = 0;
     const tool = createFetchUrlTool({
-      fetchFn: (url) => {
-        if (url.toString().includes("r.jina.ai")) {
-          return Promise.resolve(new Response("# Test Page\n\nContent here.", {
-            headers: { "content-type": "text/markdown" },
-          }));
-        }
-        return Promise.reject(new Error("Should not reach manual"));
+      cache: new LinkContentCache(),
+      fetchFn: () => {
+        calls += 1;
+        return Promise.resolve(new Response(article, { headers: { "content-type": "text/html" } }));
       },
     });
 
-    const result = await tool.execute("test-id", { url: "https://example.com" });
-    const details = result.details as FetchUrlDetails;
-    expect(details.method).toBe("jina");
-    expect(getContentText(result)).toContain("Source: https://example.com/");
-    expect(getContentText(result)).toContain("Test Page");
-  });
-
-  test("returns summarize-core content when direct extraction beats Jina", async () => {
-    const calls: string[] = [];
-    const mockHtml = `
-      <html><head><title>Direct Win</title></head>
-      <body><article><p>Direct content.</p></article></body></html>
-    `;
-    const tool = createFetchUrlTool({
-      timeoutMs: 1000,
-      fetchFn: async (url) => {
-        const target = url.toString();
-        calls.push(target.includes("r.jina.ai") ? "jina" : "manual");
-        if (target.includes("r.jina.ai")) {
-          await new Promise<never>(() => undefined);
-          return new Response("# Slow Jina\n\nSlow content.", {
-            headers: { "content-type": "text/markdown" },
-          });
-        }
-        return new Response(mockHtml, { headers: { "content-type": "text/html" } });
-      },
+    const first = await tool.execute("first", { url: "https://example.com/post", line_count: 2 });
+    const firstDetails = first.details as { endLine?: number; totalLines?: number; cacheStatus?: string };
+    expect(firstDetails.cacheStatus).toBe("miss_stored");
+    expect(firstDetails.totalLines).toBeGreaterThan(2);
+    const second = await tool.execute("second", {
+      url: "https://example.com/post",
+      start_line: (firstDetails.endLine ?? 0) + 1,
+      line_count: 2,
     });
-
-    const result = await tool.execute("test-id", { url: "https://example.com" });
-    const details = result.details as FetchUrlDetails;
-    expect(calls).toContain("jina");
-    expect(calls).toContain("manual");
-    expect(details.method).toBe("summarize-core");
-    expect(getContentText(result)).toContain("Direct content.");
+    expect((second.details as { cacheStatus?: string }).cacheStatus).toBe("hit");
+    expect(calls).toBe(1);
   });
 
-  test("falls back to summarize-core when Jina fails", async () => {
-    const mockHtml = `
-      <html><head><title>Fallback Test</title></head>
-      <body><article><p>Manual content.</p></article></body></html>
-    `;
-
+  test("searches readable and raw views", async () => {
+    const html = `<!doctype html><html><head><title>Data</title><script type="application/ld+json">{"secret":"needle"}</script></head>
+      <body><article><p>visible phrase</p></article></body></html>`;
     const tool = createFetchUrlTool({
-      fetchFn: (url) => {
-        if (url.toString().includes("r.jina.ai")) {
-          return Promise.resolve(new Response("Error", { status: 500 }));
-        }
-        return Promise.resolve(new Response(mockHtml, { headers: { "content-type": "text/html" } }));
-      },
-    });
-
-    const result = await tool.execute("test-id", { url: "https://example.com" });
-    const details = result.details as FetchUrlDetails;
-    expect(details.method).toBe("summarize-core");
-  });
-
-  test("falls back to manual when summarize-core fails", async () => {
-    const mockHtml = `
-      <html><head><title>Manual Fallback</title></head>
-      <body><article><p>Manual content after summarize failure.</p></article></body></html>
-    `;
-    let directCalls = 0;
-    const tool = createFetchUrlTool({
-      disableJina: true,
-      fetchFn: (url) => {
-        if (!url.toString().includes("r.jina.ai")) directCalls++;
-        if (directCalls === 1) {
-          return Promise.resolve(new Response('{"not":"html"}', { headers: { "content-type": "application/json" } }));
-        }
-        return Promise.resolve(new Response(mockHtml, { headers: { "content-type": "text/html" } }));
-      },
-    });
-
-    const result = await tool.execute("test-id", { url: "https://example.com" });
-    const details = result.details as FetchUrlDetails;
-    expect(details.method).toBe("manual");
-    expect(getContentText(result)).toContain("Manual content after summarize failure.");
-  });
-
-  test("rejects direct anti-bot challenge and waits for Jina content", async () => {
-    const challengeHtml = `
-      <html><head><title>Just a moment...</title></head>
-      <body><main>Checking your browser before accessing example.com.</main></body></html>
-    `;
-    const tool = createFetchUrlTool({
-      fetchFn: async (url) => {
-        if (url.toString().includes("r.jina.ai")) {
-          await new Promise((resolve) => setTimeout(resolve, 10));
-          return new Response("# Real Article\n\nUseful content.", {
-            headers: { "content-type": "text/markdown" },
-          });
-        }
-        return new Response(challengeHtml, { headers: { "content-type": "text/html" } });
-      },
-    });
-
-    const result = await tool.execute("test-id", { url: "https://example.com" });
-    const details = result.details as FetchUrlDetails;
-    expect(details.method).toBe("jina");
-    expect(getContentText(result)).toContain("Useful content.");
-  });
-
-  test("fails instead of returning direct anti-bot challenge content", async () => {
-    const challengeHtml = `
-      <html><head><title>Just a moment...</title></head>
-      <body><main>Checking your browser before accessing example.com.</main></body></html>
-    `;
-    const tool = createFetchUrlTool({
-      disableJina: true,
-      fetchFn: () => Promise.resolve(new Response(challengeHtml, { headers: { "content-type": "text/html" } })),
-    });
-
-    try {
-      await tool.execute("test-id", { url: "https://example.com" });
-      expect.unreachable("Should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(Error);
-      expect((err as Error).message).toContain("anti-bot challenge");
-    }
-  });
-
-  test("rejects invalid URLs", async () => {
-    const tool = createFetchUrlTool();
-    try {
-      await tool.execute("test-id", { url: "not-a-url" });
-      expect.unreachable("Should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(Error);
-      expect((err as Error).message).toContain("Invalid URL");
-    }
-  });
-
-  test("rejects non-HTTP protocols", async () => {
-    const tool = createFetchUrlTool();
-    try {
-      await tool.execute("test-id", { url: "ftp://example.com" });
-      expect.unreachable("Should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(Error);
-      expect((err as Error).message).toContain("Only HTTP/HTTPS");
-    }
-  });
-
-  test("truncates long content", async () => {
-    const longContent = "x".repeat(20000);
-    const tool = createFetchUrlTool({
-      maxContentLength: 100,
-      fetchFn: () =>
-        Promise.resolve(new Response(`# Title\n\n${longContent}`, {
-          headers: { "content-type": "text/markdown" },
-        })),
-    });
-
-    const result = await tool.execute("test-id", { url: "https://example.com" });
-    expect(getContentText(result)).toContain("[Content truncated...]");
-  });
-
-  test("disableJina forces manual extraction", async () => {
-    const mockHtml = `<html><body><article><p>Manual only.</p></article></body></html>`;
-
-    const tool = createFetchUrlTool({
-      disableJina: true,
-      disableSummarize: true,
-      fetchFn: () => Promise.resolve(new Response(mockHtml, { headers: { "content-type": "text/html" } })),
-    });
-
-    const result = await tool.execute("test-id", { url: "https://example.com" });
-    const details = result.details as FetchUrlDetails;
-    expect(details.method).toBe("manual");
-  });
-
-  test("extracts title from Jina markdown heading", async () => {
-    const tool = createFetchUrlTool({
-      fetchFn: () =>
-        Promise.resolve(new Response("# My Article Title\n\nSome body content.", {
-          headers: { "content-type": "text/markdown" },
-        })),
-    });
-
-    const result = await tool.execute("test-id", { url: "https://example.com/page" });
-    const details = result.details as FetchUrlDetails;
-    expect(details.title).toBe("My Article Title");
-  });
-
-  test("falls back to hostname when no title in Jina response", async () => {
-    const tool = createFetchUrlTool({
-      fetchFn: () =>
-        Promise.resolve(new Response("No heading here, just content.", {
-          headers: { "content-type": "text/markdown" },
-        })),
-    });
-
-    const result = await tool.execute("test-id", { url: "https://example.com/page" });
-    const details = result.details as FetchUrlDetails;
-    expect(details.title).toBe("example.com");
-  });
-
-  test("manual extraction includes source URL in output", async () => {
-    const mockHtml = `
-      <html><head><title>Test Article</title></head>
-      <body><article><p>Article content.</p></article></body></html>
-    `;
-
-    const tool = createFetchUrlTool({
-      disableJina: true,
-      fetchFn: () => Promise.resolve(new Response(mockHtml, { headers: { "content-type": "text/html" } })),
-    });
-
-    const result = await tool.execute("test-id", { url: "https://example.com/article" });
-    expect(getContentText(result)).toContain("Source: https://example.com/article");
-  });
-
-  test("preserves normalized lazy page images and Open Graph images", async () => {
-    const html = `<html><head><title>Pictures</title><meta property="og:image" content="/hero.jpg"></head>
-      <body><article><p>Body.</p><img alt="Example" data-src="images/example.png"></article></body></html>`;
-    const tool = createFetchUrlTool({
-      disableJina: true,
-      disableSummarize: true,
-      maxPageImages: 5,
+      cache: new LinkContentCache(),
       fetchFn: () => Promise.resolve(new Response(html, { headers: { "content-type": "text/html" } })),
     });
-    const result = await tool.execute("test-id", { url: "https://example.com/posts/page" });
-    const output = getContentText(result);
-    const details = result.details as FetchUrlDetails;
-    expect(output).toContain("## Page images");
-    expect(output).toContain("https://example.com/hero.jpg");
-    expect(output).toContain("https://example.com/posts/images/example.png");
-    expect(details.images).toHaveLength(2);
+
+    const readable = await tool.execute("readable", { url: "https://example.com", pattern: "visible phrase" });
+    expect(text(readable)).toContain("visible phrase");
+    const raw = await tool.execute("raw", { url: "https://example.com", pattern: "needle", raw: true });
+    expect(text(raw)).toContain("needle");
+    expect((raw.details as { cacheStatus?: string }).cacheStatus).toBe("hit");
   });
 
-  test("normalizes image links retained by Jina markdown", async () => {
+  test("splits a long raw HTML line into ranges", async () => {
+    const html = `<!doctype html><html><body><article><p>ok</p></article><script>${"x".repeat(9_000)}</script></body></html>`;
     const tool = createFetchUrlTool({
-      fetchFn: () => Promise.resolve(new Response("# Page\n\n![Chart](/img/chart.png)", {
-        headers: { "content-type": "text/markdown" },
+      cache: new LinkContentCache(),
+      fetchFn: () => Promise.resolve(new Response(html, { headers: { "content-type": "text/html" } })),
+    });
+    const result = await tool.execute("raw", { url: "https://example.com", raw: true, line_count: 2 });
+    expect((result.details as { totalLines?: number }).totalLines).toBeGreaterThan(2);
+    expect(text(result)).toContain("More content exists");
+  });
+
+  test("supports refresh and bypass without replacing refreshed content", async () => {
+    let calls = 0;
+    const tool = createFetchUrlTool({
+      cache: new LinkContentCache(),
+      fetchFn: () => {
+        calls += 1;
+        return Promise.resolve(new Response(article.replace("alpha", `alpha-${calls}`), {
+          headers: { "content-type": "text/html" },
+        }));
+      },
+    });
+    await tool.execute("first", { url: "https://example.com" });
+    const refreshed = await tool.execute("refresh", { url: "https://example.com", cache_mode: "refresh" });
+    expect(text(refreshed)).toContain("alpha-2");
+    const bypassed = await tool.execute("bypass", { url: "https://example.com", cache_mode: "bypass" });
+    expect(text(bypassed)).toContain("alpha-3");
+    const cached = await tool.execute("cached", { url: "https://example.com" });
+    expect(text(cached)).toContain("alpha-2");
+    expect(calls).toBe(3);
+  });
+
+  test("does not cache an anti-bot challenge", async () => {
+    let calls = 0;
+    const challenge = `<!doctype html><html><head><title>Just a moment</title></head>
+      <body><script src="/cdn-cgi/challenge-platform/x"></script>Verify you are human</body></html>`;
+    const tool = createFetchUrlTool({
+      cache: new LinkContentCache(),
+      fetchFn: () => {
+        calls += 1;
+        return Promise.resolve(new Response(challenge, { headers: { "content-type": "text/html" } }));
+      },
+    });
+    const first = await Promise.allSettled([Promise.resolve(tool.execute("one", { url: "https://example.com" }))]);
+    const second = await Promise.allSettled([Promise.resolve(tool.execute("two", { url: "https://example.com" }))]);
+    expect(first[0].status === "rejected" ? String(first[0].reason) : "").toContain("anti-bot challenge");
+    expect(second[0].status === "rejected" ? String(second[0].reason) : "").toContain("anti-bot challenge");
+    expect(calls).toBe(4);
+  });
+
+  test("returns image content for an image URL", async () => {
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+    const tool = createFetchUrlTool({
+      cache: new LinkContentCache(),
+      fetchFn: () => Promise.resolve(new Response(png, { headers: { "content-type": "image/png" } })),
+    });
+    const result = await tool.execute("image", { url: "https://example.com/a.png" });
+    expect(result.content.some((part) => part.type === "image")).toBeTrue();
+    expect((result.details as { resolvedKind?: string }).resolvedKind).toBe("image");
+  });
+
+  test("rejects invalid URLs and incompatible range search", async () => {
+    const tool = createFetchUrlTool();
+    const results = await Promise.allSettled([
+      Promise.resolve(tool.execute("invalid", { url: "not-a-url" })),
+      Promise.resolve(tool.execute("mixed", {
+        url: "https://example.com",
+        pattern: "x",
+        start_line: 2,
       })),
-    });
-    const result = await tool.execute("test-id", { url: "https://example.com/post" });
-    expect(getContentText(result)).toContain('"Chart" — https://example.com/img/chart.png');
-  });
-
-  test("rejects non-HTML content type in manual mode", async () => {
-    const tool = createFetchUrlTool({
-      disableJina: true,
-      fetchFn: () =>
-        Promise.resolve(new Response('{"data": "json"}', { headers: { "content-type": "application/json" } })),
-    });
-
-    try {
-      await tool.execute("test-id", { url: "https://example.com/api" });
-      expect.unreachable("Should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(Error);
-      expect((err as Error).message).toContain("Unsupported content type");
-    }
-  });
-
-  test("handles HTTP errors in manual mode", async () => {
-    const tool = createFetchUrlTool({
-      disableJina: true,
-      fetchFn: () => Promise.resolve(new Response("Not Found", { status: 404, statusText: "Not Found" })),
-    });
-
-    try {
-      await tool.execute("test-id", { url: "https://example.com/missing" });
-      expect.unreachable("Should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(Error);
-      expect((err as Error).message).toContain("HTTP 404");
-    }
-  });
-
-  test("times out with clear error", async () => {
-    const tool = createFetchUrlTool({
-      disableJina: true,
-      timeoutMs: 10,
-      fetchFn: () => new Promise<Response>(() => {}),
-    });
-
-    try {
-      await tool.execute("test-id", { url: "https://example.com" });
-      expect.unreachable("Should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(Error);
-      expect((err as Error).message).toContain("fetch_url failed for https://example.com/");
-      expect((err as Error).message).toContain("fetch_url timed out after 10ms");
-    }
-  });
-
-  test("throws when page has no extractable content", async () => {
-    // Empty HTML with no textual content at all
-    const mockHtml = `<html><head></head><body></body></html>`;
-
-    const tool = createFetchUrlTool({
-      disableJina: true,
-      fetchFn: () => Promise.resolve(new Response(mockHtml, { headers: { "content-type": "text/html" } })),
-    });
-
-    try {
-      await tool.execute("test-id", { url: "https://example.com" });
-      expect.unreachable("Should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(Error);
-      expect((err as Error).message).toContain("Could not extract readable content");
-    }
+    ]);
+    expect(results[0].status === "rejected" ? String(results[0].reason) : "").toContain("Invalid URL");
+    expect(results[1].status === "rejected" ? String(results[1].reason) : "").toContain("pattern cannot be combined");
   });
 });

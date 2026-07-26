@@ -11,7 +11,7 @@ const config: AssetReadingConfig = {
   videoPreviewMaxBytes: 1024,
   videoPreviewTimesSeconds: [0],
   videoPreviewTimeoutSeconds: 1,
-  timeoutSeconds: { image: 1, gif: 1, audio: 1, video: 1, text: 1, file: 1 },
+  timeoutSeconds: { image: 1, gif: 1, audio: 1, video: 1, text: 1, file: 1, link: 1 },
 };
 
 const asset: MessageAsset = {
@@ -32,6 +32,17 @@ const asset: MessageAsset = {
   extractionProvider: null,
   extractedAt: null,
   createdAt: 1,
+};
+
+const linkAsset: MessageAsset = {
+  ...asset,
+  id: 8,
+  sourceKind: "url",
+  sourceKey: "https://example.com",
+  kind: "link",
+  filename: null,
+  contentType: null,
+  size: null,
 };
 
 const origin: AssetOrigin = {
@@ -73,5 +84,37 @@ describe("search_asset", () => {
       fetchFn: (() => Promise.resolve(new Response("text"))) as unknown as typeof fetch,
     });
     return expect(Promise.resolve(tool.execute("search", { asset_id: 7, pattern: "(" }))).rejects.toThrow("Invalid regex");
+  });
+
+  test("searches the raw view of a Link asset", async () => {
+    const tool = createSearchAssetTool({
+      config,
+      getAsset: () => linkAsset,
+      resolveOrigin: () => Promise.resolve(origin),
+      resolveSource: () => Promise.resolve({ url: linkAsset.sourceKey, contentType: null, filename: null }),
+      resolveLink: (input) => Promise.resolve({
+        cacheMode: input.cacheMode ?? "prefer",
+        cacheStatus: "hit",
+        content: {
+          kind: "page",
+          requestedUrl: input.url,
+          finalUrl: input.url,
+          contentType: "text/html",
+          fetchedAt: 1,
+          title: "Page",
+          readableText: "visible",
+          rawText: "<script>needle</script>",
+          images: [],
+        },
+      }),
+      cacheExtraction: () => {},
+      prepareImage: () => Promise.reject(new Error("unused")),
+    });
+
+    const result = await tool.execute("link", { asset_id: 8, pattern: "needle", raw: true });
+    const output = result.content.map((part) => part.type === "text" ? part.text : "").join("\n");
+    expect(output).toContain("Cache: hit");
+    expect(output).toContain("<script>needle</script>");
+    expect(result.details).toMatchObject({ assetId: 8, matched: true, cacheStatus: "hit", raw: true });
   });
 });

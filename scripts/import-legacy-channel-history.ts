@@ -495,6 +495,7 @@ export function discordMessageToImportRow(input: {
     guildId: input.guildId,
     channelId: input.channelId,
     createdAt: input.createdAt,
+    content: message.content,
     attachments: (message.attachments ?? []).map((attachment) => ({
       id: attachment.id,
       filename: attachment.filename,

@@ -4,6 +4,7 @@ import type { ReferenceImageInput } from "./codex-image-tool.ts";
 import type { ResolvedAssetSource } from "./read-asset-tool.ts";
 import { fetchAssetBuffer } from "./read-asset-tool.ts";
 import type { StagedAsset } from "../db/staged-asset-repository.ts";
+import type { ResolvedLinkContent } from "./link-content.ts";
 
 /** Load an exact image attachment, or a static first frame for animated visual assets. */
 export async function loadAssetReferenceImage(input: {
@@ -44,5 +45,20 @@ export async function loadStagedAssetReferenceImage(input: {
     mimeType: input.asset.contentType,
     width: metadata.width,
     height: metadata.height,
+  };
+}
+
+/** Convert a resolved visual Link preview into an image-generation reference. */
+export function resolvedLinkReferenceImage(
+  id: number,
+  content: ResolvedLinkContent,
+): ReferenceImageInput | null {
+  if (content.kind !== "image" && content.kind !== "gif") return null;
+  return {
+    id,
+    data: content.preview.toString("base64"),
+    mimeType: content.previewMimeType,
+    width: content.width,
+    height: content.height,
   };
 }

@@ -251,6 +251,7 @@ export const DEFAULT_ASSET_READING: AssetReadingConfig = {
     video: 180,
     text: 30,
     file: 30,
+    link: 30,
   },
 };
 

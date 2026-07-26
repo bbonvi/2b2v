@@ -92,6 +92,24 @@ describe("formatMessageLine", () => {
     expect(formatMessageLine({ message: message(), reply })).toBe("[@alice to @unknown (MissingTarget: true; ReplyGIFs: #8)]: hello");
   });
 
+  test("caps Link IDs without dropping the total", () => {
+    const links = Array.from({ length: 7 }, (_, index) => ({
+      id: index + 1,
+      kind: "link" as const,
+      sourceKind: "url" as const,
+      filename: null,
+      contentType: null,
+      size: null,
+      width: null,
+      height: null,
+      durationSeconds: null,
+    }));
+    expect(formatMessageLine({
+      message: message({ assets: links }),
+      reply: null,
+    })).toBe("[@alice (Links: #1, #2, #3, #4, #5, +2 more)]: hello");
+  });
+
   test("renders synthetic events directly", () => {
     const synthetic = message({ content: "Event: Thread created", isSynthetic: true });
     expect(formatMessageLine({ message: synthetic, reply: null })).toBe("Event: Thread created");
@@ -102,7 +120,7 @@ describe("history legends", () => {
   test("describe IDs, assets, and volatile display names", () => {
     expect(OLDER_LEGEND).toContain("read_asset");
     expect(NEWER_LEGEND).toContain("display name");
-    expect(NEWER_LEGEND).toContain("Images/GIFs/Audio/Video/Text/Files");
+    expect(NEWER_LEGEND).toContain("Images/GIFs/Audio/Video/Text/Files/Links");
     expect(NEWER_LEGEND).toContain("Webhook");
   });
 });

@@ -6,11 +6,27 @@ import type { MessageAsset } from "../db/asset-repository.ts";
 import type { StagedAsset } from "../db/staged-asset-repository.ts";
 import { AssetRefSchema, parseAssetRef } from "./asset-id.ts";
 import { markReadOnlyTool } from "./tool-effects.ts";
+import { renderTextRange, type TextLineRange } from "./text-view.ts";
+import {
+  cacheStatusLabel,
+  type LinkCacheMode,
+  type ResolvedLinkResult,
+} from "./link-content.ts";
+
+const LinkCacheModeSchema = Type.Union([
+  Type.Literal("prefer"),
+  Type.Literal("refresh"),
+  Type.Literal("bypass"),
+], {
+  description: "prefer reuses available content; refresh fetches and saves a new copy; bypass fetches without saving.",
+});
 
 const ReadAssetParams = Type.Object({
   asset_id: AssetRefSchema,
   start_line: Type.Optional(Type.Integer({ minimum: 1 })),
   line_count: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000 })),
+  raw: Type.Optional(Type.Boolean({ description: "Use source markup instead of readable content." })),
+  cache_mode: Type.Optional(LinkCacheModeSchema),
 });
 
 export interface ResolvedAssetSource {
@@ -46,6 +62,8 @@ export interface ReadAssetToolDeps {
   prepareImage: (buffer: Buffer, mimeType: string) => Promise<{ data: Buffer; mime: string; width: number; height: number }>;
   fetchFn?: typeof fetch;
   extractVideoFrame?: (url: string, seconds: number, timeoutSeconds: number, signal?: AbortSignal) => Promise<Buffer | null>;
+  /** Resolve one lazy chat Link through the shared runtime cache. */
+  resolveLink?: (input: { url: string; cacheMode?: LinkCacheMode; raw?: boolean }, signal?: AbortSignal) => Promise<ResolvedLinkResult>;
 }
 
 export interface AssetTextView {
@@ -75,8 +93,25 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
     async execute(_toolCallId, params, signal): Promise<AgentToolResult<
       | { assetId: number; origin: AssetOrigin; startLine?: number; endLine?: number; totalLines?: number }
       | { assetRef: string; jobId: string }
+      | {
+          assetId: number;
+          origin: AssetOrigin;
+          resolvedKind: string;
+          cacheMode: LinkCacheMode;
+          cacheStatus: string;
+          raw: boolean;
+          startLine?: number;
+          endLine?: number;
+          totalLines?: number;
+        }
     >> {
-      const input = params as { asset_id: unknown; start_line?: number; line_count?: number };
+      const input = params as {
+        asset_id: unknown;
+        start_line?: number;
+        line_count?: number;
+        raw?: boolean;
+        cache_mode?: LinkCacheMode;
+      };
       const assetRef = parseAssetRef(input.asset_id);
       if (assetRef === null) {
         throw new Error("asset_id must be a positive integer or staged asset handle");
@@ -116,6 +151,9 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
       const assetId = assetRef;
       const asset = deps.getAsset(assetId);
       if (asset === null) throw new Error(`Asset ${assetId} was not found.`);
+      if (asset.kind !== "link" && (input.raw !== undefined || input.cache_mode !== undefined)) {
+        throw new Error("raw and cache_mode apply only to Link assets.");
+      }
       const origin = await deps.resolveOrigin(asset);
       if (origin === null) throw new Error(`Asset ${assetId} source channel is unavailable or inaccessible.`);
       const timeoutSignal = AbortSignal.timeout(deps.config.timeoutSeconds[asset.kind] * 1000);
@@ -125,6 +163,16 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
       const cachedTranscriptAvailable = (asset.kind === "audio" || asset.kind === "video") && asset.extractedText !== null;
       if (source === null && !cachedTranscriptAvailable) throw new Error(`Asset ${assetId} source is no longer available.`);
       const effectiveSource = source ?? { url: "", filename: asset.filename, contentType: asset.contentType };
+      if (asset.kind === "link") {
+        if (source === null) throw new Error(`Link asset ${assetId} source is no longer available.`);
+        if (deps.resolveLink === undefined) throw new Error("Link reading is unavailable.");
+        const resolved = await deps.resolveLink({
+          url: source.url,
+          cacheMode: input.cache_mode,
+          raw: input.raw,
+        }, readSignal);
+        return await renderResolvedLink(deps, asset, origin, source, resolved, input, readSignal);
+      }
       const filename = effectiveSource.filename ?? asset.filename;
       const contentType = effectiveSource.contentType ?? asset.contentType;
       const kindLabel = `${asset.kind[0]?.toUpperCase() ?? ""}${asset.kind.slice(1)}`;
@@ -150,18 +198,17 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
       }
 
       if (asset.kind === "text" || asset.kind === "audio" || asset.kind === "video") {
-        let range: LineRange | null = null;
+        let range: TextLineRange | null = null;
         try {
           const view = await loadAssetTextView(deps, asset, effectiveSource, readSignal);
-          range = renderLineRange(view.text, input.start_line ?? 1, input.line_count ?? 200, deps.config.maxCharsPerRead);
+          range = renderTextRange(view.text, input.start_line ?? 1, input.line_count ?? 200, deps.config.maxCharsPerRead);
           const viewMeta = [
             view.providerLabel,
             `${view.text.length.toLocaleString("en-US")} characters`,
             `${range.totalLines.toLocaleString("en-US")} lines`,
           ].filter((value) => value !== undefined);
           content.push({ type: "text", text: `${view.label} (${viewMeta.join("; ")}) — showing lines ${range.startLine}-${range.endLine}:\n${range.text}` });
-          if (range.lineTruncated) content.push({ type: "text", text: `[A line exceeded maxCharsPerRead and was truncated; use search_asset to inspect it.]` });
-          else if (range.hasMore) content.push({ type: "text", text: `[More content exists. Request another line range only if needed.]` });
+          if (range.hasMore) content.push({ type: "text", text: `[More content exists. Request another line range only if needed.]` });
         } catch (error) {
           if (asset.kind === "text" || readSignal.aborted) throw error;
           content.push({ type: "text", text: `Transcript unavailable: ${error instanceof Error ? error.message : String(error)}` });
@@ -191,6 +238,125 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
   });
 }
 
+async function renderResolvedLink(
+  deps: ReadAssetToolDeps,
+  asset: MessageAsset,
+  origin: AssetOrigin,
+  source: ResolvedAssetSource,
+  resolved: ResolvedLinkResult,
+  input: {
+    start_line?: number;
+    line_count?: number;
+    raw?: boolean;
+  },
+  signal: AbortSignal,
+): Promise<AgentToolResult<{
+  assetId: number;
+  origin: AssetOrigin;
+  resolvedKind: string;
+  cacheMode: LinkCacheMode;
+  cacheStatus: string;
+  raw: boolean;
+  startLine?: number;
+  endLine?: number;
+  totalLines?: number;
+}>> {
+  const link = resolved.content;
+  const header = [
+    `Asset: Link #${asset.id}`,
+    formatAssetOrigin(origin),
+    `Link: ${link.requestedUrl}`,
+    link.finalUrl !== link.requestedUrl ? `Final URL: ${link.finalUrl}` : "",
+    `Resolved: ${link.kind} (${link.contentType})`,
+    `Cache: ${cacheStatusLabel(resolved.cacheStatus)}`,
+  ].filter((line) => line !== "").join("\n");
+  const baseDetails = {
+    assetId: asset.id,
+    origin,
+    resolvedKind: link.kind,
+    cacheMode: resolved.cacheMode,
+    cacheStatus: resolved.cacheStatus,
+    raw: input.raw === true,
+  };
+
+  if (link.kind === "image" || link.kind === "gif") {
+    return {
+      content: [
+        { type: "text", text: `${header}; dimensions: ${link.width}x${link.height}` },
+        { type: "image", data: link.preview.toString("base64"), mimeType: link.previewMimeType },
+      ],
+      details: baseDetails,
+    };
+  }
+
+  if (link.kind === "page" || link.kind === "text") {
+    const text = input.raw === true ? link.rawText : link.readableText;
+    if (text === null) {
+      throw new Error(input.raw === true
+        ? "Raw source is unavailable for this fetched page."
+        : "Readable extraction failed. Retry with raw=true to inspect source markup.");
+    }
+    const range = renderTextRange(text, input.start_line ?? 1, input.line_count ?? 200, deps.config.maxCharsPerRead);
+    return {
+      content: [{
+        type: "text",
+        text: `${header}\nShowing ${input.raw === true ? "raw" : "readable"} lines ${range.startLine}-${range.endLine} of ${range.totalLines}:\n${range.text}${range.hasMore ? `\n[More content exists. Continue at start_line=${range.endLine + 1}.]` : ""}`,
+      }],
+      details: {
+        ...baseDetails,
+        startLine: range.startLine,
+        endLine: range.endLine,
+        totalLines: range.totalLines,
+      },
+    };
+  }
+
+  const mediaAsset: MessageAsset = {
+    ...asset,
+    kind: link.kind,
+    contentType: link.contentType,
+  };
+  const content: Array<TextContent | ImageContent> = [{ type: "text", text: header }];
+  let range: TextLineRange | null = null;
+  try {
+    const view = await loadAssetTextView(deps, mediaAsset, {
+      ...source,
+      contentType: link.contentType,
+    }, signal);
+    range = renderTextRange(view.text, input.start_line ?? 1, input.line_count ?? 200, deps.config.maxCharsPerRead);
+    content.push({
+      type: "text",
+      text: `${view.label} (${view.providerLabel ?? "source"}; ${view.text.length.toLocaleString("en-US")} characters; ${range.totalLines.toLocaleString("en-US")} lines) — showing lines ${range.startLine}-${range.endLine}:\n${range.text}${range.hasMore ? `\n[More content exists. Continue at start_line=${range.endLine + 1}.]` : ""}`,
+    });
+  } catch (error) {
+    if (signal.aborted) throw error;
+    content.push({ type: "text", text: `Transcript unavailable: ${error instanceof Error ? error.message : String(error)}` });
+  }
+  if (
+    link.kind === "video"
+    && (input.start_line === undefined || input.start_line === 1)
+    && deps.extractVideoFrame !== undefined
+  ) {
+    for (const seconds of deps.config.videoPreviewTimesSeconds) {
+      const frame = await deps.extractVideoFrame(source.url, seconds, deps.config.videoPreviewTimeoutSeconds, signal);
+      if (frame === null) continue;
+      content.push({ type: "text", text: `Video frame at ${seconds}s` });
+      content.push({ type: "image", data: frame.toString("base64"), mimeType: "image/jpeg" });
+    }
+  }
+  return {
+    content,
+    details: range === null
+      ? baseDetails
+      : {
+          ...baseDetails,
+          startLine: range.startLine,
+          endLine: range.endLine,
+          totalLines: range.totalLines,
+        },
+  };
+}
+
 /** Materialize the searchable textual view of a text, audio, or video asset. */
 export async function loadAssetTextView(
   deps: ReadAssetToolDeps,
@@ -218,45 +384,6 @@ export async function loadAssetTextView(
   const transcript = await transcribeElevenLabs(deps.fetchFn ?? fetch, deps.elevenLabsApiKey, source.url, signal);
   deps.cacheExtraction(asset.id, transcript, "elevenlabs-scribe-v2-timestamped");
   return { text: transcript, label: "Transcript", providerLabel: "ElevenLabs Scribe v2" };
-}
-
-interface LineRange {
-  text: string;
-  startLine: number;
-  endLine: number;
-  totalLines: number;
-  hasMore: boolean;
-  lineTruncated: boolean;
-}
-
-function renderLineRange(text: string, requestedStart: number, requestedCount: number, maxChars: number): LineRange {
-  const lines = text.replace(/\r\n?/g, "\n").split("\n");
-  if (requestedStart > lines.length) throw new Error(`start_line ${requestedStart} exceeds the ${lines.length} available lines.`);
-  const startLine = requestedStart;
-  const selected: string[] = [];
-  let endLine = startLine - 1;
-  let chars = 0;
-  let lineTruncated = false;
-  for (let index = startLine - 1; index < lines.length && selected.length < requestedCount; index += 1) {
-    const prefix = `${index + 1} | `;
-    const line = lines[index] ?? "";
-    const available = maxChars - chars - prefix.length - (selected.length > 0 ? 1 : 0);
-    if (available <= 0) break;
-    lineTruncated = line.length > available;
-    const rendered = lineTruncated ? `${prefix}${line.slice(0, Math.max(0, available - 18))}… [line truncated]` : `${prefix}${line}`;
-    selected.push(rendered);
-    chars += rendered.length + 1;
-    endLine = index + 1;
-    if (lineTruncated) break;
-  }
-  return {
-    text: selected.join("\n"),
-    startLine,
-    endLine: Math.max(startLine, endLine),
-    totalLines: lines.length,
-    hasMore: lineTruncated || endLine < lines.length,
-    lineTruncated,
-  };
 }
 
 export async function fetchAssetBuffer(fetchFn: typeof fetch, url: string, maxBytes: number, signal?: AbortSignal): Promise<Buffer> {

@@ -112,6 +112,7 @@ function resolveAssetReadingConfig(input: AssetReadingConfigYaml | undefined, fa
       video: positive(input?.timeoutSeconds?.video, fallback.timeoutSeconds.video, "timeoutSeconds.video"),
       text: positive(input?.timeoutSeconds?.text, fallback.timeoutSeconds.text, "timeoutSeconds.text"),
       file: positive(input?.timeoutSeconds?.file, fallback.timeoutSeconds.file, "timeoutSeconds.file"),
+      link: positive(input?.timeoutSeconds?.link, fallback.timeoutSeconds.link, "timeoutSeconds.link"),
     },
   };
 }

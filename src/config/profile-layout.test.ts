@@ -42,6 +42,7 @@ describe("repository profile layout", () => {
       expect(bundle.runtime.reply).not.toBe("");
       expect(bundle.runtime.finalActionInstruction).not.toBe("");
       const sharedToolDescriptions = [
+        "fetch_url",
         "list_channel_messages",
         "list_inner_threads",
         "read_asset",

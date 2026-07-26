@@ -5,6 +5,8 @@ import { getAssetById } from "../db/asset-repository.ts";
 import type { ResolvedAssetSource } from "./read-asset-tool.ts";
 import { fetchAssetBuffer } from "./read-asset-tool.ts";
 import { getStagedAsset } from "../db/staged-asset-repository.ts";
+import { imageMimeFromBuffer } from "./image-buffer.ts";
+import type { LinkCacheMode, ResolvedLinkResult } from "./link-content.ts";
 
 /** Resolve prompt-visible asset IDs into exact outgoing Discord uploads on demand. */
 export function createStoredAssetAttachmentResolver(input: {
@@ -14,6 +16,7 @@ export function createStoredAssetAttachmentResolver(input: {
   logger: Logger;
   stagedGuildId?: string;
   fetchFn?: typeof fetch;
+  resolveLink?: (input: { url: string; cacheMode?: LinkCacheMode; raw?: boolean }, signal?: AbortSignal) => Promise<ResolvedLinkResult>;
 }): AssetAttachmentResolver {
   return async (assetIds) => {
     const attachments: OutboundAttachment[] = [];
@@ -61,6 +64,35 @@ export function createStoredAssetAttachmentResolver(input: {
         continue;
       }
       try {
+        if (asset.kind === "link") {
+          if (input.resolveLink === undefined) throw new Error("Link media resolution is unavailable");
+          const resolved = await input.resolveLink({ url: source.url });
+          if (
+            resolved.content.kind !== "image"
+            && resolved.content.kind !== "gif"
+            && resolved.content.kind !== "audio"
+            && resolved.content.kind !== "video"
+          ) {
+            throw new Error(`Link resolved to non-media content (${resolved.content.kind})`);
+          }
+          const buffer = await fetchAssetBuffer(input.fetchFn ?? fetch, source.url, input.maxDownloadBytes);
+          const contentType = resolved.content.kind === "image" || resolved.content.kind === "gif"
+            ? imageMimeFromBuffer(buffer, resolved.content.contentType)
+            : resolved.content.contentType;
+          if (
+            (resolved.content.kind === "image" || resolved.content.kind === "gif")
+            && !contentType.startsWith("image/")
+          ) {
+            throw new Error(`Link changed to unsupported content (${contentType})`);
+          }
+          attachments.push({
+            id: `asset-${id}`,
+            buffer,
+            filename: source.filename ?? `link-${id}`,
+            contentType,
+          });
+          continue;
+        }
         attachments.push({
           id: `asset-${id}`,
           buffer: await fetchAssetBuffer(input.fetchFn ?? fetch, source.url, input.maxDownloadBytes),
