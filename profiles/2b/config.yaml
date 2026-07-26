@@ -89,9 +89,9 @@ privateLife:
         social-impulse: 0.08
         observe-or-collect: 0.14
     territoryWeights:
-        open: 0.17
+        open: 0.15
         external: 0.12
-        computing-systems: 0.17
+        computing-systems: 0.19
         creative-aesthetic: 0.09
         mundane-private: 0.10
         embodied: 0.08
