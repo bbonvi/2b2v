@@ -117,7 +117,7 @@ export function buildDiscordContext(input: {
   const lines = [
     `Current: ${currentLocation}`,
     ...(hasActiveVoiceRooms
-      ? ["Active voice rooms with people exist in this guild. Use list_channels for current rooms and members."]
+      ? ["People are currently in one or more voice channels in this guild. Use list_channels to see the channels and who is in them."]
       : []),
     ...input.navigationTemplate.split(/\r?\n/),
     "Accessible guilds:",

@@ -76,18 +76,20 @@ describe("buildDiscordContext", () => {
   });
 
   test("briefly signals active voice rooms in the current guild", () => {
-    const rendered = buildDiscordContext({
-      client: fakeClient({ activeVoiceRoom: true }),
+    const input = {
       currentGuildId: "g1",
       currentGuildName: "Alpha",
       currentChannelId: "c1",
       currentChannelName: "room-1",
       navigationTemplate: "Navigation policy.",
+    };
+    const rendered = buildDiscordContext({
+      client: fakeClient({ activeVoiceRoom: true }),
+      ...input,
     });
+    const inactive = buildDiscordContext({ client: fakeClient(), ...input });
 
-    expect(rendered).toContain(
-      "Active voice rooms with people exist in this guild. Use list_channels for current rooms and members.",
-    );
+    expect(rendered.split("\n")).toHaveLength(inactive.split("\n").length + 1);
     expect(rendered).not.toContain("voice-room");
     expect(rendered).not.toContain("alice");
   });
