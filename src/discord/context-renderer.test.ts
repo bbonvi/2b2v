@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ChannelType, type Client } from "discord.js";
 import { buildDiscordContext } from "./context-renderer.ts";
 
-function fakeClient(): Client {
+function fakeClient(options: { activeVoiceRoom?: boolean } = {}): Client {
   const everyone = { id: "everyone" };
   const guilds = [
     { id: "g1", name: "Alpha", memberCount: 183, roles: { everyone } },
@@ -23,10 +23,24 @@ function fakeClient(): Client {
       permissionsFor: () => ({ has: () => true }),
     };
   });
+  const voiceChannels = options.activeVoiceRoom === true
+    ? [{
+      id: "voice-1",
+      guildId: guilds[0]?.id,
+      guild: guilds[0],
+      name: "voice-room",
+      type: ChannelType.GuildVoice,
+      viewable: true,
+      isDMBased: () => false,
+      isThread: () => false,
+      permissionsFor: () => ({ has: () => true }),
+      members: new Map([["alice", { user: { bot: false } }]]),
+    }]
+    : [];
   return {
     user: null,
     guilds: { cache: new Map(guilds.map((guild) => [guild.id, guild])) },
-    channels: { cache: new Map(channels.map((channel) => [channel.id, channel])) },
+    channels: { cache: new Map([...channels, ...voiceChannels].map((channel) => [channel.id, channel])) },
   } as unknown as Client;
 }
 
@@ -59,5 +73,22 @@ describe("buildDiscordContext", () => {
     expect(rendered).toContain("recent_2b_24h<=5");
     expect(rendered).not.toContain("2B_messages");
     expect(rendered).not.toContain("system_channel");
+  });
+
+  test("briefly signals active voice rooms in the current guild", () => {
+    const rendered = buildDiscordContext({
+      client: fakeClient({ activeVoiceRoom: true }),
+      currentGuildId: "g1",
+      currentGuildName: "Alpha",
+      currentChannelId: "c1",
+      currentChannelName: "room-1",
+      navigationTemplate: "Navigation policy.",
+    });
+
+    expect(rendered).toContain(
+      "Active voice rooms with people exist in this guild. Use list_channels for current rooms and members.",
+    );
+    expect(rendered).not.toContain("voice-room");
+    expect(rendered).not.toContain("alice");
   });
 });

@@ -103,11 +103,22 @@ export function buildDiscordContext(input: {
     popularChannels: input.popularChannels ?? [],
   });
   const guilds = selectGuilds(input.client, input.currentGuildId, popular);
+  const hasActiveVoiceRooms = [...input.client.channels.cache.values()].some((channel) =>
+    !channel.isDMBased()
+    && "guildId" in channel
+    && channel.guildId === input.currentGuildId
+    && (channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildStageVoice)
+    && botChannelPermissions(input.client, channel).canView
+    && [...channel.members.values()].some((member) => !member.user.bot)
+  );
   const currentLocation = input.currentChannelName !== undefined
     ? `${input.currentGuildName} / #${input.currentChannelName} | guild_id=${input.currentGuildId} | channel_id=${input.currentChannelId}`
     : `${input.currentGuildName} | guild_id=${input.currentGuildId} | channel_id=${input.currentChannelId}`;
   const lines = [
     `Current: ${currentLocation}`,
+    ...(hasActiveVoiceRooms
+      ? ["Active voice rooms with people exist in this guild. Use list_channels for current rooms and members."]
+      : []),
     ...input.navigationTemplate.split(/\r?\n/),
     "Accessible guilds:",
   ];
