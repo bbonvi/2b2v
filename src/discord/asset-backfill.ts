@@ -1,4 +1,4 @@
-import type { Client, Message, TextBasedChannel } from "discord.js";
+import type { Client, Message } from "discord.js";
 import type { Database } from "../db/database.ts";
 import type { Logger } from "../logger.ts";
 import { syncAssetBackfillPage } from "../db/asset-repository.ts";
@@ -42,7 +42,7 @@ export async function backfillMessageAssets(input: {
           failedChannels.add(row.channel_id);
           continue;
         }
-        const page = await (channel as TextBasedChannel).messages.fetch({
+        const page = await channel.messages.fetch({
           limit: 100,
           ...(row.before_message_id !== null ? { before: row.before_message_id } : {}),
         });

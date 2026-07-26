@@ -58,7 +58,7 @@ describe("VoiceRuntime shutdown", () => {
     internals.active = {
       id: session.id,
       channel,
-      config: {} as GuildConfig,
+      config: {},
       voiceConfig: {
         enabled: true,
         recentSessionContextMs: 0,
@@ -243,7 +243,7 @@ describe("VoiceRuntime response opportunities", () => {
     const active: Record<string, unknown> = {
       id: session.id,
       channel,
-      config: {} as GuildConfig,
+      config: {},
       voiceConfig,
       connection: {},
       player: {},

@@ -40,7 +40,8 @@ function nextValue(args: string[], index: number, flag: string): string {
 }
 
 function parseArgs(args: string[]): CliOptions {
-  let profile = process.env.PROFILE?.trim() || "2b";
+  const configuredProfile = process.env.PROFILE?.trim();
+  let profile = configuredProfile === undefined || configuredProfile === "" ? "2b" : configuredProfile;
   let scenario: PromptScenarioId = "discord";
   let provider: LlmProvider = "openai-codex";
   let format: OutputFormat = "tree";

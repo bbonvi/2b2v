@@ -44,7 +44,7 @@ FROM dependency-builder AS deps
 COPY --link package.json bun.lock ./
 RUN bun install --frozen-lockfile --production --omit=peer
 
-# --- Dev dependencies (for type-checking in CI) ---
+# --- Dev dependencies (for type-checking and linting in CI) ---
 FROM dependency-builder AS deps-dev
 COPY --link package.json bun.lock ./
 RUN bun install --frozen-lockfile

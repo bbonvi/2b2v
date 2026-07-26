@@ -2,6 +2,9 @@ import { StickerFormatType, type Message } from "discord.js";
 import type { AssetKind, UpsertMessageAsset } from "../db/asset-repository.ts";
 
 const TEXT_EXTENSIONS = /\.(?:c|cc|conf|cpp|css|csv|eml|go|h|hpp|htm|html|ini|java|js|json|jsx|log|md|py|rb|rs|sh|sql|svg|toml|ts|tsx|txt|xml|yaml|yml)$/i;
+const PNG_STICKER_FORMAT: number = StickerFormatType.PNG;
+const APNG_STICKER_FORMAT: number = StickerFormatType.APNG;
+const GIF_STICKER_FORMAT: number = StickerFormatType.GIF;
 
 export interface DiscordMessageAssetData {
   id: string;
@@ -99,10 +102,10 @@ export function assetsFromDiscordMessageData(message: DiscordMessageAssetData): 
     embedIndex++;
   }
   for (const sticker of message.stickers) {
-    const formatType = sticker.formatType as StickerFormatType;
-    const kind: AssetKind = formatType === StickerFormatType.GIF || formatType === StickerFormatType.APNG
+    const formatType = sticker.formatType;
+    const kind: AssetKind = formatType === GIF_STICKER_FORMAT || formatType === APNG_STICKER_FORMAT
       ? "gif"
-      : formatType === StickerFormatType.PNG ? "image" : "file";
+      : formatType === PNG_STICKER_FORMAT ? "image" : "file";
     assets.push({
       ...base,
       sourceKind: "sticker",

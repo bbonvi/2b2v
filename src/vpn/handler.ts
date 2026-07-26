@@ -221,7 +221,7 @@ export async function handleVpnComponent(
 
         logVpnCommand(log, "qr", userId, guildId, { profile: profile.name });
         const qrPanel = await buildQrPanel(session, vpnPeer, locale);
-        // eslint-disable-next-line @typescript-eslint/no-deprecated -- type cast, not deprecated usage
+        // oxlint-disable-next-line typescript/no-deprecated -- type cast, not deprecated usage
         await interaction.update(qrPanel as Parameters<typeof interaction.update>[0]);
         break;
       }
@@ -244,7 +244,7 @@ export async function handleVpnComponent(
 
         logVpnCommand(log, "download", userId, guildId, { profile: profile.name });
         const downloadPanel = buildDownloadPanel(session, vpnPeer, locale);
-        // eslint-disable-next-line @typescript-eslint/no-deprecated -- type cast, not deprecated usage
+        // oxlint-disable-next-line typescript/no-deprecated -- type cast, not deprecated usage
         await interaction.update(downloadPanel as Parameters<typeof interaction.update>[0]);
         break;
       }

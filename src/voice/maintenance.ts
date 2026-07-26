@@ -39,7 +39,7 @@ export function createVoiceSummaryTool(
           details: { error: true },
         });
       }
-      const summary = (params as { summary: string }).summary.replace(/\s+/g, " ").trim();
+      const summary = params.summary.replace(/\s+/g, " ").trim();
       onSummary(summary);
       return Promise.resolve({
         content: [{ type: "text", text: "Voice summary updated." }],

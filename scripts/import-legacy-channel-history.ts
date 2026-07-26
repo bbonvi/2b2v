@@ -440,7 +440,7 @@ async function discordJson<T>(path: string, token: string, signal: AbortSignal =
       return await response.json() as T;
     }
 
-    const body = await response.json().catch((): unknown => undefined);
+    const body: unknown = await response.json().catch((): unknown => undefined);
     if (response.status === 429) {
       await sleep(retryAfterMs(response, body), signal);
       continue;
@@ -719,7 +719,7 @@ function getExisting(db: Pick<Database, "raw">, rows: ImportRow[]): ExistingResu
   const missing: ImportRow[] = [];
   let existing = 0;
   for (const row of rows) {
-    const found = stmt.get(row.id) as unknown;
+    const found = stmt.get(row.id);
     if (found === null) missing.push(row);
     else existing++;
   }

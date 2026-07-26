@@ -101,7 +101,7 @@ async function assertPublicUrl(url: URL, resolveHostname: (hostname: string) => 
 }
 
 async function resolvePublicAddresses(hostname: string): Promise<string[]> {
-  return (await lookup(hostname, { all: true, verbatim: true })).map(({ address }) => address);
+  return (await lookup(hostname, { all: true, order: "verbatim" })).map(({ address }) => address);
 }
 
 function isPublicIp(address: string): boolean {

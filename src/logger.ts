@@ -545,7 +545,7 @@ export class RequestLog {
         responsePayload: undefined,
       })),
     };
-    logger.info("request_completed", logEntry as unknown as Record<string, unknown>);
+    logger.info("request_completed", logEntry);
   }
 
   private touchActive(): void {

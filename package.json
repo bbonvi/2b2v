@@ -9,21 +9,20 @@
     "codex:login": "bun run scripts/codex-login.ts",
     "prompt:inspect": "bun run scripts/prompt-inspect.ts",
     "test": "bun test",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
-    "check": "tsc --noEmit && eslint src/"
+    "lint": "oxlint . --report-unused-disable-directives",
+    "lint:fix": "oxlint . --fix --report-unused-disable-directives",
+    "check": "tsc --noEmit && oxlint . --report-unused-disable-directives"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.2",
     "@types/bun": "latest",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@types/turndown": "^5.0.6",
-    "eslint": "^9.39.2",
-    "jiti": "^2.6.1",
-    "typescript": "^5",
-    "typescript-eslint": "^8.54.0"
+    "oxlint": "^1.75.0",
+    "oxlint-plugin-eslint": "^1.75.0",
+    "oxlint-tsgolint": "^7.0.2001",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "@discordjs/opus": "^0.10.0",

@@ -138,7 +138,7 @@ Verification:
 
 ```bash
 make check-profiles
-make check
+make check # TypeScript 7 type-check and type-aware Oxlint
 make test
 ```
 

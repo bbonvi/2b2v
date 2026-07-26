@@ -579,8 +579,11 @@ describe("RequestLog", () => {
     // Console log should be truncated to 500 chars + ellipsis
     const consoleEntry = lastLog();
     const consoleTools = consoleEntry.tools as Array<Record<string, unknown>>;
-    expect((consoleTools[0]?.result as string).length).toBe(501); // 500 + "…"
-    expect((consoleTools[0]?.result as string).endsWith("…")).toBe(true);
+    const consoleResult = consoleTools[0]?.result;
+    expect(typeof consoleResult).toBe("string");
+    if (typeof consoleResult !== "string") throw new Error("Expected a string tool result");
+    expect(consoleResult.length).toBe(501); // 500 + "…"
+    expect(consoleResult.endsWith("…")).toBe(true);
   });
 
   test("records raw tool result payload for dashboard detail", () => {

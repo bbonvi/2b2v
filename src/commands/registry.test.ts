@@ -48,7 +48,7 @@ describe("registerSlashCommands", () => {
   test("propagates REST errors", async () => {
     putMock.mockRejectedValueOnce(new Error("Unauthorized"));
 
-    // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test rejects is async
+    // oxlint-disable-next-line typescript/await-thenable -- bun:test rejects is async
     await expect(
       registerSlashCommands({
         token: "bad-token",

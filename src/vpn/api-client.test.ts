@@ -29,7 +29,7 @@ describe("VpnClient", () => {
     test("throws VpnApiError on non-200 response", async () => {
       const client = createVpnClient(baseUrl, mockFetch(new Response("error", { status: 500 })));
 
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      // oxlint-disable-next-line typescript/await-thenable -- bun:test expect().rejects is thenable
       await expect(client.listServers()).rejects.toBeInstanceOf(VpnApiError);
     });
   });
@@ -85,7 +85,7 @@ describe("VpnClient", () => {
     test("resolves on success", async () => {
       const client = createVpnClient(baseUrl, mockFetch(new Response("{}")));
 
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().resolves is thenable
+      // oxlint-disable-next-line typescript/await-thenable -- bun:test expect().resolves is thenable
       await expect(client.deleteProfile("eu1", "10.0.0.1/32")).resolves.toBeUndefined();
     });
   });
@@ -95,7 +95,7 @@ describe("VpnClient", () => {
       const abortError = new DOMException("signal timed out", "AbortError");
       const client = createVpnClient(baseUrl, mockFetch(abortError));
 
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      // oxlint-disable-next-line typescript/await-thenable -- bun:test expect().rejects is thenable
       await expect(client.listServers()).rejects.toBeInstanceOf(VpnTimeoutError);
     });
   });
@@ -116,7 +116,7 @@ describe("VpnClient", () => {
     test("wraps JSON parse errors", async () => {
       const client = createVpnClient(baseUrl, mockFetch(new Response("not json")));
 
-      // eslint-disable-next-line @typescript-eslint/await-thenable -- bun:test expect().rejects is thenable
+      // oxlint-disable-next-line typescript/await-thenable -- bun:test expect().rejects is thenable
       await expect(client.listServers()).rejects.toBeInstanceOf(VpnApiError);
     });
   });

@@ -34,7 +34,6 @@ import type {
   MainConfigYaml,
   TrimConfig,
   ThinkingLevel,
-  UiLang,
   VpnConfig,
   TypingSimulationConfig,
   AgentJobsConfig,
@@ -1283,7 +1282,7 @@ export function loadGlobalConfig(
     dataDir,
     elevenLabsApiKey: env.ELEVENLABS_API_KEY,
     defaultTts: resolveTtsConfig(yaml.tts),
-    uiLang: (yaml.uiLang === "ru" ? "ru" : "en") as UiLang,
+    uiLang: yaml.uiLang === "ru" ? "ru" : "en",
     vpn: resolveVpnConfig(yaml.vpn, env),
     defaultEmotes: {
       include: yaml.emotes?.include ?? DEFAULT_EMOTES.include,

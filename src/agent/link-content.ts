@@ -389,7 +389,7 @@ function extractReadablePage(html: string, url: string, maxPageImages: number): 
 } {
   const { document } = parseHTML(html);
   const images = extractDocumentImages(document, url, maxPageImages);
-  const article = new Readability(document as unknown as Document).parse();
+  const article = new Readability(document).parse();
   const title = article?.title?.trim() !== "" && article?.title !== null && article?.title !== undefined
     ? article.title
     : document.title.trim() !== ""

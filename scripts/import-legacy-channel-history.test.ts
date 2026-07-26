@@ -78,14 +78,18 @@ describe("legacy channel history import", () => {
 
     importPage(db, [row], [row]);
 
-    expect(db.raw.prepare(
+    const stored = db.raw.prepare(
       "SELECT raw_content, translated_content, reply_to_id, assets_indexed_at FROM messages WHERE id = ?",
-    ).get(row.id)).toEqual({
+    ).get(row.id);
+    expect(stored).toMatchObject({
       raw_content: "",
       translated_content: "",
       reply_to_id: "parent",
-      assets_indexed_at: expect.any(Number),
     });
+    if (stored === null || typeof stored !== "object" || !("assets_indexed_at" in stored)) {
+      throw new Error("Expected the stored message to have an asset index timestamp");
+    }
+    expect(typeof stored.assets_indexed_at).toBe("number");
     expect(getAssetsByMessageId(db, row.id)).toMatchObject([{
       sourceKind: "attachment",
       sourceKey: "attachment",

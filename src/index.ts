@@ -915,7 +915,7 @@ const profilesDir = "profiles";
 const profileDir = join(profilesDir, profile);
 const configPath = requireProfileConfigPath(profilesDir, profile);
 const guildsDir = join(profileDir, "guilds");
-let globalConfig = loadGlobalConfig(process.env as Record<string, string | undefined>, configPath);
+let globalConfig = loadGlobalConfig(process.env, configPath);
 validateTrimConfig(globalConfig.defaultTrim);
 validateVpnConfig(globalConfig.vpn);
 log.info("profile loaded", {
@@ -3740,7 +3740,7 @@ function buildAgentTools(
       }
       for (const [, channel] of client.channels.cache) {
         if ("guildId" in channel && channel.guildId === targetGuild.id && "isThread" in channel && typeof channel.isThread === "function" && channel.isThread()) {
-          channels.set(channel.id, channel as ThreadChannel);
+          channels.set(channel.id, channel);
         }
       }
 
@@ -5504,7 +5504,7 @@ async function reloadConfigs(): Promise<void> {
   try {
     requireProfileConfigPath(profilesDir, profile);
     const newGlobal = loadGlobalConfig(
-      process.env as Record<string, string | undefined>,
+      process.env,
       configPath,
     );
     validateTrimConfig(newGlobal.defaultTrim);
