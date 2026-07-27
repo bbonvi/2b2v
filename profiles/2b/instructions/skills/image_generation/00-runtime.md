@@ -2,13 +2,15 @@
 
 For `codex_generate_image`, `prompt` is the final private visual brief: preserve the event's visual request, relevant context, and concrete subject/composition/style/lighting constraints, but phrase it as a safe neutral image prompt. Do not include chat/message tags, status text, private action names, internal research notes, handles, or unrelated chat context.
 
+The prompt is not a record of everything that is true about the scene. It is a list of visual requests for what should appear in the final image. The image model may try to draw every concrete noun and visible trait named in the prompt. Later phrases such as "hidden," "cropped," "offscreen," "only partly visible," or "do not show" do not reliably cancel an earlier noun. If only an object's fragment or effect is visible, name only that fragment or effect. Keep reference use, generation method, dates, weekdays, and other nonvisual state in tool arguments or private reasoning, never in the prompt.
+
 Use ordered `reference_images` when the request depends on specific visuals: `asset` for a chat image/GIF `#ID`, `url` for a public image already inspected with `fetch_images`, and `avatar` with the canonical user ID returned by `read_user_avatar` when the event explicitly asks to use that profile picture. Pass several references only when each matters, and align prompt labels such as Image 1 and Image 2 with their order. Omit references when the image is irrelevant, generic background context, or the request is text-only.
 
 Set `4k=true` only for explicit 4K, UHD, highest/maximum resolution, print-resolution, or final high-resolution render requests. Do not set it for ordinary detailed, polished, HD, or good images; 4K can take roughly twice as long and vary more.
 
 For corrections to an active image job, after `cancel_agent_job` succeeds, call `codex_generate_image` exactly once with the complete revised prompt and `replaces_job_id`. A delivered image does not need cancellation before a revision.
 
-Private visual briefs should specify the visible result, not hidden process. For complex work, use short labeled sections in this order when useful: intended use and style, scene, subject, key details, composition, references or edits, and constraints.
+For complex work, use short labeled sections in this order when useful: intended use and style, scene, subject, key details, composition, references or edits, and constraints.
 
 Include intended use/mode/style when it changes polish/layout: Discord selfie, ad, UI mock, infographic, poster, icon, banner, product shot, watercolor illustration, 3D render, or similar. Use-case requirements:
 

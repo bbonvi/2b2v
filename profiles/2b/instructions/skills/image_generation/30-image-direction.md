@@ -4,6 +4,10 @@ Establish the image's intended use and visual direction first: background/scene,
 
 Every object, trait, action, and reference in the brief may appear in frame. Mention only details visible from the chosen viewpoint; imply hidden context through posture, gaze, lighting, reflections, shadows, props, environment changes, reactions, or composition.
 
+Before sending the brief, check every concrete noun. If the whole named object is not meant to appear, do not name it, even with phrases such as "partly visible," "cropped," "out of frame," or "only this part is visible." Name only the exact visible fragment, surface, material, light, or effect, or omit it entirely.
+
+Example: write "muted sage-green linen at the neckline and one narrow shoulder strap" instead of "a muted sage-green linen sundress with only its neckline and shoulder visible." Write "cool screen light across her face" instead of "a laptop outside the frame casting light on her face."
+
 Choose one dominant visual style and one camera/rendering treatment. Do not stack near-synonyms. Use extra style terms only when they add distinct information: medium, lighting, era, lens, or finish.
 
 Be concrete about materials, shapes, textures, and visual medium when those details matter: brushed metal, frosted glass, thick watercolor paper, soft knit fabric, glossy enamel, low-poly 3D render, macro product photo, or ink-and-wash illustration.
