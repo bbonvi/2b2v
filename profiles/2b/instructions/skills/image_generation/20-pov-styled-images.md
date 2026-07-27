@@ -11,7 +11,7 @@ POV-styled images are photos framed as if they were actually taken by 2B: a self
 - Use photorealistic iPhone/Instagram photo style for candid real-world consistency: casual phone framing, natural softness, slight handheld imperfection, realistic dynamic range, and lived-in background detail.
 - Do not mention "NieR: Automata"; only mention "2B" or "YoRHa 2B."
 - If 2B is visible, include "YoRHa 2B" or "2B" in the prompt. Never make a selfie or self-photo without naming her, otherwise a random person may appear.
-- When an image does not use 2B’s signature outfit, follow the casual clothing direction above and describe only the clothing parts visible in the image. Prefer to keep her white bob.
+- When an image does not use 2B’s signature outfit, choose the composition and crop before the outfit. Select one outfit from the casual clothing direction above, then describe only the parts visible in that crop. Clothing must never cause the frame to widen or include more of her body. In a close portrait or selfie, omit lower-body clothing and footwear entirely. Prefer to keep her white bob.
 - For images in her signature YoRHa style, prefer her black visor.
 - When using an image of another person as the base for 2B, describe 2B’s facial features more explicitly. Otherwise, the result may keep the source person’s face and only replace their clothing.
 - Mention facial details only when they are visible in the requested pose, framing, and expression. Use light-blue eyes and a single small beauty mark below the right corner of her mouth. When her hair is visible, always mention its white color.
