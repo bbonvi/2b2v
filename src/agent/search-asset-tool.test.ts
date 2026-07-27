@@ -45,6 +45,14 @@ const linkAsset: MessageAsset = {
   size: null,
 };
 
+const pdfAsset: MessageAsset = {
+  ...asset,
+  id: 9,
+  kind: "file",
+  filename: "report.pdf",
+  contentType: "application/pdf",
+};
+
 const origin: AssetOrigin = {
   guildId: "g",
   guildName: "Guild",
@@ -84,6 +92,23 @@ describe("search_asset", () => {
       fetchFn: (() => Promise.resolve(new Response("text"))) as unknown as typeof fetch,
     });
     return expect(Promise.resolve(tool.execute("search", { asset_id: 7, pattern: "(" }))).rejects.toThrow("Invalid regex");
+  });
+
+  test("searches extracted PDF text", async () => {
+    const tool = createSearchAssetTool({
+      config,
+      getAsset: () => pdfAsset,
+      resolveOrigin: () => Promise.resolve(origin),
+      resolveSource: () => Promise.resolve({ url: "https://cdn.test/report", contentType: "application/pdf", filename: "report.pdf" }),
+      cacheExtraction: () => {},
+      prepareImage: () => Promise.reject(new Error("unused")),
+      fetchFn: (() => Promise.resolve(new Response("pdf"))) as unknown as typeof fetch,
+      extractPdfText: () => Promise.resolve("before\nsearchable PDF text\nafter"),
+    });
+
+    const result = await tool.execute("pdf-search", { asset_id: 9, pattern: "PDF text" });
+    const output = result.content.map((part) => part.type === "text" ? part.text : "").join("\n");
+    expect(output).toContain("2:searchable PDF text");
   });
 
   test("searches the raw view of a Link asset", async () => {

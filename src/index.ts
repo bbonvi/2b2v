@@ -64,7 +64,7 @@ import { listInnerThreads } from "./db/inner-thread-repository";
 import { createListChannelMessagesTool } from "./agent/list-channel-messages-tool";
 import { createOwnMessageTools } from "./agent/own-message-tool";
 import { createBraveImageSearchTool, createBraveSearchTool } from "./agent/brave-search-tool";
-import { createReadAssetTool, extractRemoteVideoFrame, type ReadAssetToolDeps } from "./agent/read-asset-tool";
+import { createReadAssetTool, extractPdfText, extractRemoteVideoFrame, type ReadAssetToolDeps } from "./agent/read-asset-tool";
 import { createSearchAssetTool } from "./agent/search-asset-tool";
 import { createReadUserAvatarTool, type AvatarSize } from "./agent/read-user-avatar-tool";
 import { createFetchImagesTool } from "./agent/fetch-images-tool";
@@ -4030,6 +4030,7 @@ function buildAgentTools(
     resolveSource: resolveAssetSource,
     cacheExtraction: (id, text, provider) => cacheAssetExtraction(db, id, text, provider),
     prepareImage: (buffer, mimeType) => prepareImageBufferForContext(buffer, mimeType, CONTEXT_IMAGE_MAX_DIMENSION),
+    extractPdfText,
     extractVideoFrame: extractRemoteVideoFrame,
     resolveLink: async (input, signal) => await resolveLinkContent({
       cache: linkContentCache,

@@ -37,6 +37,15 @@ function linkAsset(): MessageAsset {
   };
 }
 
+function pdfAsset(): MessageAsset {
+  return {
+    ...asset("file"),
+    filename: "report.pdf",
+    contentType: "application/pdf",
+    durationSeconds: null,
+  };
+}
+
 const origin: AssetOrigin = {
   guildId: "source-guild",
   guildName: "Source Guild",
@@ -119,6 +128,36 @@ describe("read_asset", () => {
     expect(result.content.some((part) => part.type === "text" && part.text.includes("Origin: Source Guild (source-guild) / #memes (source-channel); location: another guild"))).toBeTrue();
     expect(result.content.some((part) => part.type === "text" && part.text.includes("showing lines 2-3:\n2 | beta\n3 | gamma"))).toBeTrue();
     expect(result.details).toEqual({ assetId: 1, origin, startLine: 2, endLine: 3, totalLines: 3 });
+  });
+
+  test("extracts and caches bounded PDF text", async () => {
+    const record = pdfAsset();
+    let extractionCalls = 0;
+    const tool = createReadAssetTool({
+      config,
+      getAsset: () => record,
+      resolveOrigin: () => Promise.resolve(origin),
+      resolveSource: () => Promise.resolve(record.extractedText === null
+        ? { url: "https://cdn.test/report", contentType: "application/pdf", filename: "report.pdf" }
+        : null),
+      cacheExtraction: (_id, text, provider) => {
+        record.extractedText = text;
+        record.extractionProvider = provider;
+      },
+      prepareImage: () => Promise.reject(new Error("unused")),
+      fetchFn: (() => Promise.resolve(new Response("pdf"))) as unknown as typeof fetch,
+      extractPdfText: (_buffer, maxOutputBytes) => {
+        extractionCalls += 1;
+        expect(maxOutputBytes).toBe(config.maxDownloadBytes);
+        return Promise.resolve("title\nsearchable PDF text");
+      },
+    });
+
+    const first = await tool.execute("pdf", { asset_id: 1, start_line: 2 });
+    expect(first.content.some((part) => part.type === "text" && part.text.includes("2 | searchable PDF text"))).toBeTrue();
+    await tool.execute("cached-pdf", { asset_id: 1 });
+    expect(extractionCalls).toBe(1);
+    expect(record.extractionProvider).toBe("poppler-pdftotext-layout");
   });
 
   test("reads raw ranges from a cached Link asset", async () => {

@@ -61,6 +61,7 @@ export interface ReadAssetToolDeps {
   cacheExtraction: (id: number, text: string, provider: string) => void;
   prepareImage: (buffer: Buffer, mimeType: string) => Promise<{ data: Buffer; mime: string; width: number; height: number }>;
   fetchFn?: typeof fetch;
+  extractPdfText?: (buffer: Buffer, maxOutputBytes: number, signal?: AbortSignal) => Promise<string>;
   extractVideoFrame?: (url: string, seconds: number, timeoutSeconds: number, signal?: AbortSignal) => Promise<Buffer | null>;
   /** Resolve one lazy chat Link through the shared runtime cache. */
   resolveLink?: (input: { url: string; cacheMode?: LinkCacheMode; raw?: boolean }, signal?: AbortSignal) => Promise<ResolvedLinkResult>;
@@ -160,8 +161,9 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
       const readSignal = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
       const source = await deps.resolveSource(asset);
       readSignal.throwIfAborted();
-      const cachedTranscriptAvailable = (asset.kind === "audio" || asset.kind === "video") && asset.extractedText !== null;
-      if (source === null && !cachedTranscriptAvailable) throw new Error(`Asset ${assetId} source is no longer available.`);
+      const cachedTextAvailable = asset.extractedText !== null
+        && (asset.kind === "audio" || asset.kind === "video" || isPdfAsset(asset));
+      if (source === null && !cachedTextAvailable) throw new Error(`Asset ${assetId} source is no longer available.`);
       const effectiveSource = source ?? { url: "", filename: asset.filename, contentType: asset.contentType };
       if (asset.kind === "link") {
         if (source === null) throw new Error(`Link asset ${assetId} source is no longer available.`);
@@ -197,7 +199,7 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
         return { content, details: { assetId: asset.id, origin } };
       }
 
-      if (asset.kind === "text" || asset.kind === "audio" || asset.kind === "video") {
+      if (asset.kind === "text" || asset.kind === "audio" || asset.kind === "video" || isPdfAsset(asset, effectiveSource)) {
         let range: TextLineRange | null = null;
         try {
           const view = await loadAssetTextView(deps, asset, effectiveSource, readSignal);
@@ -210,7 +212,7 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
           content.push({ type: "text", text: `${view.label} (${viewMeta.join("; ")}) — showing lines ${range.startLine}-${range.endLine}:\n${range.text}` });
           if (range.hasMore) content.push({ type: "text", text: `[More content exists. Request another line range only if needed.]` });
         } catch (error) {
-          if (asset.kind === "text" || readSignal.aborted) throw error;
+          if (asset.kind === "text" || isPdfAsset(asset, effectiveSource) || readSignal.aborted) throw error;
           content.push({ type: "text", text: `Transcript unavailable: ${error instanceof Error ? error.message : String(error)}` });
         }
         if (
@@ -357,7 +359,7 @@ async function renderResolvedLink(
   };
 }
 
-/** Materialize the searchable textual view of a text, audio, or video asset. */
+/** Materialize the searchable textual view of a text, PDF, audio, or video asset. */
 export async function loadAssetTextView(
   deps: ReadAssetToolDeps,
   asset: MessageAsset,
@@ -368,6 +370,20 @@ export async function loadAssetTextView(
     // ponytail: buffer up to maxDownloadBytes; stream into rg if large-file memory pressure becomes real.
     const buffer = await fetchAssetBuffer(deps.fetchFn ?? fetch, source.url, deps.config.maxDownloadBytes, signal);
     return { text: buffer.toString("utf8"), label: "File contents" };
+  }
+  if (isPdfAsset(asset, source)) {
+    if (asset.extractedText !== null) {
+      return {
+        text: asset.extractedText,
+        label: "File contents",
+        providerLabel: asset.extractionProvider ?? undefined,
+      };
+    }
+    if (deps.extractPdfText === undefined) throw new Error("PDF text extraction is unavailable.");
+    const buffer = await fetchAssetBuffer(deps.fetchFn ?? fetch, source.url, deps.config.maxDownloadBytes, signal);
+    const text = await deps.extractPdfText(buffer, deps.config.maxDownloadBytes, signal);
+    deps.cacheExtraction(asset.id, text, "poppler-pdftotext-layout");
+    return { text, label: "File contents", providerLabel: "Poppler pdftotext" };
   }
   if (asset.kind !== "audio" && asset.kind !== "video") throw new Error(`Asset #${asset.id} has no searchable text.`);
   if (asset.extractedText !== null) {
@@ -384,6 +400,49 @@ export async function loadAssetTextView(
   const transcript = await transcribeElevenLabs(deps.fetchFn ?? fetch, deps.elevenLabsApiKey, source.url, signal);
   deps.cacheExtraction(asset.id, transcript, "elevenlabs-scribe-v2-timestamped");
   return { text: transcript, label: "Transcript", providerLabel: "ElevenLabs Scribe v2" };
+}
+
+/** Identify a PDF without expanding the durable asset-kind contract. */
+export function isPdfAsset(
+  asset: Pick<MessageAsset, "kind" | "contentType" | "filename">,
+  source?: Pick<ResolvedAssetSource, "contentType" | "filename">,
+): boolean {
+  if (asset.kind !== "file") return false;
+  const contentType = (source?.contentType ?? asset.contentType)?.split(";", 1)[0]?.trim().toLowerCase();
+  const filename = source?.filename ?? asset.filename;
+  return contentType === "application/pdf" || filename?.toLowerCase().endsWith(".pdf") === true;
+}
+
+/** Extract bounded UTF-8 text from one PDF with Poppler. */
+export async function extractPdfText(
+  buffer: Buffer,
+  maxOutputBytes: number,
+  signal?: AbortSignal,
+): Promise<string> {
+  signal?.throwIfAborted();
+  const process = Bun.spawn(
+    ["pdftotext", "-layout", "-enc", "UTF-8", "-", "-"],
+    {
+      stdin: buffer,
+      stdout: "pipe",
+      stderr: "pipe",
+      signal,
+      maxBuffer: maxOutputBytes,
+    },
+  );
+  const [exitCode, output, errorOutput] = await Promise.all([
+    process.exited,
+    new Response(process.stdout).arrayBuffer(),
+    new Response(process.stderr).text(),
+  ]);
+  signal?.throwIfAborted();
+  if (exitCode !== 0) {
+    const detail = errorOutput.trim().slice(0, 500);
+    throw new Error(`PDF text extraction failed${detail === "" ? ` (exit ${exitCode})` : `: ${detail}`}`);
+  }
+  const text = Buffer.from(output).toString("utf8").replace(/\f/gu, "\n\n").trim();
+  if (text === "") throw new Error("PDF has no extractable text.");
+  return text;
 }
 
 export async function fetchAssetBuffer(fetchFn: typeof fetch, url: string, maxBytes: number, signal?: AbortSignal): Promise<Buffer> {

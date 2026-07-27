@@ -3,7 +3,7 @@
 FROM oven/bun:1.3-debian AS base
 WORKDIR /app
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates ffmpeg libgomp1 python3 ripgrep \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg libgomp1 poppler-utils python3 ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
 # Build against the runtime's Python ABI, then download the converted multilingual model.

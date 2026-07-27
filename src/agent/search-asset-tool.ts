@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { AssetIdSchema, parseAssetId } from "./asset-id.ts";
-import { formatAssetOrigin, loadAssetTextView, type AssetOrigin, type ReadAssetToolDeps } from "./read-asset-tool.ts";
+import { formatAssetOrigin, isPdfAsset, loadAssetTextView, type AssetOrigin, type ReadAssetToolDeps } from "./read-asset-tool.ts";
 import { markReadOnlyTool } from "./tool-effects.ts";
 import { searchTextView } from "./text-view.ts";
 import { cacheStatusLabel, type LinkCacheMode } from "./link-content.ts";
@@ -51,7 +51,7 @@ export function createSearchAssetTool(deps: ReadAssetToolDeps): AgentTool {
       if (assetId === null) throw new Error("asset_id must be a positive integer, optionally prefixed with #");
       const asset = deps.getAsset(assetId);
       if (asset === null) throw new Error(`Asset ${assetId} was not found.`);
-      if (asset.kind !== "text" && asset.kind !== "audio" && asset.kind !== "video" && asset.kind !== "link") {
+      if (asset.kind !== "text" && asset.kind !== "audio" && asset.kind !== "video" && asset.kind !== "link" && !isPdfAsset(asset)) {
         throw new Error(`Asset #${assetId} is not text-searchable.`);
       }
       if (asset.kind !== "link" && (input.raw !== undefined || input.cache_mode !== undefined)) {
@@ -63,8 +63,9 @@ export function createSearchAssetTool(deps: ReadAssetToolDeps): AgentTool {
       const searchSignal = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
       const source = await deps.resolveSource(asset);
       searchSignal.throwIfAborted();
-      const cachedTranscriptAvailable = (asset.kind === "audio" || asset.kind === "video") && asset.extractedText !== null;
-      if (source === null && !cachedTranscriptAvailable) throw new Error(`Asset ${assetId} source is no longer available.`);
+      const cachedTextAvailable = asset.extractedText !== null
+        && (asset.kind === "audio" || asset.kind === "video" || isPdfAsset(asset));
+      if (source === null && !cachedTextAvailable) throw new Error(`Asset ${assetId} source is no longer available.`);
       const effectiveSource = source ?? { url: "", filename: asset.filename, contentType: asset.contentType };
       const maxResults = input.max_results ?? 10;
       const contextLines = input.context_lines ?? 2;
@@ -113,7 +114,7 @@ export function createSearchAssetTool(deps: ReadAssetToolDeps): AgentTool {
       const view = await loadAssetTextView(deps, asset, effectiveSource, searchSignal);
       const result = await searchTextView(view.text, input.pattern, contextLines, maxResults, deps.config.maxCharsPerRead, searchSignal);
       const filename = effectiveSource.filename ?? asset.filename;
-      const heading = `Asset: ${asset.kind === "text" ? "Text" : "Transcript"} #${asset.id}${filename !== null ? ` — ${filename}` : ""}\n${formatAssetOrigin(origin)}\nRegex: ${JSON.stringify(input.pattern)}`;
+      const heading = `Asset: ${asset.kind === "text" || isPdfAsset(asset, effectiveSource) ? "Text" : "Transcript"} #${asset.id}${filename !== null ? ` — ${filename}` : ""}\n${formatAssetOrigin(origin)}\nRegex: ${JSON.stringify(input.pattern)}`;
       return {
         content: [{ type: "text", text: result === null
           ? `${heading}\nNo matches.`
