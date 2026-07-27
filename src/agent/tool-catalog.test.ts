@@ -28,7 +28,7 @@ const skills: PromptSkillBundle = {
       id: "scheduling",
       title: "Scheduling",
       description: "Future actions.",
-      requiredForTools: ["schedule_task"],
+      requiredForTools: ["schedule_task", "list_scheduled_tasks", "delete_scheduled_task"],
       instructionDocuments: [],
       content: "# Skill: Scheduling",
     },
@@ -44,6 +44,8 @@ const skills: PromptSkillBundle = {
   indexPrompt: "## Skills",
   requiredByTool: {
     schedule_task: "scheduling",
+    list_scheduled_tasks: "scheduling",
+    delete_scheduled_task: "scheduling",
     start_thread: "discord_threads",
     close_thread: "discord_threads",
   },
@@ -196,6 +198,13 @@ describe("search_tools", () => {
     expect(reminder.details).toMatchObject({
       matches: ["schedule_task"],
       activateToolNames: [],
+    });
+
+    const cancellation = await search.execute("call-cancellation", { query: "cancel scheduled task" });
+    expect(cancellation.details).toMatchObject({
+      matches: ["delete_scheduled_task"],
+      activateToolNames: [],
+      requiredSkills: [{ skillId: "scheduling", toolNames: ["delete_scheduled_task"] }],
     });
 
     const presence = await search.execute("call-watch", { query: "when Alice is online" });

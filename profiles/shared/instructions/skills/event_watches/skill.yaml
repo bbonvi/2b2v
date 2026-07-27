@@ -3,6 +3,8 @@ title: Event Watches
 description: Use for requested or self-chosen reactions to future Discord events.
 required_for_tools:
   - create_event_watch
+  - list_event_watches
+  - delete_event_watch
 instructions:
   - 00-events.md
   - 10-lifecycle.md

@@ -3,5 +3,7 @@ title: Scheduling
 description: Use for requested or self-chosen time-based future actions and periodic external checks.
 required_for_tools:
   - schedule_task
+  - list_scheduled_tasks
+  - delete_scheduled_task
 instructions:
   - 00-policy.md

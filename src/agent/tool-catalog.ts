@@ -335,8 +335,7 @@ function entryScore(entry: ToolCatalogEntry, query: string): number {
   if (aliasPhrases.some((phrase) => !phrase.includes(" ") && queryTerms.includes(phrase))) {
     score += 40;
   }
-  score += matchingTermCount(queryTerms, nameTerms) * 20;
-  score += matchingTermCount(queryTerms, aliasTerms) * 12;
+  score += primaryMatches * 100;
   score += matchingTermCount(queryTerms, summaryTerms) * 3;
   score += matchingTermCount(queryTerms, groupTerms) * 4;
   if (primaryMatches === new Set(queryTerms).size) score += 25;

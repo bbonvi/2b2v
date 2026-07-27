@@ -95,7 +95,20 @@ describe("repository profile layout", () => {
       expect(bundle.runtime.skills.requiredByTool.start_thread).toBe("discord_threads");
       expect(bundle.runtime.skills.requiredByTool.close_thread).toBe("discord_threads");
       expect(bundle.runtime.skills.requiredByTool.create_event_watch).toBe("event_watches");
+      expect(bundle.runtime.skills.requiredByTool.list_event_watches).toBe("event_watches");
+      expect(bundle.runtime.skills.requiredByTool.delete_event_watch).toBe("event_watches");
       expect(bundle.runtime.skills.requiredByTool.schedule_task).toBe("scheduling");
+      expect(bundle.runtime.skills.requiredByTool.list_scheduled_tasks).toBe("scheduling");
+      expect(bundle.runtime.skills.requiredByTool.delete_scheduled_task).toBe("scheduling");
+      for (const tool of [
+        "codex_generate_image",
+        "cancel_agent_job",
+        "list_agent_jobs",
+        "read_agent_job",
+        "dismiss_agent_job",
+      ]) {
+        expect(bundle.runtime.skills.requiredByTool[tool]).toBe("image_generation");
+      }
       if (profile === "2b") {
         expect(bundle.runtime.privateLife?.length).toBeGreaterThan(500);
       } else {

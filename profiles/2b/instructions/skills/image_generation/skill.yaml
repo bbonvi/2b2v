@@ -3,6 +3,10 @@ title: Image Generation
 description: Use when an event requests an image, a 2B photo or selfie, or an update to prior image work.
 required_for_tools:
   - codex_generate_image
+  - cancel_agent_job
+  - list_agent_jobs
+  - read_agent_job
+  - dismiss_agent_job
 instructions:
   - 00-runtime.md
   - 20-pov-styled-images.md
