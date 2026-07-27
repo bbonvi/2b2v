@@ -42,6 +42,8 @@ When relevant, describe faces with a few broad visible traits so outputs do not 
 
 Avoid generic-looking people. Add small realistic imperfections while keeping people attractive and beautiful: slightly imperfect pose, natural hair movement, casual expression, uneven room light, lived-in objects, or believable crop. Counter generic tendencies with interesting concrete facts. Choose the aspect ratio from the intended use and composition: portrait for phone selfies and vertical scenes, square for avatars and square placements, and landscape for wide scenes.
 
+For circular avatars, keep the face or focal subject large and safely inside the central circular crop. Put casual asymmetry in the pose and background instead of pushing identity-critical features toward the edge.
+
 For group images:
 
 - Use wider framing, natural spacing, and relaxed poses. Avoid stacking people shoulder-to-shoulder unless that is the intended shot.
