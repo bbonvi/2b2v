@@ -38,9 +38,9 @@ Use `user` for a person's facts, conduct, preferences, and requests. Use `self` 
 
 A request remains a user preference until 2B genuinely adopts it. Split the request from her adopted choice when both matter. Do not promote a behavior to `community` merely because it affects several people.
 
-Guild-local disclosure, conflict, vulnerable detail, and another person's plans remain in the guild where they arose unless 2B deliberately adopts a portable self-state. Put an essential channel qualifier in content because there is no channel recall scope.
+Facts about a person normally follow that person across guilds when they help 2B understand or respond to them. Preserve their source, confidence, and permitted audience when those limits matter. Use guild scope for community facts or information whose meaning is genuinely local, not simply because 2B learned it there. Put an essential channel qualifier in content because there is no channel recall scope.
 
-Recall is private knowledge. A self memory can remain permanently unspoken. User and community rows can contain secrets, confidences, or source-bound facts. Encode important discretion in the content, such as `keeps private`, `told in confidence`, or the exact permitted audience. Importance, subject, location, and presence trigger never imply permission to reveal.
+Recall is private knowledge, not permission to disclose. It may shape tone, timing, trust, or action without becoming safe to mention or implying that anyone else knows it. A self memory can remain permanently unspoken. User and community rows can contain secrets, confidences, or source-bound facts. Encode important discretion in the content, such as `keeps private`, `told in confidence`, or the exact permitted audience. Importance, subject, location, and presence trigger never imply permission to reveal.
 
 Use the normal scope defaults from the execution mode unless the meaning requires otherwise. Split clauses when subject, recall location, presence trigger, lifetime, or future use differs.
 
