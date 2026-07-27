@@ -124,7 +124,7 @@ export function formatAssetMeta(prefix: "Reply" | "", assets: readonly HistoryAs
         const seconds = totalSeconds % 60;
         detail = minutes > 0 ? `${minutes}m${seconds > 0 ? `${seconds}s` : ""}` : `${seconds}s`;
       }
-      return `#${asset.id}${name !== undefined && name !== "" ? ` ${name}` : ""}${detail !== "" ? ` (${detail})` : ""}${asset.jobId !== undefined ? ` [Job ${asset.jobId}]` : ""}`;
+      return `#${asset.id}${name !== undefined && name !== "" ? ` ${name}` : ""}${detail !== "" ? ` (${detail})` : ""}${asset.originalAssetId !== undefined ? ` [orig #${asset.originalAssetId}]` : ""}${asset.jobId !== undefined ? ` [Job ${asset.jobId}]` : ""}`;
     });
     const omitted = matching.length - shown.length;
     parts.push(`${prefix}${labels[kind]}: ${values.join(", ")}${omitted > 0 ? `, +${omitted} more` : ""}`);

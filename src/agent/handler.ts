@@ -213,6 +213,8 @@ export interface OutboundAttachment {
   buffer: Buffer;
   filename: string;
   contentType: string;
+  /** Permanent chat asset that supplied these bytes when this is a repost. */
+  sourceAssetId?: number;
   requestedSize?: string;
   actualSize?: string;
   transport?: string;

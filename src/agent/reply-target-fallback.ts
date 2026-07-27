@@ -91,6 +91,7 @@ function loadStoredMessages(deps: ReplyFallbackDeps, ids: string[]): HistoryMess
         id: asset.id, kind: asset.kind, sourceKind: asset.sourceKind, filename: asset.filename,
         contentType: asset.contentType, size: asset.size, width: asset.width, height: asset.height,
         durationSeconds: asset.durationSeconds,
+        ...(asset.originalAssetId !== undefined ? { originalAssetId: asset.originalAssetId } : {}),
       })) } : {}),
       hasEmbeds: false,
       isSynthetic: row.is_synthetic === 1 || isDiceRollHistoryEvent(row.translated_content),
@@ -192,6 +193,7 @@ export async function fetchMissingReplyTargets(
         id: asset.id, kind: asset.kind, sourceKind: asset.sourceKind, filename: asset.filename,
         contentType: asset.contentType, size: asset.size, width: asset.width, height: asset.height,
         durationSeconds: asset.durationSeconds,
+        ...(asset.originalAssetId !== undefined ? { originalAssetId: asset.originalAssetId } : {}),
       })) } : {}),
       hasEmbeds: false,
       isSynthetic: false, // Fetched messages are real user messages

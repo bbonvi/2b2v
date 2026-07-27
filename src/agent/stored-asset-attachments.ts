@@ -90,6 +90,7 @@ export function createStoredAssetAttachmentResolver(input: {
             buffer,
             filename: source.filename ?? `link-${id}`,
             contentType,
+            sourceAssetId: id,
           });
           continue;
         }
@@ -98,6 +99,7 @@ export function createStoredAssetAttachmentResolver(input: {
           buffer: await fetchAssetBuffer(input.fetchFn ?? fetch, source.url, input.maxDownloadBytes),
           filename: source.filename ?? asset.filename ?? `asset-${id}`,
           contentType: source.contentType ?? asset.contentType ?? "application/octet-stream",
+          sourceAssetId: id,
         });
       } catch (error) {
         input.logger.warn("asset download failed", { assetId: id, error: error instanceof Error ? error.message : String(error) });

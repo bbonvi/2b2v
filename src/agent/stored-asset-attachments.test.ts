@@ -53,6 +53,7 @@ describe("stored asset attachments", () => {
     expect(attachments).toHaveLength(1);
     expect(attachments[0]?.filename).toBe("reaction.png");
     expect(attachments[0]?.buffer.toString()).toBe("png");
+    expect(attachments[0]?.sourceAssetId).toBe(asset.id);
   });
 
   test("does not repost when the live source is inaccessible", async () => {

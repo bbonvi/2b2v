@@ -433,5 +433,9 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
   createMessageSearchIndexes(raw);
   sanitizeExistingMemoryRows(raw);
   migrateMessageAssets(raw);
+  ignoreExistingColumn(
+    raw,
+    "ALTER TABLE message_assets ADD COLUMN original_asset_id INTEGER REFERENCES message_assets(id) ON DELETE SET NULL",
+  );
   migrateStagedAssets(raw);
 }

@@ -20,10 +20,11 @@ export interface MessageAsset {
   extractedText: string | null;
   extractionProvider: string | null;
   extractedAt: number | null;
+  originalAssetId?: number;
   createdAt: number;
 }
 
-export type UpsertMessageAsset = Omit<MessageAsset, "id" | "extractedText" | "extractionProvider" | "extractedAt">;
+export type UpsertMessageAsset = Omit<MessageAsset, "id" | "extractedText" | "extractionProvider" | "extractedAt" | "originalAssetId">;
 
 /** Replace one message's asset metadata while preserving stable local IDs for unchanged sources. */
 export function syncMessageAssets(db: Database, input: {
@@ -117,6 +118,33 @@ export function getAssetById(db: Database, id: number): MessageAsset | null {
   return row === null ? null : toAsset(row);
 }
 
+/** Mark a delivered attachment as a repost and retain any generation provenance. */
+export function recordAssetRepost(db: Database, assetId: number, sourceAssetId: number): boolean {
+  const source = db.raw.prepare("SELECT id, original_asset_id FROM message_assets WHERE id = ?")
+    .get(sourceAssetId) as { id: number; original_asset_id: number | null } | null;
+  if (source === null) return false;
+  const originalAssetId = source.original_asset_id ?? source.id;
+  if (assetId === originalAssetId) return false;
+
+  db.raw.run("BEGIN TRANSACTION");
+  try {
+    const updated = db.raw.prepare("UPDATE message_assets SET original_asset_id = ? WHERE id = ?")
+      .run(originalAssetId, assetId);
+    if (updated.changes === 0) {
+      db.raw.run("ROLLBACK");
+      return false;
+    }
+    db.raw.prepare(`INSERT OR IGNORE INTO agent_job_assets (job_id, asset_id, role)
+      SELECT job_id, ?, role FROM agent_job_assets WHERE asset_id = ?`)
+      .run(assetId, originalAssetId);
+    db.raw.run("COMMIT");
+    return true;
+  } catch (error) {
+    db.raw.run("ROLLBACK");
+    throw error;
+  }
+}
+
 /** Cache immutable extracted text or a paid transcript for later paginated reads. */
 export function cacheAssetExtraction(db: Database, id: number, text: string, provider: string): void {
   db.raw.prepare("UPDATE message_assets SET extracted_text = ?, extraction_provider = ?, extracted_at = ? WHERE id = ?")
@@ -140,6 +168,7 @@ interface AssetRow {
   extracted_text: string | null;
   extraction_provider: string | null;
   extracted_at: number | null;
+  original_asset_id: number | null;
   created_at: number;
 }
 
@@ -149,6 +178,8 @@ function toAsset(row: AssetRow): MessageAsset {
     sourceKind: row.source_kind, sourceKey: row.source_key, kind: row.kind, filename: row.filename,
     contentType: row.content_type, size: row.size, width: row.width, height: row.height,
     durationSeconds: row.duration_seconds, extractedText: row.extracted_text,
-    extractionProvider: row.extraction_provider, extractedAt: row.extracted_at, createdAt: row.created_at,
+    extractionProvider: row.extraction_provider, extractedAt: row.extracted_at,
+    ...(row.original_asset_id !== null ? { originalAssetId: row.original_asset_id } : {}),
+    createdAt: row.created_at,
   };
 }

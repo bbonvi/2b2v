@@ -4779,6 +4779,7 @@ async function processTriggeredMessage(
         width: asset.width,
         height: asset.height,
         durationSeconds: asset.durationSeconds,
+        ...(asset.originalAssetId !== undefined ? { originalAssetId: asset.originalAssetId } : {}),
       })),
       hasEmbeds: options.currentTurnOverride === undefined && message.embeds.length > 0,
       isSynthetic: options.currentTurnOverride !== undefined,

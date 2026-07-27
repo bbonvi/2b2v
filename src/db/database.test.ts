@@ -98,6 +98,16 @@ describe("database initialization", () => {
     expect(info?.name).toBe("message_reactions");
   });
 
+  test("creates repost lineage on message assets", () => {
+    const columns = db.raw.prepare("PRAGMA table_info(message_assets)").all() as Array<{ name: string }>;
+    const foreignKeys = db.raw.prepare("PRAGMA foreign_key_list(message_assets)")
+      .all() as Array<{ from: string; table: string; on_delete: string }>;
+    expect(columns.some((column) => column.name === "original_asset_id")).toBe(true);
+    expect(foreignKeys.find((foreignKey) => foreignKey.from === "original_asset_id")).toMatchObject({
+      table: "message_assets", on_delete: "SET NULL",
+    });
+  });
+
   test("adds current columns to existing dice audit tables", () => {
     const dbPath = path.join(tmpDir, "legacy-dice.db");
     const legacy = new BunDatabase(dbPath);
@@ -340,7 +350,14 @@ describe("database initialization", () => {
       created_at INTEGER NOT NULL,
       UNIQUE(message_id, source_kind, source_key)
     )`);
-    legacy.run("INSERT INTO message_assets_legacy SELECT * FROM message_assets");
+    legacy.run(`INSERT INTO message_assets_legacy
+      (id, message_id, guild_id, channel_id, source_kind, source_key, kind, filename,
+       content_type, size, width, height, duration_seconds, extracted_text,
+       extraction_provider, extracted_at, created_at)
+      SELECT id, message_id, guild_id, channel_id, source_kind, source_key, kind, filename,
+       content_type, size, width, height, duration_seconds, extracted_text,
+       extraction_provider, extracted_at, created_at
+      FROM message_assets`);
     legacy.run("DROP TABLE message_assets");
     legacy.run("ALTER TABLE message_assets_legacy RENAME TO message_assets");
     legacy.close();

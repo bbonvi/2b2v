@@ -599,6 +599,7 @@ export const SCHEMA_SQL = `
     extracted_text        TEXT,
     extraction_provider   TEXT,
     extracted_at          INTEGER,
+    original_asset_id     INTEGER REFERENCES message_assets(id) ON DELETE SET NULL,
     created_at            INTEGER NOT NULL,
     UNIQUE(message_id, source_kind, source_key)
   );

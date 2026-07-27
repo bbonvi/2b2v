@@ -6,7 +6,7 @@ import { translateOutbound, type OutboundResolvers } from "./translation";
 import type { MessagePresentation, MessageSender, OutboundAttachment } from "../agent/handler";
 import type { Logger } from "../logger";
 import type { Database } from "../db/database";
-import { syncMessageAssets } from "../db/asset-repository.ts";
+import { recordAssetRepost, syncMessageAssets } from "../db/asset-repository.ts";
 import { assetsFromDiscordMessage } from "./message-assets.ts";
 import { markBotParticipating, updateThreadActivity, upsertThread } from "../db/thread-repository";
 import type { RoutedMessageSource } from "../db/message-repository";
@@ -298,8 +298,20 @@ export function createDiscordMessageSender(input: {
     }
   }
 
-  function storeBotAssets(message: Message): void {
-    syncMessageAssets(input.db, { messageId: message.id, assets: assetsFromDiscordMessage(message) });
+  function storeBotAssets(
+    message: Message,
+    outboundAttachments: readonly OutboundAttachment[] = [],
+    leadingAttachmentCount = 0,
+  ): void {
+    const stored = syncMessageAssets(input.db, { messageId: message.id, assets: assetsFromDiscordMessage(message) });
+    const storedBySourceKey = new Map(stored.map((asset) => [asset.sourceKey, asset.id]));
+    const deliveredIds = [...message.attachments.keys()].slice(leadingAttachmentCount);
+    for (const [index, attachment] of outboundAttachments.entries()) {
+      if (attachment.sourceAssetId === undefined) continue;
+      const deliveredId = deliveredIds[index];
+      const storedId = deliveredId === undefined ? undefined : storedBySourceKey.get(deliveredId);
+      if (storedId !== undefined) recordAssetRepost(input.db, storedId, attachment.sourceAssetId);
+    }
   }
 
   function attachmentBuilders(attachments: OutboundAttachment[] | undefined): AttachmentBuilder[] {
@@ -428,7 +440,7 @@ export function createDiscordMessageSender(input: {
         sentReplyToId = null;
       }
       storeBotMessage(sent.id, targetGuildId, targetChannelId, voiceRawContent(firstChunk), voice.historyText ?? text, sentReplyToId);
-      storeBotAssets(sent);
+      storeBotAssets(sent, attachments, 1);
       await input.onDelivered?.({
         messageId: sent.id,
         guildId: targetGuildId,
@@ -502,7 +514,7 @@ export function createDiscordMessageSender(input: {
       }
       if (i === 0) firstId = sent.id;
       storeBotMessage(sent.id, targetGuildId, targetChannelId, chunk, i === 0 ? text : chunk, sentReplyToId);
-      storeBotAssets(sent);
+      storeBotAssets(sent, attachments);
       if (i === 0) {
         await input.onDelivered?.({
           messageId: sent.id,

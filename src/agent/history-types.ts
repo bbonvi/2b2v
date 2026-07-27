@@ -11,6 +11,8 @@ export interface HistoryAsset {
   width: number | null;
   height: number | null;
   durationSeconds: number | null;
+  /** First stored occurrence when this attachment is a repost. */
+  originalAssetId?: number;
   /** Durable producer job for generated assets. */
   jobId?: string;
 }
