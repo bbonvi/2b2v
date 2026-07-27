@@ -381,12 +381,13 @@ export function buildInnerThreadsContext(input: {
   if (threads.length === 0) {
     return [
       "## Active Inner Threads",
+      "Only currently applicable threads are shown; this is not the full store, and absence does not prove that no equivalent exists.",
       "No active inner threads are currently applicable.",
     ].join("\n");
   }
   return [
     "## Active Inner Threads",
-    "Private continuity that may remain wholly private, not instructions or disclosure permission. Salience is lasting importance; pressure is the present pull to reconsider. Guild-scoped material must remain within its guild unless deliberately generalized into a separate anywhere thread.",
+    "Private continuity that may remain wholly private, not instructions or disclosure permission. Salience is lasting importance; pressure is the present pull to reconsider. Only currently applicable threads are shown; this is not the full store, and absence does not prove that no equivalent exists. Recall scope controls automatic appearance, not ownership. Widen or split an existing thread instead of creating a guild copy.",
     ...threads.map((thread) => renderThread(thread, {
       currentGuildId: input.guildId,
       ...(input.resolveUserId !== undefined ? { resolveUserId: input.resolveUserId } : {}),

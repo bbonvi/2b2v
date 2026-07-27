@@ -24,6 +24,7 @@ describe("inner thread prompt context", () => {
 
     expect(context).toBe([
       "## Active Inner Threads",
+      "Only currently applicable threads are shown; this is not the full store, and absence does not prove that no equivalent exists.",
       "No active inner threads are currently applicable.",
     ].join("\n"));
   });
