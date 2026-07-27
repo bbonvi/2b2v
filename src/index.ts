@@ -59,7 +59,7 @@ import { createChannelListTool, type ChannelInfo } from "./agent/channel-list-to
 import { createEmojiListTool } from "./agent/emoji-list-tool";
 import { createDiscordTimeoutTools, type TimeoutMember, type TimeoutMemberResolution } from "./agent/timeout-user-tool";
 import { createSearchMemoriesTool } from "./agent/search-memories-tool";
-import { buildInnerThreadsContext, createListInnerThreadsTool, createRecordInnerThreadsTool } from "./agent/inner-thread-service";
+import { buildInnerThreadMaintenanceContext, buildInnerThreadsContext, createListInnerThreadsTool, createRecordInnerThreadsTool } from "./agent/inner-thread-service";
 import { listInnerThreads } from "./db/inner-thread-repository";
 import { createListChannelMessagesTool } from "./agent/list-channel-messages-tool";
 import { createOwnMessageTools } from "./agent/own-message-tool";
@@ -2734,6 +2734,16 @@ async function runInnerThreadPostReplyExtraction(input: {
     sourceRequestId: input.sourceRequestId,
     dryRun: input.dryRun,
   });
+  const maintenanceContext = buildInnerThreadMaintenanceContext({
+    db,
+    guildId,
+    visibleUserIds: [
+      input.memoryRequest.incomingMessage.authorId,
+      ...(input.memoryRequest.context.visibleUserIds ?? []),
+    ],
+    resolveUserId: (userId) => resolvePromptUsername(input.guild, userId),
+    resolveGuildId: (otherGuildId) => client.guilds.cache.get(otherGuildId)?.name,
+  });
   try {
     await runSilentToolAgentPass({
       globalConfig,
@@ -2754,6 +2764,7 @@ async function runInnerThreadPostReplyExtraction(input: {
       ),
       runtimeInstruction: promptBundle.runtime.reply,
       controlMessage: [
+        maintenanceContext,
         runtimeContextTemplate(
           "inner-thread-maintenance-execution-mode",
           {},

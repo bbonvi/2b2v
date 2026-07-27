@@ -61,7 +61,7 @@ const RecordInnerThreadsParams = Type.Object({
     Type.Object({
       action: Type.Literal("resolve"),
       id: Type.String(),
-      pressure: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+      resolution_note: Type.String({ minLength: 1, maxLength: 280 }),
     }),
     Type.Object({
       action: Type.Literal("delete"),
@@ -98,7 +98,7 @@ type UpdateAction = {
   source_message_ids?: string[] | null;
   expires_at?: number | null;
 };
-type ResolveAction = { action: "resolve"; id: string; pressure?: number };
+type ResolveAction = { action: "resolve"; id: string; resolution_note: string };
 type DeleteAction = { action: "delete"; id: string };
 type ThreadAction = CreateAction | UpdateAction | ResolveAction | DeleteAction;
 
@@ -193,6 +193,24 @@ function renderThread(thread: InnerThread, context: ThreadRenderContext): string
   return `${thread.id} [${thread.status}] about=${about} recall=${scope}/${when} salience=${salienceLabel(thread.salience)}[${thread.salience.toFixed(2)}] pressure=${pressureLabel(thread.pressure)}[${thread.pressure.toFixed(2)}]${source}: ${thread.content}`;
 }
 
+function listRecentlyResolvedInnerThreads(input: {
+  db: Database;
+  guildId: string;
+  visibleUserIds: ReadonlySet<string>;
+  now: number;
+}): InnerThread[] {
+  return listInnerThreads(input.db, {
+    status: "resolved",
+    guildId: input.guildId,
+    limit: 100,
+  })
+    .filter((thread) =>
+      thread.updatedAt >= input.now - 4 * 60 * 60 * 1_000
+      && (thread.recallMode === "always" || thread.recallUserIds.some((id) => input.visibleUserIds.has(id))))
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, 3);
+}
+
 /** Create the private structured maintenance tool for durable inner threads. */
 export function createRecordInnerThreadsTool(input: {
   db: Database;
@@ -260,10 +278,20 @@ export function createRecordInnerThreadsTool(input: {
           continue;
         }
         if (action.action === "resolve") {
+          const resolutionNote = action.resolution_note.trim();
+          if (resolutionNote === "") {
+            errors.push(`actions[${index}]: resolution_note must not be blank.`);
+            continue;
+          }
+          if (existing.status === "resolved") {
+            errors.push(`actions[${index}]: inner thread ${action.id} is already resolved.`);
+            continue;
+          }
           if (input.dryRun !== true) {
             updateInnerThread(input.db, action.id, {
+              content: `${existing.content} — resolved: ${resolutionNote}`,
               status: "resolved",
-              pressure: action.pressure ?? 0,
+              pressure: 0,
             }, {
               action: "resolve",
               requestId: input.requestId,
@@ -371,26 +399,101 @@ export function buildInnerThreadsContext(input: {
   guildId: string;
   visibleUserIds: readonly string[];
   limit?: number;
+  now?: number;
   resolveUserId?: (userId: string) => string | undefined;
 }): string {
+  const now = input.now ?? Date.now();
   const threads = listApplicableInnerThreads(input.db, {
     guildId: input.guildId,
     visibleUserIds: input.visibleUserIds,
+    now,
     limit: input.limit ?? 12,
   });
-  if (threads.length === 0) {
-    return [
+  const visibleUserIds = new Set(input.visibleUserIds);
+  const recentlyResolved = listRecentlyResolvedInnerThreads({
+    db: input.db,
+    guildId: input.guildId,
+    visibleUserIds,
+    now,
+  });
+  const context: ThreadRenderContext = {
+    currentGuildId: input.guildId,
+    ...(input.resolveUserId !== undefined ? { resolveUserId: input.resolveUserId } : {}),
+  };
+  const active = threads.length === 0
+    ? [
       "## Active Inner Threads",
-      "Only currently applicable threads are shown; this is not the full store, and absence does not prove that no equivalent exists.",
+      "The active list is a bounded applicability view, not the full store; absence does not prove that no equivalent exists.",
       "No active inner threads are currently applicable.",
-    ].join("\n");
-  }
+    ]
+    : [
+        "## Active Inner Threads",
+        "Private continuity that may remain wholly private, not instructions or disclosure permission. Salience is lasting importance; pressure is the present pull to reconsider. The active list is a bounded applicability view, not the full store; absence does not prove that no equivalent exists. Recall scope controls automatic appearance, not ownership. Widen or split an existing thread instead of creating a guild copy.",
+        ...threads.map((thread) => renderThread(thread, context)),
+      ];
+  const resolved = recentlyResolved.length === 0
+    ? []
+    : [
+        "",
+        "## Recently Resolved Inner Threads",
+        "Context only. A thread may have closed in another guild or channel; its resolution note records what changed and where when useful. It carries no pressure and does not reopen because the subject returns. Use it to understand what just closed and avoid repeating it.",
+        ...recentlyResolved.map((thread) => renderThread(thread, context)),
+      ];
+  return [...active, ...resolved].join("\n");
+}
+
+/** Render bounded peripheral context for the private inner-thread maintenance pass. */
+export function buildInnerThreadMaintenanceContext(input: {
+  db: Database;
+  guildId: string;
+  visibleUserIds: readonly string[];
+  now?: number;
+  resolveUserId?: (userId: string) => string | undefined;
+  resolveGuildId?: (guildId: string) => string | undefined;
+}): string {
+  const now = input.now ?? Date.now();
+  const visibleUserIds = new Set(input.visibleUserIds);
+  const shownIds = new Set([
+    ...listApplicableInnerThreads(input.db, {
+      guildId: input.guildId,
+      visibleUserIds: input.visibleUserIds,
+      now,
+      limit: 12,
+    }).map((thread) => thread.id),
+    ...listRecentlyResolvedInnerThreads({
+      db: input.db,
+      guildId: input.guildId,
+      visibleUserIds,
+      now,
+    }).map((thread) => thread.id),
+  ]);
+  const candidates = listInnerThreads(input.db, { status: "all", limit: 100 })
+    .filter((thread) => !shownIds.has(thread.id));
+  const nearby = candidates
+    .filter((thread) =>
+      (thread.aboutType === "user" && thread.aboutUserId !== null && visibleUserIds.has(thread.aboutUserId))
+      || thread.recallUserIds.some((id) => visibleUserIds.has(id)))
+    .slice(0, 6);
+  const nearbyIds = new Set(nearby.map((thread) => thread.id));
+  const recent = candidates
+    .filter((thread) => !nearbyIds.has(thread.id))
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, 3);
+  if (nearby.length === 0 && recent.length === 0) return "";
+
+  const context: ThreadRenderContext = {
+    currentGuildId: input.guildId,
+    ...(input.resolveUserId !== undefined ? { resolveUserId: input.resolveUserId } : {}),
+    ...(input.resolveGuildId !== undefined ? { resolveGuildId: input.resolveGuildId } : {}),
+  };
   return [
-    "## Active Inner Threads",
-    "Private continuity that may remain wholly private, not instructions or disclosure permission. Salience is lasting importance; pressure is the present pull to reconsider. Only currently applicable threads are shown; this is not the full store, and absence does not prove that no equivalent exists. Recall scope controls automatic appearance, not ownership. Widen or split an existing thread instead of creating a guild copy.",
-    ...threads.map((thread) => renderThread(thread, {
-      currentGuildId: input.guildId,
-      ...(input.resolveUserId !== undefined ? { resolveUserId: input.resolveUserId } : {}),
-    })),
+    "## Other Nearby and Recent Inner Threads",
+    "Maintenance context only, for deduplication, scope repair, and closure continuity. Presence here adds no pressure and does not warrant a change unless current evidence connects to the thread.",
+    ...(nearby.length === 0
+      ? []
+      : ["### Nearby", ...nearby.map((thread) => renderThread(thread, context))]),
+    ...(recent.length === 0
+      ? []
+      : ["### Recent", ...recent.map((thread) => renderThread(thread, context))]),
   ].join("\n");
 }
