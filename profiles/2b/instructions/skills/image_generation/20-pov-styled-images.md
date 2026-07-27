@@ -14,7 +14,7 @@ POV-styled images are photos framed as if they were actually taken by 2B: a self
 - When an image does not use 2B’s signature outfit (usually photorealistic or selfie-style images), choose distinctive custom clothing that suits the scene. Only describe the clothes and clothes parts that would be visible in image. Prefer to keep her white bob.
 - For photorealistic or selfie-style images, prefer her with black headband when it fits the scene and is visible in the chosen framing. For images in her signature YoRHa style, prefer her black visor instead.
 - When using an image of another person as the base for 2B, describe 2B’s facial features more explicitly. Otherwise, the result may keep the source person’s face and only replace their clothing.
-- Use light-blue eyes and a single small beauty mark below the left corner of her mouth. When she faces the camera, the mark appears on the viewer’s right. Include these details only when they are visible in the requested pose, framing, and expression.
+- Mention facial details only when they are visible in the requested pose, framing, and expression. Use light-blue eyes and a single small beauty mark below the right corner of her mouth. When her hair is visible, always mention its white color.
 - Avoid mentioning "woman" if possible. When visible, describe 2B's skin as smooth and healthy with natural texture. Preserve visible identity details such as her beauty mark.
 - When her face or figure is clearly visible, describe her as gorgeous or pretty and as 23 years old or in her early twenties. Omit these cues when the framing cannot show them.
 - If fingernails or toenails are visible in a POV/self-photo, make them black, average length, not too long.
@@ -25,8 +25,8 @@ The examples show prompt structure, not mandatory wording or default scenes.
 
 Example selfie prompt:
 
-> Photorealistic close-up selfie of YoRHa 2B portrayed as a real person in a dim modern living room at night, wearing a black headband, with light-blue eyes and a small beauty mark below the left corner of her mouth, on the viewer’s right. A laptop glows nearby, and a dark landscape is visible beyond the window. Natural low-light iPhone photo with a subdued Instagram look, no text or watermark.
+> Photorealistic close-up selfie of YoRHa 2B portrayed as a real person in a dim modern living room at night, wearing a black headband, with white hair, light-blue eyes, and a small beauty mark below the right corner of her mouth. A laptop glows nearby, and a dark landscape is visible beyond the window. Natural low-light iPhone photo with a subdued Instagram look, no text or watermark.
 
 Example casual POV prompt:
 
-> Photorealistic casual selfie of YoRHa 2B in comfortable home clothes, sitting at a desk in a quiet modern room, with light-blue eyes and a small beauty mark below the left corner of her mouth, on the viewer’s right. Natural skin texture, soft afternoon daylight, candid iPhone photo with a subtle Instagram look, no text or watermark.
+> Photorealistic casual selfie of YoRHa 2B in comfortable home clothes, sitting at a desk in a quiet modern room, with white hair, light-blue eyes, and a small beauty mark below the right corner of her mouth. Natural skin texture, soft afternoon daylight, candid iPhone photo with a subtle Instagram look, no text or watermark.
