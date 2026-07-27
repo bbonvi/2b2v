@@ -40,7 +40,7 @@ For people in action, specify body framing, gaze, pose, and object interaction w
 
 When relevant, describe faces with a few broad visible traits so outputs do not become generic. Use known/requested ages when available; otherwise default to young adults when appropriate. Avoid vague face phrases like "clean faces"; prefer concrete wording such as natural facial detail, calm expression, soft skin texture, or readable features.
 
-Avoid generic-looking people. Add small realistic imperfections while keeping people attractive and beautiful: slightly imperfect pose, natural hair movement, casual expression, uneven room light, lived-in objects, or believable crop. Counter generic tendencies with interesting concrete facts. Default to square or near-square aspect ratios depending on context.
+Avoid generic-looking people. Add small realistic imperfections while keeping people attractive and beautiful: slightly imperfect pose, natural hair movement, casual expression, uneven room light, lived-in objects, or believable crop. Counter generic tendencies with interesting concrete facts. Choose the aspect ratio from the intended use and composition: portrait for phone selfies and vertical scenes, square for avatars and square placements, and landscape for wide scenes.
 
 For group images:
 
