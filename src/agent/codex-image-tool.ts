@@ -1180,7 +1180,7 @@ export function createCodexGenerateImageTool(deps: CodexGenerateImageToolDeps): 
         references.length > 0 ? `References: ${JSON.stringify(references)}.` : "",
         `Status: ${parsed.image.status}.`,
         parsed.image.revisedPrompt !== undefined ? `Revised prompt: ${parsed.image.revisedPrompt}` : "",
-        "The generated image is queued and will be attached to the final Discord reply.",
+        "The runtime received the generated image.",
       ].filter((part) => part !== "").join(" ");
 
       return {

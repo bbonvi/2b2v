@@ -390,15 +390,15 @@ function parseRange(
       return { ignored: true, ignoredText: renderIgnoredText(text.slice(tagEnd, closeStart)), segments, index: closeEnd, closed: true };
     }
 
-    if (selfClosing) {
-      cursor = tagEnd;
-      continue;
-    }
-
     if (tag === "message") {
       const parsedDelivery = parseMessageDelivery(attrs);
       context.directiveErrors.push(...parsedDelivery.errors);
       const delivery = parsedDelivery.delivery;
+      if (selfClosing) {
+        if (delivery !== undefined) pushEmptyMessage(segments, delivery);
+        cursor = tagEnd;
+        continue;
+      }
       const nested = parseRange(text, tagEnd, { kind: "text" }, "message", context);
       if (nested.ignored) {
         if (hasOutputSegment(segments)) {
@@ -417,6 +417,11 @@ function parseRange(
       }
       cursor = nested.index;
       tagRe.lastIndex = cursor;
+      continue;
+    }
+
+    if (selfClosing) {
+      cursor = tagEnd;
       continue;
     }
 

@@ -216,6 +216,21 @@ describe("parseResponseDirectives", () => {
     });
   });
 
+  test("preserves self-closing asset-only message directives", () => {
+    expect(parseResponseDirectives(
+      '<message reply_to="1531177691707998309" asset_ids=["job_imgb5c146"] />',
+    )).toEqual({
+      ignored: false,
+      segments: [{
+        kind: "emptyMessage",
+        delivery: {
+          replyTo: "1531177691707998309",
+          assetIds: ["job_imgb5c146"],
+        },
+      }],
+    });
+  });
+
   test("preserves empty message directives with delivery metadata", () => {
     expect(parseResponseDirectives('<message reply="true" reply_to="12345"></message>')).toEqual({
       ignored: false,

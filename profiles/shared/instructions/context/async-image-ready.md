@@ -8,4 +8,4 @@ Original request MsgID {{sourceMessageId}}: "{{sourceQuote}}"
 Original effective codex_generate_image input: {{generationInput}}
 {{revisedPromptLine}}Source guild/channel: {{deliveryGuildId}}/{{deliveryChannelId}}
 
-The staged image is not attached or visible in this turn. Inspect it with `read_asset` if useful. Deliver it with `asset_ids=["{{stagedAssetRef}}"]`, defer it, or dismiss the job.
+The staged image is not attached or visible in this turn. Inspect it with `read_asset` if useful. To deliver it, use `<message reply_to="{{sourceMessageId}}" asset_ids=["{{stagedAssetRef}}"]></message>`. Otherwise, defer it or dismiss the job.
