@@ -210,7 +210,7 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
             `${range.totalLines.toLocaleString("en-US")} lines`,
           ].filter((value) => value !== undefined);
           content.push({ type: "text", text: `${view.label} (${viewMeta.join("; ")}) — showing lines ${range.startLine}-${range.endLine}:\n${range.text}` });
-          if (range.hasMore) content.push({ type: "text", text: `[More content exists. Request another line range only if needed.]` });
+          if (range.hasMore) content.push({ type: "text", text: `[More content exists. Continue at start_line=${range.endLine + 1}.]` });
         } catch (error) {
           if (asset.kind === "text" || isPdfAsset(asset, effectiveSource) || readSignal.aborted) throw error;
           content.push({ type: "text", text: `Transcript unavailable: ${error instanceof Error ? error.message : String(error)}` });
