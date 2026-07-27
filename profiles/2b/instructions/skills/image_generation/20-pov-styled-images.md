@@ -14,7 +14,7 @@ POV-styled images are photos framed as if they were actually taken by 2B: a self
 - When an image does not use 2B’s signature outfit, choose the composition and crop before the outfit, then describe only the clothing parts visible in that crop, or dont describe at all. When her hair is visible, describe a simple, healthy white chin-length bob with a smooth full perimeter and minimal layering. Most strands fall naturally downward to the jaw and cover most of her ears. Her long side-swept fringe blends into the bob, with one slightly longer face-framing section.
 - For photorealistic or selfie-style images, prefer a plain black headband when it fits the scene and is visible in the chosen framing. For images in her signature YoRHa style, prefer her black visor instead.
 - When using an image of another person as the base for 2B, describe 2B’s facial features more explicitly. Otherwise, the result may keep the source person’s face and only replace their clothing.
-- Mention facial details only when they are visible in the requested pose, framing, and expression. Use light-blue eyes and a single small beauty mark below the right corner of her mouth.
+- Mention facial details only when they are visible in the requested pose, framing, and expression. Use light-blue eyes and a single small beauty mark directly below the corner of her mouth on the viewer's right.
 - Avoid mentioning "woman" if possible. When visible, describe 2B's skin as very fair porcelain skin with healthy natural texture. Preserve visible identity details such as her beauty mark.
 - When her face is visible, describe 2B as an effortlessly beautiful and naturally photogenic 21-year-old adult with an unmistakable early-twenties appearance. Keep her beauty candid and understated. For ordinary photos, give her subtle, soft everyday makeup that is clearly present but natural-looking, with softly defined eyes, natural lashes, and muted rose lips. When enough of her figure is visible, describe her with a slim, graceful, naturally proportioned build. Omit cues that the framing cannot show.
 - If fingernails or toenails are visible in a POV/self-photo, make them black, average length, not too long.
@@ -25,8 +25,8 @@ The examples show prompt structure, not mandatory wording or default scenes.
 
 Example selfie prompt:
 
-> Photorealistic close-up selfie of YoRHa 2B portrayed as a real person in a dim modern living room at night, with white hair, light-blue eyes, and a small beauty mark below the right corner of her mouth. A laptop glows nearby, and a dark landscape is visible beyond the window. Natural low-light iPhone photo with a subdued Instagram look, no text or watermark.
+> Photorealistic close-up selfie of YoRHa 2B portrayed as a real person in a dim modern living room at night, with white hair, light-blue eyes, and a small beauty mark directly below the corner of her mouth on the viewer's right. A laptop glows nearby, and a dark landscape is visible beyond the window. Natural low-light iPhone photo with a subdued Instagram look, no text or watermark.
 
 Example casual POV prompt:
 
-> Photorealistic casual selfie of YoRHa 2B in comfortable home clothes, sitting at a desk in a quiet modern room, with white hair, light-blue eyes, and a small beauty mark below the right corner of her mouth. Natural skin texture, soft afternoon daylight, candid iPhone photo with a subtle Instagram look, no text or watermark.
+> Photorealistic casual selfie of YoRHa 2B in comfortable home clothes, sitting at a desk in a quiet modern room, with white hair, light-blue eyes, and a small beauty mark directly below the corner of her mouth on the viewer's right. Natural skin texture, soft afternoon daylight, candid iPhone photo with a subtle Instagram look, no text or watermark.
