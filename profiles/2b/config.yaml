@@ -60,7 +60,7 @@ privateLife:
     modelProfile: main
     maintenance:
         modelProfile: maintenance
-    opportunitiesPerDay: 24
+    opportunitiesPerDay: 16
     intervalJitter: 0.45
     lateNightStart: "22:30"
     sleepStart: "23:30"
@@ -227,9 +227,9 @@ personaModes:
 
 trim:
     trimTrigger: 1000 # Start trimming when history exceeds this many messages
-    trimTarget: 700 # Trim down to this many messages
-    windowSize: 200 # Recent messages kept uncached (newer slice)
-    messageCharLimit: 200 # Max chars per message before truncation
+    trimTarget: 600 # Trim down to this many messages
+    windowSize: 300 # Recent messages kept uncached (newer slice)
+    messageCharLimit: 300 # Max chars per message before truncation
     replyQuoteChars: 30 # Max chars for reply quote excerpts
 
 # Background memory extraction
