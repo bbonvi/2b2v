@@ -1,0 +1,9 @@
+id: notebooks
+title: Notebooks
+description: Use when 2B wants a private working surface for a task, investigation, collection, or thought she may return to.
+required_for_tools:
+  - list_notebook_revisions
+  - patch_notebook
+  - manage_notebook
+instructions:
+  - 00-policy.md

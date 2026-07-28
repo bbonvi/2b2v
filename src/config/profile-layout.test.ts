@@ -53,7 +53,17 @@ describe("repository profile layout", () => {
         "update_current_scheduled_task",
       ];
       const profileToolDescriptions = profile === "2b"
-        ? ["instruct_voice_channel", "join_voice_channel", "leave_voice_channel"]
+        ? [
+            "instruct_voice_channel",
+            "join_voice_channel",
+            "leave_voice_channel",
+            "find_notebooks",
+            "list_notebook_revisions",
+            "manage_notebook",
+            "patch_notebook",
+            "read_notebook",
+            "search_notebook",
+          ]
         : [];
       expect(Object.keys(bundle.runtime.toolDescriptions).sort()).toEqual(
         [...sharedToolDescriptions, ...profileToolDescriptions].sort(),
@@ -100,6 +110,14 @@ describe("repository profile layout", () => {
       expect(bundle.runtime.skills.requiredByTool.schedule_task).toBe("scheduling");
       expect(bundle.runtime.skills.requiredByTool.list_scheduled_tasks).toBe("scheduling");
       expect(bundle.runtime.skills.requiredByTool.delete_scheduled_task).toBe("scheduling");
+      if (profile === "2b") {
+        expect(bundle.runtime.skills.requiredByTool.patch_notebook).toBe("notebooks");
+        expect(bundle.runtime.skills.requiredByTool.manage_notebook).toBe("notebooks");
+        expect(bundle.runtime.skills.requiredByTool.list_notebook_revisions).toBe("notebooks");
+        expect(bundle.runtime.skills.requiredByTool.find_notebooks).toBeUndefined();
+        expect(bundle.runtime.skills.requiredByTool.search_notebook).toBeUndefined();
+        expect(bundle.runtime.skills.requiredByTool.read_notebook).toBeUndefined();
+      }
       for (const tool of [
         "codex_generate_image",
         "cancel_agent_job",

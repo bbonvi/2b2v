@@ -75,6 +75,61 @@ export function stagedAssetsTableSql(tableName: string, ifNotExists = false): st
 export const SCHEMA_SQL = `
   ${memoriesTableSql("memories", true)};
 
+  CREATE TABLE IF NOT EXISTS notebooks (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    title            TEXT NOT NULL CHECK(length(trim(title)) > 0),
+    content          TEXT NOT NULL,
+    recall_scope     TEXT NOT NULL CHECK(recall_scope IN ('anywhere', 'guild')),
+    recall_guild_id  TEXT,
+    recall_mode      TEXT NOT NULL CHECK(recall_mode IN ('always', 'users')),
+    shelf_after_ms   INTEGER NOT NULL DEFAULT 604800000 CHECK(shelf_after_ms > 0),
+    shelf_at         INTEGER,
+    revision         INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+    created_at       INTEGER NOT NULL,
+    edited_at        INTEGER NOT NULL,
+    shelved_at       INTEGER,
+    archived_at      INTEGER,
+    deleted_at       INTEGER,
+    CHECK((recall_scope = 'anywhere' AND recall_guild_id IS NULL) OR (recall_scope = 'guild' AND recall_guild_id IS NOT NULL))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_notebooks_state_shelf
+    ON notebooks(deleted_at, archived_at, shelved_at, shelf_at);
+
+  CREATE INDEX IF NOT EXISTS idx_notebooks_recall
+    ON notebooks(recall_scope, recall_guild_id, recall_mode, edited_at);
+
+  CREATE TABLE IF NOT EXISTS notebook_related_users (
+    notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+    user_id     TEXT NOT NULL,
+    PRIMARY KEY (notebook_id, user_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_notebook_related_users_user
+    ON notebook_related_users(user_id, notebook_id);
+
+  CREATE TABLE IF NOT EXISTS notebook_recall_users (
+    notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+    user_id     TEXT NOT NULL,
+    PRIMARY KEY (notebook_id, user_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_notebook_recall_users_user
+    ON notebook_recall_users(user_id, notebook_id);
+
+  CREATE TABLE IF NOT EXISTS notebook_revisions (
+    notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+    revision    INTEGER NOT NULL CHECK(revision > 0),
+    operation   TEXT NOT NULL,
+    change_text TEXT,
+    snapshot    TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    PRIMARY KEY (notebook_id, revision)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_notebook_revisions_created
+    ON notebook_revisions(notebook_id, created_at DESC);
+
   CREATE TABLE IF NOT EXISTS memory_recall_users (
     memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
     user_id   TEXT NOT NULL,

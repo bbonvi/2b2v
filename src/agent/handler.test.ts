@@ -71,8 +71,9 @@ function makePromptTransportConfig(): PromptTransportConfig {
         threadsInChannel: { role: "user", target: "input" },
         discordContext: { role: "user", target: "input" },
         upcomingSchedules: { role: "user", target: "input" },
-        memories: { role: "user", target: "input" },
+        notebooks: { role: "user", target: "input" },
         innerThreads: { role: "developer", target: "input" },
+        memories: { role: "user", target: "input" },
         recentHistory: { role: "user", target: "input" },
         currentContext: { role: "user", target: "input" },
         personaMode: { role: "developer", target: "input" },
@@ -94,8 +95,9 @@ function makePromptTransportConfig(): PromptTransportConfig {
         threadsInChannel: { role: "user", target: "input" },
         discordContext: { role: "user", target: "input" },
         upcomingSchedules: { role: "user", target: "input" },
-        memories: { role: "user", target: "input" },
+        notebooks: { role: "user", target: "input" },
         innerThreads: { role: "developer", target: "input" },
+        memories: { role: "user", target: "input" },
         recentHistory: { role: "user", target: "input" },
         currentContext: { role: "user", target: "input" },
         personaMode: { role: "developer", target: "input" },
@@ -949,45 +951,50 @@ describe("handleMessage", () => {
     );
   });
 
-  test("orders volatile context before recent history as configured", async () => {
-    const completeChat: ChatCompleteFn = (request) => {
-      const content = request.messages.map((message) => contentText(message.content));
-      expect(content.filter((text) => text.endsWith(" marker"))).toEqual([
-        "discord marker",
-        "members marker",
-        "channel threads marker",
-        "schedule marker",
-        "inner marker",
-        "memory marker",
-        "recent marker",
-        "current marker",
-      ]);
-      return Promise.resolve({
-        text: "done",
-        toolCalls: [],
-        rawResponse: {},
-        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
-      });
-    };
+  test("orders volatile context for OpenRouter and OpenAI Codex", async () => {
+    for (const globalConfig of [makeGlobalConfig(), makeCodexGlobal()]) {
+      const completeChat: ChatCompleteFn = (request) => {
+        const content = request.messages.map((message) => contentText(message.content));
+        expect(content.filter((text) => text.endsWith(" marker"))).toEqual([
+          "discord marker",
+          "members marker",
+          "channel threads marker",
+          "schedule marker",
+          "notebook marker",
+          "inner marker",
+          "memory marker",
+          "recent marker",
+          "current marker",
+        ]);
+        return Promise.resolve({
+          text: "done",
+          toolCalls: [],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      };
 
-    await handleMessage(
-      makeMessage({ mentionedUserIds: ["bot-1"] }),
-      makeDeps({
-        completeChat,
-        context: makeContext({
-          sections: [
-            { label: "Current Context", text: "current marker", cached: false, role: "developer" },
-            { label: "Upcoming Schedules", text: "schedule marker", cached: false, role: "developer" },
-            { label: "Server Members", text: "members marker", cached: false, role: "developer" },
-            { label: "Inner Threads", text: "inner marker", cached: false, role: "developer" },
-            { label: "Discord Context", text: "discord marker", cached: false, role: "developer" },
-            { label: "Memories", text: "memory marker", cached: false, role: "developer" },
-            { label: "Threads In This Channel", text: "channel threads marker", cached: false, role: "developer" },
-            { label: "Chat History — Newer", text: "recent marker", cached: false, role: "developer" },
-          ],
+      await handleMessage(
+        makeMessage({ mentionedUserIds: ["bot-1"] }),
+        makeDeps({
+          completeChat,
+          globalConfig,
+          context: makeContext({
+            sections: [
+              { label: "Current Context", text: "current marker", cached: false, role: "developer" },
+              { label: "Upcoming Schedules", text: "schedule marker", cached: false, role: "developer" },
+              { label: "Server Members", text: "members marker", cached: false, role: "developer" },
+              { label: "Notebooks", text: "notebook marker", cached: false, role: "developer" },
+              { label: "Inner Threads", text: "inner marker", cached: false, role: "developer" },
+              { label: "Discord Context", text: "discord marker", cached: false, role: "developer" },
+              { label: "Memories", text: "memory marker", cached: false, role: "developer" },
+              { label: "Threads In This Channel", text: "channel threads marker", cached: false, role: "developer" },
+              { label: "Chat History — Newer", text: "recent marker", cached: false, role: "developer" },
+            ],
+          }),
         }),
-      }),
-    );
+      );
+    }
   });
 
   test("uses a stable OpenRouter session id across native tool turns", async () => {

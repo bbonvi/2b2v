@@ -100,6 +100,7 @@ export type PromptTransportSectionId =
   | "threadsInChannel"
   | "discordContext"
   | "upcomingSchedules"
+  | "notebooks"
   | "memories"
   | "innerThreads"
   | "recentHistory"
@@ -370,6 +371,15 @@ export interface InnerThreadsConfig {
 
 export type InnerThreadsConfigYaml = Partial<InnerThreadsConfig>;
 
+/** Persona-owned notebook storage and prompt index behavior. */
+export interface NotebooksConfig {
+  enabled: boolean;
+  maxPromptTitles: number;
+  defaultShelfAfterMs: number;
+}
+
+export type NotebooksConfigYaml = Partial<NotebooksConfig>;
+
 /** Limits for lazy message-asset reading and extraction. */
 export interface AssetReadingConfig {
   maxCharsPerRead: number;
@@ -541,6 +551,8 @@ export interface GuildConfig {
   relationships?: RelationshipConfig;
   /** Durable private inner-thread behavior. */
   innerThreads?: InnerThreadsConfig;
+  /** Persona-owned notebook behavior. */
+  notebooks?: NotebooksConfig;
   /** Live Discord voice agent behavior. */
   voice?: VoiceConfig;
 }
@@ -605,6 +617,8 @@ export interface GlobalConfig {
   defaultRelationships?: RelationshipConfig;
   /** Default durable private inner-thread behavior. */
   defaultInnerThreads?: InnerThreadsConfig;
+  /** Default persona-owned notebook behavior. */
+  defaultNotebooks?: NotebooksConfig;
   /** Default live Discord voice agent behavior. */
   defaultVoice?: VoiceConfig;
   /** Profile-local timed persona modes and presentation state. */
@@ -669,6 +683,7 @@ export interface GuildConfigYaml {
   ambientInitiative?: AmbientInitiativeConfigYaml;
   relationships?: RelationshipConfigYaml;
   innerThreads?: InnerThreadsConfigYaml;
+  notebooks?: NotebooksConfigYaml;
   voice?: VoiceConfigYaml;
   replyLoop?: {
     maxToolCalls?: number;
@@ -749,6 +764,7 @@ export interface MainConfigYaml {
   privateLife?: PrivateLifeConfigYaml;
   relationships?: RelationshipConfigYaml;
   innerThreads?: InnerThreadsConfigYaml;
+  notebooks?: NotebooksConfigYaml;
   voice?: VoiceConfigYaml;
   personaModes?: PersonaModesConfigYaml;
   replyLoop?: {

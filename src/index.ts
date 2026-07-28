@@ -59,6 +59,7 @@ import { createChannelListTool, type ChannelInfo } from "./agent/channel-list-to
 import { createEmojiListTool } from "./agent/emoji-list-tool";
 import { createDiscordTimeoutTools, type TimeoutMember, type TimeoutMemberResolution } from "./agent/timeout-user-tool";
 import { createSearchMemoriesTool } from "./agent/search-memories-tool";
+import { buildNotebooksContext, createNotebookTools } from "./agent/notebook-service.ts";
 import { buildInnerThreadMaintenanceContext, buildInnerThreadsContext, createListInnerThreadsTool, createRecordInnerThreadsTool } from "./agent/inner-thread-service";
 import { listInnerThreads } from "./db/inner-thread-repository";
 import { createListChannelMessagesTool } from "./agent/list-channel-messages-tool";
@@ -1121,6 +1122,10 @@ function getRelationshipConfig(guildConfig: GuildConfig): RelationshipConfig {
 
 function innerThreadsEnabled(guildConfig: GuildConfig): boolean {
   return (guildConfig.innerThreads ?? globalConfig.defaultInnerThreads)?.enabled !== false;
+}
+
+function notebooksEnabled(guildConfig: GuildConfig): boolean {
+  return (guildConfig.notebooks ?? globalConfig.defaultNotebooks)?.enabled === true;
 }
 
 const voiceRepository = new VoiceRepository(db);
@@ -3082,6 +3087,15 @@ async function buildContext(
         resolveUserId: (userId) => resolvePromptUsername(guild, userId),
         contextInstruction: promptBundle.runtime.contextTemplates.memory,
       });
+  const notebookConfig = guildConfig.notebooks ?? globalConfig.defaultNotebooks;
+  const notebooks = notebooksEnabled(guildConfig) && notebookConfig !== undefined
+    ? buildNotebooksContext({
+        db,
+        guildId,
+        visibleUserIds,
+        maxTitles: notebookConfig.maxPromptTitles,
+      })
+    : "";
 
   const pendingSchedules = listUpcomingForContext(db, guildId, channelId);
   const oneOffCount = pendingSchedules.filter((s) => s.type === "one_off").length;
@@ -3285,11 +3299,22 @@ async function buildContext(
     ? voiceRuntime.presenceContext()
     : "";
 
+  const innerThreadsText = innerThreadsEnabled(guildConfig)
+    ? buildInnerThreadsContext({
+        db,
+        guildId,
+        visibleUserIds,
+        resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username
+          ?? client.users.cache.get(userId)?.username,
+      })
+    : "";
   const assembled = assembleContext({
       toolInstructions: "",
       instructions: guildConfig.instructions,
       emojis: emojiContext,
       members: displayNameContext,
+      notebooks,
+      innerThreads: innerThreadsText,
       memories,
       discordContext,
       upcomingSchedules,
@@ -3311,24 +3336,6 @@ async function buildContext(
   });
   assembled.memoryFocusUserId = memoryFocusUserId;
   assembled.visibleUserIds = visibleUserIds;
-  const innerThreadsText = innerThreadsEnabled(guildConfig)
-    ? buildInnerThreadsContext({
-        db,
-        guildId,
-        visibleUserIds,
-        resolveUserId: (userId) => guild.members.cache.get(userId)?.user.username
-          ?? client.users.cache.get(userId)?.username,
-      })
-    : "";
-  if (innerThreadsText !== "") {
-    const memoryIndex = assembled.sections.findIndex((section) => section.label === "Memories");
-    const insertAt = memoryIndex === -1 ? 0 : memoryIndex + 1;
-    assembled.sections = [
-      ...assembled.sections.slice(0, insertAt),
-      { label: "Inner Threads", text: innerThreadsText, cached: false, role: "developer" as const },
-      ...assembled.sections.slice(insertAt),
-    ];
-  }
   const activeJobsText = renderAgentJobsContext(
     visibleJobs,
     runtimeContextTemplate("active-image-jobs", {}, "Image generation is asynchronous."),
@@ -3931,6 +3938,14 @@ function buildAgentTools(
         resolveGuildId: (targetGuildId) => client.guilds.cache.get(targetGuildId)?.name,
       })]
     : [];
+  const notebookConfig = guildConfig.notebooks ?? globalConfig.defaultNotebooks;
+  const notebookTools = notebooksEnabled(guildConfig) && notebookConfig !== undefined
+    ? createNotebookTools({
+        db,
+        currentGuildId: guildId,
+        defaultShelfAfterMs: notebookConfig.defaultShelfAfterMs,
+      })
+    : [];
 
   const listChannelMessagesTool = createListChannelMessagesTool({
     guildId,
@@ -4165,7 +4180,7 @@ function buildAgentTools(
       deleteStagedAsset(db, staged.ref);
     },
   });
-  const tools = [searchTool, ...scheduleTools, ...eventWatchTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memorySearchTool, ...innerThreadTools, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, ...jobInspectionTools, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const tools = [searchTool, ...scheduleTools, ...eventWatchTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memorySearchTool, ...notebookTools, ...innerThreadTools, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, ...jobInspectionTools, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (diceRollTool !== undefined) tools.push(diceRollTool);
   if (includeImageGenerationTools) {
     const imageProfile = resolveModelProfile(

@@ -27,13 +27,16 @@ const INITIAL_ACTOR_TOOL_NAMES = new Set([
   "list_chat_users",
   "list_emojis",
   "list_inner_threads",
+  "find_notebooks",
   "load_skill",
   "react_to_message",
   "read_asset",
+  "read_notebook",
   "read_user_avatar",
   "search_asset",
   "search_channel_messages",
   "search_memories",
+  "search_notebook",
   "search_tools",
   "update_current_event_watch",
   "update_current_scheduled_task",
@@ -163,6 +166,11 @@ const TOOL_METADATA: Readonly<Record<string, Omit<ToolCatalogEntry, "tool">>> = 
     summary: "Inspect durable private intentions, curiosities, conflicts, and commitments.",
     aliases: ["inner intentions", "open personal threads", "unresolved curiosity"],
   },
+  list_notebook_revisions: {
+    group: "continuity",
+    summary: "Inspect immutable revisions of one persona notebook.",
+    aliases: ["notebook history", "notebook revisions", "past notebook version"],
+  },
   list_scheduled_tasks: {
     group: "future_commitments",
     summary: "Inspect pending one-off or recurring future actions.",
@@ -182,6 +190,11 @@ const TOOL_METADATA: Readonly<Record<string, Omit<ToolCatalogEntry, "tool">>> = 
     group: "chat_assets",
     summary: "Inspect a typed chat image, GIF, audio, video, text, or file asset.",
     aliases: ["read attachment", "view uploaded image", "inspect file", "listen voice message"],
+  },
+  read_notebook: {
+    group: "continuity",
+    summary: "Read current or historical notebook content by physical line range.",
+    aliases: ["open notebook", "notebook content", "read notebook revision"],
   },
   read_user_avatar: {
     group: "discord_context",
@@ -228,6 +241,26 @@ const TOOL_METADATA: Readonly<Record<string, Omit<ToolCatalogEntry, "tool">>> = 
     group: "continuity",
     summary: "Inspect durable memories when relevant personal context is uncertain.",
     aliases: ["recall memory", "remember user", "past personal context"],
+  },
+  find_notebooks: {
+    group: "continuity",
+    summary: "Find persona notebooks by state, related user, title, or content.",
+    aliases: ["find notebook", "search notes", "notebook titles"],
+  },
+  search_notebook: {
+    group: "continuity",
+    summary: "Find physical lines inside one known persona notebook.",
+    aliases: ["search notebook content", "find in notebook", "search notebook lines"],
+  },
+  patch_notebook: {
+    group: "continuity",
+    summary: "Apply revision-checked contextual line hunks to an active notebook.",
+    aliases: ["edit notebook", "patch notes", "update notebook lines"],
+  },
+  manage_notebook: {
+    group: "continuity",
+    summary: "Create, rewrite, move, trash, or restore a persona notebook.",
+    aliases: ["create notebook", "archive notebook", "shelve notebook", "restore notebook"],
   },
   start_thread: {
     group: "discord_conversation",

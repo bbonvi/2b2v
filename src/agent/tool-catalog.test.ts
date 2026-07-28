@@ -82,6 +82,20 @@ describe("ToolCatalog", () => {
       .toEqual(["custom_profile_action"]);
   });
 
+  test("keeps notebook discovery and reading active but defers revision history", () => {
+    const tools = [
+      tool("find_notebooks"),
+      tool("search_notebook"),
+      tool("read_notebook"),
+      tool("list_notebook_revisions"),
+    ];
+    expect([...initialActorToolNames(tools)]).toEqual([
+      "find_notebooks",
+      "search_notebook",
+      "read_notebook",
+    ]);
+  });
+
   test("adds registered tools once and never activates unknown names", () => {
     const catalog = new ToolCatalog(
       [tool("search_tools"), tool("fetch_url"), tool("web_search")],

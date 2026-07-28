@@ -13,6 +13,7 @@ import type {
   LlmProvider,
   MembersConfig,
   MemoryExtractionConfig,
+  NotebooksConfig,
   PromptCachingConfig,
   PromptTransportConfig,
   PromptTransportSectionId,
@@ -76,6 +77,12 @@ export const DEFAULT_RELATIONSHIPS: RelationshipConfig = {
 export const DEFAULT_INNER_THREADS: InnerThreadsConfig = {
   enabled: true,
   modelProfile: "main",
+};
+
+export const DEFAULT_NOTEBOOKS: NotebooksConfig = {
+  enabled: false,
+  maxPromptTitles: 10,
+  defaultShelfAfterMs: 7 * 24 * 60 * 60 * 1000,
 };
 
 export const DEFAULT_AMBIENT_ATTENTION_MODE: AmbientAttentionModeConfig = {
@@ -326,8 +333,9 @@ export const PROMPT_TRANSPORT_SECTION_IDS: readonly PromptTransportSectionId[] =
   "threadsInChannel",
   "discordContext",
   "upcomingSchedules",
-  "memories",
+  "notebooks",
   "innerThreads",
+  "memories",
   "recentHistory",
   "currentContext",
   "personaMode",
@@ -350,8 +358,9 @@ export const DEFAULT_PROMPT_TRANSPORT: PromptTransportConfig = {
       threadsInChannel: { role: "user", target: "input" },
       discordContext: { role: "user", target: "input" },
       upcomingSchedules: { role: "user", target: "input" },
-      memories: { role: "user", target: "input" },
+      notebooks: { role: "developer", target: "input" },
       innerThreads: { role: "developer", target: "input" },
+      memories: { role: "user", target: "input" },
       recentHistory: { role: "user", target: "input" },
       currentContext: { role: "user", target: "input" },
       personaMode: { role: "developer", target: "input" },
@@ -373,8 +382,9 @@ export const DEFAULT_PROMPT_TRANSPORT: PromptTransportConfig = {
       threadsInChannel: { role: "user", target: "input" },
       discordContext: { role: "user", target: "input" },
       upcomingSchedules: { role: "user", target: "input" },
-      memories: { role: "user", target: "input" },
+      notebooks: { role: "user", target: "input" },
       innerThreads: { role: "developer", target: "input" },
+      memories: { role: "user", target: "input" },
       recentHistory: { role: "user", target: "input" },
       currentContext: { role: "user", target: "input" },
       personaMode: { role: "developer", target: "input" },

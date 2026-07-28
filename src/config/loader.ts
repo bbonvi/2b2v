@@ -15,6 +15,7 @@ import {
   DEFAULT_LLM_PROVIDER,
   DEFAULT_MEMBERS,
   DEFAULT_MEMORY_EXTRACTION,
+  DEFAULT_NOTEBOOKS,
   DEFAULT_PROMPT_CACHING,
   DEFAULT_PROMPT_TRANSPORT,
   DEFAULT_PRIVATE_LIFE,
@@ -55,6 +56,8 @@ import type {
   ReplyLoopConfig,
   MemoryExtractionConfig,
   MemoryContextConfig,
+  NotebooksConfig,
+  NotebooksConfigYaml,
   ServiceTier,
   LlmProvider,
   CodexTransport,
@@ -1062,6 +1065,25 @@ function resolveInnerThreadsConfig(
   };
 }
 
+function resolveNotebooksConfig(
+  defaults: NotebooksConfig | undefined,
+  partial: NotebooksConfigYaml | undefined,
+): NotebooksConfig {
+  const base = defaults ?? DEFAULT_NOTEBOOKS;
+  const resolved = {
+    enabled: partial?.enabled ?? base.enabled,
+    maxPromptTitles: partial?.maxPromptTitles ?? base.maxPromptTitles,
+    defaultShelfAfterMs: partial?.defaultShelfAfterMs ?? base.defaultShelfAfterMs,
+  };
+  if (!Number.isInteger(resolved.maxPromptTitles) || resolved.maxPromptTitles < 1 || resolved.maxPromptTitles > 100) {
+    throw new Error("notebooks.maxPromptTitles must be an integer from 1 to 100");
+  }
+  if (!Number.isSafeInteger(resolved.defaultShelfAfterMs) || resolved.defaultShelfAfterMs < 1) {
+    throw new Error("notebooks.defaultShelfAfterMs must be a positive integer");
+  }
+  return resolved;
+}
+
 function resolveTypingSimulationConfig(
   defaults: TypingSimulationConfig,
   partial: Partial<TypingSimulationConfig> | undefined,
@@ -1220,6 +1242,7 @@ export function loadGlobalConfig(
   const defaultMemoryContext = resolveMemoryContext(undefined, yaml.memoryContext);
   const defaultRelationships = resolveRelationshipConfig(undefined, yaml.relationships);
   const defaultInnerThreads = resolveInnerThreadsConfig(undefined, yaml.innerThreads);
+  const defaultNotebooks = resolveNotebooksConfig(undefined, yaml.notebooks);
   const defaultVoice = resolveVoiceConfig(DEFAULT_VOICE_CONFIG, yaml.voice);
   const personaModes = resolvePersonaModesConfig(yaml.personaModes, dirname(configPath));
   validateModelProfileReferences(modelProfiles, [
@@ -1307,6 +1330,7 @@ export function loadGlobalConfig(
     defaultMemoryContext,
     defaultRelationships,
     defaultInnerThreads,
+    defaultNotebooks,
     defaultVoice,
     personaModes,
   };
@@ -1401,6 +1425,7 @@ export function resolveGuildConfig(
     memoryContext: resolveMemoryContext(global.defaultMemoryContext, partial.memoryContext),
     relationships: resolveRelationshipConfig(global.defaultRelationships, partial.relationships),
     innerThreads: resolveInnerThreadsConfig(global.defaultInnerThreads, partial.innerThreads),
+    notebooks: resolveNotebooksConfig(global.defaultNotebooks, partial.notebooks),
     voice: resolveVoiceConfig(global.defaultVoice ?? DEFAULT_VOICE_CONFIG, partial.voice),
   };
   validateModelProfileReferences(global.modelProfiles, [
@@ -1485,6 +1510,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     ambientAttention: config.ambientAttention,
     relationships: config.relationships,
     innerThreads: config.innerThreads,
+    notebooks: config.notebooks,
     voice: config.voice,
     replyLoop: config.replyLoop,
     memoryExtraction: config.memoryExtraction,

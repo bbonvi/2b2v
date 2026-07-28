@@ -354,6 +354,30 @@ describe("guild resolution and persistence", () => {
     }).innerThreads).toEqual({ enabled: true, modelProfile: "main" });
   });
 
+  test("inherits and overrides bounded notebook configuration", () => {
+    const global = loadGlobalConfig(BASE_ENV, writeConfig([
+      configText,
+      "notebooks:",
+      "  enabled: true",
+      "  maxPromptTitles: 10",
+      "  defaultShelfAfterMs: 604800000",
+    ].join("\n")));
+    expect(global.defaultNotebooks).toEqual({
+      enabled: true,
+      maxPromptTitles: 10,
+      defaultShelfAfterMs: 604800000,
+    });
+    expect(resolveGuildConfig(global, {
+      guildId: "2",
+      slug: "",
+      notebooks: { maxPromptTitles: 5 },
+    }).notebooks).toEqual({
+      enabled: true,
+      maxPromptTitles: 5,
+      defaultShelfAfterMs: 604800000,
+    });
+  });
+
   test("rejects an unknown guild profile reference", () => {
     const global = loadGlobalConfig(BASE_ENV, writeConfig(configText));
     expect(() => resolveGuildConfig(global, {

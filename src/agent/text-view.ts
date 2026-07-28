@@ -71,6 +71,40 @@ export function renderTextRange(
   };
 }
 
+/** Render a range without normalizing or wrapping the stored physical lines. */
+export function renderPhysicalTextRange(
+  text: string,
+  requestedStart: number,
+  requestedCount: number,
+  maxChars: number,
+): TextLineRange {
+  const lines = text.split("\n");
+  if (requestedStart > lines.length) {
+    throw new Error(`start_line ${requestedStart} exceeds the ${lines.length} available lines.`);
+  }
+  const selected: string[] = [];
+  let endLine = requestedStart - 1;
+  let chars = 0;
+  for (let index = requestedStart - 1; index < lines.length && selected.length < requestedCount; index += 1) {
+    const rendered = `${index + 1} | ${lines[index] ?? ""}`;
+    const separatorChars = selected.length > 0 ? 1 : 0;
+    if (chars + separatorChars + rendered.length > maxChars) break;
+    selected.push(rendered);
+    chars += separatorChars + rendered.length;
+    endLine = index + 1;
+  }
+  if (selected.length === 0) {
+    throw new Error(`Line ${requestedStart} cannot fit within the ${maxChars} character read limit.`);
+  }
+  return {
+    text: selected.join("\n"),
+    startLine: requestedStart,
+    endLine,
+    totalLines: lines.length,
+    hasMore: endLine < lines.length,
+  };
+}
+
 /** Regex-search a bounded display view with ripgrep syntax. */
 export async function searchTextView(
   text: string,

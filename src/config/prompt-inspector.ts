@@ -130,7 +130,7 @@ const TEXT_FINAL_BLOCKS: PromptBlockDefinition[] = [
 
 const BASE_DYNAMIC_SECTIONS = [
   "Stable context and older history, when present.",
-  "Guild, channel, schedules, memories, inner threads, recent history, members, and thread metadata, when present.",
+  "Guild, channel, schedules, notebooks, inner threads, memories, recent history, members, and thread metadata, when present.",
   "Current event metadata, text, and attached images.",
   "Persona mode and response instruction overlays, when active.",
   "Tool schemas for the initial tool surface; search_tools and load_skill can add more tools later.",

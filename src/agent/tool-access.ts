@@ -14,6 +14,8 @@ const WRITE_TOOL_NAMES = new Set([
   "instruct_voice_channel",
   "join_voice_channel",
   "leave_voice_channel",
+  "manage_notebook",
+  "patch_notebook",
   "react_to_message",
   "roll_dice",
   "schedule_task",

@@ -123,6 +123,7 @@ promptTransport:
             serverMembers: { role: developer, target: input, cacheGroup: members }
             threadsInChannel: { role: developer, target: input, cacheGroup: threads }
             upcomingSchedules: { role: developer, target: input, cacheGroup: shcedules }
+            notebooks: { role: developer, target: input, cacheGroup: notebooks }
             innerThreads: { role: developer, target: input, cacheGroup: inner-threads }
             memories: { role: developer, target: input, cacheGroup: memories }
             recentHistory: { role: user, target: input, cacheGroup: recent }
@@ -147,8 +148,9 @@ promptTransport:
             threadsInChannel: { role: user, target: input } # (thread list/metadata context)
             discordContext: { role: user, target: input } # (current guild/channel navigation context)
             upcomingSchedules: { role: user, target: input } # (pending schedule summary)
-            memories: { role: user, target: input, cacheGroup: memories } # (selected memory context)
+            notebooks: { role: user, target: input, cacheGroup: notebooks } # (applicable persona notebook titles)
             innerThreads: { role: user, target: input, cacheGroup: inner-threads } # (private active inner threads)
+            memories: { role: user, target: input, cacheGroup: memories } # (selected memory context)
             recentHistory: { role: user, target: input } # (uncached recent chat history)
             currentContext: { role: user, target: input } # (time/contact/current-turn metadata)
             personaMode: { role: user, target: input } # (volatile active persona mode overlay)
@@ -245,6 +247,11 @@ relationships:
 innerThreads:
     enabled: true
     modelProfile: maintenance
+
+notebooks:
+    enabled: true
+    maxPromptTitles: 10
+    defaultShelfAfterMs: 604800000
 
 ambientAttention:
     enabled: true # (enable delayed non-trigger attention candidates)

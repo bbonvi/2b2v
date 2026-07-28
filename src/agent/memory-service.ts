@@ -331,7 +331,7 @@ const MEMORY_AGE_BUCKETS = [
   { milliseconds: 2 * 365 * 24 * 60 * 60 * 1000, label: "2y+" },
 ] as const;
 
-function formatMemoryAge(updatedAt: number, now = Date.now()): string {
+export function formatMemoryAge(updatedAt: number, now = Date.now()): string {
   const elapsed = Math.max(0, now - updatedAt);
   let closest: (typeof MEMORY_AGE_BUCKETS)[number] = MEMORY_AGE_BUCKETS[0];
   for (const bucket of MEMORY_AGE_BUCKETS.slice(1)) {
