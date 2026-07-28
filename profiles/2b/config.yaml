@@ -60,7 +60,7 @@ privateLife:
     modelProfile: main
     maintenance:
         modelProfile: maintenance
-    opportunitiesPerDay: 16
+    opportunitiesPerDay: 24
     intervalJitter: 0.45
     lateNightStart: "22:30"
     sleepStart: "23:30"
