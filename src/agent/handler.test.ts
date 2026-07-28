@@ -949,17 +949,19 @@ describe("handleMessage", () => {
     );
   });
 
-  test("orders append-oriented recent history before rewrite-heavy private context", async () => {
+  test("orders volatile context before recent history as configured", async () => {
     const completeChat: ChatCompleteFn = (request) => {
       const content = request.messages.map((message) => contentText(message.content));
-      const recentIndex = content.findIndex((text) => text.includes("recent marker"));
-      const memoriesIndex = content.findIndex((text) => text.includes("memory marker"));
-      const threadsIndex = content.findIndex((text) => text.includes("inner marker"));
-      const schedulesIndex = content.findIndex((text) => text.includes("schedule marker"));
-      expect(recentIndex).toBeGreaterThanOrEqual(0);
-      expect(memoriesIndex).toBeGreaterThan(recentIndex);
-      expect(threadsIndex).toBeGreaterThan(memoriesIndex);
-      expect(schedulesIndex).toBeGreaterThan(threadsIndex);
+      expect(content.filter((text) => text.endsWith(" marker"))).toEqual([
+        "discord marker",
+        "members marker",
+        "channel threads marker",
+        "schedule marker",
+        "inner marker",
+        "memory marker",
+        "recent marker",
+        "current marker",
+      ]);
       return Promise.resolve({
         text: "done",
         toolCalls: [],
@@ -974,9 +976,13 @@ describe("handleMessage", () => {
         completeChat,
         context: makeContext({
           sections: [
+            { label: "Current Context", text: "current marker", cached: false, role: "developer" },
             { label: "Upcoming Schedules", text: "schedule marker", cached: false, role: "developer" },
+            { label: "Server Members", text: "members marker", cached: false, role: "developer" },
             { label: "Inner Threads", text: "inner marker", cached: false, role: "developer" },
+            { label: "Discord Context", text: "discord marker", cached: false, role: "developer" },
             { label: "Memories", text: "memory marker", cached: false, role: "developer" },
+            { label: "Threads In This Channel", text: "channel threads marker", cached: false, role: "developer" },
             { label: "Chat History — Newer", text: "recent marker", cached: false, role: "developer" },
           ],
         }),

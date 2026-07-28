@@ -941,12 +941,12 @@ const VOLATILE_SECTION_IDS_BY_LABEL: Readonly<Record<string, PromptTransportSect
 
 const VOLATILE_SECTION_ORDER: readonly PromptTransportSectionId[] = [
   "discordContext",
-  "recentHistory",
-  "memories",
-  "innerThreads",
-  "upcomingSchedules",
   "serverMembers",
   "threadsInChannel",
+  "upcomingSchedules",
+  "innerThreads",
+  "memories",
+  "recentHistory",
   "currentContext",
   "personaMode",
   "responseInstruction",

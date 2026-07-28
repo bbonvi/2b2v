@@ -113,40 +113,24 @@ promptTransport:
     openaiCodex:
         mode: split-input # (send stable sections as separate cacheable input messages)
         sections:
-            system: { role: developer, target: instructions } # (top-level system/developer instruction bucket)
-            core: { role: developer, target: input, cacheGroup: core } # (stable persona/style prompt)
-            skills: { role: developer, target: input, cacheGroup: skills } # (stable available-skill index)
-            runtime: { role: developer, target: input, cacheGroup: runtime } # (stable runtime behavior policy)
-            stableContext: {
-                    role: developer,
-                    target: input,
-                    cacheGroup: stable-context,
-                } # (less volatile contextual prefix)
-            olderHistory: { role: developer, target: input, cacheGroup: older-history } # (cached older chat history)
-            serverMembers: { role: developer, target: input, cacheGroup: members } # (visible member/display-name context)
-            threadsInChannel: { role: developer, target: input, cacheGroup: threads } # (thread list/metadata context)
-            discordContext: { role: developer, target: input, cacheGroup: context } # (current guild/channel navigation context)
-            upcomingSchedules: { role: developer, target: input, cacheGroup: shcedules } # (pending schedule summary)
-            innerThreads: { role: developer, target: input, cacheGroup: inner-threads } # (private active inner threads)
-            memories: { role: developer, target: input, cacheGroup: memories } # (selected memory context)
-            recentHistory: { role: user, target: input, cacheGroup: recent } # (uncached recent chat history)
-            currentContext: {
-                    role: user,
-                    target: input,
-                    cacheGroup: current-context,
-                } # (time/contact/current-turn metadata)
-            personaMode: { role: developer, target: input } # (volatile active persona mode overlay)
-            responseInstruction: {
-                    role: developer,
-                    target: input,
-                    cacheGroup: response-instruction,
-                } # (reply-loop behavior instruction)
-            currentTurn: { role: user, target: input, cacheGroup: current-turn } # (new Discord event text)
-            finalActionInstruction: {
-                    role: developer,
-                    target: input,
-                    cacheGroup: final-action,
-                } # (last instruction before action)
+            system: { role: developer, target: instructions }
+            core: { role: developer, target: input, cacheGroup: core }
+            skills: { role: developer, target: input, cacheGroup: skills }
+            runtime: { role: developer, target: input, cacheGroup: runtime }
+            stableContext: { role: developer, target: input, cacheGroup: stable-context }
+            olderHistory: { role: developer, target: input, cacheGroup: older-history }
+            discordContext: { role: developer, target: input, cacheGroup: context }
+            serverMembers: { role: developer, target: input, cacheGroup: members }
+            threadsInChannel: { role: developer, target: input, cacheGroup: threads }
+            upcomingSchedules: { role: developer, target: input, cacheGroup: shcedules }
+            innerThreads: { role: developer, target: input, cacheGroup: inner-threads }
+            memories: { role: developer, target: input, cacheGroup: memories }
+            recentHistory: { role: user, target: input, cacheGroup: recent }
+            currentContext: { role: user, target: input, cacheGroup: current-context, }
+            personaMode: { role: developer, target: input }
+            responseInstruction: { role: developer, target: input, cacheGroup: response-instruction }
+            currentTurn: { role: user, target: input, cacheGroup: current-turn }
+            finalActionInstruction: { role: developer, target: input, cacheGroup: final-action }
     openrouter:
         sections:
             system: { role: system, target: input, cacheGroup: core } # (system prompt section in OpenRouter messages)
