@@ -412,6 +412,12 @@ function parsePromptTransportTarget(value: unknown, key: string): PromptTranspor
   throw new Error(`${key} must be "instructions" or "input"`);
 }
 
+function parsePromptTransportContent(value: unknown, key: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "string") return value;
+  throw new Error(`${key} must be a string`);
+}
+
 function parseCodexPromptTransportMode(value: unknown, key: string): CodexPromptTransportMode | undefined {
   if (value === undefined) return undefined;
   if (value === "legacy-instructions" || value === "split-input") return value;
@@ -445,6 +451,9 @@ function resolveProviderPromptTransport(
         role: parsePromptTransportRole(partialSection?.role, `${key}.sections.${id}.role`) ?? baseSection.role,
         target: parsePromptTransportTarget(partialSection?.target, `${key}.sections.${id}.target`) ?? baseSection.target,
         cacheGroup: partialSection?.cacheGroup ?? baseSection.cacheGroup,
+        ...(id === "custom"
+          ? { content: parsePromptTransportContent(partialSection?.content, `${key}.sections.custom.content`) ?? baseSection.content ?? "" }
+          : {}),
       }];
     }),
   ) as Record<PromptTransportSectionId, PromptTransportSectionConfig>;

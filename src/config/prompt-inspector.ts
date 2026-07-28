@@ -861,8 +861,27 @@ export function inspectPromptScenario(input: {
     : input.transport.openrouter;
   const documents: PromptInspectionDocument[] = [];
   const blocks: PromptInspectionBlock[] = [];
+  const customContent = providerTransport.sections.custom.content ?? "";
+  const customBlock: PromptBlockDefinition = {
+    code: {
+      source: `config:promptTransport.${provider === "openai-codex" ? "openaiCodex" : "openrouter"}.sections.custom.content`,
+      text: customContent,
+    },
+    phase: "stable",
+    transportSection: "custom",
+    reason: "Freeform provider instruction inserted after older history.",
+  };
+  const firstNonStable = definition.blocks.findIndex((block) => block.phase !== "stable");
+  const customInsertAt = firstNonStable === -1 ? definition.blocks.length : firstNonStable;
+  const definitionBlocks = customContent.trim() !== "" && (definition.family === "actor" || definition.family === "maintenance")
+    ? [
+        ...definition.blocks.slice(0, customInsertAt),
+        customBlock,
+        ...definition.blocks.slice(customInsertAt),
+      ]
+    : definition.blocks;
 
-  for (const [blockIndex, block] of definition.blocks.entries()) {
+  for (const [blockIndex, block] of definitionBlocks.entries()) {
     const loaded = documentsForBlock(input.bundle, block, blockIndex);
     if (loaded.text === "") continue;
     const placement = placementFor(provider, input.transport, block);

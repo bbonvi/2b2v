@@ -896,6 +896,10 @@ function sectionsForStablePrompt(
     sectionPlacement(transport, "stableContext"),
     sectionPlacement(transport, "olderHistory"),
   ));
+  const customContent = sectionPlacement(transport, "custom").content ?? "";
+  if (customContent.trim() !== "") {
+    stable.push(stableSection("custom", customContent, transport, "global"));
+  }
   return stable;
 }
 

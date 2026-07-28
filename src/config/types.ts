@@ -96,6 +96,7 @@ export type PromptTransportSectionId =
   | "runtime"
   | "stableContext"
   | "olderHistory"
+  | "custom"
   | "serverMembers"
   | "threadsInChannel"
   | "discordContext"
@@ -124,6 +125,8 @@ export interface PromptTransportSectionConfig {
   role: PromptTransportRole;
   target: PromptTransportTarget;
   cacheGroup?: string;
+  /** Exact model-visible text for the custom section. Other sections ignore this field. */
+  content?: string;
 }
 
 /** Provider-specific prompt transport policy. */

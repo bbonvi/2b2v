@@ -100,6 +100,12 @@ members:
 #         target: instructions
 #       core:
 #         target: instructions
+#       custom:
+#         role: developer
+#         target: input
+#         cacheGroup: custom
+#         content: |
+#           Write any temporary steering instruction here.
 
 # Native reply/tool loop limits (overrides global defaults)
 # replyLoop:

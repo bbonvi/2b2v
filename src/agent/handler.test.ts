@@ -67,6 +67,7 @@ function makePromptTransportConfig(): PromptTransportConfig {
         runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
         stableContext: { role: "user", target: "input", cacheGroup: "stable-context" },
         olderHistory: { role: "user", target: "input", cacheGroup: "older-history" },
+        custom: { role: "developer", target: "input", cacheGroup: "custom", content: "" },
         serverMembers: { role: "user", target: "input" },
         threadsInChannel: { role: "user", target: "input" },
         discordContext: { role: "user", target: "input" },
@@ -91,6 +92,7 @@ function makePromptTransportConfig(): PromptTransportConfig {
         runtime: { role: "developer", target: "input", cacheGroup: "runtime" },
         stableContext: { role: "user", target: "input", cacheGroup: "stable-context" },
         olderHistory: { role: "user", target: "input", cacheGroup: "older-history" },
+        custom: { role: "developer", target: "input", cacheGroup: "custom", content: "" },
         serverMembers: { role: "user", target: "input" },
         threadsInChannel: { role: "user", target: "input" },
         discordContext: { role: "user", target: "input" },
@@ -941,6 +943,44 @@ describe("handleMessage", () => {
       makeMessage({ mentionedUserIds: ["bot-1"] }),
       makeDeps({
         completeChat,
+        context: makeContext({
+          sections: [
+            { label: "Chat History — Older", text: "## Chat History — Older\n[@old]: cached chunk", cached: true, role: "system" },
+            { label: "Chat History — Newer", text: "## Chat History\n[@new]: volatile recent", cached: false, role: "developer" },
+          ],
+        }),
+      }),
+    );
+  });
+
+  test("inserts custom transport content after older history", async () => {
+    const transport = makePromptTransportConfig();
+    transport.openrouter.sections.custom.content = "Use the new feature.";
+    const completeChat: ChatCompleteFn = (request) => {
+      const payload = { messages: [...request.messages] };
+      request.onPayload?.(payload);
+
+      const texts = (payload.messages as Array<{ content?: unknown }>).map((message) => contentText(message.content));
+      const olderIndex = texts.findIndex((text) => text.includes("## Chat History — Older"));
+      const customIndex = texts.findIndex((text) => text === "Use the new feature.");
+      const recentIndex = texts.findIndex((text) => text.includes("## Chat History\n[@new]: volatile recent"));
+      expect(olderIndex).toBeGreaterThanOrEqual(0);
+      expect(customIndex).toBeGreaterThan(olderIndex);
+      expect(recentIndex).toBeGreaterThan(customIndex);
+
+      return Promise.resolve({
+        text: "done",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        guildConfig: makeGuildConfig({ promptTransport: transport }),
         context: makeContext({
           sections: [
             { label: "Chat History — Older", text: "## Chat History — Older\n[@old]: cached chunk", cached: true, role: "system" },

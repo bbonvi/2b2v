@@ -67,6 +67,41 @@ describe("raw config loading", () => {
   });
 });
 
+describe("prompt transport", () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  test("loads custom content and lets a guild clear it", () => {
+    const global = loadGlobalConfig(BASE_ENV, writeConfig([
+      "promptTransport:",
+      "  openaiCodex:",
+      "    sections:",
+      "      custom:",
+      "        content: |",
+      "          Use the new feature.",
+    ].join("\n")));
+
+    expect(global.defaultPromptTransport.openaiCodex.sections.custom.content).toBe("Use the new feature.\n");
+    expect(resolveGuildConfig(global, {
+      guildId: "1",
+      slug: "",
+      promptTransport: {
+        openaiCodex: {
+          sections: { custom: { content: "" } },
+        },
+      },
+    }).promptTransport.openaiCodex.sections.custom.content).toBe("");
+
+    expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+      "promptTransport:",
+      "  openaiCodex:",
+      "    sections:",
+      "      custom:",
+      "        content: 42",
+    ].join("\n")))).toThrow("promptTransport.openaiCodex.sections.custom.content must be a string");
+  });
+});
+
 describe("instructions", () => {
   beforeEach(setup);
   afterEach(teardown);

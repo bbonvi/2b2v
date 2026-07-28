@@ -133,6 +133,26 @@ describe("prompt inspector", () => {
     expect(openrouter.assembled.input.some((entry) => entry.text.includes(bundle.systemPrompt))).toBe(true);
   });
 
+  test("shows custom provider instructions", () => {
+    const transport = structuredClone(config.defaultPromptTransport);
+    transport.openaiCodex.sections.custom.content = "Use the new feature.";
+    const result = inspectPromptScenario({
+      bundle,
+      profile: PROFILE,
+      scenario: "discord",
+      provider: "openai-codex",
+      transport,
+    });
+    const custom = result.documents.find((document) => document.transportSection === "custom");
+
+    expect(custom).toMatchObject({
+      role: "developer",
+      target: "input",
+      text: "Use the new feature.",
+    });
+    expect(result.assembled.input.some((entry) => entry.text === "Use the new feature.")).toBe(true);
+  });
+
   test("places direct evaluator policy in the provider system channel", () => {
     const codex = inspect("ambient-initiative-evaluator", "openai-codex");
     const openrouter = inspect("ambient-initiative-evaluator", "openrouter");

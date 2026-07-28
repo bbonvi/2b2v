@@ -119,6 +119,12 @@ promptTransport:
             runtime: { role: developer, target: input, cacheGroup: runtime }
             stableContext: { role: developer, target: input, cacheGroup: stable-context }
             olderHistory: { role: developer, target: input, cacheGroup: older-history }
+            # Exact freeform instructions inserted after older history. Empty means disabled.
+            custom:
+                role: developer
+                target: input
+                cacheGroup: custom
+                content: |
             discordContext: { role: developer, target: input, cacheGroup: context }
             serverMembers: { role: developer, target: input, cacheGroup: members }
             threadsInChannel: { role: developer, target: input, cacheGroup: threads }
@@ -144,6 +150,11 @@ promptTransport:
                     cacheGroup: stable-context,
                 } # (less volatile contextual prefix)
             olderHistory: { role: user, target: input, cacheGroup: older-history } # (cached older chat history)
+            custom:
+                role: developer
+                target: input
+                cacheGroup: custom
+                content: |
             serverMembers: { role: user, target: input } # (visible member/display-name context)
             threadsInChannel: { role: user, target: input } # (thread list/metadata context)
             discordContext: { role: user, target: input } # (current guild/channel navigation context)
