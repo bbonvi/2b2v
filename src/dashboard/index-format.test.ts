@@ -289,6 +289,21 @@ describe("dashboard memory workspace", () => {
   });
 });
 
+describe("dashboard notebook workspace", () => {
+  test("mounts the two-pane notebook editor as its own island", () => {
+    const html = readFileSync("src/dashboard/index.html", "utf8");
+    const island = readFileSync("src/dashboard/notebooks-tab.tsx", "utf8");
+
+    expect(html).toContain('id="tab-notebooks"');
+    expect(html).toContain('id="notebooks-tab-root"');
+    expect(html).toContain('src="/assets/notebooks-tab.js"');
+    expect(island).toContain("notebooks-index");
+    expect(island).toContain("notebook-content-editor");
+    expect(island).toContain("/api/management/notebooks");
+    expect(island).toContain("expectedRevision");
+  });
+});
+
 describe("dashboard prompt inspector", () => {
   test("mounts the prompt inspector as its own dashboard island", () => {
     const html = readFileSync("src/dashboard/index.html", "utf8");

@@ -270,7 +270,9 @@ innerThreads:
 notebooks:
     enabled: true
     maxPromptTitles: 10
-    defaultShelfAfterMs: 604800000
+    defaultShelfAfter:
+        amount: 7
+        unit: days
 
 ambientAttention:
     enabled: true # (enable delayed non-trigger attention candidates)

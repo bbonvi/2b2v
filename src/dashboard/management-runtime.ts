@@ -2,6 +2,18 @@ import type { Client, Guild, GuildBasedChannel, ThreadChannel } from "discord.js
 import type { Database } from "../db/database";
 import { deleteInnerThread } from "../db/inner-thread-repository";
 import { createMemory, deleteMemory, updateMemory } from "../db/memory-repository";
+import {
+  createNotebook as createStoredNotebook,
+  DEFAULT_NOTEBOOK_SHELF_AFTER_MS,
+  listNotebookCandidates,
+  restoreTrashedNotebook,
+  rewriteNotebook,
+  setNotebookState,
+  trashNotebook,
+  type Notebook,
+  type NotebookMutationResult,
+  type NotebookState,
+} from "../db/notebook-repository";
 import { channelTypeLabel, isSendableGuildChannel } from "../discord/message-sender";
 import {
   deleteStoredManagementMessages,
@@ -60,6 +72,21 @@ export type DashboardManagementRuntime = {
   editMemory: (input: ManagementMemoryEditInput) => { memory: DecoratedManagementMemory };
   deleteMemory: (memoryId: number) => { deleted: boolean; memoryId: number };
   restoreMemory: (memoryId: number) => { memory: DecoratedManagementMemory };
+  listNotebooks: () => { notebooks: Notebook[]; defaultShelfAfterMs: number };
+  createNotebook: (input: { title: string; content: string; shelfAfterMs?: number }) => { notebook: Notebook };
+  editNotebook: (input: {
+    notebookId: number;
+    expectedRevision: number;
+    title: string;
+    content: string;
+    shelfAfterMs: number;
+  }) => { notebook: Notebook };
+  setNotebookState: (input: {
+    notebookId: number;
+    expectedRevision: number;
+    targetState: Exclude<NotebookState, "trashed">;
+  }) => { notebook: Notebook };
+  deleteNotebook: (input: { notebookId: number; expectedRevision: number }) => { notebook: Notebook };
   userName: (userId: string) => string;
 };
 
@@ -123,6 +150,7 @@ function assertManagementMemoryState(input: ManagementMemoryCreateInput): void {
 export function createDashboardManagementRuntime(input: {
   client: Client;
   db: Database;
+  defaultNotebookShelfAfterMs?: number;
 }): DashboardManagementRuntime {
   const storedUsernameStatement = input.db.raw.prepare(
     `SELECT author_username
@@ -427,6 +455,15 @@ export function createDashboardManagementRuntime(input: {
     return { memory: decorateManagementMemory(row) };
   };
 
+  const notebookMutation = (result: NotebookMutationResult): { notebook: Notebook } => {
+    if ("notebook" in result) return result;
+    if (result.error === "revision_conflict") {
+      throw new Error(`Notebook changed at revision ${result.currentRevision}. Reload it before saving.`);
+    }
+    throw new Error("message" in result ? result.message : "Notebook not found.");
+  };
+  const defaultNotebookShelfAfterMs = input.defaultNotebookShelfAfterMs ?? DEFAULT_NOTEBOOK_SHELF_AFTER_MS;
+
   return {
     getDirectory: buildManagementDirectory,
     listMessages: (filter) => ({
@@ -443,6 +480,53 @@ export function createDashboardManagementRuntime(input: {
     editMemory: editManagementMemoryState,
     deleteMemory: (memoryId) => ({ deleted: deleteMemory(input.db, memoryId), memoryId }),
     restoreMemory: restoreManagementMemoryState,
+    listNotebooks: () => ({
+      notebooks: [
+        ...listNotebookCandidates(input.db),
+        ...listNotebookCandidates(input.db, { state: "trashed" }),
+      ].sort((a, b) => {
+        const editOrder = b.editedAt - a.editedAt;
+        return editOrder !== 0 ? editOrder : b.id - a.id;
+      }),
+      defaultShelfAfterMs: defaultNotebookShelfAfterMs,
+    }),
+    createNotebook: (notebookInput) => ({
+      notebook: createStoredNotebook(input.db, {
+        title: notebookInput.title,
+        content: notebookInput.content,
+        shelfAfterMs: notebookInput.shelfAfterMs ?? defaultNotebookShelfAfterMs,
+      }),
+    }),
+    editNotebook: (notebookInput) => notebookMutation(rewriteNotebook(input.db, notebookInput.notebookId, {
+      expectedRevision: notebookInput.expectedRevision,
+      title: notebookInput.title,
+      content: notebookInput.content,
+      shelfAfterMs: notebookInput.shelfAfterMs,
+    })),
+    setNotebookState: (notebookInput) => {
+      const current = listNotebookCandidates(input.db, {
+        state: "trashed",
+        notebookId: notebookInput.notebookId,
+      })[0];
+      return notebookMutation(current === undefined
+        ? setNotebookState(
+            input.db,
+            notebookInput.notebookId,
+            notebookInput.expectedRevision,
+            notebookInput.targetState,
+          )
+        : restoreTrashedNotebook(
+            input.db,
+            notebookInput.notebookId,
+            notebookInput.expectedRevision,
+            notebookInput.targetState,
+          ));
+    },
+    deleteNotebook: (notebookInput) => notebookMutation(trashNotebook(
+      input.db,
+      notebookInput.notebookId,
+      notebookInput.expectedRevision,
+    )),
     userName: managementUserName,
   };
 }

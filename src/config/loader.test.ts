@@ -395,7 +395,9 @@ describe("guild resolution and persistence", () => {
       "notebooks:",
       "  enabled: true",
       "  maxPromptTitles: 10",
-      "  defaultShelfAfterMs: 604800000",
+      "  defaultShelfAfter:",
+      "    amount: 7",
+      "    unit: days",
     ].join("\n")));
     expect(global.defaultNotebooks).toEqual({
       enabled: true,
@@ -411,6 +413,13 @@ describe("guild resolution and persistence", () => {
       maxPromptTitles: 5,
       defaultShelfAfterMs: 604800000,
     });
+    expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+      configText,
+      "notebooks:",
+      "  defaultShelfAfter:",
+      "    amount: 0",
+      "    unit: days",
+    ].join("\n")))).toThrow("Duration requires a positive amount");
   });
 
   test("rejects an unknown guild profile reference", () => {

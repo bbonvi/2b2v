@@ -2,6 +2,7 @@ import type { TtsConfig, VoicePreset } from "../tts/types.ts";
 import type { AssetKind } from "../db/asset-repository.ts";
 import type { PersonaModesConfig, PersonaModesConfigYaml } from "../modes/types.ts";
 import type { PrivateLifeConfig, PrivateLifeConfigYaml } from "../private-life/types.ts";
+import type { RelativeDuration } from "../time/relative-duration.ts";
 import type {
   RelationshipConfig,
   RelationshipConfigYaml,
@@ -381,7 +382,9 @@ export interface NotebooksConfig {
   defaultShelfAfterMs: number;
 }
 
-export type NotebooksConfigYaml = Partial<NotebooksConfig>;
+export type NotebooksConfigYaml = Partial<Omit<NotebooksConfig, "defaultShelfAfterMs">> & {
+  defaultShelfAfter?: RelativeDuration;
+};
 
 /** Limits for lazy message-asset reading and extraction. */
 export interface AssetReadingConfig {

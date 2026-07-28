@@ -89,6 +89,7 @@ import {
 import type { TextNormalizationMode, TtsConfig, VoicePreset } from "../tts/types.ts";
 import { resolvePersonaModesConfig } from "../modes/config.ts";
 import { stripMarkdownComments } from "./instruction-text.ts";
+import { relativeDurationToMilliseconds } from "../time/relative-duration.ts";
 
 function resolveAssetReadingConfig(input: AssetReadingConfigYaml | undefined, fallback: AssetReadingConfig = DEFAULT_ASSET_READING): AssetReadingConfig {
   const positive = (value: number | undefined, fallback: number, name: string): number => {
@@ -1082,13 +1083,12 @@ function resolveNotebooksConfig(
   const resolved = {
     enabled: partial?.enabled ?? base.enabled,
     maxPromptTitles: partial?.maxPromptTitles ?? base.maxPromptTitles,
-    defaultShelfAfterMs: partial?.defaultShelfAfterMs ?? base.defaultShelfAfterMs,
+    defaultShelfAfterMs: partial?.defaultShelfAfter === undefined
+      ? base.defaultShelfAfterMs
+      : relativeDurationToMilliseconds(partial.defaultShelfAfter),
   };
   if (!Number.isInteger(resolved.maxPromptTitles) || resolved.maxPromptTitles < 1 || resolved.maxPromptTitles > 100) {
     throw new Error("notebooks.maxPromptTitles must be an integer from 1 to 100");
-  }
-  if (!Number.isSafeInteger(resolved.defaultShelfAfterMs) || resolved.defaultShelfAfterMs < 1) {
-    throw new Error("notebooks.defaultShelfAfterMs must be a positive integer");
   }
   return resolved;
 }

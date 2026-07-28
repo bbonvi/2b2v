@@ -52,6 +52,22 @@ describe("notebook tools", () => {
     expect(isToolAllowedInMaintenance(namedTool("patch_notebook"), "record_memory")).toBe(false);
   });
 
+  test("accepts a readable shelf duration instead of raw milliseconds", async () => {
+    const manage = namedTool("manage_notebook");
+    const schema = manage.parameters as { properties?: Record<string, unknown> };
+    expect(schema.properties?.shelf_after).toBeDefined();
+    expect(schema.properties?.shelf_after_ms).toBeUndefined();
+
+    await text(manage, {
+      action: "create",
+      title: "Short-lived work",
+      shelf_after: { amount: 2, unit: "days" },
+    });
+
+    expect(db.raw.prepare("SELECT shelf_after_ms FROM notebooks").get())
+      .toEqual({ shelf_after_ms: 2 * 24 * 60 * 60 * 1000 });
+  });
+
   test("finds notebooks by title or content with exact metadata and ID pagination", async () => {
     const now = Date.now();
     const first = createNotebook(db, {

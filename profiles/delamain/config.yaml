@@ -54,7 +54,9 @@ innerThreads:
 notebooks:
   enabled: false
   maxPromptTitles: 10
-  defaultShelfAfterMs: 604800000
+  defaultShelfAfter:
+    amount: 7
+    unit: days
 
 memoryExtraction:
   modelProfile: main

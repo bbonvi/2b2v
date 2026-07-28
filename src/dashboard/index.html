@@ -115,7 +115,7 @@
     border-color: var(--border);
     color: var(--text-dim);
   }
-  .tabs { display: flex; gap: .35rem; align-items: center; }
+  .tabs { display: flex; gap: .35rem; align-items: center; overflow-x: auto; }
   .tab-btn {
     background: transparent;
     border: 1px solid transparent;
@@ -1800,6 +1800,180 @@
     .memory-editor-grid.two { grid-template-columns: 1fr; }
   }
 
+  #notebooks-view { padding: 0; }
+  .notebooks-workspace {
+    min-height: calc(100vh - 48px);
+    display: grid;
+    grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+    background:
+      linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px) 0 0 / 32px 32px,
+      var(--bg);
+  }
+  .notebooks-index {
+    min-width: 0;
+    background: #0c0e0f;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+  }
+  .notebooks-index-head {
+    min-height: 80px;
+    padding: 1rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .notebooks-kicker {
+    color: #b79555;
+    font: 600 .58rem/1.2 var(--sans);
+    letter-spacing: .16em;
+    text-transform: uppercase;
+  }
+  .notebooks-index h2 {
+    color: var(--text-bright);
+    font: 500 1.15rem/1.2 var(--sans);
+    margin-top: .2rem;
+  }
+  .notebooks-filters {
+    padding: .75rem;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: .45rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .notebooks-filters input,
+  .notebook-title-row > input,
+  .notebook-title-row label input {
+    min-width: 0;
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-bright);
+    font: inherit;
+    padding: .55rem .65rem;
+    outline: none;
+  }
+  .notebooks-filters input:focus,
+  .notebook-title-row input:focus,
+  .notebook-content-editor:focus { border-color: #826c43; }
+  .notebooks-filters select { min-width: 92px; }
+  .notebooks-list { overflow: auto; flex: 1; }
+  .notebook-index-row {
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    padding: .78rem .85rem;
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr);
+    gap: .65rem;
+    cursor: pointer;
+  }
+  .notebook-index-row:hover { background: rgba(255,255,255,.025); }
+  .notebook-index-row.selected {
+    background: linear-gradient(90deg, rgba(183,149,85,.15), rgba(183,149,85,.025));
+    box-shadow: inset 2px 0 #b79555;
+  }
+  .notebook-state-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    margin-top: .3rem;
+  }
+  .notebook-state-dot.active { background: var(--green); }
+  .notebook-state-dot.shelved { background: var(--amber); }
+  .notebook-state-dot.archived { background: #7086a8; }
+  .notebook-state-dot.trashed { background: var(--red); }
+  .notebook-index-copy { min-width: 0; display: grid; gap: .18rem; }
+  .notebook-index-copy strong {
+    color: var(--text-bright);
+    font: 500 .78rem/1.3 var(--sans);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .notebook-index-copy small { color: var(--text-dim); font-size: .59rem; }
+  .notebooks-empty { color: var(--text-dim); padding: 1rem; font-size: .68rem; }
+  .notebook-editor {
+    min-width: 0;
+    padding: clamp(1rem, 3vw, 2.5rem);
+    display: flex;
+    flex-direction: column;
+    gap: .85rem;
+  }
+  .notebook-editor-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-bottom: .8rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .notebook-editor-meta { color: var(--text-dim); font-size: .62rem; margin-top: .2rem; }
+  .notebook-actions { display: flex; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; }
+  .notebook-error {
+    color: #ffb4b4;
+    border: 1px solid var(--red-dim);
+    background: rgba(239,68,68,.07);
+    padding: .55rem .7rem;
+  }
+  .notebook-title-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: .7rem;
+  }
+  .notebook-title-row > input {
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    padding: .5rem 0;
+    font: 500 clamp(1.2rem, 2.3vw, 2rem)/1.2 var(--sans);
+  }
+  .notebook-title-row label {
+    display: grid;
+    grid-template-columns: auto 70px 105px;
+    align-items: center;
+    gap: .4rem;
+    color: var(--text-dim);
+    font-size: .62rem;
+  }
+  .notebook-title-row label select { min-width: 105px; }
+  .notebook-content-editor {
+    width: 100%;
+    flex: 1;
+    min-height: 520px;
+    resize: vertical;
+    background: rgba(8,9,10,.88);
+    border: 1px solid var(--border);
+    color: #d7d4cc;
+    font: 400 .85rem/1.75 var(--mono);
+    padding: clamp(1rem, 2.5vw, 2rem);
+    outline: none;
+    tab-size: 2;
+  }
+  .notebook-content-editor:disabled,
+  .notebook-title-row input:disabled,
+  .notebook-title-row select:disabled { opacity: .65; }
+  .notebook-readonly {
+    color: var(--amber);
+    font-size: .65rem;
+    text-align: right;
+  }
+  @media (max-width: 760px) {
+    .notebooks-workspace { grid-template-columns: 1fr; }
+    .notebooks-index { max-height: 42vh; border-right: 0; border-bottom: 1px solid var(--border); }
+    .notebook-editor-head, .notebook-title-row { align-items: stretch; grid-template-columns: 1fr; }
+    .notebook-editor-head { flex-direction: column; }
+    .notebook-actions { justify-content: flex-start; }
+    .notebook-title-row label { grid-template-columns: auto 1fr 1fr; }
+    .notebook-content-editor { min-height: 55vh; }
+  }
+
   /* Scrollbar */
   ::-webkit-scrollbar { width: 6px }
   ::-webkit-scrollbar-track { background: var(--bg) }
@@ -1813,11 +1987,12 @@
   <div class="topbar-sep"></div>
   <div class="tabs">
     <button class="tab-btn active" id="tab-logs">Logs</button>
-    <button class="tab-btn" id="tab-management">Management</button>
+    <button class="tab-btn" id="tab-management">Lab</button>
     <button class="tab-btn" id="tab-prompts">Prompts</button>
     <button class="tab-btn" id="tab-memories">Memories</button>
+    <button class="tab-btn" id="tab-notebooks">Notebooks</button>
     <button class="tab-btn" id="tab-inner-threads">Inner Threads</button>
-    <button class="tab-btn" id="tab-relationships">Relationship Lab</button>
+    <button class="tab-btn" id="tab-relationships">Relationships</button>
     <button class="tab-btn" id="tab-voice">Voice</button>
   </div>
   <div class="topbar-sep"></div>
@@ -1940,6 +2115,10 @@
   <div id="memories-tab-root"></div>
 </div>
 
+<div class="content" id="notebooks-view" hidden>
+  <div id="notebooks-tab-root"></div>
+</div>
+
 <div class="content" id="prompts-view" hidden>
   <div id="prompts-tab-root"></div>
 </div>
@@ -2004,6 +2183,7 @@
   const tabManagement = document.getElementById('tab-management');
   const tabPrompts = document.getElementById('tab-prompts');
   const tabMemories = document.getElementById('tab-memories');
+  const tabNotebooks = document.getElementById('tab-notebooks');
   const tabInnerThreads = document.getElementById('tab-inner-threads');
   const tabRelationship = document.getElementById('tab-relationships');
   const tabVoice = document.getElementById('tab-voice');
@@ -2012,6 +2192,7 @@
   const managementView = document.getElementById('management-view');
   const promptsView = document.getElementById('prompts-view');
   const memoriesView = document.getElementById('memories-view');
+  const notebooksView = document.getElementById('notebooks-view');
   const innerThreadsView = document.getElementById('inner-threads-view');
   const relationshipsView = document.getElementById('relationships-view');
   const voiceView = document.getElementById('voice-view');
@@ -2046,7 +2227,7 @@
   const itCount = document.getElementById('it-count');
   const itList = document.getElementById('it-list');
   const itAssets = document.getElementById('it-assets');
-  let activeTab = location.hash === '#management' ? 'management' : location.hash === '#prompts' ? 'prompts' : location.hash === '#memories' ? 'memories' : location.hash === '#inner-threads' ? 'inner-threads' : location.hash === '#relationships' ? 'relationships' : location.hash === '#voice' ? 'voice' : 'logs';
+  let activeTab = location.hash === '#management' ? 'management' : location.hash === '#prompts' ? 'prompts' : location.hash === '#memories' ? 'memories' : location.hash === '#notebooks' ? 'notebooks' : location.hash === '#inner-threads' ? 'inner-threads' : location.hash === '#relationships' ? 'relationships' : location.hash === '#voice' ? 'voice' : 'logs';
   modeRail.style.display = activeTab === 'logs' ? '' : 'none';
   let managementDirectory = { guilds: [], channels: [], users: [] };
   let managementMessages = [];
@@ -2971,6 +3152,7 @@
     tabManagement.classList.toggle('active', tab === 'management');
     tabPrompts.classList.toggle('active', tab === 'prompts');
     tabMemories.classList.toggle('active', tab === 'memories');
+    tabNotebooks.classList.toggle('active', tab === 'notebooks');
     tabInnerThreads.classList.toggle('active', tab === 'inner-threads');
     tabRelationship.classList.toggle('active', tab === 'relationships');
     tabVoice.classList.toggle('active', tab === 'voice');
@@ -2978,12 +3160,13 @@
     managementView.hidden = tab !== 'management';
     promptsView.hidden = tab !== 'prompts';
     memoriesView.hidden = tab !== 'memories';
+    notebooksView.hidden = tab !== 'notebooks';
     innerThreadsView.hidden = tab !== 'inner-threads';
     relationshipsView.hidden = tab !== 'relationships';
     voiceView.hidden = tab !== 'voice';
     modeRail.style.display = tab === 'logs' ? '' : 'none';
     logFilters.style.display = tab === 'logs' ? 'flex' : 'none';
-    location.hash = tab === 'management' ? 'management' : tab === 'prompts' ? 'prompts' : tab === 'memories' ? 'memories' : tab === 'inner-threads' ? 'inner-threads' : tab === 'relationships' ? 'relationships' : tab === 'voice' ? 'voice' : 'logs';
+    location.hash = tab === 'management' ? 'management' : tab === 'prompts' ? 'prompts' : tab === 'memories' ? 'memories' : tab === 'notebooks' ? 'notebooks' : tab === 'inner-threads' ? 'inner-threads' : tab === 'relationships' ? 'relationships' : tab === 'voice' ? 'voice' : 'logs';
     if (tab === 'management') {
       refreshManagement();
       if (logPollingActive && managementPollTimer === null) pollManagement();
@@ -3718,6 +3901,7 @@
   tabManagement.addEventListener('click', () => { setTab('management'); });
   tabPrompts.addEventListener('click', () => { setTab('prompts'); });
   tabMemories.addEventListener('click', () => { setTab('memories'); });
+  tabNotebooks.addEventListener('click', () => { setTab('notebooks'); });
   tabInnerThreads.addEventListener('click', () => { setTab('inner-threads'); });
   tabRelationship.addEventListener('click', () => { setTab('relationships'); });
   tabVoice.addEventListener('click', () => { setTab('voice'); });
@@ -3965,6 +4149,7 @@
 </script>
 <script type="module" src="/assets/relationships-lab.js"></script>
 <script type="module" src="/assets/memories-tab.js"></script>
+<script type="module" src="/assets/notebooks-tab.js"></script>
 <script type="module" src="/assets/prompts-tab.js"></script>
 <script type="module" src="/assets/voice-tab.js"></script>
 </body>

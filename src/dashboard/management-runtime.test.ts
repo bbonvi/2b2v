@@ -143,6 +143,45 @@ describe("dashboard management runtime", () => {
     expect(runtime.listMemories({ status: "active" }).memories.map((memory) => memory.id)).toEqual([memoryId]);
   });
 
+  test("creates, edits, shelves, trashes, and restores notebooks", () => {
+    const runtime = managementRuntime();
+    const created = runtime.createNotebook({
+      title: "Dashboard notebook",
+      content: "first",
+      shelfAfterMs: 2 * 24 * 60 * 60 * 1000,
+    }).notebook;
+    const edited = runtime.editNotebook({
+      notebookId: created.id,
+      expectedRevision: created.revision,
+      title: "Renamed notebook",
+      content: "second",
+      shelfAfterMs: created.shelfAfterMs,
+    }).notebook;
+    const shelved = runtime.setNotebookState({
+      notebookId: edited.id,
+      expectedRevision: edited.revision,
+      targetState: "shelved",
+    }).notebook;
+    const trashed = runtime.deleteNotebook({
+      notebookId: shelved.id,
+      expectedRevision: shelved.revision,
+    }).notebook;
+    const restored = runtime.setNotebookState({
+      notebookId: trashed.id,
+      expectedRevision: trashed.revision,
+      targetState: "active",
+    }).notebook;
+
+    expect(restored).toMatchObject({
+      id: created.id,
+      title: "Renamed notebook",
+      content: "second",
+      state: "active",
+      revision: 5,
+    });
+    expect(runtime.listNotebooks().notebooks.map((notebook) => notebook.id)).toEqual([created.id]);
+  });
+
   test("deletes an inner thread", () => {
     const thread = createInnerThread(db, {
       content: "unfinished",

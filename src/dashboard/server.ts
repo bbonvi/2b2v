@@ -3,6 +3,8 @@ import type { Logger } from "../logger";
 import { isMemoryKind } from "../db/memory-repository";
 import { isPromptScenarioId } from "../config/prompt-inspector";
 import type { PromptScenarioId } from "../config/prompt-inspector";
+import type { NotebookState } from "../db/notebook-repository";
+import { relativeDurationToMilliseconds } from "../time/relative-duration";
 import dashboard from "./index.html";
 import type {
   ManagementDirectory,
@@ -65,6 +67,21 @@ interface DashboardManagementApi {
   editMemory: (input: ManagementMemoryEditInput) => AwaitableDashboardManagementResult;
   deleteMemory: (memoryId: number) => AwaitableDashboardManagementResult;
   restoreMemory: (memoryId: number) => AwaitableDashboardManagementResult;
+  listNotebooks: () => AwaitableDashboardManagementResult;
+  createNotebook: (input: { title: string; content: string; shelfAfterMs?: number }) => AwaitableDashboardManagementResult;
+  editNotebook: (input: {
+    notebookId: number;
+    expectedRevision: number;
+    title: string;
+    content: string;
+    shelfAfterMs: number;
+  }) => AwaitableDashboardManagementResult;
+  setNotebookState: (input: {
+    notebookId: number;
+    expectedRevision: number;
+    targetState: Exclude<NotebookState, "trashed">;
+  }) => AwaitableDashboardManagementResult;
+  deleteNotebook: (input: { notebookId: number; expectedRevision: number }) => AwaitableDashboardManagementResult;
   relationships: {
     getOverview: (input?: { userId?: string }) => AwaitableDashboardManagementResult;
     reset: (input?: { userId?: string }) => AwaitableDashboardManagementResult;
@@ -328,6 +345,20 @@ function parseMemoryMutationBody(body: Record<string, unknown>): Omit<Management
     result.expiresAt = body.expiresAt;
   }
   return result;
+}
+
+function notebookIdParam(value: string): number | null {
+  const notebookId = Number(value);
+  return Number.isInteger(notebookId) && notebookId > 0 ? notebookId : null;
+}
+
+function expectedNotebookRevision(body: Record<string, unknown>): number {
+  if (typeof body.expectedRevision !== "number"
+    || !Number.isInteger(body.expectedRevision)
+    || body.expectedRevision < 1) {
+    throw new Error("expectedRevision must be a positive integer.");
+  }
+  return body.expectedRevision;
 }
 
 function requestLogFilters(req: Request): { guildId?: string; channelId?: string; authorUsername?: string } {
@@ -724,6 +755,100 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
         },
       },
 
+      "/api/management/notebooks": {
+        GET: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          return json(await management.listNotebooks());
+        },
+        POST: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          try {
+            const body = await readJsonObject(req);
+            const title = typeof body.title === "string" ? body.title.trim() : "";
+            const content = typeof body.content === "string" ? body.content : "";
+            if (title === "") return json({ error: "title is required." }, 400);
+            return json(await management.createNotebook({
+              title,
+              content,
+              ...("shelfAfter" in body
+                ? { shelfAfterMs: relativeDurationToMilliseconds(body.shelfAfter) }
+                : {}),
+            }));
+          } catch (err) {
+            return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+          }
+        },
+      },
+
+      "/api/management/notebooks/:notebookId": {
+        PATCH: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          try {
+            const notebookId = notebookIdParam(req.params.notebookId);
+            if (notebookId === null) return json({ error: "Valid notebookId is required." }, 400);
+            const body = await readJsonObject(req);
+            const title = typeof body.title === "string" ? body.title.trim() : "";
+            if (title === "" || typeof body.content !== "string" || !("shelfAfter" in body)) {
+              return json({ error: "title, content, shelfAfter, and expectedRevision are required." }, 400);
+            }
+            return json(await management.editNotebook({
+              notebookId,
+              expectedRevision: expectedNotebookRevision(body),
+              title,
+              content: body.content,
+              shelfAfterMs: relativeDurationToMilliseconds(body.shelfAfter),
+            }));
+          } catch (err) {
+            return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+          }
+        },
+        DELETE: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          try {
+            const notebookId = notebookIdParam(req.params.notebookId);
+            if (notebookId === null) return json({ error: "Valid notebookId is required." }, 400);
+            return json(await management.deleteNotebook({
+              notebookId,
+              expectedRevision: expectedNotebookRevision(await readJsonObject(req)),
+            }));
+          } catch (err) {
+            return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+          }
+        },
+      },
+
+      "/api/management/notebooks/:notebookId/state": {
+        POST: async (req) => {
+          const denied = requireAuth(req);
+          if (denied !== null) return denied;
+          if (management === undefined) return json({ error: "Management API is disabled" }, 404);
+          try {
+            const notebookId = notebookIdParam(req.params.notebookId);
+            if (notebookId === null) return json({ error: "Valid notebookId is required." }, 400);
+            const body = await readJsonObject(req);
+            const targetState = body.targetState;
+            if (targetState !== "active" && targetState !== "shelved" && targetState !== "archived") {
+              return json({ error: "targetState must be active, shelved, or archived." }, 400);
+            }
+            return json(await management.setNotebookState({
+              notebookId,
+              expectedRevision: expectedNotebookRevision(body),
+              targetState,
+            }));
+          } catch (err) {
+            return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+          }
+        },
+      },
+
       "/api/management/memories": {
         GET: async (req) => {
           const denied = requireAuth(req);
@@ -936,13 +1061,19 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
       "/assets/relationships-lab.js": async (req) => {
         const denied = requireAuth(req);
         if (denied !== null) return denied;
-        return dashboardAssetResponse("./relationships-lab.tsx", "Relationship Lab");
+        return dashboardAssetResponse("./relationships-lab.tsx", "Relationships");
       },
 
       "/assets/memories-tab.js": async (req) => {
         const denied = requireAuth(req);
         if (denied !== null) return denied;
         return dashboardAssetResponse("./memories-tab.tsx", "Memories tab");
+      },
+
+      "/assets/notebooks-tab.js": async (req) => {
+        const denied = requireAuth(req);
+        if (denied !== null) return denied;
+        return dashboardAssetResponse("./notebooks-tab.tsx", "Notebooks tab");
       },
 
       "/assets/prompts-tab.js": async (req) => {

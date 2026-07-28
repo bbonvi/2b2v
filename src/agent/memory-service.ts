@@ -21,6 +21,12 @@ import type { OpenRouterChatRequest } from "../llm/types";
 import type { LlmProvider, PromptCachingConfig } from "../config/types";
 import { prependStableSectionsToPayload, type StablePromptSection } from "./prompt-cache";
 import { currentLocalContext } from "../time/agent-time";
+import {
+  isRelativeDuration,
+  RelativeDurationSchema,
+  relativeDurationToMilliseconds,
+  type RelativeDuration,
+} from "../time/relative-duration";
 
 export interface MemoryContextInput {
   db: Database;
@@ -151,7 +157,6 @@ interface MemoryMutationInput {
 
 type MemoryRecallInInput = "anywhere" | "current_guild";
 type MemoryRecallWhenInput = "always" | { users_present: string[] };
-type ExpiresInUnit = "minutes" | "hours" | "days" | "weeks" | "months";
 const MAX_SCRATCHPAD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_RECENT_USER_MAX_USERS = 3;
 const DEFAULT_RECENT_USER_MAX_MEMORIES = 4;
@@ -161,23 +166,8 @@ const DEFAULT_RELATIONSHIP_ANCHOR_MAX_USERS = 2;
 const DEFAULT_RELATIONSHIP_ANCHOR_MAX_MEMORIES = 2;
 const DEFAULT_RELATIONSHIP_ANCHOR_MAX_ROWS = 4;
 
-interface ExpiresIn {
-  amount: number;
-  unit: ExpiresInUnit;
-}
-
-const ExpiresInSchema = Type.Object({
-  amount: Type.Number({
-    exclusiveMinimum: 0,
-  }),
-  unit: Type.Union([
-    Type.Literal("minutes"),
-    Type.Literal("hours"),
-    Type.Literal("days"),
-    Type.Literal("weeks"),
-    Type.Literal("months"),
-  ]),
-}, { additionalProperties: false });
+type ExpiresIn = RelativeDuration;
+const ExpiresInSchema = RelativeDurationSchema;
 
 const MemoryRecallWhenSchema = Type.Union([
   Type.Literal("always"),
@@ -737,34 +727,11 @@ function normalizeKind(value: unknown): MemoryKind | null {
 function normalizeExpiresIn(value: unknown): ExpiresIn | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
-  if (!isRecord(value)) return undefined;
-
-  const { amount, unit } = value;
-  if (
-    typeof amount !== "number"
-    || !Number.isFinite(amount)
-    || amount <= 0
-    || (unit !== "minutes" && unit !== "hours" && unit !== "days" && unit !== "weeks" && unit !== "months")
-  ) {
-    return undefined;
-  }
-  return { amount, unit };
-}
-
-function expiresInToMilliseconds(expiresIn: ExpiresIn): number {
-  const minuteMs = 60 * 1000;
-  const unitMs: Record<ExpiresInUnit, number> = {
-    minutes: minuteMs,
-    hours: 60 * minuteMs,
-    days: 24 * 60 * minuteMs,
-    weeks: 7 * 24 * 60 * minuteMs,
-    months: 30 * 24 * 60 * minuteMs,
-  };
-  return expiresIn.amount * unitMs[expiresIn.unit];
+  return isRelativeDuration(value) ? value : undefined;
 }
 
 function expiresInToExpiresAt(expiresIn: ExpiresIn, now = Date.now()): number {
-  return Math.round(now + expiresInToMilliseconds(expiresIn));
+  return now + relativeDurationToMilliseconds(expiresIn);
 }
 
 function scratchpadExpiryIsValid(
@@ -773,7 +740,7 @@ function scratchpadExpiryIsValid(
 ): boolean {
   if (action.kind !== "scratchpad") return true;
   if (action.expiresIn === null) return false;
-  if (action.expiresIn !== undefined) return expiresInToMilliseconds(action.expiresIn) <= MAX_SCRATCHPAD_TTL_MS;
+  if (action.expiresIn !== undefined) return relativeDurationToMilliseconds(action.expiresIn) <= MAX_SCRATCHPAD_TTL_MS;
   return existing?.kind === "scratchpad" && existing.expiresAt !== null;
 }
 

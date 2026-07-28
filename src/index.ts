@@ -5748,7 +5748,11 @@ const dashboardPassword = process.env.DASHBOARD_PASSWORD;
 const bypassDashboardAuth = process.env.UNSAFELY_BYPASS_DASHBOARD_AUTH === "true";
 const dashboardPasswordlessCidrs = parseDashboardPasswordlessCidrs(process.env.DASHBOARD_PASSWORDLESS_CIDRS);
 const dashboardTrustedProxyCidrs = parseDashboardPasswordlessCidrs(process.env.DASHBOARD_TRUSTED_PROXY_CIDRS);
-const dashboardManagementRuntime = createDashboardManagementRuntime({ client, db });
+const dashboardManagementRuntime = createDashboardManagementRuntime({
+  client,
+  db,
+  defaultNotebookShelfAfterMs: globalConfig.defaultNotebooks?.defaultShelfAfterMs,
+});
 const dashboardManagement = {
   getPersonaModeStatus: () => {
     const status = personaModeRuntime.getStatus();
@@ -5822,6 +5826,11 @@ const dashboardManagement = {
   editMemory: dashboardManagementRuntime.editMemory,
   deleteMemory: dashboardManagementRuntime.deleteMemory,
   restoreMemory: dashboardManagementRuntime.restoreMemory,
+  listNotebooks: dashboardManagementRuntime.listNotebooks,
+  createNotebook: dashboardManagementRuntime.createNotebook,
+  editNotebook: dashboardManagementRuntime.editNotebook,
+  setNotebookState: dashboardManagementRuntime.setNotebookState,
+  deleteNotebook: dashboardManagementRuntime.deleteNotebook,
   relationships: createRelationshipsManagementApi({
     db,
     getGlobalConfig: () => globalConfig,

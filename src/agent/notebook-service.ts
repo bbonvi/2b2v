@@ -25,6 +25,11 @@ import { formatMemoryAge } from "./memory-service.ts";
 import { runRipgrep } from "./ripgrep.ts";
 import { renderPhysicalTextRange } from "./text-view.ts";
 import { markReadOnlyTool } from "./tool-effects.ts";
+import {
+  RelativeDurationSchema,
+  relativeDurationToMilliseconds,
+  type RelativeDuration,
+} from "../time/relative-duration.ts";
 
 const NOTEBOOK_READ_MAX_CHARS = 30_000;
 const NOTEBOOK_READ_DEFAULT_LINES = 200;
@@ -448,7 +453,7 @@ export function createNotebookTools(deps: NotebookToolDeps): AgentTool[] {
       recall_mode: Type.Optional(Type.Union([Type.Literal("always"), Type.Literal("users")])),
       related_user_ids: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 100 })),
       recall_user_ids: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 100 })),
-      shelf_after_ms: Type.Optional(Type.Integer({ minimum: 1 })),
+      shelf_after: Type.Optional(RelativeDurationSchema),
       target_state: Type.Optional(Type.Union([
         Type.Literal("active"),
         Type.Literal("shelved"),
@@ -468,7 +473,7 @@ export function createNotebookTools(deps: NotebookToolDeps): AgentTool[] {
         recall_mode?: "always" | "users";
         related_user_ids?: string[];
         recall_user_ids?: string[];
-        shelf_after_ms?: number;
+        shelf_after?: RelativeDuration;
         target_state?: "active" | "shelved" | "archived";
         source_revision?: number;
       };
@@ -485,7 +490,9 @@ export function createNotebookTools(deps: NotebookToolDeps): AgentTool[] {
             recallMode: input.recall_mode,
             relatedUserIds: input.related_user_ids,
             recallUserIds: input.recall_user_ids,
-            shelfAfterMs: input.shelf_after_ms ?? deps.defaultShelfAfterMs,
+            shelfAfterMs: input.shelf_after === undefined
+              ? deps.defaultShelfAfterMs
+              : relativeDurationToMilliseconds(input.shelf_after),
           });
           return Promise.resolve(mutationResult({ notebook }));
         }
@@ -502,7 +509,9 @@ export function createNotebookTools(deps: NotebookToolDeps): AgentTool[] {
             recallMode: input.recall_mode,
             relatedUserIds: input.related_user_ids,
             recallUserIds: input.recall_user_ids,
-            shelfAfterMs: input.shelf_after_ms,
+            shelfAfterMs: input.shelf_after === undefined
+              ? undefined
+              : relativeDurationToMilliseconds(input.shelf_after),
           })));
         }
         if (input.action === "trash") {

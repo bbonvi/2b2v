@@ -128,7 +128,7 @@ function RelationshipsLab(): JSX.Element {
   const selectedLabel = userOptions.find(([id]) => id === selectedUserId)?.[1] ?? selectedUserId;
   const selectedProfile = overview?.selectedProfile ?? null;
 
-  if (overview === null) return <div className="relationships-error">Loading Relationships Lab...</div>;
+  if (overview === null) return <div className="relationships-error">Loading relationships...</div>;
 
   return (
     <div className="relationships-shell">
