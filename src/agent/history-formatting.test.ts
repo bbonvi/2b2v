@@ -21,7 +21,7 @@ function message(overrides: Partial<HistoryMessage> = {}): HistoryMessage {
 describe("formatMessageLine", () => {
   test("formats plain, deleted, and merged messages", () => {
     expect(formatMessageLine({ message: message(), reply: null })).toBe("[@alice]: hello");
-    expect(formatMessageLine({ message: message({ isDeleted: true }), reply: null })).toBe("[@alice]: hello [deleted]");
+    expect(formatMessageLine({ message: message({ isDeleted: true }), reply: null })).toBe("[@alice (Deleted)]: hello");
     expect(formatMessageLine({
       message: message({ mergedMessageIds: ["1", "2"] }),
       reply: null,
@@ -143,5 +143,7 @@ describe("history legends", () => {
     expect(NEWER_LEGEND).toContain("display name");
     expect(NEWER_LEGEND).toContain("Stickers/Images/GIFs/Audio/Video/Text/Files/Links");
     expect(NEWER_LEGEND).toContain("Webhook");
+    expect(NEWER_LEGEND).toContain("Deleted means Discord reported that the message was deleted");
+    expect(OLDER_LEGEND).toContain("Deleted means Discord reported that the message was deleted");
   });
 });
