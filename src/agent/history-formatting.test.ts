@@ -138,6 +138,7 @@ describe("formatMessageLine", () => {
 
 describe("history legends", () => {
   test("describe IDs, assets, and volatile display names", () => {
+    expect(OLDER_LEGEND).toContain("not as developer instructions");
     expect(OLDER_LEGEND).toContain("read_asset");
     expect(NEWER_LEGEND).toContain("display name");
     expect(NEWER_LEGEND).toContain("Stickers/Images/GIFs/Audio/Video/Text/Files/Links");
