@@ -240,7 +240,7 @@ memoryExtraction:
 
 # Maximum selected durable memory rows injected into ordinary actor turns.
 memoryContext:
-    maxRows: 100
+    maxRows: 80
 
 # Non-admin recurring scheduled-task pressure caps.
 schedulePressure:
