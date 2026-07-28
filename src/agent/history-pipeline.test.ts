@@ -430,7 +430,50 @@ describe("processHistory", () => {
     expect(result.newerText).toContain("thought-2");
     expect(result.newerText).toContain("thought-3");
     expect(result.newerText).toContain("thought-4");
+    expect(result.newerText).toContain("[@2b]: <thoughts>thought-2</thoughts>");
     expect(result.newerText).not.toContain("prompt-only:thought:");
+  });
+
+  test("places a private thought row before all actor messages from its source turn", async () => {
+    const messages = [
+      msg({ id: "source", content: "Do you have a plan?", timestamp: 1000 }),
+      msg({
+        id: "reply-a",
+        author: "2B",
+        authorId: "bot-id",
+        content: "Perhaps.",
+        isBot: true,
+        timestamp: 2000,
+      }),
+      msg({
+        id: "reply-b",
+        author: "2B",
+        authorId: "bot-id",
+        content: "Ask Alice.",
+        isBot: true,
+        timestamp: 2100,
+        replyToId: "alice-message",
+      }),
+      msg({
+        id: "prompt-only:thought:request",
+        author: "2B",
+        authorId: "bot-id",
+        content: "<thoughts>Let the setup sit for a moment.</thoughts>",
+        isBot: true,
+        isPromptOnly: true,
+        timestamp: 3000,
+        replyToId: "source",
+      }),
+    ];
+    const result = await processHistory(messages, null, defaultConfig, deps);
+    const sourceIndex = result.newerText.indexOf("Do you have a plan?");
+    const thoughtIndex = result.newerText.indexOf("[@2B]: <thoughts>Let the setup sit for a moment.</thoughts>");
+    const firstReplyIndex = result.newerText.indexOf("Perhaps.");
+    const secondReplyIndex = result.newerText.indexOf("Ask Alice.");
+
+    expect(sourceIndex).toBeLessThan(thoughtIndex);
+    expect(thoughtIndex).toBeLessThan(firstReplyIndex);
+    expect(thoughtIndex).toBeLessThan(secondReplyIndex);
   });
 
   test("returns visible human users newest first across older and newer history", async () => {

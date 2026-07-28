@@ -5,7 +5,7 @@ import { sortMessages, sliceHistory } from "./history-slicing.ts";
 import { mergeConsecutiveMessages } from "./history-merge.ts";
 import { trimMessages } from "./history-trimming.ts";
 import { insertDateStamps, RECENT_HISTORY_DATE_STAMP_GAP_MS } from "./history-dates.ts";
-import { formatMessageLine, NEWER_LEGEND, OLDER_LEGEND } from "./history-formatting.ts";
+import { formatHistoryContent, formatMessageLine, NEWER_LEGEND, OLDER_LEGEND } from "./history-formatting.ts";
 import { resolveReplies } from "./history-replies.ts";
 import { fetchMissingReplyTargets } from "./reply-target-fallback.ts";
 
@@ -70,13 +70,19 @@ export async function processHistory(
   // 4. Trim older slice only (newer messages kept intact for recency)
   const olderTrimmed = trimMessages(older, config.trim.messageCharLimit);
   const newerTrimmed = newer;
-  const firstNewerTimestamp = newerTrimmed[0]?.timestamp;
-  const recentPrivateThoughts = firstNewerTimestamp === undefined
-    ? []
-    : privateThoughts.filter((message) => message.timestamp >= firstNewerTimestamp);
-  const newerHistory = sortMessages([...newerTrimmed, ...recentPrivateThoughts]);
+  const recentMessageIds = new Set(newerTrimmed.flatMap((message) =>
+    message.mergedMessageIds ?? [message.id]
+  ));
+  const recentPrivateThoughts = privateThoughts.filter((message) =>
+    message.replyToId !== null && recentMessageIds.has(message.replyToId)
+  );
+  const thoughtsBySourceId = Map.groupBy(recentPrivateThoughts, (message) => message.replyToId);
+  const newerHistory = newerTrimmed.flatMap((message) => [
+    message,
+    ...(message.mergedMessageIds ?? [message.id]).flatMap((id) => thoughtsBySourceId.get(id) ?? []),
+  ]);
   const newerMessages = latestWithDisplayName !== null
-    ? sortMessages([...newerHistory, latestWithDisplayName])
+    ? [...newerHistory, latestWithDisplayName]
     : newerHistory;
   const oldestVisibleMessageId = [...olderTrimmed, ...newerTrimmed].find((m) => m.isPromptOnly !== true)?.id;
 
@@ -142,12 +148,14 @@ export async function processHistory(
         if (latestUserMessage !== null && m.id === latestUserMessage.id && reply === null) {
           reply = replyResult.latestUser;
         }
-        lines.push(formatMessageLine({
-          message: m,
-          reply,
-          includeMessageIds: true,
-          includeDisplayNames: true,
-        }));
+        lines.push(m.id.startsWith(PRIVATE_THOUGHT_MESSAGE_ID_PREFIX)
+          ? `[@${m.author}]: ${formatHistoryContent(m)}`
+          : formatMessageLine({
+            message: m,
+            reply,
+            includeMessageIds: true,
+            includeDisplayNames: true,
+          }));
       }
     }
     newerText = `## Chat History\n${lines.join("\n")}`;
