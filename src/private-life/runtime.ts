@@ -238,6 +238,19 @@ function blockedTool(tool: AgentTool, reason: string): AgentTool {
   };
 }
 
+/** Return the live private-life restriction for one tool call. */
+export function privateLifeToolBlockReason(
+  tool: AgentTool,
+  phase: PrivateLifeDayPhase,
+  publicActionAllowed: boolean,
+): string | undefined {
+  if (phase === "sleep-window" && !isReadOnlyTool(tool)) return "2B is asleep";
+  if (PUBLIC_ACTION_TOOL_NAMES.has(tool.name) && !publicActionAllowed) {
+    return "the private-life public-action budget is closed";
+  }
+  return undefined;
+}
+
 function toolResultFailed(result: AgentToolResult<unknown>): boolean {
   if (result.details === null || typeof result.details !== "object") return false;
   const details = result.details as Record<string, unknown>;
@@ -337,14 +350,7 @@ function opportunityText(input: {
         : "Room history: the grounded source room of the selected inner thread.",
     `Activity mode: ${input.selection.mode}`,
     `Subject territory: ${input.selection.territory}`,
-    `Action scope: ${input.selection.actionScope}`,
-    input.selection.actionScope === "reflect-only"
-      ? "Remain in private thought. Do not use tools, perform external actions, or send Discord output."
-      : input.selection.actionScope === "quiet-exploration"
-        ? "Quiet read-only exploration is available. Do not change external state or send Discord output."
-        : input.selection.actionScope === "private-action"
-          ? "Private action is available. Do not perform public Discord actions or send Discord output."
-          : "A social opportunity is available, but visible output remains optional.",
+    `Suggested action scope: ${input.selection.actionScope}. This is a starting direction, not a permission boundary.`,
     input.selection.continuedThreadContent === undefined
       ? ""
       : `Selected inner thread: ${input.selection.continuedThreadId ?? "unknown"}: ${input.selection.continuedThreadContent}`,
@@ -607,8 +613,8 @@ export function createPrivateLifeRuntime(deps: PrivateLifeRuntimeDeps): PrivateL
     requestLog.setTriggerContext({
       messageId: episodeId,
       authorUsername: "private-life",
-      content: `${selection.origin} / ${selection.mode} / ${selection.territory}`,
-      translatedContent: `${selection.origin} / ${selection.mode} / ${selection.territory}`,
+      content: `${selection.origin} / ${selection.mode} / ${selection.territory} / ${selection.actionScope}`,
+      translatedContent: `${selection.origin} / ${selection.mode} / ${selection.territory} / ${selection.actionScope}`,
     });
     requestLog.setAgentRan(true);
     deps.requestLogStore.incrementActive();
@@ -697,8 +703,7 @@ export function createPrivateLifeRuntime(deps: PrivateLifeRuntimeDeps): PrivateL
       };
       const generatedImages = createGeneratedImageRuntime();
       const publicAction = { executed: false };
-      const visibleAllowed = (): boolean => selection.actionScope === "social-opportunity"
-        && current.allowVisibleOutput
+      const visibleAllowed = (): boolean => current.allowVisibleOutput
         && phase !== "sleep-window"
         && visibleOutputAvailableAtStart
         && (deps.activeRequestCount?.() ?? 1) <= 1
@@ -714,22 +719,16 @@ export function createPrivateLifeRuntime(deps: PrivateLifeRuntimeDeps): PrivateL
         { visibleUserIds: context.visibleUserIds ?? [] },
       );
       const timeSafeTools = baseTools.map((tool) => {
-        if (phase === "sleep-window" && !isReadOnlyTool(tool)) return blockedTool(tool, "2B is asleep");
-        if (selection.actionScope === "reflect-only") {
-          return blockedTool(tool, "this opportunity is private reflection only");
-        }
-        if (selection.actionScope === "quiet-exploration" && !isReadOnlyTool(tool)) {
-          return blockedTool(tool, "this opportunity allows read-only exploration only");
-        }
-        if (selection.actionScope === "private-action" && PUBLIC_ACTION_TOOL_NAMES.has(tool.name)) {
-          return blockedTool(tool, "this opportunity does not allow public Discord actions");
-        }
+        const timeBlockReason = privateLifeToolBlockReason(tool, phase, true);
+        if (timeBlockReason !== undefined) return blockedTool(tool, timeBlockReason);
         if (!PUBLIC_ACTION_TOOL_NAMES.has(tool.name)) return tool;
         return {
           ...tool,
           execute: async (toolCallId: string, params: unknown, signal?: AbortSignal) => {
-            if (!visibleAllowed()) return await blockedTool(tool, "the private-life public-action budget is closed")
-              .execute(toolCallId, params, signal);
+            const blockReason = privateLifeToolBlockReason(tool, phase, visibleAllowed());
+            if (blockReason !== undefined) {
+              return await blockedTool(tool, blockReason).execute(toolCallId, params, signal);
+            }
             const result = await tool.execute(toolCallId, params, signal);
             if (!toolResultFailed(result)) publicAction.executed = true;
             return result;
