@@ -516,6 +516,17 @@ function textFromMessageParts(message: OpenRouterMessage): string {
     .trim();
 }
 
+function privateThoughtsFromTranscript(
+  transcript: readonly OpenRouterMessage[] | undefined,
+): string[] {
+  return (transcript ?? []).flatMap((message): string[] => {
+    if (message.role !== "assistant") return [];
+    const parsed = parseResponseDirectives(textFromMessageParts(message));
+    if (parsed.malformedPrivateOutput === true || parsed.directiveErrors !== undefined) return [];
+    return parsed.privateThoughts ?? [];
+  });
+}
+
 function portableActorTurnEvidence(
   transcript: readonly OpenRouterMessage[] | undefined,
   assistantReply: string,
@@ -3241,6 +3252,7 @@ export async function handleMessage(
       });
       return { triggered: true, triggerResult, agentRan: true, maintenanceTranscript, availableTools: tools, promptContext: maintenancePromptContext };
     }
+    const privateThoughts = privateThoughtsFromTranscript(maintenanceTranscript);
     if (parsedResponse.ignored) {
       if (parsedResponse.ignoredText !== undefined) {
         try {
@@ -3262,7 +3274,7 @@ export async function handleMessage(
         triggered: true,
         triggerResult,
         agentRan: true,
-        ...(parsedResponse.privateThoughts !== undefined ? { privateThoughts: parsedResponse.privateThoughts } : {}),
+        ...(privateThoughts.length > 0 ? { privateThoughts } : {}),
         maintenanceTranscript,
         availableTools: tools,
         promptContext: maintenancePromptContext,
@@ -3275,7 +3287,7 @@ export async function handleMessage(
         triggered: true,
         triggerResult,
         agentRan: true,
-        ...(parsedResponse.privateThoughts !== undefined ? { privateThoughts: parsedResponse.privateThoughts } : {}),
+        ...(privateThoughts.length > 0 ? { privateThoughts } : {}),
         maintenanceTranscript,
         availableTools: tools,
         promptContext: maintenancePromptContext,
@@ -3287,7 +3299,6 @@ export async function handleMessage(
         triggered: true,
         triggerResult,
         agentRan: true,
-        ...(parsedResponse.privateThoughts !== undefined ? { privateThoughts: parsedResponse.privateThoughts } : {}),
         maintenanceTranscript,
         availableTools: tools,
         promptContext: maintenancePromptContext,
@@ -3328,7 +3339,7 @@ export async function handleMessage(
       triggerResult,
       agentRan: true,
       responseText: memoryReply,
-      ...(parsedResponse.privateThoughts !== undefined ? { privateThoughts: parsedResponse.privateThoughts } : {}),
+      ...(privateThoughts.length > 0 ? { privateThoughts } : {}),
       maintenanceTranscript,
       availableTools: tools,
       promptContext: maintenancePromptContext,

@@ -1,5 +1,5 @@
 import type { Database } from "./database";
-import type { HistoryMessage } from "../agent/history-types";
+import { PRIVATE_THOUGHT_MESSAGE_ID_PREFIX, type HistoryMessage } from "../agent/history-types";
 import type { TrimConfig } from "../config/types";
 import type { AssetKind, AssetSourceKind } from "./asset-repository.ts";
 import type { HistoryAsset } from "../agent/history-types.ts";
@@ -1064,9 +1064,10 @@ export function getContextHistoryMessages(
     ? [excludeMessageIds]
     : [...(excludeMessageIds ?? [])];
   const excludeClause = excludedIds.length > 0 ? ` AND id NOT IN (${excludedIds.map(() => "?").join(",")})` : "";
-  const params = [channelId, ...excludedIds];
+  const privateThoughtPattern = `${PRIVATE_THOUGHT_MESSAGE_ID_PREFIX}%`;
+  const params = [channelId, privateThoughtPattern, ...excludedIds];
   const countRow = db.raw
-    .prepare(`SELECT COUNT(*) AS count FROM messages WHERE channel_id = ?${excludeClause}`)
+    .prepare(`SELECT COUNT(*) AS count FROM messages WHERE channel_id = ? AND id NOT LIKE ?${excludeClause}`)
     .get(...params) as { count: number } | null;
   const totalMessages = countRow?.count ?? 0;
   const takeCount = chunkedHistoryTakeCount(totalMessages, trim);
@@ -1076,14 +1077,27 @@ export function getContextHistoryMessages(
     .prepare(
       `SELECT id, author_username, user_id, translated_content, is_bot, webhook_id, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
        FROM messages
-       WHERE channel_id = ?${excludeClause}
+       WHERE channel_id = ? AND id NOT LIKE ?${excludeClause}
        ORDER BY created_at DESC
        LIMIT ?`
     )
     .all(...params, takeCount) as HistoryRow[];
 
   rows.reverse();
-  return hydrateHistoryRows(db, rows);
+  const oldestTimestamp = rows[0]?.created_at;
+  if (oldestTimestamp === undefined) return [];
+  const privateThoughtRows = db.raw
+    .prepare(
+      `SELECT id, author_username, user_id, translated_content, is_bot, webhook_id, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
+       FROM messages
+       WHERE channel_id = ? AND id LIKE ? AND created_at >= ?
+       ORDER BY created_at ASC, id ASC`
+    )
+    .all(channelId, privateThoughtPattern, oldestTimestamp) as HistoryRow[];
+  return hydrateHistoryRows(db, [...rows, ...privateThoughtRows].sort((left, right) => {
+    const timeDiff = left.created_at - right.created_at;
+    return timeDiff !== 0 ? timeDiff : left.id.localeCompare(right.id);
+  }));
 }
 
 /**

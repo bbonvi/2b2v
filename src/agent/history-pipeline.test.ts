@@ -396,6 +396,43 @@ describe("processHistory", () => {
     expect(result.newerText).not.toContain("content-1");
   });
 
+  test("shows private thought traces only beside the recent ordinary window", async () => {
+    const config = {
+      ...defaultConfig,
+      trim: { ...defaultConfig.trim, trimTarget: 5, windowSize: 2, trimTrigger: 20 },
+    };
+    const messages = Array.from({ length: 5 }, (_, index) => [
+      msg({
+        id: `message-${index}`,
+        author: `user${index}`,
+        authorId: `uid-${index}`,
+        content: `content-${index}`,
+        timestamp: 1000 + index * 1000,
+      }),
+      msg({
+        id: `prompt-only:thought:request-${index}`,
+        author: "2b",
+        authorId: "bot-id",
+        content: `<thoughts>thought-${index}</thoughts>`,
+        isBot: true,
+        isPromptOnly: true,
+        timestamp: 1001 + index * 1000,
+        replyToId: `message-${index}`,
+      }),
+    ]).flat();
+    const latest = msg({ id: "latest", content: "latest", timestamp: 7000 });
+
+    const result = await processHistory(messages, latest, config, deps);
+
+    expect(result.olderText).not.toContain("<thoughts>");
+    expect(result.newerText).not.toContain("thought-0");
+    expect(result.newerText).not.toContain("thought-1");
+    expect(result.newerText).toContain("thought-2");
+    expect(result.newerText).toContain("thought-3");
+    expect(result.newerText).toContain("thought-4");
+    expect(result.newerText).not.toContain("prompt-only:thought:");
+  });
+
   test("returns visible human users newest first across older and newer history", async () => {
     const config = {
       ...defaultConfig,

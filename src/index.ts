@@ -30,7 +30,7 @@ import {
 import { typingSimulationDelayMs } from "./agent/typing-simulation";
 import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, selectNormalDispatchTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
-import type { HistoryMessage } from "./agent/history-types";
+import { PRIVATE_THOUGHT_MESSAGE_ID_PREFIX, type HistoryMessage } from "./agent/history-types";
 import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listDiscordChannelUsage, listChannelMessages, getRoutedMessageSource, getLatestMessageActivityBefore, type MessageActivity } from "./db/message-repository";
 import { cleanupDeletedDiscordMessage } from "./db/message-cleanup";
 import {
@@ -41,7 +41,7 @@ import {
   markMemoryExtractionCheckpointAtMessage,
 } from "./db/memory-extraction-repository";
 import { processHistory } from "./agent/history-pipeline";
-import { trimMessages } from "./agent/history-trimming";
+import { normalizeWhitespace, trimMessages } from "./agent/history-trimming";
 import { formatMessageLine, OLDER_LEGEND } from "./agent/history-formatting";
 import { insertDateStamps } from "./agent/history-dates";
 import { formatRelativeAgo } from "./agent/history-dates";
@@ -700,6 +700,35 @@ function persistIgnoredBotReply(input: {
     botUserId: input.botUserId,
     botUsername: input.botUsername,
     content: input.historyText,
+    replyToId: input.sourceMessageId,
+  });
+}
+
+function persistPrivateThoughts(input: {
+  guildId: string;
+  channelId: string;
+  botUserId: string;
+  botUsername: string;
+  sourceMessageId: string;
+  requestId: string;
+  thoughts: string[];
+  maxChars: number;
+}): void {
+  const text = input.thoughts
+    .map(normalizeWhitespace)
+    .filter((thought) => thought !== "")
+    .join("\n\n");
+  if (text === "") return;
+  const content = text.length > input.maxChars
+    ? `${text.slice(0, input.maxChars)}…`
+    : text;
+  insertPromptOnlyBotMessage(db, {
+    id: `${PRIVATE_THOUGHT_MESSAGE_ID_PREFIX}${input.requestId}`,
+    guildId: input.guildId,
+    channelId: input.channelId,
+    botUserId: input.botUserId,
+    botUsername: input.botUsername,
+    content: `<thoughts>${content}</thoughts>`,
     replyToId: input.sourceMessageId,
   });
 }
@@ -5123,7 +5152,17 @@ async function processTriggeredMessage(
         deps,
         requestLog,
         logger: log,
-        afterSuccess: () => {
+        afterSuccess: (result) => {
+          persistPrivateThoughts({
+            guildId,
+            channelId,
+            botUserId: client.user?.id ?? "",
+            botUsername: client.user?.username ?? "bot",
+            sourceMessageId: message.id,
+            requestId: requestLog.requestId,
+            thoughts: result.privateThoughts ?? [],
+            maxChars: guildConfig.trim.messageCharLimit,
+          });
           const botMessageId = sentBotMessageIds.at(-1);
           // Attachment-only and intermediate-only replies have no response text;
           // the delivered Discord message is the durable signal for lingering attention.

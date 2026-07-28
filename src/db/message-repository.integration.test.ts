@@ -542,6 +542,38 @@ describe("getContextHistoryMessages", () => {
     ]);
   });
 
+  test("loads private thought traces without counting them against the ordinary window", () => {
+    for (let index = 0; index < 11; index += 1) {
+      insertMessage(`m${index}`, { channelId: "c1", createdAt: now + index * 10 });
+      insertPromptOnlyBotMessage(db, {
+        id: `prompt-only:thought:r${index}`,
+        guildId: "g1",
+        channelId: "c1",
+        botUserId: "bot-1",
+        botUsername: "2b",
+        content: `<thoughts>thought-${index}</thoughts>`,
+        replyToId: `m${index}`,
+        createdAt: now + index * 10 + 1,
+      });
+    }
+
+    const rows = getContextHistoryMessages(db, "c1", trim);
+
+    expect(rows.filter((message) => !message.id.startsWith("prompt-only:thought:")).map((message) => message.id))
+      .toEqual(["m3", "m4", "m5", "m6", "m7", "m8", "m9", "m10"]);
+    expect(rows.filter((message) => message.id.startsWith("prompt-only:thought:")).map((message) => message.id))
+      .toEqual([
+        "prompt-only:thought:r3",
+        "prompt-only:thought:r4",
+        "prompt-only:thought:r5",
+        "prompt-only:thought:r6",
+        "prompt-only:thought:r7",
+        "prompt-only:thought:r8",
+        "prompt-only:thought:r9",
+        "prompt-only:thought:r10",
+      ]);
+  });
+
   test("keeps deleted message content in context history", () => {
     insertMessage("deleted-msg", { channelId: "c1", translatedContent: "remove me", createdAt: now });
     markDiscordMessageDeleted(db, { id: "deleted-msg", guildId: "g1", channelId: "c1" });

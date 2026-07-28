@@ -1,6 +1,8 @@
 import type { TrimConfig } from "../config/types.ts";
 import type { AssetKind, AssetSourceKind } from "../db/asset-repository.ts";
 
+export const PRIVATE_THOUGHT_MESSAGE_ID_PREFIX = "prompt-only:thought:";
+
 export interface HistoryAsset {
   id: number;
   kind: AssetKind;

@@ -2208,6 +2208,58 @@ describe("handleMessage", () => {
     expect(JSON.stringify(afterReplyCalls[0]?.maintenanceTranscript)).toContain("inspect the broken seal later");
   });
 
+  test("keeps authored thoughts from tool turns in transcript order", async () => {
+    const tool: AgentTool = {
+      name: "lookup",
+      label: "Lookup",
+      description: "Look something up",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({ content: [{ type: "text", text: "found" }], details: {} }),
+    };
+    let calls = 0;
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          text: "<thoughts>Keep the setup quiet until the result arrives.</thoughts>",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "lookup", arguments: "{}" },
+          }],
+          providerNativeContent: [{ type: "thinking", thinking: "provider reasoning" }],
+          rawResponse: {},
+          messageForLogs: {
+            role: "assistant",
+            usage: { input: 1, output: 1, totalTokens: 2 },
+            content: [{ type: "text", text: "<thoughts>Keep the setup quiet until the result arrives.</thoughts>" }],
+          },
+        });
+      }
+      return Promise.resolve({
+        text: "<thoughts>Now use it.</thoughts><message>Found it.</message>",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: {
+          role: "assistant",
+          usage: { input: 1, output: 1, totalTokens: 2 },
+          content: [{ type: "text", text: "<thoughts>Now use it.</thoughts><message>Found it.</message>" }],
+        },
+      });
+    };
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({ completeChat, extraTools: [tool] }),
+    );
+
+    expect(result.privateThoughts).toEqual([
+      "Keep the setup quiet until the result arrives.",
+      "Now use it.",
+    ]);
+    expect(result.privateThoughts).not.toContain("provider reasoning");
+  });
+
   test("blocks malformed thoughts without sending or scheduling maintenance", async () => {
     const completeChat: ChatCompleteFn = () => Promise.resolve({
       text: "<thoughts>private text that must not leak",

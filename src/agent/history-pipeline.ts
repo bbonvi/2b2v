@@ -1,4 +1,5 @@
 import type { HistoryMessage, HistoryProcessingConfig } from "./history-types.ts";
+import { PRIVATE_THOUGHT_MESSAGE_ID_PREFIX } from "./history-types.ts";
 import type { ReplyFallbackDeps } from "./reply-target-fallback.ts";
 import { sortMessages, sliceHistory } from "./history-slicing.ts";
 import { mergeConsecutiveMessages } from "./history-merge.ts";
@@ -32,15 +33,21 @@ export async function processHistory(
   const triggerMessageIds = new Set(config.triggerMessageIds ?? []);
 
   // 1. Sort deterministically
-  const sorted = sortMessages(applyDisplayNames(messages, config.displayNamesByUserId));
+  const allSorted = sortMessages(applyDisplayNames(messages, config.displayNamesByUserId));
+  const privateThoughts = allSorted.filter((message) =>
+    message.id.startsWith(PRIVATE_THOUGHT_MESSAGE_ID_PREFIX)
+  );
+  const sorted = allSorted.filter((message) =>
+    !message.id.startsWith(PRIVATE_THOUGHT_MESSAGE_ID_PREFIX)
+  );
   const latestWithDisplayName = latestUserMessage !== null
     ? annotateTriggerMessage(applyDisplayName(latestUserMessage, config.displayNamesByUserId), triggerMessageIds)
     : null;
 
   // Preserve original message boundaries for exact reply quotes and adjacency.
   const originalMessages = latestWithDisplayName !== null
-    ? [...sorted, latestWithDisplayName]
-    : sorted;
+    ? [...allSorted, latestWithDisplayName]
+    : allSorted;
   const normalizedContentMap = new Map<string, string>();
   const previousMessageIdByMessageId = new Map<string, string | null>();
   let previousMessageId: string | null = null;
@@ -63,15 +70,20 @@ export async function processHistory(
   // 4. Trim older slice only (newer messages kept intact for recency)
   const olderTrimmed = trimMessages(older, config.trim.messageCharLimit);
   const newerTrimmed = newer;
+  const firstNewerTimestamp = newerTrimmed[0]?.timestamp;
+  const recentPrivateThoughts = firstNewerTimestamp === undefined
+    ? []
+    : privateThoughts.filter((message) => message.timestamp >= firstNewerTimestamp);
+  const newerHistory = sortMessages([...newerTrimmed, ...recentPrivateThoughts]);
   const newerMessages = latestWithDisplayName !== null
-    ? [...newerTrimmed, latestWithDisplayName]
-    : newerTrimmed;
+    ? sortMessages([...newerHistory, latestWithDisplayName])
+    : newerHistory;
   const oldestVisibleMessageId = [...olderTrimmed, ...newerTrimmed].find((m) => m.isPromptOnly !== true)?.id;
 
   // 5. Fetch missing reply targets from Discord
   const allForFallback = latestWithDisplayName !== null
-    ? [...olderTrimmed, ...newerTrimmed, latestWithDisplayName]
-    : [...olderTrimmed, ...newerTrimmed];
+    ? [...olderTrimmed, ...newerHistory, latestWithDisplayName]
+    : [...olderTrimmed, ...newerHistory];
   const fetched = applyDisplayNames(await fetchMissingReplyTargets(replyFallbackDeps, allForFallback), config.displayNamesByUserId);
 
   // 6. Add fetched messages to normalized content map
@@ -82,7 +94,7 @@ export async function processHistory(
   // 7. Resolve reply contexts
   const replyResult = resolveReplies({
     older: olderTrimmed,
-    newer: newerTrimmed,
+    newer: newerHistory,
     latestUserMessage: latestWithDisplayName,
     replyQuoteChars: config.replyQuoteChars,
     normalizedContentMap,
