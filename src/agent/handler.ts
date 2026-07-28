@@ -213,6 +213,8 @@ export interface OutboundAttachment {
   buffer: Buffer;
   filename: string;
   contentType: string;
+  /** Send this Discord sticker ID natively; the file fields remain its fallback. */
+  stickerId?: string;
   /** Permanent chat asset that supplied these bytes when this is a repost. */
   sourceAssetId?: number;
   requestedSize?: string;

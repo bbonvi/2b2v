@@ -849,7 +849,7 @@ function createHandlerDeps(input: {
   };
 }
 
-function createAssetAttachmentResolver(_guildId: string, guildConfig: GuildConfig, logger: Logger): AssetAttachmentResolver {
+function createAssetAttachmentResolver(guildId: string, guildConfig: GuildConfig, logger: Logger): AssetAttachmentResolver {
   const resolveSource = createDiscordAssetSourceResolver({
     fetchMessage: async (channelId, messageId) => {
       const channel = await fetchAccessibleGuildChannel(channelId);
@@ -863,13 +863,19 @@ function createAssetAttachmentResolver(_guildId: string, guildConfig: GuildConfi
   });
   return createStoredAssetAttachmentResolver({
     db,
-    stagedGuildId: _guildId,
+    stagedGuildId: guildId,
     maxDownloadBytes: guildConfig.assetReading?.maxDownloadBytes ?? DEFAULT_ASSET_READING.maxDownloadBytes,
     resolveSource,
     resolveLink: async (input, signal) => await resolveLinkContent({
       cache: linkContentCache,
       externalImages: globalConfig.externalImages ?? DEFAULT_EXTERNAL_IMAGES,
     }, input, signal),
+    canSendSticker: async (stickerId) => {
+      const guild = client.guilds.cache.get(guildId);
+      if (guild === undefined) return false;
+      const sticker = await guild.stickers.fetch(stickerId).catch(() => null);
+      return sticker !== null && sticker.available !== false;
+    },
     logger,
   });
 }

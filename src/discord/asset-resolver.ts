@@ -1,4 +1,4 @@
-import type { Message } from "discord.js";
+import { StickerFormatType, type Message } from "discord.js";
 import type { MessageAsset } from "../db/asset-repository.ts";
 import type { ResolvedAssetSource } from "../agent/read-asset-tool.ts";
 
@@ -40,6 +40,14 @@ export function createDiscordAssetSourceResolver(deps: DiscordAssetResolverDeps)
       };
     }
     const sticker = message.stickers.get(asset.sourceKey);
-    return sticker?.url === undefined ? null : { url: sticker.url, contentType: asset.contentType, filename: sticker.name };
+    if (sticker?.url === undefined) return null;
+    const gif = sticker.format === StickerFormatType.GIF;
+    const lottie = sticker.format === StickerFormatType.Lottie;
+    const extension = gif ? "gif" : lottie ? "json" : "png";
+    return {
+      url: sticker.url,
+      contentType: gif ? "image/gif" : lottie ? "application/json" : "image/png",
+      filename: `${sticker.name}.${extension}`,
+    };
   };
 }

@@ -5,8 +5,9 @@ import { getAssetById } from "../db/asset-repository.ts";
 import type { ResolvedAssetSource } from "./read-asset-tool.ts";
 import { fetchAssetBuffer } from "./read-asset-tool.ts";
 import { getStagedAsset } from "../db/staged-asset-repository.ts";
-import { imageMimeFromBuffer } from "./image-buffer.ts";
+import { imageExtensionForMime, imageMimeFromBuffer } from "./image-buffer.ts";
 import type { LinkCacheMode, ResolvedLinkResult } from "./link-content.ts";
+import { extname } from "node:path";
 
 /** Resolve prompt-visible asset IDs into exact outgoing Discord uploads on demand. */
 export function createStoredAssetAttachmentResolver(input: {
@@ -17,10 +18,12 @@ export function createStoredAssetAttachmentResolver(input: {
   stagedGuildId?: string;
   fetchFn?: typeof fetch;
   resolveLink?: (input: { url: string; cacheMode?: LinkCacheMode; raw?: boolean }, signal?: AbortSignal) => Promise<ResolvedLinkResult>;
+  canSendSticker?: (stickerId: string) => Promise<boolean>;
 }): AssetAttachmentResolver {
   return async (assetIds) => {
     const attachments: OutboundAttachment[] = [];
     const seen = new Set<string>();
+    let nativeStickerCount = 0;
     for (const id of assetIds) {
       const key = String(id);
       if (seen.has(key)) continue;
@@ -94,11 +97,25 @@ export function createStoredAssetAttachmentResolver(input: {
           });
           continue;
         }
+        const buffer = await fetchAssetBuffer(input.fetchFn ?? fetch, source.url, input.maxDownloadBytes);
+        const declaredContentType = source.contentType ?? asset.contentType ?? "application/octet-stream";
+        const contentType = asset.kind === "image" || asset.kind === "gif"
+          ? imageMimeFromBuffer(buffer, declaredContentType)
+          : declaredContentType;
+        let filename = source.filename ?? asset.filename ?? `asset-${id}`;
+        if ((asset.kind === "image" || asset.kind === "gif") && extname(filename) === "") {
+          filename = `${filename}.${imageExtensionForMime(contentType)}`;
+        }
+        const nativeSticker = asset.sourceKind === "sticker"
+          && nativeStickerCount < 3
+          && await input.canSendSticker?.(asset.sourceKey) === true;
+        if (nativeSticker) nativeStickerCount++;
         attachments.push({
           id: `asset-${id}`,
-          buffer: await fetchAssetBuffer(input.fetchFn ?? fetch, source.url, input.maxDownloadBytes),
-          filename: source.filename ?? asset.filename ?? `asset-${id}`,
-          contentType: source.contentType ?? asset.contentType ?? "application/octet-stream",
+          buffer,
+          filename,
+          contentType,
+          ...(nativeSticker ? { stickerId: asset.sourceKey } : {}),
           sourceAssetId: id,
         });
       } catch (error) {

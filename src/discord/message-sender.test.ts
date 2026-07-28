@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { MessageFlags } from "discord.js";
-import { buildComponentsV2CardPayload } from "./message-sender";
+import { buildAttachmentPayload, buildComponentsV2CardPayload } from "./message-sender";
+
+test("builds a native sticker message", () => {
+  expect(buildAttachmentPayload("", [], "nonce-1", ["sticker-1"])).toEqual({
+    stickers: ["sticker-1"],
+    nonce: "nonce-1",
+    enforceNonce: true,
+  });
+});
 
 describe("buildComponentsV2CardPayload", () => {
   test("builds a non-interactive Discord Components V2 card", () => {

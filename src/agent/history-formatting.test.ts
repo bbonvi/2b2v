@@ -81,6 +81,26 @@ describe("formatMessageLine", () => {
     })).toBe("[@alice (Images: #21 cat.png [orig #7] [Job img-abc123]; Audio: #22 voice.ogg (5s); Files: #23 notes.pdf (50B))]: hello");
   });
 
+  test("shows stickers separately from their image transport", () => {
+    expect(formatMessageLine({
+      message: message({
+        content: "<sticker>хуйня</sticker>",
+        assets: [{
+          id: 12066,
+          kind: "image",
+          sourceKind: "sticker",
+          filename: "хуйня",
+          contentType: null,
+          size: null,
+          width: null,
+          height: null,
+          durationSeconds: null,
+        }],
+      }),
+      reply: null,
+    })).toBe("[@alice (Stickers: #12066 хуйня)]: <sticker>хуйня</sticker>");
+  });
+
   test("formats reply assets and missing targets", () => {
     const reply: ReplyContext = {
       targetAuthor: "unknown",
@@ -120,7 +140,7 @@ describe("history legends", () => {
   test("describe IDs, assets, and volatile display names", () => {
     expect(OLDER_LEGEND).toContain("read_asset");
     expect(NEWER_LEGEND).toContain("display name");
-    expect(NEWER_LEGEND).toContain("Images/GIFs/Audio/Video/Text/Files/Links");
+    expect(NEWER_LEGEND).toContain("Stickers/Images/GIFs/Audio/Video/Text/Files/Links");
     expect(NEWER_LEGEND).toContain("Webhook");
   });
 });

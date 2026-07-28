@@ -56,6 +56,93 @@ describe("stored asset attachments", () => {
     expect(attachments[0]?.sourceAssetId).toBe(asset.id);
   });
 
+  test("uses a native sticker and keeps a typed image fallback", async () => {
+    const [asset] = syncMessageAssets(db, {
+      messageId: "sticker-message",
+      assets: [{
+        messageId: "sticker-message",
+        guildId: "g",
+        channelId: "c",
+        sourceKind: "sticker",
+        sourceKey: "sticker-1",
+        kind: "image",
+        filename: "хуйня",
+        contentType: null,
+        size: null,
+        width: null,
+        height: null,
+        durationSeconds: null,
+        createdAt: 1,
+      }],
+    });
+    if (asset === undefined) throw new Error("test asset was not created");
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+    const resolver = createStoredAssetAttachmentResolver({
+      db,
+      maxDownloadBytes: 1024,
+      resolveSource: () => Promise.resolve({
+        url: "https://cdn.test/sticker.png",
+        contentType: null,
+        filename: "хуйня",
+      }),
+      canSendSticker: () => Promise.resolve(true),
+      logger: createLogger({ level: "error" }),
+      fetchFn: (() => Promise.resolve(new Response(png))) as unknown as typeof fetch,
+    });
+
+    const attachments = await resolver([asset.id]);
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]).toMatchObject({
+      filename: "хуйня.png",
+      contentType: "image/png",
+      stickerId: "sticker-1",
+      sourceAssetId: asset.id,
+    });
+  });
+
+  test("uploads an unavailable GIF sticker with a GIF extension", async () => {
+    const [asset] = syncMessageAssets(db, {
+      messageId: "sticker-message",
+      assets: [{
+        messageId: "sticker-message",
+        guildId: "g",
+        channelId: "c",
+        sourceKind: "sticker",
+        sourceKey: "sticker-1",
+        kind: "gif",
+        filename: "dance",
+        contentType: null,
+        size: null,
+        width: null,
+        height: null,
+        durationSeconds: null,
+        createdAt: 1,
+      }],
+    });
+    if (asset === undefined) throw new Error("test asset was not created");
+    const gif = Buffer.from("GIF89a");
+    const resolver = createStoredAssetAttachmentResolver({
+      db,
+      maxDownloadBytes: 1024,
+      resolveSource: () => Promise.resolve({
+        url: "https://cdn.test/sticker.gif",
+        contentType: null,
+        filename: "dance",
+      }),
+      canSendSticker: () => Promise.resolve(false),
+      logger: createLogger({ level: "error" }),
+      fetchFn: (() => Promise.resolve(new Response(gif))) as unknown as typeof fetch,
+    });
+
+    const attachments = await resolver([asset.id]);
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]).toMatchObject({
+      filename: "dance.gif",
+      contentType: "image/gif",
+      sourceAssetId: asset.id,
+    });
+  });
+
   test("does not repost when the live source is inaccessible", async () => {
     const [asset] = syncMessageAssets(db, {
       messageId: "source-message",

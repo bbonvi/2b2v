@@ -46,3 +46,24 @@ describe("message links", () => {
     expect(assets.filter((asset) => asset.kind === "image")).toHaveLength(1);
   });
 });
+
+test("records a sticker source separately from its image kind", () => {
+  const assets = assetsFromDiscordMessageData({
+    id: "m1",
+    guildId: "g1",
+    channelId: "c1",
+    createdAt: 1,
+    content: "",
+    attachments: [],
+    embeds: [],
+    stickers: [{ id: "sticker-1", name: "хуйня", formatType: 1 }],
+  });
+
+  expect(assets).toHaveLength(1);
+  expect(assets[0]).toMatchObject({
+    sourceKind: "sticker",
+    sourceKey: "sticker-1",
+    kind: "image",
+    filename: "хуйня",
+  });
+});

@@ -15,6 +15,7 @@ import { assertSafeDiscordText } from "./outbound-xml-guard.ts";
 type AttachmentSendPayload = {
   content?: string;
   files?: AttachmentBuilder[];
+  stickers?: string[];
   nonce?: string;
   enforceNonce?: boolean;
   components?: ContainerBuilder[];
@@ -31,10 +32,16 @@ function discordMessageNonce(dedupeKey: string | undefined, part: string): strin
   return createHash("sha256").update(`${dedupeKey}:${part}`).digest("base64url").slice(0, 25);
 }
 
-function buildAttachmentPayload(content: string, attachments: AttachmentBuilder[], nonce?: string): AttachmentSendPayload {
+export function buildAttachmentPayload(
+  content: string,
+  attachments: AttachmentBuilder[],
+  nonce?: string,
+  stickerIds: string[] = [],
+): AttachmentSendPayload {
   return {
     ...(content !== "" ? { content } : {}),
     ...(attachments.length > 0 ? { files: attachments } : {}),
+    ...(stickerIds.length > 0 ? { stickers: stickerIds } : {}),
     ...(nonce !== undefined ? { nonce, enforceNonce: true } : {}),
   };
 }
@@ -306,9 +313,10 @@ export function createDiscordMessageSender(input: {
     const stored = syncMessageAssets(input.db, { messageId: message.id, assets: assetsFromDiscordMessage(message) });
     const storedBySourceKey = new Map(stored.map((asset) => [asset.sourceKey, asset.id]));
     const deliveredIds = [...message.attachments.keys()].slice(leadingAttachmentCount);
-    for (const [index, attachment] of outboundAttachments.entries()) {
+    let deliveredAttachmentIndex = 0;
+    for (const attachment of outboundAttachments) {
+      const deliveredId = attachment.stickerId ?? deliveredIds[deliveredAttachmentIndex++];
       if (attachment.sourceAssetId === undefined) continue;
-      const deliveredId = deliveredIds[index];
       const storedId = deliveredId === undefined ? undefined : storedBySourceKey.get(deliveredId);
       if (storedId !== undefined) recordAssetRepost(input.db, storedId, attachment.sourceAssetId);
     }
@@ -316,7 +324,13 @@ export function createDiscordMessageSender(input: {
 
   function attachmentBuilders(attachments: OutboundAttachment[] | undefined): AttachmentBuilder[] {
     if (attachments === undefined || attachments.length === 0) return [];
-    return attachments.map((attachment) => new AttachmentBuilder(attachment.buffer, { name: attachment.filename }));
+    return attachments
+      .filter((attachment) => attachment.stickerId === undefined)
+      .map((attachment) => new AttachmentBuilder(attachment.buffer, { name: attachment.filename }));
+  }
+
+  function stickerIds(attachments: OutboundAttachment[] | undefined): string[] {
+    return attachments?.flatMap((attachment) => attachment.stickerId === undefined ? [] : [attachment.stickerId]) ?? [];
   }
 
   return async (text, reply, channelId, voice, _signal, replyToMessageId, attachments, dedupeKey, presentation) => {
@@ -416,6 +430,7 @@ export function createDiscordMessageSender(input: {
     if (voice !== undefined) {
       const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
       const imageAttachments = attachmentBuilders(attachments);
+      const nativeStickerIds = stickerIds(attachments);
       const warnings: string[] = [];
       const translated = translateOutbound(text, outboundResolvers, warnings);
       const chunks = splitMessage(translated);
@@ -424,6 +439,7 @@ export function createDiscordMessageSender(input: {
         firstChunk,
         [attachment, ...imageAttachments],
         discordMessageNonce(dedupeKey, "voice-0"),
+        nativeStickerIds,
       );
       let sent: Message;
       let sentReplyToId: string | null;
@@ -465,8 +481,9 @@ export function createDiscordMessageSender(input: {
     const translated = translateOutbound(text, outboundResolvers, warnings);
     assertSafeDiscordText(translated);
     const imageAttachments = attachmentBuilders(attachments);
+    const nativeStickerIds = stickerIds(attachments);
     if (presentation?.kind === "components_v2_card") {
-      if (imageAttachments.length > 0) throw new Error("Components V2 cards cannot use legacy attachments through this sender.");
+      if (attachments !== undefined && attachments.length > 0) throw new Error("Components V2 cards cannot use legacy attachments or stickers through this sender.");
       const payload = buildComponentsV2CardPayload(
         translated,
         presentation,
@@ -489,7 +506,7 @@ export function createDiscordMessageSender(input: {
       return { sentMessageId: delivered.message.id, warnings: unresolvedEmojiWarnings(warnings) };
     }
     const chunks = splitMessage(translated);
-    if (chunks.length === 0 && imageAttachments.length > 0) chunks.push("");
+    if (chunks.length === 0 && (imageAttachments.length > 0 || nativeStickerIds.length > 0)) chunks.push("");
     let firstId = "";
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i] as string;
@@ -497,6 +514,7 @@ export function createDiscordMessageSender(input: {
         chunk,
         i === 0 ? imageAttachments : [],
         discordMessageNonce(dedupeKey, `text-${i}`),
+        i === 0 ? nativeStickerIds : [],
       );
       let sent: Message;
       let sentReplyToId: string | null;
