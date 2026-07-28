@@ -226,6 +226,29 @@ describe("listThreadsForContext", () => {
     expect(listThreadsForContext(db, "ch-1")).toHaveLength(1);
   });
 
+  test("hides threads that were closed more than one day ago", () => {
+    const now = Date.now();
+    for (const [threadId, archivedAt] of [
+      ["open", null],
+      ["recently-closed", now - 23 * 60 * 60 * 1000],
+      ["stale-closed", now - 25 * 60 * 60 * 1000],
+    ] as const) {
+      insertThread(db, {
+        threadId,
+        guildId: "guild-1",
+        parentChatId: "ch-1",
+        starterMessageId: threadId,
+        threadName: threadId,
+        archivedAt,
+      });
+    }
+
+    expect(listThreadsForContext(db, "ch-1").map((thread) => thread.threadId).sort()).toEqual([
+      "open",
+      "recently-closed",
+    ]);
+  });
+
   test("filters by parent chat", () => {
     insertThread(db, {
       threadId: "thread-1",

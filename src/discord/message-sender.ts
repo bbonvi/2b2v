@@ -407,7 +407,7 @@ export function createDiscordMessageSender(input: {
       const updated = updateThreadActivity(input.db, targetChannelId, {
         lastActivityAt: activityAt,
         lastMessageId: sentMessageId,
-        archivedAt: targetChannel.archived === true ? activityAt : null,
+        archivedAt: targetChannel.archived === true ? targetChannel.archiveTimestamp : null,
       });
       if (!updated) {
         upsertThread(input.db, {
@@ -421,7 +421,7 @@ export function createDiscordMessageSender(input: {
           lastMessageId: sentMessageId,
           messageCount: targetChannel.messageCount ?? 1,
           createdByBot: targetChannel.ownerId === input.botUserId,
-          archivedAt: targetChannel.archived === true ? activityAt : null,
+          archivedAt: targetChannel.archived === true ? targetChannel.archiveTimestamp : null,
         });
       }
       markBotParticipating(input.db, targetChannelId);

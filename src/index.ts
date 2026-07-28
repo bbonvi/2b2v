@@ -3236,7 +3236,7 @@ async function buildContext(
       messageCount: liveChannel.messageCount ?? 0,
       botParticipating: false,
       createdByBot: liveChannel.ownerId === client.user?.id,
-      archivedAt: liveChannel.archived === true ? Date.now() : null,
+      archivedAt: liveChannel.archived === true ? liveChannel.archiveTimestamp : null,
     });
   }
 
@@ -3258,7 +3258,7 @@ async function buildContext(
         lastActivityAt: existing?.lastActivityAt ?? createdAt,
         messageCount: cached.messageCount ?? 0,
         createdByBot: cached.ownerId === client.user?.id,
-        archivedAt: cached.archived === true ? Date.now() : null,
+        archivedAt: cached.archived === true ? cached.archiveTimestamp : null,
       });
     }
     const threads = listThreadsForContext(db, channelId);
@@ -5306,7 +5306,7 @@ function persistInboundDiscordMessage(message: Message, rawContent: string, tran
     const updated = updateThreadActivity(db, channelId, {
       lastActivityAt: messageCreatedAt,
       lastMessageId: message.id,
-      archivedAt: message.channel.archived === true ? now : null,
+      archivedAt: message.channel.archived === true ? message.channel.archiveTimestamp : null,
     });
     if (!updated) {
       upsertThread(db, {
@@ -5320,7 +5320,7 @@ function persistInboundDiscordMessage(message: Message, rawContent: string, tran
         lastMessageId: message.id,
         messageCount: message.channel.messageCount ?? 1,
         createdByBot: message.channel.ownerId === client.user?.id,
-        archivedAt: message.channel.archived === true ? now : null,
+        archivedAt: message.channel.archived === true ? message.channel.archiveTimestamp : null,
       });
     }
   }

@@ -1,5 +1,7 @@
 import type { Database } from "./database";
 
+const CLOSED_THREAD_CONTEXT_TTL_MS = 24 * 60 * 60 * 1000;
+
 export interface ThreadRow {
   threadId: string;
   guildId: string;
@@ -174,7 +176,8 @@ export interface ThreadContextInfo {
 }
 
 /**
- * List bot-participating threads for a parent chat, ordered by last activity DESC.
+ * List open and recently closed bot-participating threads for a parent chat,
+ * ordered by last activity DESC.
  * Used for "Threads In This Chat" context section.
  */
 export function listThreadsForContext(
@@ -187,11 +190,13 @@ export function listThreadsForContext(
       `SELECT thread_id, thread_name, message_count, last_activity_at
         , starter_message_id, last_message_id, bot_participating, created_by_bot, archived_at
        FROM threads
-       WHERE parent_chat_id = ? AND (bot_participating = 1 OR created_by_bot = 1)
+       WHERE parent_chat_id = ?
+         AND (bot_participating = 1 OR created_by_bot = 1)
+         AND (archived_at IS NULL OR archived_at >= ?)
        ORDER BY last_activity_at DESC
        LIMIT ?`
     )
-    .all(parentChatId, limit) as Array<{
+    .all(parentChatId, Date.now() - CLOSED_THREAD_CONTEXT_TTL_MS, limit) as Array<{
       thread_id: string;
       thread_name: string;
       starter_message_id: string;
