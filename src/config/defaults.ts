@@ -153,6 +153,7 @@ export const DEFAULT_AMBIENT_INITIATIVE: AmbientInitiativeConfig = {
   enabled: false,
   botContactIds: [],
   shadowMode: false,
+  wallClockTimeoutMs: 500_000,
   checkIntervalMinMs: 10 * 60 * 1000,
   checkIntervalMaxMs: 20 * 60 * 1000,
   activeHours: {
@@ -180,6 +181,7 @@ export const DEFAULT_AMBIENT_INITIATIVE: AmbientInitiativeConfig = {
 export const DEFAULT_PRIVATE_LIFE: PrivateLifeConfig = {
   enabled: false,
   modelProfile: "main",
+  wallClockTimeoutMs: 500_000,
   maintenance: {
     modelProfile: "main",
   },

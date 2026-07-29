@@ -285,6 +285,7 @@ describe("model profile resolution", () => {
     const configured = loadGlobalConfig(BASE_ENV, writeConfig([
       "privateLife:",
       "  enabled: true",
+      "  wallClockTimeoutMs: 501000",
       "  opportunitiesPerDay: 37",
       "  sleepRateMultiplier: 0.02",
       "  candidateCount: 7",
@@ -304,6 +305,7 @@ describe("model profile resolution", () => {
 
     expect(configured.privateLife).toMatchObject({
       enabled: true,
+      wallClockTimeoutMs: 501_000,
       opportunitiesPerDay: 37,
       sleepRateMultiplier: 0.02,
       candidateCount: 7,
@@ -339,6 +341,10 @@ describe("model profile resolution", () => {
       "privateLife:",
       "  visibleOutputCooldownMinutes: 1441",
     ].join("\n")))).toThrow("privateLife.visibleOutputCooldownMinutes must be between 0 and 1440");
+    expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+      "privateLife:",
+      "  wallClockTimeoutMs: 999",
+    ].join("\n")))).toThrow("privateLife.wallClockTimeoutMs must be >= 1000");
     expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
       "privateLife:",
       "  guildId: guild-1",
@@ -387,6 +393,25 @@ describe("guild resolution and persistence", () => {
       slug: "",
       innerThreads: { enabled: true, modelProfile: "main" },
     }).innerThreads).toEqual({ enabled: true, modelProfile: "main" });
+  });
+
+  test("inherits and overrides ambient initiative wall-clock budget", () => {
+    const global = loadGlobalConfig(BASE_ENV, writeConfig([
+      configText,
+      "ambientInitiative:",
+      "  wallClockTimeoutMs: 500000",
+    ].join("\n")));
+    expect(global.defaultAmbientInitiative?.wallClockTimeoutMs).toBe(500_000);
+    expect(resolveGuildConfig(global, {
+      guildId: "2",
+      slug: "",
+      ambientInitiative: { wallClockTimeoutMs: 501_000 },
+    }).ambientInitiative?.wallClockTimeoutMs).toBe(501_000);
+    expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+      configText,
+      "ambientInitiative:",
+      "  wallClockTimeoutMs: 999",
+    ].join("\n")))).toThrow("ambientInitiative.wallClockTimeoutMs must be >= 1000");
   });
 
   test("inherits and overrides bounded notebook configuration", () => {
@@ -448,12 +473,14 @@ describe("guild resolution and persistence", () => {
       slug: "fast",
       modelProfile: "fast",
       instructions: "Guild instructions",
+      ambientInitiative: { wallClockTimeoutMs: 501_000 },
     });
     saveGuildConfig(path, config);
     expect(loadGuildConfigFile(path)).toMatchObject({
       modelProfile: "fast",
       instructions: "Guild instructions",
       innerThreads: { enabled: true, modelProfile: "main" },
+      ambientInitiative: { wallClockTimeoutMs: 501_000 },
     });
   });
 });

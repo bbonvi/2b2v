@@ -699,6 +699,7 @@ export function createPrivateLifeRuntime(deps: PrivateLifeRuntimeDeps): PrivateL
         replyLoop: {
           ...location.guildConfig.replyLoop,
           maxToolCalls: current.maxToolCalls,
+          wallClockTimeoutMs: current.wallClockTimeoutMs,
         },
       };
       const generatedImages = createGeneratedImageRuntime();

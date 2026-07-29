@@ -819,6 +819,9 @@ function resolvePrivateLifeConfig(partial: PrivateLifeConfigYaml | undefined): P
   if (!Number.isInteger(resolved.maxToolCalls) || resolved.maxToolCalls < 0) {
     throw new Error("privateLife.maxToolCalls must be >= 0");
   }
+  if (!Number.isFinite(resolved.wallClockTimeoutMs) || resolved.wallClockTimeoutMs < 1000) {
+    throw new Error("privateLife.wallClockTimeoutMs must be >= 1000");
+  }
   if (!Number.isInteger(resolved.recentThemeLimit) || resolved.recentThemeLimit < 1 || resolved.recentThemeLimit > 200) {
     throw new Error("privateLife.recentThemeLimit must be between 1 and 200");
   }
@@ -909,6 +912,9 @@ function validateClockTime(value: string, keyPrefix: string): void {
 function validateAmbientInitiativeConfig(config: AmbientInitiativeConfig, keyPrefix: string): void {
   if (new Set(config.botContactIds).size !== config.botContactIds.length) {
     throw new Error(`${keyPrefix}.botContactIds must not contain duplicates`);
+  }
+  if (!Number.isFinite(config.wallClockTimeoutMs) || config.wallClockTimeoutMs < 1000) {
+    throw new Error(`${keyPrefix}.wallClockTimeoutMs must be >= 1000`);
   }
   if (!Number.isFinite(config.checkIntervalMinMs) || config.checkIntervalMinMs < 1000) {
     throw new Error(`${keyPrefix}.checkIntervalMinMs must be >= 1000`);
@@ -1517,6 +1523,7 @@ export function saveGuildConfig(filePath: string, config: GuildConfig): void {
     typingSimulation: config.typingSimulation,
     promptTransport: config.promptTransport,
     ambientAttention: config.ambientAttention,
+    ambientInitiative: config.ambientInitiative,
     relationships: config.relationships,
     innerThreads: config.innerThreads,
     notebooks: config.notebooks,

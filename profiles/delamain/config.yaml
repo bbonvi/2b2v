@@ -216,6 +216,7 @@ ambientInitiative:
     botContactIds:
         - "1130796465049042954" # (2B production Discord user ID)
     shadowMode: false # (when true, evaluate/log but do not send automatic initiatives)
+    wallClockTimeoutMs: 500000 # (wall-clock budget for one autonomous actor turn)
     mainChannelId: "" # (empty auto-picks most active human channel over lookback)
     checkIntervalMinMs: 600000 # (shortest jittered cheap opportunity check interval)
     checkIntervalMaxMs: 1200000 # (longest jittered cheap opportunity check interval)

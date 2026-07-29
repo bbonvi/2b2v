@@ -667,6 +667,13 @@ export function createGenericAmbientInitiativeRuntime(
     preSendRejected: boolean;
     rejectedDraft?: string;
   }> {
+    const actorGuildConfig: GuildConfig = {
+      ...input.guildConfig,
+      replyLoop: {
+        ...input.guildConfig.replyLoop,
+        wallClockTimeoutMs: input.config.wallClockTimeoutMs,
+      },
+    };
     const botUserId = deps.client.user?.id ?? "";
     const botUsername = deps.client.user?.username ?? "bot";
     const now = Date.now();
@@ -705,7 +712,7 @@ export function createGenericAmbientInitiativeRuntime(
       input.candidate.guildId,
       input.candidate.channelId,
       input.guild,
-      input.guildConfig,
+      actorGuildConfig,
       opportunityText,
       latest,
       deps.createSyntheticReplyFallbackDeps({
@@ -752,7 +759,7 @@ export function createGenericAmbientInitiativeRuntime(
     const baseTools = deps.buildAgentTools(
       input.candidate.guildId,
       input.candidate.channelId,
-      input.guildConfig,
+      actorGuildConfig,
       input.guild,
       context.contextMessageIds ?? [],
       generatedImages.onGeneratedImage,
@@ -761,7 +768,7 @@ export function createGenericAmbientInitiativeRuntime(
     );
     const visibleMaintenanceTools = deps.createVisibleMaintenanceTools({
       guild: input.guild,
-      guildConfig: input.guildConfig,
+      guildConfig: actorGuildConfig,
       memoryRequest: {
         sourceMessageId: input.candidate.id,
         userMessage: opportunityText,
@@ -832,7 +839,7 @@ export function createGenericAmbientInitiativeRuntime(
       incoming,
       deps.createHandlerDeps({
         guildId: input.candidate.guildId,
-        guildConfig: input.guildConfig,
+        guildConfig: actorGuildConfig,
         context,
         currentChannelId: input.candidate.channelId,
         sender,
@@ -884,7 +891,7 @@ export function createGenericAmbientInitiativeRuntime(
             : {
                 afterReply: async (request) => {
                   await deps.runMaintenance?.({
-                    guildConfig: input.guildConfig,
+                    guildConfig: actorGuildConfig,
                     request,
                     guild: input.guild,
                     channel: input.channel,

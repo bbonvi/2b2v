@@ -53,6 +53,8 @@ export interface PrivateLifeConfig {
   enabled: boolean;
   /** Named model profile used by private-life actor turns. */
   modelProfile: string;
+  /** Wall-clock budget for one private-life actor turn and its maintenance. */
+  wallClockTimeoutMs: number;
   /** Hidden episode-summary maintenance policy. */
   maintenance: PrivateLifeMaintenanceConfig;
   opportunitiesPerDay: number;

@@ -259,6 +259,8 @@ export interface AmbientInitiativeConfig {
   /** Known Discord bot contacts the actor may choose to address. */
   botContactIds: string[];
   shadowMode: boolean;
+  /** Wall-clock budget for one autonomous actor turn. */
+  wallClockTimeoutMs: number;
   mainChannelId?: string;
   checkIntervalMinMs: number;
   checkIntervalMaxMs: number;

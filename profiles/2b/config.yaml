@@ -55,6 +55,7 @@ modelProfile: main
 privateLife:
     enabled: true
     modelProfile: main
+    wallClockTimeoutMs: 500000 # (wall-clock budget for one private-life actor turn and its maintenance)
     maintenance:
         modelProfile: maintenance
     opportunitiesPerDay: 16
@@ -325,6 +326,7 @@ ambientAttention:
 ambientInitiative:
     enabled: true # (allow proactive non-triggered initiative in the main channel)
     shadowMode: false # (when true, evaluate/log but do not send automatic initiatives)
+    wallClockTimeoutMs: 500000 # (wall-clock budget for one autonomous actor turn)
     mainChannelId: "" # (empty auto-picks most active human channel over lookback)
     checkIntervalMinMs: 300000 # (shortest jittered cheap opportunity check interval)
     checkIntervalMaxMs: 600000 # (longest jittered cheap opportunity check interval)

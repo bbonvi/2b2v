@@ -61,6 +61,7 @@ trim:
 # Optional known bot contacts available to the actor during ordinary initiative.
 # ambientInitiative:
 #   botContactIds: ["000000000000000000"]
+#   wallClockTimeoutMs: 500000
 
 # Discord user IDs with admin access to bot commands
 adminUserIds: []
