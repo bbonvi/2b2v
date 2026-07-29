@@ -111,12 +111,16 @@ describe("repository profile layout", () => {
       expect(bundle.runtime.skills.requiredByTool.list_scheduled_tasks).toBe("scheduling");
       expect(bundle.runtime.skills.requiredByTool.delete_scheduled_task).toBe("scheduling");
       if (profile === "2b") {
-        expect(bundle.runtime.skills.requiredByTool.patch_notebook).toBeUndefined();
-        expect(bundle.runtime.skills.requiredByTool.manage_notebook).toBe("notebooks");
-        expect(bundle.runtime.skills.requiredByTool.list_notebook_revisions).toBe("notebooks");
-        expect(bundle.runtime.skills.requiredByTool.find_notebooks).toBeUndefined();
-        expect(bundle.runtime.skills.requiredByTool.search_notebook).toBeUndefined();
-        expect(bundle.runtime.skills.requiredByTool.read_notebook).toBeUndefined();
+        for (const tool of [
+          "find_notebooks",
+          "search_notebook",
+          "read_notebook",
+          "patch_notebook",
+          "list_notebook_revisions",
+          "manage_notebook",
+        ]) {
+          expect(bundle.runtime.skills.requiredByTool[tool]).toBe("notebooks");
+        }
       }
       for (const tool of [
         "codex_generate_image",

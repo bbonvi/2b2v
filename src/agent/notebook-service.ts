@@ -619,7 +619,12 @@ export function buildNotebooksContext(input: {
   const cold = countColdNotebooks(input.db, now);
   if (active.length === 0 && shelved.length === 0 && cold.archived === 0 && cold.trashed === 0) return "";
 
-  const lines = ["## Notebooks"];
+  // Keep the retrieval cue beside the full index where the model chooses whether a notebook matters now.
+  const lines = [
+    "## Notebooks",
+    "",
+    "Read an active notebook when her current action continues or changes its tracked work. She may read any notebook related to the subject at hand. Merely mentioning its subject does not require a read.",
+  ];
   if (selectedShelved.length > 0) {
     lines.push("", "A shelved row's `[age]` is the rough time since its last edit.");
   }
@@ -631,14 +636,7 @@ export function buildNotebooksContext(input: {
     if (overflow !== undefined) lines.push(...(selectedShelved.length > 0 ? [""] : []), overflow);
   }
   if (active.length > 0) {
-    // Keep the retrieval cue beside the titles where the model chooses whether they matter now.
-    lines.push(
-      "",
-      "### Active",
-      "",
-      "Read an active notebook when her current action continues or changes its tracked work. Merely mentioning its subject does not require a read.",
-      "",
-    );
+    lines.push("", "### Active", "");
     lines.push(...selectedActive.map((notebook) => `${notebook.id} | ${notebook.title}`));
     const overflow = overflowLine(active.length - selectedActive.length);
     if (overflow !== undefined) lines.push(...(selectedActive.length > 0 ? [""] : []), overflow);

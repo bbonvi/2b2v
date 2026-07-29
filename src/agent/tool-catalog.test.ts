@@ -82,7 +82,7 @@ describe("ToolCatalog", () => {
       .toEqual(["custom_profile_action"]);
   });
 
-  test("keeps notebook reading and patching active but defers management and revision history", () => {
+  test("keeps common notebook tools visible initially but defers management and revision history", () => {
     const tools = [
       tool("find_notebooks"),
       tool("search_notebook"),

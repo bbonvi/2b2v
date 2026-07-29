@@ -1,8 +1,12 @@
 id: notebooks
 title: Notebooks
-# Patching stays direct; the skill gates rarer lifecycle and history operations.
-description: Load to unlock additional notebook management and history tools for creating, rewriting, changing state, trashing, restoring, or inspecting revisions. Reading and patching an active notebook do not require it.
+# Common tools remain visible before loading; the skill requirement gates use, not discovery.
+description: Use whenever 2B works with a notebook. It covers selection and reuse, form, recall, state, revisions, and when changes belong in the active turn.
 required_for_tools:
+  - find_notebooks
+  - search_notebook
+  - read_notebook
+  - patch_notebook
   - list_notebook_revisions
   - manage_notebook
 instructions:
