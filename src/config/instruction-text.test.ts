@@ -13,15 +13,14 @@ describe("stripMarkdownComments", () => {
       "Done.",
     ].join("\n"))).toBe([
       "Keep this.",
-      "",
       "Keep that.",
-      "",
       "Done.",
     ].join("\n"));
   });
 
   test("removes inline comments without changing surrounding text", () => {
     expect(stripMarkdownComments("before<!-- hidden -->after")).toBe("beforeafter");
+    expect(stripMarkdownComments("<!-- hidden -->before\n<!-- remove -->\nafter")).toBe("before\nafter");
   });
 
   test("leaves unclosed comments unchanged", () => {
