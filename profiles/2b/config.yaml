@@ -509,7 +509,7 @@ assetReading:
     maxDownloadBytes: 104857600
     maxTranscriptionDurationSeconds: 7200
     videoPreviewMaxBytes: 104857600
-    videoPreviewTimesSeconds: [0, 1, 5]
+    videoPreviewTimesSeconds: [0, 1, 5, 10, 15]
     videoPreviewTimeoutSeconds: 30
     timeoutSeconds:
         image: 30
