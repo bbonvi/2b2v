@@ -386,7 +386,22 @@ function parsePatch(changeText: string): ParsedPatchHunk[] {
   const lines = changeText.split("\n");
   const hunks: ParsedPatchHunk[] = [];
   let current: ParsedPatchHunk | undefined;
+  let expectsContextLine = false;
   for (const line of lines) {
+    if (line === "@@") {
+      current = undefined;
+      expectsContextLine = true;
+      continue;
+    }
+    if (expectsContextLine) {
+      if (!line.startsWith(" ") || line.length === 1) {
+        throw new Error("Bare '@@' must be followed by a space-prefixed context line.");
+      }
+      current = { context: line.slice(1), oldLines: [], newLines: [] };
+      hunks.push(current);
+      expectsContextLine = false;
+      continue;
+    }
     if (line.startsWith("@@ ")) {
       const context = line.slice(3);
       if (context === "") throw new Error("Patch context cannot be empty.");
@@ -404,6 +419,7 @@ function parsePatch(changeText: string): ParsedPatchHunk[] {
       throw new Error(`Malformed patch line: ${line}`);
     }
   }
+  if (expectsContextLine) throw new Error("Bare '@@' must be followed by a space-prefixed context line.");
   if (hunks.length === 0) throw new Error("Patch has no hunks.");
   for (const hunk of hunks) {
     if (hunk.oldLines.length === 0 && hunk.newLines.length === 0) {

@@ -132,6 +132,13 @@ describe("notebook patches and revisions", () => {
       .toThrow("Patch context is ambiguous");
   });
 
+  test("accepts a bare hunk header with a space-prefixed context", () => {
+    expect(applyNotebookPatch(
+      "## Сейчас\n- Макетка входного каскада на SN74LVC1G17.\n- Второй пороговый вход пока не ставлю.",
+      "@@\n ## Сейчас\n-- Макетка входного каскада на SN74LVC1G17.\n-- Второй пороговый вход пока не ставлю.\n+- Макетка входного каскада на SN74LVC1G17 собрана.",
+    )).toBe("## Сейчас\n- Макетка входного каскада на SN74LVC1G17 собрана.");
+  });
+
   test("rolls back every hunk when one context fails", () => {
     const notebook = createNotebook(db, {
       title: "Rollback",

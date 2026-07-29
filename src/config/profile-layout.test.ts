@@ -77,7 +77,7 @@ describe("repository profile layout", () => {
         "update_current_scheduled_task/handoffNote",
       ];
       const profileParameterDescriptions = profile === "2b"
-        ? ["instruct_voice_channel/instruction"]
+        ? ["instruct_voice_channel/instruction", "patch_notebook/patch"]
         : [];
       expect(Object.keys(bundle.runtime.toolParameterDescriptions).sort()).toEqual(
         [...sharedParameterDescriptions, ...profileParameterDescriptions].sort(),
