@@ -128,6 +128,20 @@ describe("search_channel_messages", () => {
     expect(text(result)).not.toContain("MsgID: other");
   });
 
+  test("accepts local dates as search boundaries", async () => {
+    insertMessage("before", "wanted", { createdAt: Date.UTC(2026, 4, 31, 23, 59) });
+    insertMessage("inside", "wanted", { createdAt: Date.UTC(2026, 5, 1, 12) });
+    insertMessage("after", "wanted", { createdAt: Date.UTC(2026, 5, 2, 0, 1) });
+    const result = await tool().execute("tc", {
+      pattern: "wanted",
+      after: "2026-06-01",
+      before: "2026-06-02",
+    }, AbortSignal.timeout(5000));
+    expect(text(result)).toContain("MsgID: inside");
+    expect(text(result)).not.toContain("MsgID: before");
+    expect(text(result)).not.toContain("MsgID: after");
+  });
+
   test("supports user and asset filters without a regex", async () => {
     insertMessage("wanted", "file owner", { userId: "u1" });
     insertMessage("other", "no file", { userId: "u2" });

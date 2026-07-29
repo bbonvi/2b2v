@@ -145,6 +145,26 @@ export function parseLocalDateTimeToEpoch(localDateTime: string, timezone: strin
   }
 }
 
+/** Parse a local date boundary or exact local datetime into epoch ms. */
+export function parseLocalDateBoundaryToEpoch(value: string, timezone: string): ParseResult {
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(value)) {
+    return parseLocalDateTimeToEpoch(value, timezone);
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return { ok: false, error: "Invalid format. Expected: YYYY-MM-DD or YYYY-MM-DD HH:mm" };
+  }
+  if (!isValidTemporalTimezone(timezone)) {
+    return { ok: false, error: `Invalid timezone: ${timezone}` };
+  }
+  try {
+    const date = Temporal.PlainDate.from(value);
+    return { ok: true, epochMs: date.toZonedDateTime(timezone).epochMilliseconds };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `Invalid date: ${message}` };
+  }
+}
+
 /**
  * When Temporal rejects with "multiple instants found", distinguish between
  * nonexistent (spring forward gap) and ambiguous (fall back overlap) times.

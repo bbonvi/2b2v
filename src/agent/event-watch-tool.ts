@@ -8,7 +8,7 @@ import {
   listEventWatches,
   type EventWatchScope,
 } from "../db/event-watch-repository.ts";
-import { parseLocalDateTimeToEpoch } from "../time/agent-time.ts";
+import { parseLocalDateBoundaryToEpoch, parseLocalDateTimeToEpoch } from "../time/agent-time.ts";
 import {
   DEFAULT_EVENT_COOLDOWN_SECONDS,
   DEFAULT_EVENT_WATCH_PRESSURE,
@@ -350,7 +350,7 @@ function validateAfter(after: string | undefined, timezone: string): string | nu
   if (after === undefined) return null;
   const normalized = after.trim();
   if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(normalized)) return null;
-  const parsed = parseLocalDateTimeToEpoch(normalized, timezone);
+  const parsed = parseLocalDateBoundaryToEpoch(normalized, timezone);
   return parsed.ok ? null : parsed.error;
 }
 

@@ -13,7 +13,7 @@ import {
   type SearchMessageMatch,
 } from "../db/message-repository.ts";
 import type { Logger } from "../logger.ts";
-import { formatLocalWallClock, parseLocalDateTimeToEpoch } from "../time/agent-time.ts";
+import { formatLocalWallClock, parseLocalDateBoundaryToEpoch } from "../time/agent-time.ts";
 import { AssetIdSchema, parseAssetId } from "./asset-id.ts";
 import { formatMessageLine } from "./history-formatting.ts";
 import { resolveReplies } from "./history-replies.ts";
@@ -264,7 +264,7 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
 
 function parseDateFilter(value: string | undefined, name: string, timezone: string): number | string | undefined {
   if (value === undefined) return undefined;
-  const parsed = parseLocalDateTimeToEpoch(value.trim(), timezone);
+  const parsed = parseLocalDateBoundaryToEpoch(value.trim(), timezone);
   return parsed.ok ? parsed.epochMs : `Invalid ${name}: ${parsed.error}`;
 }
 

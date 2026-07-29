@@ -5,7 +5,7 @@ import {
   type EventWatchFire,
 } from "../db/event-watch-repository.ts";
 import { runRipgrep } from "../agent/ripgrep.ts";
-import { formatLocalWallClock, parseLocalDateTimeToEpoch } from "../time/agent-time.ts";
+import { formatLocalWallClock, parseLocalDateBoundaryToEpoch } from "../time/agent-time.ts";
 import type {
   EventWatch,
   EventWatchPressure,
@@ -33,7 +33,7 @@ export function isWatchEligibleAfter(watch: EventWatch, at: number, timezone = w
   if (/^\d{2}:\d{2}$/.test(watch.after)) {
     return formatLocalWallClock(at, timezone).slice(11) >= watch.after;
   }
-  const parsed = parseLocalDateTimeToEpoch(watch.after, timezone);
+  const parsed = parseLocalDateBoundaryToEpoch(watch.after, timezone);
   return parsed.ok && at >= parsed.epochMs;
 }
 

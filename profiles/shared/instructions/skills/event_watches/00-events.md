@@ -9,4 +9,5 @@ Use one atomic event:
 - `member`: optional user and guild join/leave.
 - `reaction`: optional reactor, add/remove, message, emoji, or current aggregate `countAtLeast`.
 
-Omit `userId` for any user. Use `occurrences` only for one rolling count within a duration; do not combine it with reaction `countAtLeast`. Use `after` as daily `HH:mm` or absolute `YYYY-MM-DD HH:mm`.
+<!-- `after` is an eligibility boundary, so a local date does not need an arbitrary time. -->
+Omit `userId` for any user. Use `occurrences` only for one rolling count within a duration; do not combine it with reaction `countAtLeast`. Use `after` as daily `HH:mm`, local `YYYY-MM-DD`, or local `YYYY-MM-DD HH:mm`.

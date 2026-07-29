@@ -81,7 +81,7 @@ describe("event watch matcher", () => {
     }
   });
 
-  test("applies daily and absolute local after boundaries", () => {
+  test("applies daily, date, and exact local after boundaries", () => {
     const base = {
       id: "watch",
       source: { scope: "guild", guildId: "guild-1" },
@@ -103,6 +103,8 @@ describe("event watch matcher", () => {
     } satisfies Omit<EventWatch, "after">;
     expect(isWatchEligibleAfter({ ...base, after: "18:00" }, Date.UTC(2026, 6, 24, 17, 59))).toBe(false);
     expect(isWatchEligibleAfter({ ...base, after: "18:00" }, Date.UTC(2026, 6, 24, 18, 0))).toBe(true);
+    expect(isWatchEligibleAfter({ ...base, after: "2026-07-24" }, Date.UTC(2026, 6, 23, 23, 59))).toBe(false);
+    expect(isWatchEligibleAfter({ ...base, after: "2026-07-24" }, Date.UTC(2026, 6, 24, 0, 0))).toBe(true);
     expect(isWatchEligibleAfter({ ...base, after: "2026-07-24 18:00" }, Date.UTC(2026, 6, 24, 17, 59))).toBe(false);
     expect(isWatchEligibleAfter({ ...base, after: "2026-07-24 18:00" }, Date.UTC(2026, 6, 24, 18, 0))).toBe(true);
   });

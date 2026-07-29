@@ -3,6 +3,7 @@ import {
   formatLocalWallClock,
   currentLocalContext,
   formatElapsedDuration,
+  parseLocalDateBoundaryToEpoch,
   parseLocalDateTimeToEpoch,
 } from "./agent-time.ts";
 
@@ -160,5 +161,20 @@ describe("parseLocalDateTimeToEpoch", () => {
     if (!result.ok) {
       expect(result.error).toContain("YYYY-MM-DD HH:mm");
     }
+  });
+});
+
+describe("parseLocalDateBoundaryToEpoch", () => {
+  test("accepts a date as the start of that date in the local timezone", () => {
+    const result = parseLocalDateBoundaryToEpoch("2026-02-06", "America/New_York");
+    expect(result).toEqual({ ok: true, epochMs: Date.UTC(2026, 1, 6, 5) });
+  });
+
+  test("keeps exact datetimes and rejects other formats", () => {
+    expect(parseLocalDateBoundaryToEpoch("2026-02-06 14:30", "UTC"))
+      .toEqual({ ok: true, epochMs: Date.UTC(2026, 1, 6, 14, 30) });
+    const invalid = parseLocalDateBoundaryToEpoch("2026/02/06", "UTC");
+    expect(invalid.ok).toBe(false);
+    if (!invalid.ok) expect(invalid.error).toContain("YYYY-MM-DD or YYYY-MM-DD HH:mm");
   });
 });
