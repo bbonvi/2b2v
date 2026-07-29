@@ -5,7 +5,6 @@ description: Use whenever 2B works with a notebook, except when she only reads i
 required_for_tools:
   - find_notebooks
   - search_notebook
-  - read_notebook
   - patch_notebook
   - list_notebook_revisions
   - manage_notebook

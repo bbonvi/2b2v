@@ -115,13 +115,13 @@ describe("repository profile layout", () => {
         for (const tool of [
           "find_notebooks",
           "search_notebook",
-          "read_notebook",
           "patch_notebook",
           "list_notebook_revisions",
           "manage_notebook",
         ]) {
           expect(bundle.runtime.skills.requiredByTool[tool]).toBe("notebooks");
         }
+        expect(bundle.runtime.skills.requiredByTool.read_notebook).toBeUndefined();
       }
       for (const tool of [
         "codex_generate_image",
