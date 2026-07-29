@@ -82,17 +82,20 @@ describe("ToolCatalog", () => {
       .toEqual(["custom_profile_action"]);
   });
 
-  test("keeps notebook discovery and reading active but defers revision history", () => {
+  test("keeps notebook reading and patching active but defers management and revision history", () => {
     const tools = [
       tool("find_notebooks"),
       tool("search_notebook"),
       tool("read_notebook"),
+      tool("patch_notebook"),
+      tool("manage_notebook"),
       tool("list_notebook_revisions"),
     ];
     expect([...initialActorToolNames(tools)]).toEqual([
       "find_notebooks",
       "search_notebook",
       "read_notebook",
+      "patch_notebook",
     ]);
   });
 

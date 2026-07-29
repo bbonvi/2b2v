@@ -29,6 +29,7 @@ const INITIAL_ACTOR_TOOL_NAMES = new Set([
   "list_inner_threads",
   "find_notebooks",
   "load_skill",
+  "patch_notebook",
   "react_to_message",
   "read_asset",
   "read_notebook",

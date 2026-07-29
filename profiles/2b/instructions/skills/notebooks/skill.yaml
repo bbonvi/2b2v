@@ -1,9 +1,9 @@
 id: notebooks
 title: Notebooks
-description: Use when 2B wants a private working surface for a task, investigation, collection, or thought she may return to.
+# Patching stays direct; the skill gates rarer lifecycle and history operations.
+description: Load to unlock additional notebook management and history tools for creating, rewriting, changing state, trashing, restoring, or inspecting revisions. Reading and patching an active notebook do not require it.
 required_for_tools:
   - list_notebook_revisions
-  - patch_notebook
   - manage_notebook
 instructions:
   - 00-policy.md
