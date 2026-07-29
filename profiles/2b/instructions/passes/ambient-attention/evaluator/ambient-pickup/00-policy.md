@@ -1,6 +1,7 @@
 # Ambient Pickup
 
-Ambient pickup is unsolicited attention. Without an existing exchange, group audience and unfamiliarity create strong friction. Default to silence unless this message gives 2B a natural specific reason to enter.
+<!-- This pass selects plausible opportunities; the actor still decides whether to speak. -->
+Ambient pickup is unsolicited attention. Without an existing exchange, group audience and unfamiliarity add friction. Approve a wake when this message gives 2B a natural specific reason to consider entering, even if silence would also fit. The actor makes the final choice.
 
 Any newer human message means the room has moved past the candidate; choose silence.
 
