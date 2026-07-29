@@ -8,12 +8,20 @@ import { markReadOnlyTool } from "./tool-effects.ts";
 
 export type ListChannelMessage = HistoryMessage;
 
+export interface ListChannelMessagesLocation {
+  guildId: string;
+  guildName: string;
+  channelId: string;
+  channelName: string;
+}
+
 export interface ListChannelMessagesPage {
+  location: ListChannelMessagesLocation;
   messages: ListChannelMessage[];
 }
 
 export interface ListChannelMessagesInput {
-  channelId: string;
+  channelId?: string;
   limit: number;
   beforeMessageId?: string;
   afterMessageId?: string;
@@ -27,7 +35,7 @@ export interface ListChannelMessagesToolDeps {
 }
 
 const ListChannelMessagesParams = Type.Object({
-  channel_id: Type.String(),
+  channel_id: Type.Optional(Type.String()),
   limit: Type.Optional(Type.Number()),
   before_message_id: Type.Optional(Type.String()),
   after_message_id: Type.Optional(Type.String()),
@@ -46,7 +54,15 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
     async execute(
       _toolCallId: string,
       params: unknown
-    ): Promise<AgentToolResult<{ count: number; oldest_message_id?: string; newest_message_id?: string } | { error: boolean }>> {
+    ): Promise<AgentToolResult<{
+      guild_id: string;
+      guild_name: string;
+      channel_id: string;
+      channel_name: string;
+      count: number;
+      oldest_message_id?: string;
+      newest_message_id?: string;
+    } | { error: boolean }>> {
       const {
         channel_id,
         limit: rawLimit,
@@ -54,13 +70,14 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
         after_message_id,
         around_message_id,
       } = params as {
-        channel_id: string;
+        channel_id?: string;
         limit?: number;
         before_message_id?: string;
         after_message_id?: string;
         around_message_id?: string;
       };
       const limit = Math.max(1, Math.min(rawLimit ?? 50, 100));
+      const channelId = channel_id?.trim();
       const beforeMessageId = before_message_id?.trim();
       const afterMessageId = after_message_id?.trim();
       const aroundMessageId = around_message_id?.trim();
@@ -74,12 +91,19 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
           details: { error: true },
         };
       }
+      if ((channelId === undefined || channelId === "")
+        && !hasBeforeCursor && !hasAfterCursor && !hasAroundCursor) {
+        return {
+          content: [{ type: "text", text: "Provide channel_id or one message anchor." }],
+          details: { error: true },
+        };
+      }
 
       let page: ListChannelMessagesPage | null;
       try {
         page = await fetchMessages({
-          channelId: channel_id,
           limit,
+          ...(channelId !== undefined && channelId !== "" ? { channelId } : {}),
           ...(beforeMessageId !== undefined && beforeMessageId !== "" ? { beforeMessageId } : {}),
           ...(afterMessageId !== undefined && afterMessageId !== "" ? { afterMessageId } : {}),
           ...(aroundMessageId !== undefined && aroundMessageId !== "" ? { aroundMessageId } : {}),
@@ -97,11 +121,18 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
         };
       }
 
-      const { messages } = page;
+      const { location, messages } = page;
+      const locationLine = `Channel: ${location.guildName} / #${location.channelName} | guild_id=${location.guildId} | channel_id=${location.channelId}`;
+      const locationDetails = {
+        guild_id: location.guildId,
+        guild_name: location.guildName,
+        channel_id: location.channelId,
+        channel_name: location.channelName,
+      };
       if (messages.length === 0) {
         return {
-          content: [{ type: "text", text: "No messages found in this channel." }],
-          details: { count: 0 },
+          content: [{ type: "text", text: `${locationLine}\nNo messages found in this channel.` }],
+          details: { ...locationDetails, count: 0 },
         };
       }
 
@@ -115,6 +146,7 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
       const newestMessageId = messages[messages.length - 1]?.id;
       const cursorLine = `Page cursors: oldest_message_id=${oldestMessageId ?? ""}; newest_message_id=${newestMessageId ?? ""}. Use before_message_id for older messages or after_message_id for newer messages.`;
       const lines = [
+        locationLine,
         "Channel messages, ordered oldest to newest.",
         ...messages.map((message) => `[${formatLocalWallClock(message.timestamp, timezone)}]\n${formatMessageLine({
           message,
@@ -126,6 +158,7 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
       return {
         content: [{ type: "text", text: lines.join("\n") }],
         details: {
+          ...locationDetails,
           count: messages.length,
           ...(oldestMessageId !== undefined ? { oldest_message_id: oldestMessageId } : {}),
           ...(newestMessageId !== undefined ? { newest_message_id: newestMessageId } : {}),

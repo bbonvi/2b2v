@@ -31,7 +31,7 @@ import { typingSimulationDelayMs } from "./agent/typing-simulation";
 import { createChannelDispatcher, DispatchSupersededError, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, selectNormalDispatchTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import { PRIVATE_THOUGHT_MESSAGE_ID_PREFIX, type HistoryMessage } from "./agent/history-types";
-import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listDiscordChannelUsage, listChannelMessages, getRoutedMessageSource, getLatestMessageActivityBefore, type MessageActivity } from "./db/message-repository";
+import { getContextHistoryMessages, getMessageSearchMatchesByIds, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listDiscordChannelUsage, listChannelMessages, getRoutedMessageSource, getLatestMessageActivityBefore, type MessageActivity } from "./db/message-repository";
 import { cleanupDeletedDiscordMessage } from "./db/message-cleanup";
 import {
   countMessagesSinceMemoryExtraction,
@@ -3984,7 +3984,13 @@ function buildAgentTools(
     guildId,
     timezone: guildConfig.timezone,
     fetchMessages: async (input) => {
-      const channel = await fetchAccessibleGuildChannel(input.channelId);
+      const anchorMessageId = input.aroundMessageId ?? input.beforeMessageId ?? input.afterMessageId;
+      const storedLocation = input.channelId === undefined && anchorMessageId !== undefined
+        ? getMessageSearchMatchesByIds(db, [anchorMessageId])[0]
+        : undefined;
+      const targetChannelId = input.channelId ?? storedLocation?.channelId;
+      if (targetChannelId === undefined) return null;
+      const channel = await fetchAccessibleGuildChannel(targetChannelId);
       if (channel === null || !("messages" in channel)) return null;
       const messages = listChannelMessages(db, channel.guildId, channel.id, {
         limit: input.limit,
@@ -3992,7 +3998,15 @@ function buildAgentTools(
         ...(input.afterMessageId !== undefined ? { afterMessageId: input.afterMessageId } : {}),
         ...(input.aroundMessageId !== undefined ? { aroundMessageId: input.aroundMessageId } : {}),
       });
-      return messages === null ? null : { messages };
+      return messages === null ? null : {
+        location: {
+          guildId: channel.guildId,
+          guildName: channel.guild.name,
+          channelId: channel.id,
+          channelName: channelDisplayName(channel) ?? channel.id,
+        },
+        messages,
+      };
     },
   });
 

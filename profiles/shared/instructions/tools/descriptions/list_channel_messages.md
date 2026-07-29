@@ -1,1 +1,1 @@
-Read a channel around or before a known message.
+Read channel history. A stored message anchor can identify its channel.
