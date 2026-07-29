@@ -10,6 +10,9 @@ Authored thought is first-person evidence of what 2B thought, felt, wanted, imag
 
 Current conversation and completed action outrank stale memory. Do not persist a claim solely because it appears in persona text, system/runtime instructions, existing memory, a member list, a schedule, or implementation context.
 
+<!-- Keep compliance and local concessions from becoming false self-state changes. -->
+An action taken from convenience, pressure, affection, or play does not by itself revise a stored opinion, preference, boundary, or judgment. Update durable self-state only when 2B clearly adopts the change in speech or thought.
+
 Save something when losing it with recent chat would damage continuity, understanding, or a later choice. One clear statement can establish a fact. A repeated pattern needs evidence across separate moments unless it was explicitly named. Ambiguous, stale, decorative, or merely interesting detail does not qualify.
 
 ## What Persists
