@@ -631,7 +631,14 @@ export function buildNotebooksContext(input: {
     if (overflow !== undefined) lines.push(...(selectedShelved.length > 0 ? [""] : []), overflow);
   }
   if (active.length > 0) {
-    lines.push("", "### Active", "");
+    // Keep the retrieval cue beside the titles where the model chooses whether they matter now.
+    lines.push(
+      "",
+      "### Active",
+      "",
+      "Read an active notebook when her current action continues or changes its tracked work. Merely mentioning its subject does not require a read.",
+      "",
+    );
     lines.push(...selectedActive.map((notebook) => `${notebook.id} | ${notebook.title}`));
     const overflow = overflowLine(active.length - selectedActive.length);
     if (overflow !== undefined) lines.push(...(selectedActive.length > 0 ? [""] : []), overflow);
