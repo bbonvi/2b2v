@@ -1635,6 +1635,134 @@ describe("handleMessage", () => {
     expect(result.responseText).toBe("first normal\n[msg-break]\nsecond normal");
   });
 
+  test("commits only after a complete message envelope", async () => {
+    const events: string[] = [];
+    const completeChat: ChatCompleteFn = async (request) => {
+      await request.onTextDelta?.("<thoughts>still drafting</thoughts><message>par");
+      expect(events).toEqual([]);
+      await request.onTextDelta?.("tial</message>");
+      expect(events).toEqual(["committed"]);
+      return {
+        text: "<thoughts>still drafting</thoughts><message>partial</message>",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      };
+    };
+    const sender: MessageSender = (text) => {
+      events.push(`sent:${text}`);
+      return Promise.resolve({ sentMessageId: "sent-1" });
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        sender,
+        onActionCommitted: () => { events.push("committed"); },
+      }),
+    );
+
+    expect(events).toEqual(["committed", "sent:partial"]);
+  });
+
+  test("commits a complete tool call before tool execution", async () => {
+    let committed = false;
+    let calls = 0;
+    const lookupTool: AgentTool = {
+      name: "search_channel_messages",
+      label: "Search",
+      description: "Search",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: () => {
+        expect(committed).toBe(true);
+        return Promise.resolve({ content: [{ type: "text", text: "tool result" }], details: {} });
+      },
+    };
+    const completeChat: ChatCompleteFn = async (request) => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          text: "<thoughts>checking</thoughts>",
+          toolCalls: [{
+            id: "call-search",
+            type: "function",
+            function: { name: "search_channel_messages", arguments: "{\"query\":\"x\"}" },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        };
+      }
+      await request.onTextDelta?.("<message>done</message>");
+      return {
+        text: "<message>done</message>",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      };
+    };
+
+    await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        extraTools: [lookupTool],
+        onActionCommitted: () => { committed = true; },
+      }),
+    );
+
+    expect(committed).toBe(true);
+  });
+
+  test("does not commit or execute a tool call returned after cancellation", async () => {
+    const controller = new AbortController();
+    const cancellation = new Error("superseded");
+    let committed = false;
+    let executed = false;
+    const lookupTool: AgentTool = {
+      name: "search_channel_messages",
+      label: "Search",
+      description: "Search",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: () => {
+        executed = true;
+        return Promise.resolve({ content: [{ type: "text", text: "tool result" }], details: {} });
+      },
+    };
+    const completeChat: ChatCompleteFn = () => {
+      controller.abort(cancellation);
+      return Promise.resolve({
+        text: "",
+        toolCalls: [{
+          id: "call-search",
+          type: "function",
+          function: { name: "search_channel_messages", arguments: "{\"query\":\"x\"}" },
+        }],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    let thrown: unknown;
+    try {
+      await handleMessage(
+        makeMessage({ mentionedUserIds: ["bot-1"] }),
+        makeDeps({
+          abortSignal: controller.signal,
+          completeChat,
+          extraTools: [lookupTool],
+          onActionCommitted: () => { committed = true; },
+        }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(cancellation);
+    expect(committed).toBe(false);
+    expect(executed).toBe(false);
+  });
+
   test("adds a rejected outbound XML error to the model conversation and retries", async () => {
     let calls = 0;
     let retryInstruction = "";

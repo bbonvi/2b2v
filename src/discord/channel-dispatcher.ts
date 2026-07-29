@@ -34,10 +34,24 @@ export interface DispatchOutcome {
   visibleOutputSent?: boolean;
 }
 
+export class DispatchSupersededError extends Error {
+  override readonly name = "DispatchSupersededError";
+}
+
+export interface DispatchRunControl {
+  /** Cancels the current handler when a same-user follow-up supersedes it. */
+  signal: AbortSignal;
+  /** Allows same-user follow-ups to cancel this handler before it commits. */
+  enableSupersession(): void;
+  /** Prevents later messages from cancelling this handler. */
+  commit(): void;
+}
+
 /** Handler function that the dispatcher calls with accumulated messages. */
 export type DispatchHandler = (
   messages: PendingMessage[],
   trigger: SelectedDispatchTrigger | null,
+  control: DispatchRunControl,
 ) => Promise<DispatchOutcome | undefined>;
 
 export interface EnqueueOptions {
@@ -74,6 +88,12 @@ interface ChannelState {
   suppressedOrder: string[];
   typingByUser: Map<string, number>;
   typingResumeGraceUntilByUser: Map<string, number>;
+  activeDispatch: {
+    trigger: SelectedDispatchTrigger | null;
+    controller: AbortController;
+    supersessionEnabled: boolean;
+    committed: boolean;
+  } | null;
 }
 
 export interface ChannelDispatcher {
@@ -319,6 +339,7 @@ export function createChannelDispatcher(opts: {
         suppressedOrder: [],
         typingByUser: new Map<string, number>(),
         typingResumeGraceUntilByUser: new Map<string, number>(),
+        activeDispatch: null,
       };
       channels.set(channelId, state);
     }
@@ -467,6 +488,14 @@ export function createChannelDispatcher(opts: {
       return;
     }
     state.running = true;
+    const controller = new AbortController();
+    const activeDispatch = {
+      trigger: dispatchTrigger,
+      controller,
+      supersessionEnabled: false,
+      committed: false,
+    };
+    state.activeDispatch = activeDispatch;
     debug?.("dispatcher_debounce_dispatch", {
       channelId,
       batchIds: batch.map((message) => message.id),
@@ -476,7 +505,17 @@ export function createChannelDispatcher(opts: {
     });
 
     let coveredMessageIds: string[] = [];
-    void handler(batch, dispatchTrigger)
+    void handler(batch, dispatchTrigger, {
+      signal: controller.signal,
+      enableSupersession: () => {
+        if (!controller.signal.aborted && !activeDispatch.committed) {
+          activeDispatch.supersessionEnabled = true;
+        }
+      },
+      commit: () => {
+        if (!controller.signal.aborted) activeDispatch.committed = true;
+      },
+    })
       .then((result) => {
         coveredMessageIds = result?.coveredMessageIds ?? [];
       })
@@ -485,8 +524,21 @@ export function createChannelDispatcher(opts: {
       })
       .finally(() => {
         state.running = false;
-        suppressCoveredMessages(state, coveredMessageIds);
+        state.activeDispatch = null;
 
+        if (controller.signal.aborted && !activeDispatch.committed) {
+          if (state.debounceTimer !== null) {
+            timers.clearTimeout(state.debounceTimer);
+            state.debounceTimer = null;
+          }
+          state.pending = [...batch, ...state.queued, ...state.pending];
+          state.queued = [];
+          ensurePendingDebounce(channelId, state);
+          resolveDrainIfIdle();
+          return;
+        }
+
+        suppressCoveredMessages(state, coveredMessageIds);
         if (state.queued.length > 0) {
           // Messages arrived during handler execution, start new debounce cycle
           if (state.debounceTimer !== null) {
@@ -521,6 +573,21 @@ export function createChannelDispatcher(opts: {
 
     const existingTrigger = selectNextDispatchTrigger(state.pending);
     state.pending.push(pending);
+    const activeDispatch = state.activeDispatch;
+    if (
+      activeDispatch !== null
+      && activeDispatch.supersessionEnabled
+      && !activeDispatch.committed
+      && !activeDispatch.controller.signal.aborted
+      && activeDispatch.trigger !== null
+      && selectedWatchIds(activeDispatch.trigger).length === 0
+      && allowsSameAuthorFollowup(activeDispatch.trigger)
+      && activeDispatch.trigger.message.authorId === options.authorId
+    ) {
+      activeDispatch.controller.abort(new DispatchSupersededError(
+        `Dispatch superseded by message ${messageId} from ${options.authorId}.`,
+      ));
+    }
     let typingAction = "unchanged";
 
     const lastTypingAt = state.typingByUser.get(options.authorId);

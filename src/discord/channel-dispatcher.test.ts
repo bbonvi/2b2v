@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { createChannelDispatcher as createRawChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type PendingMessage, type DispatchHandler, type ChannelDispatcher, type DispatcherTimerApi } from "./channel-dispatcher";
+import { createChannelDispatcher as createRawChannelDispatcher, DispatchSupersededError, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, type PendingMessage, type DispatchHandler, type ChannelDispatcher, type DispatcherTimerApi } from "./channel-dispatcher";
 import type { TriggerResult } from "../agent/triggers.ts";
 import type { DispatcherConfig, TriggerConfig } from "../config/types";
 
@@ -659,6 +659,69 @@ describe("createChannelDispatcher", () => {
     await delay(70);
     expect(callCount).toBe(1);
 
+    dispatcher.dispose();
+  });
+
+  test("requeues the existing batch when a same-author follow-up supersedes an uncommitted dispatch", async () => {
+    const calls: string[][] = [];
+    let firstSignal: AbortSignal | undefined;
+    const handler: DispatchHandler = (messages, _trigger, control) => {
+      calls.push(messages.map((message) => message.id));
+      control.enableSupersession();
+      if (calls.length > 1) {
+        control.commit();
+        return Promise.resolve({ coveredMessageIds: messages.map((message) => message.id) });
+      }
+      firstSignal = control.signal;
+      return new Promise((resolve) => {
+        control.signal.addEventListener("abort", () => resolve({ coveredMessageIds: [] }), { once: true });
+      });
+    };
+    const dispatcher = createChannelDispatcher({
+      config: makeConfig(),
+      triggers: makeTriggers({ keywordDebounceMs: 20, typingIdleMs: 0 }),
+      handler,
+    });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-key"), { reason: "keyword", keyword: "2b" }, "user-1");
+    await delay(20);
+    enqueue(dispatcher, makeMessage("ch-1", "m-followup"), null, "user-1");
+    await delay(0);
+
+    expect(firstSignal?.aborted).toBe(true);
+    expect(firstSignal?.reason).toBeInstanceOf(DispatchSupersededError);
+    await delay(19);
+    expect(calls).toEqual([["m-key"]]);
+    await delay(1);
+    expect(calls).toEqual([["m-key"], ["m-key", "m-followup"]]);
+
+    dispatcher.dispose();
+  });
+
+  test("does not supersede a dispatch after it commits", async () => {
+    let release: (() => void) | undefined;
+    let signal: AbortSignal | undefined;
+    const handler: DispatchHandler = (_messages, _trigger, control) => {
+      signal = control.signal;
+      control.enableSupersession();
+      control.commit();
+      return new Promise((resolve) => {
+        release = () => resolve({ coveredMessageIds: [] });
+      });
+    };
+    const dispatcher = createChannelDispatcher({
+      config: makeConfig(),
+      triggers: makeTriggers({ keywordDebounceMs: 20, typingIdleMs: 0 }),
+      handler,
+    });
+
+    enqueue(dispatcher, makeMessage("ch-1", "m-key"), { reason: "keyword", keyword: "2b" }, "user-1");
+    await delay(20);
+    enqueue(dispatcher, makeMessage("ch-1", "m-followup"), null, "user-1");
+
+    expect(signal?.aborted).toBe(false);
+    release?.();
+    await delay(0);
     dispatcher.dispose();
   });
 

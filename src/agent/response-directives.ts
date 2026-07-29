@@ -443,6 +443,33 @@ function parseRange(
   return { ignored: false, segments, index: text.length, closed: false };
 }
 
+/** Report whether streamed output contains a complete, valid visible message action. */
+export function hasCompleteMessageAction(response: string): boolean {
+  const privateResult = stripPrivateBlocks(unwrapDirectiveFences(response));
+  if (privateResult.malformed) return false;
+  const text = privateResult.text;
+  const tagRe = new RegExp(TAG_RE.source, "gi");
+  for (;;) {
+    const match = tagRe.exec(text);
+    if (match === null) return false;
+    if (match[1] === "/" || match[2]?.toLowerCase() !== "message") continue;
+    const selfClosing = /\/\s*$/.test(match[3] ?? "");
+    const end = selfClosing
+      ? tagRe.lastIndex
+      : closingTagEnd(text, "message", tagRe.lastIndex);
+    if (!selfClosing && end === tagRe.lastIndex) continue;
+    const parsed = parseResponseDirectives(text.slice(match.index, end));
+    if (
+      !parsed.ignored
+      && parsed.directiveErrors === undefined
+      && parsed.malformedPrivateOutput !== true
+      && hasOutputSegment(parsed.segments)
+    ) {
+      return true;
+    }
+  }
+}
+
 export function parseResponseDirectives(response: string): ParsedResponseDirectives {
   const privateResult = stripPrivateBlocks(unwrapDirectiveFences(response));
   if (privateResult.malformed) {

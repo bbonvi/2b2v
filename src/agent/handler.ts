@@ -40,6 +40,7 @@ import {
   type StablePromptSection,
 } from "./prompt-cache.ts";
 import {
+  hasCompleteMessageAction,
   parseResponseDirectives,
   renderSegmentsForMemory,
   type MessageDelivery,
@@ -289,6 +290,8 @@ export interface HandlerDeps {
   getTypingStartedAt?: () => number;
   /** Called after user-visible output starts so continuous background typing can stop. */
   onVisibleOutput?: () => void;
+  /** Called when the model produces its first complete visible message or tool call. */
+  onActionCommitted?: () => void;
   /** Reports public output produced directly by a state-changing tool in this reply loop. */
   hasExternalVisibleOutput?: () => boolean;
   /** Minimum visible typing time before a buffered streamed follow-up message is sent. */
@@ -777,6 +780,12 @@ function isAgentTimeBudgetExceededError(error: unknown): boolean {
 
 function isAgentTimeBudgetExceededSignal(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true && isAgentTimeBudgetExceededError(signal.reason);
+}
+
+function assertActionCanCommit(signal: AbortSignal | undefined, fallback: string): void {
+  if (signal?.aborted === true && !isAgentTimeBudgetExceededSignal(signal)) {
+    throw abortReason(signal, fallback);
+  }
 }
 
 async function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
@@ -1577,6 +1586,7 @@ async function runNativeToolLoop(input: {
   stopOnAgentTimeBudget?: boolean;
   terminateAfterSuccessfulToolRoundNames?: readonly string[];
   onActiveToolsChanged?: (tools: readonly AgentTool[]) => void;
+  onActionCommitted?: () => void;
 }): Promise<{ text: string; stopReason?: string }> {
   const toolCatalog = new ToolCatalog(
     input.tools,
@@ -1748,6 +1758,10 @@ async function runNativeToolLoop(input: {
         return await finishAfterAgentTimeBudget();
       }
       throw error;
+    }
+    if (result.toolCalls.length > 0) {
+      assertActionCanCommit(input.signal, "Agent loop aborted before tool execution.");
+      input.onActionCommitted?.();
     }
     input.requestLog?.recordLLMCompletion(result.messageForLogs);
     const stopReason = modelTurnStopReason(result);
@@ -2450,6 +2464,7 @@ interface LiveMessageDispatchDeps {
   onStillWorking?: (channelId: string | undefined) => void | Promise<void>;
   getTypingStartedAt?: () => number;
   onVisibleOutput?: () => void;
+  onActionCommitted?: () => void;
   typingHoldMs: number;
   typingHoldMsForSegment?: (segment: DispatchSegment) => number;
   signal?: AbortSignal;
@@ -2464,6 +2479,7 @@ class LiveMessageDispatcher {
   private sent = 0;
   private currentChannelOutputSent = false;
   private disabled = false;
+  private actionCommitted = false;
   private gapTypingSent = false;
   private gapTypingReadyAt = 0;
 
@@ -2489,6 +2505,7 @@ class LiveMessageDispatcher {
   async push(delta: string): Promise<void> {
     if (delta === "" || this.disabled) return;
     this.buffer += delta;
+    if (!this.actionCommitted && hasCompleteMessageAction(this.buffer)) this.commitAction();
     await this.flushCompleteEnvelopes({ notifyTyping: true });
   }
 
@@ -2498,6 +2515,7 @@ class LiveMessageDispatcher {
     if (!finalText.startsWith(consumedPrefix)) {
       const parsed = parseResponseDirectives(finalText);
       if (!parsed.ignored && parsed.segments.length > 0) {
+        this.commitAction();
         this.sent += await sendResponseSegments({
           ...this.deps,
           segments: parsed.segments,
@@ -2516,6 +2534,7 @@ class LiveMessageDispatcher {
     if (remainder !== "") {
       const parsed = parseResponseDirectives(remainder);
       if (!parsed.ignored && parsed.segments.length > 0) {
+        this.commitAction();
         this.sent += await sendResponseSegments({
           ...this.deps,
           segments: parsed.segments,
@@ -2563,6 +2582,7 @@ class LiveMessageDispatcher {
       const rawEnvelope = this.buffer.slice(cursor, closeEnd);
       const parsed = parseResponseDirectives(rawEnvelope);
       if (!parsed.ignored && parsed.segments.length > 0) {
+        this.commitAction();
         if (this.deps.typingHoldMsForSegment === undefined) await this.waitForGapTypingHold();
         this.clearGapTyping();
         const typeAfterMessage = input.notifyTyping
@@ -2589,6 +2609,13 @@ class LiveMessageDispatcher {
     this.gapTypingSent = true;
     await this.deps.onStillWorking?.(this.deps.destinationChannelId);
     this.gapTypingReadyAt = Date.now() + this.deps.typingHoldMs;
+  }
+
+  private commitAction(): void {
+    if (this.actionCommitted) return;
+    assertActionCanCommit(this.deps.signal, "Agent loop aborted before message delivery.");
+    this.actionCommitted = true;
+    this.deps.onActionCommitted?.();
   }
 
   private async waitForGapTypingHold(): Promise<void> {
@@ -2989,6 +3016,12 @@ export async function handleMessage(
     activeToolNames: actorInitialTools.map((tool) => tool.name),
   };
   const startedAt = Date.now();
+  let modelActionCommitted = false;
+  const commitModelAction = (): void => {
+    if (modelActionCommitted) return;
+    modelActionCommitted = true;
+    deps.onActionCommitted?.();
+  };
   let maintenanceTranscript: OpenRouterMessage[] | undefined;
   let finalText = "";
   let finalStopReason: string | undefined;
@@ -3070,6 +3103,7 @@ export async function handleMessage(
         onStillWorking: deps.onStillWorking,
         getTypingStartedAt: deps.getTypingStartedAt,
         onVisibleOutput: noteVisibleOutput,
+        onActionCommitted: commitModelAction,
         typingHoldMs: liveMessageTypingHoldMs,
         typingHoldMsForSegment,
         signal: wallController.signal,
@@ -3205,6 +3239,7 @@ export async function handleMessage(
           maintenancePromptContext.activeToolNames = activeTools.map((tool) => tool.name);
           maintenancePromptContext.toolContractSignature = toolContractSignature(activeTools);
         },
+        onActionCommitted: commitModelAction,
       });
       finalText = result.text;
       finalStopReason = result.stopReason;
@@ -3213,6 +3248,7 @@ export async function handleMessage(
       deps.abortSignal?.removeEventListener("abort", onCallerAbort);
     }
 
+    assertActionCanCommit(wallController.signal, "Agent loop aborted before completing its first action.");
     if (finalStopReason === "length") {
       deps.log?.warn("native reply blocked after incomplete model output", {
         stopReason: finalStopReason,
@@ -3296,6 +3332,8 @@ export async function handleMessage(
         promptContext: maintenancePromptContext,
       };
     }
+    assertActionCanCommit(wallController.signal, "Agent loop aborted before final message delivery.");
+    commitModelAction();
     if (deps.preSendCheck !== undefined && !await deps.preSendCheck(finalText)) {
       deps.log?.debug("native_reply_dropped_before_send", { durationMs: Date.now() - startedAt });
       return {

@@ -28,7 +28,7 @@ import {
   type TriggerResult,
 } from "./agent/triggers";
 import { typingSimulationDelayMs } from "./agent/typing-simulation";
-import { createChannelDispatcher, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, selectNormalDispatchTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
+import { createChannelDispatcher, DispatchSupersededError, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, selectNormalDispatchTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
 import { PRIVATE_THOUGHT_MESSAGE_ID_PREFIX, type HistoryMessage } from "./agent/history-types";
 import { getContextHistoryMessages, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listDiscordChannelUsage, listChannelMessages, getRoutedMessageSource, getLatestMessageActivityBefore, type MessageActivity } from "./db/message-repository";
@@ -916,18 +916,22 @@ async function runLoggedAgentTurn(input: {
   requestLog: RequestLog;
   logger: Logger;
   afterSuccess?: (result: HandleResult) => void | Promise<void>;
-  onFinally?: (result: HandleResult | undefined) => void;
+  onFinally?: (result: HandleResult | undefined, error: unknown) => void;
 }): Promise<HandleResult> {
   let result: HandleResult | undefined;
+  let error: unknown;
   try {
     result = await handleMessage(input.incoming, input.deps);
     await input.afterSuccess?.(result);
     return result;
   } catch (err) {
-    input.requestLog.setError(err instanceof Error ? err.message : String(err));
+    error = err;
+    if (!(err instanceof DispatchSupersededError)) {
+      input.requestLog.setError(err instanceof Error ? err.message : String(err));
+    }
     throw err;
   } finally {
-    input.onFinally?.(result);
+    input.onFinally?.(result, error);
     if (result !== undefined) {
       input.requestLog.setTrigger(result.triggerResult);
       input.requestLog.setAgentRan(result.agentRan);
@@ -4485,7 +4489,7 @@ function getOrCreateDispatcher(guildId: string): ChannelDispatcher {
     config: config.dispatcher,
     triggers: config.triggers,
     debug: (event, fields) => log.debug(event, { guildId, ...fields }),
-    handler: async (batch, trigger): Promise<DispatchOutcome> => {
+    handler: async (batch, trigger, control): Promise<DispatchOutcome> => {
       if (trigger === null) return { coveredMessageIds: [] };
       const selected = selectDispatchMessageForTrigger(batch, trigger);
       if (selected === undefined) return { coveredMessageIds: [] };
@@ -4504,7 +4508,11 @@ function getOrCreateDispatcher(guildId: string): ChannelDispatcher {
         );
       }
       if (trigger.result === null) return { coveredMessageIds: [] };
-      return await processTriggeredMessage(selected.message as Message, trigger.result, currentTurnMessages);
+      control.enableSupersession();
+      return await processTriggeredMessage(selected.message as Message, trigger.result, currentTurnMessages, {
+        abortSignal: control.signal,
+        onActionCommitted: () => { control.commit(); },
+      });
     },
   });
   dispatchers.set(guildId, dispatcher);
@@ -4699,6 +4707,8 @@ async function processTriggeredMessage(
     };
     preSendCheck?: (draftText: string) => boolean | Promise<boolean>;
     onWriteToolStart?: (toolName: string) => void;
+    abortSignal?: AbortSignal;
+    onActionCommitted?: () => void;
     eventWatchTurn?: EventWatchTurn;
   } = {},
 ): Promise<DispatchOutcome> {
@@ -5101,6 +5111,8 @@ async function processTriggeredMessage(
         forceTrigger: options.eventWatchTurn !== undefined ? true : undefined,
         disableLiveOutput: options.disableLiveOutput,
         preSendCheck: options.preSendCheck,
+        abortSignal: options.abortSignal,
+        onActionCommitted: options.onActionCommitted,
         onIgnoredReply: ({ channelId: destinationChannelId, historyText }) => {
           persistIgnoredBotReply({
             guildId,
@@ -5181,8 +5193,9 @@ async function processTriggeredMessage(
             allowFollowUp: triggerOverride?.reason === "mention" || triggerOverride?.reason === "keyword",
           });
         },
-        onFinally: (completed) => {
+        onFinally: (completed, error) => {
           typing.stopLoop();
+          if (error instanceof DispatchSupersededError) return;
           const completedTrigger = completed?.triggerResult ?? triggerOverride;
           if (
             completedTrigger?.reason === "mention" ||
@@ -5201,6 +5214,13 @@ async function processTriggeredMessage(
       visibleOutputSent: sentBotMessageIds.length > 0 || externalVisibleOutputSent,
     };
   } catch (err) {
+    if (err instanceof DispatchSupersededError) {
+      log.debug("message turn superseded before model action", {
+        messageId: message.id,
+        guildId: message.guildId,
+      });
+      return { coveredMessageIds: [] };
+    }
     if (!requestLogEmitted) {
       requestLog.setError(err instanceof Error ? err.message : String(err));
       requestLog.emit(log);
