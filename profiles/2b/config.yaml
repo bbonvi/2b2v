@@ -8,7 +8,7 @@ modelProfiles:
         # provider: openrouter
         # model: deepseek/deepseek-v4-pro
         # modelParams: {}
-        modelParams: { textVerbosity: medium }
+        modelParams: { textVerbosity: low }
         thinkingLevel: medium
         codexTransport: websocket-cached
         promptCaching: { enabled: true }
@@ -29,7 +29,7 @@ modelProfiles:
     maintenance:
         provider: openai-codex
         model: gpt-5.6-sol
-        modelParams: { textVerbosity: medium }
+        modelParams: { textVerbosity: low }
         thinkingLevel: medium
         codexTransport: websocket-cached
         promptCaching: { enabled: true }
