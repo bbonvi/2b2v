@@ -72,8 +72,6 @@ describe("repository profile layout", () => {
       const sharedParameterDescriptions = [
         "cancel_agent_job/mode",
         "list_channel_messages/around_message_id",
-        "search_channel_messages/after",
-        "search_channel_messages/before",
         "search_channel_messages/scope",
         "update_current_event_watch/handoffNote",
         "update_current_scheduled_task/handoffNote",
