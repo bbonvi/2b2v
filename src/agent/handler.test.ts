@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { splitDeferredTools } from "../../node_modules/@earendil-works/pi-ai/dist/utils/deferred-tools.js";
@@ -2593,6 +2593,51 @@ describe("handleMessage", () => {
 
     expect(result.responseText).toBe("recovered after codex server error");
     expect(calls).toBe(3);
+  });
+
+  test("waits 2 then 5 seconds between transient provider retries", async () => {
+    let calls = 0;
+    const retryDelays: number[] = [];
+    const originalSetTimeout = globalThis.setTimeout;
+    const mockSetTimeout = ((
+      callback: (...callbackArgs: unknown[]) => void,
+      delay?: number,
+      ...args: unknown[]
+    ) => {
+      if (delay === 2_000 || delay === 5_000) {
+        retryDelays.push(delay);
+        queueMicrotask(() => { callback(...args); });
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }
+      return originalSetTimeout(callback, delay, ...args);
+    }) as typeof setTimeout;
+    const timeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(mockSetTimeout);
+    const completeChat: ChatCompleteFn = () => {
+      calls += 1;
+      if (calls < 3) {
+        return Promise.reject(new ModelProviderError("Our servers are currently overloaded.", {
+          kind: "provider_transient",
+          retryable: true,
+        }));
+      }
+      return Promise.resolve({
+        text: "recovered after overload",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [{ type: "text", text: "recovered after overload" }] },
+      });
+    };
+    const deps = makeDeps({ completeChat });
+    delete deps.modelTurnRetryDelayMs;
+
+    try {
+      const result = await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
+      expect(result.responseText).toBe("recovered after overload");
+      expect(calls).toBe(3);
+      expect(retryDelays).toEqual([2_000, 5_000]);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
   });
 
   test("records normalized provider errors with pending LLM request payload", async () => {

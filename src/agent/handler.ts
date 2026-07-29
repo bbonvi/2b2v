@@ -1338,7 +1338,7 @@ async function completeModelTurnWithRetries(input: {
           maxAttempts,
           error: makeToolErrorText(normalizedError),
         });
-        await sleepMs(input.retryDelayMs?.(attempt) ?? retryBackoffMs(attempt), input.request.signal);
+        await sleepMs(input.retryDelayMs?.(attempt) ?? retryBackoffMs(attempt, normalizedError), input.request.signal);
         continue;
       }
       return result;
@@ -1365,14 +1365,17 @@ async function completeModelTurnWithRetries(input: {
         maxAttempts,
         error: makeToolErrorText(normalizedError),
       });
-      await sleepMs(input.retryDelayMs?.(attempt) ?? retryBackoffMs(attempt), input.request.signal);
+      await sleepMs(input.retryDelayMs?.(attempt) ?? retryBackoffMs(attempt, normalizedError), input.request.signal);
     }
   }
 
   throw new Error("LLM retry loop ended without a result.");
 }
 
-function retryBackoffMs(attempt: number): number {
+function retryBackoffMs(attempt: number, error: Error): number {
+  if (error instanceof ModelProviderError && error.kind === "provider_transient") {
+    return attempt === 1 ? 2_000 : 5_000;
+  }
   const baseMs = 250 * (2 ** Math.max(0, attempt - 1));
   return Math.round(baseMs * (0.8 + Math.random() * 0.4));
 }
