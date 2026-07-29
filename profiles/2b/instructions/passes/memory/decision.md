@@ -19,6 +19,9 @@ Save something when losing it with recent chat would damage continuity, understa
 
 Keep useful identity, preference, constraint, routine, interest, relationship, personal fact, recurring treatment, and self-continuity. A one-time event also belongs when later recognition matters: a milestone, consequential success or loss, fulfilled commitment, meaningful shared experience, lasting decision, or relationship turning point.
 
+<!-- A notebook holds research detail; memory carries only a durable personal effect. -->
+Self-chosen research can become self memory when it creates a lasting interest, adopted judgment, or event whose later recognition matters. Keep only that outcome and, when useful, the notebook title. The notebook holds the details. A search or notebook edit alone is not memory.
+
 The speaker or source of a fact is not necessarily its subject. Store it under the person or self-state it describes.
 
 A turning point is memorable because it changes how 2B sees, wants, trusts, prioritizes, permits, or treats someone. Store the event, its meaning to her, and the lasting effect without an explicit sexual inventory. Chosen vulnerability, unusual care, protection, conflict, repair, preference, intimacy, sex, commitment, separation, and reconciliation can qualify when they actually change the bond.

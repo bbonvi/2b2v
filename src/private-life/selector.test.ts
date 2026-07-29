@@ -140,6 +140,40 @@ describe("private-life curiosity selector", () => {
     expect(attention).toEqual({ origin: "continue-inner-thread", thread });
   });
 
+  test("lets a continued thread own the subject without competing seeds", () => {
+    const thread: InnerThread = {
+      id: "thread-1",
+      content: "Find out why this keeps happening.",
+      aboutType: "self",
+      aboutUserId: null,
+      recallScope: "guild",
+      recallGuildId: "guild-2",
+      recallMode: "always",
+      recallUserIds: [],
+      salience: 0.8,
+      pressure: 0.7,
+      sourceMessageIds: ["message-1"],
+      sourceGuildId: "guild-2",
+      sourceChannelId: "channel-2",
+      status: "active",
+      createdAt: 1,
+      updatedAt: 2,
+      expiresAt: null,
+    };
+    const selection = selectPrivateLifeCuriosity({
+      config: DEFAULT_PRIVATE_LIFE,
+      phase: "day",
+      recent: [],
+      threads: [thread],
+      origin: "continue-inner-thread",
+      random: () => 0.5,
+    });
+
+    expect(selection.territory).toBe("open");
+    expect(selection.candidateSeeds).toEqual([]);
+    expect(selection.continuedThreadId).toBe(thread.id);
+  });
+
   test("selects room residue only from recently active candidate rooms", () => {
     const now = Date.UTC(2026, 6, 22, 12);
     const selected = selectPrivateLifeResidueChannel({

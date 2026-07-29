@@ -354,6 +354,7 @@ export function selectPrivateLifeCuriosity(input: {
     random,
   });
   const origin = attention.origin;
+  const thread = attention.thread;
   const mode = input.mode ?? weightedChoice(
       PRIVATE_LIFE_CURIOSITY_MODES,
       (value) => input.config.modeWeights[value]
@@ -361,12 +362,14 @@ export function selectPrivateLifeCuriosity(input: {
         * nightModeMultiplier(value, input.phase),
       random,
     );
-  const territory = input.territory ?? weightedChoice(
-      PRIVATE_LIFE_TERRITORIES,
-      (value) => input.config.territoryWeights[value]
-        * noveltyMultiplier(recentCount(input.recent, "territory", value)),
-      random,
-    );
+  const territory = input.territory ?? (thread === undefined
+    ? weightedChoice(
+        PRIVATE_LIFE_TERRITORIES,
+        (value) => input.config.territoryWeights[value]
+          * noveltyMultiplier(recentCount(input.recent, "territory", value)),
+        random,
+      )
+    : "open");
   const actionScope = input.actionScope ?? weightedChoice(
     PRIVATE_LIFE_ACTION_SCOPES,
     (value) => input.config.actionScopeWeights[value]
@@ -374,8 +377,9 @@ export function selectPrivateLifeCuriosity(input: {
       * (value === "social-opportunity" && input.socialOutputAvailable === false ? 0 : 1),
     random,
   );
-  const thread = attention.thread;
-  const freshSeeds = candidateSeeds(territory, input.config.candidateCount, input.recent, random);
+  const freshSeeds = thread === undefined
+    ? candidateSeeds(territory, input.config.candidateCount, input.recent, random)
+    : [];
   return {
     origin: thread === undefined && origin === "continue-inner-thread" ? "spontaneous" : origin,
     mode,
