@@ -283,7 +283,7 @@ ambientAttention:
     maxNewMessagesBeforeDrop: 4 # (drop if too much newer human context appears)
     ambientPickup:
         enabled: true # (allow pickup of quiet unaddressed messages)
-        minDelayMs: 90000 # (minimum wait before evaluating quiet pickup)
+        minDelayMs: 60000 # (minimum wait before evaluating quiet pickup)
         maxDelayMs: 160000 # (maximum wait before evaluating quiet pickup)
         probabilityThreshold: 0.7 # (minimum evaluator reply probability after jitter)
         confidenceThreshold: 0.7 # (minimum evaluator confidence)
@@ -292,7 +292,7 @@ ambientAttention:
         maxRepliesPerUserPerHour: 4 # (pickup budget per user)
         maxRepliesPerChannelPerHour: 8 # (pickup budget per channel)
         randomJitter: 0.04 # (small score wobble, not primary decision)
-        minQuietMs: 80000 # (minimum silence after trigger before pickup can pass)
+        minQuietMs: 50000 # (minimum silence after trigger before pickup can pass)
     lingering:
         enabled: true # (keep temporary attention after 2B replies)
         minDelayMs: 2500 # (minimum wait before evaluating same-user continuation)
