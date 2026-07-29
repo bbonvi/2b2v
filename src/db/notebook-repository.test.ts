@@ -123,20 +123,36 @@ describe("notebook shelving and concurrency", () => {
 });
 
 describe("notebook patches and revisions", () => {
-  test("applies several line hunks and rejects ambiguous context", () => {
+  test("applies ordered hunks with inline context headers", () => {
     expect(applyNotebookPatch(
-      "## A\nold one\nold two\n\n## B\nquestion",
-      "@@ ## A\n-old one\n-old two\n+new one\n+new two\n\n@@ ## B\n-question\n+answer",
-    )).toBe("## A\nnew one\nnew two\n\n## B\nanswer");
-    expect(() => applyNotebookPatch("## A\nx\n## A\ny", "@@ ## A\n-x\n+z"))
-      .toThrow("Patch context is ambiguous");
+      "## A\nold\n## A\nold",
+      "@@ ## A\n-old\n+first\n@@ ## A\n-old\n+second",
+    )).toBe("## A\nfirst\n## A\nsecond");
   });
 
-  test("accepts a bare hunk header with a space-prefixed context", () => {
+  test("accepts apply_patch context lines throughout bare and inline hunks", () => {
     expect(applyNotebookPatch(
-      "## Сейчас\n- Макетка входного каскада на SN74LVC1G17.\n- Второй пороговый вход пока не ставлю.",
-      "@@\n ## Сейчас\n-- Макетка входного каскада на SN74LVC1G17.\n-- Второй пороговый вход пока не ставлю.\n+- Макетка входного каскада на SN74LVC1G17 собрана.",
-    )).toBe("## Сейчас\n- Макетка входного каскада на SN74LVC1G17 собрана.");
+      "## Выбрано\n- Полностью раздельная DIY-модель, Ferris-подобная\n- 34 клавиши\n- MX, не Choc\n- Тактильные бесшумные свитчи\n\n## Следующий вопрос\nСтарый вопрос.",
+      "@@ ## Выбрано\n - Полностью раздельная DIY-модель, Ferris-подобная\n - 34 клавиши\n - MX, не Choc\n - Тактильные бесшумные свитчи\n+- Сейчас стоят Outemu Cream Yellow\n\n@@\n ## Следующий вопрос\n-Старый вопрос.\n+Хотсвап или пайка.",
+    )).toBe(
+      "## Выбрано\n- Полностью раздельная DIY-модель, Ferris-подобная\n- 34 клавиши\n- MX, не Choc\n- Тактильные бесшумные свитчи\n- Сейчас стоят Outemu Cream Yellow\n\n## Следующий вопрос\nХотсвап или пайка.",
+    );
+  });
+
+  test("accepts an edited line repeated as its inline hunk header", () => {
+    expect(applyNotebookPatch(
+      "- Сейчас стоят Outemu Cream Yellow\n\n## Следующий вопрос\nХотсвап или пайка.",
+      "@@ - Сейчас стоят Outemu Cream Yellow\n-- Сейчас стоят Outemu Cream Yellow\n+- Их усилие подходит\n\n@@ ## Следующий вопрос\n-Хотсвап или пайка.\n+Печатная плата или проводной монтаж.",
+    )).toBe(
+      "- Их усилие подходит\n\n## Следующий вопрос\nПечатная плата или проводной монтаж.",
+    );
+  });
+
+  test("supports headerless first hunks, trailing context, and end-of-file matching", () => {
+    expect(applyNotebookPatch(
+      "first\nold\nlast\n",
+      " first\n-old\n+new\n last\n*** End of File",
+    )).toBe("first\nnew\nlast\n");
   });
 
   test("rolls back every hunk when one context fails", () => {

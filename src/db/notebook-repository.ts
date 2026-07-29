@@ -111,9 +111,11 @@ interface NotebookRevisionRow {
 }
 
 interface ParsedPatchHunk {
-  context: string;
+  context: string | null;
   oldLines: string[];
   newLines: string[];
+  endOfFile: boolean;
+  changed: boolean;
 }
 
 function normalizeUserIds(values: readonly string[] | undefined): string[] {
@@ -384,75 +386,135 @@ export function listNotebookRevisions(
 
 function parsePatch(changeText: string): ParsedPatchHunk[] {
   const lines = changeText.split("\n");
+  if (lines.at(-1) === "") lines.pop();
   const hunks: ParsedPatchHunk[] = [];
   let current: ParsedPatchHunk | undefined;
-  let expectsContextLine = false;
   for (const line of lines) {
-    if (line === "@@") {
-      current = undefined;
-      expectsContextLine = true;
-      continue;
-    }
-    if (expectsContextLine) {
-      if (!line.startsWith(" ") || line.length === 1) {
-        throw new Error("Bare '@@' must be followed by a space-prefixed context line.");
-      }
-      current = { context: line.slice(1), oldLines: [], newLines: [] };
-      hunks.push(current);
-      expectsContextLine = false;
-      continue;
-    }
-    if (line.startsWith("@@ ")) {
-      const context = line.slice(3);
-      if (context === "") throw new Error("Patch context cannot be empty.");
-      current = { context, oldLines: [], newLines: [] };
+    const header = line.trimEnd();
+    if (header === "@@" || header.startsWith("@@ ")) {
+      current = {
+        context: header === "@@" ? null : header.slice(3),
+        oldLines: [],
+        newLines: [],
+        endOfFile: false,
+        changed: false,
+      };
       hunks.push(current);
       continue;
     }
     if (line === "" && current === undefined && hunks.length === 0) continue;
-    if (current === undefined) throw new Error("Every patch hunk must start with '@@ context'.");
+    if (current === undefined) {
+      if (!line.startsWith(" ") && !line.startsWith("-") && !line.startsWith("+")) {
+        throw new Error("Every patch line must start with '@@', ' ', '-', or '+'.");
+      }
+      current = {
+        context: null,
+        oldLines: [],
+        newLines: [],
+        endOfFile: false,
+        changed: false,
+      };
+      hunks.push(current);
+    }
+    if (line === "*** End of File") {
+      current.endOfFile = true;
+      continue;
+    }
+    if (current.endOfFile) {
+      if (line === "") continue;
+      throw new Error("Only a new hunk may follow '*** End of File'.");
+    }
     if (line.startsWith("-")) {
       current.oldLines.push(line.slice(1));
+      current.changed = true;
     } else if (line.startsWith("+")) {
       current.newLines.push(line.slice(1));
-    } else if (line !== "") {
+      current.changed = true;
+    } else if (line.startsWith(" ")) {
+      current.oldLines.push(line.slice(1));
+      current.newLines.push(line.slice(1));
+    } else if (line === "") {
+      current.oldLines.push("");
+      current.newLines.push("");
+    } else {
       throw new Error(`Malformed patch line: ${line}`);
     }
   }
-  if (expectsContextLine) throw new Error("Bare '@@' must be followed by a space-prefixed context line.");
   if (hunks.length === 0) throw new Error("Patch has no hunks.");
   for (const hunk of hunks) {
-    if (hunk.oldLines.length === 0 && hunk.newLines.length === 0) {
-      throw new Error(`Patch hunk '${hunk.context}' has no changes.`);
+    if (!hunk.changed) {
+      throw new Error(`Patch hunk '${hunk.context ?? "@@"}' has no changes.`);
     }
   }
   return hunks;
 }
 
-/** Apply contextual line hunks without changing unrelated physical lines. */
+function findPatchSequence(
+  lines: readonly string[],
+  pattern: readonly string[],
+  start: number,
+  endOfFile: boolean,
+): number | null {
+  const contentEnd = lines.at(-1) === "" ? lines.length - 1 : lines.length;
+  const lastStart = contentEnd - pattern.length;
+  if (lastStart < start) return null;
+  if (endOfFile) {
+    return lines.slice(lastStart, contentEnd).every((line, index) => line === pattern[index])
+      ? lastStart
+      : null;
+  }
+  for (let index = start; index <= lastStart; index += 1) {
+    if (lines.slice(index, index + pattern.length).every((line, offset) => line === pattern[offset])) {
+      return index;
+    }
+  }
+  return null;
+}
+
+/** Apply apply_patch-compatible update hunks without changing unrelated physical lines. */
 export function applyNotebookPatch(content: string, changeText: string): string {
   const hunks = parsePatch(changeText);
   const lines = content.split("\n");
-  const replacements: Array<{ start: number; end: number; lines: string[] }> = [];
-  const usedContexts = new Set<string>();
-  for (const hunk of hunks) {
-    if (usedContexts.has(hunk.context)) throw new Error(`Duplicate patch context: ${hunk.context}`);
-    usedContexts.add(hunk.context);
-    const matches: number[] = [];
-    for (let index = 0; index < lines.length; index += 1) {
-      if (lines[index] === hunk.context) matches.push(index);
+  const contentEnd = lines.at(-1) === "" ? lines.length - 1 : lines.length;
+  const replacements: Array<{ start: number; end: number; lines: string[]; order: number }> = [];
+  let cursor = 0;
+  for (const [order, hunk] of hunks.entries()) {
+    const contextIndex = hunk.context === null
+      ? null
+      : findPatchSequence(lines, [hunk.context], cursor, false);
+    if (hunk.context !== null && contextIndex === null) {
+      throw new Error(`Patch context not found: ${hunk.context}`);
     }
-    if (matches.length === 0) throw new Error(`Patch context not found: ${hunk.context}`);
-    if (matches.length > 1) throw new Error(`Patch context is ambiguous: ${hunk.context}`);
-    const start = (matches[0] ?? 0) + 1;
-    const actual = lines.slice(start, start + hunk.oldLines.length);
-    if (actual.length !== hunk.oldLines.length
-      || actual.some((line, index) => line !== hunk.oldLines[index])) {
-      throw new Error(`Patch removal does not match after context: ${hunk.context}`);
+
+    let start: number | null;
+    if (hunk.oldLines.length === 0) {
+      start = hunk.endOfFile || contextIndex === null ? contentEnd : contextIndex + 1;
+    } else {
+      start = contextIndex !== null && hunk.oldLines[0] === hunk.context
+        ? findPatchSequence(lines, hunk.oldLines, contextIndex, hunk.endOfFile)
+        : null;
+      start ??= findPatchSequence(
+        lines,
+        hunk.oldLines,
+        contextIndex === null ? cursor : contextIndex + 1,
+        hunk.endOfFile,
+      );
     }
-    replacements.push({ start, end: start + hunk.oldLines.length, lines: hunk.newLines });
+    if (start === null) {
+      throw new Error(`Patch lines not found${hunk.context === null ? "" : ` after context: ${hunk.context}`}`);
+    }
+    replacements.push({
+      start,
+      end: start + hunk.oldLines.length,
+      lines: hunk.newLines,
+      order,
+    });
+    cursor = start + hunk.oldLines.length;
   }
-  const ordered = replacements.sort((a, b) => b.start - a.start);
+  const ordered = replacements.sort((a, b) => {
+    const positionOrder = b.start - a.start;
+    return positionOrder !== 0 ? positionOrder : b.order - a.order;
+  });
   for (let index = 1; index < ordered.length; index += 1) {
     const previous = ordered[index - 1];
     const current = ordered[index];

@@ -1,2 +1,2 @@
-<!-- The parser accepts both forms because models often use Codex's bare-hunk style. -->
-Start each hunk with `@@ exact context line`, then use `-old line` and `+new line`.
+<!-- Keep this aligned with Codex update hunks so the model can reuse a trained format. -->
+Use `apply_patch` update hunks without the file wrapper: start with `@@` or `@@ context`, then prefix unchanged, removed, and added lines with a space, `-`, and `+`.
