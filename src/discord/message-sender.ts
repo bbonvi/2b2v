@@ -9,7 +9,7 @@ import type { Database } from "../db/database";
 import { recordAssetRepost, syncMessageAssets } from "../db/asset-repository.ts";
 import { assetsFromDiscordMessage } from "./message-assets.ts";
 import { markBotParticipating, updateThreadActivity, upsertThread } from "../db/thread-repository";
-import type { RoutedMessageSource } from "../db/message-repository";
+import { upsertBotMessageContent, type RoutedMessageSource } from "../db/message-repository";
 import { assertSafeDiscordText } from "./outbound-xml-guard.ts";
 
 type AttachmentSendPayload = {
@@ -81,29 +81,18 @@ function createBotMessageStore(input: {
       && (input.routedFrom.routedFromGuildId !== targetGuildId || input.routedFrom.routedFromChannelId !== targetChannelId)
       ? input.routedFrom
       : undefined;
-    input.db.raw
-      .prepare(
-        `INSERT OR IGNORE INTO messages
-           (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, is_bot, created_at, reply_to_id,
-            routed_from_guild_id, routed_from_channel_id, routed_from_message_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        sentId,
-        targetGuildId,
-        targetChannelId,
-        input.botUserId,
-        input.botUsername,
-        rawContent,
-        plainContent,
-        1,
-        ts,
-        replyToId,
-        routedFrom?.routedFromGuildId ?? null,
-        routedFrom?.routedFromChannelId ?? null,
-        routedFrom?.routedFromMessageId ?? null,
-      );
-
+    upsertBotMessageContent(input.db, {
+      id: sentId,
+      guildId: targetGuildId,
+      channelId: targetChannelId,
+      botUserId: input.botUserId,
+      botUsername: input.botUsername,
+      rawContent,
+      translatedContent: plainContent,
+      createdAt: ts,
+      replyToId,
+      routedFrom,
+    });
   };
 }
 
