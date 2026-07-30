@@ -495,6 +495,75 @@ describe("processHistory", () => {
     expect(thoughtIndex).toBeLessThan(secondReplyIndex);
   });
 
+  test("pairs untrimmed handoffs with linked messages in older and newer history", async () => {
+    const config = {
+      ...defaultConfig,
+      trim: {
+        ...defaultConfig.trim,
+        trimTarget: 5,
+        windowSize: 2,
+        trimTrigger: 20,
+        messageCharLimit: 30,
+      },
+    };
+    const messages = Array.from({ length: 5 }, (_, index) => msg({
+      id: `message-${index}`,
+      author: `user${index}`,
+      authorId: `uid-${index}`,
+      content: `content-${index}`,
+      timestamp: 1000 + index * 1000,
+    }));
+    const olderHandoff = msg({
+      id: "prompt-only:handoff:source:routed-old",
+      author: "2B",
+      authorId: "bot-id",
+      content: "<handoff>\n  Older line keeps\n    indentation and " + "x".repeat(80) + "\n</handoff>",
+      isBot: true,
+      isPromptOnly: true,
+      timestamp: 20_000,
+      replyToId: "message-0",
+    });
+    const newerHandoff = msg({
+      id: "prompt-only:handoff:destination:routed-new",
+      author: "2B",
+      authorId: "bot-id",
+      content: "<handoff>\nNewer line one\n  Newer line two\n</handoff>",
+      isBot: true,
+      isPromptOnly: true,
+      timestamp: 21_000,
+      replyToId: "message-3",
+    });
+    const orphan = msg({
+      id: "prompt-only:handoff:source:orphan",
+      author: "2B",
+      authorId: "bot-id",
+      content: "<handoff>must not render</handoff>",
+      isBot: true,
+      isPromptOnly: true,
+      timestamp: 22_000,
+      replyToId: "outside-window",
+    });
+
+    const result = await processHistory(
+      [...messages, olderHandoff, newerHandoff, orphan],
+      msg({ id: "latest", content: "latest", timestamp: 30_000 }),
+      config,
+      deps,
+    );
+
+    expect(result.olderText).toContain(`[@2B]: ${olderHandoff.content}`);
+    expect(result.olderText).not.toContain("[trimmed");
+    expect(result.olderText.indexOf("content-0")).toBeLessThan(
+      result.olderText.indexOf(olderHandoff.content),
+    );
+    expect(result.newerText).toContain(`[@2B]: ${newerHandoff.content}`);
+    expect(result.newerText.indexOf("content-3")).toBeLessThan(
+      result.newerText.indexOf(newerHandoff.content),
+    );
+    expect(`${result.olderText}\n${result.newerText}`).not.toContain("must not render");
+    expect(`${result.olderText}\n${result.newerText}`).not.toContain("prompt-only:handoff:");
+  });
+
   test("returns visible human users newest first across older and newer history", async () => {
     const config = {
       ...defaultConfig,

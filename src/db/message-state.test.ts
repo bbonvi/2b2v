@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "./database";
-import { deleteBotMessageState, getRoutedMessageSource, upsertBotMessageContent } from "./message-repository";
+import { deleteBotMessageState, getRoutedMessageSource, insertPromptOnlyMessageHandoff, upsertBotMessageContent } from "./message-repository";
 import { upsertMessageReaction } from "./message-reactions";
 
 let db: Database;
@@ -115,6 +115,79 @@ describe("bot message state helpers", () => {
       routedFromChannelId: "c1",
       routedFromMessageId: "source-msg",
     });
+  });
+
+  test("persists escaped source and destination handoffs and returns the destination handoff", () => {
+    upsertBotMessageContent(db, {
+      id: "routed",
+      guildId: "g2",
+      channelId: "c2",
+      botUserId: "bot-1",
+      botUsername: "2b",
+      rawContent: "visible",
+      translatedContent: "visible",
+      createdAt: 999,
+      replyToId: null,
+      routedFrom: {
+        routedFromGuildId: "g1",
+        routedFromChannelId: "c1",
+        routedFromMessageId: "source-msg",
+      },
+    });
+    insertPromptOnlyMessageHandoff(db, {
+      sourceGuildId: "g1",
+      sourceChannelId: "c1",
+      sourceMessageId: "source-msg",
+      destinationGuildId: "g2",
+      destinationChannelId: "c2",
+      routedMessageId: "routed",
+      botUserId: "bot-1",
+      botUsername: "2b",
+      handoff: "Line one\n2 < 3 & \"quoted\".",
+    });
+
+    const expectedHandoff = [
+      "<handoff",
+      '  source_guild_id="g1"',
+      '  source_channel_id="c1"',
+      '  source_message_id="source-msg"',
+      '  destination_guild_id="g2"',
+      '  destination_channel_id="c2"',
+      '  routed_message_id="routed">',
+      "Line one",
+      "2 &lt; 3 &amp; &quot;quoted&quot;.",
+      "</handoff>",
+    ].join("\n");
+    const rows = db.raw.prepare(
+      "SELECT id, guild_id, channel_id, translated_content, reply_to_id, is_prompt_only FROM messages WHERE id LIKE 'prompt-only:handoff:%' ORDER BY id",
+    ).all() as Array<Record<string, string | number>>;
+    expect(rows).toEqual([
+      {
+        id: "prompt-only:handoff:destination:routed",
+        guild_id: "g2",
+        channel_id: "c2",
+        translated_content: expectedHandoff,
+        reply_to_id: "routed",
+        is_prompt_only: 1,
+      },
+      {
+        id: "prompt-only:handoff:source:routed",
+        guild_id: "g1",
+        channel_id: "c1",
+        translated_content: expectedHandoff,
+        reply_to_id: "source-msg",
+        is_prompt_only: 1,
+      },
+    ]);
+    expect(getRoutedMessageSource(db, { messageId: "routed", guildId: "g2", channelId: "c2" }))
+      .toEqual({
+        routedFromGuildId: "g1",
+        routedFromChannelId: "c1",
+        routedFromMessageId: "source-msg",
+        handoff: expectedHandoff,
+      });
+    expect(db.raw.prepare("SELECT translated_content FROM messages WHERE id = 'routed'").get())
+      .toEqual({ translated_content: "visible" });
   });
 
   test("upsertBotMessageContent refuses to update user-authored rows", () => {

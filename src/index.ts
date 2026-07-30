@@ -30,8 +30,8 @@ import {
 import { typingSimulationDelayMs } from "./agent/typing-simulation";
 import { createChannelDispatcher, DispatchSupersededError, selectDispatchMessageForTrigger, selectDispatchMessagesForTrigger, selectNormalDispatchTrigger, type ChannelDispatcher, type DispatchOutcome } from "./discord/channel-dispatcher";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "./agent/context-assembly";
-import { PRIVATE_THOUGHT_MESSAGE_ID_PREFIX, type HistoryMessage } from "./agent/history-types";
-import { getContextHistoryMessages, getMessageSearchMatchesByIds, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listDiscordChannelUsage, listChannelMessages, getRoutedMessageSource, getLatestMessageActivityBefore, type MessageActivity } from "./db/message-repository";
+import { PRIVATE_HANDOFF_MESSAGE_ID_PREFIX, PRIVATE_THOUGHT_MESSAGE_ID_PREFIX, type HistoryMessage } from "./agent/history-types";
+import { getContextHistoryMessages, getMessageSearchMatchesByIds, insertSyntheticEvent, insertPromptOnlyBotMessage, insertPromptOnlyMessageHandoff, getParentPreContext, listDiscordChannelUsage, listChannelMessages, getRoutedMessageSource, getLatestMessageActivityBefore, upsertBotMessageContent, type MessageActivity } from "./db/message-repository";
 import { cleanupDeletedDiscordMessage } from "./db/message-cleanup";
 import {
   countMessagesSinceMemoryExtraction,
@@ -42,7 +42,7 @@ import {
 } from "./db/memory-extraction-repository";
 import { processHistory } from "./agent/history-pipeline";
 import { normalizeWhitespace, trimMessages } from "./agent/history-trimming";
-import { formatMessageLine, OLDER_LEGEND } from "./agent/history-formatting";
+import { formatHistoryContent, formatMessageLine, OLDER_LEGEND } from "./agent/history-formatting";
 import { insertDateStamps } from "./agent/history-dates";
 import { formatRelativeAgo } from "./agent/history-dates";
 import { currentLocalContext, formatElapsedDuration } from "./time/agent-time";
@@ -1323,9 +1323,14 @@ async function resolveDefaultVoiceTextChannel(guildId: string): Promise<Sendable
 
 async function sendVoiceTextDirective(message: {
   channelId?: string;
+  handoff?: string;
   replyTo?: string;
   resolvesInstruction?: string;
   text: string;
+}, source: {
+  sourceGuildId: string;
+  sourceChannelId: string;
+  sourceMessageId: string;
 }): Promise<{ sentMessageId: string }> {
   const snapshot = voiceRuntime.snapshot();
   const instruction = message.resolvesInstruction === undefined
@@ -1358,6 +1363,38 @@ async function sendVoiceTextDirective(message: {
     sent = await channel.send({
       content: fallback,
       allowedMentions: { users: instruction === undefined ? [] : [instruction.requesterId] },
+    });
+  }
+  const destinationGuildId = sent.guildId ?? channel.guildId;
+  const destinationChannelId = sent.channelId;
+  upsertBotMessageContent(db, {
+    id: sent.id,
+    guildId: destinationGuildId,
+    channelId: destinationChannelId,
+    botUserId: client.user?.id ?? "",
+    botUsername: client.user?.username ?? "bot",
+    rawContent: sent.content,
+    translatedContent: sent.content,
+    createdAt: sent.createdTimestamp,
+    replyToId: sent.reference?.messageId ?? null,
+    routedFrom: source.sourceGuildId !== destinationGuildId
+      || source.sourceChannelId !== destinationChannelId
+      ? {
+          routedFromGuildId: source.sourceGuildId,
+          routedFromChannelId: source.sourceChannelId,
+          routedFromMessageId: source.sourceMessageId,
+        }
+      : undefined,
+  });
+  if (message.handoff !== undefined) {
+    insertPromptOnlyMessageHandoff(db, {
+      ...source,
+      destinationGuildId,
+      destinationChannelId,
+      routedMessageId: sent.id,
+      botUserId: client.user?.id ?? "",
+      botUsername: client.user?.username ?? "bot",
+      handoff: message.handoff,
     });
   }
   return { sentMessageId: sent.id };
@@ -3296,7 +3333,20 @@ async function buildContext(
 
       if (parentMessages.length > 0) {
         // Apply trimming (same rules as older history)
-        const trimmed = trimMessages(parentMessages, guildConfig.trim.messageCharLimit);
+        const handoffs = parentMessages.filter((message) =>
+          message.id.startsWith(PRIVATE_HANDOFF_MESSAGE_ID_PREFIX)
+        );
+        const trimmed = trimMessages(
+          parentMessages.filter((message) =>
+            !message.id.startsWith(PRIVATE_HANDOFF_MESSAGE_ID_PREFIX)
+          ),
+          guildConfig.trim.messageCharLimit,
+        ).flatMap((message) => [
+          message,
+          ...handoffs
+            .filter((handoff) => handoff.replyToId === message.id)
+            .map((handoff) => ({ ...handoff, timestamp: message.timestamp })),
+        ]);
 
         // Format with date stamps
         const dateEntries = insertDateStamps(trimmed, guildConfig.timezone);
@@ -3308,10 +3358,12 @@ async function buildContext(
             const m = trimmed[entry.index];
             if (m === undefined) continue;
             // No reply resolution for parent pre-context (simplified)
-            lines.push(formatMessageLine({
-              message: m,
-              reply: null,
-            }));
+            lines.push(m.id.startsWith(PRIVATE_HANDOFF_MESSAGE_ID_PREFIX)
+              ? `[@${m.author}]: ${formatHistoryContent(m)}`
+              : formatMessageLine({
+                message: m,
+                reply: null,
+              }));
           }
         }
         parentPreContext = `## Parent Pre-Context\n${lines.join("\n")}`;
@@ -5074,6 +5126,10 @@ async function processTriggeredMessage(
               sourceGuildId: repliedToBotRouteSource.routedFromGuildId,
               sourceChannelId: repliedToBotRouteSource.routedFromChannelId,
               sourceMessageId: repliedToBotRouteSource.routedFromMessageId,
+              ...(repliedToBotRouteSource.handoff !== undefined
+                && context.contextMessageIds?.includes(message.reference?.messageId ?? "") !== true
+                ? { handoff: repliedToBotRouteSource.handoff }
+                : {}),
             },
           }
         : {}),
@@ -5137,6 +5193,19 @@ async function processTriggeredMessage(
             historyText,
           });
           ambientRuntime.clearAmbientLeaseForUser(guildId, destinationChannelId ?? channelId, message.author.id);
+        },
+        onHandoffDelivered: (handoff) => {
+          insertPromptOnlyMessageHandoff(db, {
+            sourceGuildId: guildId,
+            sourceChannelId: channelId,
+            sourceMessageId: message.id,
+            destinationGuildId: handoff.destinationGuildId,
+            destinationChannelId: handoff.destinationChannelId,
+            routedMessageId: handoff.routedMessageId,
+            botUserId: client.user?.id ?? "",
+            botUsername: client.user?.username ?? "bot",
+            handoff: handoff.handoff,
+          });
         },
         afterReply: async (memoryRequest) => {
           if (options.currentTurnOverride !== undefined && options.eventWatchTurn !== undefined) return;

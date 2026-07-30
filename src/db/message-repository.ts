@@ -1,5 +1,9 @@
 import type { Database } from "./database";
-import { PRIVATE_THOUGHT_MESSAGE_ID_PREFIX, type HistoryMessage } from "../agent/history-types";
+import {
+  PRIVATE_HANDOFF_MESSAGE_ID_PREFIX,
+  PRIVATE_THOUGHT_MESSAGE_ID_PREFIX,
+  type HistoryMessage,
+} from "../agent/history-types";
 import type { TrimConfig } from "../config/types";
 import type { AssetKind, AssetSourceKind } from "./asset-repository.ts";
 import type { HistoryAsset } from "../agent/history-types.ts";
@@ -24,6 +28,8 @@ export interface RoutedMessageSource {
   routedFromGuildId: string;
   routedFromChannelId: string;
   routedFromMessageId: string;
+  /** Private routed-message context, when the sending turn supplied it. */
+  handoff?: string;
 }
 
 export interface UpsertBotMessageContentInput {
@@ -611,15 +617,24 @@ export function getRoutedMessageSource(
 ): RoutedMessageSource | null {
   const row = db.raw
     .prepare(
-      `SELECT routed_from_guild_id, routed_from_channel_id, routed_from_message_id
+      `SELECT messages.routed_from_guild_id, messages.routed_from_channel_id, messages.routed_from_message_id,
+              handoff.translated_content AS handoff_content
        FROM messages
-       WHERE id = ? AND guild_id = ? AND channel_id = ?
-         AND is_bot = 1 AND is_synthetic = 0 AND is_prompt_only = 0`
+       LEFT JOIN messages AS handoff
+         ON handoff.id = ? || messages.id AND handoff.is_prompt_only = 1
+       WHERE messages.id = ? AND messages.guild_id = ? AND messages.channel_id = ?
+         AND messages.is_bot = 1 AND messages.is_synthetic = 0 AND messages.is_prompt_only = 0`
     )
-    .get(input.messageId, input.guildId, input.channelId) as {
+    .get(
+      `${PRIVATE_HANDOFF_MESSAGE_ID_PREFIX}destination:`,
+      input.messageId,
+      input.guildId,
+      input.channelId,
+    ) as {
       routed_from_guild_id: string | null;
       routed_from_channel_id: string | null;
       routed_from_message_id: string | null;
+      handoff_content: string | null;
     } | null;
 
   if (
@@ -634,6 +649,7 @@ export function getRoutedMessageSource(
     routedFromGuildId: row.routed_from_guild_id,
     routedFromChannelId: row.routed_from_channel_id,
     routedFromMessageId: row.routed_from_message_id,
+    ...(row.handoff_content !== null ? { handoff: row.handoff_content } : {}),
   };
 }
 
@@ -996,20 +1012,22 @@ export function getHistoryMessages(
   channelId: string,
   limit: number,
 ): HistoryMessage[] {
+  const privateHandoffPattern = `${PRIVATE_HANDOFF_MESSAGE_ID_PREFIX}%`;
   const rows = db.raw
     .prepare(
       `SELECT id, author_username, user_id, translated_content, is_bot, webhook_id, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
        FROM messages
-       WHERE channel_id = ?
+       WHERE channel_id = ? AND id NOT LIKE ?
        ORDER BY created_at DESC
        LIMIT ?`
     )
-    .all(channelId, limit) as HistoryRow[];
+    .all(channelId, privateHandoffPattern, limit) as HistoryRow[];
 
   // Reverse to chronological order
   rows.reverse();
 
-  return hydrateHistoryRows(db, rows);
+  return hydrateHistoryRows(db, [...rows, ...linkedPrivateHandoffRows(db, channelId, rows)]
+    .sort(compareHistoryRows));
 }
 
 /** Count human channel messages by fixed time bucket for ambient activity baselines. */
@@ -1046,6 +1064,33 @@ function chunkedHistoryTakeCount(totalMessages: number, trim: TrimConfig): numbe
   return totalMessages - dropCount;
 }
 
+function compareHistoryRows(left: HistoryRow, right: HistoryRow): number {
+  const timeDiff = left.created_at - right.created_at;
+  return timeDiff !== 0 ? timeDiff : left.id.localeCompare(right.id);
+}
+
+function linkedPrivateHandoffRows(
+  db: Database,
+  channelId: string,
+  linkedRows: HistoryRow[],
+): HistoryRow[] {
+  const linkedMessageIds = linkedRows.map((row) => row.id);
+  if (linkedMessageIds.length === 0) return [];
+  return db.raw
+    .prepare(
+      `SELECT id, author_username, user_id, translated_content, is_bot, webhook_id, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
+       FROM messages
+       WHERE channel_id = ? AND id LIKE ?
+         AND reply_to_id IN (${linkedMessageIds.map(() => "?").join(",")})
+       ORDER BY created_at ASC, id ASC`
+    )
+    .all(
+      channelId,
+      `${PRIVATE_HANDOFF_MESSAGE_ID_PREFIX}%`,
+      ...linkedMessageIds,
+    ) as HistoryRow[];
+}
+
 /**
  * Fetch the channel history window for prompt context.
  *
@@ -1065,9 +1110,11 @@ export function getContextHistoryMessages(
     : [...(excludeMessageIds ?? [])];
   const excludeClause = excludedIds.length > 0 ? ` AND id NOT IN (${excludedIds.map(() => "?").join(",")})` : "";
   const privateThoughtPattern = `${PRIVATE_THOUGHT_MESSAGE_ID_PREFIX}%`;
-  const params = [channelId, privateThoughtPattern, ...excludedIds];
+  const privateHandoffPattern = `${PRIVATE_HANDOFF_MESSAGE_ID_PREFIX}%`;
+  const params = [channelId, privateThoughtPattern, privateHandoffPattern, ...excludedIds];
   const countRow = db.raw
-    .prepare(`SELECT COUNT(*) AS count FROM messages WHERE channel_id = ? AND id NOT LIKE ?${excludeClause}`)
+    .prepare(`SELECT COUNT(*) AS count FROM messages
+      WHERE channel_id = ? AND id NOT LIKE ? AND id NOT LIKE ?${excludeClause}`)
     .get(...params) as { count: number } | null;
   const totalMessages = countRow?.count ?? 0;
   const takeCount = chunkedHistoryTakeCount(totalMessages, trim);
@@ -1077,7 +1124,7 @@ export function getContextHistoryMessages(
     .prepare(
       `SELECT id, author_username, user_id, translated_content, is_bot, webhook_id, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
        FROM messages
-       WHERE channel_id = ? AND id NOT LIKE ?${excludeClause}
+       WHERE channel_id = ? AND id NOT LIKE ? AND id NOT LIKE ?${excludeClause}
        ORDER BY created_at DESC
        LIMIT ?`
     )
@@ -1094,10 +1141,11 @@ export function getContextHistoryMessages(
        ORDER BY created_at ASC, id ASC`
     )
     .all(channelId, privateThoughtPattern, oldestTimestamp) as HistoryRow[];
-  return hydrateHistoryRows(db, [...rows, ...privateThoughtRows].sort((left, right) => {
-    const timeDiff = left.created_at - right.created_at;
-    return timeDiff !== 0 ? timeDiff : left.id.localeCompare(right.id);
-  }));
+  const privateHandoffRows = linkedPrivateHandoffRows(db, channelId, rows);
+  return hydrateHistoryRows(
+    db,
+    [...rows, ...privateThoughtRows, ...privateHandoffRows].sort(compareHistoryRows),
+  );
 }
 
 /**
@@ -1196,33 +1244,24 @@ export function getParentPreContext(
   beforeTimestamp: number,
   limit: number,
 ): HistoryMessage[] {
+  const privateHandoffPattern = `${PRIVATE_HANDOFF_MESSAGE_ID_PREFIX}%`;
   const rows = db.raw
     .prepare(
       `SELECT id, author_username, user_id, translated_content, is_bot, webhook_id, created_at, reply_to_id, is_synthetic, is_prompt_only, deleted_at, related_thread_id
        FROM messages
-       WHERE channel_id = ? AND created_at < ? AND is_synthetic = 0
+       WHERE channel_id = ? AND created_at < ? AND is_synthetic = 0 AND id NOT LIKE ?
        ORDER BY created_at DESC
        LIMIT ?`
     )
-    .all(parentChatId, beforeTimestamp, limit) as Array<{
-      id: string;
-      author_username: string;
-      user_id: string;
-      translated_content: string;
-      is_bot: number;
-      webhook_id: string | null;
-      created_at: number;
-      reply_to_id: string | null;
-      is_synthetic: number;
-      is_prompt_only: number;
-      deleted_at: number | null;
-      related_thread_id: string | null;
-    }>;
+    .all(parentChatId, beforeTimestamp, privateHandoffPattern, limit) as HistoryRow[];
 
   // Reverse to chronological order (oldest first)
   rows.reverse();
 
-  return hydrateHistoryRows(db, rows);
+  return hydrateHistoryRows(
+    db,
+    [...rows, ...linkedPrivateHandoffRows(db, parentChatId, rows)].sort(compareHistoryRows),
+  );
 }
 
 export type ChannelMessageRow = HistoryMessage;
@@ -1358,6 +1397,18 @@ export interface InsertPromptOnlyBotMessageInput {
   createdAt?: number;
 }
 
+export interface InsertPromptOnlyMessageHandoffInput {
+  sourceGuildId: string;
+  sourceChannelId: string;
+  sourceMessageId: string;
+  destinationGuildId: string;
+  destinationChannelId: string;
+  routedMessageId: string;
+  botUserId: string;
+  botUsername: string;
+  handoff: string;
+}
+
 /**
  * Insert a synthetic "Event" row for thread creation/handoff.
  * Stored in the parent channel with is_synthetic=1 and related_thread_id set.
@@ -1410,6 +1461,52 @@ export function insertPromptOnlyBotMessage(db: Database, input: InsertPromptOnly
       input.createdAt ?? Date.now(),
       input.replyToId ?? null,
     );
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+/** Persist one authored handoff beside its source and delivered Discord messages. */
+export function insertPromptOnlyMessageHandoff(
+  db: Database,
+  input: InsertPromptOnlyMessageHandoffInput,
+): void {
+  const content = [
+    "<handoff",
+    `  source_guild_id="${escapeXml(input.sourceGuildId)}"`,
+    `  source_channel_id="${escapeXml(input.sourceChannelId)}"`,
+    `  source_message_id="${escapeXml(input.sourceMessageId)}"`,
+    `  destination_guild_id="${escapeXml(input.destinationGuildId)}"`,
+    `  destination_channel_id="${escapeXml(input.destinationChannelId)}"`,
+    `  routed_message_id="${escapeXml(input.routedMessageId)}">`,
+    escapeXml(input.handoff),
+    "</handoff>",
+  ].join("\n");
+  const common = {
+    botUserId: input.botUserId,
+    botUsername: input.botUsername,
+    content,
+  };
+  insertPromptOnlyBotMessage(db, {
+    ...common,
+    id: `${PRIVATE_HANDOFF_MESSAGE_ID_PREFIX}source:${input.routedMessageId}`,
+    guildId: input.sourceGuildId,
+    channelId: input.sourceChannelId,
+    replyToId: input.sourceMessageId,
+  });
+  insertPromptOnlyBotMessage(db, {
+    ...common,
+    id: `${PRIVATE_HANDOFF_MESSAGE_ID_PREFIX}destination:${input.routedMessageId}`,
+    guildId: input.destinationGuildId,
+    channelId: input.destinationChannelId,
+    replyToId: input.routedMessageId,
+  });
 }
 
 /**

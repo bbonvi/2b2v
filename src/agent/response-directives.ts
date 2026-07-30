@@ -8,6 +8,8 @@ export type ResponseSegment =
 
 export interface MessageDelivery {
   channelId?: string;
+  /** Private context persisted beside the delivered message, never sent to Discord. */
+  handoff?: string;
   reply?: boolean;
   replyTo?: string;
   keepTyping?: boolean;
@@ -35,6 +37,7 @@ interface ParseResult {
   segments: ResponseSegment[];
   index: number;
   closed: boolean;
+  handoff?: string;
 }
 
 interface ParsedAttribute {
@@ -44,13 +47,16 @@ interface ParsedAttribute {
 
 interface ParseContext {
   directiveErrors: string[];
+  malformedPrivateOutput: boolean;
 }
 
-const RESERVED_TAG_RE = /<\s*\/?\s*(?:voice|audio|message|ignore)(?=[\s/>])/i;
+const RESERVED_TAG_RE = /<\s*\/?\s*(?:voice|audio|message|handoff|ignore)(?=[\s/>])/i;
 const FENCE_RE = /```[ \t]*(?:[a-zA-Z0-9_-]+)?[ \t]*\n?([\s\S]*?)```/g;
 const PRIVATE_TAG_RE = /<\s*(\/?)\s*(scene|thoughts?)(?=[\s/>])([^>]*)>/gi;
 const PRIVATE_TAG_PREFIX_RE = /<\s*\/?\s*(?:scene|thoughts?)(?=[\s/>]|$)/i;
-const TAG_RE = /<\s*(\/?)\s*(voice|audio|message|ignore)(?=[\s/>])([^>]*)>/gi;
+const TAG_RE = /<\s*(\/?)\s*(voice|audio|message|handoff|ignore)(?=[\s/>])([^>]*)>/gi;
+const HANDOFF_TAG_PREFIX_RE = /<\s*\/?\s*handoff(?=[\s/>]|$)/i;
+const RESPONSE_TAG_PREFIX_RE = /<\s*\/?\s*(?:thoughts?|voice|audio|message|handoff|ignore)(?=[\s/>]|$)/i;
 const USERNAME_PATTERN = "[A-Za-z0-9_](?:[A-Za-z0-9_.]{0,30}[A-Za-z0-9_])?";
 const CHANNEL_PATTERN = "#[A-Za-z0-9_][\\w-]{0,99}";
 const URL_PATTERN = "https?:\\/\\/[^\\s<>()]+";
@@ -321,7 +327,7 @@ function ignoreDirectiveEnd(text: string, tagEnd: number): number {
   return closeStart === -1 ? text.length : closeStart + "</ignore>".length;
 }
 
-function closingTagEnd(text: string, tag: "voice" | "audio" | "message", from: number): number {
+function closingTagEnd(text: string, tag: "voice" | "audio" | "message" | "handoff", from: number): number {
   const closeStart = text.toLowerCase().indexOf(`</${tag}>`, from);
   return closeStart === -1 ? from : closeStart + tag.length + 3;
 }
@@ -341,10 +347,11 @@ function parseRange(
   text: string,
   start: number,
   mode: SegmentMode,
-  stopTag: "voice" | "audio" | "message" | "ignore" | null,
+  stopTag: "voice" | "audio" | "message" | "handoff" | "ignore" | null,
   context: ParseContext,
 ): ParseResult {
   const segments: ResponseSegment[] = [];
+  let handoff: string | undefined;
   let cursor = start;
   const tagRe = new RegExp(TAG_RE.source, "gi");
   tagRe.lastIndex = start;
@@ -358,7 +365,7 @@ function parseRange(
     const isClosing = match[1] === "/";
     const rawTag = match[2];
     if (rawTag === undefined) continue;
-    const tag = rawTag.toLowerCase() as "voice" | "audio" | "message" | "ignore";
+    const tag = rawTag.toLowerCase() as "voice" | "audio" | "message" | "handoff" | "ignore";
     const attrs = match[3] ?? "";
     const selfClosing = /\/\s*$/.test(attrs);
 
@@ -366,8 +373,15 @@ function parseRange(
 
     if (isClosing) {
       if (stopTag === tag) {
-        return { ignored: false, segments, index: tagEnd, closed: true };
+        return {
+          ignored: false,
+          segments,
+          index: tagEnd,
+          closed: true,
+          ...(handoff !== undefined ? { handoff } : {}),
+        };
       }
+      if (tag === "handoff") context.malformedPrivateOutput = true;
       pushSegment(segments, mode, match[0]);
       cursor = tagEnd;
       continue;
@@ -390,6 +404,27 @@ function parseRange(
       return { ignored: true, ignoredText: renderIgnoredText(text.slice(tagEnd, closeStart)), segments, index: closeEnd, closed: true };
     }
 
+    if (tag === "handoff") {
+      const closeStart = text.toLowerCase().indexOf("</handoff>", tagEnd);
+      const body = closeStart === -1 ? text.slice(tagEnd) : text.slice(tagEnd, closeStart);
+      if (
+        stopTag !== "message"
+        || selfClosing
+        || attrs.trim() !== ""
+        || closeStart === -1
+        || handoff !== undefined
+        || HANDOFF_TAG_PREFIX_RE.test(body)
+        || RESPONSE_TAG_PREFIX_RE.test(body)
+      ) {
+        context.malformedPrivateOutput = true;
+        return { ignored: false, segments: [], index: text.length, closed: false };
+      }
+      handoff = body.trim();
+      cursor = closeStart + "</handoff>".length;
+      tagRe.lastIndex = cursor;
+      continue;
+    }
+
     if (tag === "message") {
       const parsedDelivery = parseMessageDelivery(attrs);
       context.directiveErrors.push(...parsedDelivery.errors);
@@ -408,12 +443,15 @@ function parseRange(
         }
         return { ignored: true, ignoredText: nested.ignoredText, segments, index: text.length, closed: false };
       }
+      const messageDelivery = nested.handoff !== undefined
+        ? { ...(delivery ?? {}), handoff: nested.handoff }
+        : delivery;
       if (hasOutputSegment(nested.segments)) {
-        pushMessageBreak(segments, delivery);
+        pushMessageBreak(segments, messageDelivery);
         segments.push(...nested.segments);
         pushMessageBreak(segments);
-      } else if (delivery !== undefined) {
-        pushEmptyMessage(segments, delivery);
+      } else if (messageDelivery !== undefined) {
+        pushEmptyMessage(segments, messageDelivery);
       }
       cursor = nested.index;
       tagRe.lastIndex = cursor;
@@ -440,7 +478,13 @@ function parseRange(
   }
 
   pushSegment(segments, mode, text.slice(cursor));
-  return { ignored: false, segments, index: text.length, closed: false };
+  return {
+    ignored: false,
+    segments,
+    index: text.length,
+    closed: false,
+    ...(handoff !== undefined ? { handoff } : {}),
+  };
 }
 
 /** Report whether streamed output contains a complete, valid visible message action. */
@@ -475,14 +519,15 @@ export function parseResponseDirectives(response: string): ParsedResponseDirecti
   if (privateResult.malformed) {
     return { ignored: false, malformedPrivateOutput: true, segments: [] };
   }
-  const context: ParseContext = { directiveErrors: [] };
+  const context: ParseContext = { directiveErrors: [], malformedPrivateOutput: false };
   const parsed = parseRange(privateResult.text, 0, { kind: "text" }, null, context);
   return {
     ignored: parsed.ignored,
     ...(parsed.ignoredText !== undefined ? { ignoredText: parsed.ignoredText } : {}),
     ...(context.directiveErrors.length > 0 ? { directiveErrors: context.directiveErrors } : {}),
     ...(privateResult.thoughts.length > 0 ? { privateThoughts: privateResult.thoughts } : {}),
-    segments: parsed.ignored || context.directiveErrors.length > 0
+    ...(context.malformedPrivateOutput ? { malformedPrivateOutput: true } : {}),
+    segments: parsed.ignored || context.directiveErrors.length > 0 || context.malformedPrivateOutput
       ? []
       : normalizeMessageBreaks(parsed.segments),
   };

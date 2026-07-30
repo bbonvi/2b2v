@@ -613,6 +613,7 @@ describe("handleMessage", () => {
       expect(currentTurn).toContain("Source GuildID: source-guild");
       expect(currentTurn).toContain("Source ChannelID: source-channel");
       expect(currentTurn).toContain("Source MsgID: source-msg");
+      expect(currentTurn).toContain("<handoff>old routed context</handoff>");
       expect(currentTurn).toContain("hello bot");
       const currentTurnIndex = messages.findIndex((message) => contentText(message.content).includes("## Current Discord Message"));
       expect(messages[currentTurnIndex + 1]?.role).toBe("user");
@@ -639,6 +640,7 @@ describe("handleMessage", () => {
           sourceGuildId: "source-guild",
           sourceChannelId: "source-channel",
           sourceMessageId: "source-msg",
+          handoff: "<handoff>old routed context</handoff>",
         },
         assets: [{
           id: 29,
@@ -2086,6 +2088,104 @@ describe("handleMessage", () => {
     ]);
     expect(speechTexts).toEqual(["[whispers] quiet line"]);
     expect(result.responseText).toBe('Text first\n<voice>[whispers] quiet line</voice>\ntext after');
+  });
+
+  test("keeps streamed handoffs out of text, voice, attachments, and visible memory", async () => {
+    const response = [
+      '<message channel_id="thread-1" asset_ids=[12]>',
+      "<handoff>text-private\nline two</handoff>",
+      "Visible text.",
+      "</message>",
+      '<message channel_id="thread-2">',
+      "<handoff>voice-private</handoff>",
+      "Caption <voice>Spoken line.</voice>",
+      "</message>",
+    ].join("\n");
+    const completeChat: ChatCompleteFn = async (request) => {
+      await request.onTextDelta?.(response);
+      return {
+        text: response,
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      };
+    };
+    const sends: Array<{
+      text: string;
+      channelId?: string;
+      voiceHistory?: string;
+      attachments?: string[];
+    }> = [];
+    const sender: MessageSender = (text, _reply, channelId, voice, _signal, _replyTo, attachments) => {
+      sends.push({
+        text,
+        channelId,
+        voiceHistory: voice?.historyText,
+        attachments: attachments?.map((attachment) => attachment.filename),
+      });
+      return Promise.resolve({
+        sentMessageId: `sent-${sends.length}`,
+        sentGuildId: "destination-guild",
+        sentChannelId: channelId ?? "channel-1",
+      });
+    };
+    const spoken: string[] = [];
+    const handoffs: unknown[] = [];
+
+    const result = await handleMessage(
+      makeMessage({ mentionedUserIds: ["bot-1"] }),
+      makeDeps({
+        completeChat,
+        sender,
+        ttsEnabled: true,
+        generateSpeech: (text) => {
+          spoken.push(text);
+          return Promise.resolve({ ok: true, buffer: Buffer.from("audio"), contentType: "audio/mpeg" });
+        },
+        resolveAssetAttachments: () => Promise.resolve([{
+          id: "asset-12",
+          buffer: Buffer.from("image"),
+          filename: "asset.png",
+          contentType: "image/png",
+        }]),
+        onHandoffDelivered: (handoff) => { handoffs.push(handoff); },
+      }),
+    );
+
+    expect(sends).toEqual([
+      {
+        text: "Visible text.",
+        channelId: "thread-1",
+        voiceHistory: undefined,
+        attachments: ["asset.png"],
+      },
+      {
+        text: "Caption",
+        channelId: "thread-2",
+        voiceHistory: "Caption\n<voice>Spoken line.</voice>",
+        attachments: undefined,
+      },
+    ]);
+    expect(spoken).toEqual(["Spoken line."]);
+    expect(handoffs).toEqual([
+      {
+        handoff: "text-private\nline two",
+        routedMessageId: "sent-1",
+        destinationGuildId: "destination-guild",
+        destinationChannelId: "thread-1",
+      },
+      {
+        handoff: "voice-private",
+        routedMessageId: "sent-2",
+        destinationGuildId: "destination-guild",
+        destinationChannelId: "thread-2",
+      },
+    ]);
+    expect(result.responseText).toBe(
+      "Visible text.\n[msg-break]\nCaption\n<voice>Spoken line.</voice>",
+    );
+    expect(JSON.stringify({ sends, spoken, responseText: result.responseText }))
+      .not.toContain("private");
   });
 
   test("sends audio directive inside message directive as one separate voice message", async () => {

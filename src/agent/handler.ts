@@ -100,6 +100,8 @@ export interface IncomingMessage {
     sourceGuildId: string;
     sourceChannelId: string;
     sourceMessageId: string;
+    /** Stored private context omitted when the routed message is already in history. */
+    handoff?: string;
   };
   imageInputs?: CurrentTurnImageInput[];
   /** Lazy assets attached to the current Discord event. */
@@ -254,7 +256,12 @@ export type MessageSender = (
   attachments?: OutboundAttachment[],
   dedupeKey?: string,
   presentation?: MessagePresentation,
-) => Promise<{ sentMessageId: string; warnings?: string[] }>;
+) => Promise<{
+  sentMessageId: string;
+  sentGuildId?: string;
+  sentChannelId?: string;
+  warnings?: string[];
+}>;
 
 /** Resolves stored chat asset IDs into Discord-ready file attachments. */
 export type AssetAttachmentResolver = (assetIds: AssetRef[]) => Promise<OutboundAttachment[]>;
@@ -314,6 +321,13 @@ export interface HandlerDeps {
   consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
   /** Resolves asset_ids on <message> envelopes into outgoing Discord attachments. */
   resolveAssetAttachments?: AssetAttachmentResolver;
+  /** Persists private context after the routed Discord message exists. */
+  onHandoffDelivered?: (input: {
+    handoff: string;
+    routedMessageId: string;
+    destinationGuildId: string;
+    destinationChannelId: string;
+  }) => void | Promise<void>;
   /** Disable streamed Discord sends so callers can re-check state before final delivery. */
   disableLiveOutput?: boolean;
   /** Replace normal text/voice directive dispatch with a live external stream. */
@@ -373,6 +387,13 @@ class EmptyModelResponseError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "EmptyModelResponseError";
+  }
+}
+
+class HandoffPersistenceError extends Error {
+  constructor(cause: unknown) {
+    super("Discord message was delivered, but its handoff could not be persisted.", { cause });
+    this.name = "HandoffPersistenceError";
   }
 }
 
@@ -1068,6 +1089,9 @@ function buildCurrentMessageMetadata(msg: IncomingMessage, runtimePrompts?: Runt
     lines.push(`Source GuildID: ${msg.repliedToBotRouteSource.sourceGuildId}`);
     lines.push(`Source ChannelID: ${msg.repliedToBotRouteSource.sourceChannelId}`);
     lines.push(`Source MsgID: ${msg.repliedToBotRouteSource.sourceMessageId}`);
+    if (msg.repliedToBotRouteSource.handoff !== undefined) {
+      lines.push(msg.repliedToBotRouteSource.handoff);
+    }
     lines.push(runtimeContextTemplate(
       runtimePrompts,
       "routed-reply-source",
@@ -1076,7 +1100,7 @@ function buildCurrentMessageMetadata(msg: IncomingMessage, runtimePrompts?: Runt
         sourceChannelId: msg.repliedToBotRouteSource.sourceChannelId,
         sourceMessageId: msg.repliedToBotRouteSource.sourceMessageId,
       },
-      "Use chat history/search if source context is needed for your next action; do not expose source-channel details unless relevant.",
+      "Use the routed message's <handoff> to understand why it was sent and what this reply continues. If absent or insufficient, inspect the source with list_channel_messages or search_channel_messages. Do not expose source-room details unless relevant here.",
     ));
   }
   return lines.join("\n");
@@ -2243,6 +2267,7 @@ async function sendOneSegment(input: {
   requestLog?: RequestLog;
   signal?: AbortSignal;
   onSent?: () => void | Promise<void>;
+  onHandoffDelivered?: HandlerDeps["onHandoffDelivered"];
 }): Promise<void> {
   const destinationChannelId = input.segment.delivery?.channelId ?? input.destinationChannelId;
   const args: Record<string, unknown> = {
@@ -2302,6 +2327,23 @@ async function sendOneSegment(input: {
       discordSendDedupeKey({ requestLog: input.requestLog, sendId: input.sendId }),
     );
     assertSentMessageId(result);
+    if (input.segment.delivery?.handoff !== undefined && input.onHandoffDelivered !== undefined) {
+      if (result.sentGuildId === undefined || result.sentChannelId === undefined) {
+        throw new HandoffPersistenceError(
+          new Error("Discord sender did not return destination identifiers for a handoff."),
+        );
+      }
+      try {
+        await input.onHandoffDelivered({
+          handoff: input.segment.delivery.handoff,
+          routedMessageId: result.sentMessageId,
+          destinationGuildId: result.sentGuildId,
+          destinationChannelId: result.sentChannelId,
+        });
+      } catch (error) {
+        throw new HandoffPersistenceError(error);
+      }
+    }
     await input.onSent?.();
     const warnings = result.warnings ?? [];
     input.requestLog?.recordToolEnd(input.sendId, false, {
@@ -2353,6 +2395,7 @@ async function sendResponseSegments(input: {
   signal?: AbortSignal;
   pendingAttachments?: OutboundAttachment[];
   resolveAssetAttachments?: AssetAttachmentResolver;
+  onHandoffDelivered?: HandlerDeps["onHandoffDelivered"];
 }): Promise<number> {
   let sent = input.sentOffset ?? 0;
   let sentNow = 0;
@@ -2422,6 +2465,7 @@ async function sendResponseSegments(input: {
         requestLog: input.requestLog,
         signal: input.signal,
         onSent,
+        onHandoffDelivered: input.onHandoffDelivered,
       });
       continue;
     }
@@ -2441,8 +2485,10 @@ async function sendResponseSegments(input: {
         requestLog: input.requestLog,
         signal: input.signal,
         onSent,
+        onHandoffDelivered: input.onHandoffDelivered,
       });
     } catch (error) {
+      if (error instanceof HandoffPersistenceError) throw error;
       input.log?.warn("voice directive failed; falling back to text", {
         error: makeToolErrorText(error),
       });
@@ -2460,6 +2506,7 @@ async function sendResponseSegments(input: {
         requestLog: input.requestLog,
         signal: input.signal,
         onSent,
+        onHandoffDelivered: input.onHandoffDelivered,
       });
     }
   }
@@ -2484,6 +2531,7 @@ interface LiveMessageDispatchDeps {
   signal?: AbortSignal;
   pendingAttachments?: OutboundAttachment[];
   resolveAssetAttachments?: AssetAttachmentResolver;
+  onHandoffDelivered?: HandlerDeps["onHandoffDelivered"];
 }
 
 class LiveMessageDispatcher {
@@ -3123,6 +3171,7 @@ export async function handleMessage(
         signal: wallController.signal,
         pendingAttachments,
         resolveAssetAttachments: deps.resolveAssetAttachments,
+        onHandoffDelivered: deps.onHandoffDelivered,
       });
       liveDispatchers.set(key, dispatcher);
       return dispatcher;
@@ -3150,6 +3199,7 @@ export async function handleMessage(
           typingHoldMs: liveMessageTypingHoldMs,
           typingHoldMsForSegment,
           signal: wallController.signal,
+          onHandoffDelivered: deps.onHandoffDelivered,
         });
         intermediateStatus.sent = true;
         return true;
@@ -3379,6 +3429,7 @@ export async function handleMessage(
         signal: wallController.signal.aborted ? undefined : wallController.signal,
         pendingAttachments,
         resolveAssetAttachments: deps.resolveAssetAttachments,
+        onHandoffDelivered: deps.onHandoffDelivered,
       });
     }
 

@@ -128,6 +128,66 @@ describe("parseResponseDirectives", () => {
     });
   });
 
+  test("extracts one multiline handoff from each message without changing visible text", () => {
+    expect(parseResponseDirectives([
+      '<message channel_id="chan-2">',
+      "  <handoff>",
+      "Source line one.",
+      "  Source line two with &lt;message&gt; &amp; XML.",
+      "  </handoff>",
+      "  Visible first.",
+      "</message>",
+      '<message channel_id="chan-3"><handoff>Second private note.</handoff>Visible second.</message>',
+    ].join("\n"))).toEqual({
+      ignored: false,
+      segments: [
+        {
+          kind: "messageBreak",
+          delivery: {
+            channelId: "chan-2",
+            handoff: "Source line one.\n  Source line two with &lt;message&gt; &amp; XML.",
+          },
+        },
+        { kind: "text", text: "Visible first." },
+        {
+          kind: "messageBreak",
+          delivery: { channelId: "chan-3", handoff: "Second private note." },
+        },
+        { kind: "text", text: "Visible second." },
+      ],
+    });
+  });
+
+  test("allows a handoff in a same-channel message envelope", () => {
+    expect(parseResponseDirectives(
+      "<message><handoff>Private same-room continuity.</handoff>Visible.</message>",
+    ).segments).toEqual([
+      {
+        kind: "messageBreak",
+        delivery: { handoff: "Private same-room continuity." },
+      },
+      { kind: "text", text: "Visible." },
+    ]);
+  });
+
+  test("fails closed on malformed, duplicate, nested, or misplaced handoffs", () => {
+    for (const response of [
+      "<handoff>outside</handoff><message>visible</message>",
+      "<message><handoff>unclosed\nvisible</message>",
+      "<message><handoff>one</handoff><handoff>two</handoff>visible</message>",
+      "<message><handoff>outer<handoff>inner</handoff></handoff>visible</message>",
+      '<message><handoff kind="private">secret</handoff>visible</message>',
+      "<message><voice><handoff>not direct</handoff>spoken</voice></message>",
+      "<message><handoff>raw <voice>tag</voice></handoff>visible</message>",
+    ]) {
+      expect(parseResponseDirectives(response)).toEqual({
+        ignored: false,
+        malformedPrivateOutput: true,
+        segments: [],
+      });
+    }
+  });
+
   test("rejects legacy chat_id delivery attributes", () => {
     expect(parseResponseDirectives("<message chat_id=\"chan-2\">first</message>")).toEqual({
       ignored: false,
@@ -394,6 +454,13 @@ describe("renderSegmentsForMemory", () => {
       { kind: "messageBreak", delivery: { reply: false } },
       { kind: "text", text: "first" },
     ])).toBe("first");
+  });
+
+  test("does not render handoff delivery metadata in visible memory text", () => {
+    expect(renderSegmentsForMemory([
+      { kind: "messageBreak", delivery: { handoff: "private\ncontext" } },
+      { kind: "text", text: "visible" },
+    ])).toBe("visible");
   });
 
   test("escapes voice text when rendering XML for history", () => {
