@@ -19,6 +19,7 @@ import {
   DEFAULT_PROMPT_CACHING,
   DEFAULT_PROMPT_TRANSPORT,
   DEFAULT_PRIVATE_LIFE,
+  DEFAULT_REPERTOIRE,
   DEFAULT_RELATIONSHIPS,
   DEFAULT_REPLY_LOOP,
   DEFAULT_SCHEDULE_PRESSURE,
@@ -56,6 +57,7 @@ import type {
   ReplyLoopConfig,
   MemoryExtractionConfig,
   MemoryContextConfig,
+  RepertoireConfig,
   NotebooksConfig,
   NotebooksConfigYaml,
   ServiceTier,
@@ -1049,6 +1051,24 @@ function resolveMemoryContext(
   return resolved;
 }
 
+function resolveRepertoireConfig(partial: MainConfigYaml["repertoire"]): RepertoireConfig {
+  const resolved: RepertoireConfig = {
+    enabled: partial?.enabled ?? DEFAULT_REPERTOIRE.enabled,
+    lookbackHours: partial?.lookbackHours ?? DEFAULT_REPERTOIRE.lookbackHours,
+    refreshMinutes: partial?.refreshMinutes ?? DEFAULT_REPERTOIRE.refreshMinutes,
+    maxSourceChannels: partial?.maxSourceChannels ?? DEFAULT_REPERTOIRE.maxSourceChannels,
+    maxMessages: partial?.maxMessages ?? DEFAULT_REPERTOIRE.maxMessages,
+    maxChars: partial?.maxChars ?? DEFAULT_REPERTOIRE.maxChars,
+  };
+  for (const [key, value] of Object.entries(resolved)) {
+    if (key === "enabled") continue;
+    if (!Number.isInteger(value) || Number(value) < 1) {
+      throw new Error(`repertoire.${key} must be a positive integer`);
+    }
+  }
+  return resolved;
+}
+
 function resolveRelationshipConfig(
   defaults: RelationshipConfig | undefined,
   partial: RelationshipConfigYaml | undefined,
@@ -1255,6 +1275,7 @@ export function loadGlobalConfig(
   const privateLife = resolvePrivateLifeConfig(yaml.privateLife);
   const defaultMemoryExtraction = resolveGlobalMemoryExtraction(yaml.memoryExtraction);
   const defaultMemoryContext = resolveMemoryContext(undefined, yaml.memoryContext);
+  const repertoire = resolveRepertoireConfig(yaml.repertoire);
   const defaultRelationships = resolveRelationshipConfig(undefined, yaml.relationships);
   const defaultInnerThreads = resolveInnerThreadsConfig(undefined, yaml.innerThreads);
   const defaultNotebooks = resolveNotebooksConfig(undefined, yaml.notebooks);
@@ -1342,6 +1363,7 @@ export function loadGlobalConfig(
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
     defaultMemoryExtraction,
     defaultMemoryContext,
+    repertoire,
     defaultRelationships,
     defaultInnerThreads,
     defaultNotebooks,

@@ -139,7 +139,39 @@ describe("model profile resolution", () => {
       quality: "auto",
       modelProfile: "main",
     });
+    expect(config.repertoire).toEqual({
+      enabled: false,
+      lookbackHours: 48,
+      refreshMinutes: 240,
+      maxSourceChannels: 4,
+      maxMessages: 15,
+      maxChars: 10_000,
+    });
     expect(config.defaultVoice?.playback.volume).toBe(1);
+  });
+
+  test("loads and validates repertoire settings", () => {
+    const config = loadGlobalConfig(BASE_ENV, writeConfig([
+      "repertoire:",
+      "  enabled: true",
+      "  lookbackHours: 24",
+      "  refreshMinutes: 60",
+      "  maxSourceChannels: 3",
+      "  maxMessages: 12",
+      "  maxChars: 8000",
+    ].join("\n")));
+    expect(config.repertoire).toEqual({
+      enabled: true,
+      lookbackHours: 24,
+      refreshMinutes: 60,
+      maxSourceChannels: 3,
+      maxMessages: 12,
+      maxChars: 8_000,
+    });
+    expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+      "repertoire:",
+      "  maxMessages: 0",
+    ].join("\n")))).toThrow("repertoire.maxMessages must be a positive integer");
   });
 
   test("resolves complete per-workload profiles and voice maintenance references", () => {

@@ -366,6 +366,16 @@ export interface MemoryContextConfig {
   maxRows: number;
 }
 
+/** Cross-room samples of the persona's recent conversational expression. */
+export interface RepertoireConfig {
+  enabled: boolean;
+  lookbackHours: number;
+  refreshMinutes: number;
+  maxSourceChannels: number;
+  maxMessages: number;
+  maxChars: number;
+}
+
 /** Durable private inner-thread behavior. */
 export interface InnerThreadsConfig {
   /** Enable prompt context, retrieval, and maintenance. */
@@ -620,6 +630,8 @@ export interface GlobalConfig {
   /** Default background memory extraction behavior. */
   defaultMemoryExtraction: MemoryExtractionConfig;
   defaultMemoryContext?: MemoryContextConfig;
+  /** Profile-wide cross-room conversational repertoire. */
+  repertoire: RepertoireConfig;
   /** Default durable relationship-profile behavior. */
   defaultRelationships?: RelationshipConfig;
   /** Default durable private inner-thread behavior. */
@@ -791,6 +803,7 @@ export interface MainConfigYaml {
     };
   };
   memoryContext?: Partial<MemoryContextConfig>;
+  repertoire?: Partial<RepertoireConfig>;
 }
 
 /** Raw prompt transport YAML shape. */

@@ -51,6 +51,7 @@ import type { ReplyFallbackDeps } from "./agent/reply-target-fallback";
 import { createElevenLabsClient, type ElevenLabsClient } from "./tts/client";
 import type { TtsResult } from "./tts/types";
 import { buildMemoryContext, buildMemoryMaintenanceContext, buildPrivateLifeMemoryContext, buildVisibleUserMemoryContext, createRecordMemoryTool } from "./agent/memory-service";
+import { buildRepertoireContext } from "./agent/repertoire-context.ts";
 import { createSearchChannelMessagesTool } from "./agent/search-channel-messages-tool";
 import { createScheduleTools } from "./agent/schedule-tool";
 import { createEventWatchTools } from "./agent/event-watch-tool.ts";
@@ -3392,6 +3393,27 @@ async function buildContext(
           ?? client.users.cache.get(userId)?.username,
       })
     : "";
+  const botUserId = client.user?.id;
+  let repertoire = "";
+  if (globalConfig.repertoire.enabled && botUserId !== undefined) {
+    try {
+      repertoire = buildRepertoireContext({
+        db,
+        config: globalConfig.repertoire,
+        instruction: runtimeContextTemplate("repertoire"),
+        botUserId,
+        currentGuildId: guildId,
+        currentChannelId: channelId,
+        mergeMessageGapSeconds: guildConfig.mergeMessageGapSeconds,
+      });
+    } catch (error) {
+      log.warn("failed to build repertoire context", {
+        guildId,
+        channelId,
+        error: String(error),
+      });
+    }
+  }
   const assembled = assembleContext({
       toolInstructions: "",
       instructions: guildConfig.instructions,
@@ -3405,6 +3427,7 @@ async function buildContext(
       threadsInChat,
       threadMetadata,
       parentPreContext,
+      repertoire,
       olderHistory: olderText,
       newerHistory: newerText,
       currentContext: [

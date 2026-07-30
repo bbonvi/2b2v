@@ -17,6 +17,7 @@ import type {
   PromptCachingConfig,
   PromptTransportConfig,
   PromptTransportSectionId,
+  RepertoireConfig,
   RelationshipConfig,
   ReplyLoopConfig,
   SchedulePressureConfig,
@@ -63,6 +64,15 @@ export const DEFAULT_MEMORY_EXTRACTION: MemoryExtractionConfig = {
     maxBatchMessages: 300,
     minIntervalSeconds: 600,
   },
+};
+
+export const DEFAULT_REPERTOIRE: RepertoireConfig = {
+  enabled: false,
+  lookbackHours: 48,
+  refreshMinutes: 240,
+  maxSourceChannels: 4,
+  maxMessages: 15,
+  maxChars: 10_000,
 };
 
 export const DEFAULT_RELATIONSHIPS: RelationshipConfig = {

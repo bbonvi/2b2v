@@ -51,6 +51,14 @@ modelProfiles:
         promptCaching: { enabled: true }
 modelProfile: main
 
+repertoire:
+    enabled: true
+    lookbackHours: 48
+    refreshMinutes: 240
+    maxSourceChannels: 4
+    maxMessages: 15
+    maxChars: 10000
+
 # Profile-wide private curiosity. One loop runs across all guilds.
 privateLife:
     enabled: true

@@ -129,7 +129,7 @@ const TEXT_FINAL_BLOCKS: PromptBlockDefinition[] = [
 ];
 
 const BASE_DYNAMIC_SECTIONS = [
-  "Stable context and older history, when present.",
+  "Stable context, cross-room repertoire, and older history, when present.",
   "Guild, channel, schedules, notebooks, inner threads, memories, recent history, members, and thread metadata, when present.",
   "Current event metadata, text, and attached images.",
   "Persona mode and response instruction overlays, when active.",

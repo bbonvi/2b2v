@@ -19,6 +19,7 @@ function makeInput(overrides: Partial<ContextAssemblyInput> = {}): ContextAssemb
     upcomingSchedules: "- [cron UTC] 0 9 * * *: Good morning",
     threadsInChat: "",
     parentPreContext: "",
+    repertoire: "",
     olderHistory: "## Chat History (Older)\nLegend: ...\n[@alice]: hello",
     newerHistory: "## Chat History (Recent)\n[@bob]: hi there",
     currentContext: "Guild: g1 | Channel: c1\nDate/Time: 2026-01-01T00:00:00Z",
@@ -60,6 +61,7 @@ describe("SECTION_DEFS", () => {
       "Available Emojis",
       "Thread Metadata",
       "Parent Pre-Context",
+      "Repertoire",
       "Chat History — Older",
     ]);
   });
@@ -192,6 +194,15 @@ describe("assembleContext", () => {
     const result = assembleContext(makeInput({ memories: "- Entry one" }));
     const section = result.sections.find((s) => s.label === "Memories");
     expect(section?.text).toBe("## Memory\n- Entry one");
+  });
+
+  test("places stable repertoire immediately before older history", () => {
+    const result = assembleContext(makeInput({ repertoire: "## Repertoire\n2B: hm." }));
+    const labels = result.sections.map((section) => section.label);
+    expect(labels.slice(labels.indexOf("Repertoire"), labels.indexOf("Repertoire") + 2))
+      .toEqual(["Repertoire", "Chat History — Older"]);
+    expect(result.sections.find((section) => section.label === "Repertoire"))
+      .toMatchObject({ cached: true, role: "system" });
   });
 
   test("places Notebooks before Active Inner Threads and Memories", () => {

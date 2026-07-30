@@ -150,6 +150,14 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
       maxToolCalls: 5,
       ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
     },
+    repertoire: {
+      enabled: false,
+      lookbackHours: 48,
+      refreshMinutes: 240,
+      maxSourceChannels: 4,
+      maxMessages: 15,
+      maxChars: 10_000,
+    },
     ...overrides,
   };
 }
