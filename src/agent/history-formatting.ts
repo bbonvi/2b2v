@@ -120,7 +120,9 @@ export function formatAssetMeta(prefix: "Reply" | "", assets: readonly HistoryAs
     if (matching.length === 0) continue;
     const shown = kind === "link" ? matching.slice(0, 5) : matching;
     const values = shown.map((asset) => {
-      const name = asset.filename?.replace(/[\t\n\r,;()[\]]+/g, " ").trim();
+      const name = kind === "image" || kind === "gif"
+        ? undefined
+        : asset.filename?.replace(/[\t\n\r,;()[\]]+/g, " ").trim();
       let detail = "";
       if ((kind === "text" || kind === "file") && asset.size !== null) detail = formatFileSize(asset.size);
       if ((kind === "audio" || kind === "video") && asset.durationSeconds !== null) {

@@ -78,7 +78,7 @@ describe("formatMessageLine", () => {
         { id: 23, kind: "file", sourceKind: "attachment", filename: "notes.pdf", contentType: "application/pdf", size: 50, width: null, height: null, durationSeconds: null },
       ] }),
       reply: null,
-    })).toBe("[@alice (Images: #21 cat.png [orig #7] [Job img-abc123]; Audio: #22 voice.ogg (5s); Files: #23 notes.pdf (50B))]: hello");
+    })).toBe("[@alice (Images: #21 [orig #7] [Job img-abc123]; Audio: #22 voice.ogg (5s); Files: #23 notes.pdf (50B))]: hello");
   });
 
   test("shows stickers separately from their image transport", () => {
