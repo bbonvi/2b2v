@@ -1,7 +1,6 @@
+import { createHash } from "node:crypto";
 import type { RepertoireConfig } from "../config/types.ts";
 import type { Database } from "../db/database.ts";
-
-type ExcerptKind = "mention" | "reply" | "adjacent" | "standalone";
 
 interface SourceChannelRow {
   guild_id: string;
@@ -15,12 +14,10 @@ interface CandidateRow {
   translated_content: string;
   created_at: number;
   previous_id: string | null;
-  previous_raw_content: string | null;
   previous_content: string | null;
   previous_is_bot: number | null;
   previous_created_at: number | null;
   reply_id: string | null;
-  reply_raw_content: string | null;
   reply_content: string | null;
   reply_created_at: number | null;
 }
@@ -32,9 +29,7 @@ interface ExcerptMessage {
 }
 
 interface RepertoireExcerpt {
-  kind: ExcerptKind;
   sourceGuildId: string;
-  sourceChannelId: string;
   cue?: ExcerptMessage;
   responses: ExcerptMessage[];
 }
@@ -57,7 +52,8 @@ export interface RepertoireContextInput {
   random?: () => number;
 }
 
-const EXCERPT_KINDS: readonly ExcerptKind[] = ["mention", "reply", "adjacent", "standalone"];
+// Four slices cap repeat pressure while keeping enough examples in each rotation.
+const ROTATION_PARTITIONS = 4;
 const cache = new Map<string, CacheEntry>();
 
 function shuffle<T>(values: readonly T[], random: () => number): T[] {
@@ -69,20 +65,12 @@ function shuffle<T>(values: readonly T[], random: () => number): T[] {
   return result;
 }
 
-function mentionsBot(rawContent: string, botUserId: string): boolean {
-  return rawContent.includes(`<@${botUserId}>`) || rawContent.includes(`<@!${botUserId}>`);
-}
-
 function cueFromRow(
   row: CandidateRow,
-  botUserId: string,
   mergeGapMs: number,
-): { cue?: ExcerptMessage; kind: ExcerptKind } {
+): ExcerptMessage | undefined {
   if (row.reply_id !== null && row.reply_content !== null && row.reply_created_at !== null) {
-    return {
-      cue: { id: row.reply_id, content: row.reply_content, createdAt: row.reply_created_at },
-      kind: mentionsBot(row.reply_raw_content ?? "", botUserId) ? "mention" : "reply",
-    };
+    return { id: row.reply_id, content: row.reply_content, createdAt: row.reply_created_at };
   }
   if (
     row.previous_id === null
@@ -91,21 +79,17 @@ function cueFromRow(
     || row.previous_is_bot !== 0
     || row.created_at - row.previous_created_at > mergeGapMs
   ) {
-    return { kind: "standalone" };
+    return undefined;
   }
   return {
-    cue: {
-      id: row.previous_id,
-      content: row.previous_content,
-      createdAt: row.previous_created_at,
-    },
-    kind: mentionsBot(row.previous_raw_content ?? "", botUserId) ? "mention" : "adjacent",
+    id: row.previous_id,
+    content: row.previous_content,
+    createdAt: row.previous_created_at,
   };
 }
 
 function buildChannelExcerpts(
   rows: readonly CandidateRow[],
-  botUserId: string,
   mergeGapMs: number,
 ): RepertoireExcerpt[] {
   const excerpts: RepertoireExcerpt[] = [];
@@ -125,11 +109,9 @@ function buildChannelExcerpts(
       });
       continue;
     }
-    const { cue, kind } = cueFromRow(row, botUserId, mergeGapMs);
+    const cue = cueFromRow(row, mergeGapMs);
     excerpts.push({
-      kind,
       sourceGuildId: row.guild_id,
-      sourceChannelId: row.channel_id,
       ...(cue === undefined ? {} : { cue }),
       responses: [{
         id: row.id,
@@ -141,24 +123,46 @@ function buildChannelExcerpts(
   return excerpts;
 }
 
-function orderByKind(
+function excerptMessageCount(excerpt: RepertoireExcerpt): number {
+  return excerpt.responses.length + (excerpt.cue === undefined ? 0 : 1);
+}
+
+function poolMessageCount(excerpts: readonly RepertoireExcerpt[]): number {
+  return excerpts.reduce((total, excerpt) => total + excerptMessageCount(excerpt), 0);
+}
+
+function orderForTarget(
   excerpts: readonly RepertoireExcerpt[],
+  input: RepertoireContextInput,
   random: () => number,
 ): RepertoireExcerpt[] {
-  const queues = shuffle(
-    EXCERPT_KINDS
-      .map((kind) => shuffle(excerpts.filter((excerpt) => excerpt.kind === kind), random))
-      .filter((queue) => queue.length > 0),
-    random,
-  );
-  const ordered: RepertoireExcerpt[] = [];
-  while (queues.some((queue) => queue.length > 0)) {
-    for (const queue of queues) {
-      const excerpt = queue.shift();
-      if (excerpt !== undefined) ordered.push(excerpt);
-    }
-  }
-  return ordered;
+  if (input.random !== undefined) return shuffle(excerpts, random);
+  return excerpts
+    .map((excerpt) => ({
+      excerpt,
+      score: createHash("sha256")
+        .update(`${input.botUserId}:${input.currentChannelId}:${excerpt.responses[0]?.id ?? ""}`)
+        .digest("hex"),
+    }))
+    .sort((left, right) => left.score.localeCompare(right.score))
+    .map(({ excerpt }) => excerpt);
+}
+
+function rotationPartition(
+  excerpts: readonly RepertoireExcerpt[],
+  input: RepertoireContextInput,
+  now: number,
+  random: () => number,
+): RepertoireExcerpt[] {
+  const quota = Math.floor(excerpts.length / ROTATION_PARTITIONS);
+  if (quota === 0) return [];
+  const ordered = orderForTarget(excerpts, input, random);
+  const rotation = Math.floor(now / (input.config.refreshMinutes * 60 * 1_000));
+  const start = rotation * quota % ordered.length;
+  return Array.from(
+    { length: quota },
+    (_, index) => ordered[(start + index) % ordered.length],
+  ).filter((excerpt) => excerpt !== undefined);
 }
 
 function normalizeContent(content: string, foreignGuild: boolean): string {
@@ -181,47 +185,37 @@ function renderExcerpt(excerpt: RepertoireExcerpt, currentGuildId: string): stri
 function selectExcerpts(
   channelExcerpts: readonly RepertoireExcerpt[][],
   input: RepertoireContextInput,
+  now: number,
   random: () => number,
 ): RepertoireExcerpt[] {
-  const queues = shuffle(
-    channelExcerpts.map((excerpts) => orderByKind(excerpts, random)),
-    random,
-  );
+  const candidates = channelExcerpts
+    .filter((excerpts) => excerpts.length >= ROTATION_PARTITIONS)
+    .sort((left, right) => poolMessageCount(right) - poolMessageCount(left))
+    .flatMap((excerpts) => rotationPartition(excerpts, input, now, random));
   const selected: RepertoireExcerpt[] = [];
   let messageCount = 0;
   let charCount = input.instruction.trim().length;
 
-  while (queues.some((queue) => queue.length > 0)) {
-    let added = false;
-    for (const queue of queues) {
-      while (queue.length > 0) {
-        const excerpt = queue.shift();
-        if (excerpt === undefined) break;
-        const excerptMessageCount = excerpt.responses.length + (excerpt.cue === undefined ? 0 : 1);
-        const rendered = renderExcerpt(excerpt, input.currentGuildId);
-        if (
-          messageCount + excerptMessageCount > input.config.maxMessages
-          || charCount + 2 + rendered.length > input.config.maxChars
-        ) {
-          continue;
-        }
-        selected.push(excerpt);
-        messageCount += excerptMessageCount;
-        charCount += 2 + rendered.length;
-        added = true;
-        break;
-      }
+  for (const excerpt of candidates) {
+    const excerptMessages = excerptMessageCount(excerpt);
+    const rendered = renderExcerpt(excerpt, input.currentGuildId);
+    if (
+      messageCount + excerptMessages > input.config.maxMessages
+      || charCount + 2 + rendered.length > input.config.maxChars
+    ) {
+      continue;
     }
-    if (!added) break;
+    selected.push(excerpt);
+    messageCount += excerptMessages;
+    charCount += 2 + rendered.length;
   }
   return selected;
 }
 
-function loadExcerpts(
+function loadChannelExcerpts(
   input: RepertoireContextInput,
-  now: number,
-  random: () => number,
-): RepertoireExcerpt[] {
+  since: number,
+): RepertoireExcerpt[][] {
   const sourceChannelStatement = input.db.raw.prepare(
     `SELECT guild_id, channel_id
      FROM messages
@@ -233,30 +227,18 @@ function loadExcerpts(
      ORDER BY COUNT(*) DESC, MAX(created_at) DESC, guild_id, channel_id
      LIMIT ?`,
   );
-  let effectiveSince = now - input.config.lookbackHours * 60 * 60 * 1_000;
-  let sourceChannels = sourceChannelStatement.all(
+  const sourceChannels = sourceChannelStatement.all(
     input.botUserId,
     input.currentChannelId,
-    effectiveSince,
+    since,
     input.config.maxSourceChannels,
   ) as SourceChannelRow[];
-  if (sourceChannels.length === 0) {
-    effectiveSince = now - input.config.lookbackHours * 2 * 60 * 60 * 1_000;
-    sourceChannels = sourceChannelStatement.all(
-      input.botUserId,
-      input.currentChannelId,
-      effectiveSince,
-      input.config.maxSourceChannels,
-    ) as SourceChannelRow[];
-  }
 
   const candidateStatement = input.db.raw.prepare(
     `SELECT b.id, b.guild_id, b.channel_id, b.translated_content, b.created_at,
-            p.id AS previous_id, p.raw_content AS previous_raw_content,
-            p.translated_content AS previous_content,
+            p.id AS previous_id, p.translated_content AS previous_content,
             p.is_bot AS previous_is_bot, p.created_at AS previous_created_at,
-            r.id AS reply_id, r.raw_content AS reply_raw_content,
-            r.translated_content AS reply_content,
+            r.id AS reply_id, r.translated_content AS reply_content,
             r.created_at AS reply_created_at
      FROM messages b
      LEFT JOIN messages r
@@ -285,11 +267,33 @@ function loadExcerpts(
       source.guild_id,
       source.channel_id,
       input.botUserId,
-      effectiveSince,
+      since,
     ) as CandidateRow[];
-    return buildChannelExcerpts(rows, input.botUserId, mergeGapMs);
+    return buildChannelExcerpts(rows, mergeGapMs);
   });
-  return selectExcerpts(channelExcerpts, input, random);
+  return channelExcerpts;
+}
+
+function safeCapacity(channelExcerpts: readonly RepertoireExcerpt[][]): number {
+  return channelExcerpts
+    .filter((excerpts) => excerpts.length >= ROTATION_PARTITIONS)
+    .reduce(
+      (total, excerpts) => total + Math.floor(poolMessageCount(excerpts) / ROTATION_PARTITIONS),
+      0,
+    );
+}
+
+function loadExcerpts(
+  input: RepertoireContextInput,
+  now: number,
+  random: () => number,
+): RepertoireExcerpt[] {
+  const lookbackMs = input.config.lookbackHours * 60 * 60 * 1_000;
+  let channelExcerpts = loadChannelExcerpts(input, now - lookbackMs);
+  if (safeCapacity(channelExcerpts) < input.config.maxMessages) {
+    channelExcerpts = loadChannelExcerpts(input, now - lookbackMs * 2);
+  }
+  return selectExcerpts(channelExcerpts, input, now, random);
 }
 
 /** Build the periodically rotated, cross-room repertoire section for an actor turn. */

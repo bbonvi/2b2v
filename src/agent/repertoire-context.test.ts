@@ -45,10 +45,34 @@ function insertMessage(
   );
 }
 
+function insertBotSeries(
+  db: Database,
+  input: {
+    guildId: string;
+    channelId: string;
+    prefix: string;
+    count: number;
+    startAt: number;
+    gapMs?: number;
+  },
+): void {
+  for (let index = 0; index < input.count; index += 1) {
+    insertMessage(db, {
+      id: `${input.prefix}-${index + 1}`,
+      guildId: input.guildId,
+      channelId: input.channelId,
+      userId: "2b",
+      content: `${input.prefix} ${index + 1}`,
+      createdAt: input.startAt + index * (input.gapMs ?? 100_000),
+      isBot: true,
+    });
+  }
+}
+
 describe("buildRepertoireContext", () => {
-  test("rotates grounded excerpts from other rooms and keeps multi-send rhythm", () => {
+  test("samples grounded excerpts and keeps multi-send rhythm", () => {
     const db = createDatabase(":memory:");
-    const now = 2_000_000_000;
+    const now = 2_000_160_000;
     try {
       insertMessage(db, {
         id: "current-bot",
@@ -65,7 +89,7 @@ describe("buildRepertoireContext", () => {
         channelId: "foreign-room",
         userId: "alice",
         content: "<@2b> look <:wave:123>",
-        createdAt: now - 400_000,
+        createdAt: now - 2_000_000,
       });
       insertMessage(db, {
         id: "foreign-bot-1",
@@ -73,7 +97,7 @@ describe("buildRepertoireContext", () => {
         channelId: "foreign-room",
         userId: "2b",
         content: "first beat",
-        createdAt: now - 399_000,
+        createdAt: now - 1_999_000,
         isBot: true,
       });
       insertMessage(db, {
@@ -82,7 +106,7 @@ describe("buildRepertoireContext", () => {
         channelId: "foreign-room",
         userId: "2b",
         content: "second beat",
-        createdAt: now - 398_500,
+        createdAt: now - 1_998_500,
         isBot: true,
       });
       insertMessage(db, {
@@ -91,8 +115,16 @@ describe("buildRepertoireContext", () => {
         channelId: "foreign-room",
         userId: "2b",
         content: "unprompted thought",
-        createdAt: now - 200_000,
+        createdAt: now - 1_800_000,
         isBot: true,
+      });
+      insertBotSeries(db, {
+        guildId: "foreign-guild",
+        channelId: "foreign-room",
+        prefix: "foreign-fill",
+        count: 6,
+        startAt: now - 1_600_000,
+        gapMs: 200_000,
       });
       insertMessage(db, {
         id: "reply-cue",
@@ -100,7 +132,7 @@ describe("buildRepertoireContext", () => {
         channelId: "other-room",
         userId: "bob",
         content: "old direct question",
-        createdAt: now - 150_000,
+        createdAt: now - 500_000,
       });
       insertMessage(db, {
         id: "intervening-bot",
@@ -108,7 +140,7 @@ describe("buildRepertoireContext", () => {
         channelId: "other-room",
         userId: "other-bot",
         content: "noise",
-        createdAt: now - 149_000,
+        createdAt: now - 499_000,
         isBot: true,
       });
       insertMessage(db, {
@@ -117,20 +149,27 @@ describe("buildRepertoireContext", () => {
         channelId: "other-room",
         userId: "2b",
         content: "direct answer <:local:456>",
-        createdAt: now - 148_000,
+        createdAt: now - 498_000,
         isBot: true,
         replyToId: "reply-cue",
+      });
+      insertBotSeries(db, {
+        guildId: "current-guild",
+        channelId: "other-room",
+        prefix: "local-fill",
+        count: 3,
+        startAt: now - 350_000,
       });
 
       const input = {
         db,
         config: CONFIG,
-        instruction: "## Repertoire\nUse these as examples.",
+        instruction: "## Examples\nUse these as examples.",
         botUserId: "2b",
         currentGuildId: "current-guild",
         currentChannelId: "current-room",
         mergeMessageGapSeconds: 90,
-        random: () => 0,
+        random: () => 0.999,
       };
       const first = buildRepertoireContext({ ...input, now });
       expect(first).toContain("User: <@2b> look :wave:");
@@ -139,117 +178,158 @@ describe("buildRepertoireContext", () => {
       expect(first).toContain("User: old direct question");
       expect(first).toContain("2B: direct answer <:local:456>");
       expect(first).not.toContain("never include current room");
-
-      insertMessage(db, {
-        id: "new-after-cache",
-        guildId: "current-guild",
-        channelId: "other-room",
-        userId: "2b",
-        content: "new rotation",
-        createdAt: now,
-        isBot: true,
-      });
-      expect(buildRepertoireContext({ ...input, now: now + 1 })).not.toContain("new rotation");
-      expect(buildRepertoireContext({ ...input, now: now + 60_001 })).toContain("new rotation");
     } finally {
       db.close();
     }
   });
 
-  test("ranks source rooms by the persona's own activity", () => {
+  test("gives the largest source room proportionally more examples", () => {
     const db = createDatabase(":memory:");
     const now = 3_000_000_000;
     try {
-      insertMessage(db, {
-        id: "noisy-human-1",
+      insertBotSeries(db, {
         guildId: "g",
-        channelId: "human-noisy",
-        userId: "u1",
-        content: "noise one",
-        createdAt: now - 5_000,
+        channelId: "smaller-room",
+        prefix: "smaller",
+        count: 4,
+        startAt: now - 2_000_000,
       });
-      insertMessage(db, {
-        id: "noisy-human-2",
+      insertBotSeries(db, {
         guildId: "g",
-        channelId: "human-noisy",
-        userId: "u2",
-        content: "noise two",
-        createdAt: now - 4_000,
-      });
-      insertMessage(db, {
-        id: "noisy-bot",
-        guildId: "g",
-        channelId: "human-noisy",
-        userId: "2b",
-        content: "low persona activity",
-        createdAt: now - 3_000,
-        isBot: true,
-      });
-      insertMessage(db, {
-        id: "rich-bot-1",
-        guildId: "g",
-        channelId: "persona-rich",
-        userId: "2b",
-        content: "high activity one",
-        createdAt: now - 2_000,
-        isBot: true,
-      });
-      insertMessage(db, {
-        id: "rich-bot-2",
-        guildId: "g",
-        channelId: "persona-rich",
-        userId: "2b",
-        content: "high activity two",
-        createdAt: now - 1_000,
-        isBot: true,
+        channelId: "largest-room",
+        prefix: "largest",
+        count: 8,
+        startAt: now - 1_000_000,
       });
 
       const context = buildRepertoireContext({
         db,
-        config: { ...CONFIG, maxSourceChannels: 1 },
-        instruction: "## Repertoire",
+        config: { ...CONFIG, maxSourceChannels: 2, maxMessages: 4 },
+        instruction: "## Examples",
         botUserId: "2b",
         currentGuildId: "g",
         currentChannelId: "ranking-target",
         mergeMessageGapSeconds: 90,
         now,
-        random: () => 0,
+        random: () => 0.999,
       });
-      expect(context).toContain("high activity one");
-      expect(context).toContain("high activity two");
-      expect(context).not.toContain("low persona activity");
+      const lines = context.split("\n").filter((line) => line.startsWith("2B: "));
+      expect(lines.filter((line) => line.startsWith("2B: largest"))).toHaveLength(2);
+      expect(lines.filter((line) => line.startsWith("2B: smaller"))).toHaveLength(1);
     } finally {
       db.close();
     }
   });
 
-  test("doubles the lookback when the primary window has no source messages", () => {
+  test("doubles the lookback when the primary pool cannot support the requested size", () => {
     const db = createDatabase(":memory:");
-    const now = 4_000_000_000;
+    const now = 4_000_080_000;
     try {
-      insertMessage(db, {
-        id: "fallback-bot",
+      insertBotSeries(db, {
         guildId: "g",
         channelId: "fallback-source",
-        userId: "2b",
-        content: "older voice",
-        createdAt: now - 72 * 60 * 60 * 1_000,
-        isBot: true,
+        prefix: "older",
+        count: 4,
+        startAt: now - 72 * 60 * 60 * 1_000,
+      });
+      insertBotSeries(db, {
+        guildId: "g",
+        channelId: "fallback-source",
+        prefix: "recent",
+        count: 4,
+        startAt: now - 4 * 60 * 60 * 1_000,
       });
 
       const context = buildRepertoireContext({
         db,
-        config: CONFIG,
-        instruction: "## Repertoire",
+        config: { ...CONFIG, maxMessages: 2 },
+        instruction: "## Examples",
         botUserId: "2b",
         currentGuildId: "g",
         currentChannelId: "fallback-target",
         mergeMessageGapSeconds: 90,
         now,
-        random: () => 0,
+        random: () => 0.999,
       });
 
-      expect(context).toContain("2B: older voice");
+      expect(context).toContain("2B: older");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("omits source rooms with fewer than four excerpts", () => {
+    const db = createDatabase(":memory:");
+    const now = 5_000_000_000;
+    try {
+      insertBotSeries(db, {
+        guildId: "g",
+        channelId: "weak-source",
+        prefix: "weak",
+        count: 3,
+        startAt: now - 300_000,
+      });
+
+      const context = buildRepertoireContext({
+        db,
+        config: CONFIG,
+        instruction: "## Examples",
+        botUserId: "2b",
+        currentGuildId: "g",
+        currentChannelId: "weak-target",
+        mergeMessageGapSeconds: 90,
+        now,
+      });
+
+      expect(context).toBe("");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps a stable partition across recomputation and rotates without overlap", () => {
+    const db = createDatabase(":memory:");
+    const now = 5_000_160_000;
+    try {
+      insertBotSeries(db, {
+        guildId: "g",
+        channelId: "rotation-source",
+        prefix: "rotation",
+        count: 8,
+        startAt: now - 1_000_000,
+      });
+
+      const input = {
+        db,
+        config: { ...CONFIG, maxMessages: 2 },
+        botUserId: "2b",
+        currentGuildId: "g",
+        currentChannelId: "rotation-target",
+        mergeMessageGapSeconds: 90,
+      };
+      const first = buildRepertoireContext({
+        ...input,
+        instruction: "## Examples\nfirst",
+        now,
+      });
+      const recomputed = buildRepertoireContext({
+        ...input,
+        instruction: "## Examples\nrecomputed",
+        now: now + 1,
+      });
+      const rotated = buildRepertoireContext({
+        ...input,
+        instruction: "## Examples\nrecomputed",
+        now: now + 60_002,
+      });
+      const lines = (context: string): string[] =>
+        context.split("\n").filter((line) => line.startsWith("2B: "));
+      const firstLines = lines(first);
+      const rotatedLines = lines(rotated);
+
+      expect(lines(recomputed)).toEqual(firstLines);
+      expect(rotatedLines).toHaveLength(2);
+      expect(rotatedLines.some((line) => firstLines.includes(line))).toBe(false);
     } finally {
       db.close();
     }
