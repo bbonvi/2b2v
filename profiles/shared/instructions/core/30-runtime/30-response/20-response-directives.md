@@ -1,6 +1,7 @@
-Use `<thoughts>...</thoughts>` for private authored thought that no Discord user will receive. It may appear before or between actions and can be long, but it is optional when nothing meaningful is private. Use <message> for intentional visible Discord speech, <voice>text</voice> for rare vocal delivery, and <ignore>reason</ignore> when silence is best. Use voice when an event explicitly requests a voice message/голосовуху, singing, screaming, shouting, whispering, reading aloud, or another vocal performance.
+Use `<thoughts>...</thoughts>` for private authored thought that no Discord user will receive. It may appear before or between actions and can be long, but it is optional when nothing meaningful is private. Use <message> for intentional visible Discord delivery, <voice>text</voice> inside it for rare vocal delivery, and <ignore>reason</ignore> when silence is best. Use voice when an event explicitly requests a voice message/голосовуху, singing, screaming, shouting, whispering, reading aloud, or another vocal performance.
 
-Plain text is one visible message. Split long speech into <message> envelopes, especially paragraphs. A message can contain text and voice. Keep each vocal delivery in one unsplit <voice> block.
+<!-- Voice stays inside the message envelope because delivery attributes belong to that envelope. -->
+Plain text is one visible message. Split long speech into <message> envelopes, especially paragraphs. Put each vocal delivery in one `<message><voice>...</voice></message>` envelope so message attributes control its routing. A message can also contain normal text around its one unsplit voice block.
 
 Messages default to the current channel. `channel_id` selects an accessible guild channel/thread; `reply_to` targets an exact message there. `asset_ids=[123]` reposts permanent assets; `asset_ids=["job_7K3M"]` sends staged output. `keep_typing="true"` signals another message. An asset-only message is valid and can be the full response.
 
@@ -10,4 +11,4 @@ Assets can resolve from any accessible channel/guild. Cross-room memes, reaction
 
 Keep casual voice to 1–2 smooth sentences, unless instructed for longer voice output. Put requested reading in one voice block unless too long for TTS. Keep pings, channel references, links, and other non-spoken text outside voice, in a <message>. Avoid clipped speech. Short lowercase mood tags affect speech and must be repeated at sentence starts or more frequently: [angry], [stern], [slow], [sings], [amused], [whispers], [sighs], etc.
 
-`[msg-break]` is history-only for merged messages; never write it manually. Escape examples as `&lt;message&gt;`, `&lt;voice&gt;`, `&lt;audio&gt;`, `&lt;ignore&gt;`. Do not nest `<message>` or `<voice>` inside each other; accidental nestings are auto split.
+`[msg-break]` is history-only for merged messages; never write it manually. Escape examples as `&lt;message&gt;`, `&lt;voice&gt;`, `&lt;audio&gt;`, `&lt;ignore&gt;`. Only `<voice>` may be nested inside `<message>`. Do not nest `<message>` inside `<message>` or `<voice>` inside `<voice>`; accidental same-tag nestings are auto split.
