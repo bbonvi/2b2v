@@ -1,5 +1,6 @@
 export interface VoiceMessageDirective {
   channelId?: string;
+  handoff?: string;
   replyTo?: string;
   resolvesInstruction?: string;
   text: string;
@@ -21,6 +22,50 @@ function attributes(tag: string): Record<string, string> {
     if (key !== undefined && value !== undefined) result[key.toLowerCase()] = value;
   }
   return result;
+}
+
+const HANDOFF_TAG_RE = /<\s*(\/?)\s*handoff(?=[\s/>])([^>]*)>/gi;
+const HANDOFF_TAG_PREFIX_RE = /<\s*\/?\s*handoff(?=[\s/>]|$)/i;
+const RESPONSE_TAG_PREFIX_RE = /<\s*\/?\s*(?:thoughts?|voice|audio|message|handoff|ignore)(?=[\s/>]|$)/i;
+
+function extractMessageHandoff(body: string): {
+  text: string;
+  handoff?: string;
+  malformed: boolean;
+} {
+  const visible: string[] = [];
+  const tagRe = new RegExp(HANDOFF_TAG_RE.source, "gi");
+  let cursor = 0;
+  let activeBodyStart: number | undefined;
+  let handoff: string | undefined;
+
+  for (;;) {
+    const match = tagRe.exec(body);
+    if (match === null) break;
+    const closing = match[1] === "/";
+    const attrs = match[2] ?? "";
+    const selfClosing = /\/\s*$/.test(attrs);
+    if (activeBodyStart === undefined) {
+      if (closing || selfClosing || attrs.trim() !== "" || handoff !== undefined) {
+        return { text: "", malformed: true };
+      }
+      visible.push(body.slice(cursor, match.index));
+      activeBodyStart = tagRe.lastIndex;
+      continue;
+    }
+    if (!closing || selfClosing || attrs.trim() !== "") return { text: "", malformed: true };
+    const privateBody = body.slice(activeBodyStart, match.index);
+    if (RESPONSE_TAG_PREFIX_RE.test(privateBody)) return { text: "", malformed: true };
+    handoff = privateBody.trim();
+    cursor = tagRe.lastIndex;
+    activeBodyStart = undefined;
+  }
+
+  if (activeBodyStart !== undefined) return { text: "", malformed: true };
+  visible.push(body.slice(cursor));
+  const text = visible.join("").trim();
+  if (HANDOFF_TAG_PREFIX_RE.test(text)) return { text: "", malformed: true };
+  return { text, ...(handoff !== undefined ? { handoff } : {}), malformed: false };
 }
 
 // Most live replies are only one or two terse sentences. Briefly preserve both
@@ -53,6 +98,7 @@ export class VoiceResponseParser {
   private serial: Promise<void> = Promise.resolve();
   private deferredError: unknown;
   private finished = false;
+  private malformed = false;
 
   constructor(private readonly callbacks: VoiceResponseParserCallbacks) {}
 
@@ -63,7 +109,7 @@ export class VoiceResponseParser {
       const deferredError = this.deferredErrorValue();
       if (deferredError !== undefined) throw deferredError;
       this.buffer += delta;
-      await this.drain(false);
+      if (await this.drain(false)) this.malformed = true;
       this.scheduleIdleCommit();
     });
   }
@@ -75,8 +121,12 @@ export class VoiceResponseParser {
       const deferredError = this.deferredErrorValue();
       if (deferredError !== undefined) throw deferredError;
       if (this.ignored) return { plannedSpeech: "", ignored: true, malformed: false };
-      const malformed = await this.drain(true);
-      return { plannedSpeech: this.plannedSpeech.join(" ").trim(), ignored: this.ignored, malformed };
+      if (await this.drain(true)) this.malformed = true;
+      return {
+        plannedSpeech: this.plannedSpeech.join(" ").trim(),
+        ignored: this.ignored,
+        malformed: this.malformed,
+      };
     });
   }
 
@@ -142,11 +192,16 @@ export class VoiceResponseParser {
         const closeStart = lower.indexOf("</message>", openEnd + 1);
         if (closeStart === -1) return final;
         const attrs = attributes(this.buffer.slice(0, openEnd + 1));
-        const text = this.buffer.slice(openEnd + 1, closeStart).trim();
-        if (text !== "") {
+        const parsed = extractMessageHandoff(this.buffer.slice(openEnd + 1, closeStart));
+        if (parsed.malformed) {
+          this.buffer = "";
+          return true;
+        }
+        if (parsed.text !== "") {
           await this.callbacks.onMessage({
-            text,
+            text: parsed.text,
             ...(attrs.channel_id !== undefined ? { channelId: attrs.channel_id } : {}),
+            ...(parsed.handoff !== undefined ? { handoff: parsed.handoff } : {}),
             ...(attrs.reply_to !== undefined ? { replyTo: attrs.reply_to } : {}),
             ...(attrs.resolves_instruction !== undefined
               ? { resolvesInstruction: attrs.resolves_instruction }
@@ -171,6 +226,8 @@ export class VoiceResponseParser {
         "<voice",
         "</voice",
         "<message",
+        "<handoff",
+        "</handoff",
         "<ignore",
         "<thought",
         "</thought",
@@ -202,7 +259,7 @@ export class VoiceResponseParser {
       this.idleCommit = undefined;
       void this.enqueue(async () => {
         if (this.finished || this.ignored) return;
-        await this.drain(false, true);
+        if (await this.drain(false, true)) this.malformed = true;
       }).catch((error: unknown) => {
         this.deferredError = error;
       });

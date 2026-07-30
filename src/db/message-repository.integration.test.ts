@@ -1,6 +1,6 @@
 import { test, expect, beforeEach, describe } from "bun:test";
 import { createDatabase, type Database } from "./database";
-import { getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, getParentPreContext, listBotChannelActivityUsage, listBotChannelUsage, listDiscordChannelUsage, listChannelMessages, markDiscordMessageDeleted } from "./message-repository";
+import { getMessageById, searchMessagesLiteral, getMessagesAroundMessage, getMessagesAroundTimestamp, getHistoryMessages, getContextHistoryMessages, getLatestMessageActivityBefore, insertSyntheticEvent, insertPromptOnlyBotMessage, insertPromptOnlyMessageHandoff, getParentPreContext, listBotChannelActivityUsage, listBotChannelUsage, listDiscordChannelUsage, listChannelMessages, markDiscordMessageDeleted } from "./message-repository";
 
 let db: Database;
 
@@ -573,6 +573,41 @@ describe("getContextHistoryMessages", () => {
       ]);
   });
 
+  test("loads only linked handoffs without counting them against the ordinary window", () => {
+    for (let index = 0; index < 11; index += 1) {
+      insertMessage(`m${index}`, { channelId: "c1", createdAt: now + index });
+    }
+    for (const index of [0, 3]) {
+      insertPromptOnlyMessageHandoff(db, {
+        sourceGuildId: "g1",
+        sourceChannelId: "c1",
+        sourceMessageId: `m${index}`,
+        destinationGuildId: "g2",
+        destinationChannelId: "c2",
+        routedMessageId: `routed-${index}`,
+        botUserId: "bot-1",
+        botUsername: "2b",
+        handoff: `private-${index}`,
+      });
+    }
+    insertPromptOnlyBotMessage(db, {
+      id: "prompt-only:handoff:source:orphan",
+      guildId: "g1",
+      channelId: "c1",
+      botUserId: "bot-1",
+      botUsername: "2b",
+      content: "<handoff>orphan</handoff>",
+      replyToId: "missing",
+    });
+
+    const rows = getContextHistoryMessages(db, "c1", trim);
+
+    expect(rows.filter((message) => !message.id.startsWith("prompt-only:handoff:")).map((message) => message.id))
+      .toEqual(["m3", "m4", "m5", "m6", "m7", "m8", "m9", "m10"]);
+    expect(rows.filter((message) => message.id.startsWith("prompt-only:handoff:")).map((message) => message.id))
+      .toEqual(["prompt-only:handoff:source:routed-3"]);
+  });
+
   test("keeps deleted message content in context history", () => {
     insertMessage("deleted-msg", { channelId: "c1", translatedContent: "remove me", createdAt: now });
     markDiscordMessageDeleted(db, { id: "deleted-msg", guildId: "g1", channelId: "c1" });
@@ -863,6 +898,29 @@ describe("listChannelMessages", () => {
 
     const results = listChannelMessages(db, "g1", "c1", { limit: 10 }) ?? [];
     expect(results.map((r) => r.id)).toEqual(["real-msg"]);
+  });
+
+  test("excludes handoff rows from list and literal search tools", () => {
+    insertMessage("source", { guildId: "g1", channelId: "c1", translatedContent: "visible" });
+    insertPromptOnlyMessageHandoff(db, {
+      sourceGuildId: "g1",
+      sourceChannelId: "c1",
+      sourceMessageId: "source",
+      destinationGuildId: "g2",
+      destinationChannelId: "c2",
+      routedMessageId: "routed",
+      botUserId: "bot-1",
+      botUsername: "2b",
+      handoff: "private searchable phrase",
+    });
+
+    expect(listChannelMessages(db, "g1", "c1", { limit: 10 })?.map((message) => message.id))
+      .toEqual(["source"]);
+    expect(searchMessagesLiteral(db, "private searchable phrase", {
+      guildId: "g1",
+      channelId: "c1",
+      limit: 10,
+    })).toEqual([]);
   });
 
   test("returns correct ChannelMessageRow structure", () => {

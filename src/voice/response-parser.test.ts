@@ -24,6 +24,45 @@ describe("VoiceResponseParser", () => {
     expect(result.plannedSpeech).toBe("Understood. I will stay.");
   });
 
+  test("extracts multiline handoffs from message directives without delivering them", async () => {
+    const messages: VoiceMessageDirective[] = [];
+    const parser = new VoiceResponseParser({
+      onSpeech: () => {},
+      onMessage: (message) => { messages.push(message); },
+      onIgnore: () => {},
+    });
+    await parser.push('<message channel_id="c1">\n<handoff>\nprivate line one\n  private line two\n</handoff>\nVisible text.\n</message>');
+
+    expect(await parser.finish()).toEqual({
+      plannedSpeech: "",
+      ignored: false,
+      malformed: false,
+    });
+    expect(messages).toEqual([{
+      channelId: "c1",
+      handoff: "private line one\n  private line two",
+      text: "Visible text.",
+    }]);
+  });
+
+  test("fails closed on nested or malformed message handoffs", async () => {
+    for (const response of [
+      "<message><handoff>private</message>",
+      "<message><handoff>outer<handoff>inner</handoff></handoff>visible</message>",
+      "<message><handoff>one</handoff><handoff>two</handoff>visible</message>",
+    ]) {
+      const messages: VoiceMessageDirective[] = [];
+      const parser = new VoiceResponseParser({
+        onSpeech: () => {},
+        onMessage: (message) => { messages.push(message); },
+        onIgnore: () => {},
+      });
+      await parser.push(response);
+      expect((await parser.finish()).malformed).toBe(true);
+      expect(messages).toEqual([]);
+    }
+  });
+
   test("fails closed on malformed reserved markup", async () => {
     const speech: string[] = [];
     const parser = new VoiceResponseParser({

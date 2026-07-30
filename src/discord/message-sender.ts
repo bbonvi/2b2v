@@ -463,7 +463,12 @@ export function createDiscordMessageSender(input: {
         storeBotAssets(followup);
       }
       noteThreadActivity(sent.id);
-      return { sentMessageId: sent.id, warnings: unresolvedEmojiWarnings(warnings) };
+      return {
+        sentMessageId: sent.id,
+        sentGuildId: targetGuildId,
+        sentChannelId: targetChannelId,
+        warnings: unresolvedEmojiWarnings(warnings),
+      };
     }
 
     const warnings: string[] = [];
@@ -492,7 +497,12 @@ export function createDiscordMessageSender(input: {
         delivered.replyToId,
       );
       noteThreadActivity(delivered.message.id);
-      return { sentMessageId: delivered.message.id, warnings: unresolvedEmojiWarnings(warnings) };
+      return {
+        sentMessageId: delivered.message.id,
+        sentGuildId: targetGuildId,
+        sentChannelId: targetChannelId,
+        warnings: unresolvedEmojiWarnings(warnings),
+      };
     }
     const chunks = splitMessage(translated);
     if (chunks.length === 0 && (imageAttachments.length > 0 || nativeStickerIds.length > 0)) chunks.push("");
@@ -532,6 +542,11 @@ export function createDiscordMessageSender(input: {
       }
     }
     noteThreadActivity(firstId);
-    return { sentMessageId: firstId, warnings: unresolvedEmojiWarnings(warnings) };
+    return {
+      sentMessageId: firstId,
+      sentGuildId: targetGuildId,
+      sentChannelId: targetChannelId,
+      warnings: unresolvedEmojiWarnings(warnings),
+    };
   };
 }

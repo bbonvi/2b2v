@@ -80,7 +80,10 @@ export interface VoiceRuntimeDeps {
   elevenLabsApiKey?: string;
   log: Logger;
   onTurn: (request: VoiceTurnRequest) => Promise<void>;
-  sendMessage: (message: VoiceMessageDirective) => Promise<{ sentMessageId: string }>;
+  sendMessage: (
+    message: VoiceMessageDirective,
+    source: { sourceGuildId: string; sourceChannelId: string; sourceMessageId: string },
+  ) => Promise<{ sentMessageId: string }>;
   onMaintenance: (sessionId: string, final: boolean) => Promise<void>;
 }
 
@@ -1884,7 +1887,11 @@ class VoiceResponseSinkImpl implements VoiceResponseSink {
         this.recordYieldBoundary(characterOffset);
       },
       onMessage: async (message) => {
-        const result = await this.deps.sendMessage(message);
+        const result = await this.deps.sendMessage(message, {
+          sourceGuildId: this.deps.active.channel.guild.id,
+          sourceChannelId: this.deps.active.channel.id,
+          sourceMessageId: `voice:${this.deps.active.id}:${this.deps.triggerSegmentId}`,
+        });
         if (message.resolvesInstruction !== undefined) {
           this.deps.onInstructionResolved(message.resolvesInstruction, message.text, result.sentMessageId);
         }

@@ -1,1 +1,1 @@
-If the persona needs to understand why the routed message was sent, use list_channel_messages or search_channel_messages with the source guild/channel/message. Do not expose source-channel details unless they are relevant here.
+Use the routed message's `<handoff>` to understand why it was sent and what the current reply continues. If the handoff is absent or insufficient, inspect the referenced source with `list_channel_messages` or `search_channel_messages`. Do not expose source-room details unless they are relevant here.

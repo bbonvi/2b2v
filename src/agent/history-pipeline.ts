@@ -1,5 +1,8 @@
 import type { HistoryMessage, HistoryProcessingConfig } from "./history-types.ts";
-import { PRIVATE_THOUGHT_MESSAGE_ID_PREFIX } from "./history-types.ts";
+import {
+  PRIVATE_HANDOFF_MESSAGE_ID_PREFIX,
+  PRIVATE_THOUGHT_MESSAGE_ID_PREFIX,
+} from "./history-types.ts";
 import type { ReplyFallbackDeps } from "./reply-target-fallback.ts";
 import { sortMessages, sliceHistory } from "./history-slicing.ts";
 import { mergeConsecutiveMessages } from "./history-merge.ts";
@@ -37,8 +40,12 @@ export async function processHistory(
   const privateThoughts = allSorted.filter((message) =>
     message.id.startsWith(PRIVATE_THOUGHT_MESSAGE_ID_PREFIX)
   );
+  const privateHandoffs = allSorted.filter((message) =>
+    message.id.startsWith(PRIVATE_HANDOFF_MESSAGE_ID_PREFIX)
+  );
   const sorted = allSorted.filter((message) =>
     !message.id.startsWith(PRIVATE_THOUGHT_MESSAGE_ID_PREFIX)
+    && !message.id.startsWith(PRIVATE_HANDOFF_MESSAGE_ID_PREFIX)
   );
   const latestWithDisplayName = latestUserMessage !== null
     ? annotateTriggerMessage(applyDisplayName(latestUserMessage, config.displayNamesByUserId), triggerMessageIds)
@@ -74,11 +81,13 @@ export async function processHistory(
   const recentPrivateThoughts = privateThoughts.filter((message) =>
     message.replyToId !== null && recentMessageIds.has(message.replyToId)
   );
-  const thoughtsBySourceId = Map.groupBy(recentPrivateThoughts, (message) => message.replyToId);
-  const newerHistory = newerTrimmed.flatMap((message) => [
-    message,
-    ...(message.mergedMessageIds ?? [message.id]).flatMap((id) => thoughtsBySourceId.get(id) ?? []),
-  ]);
+  const olderHistory = attachPrivateRows(olderTrimmed, privateHandoffs);
+  const newerHistory = attachPrivateRows(
+    newerTrimmed,
+    allSorted.filter((message) =>
+      privateHandoffs.includes(message) || recentPrivateThoughts.includes(message)
+    ),
+  );
   const newerMessages = latestWithDisplayName !== null
     ? [...newerHistory, latestWithDisplayName]
     : newerHistory;
@@ -86,13 +95,13 @@ export async function processHistory(
 
   // 5. Fetch missing reply targets from Discord
   const allForFallback = latestWithDisplayName !== null
-    ? [...olderTrimmed, ...newerHistory, latestWithDisplayName]
-    : [...olderTrimmed, ...newerHistory];
+    ? [...olderHistory, ...newerHistory, latestWithDisplayName]
+    : [...olderHistory, ...newerHistory];
   const fetched = applyDisplayNames(await fetchMissingReplyTargets(replyFallbackDeps, allForFallback), config.displayNamesByUserId);
 
   // 6. Resolve reply contexts
   const replyResult = resolveReplies({
-    older: olderTrimmed,
+    older: olderHistory,
     newer: newerHistory,
     latestUserMessage: latestWithDisplayName,
     previousMessageIdByMessageId,
@@ -101,19 +110,21 @@ export async function processHistory(
 
   // 7. Format older slice with date stamps
   let olderText = "";
-  if (olderTrimmed.length > 0) {
-    const dateEntries = insertDateStamps(olderTrimmed, config.timezone);
+  if (olderHistory.length > 0) {
+    const dateEntries = insertDateStamps(olderHistory, config.timezone);
     const lines: string[] = [OLDER_LEGEND];
     for (const entry of dateEntries) {
       if (entry.type === "date") {
         lines.push(entry.text);
       } else {
-        const m = olderTrimmed[entry.index];
+        const m = olderHistory[entry.index];
         if (m === undefined) continue;
-        lines.push(formatMessageLine({
-          message: m,
-          reply: replyResult.older.get(m.id) ?? null,
-        }));
+        lines.push(isPrivateHistoryRow(m)
+          ? `[@${m.author}]: ${formatHistoryContent(m)}`
+          : formatMessageLine({
+            message: m,
+            reply: replyResult.older.get(m.id) ?? null,
+          }));
       }
     }
     olderText = `## Chat History — Older\n${lines.join("\n")}`;
@@ -139,7 +150,7 @@ export async function processHistory(
         if (latestUserMessage !== null && m.id === latestUserMessage.id && reply === null) {
           reply = replyResult.latestUser;
         }
-        lines.push(m.id.startsWith(PRIVATE_THOUGHT_MESSAGE_ID_PREFIX)
+        lines.push(isPrivateHistoryRow(m)
           ? `[@${m.author}]: ${formatHistoryContent(m)}`
           : formatMessageLine({
             message: m,
@@ -155,8 +166,34 @@ export async function processHistory(
   return {
     olderText,
     newerText,
-    visibleUserIds: collectVisibleUserIds([...olderTrimmed, ...newerMessages]),
+    visibleUserIds: collectVisibleUserIds([...olderHistory, ...newerMessages]),
   };
+}
+
+function isPrivateHistoryRow(message: HistoryMessage): boolean {
+  return message.id.startsWith(PRIVATE_THOUGHT_MESSAGE_ID_PREFIX)
+    || message.id.startsWith(PRIVATE_HANDOFF_MESSAGE_ID_PREFIX);
+}
+
+function attachPrivateRows(
+  messages: HistoryMessage[],
+  privateRows: HistoryMessage[],
+): HistoryMessage[] {
+  const rowsByLinkedMessageId = Map.groupBy(
+    privateRows.filter((message) => message.replyToId !== null),
+    (message) => message.replyToId,
+  );
+  return messages.flatMap((message) => [
+    message,
+    ...(message.mergedMessageIds ?? [message.id]).flatMap((id) =>
+      (rowsByLinkedMessageId.get(id) ?? []).map((row) => ({
+        ...row,
+        timestamp: row.id.startsWith(PRIVATE_HANDOFF_MESSAGE_ID_PREFIX)
+          ? message.timestamp
+          : row.timestamp,
+      }))
+    ),
+  ]);
 }
 
 function annotateTriggerSpan(
