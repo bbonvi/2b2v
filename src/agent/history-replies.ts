@@ -90,6 +90,7 @@ function buildReplyContext(
   replyQuoteChars: number,
   normalizedContentMap: Map<string, string> | undefined,
   previousMessageIdByMessageId: ReadonlyMap<string, string | null> | undefined,
+  visibleMessageIds: ReadonlySet<string>,
 ): ReplyContext | null {
   if (message.replyToId === null) return null;
 
@@ -104,7 +105,6 @@ function buildReplyContext(
     };
   }
 
-  // Do not repeat target content when it is already the previous message.
   let quote: string | null = null;
   let isImmediatePrevious = false;
 
@@ -126,7 +126,9 @@ function buildReplyContext(
     quote,
     replyMsgId: message.replyToId,
     missingTarget: false,
-    ...(!isImmediatePrevious && target.assets !== undefined && target.assets.length > 0 ? { replyAssets: target.assets } : {}),
+    ...(!visibleMessageIds.has(message.replyToId) && target.assets !== undefined && target.assets.length > 0
+      ? { replyAssets: target.assets }
+      : {}),
   };
 }
 
@@ -135,7 +137,8 @@ function buildReplyContext(
  *
  * Rules per spec:
  * - Older slice: no quote, include target author + ID.
- * - Newer slice: no quote or reply assets if the target is immediately previous; otherwise include them.
+ * - Newer slice: no quote if the target is immediately previous; otherwise include one.
+ * - Reply assets: include only when the target is outside both visible history slices.
  * - Latest user message: treated like newer slice, with the last newer message as "immediately previous".
  * - Missing targets: flagged with missingTarget=true, author="unknown".
  * - Quotes: derived from normalized content, truncated to replyQuoteChars.
@@ -151,6 +154,9 @@ export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult
     extraLookup,
   } = input;
   const lookup = buildLookup(older, newer, latestUserMessage, extraLookup);
+  const visibleMessageIds = new Set(
+    [...older, ...newer].flatMap((message) => [message.id, ...(message.mergedMessageIds ?? [])]),
+  );
 
   const olderMap = new Map<string, ReplyContext>();
   for (const m of older) {
@@ -162,6 +168,7 @@ export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult
       replyQuoteChars,
       normalizedContentMap,
       previousMessageIdByMessageId,
+      visibleMessageIds,
     );
     if (ctx !== null) olderMap.set(m.id, ctx);
   }
@@ -179,6 +186,7 @@ export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult
       replyQuoteChars,
       normalizedContentMap,
       previousMessageIdByMessageId,
+      visibleMessageIds,
     );
     if (ctx !== null) newerMap.set(m.id, ctx);
   }
@@ -194,6 +202,7 @@ export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult
       replyQuoteChars,
       normalizedContentMap,
       previousMessageIdByMessageId,
+      visibleMessageIds,
     );
   }
 

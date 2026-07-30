@@ -29,7 +29,7 @@ describe("resolveReplies", () => {
     expect(result.newer.get("2")?.replyAssets).toBeUndefined();
   });
 
-  test("quotes non-adjacent targets and preserves lazy assets", () => {
+  test("quotes visible non-adjacent targets without copying their assets", () => {
     const target = message("1", { assets: [
       { id: 7, kind: "image", sourceKind: "attachment", filename: "cat.png", contentType: "image/png", size: 1, width: 1, height: 1, durationSeconds: null },
     ] });
@@ -42,8 +42,8 @@ describe("resolveReplies", () => {
     expect(result.newer.get("3")).toMatchObject({
       targetAuthor: "user-1",
       quote: "message 1",
-      replyAssets: [{ id: 7 }],
     });
+    expect(result.newer.get("3")?.replyAssets).toBeUndefined();
   });
 
   test("resolves merged message aliases", () => {
@@ -127,7 +127,12 @@ describe("resolveReplies", () => {
   });
 
   test("keeps older replies unquoted and resolves fetched targets", () => {
-    const target = message("1", { content: "fetched target" });
+    const target = message("1", {
+      content: "fetched target",
+      assets: [
+        { id: 7, kind: "image", sourceKind: "attachment", filename: "cat.png", contentType: "image/png", size: 1, width: 1, height: 1, durationSeconds: null },
+      ],
+    });
     const olderReply = message("2", { replyToId: "1" });
     const newerReply = message("3", { replyToId: "1" });
     const result = resolveReplies({
@@ -138,7 +143,11 @@ describe("resolveReplies", () => {
       extraLookup: [target],
     });
     expect(result.older.get("2")).toMatchObject({ targetAuthor: "user-1", quote: null });
-    expect(result.newer.get("3")).toMatchObject({ targetAuthor: "user-1", quote: "fetched target" });
+    expect(result.newer.get("3")).toMatchObject({
+      targetAuthor: "user-1",
+      quote: "fetched target",
+      replyAssets: [{ id: 7 }],
+    });
   });
 
   test("normalizes and truncates quotes from untrimmed content", () => {
