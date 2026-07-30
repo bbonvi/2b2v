@@ -177,5 +177,7 @@ describe("repository profile layout", () => {
     expect(loadMainConfig(delamainPath)).not.toHaveProperty("persona");
     expect(twoB.runtimeProfileId).toBe("2b");
     expect(delamain.runtimeProfileId).toBe("delamain");
+    expect(twoB.repertoire.enabled).toBe(true);
+    expect(delamain.repertoire.enabled).toBe(false);
   });
 });

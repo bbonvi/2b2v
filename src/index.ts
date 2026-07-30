@@ -171,6 +171,9 @@ import { createDiscordAssetSourceResolver } from "./discord/asset-resolver";
 import { backfillMessageAssets } from "./discord/asset-backfill";
 import { fetchMessagesAfterRestart } from "./discord/restart-catchup";
 import { clearRestartRecoveryState, getRestartRecoveryState, listRecentDiscordChannels, setRestartRecoveryCutoff } from "./db/restart-recovery-repository";
+import { loadRepertoireSnapshot } from "./db/repertoire-repository.ts";
+import { renderRepertoireContext } from "./repertoire/exchanges.ts";
+import { maybeRefreshRepertoire } from "./repertoire/runtime.ts";
 import { AsyncTaskTracker } from "./runtime/async-task-tracker";
 import { DEFAULT_ASSET_READING, DEFAULT_EXTERNAL_IMAGES } from "./config/defaults";
 import { join } from "path";
@@ -842,6 +845,7 @@ function createHandlerDeps(input: {
   let visibleModeOutput = false;
   const onVisibleOutput = input.overrides?.onVisibleOutput;
   const onAgentEnd = input.overrides?.onAgentEnd;
+  const afterReply = input.overrides?.afterReply;
   return {
     globalConfig,
     guildConfig: input.guildConfig,
@@ -876,6 +880,27 @@ function createHandlerDeps(input: {
       if (input.modeLifecycle === false || !visibleModeOutput) return;
       personaModeRuntime.noteVisibleTurn(input.guildId);
     },
+    afterReply: afterReply === undefined
+      ? undefined
+      : async (request) => {
+          await afterReply(request);
+          if (!request.visibleReplySent) return;
+          await maybeRefreshRepertoire({
+            db,
+            globalConfig,
+            botUserId: client.user?.id ?? "",
+            guildId: input.guildId,
+            channelId: input.currentChannelId,
+            mergeMessageGapSeconds: input.guildConfig.mergeMessageGapSeconds,
+            llmOutputTimeoutMs: input.guildConfig.replyLoop.llmOutputTimeoutMs,
+            systemPrompt: promptBundle.systemPrompt,
+            personaPrompt: promptBundle.corePrompt,
+            runtimePrompt: promptBundle.runtime.reply,
+            decisionInstruction: promptBundle.runtime.contextTemplates["repertoire-refresh-decision"] ?? "",
+            requestLogStore,
+            log: input.log.child({ component: "repertoire-refresh" }),
+          });
+        },
   };
 }
 
@@ -1230,6 +1255,7 @@ async function voiceAssembledContext(
     undefined,
     {
       appendLatestToHistory: false,
+      includeRepertoire: false,
       additionalVisibleUserIds: request.transcript
         .filter((segment) => !segment.synthetic)
         .map((segment) => segment.userId),
@@ -3063,6 +3089,7 @@ async function buildContext(
     includeHistory?: boolean;
     historyLimit?: number;
     memoryFocusUserId?: string;
+    includeRepertoire?: boolean;
   } = {},
 ): Promise<AssembledContext> {
   // Chat history via the full processing pipeline
@@ -3392,6 +3419,21 @@ async function buildContext(
           ?? client.users.cache.get(userId)?.username,
       })
     : "";
+  const repertoire = globalConfig.repertoire.enabled
+    && historyOptions.includeRepertoire !== false
+    && client.user !== null
+    ? renderRepertoireContext({
+        instruction: promptBundle.runtime.contextTemplates.repertoire ?? "",
+        entries: loadRepertoireSnapshot(db, {
+          currentGuildId: guildId,
+          botUserId: client.user.id,
+          mergeMessageGapSeconds: guildConfig.mergeMessageGapSeconds,
+        }),
+        currentGuildId: guildId,
+        maxEntriesPerChannel: globalConfig.repertoire.maxEntriesPerChannel,
+        maxChars: globalConfig.repertoire.maxPromptChars,
+      })
+    : "";
   const assembled = assembleContext({
       toolInstructions: "",
       instructions: guildConfig.instructions,
@@ -3405,6 +3447,7 @@ async function buildContext(
       threadsInChat,
       threadMetadata,
       parentPreContext,
+      repertoire,
       olderHistory: olderText,
       newerHistory: newerText,
       currentContext: [

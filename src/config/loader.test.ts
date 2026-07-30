@@ -140,6 +140,13 @@ describe("model profile resolution", () => {
       modelProfile: "main",
     });
     expect(config.defaultVoice?.playback.volume).toBe(1);
+    expect(config.repertoire).toMatchObject({
+      enabled: false,
+      modelProfile: "main",
+      refreshAfterMinutes: 240,
+      maxRecentEntries: 8,
+      maxAnchorEntries: 6,
+    });
   });
 
   test("resolves complete per-workload profiles and voice maintenance references", () => {
@@ -161,6 +168,9 @@ describe("model profile resolution", () => {
       "modelProfile: main",
       "memoryExtraction:",
       "  modelProfile: main",
+      "repertoire:",
+      "  enabled: true",
+      "  modelProfile: fast",
       "relationships:",
       "  modelProfile: main",
       "innerThreads:",
@@ -203,6 +213,7 @@ describe("model profile resolution", () => {
     expect(config.defaultInnerThreads?.modelProfile).toBe("fast");
     expect(config.privateLife?.maintenance.modelProfile).toBe("fast");
     expect(config.defaultAmbientAttention?.evaluator.modelProfile).toBe("fast");
+    expect(config.repertoire).toMatchObject({ enabled: true, modelProfile: "fast" });
   });
 
   test("rejects unknown workload references", () => {
@@ -221,6 +232,12 @@ describe("model profile resolution", () => {
       "  modelProfile: missing",
     ].join("\n")))).toThrow(
       'innerThreads.modelProfile references unknown model profile "missing"',
+    );
+    expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+      "repertoire:",
+      "  modelProfile: missing",
+    ].join("\n")))).toThrow(
+      'repertoire.modelProfile references unknown model profile "missing"',
     );
     expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
       "privateLife:",
@@ -349,6 +366,45 @@ describe("model profile resolution", () => {
       "privateLife:",
       "  guildId: guild-1",
     ].join("\n")))).toThrow("location overrides belong to Prompt Lab");
+  });
+
+  test("resolves and validates profile-wide repertoire configuration", () => {
+    const configured = loadGlobalConfig(BASE_ENV, writeConfig([
+      "repertoire:",
+      "  enabled: true",
+      "  refreshAfterBotMessages: 12",
+      "  refreshAfterMinutes: 180",
+      "  retryCooldownMinutes: 15",
+      "  candidateLookbackHours: 6",
+      "  maxCandidates: 16",
+      "  maxSourceChannels: 2",
+      "  maxEntriesPerChannel: 6",
+      "  maxEntriesPerGuild: 10",
+      "  maxRecentEntries: 7",
+      "  maxAnchorEntries: 4",
+      "  maxPromptChars: 9000",
+    ].join("\n")));
+
+    expect(configured.repertoire).toEqual({
+      enabled: true,
+      modelProfile: "main",
+      refreshAfterBotMessages: 12,
+      refreshAfterMinutes: 180,
+      retryCooldownMinutes: 15,
+      candidateLookbackHours: 6,
+      maxCandidates: 16,
+      maxSourceChannels: 2,
+      maxEntriesPerChannel: 6,
+      maxEntriesPerGuild: 10,
+      maxRecentEntries: 7,
+      maxAnchorEntries: 4,
+      maxPromptChars: 9000,
+    });
+    expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+      "repertoire:",
+      "  maxCandidates: 2",
+      "  maxRecentEntries: 3",
+    ].join("\n")))).toThrow("repertoire.maxRecentEntries must be <= repertoire.maxCandidates");
   });
 });
 
