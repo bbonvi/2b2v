@@ -19,11 +19,14 @@ function message(id: string, overrides: Partial<HistoryMessage> = {}): HistoryMe
 }
 
 describe("resolveReplies", () => {
-  test("omits a quote for the immediately previous message", () => {
-    const first = message("1");
+  test("omits target content for the immediately previous message", () => {
+    const first = message("1", { assets: [
+      { id: 7, kind: "audio", sourceKind: "attachment", filename: "voice.ogg", contentType: "audio/ogg", size: 1, width: null, height: null, durationSeconds: 2 },
+    ] });
     const second = message("2", { replyToId: "1" });
     const result = resolveReplies({ older: [], newer: [first, second], latestUserMessage: null, replyQuoteChars: 100 });
     expect(result.newer.get("2")).toMatchObject({ targetAuthor: "user-1", quote: null, missingTarget: false });
+    expect(result.newer.get("2")?.replyAssets).toBeUndefined();
   });
 
   test("quotes non-adjacent targets and preserves lazy assets", () => {

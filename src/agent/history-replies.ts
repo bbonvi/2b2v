@@ -104,12 +104,13 @@ function buildReplyContext(
     };
   }
 
-  // Determine if quote should be included
+  // Do not repeat target content when it is already the previous message.
   let quote: string | null = null;
+  let isImmediatePrevious = false;
 
   if (!isOlderSlice) {
     const originalPreviousId = previousMessageIdByMessageId?.get(message.id);
-    const isImmediatePrevious = originalPreviousId !== undefined
+    isImmediatePrevious = originalPreviousId !== undefined
       ? originalPreviousId === message.replyToId
       : immediatelyPrevious !== null && messageHasId(immediatelyPrevious, message.replyToId);
     if (!isImmediatePrevious) {
@@ -125,7 +126,7 @@ function buildReplyContext(
     quote,
     replyMsgId: message.replyToId,
     missingTarget: false,
-    ...(target.assets !== undefined && target.assets.length > 0 ? { replyAssets: target.assets } : {}),
+    ...(!isImmediatePrevious && target.assets !== undefined && target.assets.length > 0 ? { replyAssets: target.assets } : {}),
   };
 }
 
@@ -134,7 +135,7 @@ function buildReplyContext(
  *
  * Rules per spec:
  * - Older slice: no quote, include target author + ID.
- * - Newer slice: no quote if reply target is immediately previous message; otherwise include quote.
+ * - Newer slice: no quote or reply assets if the target is immediately previous; otherwise include them.
  * - Latest user message: treated like newer slice, with the last newer message as "immediately previous".
  * - Missing targets: flagged with missingTarget=true, author="unknown".
  * - Quotes: derived from normalized content, truncated to replyQuoteChars.
