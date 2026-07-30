@@ -1085,7 +1085,7 @@ describe("handleMessage", () => {
     ]);
   });
 
-  test("hashes long provider session ids to fit OpenAI prompt cache key limits", async () => {
+  test("uses a stable UUIDv7 Codex session id across turns", async () => {
     const sessionIds: Array<string | undefined> = [];
     const completeChat: ChatCompleteFn = (request) => {
       sessionIds.push(request.sessionId);
@@ -1097,17 +1097,16 @@ describe("handleMessage", () => {
       });
     };
 
-    await handleMessage(
-      makeMessage({ mentionedUserIds: ["bot-1"] }),
-      makeDeps({
-        completeChat,
-        globalConfig: makeCodexGlobal(),
-        requestLog: new RequestLog("1075346959298199564", "1080016551471743046"),
-      }),
-    );
+    const deps = {
+      completeChat,
+      globalConfig: makeCodexGlobal(),
+      requestLog: new RequestLog("1075346959298199564", "1080016551471743046"),
+    };
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), makeDeps(deps));
+    await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), makeDeps(deps));
 
-    expect(sessionIds[0]?.startsWith("2b2v:")).toBe(true);
-    expect(sessionIds[0]?.length).toBeLessThanOrEqual(64);
+    expect(sessionIds[0]).toBe(sessionIds[1]);
+    expect(sessionIds[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
   test("shares Codex prompt cache keys without sharing channel transport sessions", async () => {

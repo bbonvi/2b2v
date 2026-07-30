@@ -16,7 +16,7 @@ const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_IMAGES_GENERATIONS_URL = "https://chatgpt.com/backend-api/codex/images/generations";
 const CODEX_IMAGES_EDITS_URL = "https://chatgpt.com/backend-api/codex/images/edits";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
-const OPENAI_BETA_HEADER = "responses=experimental";
+const CODEX_CLI_VERSION = "0.146.0";
 const DEFAULT_OUTPUT_FORMAT = "webp";
 const BACKEND_IMAGE_MODEL = "gpt-image-2";
 const DEFAULT_IMAGE_SIZE = "auto";
@@ -591,9 +591,9 @@ export function buildCodexHeaders(input: {
   return {
     Authorization: `Bearer ${input.token}`,
     "chatgpt-account-id": input.accountId,
-    "OpenAI-Beta": OPENAI_BETA_HEADER,
-    originator: "pi",
-    "User-Agent": `pi (${platform()} ${release()}; ${arch()})`,
+    originator: "codex_cli_rs",
+    version: CODEX_CLI_VERSION,
+    "User-Agent": `codex_cli_rs/${CODEX_CLI_VERSION} (${platform()} ${release()}; ${arch()})`,
     accept: input.accept ?? "text/event-stream",
     "content-type": "application/json",
     ...(input.sessionId !== undefined ? { session_id: input.sessionId } : {}),

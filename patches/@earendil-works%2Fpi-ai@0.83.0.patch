@@ -1,0 +1,34 @@
+diff --git a/dist/api/openai-codex-responses.js b/dist/api/openai-codex-responses.js
+index bb9fa794ee6cb9f73149dda5733b286941bbb550..4c9f56b6acaa1b4aacfd7186cdb048e37876b26a 100644
+--- a/dist/api/openai-codex-responses.js
++++ b/dist/api/openai-codex-responses.js
+@@ -29,6 +29,7 @@ const DEFAULT_MAX_RETRIES = 0;
+ const BASE_DELAY_MS = 1000;
+ const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
+ const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
++const CODEX_CLI_VERSION = "0.146.0";
+ // The Codex backend accepts zstd-compressed request bodies on the SSE responses
+ // endpoint (the same endpoint the official Codex client compresses against).
+ const REQUEST_COMPRESSION_ZSTD_LEVEL = 3;
+@@ -1243,14 +1244,18 @@ function buildBaseCodexHeaders(initHeaders, additionalHeaders, accountId, token)
+     }
+     headers.set("Authorization", `Bearer ${token}`);
+     headers.set("chatgpt-account-id", accountId);
+-    headers.set("originator", "pi");
+-    const userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : "pi (browser)";
++    headers.set("originator", "codex_cli_rs");
++    headers.set("version", CODEX_CLI_VERSION);
++    const userAgent = _os
++        ? `codex_cli_rs/${CODEX_CLI_VERSION} (${_os.platform()} ${_os.release()}; ${_os.arch()})`
++        : `codex_cli_rs/${CODEX_CLI_VERSION} (browser)`;
+     headers.set("User-Agent", userAgent);
+     return headers;
+ }
+ function buildSSEHeaders(initHeaders, additionalHeaders, accountId, token, sessionId) {
+     const headers = buildBaseCodexHeaders(initHeaders, additionalHeaders, accountId, token);
+-    headers.set("OpenAI-Beta", "responses=experimental");
++    headers.delete("OpenAI-Beta");
++    headers.delete("openai-beta");
+     headers.set("accept", "text/event-stream");
+     headers.set("content-type", "application/json");
+     if (sessionId) {

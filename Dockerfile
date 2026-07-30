@@ -42,11 +42,13 @@ ADD --chmod=755 ${YT_DLP_URL} /yt-dlp
 # --- Install dependencies ---
 FROM dependency-builder AS deps
 COPY --link package.json bun.lock ./
+COPY --link patches/ ./patches/
 RUN bun install --frozen-lockfile --production --omit=peer
 
 # --- Dev dependencies (for type-checking and linting in CI) ---
 FROM dependency-builder AS deps-dev
 COPY --link package.json bun.lock ./
+COPY --link patches/ ./patches/
 RUN bun install --frozen-lockfile
 
 # --- Production image ---

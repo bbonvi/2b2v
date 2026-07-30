@@ -662,7 +662,7 @@ describe("parseCodexDirectImageResponse", () => {
 });
 
 describe("buildCodexHeaders", () => {
-  test("mirrors the pi-ai Codex adapter envelope", () => {
+  test("mirrors the installed Codex CLI envelope without the obsolete SSE beta", () => {
     const headers = buildCodexHeaders({
       token: "token",
       accountId: "account-1",
@@ -671,9 +671,10 @@ describe("buildCodexHeaders", () => {
 
     expect(headers.Authorization).toBe("Bearer token");
     expect(headers["chatgpt-account-id"]).toBe("account-1");
-    expect(headers["OpenAI-Beta"]).toBe("responses=experimental");
-    expect(headers.originator).toBe("pi");
-    expect(headers["User-Agent"]?.startsWith("pi (")).toBe(true);
+    expect(headers["OpenAI-Beta"]).toBeUndefined();
+    expect(headers.originator).toBe("codex_cli_rs");
+    expect(headers.version).toBe("0.146.0");
+    expect(headers["User-Agent"]?.startsWith("codex_cli_rs/0.146.0 (")).toBe(true);
     expect(headers.session_id).toBe("session-1");
     expect(headers.accept).toBe("text/event-stream");
     expect(headers["content-type"]).toBe("application/json");

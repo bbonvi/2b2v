@@ -923,10 +923,24 @@ function sectionsForStablePrompt(
   return stable;
 }
 
+const codexProviderSessionIds = new Map<string, string>();
+
 /** Build a channel-isolated provider session id for transport continuation. */
-function buildProviderSessionId(requestLog: RequestLog | undefined, modelId: string): string | undefined {
+function buildProviderSessionId(
+  requestLog: RequestLog | undefined,
+  provider: LlmProvider,
+  modelId: string,
+): string | undefined {
   if (requestLog === undefined) return undefined;
-  const sessionId = `2b2v:${requestLog.guildId}:${requestLog.channelId}:${modelId}`;
+  const key = `${requestLog.guildId}:${requestLog.channelId}:${provider}:${modelId}`;
+  if (provider === "openai-codex") {
+    const existing = codexProviderSessionIds.get(key);
+    if (existing !== undefined) return existing;
+    const sessionId = Bun.randomUUIDv7();
+    codexProviderSessionIds.set(key, sessionId);
+    return sessionId;
+  }
+  const sessionId = `2b2v:${key}`;
   if (sessionId.length <= 64) return sessionId;
   return `2b2v:${createHash("sha256").update(sessionId).digest("hex").slice(0, 58)}`;
 }
@@ -2764,7 +2778,7 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
   );
   const sessionId = inheritedPromptCompatible
     ? inheritedPrompt.sessionId
-    : buildProviderSessionId(input.requestLog, `${provider}:${model.id}`);
+    : buildProviderSessionId(input.requestLog, provider, model.id);
   const promptCacheKey = provider === "openai-codex"
     ? promptCaching.enabled
       ? canContinueActorToolSurface && inheritedPrompt.promptCacheKey !== undefined
@@ -2992,7 +3006,7 @@ export async function handleMessage(
   const initialRoles = initialMessageRoles(transport, volatileMessages, finalActionInstruction !== "");
   const reqLog = deps.requestLog;
   const visibleToolSignature = toolContractSignature(actorInitialTools);
-  const sessionId = buildProviderSessionId(reqLog, `${model.llmProvider}:${model.id}`);
+  const sessionId = buildProviderSessionId(reqLog, model.llmProvider, model.id);
   const promptCacheKey = model.llmProvider === "openai-codex"
     ? profile.promptCaching.enabled
       ? buildCodexPromptCacheKey(

@@ -7,28 +7,28 @@ modelProfiles:
         model: gpt-5.6-sol
         modelParams: { textVerbosity: low }
         thinkingLevel: medium
-        codexTransport: sse
+        codexTransport: websocket-cached
         promptCaching: { enabled: true }
     maintenance:
         provider: openai-codex
         model: gpt-5.6-sol
         modelParams: { textVerbosity: low }
         thinkingLevel: medium
-        codexTransport: sse
+        codexTransport: websocket-cached
         promptCaching: { enabled: true }
     imageGeneration:
         provider: openai-codex
         model: gpt-5.6-sol
         modelParams: {}
         thinkingLevel: medium
-        codexTransport: sse
+        codexTransport: websocket-cached
         promptCaching: { enabled: true }
     evaluator:
         provider: openai-codex
         model: gpt-5.3-codex-spark
         modelParams: { textVerbosity: low }
         thinkingLevel: minimal
-        codexTransport: sse
+        codexTransport: websocket-cached
         promptCaching: { enabled: true }
     realtimeVoice:
         provider: openai-codex
@@ -41,13 +41,13 @@ modelProfiles:
         provider: openai-codex
         model: gpt-5.6-terra
         thinkingLevel: minimal
-        codexTransport: sse
+        codexTransport: websocket-cached
         promptCaching: { enabled: true }
     vision:
         provider: openai-codex
         model: gpt-5.5
         thinkingLevel: minimal
-        codexTransport: sse
+        codexTransport: websocket-cached
         promptCaching: { enabled: true }
 modelProfile: main
 
