@@ -181,7 +181,7 @@ replyLoop:
     llmOutputTimeoutMs: 80000 # Timeout for one LLM turn (milliseconds)
 
 agentJobs:
-    imageTimeoutMs: 300000 # (max async image job runtime)
+    imageTimeoutMs: 400000 # (max async image job runtime)
     imageCancelGraceMs: 60000 # (window where replacement/cancel can target a fresh image job)
     terminalVisibleMs: 600000 # (how long completed/failed jobs stay visible in prompt context)
     maxImageReplacements: 2 # (max times one image request may be replaced)
