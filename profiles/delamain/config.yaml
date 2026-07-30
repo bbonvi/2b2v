@@ -209,7 +209,6 @@ trim:
     trimTarget: 500 # Trim down to this many messages
     windowSize: 80 # Recent messages kept uncached (newer slice)
     messageCharLimit: 200 # Max chars per message before truncation
-    replyQuoteChars: 30 # Max chars for reply quote excerpts
 
 ambientInitiative:
     enabled: true # (allow proactive non-triggered initiative in the main channel)

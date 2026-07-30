@@ -339,7 +339,6 @@ export interface TrimConfig {
   trimTarget: number;
   windowSize: number;
   messageCharLimit: number;
-  replyQuoteChars: number;
 }
 
 /** Automatic background memory extraction controls. */

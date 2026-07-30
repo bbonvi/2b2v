@@ -19,31 +19,28 @@ function message(id: string, overrides: Partial<HistoryMessage> = {}): HistoryMe
 }
 
 describe("resolveReplies", () => {
-  test("omits target content for the immediately previous message", () => {
-    const first = message("1", { assets: [
-      { id: 7, kind: "audio", sourceKind: "attachment", filename: "voice.ogg", contentType: "audio/ogg", size: 1, width: null, height: null, durationSeconds: 2 },
-    ] });
+  test("omits ReplyMsgID for the immediately previous visible message", () => {
+    const first = message("1");
     const second = message("2", { replyToId: "1" });
-    const result = resolveReplies({ older: [], newer: [first, second], latestUserMessage: null, replyQuoteChars: 100 });
-    expect(result.newer.get("2")).toMatchObject({ targetAuthor: "user-1", quote: null, missingTarget: false });
-    expect(result.newer.get("2")?.replyAssets).toBeUndefined();
+    const result = resolveReplies({ older: [], newer: [first, second], latestUserMessage: null });
+    expect(result.newer.get("2")).toMatchObject({
+      targetAuthor: "user-1",
+      replyMsgId: null,
+      missingTarget: false,
+    });
   });
 
-  test("quotes visible non-adjacent targets without copying their assets", () => {
-    const target = message("1", { assets: [
-      { id: 7, kind: "image", sourceKind: "attachment", filename: "cat.png", contentType: "image/png", size: 1, width: 1, height: 1, durationSeconds: null },
-    ] });
+  test("includes ReplyMsgID for a non-adjacent target", () => {
     const result = resolveReplies({
       older: [],
-      newer: [target, message("2"), message("3", { replyToId: "1" })],
+      newer: [message("1"), message("2"), message("3", { replyToId: "1" })],
       latestUserMessage: null,
-      replyQuoteChars: 100,
     });
     expect(result.newer.get("3")).toMatchObject({
       targetAuthor: "user-1",
-      quote: "message 1",
+      replyMsgId: "1",
+      missingTarget: false,
     });
-    expect(result.newer.get("3")?.replyAssets).toBeUndefined();
   });
 
   test("resolves merged message aliases", () => {
@@ -52,12 +49,15 @@ describe("resolveReplies", () => {
       older: [],
       newer: [target, message("3", { replyToId: "2" })],
       latestUserMessage: null,
-      replyQuoteChars: 100,
     });
-    expect(result.newer.get("3")).toMatchObject({ targetAuthor: "user-1", missingTarget: false });
+    expect(result.newer.get("3")).toMatchObject({
+      targetAuthor: "user-1",
+      replyMsgId: null,
+      missingTarget: false,
+    });
   });
 
-  test("omits a quote only for the last message in a merged previous row", () => {
+  test("omits ReplyMsgID only for the last message in a merged previous row", () => {
     const target = message("1", {
       content: "first [msg-break] second",
       mergedMessageIds: ["1", "2"],
@@ -66,18 +66,13 @@ describe("resolveReplies", () => {
       older: [],
       newer: [target, message("3", { replyToId: "2" })],
       latestUserMessage: null,
-      replyQuoteChars: 100,
-      normalizedContentMap: new Map([
-        ["1", "first"],
-        ["2", "second"],
-      ]),
       previousMessageIdByMessageId: new Map([["3", "2"]]),
     });
 
-    expect(result.newer.get("3")).toMatchObject({ quote: null });
+    expect(result.newer.get("3")).toMatchObject({ replyMsgId: null });
   });
 
-  test("quotes only the selected earlier message from a merged previous row", () => {
+  test("identifies an earlier message from a merged previous row", () => {
     const target = message("1", {
       content: "first [msg-break] second",
       mergedMessageIds: ["1", "2"],
@@ -86,29 +81,23 @@ describe("resolveReplies", () => {
       older: [],
       newer: [target, message("3", { replyToId: "1" })],
       latestUserMessage: null,
-      replyQuoteChars: 100,
-      normalizedContentMap: new Map([
-        ["1", "first"],
-        ["2", "second"],
-      ]),
       previousMessageIdByMessageId: new Map([["3", "2"]]),
     });
 
-    expect(result.newer.get("3")).toMatchObject({ quote: "first" });
+    expect(result.newer.get("3")).toMatchObject({ replyMsgId: "1" });
   });
 
-  test("omits a quote across the older and newer slice boundary", () => {
+  test("omits ReplyMsgID across the older and newer slice boundary", () => {
     const target = message("1");
     const reply = message("2", { replyToId: "1" });
     const result = resolveReplies({
       older: [target],
       newer: [reply],
       latestUserMessage: null,
-      replyQuoteChars: 100,
       previousMessageIdByMessageId: new Map([["2", "1"]]),
     });
 
-    expect(result.newer.get("2")).toMatchObject({ quote: null });
+    expect(result.newer.get("2")).toMatchObject({ replyMsgId: null });
   });
 
   test("marks unavailable targets", () => {
@@ -116,50 +105,37 @@ describe("resolveReplies", () => {
       older: [],
       newer: [message("2", { replyToId: "999" })],
       latestUserMessage: null,
-      replyQuoteChars: 100,
     });
     expect(result.newer.get("2")).toEqual({
       targetAuthor: "unknown",
-      quote: null,
       replyMsgId: "999",
       missingTarget: true,
     });
   });
 
-  test("keeps older replies unquoted and resolves fetched targets", () => {
-    const target = message("1", {
-      content: "fetched target",
-      assets: [
-        { id: 7, kind: "image", sourceKind: "attachment", filename: "cat.png", contentType: "image/png", size: 1, width: 1, height: 1, durationSeconds: null },
-      ],
-    });
+  test("identifies fetched targets outside visible history", () => {
+    const target = message("1");
     const olderReply = message("2", { replyToId: "1" });
     const newerReply = message("3", { replyToId: "1" });
     const result = resolveReplies({
       older: [olderReply],
       newer: [newerReply],
       latestUserMessage: null,
-      replyQuoteChars: 100,
       extraLookup: [target],
     });
-    expect(result.older.get("2")).toMatchObject({ targetAuthor: "user-1", quote: null });
-    expect(result.newer.get("3")).toMatchObject({
-      targetAuthor: "user-1",
-      quote: "fetched target",
-      replyAssets: [{ id: 7 }],
-    });
+    expect(result.older.get("2")).toMatchObject({ targetAuthor: "user-1", replyMsgId: "1" });
+    expect(result.newer.get("3")).toMatchObject({ targetAuthor: "user-1", replyMsgId: "1" });
   });
 
-  test("normalizes and truncates quotes from untrimmed content", () => {
-    const target = message("1", { content: "trimmed marker" });
+  test("keeps ReplyMsgID when the immediate target is outside visible history", () => {
     const result = resolveReplies({
       older: [],
-      newer: [target, message("2"), message("3", { replyToId: "1" })],
+      newer: [message("2", { replyToId: "1" })],
       latestUserMessage: null,
-      replyQuoteChars: 12,
-      normalizedContentMap: new Map([["1", "original\nlong\tcontent"]]),
+      previousMessageIdByMessageId: new Map([["2", "1"]]),
+      extraLookup: [message("1")],
     });
-    expect(result.newer.get("3")?.quote).toBe("original lon…");
+    expect(result.newer.get("2")).toMatchObject({ replyMsgId: "1" });
   });
 
   test("resolves the detached latest user reply against the newer slice", () => {
@@ -168,8 +144,7 @@ describe("resolveReplies", () => {
       older: [],
       newer: [message("1"), message("2")],
       latestUserMessage: latest,
-      replyQuoteChars: 100,
     });
-    expect(result.latestUser).toMatchObject({ targetAuthor: "user-1", quote: "message 1" });
+    expect(result.latestUser).toMatchObject({ targetAuthor: "user-1", replyMsgId: "1" });
   });
 });

@@ -185,7 +185,7 @@ describe("schedule tool → DB roundtrip", () => {
 
 describe("trigger → trimming pipeline", () => {
   test("context trimming preserves newest messages when over trigger", () => {
-    const trim: TrimConfig = { trimTrigger: 10, trimTarget: 5, windowSize: 20, messageCharLimit: 200, replyQuoteChars: 50 };
+    const trim: TrimConfig = { trimTrigger: 10, trimTarget: 5, windowSize: 20, messageCharLimit: 200 };
     const messages: ChatMessage[] = Array.from({ length: 12 }, (_, index) => ({
       author: `user-${index}`,
       content: `message-${index}`,

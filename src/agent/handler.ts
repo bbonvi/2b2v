@@ -1062,7 +1062,7 @@ function buildCurrentMessageMetadata(msg: IncomingMessage, runtimePrompts?: Runt
   if (msg.replyToMessageId !== undefined) {
     lines.push(`ReplyToMsgID: ${msg.replyToMessageId}`);
   }
-  if (msg.assets !== undefined) lines.push(...formatAssetMeta("", msg.assets));
+  if (msg.assets !== undefined) lines.push(...formatAssetMeta(msg.assets));
   if (msg.repliedToBotRouteSource !== undefined) {
     lines.push("Reply Context: The current event replies to a message you previously sent here from another channel.");
     lines.push(`Source GuildID: ${msg.repliedToBotRouteSource.sourceGuildId}`);

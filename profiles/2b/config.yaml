@@ -228,7 +228,6 @@ trim:
     trimTarget: 600 # Trim down to this many messages
     windowSize: 100 # Recent messages kept uncached (newer slice)
     messageCharLimit: 300 # Max chars per message before truncation
-    replyQuoteChars: 30 # Max chars for reply quote excerpts
 
 # Background memory extraction
 memoryExtraction:

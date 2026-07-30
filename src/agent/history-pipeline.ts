@@ -26,7 +26,7 @@ export interface ProcessedHistory {
 export async function processHistory(
   messages: HistoryMessage[],
   latestUserMessage: HistoryMessage | null,
-  config: HistoryProcessingConfig & { replyQuoteChars: number },
+  config: HistoryProcessingConfig,
   replyFallbackDeps: ReplyFallbackDeps,
   _nowMs = Date.now(),
 ): Promise<ProcessedHistory> {
@@ -44,15 +44,13 @@ export async function processHistory(
     ? annotateTriggerMessage(applyDisplayName(latestUserMessage, config.displayNamesByUserId), triggerMessageIds)
     : null;
 
-  // Preserve original message boundaries for exact reply quotes and adjacency.
+  // Preserve original message boundaries for exact reply adjacency.
   const originalMessages = latestWithDisplayName !== null
     ? [...allSorted, latestWithDisplayName]
     : allSorted;
-  const normalizedContentMap = new Map<string, string>();
   const previousMessageIdByMessageId = new Map<string, string | null>();
   let previousMessageId: string | null = null;
   for (const message of originalMessages) {
-    normalizedContentMap.set(message.id, message.content);
     if (message.isSynthetic || message.isPromptOnly === true) continue;
     previousMessageIdByMessageId.set(message.id, previousMessageId);
     previousMessageId = message.id;
@@ -92,23 +90,16 @@ export async function processHistory(
     : [...olderTrimmed, ...newerHistory];
   const fetched = applyDisplayNames(await fetchMissingReplyTargets(replyFallbackDeps, allForFallback), config.displayNamesByUserId);
 
-  // 6. Add fetched messages to normalized content map
-  for (const m of fetched) {
-    normalizedContentMap.set(m.id, m.content);
-  }
-
-  // 7. Resolve reply contexts
+  // 6. Resolve reply contexts
   const replyResult = resolveReplies({
     older: olderTrimmed,
     newer: newerHistory,
     latestUserMessage: latestWithDisplayName,
-    replyQuoteChars: config.replyQuoteChars,
-    normalizedContentMap,
     previousMessageIdByMessageId,
     extraLookup: fetched,
   });
 
-  // 8. Format older slice with date stamps
+  // 7. Format older slice with date stamps
   let olderText = "";
   if (olderTrimmed.length > 0) {
     const dateEntries = insertDateStamps(olderTrimmed, config.timezone);
@@ -128,7 +119,7 @@ export async function processHistory(
     olderText = `## Chat History — Older\n${lines.join("\n")}`;
   }
 
-  // 9. Format newer slice with date stamps
+  // 8. Format newer slice with date stamps
   let newerText = "";
   if (newerMessages.length > 0) {
     const newerDateEntries = insertDateStamps(newerMessages, config.timezone, {

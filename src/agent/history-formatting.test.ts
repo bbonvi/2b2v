@@ -50,7 +50,6 @@ describe("formatMessageLine", () => {
     const reply: ReplyContext = {
       targetAuthor: "bob",
       targetDisplayName: "Bob X",
-      quote: "earlier text",
       replyMsgId: "123",
       missingTarget: false,
     };
@@ -59,7 +58,7 @@ describe("formatMessageLine", () => {
       reply,
       includeMessageIds: true,
       includeDisplayNames: true,
-    })).toBe('[@alice (Alice W) to @bob (Bob X) (MsgID: 1; Quote: "earlier text"; <trigger>)]: hello');
+    })).toBe("[@alice (Alice W) to @bob (Bob X) (MsgID: 1; ReplyMsgID: 123; <trigger>)]: hello");
   });
 
   test("marks webhook messages in existing history metadata", () => {
@@ -101,15 +100,13 @@ describe("formatMessageLine", () => {
     })).toBe("[@alice (Stickers: #12066 хуйня)]: <sticker>хуйня</sticker>");
   });
 
-  test("formats reply assets and missing targets", () => {
+  test("formats reply IDs and missing targets", () => {
     const reply: ReplyContext = {
       targetAuthor: "unknown",
-      quote: null,
       replyMsgId: "missing",
       missingTarget: true,
-      replyAssets: [{ id: 8, kind: "gif", sourceKind: "embed", filename: null, contentType: null, size: null, width: 100, height: 100, durationSeconds: null }],
     };
-    expect(formatMessageLine({ message: message(), reply })).toBe("[@alice to @unknown (MissingTarget: true; ReplyGIFs: #8)]: hello");
+    expect(formatMessageLine({ message: message(), reply })).toBe("[@alice to @unknown (ReplyMsgID: missing; MissingTarget: true)]: hello");
   });
 
   test("caps Link IDs without dropping the total", () => {

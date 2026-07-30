@@ -27,11 +27,9 @@ const defaultConfig = {
     trimTarget: 100,
     windowSize: 30,
     messageCharLimit: 500,
-    replyQuoteChars: 80,
   },
   mergeMessageGapSeconds: 120,
   timezone: "UTC",
-  replyQuoteChars: 80,
 };
 
 function makeDeps(db: Database): ReplyFallbackDeps {
@@ -273,7 +271,27 @@ describe("processHistory", () => {
     const result = await processHistory([m1, m2], latest, defaultConfig, deps);
 
     expect(result.newerText).toContain("to @bob");
-    expect(result.newerText).not.toContain("ReplyMsgID");
+    expect(result.newerText).not.toContain("ReplyMsgID: 1");
+  });
+
+  test("identifies a non-adjacent asset-only reply target", async () => {
+    const target = msg({
+      id: "image",
+      content: "",
+      timestamp: 1000,
+      assets: [
+        { id: 7, kind: "image", sourceKind: "attachment", filename: "image.png", contentType: "image/png", size: 1, width: 1, height: 1, durationSeconds: null },
+      ],
+    });
+    const middle = msg({ id: "middle", content: "later", timestamp: 2000 });
+    const latest = msg({ id: "reply", content: "this one", timestamp: 3000, replyToId: "image" });
+
+    const result = await processHistory([target, middle], latest, defaultConfig, deps);
+
+    expect(result.newerText).toContain("[@alice (MsgID: image; Images: #7)]: ");
+    expect(result.newerText).toContain(
+      "[@alice to @alice (MsgID: reply; ReplyMsgID: image)]: this one",
+    );
   });
 
   test("bot reply metadata is shown when stored replyToId points to a user message", async () => {
@@ -298,7 +316,7 @@ describe("processHistory", () => {
     expect(result.newerText).not.toContain("MissingTarget");
   });
 
-  test("latest reply to the last merged message omits its quote", async () => {
+  test("latest reply to the last merged message omits ReplyMsgID", async () => {
     const messages = [
       msg({ id: "bot-1", author: "bot", authorId: "bot-id", isBot: true, content: "first bot chunk", timestamp: 1000 }),
       msg({ id: "bot-2", author: "bot", authorId: "bot-id", isBot: true, content: "second bot chunk", timestamp: 2000 }),
@@ -315,10 +333,10 @@ describe("processHistory", () => {
     const result = await processHistory(messages, latest, defaultConfig, deps);
 
     expect(result.newerText).toContain("[@user to @bot (MsgID: user-1)]: replying");
-    expect(result.newerText).not.toContain("Quote:");
+    expect(result.newerText).not.toContain("ReplyMsgID: bot-2");
   });
 
-  test("latest reply to an earlier merged message quotes only that message", async () => {
+  test("latest reply to an earlier merged message identifies that message", async () => {
     const messages = [
       msg({ id: "bot-1", author: "bot", authorId: "bot-id", isBot: true, content: "first bot chunk", timestamp: 1000 }),
       msg({ id: "bot-2", author: "bot", authorId: "bot-id", isBot: true, content: "second bot chunk", timestamp: 2000 }),
@@ -334,11 +352,12 @@ describe("processHistory", () => {
 
     const result = await processHistory(messages, latest, defaultConfig, deps);
 
-    expect(result.newerText).toContain('Quote: "first bot chunk"');
-    expect(result.newerText).not.toContain('Quote: "first bot chunk [msg-break]');
+    expect(result.newerText).toContain(
+      "[@user to @bot (MsgID: user-1; ReplyMsgID: bot-1)]: replying",
+    );
   });
 
-  test("first newer reply to the last older message omits its quote", async () => {
+  test("first newer reply to the last older message omits ReplyMsgID", async () => {
     const config = {
       ...defaultConfig,
       trim: { ...defaultConfig.trim, trimTarget: 5, windowSize: 2, trimTrigger: 20 },
@@ -356,7 +375,7 @@ describe("processHistory", () => {
 
     expect(result.olderText).toContain("target");
     expect(result.newerText).toContain("[@three to @two (MsgID: 3)]: reply");
-    expect(result.newerText).not.toContain('Quote: "target"');
+    expect(result.newerText).not.toContain("ReplyMsgID: 2");
   });
 
   test("messages split correctly between older and newer with controlled config", async () => {

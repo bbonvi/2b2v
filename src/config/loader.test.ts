@@ -492,14 +492,12 @@ describe("validation helpers", () => {
       trimTarget: 150,
       windowSize: 20,
       messageCharLimit: 200,
-      replyQuoteChars: 50,
     })).not.toThrow();
     expect(() => validateTrimConfig({
       trimTrigger: 150,
       trimTarget: 150,
       windowSize: 20,
       messageCharLimit: 200,
-      replyQuoteChars: 50,
     })).toThrow("trimTrigger must be > trim.trimTarget");
   });
 

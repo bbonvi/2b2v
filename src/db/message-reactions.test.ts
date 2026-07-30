@@ -11,7 +11,6 @@ const trim: TrimConfig = {
   trimTarget: 10,
   windowSize: 20,
   messageCharLimit: 200,
-  replyQuoteChars: 50,
 };
 
 function insertMessage(id: string): void {

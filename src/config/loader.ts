@@ -1300,7 +1300,6 @@ export function loadGlobalConfig(
       trimTarget: yaml.trim?.trimTarget ?? DEFAULT_TRIM.trimTarget,
       windowSize: yaml.trim?.windowSize ?? DEFAULT_TRIM.windowSize,
       messageCharLimit: yaml.trim?.messageCharLimit ?? DEFAULT_TRIM.messageCharLimit,
-      replyQuoteChars: yaml.trim?.replyQuoteChars ?? DEFAULT_TRIM.replyQuoteChars,
     },
     defaultTriggers: {
       mention: yaml.triggers?.mention ?? DEFAULT_TRIGGER.mention,
@@ -1404,7 +1403,6 @@ export function resolveGuildConfig(
       trimTarget: partial.trim?.trimTarget ?? global.defaultTrim.trimTarget,
       windowSize: partial.trim?.windowSize ?? global.defaultTrim.windowSize,
       messageCharLimit: partial.trim?.messageCharLimit ?? global.defaultTrim.messageCharLimit,
-      replyQuoteChars: partial.trim?.replyQuoteChars ?? global.defaultTrim.replyQuoteChars,
     },
     adminUserIds: partial.adminUserIds ?? [],
     mergeMessageGapSeconds: partial.mergeMessageGapSeconds ?? global.defaultMergeMessageGapSeconds,

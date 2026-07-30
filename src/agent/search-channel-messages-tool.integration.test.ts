@@ -305,10 +305,10 @@ describe("search_channel_messages", () => {
     expect(text(conflictingScope)).toContain("cannot be combined");
   });
 
-  test("shows reply target and quote when available", async () => {
+  test("shows the reply target message ID", async () => {
     insertMessage("parent", "quoted parent text", { username: "bob", createdAt: baseTime });
     insertMessage("reply", "needle reply", { username: "alice", createdAt: baseTime + 1000, replyToId: "parent" });
     const result = await tool().execute("tc", { pattern: "needle" }, AbortSignal.timeout(5000));
-    expect(text(result)).toContain('[@alice to @bob (MsgID: reply; Quote: "quoted parent text")]');
+    expect(text(result)).toContain("[@alice to @bob (MsgID: reply; ReplyMsgID: parent)]");
   });
 });

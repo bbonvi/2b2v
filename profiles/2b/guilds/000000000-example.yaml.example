@@ -24,7 +24,6 @@ trim:
   trimTarget: 150
   windowSize: 20
   messageCharLimit: 200
-  replyQuoteChars: 50
 
 # Optional per-guild memory extraction override
 # memoryExtraction:

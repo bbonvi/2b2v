@@ -140,7 +140,6 @@ export function createListChannelMessagesTool(deps: ListChannelMessagesToolDeps)
         older: [],
         newer: messages,
         latestUserMessage: null,
-        replyQuoteChars: 200,
       }).newer;
       const oldestMessageId = messages[0]?.id;
       const newestMessageId = messages[messages.length - 1]?.id;

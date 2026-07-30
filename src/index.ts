@@ -3063,7 +3063,6 @@ async function buildContext(
       trim: guildConfig.trim,
       mergeMessageGapSeconds: guildConfig.mergeMessageGapSeconds,
       timezone: guildConfig.timezone,
-      replyQuoteChars: guildConfig.trim.replyQuoteChars,
       triggerMessageIds: historyOptions.triggerMessageIds,
       displayNamesByUserId,
     },

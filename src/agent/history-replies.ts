@@ -6,14 +6,6 @@ export interface ResolveRepliesInput {
   newer: HistoryMessage[];
   /** The latest user message (already detached from slices), or null. */
   latestUserMessage: HistoryMessage | null;
-  replyQuoteChars: number;
-  /**
-   * Optional map of message ID → normalized-but-untrimmed content.
-   * When provided, quotes are derived from this map instead of message.content.
-   * Per spec: "Reply quotes MUST be derived from the normalized original content
-   * before messageCharLimit trimming is applied."
-   */
-  normalizedContentMap?: Map<string, string>;
   /**
    * Original Discord message ID → immediately previous Discord message ID.
    * Use this when formatted rows can represent more than one message or cross slices.
@@ -30,21 +22,6 @@ export interface ResolveRepliesResult {
   newer: Map<string, ReplyContext>;
   /** ReplyContext for the latest user message, or null if no reply. */
   latestUser: ReplyContext | null;
-}
-
-/**
- * Normalize whitespace for quote extraction (same as trimming module).
- */
-function normalizeForQuote(content: string): string {
-  return content.replace(/[\t\n\r]+/g, " ");
-}
-
-/**
- * Truncate a quote to the char limit, appending "…" if truncated.
- */
-function truncateQuote(text: string, limit: number): string {
-  if (text.length <= limit) return text;
-  return text.slice(0, limit) + "…";
 }
 
 /**
@@ -72,23 +49,15 @@ function buildLookup(
   return map;
 }
 
-function messageHasId(message: HistoryMessage, id: string): boolean {
-  return message.id === id || (message.mergedMessageIds ?? []).includes(id);
-}
-
 /**
  * Build a ReplyContext for a message, given its slice context.
  *
- * @param isOlderSlice - true if the message is in the older slice (no quotes).
- * @param immediatelyPrevious - message immediately before this one in the newer slice (or null).
+ * @param immediatelyPrevious - message immediately before this one in visible history (or null).
  */
 function buildReplyContext(
   message: HistoryMessage,
   lookup: Map<string, HistoryMessage>,
-  isOlderSlice: boolean,
   immediatelyPrevious: HistoryMessage | null,
-  replyQuoteChars: number,
-  normalizedContentMap: Map<string, string> | undefined,
   previousMessageIdByMessageId: ReadonlyMap<string, string | null> | undefined,
   visibleMessageIds: ReadonlySet<string>,
 ): ReplyContext | null {
@@ -99,36 +68,24 @@ function buildReplyContext(
   if (target === undefined) {
     return {
       targetAuthor: "unknown",
-      quote: null,
       replyMsgId: message.replyToId,
       missingTarget: true,
     };
   }
 
-  let quote: string | null = null;
-  let isImmediatePrevious = false;
-
-  if (!isOlderSlice) {
-    const originalPreviousId = previousMessageIdByMessageId?.get(message.id);
-    isImmediatePrevious = originalPreviousId !== undefined
+  const originalPreviousId = previousMessageIdByMessageId?.get(message.id);
+  const isImmediatePrevious = visibleMessageIds.has(message.replyToId) && (
+    originalPreviousId !== undefined
       ? originalPreviousId === message.replyToId
-      : immediatelyPrevious !== null && messageHasId(immediatelyPrevious, message.replyToId);
-    if (!isImmediatePrevious) {
-      const raw = normalizedContentMap?.get(message.replyToId) ?? normalizedContentMap?.get(target.id) ?? target.content;
-      const normalized = normalizeForQuote(raw);
-      quote = truncateQuote(normalized, replyQuoteChars);
-    }
-  }
+      : immediatelyPrevious !== null
+        && (immediatelyPrevious.mergedMessageIds?.at(-1) ?? immediatelyPrevious.id) === message.replyToId
+  );
 
   return {
     targetAuthor: target.author,
     ...(target.authorDisplayName !== undefined ? { targetDisplayName: target.authorDisplayName } : {}),
-    quote,
-    replyMsgId: message.replyToId,
+    replyMsgId: isImmediatePrevious ? null : message.replyToId,
     missingTarget: false,
-    ...(!visibleMessageIds.has(message.replyToId) && target.assets !== undefined && target.assets.length > 0
-      ? { replyAssets: target.assets }
-      : {}),
   };
 }
 
@@ -136,20 +93,15 @@ function buildReplyContext(
  * Resolve reply contexts for all messages in older/newer slices and the latest user message.
  *
  * Rules per spec:
- * - Older slice: no quote, include target author + ID.
- * - Newer slice: no quote if the target is immediately previous; otherwise include one.
- * - Reply assets: include only when the target is outside both visible history slices.
- * - Latest user message: treated like newer slice, with the last newer message as "immediately previous".
+ * - Immediate visible target: include the target author without a redundant ID.
+ * - Other targets: include ReplyMsgID so the model can inspect the exact message on demand.
  * - Missing targets: flagged with missingTarget=true, author="unknown".
- * - Quotes: derived from normalized content, truncated to replyQuoteChars.
  */
 export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult {
   const {
     older,
     newer,
     latestUserMessage,
-    replyQuoteChars,
-    normalizedContentMap,
     previousMessageIdByMessageId,
     extraLookup,
   } = input;
@@ -159,14 +111,14 @@ export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult
   );
 
   const olderMap = new Map<string, ReplyContext>();
-  for (const m of older) {
+  for (let i = 0; i < older.length; i++) {
+    const m = older[i];
+    if (m === undefined) continue;
+    const prev = i > 0 ? older[i - 1] ?? null : null;
     const ctx = buildReplyContext(
       m,
       lookup,
-      true,
-      null,
-      replyQuoteChars,
-      normalizedContentMap,
+      prev,
       previousMessageIdByMessageId,
       visibleMessageIds,
     );
@@ -177,14 +129,11 @@ export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult
   for (let i = 0; i < newer.length; i++) {
     const m = newer[i];
     if (m === undefined) continue;
-    const prev = i > 0 ? newer[i - 1] ?? null : null;
+    const prev = i > 0 ? newer[i - 1] ?? null : older.at(-1) ?? null;
     const ctx = buildReplyContext(
       m,
       lookup,
-      false,
       prev,
-      replyQuoteChars,
-      normalizedContentMap,
       previousMessageIdByMessageId,
       visibleMessageIds,
     );
@@ -193,14 +142,11 @@ export function resolveReplies(input: ResolveRepliesInput): ResolveRepliesResult
 
   let latestUser: ReplyContext | null = null;
   if (latestUserMessage !== null && latestUserMessage.replyToId !== null) {
-    const lastNewer = newer.length > 0 ? newer[newer.length - 1] ?? null : null;
+    const lastVisible = newer.at(-1) ?? older.at(-1) ?? null;
     latestUser = buildReplyContext(
       latestUserMessage,
       lookup,
-      false,
-      lastNewer,
-      replyQuoteChars,
-      normalizedContentMap,
+      lastVisible,
       previousMessageIdByMessageId,
       visibleMessageIds,
     );

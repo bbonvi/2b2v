@@ -42,7 +42,6 @@ export const DEFAULT_TRIM: TrimConfig = {
   trimTarget: 150,
   windowSize: 20,
   messageCharLimit: 200,
-  replyQuoteChars: 50,
 };
 
 export const DEFAULT_EXTERNAL_IMAGES: ExternalImagesConfig = {

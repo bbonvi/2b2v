@@ -233,7 +233,6 @@ export function createSearchChannelMessagesTool(deps: SearchChannelMessagesToolD
         older: [],
         newer: messages,
         latestUserMessage: null,
-        replyQuoteChars: 200,
         extraLookup: getHistoryMessagesByIds(db, replyIds),
       }).newer;
       const intro = pattern === undefined

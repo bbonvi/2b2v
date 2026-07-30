@@ -24,7 +24,6 @@ const trim: TrimConfig = {
   trimTarget: 8,
   windowSize: 3,
   messageCharLimit: 200,
-  replyQuoteChars: 50,
 };
 
 describe("sortMessages", () => {
@@ -141,7 +140,6 @@ describe("sliceHistory", () => {
       trimTarget: 300,
       windowSize: 50,
       messageCharLimit: 200,
-      replyQuoteChars: 50,
     };
 
     const r70 = sliceHistory(Array.from({ length: 70 }, (_, i) => msg(String(i), i * 100)), wideTrim);
@@ -159,7 +157,6 @@ describe("sliceHistory", () => {
       trimTarget: 150,
       windowSize: 20,
       messageCharLimit: 200,
-      replyQuoteChars: 50,
     };
 
     const r149 = sliceHistory(Array.from({ length: 149 }, (_, i) => msg(String(i), i * 100)), unevenTrim);

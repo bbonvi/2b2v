@@ -476,7 +476,6 @@ describe("getContextHistoryMessages", () => {
     trimTarget: 8,
     windowSize: 3,
     messageCharLimit: 200,
-    replyQuoteChars: 50,
   };
 
   test("keeps oldest included message stable until a full window chunk accumulates", () => {
