@@ -17,7 +17,6 @@ import type {
   PromptCachingConfig,
   PromptTransportConfig,
   PromptTransportSectionId,
-  RepertoireConfig,
   RelationshipConfig,
   ReplyLoopConfig,
   SchedulePressureConfig,
@@ -64,22 +63,6 @@ export const DEFAULT_MEMORY_EXTRACTION: MemoryExtractionConfig = {
     maxBatchMessages: 300,
     minIntervalSeconds: 600,
   },
-};
-
-export const DEFAULT_REPERTOIRE: RepertoireConfig = {
-  enabled: false,
-  modelProfile: "main",
-  refreshAfterBotMessages: 40,
-  refreshAfterMinutes: 240,
-  retryCooldownMinutes: 30,
-  candidateLookbackHours: 12,
-  maxCandidates: 24,
-  maxSourceChannels: 3,
-  maxEntriesPerChannel: 3,
-  maxEntriesPerGuild: 6,
-  maxRecentEntries: 8,
-  maxAnchorEntries: 6,
-  maxPromptChars: 12_000,
 };
 
 export const DEFAULT_RELATIONSHIPS: RelationshipConfig = {

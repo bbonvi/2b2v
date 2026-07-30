@@ -251,34 +251,6 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_messages_user_guild
     ON messages(user_id, guild_id);
 
-  CREATE TABLE IF NOT EXISTS repertoire_entries (
-    id                       TEXT PRIMARY KEY,
-    tier                     TEXT NOT NULL CHECK(tier IN ('recent', 'anchor')),
-    scope_type               TEXT NOT NULL CHECK(scope_type IN ('profile', 'guild')),
-    scope_guild_id           TEXT,
-    condition_text           TEXT,
-    source_message_ids_json  TEXT NOT NULL,
-    position                 INTEGER NOT NULL,
-    selected_at              INTEGER NOT NULL,
-    last_selected_at         INTEGER NOT NULL,
-    CHECK((tier = 'recent' AND condition_text IS NULL)
-       OR (tier = 'anchor' AND condition_text IS NOT NULL)),
-    CHECK(tier = 'anchor' OR scope_type = 'profile'),
-    CHECK((scope_type = 'profile' AND scope_guild_id IS NULL)
-       OR (scope_type = 'guild' AND scope_guild_id IS NOT NULL))
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_repertoire_entries_tier_position
-    ON repertoire_entries(tier, position);
-
-  CREATE TABLE IF NOT EXISTS repertoire_refresh_state (
-    singleton           INTEGER PRIMARY KEY CHECK(singleton = 1),
-    through_message_id  TEXT,
-    through_created_at  INTEGER NOT NULL DEFAULT 0,
-    last_attempt_at     INTEGER NOT NULL DEFAULT 0,
-    last_success_at     INTEGER NOT NULL DEFAULT 0
-  );
-
   CREATE TABLE IF NOT EXISTS dice_rolls (
     id                   TEXT PRIMARY KEY,
     request_key          TEXT NOT NULL UNIQUE,

@@ -150,21 +150,6 @@ function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
       maxToolCalls: 5,
       ambient: { enabled: false, everyMessages: 300, maxBatchMessages: 300, minIntervalSeconds: 600 },
     },
-    repertoire: {
-      enabled: false,
-      modelProfile: "main",
-      refreshAfterBotMessages: 40,
-      refreshAfterMinutes: 240,
-      retryCooldownMinutes: 30,
-      candidateLookbackHours: 12,
-      maxCandidates: 24,
-      maxSourceChannels: 3,
-      maxEntriesPerChannel: 3,
-      maxEntriesPerGuild: 6,
-      maxRecentEntries: 8,
-      maxAnchorEntries: 6,
-      maxPromptChars: 12_000,
-    },
     ...overrides,
   };
 }

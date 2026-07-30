@@ -89,7 +89,6 @@ Profile files override shared files with the same path. To inspect the exact eff
 bun run prompt:inspect -- --list
 bun run prompt:inspect -- --surface event-watch --format tree
 bun run prompt:inspect -- --surface voice-actor --provider openrouter --format assembled
-bun run prompt:inspect -- --surface repertoire-refresh --format assembled
 bun run prompt:inspect -- --surface scheduled-task --guild <GUILD_ID> --format json
 ```
 
@@ -113,9 +112,7 @@ timezone: UTC
 adminUserIds: []
 ```
 
-Top-level `modelProfiles` entries are complete execution policies: provider, model, model parameters, reasoning level, service tier, Codex transport, and prompt-caching behavior. Workloads and guilds select one by name through `modelProfile`; live voice, voice summary, voice extraction, ambient evaluators, memory, relationships, inner threads, repertoire refresh, private-life actors and episode maintenance, image reading, and image generation may each select different profiles. All config fields are optional unless the matching feature needs credentials or IDs. `PROFILE` selects configuration and instructions together.
-
-Top-level `repertoire.enabled` controls one profile-wide portable set of visible Discord exchanges. `repertoire.modelProfile` selects the private JSON refresh pass. Count-or-age cadence, retry cooldown, candidate lookback, source diversity, recent and anchor caps, and the hard prompt character limit are configured under `repertoire`. It defaults to disabled and is enabled only for the 2B profile. Actor prompts receive retained anchors and rotating recent examples before older room history; live voice does not.
+Top-level `modelProfiles` entries are complete execution policies: provider, model, model parameters, reasoning level, service tier, Codex transport, and prompt-caching behavior. Workloads and guilds select one by name through `modelProfile`; live voice, voice summary, voice extraction, ambient evaluators, memory, relationships, inner threads, private-life actors and episode maintenance, image reading, and image generation may each select different profiles. All config fields are optional unless the matching feature needs credentials or IDs. `PROFILE` selects configuration and instructions together.
 
 `innerThreads.enabled` defaults to `true` and can be overridden per guild. Set it to `false` to remove inner-thread prompt context and tools and to skip inner-thread maintenance. `innerThreads.modelProfile` selects the hidden maintenance model.
 

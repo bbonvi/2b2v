@@ -92,28 +92,6 @@ describe("prompt inspector", () => {
     ))).toBe(true);
   });
 
-  test("covers actor repertoire placement and the refresh pass", () => {
-    const actor = inspect("discord");
-    const refresh = inspect("repertoire-refresh");
-
-    expect(actor.dynamicSections.some((section) => section.includes("repertoire examples"))).toBe(true);
-    expect(actor.catalog.some((entry) =>
-      entry.groupId === "context"
-      && entry.key === "repertoire"
-      && entry.status === "conditional"
-    )).toBe(true);
-    expect(refresh.documents.some((document) =>
-      document.groupId === "pass.repertoire-refresh.decision"
-      && document.phase === "pass"
-    )).toBe(true);
-    expect(refresh.documents.some((document) => document.groupId === "core.persona")).toBe(true);
-    expect(bundle.runtime.contextTemplates.repertoire).toContain("not current feelings");
-    expect(bundle.runtime.contextTemplates.repertoire).toContain("or new event evidence");
-    expect(bundle.runtime.contextTemplates.repertoire).toContain("Do not copy one word for word");
-    expect(bundle.runtime.contextTemplates["repertoire-refresh-decision"]).toContain("Do not optimize for baseline similarity");
-    expect(bundle.runtime.contextTemplates["repertoire-refresh-decision"]).toContain("permitted roughness");
-  });
-
   test("retains profile override provenance and conditional sources", () => {
     const result = inspect("discord");
     const override = result.catalog.find((entry) => entry.overriddenSources.length > 0);

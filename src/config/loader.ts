@@ -19,7 +19,6 @@ import {
   DEFAULT_PROMPT_CACHING,
   DEFAULT_PROMPT_TRANSPORT,
   DEFAULT_PRIVATE_LIFE,
-  DEFAULT_REPERTOIRE,
   DEFAULT_RELATIONSHIPS,
   DEFAULT_REPLY_LOOP,
   DEFAULT_SCHEDULE_PRESSURE,
@@ -47,7 +46,6 @@ import type {
   PromptTransportSectionConfig,
   PromptTransportSectionId,
   PromptTransportTarget,
-  RepertoireConfig,
   ModelProfileConfig,
   ModelProfileConfigYaml,
   ImageReadingConfig,
@@ -1051,39 +1049,6 @@ function resolveMemoryContext(
   return resolved;
 }
 
-function resolveRepertoireConfig(partial: MainConfigYaml["repertoire"]): RepertoireConfig {
-  const config = { ...DEFAULT_REPERTOIRE, ...partial };
-  if (config.modelProfile.trim() === "") {
-    throw new Error("repertoire.modelProfile must not be empty");
-  }
-  for (const key of [
-    "refreshAfterBotMessages",
-    "maxCandidates",
-    "maxSourceChannels",
-    "maxEntriesPerChannel",
-    "maxEntriesPerGuild",
-    "maxRecentEntries",
-    "maxAnchorEntries",
-    "maxPromptChars",
-  ] as const) {
-    if (!Number.isInteger(config[key]) || config[key] < 1) {
-      throw new Error(`repertoire.${key} must be a positive integer`);
-    }
-  }
-  for (const key of ["refreshAfterMinutes", "retryCooldownMinutes", "candidateLookbackHours"] as const) {
-    if (!Number.isFinite(config[key]) || config[key] < 0) {
-      throw new Error(`repertoire.${key} must be >= 0`);
-    }
-  }
-  if (config.candidateLookbackHours === 0) {
-    throw new Error("repertoire.candidateLookbackHours must be > 0");
-  }
-  if (config.maxRecentEntries > config.maxCandidates) {
-    throw new Error("repertoire.maxRecentEntries must be <= repertoire.maxCandidates");
-  }
-  return config;
-}
-
 function resolveRelationshipConfig(
   defaults: RelationshipConfig | undefined,
   partial: RelationshipConfigYaml | undefined,
@@ -1290,7 +1255,6 @@ export function loadGlobalConfig(
   const privateLife = resolvePrivateLifeConfig(yaml.privateLife);
   const defaultMemoryExtraction = resolveGlobalMemoryExtraction(yaml.memoryExtraction);
   const defaultMemoryContext = resolveMemoryContext(undefined, yaml.memoryContext);
-  const repertoire = resolveRepertoireConfig(yaml.repertoire);
   const defaultRelationships = resolveRelationshipConfig(undefined, yaml.relationships);
   const defaultInnerThreads = resolveInnerThreadsConfig(undefined, yaml.innerThreads);
   const defaultNotebooks = resolveNotebooksConfig(undefined, yaml.notebooks);
@@ -1301,7 +1265,6 @@ export function loadGlobalConfig(
     [defaultImageReading.fallbackModelProfile, "imageReading.fallbackModelProfile"],
     [defaultImageGeneration.modelProfile, "imageGeneration.modelProfile"],
     [defaultMemoryExtraction.modelProfile, "memoryExtraction.modelProfile"],
-    [repertoire.modelProfile, "repertoire.modelProfile"],
     [defaultRelationships.modelProfile, "relationships.modelProfile"],
     [defaultInnerThreads.modelProfile, "innerThreads.modelProfile"],
     [defaultVoice.modelProfile, "voice.modelProfile"],
@@ -1379,7 +1342,6 @@ export function loadGlobalConfig(
     defaultReplyLoop: resolveGlobalReplyLoop(yaml.replyLoop),
     defaultMemoryExtraction,
     defaultMemoryContext,
-    repertoire,
     defaultRelationships,
     defaultInnerThreads,
     defaultNotebooks,

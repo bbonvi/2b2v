@@ -19,7 +19,6 @@ function makeInput(overrides: Partial<ContextAssemblyInput> = {}): ContextAssemb
     upcomingSchedules: "- [cron UTC] 0 9 * * *: Good morning",
     threadsInChat: "",
     parentPreContext: "",
-    repertoire: "",
     olderHistory: "## Chat History (Older)\nLegend: ...\n[@alice]: hello",
     newerHistory: "## Chat History (Recent)\n[@bob]: hi there",
     currentContext: "Guild: g1 | Channel: c1\nDate/Time: 2026-01-01T00:00:00Z",
@@ -61,7 +60,6 @@ describe("SECTION_DEFS", () => {
       "Available Emojis",
       "Thread Metadata",
       "Parent Pre-Context",
-      "Repertoire",
       "Chat History — Older",
     ]);
   });
@@ -282,16 +280,6 @@ describe("assembleContext", () => {
     const result = assembleContext(makeInput({ parentPreContext: "" }));
     const labels = result.sections.map((s) => s.label);
     expect(labels).not.toContain("Parent Pre-Context");
-  });
-
-  test("places cached repertoire immediately before older history", () => {
-    const result = assembleContext(makeInput({ repertoire: "## Repertoire Examples\nexample" }));
-    const labels = result.sections.map((section) => section.label);
-    const index = labels.indexOf("Repertoire");
-
-    expect(index).toBeGreaterThan(-1);
-    expect(labels[index + 1]).toBe("Chat History — Older");
-    expect(result.sections[index]).toMatchObject({ cached: true, role: "system" });
   });
 
   test("thread context has correct section order", () => {
