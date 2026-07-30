@@ -56,7 +56,7 @@ repertoire:
     lookbackHours: 48
     refreshMinutes: 240
     maxSourceChannels: 4
-    maxMessages: 25
+    maxMessages: 30
     maxChars: 10000
 
 # Profile-wide private curiosity. One loop runs across all guilds.
