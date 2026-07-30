@@ -376,7 +376,7 @@ class EmptyModelResponseError extends Error {
   }
 }
 
-const MODEL_TURN_MAX_ATTEMPTS = 3;
+const MODEL_TURN_MAX_ATTEMPTS = 5;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
@@ -1383,7 +1383,7 @@ async function completeModelTurnWithRetries(input: {
 
 function retryBackoffMs(attempt: number, error: Error): number {
   if (error instanceof ModelProviderError && error.kind === "provider_transient") {
-    return attempt === 1 ? 2_000 : 5_000;
+    return [2_000, 3_000, 5_000, 5_000][attempt - 1] ?? 5_000;
   }
   const baseMs = 250 * (2 ** Math.max(0, attempt - 1));
   return Math.round(baseMs * (0.8 + Math.random() * 0.4));

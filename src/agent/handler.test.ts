@@ -2723,7 +2723,7 @@ describe("handleMessage", () => {
     expect(calls).toBe(3);
   });
 
-  test("waits 2 then 5 seconds between transient provider retries", async () => {
+  test("waits 2, 3, 5, and 5 seconds between transient provider retries", async () => {
     let calls = 0;
     const retryDelays: number[] = [];
     const originalSetTimeout = globalThis.setTimeout;
@@ -2732,7 +2732,7 @@ describe("handleMessage", () => {
       delay?: number,
       ...args: unknown[]
     ) => {
-      if (delay === 2_000 || delay === 5_000) {
+      if (delay === 2_000 || delay === 3_000 || delay === 5_000) {
         retryDelays.push(delay);
         queueMicrotask(() => { callback(...args); });
         return 0 as unknown as ReturnType<typeof setTimeout>;
@@ -2742,7 +2742,7 @@ describe("handleMessage", () => {
     const timeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(mockSetTimeout);
     const completeChat: ChatCompleteFn = () => {
       calls += 1;
-      if (calls < 3) {
+      if (calls < 5) {
         return Promise.reject(new ModelProviderError("Our servers are currently overloaded.", {
           kind: "provider_transient",
           retryable: true,
@@ -2761,8 +2761,8 @@ describe("handleMessage", () => {
     try {
       const result = await handleMessage(makeMessage({ mentionedUserIds: ["bot-1"] }), deps);
       expect(result.responseText).toBe("recovered after overload");
-      expect(calls).toBe(3);
-      expect(retryDelays).toEqual([2_000, 5_000]);
+      expect(calls).toBe(5);
+      expect(retryDelays).toEqual([2_000, 3_000, 5_000, 5_000]);
     } finally {
       timeoutSpy.mockRestore();
     }
@@ -2788,10 +2788,10 @@ describe("handleMessage", () => {
     expect(thrown).toBeInstanceOf(Error);
     expect((thrown as Error).message).toBe("OpenRouter request failed: Not Found");
     const llmCalls = requestLog.toEntry().llmCalls;
-    expect(llmCalls).toHaveLength(3);
+    expect(llmCalls).toHaveLength(5);
     expect(llmCalls.every((call) => call.isError === true)).toBe(true);
-    expect(llmCalls[2]?.error).toBe("OpenRouter request failed: Not Found");
-    expect(llmCalls[2]?.requestPayload).toEqual({ model: "moonshotai/kimi-k2.5", route: "test-route" });
+    expect(llmCalls[4]?.error).toBe("OpenRouter request failed: Not Found");
+    expect(llmCalls[4]?.requestPayload).toEqual({ model: "moonshotai/kimi-k2.5", route: "test-route" });
   });
 
   test("retries empty final model responses before sending final response", async () => {
@@ -2925,7 +2925,7 @@ describe("handleMessage", () => {
     expect(afterReplyCalls[0]).toMatchObject({ visibleReplySent: true });
   });
 
-  test("stops retrying empty final model responses after three attempts", async () => {
+  test("stops retrying empty final model responses after five attempts", async () => {
     let calls = 0;
     const completeChat: ChatCompleteFn = () => {
       calls += 1;
@@ -2950,7 +2950,7 @@ describe("handleMessage", () => {
 
     expect(thrown).toBeInstanceOf(Error);
     expect((thrown as Error).message).toContain("Model produced an empty response.");
-    expect(calls).toBe(3);
+    expect(calls).toBe(5);
     expect(sender).toHaveBeenCalledTimes(0);
   });
 
