@@ -56,6 +56,7 @@ export interface ContextAssemblyInput {
   threadMetadata?: ThreadMetadata;
   /** Parent channel pre-context (for thread channels only). Formatted history text. */
   parentPreContext: string;
+  repertoire: string;
   olderHistory: string;
   newerHistory: string;
   currentContext: string;
@@ -105,6 +106,7 @@ export const SECTION_DEFS: readonly SectionDef[] = [
   { label: "Available Emojis",     role: "system",    cached: true,  source: { kind: "field", inputKey: "emojis", header: "## Available Emojis" } },
   { label: "Thread Metadata",      role: "system",    cached: true,  source: { kind: "computed", compute: computeThreadMetadata, header: "## Thread Metadata" } },
   { label: "Parent Pre-Context",   role: "system",    cached: true,  source: { kind: "field", inputKey: "parentPreContext" } },
+  { label: "Repertoire",           role: "system",    cached: true,  source: { kind: "field", inputKey: "repertoire" } },
   { label: "Chat History — Older", role: "system",    cached: true,  source: { kind: "field", inputKey: "olderHistory" } },
 
   // Group 3: developer, uncached (volatile per-message)

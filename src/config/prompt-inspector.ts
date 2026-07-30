@@ -32,6 +32,7 @@ export const PROMPT_SCENARIO_IDS = [
   "relationship-maintenance",
   "inner-thread-maintenance",
   "private-life-maintenance",
+  "repertoire-refresh",
   "ambient-attention-evaluator-ambient-pickup",
   "ambient-attention-evaluator-lingering-attention",
   "ambient-attention-evaluator-follow-up",
@@ -156,7 +157,15 @@ function actorScenario(
 }
 
 const SCENARIOS: Record<PromptScenarioId, PromptScenarioDefinition> = {
-  discord: actorScenario("discord", "Discord actor", "Normal text action turn."),
+  discord: actorScenario(
+    "discord",
+    "Discord actor",
+    "Normal text action turn.",
+    [],
+    TEXT_FINAL_BLOCKS,
+    CORE_ACTOR_BLOCKS,
+    ["Profile-wide repertoire examples before older room history, when enabled and populated."],
+  ),
   "scheduled-task": actorScenario(
     "scheduled-task",
     "Scheduled task",
@@ -409,6 +418,25 @@ const SCENARIOS: Record<PromptScenarioId, PromptScenarioDefinition> = {
       { groupId: "pass.private-life.maintenance", phase: "pass", directPlacement: "control", reason: "Private-life episode summary control mode." },
     ],
     dynamicSections: ["Episode actions, private thoughts, visible output, and record_private_life_episode tool schema."],
+  },
+  "repertoire-refresh": {
+    id: "repertoire-refresh",
+    label: "Repertoire refresh",
+    family: "maintenance",
+    description: "Direct JSON selection pass for the profile-wide portable repertoire.",
+    blocks: [
+      CORE_ACTOR_BLOCKS[0] as PromptBlockDefinition,
+      CORE_ACTOR_BLOCKS[1] as PromptBlockDefinition,
+      CORE_ACTOR_BLOCKS[2] as PromptBlockDefinition,
+      CORE_ACTOR_BLOCKS[4] as PromptBlockDefinition,
+      {
+        groupId: "pass.repertoire-refresh.decision",
+        phase: "pass",
+        directPlacement: "system",
+        reason: "Profile repertoire selection and validation policy.",
+      },
+    ],
+    dynamicSections: ["Bounded recent exchange candidates, current retained anchors, and the strict JSON response schema."],
   },
   "ambient-attention-evaluator-ambient-pickup": {
     id: "ambient-attention-evaluator-ambient-pickup",

@@ -635,6 +635,13 @@ export function loadInstructionBundle(profilesDir: string, profile: string, log:
       "pass.private-life.maintenance",
       false,
     ),
+    "pass.repertoire-refresh.decision": loadLayeredDocumentGroup(
+      instructionRoots,
+      join("passes", "repertoire-refresh", "decision.md"),
+      log,
+      "pass.repertoire-refresh.decision",
+      false,
+    ),
     "pass.image-reading.fallback-system": loadRequiredDocumentGroup(
       instructionRoots,
       join("passes", "image-reading", "fallback-system"),
@@ -696,6 +703,7 @@ export function loadInstructionBundle(profilesDir: string, profile: string, log:
     ["inner-thread-pass-decision", "pass.inner-threads.decision"],
     ["semantic-maintenance-execution-mode", "pass.semantic-maintenance.execution-mode"],
     ["private-life-maintenance", "pass.private-life.maintenance"],
+    ["repertoire-refresh-decision", "pass.repertoire-refresh.decision"],
   ];
   for (const [key, groupId] of contextGroups) {
     const group = groups[groupId];

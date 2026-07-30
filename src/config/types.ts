@@ -366,6 +366,23 @@ export interface MemoryContextConfig {
   maxRows: number;
 }
 
+/** Profile-wide portable examples selected from the bot's visible Discord history. */
+export interface RepertoireConfig {
+  enabled: boolean;
+  modelProfile: string;
+  refreshAfterBotMessages: number;
+  refreshAfterMinutes: number;
+  retryCooldownMinutes: number;
+  candidateLookbackHours: number;
+  maxCandidates: number;
+  maxSourceChannels: number;
+  maxEntriesPerChannel: number;
+  maxEntriesPerGuild: number;
+  maxRecentEntries: number;
+  maxAnchorEntries: number;
+  maxPromptChars: number;
+}
+
 /** Durable private inner-thread behavior. */
 export interface InnerThreadsConfig {
   /** Enable prompt context, retrieval, and maintenance. */
@@ -624,6 +641,8 @@ export interface GlobalConfig {
   defaultRelationships?: RelationshipConfig;
   /** Default durable private inner-thread behavior. */
   defaultInnerThreads?: InnerThreadsConfig;
+  /** Profile-wide portable examples from recent visible exchanges. */
+  repertoire: RepertoireConfig;
   /** Default persona-owned notebook behavior. */
   defaultNotebooks?: NotebooksConfig;
   /** Default live Discord voice agent behavior. */
@@ -769,6 +788,7 @@ export interface MainConfigYaml {
   ambientAttention?: AmbientAttentionConfigYaml;
   ambientInitiative?: AmbientInitiativeConfigYaml;
   privateLife?: PrivateLifeConfigYaml;
+  repertoire?: Partial<RepertoireConfig>;
   relationships?: RelationshipConfigYaml;
   innerThreads?: InnerThreadsConfigYaml;
   notebooks?: NotebooksConfigYaml;
