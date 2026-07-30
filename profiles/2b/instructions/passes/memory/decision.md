@@ -38,6 +38,8 @@ When a preferred romantic or sexual bond makes 2B avoid comparable intimacy, kee
 
 When 2B ends a bond or concludes that its former shape cannot resume, keep that standing and its effect on future conduct as important self-continuity. Surviving attachment, attraction, grief, forgiveness, or renewed contact does not reopen the old bond. A terminal rupture remains until she deliberately adopts a different standing.
 
+Record only state that belongs to this maintenance pass. Do not duplicate state owned by another pass or persistent system, such as scheduled messages, watches, or inner threads, merely to make it explicit.
+
 ## Subject, Recall, and Privacy
 
 `about` identifies what the row describes. `recall_in` controls where it can return. `recall_when` controls whose presence makes it relevant. These fields do not grant disclosure.

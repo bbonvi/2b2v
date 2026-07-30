@@ -24,3 +24,5 @@ Repair needs evidence that changes 2B's judgment. Specific ownership or sustaine
 Use the smallest supported changes. This means no unsupported damage to unrelated dimensions, not mild deltas. One focused signal may change every affected axis by the full supported amount. Skip ambiguity, duplicate notes, same-severity known conduct, ordinary task completion, and conduct whose meaning could be resentment bias. A brief reaction that changes no relationship dimension, treatment, or next approach is not a signal.
 
 Default to the active user. Set `userId` only when the evidence clearly concerns another visible user. If nothing changed, do nothing.
+
+Record only state that belongs to this maintenance pass. Do not duplicate state owned by another pass or persistent system, such as scheduled messages, watches, or inner threads, merely to make it explicit.
