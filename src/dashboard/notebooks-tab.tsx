@@ -90,19 +90,24 @@ function NotebooksTab(): JSX.Element {
   }, [notebooks, query, stateFilter]);
 
   useEffect(() => {
-    void api<NotebookListResponse>("/api/management/notebooks")
-      .then((result) => {
-        const defaultDuration = durationFromMilliseconds(result.defaultShelfAfterMs);
-        setDefaultShelfAfter(defaultDuration);
-        setNotebooks(result.notebooks);
-        const first = result.notebooks[0];
-        if (first !== undefined) {
-          setSelectedId(first.id);
-        } else {
-          setDraft({ ...EMPTY_DRAFT, shelfAfter: defaultDuration });
-        }
-      })
-      .catch((cause: unknown) => { setError(cause instanceof Error ? cause.message : String(cause)); });
+    const refresh = (): void => {
+      void api<NotebookListResponse>("/api/management/notebooks")
+        .then((result) => {
+          const defaultDuration = durationFromMilliseconds(result.defaultShelfAfterMs);
+          setDefaultShelfAfter(defaultDuration);
+          setNotebooks(result.notebooks);
+          setSelectedId((current) => result.notebooks.some((notebook) => notebook.id === current)
+            ? current
+            : (result.notebooks[0]?.id ?? null));
+          if (result.notebooks.length === 0) setDraft({ ...EMPTY_DRAFT, shelfAfter: defaultDuration });
+          setError("");
+        })
+        .catch((cause: unknown) => { setError(cause instanceof Error ? cause.message : String(cause)); });
+    };
+
+    refresh();
+    window.addEventListener("dashboard:notebooks-open", refresh);
+    return () => { window.removeEventListener("dashboard:notebooks-open", refresh); };
   }, []);
 
   useEffect(() => {

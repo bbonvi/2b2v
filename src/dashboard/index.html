@@ -3170,6 +3170,8 @@
     if (tab === 'management') {
       refreshManagement();
       if (logPollingActive && managementPollTimer === null) pollManagement();
+    } else if (tab === 'notebooks') {
+      window.dispatchEvent(new Event('dashboard:notebooks-open'));
     } else if (tab === 'inner-threads') {
       refreshInnerThreads();
     } else if (managementPollTimer !== null) {

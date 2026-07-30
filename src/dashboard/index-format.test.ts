@@ -301,6 +301,8 @@ describe("dashboard notebook workspace", () => {
     expect(island).toContain("notebook-content-editor");
     expect(island).toContain("/api/management/notebooks");
     expect(island).toContain("expectedRevision");
+    expect(loadDashboardScript()).toContain("window.dispatchEvent(new Event('dashboard:notebooks-open'))");
+    expect(island).toContain('window.addEventListener("dashboard:notebooks-open", refresh)');
   });
 });
 
