@@ -133,10 +133,10 @@ describe("buildRepertoireContext", () => {
         random: () => 0,
       };
       const first = buildRepertoireContext({ ...input, now });
-      expect(first).toContain("Participant: <@2b> look :wave:");
+      expect(first).toContain("User: <@2b> look :wave:");
       expect(first).toContain("2B: first beat\n2B: second beat");
       expect(first).toContain("2B: unprompted thought");
-      expect(first).toContain("Participant: old direct question");
+      expect(first).toContain("User: old direct question");
       expect(first).toContain("2B: direct answer <:local:456>");
       expect(first).not.toContain("never include current room");
 
@@ -218,6 +218,38 @@ describe("buildRepertoireContext", () => {
       expect(context).toContain("high activity one");
       expect(context).toContain("high activity two");
       expect(context).not.toContain("low persona activity");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("doubles the lookback when the primary window has no source messages", () => {
+    const db = createDatabase(":memory:");
+    const now = 4_000_000_000;
+    try {
+      insertMessage(db, {
+        id: "fallback-bot",
+        guildId: "g",
+        channelId: "fallback-source",
+        userId: "2b",
+        content: "older voice",
+        createdAt: now - 72 * 60 * 60 * 1_000,
+        isBot: true,
+      });
+
+      const context = buildRepertoireContext({
+        db,
+        config: CONFIG,
+        instruction: "## Repertoire",
+        botUserId: "2b",
+        currentGuildId: "g",
+        currentChannelId: "fallback-target",
+        mergeMessageGapSeconds: 90,
+        now,
+        random: () => 0,
+      });
+
+      expect(context).toContain("2B: older voice");
     } finally {
       db.close();
     }

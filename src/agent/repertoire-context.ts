@@ -171,7 +171,7 @@ function renderExcerpt(excerpt: RepertoireExcerpt, currentGuildId: string): stri
   return [
     ...(excerpt.cue === undefined
       ? []
-      : [`Participant: ${normalizeContent(excerpt.cue.content, foreignGuild)}`]),
+      : [`User: ${normalizeContent(excerpt.cue.content, foreignGuild)}`]),
     ...excerpt.responses.map(
       (message) => `2B: ${normalizeContent(message.content, foreignGuild)}`,
     ),
@@ -222,8 +222,7 @@ function loadExcerpts(
   now: number,
   random: () => number,
 ): RepertoireExcerpt[] {
-  const since = now - input.config.lookbackHours * 60 * 60 * 1_000;
-  const sourceChannels = input.db.raw.prepare(
+  const sourceChannelStatement = input.db.raw.prepare(
     `SELECT guild_id, channel_id
      FROM messages
      WHERE user_id = ? AND is_bot = 1
@@ -233,12 +232,23 @@ function loadExcerpts(
      GROUP BY guild_id, channel_id
      ORDER BY COUNT(*) DESC, MAX(created_at) DESC, guild_id, channel_id
      LIMIT ?`,
-  ).all(
+  );
+  let effectiveSince = now - input.config.lookbackHours * 60 * 60 * 1_000;
+  let sourceChannels = sourceChannelStatement.all(
     input.botUserId,
     input.currentChannelId,
-    since,
+    effectiveSince,
     input.config.maxSourceChannels,
   ) as SourceChannelRow[];
+  if (sourceChannels.length === 0) {
+    effectiveSince = now - input.config.lookbackHours * 2 * 60 * 60 * 1_000;
+    sourceChannels = sourceChannelStatement.all(
+      input.botUserId,
+      input.currentChannelId,
+      effectiveSince,
+      input.config.maxSourceChannels,
+    ) as SourceChannelRow[];
+  }
 
   const candidateStatement = input.db.raw.prepare(
     `SELECT b.id, b.guild_id, b.channel_id, b.translated_content, b.created_at,
@@ -275,7 +285,7 @@ function loadExcerpts(
       source.guild_id,
       source.channel_id,
       input.botUserId,
-      since,
+      effectiveSince,
     ) as CandidateRow[];
     return buildChannelExcerpts(rows, input.botUserId, mergeGapMs);
   });

@@ -116,7 +116,7 @@ Top-level `modelProfiles` entries are complete execution policies: provider, mod
 
 `innerThreads.enabled` defaults to `true` and can be overridden per guild. Set it to `false` to remove inner-thread prompt context and tools and to skip inner-thread maintenance. `innerThreads.modelProfile` selects the hidden maintenance model.
 
-Top-level `repertoire` periodically samples recent 2B exchanges from the rooms where she speaks most and injects them into other rooms as stable style references. It uses no maintenance model or durable feature state; `lookbackHours`, `refreshMinutes`, `maxSourceChannels`, `maxMessages`, and `maxChars` bound selection and prompt size.
+Top-level `repertoire` periodically samples recent 2B exchanges from the rooms where she speaks most and injects them into other rooms as stable style references. If the configured lookback has no source messages, it retries once with twice that window. It uses no maintenance model or durable feature state; `lookbackHours`, `refreshMinutes`, `maxSourceChannels`, `maxMessages`, and `maxChars` bound selection and prompt size.
 
 Personas can create durable private event watches for messages, webhook publications, assets, presence, voice movement, guild membership, and reactions. A watch can observe one channel, one guild, or all accessible guilds; use a daily or absolute local-time gate, a rolling occurrence threshold, cooldown, expiry, or fire ceiling; and run its private action turn in another accessible channel. Matches do not require visible output. Schedule and watch inspection can use channel, guild, or profile scope, and schedule creation can select an accessible destination channel.
 
