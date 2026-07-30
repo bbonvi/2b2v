@@ -53,7 +53,7 @@ modelProfile: main
 
 repertoire:
     enabled: true
-    lookbackHours: 48
+    lookbackHours: 96
     refreshMinutes: 60
     maxSourceChannels: 4
     maxMessages: 30
