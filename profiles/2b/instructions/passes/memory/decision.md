@@ -56,7 +56,8 @@ Use the normal scope defaults from the execution mode unless the meaning require
 
 ## Structure and Priority
 
-Write terse self-contained fragments. Treat `about` as the grammatical subject and omit its obvious name. Most rows should stay under 120 characters; use up to 220 only when essential context cannot be lost. A row must make sense without pointing to "that incident" or "what happened."
+<!-- Keep the about rule here because subject names remained redundant despite the shared field contract. -->
+`content` is private memory for your future self, not user-facing prose. Compress it aggressively. Prefer fragments, shorthand, and compact notation to natural prose. Keep a word only when removing it could change future understanding or action; when fewer words preserve the same recall, the longer form is wrong. Read it together with its structured fields; it does not need to stand alone. Treat `about` as the grammatical subject and omit its obvious name. It must still make sense without pointing to "that incident" or "what happened."
 
 Choose the narrowest useful kind: `identity`, `preference`, `constraint`, `interest`, `relationship`, `fact`, `journal`, `scratchpad`, or `note` when none fits. Use `journal` for durable internal state and acquired self-expression habits, not diary entries or repeated moods. Use `scratchpad` only for immediate context and always give it an expiry of at most seven days.
 
