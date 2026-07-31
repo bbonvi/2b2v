@@ -3447,6 +3447,7 @@ async function buildContext(
       members: displayNameContext,
       notebooks,
       innerThreads: innerThreadsText,
+      relationships: relationshipsContext,
       memories,
       discordContext,
       upcomingSchedules,
@@ -3458,7 +3459,6 @@ async function buildContext(
       newerHistory: newerText,
       currentContext: [
         currentContext,
-        relationshipsContext,
         voicePresenceContext,
       ]
         .filter((part) => part !== "")

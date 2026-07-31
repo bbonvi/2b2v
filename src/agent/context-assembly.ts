@@ -47,6 +47,7 @@ export interface ContextAssemblyInput {
   members: string;
   notebooks: string;
   innerThreads: string;
+  relationships: string;
   memories: string;
   discordContext: string;
   upcomingSchedules: string;
@@ -117,6 +118,7 @@ export const SECTION_DEFS: readonly SectionDef[] = [
   { label: "Upcoming Schedules",   role: "developer", cached: false, source: { kind: "field", inputKey: "upcomingSchedules", header: "## Upcoming Schedules" } },
   { label: "Notebooks",            role: "developer", cached: false, source: { kind: "field", inputKey: "notebooks" } },
   { label: "Inner Threads",        role: "developer", cached: false, source: { kind: "field", inputKey: "innerThreads" } },
+  { label: "Relationships",        role: "developer", cached: false, source: { kind: "field", inputKey: "relationships" } },
   { label: "Memories",             role: "developer", cached: false, source: { kind: "field", inputKey: "memories", header: "## Memory" } },
   { label: "Chat History — Newer", role: "developer", cached: false, source: { kind: "field", inputKey: "newerHistory" } },
   { label: "Current Context",      role: "developer", cached: false, source: { kind: "field", inputKey: "currentContext", header: "## Current Context" } },

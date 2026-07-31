@@ -105,6 +105,7 @@ export type PromptTransportSectionId =
   | "notebooks"
   | "memories"
   | "innerThreads"
+  | "relationships"
   | "recentHistory"
   | "currentContext"
   | "personaMode"
