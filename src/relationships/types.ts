@@ -59,9 +59,13 @@ export interface RelationshipSignalInput {
   confidence: number;
   visibility?: RelationshipVisibility;
   axes?: Partial<Record<RelationshipAxis, number>>;
+  /** Reverse a still-unrepaired part of recent opposing axis movement. */
+  repair?: boolean;
   note?: string;
   boundary?: string;
+  removeBoundary?: string;
   openLoop?: string;
+  closeOpenLoop?: string;
 }
 
 export interface RelationshipConfig {

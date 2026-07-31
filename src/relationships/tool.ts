@@ -16,9 +16,12 @@ const SignalSchema = Type.Object({
   confidence: Type.Number({ minimum: 0, maximum: 1 }),
   visibility: Type.Optional(Type.String({ enum: [...RELATIONSHIP_VISIBILITIES] })),
   axes: Type.Optional(AxesSchema),
+  repair: Type.Optional(Type.Boolean()),
   note: Type.Optional(Type.String({ minLength: 1 })),
   boundary: Type.Optional(Type.String({ minLength: 1 })),
+  removeBoundary: Type.Optional(Type.String({ minLength: 1 })),
   openLoop: Type.Optional(Type.String({ minLength: 1 })),
+  closeOpenLoop: Type.Optional(Type.String({ minLength: 1 })),
 }, { additionalProperties: false });
 
 const RecordRelationshipSchema = Type.Object({

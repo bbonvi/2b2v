@@ -19,7 +19,6 @@ import { createSchedulerEngine, type SchedulerEngine } from "./scheduler/engine"
 import { createScheduledTaskRunner } from "./scheduler/scheduled-task-runtime";
 import { handleMessage, hasMaintenanceMaterial, runSilentMemoryAgentPass, runSilentToolAgentPass, type HandleResult, type AssetAttachmentResolver, type IncomingMessage, type HandlerDeps, type MemoryExtractionRequest, type MessageSender, type OutboundAttachment } from "./agent/handler";
 import { trackWriteToolStarts } from "./agent/tool-access";
-import { buildComputedContactContextForUser } from "./agent/contact-context";
 import {
   contentMentionsEveryone,
   shouldRespond,
@@ -141,12 +140,15 @@ import { createRelationshipsManagementApi } from "./dashboard/relationships-mana
 import { createDashboardManagementRuntime, dashboardTriggerLocation } from "./dashboard/management-runtime";
 import { createPromptLabRunner, promptLabDryRunTools, promptLabSummary, promptLabSyntheticId } from "./dashboard/prompt-lab-runtime";
 import {
+  buildPriorExchangesContext,
   createRecordRelationshipTool,
   getRelationshipProfile,
   hasRelationshipData,
+  listRelationshipEvents,
   listRelationshipProfiles,
   renderNotableRelationshipsContext,
   renderRelationshipAxisValues,
+  renderRelationshipMaintenanceContext,
   renderRelationshipPromptContext,
   selectRelationshipAnchorProfiles,
   type RelationshipContextProfile,
@@ -2327,9 +2329,11 @@ function notableRelationshipProfiles(): RelationshipContextProfile[] {
 function buildRelationshipPromptContext(input: {
   guildConfig: GuildConfig;
   latestUserMessage: HistoryMessage;
+  currentGuildId: string;
+  currentChannelId: string;
+  botUserId?: string;
   visibleUserIds: string[];
   resolveUserLabel: (userId: string) => string;
-  contactContext?: string;
   mode: RelationshipContextRunMode;
   notable?: RelationshipContextProfile[];
   anchors?: RelationshipContextProfile[];
@@ -2345,6 +2349,7 @@ function buildRelationshipPromptContext(input: {
     });
   }
   const currentUserId = input.latestUserMessage.authorId;
+  const current = getRelationshipProfile(db, currentUserId);
   const anchorUserIds = new Set((input.anchors ?? []).map((entry) => entry.profile.userId));
   const anchors = (input.anchors ?? []).filter((entry) => entry.profile.userId !== currentUserId);
   const visible = input.visibleUserIds
@@ -2357,11 +2362,20 @@ function buildRelationshipPromptContext(input: {
     .filter((entry) => hasRelationshipData(entry.profile) && !anchorUserIds.has(entry.profile.userId))
     .slice(0, 3);
   return renderRelationshipPromptContext({
-    current: getRelationshipProfile(db, currentUserId),
+    current,
     currentLabel: input.resolveUserLabel(currentUserId),
-    computedContact: input.contactContext,
     anchors,
     others: visible,
+    priorExchanges: input.mode === "live" && input.botUserId !== undefined
+      ? buildPriorExchangesContext({
+          db,
+          profile: current,
+          botUserId: input.botUserId,
+          currentUserId,
+          currentGuildId: input.currentGuildId,
+          currentChannelId: input.currentChannelId,
+        })
+      : "",
     template: promptBundle.runtime.relationships.context,
     includeCurrent: input.mode !== "virtual" || !input.latestUserMessage.isBot,
   });
@@ -2720,11 +2734,21 @@ async function runRelationshipPostReplyExtraction(input: {
         onRelationshipResult: input.onResult,
       }));
   try {
-    const currentRelationshipAxes = [
-      "## Current Relationship Axis Values",
-      `Subject: @${input.currentUsername ?? input.currentUserId} (${input.currentUserId}).`,
-      renderRelationshipAxisValues(getRelationshipProfile(db, input.currentUserId)),
-    ].join("\n");
+    const relationshipUserIds = [...new Set([
+      input.currentUserId,
+      ...(input.memoryRequest.context.visibleUserIds ?? []),
+    ])];
+    const relationshipState = renderRelationshipMaintenanceContext(
+      relationshipUserIds.map((userId) => ({
+        profile: getRelationshipProfile(db, userId),
+        label: userId === input.currentUserId
+          ? `@${input.currentUsername ?? userId} (${userId})`
+          : input.guild?.members.cache.get(userId)?.user.username !== undefined
+            ? `@${input.guild.members.cache.get(userId)?.user.username ?? userId} (${userId})`
+            : userId,
+        events: listRelationshipEvents(db, { userId, limit: 30 }),
+      })),
+    );
     const executionMode = runtimeContextTemplate(
       "relationship-maintenance-execution-mode",
       { maxToolCalls: config.maxToolCalls },
@@ -2749,7 +2773,7 @@ async function runRelationshipPostReplyExtraction(input: {
       runtimeInstruction: promptBundle.runtime.reply,
       controlMessage: [
         executionMode,
-        currentRelationshipAxes,
+        relationshipState,
         "## Post-Reply Relationship Consideration",
         runtimeContextTemplate(
           "relationship-pass-decision",
@@ -3238,26 +3262,14 @@ async function buildContext(
     latestUserMessage,
     currentTurnBoundary,
   });
-  const contactContext = client.user?.id !== undefined
-    ? buildComputedContactContextForUser({
-      db,
-      botUserId: client.user.id,
-      botAddressAliasesForGuild: (contactGuildId) => [
-        client.user?.username ?? "",
-        ...getGuildConfig(contactGuildId).triggers.keywords,
-      ],
-      userId: latestUserMessage.authorId,
-      currentChannelId: channelId,
-      beforeCreatedAt: (currentTurnBoundary ?? { timestamp: latestUserMessage.timestamp }).timestamp,
-      beforeMessageId: (currentTurnBoundary ?? { messageId: latestUserMessage.id }).messageId,
-    })?.rendered.replace(/^Known interaction history:\s*/u, "")
-    : undefined;
   const relationshipsContext = buildRelationshipPromptContext({
     guildConfig,
     latestUserMessage,
+    currentGuildId: guildId,
+    currentChannelId: channelId,
+    ...(client.user?.id !== undefined ? { botUserId: client.user.id } : {}),
     visibleUserIds,
     resolveUserLabel: resolveRelationshipUserLabel,
-    contactContext,
     mode: relationshipsMode,
     notable,
     anchors: relationshipAnchors,

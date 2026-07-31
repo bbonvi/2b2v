@@ -1,4 +1,4 @@
-import type { RelationshipAxes, RelationshipProfile } from "./types";
+import type { RelationshipAxes, RelationshipEvent, RelationshipProfile } from "./types";
 
 export const RELATIONSHIP_AXES = [
   "familiarity",
@@ -13,6 +13,18 @@ export const RELATIONSHIP_AXES = [
 ] as const;
 
 export const RELATIONSHIP_VISIBILITIES = ["source-bound", "relationship-private", "private-internal"] as const;
+
+/** Read applied axis movement from current events and legacy pre-window events. */
+export function relationshipEventAppliedAxes(event: RelationshipEvent): Partial<RelationshipAxes> {
+  const current = event.payload.appliedAxes;
+  if (current !== null && typeof current === "object" && !Array.isArray(current)) {
+    return current;
+  }
+  const legacy = event.payload.axes;
+  return legacy !== null && typeof legacy === "object" && !Array.isArray(legacy)
+    ? legacy
+    : {};
+}
 
 export function baseRelationshipAxes(): RelationshipAxes {
   return Object.fromEntries(RELATIONSHIP_AXES.map((axis) => [axis, 0])) as RelationshipAxes;

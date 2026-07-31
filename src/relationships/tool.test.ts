@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { createDatabase } from "../db/database";
-import { createRecordRelationshipTool, getRelationshipProfile, listRelationshipEvents, type RelationshipConfig, type RelationshipMutationResult } from "./index";
+import {
+  applyRelationshipSignals,
+  createRecordRelationshipTool,
+  getRelationshipProfile,
+  listRelationshipEvents,
+  type RelationshipConfig,
+  type RelationshipMutationResult,
+} from "./index";
 
 function config(): RelationshipConfig {
   return { modelProfile: "main", enabled: true, promptInjection: true, maxAxisDeltaPerSignal: 4, maxToolCalls: 5 };
@@ -29,7 +36,7 @@ describe("record_relationship tool", () => {
     db.close();
   });
 
-  test("records a full-range relationship reversal when the profile allows it", async () => {
+  test("records a large repair when recent movement supports it", async () => {
     const db = createDatabase(":memory:");
     const tool = createRecordRelationshipTool({
       db,
@@ -37,28 +44,38 @@ describe("record_relationship tool", () => {
       scope: { userId: "u1" },
     });
 
-    await tool.execute("call-1", {
+    applyRelationshipSignals(db, config(), {
+      source: "admin",
+      scope: { userId: "u1" },
       signals: [{
-        summary: "A long-established bond created deep trust.",
+        summary: "Established bond.",
         confidence: 1,
         axes: { trust: 80, warmth: 45, tension: -30, attachment: 70 },
+      }],
+      now: 1,
+    });
+    await tool.execute("call-1", {
+      signals: [{
+        summary: "A confirmed apparent rupture damaged the bond.",
+        confidence: 1,
+        axes: { trust: -150, warmth: -90, tension: 90, attachment: -5 },
       }],
     });
     const result = await tool.execute("call-2", {
       signals: [{
-        summary: "A confirmed turning point destroyed established trust.",
+        summary: "The apparent rupture was fully corrected.",
         confidence: 1,
-        axes: { trust: -150, warmth: -90, tension: 90, attachment: -5 },
-        note: "2B considers the former bond ended.",
+        repair: true,
+        axes: { trust: 150, warmth: 90, tension: -90, attachment: 5 },
       }],
     });
 
     expect((result.details as RelationshipMutationResult).accepted).toHaveLength(1);
     expect(getRelationshipProfile(db, "u1").axes).toMatchObject({
-      trust: -70,
-      warmth: -45,
-      tension: 60,
-      attachment: 65,
+      trust: 80,
+      warmth: 45,
+      tension: -30,
+      attachment: 70,
     });
     db.close();
   });

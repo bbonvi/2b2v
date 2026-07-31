@@ -3,12 +3,13 @@ import { emptyRelationshipProfile } from "./state";
 import {
   renderNotableRelationshipsContext,
   renderRelationshipAxisValues,
+  renderRelationshipMaintenanceContext,
   renderRelationshipPromptContext,
   selectRelationshipAnchorProfiles,
 } from "./context";
 
 describe("selectRelationshipAnchorProfiles", () => {
-  test("selects at most two strong positive relationships by total investment", () => {
+  test("selects strong positive, negative, and contradictory relationships by total salience", () => {
     const broad = emptyRelationshipProfile("broad", 1);
     broad.axes.trust = 30;
     broad.axes.warmth = 20;
@@ -21,30 +22,12 @@ describe("selectRelationshipAnchorProfiles", () => {
     weak.axes.warmth = 29;
 
     expect(selectRelationshipAnchorProfiles([weak, tense, warm, broad]).map((profile) => profile.userId))
-      .toEqual(["broad", "warm"]);
+      .toEqual(["tense", "broad"]);
   });
 });
 
 describe("renderRelationshipPromptContext", () => {
-  test("surfaces faint selective feelings before stronger relationship axes", () => {
-    const current = emptyRelationshipProfile("u1", 1);
-    current.axes.warmth = 2;
-    current.axes.curiosity = 2;
-    current.axes.attraction = 2;
-    current.axes.intimacy = 2;
-
-    const rendered = renderRelationshipPromptContext({
-      current,
-      currentLabel: "@alice / u1",
-    });
-
-    expect(rendered).toContain("has some warmth toward them");
-    expect(rendered).toContain("is a little curious about them");
-    expect(rendered).toContain("notices a faint private pull toward them");
-    expect(rendered).not.toContain("personally open");
-  });
-
-  test("addresses the active persona directly and keeps other users compact", () => {
+  test("renders all raw axes and one combined portrait without recent event summaries", () => {
     const current = emptyRelationshipProfile("u1", 1);
     current.axes.warmth = 15;
     current.axes.trust = 14;
@@ -57,32 +40,32 @@ describe("renderRelationshipPromptContext", () => {
       { id: "r2", at: 2, summary: "second signal.", visibility: "relationship-private" },
     );
     const other = emptyRelationshipProfile("u2", 1);
-    other.axes.trust = 12;
+    other.axes.trust = -12;
     other.notes.push("other note.");
 
     const rendered = renderRelationshipPromptContext({
       current,
       currentLabel: "@alice / u1",
-      computedContact: "observed history with this user; familiarity.",
       others: [{ profile: other, label: "@bob / u2", reason: "high-score" }],
+      priorExchanges: "## Prior Exchanges With This Person\nUser: hi\n2B: hm",
     });
 
     expect(rendered).toContain("## Relationships");
-    expect(rendered).toContain("This is your stored relationship stance toward this user.");
-    expect(rendered).toContain("Interaction history: observed history with this user; familiarity.");
+    expect(rendered).toContain("Raw values and prose are private durable background.");
     expect(rendered).toContain("Subject: @alice / u1.");
-    expect(rendered).toContain("Relationship stance: The persona feels warm toward them, trusts them, and is slightly more personally open with them.");
+    expect(rendered).not.toContain("Interaction history:");
+    expect(rendered).toContain("Raw durable axes: familiarity=0, trust=14, warmth=15, respect=0, tension=0, curiosity=0, attraction=0, intimacy=10, attachment=0");
+    expect(rendered).toMatch(/Contextual portrait \[growing-positive-\d\]:/);
     expect(rendered).toContain("Notes: first note; second note; third note.");
     expect(rendered).toContain("Boundaries: first boundary; second boundary.");
     expect(rendered).toContain("Open loops: first loop; second loop.");
-    expect(rendered).toContain("Recent signals: first signal; second signal.");
-    expect(rendered).toContain("- @bob / u2: The persona trusts them; other note.");
+    expect(rendered).toContain("## Prior Exchanges With This Person");
+    expect(rendered).toContain("- @bob / u2: raw axes:");
+    expect(rendered).not.toContain("Recent signals:");
+    expect(rendered).not.toContain("first signal");
     expect(rendered).not.toContain(".;");
     expect(rendered).not.toContain("。;");
     expect(rendered).not.toContain(";;");
-    expect(rendered).not.toContain("Axes:");
-    expect(rendered).not.toContain("trust +12");
-    expect(rendered).not.toContain("Active speaker");
   });
 
   test("renders relationship anchors in expanded form before compact recent users", () => {
@@ -109,11 +92,25 @@ describe("renderRelationshipPromptContext", () => {
     });
 
     expect(rendered).toContain("Relationship anchors:\n\n### @anchor / u2");
+    expect(rendered).toContain("Raw durable axes:");
+    expect(rendered).toContain("Contextual portrait [");
     expect(rendered).toContain("Notes: anchor note.");
-    expect(rendered).toContain("Recent signals: anchor signal.");
     expect(rendered).toContain("Other relevant relationship profiles:\n- @recent / u3:");
+    expect(rendered).not.toContain("anchor signal");
     expect(rendered).not.toContain("### @recent / u3");
     expect(rendered.indexOf("Relationship anchors:")).toBeLessThan(rendered.indexOf("Other relevant relationship profiles:"));
+  });
+
+  test("renders neutral raw state for a new current user", () => {
+    const current = emptyRelationshipProfile("u1", 1);
+    const rendered = renderRelationshipPromptContext({
+      current,
+      currentLabel: "@alice / u1",
+    });
+
+    expect(rendered).toContain("Raw durable axes: familiarity=0, trust=0");
+    expect(rendered).toMatch(/Contextual portrait \[unknown-neutral-\d\]:/);
+    expect(rendered).toContain("No stored durable changes beyond the neutral defaults.");
   });
 
   test("omits the current subject during autonomous turns while retaining other profiles", () => {
@@ -129,11 +126,9 @@ describe("renderRelationshipPromptContext", () => {
 
     expect(rendered).toContain("## Relationships");
     expect(rendered).toContain("Other relevant relationship profiles:");
-    expect(rendered).toContain("- @bob / u2: The persona trusts them.");
+    expect(rendered).toContain("- @bob / u2: raw axes:");
     expect(rendered).not.toContain("@2B");
     expect(rendered).not.toContain("Subject:");
-    expect(rendered).not.toContain("No stored relationship profile yet.");
-    expect(rendered).not.toContain("current user");
   });
 
   test("omits an empty relationship section when an autonomous turn has no relevant profiles", () => {
@@ -145,12 +140,47 @@ describe("renderRelationshipPromptContext", () => {
   });
 });
 
-describe("renderRelationshipAxisValues", () => {
-  test("renders exact scores for hidden maintenance context", () => {
+describe("renderRelationshipMaintenanceContext", () => {
+  test("renders rounded axes, complete active lists, and recent applied changes", () => {
     const profile = emptyRelationshipProfile("u1", 1);
+    profile.axes.trust = 35;
+    profile.notes.push("one", "two");
+    profile.boundaries.push("exact boundary");
+    profile.openLoops.push("exact open matter");
+
+    const rendered = renderRelationshipMaintenanceContext([{
+      profile,
+      label: "@alice (u1)",
+      events: [{
+        id: "event-1",
+        type: "relationship_signal",
+        at: 1,
+        source: "llm",
+        visibility: "relationship-private",
+        guildId: "g1",
+        channelId: "c1",
+        userId: "u1",
+        summary: "Trust dropped after a misread.",
+        payload: { appliedAxes: { trust: -40 } },
+        createdAt: 1,
+      }],
+    }]);
+
+    expect(rendered).toContain("Raw durable axes: familiarity=0, trust=35");
+    expect(rendered).toContain('Active boundaries:\n- "exact boundary"');
+    expect(rendered).toContain('Open matters:\n- "exact open matter"');
+    expect(rendered).toContain("event-1: trust=-40; Trust dropped after a misread.");
+  });
+});
+
+describe("renderRelationshipAxisValues", () => {
+  test("renders every score rounded to two decimal places", () => {
+    const profile = emptyRelationshipProfile("u1", 1);
+    profile.axes.familiarity = 14.450000000000003;
     profile.axes.trust = 35;
     profile.axes.tension = -12;
 
+    expect(renderRelationshipAxisValues(profile)).toContain("familiarity=14.45");
     expect(renderRelationshipAxisValues(profile)).toContain("trust=35");
     expect(renderRelationshipAxisValues(profile)).toContain("tension=-12");
   });
@@ -171,10 +201,11 @@ describe("renderNotableRelationshipsContext", () => {
     });
 
     expect(rendered).toContain("### @user0 / u0");
+    expect(rendered).toContain("Raw durable axes:");
     expect(rendered).toContain("Notes: note 0.");
     expect(rendered).toContain("### @user2 / u2");
     expect(rendered).toContain("Other known people:");
-    expect(rendered).toContain("- @user3 / u3:");
+    expect(rendered).toContain("- @user3 / u3: raw axes:");
     expect(rendered).not.toContain("### @user3 / u3");
   });
 });
