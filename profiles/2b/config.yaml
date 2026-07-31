@@ -265,10 +265,10 @@ relationships:
     enabled: true
     promptInjection: true
     priorExchanges:
-        enabled: false
+        enabled: true
         maxExchanges: 6
         maxMessageChars: 700
-        refreshMinutes: 60
+        refreshMinutes: 10
     maxAxisDeltaPerSignal: 200
     maxToolCalls: 5
 
