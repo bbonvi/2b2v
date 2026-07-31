@@ -1,7 +1,8 @@
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Client, Guild } from "discord.js";
 import type { AssembledContext } from "../agent/context-assembly";
-import { handleMessage, type HandlerDeps, type IncomingMessage, type MessageSender } from "../agent/handler";
+import { handleMessage } from "../agent/handler";
+import type { HandlerDeps, IncomingMessage, MessageSender } from "../agent/turn-types";
 import type { HistoryMessage } from "../agent/history-types";
 import type { ReplyFallbackDeps } from "../agent/reply-target-fallback";
 import { createCloseThreadTool, createStartThreadTool } from "../agent/start-thread-tool";
@@ -548,4 +549,30 @@ export function createPromptLabRunner(input: {
       input.requestLogStore.decrementActive();
     }
   };
+}
+
+/** Bind Discord user presentation to the prompt-lab runner. */
+export function createDiscordPromptLabRunner(
+  input: Omit<Parameters<typeof createPromptLabRunner>[0], "promptLabUserFromGuild"> & {
+    dashboardUserName: (userId: string) => string;
+  },
+): ReturnType<typeof createPromptLabRunner> {
+  const { dashboardUserName, ...runnerInput } = input;
+  return createPromptLabRunner({
+    ...runnerInput,
+    promptLabUserFromGuild: (guild, userId) => {
+      const member = guild.members.cache.get(userId);
+      const cachedUser = input.client.users.cache.get(userId);
+      return {
+        id: userId,
+        username: member?.user.username ?? cachedUser?.username ?? dashboardUserName(userId),
+        ...(member?.displayName !== undefined ? { displayName: member.displayName } : {}),
+        ...(member?.user.globalName !== null && member?.user.globalName !== undefined
+          ? { globalName: member.user.globalName }
+          : cachedUser?.globalName !== null && cachedUser?.globalName !== undefined
+            ? { globalName: cachedUser.globalName }
+            : {}),
+      };
+    },
+  });
 }

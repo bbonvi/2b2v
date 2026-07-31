@@ -2,7 +2,7 @@ import type { Guild, Message, TextChannel } from "discord.js";
 import type { GuildConfig } from "../config/types";
 import type { Database } from "../db/database";
 import { cleanupDeletedBotMessage } from "../db/message-cleanup";
-import { upsertBotMessageContent } from "../db/message-repository";
+import { upsertBotMessageContent } from "../db/message-state-repository";
 import type { ReplyFallbackDeps } from "../agent/reply-target-fallback";
 import { syncMessageAssets } from "../db/asset-repository.ts";
 import { assetsFromDiscordMessage } from "./message-assets.ts";

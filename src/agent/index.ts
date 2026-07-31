@@ -24,12 +24,15 @@ export {
 
 export {
   handleMessage,
-  type IncomingMessage,
-  type HandlerDeps,
-  type HandleResult,
-  type MessageSender,
-  type VoiceAttachment,
 } from "./handler.ts";
+
+export type {
+  IncomingMessage,
+  HandlerDeps,
+  HandleResult,
+  MessageSender,
+  VoiceAttachment,
+} from "./turn-types.ts";
 
 export {
   parseResponseDirectives,
@@ -41,12 +44,15 @@ export { trimChatHistory } from "./context-trimming.ts";
 
 export {
   buildMemoryContext,
+  type MemoryContextInput,
+} from "./memory-context.ts";
+
+export {
   createRecordMemoryTool,
   extractAndApplyMemories,
-  type MemoryContextInput,
   type MemoryExtractionInput,
   type RecordMemoryToolDeps,
-} from "./memory-service.ts";
+} from "./memory-extraction.ts";
 
 export { createSearchChannelMessagesTool, type SearchChannelMessagesToolDeps } from "./search-channel-messages-tool.ts";
 export { createSearchAssetTool } from "./search-asset-tool.ts";

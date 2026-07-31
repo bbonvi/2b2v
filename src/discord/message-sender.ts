@@ -3,13 +3,13 @@ import { AttachmentBuilder, ChannelType, ContainerBuilder, MessageFlags, Permiss
 import { sendWithUnknownMessageReferenceFallback } from "./message-reference-retry";
 import { splitMessage } from "./split-message";
 import { translateOutbound, type OutboundResolvers } from "./translation";
-import type { MessagePresentation, MessageSender, OutboundAttachment } from "../agent/handler";
+import type { MessagePresentation, MessageSender, OutboundAttachment } from "../agent/turn-types";
 import type { Logger } from "../logger";
 import type { Database } from "../db/database";
 import { recordAssetRepost, syncMessageAssets } from "../db/asset-repository.ts";
 import { assetsFromDiscordMessage } from "./message-assets.ts";
 import { markBotParticipating, updateThreadActivity, upsertThread } from "../db/thread-repository";
-import { upsertBotMessageContent, type RoutedMessageSource } from "../db/message-repository";
+import { upsertBotMessageContent, type RoutedMessageSource } from "../db/message-state-repository";
 import { assertSafeDiscordText } from "./outbound-xml-guard.ts";
 
 type AttachmentSendPayload = {

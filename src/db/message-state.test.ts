@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "./database";
-import { deleteBotMessageState, getRoutedMessageSource, insertPromptOnlyMessageHandoff, upsertBotMessageContent } from "./message-repository";
+import { deleteBotMessageState, getRoutedMessageSource, insertPromptOnlyMessageHandoff, upsertBotMessageContent } from "./message-state-repository";
 import { upsertMessageReaction } from "./message-reactions";
 
 let db: Database;

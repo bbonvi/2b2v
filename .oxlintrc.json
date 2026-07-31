@@ -213,6 +213,7 @@
       ],
       "rules": {
         "eqeqeq": ["error", "always"],
+        "max-lines": ["error", 1000],
         "no-unused-vars": [
           "error",
           {

@@ -7,7 +7,7 @@ import {
   renderAmbientHistory,
   resolveLocalChannelShape,
   shouldDeferAmbientCandidateForTyping,
-} from "./runtime.ts";
+} from "./attention-policy.ts";
 
 function msg(overrides: Partial<HistoryMessage> = {}): HistoryMessage {
   return {

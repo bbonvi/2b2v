@@ -6,13 +6,13 @@ import type { PromptBundle, RuntimePromptBundle } from "../config/instruction-bu
 import type { AssembledContext } from "../agent/context-assembly.ts";
 import type { HistoryMessage } from "../agent/history-types.ts";
 import type { ReplyFallbackDeps } from "../agent/reply-target-fallback.ts";
-import {
-  handleMessage,
-  type HandlerDeps,
-  type IncomingMessage,
-  type MemoryExtractionRequest,
-  type MessageSender,
-} from "../agent/handler.ts";
+import { handleMessage } from "../agent/handler.ts";
+import type {
+  HandlerDeps,
+  IncomingMessage,
+  MemoryExtractionRequest,
+  MessageSender,
+} from "../agent/turn-types.ts";
 import type { Logger } from "../logger.ts";
 import { RequestLog } from "../logger.ts";
 import type { RequestLogStore } from "../dashboard/store.ts";
@@ -33,7 +33,7 @@ import { listInnerThreads, type InnerThread } from "../db/inner-thread-repositor
 import {
   listBotChannelActivityUsage,
   type BotChannelActivityUsage,
-} from "../db/message-repository.ts";
+} from "../db/message-activity-repository.ts";
 import {
   completePrivateLifeEpisode,
   countPrivateLifeVisibleEpisodesSince,
