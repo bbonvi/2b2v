@@ -121,6 +121,58 @@ describe("relationship portraits", () => {
     expect(relationshipPortrait(axes).id).toStartWith("familiar-neutral-");
   });
 
+  test("combines familiar adverse signals without turning one low axis into dislike", () => {
+    const axes = baseRelationshipAxes();
+    Object.assign(axes, {
+      familiarity: 23.45,
+      trust: -11.75,
+      warmth: -2.45,
+      respect: -16,
+      tension: 15.75,
+      curiosity: 2,
+      intimacy: 0.25,
+    });
+
+    expect(relationshipPortrait(axes).id).toStartWith("familiar-adverse-");
+
+    axes.tension = 0;
+    expect(relationshipPortrait(axes).id).toStartWith("familiar-distrustful-");
+
+    axes.trust = 0;
+    expect(relationshipPortrait(axes).id).toStartWith("familiar-low-regard-");
+  });
+
+  test("preserves common contradictions and bond pressures", () => {
+    const cases = [
+      [{ warmth: 45, tension: 45 }, "warm-tense-"],
+      [{ trust: 45, tension: 45 }, "trusted-tense-"],
+      [{ respect: 45, tension: 45 }, "respected-tense-"],
+      [{ intimacy: 45, trust: -45 }, "intimate-untrusted-"],
+      [{ attraction: 45, warmth: -45 }, "attracted-disliked-"],
+      [{ attachment: 45, trust: -45 }, "attached-distrustful-"],
+      [{ attachment: 45, attraction: 45 }, "attached-attracted-"],
+      [{ curiosity: 45, trust: -15 }, "curious-wary-"],
+    ] as const;
+
+    for (const [values, family] of cases) {
+      expect(relationshipPortrait(Object.assign(baseRelationshipAxes(), values)).id)
+        .toStartWith(family);
+    }
+  });
+
+  test("gives standalone warmth, regard, and openness their own shape", () => {
+    const cases = [
+      [{ warmth: 45 }, "warm-distant-"],
+      [{ respect: 45 }, "respected-distant-"],
+      [{ intimacy: 45 }, "open-detached-"],
+    ] as const;
+
+    for (const [values, family] of cases) {
+      expect(relationshipPortrait(Object.assign(baseRelationshipAxes(), values)).id)
+        .toStartWith(family);
+    }
+  });
+
   test("keeps every registered variant reachable across combined band vectors", () => {
     const values = [-80, -45, -15, 0, 15, 45, 80];
     const registered = new Set(relationshipPortraitVariantIds());
