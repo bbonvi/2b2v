@@ -14,6 +14,7 @@ function makeInput(overrides: Partial<ContextAssemblyInput> = {}): ContextAssemb
     members: "@alice — Alice\n@bob — Bob",
     notebooks: "",
     innerThreads: "",
+    relationships: "",
     memories: "- User likes cats",
     discordContext: "Current guild: Test Guild (g1)",
     upcomingSchedules: "- [cron UTC] 0 9 * * *: Good morning",
@@ -215,6 +216,15 @@ describe("assembleContext", () => {
       .toEqual(["Notebooks", "Inner Threads", "Memories"]);
     expect(result.sections.find((section) => section.label === "Notebooks")?.text)
       .toBe("## Notebooks\n1 | Work");
+  });
+
+  test("places volatile relationship context immediately before memories", () => {
+    const result = assembleContext(makeInput({ relationships: "## Relationships\nCurrent standing." }));
+    const labels = result.sections.map((section) => section.label);
+    expect(labels.filter((label) => ["Relationships", "Memories"].includes(label)))
+      .toEqual(["Relationships", "Memories"]);
+    expect(result.sections.find((section) => section.label === "Relationships"))
+      .toMatchObject({ cached: false, role: "developer", text: "## Relationships\nCurrent standing." });
   });
 
   test("wraps discord context with section header", () => {

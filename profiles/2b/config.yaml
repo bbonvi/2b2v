@@ -137,6 +137,7 @@ promptTransport:
             upcomingSchedules: { role: developer, target: input, cacheGroup: shcedules }
             notebooks: { role: developer, target: input, cacheGroup: notebooks }
             innerThreads: { role: developer, target: input, cacheGroup: inner-threads }
+            relationships: { role: developer, target: input, cacheGroup: relationships }
             memories: { role: developer, target: input, cacheGroup: memories }
             recentHistory: { role: user, target: input, cacheGroup: recent }
             currentContext: { role: user, target: input, cacheGroup: current-context, }
@@ -167,6 +168,7 @@ promptTransport:
             upcomingSchedules: { role: user, target: input } # (pending schedule summary)
             notebooks: { role: user, target: input, cacheGroup: notebooks } # (applicable persona notebook titles)
             innerThreads: { role: user, target: input, cacheGroup: inner-threads } # (private active inner threads)
+            relationships: { role: user, target: input, cacheGroup: relationships } # (current durable relationship context)
             memories: { role: user, target: input, cacheGroup: memories } # (selected memory context)
             recentHistory: { role: user, target: input } # (uncached recent chat history)
             currentContext: { role: user, target: input } # (time/contact/current-turn metadata)
@@ -181,7 +183,7 @@ replyLoop:
     llmOutputTimeoutMs: 80000 # Timeout for one LLM turn (milliseconds)
 
 agentJobs:
-    imageTimeoutMs: 400000 # (max async image job runtime)
+    imageTimeoutMs: 500000 # (max async image job runtime)
     imageCancelGraceMs: 60000 # (window where replacement/cancel can target a fresh image job)
     terminalVisibleMs: 600000 # (how long completed/failed jobs stay visible in prompt context)
     maxImageReplacements: 2 # (max times one image request may be replaced)

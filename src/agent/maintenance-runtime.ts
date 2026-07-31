@@ -16,7 +16,7 @@ import { createSearchToolsTool } from "../agent/tool-catalog.ts";
 import { createPrivateLifeSummaryTool } from "../private-life/summary-tool.ts";
 import { dashboardTriggerLocation } from "../dashboard/management-runtime";
 import { promptLabSyntheticId } from "../dashboard/prompt-lab-runtime";
-import { createRecordRelationshipTool, getRelationshipProfile, listRelationshipEvents, renderRelationshipMaintenanceContext, type RelationshipConfig, type RelationshipMutationResult } from "../relationships";
+import { createRecordRelationshipTool, getRelationshipProfile, listRelationshipEvents, listRelationshipProfiles, renderRelationshipMaintenanceContext, selectRelationshipAnchorProfiles, selectRelationshipContextProfiles, type RelationshipConfig, type RelationshipContextProfile, type RelationshipMutationResult } from "../relationships";
 import { type PromptBundle } from "../config/instruction-bundle";
 import type { Database } from "../db/database";
 import { type Client, type Guild } from "discord.js";
@@ -395,21 +395,36 @@ async function runRelationshipPostReplyExtraction(input: {
         onRelationshipResult: input.onResult,
       }));
   try {
-    const relationshipUserIds = [...new Set([
-      input.currentUserId,
-      ...(input.memoryRequest.context.visibleUserIds ?? []),
-    ])];
-    const relationshipState = renderRelationshipMaintenanceContext(
-      relationshipUserIds.map((userId) => ({
-        profile: getRelationshipProfile(db, userId),
-        label: userId === input.currentUserId
-          ? `@${input.currentUsername ?? userId} (${userId})`
-          : input.guild?.members.cache.get(userId)?.user.username !== undefined
-            ? `@${input.guild.members.cache.get(userId)?.user.username ?? userId} (${userId})`
-            : userId,
-        events: listRelationshipEvents(db, { userId, limit: 30 }),
-      })),
-    );
+    const relationshipLabel = (userId: string): string => {
+      if (userId === input.currentUserId) return `@${input.currentUsername ?? userId} (${userId})`;
+      const username = input.guild?.members.cache.get(userId)?.user.username;
+      return username === undefined ? userId : `@${username} (${userId})`;
+    };
+    const selected = selectRelationshipContextProfiles({
+      currentUserId: input.currentUserId,
+      anchors: selectRelationshipAnchorProfiles(listRelationshipProfiles(db, 500)).map(
+        (profile): RelationshipContextProfile => ({
+          profile,
+          label: relationshipLabel(profile.userId),
+          reason: "anchor",
+        }),
+      ),
+      recent: (input.memoryRequest.context.visibleUserIds ?? []).map(
+        (userId): RelationshipContextProfile => ({
+          profile: getRelationshipProfile(db, userId),
+          label: relationshipLabel(userId),
+          reason: "recent-chat",
+        }),
+      ),
+    });
+    const relationshipState = renderRelationshipMaintenanceContext({
+      current: {
+        profile: getRelationshipProfile(db, input.currentUserId),
+        label: relationshipLabel(input.currentUserId),
+        events: listRelationshipEvents(db, { userId: input.currentUserId, limit: 30 }),
+      },
+      others: [...selected.anchors, ...selected.recent],
+    });
     const executionMode = runtimeContextTemplate(
       "relationship-maintenance-execution-mode",
       { maxToolCalls: config.maxToolCalls },

@@ -26,7 +26,7 @@ import { annotateHistoryJobs, renderAgentJobsContext } from "../agent/generated-
 import { listEventWatches } from "../db/event-watch-repository.ts";
 import { upsertThread, listThreadsForContext, getThreadMetadata, getThread } from "../db/thread-repository";
 import { countUserMemoriesByUser } from "../db/memory-repository";
-import { buildPriorExchangesContext, getRelationshipProfile, hasRelationshipData, listRelationshipEvents, listRelationshipProfiles, renderNotableRelationshipsContext, renderRelationshipPromptContext, selectRelationshipAnchorProfiles, type RelationshipContextProfile, type RelationshipConfig } from "../relationships";
+import { buildPriorExchangesContext, getRelationshipProfile, hasRelationshipData, listRelationshipEvents, listRelationshipProfiles, renderNotableRelationshipsContext, renderRelationshipPromptContext, selectRelationshipAnchorProfiles, selectRelationshipContextProfiles, type RelationshipContextProfile, type RelationshipConfig } from "../relationships";
 import { listUpcomingForContext } from "../db/schedule-repository";
 import { type PromptBundle } from "../config/instruction-bundle";
 import type { Database } from "../db/database";
@@ -276,22 +276,21 @@ function buildRelationshipPromptContext(input: {
   }
   const currentUserId = input.latestUserMessage.authorId;
   const current = getRelationshipProfile(db, currentUserId);
-  const anchorUserIds = new Set((input.anchors ?? []).map((entry) => entry.profile.userId));
-  const anchors = (input.anchors ?? [])
-    .filter((entry) => entry.profile.userId !== currentUserId)
+  const selected = selectRelationshipContextProfiles({
+    currentUserId,
+    anchors: input.anchors ?? [],
+    recent: input.visibleUserIds.map((userId): RelationshipContextProfile => ({
+      profile: getRelationshipProfile(db, userId),
+      label: input.resolveUserLabel(userId),
+      reason: "recent-chat",
+    })),
+  });
+  const anchors = selected.anchors
     .map((entry): RelationshipContextProfile => ({
       ...entry,
       events: listRelationshipEvents(db, { userId: entry.profile.userId, limit: 500 }),
     }));
-  const visible = input.visibleUserIds
-    .filter((userId) => userId !== currentUserId)
-    .map((userId): RelationshipContextProfile => ({
-      profile: getRelationshipProfile(db, userId),
-      label: input.resolveUserLabel(userId),
-      reason: "recent-chat",
-    }))
-    .filter((entry) => hasRelationshipData(entry.profile) && !anchorUserIds.has(entry.profile.userId))
-    .slice(0, 3)
+  const visible = selected.recent
     .map((entry): RelationshipContextProfile => ({
       ...entry,
       events: listRelationshipEvents(db, { userId: entry.profile.userId, limit: 500 }),
@@ -686,6 +685,7 @@ async function buildContext(
       members: displayNameContext,
       notebooks,
       innerThreads: innerThreadsText,
+      relationships: relationshipsContext,
       memories,
       discordContext,
       upcomingSchedules,
@@ -697,7 +697,6 @@ async function buildContext(
       newerHistory: newerText,
       currentContext: [
         currentContext,
-        relationshipsContext,
         voicePresence,
       ]
         .filter((part) => part !== "")

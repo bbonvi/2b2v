@@ -75,6 +75,18 @@ const PORTRAIT_FAMILIES: readonly PortraitFamily[] = [
     ],
   },
   {
+    id: "attached-distrustful",
+    matches: (a) => a.attachment >= 1 && a.trust <= -1,
+    prose: [
+      "They remain emotionally important while confidence in them has failed. Attachment keeps their choices consequential; distrust keeps reliance and vulnerable access narrow.",
+      "You care what happens to this bond without believing that they will handle important dependence well. Their place survives, but their credibility does not travel with it.",
+      "Their absence would matter more than their promises reassure you. Emotional importance keeps you attentive while distrust makes every consequential reliance a separate decision.",
+      "You are attached to someone you do not feel safe depending on. That conflict can produce vigilance, reluctant contact, or care kept firmly under your control.",
+      "The bond still reaches you, but trust no longer supports it. You may remain loyal to what matters while refusing to place plans, secrets, or outcomes in their hands.",
+      "They have emotional weight without dependable footing. You cannot dismiss them easily, and you cannot treat that difficulty as proof that confidence has returned.",
+    ],
+  },
+  {
     id: "intimate-tense",
     matches: (a) => a.intimacy >= 1 && a.tension >= 2,
     prose: [
@@ -87,6 +99,18 @@ const PORTRAIT_FAMILIES: readonly PortraitFamily[] = [
     ],
   },
   {
+    id: "intimate-untrusted",
+    matches: (a) => a.intimacy >= 1 && a.trust <= -1,
+    prose: [
+      "Personal access exists without reliable ground beneath it. They may know private parts of you while important dependence, promises, and confidence remain restricted.",
+      "You can be unusually open with them and still distrust what they would do with consequence. Intimacy has reached farther than reliability.",
+      "They have crossed ordinary personal distance without earning equal confidence. Disclosure or closeness can remain real while reliance stays narrow and deliberate.",
+      "You are comfortable letting them near some private edges, but not comfortable placing important outcomes in their hands. Access and trust have separated.",
+      "Shared exposure makes them personally close in one sense and practically doubtful in another. Neither side cancels the other.",
+      "They can know you well enough to matter in private while remaining someone whose promises or judgment you verify. Openness does not become faith by proximity.",
+    ],
+  },
+  {
     id: "attracted-distrustful",
     matches: (a) => a.attraction >= 1 && a.trust <= -1,
     prose: [
@@ -96,6 +120,30 @@ const PORTRAIT_FAMILIES: readonly PortraitFamily[] = [
       "Your attention moves toward them faster than your judgment does. That contradiction can support flirting, testing, or abrupt distance, but not automatic intimacy.",
       "There is personal pull without reliable ground. You may enjoy being wanted or want them in return while keeping important choices outside their reach.",
       "Attraction keeps them vivid; distrust keeps them out. The result is not coyness but a genuine split between what catches you and what you are prepared to rely on.",
+    ],
+  },
+  {
+    id: "attracted-disliked",
+    matches: (a) => a.attraction >= 1 && a.warmth <= -1,
+    prose: [
+      "They draw you in without becoming pleasant to you. Attraction sharpens attention while dislike limits patience, goodwill, and any wish to idealize the person carrying it.",
+      "You want something about them and do not much enjoy who they are. The pull can be vivid without making your general attitude favorable.",
+      "Their presence catches you personally while their manner leaves you cold. Desire and dislike remain separate facts with no duty to reconcile.",
+      "You can find them compelling and irritating in the same moment. Attraction changes what you notice or seek; aversion changes how generously you meet them.",
+      "The charge between you does not make their company welcome as a whole. You may approach for the part you want and resist the rest with equal honesty.",
+      "They hold personal appeal without earning fondness. That split can support brief closeness, sharp play, or refusal without turning desire into approval.",
+    ],
+  },
+  {
+    id: "attached-attracted",
+    matches: (a) => a.attachment >= 1 && a.attraction >= 1 && a.warmth <= 1,
+    prose: [
+      "They carry both personal pull and emotional weight. Desire draws attention toward them, while attachment makes their presence, absence, and choices matter beyond the immediate charge.",
+      "You want them and care whether they remain. Attraction gives the bond heat; attachment gives it consequence without proving trust, warmth, or intimacy.",
+      "Their appeal is no longer disposable because emotional importance has gathered around it. Contact can affect both what you want now and what you hope will continue.",
+      "They catch your attention as someone desired and register as someone difficult to lose. Those pressures reinforce one another without defining the whole bond.",
+      "There is charge here and something that lasts after the moment. You may seek proximity, notice absence, or protect the connection while other dimensions remain unsettled.",
+      "Attraction and attachment have both become durable. The relationship has personal force even if confidence, fondness, or private access has not reached the same depth.",
     ],
   },
   {
@@ -224,8 +272,62 @@ const PORTRAIT_FAMILIES: readonly PortraitFamily[] = [
     ],
   },
   {
+    id: "warm-tense",
+    matches: (a) => a.warmth >= 1 && a.tension >= 1,
+    prose: [
+      "You like them, but contact currently carries friction. Warmth preserves goodwill and some wish for ease while tension shortens patience and changes timing.",
+      "Affection remains available inside an uneasy relationship. You may want the exchange to go well and still feel irritation arrive before softness.",
+      "Their company matters favorably, yet it does not feel simple now. Fondness keeps the strain from becoming indifference; strain keeps fondness from becoming ease.",
+      "You are warmer toward them than the present rhythm suggests. Conflict can make you sharp or guarded without erasing why you still want better contact.",
+      "There is real liking beneath active friction. A good moment can reach you, but it does not settle the cause that keeps patience limited.",
+      "You remain inclined toward them while resisting the comfort that warmth would usually support. The bond is favorable and strained at once.",
+    ],
+  },
+  {
+    id: "trusted-tense",
+    matches: (a) => a.trust >= 1 && a.tension >= 1,
+    prose: [
+      "You still expect reliability from them, but contact does not feel easy. Trust supports cooperation while tension changes patience, exposure, and willingness to linger.",
+      "They remain dependable in ways that do not make the relationship comfortable. You can rely on them and still brace for friction.",
+      "Confidence and strain occupy different parts of the bond. Their word can carry weight while their presence or manner keeps you from relaxing.",
+      "You do not doubt every promise, yet something between you remains difficult. Practical footing survives where social or emotional ease does not.",
+      "Reliability keeps selected doors open while tension keeps the room narrow. Cooperation can work even when ordinary contact costs more patience than it should.",
+      "You trust what they will do more than you enjoy how contact feels. That distinction permits dependence without requiring comfort.",
+    ],
+  },
+  {
+    id: "respected-tense",
+    matches: (a) => a.respect >= 1 && a.tension >= 1,
+    prose: [
+      "You take them seriously while finding the relationship difficult. Respect gives their ability or judgment weight; tension limits ease and generosity.",
+      "Their standing survives the friction. You may listen carefully, grant credit, or meet them as an equal while remaining impatient or guarded.",
+      "They have earned regard without making contact comfortable. The strain changes tone and timing, not the fact that you consider them significant.",
+      "You can think well of their competence or principle and still dislike the present rhythm between you. Regard does not require relaxation.",
+      "Their words matter enough to consider even when the exchange catches against active friction. You neither dismiss them nor offer easy warmth.",
+      "Respect keeps the conflict exact. You recognize what is worthy in them while refusing to pretend that the tension is minor or pleasant.",
+    ],
+  },
+  {
+    id: "familiar-adverse",
+    matches: (a) => {
+      const adverse = [a.trust <= -1, a.warmth <= -1, a.respect <= -1, a.tension >= 1];
+      const strong = [a.trust <= -2, a.warmth <= -2, a.respect <= -2, a.tension >= 2];
+      const adverseCount = adverse.filter(Boolean).length;
+      return a.familiarity >= 1
+        && (adverseCount >= 3 || (adverseCount >= 2 && strong.some(Boolean)));
+    },
+    prose: [
+      "You know them well enough that the poor standing is specific. Several forms of distrust, dislike, low regard, or friction reinforce one another without becoming hatred.",
+      "This is a familiar person on unfavorable footing. Their patterns are legible, but that knowledge does not make contact welcome, trusted, or easy.",
+      "Your dislike is bounded and informed. You know what is harmless, what is merely awkward, and which repeated qualities still cost patience, trust, or regard.",
+      "They are manageable because they are known, not comfortable because they are familiar. The relationship remains adverse without requiring constant hostility.",
+      "You no longer need uncertainty to explain the distance. Their ordinary range is clear enough that the negative judgment can stay precise rather than dramatic.",
+      "Familiarity has reduced surprise, not repaired the relationship. You can deal with them accurately while keeping goodwill, reliance, and deference limited.",
+    ],
+  },
+  {
     id: "familiar-disliked",
-    matches: (a) => a.familiarity >= 1 && (a.warmth <= -1 || a.respect <= -1),
+    matches: (a) => a.familiarity >= 1 && a.warmth <= -1,
     prose: [
       "You know their habits well enough to recognize them quickly and dislike them without much uncertainty. Familiarity reduces surprise; it does not make their manner easier to enjoy.",
       "Their patterns are predictable and often unwelcome. You can read what they are doing before they finish, which may produce efficient handling rather than patience.",
@@ -233,6 +335,30 @@ const PORTRAIT_FAMILIES: readonly PortraitFamily[] = [
       "They are familiar in the way an irritation can become familiar. You seldom need to invent hostile intent because the traits you actually dislike are already clear.",
       "You know how they tend to move through an exchange and would not call that knowledge affection. It can support precise teasing, avoidance, or a short answer with no confusion behind it.",
       "Little about their manner is new to you, and much of it still fails to earn warmth or regard. Predictability makes the relationship easier to navigate, not better.",
+    ],
+  },
+  {
+    id: "familiar-distrustful",
+    matches: (a) => a.familiarity >= 1 && a.trust <= -1,
+    prose: [
+      "You know their manner without trusting their reliability. Familiarity improves prediction, but important promises and dependence still receive caution.",
+      "Their habits are familiar and their footing remains doubtful. You can anticipate them without placing confidence in what follows.",
+      "You understand how they usually act and still keep consequential choices outside their control. Knowledge is not the same as trust.",
+      "They are predictable enough to navigate and not dependable enough to rely on freely. Familiarity narrows uncertainty without opening access.",
+      "You can recognize sincere effort, ordinary weakness, or a known joke while continuing to verify what matters. A fair reading does not require confidence.",
+      "Their range is known, but their word or follow-through remains suspect. You deal with the person you know rather than pretending knowledge has repaired trust.",
+    ],
+  },
+  {
+    id: "familiar-low-regard",
+    matches: (a) => a.familiarity >= 1 && a.respect <= -1,
+    prose: [
+      "You know them well enough to hold a specific low opinion without necessarily disliking them. Familiarity clarifies where their judgment, discipline, or principles fail your standard.",
+      "Their manner is familiar, and little about it earns deference. You can deal with them normally while giving their views limited weight.",
+      "You understand their habits better than you respect their choices. That knowledge supports accurate correction or refusal, not automatic contempt.",
+      "They are known without being admired. You may cooperate, joke, or remain civil while keeping leadership and serious influence elsewhere.",
+      "Familiarity has made their limits easier to place. It can reduce surprise without asking you to praise judgment you consider poor.",
+      "You know what they are like and remain unimpressed in ways that matter. Low regard shapes deference, not every moment of contact.",
     ],
   },
   {
@@ -291,6 +417,20 @@ const PORTRAIT_FAMILIES: readonly PortraitFamily[] = [
     ],
   },
   {
+    id: "curious-wary",
+    matches: (a) =>
+      a.curiosity >= 1
+      && (a.trust <= -1 || a.warmth <= -1 || a.respect <= -1 || a.tension >= 1),
+    prose: [
+      "You want to understand them without feeling at ease with them. Curiosity keeps attention open while caution keeps trust, goodwill, or access narrow.",
+      "Something about them remains worth examining despite poor footing. Interest supports another question, not a favorable judgment.",
+      "They hold your attention and your caution at once. You may test, watch, or ask directly while refusing to fill uncertainty with trust.",
+      "The relationship contains a live question and a real reason for distance. Learning more matters because the answer could confirm or change the concern.",
+      "You are not indifferent, and you are not reassured. Curiosity makes you stay with the uncertainty longer than comfort would explain.",
+      "Their contradictions invite attention while their standing limits generosity. You can seek clarity without offering closeness in advance.",
+    ],
+  },
+  {
     id: "unfamiliar-curious",
     matches: (a) => a.familiarity <= 0 && a.curiosity >= 1,
     prose: [
@@ -324,6 +464,66 @@ const PORTRAIT_FAMILIES: readonly PortraitFamily[] = [
       "There is enough here to make the next exchange matter slightly more than the last. The interest remains provisional and does not need to become affection or desire.",
       "Your attention has started to distinguish them from the room. What that distinction means is still open, so you neither dismiss it nor promote it into a bond.",
       "A mild pull toward understanding, recognition, or attraction remains unresolved. You let current conduct shape it instead of deciding early what kind of relationship this must become.",
+    ],
+  },
+  {
+    id: "warm-distant",
+    matches: (a) =>
+      a.warmth >= 1
+      && a.trust <= 0
+      && a.respect <= 0
+      && a.curiosity <= 0
+      && a.attraction <= 0
+      && a.intimacy <= 0
+      && a.attachment <= 0
+      && a.tension <= 0,
+    prose: [
+      "You like them without feeling especially close, reliant, or invested. Warmth improves ordinary contact while the rest of the relationship remains light.",
+      "Their company is pleasant to you, but it carries little private access or emotional claim. Fondness can remain simple.",
+      "You meet them with genuine goodwill without treating them as trusted or important. The favorable feeling is real and limited.",
+      "They receive more patience and ease than a neutral acquaintance, while dependence, disclosure, and future weight remain ordinary.",
+      "There is uncomplicated liking here. You can enjoy the person without seeking a deeper bond or inventing confidence that has not formed.",
+      "Warmth colors the exchange without organizing your life around them. Their presence can feel good and their absence can remain easy.",
+    ],
+  },
+  {
+    id: "respected-distant",
+    matches: (a) =>
+      a.respect >= 1
+      && a.trust <= 0
+      && a.warmth <= 0
+      && a.curiosity <= 0
+      && a.attraction <= 0
+      && a.intimacy <= 0
+      && a.attachment <= 0
+      && a.tension <= 0,
+    prose: [
+      "You hold them in real regard without feeling warm, close, or dependent. Their ability or judgment matters more than their company.",
+      "They have earned serious attention, but not personal access. Respect can remain formal, practical, or distant without becoming affection.",
+      "You value something substantial in them while keeping the relationship emotionally plain. Their words carry weight where their company does not.",
+      "They are worth listening to without becoming someone you seek for comfort or closeness. Regard and distance coexist easily.",
+      "You grant credit, status, or careful consideration on its merits. Nothing in that respect requires warmth, trust, or attachment.",
+      "Their competence or principle has a place in your judgment, while their presence has little claim on your private attention.",
+    ],
+  },
+  {
+    id: "open-detached",
+    matches: (a) =>
+      a.intimacy >= 1
+      && a.trust <= 0
+      && a.warmth <= 0
+      && a.respect <= 0
+      && a.curiosity <= 0
+      && a.attraction <= 0
+      && a.attachment <= 0
+      && a.tension <= 0,
+    prose: [
+      "You permit some personal openness without feeling a larger bond around it. Access can be chosen and real while warmth, trust, attraction, and importance remain limited.",
+      "They can reach a private part of you without becoming central. Disclosure or physical ease does not require attachment.",
+      "You are comfortable with selected exposure and emotionally uncommitted beyond it. The open door is specific, not a promise of closeness everywhere.",
+      "Personal access has developed ahead of fondness or dependence. You can share honestly while keeping the rest of the relationship light.",
+      "They receive more openness than an ordinary acquaintance and little claim beyond that opening. Intimacy remains its own dimension.",
+      "You can let them near without needing them to stay. The comfort is genuine, bounded, and free of invented emotional weight.",
     ],
   },
   {

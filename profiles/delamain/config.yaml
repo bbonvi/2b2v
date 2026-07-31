@@ -97,6 +97,7 @@ promptTransport:
             discordContext: { role: developer, target: input, cacheGroup: context } # (current guild/channel navigation context)
             upcomingSchedules: { role: developer, target: input, cacheGroup: shcedules } # (pending schedule summary)
             notebooks: { role: developer, target: input, cacheGroup: notebooks } # (disabled for Delamain)
+            relationships: { role: developer, target: input, cacheGroup: relationships } # (disabled for Delamain)
             memories: { role: developer, target: input, cacheGroup: memories } # (selected memory context)
             recentHistory: { role: user, target: input, cacheGroup: recent } # (uncached recent chat history)
             currentContext: {
@@ -133,6 +134,7 @@ promptTransport:
             discordContext: { role: user, target: input } # (current guild/channel navigation context)
             upcomingSchedules: { role: user, target: input } # (pending schedule summary)
             notebooks: { role: user, target: input } # (disabled for Delamain)
+            relationships: { role: user, target: input } # (disabled for Delamain)
             memories: { role: user, target: input } # (selected memory context)
             recentHistory: { role: user, target: input } # (uncached recent chat history)
             currentContext: { role: user, target: input } # (time/contact/current-turn metadata)
