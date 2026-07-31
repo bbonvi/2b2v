@@ -214,5 +214,3 @@ export function resolveVoiceConfig(defaults: VoiceConfig, partial: VoiceConfigYa
   }
   return resolved;
 }
-
-

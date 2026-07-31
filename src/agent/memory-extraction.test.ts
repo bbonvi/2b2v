@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "../db/database.ts";
-import { createMemory, getMemory, listMemories, updateMemory } from "../db/memory-repository.ts";
+import { createMemory, getMemory, listMemories } from "../db/memory-repository.ts";
 
 let db: Database;
 
@@ -970,4 +970,3 @@ describe("createRecordMemoryTool", () => {
     expect(listMemories(db, { guildId: "g1", about: "self" })).toHaveLength(0);
   });
 });
-

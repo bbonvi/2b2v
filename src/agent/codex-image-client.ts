@@ -712,5 +712,3 @@ export async function requestImage(input: {
     throw new Error(`${codexFailureMessage(responsesParsed)} Direct fallback failed: ${directFailure}`);
   }
 }
-
-

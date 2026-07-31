@@ -112,4 +112,3 @@ export function resolveGuildImageGeneration(
     modelProfile: partial?.modelProfile ?? global.modelProfile,
   };
 }
-

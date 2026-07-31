@@ -486,4 +486,3 @@ export function searchMessagesLiteral(
  *
  * Returns messages in chronological order (oldest first), excludes synthetic events.
  */
-

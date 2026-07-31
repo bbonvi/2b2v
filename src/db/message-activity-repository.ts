@@ -255,5 +255,3 @@ export function getChannelHumanActivityBuckets(
     )
     .all(after, bucketMs, guildId, channelId, after, before) as ChannelActivityBucket[];
 }
-
-

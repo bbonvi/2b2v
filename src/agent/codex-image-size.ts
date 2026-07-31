@@ -121,5 +121,3 @@ export async function imageSizeFromBuffer(buffer: Buffer): Promise<string | unde
     return undefined;
   }
 }
-
-

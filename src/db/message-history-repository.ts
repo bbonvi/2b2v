@@ -380,5 +380,3 @@ export function listChannelMessages(
 
   return hydrateHistoryRows(db, rows);
 }
-
-

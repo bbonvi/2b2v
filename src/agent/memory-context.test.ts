@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "../db/database.ts";
-import { createMemory, getMemory, listMemories, updateMemory } from "../db/memory-repository.ts";
+import { createMemory, getMemory, updateMemory } from "../db/memory-repository.ts";
 
 let db: Database;
 
@@ -554,5 +554,3 @@ describe("buildVisibleUserMemoryContext", () => {
     expect(context.indexOf("Middle visible-user memory.")).toBeLessThan(context.indexOf("Newest visible-user memory."));
   });
 });
-
-

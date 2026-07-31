@@ -740,4 +740,3 @@ export async function extractAndApplyMemories(input: MemoryExtractionInput): Pro
 
   await applyMemoryActions(input, extracted);
 }
-

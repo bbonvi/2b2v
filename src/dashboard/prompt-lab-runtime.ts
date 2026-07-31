@@ -550,3 +550,29 @@ export function createPromptLabRunner(input: {
     }
   };
 }
+
+/** Bind Discord user presentation to the prompt-lab runner. */
+export function createDiscordPromptLabRunner(
+  input: Omit<Parameters<typeof createPromptLabRunner>[0], "promptLabUserFromGuild"> & {
+    dashboardUserName: (userId: string) => string;
+  },
+): ReturnType<typeof createPromptLabRunner> {
+  const { dashboardUserName, ...runnerInput } = input;
+  return createPromptLabRunner({
+    ...runnerInput,
+    promptLabUserFromGuild: (guild, userId) => {
+      const member = guild.members.cache.get(userId);
+      const cachedUser = input.client.users.cache.get(userId);
+      return {
+        id: userId,
+        username: member?.user.username ?? cachedUser?.username ?? dashboardUserName(userId),
+        ...(member?.displayName !== undefined ? { displayName: member.displayName } : {}),
+        ...(member?.user.globalName !== null && member?.user.globalName !== undefined
+          ? { globalName: member.user.globalName }
+          : cachedUser?.globalName !== null && cachedUser?.globalName !== undefined
+            ? { globalName: cachedUser.globalName }
+            : {}),
+      };
+    },
+  });
+}

@@ -437,4 +437,3 @@ export function deleteRecentMessages(
 
   return { messageIds };
 }
-

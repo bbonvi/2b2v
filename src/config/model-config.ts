@@ -223,5 +223,3 @@ export function validateModelProfileReferences(
     requireModelProfile(profiles, id, path);
   }
 }
-
-

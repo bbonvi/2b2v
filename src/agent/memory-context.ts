@@ -515,5 +515,3 @@ export function buildVisibleUserMemoryContext(input: VisibleUserMemoryContextInp
   lines.push(...formatMemoryContextRows(orderedRows, input.guildId, input.resolveUserId));
   return lines.join("\n");
 }
-
-

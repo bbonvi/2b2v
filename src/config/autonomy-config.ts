@@ -332,5 +332,3 @@ function validateAmbientInitiativeConfig(config: AmbientInitiativeConfig, keyPre
     throw new Error(`${keyPrefix}.mainChannelLookbackDays must be > 0`);
   }
 }
-
-

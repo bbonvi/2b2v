@@ -241,18 +241,18 @@ export function createAmbientAttentionPolicy(input: {
       .get(messageId, guildId) as { raw_content: string } | null;
     return row?.raw_content ?? null;
   }
-  
+
   function contentMentionsBot(content: string, botUserId: string): boolean {
     if (botUserId === "") return false;
     return new RegExp(`<@!?${botUserId}>`).test(content);
   }
-  
+
   function mentionedRoleIds(content: string): string[] {
     return [...content.matchAll(/<@&(\d+)>/g)].flatMap((match) =>
       match[1] === undefined ? [] : [match[1]]
     );
   }
-  
+
   function storedMessageRepliesToOwnBot(message: HistoryMessage, guildId: string): boolean {
     if (message.replyToId === null) return false;
     const botUserId = client.user?.id ?? "";
@@ -262,7 +262,7 @@ export function createAmbientAttentionPolicy(input: {
       .get(message.replyToId, guildId) as { user_id: string; is_bot: number } | null;
     return row !== null && row.user_id === botUserId && row.is_bot === 1;
   }
-  
+
   function deterministicHistoryTrigger(message: HistoryMessage, guildConfig: GuildConfig): TriggerResult {
     const botUserId = client.user?.id ?? "";
     const rawContent = rawStoredMessageContent(message.id, guildConfig.guildId) ?? message.content;
@@ -286,14 +286,14 @@ export function createAmbientAttentionPolicy(input: {
       { ...guildConfig.triggers, randomChance: 0 },
     );
   }
-  
+
   function memoryCountBucket(memoryCount: number): string {
     if (memoryCount <= 0) return "none";
     if (memoryCount <= 2) return "few";
     if (memoryCount <= 8) return "some";
     return "many";
   }
-  
+
   function familiarityBucket(input: {
     familiarityScore: number;
     directContactEvents: number;
@@ -305,7 +305,7 @@ export function createAmbientAttentionPolicy(input: {
     if (input.directContactEvents >= 3 || input.activeContactDays >= 2) return "occasional";
     return "new_or_light_contact";
   }
-  
+
   function recencyBucket(timestamp: number | null, now: number): string {
     if (timestamp === null) return "none";
     const ageMs = Math.max(0, now - timestamp);
@@ -314,11 +314,11 @@ export function createAmbientAttentionPolicy(input: {
     if (ageMs <= 30 * 24 * 60 * 60 * 1000) return "this_month";
     return "old";
   }
-  
+
   function isPromptOnlyIgnore(message: HistoryMessage): boolean {
     return message.isBot && message.isPromptOnly === true && message.content.trim().toLowerCase().startsWith("<ignore");
   }
-  
+
   function recentBotInvolvement(history: readonly HistoryMessage[], userId: string, now: number): string {
     const recent = history.filter((message) => now - message.timestamp <= 10 * 60 * 1000);
     const botUserId = client.user?.id ?? "";
@@ -348,7 +348,7 @@ export function createAmbientAttentionPolicy(input: {
     }
     return "none_recent";
   }
-  
+
   function renderAmbientRelationshipSignals(candidate: AmbientCandidate, history: HistoryMessage[], config: AmbientAttentionConfig): string {
     const now = Date.now();
     const contact = buildComputedContactContextForUser({
@@ -389,7 +389,7 @@ export function createAmbientAttentionPolicy(input: {
       `recent_bot_involvement: ${recentBotInvolvement(history, candidate.userId, now)}`,
     ].join("\n");
   }
-  
+
   function ambientCandidateTriggerContext(candidate: AmbientCandidate): {
     guildName?: string;
     channelName?: string;
@@ -411,7 +411,7 @@ export function createAmbientAttentionPolicy(input: {
       translatedContent,
     };
   }
-  
+
   function createAmbientRequestLog(candidate: AmbientCandidate, status: string): RequestLog {
     const requestLog = new RuntimeRequestLog(candidate.guildId, candidate.channelId, requestLogStore);
     requestLog.setAuthor(candidate.message.author.username);
@@ -426,12 +426,12 @@ export function createAmbientAttentionPolicy(input: {
     requestLog.setAgentRan(true);
     return requestLog;
   }
-  
+
   function emitAmbientRequestLog(requestLog: RequestLog): void {
     requestLog.emit(log);
     requestLogStore.decrementActive();
   }
-  
+
   function recordAmbientRuntimeAction(
     requestLog: RequestLog,
     id: string,
@@ -446,8 +446,8 @@ export function createAmbientAttentionPolicy(input: {
       structuredContent: result,
     });
   }
-  
-  
+
+
   function ambientHardGate(
     config: AmbientAttentionConfig,
     candidate: AmbientCandidate,
@@ -470,11 +470,11 @@ export function createAmbientAttentionPolicy(input: {
     if (activeTypingInChannel(candidate.guildId, candidate.channelId, ambientTypingActiveMs(config, candidate.kind), now)) {
       return { ok: false, reason: "user typing active" };
     }
-  
+
     const trigger = getMessageById(db, candidate.triggerMessageId, candidate.guildId);
     if (trigger === null || trigger.channelId !== candidate.channelId) return { ok: false, reason: "trigger message missing" };
     if (trigger.translatedContent.trim() === "") return { ok: false, reason: "empty trigger message" };
-  
+
     const history = getHistoryMessages(db, candidate.channelId, config.historyLimit);
     const afterTrigger = history.filter((message) =>
       message.timestamp > candidate.triggerCreatedAt ||
@@ -495,14 +495,14 @@ export function createAmbientAttentionPolicy(input: {
     if (afterTrigger.some((message) => !message.isBot && message.replyToId === candidate.triggerMessageId && message.authorId !== candidate.userId)) {
       return { ok: false, reason: "another human replied to trigger" };
     }
-  
+
     if (candidate.kind === "lingering_attention") {
       const lease = findAmbientLease(candidate.guildId, candidate.channelId, candidate.userId);
       if (lease === undefined) return { ok: false, reason: "lingering lease missing" };
       if (lease.expiresAt <= now) return { ok: false, reason: "lingering lease expired" };
       if (newHumanMessages.length > 0) return { ok: false, reason: "newer human message exists" };
     }
-  
+
     if (candidate.kind === "follow_up") {
       const lease = findAmbientLease(candidate.guildId, candidate.channelId, candidate.userId);
       if (lease === undefined || lease.botMessageId !== candidate.triggerMessageId) return { ok: false, reason: "follow-up lease missing" };
@@ -530,10 +530,10 @@ export function createAmbientAttentionPolicy(input: {
         return { ok: false, reason: "quiet window too short" };
       }
     }
-  
+
     return { ok: true, history };
   }
-  
+
   async function evaluateAmbientCandidate(
     config: AmbientAttentionConfig,
     candidate: AmbientCandidate,
@@ -635,7 +635,7 @@ export function createAmbientAttentionPolicy(input: {
       return null;
     }
   }
-  
+
   function ambientDecisionVerdict(
     config: AmbientAttentionConfig,
     candidate: AmbientCandidate,
@@ -701,7 +701,7 @@ export function createAmbientAttentionPolicy(input: {
       explanation: "Evaluator decision cleared probability and confidence thresholds.",
     };
   }
-  
+
   function ambientEvaluatorPolicyForKind(kind: AmbientAttentionKind): string {
     const policies = getPromptBundle().runtime.ambientAttentionEvaluator;
     const kindPolicy = kind === "ambient_pickup"
@@ -711,7 +711,7 @@ export function createAmbientAttentionPolicy(input: {
         : policies.followUp;
     return [policies.shared, kindPolicy].filter((part) => part.trim() !== "").join("\n\n");
   }
-  
+
   return {
     createAmbientRequestLog,
     emitAmbientRequestLog,
