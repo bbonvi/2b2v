@@ -3,7 +3,7 @@ import {
   deleteBotMessageState,
   deleteRecentMessages,
   markDiscordMessageDeleted,
-} from "./message-repository.ts";
+} from "./message-state-repository.ts";
 
 export interface CleanupResult {
   messagesDeleted: number;

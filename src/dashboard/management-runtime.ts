@@ -1,4 +1,17 @@
-import type { Client, Guild, GuildBasedChannel, ThreadChannel } from "discord.js";
+import { ChannelType, type Client, type Guild, type GuildBasedChannel, type ThreadChannel } from "discord.js";
+import type { AmbientRuntime } from "../ambient/runtime";
+import type { loadGlobalConfig } from "../config/loader";
+import { resolveGuildConfig } from "../config/loader";
+import type { PromptBundle } from "../config/instruction-bundle";
+import { inspectPromptScenario, type PromptScenarioId } from "../config/prompt-inspector";
+import { listInnerThreads } from "../db/inner-thread-repository";
+import { listStagedAssets } from "../db/staged-asset-repository";
+import type { createPersonaModeRuntime } from "../modes/runtime";
+import type { createPrivateLifeRuntime } from "../private-life/runtime";
+import { PRIVATE_LIFE_ACTION_SCOPES, PRIVATE_LIFE_ATTENTION_ORIGINS, PRIVATE_LIFE_CURIOSITY_MODES, PRIVATE_LIFE_TERRITORIES } from "../private-life/types";
+import { createRelationshipsManagementApi } from "./relationships-management";
+import type { VoiceRuntime } from "../voice/runtime";
+import type { createPromptLabRunner } from "./prompt-lab-runtime";
 import type { Database } from "../db/database";
 import { deleteInnerThread } from "../db/inner-thread-repository";
 import { createMemory, deleteMemory, updateMemory } from "../db/memory-repository";
@@ -537,5 +550,140 @@ export function createDashboardManagementRuntime(input: {
       notebookInput.expectedRevision,
     )),
     userName: managementUserName,
+  };
+}
+
+/** Assemble the dashboard API from its owning runtimes. */
+export function createDashboardManagement(input: {
+  profile: string;
+  client: Client;
+  db: Database;
+  runtime: DashboardManagementRuntime;
+  personaModeRuntime: ReturnType<typeof createPersonaModeRuntime>;
+  ambientRuntime: AmbientRuntime;
+  privateLifeRuntime: ReturnType<typeof createPrivateLifeRuntime>;
+  voiceRuntime: VoiceRuntime;
+  runPromptLab: ReturnType<typeof createPromptLabRunner>;
+  getGlobalConfig: () => ReturnType<typeof loadGlobalConfig>;
+  getPromptBundle: () => PromptBundle;
+  getGuildConfig: (guildId: string) => ReturnType<typeof resolveGuildConfig>;
+}) {
+  const runtime = input.runtime;
+  return {
+    getPersonaModeStatus: () => {
+      const status = input.personaModeRuntime.getStatus();
+      return {
+        profile: input.profile,
+        ...status,
+        guilds: status.guilds.map((entry) => ({
+          ...entry,
+          guildName: input.client.guilds.cache.get(entry.guildId)?.name ?? entry.guildId,
+        })),
+      };
+    },
+    getDirectory: runtime.getDirectory,
+    listMessages: runtime.listMessages,
+    editMessage: runtime.editMessage,
+    deleteMessages: runtime.deleteMessages,
+    deleteLatestMessages: runtime.deleteLatestMessages,
+    inspectPrompts: (inspectInput: {
+      scenario: PromptScenarioId;
+      provider: "openai-codex" | "openrouter";
+      guildId?: string;
+    }) => {
+      const guildConfig = inspectInput.guildId !== undefined
+        ? input.getGuildConfig(inspectInput.guildId)
+        : resolveGuildConfig(input.getGlobalConfig(), { guildId: "dashboard", slug: "dashboard" });
+      return inspectPromptScenario({
+        bundle: input.getPromptBundle(),
+        profile: input.profile,
+        scenario: inspectInput.scenario,
+        provider: inspectInput.provider,
+        transport: guildConfig.promptTransport,
+      });
+    },
+    runPromptLab: input.runPromptLab,
+    runPromptLabAmbientInitiative: input.ambientRuntime.runPromptLabAmbientInitiative,
+    runPromptLabPrivateLife: (runInput: {
+      guildId: string;
+      channelId: string;
+      origin?: string;
+      mode?: string;
+      territory?: string;
+      actionScope?: string;
+    }) => {
+      const origin = PRIVATE_LIFE_ATTENTION_ORIGINS.find((candidate) => candidate === runInput.origin);
+      const mode = PRIVATE_LIFE_CURIOSITY_MODES.find((candidate) => candidate === runInput.mode);
+      const territory = PRIVATE_LIFE_TERRITORIES.find((candidate) => candidate === runInput.territory);
+      const actionScope = PRIVATE_LIFE_ACTION_SCOPES.find((candidate) => candidate === runInput.actionScope);
+      if (runInput.origin !== undefined && origin === undefined) throw new Error(`Unknown private-life origin: ${runInput.origin}`);
+      if (runInput.mode !== undefined && mode === undefined) throw new Error(`Unknown private-life mode: ${runInput.mode}`);
+      if (runInput.territory !== undefined && territory === undefined) throw new Error(`Unknown private-life territory: ${runInput.territory}`);
+      if (runInput.actionScope !== undefined && actionScope === undefined) throw new Error(`Unknown private-life action scope: ${runInput.actionScope}`);
+      return input.privateLifeRuntime.runPromptLab({
+        guildId: runInput.guildId,
+        channelId: runInput.channelId,
+        ...(origin !== undefined ? { origin } : {}),
+        ...(mode !== undefined ? { mode } : {}),
+        ...(territory !== undefined ? { territory } : {}),
+        ...(actionScope !== undefined ? { actionScope } : {}),
+      });
+    },
+    listPrivateLifeEpisodes: (limit?: number) => ({ episodes: input.privateLifeRuntime.listEpisodes(limit) }),
+    listInnerThreads: (filter: { guildId?: string; status?: "active" | "resolved"; limit?: number }) => ({
+      threads: listInnerThreads(input.db, filter),
+    }),
+    deleteInnerThread: runtime.deleteInnerThread,
+    listStagedAssets: (filter: { guildId?: string; channelId?: string; unresolvedOnly?: boolean; limit?: number }) => ({
+      assets: listStagedAssets(input.db, filter),
+    }),
+    listMemories: runtime.listMemories,
+    createMemory: runtime.createMemory,
+    editMemory: runtime.editMemory,
+    deleteMemory: runtime.deleteMemory,
+    restoreMemory: runtime.restoreMemory,
+    listNotebooks: runtime.listNotebooks,
+    createNotebook: runtime.createNotebook,
+    editNotebook: runtime.editNotebook,
+    setNotebookState: runtime.setNotebookState,
+    deleteNotebook: runtime.deleteNotebook,
+    relationships: createRelationshipsManagementApi({
+      db: input.db,
+      getGlobalConfig: input.getGlobalConfig,
+      getGuildConfig: () => resolveGuildConfig(input.getGlobalConfig(), { guildId: "dashboard", slug: "dashboard" }),
+    }),
+    voice: {
+      getSnapshot: () => input.voiceRuntime.snapshot(),
+      subscribe: (listener: (snapshot: object) => void) => input.voiceRuntime.subscribe(listener),
+      listChannels: () => ({
+        channels: [...input.client.guilds.cache.values()].flatMap((guild) => [...guild.channels.cache.values()]
+          .filter((channel) => channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildStageVoice)
+          .map((channel) => ({
+            id: channel.id,
+            name: channel.name,
+            guildId: guild.id,
+            guildName: guild.name,
+            members: [...channel.members.values()]
+              .filter((member) => !member.user.bot)
+              .map((member) => member.user.username),
+          }))),
+      }),
+      join: async (channelId: string) => await input.voiceRuntime.join(channelId),
+      leave: async () => {
+        await input.voiceRuntime.leave("Voice session ended from the dashboard.");
+        return input.voiceRuntime.snapshot();
+      },
+      inject: async (text: string) => {
+        const snapshot = input.voiceRuntime.snapshot();
+        if (snapshot.guildId === undefined) throw new Error("2B is not connected to a voice channel.");
+        return await input.voiceRuntime.inject({
+          guildId: snapshot.guildId,
+          userId: "dashboard",
+          username: "dashboard",
+          text,
+          trusted: true,
+        });
+      },
+    },
   };
 }

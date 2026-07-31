@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "../db/database.ts";
-import { getHistoryMessagesByIds } from "../db/message-repository.ts";
+import { getHistoryMessagesByIds } from "../db/message-history-repository.ts";
 import { AgentJobStore } from "./job-runtime.ts";
 
 const config = {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createDatabase } from "./database.ts";
 import { getAssetById, recordAssetRepost, syncAssetBackfillPage, syncMessageAssets } from "./asset-repository.ts";
-import { getHistoryMessagesByIds } from "./message-repository.ts";
+import { getHistoryMessagesByIds } from "./message-history-repository.ts";
 
 function insertMessage(db: ReturnType<typeof createDatabase>, id: string): void {
   db.raw.prepare(`INSERT INTO messages (id, guild_id, channel_id, user_id, author_username, raw_content, translated_content, created_at)

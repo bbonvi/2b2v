@@ -4,7 +4,7 @@ import {
   isPasswordlessDashboardRequest,
   parseDashboardPasswordlessCidrs,
   requestClientIpCandidates,
-} from "./server.ts";
+} from "./auth.ts";
 
 describe("dashboard passwordless network auth", () => {
   test("parses CIDRs from comma or whitespace separated env values", () => {

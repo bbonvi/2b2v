@@ -67,7 +67,7 @@ describe("VoiceRuntime shutdown", () => {
     };
     const internals = runtime as unknown as {
       active: unknown;
-      transcriber: typeof transcriber;
+      speakerCapture: { transcriber: typeof transcriber };
     };
     internals.active = {
       id: session.id,
@@ -105,7 +105,7 @@ describe("VoiceRuntime shutdown", () => {
       speakingSince: new Map(),
       subscriptions: new Set(),
     };
-    internals.transcriber = transcriber;
+    internals.speakerCapture.transcriber = transcriber;
 
     await runtime.shutdown();
 

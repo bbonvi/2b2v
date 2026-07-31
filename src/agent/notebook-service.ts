@@ -21,7 +21,7 @@ import {
   type NotebookSearchState,
   type NotebookState,
 } from "../db/notebook-repository.ts";
-import { formatMemoryAge } from "./memory-service.ts";
+import { formatMemoryAge } from "./memory-context.ts";
 import { runRipgrep } from "./ripgrep.ts";
 import { renderPhysicalTextRange } from "./text-view.ts";
 import { markReadOnlyTool } from "./tool-effects.ts";

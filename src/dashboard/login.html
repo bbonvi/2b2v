@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Login — Request Dashboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    font-family:'JetBrains Mono',monospace;
+    background:#0a0a0a;
+    color:#c8c8c8;
+    display:flex;align-items:center;justify-content:center;
+    min-height:100vh;
+  }
+  .login-box{
+    background:#111;border:1px solid #2a2a2a;
+    padding:2.5rem;width:340px;
+  }
+  h1{font-size:.85rem;text-transform:uppercase;letter-spacing:.15em;color:#666;margin-bottom:1.5rem}
+  input{
+    width:100%;padding:.65rem .8rem;
+    background:#0a0a0a;border:1px solid #333;color:#e0e0e0;
+    font-family:inherit;font-size:.8rem;
+    margin-bottom:1rem;outline:none;
+  }
+  input:focus{border-color:#4a9eff}
+  button{
+    width:100%;padding:.65rem;
+    background:#4a9eff;border:none;color:#000;
+    font-family:inherit;font-size:.75rem;font-weight:600;
+    text-transform:uppercase;letter-spacing:.1em;cursor:pointer;
+  }
+  button:hover{background:#6bb3ff}
+  .err{color:#ff4a4a;font-size:.7rem;margin-bottom:.8rem;display:none}
+</style>
+</head>
+<body>
+<div class="login-box">
+  <h1>Request Dashboard</h1>
+  <div class="err" id="err">Invalid password</div>
+  <form id="f">
+    <input type="password" name="password" placeholder="Password" autofocus>
+    <button type="submit">Authenticate</button>
+  </form>
+</div>
+<script>
+document.getElementById('f').onsubmit=async e=>{
+  e.preventDefault();
+  const pw=e.target.password.value;
+  const r=await fetch('/api/auth',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:pw})});
+  if(r.ok){location.href='/'}
+  else{const el=document.getElementById('err');el.style.display='block'}
+};
+</script>
+</body>
+</html>

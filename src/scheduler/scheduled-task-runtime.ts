@@ -2,7 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Client, Guild, TextChannel } from "discord.js";
 import type { AssembledContext } from "../agent/context-assembly";
 import { createGeneratedImageRuntime, type GeneratedImageRuntime, shortQuote } from "../agent/generated-image-runtime";
-import type { HandleResult, HandlerDeps, AssetAttachmentResolver, IncomingMessage, MessageSender } from "../agent/handler";
+import type { HandleResult, HandlerDeps, AssetAttachmentResolver, IncomingMessage, MessageSender } from "../agent/turn-types";
 import type { HistoryMessage } from "../agent/history-types";
 import type { GuildConfig } from "../config/types";
 import type { Database } from "../db/database";

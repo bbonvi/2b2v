@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Database } from "../db/database";
 import { listMemories, type MemoryRow } from "../db/memory-repository";
-import { formatMemorySearchRow } from "./memory-service.ts";
+import { formatMemorySearchRow } from "./memory-context.ts";
 import { runRipgrep } from "./ripgrep.ts";
 import { markReadOnlyTool } from "./tool-effects.ts";
 

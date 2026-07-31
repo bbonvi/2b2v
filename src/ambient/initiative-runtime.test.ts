@@ -8,7 +8,7 @@ import {
   calculateAmbientInitiativePressure,
   formatBotContacts,
   type AmbientInitiativeSignals,
-} from "./initiative-runtime.ts";
+} from "./initiative-policy.ts";
 
 function config(overrides: Partial<AmbientInitiativeConfig> = {}): AmbientInitiativeConfig {
   return {
