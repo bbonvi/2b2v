@@ -47,20 +47,28 @@ describe("renderRelationshipPromptContext", () => {
       current,
       currentLabel: "@alice / u1",
       others: [{ profile: other, label: "@bob / u2", reason: "high-score" }],
-      priorExchanges: "## Prior Exchanges With This Person\nUser: hi\n2B: hm",
+      priorExchanges: "#### Earlier exchanges with this person\nUser: hi\n2B: hm",
     });
 
     expect(rendered).toContain("## Relationships");
-    expect(rendered).toContain("Raw values and prose are private durable background.");
-    expect(rendered).toContain("Subject: @alice / u1.");
+    expect(rendered).toContain("\n\n---\n\n### Current person");
+    expect(rendered).toContain("### Current person\n\n@alice / u1");
+    expect(rendered).not.toContain("Subject:");
     expect(rendered).not.toContain("Interaction history:");
-    expect(rendered).toContain("Raw durable axes: familiarity=0, trust=14, warmth=15, respect=0, tension=0, curiosity=0, attraction=0, intimacy=10, attachment=0");
-    expect(rendered).toMatch(/Contextual portrait \[growing-positive-\d\]:/);
-    expect(rendered).toContain("Notes: first note; second note; third note.");
-    expect(rendered).toContain("Boundaries: first boundary; second boundary.");
-    expect(rendered).toContain("Open loops: first loop; second loop.");
-    expect(rendered).toContain("## Prior Exchanges With This Person");
-    expect(rendered).toContain("- @bob / u2: raw axes:");
+    expect(rendered).toContain("How this relationship sits with you:");
+    expect(rendered).not.toContain("Contextual portrait [");
+    expect(rendered).toContain("Private reference values:\n\nfamiliarity=0, trust=14, warmth=15, respect=0, tension=0, curiosity=0, attraction=0, intimacy=10, attachment=0");
+    expect(rendered.indexOf("How this relationship sits with you:"))
+      .toBeLessThan(rendered.indexOf("Private reference values:"));
+    expect(rendered).toContain("- Notes: first note; second note; third note.");
+    expect(rendered).toContain("- Specific boundaries: first boundary; second boundary.");
+    expect(rendered).toContain("- Unresolved matters: first loop; second loop.");
+    expect(rendered).toContain("#### Earlier exchanges with this person");
+    expect(rendered).toContain("### Other relevant people");
+    expect(rendered).toContain("#### Others present or recently active");
+    expect(rendered).toContain("- @bob / u2 —");
+    expect(rendered).toContain("private values:");
+    expect((rendered.match(/^---$/gmu) ?? [])).toHaveLength(2);
     expect(rendered).not.toContain("Recent signals:");
     expect(rendered).not.toContain("first signal");
     expect(rendered).not.toContain(".;");
@@ -91,14 +99,17 @@ describe("renderRelationshipPromptContext", () => {
       others: [{ profile: recent, label: "@recent / u3", reason: "recent-chat" }],
     });
 
-    expect(rendered).toContain("Relationship anchors:\n\n### @anchor / u2");
-    expect(rendered).toContain("Raw durable axes:");
-    expect(rendered).toContain("Contextual portrait [");
-    expect(rendered).toContain("Notes: anchor note.");
-    expect(rendered).toContain("Other relevant relationship profiles:\n- @recent / u3:");
+    expect(rendered).toContain("### Other relevant people");
+    expect(rendered).toContain("#### People with lasting weight");
+    expect(rendered).toContain("- @anchor / u2 —");
+    expect(rendered).toContain("anchor note");
+    expect(rendered).toContain("#### Others present or recently active");
+    expect(rendered).toContain("- @recent / u3 —");
     expect(rendered).not.toContain("anchor signal");
-    expect(rendered).not.toContain("### @recent / u3");
-    expect(rendered.indexOf("Relationship anchors:")).toBeLessThan(rendered.indexOf("Other relevant relationship profiles:"));
+    expect(rendered).not.toContain("#### @anchor / u2");
+    expect(rendered).not.toContain("#### @recent / u3");
+    expect(rendered.indexOf("#### People with lasting weight"))
+      .toBeLessThan(rendered.indexOf("#### Others present or recently active"));
   });
 
   test("renders neutral raw state for a new current user", () => {
@@ -108,9 +119,10 @@ describe("renderRelationshipPromptContext", () => {
       currentLabel: "@alice / u1",
     });
 
-    expect(rendered).toContain("Raw durable axes: familiarity=0, trust=0");
-    expect(rendered).toMatch(/Contextual portrait \[unknown-neutral-\d\]:/);
-    expect(rendered).toContain("No stored durable changes beyond the neutral defaults.");
+    expect(rendered).toContain("### Current person\n\n@alice / u1");
+    expect(rendered).toContain("Private reference values:\n\nfamiliarity=0, trust=0");
+    expect(rendered).not.toContain("Contextual portrait [");
+    expect(rendered).toContain("No durable relationship changes are stored yet.");
   });
 
   test("omits the current subject during autonomous turns while retaining other profiles", () => {
@@ -125,10 +137,11 @@ describe("renderRelationshipPromptContext", () => {
     });
 
     expect(rendered).toContain("## Relationships");
-    expect(rendered).toContain("Other relevant relationship profiles:");
-    expect(rendered).toContain("- @bob / u2: raw axes:");
+    expect(rendered).toContain("### Other relevant people");
+    expect(rendered).toContain("#### Others present or recently active");
+    expect(rendered).toContain("- @bob / u2 —");
     expect(rendered).not.toContain("@2B");
-    expect(rendered).not.toContain("Subject:");
+    expect(rendered).not.toContain("### Current person");
   });
 
   test("omits an empty relationship section when an autonomous turn has no relevant profiles", () => {
@@ -200,12 +213,14 @@ describe("renderNotableRelationshipsContext", () => {
       compact: profiles.slice(3),
     });
 
-    expect(rendered).toContain("### @user0 / u0");
-    expect(rendered).toContain("Raw durable axes:");
-    expect(rendered).toContain("Notes: note 0.");
-    expect(rendered).toContain("### @user2 / u2");
-    expect(rendered).toContain("Other known people:");
-    expect(rendered).toContain("- @user3 / u3: raw axes:");
-    expect(rendered).not.toContain("### @user3 / u3");
+    expect(rendered).toContain("### People with lasting weight");
+    expect(rendered).toContain("#### @user0 / u0");
+    expect(rendered).toContain("How this relationship sits with you:");
+    expect(rendered).toContain("Private reference values:");
+    expect(rendered).toContain("- Notes: note 0.");
+    expect(rendered).toContain("#### @user2 / u2");
+    expect(rendered).toContain("### Other known people");
+    expect(rendered).toContain("- @user3 / u3 —");
+    expect(rendered).not.toContain("#### @user3 / u3");
   });
 });

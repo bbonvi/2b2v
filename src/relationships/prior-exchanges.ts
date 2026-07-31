@@ -170,7 +170,7 @@ export function buildPriorExchangesContext(input: PriorExchangesContextInput): s
   const exchanges = selectExchanges(input);
   if (exchanges.length === 0) return "";
   return [
-    "## Prior Exchanges With This Person",
+    "#### Earlier exchanges with this person",
     "These earlier exchanges show conversational rhythm that has worked with this same person. They may inform recognition, timing, and natural range. They do not preserve old mood or facts, create permission, or override the current relationship and present exchange.",
     ...exchanges.map((exchange) => {
       const foreignGuild = exchange.guildId !== input.currentGuildId;

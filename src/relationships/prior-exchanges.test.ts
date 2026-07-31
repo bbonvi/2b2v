@@ -132,7 +132,7 @@ describe("prior exchanges context", () => {
 
     expect(first).toBe(sameHour);
     expect(first).not.toBe(nextHour);
-    expect(first).toContain("## Prior Exchanges With This Person");
+    expect(first).toContain("#### Earlier exchanges with this person");
     expect(first).toContain("User: linked :wave:");
     expect(first).toContain("2B: reply 0");
     expect(first).toContain("ordinary");

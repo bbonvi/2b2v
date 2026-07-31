@@ -3,19 +3,19 @@ import { RELATIONSHIP_AXES, baseRelationshipAxes } from "./state";
 import { relationshipPortrait, relationshipPortraitVariantIds } from "./portrait";
 
 describe("relationship portraits", () => {
-  test("provides at least 120 unique full-prose variants", () => {
+  test("provides at least 150 unique full-prose variants", () => {
     const ids = relationshipPortraitVariantIds();
-    expect(ids.length).toBeGreaterThanOrEqual(120);
+    expect(ids.length).toBeGreaterThanOrEqual(150);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
   test("keeps selection stable while every axis stays in the same band", () => {
     const first = baseRelationshipAxes();
     first.familiarity = 12;
-    first.trust = 35;
+    first.trust = 25;
     first.warmth = -12;
-    first.attraction = 14;
-    const second = { ...first, familiarity: 20, trust: 50, warmth: -20, attraction: 25 };
+    first.attraction = 8;
+    const second = { ...first, familiarity: 20, trust: 40, warmth: -20, attraction: 14 };
 
     expect(relationshipPortrait(first).id).toBe(relationshipPortrait(second).id);
   });
@@ -52,24 +52,67 @@ describe("relationship portraits", () => {
       attachment: 6,
     });
 
-    expect(relationshipPortrait(axes).id).toStartWith("warm-trusted-open-");
+    expect(relationshipPortrait(axes).id).toStartWith("warm-trusted-open-pull-");
 
     axes.intimacy = 0;
     expect(relationshipPortrait(axes).id).toStartWith("warm-trusted-");
   });
 
+  test("lets strong warmth and intimacy outweigh mild remaining tension", () => {
+    const axes = baseRelationshipAxes();
+    Object.assign(axes, {
+      familiarity: 40.9,
+      trust: 2.6,
+      warmth: 69.6,
+      respect: -2.7,
+      tension: 9.666667,
+      curiosity: 6.1,
+      attraction: 24.84,
+      intimacy: 27.6,
+      attachment: 16.4,
+    });
+
+    expect(relationshipPortrait(axes).id).toStartWith("warm-open-");
+  });
+
+  test("lets quieter trust and attraction register before easily accumulated axes", () => {
+    const axes = baseRelationshipAxes();
+
+    axes.attraction = 2;
+    expect(relationshipPortrait(axes).id).toStartWith("unknown-neutral-");
+    axes.attraction = 3;
+    expect(relationshipPortrait(axes).id).toStartWith("attracted-detached-");
+
+    Object.assign(axes, baseRelationshipAxes());
+    axes.trust = 4;
+    expect(relationshipPortrait(axes).id).toStartWith("unknown-neutral-");
+    axes.trust = 5;
+    expect(relationshipPortrait(axes).id).toStartWith("trusted-distant-");
+
+    Object.assign(axes, baseRelationshipAxes());
+    axes.familiarity = 9;
+    expect(relationshipPortrait(axes).id).toStartWith("unknown-neutral-");
+    axes.familiarity = 10;
+    expect(relationshipPortrait(axes).id).toStartWith("familiar-neutral-");
+  });
+
   test("keeps every registered variant reachable across combined band vectors", () => {
     const values = [-80, -45, -15, 0, 15, 45, 80];
     const registered = new Set(relationshipPortraitVariantIds());
-    const seen = new Set<string>();
+    const seen = new Map<string, string>();
     let seed = 1;
     for (let index = 0; index < 2_000_000 && seen.size < registered.size; index += 1) {
       const axes = Object.fromEntries(RELATIONSHIP_AXES.map((axis) => {
         seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
         return [axis, values[seed % values.length] ?? 0];
       })) as ReturnType<typeof baseRelationshipAxes>;
-      seen.add(relationshipPortrait(axes).id);
+      const portrait = relationshipPortrait(axes);
+      seen.set(portrait.id, portrait.prose);
     }
-    expect(seen).toEqual(registered);
+    expect(new Set(seen.keys())).toEqual(registered);
+    const wordCounts = [...seen.values()].map((prose) => prose.trim().split(/\s+/u).length);
+    expect(Math.min(...wordCounts)).toBeGreaterThanOrEqual(90);
+    expect(wordCounts.reduce((sum, count) => sum + count, 0) / wordCounts.length)
+      .toBeGreaterThanOrEqual(110);
   });
 });

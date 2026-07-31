@@ -1,5 +1,6 @@
 import type { RelationshipAxes, RelationshipAxis } from "./types";
 import { RELATIONSHIP_AXES } from "./state";
+import { RELATIONSHIP_PORTRAIT_EXPANSIONS } from "./portrait-prose";
 
 export type AxisBand =
   | "strong-negative"
@@ -62,7 +63,7 @@ const PORTRAIT_FAMILIES: readonly PortraitFamily[] = [
   },
   {
     id: "attached-angry",
-    matches: (a) => a.attachment >= 1 && a.tension >= 1,
+    matches: (a) => a.attachment >= 1 && a.tension >= 2,
     prose: [
       "They matter enough to make the irritation persistent rather than casual. You may be sharper with them precisely because you still want an answer, changed treatment, or some sign that the bond matters to them too.",
       "Attachment keeps you from dismissing the friction. Their choices reach farther into your mood and plans than you would allow from someone unimportant, even while you restrict warmth or access.",
@@ -74,7 +75,7 @@ const PORTRAIT_FAMILIES: readonly PortraitFamily[] = [
   },
   {
     id: "intimate-tense",
-    matches: (a) => a.intimacy >= 1 && a.tension >= 1,
+    matches: (a) => a.intimacy >= 1 && a.tension >= 2,
     prose: [
       "They have seen or reached parts of you that most people do not, and the present tension does not erase that access. It makes each silence, avoidance, or small act feel more deliberate.",
       "Personal openness remains possible, but it is no longer easy. You know how close they can come and are more aware of every moment when you choose not to let them.",
@@ -169,6 +170,59 @@ const PORTRAIT_FAMILIES: readonly PortraitFamily[] = [
     ],
   },
   {
+    id: "warm-trusted-open-pull",
+    matches: (a) =>
+      a.warmth >= 2
+      && a.trust >= 1
+      && a.intimacy >= 1
+      && a.tension <= 0
+      && (a.attraction >= 1 || a.attachment >= 1),
+    prose: [
+      "Affection, trust, and chosen closeness already carry the relationship, while a quieter pull or attachment gives it extra personal weight. They are not merely safe company; their presence reaches you in a more selective way.",
+      "The bond is warm, trusted, and open enough to matter in private, with attraction or attachment beginning to gather inside it. Those quieter feelings do not need to lead before they can change how you notice and choose them.",
+      "You already let them close on favorable ground. A smaller current of desire or emotional importance runs beneath that ease, making the relationship more personally charged than its quieter values would suggest alone.",
+      "Warmth governs your general attitude, trust makes access feel credible, and intimacy has become real rather than theoretical. The lighter pull and attachment now have a strong bond around them, so even subtle signs can carry meaning.",
+      "This is a notably good relationship with real private access, not an uncertain connection. Attraction or attachment remains quieter than the warmth, yet it can appear through extra notice, preference, anticipation, or the wish to keep them near.",
+      "They occupy a warm and trusted place close enough for smaller attraction and attachment to become felt undertones. The bond is already substantial; those lower values give it texture rather than measuring whether it exists.",
+    ],
+  },
+  {
+    id: "warm-trusted-open",
+    matches: (a) => a.warmth >= 2 && a.trust >= 1 && a.intimacy >= 1 && a.tension <= 0,
+    prose: [
+      "You are firmly warm toward them, trust them enough to give their intentions real weight, and allow meaningful personal access. The relationship is notable and comfortable without needing strong attachment or desire to justify it.",
+      "They have earned more than general goodwill. You tend to meet them with affection, confidence, and personal openness, so ordinary contact can carry an ease that you do not offer to everyone.",
+      "Warmth sets the general tone between you, trust gives it stable footing, and intimacy lets some of your private self remain within reach. Attraction or attachment may add color, but neither has to define the bond.",
+      "You care how contact with them feels and usually expect them to handle some personal access well. That combination gives them a real place in your life even if dependence, commitment, or desire remains lighter.",
+      "The relationship is clearly favorable and personally open. You can be soft, blunt, playful, or quiet with them from a base of warmth and trust rather than treating every exchange as uncertain.",
+      "Warmth, trust, and chosen closeness already give this person a substantial place with you. The quieter attraction and attachment add a personal undertone instead of making the bond uncertain.",
+    ],
+  },
+  {
+    id: "warm-trusted",
+    matches: (a) => a.warmth >= 2 && a.trust >= 1 && a.intimacy <= 0 && a.tension <= 0,
+    prose: [
+      "You are strongly warm toward them and trust them in meaningful ways. That favorable footing shapes your general attitude, although private exposure and deeper closeness still remain limited.",
+      "They receive real affection and confidence from you, not only polite goodwill. You can assume better intent and offer more ease while keeping the most private parts of yourself separate.",
+      "Warmth gives the relationship a generous baseline and trust makes that baseline durable. The bond is notable even before intimacy, dependence, or desire becomes central.",
+      "You like them enough for it to affect ordinary contact, and you expect them to be reliable where it matters. Personal access is still selective rather than deeply open.",
+      "Your stance toward them is clearly favorable: warmer than an acquaintance and more trusting than simple familiarity. Closeness has room to grow, but it does not need to be invented.",
+      "They have a stable positive place with you. Fondness and confidence carry the relationship, while intimacy, attraction, and attachment keep their separate weight.",
+    ],
+  },
+  {
+    id: "warm-open",
+    matches: (a) => a.warmth >= 2 && a.intimacy >= 1 && a.trust >= 0 && a.tension <= 1,
+    prose: [
+      "Warmth and chosen personal access already make this a meaningful bond. Trust is quieter than the closeness, but there is no settled distrust forcing the relationship back toward distance.",
+      "You care for them and have let them past ordinary surfaces, even though confidence in their reliability has not grown at the same pace. The relationship remains favorable and personally real.",
+      "Affection is strong enough to govern your general stance, and intimacy gives that affection a private place to live. Lower trust adds caution without making the bond cold or uncertain.",
+      "They reach you through warmth and personal closeness before trust has become equally substantial. You can value the bond while keeping some forms of reliance more selective.",
+      "This person already receives real affection and access. The relationship has weight of its own, while trust, attraction, attachment, and mild friction add different textures inside it.",
+      "You are not merely interested in them: warmth and intimacy have established a personal bond. Quieter confidence or mild tension qualifies how you handle it rather than deciding whether it matters.",
+    ],
+  },
+  {
     id: "familiar-disliked",
     matches: (a) => a.familiarity >= 1 && (a.warmth <= -1 || a.respect <= -1),
     prose: [
@@ -182,7 +236,7 @@ const PORTRAIT_FAMILIES: readonly PortraitFamily[] = [
   },
   {
     id: "familiar-tense",
-    matches: (a) => a.familiarity >= 1 && a.tension >= 1,
+    matches: (a) => a.familiarity >= 1 && a.tension >= 2,
     prose: [
       "You know their ordinary manner well enough that the tension is not simple uncertainty. Familiar habits, jokes, softness, and roughness remain legible, but the friction changes how much patience they receive.",
       "They are easy to recognize and difficult to relax around. Shared patterns let you anticipate the next beat while active strain keeps you from meeting it casually.",
@@ -214,30 +268,6 @@ const PORTRAIT_FAMILIES: readonly PortraitFamily[] = [
       "They are safe to rely on in known ways and not especially close. The relationship can be solid, useful, and emotionally plain.",
       "You expect them to follow through without expecting them to understand you deeply. That distinction keeps cooperation easy and exposure limited.",
       "Confidence exists without tenderness. You may give them responsibility or believe their word while keeping your private life and emotional attention out of reach.",
-    ],
-  },
-  {
-    id: "warm-trusted-open",
-    matches: (a) => a.warmth >= 2 && a.trust >= 1 && a.intimacy >= 1 && a.tension <= 0,
-    prose: [
-      "You are firmly warm toward them, trust them enough to give their intentions real weight, and allow meaningful personal access. The relationship is notable and comfortable without needing strong attachment or desire to justify it.",
-      "They have earned more than general goodwill. You tend to meet them with affection, confidence, and personal openness, so ordinary contact can carry an ease that you do not offer to everyone.",
-      "Warmth sets the general tone between you, trust gives it stable footing, and intimacy lets some of your private self remain within reach. Attraction or attachment may add color, but neither has to define the bond.",
-      "You care how contact with them feels and usually expect them to handle some personal access well. That combination gives them a real place in your life even if dependence, commitment, or desire remains lighter.",
-      "The relationship is clearly favorable and personally open. You can be soft, blunt, playful, or quiet with them from a base of warmth and trust rather than treating every exchange as uncertain.",
-      "They matter enough to receive easy warmth, credible trust, and a degree of chosen closeness. The bond has substance, although its attraction and attachment are still their own questions.",
-    ],
-  },
-  {
-    id: "warm-trusted",
-    matches: (a) => a.warmth >= 2 && a.trust >= 1 && a.intimacy <= 0 && a.tension <= 0,
-    prose: [
-      "You are strongly warm toward them and trust them in meaningful ways. That favorable footing shapes your general attitude, although private exposure and deeper closeness still remain limited.",
-      "They receive real affection and confidence from you, not only polite goodwill. You can assume better intent and offer more ease while keeping the most private parts of yourself separate.",
-      "Warmth gives the relationship a generous baseline and trust makes that baseline durable. The bond is notable even before intimacy, dependence, or desire becomes central.",
-      "You like them enough for it to affect ordinary contact, and you expect them to be reliable where it matters. Personal access is still selective rather than deeply open.",
-      "Your stance toward them is clearly favorable: warmer than an acquaintance and more trusting than simple familiarity. Closeness has room to grow, but it does not need to be invented.",
-      "They have a stable positive place with you. Fondness and confidence carry the relationship, while intimacy, attraction, and attachment keep their separate weight.",
     ],
   },
   {
@@ -314,14 +344,40 @@ const PORTRAIT_FAMILIES: readonly PortraitFamily[] = [
   },
 ] as const;
 
-function axisBand(value: number): AxisBand {
-  if (value <= -60) return "strong-negative";
-  if (value <= -30) return "negative";
-  if (value <= -8) return "mild-negative";
-  if (value < 8) return "neutral";
-  if (value < 30) return "mild-positive";
-  if (value < 60) return "positive";
-  return "strong-positive";
+interface AxisBandThresholds {
+  mild: number;
+  positive: number;
+  strong: number;
+}
+
+// Easily accumulated axes need more absolute weight; quieter axes should register earlier.
+const AXIS_BAND_THRESHOLDS = {
+  familiarity: { mild: 10, positive: 40, strong: 75 },
+  trust: { mild: 5, positive: 20, strong: 50 },
+  warmth: { mild: 10, positive: 35, strong: 65 },
+  respect: { mild: 8, positive: 30, strong: 60 },
+  tension: { mild: 8, positive: 30, strong: 60 },
+  curiosity: { mild: 6, positive: 25, strong: 55 },
+  attraction: { mild: 3, positive: 15, strong: 40 },
+  intimacy: { mild: 8, positive: 25, strong: 55 },
+  attachment: { mild: 5, positive: 20, strong: 50 },
+} as const satisfies Record<RelationshipAxis, AxisBandThresholds>;
+
+function axisBand(axis: RelationshipAxis, value: number): AxisBand {
+  const thresholds = AXIS_BAND_THRESHOLDS[axis];
+  const magnitude = Math.abs(value);
+  const level = magnitude >= thresholds.strong
+    ? 3
+    : magnitude >= thresholds.positive
+      ? 2
+      : magnitude >= thresholds.mild
+        ? 1
+        : 0;
+  if (level === 0) return "neutral";
+  if (value > 0) {
+    return level === 3 ? "strong-positive" : level === 2 ? "positive" : "mild-positive";
+  }
+  return level === 3 ? "strong-negative" : level === 2 ? "negative" : "mild-negative";
 }
 
 const BAND_NUMBER: Record<AxisBand, number> = {
@@ -336,12 +392,12 @@ const BAND_NUMBER: Record<AxisBand, number> = {
 
 function bandVector(axes: RelationshipAxes): BandVector {
   return Object.fromEntries(
-    RELATIONSHIP_AXES.map((axis) => [axis, BAND_NUMBER[axisBand(axes[axis])]]),
+    RELATIONSHIP_AXES.map((axis) => [axis, BAND_NUMBER[axisBand(axis, axes[axis])]]),
   ) as BandVector;
 }
 
 function shadeIndex(axes: RelationshipAxes): number {
-  const signature = RELATIONSHIP_AXES.map((axis) => axisBand(axes[axis])).join("|");
+  const signature = RELATIONSHIP_AXES.map((axis) => axisBand(axis, axes[axis])).join("|");
   let hash = 2166136261;
   for (const character of signature) {
     hash ^= character.codePointAt(0) ?? 0;
@@ -356,11 +412,18 @@ export function relationshipPortrait(axes: RelationshipAxes): RelationshipPortra
   const family = PORTRAIT_FAMILIES.find((candidate) => candidate.matches(bands));
   if (family === undefined) throw new Error("Relationship portrait fallback is missing.");
   const shade = shadeIndex(axes);
-  const prose = family.prose[shade];
-  if (prose === undefined) throw new Error(`Relationship portrait shade ${shade} is missing.`);
+  const opener = family.prose[shade];
+  const expansion = RELATIONSHIP_PORTRAIT_EXPANSIONS[family.id];
+  if (expansion === undefined) {
+    throw new Error(`Relationship portrait expansion ${family.id} is missing.`);
+  }
+  const detail = expansion.shades[shade];
+  if (opener === undefined || detail === undefined) {
+    throw new Error(`Relationship portrait shade ${shade} is missing.`);
+  }
   return {
     id: `${family.id}-${shade + 1}`,
-    prose,
+    prose: `${opener} ${expansion.core} ${detail}`,
   };
 }
 

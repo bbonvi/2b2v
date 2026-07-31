@@ -106,30 +106,78 @@ function shortPortrait(profile: RelationshipProfile): string {
   return prose.match(/^[^.!?]+[.!?]/u)?.[0] ?? prose;
 }
 
+function durableDetailLines(profile: RelationshipProfile): string[] {
+  const notes = joinPromptItems(profile.notes.slice(-4));
+  const boundaries = joinPromptItems(profile.boundaries.slice(-3));
+  const loops = joinPromptItems(profile.openLoops.slice(-3));
+  return [
+    notes !== "" ? `- Notes: ${notes}.` : "",
+    boundaries !== "" ? `- Specific boundaries: ${boundaries}.` : "",
+    loops !== "" ? `- Unresolved matters: ${loops}.` : "",
+  ].filter((line) => line !== "");
+}
+
 function compactProfileLine(entry: RelationshipContextProfile): string {
   const notes = entry.profile.notes.at(-1);
   const loop = entry.profile.openLoops.at(-1);
-  const detail = notes ?? (loop !== undefined ? `open: ${loop}` : undefined);
-  return `- ${entry.label}: ${joinPromptItems([
-    `raw axes: ${renderRelationshipAxisValues(entry.profile)}`,
+  const detail = notes ?? (loop !== undefined ? `unresolved: ${loop}` : undefined);
+  return `- ${entry.label} — ${joinPromptItems([
     shortPortrait(entry.profile),
+    `private values: ${renderRelationshipAxisValues(entry.profile)}`,
     ...(detail !== undefined ? [detail] : []),
   ])}.`;
 }
 
 function fullProfileBlock(entry: RelationshipContextProfile): string {
-  const notes = joinPromptItems(entry.profile.notes.slice(-4));
-  const boundaries = joinPromptItems(entry.profile.boundaries.slice(-3));
-  const loops = joinPromptItems(entry.profile.openLoops.slice(-3));
   const portrait = relationshipPortrait(entry.profile.axes);
+  const details = durableDetailLines(entry.profile);
   return [
-    `### ${entry.label}`,
-    `Raw durable axes: ${renderRelationshipAxisValues(entry.profile)}`,
-    `Contextual portrait [${portrait.id}]: ${portrait.prose}`,
-    notes !== "" ? `Notes: ${notes}.` : "",
-    boundaries !== "" ? `Boundaries: ${boundaries}.` : "",
-    loops !== "" ? `Open loops: ${loops}.` : "",
+    `#### ${entry.label}`,
+    "How this relationship sits with you:",
+    portrait.prose,
+    "Private reference values:",
+    renderRelationshipAxisValues(entry.profile),
+    ...(details.length > 0 ? ["Durable details:", ...details] : []),
   ].filter((line) => line !== "").join("\n");
+}
+
+function currentProfileBlock(profile: RelationshipProfile | undefined, label: string): string {
+  if (profile === undefined) {
+    return [
+      "---",
+      "### Current person",
+      label,
+      "No stored relationship profile yet.",
+    ].join("\n\n");
+  }
+  const portrait = relationshipPortrait(profile.axes);
+  const details = durableDetailLines(profile);
+  return [
+    "---",
+    "### Current person",
+    label,
+    "How this relationship sits with you:",
+    portrait.prose,
+    "Private reference values:",
+    renderRelationshipAxisValues(profile),
+    ...(details.length > 0 ? ["Durable details:", ...details] : []),
+    !hasRelationshipData(profile) ? "No durable relationship changes are stored yet." : "",
+  ].filter((line) => line !== "").join("\n\n");
+}
+
+function otherPeopleBlock(
+  anchors: readonly RelationshipContextProfile[],
+  others: readonly RelationshipContextProfile[],
+): string {
+  if (anchors.length === 0 && others.length === 0) return "";
+  return [
+    "---",
+    "### Other relevant people",
+    anchors.length > 0 ? "#### People with lasting weight" : "",
+    ...anchors.map(compactProfileLine),
+    others.length > 0 ? "#### Others present or recently active" : "",
+    ...others.map(compactProfileLine),
+  ].filter((line) => line !== "").join("\n\n");
 }
 
 /** Render notable people for private-life turns without pretending the bot is the current subject. */
@@ -145,9 +193,10 @@ export function renderNotableRelationshipsContext(input: {
   return [
     "## Relationships",
     policy,
-    input.full.length > 0 ? "Notable people:" : "",
+    "---",
+    input.full.length > 0 ? "### People with lasting weight" : "",
     ...input.full.map(fullProfileBlock),
-    input.compact.length > 0 ? "Other known people:" : "",
+    input.compact.length > 0 ? "### Other known people" : "",
     ...input.compact.map(compactProfileLine),
   ].filter((line) => line !== "").join("\n\n");
 }
@@ -165,57 +214,20 @@ export function renderRelationshipPromptContext(input: {
     ? stripHeading(input.template)
     : "Relationship state is private durable context. Use it quietly as background stance.";
   const includeCurrent = input.includeCurrent ?? true;
-  const anchorProfiles = input.anchors !== undefined && input.anchors.length > 0
-    ? ["Relationship anchors:", ...input.anchors.map(fullProfileBlock)].join("\n\n")
-    : "";
-  const otherProfiles = input.others !== undefined && input.others.length > 0
-    ? ["Other relevant relationship profiles:", ...input.others.map(compactProfileLine)].join("\n")
-    : "";
+  const otherPeople = otherPeopleBlock(input.anchors ?? [], input.others ?? []);
   if (!includeCurrent) {
-    if (anchorProfiles === "" && otherProfiles === "") return "";
+    if (otherPeople === "") return "";
     return [
       "## Relationships",
       policy,
-      anchorProfiles,
-      otherProfiles,
+      otherPeople,
     ].filter((line) => line !== "").join("\n\n");
   }
-  const current = input.current;
-  if (current === undefined || !hasRelationshipData(current)) {
-    const emptyProfile = current;
-    return [
-      "## Relationships",
-      policy,
-      `Subject: ${input.currentLabel}.`,
-      "Raw values and prose are private durable background. They do not require a visible reaction, relationship performance, or another maintenance update.",
-      ...(emptyProfile === undefined
-        ? ["No stored relationship profile yet."]
-        : [
-            `Raw durable axes: ${renderRelationshipAxisValues(emptyProfile)}`,
-            `Contextual portrait [${relationshipPortrait(emptyProfile.axes).id}]: ${relationshipPortrait(emptyProfile.axes).prose}`,
-            "No stored durable changes beyond the neutral defaults.",
-          ]),
-      input.priorExchanges ?? "",
-      anchorProfiles !== "" ? `\n${anchorProfiles}` : "",
-      otherProfiles !== "" ? `\n${otherProfiles}` : "",
-    ].filter((line) => line !== "").join("\n");
-  }
-  const notes = joinPromptItems(current.notes.slice(-4));
-  const boundaries = joinPromptItems(current.boundaries.slice(-3));
-  const loops = joinPromptItems(current.openLoops.slice(-3));
-  const portrait = relationshipPortrait(current.axes);
   return [
     "## Relationships",
     policy,
-    `Subject: ${input.currentLabel}.`,
-    "Raw values and prose are private durable background. They do not require a visible reaction, relationship performance, or another maintenance update.",
-    `Raw durable axes: ${renderRelationshipAxisValues(current)}`,
-    `Contextual portrait [${portrait.id}]: ${portrait.prose}`,
-    notes !== "" ? `Notes: ${notes}.` : "",
-    boundaries !== "" ? `Boundaries: ${boundaries}.` : "",
-    loops !== "" ? `Open loops: ${loops}.` : "",
+    currentProfileBlock(input.current, input.currentLabel),
     input.priorExchanges ?? "",
-    anchorProfiles !== "" ? `\n${anchorProfiles}` : "",
-    otherProfiles !== "" ? `\n${otherProfiles}` : "",
-  ].filter((line) => line !== "").join("\n");
+    otherPeople,
+  ].filter((line) => line !== "").join("\n\n");
 }

@@ -337,6 +337,11 @@ export const SCHEMA_SQL = `
     created_at    INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS data_migrations (
+    id          TEXT PRIMARY KEY,
+    applied_at  INTEGER NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_relationship_profiles_updated
     ON relationship_profiles(updated_at);
 

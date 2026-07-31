@@ -9,6 +9,9 @@ type ForeignKey = {
   from: string;
   on_delete: string;
 };
+type RelationshipAxisKey = "trust" | "warmth" | "respect" | "tension" | "attraction" | "intimacy";
+
+const RELATIONSHIP_AXIS_CORRECTION_ID = "relationship-axis-correction-2026-07-31";
 
 const STRUCTURED_MEMORY_KIND_SQL = `CASE
   WHEN kind IN ('global_note', 'user_note') THEN 'note'
@@ -59,6 +62,72 @@ function sanitizeExistingMemoryRows(raw: BunDatabase): void {
 
 function tableExists(raw: BunDatabase, table: string): boolean {
   return raw.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== null;
+}
+
+function numericAxis(axes: Record<string, unknown>, axis: RelationshipAxisKey): number {
+  const value = axes[axis];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function roundedAxis(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
+}
+
+/**
+ * Correct historic relationship drift once. The migration preserves source
+ * events and profile recency because this is calibration, not a new encounter.
+ */
+function migrateRelationshipAxisCorrection(raw: BunDatabase): void {
+  if (raw.prepare("SELECT 1 FROM data_migrations WHERE id = ?").get(RELATIONSHIP_AXIS_CORRECTION_ID) !== null) {
+    return;
+  }
+  const rows = raw.prepare("SELECT user_id, axes_json FROM relationship_profiles")
+    .all() as Array<{ user_id: string; axes_json: string }>;
+  const update = raw.prepare("UPDATE relationship_profiles SET axes_json = ? WHERE user_id = ?");
+  runInTransaction(raw, () => {
+    for (const row of rows) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(row.axes_json) as unknown;
+      } catch {
+        continue;
+      }
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+      const axes = parsed as Record<string, unknown>;
+      const corrected = { ...axes };
+      let changed = false;
+      const warmth = numericAxis(axes, "warmth");
+      const intimacy = numericAxis(axes, "intimacy");
+      const attraction = numericAxis(axes, "attraction");
+      const tension = numericAxis(axes, "tension");
+      const respect = numericAxis(axes, "respect");
+      const trust = numericAxis(axes, "trust");
+
+      if (warmth >= 40 && intimacy > 0) {
+        const nextAttraction = roundedAxis(Math.max(attraction, intimacy * 0.9));
+        if (nextAttraction !== attraction) {
+          corrected.attraction = nextAttraction;
+          changed = true;
+        }
+      }
+      if ((warmth >= 20 && tension > 0) || tension > 30) {
+        corrected.tension = roundedAxis(tension / 3);
+        changed = true;
+      }
+      if (respect < -30) {
+        corrected.respect = roundedAxis(respect / 3);
+        changed = true;
+      }
+      if (trust < -30) {
+        corrected.trust = roundedAxis(trust / 2);
+        changed = true;
+      }
+
+      if (changed) update.run(JSON.stringify(corrected), row.user_id);
+    }
+    raw.prepare("INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)")
+      .run(RELATIONSHIP_AXIS_CORRECTION_ID, Date.now());
+  });
 }
 
 function createMemoryRecallTable(raw: BunDatabase): void {
@@ -438,4 +507,5 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
     "ALTER TABLE message_assets ADD COLUMN original_asset_id INTEGER REFERENCES message_assets(id) ON DELETE SET NULL",
   );
   migrateStagedAssets(raw);
+  migrateRelationshipAxisCorrection(raw);
 }

@@ -5,6 +5,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createMemory, getMemory } from "./memory-repository";
 import { createStagedAsset, getStagedAsset } from "./staged-asset-repository.ts";
+import { SCHEMA_SQL } from "./schema.ts";
+import { getRelationshipProfile } from "../relationships/repository.ts";
 
 let db: Database;
 let tmpDir: string;
@@ -388,6 +390,107 @@ describe("database initialization", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('relationship_profiles', 'relationship_events')")
       .all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name).sort()).toEqual(["relationship_events", "relationship_profiles"]);
+  });
+
+  test("corrects historic relationship-axis drift exactly once", () => {
+    const dbPath = path.join(tmpDir, "legacy-relationship-axes.db");
+    const legacy = new BunDatabase(dbPath);
+    legacy.run(SCHEMA_SQL);
+    const insert = legacy.prepare(`INSERT INTO relationship_profiles
+      (user_id, axes_json, notes_json, boundaries_json, open_loops_json, recent_json, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    insert.run("example", JSON.stringify({
+      familiarity: 40.9,
+      trust: 2.6,
+      warmth: 69.6,
+      respect: -2.7,
+      tension: 29,
+      curiosity: 6.1,
+      attraction: 12.6,
+      intimacy: 27.6,
+      attachment: 16.4,
+    }), '["keep note"]', '["keep boundary"]', '["keep loop"]', "[]", 123);
+    insert.run("overlap", JSON.stringify({
+      familiarity: 10,
+      trust: -40,
+      warmth: 50,
+      respect: -45,
+      tension: 45,
+      curiosity: 0,
+      attraction: 50,
+      intimacy: 20,
+      attachment: 0,
+    }), "[]", "[]", "[]", "[]", 456);
+    insert.run("cold-tense", JSON.stringify({
+      familiarity: 0,
+      trust: 0,
+      warmth: 0,
+      respect: 0,
+      tension: 45,
+      curiosity: 0,
+      attraction: 0,
+      intimacy: 0,
+      attachment: 0,
+    }), "[]", "[]", "[]", "[]", 789);
+    insert.run("thresholds", JSON.stringify({
+      familiarity: 0,
+      trust: -30,
+      warmth: 39.9,
+      respect: -30,
+      tension: 30,
+      curiosity: 0,
+      attraction: 2,
+      intimacy: 100,
+      attachment: 0,
+    }), "[]", "[]", "[]", "[]", 999);
+    legacy.close();
+
+    const migrated = createDatabase(dbPath);
+    expect(getRelationshipProfile(migrated, "example")).toMatchObject({
+      axes: {
+        trust: 2.6,
+        warmth: 69.6,
+        respect: -2.7,
+        tension: 9.666667,
+        attraction: 24.84,
+        intimacy: 27.6,
+      },
+      notes: ["keep note"],
+      boundaries: ["keep boundary"],
+      openLoops: ["keep loop"],
+      updatedAt: 123,
+    });
+    expect(getRelationshipProfile(migrated, "overlap").axes).toMatchObject({
+      trust: -20,
+      respect: -15,
+      tension: 15,
+      attraction: 50,
+    });
+    expect(getRelationshipProfile(migrated, "cold-tense").axes.tension).toBe(15);
+    expect(getRelationshipProfile(migrated, "thresholds").axes).toMatchObject({
+      trust: -30,
+      warmth: 39.9,
+      respect: -30,
+      tension: 10,
+      attraction: 2,
+      intimacy: 100,
+    });
+    expect(migrated.raw.prepare("SELECT COUNT(*) AS count FROM data_migrations").get())
+      .toEqual({ count: 1 });
+    migrated.close();
+
+    const reopened = createDatabase(dbPath);
+    try {
+      expect(getRelationshipProfile(reopened, "overlap").axes).toMatchObject({
+        trust: -20,
+        respect: -15,
+        tension: 15,
+      });
+      expect(reopened.raw.prepare("SELECT COUNT(*) AS count FROM data_migrations").get())
+        .toEqual({ count: 1 });
+    } finally {
+      reopened.close();
+    }
   });
 
   test("drops the obsolete stored-images table", () => {
