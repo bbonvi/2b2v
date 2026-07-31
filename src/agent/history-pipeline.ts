@@ -120,7 +120,7 @@ export async function processHistory(
         const m = olderHistory[entry.index];
         if (m === undefined) continue;
         lines.push(isPrivateHistoryRow(m)
-          ? `[@${m.author}]: ${formatHistoryContent(m)}`
+          ? formatPrivateHistoryRow(m)
           : formatMessageLine({
             message: m,
             reply: replyResult.older.get(m.id) ?? null,
@@ -151,7 +151,7 @@ export async function processHistory(
           reply = replyResult.latestUser;
         }
         lines.push(isPrivateHistoryRow(m)
-          ? `[@${m.author}]: ${formatHistoryContent(m)}`
+          ? formatPrivateHistoryRow(m)
           : formatMessageLine({
             message: m,
             reply,
@@ -173,6 +173,13 @@ export async function processHistory(
 function isPrivateHistoryRow(message: HistoryMessage): boolean {
   return message.id.startsWith(PRIVATE_THOUGHT_MESSAGE_ID_PREFIX)
     || message.id.startsWith(PRIVATE_HANDOFF_MESSAGE_ID_PREFIX);
+}
+
+function formatPrivateHistoryRow(message: HistoryMessage): string {
+  const content = message.id.startsWith(`${PRIVATE_HANDOFF_MESSAGE_ID_PREFIX}source:`)
+    ? "<handoff>...</handoff>"
+    : formatHistoryContent(message);
+  return `[@${message.author}]: ${content}`;
 }
 
 function attachPrivateRows(
