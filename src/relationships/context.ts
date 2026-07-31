@@ -256,7 +256,6 @@ function currentProfileBlock(
 ): string {
   if (profile === undefined) {
     return [
-      "---",
       "### Current person",
       label,
       "No stored relationship profile yet.",
@@ -265,7 +264,6 @@ function currentProfileBlock(
   const portrait = relationshipPortrait(profile.axes);
   const details = durableDetailLines(profile);
   return [
-    "---",
     "### Current person",
     label,
     "How this relationship sits with you:",

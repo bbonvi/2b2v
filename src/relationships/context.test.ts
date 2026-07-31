@@ -73,7 +73,7 @@ describe("renderRelationshipPromptContext", () => {
     });
 
     expect(rendered).toContain("## Relationships");
-    expect(rendered).toContain("\n\n---\n\n### Current person");
+    expect(rendered).not.toContain("\n\n---\n\n### Current person");
     expect(rendered).toContain("### Current person\n\n@alice / u1");
     expect(rendered).not.toContain("Subject:");
     expect(rendered).not.toContain("Interaction history:");
@@ -90,7 +90,7 @@ describe("renderRelationshipPromptContext", () => {
     expect(rendered).toContain("#### Others present or recently active");
     expect(rendered).toContain("- @bob / u2 —");
     expect(rendered).toContain("private values:");
-    expect((rendered.match(/^---$/gmu) ?? [])).toHaveLength(2);
+    expect((rendered.match(/^---$/gmu) ?? [])).toHaveLength(1);
     expect(rendered).not.toContain("Recent signals:");
     expect(rendered).not.toContain("first signal");
     expect(rendered).not.toContain(".;");
