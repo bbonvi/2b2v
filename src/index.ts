@@ -2379,6 +2379,7 @@ function buildRelationshipPromptContext(input: {
     priorExchanges: input.mode === "live" && input.botUserId !== undefined
       ? buildPriorExchangesContext({
           db,
+          enabled: config.priorExchanges,
           profile: current,
           botUserId: input.botUserId,
           currentUserId,

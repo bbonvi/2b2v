@@ -26,6 +26,7 @@ interface Overview {
   config: {
     enabled: boolean;
     promptInjection: boolean;
+    priorExchanges: boolean;
     maxAxisDeltaPerSignal: number;
   };
 }
@@ -144,6 +145,7 @@ function RelationshipsLab(): JSX.Element {
             </select>
           </div>
           <div className="relationships-row"><div className="relationships-label">Post-reply pass</div><div className="relationships-value">main model</div></div>
+          <div className="relationships-row"><div className="relationships-label">Earlier exchanges</div><div className="relationships-value">{overview.config.priorExchanges ? "on" : "off"}</div></div>
           <div className="relationships-row"><div className="relationships-label">Max axis delta</div><div className="relationships-value">{overview.config.maxAxisDeltaPerSignal}</div></div>
           <div className="relationships-actions">
             <button className="btn danger" disabled={busy} onClick={() => void reset()}>Reset</button>

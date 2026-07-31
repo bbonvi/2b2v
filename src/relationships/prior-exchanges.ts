@@ -23,6 +23,7 @@ interface PriorExchange {
 
 export interface PriorExchangesContextInput {
   db: Database;
+  enabled: boolean;
   profile: RelationshipProfile;
   botUserId: string;
   currentUserId: string;
@@ -167,6 +168,7 @@ function content(text: string, foreignGuild: boolean): string {
 
 /** Render deterministic same-user cross-room examples in volatile actor context. */
 export function buildPriorExchangesContext(input: PriorExchangesContextInput): string {
+  if (!input.enabled) return "";
   const exchanges = selectExchanges(input);
   if (exchanges.length === 0) return "";
   return [

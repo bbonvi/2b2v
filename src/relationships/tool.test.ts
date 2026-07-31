@@ -10,7 +10,14 @@ import {
 } from "./index";
 
 function config(): RelationshipConfig {
-  return { modelProfile: "main", enabled: true, promptInjection: true, maxAxisDeltaPerSignal: 4, maxToolCalls: 5 };
+  return {
+    modelProfile: "main",
+    enabled: true,
+    promptInjection: true,
+    priorExchanges: false,
+    maxAxisDeltaPerSignal: 4,
+    maxToolCalls: 5,
+  };
 }
 
 describe("record_relationship tool", () => {

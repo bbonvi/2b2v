@@ -264,6 +264,7 @@ relationships:
     modelProfile: maintenance
     enabled: true
     promptInjection: true
+    priorExchanges: false
     maxAxisDeltaPerSignal: 200
     maxToolCalls: 5
 

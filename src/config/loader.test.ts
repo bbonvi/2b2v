@@ -147,6 +147,7 @@ describe("model profile resolution", () => {
       maxMessages: 15,
       maxChars: 10_000,
     });
+    expect(config.defaultRelationships?.priorExchanges).toBe(false);
     expect(config.defaultVoice?.playback.volume).toBe(1);
   });
 
@@ -195,6 +196,7 @@ describe("model profile resolution", () => {
       "  modelProfile: main",
       "relationships:",
       "  modelProfile: main",
+      "  priorExchanges: true",
       "innerThreads:",
       "  modelProfile: fast",
       "privateLife:",
@@ -233,6 +235,7 @@ describe("model profile resolution", () => {
       everySegments: 80,
     });
     expect(config.defaultInnerThreads?.modelProfile).toBe("fast");
+    expect(config.defaultRelationships?.priorExchanges).toBe(true);
     expect(config.privateLife?.maintenance.modelProfile).toBe("fast");
     expect(config.defaultAmbientAttention?.evaluator.modelProfile).toBe("fast");
   });

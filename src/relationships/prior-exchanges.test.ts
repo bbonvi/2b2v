@@ -9,6 +9,7 @@ const config: RelationshipConfig = {
   modelProfile: "main",
   enabled: true,
   promptInjection: true,
+  priorExchanges: false,
   maxAxisDeltaPerSignal: 200,
   maxToolCalls: 5,
 };
@@ -120,6 +121,7 @@ describe("prior exchanges context", () => {
 
     const base = {
       db,
+      enabled: true,
       profile: getRelationshipProfile(db, "u1"),
       botUserId: "bot",
       currentUserId: "u1",
@@ -130,6 +132,7 @@ describe("prior exchanges context", () => {
     const sameHour = buildPriorExchangesContext({ ...base, now: 30 * 60 * 1_000 });
     const nextHour = buildPriorExchangesContext({ ...base, now: 60 * 60 * 1_000 });
 
+    expect(buildPriorExchangesContext({ ...base, enabled: false, now: 1 })).toBe("");
     expect(first).toBe(sameHour);
     expect(first).not.toBe(nextHour);
     expect(first).toContain("#### Earlier exchanges with this person");

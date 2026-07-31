@@ -79,6 +79,7 @@ export const DEFAULT_RELATIONSHIPS: RelationshipConfig = {
   modelProfile: "main",
   enabled: true,
   promptInjection: true,
+  priorExchanges: false,
   maxAxisDeltaPerSignal: 4,
   maxToolCalls: 5,
 };

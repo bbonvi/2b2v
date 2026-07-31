@@ -14,6 +14,7 @@ function config(maxAxisDeltaPerSignal = 200): RelationshipConfig {
     modelProfile: "main",
     enabled: true,
     promptInjection: true,
+    priorExchanges: false,
     maxAxisDeltaPerSignal,
     maxToolCalls: 5,
   };

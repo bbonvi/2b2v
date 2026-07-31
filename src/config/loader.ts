@@ -1078,6 +1078,7 @@ function resolveRelationshipConfig(
     modelProfile: partial?.modelProfile ?? base.modelProfile,
     enabled: partial?.enabled ?? base.enabled,
     promptInjection: partial?.promptInjection ?? base.promptInjection,
+    priorExchanges: partial?.priorExchanges ?? base.priorExchanges,
     maxAxisDeltaPerSignal: partial?.maxAxisDeltaPerSignal ?? base.maxAxisDeltaPerSignal,
     maxToolCalls: partial?.maxToolCalls ?? base.maxToolCalls,
   };

@@ -27,6 +27,7 @@ export interface RelationshipsOverview {
   config: {
     enabled: boolean;
     promptInjection: boolean;
+    priorExchanges: boolean;
     maxAxisDeltaPerSignal: number;
   };
 }
@@ -50,6 +51,7 @@ function overview(db: Database, config: RelationshipConfig, selectedUserId?: str
     config: {
       enabled: config.enabled,
       promptInjection: config.promptInjection,
+      priorExchanges: config.priorExchanges,
       maxAxisDeltaPerSignal: config.maxAxisDeltaPerSignal,
     },
   };

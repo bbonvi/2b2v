@@ -73,6 +73,7 @@ export interface RelationshipConfig {
   modelProfile: string;
   enabled: boolean;
   promptInjection: boolean;
+  priorExchanges: boolean;
   maxAxisDeltaPerSignal: number;
   maxToolCalls: number;
 }
