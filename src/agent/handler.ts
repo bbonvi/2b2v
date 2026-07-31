@@ -2739,7 +2739,7 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
     passKind === "ambient"
       ? "## Memory Maintenance Review — Periodic Trigger"
       : "## Memory Maintenance Review — Post-Reply Trigger",
-    "Current time for expiresIn decisions:",
+    "Current time for expiresIn and importantUntil decisions:",
     currentLocalContext(input.guildConfig.timezone, now),
   ].join("\n");
   return [

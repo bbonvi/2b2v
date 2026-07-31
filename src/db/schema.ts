@@ -23,6 +23,7 @@ export function memoriesTableSql(tableName: string, ifNotExists = false): string
     provenance_json   TEXT,
     confidence        REAL NOT NULL DEFAULT 0.7 CHECK(confidence >= 0 AND confidence <= 1),
     priority          INTEGER NOT NULL DEFAULT 0,
+    important_until   INTEGER,
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
     expires_at        INTEGER,

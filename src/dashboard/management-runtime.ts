@@ -145,6 +145,12 @@ function assertManagementMemoryState(input: ManagementMemoryCreateInput): void {
     throw new Error("Confidence must be between 0 and 1.");
   }
   if (!Number.isFinite(input.priority) || input.priority < 0) throw new Error("Priority must be zero or greater.");
+  if (input.importantUntil !== undefined && input.importantUntil !== null) {
+    if (!Number.isFinite(input.importantUntil) || input.importantUntil <= Date.now()) {
+      throw new Error("Important-until time must be in the future.");
+    }
+    if (input.priority <= 0) throw new Error("Important-until time requires important priority.");
+  }
 }
 
 export function createDashboardManagementRuntime(input: {
@@ -401,6 +407,7 @@ export function createDashboardManagementRuntime(input: {
       provenance: memoryInput.provenance,
       confidence: memoryInput.confidence,
       priority: memoryInput.priority,
+      importantUntil: memoryInput.importantUntil,
       expiresAt: memoryInput.expiresAt,
     });
     const row = getManagementMemory(input.db, memoryId);
@@ -423,6 +430,7 @@ export function createDashboardManagementRuntime(input: {
       provenance: "provenance" in memoryInput ? memoryInput.provenance : existing.provenance,
       confidence: memoryInput.confidence ?? existing.confidence,
       priority: memoryInput.priority ?? existing.priority,
+      importantUntil: "importantUntil" in memoryInput ? memoryInput.importantUntil : existing.importantUntil,
       expiresAt: "expiresAt" in memoryInput ? memoryInput.expiresAt : existing.expiresAt,
     };
     assertManagementMemoryState(next);
@@ -437,6 +445,7 @@ export function createDashboardManagementRuntime(input: {
       provenance: next.provenance,
       confidence: next.confidence,
       priority: next.priority,
+      importantUntil: next.importantUntil,
       expiresAt: next.expiresAt,
     });
     if (!updated) throw new Error("Memory update did not change a row.");

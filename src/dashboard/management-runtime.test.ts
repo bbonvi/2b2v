@@ -104,6 +104,7 @@ describe("dashboard management runtime", () => {
       provenance: { source: "dashboard" },
       confidence: 0.95,
       priority: 3,
+      importantUntil: 9_999_999_999_998,
       expiresAt: 9_999_999_999_999,
     }).memory;
 
@@ -122,6 +123,7 @@ describe("dashboard management runtime", () => {
       provenance: { source: "dashboard" },
       confidence: 0.95,
       priority: 3,
+      importantUntil: 9_999_999_999_998,
     });
   });
 

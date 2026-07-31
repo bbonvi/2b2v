@@ -47,6 +47,7 @@ interface MemoryRecord {
   provenance: Record<string, unknown> | null;
   confidence: number;
   priority: number;
+  importantUntil: number | null;
   createdAt: number;
   updatedAt: number;
   expiresAt: number | null;
@@ -67,6 +68,7 @@ interface MemoryDraft {
   provenanceText: string;
   confidence: number;
   important: boolean;
+  importantUntilInput: string;
   expiresAtInput: string;
   createdAt: number | null;
   updatedAt: number | null;
@@ -146,6 +148,7 @@ function draftFromMemory(memory: MemoryRecord): MemoryDraft {
     provenanceText: memory.provenance === null ? "" : JSON.stringify(memory.provenance, null, 2),
     confidence: memory.confidence,
     important: memory.priority > 0,
+    importantUntilInput: toLocalDateTimeInput(memory.importantUntil),
     expiresAtInput: toLocalDateTimeInput(memory.expiresAt),
     createdAt: memory.createdAt,
     updatedAt: memory.updatedAt,
@@ -168,6 +171,7 @@ function newDraft(directory: ManagementDirectory): MemoryDraft {
     provenanceText: "",
     confidence: 0.7,
     important: false,
+    importantUntilInput: "",
     expiresAtInput: "",
     createdAt: null,
     updatedAt: null,
@@ -413,6 +417,8 @@ function MemoriesTab(): JSX.Element {
     }
     const expiresAt = draft.expiresAtInput === "" ? null : new Date(draft.expiresAtInput).getTime();
     if (expiresAt !== null && !Number.isFinite(expiresAt)) { setError("Expiry time is invalid."); return; }
+    const importantUntil = !draft.important || draft.importantUntilInput === "" ? null : new Date(draft.importantUntilInput).getTime();
+    if (importantUntil !== null && (!Number.isFinite(importantUntil) || importantUntil <= Date.now())) { setError("Important-until time must be in the future."); return; }
     const payload = {
       about: draft.about,
       aboutUserId: draft.about === "user" ? draft.aboutUserId : null,
@@ -424,6 +430,7 @@ function MemoriesTab(): JSX.Element {
       provenance,
       confidence: draft.confidence,
       priority: draft.important ? 1 : 0,
+      importantUntil,
       expiresAt,
     };
     setSaving(true);
@@ -582,6 +589,17 @@ function MemoriesTab(): JSX.Element {
                     <label><input type="checkbox" checked={draft.important} onChange={(event) => updateDraft("important", event.currentTarget.checked)} /><span><strong>Important</strong><small>Pinned above ordinary memories</small></span></label>
                   </div>
                 </div>
+
+                {draft.important ? <div className="memory-expiry-editor">
+                  <div className="memory-editor-label"><span>Important until</span><small>optional; memory stays after this time</small></div>
+                  <input {...NON_CREDENTIAL_INPUT_PROPS} type="datetime-local" value={draft.importantUntilInput} onChange={(event) => updateDraft("importantUntilInput", event.currentTarget.value)} />
+                  <div className="memory-expiry-shortcuts">
+                    <button type="button" onClick={() => updateDraft("importantUntilInput", "")}>No limit</button>
+                    <button type="button" onClick={() => updateDraft("importantUntilInput", toLocalDateTimeInput(Date.now() + 86_400_000))}>+1 day</button>
+                    <button type="button" onClick={() => updateDraft("importantUntilInput", toLocalDateTimeInput(Date.now() + 7 * 86_400_000))}>+7 days</button>
+                    <button type="button" onClick={() => updateDraft("importantUntilInput", toLocalDateTimeInput(Date.now() + 30 * 86_400_000))}>+30 days</button>
+                  </div>
+                </div> : null}
 
                 <div className="memory-recall">
                   <div className="memory-editor-label"><span>Recall when</span><small>Independent from what it describes</small></div>

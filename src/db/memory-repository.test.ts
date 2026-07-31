@@ -43,19 +43,23 @@ describe("createMemory", () => {
     expect(row?.sourceMessageId).toBe("m1");
     expect(row?.confidence).toBe(0.9);
     expect(row?.priority).toBe(0);
+    expect(row?.importantUntil).toBeNull();
     expect(row?.expiresAt).toBeNull();
   });
 
   test("stores important memory priority", () => {
+    const importantUntil = Date.now() + 60_000;
     const id = createMemory(db, {
       guildId: "g1",
       about: "self",
       kind: "journal",
       content: "Important self continuity.",
       priority: 1,
+      importantUntil,
     });
 
     expect(getMemory(db, id)?.priority).toBe(1);
+    expect(getMemory(db, id)?.importantUntil).toBe(importantUntil);
   });
 
   test("clamps confidence", () => {
@@ -396,6 +400,29 @@ describe("listMemories", () => {
 
     const rows = listMemories(db, { guildId: "g1", aboutUserId: "u1", limit: 1 });
     expect(rows.map((row) => row.content)).toEqual(["Old important"]);
+  });
+
+  test("keeps a memory but lowers its effective priority after importantUntil", () => {
+    const ended = createMemory(db, {
+      guildId: "g1",
+      aboutUserId: "u1",
+      kind: "fact",
+      content: "Priority window ended",
+      priority: 1,
+      importantUntil: Date.now() - 1,
+    });
+    const normal = createMemory(db, {
+      guildId: "g1",
+      aboutUserId: "u1",
+      kind: "fact",
+      content: "Newer normal",
+    });
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(100, ended);
+    db.raw.prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(200, normal);
+
+    expect(getMemory(db, ended)?.priority).toBe(0);
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" }).map((row) => row.content))
+      .toEqual(["Newer normal", "Priority window ended"]);
   });
 
   test("excludes expired memories from active reads and counts", () => {

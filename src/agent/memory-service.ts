@@ -187,6 +187,7 @@ const MemoryWriteProperties = {
   ])),
   confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
   important: Type.Optional(Type.Boolean()),
+  importantUntil: Type.Optional(Type.Union([ExpiresInSchema, Type.Null()])),
   expiresIn: Type.Optional(Type.Union([ExpiresInSchema, Type.Null()])),
 };
 
@@ -239,6 +240,7 @@ type MemoryExtraction = {
       source_message_id?: string | null;
       confidence?: number;
       important?: boolean;
+      importantUntil?: ExpiresIn | null;
       expiresIn?: ExpiresIn | null;
     }
     | {
@@ -253,6 +255,7 @@ type MemoryExtraction = {
       source_message_id?: string | null;
       confidence?: number;
       important?: boolean;
+      importantUntil?: ExpiresIn | null;
       expiresIn?: ExpiresIn | null;
     }
     | { action: "delete"; id: number }
@@ -304,6 +307,10 @@ function formatExpiry(expiresAt: number, now = Date.now()): string {
   return `expires in ${units.value} ${units.label}${units.value === 1 ? "" : "s"}`;
 }
 
+function formatImportanceEnd(importantUntil: number): string {
+  return formatExpiry(importantUntil).replace("expires in", "important for");
+}
+
 const MEMORY_AGE_BUCKETS = [
   { milliseconds: 60 * 1000, label: "1min" },
   { milliseconds: 60 * 60 * 1000, label: "1h" },
@@ -337,7 +344,8 @@ function formatMemoryRow(
 ): string {
   const age = ` [${formatMemoryAge(row.updatedAt)}]`;
   const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
-  return `- ${row.id} [about:${aboutLabel(row, resolveUserId)}] [in:${recallLocationLabel(row, currentGuildId)}] [when:${recallTriggerLabel(row, resolveUserId)}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${age}${expiry} ${row.content}`;
+  const importanceEnd = row.priority > 0 && row.importantUntil !== null ? ` [${formatImportanceEnd(row.importantUntil)}]` : "";
+  return `- ${row.id} [about:${aboutLabel(row, resolveUserId)}] [in:${recallLocationLabel(row, currentGuildId)}] [when:${recallTriggerLabel(row, resolveUserId)}] [${formatConfidence(row.confidence)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${age}${expiry}${importanceEnd} ${row.content}`;
 }
 
 /** Render one self-contained memory search result without internal confidence. */
@@ -348,8 +356,9 @@ export function formatMemorySearchRow(
 ): string {
   const age = ` [${formatMemoryAge(row.updatedAt)}]`;
   const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
+  const importanceEnd = row.priority > 0 && row.importantUntil !== null ? ` [${formatImportanceEnd(row.importantUntil)}]` : "";
   const source = row.sourceMessageId === null ? "" : ` [${row.sourceMessageId}]`;
-  return `- ${row.id} [about:${aboutLabel(row, resolveUserId)}] [in:${recallLocationLabel(row, currentGuildId)}] [when:${recallTriggerLabel(row, resolveUserId)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${age}${expiry}${source} ${row.content}`;
+  return `- ${row.id} [about:${aboutLabel(row, resolveUserId)}] [in:${recallLocationLabel(row, currentGuildId)}] [when:${recallTriggerLabel(row, resolveUserId)}] [${row.kind}]${row.priority > 0 ? " [IMPORTANT]" : ""}${age}${expiry}${importanceEnd}${source} ${row.content}`;
 }
 
 interface MemoryContextGroup {
@@ -396,7 +405,8 @@ function formatMemoryContextRows(
       for (const row of group.rows.filter((candidate) => kindCounts.get(candidate.kind) === 1)) {
         const age = ` [${formatMemoryAge(row.updatedAt)}]`;
         const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
-        lines.push(`${row.id} ${row.kind}${age}${expiry} | ${row.content}`);
+        const importanceEnd = row.priority > 0 && row.importantUntil !== null ? ` [${formatImportanceEnd(row.importantUntil)}]` : "";
+        lines.push(`${row.id} ${row.kind}${age}${expiry}${importanceEnd} | ${row.content}`);
       }
 
       const repeatedKinds = [...new Set(group.rows
@@ -408,7 +418,8 @@ function formatMemoryContextRows(
         for (const row of group.rows.filter((candidate) => candidate.kind === kind)) {
           const age = ` [${formatMemoryAge(row.updatedAt)}]`;
           const expiry = row.expiresAt !== null ? ` [${formatExpiry(row.expiresAt)}]` : "";
-          lines.push(`${row.id}${age}${expiry} | ${row.content}`);
+          const importanceEnd = row.priority > 0 && row.importantUntil !== null ? ` [${formatImportanceEnd(row.importantUntil)}]` : "";
+          lines.push(`${row.id}${age}${expiry}${importanceEnd} | ${row.content}`);
         }
       }
     }
@@ -447,7 +458,7 @@ function memoryClockContext(timezone: string | undefined, now = Date.now()): str
 export function buildMemoryPolicyInstructions(): string[] {
   return [
     "Preserve only durable, future-useful memory and choose the cleanest focused row structure rather than minimizing mutations.",
-    "Set important true only for durable memories that must reliably shape behavior across weeks/months.",
+    "Set important true only for memories that must reliably shape behavior while active. Importance and expiry are independent; importantUntil lowers priority without deleting the memory.",
   ];
 }
 
@@ -768,6 +779,8 @@ function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][
     if ("expiresAt" in value) return null;
     const expiresIn = normalizeExpiresIn(value.expiresIn);
     if ("expiresIn" in value && expiresIn === undefined) return null;
+    const importantUntil = normalizeExpiresIn(value.importantUntil);
+    if ("importantUntil" in value && importantUntil === undefined) return null;
     const kind = "kind" in value ? normalizeKind(value.kind) : "fact";
     if (kind === null) return null;
     const about = normalizeAbout(value.about);
@@ -787,6 +800,7 @@ function normalizeExtractionAction(value: unknown): MemoryExtraction["actions"][
       content,
       ...(confidence !== undefined ? { confidence } : {}),
       ...(typeof value.important === "boolean" ? { important: value.important } : {}),
+      ...(importantUntil !== undefined ? { importantUntil } : {}),
       ...(expiresIn !== undefined ? { expiresIn } : {}),
     };
     return action === "update" && id !== undefined
@@ -872,6 +886,20 @@ function memoryExtractionResponseFormat(): Record<string, unknown> {
                     content: { type: "string", minLength: 1 },
                     confidence: { type: "number", minimum: 0, maximum: 1 },
                     important: { type: "boolean" },
+                    importantUntil: {
+                      anyOf: [
+                        {
+                          type: "object",
+                          additionalProperties: false,
+                          required: ["amount", "unit"],
+                          properties: {
+                            amount: { type: "number", exclusiveMinimum: 0 },
+                            unit: { type: "string", enum: ["minutes", "hours", "days", "weeks", "months"] },
+                          },
+                        },
+                        { type: "null" },
+                      ],
+                    },
                     expiresIn: {
                       anyOf: [
                         {
@@ -915,6 +943,20 @@ function memoryExtractionResponseFormat(): Record<string, unknown> {
                     content: { type: "string", minLength: 1 },
                     confidence: { type: "number", minimum: 0, maximum: 1 },
                     important: { type: "boolean" },
+                    importantUntil: {
+                      anyOf: [
+                        {
+                          type: "object",
+                          additionalProperties: false,
+                          required: ["amount", "unit"],
+                          properties: {
+                            amount: { type: "number", exclusiveMinimum: 0 },
+                            unit: { type: "string", enum: ["minutes", "hours", "days", "weeks", "months"] },
+                          },
+                        },
+                        { type: "null" },
+                      ],
+                    },
                     expiresIn: {
                       anyOf: [
                         {
@@ -963,7 +1005,7 @@ function buildExtractionPrompt(input: MemoryExtractionInput): string {
     "Existing memories:",
     current !== "" ? current : "(none)",
     "",
-    "Current time for expiresIn decisions:",
+    "Current time for expiresIn and importantUntil decisions:",
     memoryClockContext(input.timezone),
     "",
     ...(input.recentContext.trim() !== ""
@@ -1069,11 +1111,20 @@ async function prepareMemoryActions(
       throw new Error("Community memories must be recalled in the current guild.");
     }
     if (!scratchpadExpiryIsValid(action, existing)) throw new Error("Scratchpad memories require expiresIn of at most seven days.");
+    const isImportant = action.important ?? (existing?.priority ?? 0) > 0;
+    if (action.importantUntil !== undefined && action.importantUntil !== null && !isImportant) {
+      throw new Error("importantUntil requires important=true.");
+    }
     const expiresAt = action.expiresIn === undefined
       ? undefined
       : action.expiresIn === null
         ? null
         : expiresInToExpiresAt(action.expiresIn);
+    const importantUntil = action.importantUntil === undefined
+      ? undefined
+      : action.importantUntil === null
+        ? null
+        : expiresInToExpiresAt(action.importantUntil);
     const common = {
       about: target.about,
       aboutUserId: target.aboutUserId,
@@ -1084,6 +1135,7 @@ async function prepareMemoryActions(
       ...(action.source_message_id !== undefined ? { sourceMessageId: action.source_message_id } : {}),
       confidence: action.confidence,
       ...(action.important !== undefined ? { priority: action.important ? 1 : 0 } : {}),
+      ...(importantUntil !== undefined ? { importantUntil } : {}),
       ...(expiresAt !== undefined ? { expiresAt } : {}),
     };
     if (common.content === "") throw new Error("Memory content cannot be empty.");

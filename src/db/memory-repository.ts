@@ -19,6 +19,7 @@ export interface MemoryRow {
   provenance: Record<string, unknown> | null;
   confidence: number;
   priority: number;
+  importantUntil: number | null;
   createdAt: number;
   updatedAt: number;
   expiresAt: number | null;
@@ -37,6 +38,7 @@ export interface CreateMemoryInput {
   provenance?: Record<string, unknown> | null;
   confidence?: number;
   priority?: number;
+  importantUntil?: number | null;
   expiresAt?: number | null;
 }
 
@@ -51,6 +53,7 @@ export interface UpdateMemoryInput {
   provenance?: Record<string, unknown> | null;
   confidence?: number;
   priority?: number;
+  importantUntil?: number | null;
   expiresAt?: number | null;
   deletedAt?: number | null;
 }
@@ -244,8 +247,8 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
   }
   const result = db.raw
     .prepare(
-      `INSERT INTO memories (about_type, about_user_id, recall_scope, recall_guild_id, recall_mode, kind, content, source_message_id, provenance_json, confidence, priority, created_at, updated_at, expires_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+      `INSERT INTO memories (about_type, about_user_id, recall_scope, recall_guild_id, recall_mode, kind, content, source_message_id, provenance_json, confidence, priority, important_until, created_at, updated_at, expires_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
     )
     .run(
       about,
@@ -259,6 +262,7 @@ export function createMemory(db: Database, input: CreateMemoryInput): number {
       input.provenance !== undefined && input.provenance !== null ? JSON.stringify(input.provenance) : null,
       clampConfidence(input.confidence),
       clampPriority(input.priority),
+      input.importantUntil ?? null,
       now,
       now,
       input.expiresAt ?? null,
@@ -339,6 +343,13 @@ export function updateMemory(db: Database, id: number, input: UpdateMemoryInput)
   if (input.priority !== undefined) {
     sets.push("priority = ?");
     params.push(clampPriority(input.priority));
+    if (input.priority <= 0 && !("importantUntil" in input)) {
+      sets.push("important_until = NULL");
+    }
+  }
+  if ("importantUntil" in input) {
+    sets.push("important_until = ?");
+    params.push(input.importantUntil ?? null);
   }
   if (input.recallWhen !== undefined) {
     sets.push("recall_mode = ?");
@@ -392,7 +403,8 @@ export function listMemories(db: Database, filter: ListMemoriesFilter): MemoryRo
 
   const order = filter.order === "recent"
     ? "created_at DESC, id DESC"
-    : "priority DESC, updated_at DESC, id DESC";
+    : "CASE WHEN important_until IS NULL OR important_until > ? THEN priority ELSE 0 END DESC, updated_at DESC, id DESC";
+  if (filter.order !== "recent") params.push(Date.now());
   let sql = `SELECT * FROM memories WHERE ${conditions.join(" AND ")} ORDER BY ${order}`;
   if (filter.limit !== undefined && filter.limit > 0) {
     sql += " LIMIT ?";
@@ -469,6 +481,7 @@ function mapRow(row: Record<string, unknown>, recallUserIds: string[]): MemoryRo
       ? parsed as Record<string, unknown>
       : null;
   }
+  const importantUntil = row.important_until as number | null;
   return {
     id: Number(row.id),
     about: row.about_type as MemoryAbout,
@@ -480,7 +493,8 @@ function mapRow(row: Record<string, unknown>, recallUserIds: string[]): MemoryRo
     sourceMessageId: row.source_message_id as string | null,
     provenance,
     confidence: Number(row.confidence),
-    priority: Number(row.priority ?? 0),
+    priority: importantUntil !== null && importantUntil <= Date.now() ? 0 : Number(row.priority ?? 0),
+    importantUntil,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
     expiresAt: row.expires_at as number | null,

@@ -165,6 +165,7 @@ function migrateMemoryRecallModel(raw: BunDatabase, memoryColumns: readonly Tabl
   const priorityExpression = hasColumn(memoryColumns, "priority")
     ? "CASE WHEN priority < 0 THEN 0 ELSE COALESCE(priority, 0) END"
     : "0";
+  const importantUntilExpression = hasColumn(memoryColumns, "important_until") ? "important_until" : "NULL";
   const expectedMemoryCount = hasStructuredSchema
     ? (raw.prepare("SELECT COUNT(*) AS count FROM memories WHERE TRIM(content) <> ''").get() as { count: number }).count
     : (raw.prepare(`SELECT COUNT(*) AS count FROM memories
@@ -202,7 +203,7 @@ function migrateMemoryRecallModel(raw: BunDatabase, memoryColumns: readonly Tabl
             WHEN ${STRUCTURED_MEMORY_KIND_SQL} = 'scratchpad' AND expires_at IS NULL THEN 'note'
             ELSE ${STRUCTURED_MEMORY_KIND_SQL}
           END`;
-      raw.run(`INSERT INTO memories_new (id, about_type, about_user_id, recall_scope, recall_guild_id, recall_mode, kind, content, source_message_id, provenance_json, confidence, priority, created_at, updated_at, expires_at, deleted_at)
+      raw.run(`INSERT INTO memories_new (id, about_type, about_user_id, recall_scope, recall_guild_id, recall_mode, kind, content, source_message_id, provenance_json, confidence, priority, important_until, created_at, updated_at, expires_at, deleted_at)
         SELECT
           id,
           ${aboutExpression},
@@ -216,6 +217,7 @@ function migrateMemoryRecallModel(raw: BunDatabase, memoryColumns: readonly Tabl
           ${provenanceExpression},
           CASE WHEN confidence < 0 THEN 0 WHEN confidence > 1 THEN 1 ELSE COALESCE(confidence, 0.7) END,
           ${priorityExpression},
+          ${importantUntilExpression},
           created_at,
           updated_at,
           expires_at,
@@ -223,7 +225,7 @@ function migrateMemoryRecallModel(raw: BunDatabase, memoryColumns: readonly Tabl
         FROM memories
         WHERE TRIM(content) <> ''`);
     } else {
-      raw.run(`INSERT INTO memories_new (about_type, about_user_id, recall_scope, recall_guild_id, recall_mode, kind, content, source_message_id, provenance_json, confidence, priority, created_at, updated_at, expires_at, deleted_at)
+      raw.run(`INSERT INTO memories_new (about_type, about_user_id, recall_scope, recall_guild_id, recall_mode, kind, content, source_message_id, provenance_json, confidence, priority, important_until, created_at, updated_at, expires_at, deleted_at)
         SELECT
           CASE WHEN scope = 'user' THEN 'user' ELSE 'community' END,
           CASE WHEN scope = 'user' THEN user_id ELSE NULL END,
@@ -240,6 +242,7 @@ function migrateMemoryRecallModel(raw: BunDatabase, memoryColumns: readonly Tabl
           NULL,
           0.7,
           0,
+          NULL,
           created_at,
           updated_at,
           CASE WHEN expires_at IS NOT NULL AND expires_at > (strftime('%s','now') * 1000) THEN expires_at ELSE NULL END,
@@ -438,6 +441,7 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
     "ALTER TABLE memories ADD COLUMN expires_at INTEGER",
     "ALTER TABLE memories ADD COLUMN provenance_json TEXT",
     "ALTER TABLE memories ADD COLUMN priority INTEGER NOT NULL DEFAULT 0 CHECK(priority >= 0)",
+    "ALTER TABLE memories ADD COLUMN important_until INTEGER",
     "ALTER TABLE memory_extraction_checkpoints ADD COLUMN maintenance_cursor_id INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE schedules ADD COLUMN created_by_user_id TEXT",
     "ALTER TABLE schedules ADD COLUMN created_by_username TEXT",

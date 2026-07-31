@@ -46,6 +46,7 @@ export interface ManagementMemoryRow {
   provenance: Record<string, unknown> | null;
   confidence: number;
   priority: number;
+  importantUntil: number | null;
   createdAt: number;
   updatedAt: number;
   expiresAt: number | null;
@@ -81,6 +82,7 @@ export interface ManagementMemoryCreateInput {
   provenance?: Record<string, unknown> | null;
   confidence: number;
   priority: number;
+  importantUntil?: number | null;
   expiresAt?: number | null;
 }
 
@@ -248,6 +250,7 @@ export function listManagementMemories(
   db: Database,
   filter: ManagementMemoryFilter,
 ): ManagementMemoryRow[] {
+  const now = Date.now();
   const conditions: string[] = [];
   const params: Array<string | number> = [];
   if (filter.memoryId !== undefined) {
@@ -290,7 +293,10 @@ export function listManagementMemories(
     params.push(filter.recallScope);
   }
   if (filter.important !== undefined) {
-    conditions.push(filter.important ? "m.priority > 0" : "m.priority = 0");
+    conditions.push(filter.important
+      ? "m.priority > 0 AND (m.important_until IS NULL OR m.important_until > ?)"
+      : "(m.priority = 0 OR (m.important_until IS NOT NULL AND m.important_until <= ?))");
+    params.push(now);
   }
   if (filter.query !== undefined && filter.query.trim() !== "") {
     conditions.push("(m.content LIKE ? ESCAPE '\\' OR CAST(m.id AS TEXT) = ? OR m.source_message_id = ?)");
@@ -303,11 +309,11 @@ export function listManagementMemories(
   if (status === "active") {
     conditions.push("m.deleted_at IS NULL");
     conditions.push("(m.expires_at IS NULL OR m.expires_at > ?)");
-    params.push(Date.now());
+    params.push(now);
   } else if (status === "expired") {
     conditions.push("m.deleted_at IS NULL");
     conditions.push("m.expires_at IS NOT NULL AND m.expires_at <= ?");
-    params.push(Date.now());
+    params.push(now);
   } else if (status === "deleted") {
     conditions.push("m.deleted_at IS NOT NULL");
   }
@@ -316,15 +322,15 @@ export function listManagementMemories(
   const rows = db.raw
     .prepare(
       `SELECT m.id, m.about_type, m.about_user_id, m.recall_scope, m.recall_guild_id, m.recall_mode, m.kind, m.content, m.source_message_id,
-              m.provenance_json, m.confidence, m.priority, m.created_at, m.updated_at, m.expires_at, m.deleted_at,
+              m.provenance_json, m.confidence, m.priority, m.important_until, m.created_at, m.updated_at, m.expires_at, m.deleted_at,
               source.guild_id AS source_guild_id, source.channel_id AS source_channel_id
        FROM memories m
        LEFT JOIN messages source ON source.id = m.source_message_id
        ${where}
-       ORDER BY m.priority DESC, m.updated_at DESC, m.id DESC
+       ORDER BY CASE WHEN m.important_until IS NULL OR m.important_until > ? THEN m.priority ELSE 0 END DESC, m.updated_at DESC, m.id DESC
        LIMIT ?`
     )
-    .all(...params, clampLimit(filter.limit, 200, 1000)) as Array<{
+    .all(...params, now, clampLimit(filter.limit, 200, 1000)) as Array<{
       id: number;
       about_type: "community" | "user" | "self";
       about_user_id: string | null;
@@ -337,6 +343,7 @@ export function listManagementMemories(
       provenance_json: string | null;
       confidence: number;
       priority: number;
+      important_until: number | null;
       created_at: number;
       updated_at: number;
       expires_at: number | null;
@@ -371,7 +378,8 @@ export function listManagementMemories(
       sourceChannelId: row.source_channel_id,
       provenance,
       confidence: row.confidence,
-      priority: row.priority,
+      priority: row.important_until !== null && row.important_until <= now ? 0 : row.priority,
+      importantUntil: row.important_until,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       expiresAt: row.expires_at,

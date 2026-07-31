@@ -120,13 +120,21 @@ describe("buildMemoryContext", () => {
     expect(resolved).toContain("### @owner | anywhere | always\n\n1 constraint [1min] | Owner requires direct permission before use.");
   });
 
-  test("renders future expiry relatively", () => {
+  test("renders future expiry and importance end relatively", () => {
     createMemory(db, {
       guildId: "g1",
       aboutUserId: "u1",
       kind: "scratchpad",
       content: "Alice is temporarily focused on launch prep.",
       expiresAt: Date.now() + (3 * 24 * 60 * 60 * 1000),
+    });
+    createMemory(db, {
+      guildId: "g1",
+      aboutUserId: "u1",
+      kind: "constraint",
+      content: "Alice needs launch issues pinned this week.",
+      priority: 1,
+      importantUntil: Date.now() + (7 * 24 * 60 * 60 * 1000),
     });
 
     const context = buildMemoryContext({
@@ -136,6 +144,7 @@ describe("buildMemoryContext", () => {
     });
 
     expect(context).toContain("scratchpad [1min] [expires in 3 days] | Alice is temporarily focused on launch prep.");
+    expect(context).toContain("constraint [1min] [important for 7 days] | Alice needs launch issues pinned this week.");
     expect(context).not.toContain("expiresAt");
   });
 
@@ -1038,6 +1047,7 @@ describe("createRecordMemoryTool", () => {
         kind: "preference",
         content: "Prefers concise answers.",
         important: true,
+        importantUntil: { amount: 30, unit: "minutes" },
         expiresIn: { amount: 90, unit: "minutes" },
       }],
     });
@@ -1049,8 +1059,34 @@ describe("createRecordMemoryTool", () => {
     expect(memories[0]?.recallIn).toBe("anywhere");
     expect(memories[0]?.recallWhen).toEqual(["u1"]);
     expect(memories[0]?.priority).toBe(1);
+    expect(memories[0]?.importantUntil).toBeGreaterThanOrEqual(before + 30 * 60 * 1000);
+    expect(memories[0]?.importantUntil).toBeLessThanOrEqual(after + 30 * 60 * 1000);
     expect(memories[0]?.expiresAt).toBeGreaterThanOrEqual(before + 90 * 60 * 1000);
     expect(memories[0]?.expiresAt).toBeLessThanOrEqual(after + 90 * 60 * 1000);
+  });
+
+  test("rejects importantUntil on a normal memory", async () => {
+    const tool = createRecordMemoryTool({
+      db,
+      guildId: "g1",
+      currentUserId: "u1",
+      currentUsername: "alice",
+      sourceMessageId: "m1",
+    });
+
+    const result = await tool.execute("call-1", {
+      actions: [{
+        action: "create",
+        about: "user",
+        username: "@alice",
+        kind: "fact",
+        content: "Normal memory with an invalid priority deadline.",
+        importantUntil: { amount: 1, unit: "days" },
+      }],
+    });
+
+    expect(result.details).toEqual({ error: true });
+    expect(listMemories(db, { guildId: "g1", aboutUserId: "u1" })).toHaveLength(0);
   });
 
   test("uses only explicit source message IDs and supports preserve, replace, and clear", async () => {

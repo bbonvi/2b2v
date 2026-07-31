@@ -87,20 +87,21 @@ describe("dashboard memory management", () => {
     db.raw
       .prepare(
         `INSERT INTO memories
-           (about_type, recall_scope, recall_guild_id, recall_mode, kind, content, confidence, priority, created_at, updated_at)
+           (about_type, recall_scope, recall_guild_id, recall_mode, kind, content, confidence, priority, important_until, created_at, updated_at)
          VALUES
-           ('community', 'guild', 'g1', 'always', 'fact', 'ordinary newer', 0.7, 0, 40, 40),
-           ('community', 'guild', 'g1', 'always', 'fact', 'important older', 0.7, 1, 20, 20),
-           ('community', 'guild', 'g1', 'always', 'fact', 'important newer', 0.7, 1, 30, 30)`
+           ('community', 'guild', 'g1', 'always', 'fact', 'ordinary newer', 0.7, 0, NULL, 40, 40),
+           ('community', 'guild', 'g1', 'always', 'fact', 'important older', 0.7, 1, NULL, 20, 20),
+           ('community', 'guild', 'g1', 'always', 'fact', 'important newer', 0.7, 1, NULL, 30, 30),
+           ('community', 'guild', 'g1', 'always', 'fact', 'ended priority', 0.7, 1, 1, 50, 50)`
       )
       .run();
 
     expect(listManagementMemories(db, { guildId: "g1" }).map((row) => row.content))
-      .toEqual(["important newer", "important older", "ordinary newer"]);
+      .toEqual(["important newer", "important older", "ended priority", "ordinary newer"]);
     expect(listManagementMemories(db, { guildId: "g1", important: true }).map((row) => row.content))
       .toEqual(["important newer", "important older"]);
     expect(listManagementMemories(db, { guildId: "g1", important: false }).map((row) => row.content))
-      .toEqual(["ordinary newer"]);
+      .toEqual(["ended priority", "ordinary newer"]);
   });
 
   test("filters by source channel, subject, applicability, kind, and lifecycle state", () => {

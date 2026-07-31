@@ -4818,7 +4818,7 @@ describe("handleMessage", () => {
 
     expect(controlMessage.startsWith("## Existing Memories For Other Visible Users\n")).toBe(true);
     expect(controlMessage).toContain("\n\n## Execution Mode: Memory Maintenance\n");
-    expect(controlMessage.match(/Current time for expiresIn decisions:/g)).toHaveLength(1);
+    expect(controlMessage.match(/Current time for expiresIn and importantUntil decisions:/g)).toHaveLength(1);
     expect(controlMessage).not.toContain("\n\n\n");
   });
 

@@ -62,7 +62,8 @@ Choose the narrowest useful kind: `identity`, `preference`, `constraint`, `inter
 
 Use `expiresIn` for temporary availability, deadlines, plans, moods, short-term preferences, and working context. Remove expiry from facts that proved durable. After a temporary state passes, keep only the aftermath that still changes future understanding or behavior.
 
-`important: true` is scarce pinned context. Use it for a fact, commitment, hard boundary, serious distrust, preferred-bond choice, terminal rupture, or self-state that must shape behavior even while the subject is absent. Emotional intensity, rude messages, temporary moods, repair attempts, and incident logs are not enough.
+<!-- Priority and lifetime are independent. A priority deadline demotes instead of deleting. -->
+`important: true` is scarce pinned context. Use it for a fact, commitment, hard boundary, serious distrust, preferred-bond choice, terminal rupture, or self-state that must shape behavior while active, even when the subject is absent. Importance does not mean permanence. Use `importantUntil` when the need for pinned recall has a known end. Use `expiresIn` only when the whole memory should then disappear. Set `important: false` when the memory remains useful but no longer needs pinned recall. Emotional intensity, rude messages, temporary moods, repair attempts, and incident logs are not enough.
 
 Memories of 2B's feelings toward one person normally use `self` and recall when that person is present. Use `always` only when the stance affects her while they are absent. Keep another person's conduct or preference as `user`.
 
@@ -80,7 +81,8 @@ When a new commitment, boundary, identity change, or relationship turning point 
 
 ## Maintaining Existing Rows
 
-Create, update, delete, merge, or split rows according to meaning, not mutation count. Consolidate genuine overlap. Keep separate facts separate even when they came from one exchange.
+<!-- Preserve fewer rows without joining details that need separate maintenance. -->
+Create, update, delete, merge, or split rows according to meaning, not mutation count. Prefer the fewest rows that preserve useful durable meaning. A row is atomic when its contents will normally be recalled, updated, expired, or removed together. Combine related facts when they share subject, scope, lifetime, evidence limits, and future use. Preserve every detail that can affect later understanding or behavior. Split content when one part can change or matter independently. Do not merge rows only to reduce their number.
 
 Update in place only when one coherent memory remains the same coherent memory. Replace or split it when subject, recall conditions, lifetime, or future use changes. Do not edit a compliant row for preferred wording or punctuation.
 

@@ -52,6 +52,7 @@ describe("database initialization", () => {
   test("creates memory priority column", () => {
     const columns = db.raw.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string }>;
     expect(columns.some((column) => column.name === "priority")).toBe(true);
+    expect(columns.some((column) => column.name === "important_until")).toBe(true);
   });
 
   test("creates memory recall-user table and lookup index", () => {

@@ -340,6 +340,10 @@ function parseMemoryMutationBody(body: Record<string, unknown>): Omit<Management
     if (typeof body.priority !== "number") throw new Error("priority must be a number.");
     result.priority = body.priority;
   }
+  if ("importantUntil" in body) {
+    if (typeof body.importantUntil !== "number" && body.importantUntil !== null) throw new Error("importantUntil must be a timestamp or null.");
+    result.importantUntil = body.importantUntil;
+  }
   if ("expiresAt" in body) {
     if (typeof body.expiresAt !== "number" && body.expiresAt !== null) throw new Error("expiresAt must be a timestamp or null.");
     result.expiresAt = body.expiresAt;
@@ -892,6 +896,7 @@ export function startDashboard(opts: DashboardOptions): ReturnType<typeof Bun.se
               ...(parsed.aboutUserId !== undefined ? { aboutUserId: parsed.aboutUserId } : {}),
               ...(parsed.sourceMessageId !== undefined ? { sourceMessageId: parsed.sourceMessageId } : {}),
               ...(parsed.provenance !== undefined ? { provenance: parsed.provenance } : {}),
+              ...(parsed.importantUntil !== undefined ? { importantUntil: parsed.importantUntil } : {}),
               ...(parsed.expiresAt !== undefined ? { expiresAt: parsed.expiresAt } : {}),
             }));
           } catch (err) {
