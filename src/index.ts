@@ -151,6 +151,7 @@ import {
   renderRelationshipMaintenanceContext,
   renderRelationshipPromptContext,
   selectRelationshipAnchorProfiles,
+  selectRelationshipContextProfiles,
   type RelationshipContextProfile,
   type RelationshipConfig,
   type RelationshipMutationResult,
@@ -2350,22 +2351,21 @@ function buildRelationshipPromptContext(input: {
   }
   const currentUserId = input.latestUserMessage.authorId;
   const current = getRelationshipProfile(db, currentUserId);
-  const anchorUserIds = new Set((input.anchors ?? []).map((entry) => entry.profile.userId));
-  const anchors = (input.anchors ?? [])
-    .filter((entry) => entry.profile.userId !== currentUserId)
+  const selected = selectRelationshipContextProfiles({
+    currentUserId,
+    anchors: input.anchors ?? [],
+    recent: input.visibleUserIds.map((userId): RelationshipContextProfile => ({
+      profile: getRelationshipProfile(db, userId),
+      label: input.resolveUserLabel(userId),
+      reason: "recent-chat",
+    })),
+  });
+  const anchors = selected.anchors
     .map((entry): RelationshipContextProfile => ({
       ...entry,
       events: listRelationshipEvents(db, { userId: entry.profile.userId, limit: 500 }),
     }));
-  const visible = input.visibleUserIds
-    .filter((userId) => userId !== currentUserId)
-    .map((userId): RelationshipContextProfile => ({
-      profile: getRelationshipProfile(db, userId),
-      label: input.resolveUserLabel(userId),
-      reason: "recent-chat",
-    }))
-    .filter((entry) => hasRelationshipData(entry.profile) && !anchorUserIds.has(entry.profile.userId))
-    .slice(0, 3)
+  const visible = selected.recent
     .map((entry): RelationshipContextProfile => ({
       ...entry,
       events: listRelationshipEvents(db, { userId: entry.profile.userId, limit: 500 }),
@@ -2748,21 +2748,36 @@ async function runRelationshipPostReplyExtraction(input: {
         onRelationshipResult: input.onResult,
       }));
   try {
-    const relationshipUserIds = [...new Set([
-      input.currentUserId,
-      ...(input.memoryRequest.context.visibleUserIds ?? []),
-    ])];
-    const relationshipState = renderRelationshipMaintenanceContext(
-      relationshipUserIds.map((userId) => ({
-        profile: getRelationshipProfile(db, userId),
-        label: userId === input.currentUserId
-          ? `@${input.currentUsername ?? userId} (${userId})`
-          : input.guild?.members.cache.get(userId)?.user.username !== undefined
-            ? `@${input.guild.members.cache.get(userId)?.user.username ?? userId} (${userId})`
-            : userId,
-        events: listRelationshipEvents(db, { userId, limit: 30 }),
-      })),
-    );
+    const relationshipLabel = (userId: string): string => {
+      if (userId === input.currentUserId) return `@${input.currentUsername ?? userId} (${userId})`;
+      const username = input.guild?.members.cache.get(userId)?.user.username;
+      return username === undefined ? userId : `@${username} (${userId})`;
+    };
+    const selected = selectRelationshipContextProfiles({
+      currentUserId: input.currentUserId,
+      anchors: selectRelationshipAnchorProfiles(listRelationshipProfiles(db, 500)).map(
+        (profile): RelationshipContextProfile => ({
+          profile,
+          label: relationshipLabel(profile.userId),
+          reason: "anchor",
+        }),
+      ),
+      recent: (input.memoryRequest.context.visibleUserIds ?? []).map(
+        (userId): RelationshipContextProfile => ({
+          profile: getRelationshipProfile(db, userId),
+          label: relationshipLabel(userId),
+          reason: "recent-chat",
+        }),
+      ),
+    });
+    const relationshipState = renderRelationshipMaintenanceContext({
+      current: {
+        profile: getRelationshipProfile(db, input.currentUserId),
+        label: relationshipLabel(input.currentUserId),
+        events: listRelationshipEvents(db, { userId: input.currentUserId, limit: 30 }),
+      },
+      others: [...selected.anchors, ...selected.recent],
+    });
     const executionMode = runtimeContextTemplate(
       "relationship-maintenance-execution-mode",
       { maxToolCalls: config.maxToolCalls },

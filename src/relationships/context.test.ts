@@ -7,6 +7,7 @@ import {
   renderRelationshipMaintenanceContext,
   renderRelationshipPromptContext,
   selectRelationshipAnchorProfiles,
+  selectRelationshipContextProfiles,
 } from "./context";
 
 function relationshipEvent(
@@ -45,6 +46,38 @@ describe("selectRelationshipAnchorProfiles", () => {
 
     expect(selectRelationshipAnchorProfiles([weak, tense, warm, broad]).map((profile) => profile.userId))
       .toEqual(["tense", "broad"]);
+  });
+});
+
+describe("selectRelationshipContextProfiles", () => {
+  test("keeps non-current anchors and three recent profiles with durable data", () => {
+    const current = emptyRelationshipProfile("current", 1);
+    current.axes.trust = 40;
+    const anchor = emptyRelationshipProfile("anchor", 2);
+    anchor.axes.warmth = 40;
+    const empty = emptyRelationshipProfile("empty", 3);
+    const recent = ["one", "two", "three", "four"].map((userId, index) => {
+      const profile = emptyRelationshipProfile(userId, index + 4);
+      profile.axes.familiarity = 1;
+      return { profile, label: userId, reason: "recent-chat" as const };
+    });
+
+    const selected = selectRelationshipContextProfiles({
+      currentUserId: current.userId,
+      anchors: [
+        { profile: current, label: "current", reason: "anchor" },
+        { profile: anchor, label: "anchor", reason: "anchor" },
+      ],
+      recent: [
+        { profile: current, label: "current", reason: "recent-chat" },
+        { profile: anchor, label: "anchor", reason: "recent-chat" },
+        { profile: empty, label: "empty", reason: "recent-chat" },
+        ...recent,
+      ],
+    });
+
+    expect(selected.anchors.map((entry) => entry.profile.userId)).toEqual(["anchor"]);
+    expect(selected.recent.map((entry) => entry.profile.userId)).toEqual(["one", "two", "three"]);
   });
 });
 
@@ -302,35 +335,44 @@ describe("renderRelationshipPromptContext", () => {
 });
 
 describe("renderRelationshipMaintenanceContext", () => {
-  test("renders rounded axes, complete active lists, and recent applied changes", () => {
+  test("keeps broad current state bounded and renders other people without their mutable details", () => {
     const profile = emptyRelationshipProfile("u1", 1);
     profile.axes.trust = 35;
-    profile.notes.push("one", "two");
-    profile.boundaries.push("exact boundary");
-    profile.openLoops.push("exact open matter");
+    profile.notes.push("old note", ...Array.from({ length: 20 }, (_value, index) => `note ${index}`));
+    profile.boundaries.push("old boundary", ...Array.from({ length: 15 }, (_value, index) => `boundary ${index}`));
+    profile.openLoops.push("old matter", ...Array.from({ length: 15 }, (_value, index) => `matter ${index}`));
+    const other = emptyRelationshipProfile("u2", 2);
+    other.axes.warmth = 20;
+    other.notes.push("other private note");
+    other.boundaries.push("other private boundary");
+    other.openLoops.push("other private matter");
+    const events = [
+      ...Array.from({ length: 15 }, (_value, index) =>
+        relationshipEvent(`event-${index}`, index, { trust: -1 }, `event summary ${index}`)
+      ),
+      relationshipEvent("old-event", 0, { trust: -1 }, "old event summary"),
+    ];
 
-    const rendered = renderRelationshipMaintenanceContext([{
-      profile,
-      label: "@alice (u1)",
-      events: [{
-        id: "event-1",
-        type: "relationship_signal",
-        at: 1,
-        source: "llm",
-        visibility: "relationship-private",
-        guildId: "g1",
-        channelId: "c1",
-        userId: "u1",
-        summary: "Trust dropped after a misread.",
-        payload: { appliedAxes: { trust: -40 } },
-        createdAt: 1,
-      }],
-    }]);
+    const rendered = renderRelationshipMaintenanceContext({
+      current: { profile, label: "@alice (u1)", events },
+      others: [{ profile: other, label: "@bob (u2)", reason: "anchor" }],
+    });
 
+    expect(rendered).toContain("### Current person\n@alice (u1)");
     expect(rendered).toContain("Raw durable axes: familiarity=0, trust=35");
-    expect(rendered).toContain('Active boundaries:\n- "exact boundary"');
-    expect(rendered).toContain('Open matters:\n- "exact open matter"');
-    expect(rendered).toContain("event-1: trust=-40; Trust dropped after a misread.");
+    expect(rendered).toContain('- "note 0"');
+    expect(rendered).not.toContain('"old note"');
+    expect(rendered).toContain('- "boundary 0"');
+    expect(rendered).not.toContain('"old boundary"');
+    expect(rendered).toContain('- "matter 0"');
+    expect(rendered).not.toContain('"old matter"');
+    expect(rendered).toContain("event-14: trust=-1; event summary 14");
+    expect(rendered).not.toContain("old-event");
+    expect(rendered).toContain("- @bob (u2) —");
+    expect(rendered).toContain("private values: familiarity=0, trust=0, warmth=20");
+    expect(rendered).not.toContain("other private note");
+    expect(rendered).not.toContain("other private boundary");
+    expect(rendered).not.toContain("other private matter");
   });
 });
 

@@ -14,6 +14,10 @@ const RELATIONSHIP_ANCHOR_MINIMUM_AXIS = 30;
 const RECENT_MOVEMENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const RECENT_MOVEMENT_MINIMUM = 5;
 const RECENT_MOVEMENT_MAX_CONTRIBUTORS = 3;
+const MAINTENANCE_NOTE_LIMIT = 20;
+const MAINTENANCE_BOUNDARY_LIMIT = 15;
+const MAINTENANCE_OPEN_MATTER_LIMIT = 15;
+const MAINTENANCE_EVENT_LIMIT = 15;
 
 interface RecentMovementContributor {
   event: RelationshipEvent;
@@ -63,6 +67,23 @@ export function selectRelationshipAnchorProfiles(
     })
     .slice(0, Math.max(0, limit))
     .map((entry) => entry.profile);
+}
+
+/** Apply the ordinary current-person, anchor, and recent-person relationship selection. */
+export function selectRelationshipContextProfiles(input: {
+  currentUserId: string;
+  anchors: readonly RelationshipContextProfile[];
+  recent: readonly RelationshipContextProfile[];
+  recentLimit?: number;
+}): { anchors: RelationshipContextProfile[]; recent: RelationshipContextProfile[] } {
+  const anchorUserIds = new Set(input.anchors.map((entry) => entry.profile.userId));
+  return {
+    anchors: input.anchors.filter((entry) => entry.profile.userId !== input.currentUserId),
+    recent: input.recent
+      .filter((entry) => entry.profile.userId !== input.currentUserId)
+      .filter((entry) => hasRelationshipData(entry.profile) && !anchorUserIds.has(entry.profile.userId))
+      .slice(0, Math.max(0, input.recentLimit ?? 3)),
+  };
 }
 
 function joinPromptItems(items: string[]): string {
@@ -169,36 +190,47 @@ function exactList(label: string, values: readonly string[]): string {
     : `${label}:\n${values.map((value) => `- ${JSON.stringify(value)}`).join("\n")}`;
 }
 
-/** Render complete mutable state and bounded audit evidence for relationship maintenance. */
-export function renderRelationshipMaintenanceContext(input: Array<{
-  profile: RelationshipProfile;
-  label: string;
-  events?: readonly RelationshipEvent[];
-}>): string {
+/** Render detailed current-user state and compact context for a few other relevant people. */
+export function renderRelationshipMaintenanceContext(input: {
+  current: {
+    profile: RelationshipProfile;
+    label: string;
+    events?: readonly RelationshipEvent[];
+  };
+  others?: readonly RelationshipContextProfile[];
+}): string {
+  const { profile, label, events = [] } = input.current;
+  const changes = events
+    .map((event) => {
+      const axes = relationshipEventAppliedAxes(event);
+      const rendered = RELATIONSHIP_AXES
+        .filter((axis) => axes[axis] !== undefined && axes[axis] !== 0)
+        .map((axis) => `${axis}=${axes[axis]}`)
+        .join(", ");
+      return rendered === "" ? "" : `- ${event.id}: ${rendered}; ${event.summary}`;
+    })
+    .filter((line) => line !== "")
+    .slice(0, MAINTENANCE_EVENT_LIMIT);
   return [
     "## Current Relationship State",
     "Values are rounded durable starting points. Quoted boundary and open-matter text must be copied exactly for removal or closure.",
-    ...input.map(({ profile, label, events = [] }) => {
-      const changes = events
-        .map((event) => {
-          const axes = relationshipEventAppliedAxes(event);
-          const rendered = RELATIONSHIP_AXES
-            .filter((axis) => axes[axis] !== undefined && axes[axis] !== 0)
-            .map((axis) => `${axis}=${axes[axis]}`)
-            .join(", ");
-          return rendered === "" ? "" : `- ${event.id}: ${rendered}; ${event.summary}`;
-        })
-        .filter((line) => line !== "")
-        .slice(0, 8);
-      return [
-        `### ${label}`,
-        `Raw durable axes: ${renderRelationshipAxisValues(profile)}`,
-        exactList("Active notes", profile.notes),
-        exactList("Active boundaries", profile.boundaries),
-        exactList("Open matters", profile.openLoops),
-        ...(changes.length === 0 ? [] : ["Recent applied axis changes:", ...changes]),
-      ].join("\n");
-    }),
+    [
+      "### Current person",
+      label,
+      `Raw durable axes: ${renderRelationshipAxisValues(profile)}`,
+      exactList("Active notes", profile.notes.slice(-MAINTENANCE_NOTE_LIMIT)),
+      exactList("Active boundaries", profile.boundaries.slice(-MAINTENANCE_BOUNDARY_LIMIT)),
+      exactList("Open matters", profile.openLoops.slice(-MAINTENANCE_OPEN_MATTER_LIMIT)),
+      ...(changes.length === 0 ? [] : ["Recent applied axis changes:", ...changes]),
+    ].join("\n"),
+    ...(input.others === undefined || input.others.length === 0
+      ? []
+      : [
+          "### Other relevant people",
+          ...input.others.map((entry) =>
+            `- ${entry.label} — ${shortPortrait(entry.profile)}; private values: ${renderRelationshipAxisValues(entry.profile)}.`
+          ),
+        ]),
   ].join("\n\n");
 }
 
