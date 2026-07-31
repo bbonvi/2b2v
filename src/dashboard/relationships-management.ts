@@ -43,6 +43,9 @@ function overview(db: Database, config: RelationshipConfig, selectedUserId?: str
     promptPreview: renderRelationshipPromptContext({
       current: selectedProfile ?? undefined,
       currentLabel: selectedUserId ?? selectedProfile?.userId ?? "no user selected",
+      currentEvents: selectedProfile === null
+        ? []
+        : listRelationshipEvents(db, { userId: selectedProfile.userId, limit: 500 }),
     }),
     config: {
       enabled: config.enabled,

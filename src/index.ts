@@ -2351,7 +2351,12 @@ function buildRelationshipPromptContext(input: {
   const currentUserId = input.latestUserMessage.authorId;
   const current = getRelationshipProfile(db, currentUserId);
   const anchorUserIds = new Set((input.anchors ?? []).map((entry) => entry.profile.userId));
-  const anchors = (input.anchors ?? []).filter((entry) => entry.profile.userId !== currentUserId);
+  const anchors = (input.anchors ?? [])
+    .filter((entry) => entry.profile.userId !== currentUserId)
+    .map((entry): RelationshipContextProfile => ({
+      ...entry,
+      events: listRelationshipEvents(db, { userId: entry.profile.userId, limit: 500 }),
+    }));
   const visible = input.visibleUserIds
     .filter((userId) => userId !== currentUserId)
     .map((userId): RelationshipContextProfile => ({
@@ -2360,10 +2365,15 @@ function buildRelationshipPromptContext(input: {
       reason: "recent-chat",
     }))
     .filter((entry) => hasRelationshipData(entry.profile) && !anchorUserIds.has(entry.profile.userId))
-    .slice(0, 3);
+    .slice(0, 3)
+    .map((entry): RelationshipContextProfile => ({
+      ...entry,
+      events: listRelationshipEvents(db, { userId: entry.profile.userId, limit: 500 }),
+    }));
   return renderRelationshipPromptContext({
     current,
     currentLabel: input.resolveUserLabel(currentUserId),
+    currentEvents: listRelationshipEvents(db, { userId: currentUserId, limit: 500 }),
     anchors,
     others: visible,
     priorExchanges: input.mode === "live" && input.botUserId !== undefined

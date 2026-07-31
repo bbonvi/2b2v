@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { emptyRelationshipProfile } from "./state";
+import type { RelationshipAxes, RelationshipEvent } from "./types";
 import {
   renderNotableRelationshipsContext,
   renderRelationshipAxisValues,
@@ -7,6 +8,27 @@ import {
   renderRelationshipPromptContext,
   selectRelationshipAnchorProfiles,
 } from "./context";
+
+function relationshipEvent(
+  id: string,
+  at: number,
+  axes: Partial<RelationshipAxes>,
+  summary = id,
+): RelationshipEvent {
+  return {
+    id,
+    type: "relationship_signal",
+    at,
+    source: "llm",
+    visibility: "relationship-private",
+    guildId: "g1",
+    channelId: "c1",
+    userId: "u1",
+    summary,
+    payload: { appliedAxes: axes },
+    createdAt: at,
+  };
+}
 
 describe("selectRelationshipAnchorProfiles", () => {
   test("selects strong positive, negative, and contradictory relationships by total salience", () => {
@@ -110,6 +132,103 @@ describe("renderRelationshipPromptContext", () => {
     expect(rendered).not.toContain("#### @recent / u3");
     expect(rendered.indexOf("#### People with lasting weight"))
       .toBeLessThan(rendered.indexOf("#### Others present or recently active"));
+  });
+
+  test("renders bounded seven-day movement for the current relationship", () => {
+    const day = 24 * 60 * 60 * 1000;
+    const now = 10 * day;
+    const current = emptyRelationshipProfile("u1", 1);
+    current.axes.trust = 20;
+    current.axes.warmth = 30;
+    const legacy = relationshipEvent("legacy", now - 3 * day, {}, "legacy warmth change");
+    legacy.payload = { axes: { warmth: 5 } };
+    const events = [
+      relationshipEvent("old", now - 8 * day, { trust: -50 }, "old event"),
+      relationshipEvent("smallest", now - day, { trust: -1 }, "smallest recent event"),
+      relationshipEvent("recovery", now - 2 * day, { trust: 2 }, "partial recovery"),
+      legacy,
+      relationshipEvent("medium", now - 4 * day, { trust: -4 }, "medium trust loss"),
+      relationshipEvent("largest", now - 5 * day, { trust: -5 }, "largest trust loss"),
+    ];
+
+    const rendered = renderRelationshipPromptContext({
+      current,
+      currentLabel: "@alice / u1",
+      currentEvents: events,
+      now,
+    });
+
+    expect(rendered).toContain("Recent notable movement for this relationship (last 7 days):");
+    expect(rendered).toContain("Across 5 recorded updates: trust -8, warmth +5.");
+    expect(rendered).toContain("Recorded interpretation: \"largest trust loss\"");
+    expect(rendered).toContain("Recorded interpretation: \"legacy warmth change\"");
+    expect(rendered).toContain("Recorded interpretation: \"medium trust loss\"");
+    expect(rendered).not.toContain("partial recovery");
+    expect(rendered).not.toContain("smallest recent event");
+    expect(rendered).not.toContain("old event");
+    expect(rendered).toContain("not facts or a demand to repeat an old reaction");
+  });
+
+  test("shows detailed movement for the first anchor and compact movement for other people", () => {
+    const day = 24 * 60 * 60 * 1000;
+    const now = 10 * day;
+    const current = emptyRelationshipProfile("u1", 1);
+    const firstAnchor = emptyRelationshipProfile("u2", 2);
+    firstAnchor.axes.warmth = 40;
+    const secondAnchor = emptyRelationshipProfile("u3", 3);
+    secondAnchor.axes.trust = 40;
+    const recent = emptyRelationshipProfile("u4", 4);
+    recent.axes.tension = 10;
+
+    const rendered = renderRelationshipPromptContext({
+      current,
+      currentLabel: "@current / u1",
+      anchors: [
+        {
+          profile: firstAnchor,
+          label: "@first / u2",
+          reason: "anchor",
+          events: [relationshipEvent("first", now - day, { warmth: 5 }, "first anchor change")],
+        },
+        {
+          profile: secondAnchor,
+          label: "@second / u3",
+          reason: "anchor",
+          events: [relationshipEvent("second", now - day, { trust: -5 }, "second anchor change")],
+        },
+      ],
+      others: [{
+        profile: recent,
+        label: "@recent / u4",
+        reason: "recent-chat",
+        events: [relationshipEvent("recent", now - day, { tension: 5 }, "recent user change")],
+      }],
+      now,
+    });
+
+    expect(rendered).toContain("Recent notable movement for @first / u2 (last 7 days):\nAcross 1 recorded update: warmth +5.");
+    expect(rendered).toContain("Recorded interpretation: \"first anchor change\"");
+    expect(rendered).toContain("Recent notable movement for @second / u3 (last 7 days): trust -5.");
+    expect(rendered).not.toContain("second anchor change");
+    expect(rendered).toContain("Recent notable movement for @recent / u4 (last 7 days): tension +5.");
+    expect(rendered).not.toContain("recent user change");
+  });
+
+  test("omits recent movement after opposite changes reduce the net below five", () => {
+    const now = 10_000;
+    const current = emptyRelationshipProfile("u1", 1);
+    const rendered = renderRelationshipPromptContext({
+      current,
+      currentLabel: "@alice / u1",
+      currentEvents: [
+        relationshipEvent("loss", 8_000, { trust: -5 }),
+        relationshipEvent("repair", 9_000, { trust: 4 }),
+      ],
+      now,
+    });
+
+    expect(rendered).not.toContain("Recent notable movement");
+    expect(rendered).not.toContain("Recorded interpretation");
   });
 
   test("renders neutral raw state for a new current user", () => {

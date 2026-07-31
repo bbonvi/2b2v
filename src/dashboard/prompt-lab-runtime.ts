@@ -24,7 +24,7 @@ import {
   type PromptLabRunResult,
 } from "./prompt-lab-types";
 import type { RelationshipConfig } from "../relationships";
-import { getRelationshipProfile, renderRelationshipPromptContext } from "../relationships";
+import { getRelationshipProfile, listRelationshipEvents, renderRelationshipPromptContext } from "../relationships";
 import type { RequestLogStore } from "./store";
 
 const PROMPT_LAB_READ_TOOL_NAMES = new Set([
@@ -164,6 +164,7 @@ export function createPromptLabRunner(input: {
     return renderRelationshipPromptContext({
       current: getRelationshipProfile(input.db, userId),
       currentLabel: userId,
+      currentEvents: listRelationshipEvents(input.db, { userId, limit: 500 }),
       template: input.getPromptBundle().runtime.relationships.context,
     });
   }

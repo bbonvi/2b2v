@@ -1,4 +1,5 @@
-import type { RelationshipEvent, RelationshipProfile } from "./types";
+import { formatRelativeAgo } from "../agent/history-dates";
+import type { RelationshipAxis, RelationshipEvent, RelationshipProfile } from "./types";
 import { RELATIONSHIP_AXES, relationshipEventAppliedAxes } from "./state";
 import { relationshipPortrait } from "./portrait";
 
@@ -6,9 +7,25 @@ export interface RelationshipContextProfile {
   profile: RelationshipProfile;
   label: string;
   reason: "recent-chat" | "high-score" | "anchor";
+  events?: readonly RelationshipEvent[];
 }
 
 const RELATIONSHIP_ANCHOR_MINIMUM_AXIS = 30;
+const RECENT_MOVEMENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const RECENT_MOVEMENT_MINIMUM = 5;
+const RECENT_MOVEMENT_MAX_CONTRIBUTORS = 3;
+
+interface RecentMovementContributor {
+  event: RelationshipEvent;
+  axes: Array<{ axis: RelationshipAxis; delta: number }>;
+  score: number;
+}
+
+interface RecentRelationshipMovement {
+  updateCount: number;
+  net: Array<{ axis: RelationshipAxis; delta: number }>;
+  contributors: RecentMovementContributor[];
+}
 
 function stripHeading(text: string): string {
   return text.trim().replace(/^#{1,6}\s+[^\n]*\n+/, "").trim();
@@ -53,6 +70,90 @@ function joinPromptItems(items: string[]): string {
     .map((item) => item.trim().replace(/[.;。；]+$/u, ""))
     .filter((item) => item !== "")
     .join("; ");
+}
+
+function roundedPromptNumber(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function signedAxisChange(axis: RelationshipAxis, delta: number): string {
+  const rounded = roundedPromptNumber(delta);
+  return `${axis} ${rounded > 0 ? "+" : ""}${rounded}`;
+}
+
+/** Derive bounded notable movement from recent immutable relationship events. */
+function recentRelationshipMovement(
+  events: readonly RelationshipEvent[],
+  now: number,
+): RecentRelationshipMovement | null {
+  const recent = events
+    .filter((event) => event.at >= now - RECENT_MOVEMENT_WINDOW_MS && event.at <= now)
+    .map((event) => ({
+      event,
+      axes: RELATIONSHIP_AXES.flatMap((axis) => {
+        const delta = relationshipEventAppliedAxes(event)[axis];
+        return delta !== undefined && Number.isFinite(delta) && delta !== 0
+          ? [{ axis, delta }]
+          : [];
+      }),
+    }))
+    .filter((entry) => entry.axes.length > 0);
+  if (recent.length === 0) return null;
+
+  const totals = new Map<RelationshipAxis, number>();
+  for (const entry of recent) {
+    for (const { axis, delta } of entry.axes) {
+      totals.set(axis, (totals.get(axis) ?? 0) + delta);
+    }
+  }
+  const net = RELATIONSHIP_AXES
+    .flatMap((axis) => {
+      const delta = roundedPromptNumber(totals.get(axis) ?? 0);
+      return Math.abs(delta) >= RECENT_MOVEMENT_MINIMUM ? [{ axis, delta }] : [];
+    });
+  if (net.length === 0) return null;
+
+  const notableAxes = new Set(net.map(({ axis }) => axis));
+  const contributors = recent
+    .map(({ event, axes }) => {
+      const relevantAxes = axes.filter(({ axis }) => notableAxes.has(axis));
+      return {
+        event,
+        axes: relevantAxes,
+        score: relevantAxes.reduce((sum, { delta }) => sum + Math.abs(delta), 0),
+      };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => {
+      const scoreDifference = right.score - left.score;
+      return scoreDifference !== 0 ? scoreDifference : right.event.at - left.event.at;
+    })
+    .slice(0, RECENT_MOVEMENT_MAX_CONTRIBUTORS);
+
+  return { updateCount: recent.length, net, contributors };
+}
+
+function renderRecentRelationshipMovement(
+  events: readonly RelationshipEvent[],
+  now: number,
+  subject: string,
+  detailed: boolean,
+): string {
+  const movement = recentRelationshipMovement(events, now);
+  if (movement === null) return "";
+  const net = movement.net.map(({ axis, delta }) => signedAxisChange(axis, delta)).join(", ");
+  if (!detailed) return `Recent notable movement for ${subject} (last 7 days): ${net}.`;
+  const updates = movement.updateCount === 1 ? "update" : "updates";
+  return [
+    `Recent notable movement for ${subject} (last 7 days):`,
+    `Across ${movement.updateCount} recorded ${updates}: ${net}.`,
+    "Largest recorded changes:",
+    ...movement.contributors.map(({ event, axes }) =>
+      `- ${formatRelativeAgo(event.at, now)}: ${axes.map(({ axis, delta }) => signedAxisChange(axis, delta)).join(", ")}. Recorded interpretation: ${JSON.stringify(event.summary.trim().slice(0, 300))}`
+    ),
+    // This prevents old maintenance judgments from becoming a fresh reaction mandate.
+    "These are prior maintenance interpretations, not facts or a demand to repeat an old reaction. Current durable values remain authoritative. If present evidence clearly resolves their basis, let that repair matter now; durable state can catch up separately.",
+  ].join("\n");
 }
 
 /** Render compact rounded axis values for model context. */
@@ -117,15 +218,22 @@ function durableDetailLines(profile: RelationshipProfile): string[] {
   ].filter((line) => line !== "");
 }
 
-function compactProfileLine(entry: RelationshipContextProfile): string {
+function compactProfileLine(
+  entry: RelationshipContextProfile,
+  now?: number,
+  detailedMovement = false,
+): string {
   const notes = entry.profile.notes.at(-1);
   const loop = entry.profile.openLoops.at(-1);
   const detail = notes ?? (loop !== undefined ? `unresolved: ${loop}` : undefined);
-  return `- ${entry.label} — ${joinPromptItems([
+  const profile = `- ${entry.label} — ${joinPromptItems([
     shortPortrait(entry.profile),
     `private values: ${renderRelationshipAxisValues(entry.profile)}`,
     ...(detail !== undefined ? [detail] : []),
   ])}.`;
+  if (now === undefined || entry.events === undefined) return profile;
+  const movement = renderRecentRelationshipMovement(entry.events, now, entry.label, detailedMovement);
+  return movement === "" ? profile : `${profile}\n${movement}`;
 }
 
 function fullProfileBlock(entry: RelationshipContextProfile): string {
@@ -141,7 +249,12 @@ function fullProfileBlock(entry: RelationshipContextProfile): string {
   ].filter((line) => line !== "").join("\n");
 }
 
-function currentProfileBlock(profile: RelationshipProfile | undefined, label: string): string {
+function currentProfileBlock(
+  profile: RelationshipProfile | undefined,
+  label: string,
+  events: readonly RelationshipEvent[],
+  now: number,
+): string {
   if (profile === undefined) {
     return [
       "---",
@@ -161,6 +274,7 @@ function currentProfileBlock(profile: RelationshipProfile | undefined, label: st
     "Private reference values:",
     renderRelationshipAxisValues(profile),
     ...(details.length > 0 ? ["Durable details:", ...details] : []),
+    renderRecentRelationshipMovement(events, now, "this relationship", true),
     !hasRelationshipData(profile) ? "No durable relationship changes are stored yet." : "",
   ].filter((line) => line !== "").join("\n\n");
 }
@@ -168,15 +282,16 @@ function currentProfileBlock(profile: RelationshipProfile | undefined, label: st
 function otherPeopleBlock(
   anchors: readonly RelationshipContextProfile[],
   others: readonly RelationshipContextProfile[],
+  now?: number,
 ): string {
   if (anchors.length === 0 && others.length === 0) return "";
   return [
     "---",
     "### Other relevant people",
     anchors.length > 0 ? "#### People with lasting weight" : "",
-    ...anchors.map(compactProfileLine),
+    ...anchors.map((entry, index) => compactProfileLine(entry, now, index === 0)),
     others.length > 0 ? "#### Others present or recently active" : "",
-    ...others.map(compactProfileLine),
+    ...others.map((entry) => compactProfileLine(entry, now)),
   ].filter((line) => line !== "").join("\n\n");
 }
 
@@ -197,7 +312,7 @@ export function renderNotableRelationshipsContext(input: {
     input.full.length > 0 ? "### People with lasting weight" : "",
     ...input.full.map(fullProfileBlock),
     input.compact.length > 0 ? "### Other known people" : "",
-    ...input.compact.map(compactProfileLine),
+    ...input.compact.map((entry) => compactProfileLine(entry)),
   ].filter((line) => line !== "").join("\n\n");
 }
 
@@ -209,12 +324,15 @@ export function renderRelationshipPromptContext(input: {
   priorExchanges?: string;
   template?: string;
   includeCurrent?: boolean;
+  currentEvents?: readonly RelationshipEvent[];
+  now?: number;
 }): string {
   const policy = input.template !== undefined && input.template.trim() !== ""
     ? stripHeading(input.template)
     : "Relationship state is private durable context. Use it quietly as background stance.";
   const includeCurrent = input.includeCurrent ?? true;
-  const otherPeople = otherPeopleBlock(input.anchors ?? [], input.others ?? []);
+  const now = input.now ?? Date.now();
+  const otherPeople = otherPeopleBlock(input.anchors ?? [], input.others ?? [], now);
   if (!includeCurrent) {
     if (otherPeople === "") return "";
     return [
@@ -226,7 +344,7 @@ export function renderRelationshipPromptContext(input: {
   return [
     "## Relationships",
     policy,
-    currentProfileBlock(input.current, input.currentLabel),
+    currentProfileBlock(input.current, input.currentLabel, input.currentEvents ?? [], now),
     input.priorExchanges ?? "",
     otherPeople,
   ].filter((line) => line !== "").join("\n\n");
