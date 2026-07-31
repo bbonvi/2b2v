@@ -14,7 +14,12 @@ function config(maxAxisDeltaPerSignal = 200): RelationshipConfig {
     modelProfile: "main",
     enabled: true,
     promptInjection: true,
-    priorExchanges: false,
+    priorExchanges: {
+      enabled: false,
+      maxExchanges: 6,
+      maxMessageChars: 700,
+      refreshMinutes: 60,
+    },
     maxAxisDeltaPerSignal,
     maxToolCalls: 5,
   };

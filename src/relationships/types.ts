@@ -73,9 +73,18 @@ export interface RelationshipConfig {
   modelProfile: string;
   enabled: boolean;
   promptInjection: boolean;
-  priorExchanges: boolean;
+  priorExchanges: PriorExchangesConfig;
   maxAxisDeltaPerSignal: number;
   maxToolCalls: number;
 }
 
-export type RelationshipConfigYaml = Partial<RelationshipConfig>;
+export interface PriorExchangesConfig {
+  enabled: boolean;
+  maxExchanges: number;
+  maxMessageChars: number;
+  refreshMinutes: number;
+}
+
+export type RelationshipConfigYaml = Partial<Omit<RelationshipConfig, "priorExchanges">> & {
+  priorExchanges?: Partial<PriorExchangesConfig>;
+};

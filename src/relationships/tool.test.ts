@@ -14,7 +14,12 @@ function config(): RelationshipConfig {
     modelProfile: "main",
     enabled: true,
     promptInjection: true,
-    priorExchanges: false,
+    priorExchanges: {
+      enabled: false,
+      maxExchanges: 6,
+      maxMessageChars: 700,
+      refreshMinutes: 60,
+    },
     maxAxisDeltaPerSignal: 4,
     maxToolCalls: 5,
   };

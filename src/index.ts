@@ -2379,12 +2379,15 @@ function buildRelationshipPromptContext(input: {
     priorExchanges: input.mode === "live" && input.botUserId !== undefined
       ? buildPriorExchangesContext({
           db,
-          enabled: config.priorExchanges,
+          enabled: config.priorExchanges.enabled,
           profile: current,
           botUserId: input.botUserId,
           currentUserId,
           currentGuildId: input.currentGuildId,
           currentChannelId: input.currentChannelId,
+          maxExchanges: config.priorExchanges.maxExchanges,
+          maxMessageChars: config.priorExchanges.maxMessageChars,
+          refreshMinutes: config.priorExchanges.refreshMinutes,
         })
       : "",
     template: promptBundle.runtime.relationships.context,

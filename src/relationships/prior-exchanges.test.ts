@@ -9,7 +9,12 @@ const config: RelationshipConfig = {
   modelProfile: "main",
   enabled: true,
   promptInjection: true,
-  priorExchanges: false,
+  priorExchanges: {
+    enabled: false,
+    maxExchanges: 6,
+    maxMessageChars: 700,
+    refreshMinutes: 60,
+  },
   maxAxisDeltaPerSignal: 200,
   maxToolCalls: 5,
 };
@@ -127,6 +132,9 @@ describe("prior exchanges context", () => {
       currentUserId: "u1",
       currentGuildId: "g1",
       currentChannelId: "current",
+      maxExchanges: 6,
+      maxMessageChars: 700,
+      refreshMinutes: 60,
     };
     const first = buildPriorExchangesContext({ ...base, now: 1 });
     const sameHour = buildPriorExchangesContext({ ...base, now: 30 * 60 * 1_000 });
@@ -142,6 +150,15 @@ describe("prior exchanges context", () => {
     expect(first).not.toContain("do not include");
     expect(first).not.toContain("already in current history");
     expect((first.match(/^User:/gmu) ?? [])).toHaveLength(6);
+
+    const bounded = buildPriorExchangesContext({
+      ...base,
+      maxExchanges: 2,
+      maxMessageChars: 8,
+      now: 1,
+    });
+    expect((bounded.match(/^User:/gmu) ?? [])).toHaveLength(2);
+    expect(bounded).toContain("User: linked …");
     db.close();
   });
 });

@@ -1078,10 +1078,24 @@ function resolveRelationshipConfig(
     modelProfile: partial?.modelProfile ?? base.modelProfile,
     enabled: partial?.enabled ?? base.enabled,
     promptInjection: partial?.promptInjection ?? base.promptInjection,
-    priorExchanges: partial?.priorExchanges ?? base.priorExchanges,
+    priorExchanges: {
+      enabled: partial?.priorExchanges?.enabled ?? base.priorExchanges.enabled,
+      maxExchanges: partial?.priorExchanges?.maxExchanges ?? base.priorExchanges.maxExchanges,
+      maxMessageChars: partial?.priorExchanges?.maxMessageChars ?? base.priorExchanges.maxMessageChars,
+      refreshMinutes: partial?.priorExchanges?.refreshMinutes ?? base.priorExchanges.refreshMinutes,
+    },
     maxAxisDeltaPerSignal: partial?.maxAxisDeltaPerSignal ?? base.maxAxisDeltaPerSignal,
     maxToolCalls: partial?.maxToolCalls ?? base.maxToolCalls,
   };
+  if (!Number.isInteger(resolved.priorExchanges.maxExchanges) || resolved.priorExchanges.maxExchanges < 1) {
+    throw new Error("relationships.priorExchanges.maxExchanges must be >= 1");
+  }
+  if (!Number.isInteger(resolved.priorExchanges.maxMessageChars) || resolved.priorExchanges.maxMessageChars < 1) {
+    throw new Error("relationships.priorExchanges.maxMessageChars must be >= 1");
+  }
+  if (!Number.isInteger(resolved.priorExchanges.refreshMinutes) || resolved.priorExchanges.refreshMinutes < 1) {
+    throw new Error("relationships.priorExchanges.refreshMinutes must be >= 1");
+  }
   if (!Number.isFinite(resolved.maxAxisDeltaPerSignal) || resolved.maxAxisDeltaPerSignal < 0) {
     throw new Error("relationships.maxAxisDeltaPerSignal must be >= 0");
   }

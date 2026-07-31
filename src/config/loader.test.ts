@@ -147,7 +147,12 @@ describe("model profile resolution", () => {
       maxMessages: 15,
       maxChars: 10_000,
     });
-    expect(config.defaultRelationships?.priorExchanges).toBe(false);
+    expect(config.defaultRelationships?.priorExchanges).toEqual({
+      enabled: false,
+      maxExchanges: 6,
+      maxMessageChars: 700,
+      refreshMinutes: 60,
+    });
     expect(config.defaultVoice?.playback.volume).toBe(1);
   });
 
@@ -175,6 +180,16 @@ describe("model profile resolution", () => {
     ].join("\n")))).toThrow("repertoire.maxMessages must be a positive integer");
   });
 
+  test("validates prior-exchange limits", () => {
+    for (const field of ["maxExchanges", "maxMessageChars", "refreshMinutes"]) {
+      expect(() => loadGlobalConfig(BASE_ENV, writeConfig([
+        "relationships:",
+        "  priorExchanges:",
+        `    ${field}: 0`,
+      ].join("\n")))).toThrow(`relationships.priorExchanges.${field} must be >= 1`);
+    }
+  });
+
   test("resolves complete per-workload profiles and voice maintenance references", () => {
     const config = loadGlobalConfig(BASE_ENV, writeConfig([
       "modelProfiles:",
@@ -196,7 +211,11 @@ describe("model profile resolution", () => {
       "  modelProfile: main",
       "relationships:",
       "  modelProfile: main",
-      "  priorExchanges: true",
+      "  priorExchanges:",
+      "    enabled: true",
+      "    maxExchanges: 4",
+      "    maxMessageChars: 500",
+      "    refreshMinutes: 30",
       "innerThreads:",
       "  modelProfile: fast",
       "privateLife:",
@@ -235,7 +254,12 @@ describe("model profile resolution", () => {
       everySegments: 80,
     });
     expect(config.defaultInnerThreads?.modelProfile).toBe("fast");
-    expect(config.defaultRelationships?.priorExchanges).toBe(true);
+    expect(config.defaultRelationships?.priorExchanges).toEqual({
+      enabled: true,
+      maxExchanges: 4,
+      maxMessageChars: 500,
+      refreshMinutes: 30,
+    });
     expect(config.privateLife?.maintenance.modelProfile).toBe("fast");
     expect(config.defaultAmbientAttention?.evaluator.modelProfile).toBe("fast");
   });

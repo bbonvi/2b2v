@@ -4,7 +4,12 @@ import type { JSX } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { CSSProperties } from "react";
-import type { RelationshipAxis, RelationshipEvent, RelationshipProfile } from "../relationships/types";
+import type {
+  PriorExchangesConfig,
+  RelationshipAxis,
+  RelationshipEvent,
+  RelationshipProfile,
+} from "../relationships/types";
 import { RELATIONSHIP_AXES } from "../relationships/state";
 
 const INVERTED_AXES = new Set<RelationshipAxis>(["tension"]);
@@ -26,7 +31,7 @@ interface Overview {
   config: {
     enabled: boolean;
     promptInjection: boolean;
-    priorExchanges: boolean;
+    priorExchanges: PriorExchangesConfig;
     maxAxisDeltaPerSignal: number;
   };
 }
@@ -145,7 +150,7 @@ function RelationshipsLab(): JSX.Element {
             </select>
           </div>
           <div className="relationships-row"><div className="relationships-label">Post-reply pass</div><div className="relationships-value">main model</div></div>
-          <div className="relationships-row"><div className="relationships-label">Earlier exchanges</div><div className="relationships-value">{overview.config.priorExchanges ? "on" : "off"}</div></div>
+          <div className="relationships-row"><div className="relationships-label">Earlier exchanges</div><div className="relationships-value">{overview.config.priorExchanges.enabled ? `${overview.config.priorExchanges.maxExchanges} exchanges` : "off"}</div></div>
           <div className="relationships-row"><div className="relationships-label">Max axis delta</div><div className="relationships-value">{overview.config.maxAxisDeltaPerSignal}</div></div>
           <div className="relationships-actions">
             <button className="btn danger" disabled={busy} onClick={() => void reset()}>Reset</button>

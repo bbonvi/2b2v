@@ -29,15 +29,15 @@ export interface PriorExchangesContextInput {
   currentUserId: string;
   currentGuildId: string;
   currentChannelId: string;
+  maxExchanges: number;
+  maxMessageChars: number;
+  refreshMinutes: number;
   now?: number;
 }
 
 const POSITIVE_GROWTH_AXES = RELATIONSHIP_AXES.filter(
   (axis) => axis !== "tension",
 );
-const MAX_EXCHANGES = 6;
-const MAX_MESSAGE_CHARS = 700;
-
 function growthAxis(event: RelationshipEvent): RelationshipAxis | undefined {
   const axes = relationshipEventAppliedAxes(event);
   return RELATIONSHIP_AXES
@@ -131,16 +131,25 @@ function ordinaryExchanges(input: PriorExchangesContextInput): PriorExchange[] {
 }
 
 function score(exchange: PriorExchange, input: PriorExchangesContextInput): string {
-  const hour = Math.floor((input.now ?? Date.now()) / (60 * 60 * 1_000));
+  // Match repertoire's target-stable ordering; timed rotation changes the slice without rerolling it.
   return createHash("sha256")
-    .update(`${input.currentUserId}:${hour}:${exchange.cueId}`)
+    .update(`${input.botUserId}:${input.currentChannelId}:${exchange.cueId}`)
     .digest("hex");
 }
 
+function rotatingOrder(
+  exchanges: readonly PriorExchange[],
+  input: PriorExchangesContextInput,
+): PriorExchange[] {
+  const ordered = [...exchanges].sort((left, right) => score(left, input).localeCompare(score(right, input)));
+  if (ordered.length === 0) return ordered;
+  const rotation = Math.floor((input.now ?? Date.now()) / (input.refreshMinutes * 60 * 1_000));
+  const start = rotation * input.maxExchanges % ordered.length;
+  return [...ordered.slice(start), ...ordered.slice(0, start)];
+}
+
 function selectExchanges(input: PriorExchangesContextInput): PriorExchange[] {
-  const order = (left: PriorExchange, right: PriorExchange): number =>
-    score(left, input).localeCompare(score(right, input));
-  const linked = linkedExchanges(input).sort(order);
+  const linked = rotatingOrder(linkedExchanges(input), input);
   const diverse: PriorExchange[] = [];
   const seenAxes = new Set<RelationshipAxis>();
   for (const exchange of linked) {
@@ -151,19 +160,20 @@ function selectExchanges(input: PriorExchangesContextInput): PriorExchange[] {
   const linkedIds = new Set(diverse.map((exchange) => exchange.cueId));
   const remainingLinked = linked.filter((exchange) => !linkedIds.has(exchange.cueId));
   const usedIds = new Set(linked.map((exchange) => exchange.cueId));
-  const ordinary = ordinaryExchanges(input)
-    .filter((exchange) => !usedIds.has(exchange.cueId))
-    .sort(order);
-  return [...diverse, ...remainingLinked, ...ordinary].slice(0, MAX_EXCHANGES);
+  const ordinary = rotatingOrder(
+    ordinaryExchanges(input).filter((exchange) => !usedIds.has(exchange.cueId)),
+    input,
+  );
+  return [...diverse, ...remainingLinked, ...ordinary].slice(0, input.maxExchanges);
 }
 
-function content(text: string, foreignGuild: boolean): string {
+function content(text: string, foreignGuild: boolean, maxChars: number): string {
   const normalized = foreignGuild
     ? text.replace(/<a?:([A-Za-z0-9_]+):\d+>/g, ":$1:")
     : text;
-  return normalized.length <= MAX_MESSAGE_CHARS
+  return normalized.length <= maxChars
     ? normalized
-    : `${normalized.slice(0, MAX_MESSAGE_CHARS - 1)}…`;
+    : `${normalized.slice(0, Math.max(0, maxChars - 1))}…`;
 }
 
 /** Render deterministic same-user cross-room examples in volatile actor context. */
@@ -177,8 +187,8 @@ export function buildPriorExchangesContext(input: PriorExchangesContextInput): s
     ...exchanges.map((exchange) => {
       const foreignGuild = exchange.guildId !== input.currentGuildId;
       return [
-        `User: ${content(exchange.cue, foreignGuild)}`,
-        `2B: ${content(exchange.response, foreignGuild)}`,
+        `User: ${content(exchange.cue, foreignGuild, input.maxMessageChars)}`,
+        `2B: ${content(exchange.response, foreignGuild, input.maxMessageChars)}`,
       ].join("\n");
     }),
   ].join("\n\n");

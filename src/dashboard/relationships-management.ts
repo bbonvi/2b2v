@@ -27,7 +27,7 @@ export interface RelationshipsOverview {
   config: {
     enabled: boolean;
     promptInjection: boolean;
-    priorExchanges: boolean;
+    priorExchanges: RelationshipConfig["priorExchanges"];
     maxAxisDeltaPerSignal: number;
   };
 }
