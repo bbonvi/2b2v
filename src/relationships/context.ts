@@ -283,7 +283,6 @@ function otherPeopleBlock(
 ): string {
   if (anchors.length === 0 && others.length === 0) return "";
   return [
-    "---",
     "### Other relevant people",
     anchors.length > 0 ? "#### People with lasting weight" : "",
     ...anchors.map((entry, index) => compactProfileLine(entry, now, index === 0)),

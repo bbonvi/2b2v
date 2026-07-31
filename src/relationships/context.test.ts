@@ -90,7 +90,8 @@ describe("renderRelationshipPromptContext", () => {
     expect(rendered).toContain("#### Others present or recently active");
     expect(rendered).toContain("- @bob / u2 —");
     expect(rendered).toContain("private values:");
-    expect((rendered.match(/^---$/gmu) ?? [])).toHaveLength(1);
+    expect(rendered).not.toContain("\n\n---\n\n### Other relevant people");
+    expect((rendered.match(/^---$/gmu) ?? [])).toHaveLength(0);
     expect(rendered).not.toContain("Recent signals:");
     expect(rendered).not.toContain("first signal");
     expect(rendered).not.toContain(".;");
