@@ -316,6 +316,11 @@ function createMessageSearchIndexes(raw: BunDatabase): void {
     "idx_messages_time",
     "CREATE INDEX idx_messages_time ON messages(created_at DESC, id DESC)",
   );
+  ensureIndex(
+    raw,
+    "idx_messages_user_bot_time",
+    "CREATE INDEX idx_messages_user_bot_time ON messages(user_id, is_bot, created_at DESC, id DESC)",
+  );
 }
 
 function messageAssetsSupportLinks(raw: BunDatabase): boolean {

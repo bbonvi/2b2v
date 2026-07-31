@@ -251,6 +251,9 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_messages_user_guild
     ON messages(user_id, guild_id);
 
+  CREATE INDEX IF NOT EXISTS idx_messages_user_bot_time
+    ON messages(user_id, is_bot, created_at DESC, id DESC);
+
   CREATE TABLE IF NOT EXISTS dice_rolls (
     id                   TEXT PRIMARY KEY,
     request_key          TEXT NOT NULL UNIQUE,

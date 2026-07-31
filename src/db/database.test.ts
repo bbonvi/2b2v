@@ -777,6 +777,18 @@ describe("messages table", () => {
       .get() as { name: string } | undefined;
     expect(idx?.name).toBe("idx_messages_user_guild");
   });
+
+  test("user-time index serves recent per-user scans without a temporary sort", () => {
+    const plan = db.raw
+      .prepare(`EXPLAIN QUERY PLAN
+        SELECT id FROM messages
+        WHERE user_id = ? AND is_bot = 0
+        ORDER BY created_at DESC, id DESC
+        LIMIT 100`)
+      .all("u1") as Array<{ detail: string }>;
+    expect(plan.some((step) => step.detail.includes("idx_messages_user_bot_time"))).toBe(true);
+    expect(plan.some((step) => step.detail.includes("TEMP B-TREE"))).toBe(false);
+  });
 });
 
 
