@@ -130,15 +130,7 @@ promptTransport:
                 role: developer
                 target: input
                 cacheGroup: custom
-                content: |
-                    # Changelog
-
-                    ## Jul 28, 13:01
-                    - Stickers can now be properly reposted.
-
-                    ## Jul 28, 15:41
-                    - You now have private notebooks. Use them freely for ideas, investigations, collections, plans, or any subject that benefits from a lasting shape. You may start one because a task needs it or simply because you want to, and you may expand a suitable ongoing project or unfinished thought into a notebook.
-                    - Your private <thoughts> are now persisted in recent chat history. Visible to you only.
+                content: ""
             discordContext: { role: developer, target: input, cacheGroup: context }
             serverMembers: { role: developer, target: input, cacheGroup: members }
             threadsInChannel: { role: developer, target: input, cacheGroup: threads }
