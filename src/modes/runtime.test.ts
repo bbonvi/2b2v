@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "../db/database.ts";
-import { createPersonaModeRuntime, type PersonaModeLogger, type PersonaModePresentationAdapter } from "./runtime.ts";
+import type { PersonaModeLogger } from "./context-runtime.ts";
+import { createPersonaModeRuntime, type PersonaModePresentationAdapter } from "./runtime.ts";
 import type { PersonaMode, PersonaModeAvatarCandidate, PersonaModesConfig } from "./types.ts";
 
 const databases: Database[] = [];

@@ -8,13 +8,15 @@ import {
   buildCodexHeaders,
   buildCodexImageRequestBody,
   buildCodexResponsesImageHeaders,
-  calculate4kImageSize,
   codexImageFailureMessageForAgent,
-  createCodexGenerateImageTool,
-  infer4kAspectRatio,
   parseCodexDirectImageResponse,
   parseCodexImageSse,
-} from "./codex-image-tool.ts";
+} from "./codex-image-client.ts";
+import {
+  calculate4kImageSize,
+  infer4kAspectRatio,
+} from "./codex-image-size.ts";
+import { createCodexGenerateImageTool } from "./codex-image-tool.ts";
 import type { ImageReference } from "./job-runtime.ts";
 
 function sseResponse(events: unknown[]): Response {

@@ -1,7 +1,7 @@
 import type { HistoryMessage } from "./history-types";
 import { isActiveJobStatus, type AgentJob, type ImageGenerationJobInput, type ImageReference } from "./job-runtime";
 import type { GeneratedImageAttachment } from "./codex-image-tool";
-import type { OutboundAttachment } from "./handler";
+import type { OutboundAttachment } from "./turn-types";
 import { formatFileSize } from "./format-file-size.ts";
 
 export const DEFAULT_CODEX_IMAGE_ROUTER_MODEL = "gpt-5.2";

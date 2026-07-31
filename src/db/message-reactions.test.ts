@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { createDatabase, type Database } from "./database";
-import { getContextHistoryMessages } from "./message-repository";
+import { getContextHistoryMessages } from "./message-history-repository";
 import { deleteMessageEmojiReaction, deleteMessageReactions, upsertMessageReaction } from "./message-reactions";
 import type { TrimConfig } from "../config/types";
 

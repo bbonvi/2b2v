@@ -1,7 +1,8 @@
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Client, Guild } from "discord.js";
 import type { AssembledContext } from "../agent/context-assembly";
-import { handleMessage, type HandlerDeps, type IncomingMessage, type MessageSender } from "../agent/handler";
+import { handleMessage } from "../agent/handler";
+import type { HandlerDeps, IncomingMessage, MessageSender } from "../agent/turn-types";
 import type { HistoryMessage } from "../agent/history-types";
 import type { ReplyFallbackDeps } from "../agent/reply-target-fallback";
 import { createCloseThreadTool, createStartThreadTool } from "../agent/start-thread-tool";

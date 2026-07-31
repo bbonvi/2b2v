@@ -1,4 +1,4 @@
-import type { AssetAttachmentResolver, OutboundAttachment } from "./handler.ts";
+import type { AssetAttachmentResolver, OutboundAttachment } from "./turn-types.ts";
 import type { Database } from "../db/database.ts";
 import type { Logger } from "../logger.ts";
 import { getAssetById } from "../db/asset-repository.ts";

@@ -6,12 +6,12 @@ import {
   findMessageSearchCandidates,
   getMessageSearchCursor,
   getMessageSearchMatchesByIds,
-  getHistoryMessagesByIds,
   type MessageSearchCursor,
   type SearchMessageCandidatesFilter,
   type SearchMessageCandidate,
   type SearchMessageMatch,
-} from "../db/message-repository.ts";
+} from "../db/message-search-repository.ts";
+import { getHistoryMessagesByIds } from "../db/message-history-repository.ts";
 import type { Logger } from "../logger.ts";
 import { formatLocalWallClock, parseLocalDateBoundaryToEpoch } from "../time/agent-time.ts";
 import { AssetIdSchema, parseAssetId } from "./asset-id.ts";

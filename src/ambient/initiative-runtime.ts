@@ -13,7 +13,7 @@ import type {
   IncomingMessage,
   MemoryExtractionRequest,
   MessageSender,
-} from "../agent/handler";
+} from "../agent/turn-types";
 import { handleMessage } from "../agent/handler";
 import type { HistoryMessage } from "../agent/history-types";
 import type { GeneratedImageAttachment } from "../agent/codex-image-tool";
@@ -28,15 +28,11 @@ import type {
   SendableGuildChannel,
 } from "../discord/message-sender";
 import {
-  botChannelPermissions,
   channelDisplayName,
   createTargetChannelResolver,
-  isSendableGuildChannel,
 } from "../discord/message-sender";
-import { getHistoryMessages } from "../db/message-repository";
+import { getHistoryMessages } from "../db/message-history-repository";
 import { listApplicableInnerThreads } from "../db/inner-thread-repository";
-import { formatHistoryContent } from "../agent/history-formatting";
-import { formatLocalWallClock } from "../time/agent-time";
 import {
   buildModelProfileStreamOptions,
   resolveModelProfile,
@@ -47,6 +43,20 @@ import { createStoredAssetAttachmentResolver } from "../agent/stored-asset-attac
 import { createDiscordAssetSourceResolver } from "../discord/asset-resolver";
 import { DEFAULT_ASSET_READING } from "../config/defaults";
 import { renderPromptTemplate } from "../config/prompt-template";
+import {
+  ambientInitiativeMemoryFocusUserId,
+  calculateAmbientInitiativePressure,
+  clampAmbientInitiativeValue,
+  formatBotContacts,
+  inAmbientInitiativeActiveHours,
+  randomAmbientInitiativeDelay,
+  recordAmbientInitiativeRuntimeAction,
+  resolveAmbientInitiativeMainChannel,
+  renderAmbientInitiativeHistory,
+  type AmbientInitiativePressure,
+  type AmbientInitiativeDecision,
+  type AmbientInitiativeSignals,
+} from "./initiative-policy";
 
 type RunMode = "automatic" | "draft" | "shadow";
 
@@ -59,60 +69,6 @@ type Candidate = {
   forced: boolean;
   forceDecision: boolean;
   runToken?: string;
-};
-
-type Decision = {
-  shouldWake: boolean;
-  wakeProbability: number;
-  confidence: number;
-  reason: string;
-};
-
-export type AmbientInitiativeSignals = {
-  now: number;
-  inActiveHours: boolean;
-  quietMs: number | null;
-  lastHumanAt: number | null;
-  lastBotAt: number | null;
-  recentHumanCount: number;
-  recentBotCount: number;
-  pendingAmbientCandidates: number;
-  activeImageJobs: number;
-  strongestThreadPressure: number;
-  applicableThreadCount: number;
-  applicableThreads: Array<{
-    id: string;
-    content: string;
-    pressure: number;
-    recallScope: "anywhere" | "guild";
-    recallGuildId: string | null;
-  }>;
-  lastInitiativeAt: number | null;
-  visibleUserIds: string[];
-};
-
-/** Use the newest visible human as the primary memory perspective for autonomous initiative. */
-export function ambientInitiativeMemoryFocusUserId(
-  signals: Pick<AmbientInitiativeSignals, "visibleUserIds">,
-): string | undefined {
-  return signals.visibleUserIds[0];
-}
-
-export function formatBotContacts(guild: Guild, botContactIds: readonly string[]): string {
-  return botContactIds.map((id) => {
-    const username = guild.members.cache.get(id)?.user.username
-      ?? guild.client.users.cache.get(id)?.username;
-    return username === undefined ? id : `@${username} (${id})`;
-  }).join(", ");
-}
-
-export type AmbientInitiativePressure = {
-  rawValue: number;
-  value: number;
-  roll: number;
-  passed: boolean;
-  adjustments: string[];
-  inputs: Record<string, number | boolean | string | null>;
 };
 
 type InitiativeRecord = {
@@ -250,129 +206,6 @@ export type GenericAmbientInitiativeRuntime = {
   clear: () => void;
 };
 
-function clamp(value: number): number {
-  return Math.max(0, Math.min(1, value));
-}
-
-function randomBetween(min: number, max: number): number {
-  return min + Math.random() * Math.max(0, max - min);
-}
-
-/** Apply ordinary social resistance while allowing genuinely high pressure to overcome it. */
-export function applyAmbientInitiativeResistance(value: number, resistance: number): number {
-  const boundedValue = clamp(value);
-  const boundedResistance = clamp(resistance);
-  return boundedValue * (boundedResistance + boundedValue * (1 - boundedResistance));
-}
-
-/** Calculate the probability that one cheap Ambient Initiative check reaches its evaluator. */
-export function calculateAmbientInitiativePressure(
-  config: AmbientInitiativeConfig,
-  signals: AmbientInitiativeSignals,
-  roll = Math.random(),
-): AmbientInitiativePressure {
-  const threadAdjusted = config.basePressure
-    + signals.strongestThreadPressure * (1 - config.basePressure);
-  let value = threadAdjusted;
-  const adjustments: string[] = [];
-  const resist = (condition: boolean, label: string, resistance: number): void => {
-    if (!condition) return;
-    value = applyAmbientInitiativeResistance(value, resistance);
-    adjustments.push(label);
-  };
-  resist(!signals.inActiveHours, "outside_active_hours", 0.25);
-  resist(signals.lastHumanAt === null, "no_recent_human_activity", 0.2);
-  resist(signals.quietMs !== null && signals.quietMs < config.quietWindowMs, "room_not_quiet", 0.45);
-  resist(
-    signals.quietMs !== null && signals.quietMs < config.recentActivityMinMs,
-    "human_activity_too_recent",
-    0.6,
-  );
-  resist(
-    signals.quietMs !== null && signals.quietMs > config.recentActivityMaxMs,
-    "room_activity_stale",
-    0.45,
-  );
-  resist(
-    signals.lastBotAt !== null && signals.now - signals.lastBotAt < config.botCooldownMs,
-    "recent_actor_output",
-    0.35,
-  );
-  resist(
-    signals.lastInitiativeAt !== null && signals.now - signals.lastInitiativeAt < config.cooldownMs,
-    "recent_visible_initiative",
-    0.2,
-  );
-  value = clamp(value);
-  return {
-    rawValue: threadAdjusted,
-    value,
-    roll,
-    passed: roll <= value,
-    adjustments,
-    inputs: {
-      basePressure: config.basePressure,
-      strongestThreadPressure: signals.strongestThreadPressure,
-      applicableThreadCount: signals.applicableThreadCount,
-      inActiveHours: signals.inActiveHours,
-      quietMs: signals.quietMs,
-      recentActorOutput: signals.lastBotAt !== null
-        && signals.now - signals.lastBotAt < config.botCooldownMs,
-      recentInitiative: signals.lastInitiativeAt !== null
-        && signals.now - signals.lastInitiativeAt < config.cooldownMs,
-    },
-  };
-}
-
-function parseClockMinutes(value: string): number {
-  const [hour = "0", minute = "0"] = value.split(":");
-  return Number(hour) * 60 + Number(minute);
-}
-
-function localClockMinutes(timezone: string, now: number): number {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date(now));
-  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0");
-  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? "0");
-  return hour * 60 + minute;
-}
-
-function inActiveHours(config: AmbientInitiativeConfig, guildConfig: GuildConfig, now: number): boolean {
-  const current = localClockMinutes(config.activeHours.timezone ?? guildConfig.timezone, now);
-  const start = parseClockMinutes(config.activeHours.start);
-  const end = parseClockMinutes(config.activeHours.end);
-  if (start === end) return true;
-  return start < end
-    ? current >= start && current <= end
-    : current >= start || current <= end;
-}
-
-function renderHistory(history: readonly HistoryMessage[], timezone: string): string {
-  return history.map((message) => {
-    const reply = message.replyToId !== null ? ` reply_to=${message.replyToId}` : "";
-    return `[${formatLocalWallClock(message.timestamp, timezone)}] ${message.author} (${message.authorId})${reply}: ${formatHistoryContent(message)}`;
-  }).join("\n");
-}
-
-function recordRuntimeAction(
-  requestLog: RequestLog,
-  id: string,
-  tool: string,
-  args: Record<string, unknown>,
-  result: Record<string, unknown>,
-  isError = false,
-): void {
-  requestLog.recordToolStart(id, tool, args);
-  requestLog.recordToolEnd(id, isError, {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-    structuredContent: result,
-  });
-}
-
 export function createGenericAmbientInitiativeRuntime(
   deps: GenericAmbientInitiativeDeps,
 ): GenericAmbientInitiativeRuntime {
@@ -380,37 +213,6 @@ export function createGenericAmbientInitiativeRuntime(
   const running = new Set<string>();
   const records: InitiativeRecord[] = [];
   let loopsEnabled = false;
-
-  function resolveMainChannel(guild: Guild, config: AmbientInitiativeConfig): SendableGuildChannel | null {
-    if (config.mainChannelId !== undefined && config.mainChannelId !== "") {
-      const channel = deps.client.channels.cache.get(config.mainChannelId);
-      return channel !== undefined
-        && isSendableGuildChannel(channel)
-        && channel.guildId === guild.id
-        && botChannelPermissions(deps.client, channel).canSend
-        ? channel
-        : null;
-    }
-    const after = Date.now() - config.mainChannelLookbackDays * 86_400_000;
-    const rows = deps.db.raw.prepare(
-      `SELECT channel_id, COUNT(*) AS count
-       FROM messages
-       WHERE guild_id = ? AND is_bot = 0 AND is_synthetic = 0
-         AND is_prompt_only = 0 AND created_at >= ?
-       GROUP BY channel_id ORDER BY count DESC`,
-    ).all(guild.id, after) as Array<{ channel_id: string; count: number }>;
-    for (const row of rows) {
-      if (row.count < config.minMainChannelHumanMessages) continue;
-      const channel = deps.client.channels.cache.get(row.channel_id);
-      if (channel !== undefined
-        && isSendableGuildChannel(channel)
-        && channel.guildId === guild.id
-        && botChannelPermissions(deps.client, channel).canSend) {
-        return channel;
-      }
-    }
-    return null;
-  }
 
   function buildSignals(
     guild: Guild,
@@ -455,7 +257,7 @@ export function createGenericAmbientInitiativeRuntime(
     );
     return {
       now,
-      inActiveHours: inActiveHours(config, guildConfig, now),
+      inActiveHours: inAmbientInitiativeActiveHours(config, guildConfig, now),
       quietMs: lastHumanAt === null ? null : now - lastHumanAt,
       lastHumanAt,
       lastBotAt,
@@ -537,7 +339,7 @@ export function createGenericAmbientInitiativeRuntime(
     pressure: AmbientInitiativePressure;
     history: HistoryMessage[];
     requestLog: RequestLog;
-  }): Promise<Decision | null> {
+  }): Promise<AmbientInitiativeDecision | null> {
     const globalConfig = deps.getGlobalConfig();
     const profile = resolveModelProfile(globalConfig, input.config.evaluator.modelProfile);
     const streamOptions = buildModelProfileStreamOptions(globalConfig, input.config.evaluator.modelProfile);
@@ -559,7 +361,7 @@ export function createGenericAmbientInitiativeRuntime(
             `signals: ${JSON.stringify(input.signals)}`,
             `pressure: ${JSON.stringify(input.pressure)}`,
             "Recent channel history:",
-            renderHistory(input.history, input.guildConfig.timezone),
+            renderAmbientInitiativeHistory(input.history, input.guildConfig.timezone),
           ].join("\n\n"),
         }],
         providerParams,
@@ -591,9 +393,9 @@ export function createGenericAmbientInitiativeRuntime(
       return {
         shouldWake: parsed.should_wake === true,
         wakeProbability: typeof parsed.wake_probability === "number"
-          ? clamp(parsed.wake_probability)
+          ? clampAmbientInitiativeValue(parsed.wake_probability)
           : 0,
-        confidence: typeof parsed.confidence === "number" ? clamp(parsed.confidence) : 0,
+        confidence: typeof parsed.confidence === "number" ? clampAmbientInitiativeValue(parsed.confidence) : 0,
         reason: typeof parsed.reason === "string" ? parsed.reason : "",
       };
     } catch (error) {
@@ -931,7 +733,7 @@ export function createGenericAmbientInitiativeRuntime(
     const requestLog = createRequestLog(input.guild, input.channel, input.candidate);
     deps.requestLogStore.incrementActive();
     if (running.has(lockKey)) {
-      recordRuntimeAction(
+      recordAmbientInitiativeRuntimeAction(
         requestLog,
         `${input.candidate.id}:lock`,
         "ambient_initiative_lock",
@@ -953,7 +755,7 @@ export function createGenericAmbientInitiativeRuntime(
         signals,
         forced: input.candidate.forced,
       });
-      recordRuntimeAction(
+      recordAmbientInitiativeRuntimeAction(
         requestLog,
         `${input.candidate.id}:gate`,
         "ambient_initiative_hard_gate",
@@ -973,7 +775,7 @@ export function createGenericAmbientInitiativeRuntime(
             inputs: { forced: true },
           }
         : calculateAmbientInitiativePressure(config, signals);
-      recordRuntimeAction(
+      recordAmbientInitiativeRuntimeAction(
         requestLog,
         `${input.candidate.id}:pressure`,
         "ambient_initiative_pressure",
@@ -989,7 +791,7 @@ export function createGenericAmbientInitiativeRuntime(
         && decision.shouldWake
         && decision.wakeProbability >= config.probabilityThreshold
         && decision.confidence >= config.confidenceThreshold;
-      recordRuntimeAction(
+      recordAmbientInitiativeRuntimeAction(
         requestLog,
         `${input.candidate.id}:decision`,
         "ambient_initiative_wake_decision",
@@ -1022,7 +824,7 @@ export function createGenericAmbientInitiativeRuntime(
           input.candidate.createdAt,
         );
         if (includesOrdinaryTrigger(activity, guildConfig)) {
-          recordRuntimeAction(
+          recordAmbientInitiativeRuntimeAction(
             requestLog,
             `${input.candidate.id}:reconsider`,
             "ambient_initiative_reconsideration",
@@ -1082,7 +884,7 @@ export function createGenericAmbientInitiativeRuntime(
     if (config === undefined || (!config.enabled && mode !== "draft")) {
       return { error: "Ambient initiative is disabled." };
     }
-    const channel = resolveMainChannel(guild, config);
+    const channel = resolveAmbientInitiativeMainChannel({ guild, config, client: deps.client, db: deps.db });
     if (channel === null) return { error: "No ambient initiative main channel is available." };
     const runMode = mode === "automatic" && config.shadowMode ? "shadow" : mode;
     const draft = runMode === "shadow"
@@ -1125,7 +927,7 @@ export function createGenericAmbientInitiativeRuntime(
           });
         })
         .finally(() => scheduleGuild(guildId));
-    }, randomBetween(config.checkIntervalMinMs, config.checkIntervalMaxMs));
+    }, randomAmbientInitiativeDelay(config.checkIntervalMinMs, config.checkIntervalMaxMs));
     timer.unref();
     timers.set(guildId, timer);
   }
