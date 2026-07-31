@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { RELATIONSHIP_AXES, baseRelationshipAxes } from "./state";
 import { relationshipPortrait, relationshipPortraitVariantIds } from "./portrait";
+import type { RelationshipPortrait } from "./portrait";
 
 describe("relationship portraits", () => {
   test("provides at least 150 unique full-prose variants", () => {
@@ -36,6 +37,30 @@ describe("relationship portraits", () => {
 
     expect(relationshipPortrait(attractedDistrust).id).toStartWith("attracted-distrustful-");
     expect(relationshipPortrait(damagedAttachment).id).toStartWith("damaged-bond-pull-");
+  });
+
+  test("keeps severe low-history relationships adverse instead of merely wary", () => {
+    const axes = baseRelationshipAxes();
+    Object.assign(axes, {
+      familiarity: 0.5,
+      trust: -39.95,
+      warmth: -65.75,
+      respect: -33.33,
+      tension: 33.33,
+      intimacy: -1,
+    });
+
+    const portrait = relationshipPortrait(axes);
+
+    expect(portrait.id).toStartWith("unfamiliar-adverse-");
+    expect(portrait.compactProse).toContain("distinctly adverse shape");
+    expect(portrait.compactProse).not.toContain("first stable impression is wary rather than warm");
+
+    axes.curiosity = 30;
+    expect(relationshipPortrait(axes).id).toStartWith("unfamiliar-adverse-");
+
+    Object.assign(axes, baseRelationshipAxes(), { trust: -5 });
+    expect(relationshipPortrait(axes).id).toStartWith("unfamiliar-wary-");
   });
 
   test("treats moderate trust, high warmth, and personal access as a notable bond", () => {
@@ -99,7 +124,7 @@ describe("relationship portraits", () => {
   test("keeps every registered variant reachable across combined band vectors", () => {
     const values = [-80, -45, -15, 0, 15, 45, 80];
     const registered = new Set(relationshipPortraitVariantIds());
-    const seen = new Map<string, string>();
+    const seen = new Map<string, RelationshipPortrait>();
     let seed = 1;
     for (let index = 0; index < 2_000_000 && seen.size < registered.size; index += 1) {
       const axes = Object.fromEntries(RELATIONSHIP_AXES.map((axis) => {
@@ -107,12 +132,16 @@ describe("relationship portraits", () => {
         return [axis, values[seed % values.length] ?? 0];
       })) as ReturnType<typeof baseRelationshipAxes>;
       const portrait = relationshipPortrait(axes);
-      seen.set(portrait.id, portrait.prose);
+      seen.set(portrait.id, portrait);
     }
     expect(new Set(seen.keys())).toEqual(registered);
-    const wordCounts = [...seen.values()].map((prose) => prose.trim().split(/\s+/u).length);
+    const portraits = [...seen.values()];
+    const wordCounts = portraits.map(({ prose }) => prose.trim().split(/\s+/u).length);
+    const compactWordCounts = portraits
+      .map(({ compactProse }) => compactProse.trim().split(/\s+/u).length);
     expect(Math.min(...wordCounts)).toBeGreaterThanOrEqual(90);
     expect(wordCounts.reduce((sum, count) => sum + count, 0) / wordCounts.length)
       .toBeGreaterThanOrEqual(110);
+    expect(Math.min(...compactWordCounts)).toBeGreaterThanOrEqual(45);
   });
 });

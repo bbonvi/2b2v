@@ -134,6 +134,34 @@ describe("renderRelationshipPromptContext", () => {
       .toBeLessThan(rendered.indexOf("#### Others present or recently active"));
   });
 
+  test("renders the combined compact portrait for a severe low-history anchor", () => {
+    const current = emptyRelationshipProfile("u1", 1);
+    const anchor = emptyRelationshipProfile("u2", 2);
+    Object.assign(anchor.axes, {
+      familiarity: 0.5,
+      trust: -39.95,
+      warmth: -65.75,
+      respect: -33.33,
+      tension: 33.33,
+      intimacy: -1,
+    });
+
+    const rendered = renderRelationshipPromptContext({
+      current,
+      currentLabel: "@current / u1",
+      anchors: [{
+        profile: anchor,
+        label: "@fanmelina (Macan's Gaze) / 1013680913890160680",
+        reason: "anchor",
+      }],
+    });
+
+    expect(rendered).toContain("The history is thin; the aversion is not");
+    expect(rendered).toContain("distinctly adverse shape");
+    expect(rendered).toContain("private values: familiarity=0.5, trust=-39.95, warmth=-65.75");
+    expect(rendered).not.toContain("Your first stable impression is wary rather than warm");
+  });
+
   test("renders bounded seven-day movement for the current relationship", () => {
     const day = 24 * 60 * 60 * 1000;
     const now = 10 * day;

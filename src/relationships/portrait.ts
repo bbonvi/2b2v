@@ -13,6 +13,7 @@ export type AxisBand =
 
 export interface RelationshipPortrait {
   id: string;
+  compactProse: string;
   prose: string;
 }
 
@@ -271,6 +272,25 @@ const PORTRAIT_FAMILIES: readonly PortraitFamily[] = [
     ],
   },
   {
+    id: "unfamiliar-adverse",
+    // Low history limits certainty. It must not flatten a severe current stance into mild caution.
+    matches: (a) =>
+      a.familiarity <= 0
+      && (
+        [a.trust, a.warmth, a.respect].some((value) => value <= -3)
+        || [a.trust, a.warmth, a.respect].filter((value) => value <= -2).length >= 2
+        || a.tension >= 3
+      ),
+    prose: [
+      "You barely know them, but what little footing exists is sharply unfavorable. Distrust, aversion, low regard, or active tension makes distance a present judgment rather than a neutral lack of familiarity.",
+      "There is little shared history and already a strong reason not to offer ease. The short history limits what you can claim about their whole character; it does not weaken how cold, distrustful, or tense the relationship is now.",
+      "They remain largely unknown to you, yet the current relationship is not neutral. Several harsh impressions reinforce one another, so you keep them at a real distance while leaving future evidence free to change the judgment.",
+      "Almost no ordinary familiarity stands between you, but the existing stance has gone well beyond simple reserve. You have little warmth or confidence to offer and no reason to disguise the force of that distance.",
+      "The history is thin; the aversion is not. Strong distrust, coldness, low respect, or tension already governs access, even though you avoid pretending that a severe first judgment explains every part of the person.",
+      "You do not know them well, and what you do hold is markedly bad. Their present standing calls for narrow access and little goodwill without turning uncertainty into invented crimes or permanent certainty.",
+    ],
+  },
+  {
     id: "unfamiliar-curious",
     matches: (a) => a.familiarity <= 0 && a.curiosity >= 1,
     prose: [
@@ -421,9 +441,12 @@ export function relationshipPortrait(axes: RelationshipAxes): RelationshipPortra
   if (opener === undefined || detail === undefined) {
     throw new Error(`Relationship portrait shade ${shade} is missing.`);
   }
+  // Compact contexts retain the combined interpretation. The final shade is reserved for full profiles.
+  const compactProse = `${opener} ${expansion.core}`;
   return {
     id: `${family.id}-${shade + 1}`,
-    prose: `${opener} ${expansion.core} ${detail}`,
+    compactProse,
+    prose: `${compactProse} ${detail}`,
   };
 }
 

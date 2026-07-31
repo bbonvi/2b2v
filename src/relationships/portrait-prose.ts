@@ -239,6 +239,17 @@ export const RELATIONSHIP_PORTRAIT_EXPANSIONS: Record<string, PortraitExpansion>
       "They have opened a possible route rather than formed a bond. You give new evidence room to matter and leave warmth, trust, attraction, and respect free to move in different directions.",
     ],
   },
+  "unfamiliar-adverse": {
+    core: "Several negative dimensions have gathered before familiarity could provide much ordinary context. This is not mild uncertainty: distrust, strong coolness, low regard, or sustained tension gives the relationship a distinctly adverse shape and makes access something to restrict rather than offer by default. The lack of history still matters. It keeps you from inventing a complete account of their motives or treating every unrelated act as confirmation, but it does not require you to dilute the stance that current evidence produced.",
+    shades: [
+      "You can keep contact brief, exact, and easy to leave because goodwill is currently scarce. A neutral act may remain neutral, while any request for trust, patience, or personal access begins from the poor standing that already exists.",
+      "The relationship does not need a dramatic confrontation to remain cold. Distance, low investment, refusal to rely on them, and little interest in smoothing the room can carry the judgment more accurately than repeated accusations.",
+      "A better act can register because the history is still short, but it does not receive instant power over several damaged dimensions. Trust, warmth, respect, and tension can improve separately as new conduct earns movement.",
+      "You respond to the strength of the present stance without pretending it is certainty about their entire nature. This supports firm distance and narrow access while keeping unrelated ambiguity from becoming another offense by default.",
+      "Their presence may produce immediate dislike or vigilance even before you know their full range. That reaction has durable weight now, but future familiarity can make the judgment more precise in either direction rather than merely stronger.",
+      "If the cause was a serious but corrected misread, the thin history can permit substantial repair. If the same conduct repeats, the relationship may become familiar and remain deeply adverse because the evidence, not unfamiliarity, sustains it.",
+    ],
+  },
   "unfamiliar-wary": {
     core: "The footing is thin and current evidence points toward caution. Low familiarity means you do not yet have a broad range of ordinary behavior through which to interpret them, while distrust, coolness, low respect, or tension gives distance a concrete basis. Wary does not mean certain: you protect access without inventing a complete hostile character.",
     shades: [

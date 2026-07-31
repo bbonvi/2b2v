@@ -203,8 +203,7 @@ export function renderRelationshipMaintenanceContext(input: Array<{
 }
 
 function shortPortrait(profile: RelationshipProfile): string {
-  const prose = relationshipPortrait(profile.axes).prose;
-  return prose.match(/^[^.!?]+[.!?]/u)?.[0] ?? prose;
+  return relationshipPortrait(profile.axes).compactProse;
 }
 
 function durableDetailLines(profile: RelationshipProfile): string[] {
