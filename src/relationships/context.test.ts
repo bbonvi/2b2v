@@ -338,16 +338,16 @@ describe("renderRelationshipMaintenanceContext", () => {
   test("keeps broad current state bounded and renders other people without their mutable details", () => {
     const profile = emptyRelationshipProfile("u1", 1);
     profile.axes.trust = 35;
-    profile.notes.push("old note", ...Array.from({ length: 20 }, (_value, index) => `note ${index}`));
-    profile.boundaries.push("old boundary", ...Array.from({ length: 15 }, (_value, index) => `boundary ${index}`));
-    profile.openLoops.push("old matter", ...Array.from({ length: 15 }, (_value, index) => `matter ${index}`));
+    profile.notes.push("old note", ...Array.from({ length: 10 }, (_value, index) => `note ${index}`));
+    profile.boundaries.push("old boundary", ...Array.from({ length: 10 }, (_value, index) => `boundary ${index}`));
+    profile.openLoops.push("old matter", ...Array.from({ length: 10 }, (_value, index) => `matter ${index}`));
     const other = emptyRelationshipProfile("u2", 2);
     other.axes.warmth = 20;
     other.notes.push("other private note");
     other.boundaries.push("other private boundary");
     other.openLoops.push("other private matter");
     const events = [
-      ...Array.from({ length: 15 }, (_value, index) =>
+      ...Array.from({ length: 10 }, (_value, index) =>
         relationshipEvent(`event-${index}`, index, { trust: -1 }, `event summary ${index}`)
       ),
       relationshipEvent("old-event", 0, { trust: -1 }, "old event summary"),
@@ -366,7 +366,7 @@ describe("renderRelationshipMaintenanceContext", () => {
     expect(rendered).not.toContain('"old boundary"');
     expect(rendered).toContain('- "matter 0"');
     expect(rendered).not.toContain('"old matter"');
-    expect(rendered).toContain("event-14: trust=-1; event summary 14");
+    expect(rendered).toContain("event-9: trust=-1; event summary 9");
     expect(rendered).not.toContain("old-event");
     expect(rendered).toContain("- @bob (u2) —");
     expect(rendered).toContain("private values: familiarity=0, trust=0, warmth=20");
