@@ -295,12 +295,11 @@ async function processSettledWatchedMessage(
   return { coveredMessageIds: currentTurnMessages.map((current) => current.id) };
 }
 
-/** Process a triggered message through the full handler pipeline. */
-function isMessageBackedTrigger(trigger: NonNullable<TriggerResult>): boolean {
+/** Ambient pickup is deliberately absent because its message may not address the actor. */
+function shouldAnnotateTriggerMessage(trigger: NonNullable<TriggerResult>): boolean {
   return trigger.reason === "mention"
     || trigger.reason === "keyword"
     || trigger.reason === "random"
-    || trigger.reason === "ambient_pickup"
     || trigger.reason === "lingering_attention";
 }
 
@@ -481,7 +480,7 @@ async function processTriggeredMessage(
       options.currentTurnOverride !== undefined ? currentTurnMessageIds : undefined,
       {
         appendLatestToHistory: options.currentTurnOverride !== undefined,
-        ...(triggerOverride !== undefined && isMessageBackedTrigger(triggerOverride)
+        ...(triggerOverride !== undefined && shouldAnnotateTriggerMessage(triggerOverride)
           ? { triggerMessageIds: currentTurnMessageIds }
           : {}),
       },
