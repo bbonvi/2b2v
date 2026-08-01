@@ -25,9 +25,10 @@ modelProfiles:
         promptCaching: { enabled: true }
     evaluator:
         provider: openai-codex
-        model: gpt-5.3-codex-spark
+        model: gpt-5.6-terra
         modelParams: { textVerbosity: low }
-        thinkingLevel: minimal
+        thinkingLevel: medium
+        serviceTier: priority
         codexTransport: websocket-cached
         promptCaching: { enabled: true }
     realtimeVoice:
@@ -40,13 +41,13 @@ modelProfiles:
     voiceSummary:
         provider: openai-codex
         model: gpt-5.6-terra
-        thinkingLevel: minimal
+        thinkingLevel: medium
         codexTransport: websocket-cached
         promptCaching: { enabled: true }
     vision:
         provider: openai-codex
-        model: gpt-5.5
-        thinkingLevel: minimal
+        model: gpt-5.6-terra
+        thinkingLevel: medium
         codexTransport: websocket-cached
         promptCaching: { enabled: true }
 modelProfile: main
