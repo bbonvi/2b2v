@@ -125,7 +125,8 @@ function buildAgentTools(
     deliverDiceRoll?: (input: DiceRollDelivery) => Promise<{ sentMessageId: string }>;
     visibleUserIds?: readonly string[];
     onVisibleOutput?: () => void;
-    forceSynchronousImageGeneration?: boolean;
+    /** Background agent that owns async image results and receives their completion events. */
+    ownerAgentJobId?: string;
   } = {},
 ) {
   const includeImageGenerationTools = options.includeImageGenerationTools ?? true;
@@ -722,6 +723,13 @@ function buildAgentTools(
   const cancelJobTool = createCancelAgentJobTool({
     store: agentJobs,
     onCancelled: async (jobId) => {
+      const cancelled = agentJobs.get(jobId);
+      if (cancelled?.kind === "image_generation" && cancelled.input.ownerAgentJobId !== undefined) {
+        const queued = agentJobs.queueOwnedImageResult(jobId);
+        if (queued.shouldRun && queued.ownerAgentJobId !== undefined) {
+          trackAgentJob(runAgentJob(queued.ownerAgentJobId));
+        }
+      }
       const staged = getStagedAssetForJob(db, jobId);
       if (staged === null) return;
       await unlinkStagedPath(workspaceStagingRoot, staged.storagePath).catch(() => {});
@@ -792,7 +800,7 @@ function buildAgentTools(
       resolveExternalReference: loadExternalReference,
       resolveAvatarReference: (userId, signal) => loadGuildAvatarReference(guild, userId, signal),
       onGeneratedImage: onGeneratedImage ?? (() => {}),
-      ...(effectiveCurrentRequest === undefined || options.forceSynchronousImageGeneration === true ? {} : { enqueueImageJob: (input) => {
+      ...(effectiveCurrentRequest === undefined ? {} : { enqueueImageJob: (input) => {
         const deliveryChannelId = options.imageDelivery?.channelId ?? channelId;
         const deliveryGuildId = options.imageDelivery?.guildId
           ?? (client.channels.cache.get(deliveryChannelId) !== undefined && isSendableGuildChannel(client.channels.cache.get(deliveryChannelId))
@@ -812,6 +820,7 @@ function buildAgentTools(
           outputFormat: input.outputFormat,
           is4k: input.is4k,
           ...(input.replacesJobId !== undefined ? { replacesJobId: input.replacesJobId } : {}),
+          ...(options.ownerAgentJobId !== undefined ? { ownerAgentJobId: options.ownerAgentJobId } : {}),
         });
         if (result.created) {
           trackImageJob(runImageGenerationJob(result.job.id).catch((err: unknown) => {

@@ -4,8 +4,10 @@ import type { AgentJobStore } from "./job-runtime.ts";
 
 const SpawnAgentParams = Type.Object({
   task_name: Type.String({ minLength: 1, maxLength: 80 }),
-  message: Type.String({ minLength: 1 }),
-  kind: Type.Optional(Type.Union([Type.Literal("workspace"), Type.Literal("persona")])),
+  message: Type.String({
+    minLength: 1,
+    description: "Self-contained assignment: objective, purpose, relevant facts and identifiers, constraints, completion criteria, and whether visible Discord action is allowed.",
+  }),
   model_profile: Type.Optional(Type.String({ minLength: 1 })),
 });
 const SendAgentMessageParams = Type.Object({
@@ -27,17 +29,15 @@ export function createAgentControlTools(input: {
   const spawn: AgentTool = {
     name: "spawn_agent",
     label: "spawn_agent",
-    description: "Start a durable asynchronous workspace or in-persona agent task.",
+    description: "Start a durable asynchronous copy of 2B for one explicit, self-contained task.",
     parameters: SpawnAgentParams,
     execute: (_toolCallId, params): Promise<AgentToolResult<unknown>> => {
       const request = params as {
         task_name: string;
         message: string;
-        kind?: "workspace" | "persona";
         model_profile?: string;
       };
       const job = input.store.enqueueAgentTask({
-        kind: request.kind === "persona" ? "persona_task" : "workspace_agent",
         guildId: input.guildId,
         channelId: input.channelId,
         requesterId: input.requesterId,
@@ -59,7 +59,7 @@ export function createAgentControlTools(input: {
   const send: AgentTool = {
     name: "send_agent_message",
     label: "send_agent_message",
-    description: "Send a follow-up to a running or yielded agent. A yielded agent resumes asynchronously.",
+    description: "Send a follow-up to a running, waiting, or yielded agent. A waiting or yielded agent resumes asynchronously.",
     parameters: SendAgentMessageParams,
     execute: (_toolCallId, params): Promise<AgentToolResult<unknown>> => {
       const request = params as { target: string; message: string };

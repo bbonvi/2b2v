@@ -11,6 +11,7 @@ import { initialMaintenanceToolNames } from "./tool-catalog.ts";
 import type { IncomingMessage, SilentMemoryAgentInput, SilentToolAgentInput } from "./turn-types.ts";
 import { AgentTimeBudgetExceededError } from "./model-retry.ts";
 import { runNativeToolLoop, toolMessage } from "./model-loop.ts";
+import { compactBackgroundTranscript } from "./background-compaction.ts";
 import { textFromMessageParts } from "./image-fallback.ts";
 import { buildCodexPromptCacheKey, buildInitialMessages, buildProviderSessionId, buildRuntimeInstruction, buildVolatileTurnMessages, codexSystemPromptForStableSections, initialMessageRoles, maintenanceCacheSurface, promptTransportForProvider, runtimeContextTemplate, sectionsForStablePrompt, toolContractSignature } from "./turn-prompt.ts";
 
@@ -120,9 +121,15 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
   ].filter((part) => part !== "").join("\n\n");
 }
 
-/** Run a hidden post-reply maintenance loop with private tools and no Discord output hooks. */
-export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promise<{ text: string; transcript: OpenRouterMessage[] }> {
-  if (input.tools.length === 0) return { text: "", transcript: [...(input.transcript ?? [])] };
+/** Run a private tool loop with no implicit Discord output. */
+export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promise<{
+  text: string;
+  transcript: OpenRouterMessage[];
+  activeToolNames: string[];
+}> {
+  if (input.tools.length === 0) {
+    return { text: "", transcript: [...(input.transcript ?? [])], activeToolNames: [] };
+  }
 
   const wallController = new AbortController();
   const parent = input.signal;
@@ -134,9 +141,10 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
     onParentAbort = () => wallController.abort(parent.reason);
     parent.addEventListener("abort", onParentAbort, { once: true });
   }
+  const wallClockTimeoutMs = input.wallClockTimeoutMs ?? input.guildConfig.replyLoop.wallClockTimeoutMs;
   const wallTimeout = setTimeout(() => {
-    wallController.abort(new AgentTimeBudgetExceededError(input.guildConfig.replyLoop.wallClockTimeoutMs));
-  }, input.guildConfig.replyLoop.wallClockTimeoutMs);
+    wallController.abort(new AgentTimeBudgetExceededError(wallClockTimeoutMs));
+  }, wallClockTimeoutMs);
 
   const complete = input.completeChat ?? completeLlmChat;
   const inheritedPrompt = input.promptContext;
@@ -169,15 +177,16 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
     && inheritedPrompt.toolContractSignature !== undefined
     && toolContractSignature(inheritedActiveTools) === inheritedPrompt.toolContractSignature
     && inheritedActiveToolNames.includes("search_tools");
-  const canReuseInheritedTranscript = inheritedPromptCompatible
-    && (provider !== "openai-codex" || canContinueActorToolSurface);
+  const continueTranscript = input.continueTranscript === true && input.transcript !== undefined;
+  const canReuseInheritedTranscript = continueTranscript
+    || (inheritedPromptCompatible && (provider !== "openai-codex" || canContinueActorToolSurface));
 
   const stableSections = inheritedPromptCompatible ? inheritedPrompt.stableSections : sectionsForStablePrompt(
     input.systemPrompt ?? "",
     input.personaPrompt ?? "",
     "",
     input.context,
-    "",
+    input.skillsInstruction ?? "",
     input.runtimeInstruction,
     transport,
   );
@@ -192,7 +201,7 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
             input.globalConfig.runtimeProfileId ?? "default",
             profileId,
             model.id,
-            maintenanceCacheSurface(input.tools),
+            input.promptCacheSurface ?? maintenanceCacheSurface(input.tools),
           )
       : ""
     : undefined;
@@ -227,58 +236,68 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
     : hasMaintenanceSearchTool
       ? initialMaintenanceToolNames(timedTools)
       : new Set(timedTools.map((tool) => tool.name));
-  const maintenanceInitialToolNames = canContinueActorToolSurface
-    ? new Set([...inheritedActiveToolNames, ...maintenanceToolNames])
-    : fallbackMaintenanceInitialToolNames;
+  const requestedInitialToolNames = input.initialToolNames === undefined
+    ? undefined
+    : new Set(input.initialToolNames.filter((name) => timedToolsByName.has(name)));
+  const maintenanceInitialToolNames = requestedInitialToolNames
+    ?? (canContinueActorToolSurface
+      ? new Set([...inheritedActiveToolNames, ...maintenanceToolNames])
+      : fallbackMaintenanceInitialToolNames);
   const newlyActiveMaintenanceTools = maintenanceToolNames
     .filter((name) => !inheritedActiveToolNames.includes(name));
   if (canContinueActorToolSurface) {
     appendDeferredMaintenanceTools(messages, newlyActiveMaintenanceTools);
   }
-  messages.push({ role: "user", content: input.controlMessage });
+  if (input.controlMessage !== "") messages.push({ role: "user", content: input.controlMessage });
 
-  const maxToolCalls = Math.max(1, input.maxToolCalls ?? input.tools.length);
+  const maxToolCalls = input.maxToolCalls === null
+    ? undefined
+    : Math.max(1, input.maxToolCalls ?? input.tools.length);
+  let activeToolNames = [...maintenanceInitialToolNames];
   timingState.resetAgentLoopStart();
   try {
+    const requestBase = {
+      provider,
+      apiKey: streamOptions.apiKey,
+      model: model.id,
+      systemPrompt: provider === "openai-codex" ? codexSystemPromptForStableSections(stableSections, transport) : "",
+      providerParams,
+      sessionId,
+      promptCacheKey,
+      onPayload: (payload: unknown) => {
+        if (provider === "openrouter") {
+          prependStableSectionsToPayload(
+            payload,
+            stableSections,
+            promptCaching,
+            model.id,
+          );
+        } else if (transport.mode === "split-input") {
+          prependStableSectionsToCodexPayload(payload, stableSections, initialRoles, {
+            enabled: promptCaching.enabled,
+            promptCacheKey,
+          });
+        }
+        input.requestLog?.recordLLMRequest(payload);
+        input.log?.debug("memory_llm_request_payload", { payload });
+      },
+    };
     const result = await runNativeToolLoop({
       complete,
-      requestBase: {
-        provider,
-        apiKey: streamOptions.apiKey,
-        model: model.id,
-        systemPrompt: provider === "openai-codex" ? codexSystemPromptForStableSections(stableSections, transport) : "",
-        providerParams,
-        sessionId,
-        promptCacheKey,
-        onPayload: (payload: unknown) => {
-          if (provider === "openrouter") {
-            prependStableSectionsToPayload(
-              payload,
-              stableSections,
-              promptCaching,
-              model.id,
-            );
-          } else if (transport.mode === "split-input") {
-            prependStableSectionsToCodexPayload(payload, stableSections, initialRoles, {
-              enabled: promptCaching.enabled,
-              promptCacheKey,
-            });
-          }
-          input.requestLog?.recordLLMRequest(payload);
-          input.log?.debug("memory_llm_request_payload", { payload });
-        },
-      },
+      requestBase,
       messages,
       tools: timedTools,
       initialToolNames: maintenanceInitialToolNames,
       maxToolCalls,
-      maxToolRounds: input.maxToolCalls !== undefined
-        ? maxToolCalls
+      maxToolRounds: input.maxToolCalls === null
+        ? undefined
+        : input.maxToolCalls !== undefined
+          ? maxToolCalls
         : Math.min(input.guildConfig.replyLoop.maxToolCalls, 3),
-      agentTimeBudgetMs: input.guildConfig.replyLoop.wallClockTimeoutMs,
+      agentTimeBudgetMs: wallClockTimeoutMs,
       llmOutputTimeoutMs: input.guildConfig.replyLoop.llmOutputTimeoutMs,
       requestLog: input.requestLog,
-      imageInputSupported: false,
+      imageInputSupported: input.imageInputSupported === true,
       consumeGeneratedAttachments: input.consumeGeneratedAttachments,
       pendingAttachments: input.pendingAttachments ?? [],
       toolTiming: timingState,
@@ -290,13 +309,31 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
       terminateAfterSuccessfulToolRoundNames: input.terminateAfterSuccessfulToolRoundNames,
       onActiveToolsChanged: canContinueActorToolSurface
         ? (activeTools) => {
+            activeToolNames = activeTools.map((tool) => tool.name);
             inheritedPrompt.activeToolNames = activeTools.map((tool) => tool.name);
             inheritedPrompt.toolContractSignature = toolContractSignature(activeTools);
           }
-        : undefined,
+        : (activeTools) => {
+            activeToolNames = activeTools.map((tool) => tool.name);
+          },
       takePendingMessages: input.takePendingMessages,
+      stopAfterAsyncImageJobCreated: input.stopAfterAsyncImageJobCreated,
+      beforeModelTurn: input.compactTranscript === undefined
+        ? undefined
+        : async (currentMessages) => await compactBackgroundTranscript({
+          messages: currentMessages,
+          fixedPromptTokens: Math.ceil(stableSections.reduce((chars, section) => chars + section.text.length, 0) / 4),
+          model,
+          reserveTokens: input.compactTranscript?.reserveTokens ?? 16_384,
+          keepRecentTokens: input.compactTranscript?.keepRecentTokens ?? 20_000,
+          complete,
+          requestBase,
+          signal: wallController.signal,
+          requestLog: input.requestLog,
+          log: input.log,
+        }),
     });
-    return { text: result.text, transcript: messages };
+    return { text: result.text, transcript: messages, activeToolNames };
   } finally {
     clearTimeout(wallTimeout);
     if (parent !== undefined && onParentAbort !== undefined) {

@@ -93,7 +93,7 @@ test("renders compact actual prompts and durable output assets in job context", 
   expect(rendered).not.toContain("quote:");
 });
 
-test("renders global persona and workspace job ownership, yield time, and handoff", () => {
+test("renders global background-agent ownership, yield time, and handoff", () => {
   const yieldedAt = Date.parse("2026-08-01T12:00:00.000Z");
   const rendered = renderAgentJobsContext([{
     id: "persona-abc123",
@@ -135,7 +135,7 @@ test("renders stopped time for dismissed agent jobs", () => {
   const stoppedAt = Date.parse("2026-08-01T12:00:00.000Z");
   const rendered = renderAgentJobsContext([{
     id: "agent-stopped",
-    kind: "workspace_agent",
+    kind: "persona_task",
     guildId: "g1",
     channelId: "c1",
     deliveryGuildId: "g1",

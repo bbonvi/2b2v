@@ -40,6 +40,9 @@ export function renderAgentJobDetails(
     job.sentMessageId !== undefined ? `Sent MsgID: ${job.sentMessageId}` : "",
     job.replacementRootJobId !== undefined ? `Replacement root: ${job.replacementRootJobId}` : "",
     job.replacesJobId !== undefined ? `Replaces: ${job.replacesJobId}` : "",
+    job.kind === "image_generation" && job.input.ownerAgentJobId !== undefined
+      ? `Owner agent: ${job.input.ownerAgentJobId}`
+      : "",
     `Replacement count: ${job.replacementCount}`,
     assets.length > 0
       ? `Assets: ${assets.map((asset) => `${asset.role} #${asset.assetId}`).join(", ")}`
@@ -78,7 +81,10 @@ export function createAgentJobInspectionTools(input: {
           : `; assets ${assets.map((asset) => `#${asset.assetId}`).join(", ")}`;
         const source = job.sentMessageId === undefined ? "" : `; sent MsgID ${job.sentMessageId}`;
         const summary = job.kind === "image_generation" ? job.input.prompt : job.input.message;
-        return `- ${job.id} ${job.kind} ${job.status} for @${job.requesterUsername}; origin guild ${job.guildId} channel ${job.channelId}; task: ${JSON.stringify(shortQuote(summary, 180))}${source}${assetText}`;
+        const owner = job.kind === "image_generation" && job.input.ownerAgentJobId !== undefined
+          ? `; owner ${job.input.ownerAgentJobId}`
+          : "";
+        return `- ${job.id} ${job.kind} ${job.status} for @${job.requesterUsername}; origin guild ${job.guildId} channel ${job.channelId}${owner}; task: ${JSON.stringify(shortQuote(summary, 180))}${source}${assetText}`;
       });
       return Promise.resolve({
         content: [{ type: "text", text: lines.length === 0 ? "No matching jobs." : lines.join("\n") }],

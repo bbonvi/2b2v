@@ -74,6 +74,14 @@ export interface AgentJobsConfig {
   yieldedAutoDismissMs: number;
   /** Maximum replacement cancellations per original image request. Default 2. */
   maxImageReplacements: number;
+  /** Maximum runtime for one background agent pass. Default 1800000. */
+  agentTimeoutMs: number;
+  /** Optional background-agent tool-call cap. Null means unlimited. Default null. */
+  agentMaxToolCalls: number | null;
+  /** Tokens reserved before background transcript compaction. Default 16384. */
+  agentCompactionReserveTokens: number;
+  /** Approximate recent transcript tokens retained after compaction. Default 20000. */
+  agentCompactionKeepRecentTokens: number;
 }
 
 /** Hard caps for non-admin recurring scheduled-task pressure. */
@@ -699,6 +707,10 @@ export interface GuildConfigYaml {
     terminalVisibleMs?: number;
     yieldedAutoDismissMs?: number;
     maxImageReplacements?: number;
+    agentTimeoutMs?: number;
+    agentMaxToolCalls?: number | null;
+    agentCompactionReserveTokens?: number;
+    agentCompactionKeepRecentTokens?: number;
   };
   schedulePressure?: SchedulePressureConfigYaml;
   promptTransport?: PromptTransportConfigYaml;
@@ -780,6 +792,10 @@ export interface MainConfigYaml {
     terminalVisibleMs?: number;
     yieldedAutoDismissMs?: number;
     maxImageReplacements?: number;
+    agentTimeoutMs?: number;
+    agentMaxToolCalls?: number | null;
+    agentCompactionReserveTokens?: number;
+    agentCompactionKeepRecentTokens?: number;
   };
   schedulePressure?: SchedulePressureConfigYaml;
   promptTransport?: PromptTransportConfigYaml;

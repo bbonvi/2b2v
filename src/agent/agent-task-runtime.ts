@@ -1,45 +1,29 @@
 import { randomUUID } from "node:crypto";
-import { basename, join } from "node:path";
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Client, Guild } from "discord.js";
 import { RequestLog, type Logger } from "../logger.ts";
 import { type requestLogStore } from "../dashboard/store.ts";
 import type { Database } from "../db/database.ts";
-import { createStagedAsset } from "../db/staged-asset-repository.ts";
-import { createSyntheticReplyFallbackDeps } from "../discord/reply-fallback-runtime.ts";
+import { getStagedAsset } from "../db/staged-asset-repository.ts";
 import { channelDisplayName, createTargetChannelResolver, type SendableGuildChannel } from "../discord/message-sender.ts";
 import type { loadGlobalConfig } from "../config/loader.ts";
 import type { GuildConfig } from "../config/types.ts";
 import type { PromptBundle } from "../config/instruction-bundle.ts";
 import { applyRuntimeToolPrompts } from "./runtime-tool-prompts.ts";
 import { createLoadSkillTool } from "./load-skill-tool.ts";
-import { createSearchToolsTool } from "./tool-catalog.ts";
+import { createSearchToolsTool, initialActorToolNames } from "./tool-catalog.ts";
 import { runSilentToolAgentPass } from "./maintenance-pass.ts";
 import { buildRuntimeInstruction } from "./turn-prompt.ts";
-import { createGeneratedImageRuntime } from "./generated-image-runtime.ts";
 import { parseResponseDirectives } from "./response-directives.ts";
 import { sendResponseSegments } from "./response-delivery.ts";
-import type { HistoryMessage } from "./history-types.ts";
+import type { AssembledContext } from "./context-assembly.ts";
 import type { IncomingMessage, MessageSender, OutboundAttachment } from "./turn-types.ts";
-import type { AgentJobStore, AgentTaskJob } from "./job-runtime.ts";
+import { isActiveJobStatus, type AgentJobStore, type AgentPendingMessage, type AgentTaskJob } from "./job-runtime.ts";
 import { AssetRefSchema, type AssetRef } from "./asset-id.ts";
 import type { OpenRouterMessage } from "../llm/types.ts";
-import type { createContextRuntime } from "./context-runtime.ts";
 import type { createToolRuntime } from "./tool-runtime.ts";
 import type { createTurnRuntime } from "./turn-runtime.ts";
-import { ensureStagedDirectory } from "./staged-path.ts";
-
-const WORKSPACE_AGENT_TOOL_NAMES = new Set([
-  "export_asset_to_workspace",
-  "fetch_images",
-  "fetch_url",
-  "read_asset",
-  "search_images",
-  "stage_workspace_file",
-  "web_search",
-  "workspace_exec",
-]);
 
 const SendDiscordMessageParams = Type.Object({
   content: Type.Optional(Type.String()),
@@ -56,7 +40,6 @@ export function createAgentTaskRuntime(input: {
   getGlobalConfig: () => ReturnType<typeof loadGlobalConfig>;
   getPromptBundle: () => PromptBundle;
   getGuildConfig: (guildId: string) => GuildConfig;
-  buildContext: ReturnType<typeof createContextRuntime>["buildContext"];
   buildAgentTools: ReturnType<typeof createToolRuntime>["buildAgentTools"];
   createBotDiscordMessageSender: ReturnType<typeof createTurnRuntime>["createBotDiscordMessageSender"];
   createAssetAttachmentResolver: ReturnType<typeof createTurnRuntime>["createAssetAttachmentResolver"];
@@ -65,17 +48,11 @@ export function createAgentTaskRuntime(input: {
 }) {
   const {
     db, client, log, requestLogStore, agentJobs, getGlobalConfig, getPromptBundle,
-    getGuildConfig, buildContext, buildAgentTools, createBotDiscordMessageSender,
+    getGuildConfig, buildAgentTools, createBotDiscordMessageSender,
     createAssetAttachmentResolver, fetchAccessibleGuildChannel, enqueueChannelTask,
   } = input;
-  let workspaceQueue = Promise.resolve();
-
   function runAgentJob(jobId: string): Promise<void> {
-    const job = agentJobs.get(jobId);
-    if (job?.kind !== "workspace_agent") return executeAgentJob(jobId);
-    const task = workspaceQueue.then(async () => await executeAgentJob(jobId));
-    workspaceQueue = task.catch(() => {});
-    return task;
+    return executeAgentJob(jobId);
   }
 
   async function executeAgentJob(jobId: string): Promise<void> {
@@ -105,7 +82,7 @@ export function createAgentTaskRuntime(input: {
     requestLog.setAgentRan(true);
     requestLogStore.incrementActive();
     try {
-      const runtime = await prepareRun(taskJob, taskJob.kind === "persona_task", controller.signal);
+      const runtime = await prepareRun(taskJob, controller.signal, taskJob.id);
       requestLog.setTriggerContext({
         guildName: runtime.incoming.guildName,
         channelName: runtime.incoming.channelName,
@@ -118,35 +95,70 @@ export function createAgentTaskRuntime(input: {
       const previousTranscript = taskJob.result?.transcript as OpenRouterMessage[] | undefined;
       const result = await runSilentToolAgentPass({
         globalConfig: getGlobalConfig(),
-        guildConfig: longRunningConfig(runtime.guildConfig),
+        guildConfig: runtime.guildConfig,
         context: runtime.context,
-        systemPrompt: taskJob.kind === "persona_task" ? getPromptBundle().systemPrompt : workspaceSystemPrompt(),
-        personaPrompt: taskJob.kind === "persona_task" ? getPromptBundle().corePrompt : "",
-        runtimePrompts: getPromptBundle().runtime,
+        systemPrompt: runtime.promptBundle.systemPrompt,
+        personaPrompt: runtime.promptBundle.corePrompt,
+        runtimePrompts: runtime.promptBundle.runtime,
+        skillsInstruction: runtime.promptBundle.runtime.skills.indexPrompt,
         incomingMessage: runtime.incoming,
         userContent: taskJob.input.message,
         assistantReply: taskJob.result?.handoff ?? "",
         visibleReplySent: false,
         tools: runtime.tools,
-        runtimeInstruction: buildRuntimeInstruction(getPromptBundle().runtime),
-        controlMessage: agentControlMessage(taskJob),
+        runtimeInstruction: buildRuntimeInstruction(runtime.promptBundle.runtime),
+        controlMessage: previousTranscript === undefined ? runtime.promptBundle.runtime.backgroundAgent : "",
         modelProfile: taskJob.input.modelProfile,
-        maxToolCalls: 64,
+        maxToolCalls: runtime.guildConfig.agentJobs.agentMaxToolCalls,
+        wallClockTimeoutMs: runtime.guildConfig.agentJobs.agentTimeoutMs,
         transcript: previousTranscript,
+        continueTranscript: true,
+        initialToolNames: taskJob.result?.activeToolNames
+          ?? [...initialActorToolNames(runtime.tools)],
+        promptCacheSurface: "discord-actor",
         requestLog,
         log: log.child({ component: "agent-task", jobId: taskJob.id, kind: taskJob.kind }),
         signal: controller.signal,
-        takePendingMessages: () => agentJobs.takePendingAgentMessages(jobId),
-        consumeGeneratedAttachments: runtime.generatedImages.consumeGeneratedAttachments,
+        takePendingMessages: async () => await materializePendingMessages(agentJobs.takePendingAgentMessages(jobId)),
+        imageInputSupported: true,
+        stopAfterAsyncImageJobCreated: false,
+        compactTranscript: {
+          reserveTokens: runtime.guildConfig.agentJobs.agentCompactionReserveTokens,
+          keepRecentTokens: runtime.guildConfig.agentJobs.agentCompactionKeepRecentTokens,
+        },
         pendingAttachments,
       });
-      const stagedRefs = await stageGeneratedAttachments(taskJob, pendingAttachments);
+      const ownedImages = agentJobs.listOwnedImageJobs(taskJob.id);
+      const activeImages = ownedImages.filter((child) => isActiveJobStatus(child.status));
+      if (activeImages.length > 0) {
+        agentJobs.markWaitingOnJobs(taskJob.id, {
+          handoff: result.text.trim(),
+          transcript: result.transcript,
+          activeToolNames: result.activeToolNames,
+        });
+        requestLog.setTrigger({ ...trigger, status: "waiting_on_jobs" });
+        return;
+      }
+      const outputManifest = [...ownedImages.map((child) => ({
+        jobId: child.id,
+        stagedAssetRef: child.result?.stagedAssetRef,
+        workspacePath: child.result?.workspacePath,
+      }))]
+        .filter((output): output is { jobId: string; stagedAssetRef: string; workspacePath: string } =>
+          output.stagedAssetRef !== undefined && output.workspacePath !== undefined
+        );
       const joinedHandoff = [
         result.text.trim(),
-        stagedRefs.length > 0 ? `Staged outputs: ${stagedRefs.join(", ")}` : "",
+        outputManifest.length > 0
+          ? `Agent outputs:\n${outputManifest.map((output) => `- ${output.jobId}: ${output.stagedAssetRef} — ${output.workspacePath}`).join("\n")}`
+          : "",
       ].filter((part) => part !== "").join("\n\n");
       const handoff = joinedHandoff !== "" ? joinedHandoff : "Task finished without a handoff note.";
-      agentJobs.markYielded(taskJob.id, { handoff, transcript: result.transcript });
+      agentJobs.markYielded(taskJob.id, {
+        handoff,
+        transcript: result.transcript,
+        activeToolNames: result.activeToolNames,
+      });
       requestLog.setTrigger({ ...trigger, status: "yielded" });
       if (agentJobs.requeueYieldedAgentWithPendingMessages(taskJob.id)) {
         await executeAgentJob(taskJob.id);
@@ -178,12 +190,13 @@ export function createAgentTaskRuntime(input: {
     }
   }
 
-  async function prepareRun(job: AgentTaskJob, personaRun: boolean, signal: AbortSignal) {
+  async function prepareRun(job: AgentTaskJob, signal: AbortSignal, ownerAgentJobId?: string) {
     const guild = client.guilds.cache.get(job.guildId);
     if (guild === undefined) throw new Error(`Guild ${job.guildId} is unavailable.`);
     const channel = await fetchAccessibleGuildChannel(job.channelId);
     if (channel === null) throw new Error(`Channel ${job.channelId} is unavailable.`);
     const guildConfig = getGuildConfig(job.guildId);
+    const promptBundle = getPromptBundle();
     const sender = createBotDiscordMessageSender({
       defaultChannel: channel,
       resolveTargetChannel: createTargetChannelResolver(client, channel),
@@ -191,60 +204,36 @@ export function createAgentTaskRuntime(input: {
       botUsername: client.user?.username ?? "bot",
       logger: log,
     });
-    const latest = syntheticHistory(job, client.user?.id ?? "", client.user?.username ?? "bot");
-    const context = personaRun
-      ? await buildContext(
-          job.guildId,
-          job.channelId,
-          guild,
-          guildConfig,
-          job.input.message,
-          latest,
-          createSyntheticReplyFallbackDeps({ db, guildId: job.guildId, channelId: job.channelId }),
-          channel.isThread(),
-          undefined,
-          "live",
-          undefined,
-          { appendLatestToHistory: false },
-        )
-      : {
-          sections: [{
-            label: "Workspace Agent",
-            text: "Private technical task. Work only through the private workspace and return a concise factual handoff.",
-            cached: false,
-            role: "developer" as const,
-          }],
-          userMessage: job.input.message,
-        };
+    const context: AssembledContext = { sections: [], userMessage: job.input.message };
     const incoming = syntheticIncoming(job, guild, channel, client.user?.id ?? "", client.user?.username ?? "bot");
-    const generatedImages = createGeneratedImageRuntime();
     const operational = buildAgentTools(
       job.guildId,
       job.channelId,
       guildConfig,
       guild,
       context.contextMessageIds,
-      generatedImages.onGeneratedImage,
+      undefined,
       {
         requesterId: job.requesterId,
         requesterUsername: job.requesterUsername,
         sourceMessageId: job.sourceMessageId,
         sourceQuote: job.sourceQuote,
       },
-      { forceSynchronousImageGeneration: true, onVisibleOutput: () => {} },
+      {
+        ...(ownerAgentJobId !== undefined ? { ownerAgentJobId } : {}),
+        onVisibleOutput: () => {},
+      },
     );
     const resolveAssets = createAssetAttachmentResolver(job.guildId, guildConfig, log);
-    const visibleTool = personaRun
-      ? [createSendDiscordMessageTool({ sender, resolveAssets, signal })]
-      : [];
-    const selected = personaRun
-      ? [...operational, ...visibleTool]
-      : operational.filter((tool) => WORKSPACE_AGENT_TOOL_NAMES.has(tool.name));
+    const selected = [
+      ...operational,
+      createSendDiscordMessageTool({ sender, resolveAssets, signal }),
+    ];
     const loaders = applyRuntimeToolPrompts([
-      createSearchToolsTool({ tools: selected, skills: getPromptBundle().runtime.skills }),
-      createLoadSkillTool({ skills: getPromptBundle().runtime.skills }),
-    ], getPromptBundle().runtime);
-    return { guildConfig, context, incoming, tools: [...loaders, ...selected], generatedImages, sender, resolveAssets };
+      createSearchToolsTool({ tools: selected, skills: promptBundle.runtime.skills }),
+      createLoadSkillTool({ skills: promptBundle.runtime.skills }),
+    ], promptBundle.runtime);
+    return { guildConfig, context, incoming, tools: [...loaders, ...selected], sender, resolveAssets, promptBundle };
   }
 
   async function notifyPrimary(jobId: string): Promise<void> {
@@ -252,7 +241,12 @@ export function createAgentTaskRuntime(input: {
     if (job === undefined || job.kind === "image_generation" || (job.status !== "yielded" && job.status !== "failed") || job.result?.notificationPending !== true) return;
     await enqueueChannelTask(job.guildId, job.channelId, async () => {
       const current = agentJobs.get(jobId);
-      if (current === undefined || current.kind === "image_generation" || current.result?.notificationPending !== true) return;
+      if (
+        current === undefined
+        || current.kind === "image_generation"
+        || (current.status !== "yielded" && current.status !== "failed")
+        || current.result?.notificationPending !== true
+      ) return;
       const completionTime = current.completedAt;
       if (completionTime === undefined) return;
       const requestLog = new RequestLog(current.guildId, current.channelId, requestLogStore);
@@ -276,7 +270,7 @@ export function createAgentTaskRuntime(input: {
       requestLogStore.incrementActive();
       try {
         const controller = new AbortController();
-        const runtime = await prepareRun(current, true, controller.signal);
+        const runtime = await prepareRun(current, controller.signal);
         requestLog.setTriggerContext({
           guildName: runtime.incoming.guildName,
           channelName: runtime.incoming.channelName,
@@ -303,7 +297,6 @@ export function createAgentTaskRuntime(input: {
           maxToolCalls: runtime.guildConfig.replyLoop.maxToolCalls,
           requestLog,
           log: log.child({ component: "agent-handoff", jobId }),
-          consumeGeneratedAttachments: runtime.generatedImages.consumeGeneratedAttachments,
           pendingAttachments,
         });
         const parsed = parseResponseDirectives(completion.text);
@@ -335,66 +328,40 @@ export function createAgentTaskRuntime(input: {
 
   async function recover(): Promise<void> {
     const rows = db.raw.prepare(
-      "SELECT id, status FROM agent_jobs WHERE kind IN ('workspace_agent', 'persona_task') AND status IN ('queued', 'yielded', 'failed') ORDER BY created_at ASC",
+      "SELECT id, status FROM agent_jobs WHERE kind = 'persona_task' AND status IN ('queued', 'waiting_on_jobs', 'yielded', 'failed') ORDER BY created_at ASC",
     ).all() as Array<{ id: string; status: string }>;
     await Promise.all(rows.map(async (row) => {
       if (row.status === "queued") await runAgentJob(row.id);
+      else if (row.status === "waiting_on_jobs") {
+        const activeChildren = agentJobs.listOwnedImageJobs(row.id).filter((child) => isActiveJobStatus(child.status));
+        if (activeChildren.length === 0) {
+          const resumed = agentJobs.sendAgentMessage(row.id, "Background image jobs ended while the process was restarting. Inspect their terminal states and continue the task.");
+          if (resumed.shouldRun) await runAgentJob(row.id);
+        }
+      }
       else await notifyPrimary(row.id);
     }));
   }
 
-  async function stageGeneratedAttachments(job: AgentTaskJob, attachments: readonly OutboundAttachment[]): Promise<string[]> {
-    const stagingRoot = process.env.WORKSPACE_STAGING_DIR ?? join(getGlobalConfig().dataDir, "staged-assets");
-    const refs: string[] = [];
-    for (const attachment of attachments) {
-      const ref = `agent-${randomUUID().replaceAll("-", "").slice(0, 16)}`;
-      const directory = await ensureStagedDirectory(stagingRoot, ref);
-      const filename = basename(attachment.filename);
-      const storagePath = join(directory, filename);
-      await Bun.write(storagePath, attachment.buffer);
-      const now = Date.now();
-      createStagedAsset(db, {
-        ref,
-        ownerGuildId: job.guildId,
-        ownerChannelId: job.channelId,
-        filename,
-        contentType: attachment.contentType,
-        storagePath,
-        createdAt: now,
-        expiresAt: now + 7 * 24 * 60 * 60 * 1000,
-      });
-      refs.push(ref);
-    }
-    return refs;
+  async function materializePendingMessages(events: AgentPendingMessage[]): Promise<OpenRouterMessage[]> {
+    return await Promise.all(events.map(async (event): Promise<OpenRouterMessage> => {
+      if (event.kind === "text") return { role: "user", content: event.text };
+      const staged = getStagedAsset(db, event.stagedAssetRef);
+      if (staged === null) return { role: "user", content: `${event.text}\nThe staged image is unavailable for direct inspection.` };
+      const file = Bun.file(staged.storagePath);
+      if (!await file.exists()) return { role: "user", content: `${event.text}\nThe staged image file is unavailable for direct inspection.` };
+      const bytes = await file.arrayBuffer();
+      return {
+        role: "user",
+        content: [
+          { type: "text", text: event.text },
+          { type: "image_url", image_url: { url: `data:${event.contentType};base64,${Buffer.from(bytes).toString("base64")}` } },
+        ],
+      };
+    }));
   }
 
   return { runAgentJob, notifyPrimary, recover };
-}
-
-function longRunningConfig(config: GuildConfig): GuildConfig {
-  return {
-    ...config,
-    replyLoop: {
-      ...config.replyLoop,
-      wallClockTimeoutMs: Math.max(config.replyLoop.wallClockTimeoutMs, 30 * 60 * 1000),
-      maxToolCalls: Math.max(config.replyLoop.maxToolCalls, 64),
-    },
-  };
-}
-
-function workspaceSystemPrompt(): string {
-  return "You are a private technical worker. You have no persona and no social role. Complete the task in the workspace, verify the result, and return a concise factual handoff. Never address Discord users.";
-}
-
-function agentControlMessage(job: AgentTaskJob): string {
-  return [
-    `## Asynchronous ${job.kind === "persona_task" ? "Persona" : "Workspace"} Task`,
-    `Task name: ${job.input.taskName}`,
-    job.input.message,
-    job.kind === "persona_task"
-      ? "Ordinary output is a private handoff to your primary instance. Use send_discord_message only when this task explicitly requires a visible Discord action."
-      : "Work independently. Return the completed result, verification, important paths, and any blocker.",
-  ].join("\n\n");
 }
 
 function primaryHandoffControlMessage(job: AgentTaskJob): string {
@@ -404,21 +371,6 @@ function primaryHandoffControlMessage(job: AgentTaskJob): string {
     job.result?.handoff ?? "No handoff note.",
     "This is private runtime state. Inspect or continue the work when needed. If no concrete follow-up remains, call dismiss_agent_job before ending this handoff turn; leave it yielded only for an expected continuation. Do not mechanically repeat the handoff.",
   ].join("\n\n");
-}
-
-function syntheticHistory(job: AgentTaskJob, botUserId: string, botUsername: string): HistoryMessage {
-  return {
-    id: `agent-task-${job.id}-${Date.now()}`,
-    author: botUsername,
-    authorId: botUserId,
-    content: job.input.message,
-    isBot: true,
-    timestamp: Date.now(),
-    replyToId: null,
-    hasEmbeds: false,
-    isSynthetic: true,
-    relatedThreadId: null,
-  };
 }
 
 function syntheticIncoming(
@@ -447,7 +399,7 @@ function syntheticIncoming(
     eventPrompt: {
       metadataHeading: "Background Agent Task",
       contentHeading: "Task",
-      metadataText: `Job ${job.id}; private asynchronous work.`,
+      metadataText: `Job ${job.id}; task ${JSON.stringify(job.input.taskName)}; private asynchronous work.`,
     },
   };
 }

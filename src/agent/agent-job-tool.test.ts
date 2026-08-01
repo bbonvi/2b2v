@@ -83,7 +83,6 @@ describe("agent job inspection tools", () => {
 
   test("globally dismisses a yielded agent", async () => {
     const job = store.enqueueAgentTask({
-      kind: "persona_task",
       guildId: "other-guild",
       channelId: "other-channel",
       requesterId: "u2",

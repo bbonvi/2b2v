@@ -214,7 +214,6 @@ describe("AgentJobStore", () => {
 
   test("persists agent follow-ups and resumes a yielded agent", () => {
     const job = store.enqueueAgentTask({
-      kind: "workspace_agent",
       guildId: "g1",
       channelId: "c1",
       requesterId: "u1",
@@ -231,12 +230,93 @@ describe("AgentJobStore", () => {
 
     expect(resumed.shouldRun).toBe(true);
     expect(resumed.job.status).toBe("queued");
-    expect(store.takePendingAgentMessages(job.id)).toEqual(["Run the tests too."]);
+    expect(store.takePendingAgentMessages(job.id)).toEqual([{ kind: "text", text: "Run the tests too." }]);
+  });
+
+  test("wakes a waiting parent on each owned image result", () => {
+    const parent = store.enqueueAgentTask({
+      guildId: "g1",
+      channelId: "c1",
+      requesterId: "u1",
+      requesterUsername: "alice",
+      sourceMessageId: "m1",
+      sourceQuote: "make variants",
+      taskName: "variants",
+      message: "Make two variants.",
+    });
+    store.start(parent.id);
+    const first = enqueue(store, { ownerAgentJobId: parent.id }).job;
+    const second = enqueue(store, { ownerAgentJobId: parent.id }).job;
+    store.start(first.id);
+    store.start(second.id);
+    store.markWaitingOnJobs(parent.id, { handoff: "Waiting." });
+    expect(store.listGlobal("active").map((job) => job.id)).toContain(parent.id);
+
+    store.markReady(first.id, { stagedAssetRef: "one", workspacePath: "/workspace/one.png", contentType: "image/png" });
+    store.markOwnedImageCompleted(first.id);
+    const firstWake = store.queueOwnedImageResult(first.id);
+
+    expect(firstWake).toEqual({ ownerAgentJobId: parent.id, shouldRun: true });
+    expect(store.get(parent.id)?.status).toBe("queued");
+    expect(store.takePendingAgentMessages(parent.id)[0]).toMatchObject({
+      kind: "image_result",
+      childJobId: first.id,
+    });
+    expect(store.start(parent.id)?.status).toBe("running");
+    store.markWaitingOnJobs(parent.id, { handoff: "Waiting for second." });
+
+    store.markReady(second.id, { stagedAssetRef: "two", workspacePath: "/workspace/two.png", contentType: "image/png" });
+    store.markOwnedImageCompleted(second.id);
+    const secondWake = store.queueOwnedImageResult(second.id);
+
+    expect(secondWake.shouldRun).toBe(true);
+    expect(store.listOwnedImageJobs(parent.id).map((job) => job.status)).toEqual(["completed", "completed"]);
+  });
+
+  test("cancelling a parent cancels unfinished owned image jobs", () => {
+    const parent = store.enqueueAgentTask({
+      guildId: "g1",
+      channelId: "c1",
+      requesterId: "u1",
+      requesterUsername: "alice",
+      sourceMessageId: "m1",
+      sourceQuote: "make it",
+      taskName: "image",
+      message: "Make it.",
+    });
+    store.start(parent.id);
+    const child = enqueue(store, { ownerAgentJobId: parent.id }).job;
+    store.start(child.id);
+
+    expect(store.cancel(parent.id, { reason: "obsolete", mode: "explicit_cancel" }).ok).toBe(true);
+    expect(store.get(child.id)?.status).toBe("dismissed");
+  });
+
+  test("a cancelled owned image can wake its waiting parent", () => {
+    const parent = store.enqueueAgentTask({
+      guildId: "g1",
+      channelId: "c1",
+      requesterId: "u1",
+      requesterUsername: "alice",
+      sourceMessageId: "m1",
+      sourceQuote: "make it",
+      taskName: "image",
+      message: "Make it.",
+    });
+    store.start(parent.id);
+    const child = enqueue(store, { ownerAgentJobId: parent.id }).job;
+    store.start(child.id);
+    store.markWaitingOnJobs(parent.id, { handoff: "Waiting." });
+    store.cancel(child.id, { reason: "variant no longer needed", mode: "explicit_cancel" });
+
+    expect(store.queueOwnedImageResult(child.id)).toEqual({ ownerAgentJobId: parent.id, shouldRun: true });
+    const pending = store.takePendingAgentMessages(parent.id)[0];
+    expect(pending?.kind).toBe("text");
+    if (pending?.kind === "text") expect(pending.text).toContain("variant no longer needed");
   });
 
   test("auto-dismisses only notified agents left yielded for an hour", () => {
     const job = store.enqueueAgentTask({
-      kind: "workspace_agent",
       guildId: "g1",
       channelId: "c1",
       requesterId: "u1",

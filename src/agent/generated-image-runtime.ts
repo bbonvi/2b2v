@@ -127,6 +127,7 @@ function formatJobErrorForContext(error: string): string {
 
 function contextJobStatus(job: AgentJob): string {
   if (job.status === "yielded") return "yielded (paused)";
+  if (job.status === "waiting_on_jobs") return "waiting on child jobs";
   if (job.status === "dismissed") return "dismissed (stopped)";
   return job.status;
 }
@@ -151,6 +152,9 @@ export function renderAgentJobsContext(
     const here = (job.guildId === currentGuildId && job.channelId === currentChannelId)
       || (job.deliveryGuildId === currentGuildId && job.deliveryChannelId === currentChannelId);
     const replacement = job.replacesJobId !== undefined ? ` replaces ${job.replacesJobId}` : "";
+    const owner = job.kind === "image_generation" && job.input.ownerAgentJobId !== undefined
+      ? `; owner ${job.input.ownerAgentJobId}`
+      : "";
     const sent = job.sentMessageId !== undefined ? ` sent MsgID ${job.sentMessageId}` : "";
     const error = job.error !== undefined ? formatJobErrorForContext(job.error) : "";
     const delivery = job.deliveryGuildId !== job.guildId || job.deliveryChannelId !== job.channelId
@@ -173,7 +177,7 @@ export function renderAgentJobsContext(
       ? `; handoff: ${JSON.stringify(shortQuote(job.result.handoff, 180))}`
       : "";
     lines.push(
-      `- ${job.id} ${job.kind} ${contextJobStatus(job)} (${state}, ${here ? "here" : "elsewhere"}) for @${job.requesterUsername}; origin guild ${job.guildId} channel ${job.channelId} MsgID ${job.sourceMessageId}${delivery}${timing}; ${work}${handoff}${replacement}${sent}${assetText}${error}`,
+      `- ${job.id} ${job.kind} ${contextJobStatus(job)} (${state}, ${here ? "here" : "elsewhere"}) for @${job.requesterUsername}; origin guild ${job.guildId} channel ${job.channelId} MsgID ${job.sourceMessageId}${delivery}${owner}${timing}; ${work}${handoff}${replacement}${sent}${assetText}${error}`,
     );
   }
   return lines.join("\n");

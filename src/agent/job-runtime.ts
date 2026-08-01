@@ -13,15 +13,17 @@ import {
   linkAgentJobAsset,
   listAgentJobAssets,
   listAgentJobRecords,
+  listOwnedImageJobRecords,
   updateAgentJobRecord,
   type AgentJobRecord,
   type PersistedAgentJobState,
 } from "../db/agent-job-repository.ts";
 
-export type AgentJobKind = "image_generation" | "workspace_agent" | "persona_task";
+export type AgentJobKind = "image_generation" | "persona_task";
 export type AgentJobStatus =
   | "queued"
   | "running"
+  | "waiting_on_jobs"
   | "ready"
   | "yielded"
   | "completed"
@@ -43,6 +45,7 @@ export interface ImageGenerationJobInput {
   outputFormat: "png" | "jpeg" | "webp";
   is4k: boolean;
   replacesJobId?: string;
+  ownerAgentJobId?: string;
 }
 
 export interface ImageGenerationJobResult {
@@ -63,12 +66,24 @@ export interface AgentTaskJobInput {
   taskName: string;
   message: string;
   modelProfile?: string;
-  pendingMessages: string[];
+  pendingMessages: AgentPendingMessage[];
 }
+
+export type AgentPendingMessage =
+  | { kind: "text"; text: string }
+  | {
+    kind: "image_result";
+    childJobId: string;
+    text: string;
+    stagedAssetRef: string;
+    workspacePath: string;
+    contentType: string;
+  };
 
 export interface AgentTaskJobResult {
   handoff?: string;
   transcript?: unknown[];
+  activeToolNames?: string[];
   yieldedAt?: number;
   notificationPending?: boolean;
   notificationDeliveredAt?: number;
@@ -107,7 +122,7 @@ export type ImageGenerationAgentJob = AgentJobBase & {
   result?: ImageGenerationJobResult;
 };
 export type AgentTaskJob = AgentJobBase & {
-  kind: "workspace_agent" | "persona_task";
+  kind: "persona_task";
   input: AgentTaskJobInput;
   result?: AgentTaskJobResult;
 };
@@ -135,11 +150,11 @@ export interface EnqueueImageJobInput {
   outputFormat: "png" | "jpeg" | "webp";
   is4k: boolean;
   replacesJobId?: string;
+  ownerAgentJobId?: string;
   now?: number;
 }
 
 export interface EnqueueAgentTaskInput {
-  kind: "workspace_agent" | "persona_task";
   guildId: string;
   channelId: string;
   requesterId: string;
@@ -165,7 +180,7 @@ export type EnqueueImageJobResult =
     assetHistory: number[];
   };
 
-const ACTIVE_STATUSES = new Set<AgentJobStatus>(["queued", "running", "ready", "yielded"]);
+const ACTIVE_STATUSES = new Set<AgentJobStatus>(["queued", "running", "waiting_on_jobs", "ready", "yielded"]);
 const TERMINAL_STATUSES = new Set<AgentJobStatus>(["completed", "delivered", "dismissed", "expired", "interrupted", "failed"]);
 const UNLINKED_TERMINAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -215,6 +230,7 @@ export class AgentJobStore {
         outputFormat: input.outputFormat,
         is4k: input.is4k,
         ...(input.replacesJobId !== undefined ? { replacesJobId: input.replacesJobId } : {}),
+        ...(input.ownerAgentJobId !== undefined ? { ownerAgentJobId: input.ownerAgentJobId } : {}),
       },
       ...(replacementRootJobId !== undefined ? { replacementRootJobId } : {}),
       ...(input.replacesJobId !== undefined ? { replacesJobId: input.replacesJobId } : {}),
@@ -226,8 +242,8 @@ export class AgentJobStore {
 
   enqueueAgentTask(input: EnqueueAgentTaskInput): AgentTaskJob {
     const job: AgentTaskJob = {
-      id: this.createShortId(input.kind === "workspace_agent" ? "agent" : "persona"),
-      kind: input.kind,
+      id: this.createShortId("agent"),
+      kind: "persona_task",
       guildId: input.guildId,
       channelId: input.channelId,
       deliveryGuildId: input.guildId,
@@ -339,24 +355,43 @@ export class AgentJobStore {
     return this.get(id);
   }
 
+  markWaitingOnJobs(id: string, result: AgentTaskJobResult): AgentJob | undefined {
+    const job = this.get(id);
+    if (job === undefined || job.status !== "running" || job.kind === "image_generation") return job;
+    updateAgentJobRecord(this.db, id, {
+      status: "waiting_on_jobs",
+      completedAt: null,
+      resultJson: JSON.stringify({ ...result, notificationPending: false }),
+    });
+    this.aborts.delete(id);
+    return this.get(id);
+  }
+
+  markOwnedImageCompleted(id: string): AgentJob | undefined {
+    const job = this.get(id);
+    if (job === undefined || job.kind !== "image_generation" || job.status !== "ready") return job;
+    updateAgentJobRecord(this.db, id, { status: "completed" });
+    return this.get(id);
+  }
+
   sendAgentMessage(id: string, message: string): { job: AgentJob; shouldRun: boolean } {
     const job = this.get(id);
     if (job === undefined) throw new Error(`No job ${id} exists.`);
     if (job.kind === "image_generation") throw new Error(`Job ${id} is not an agent.`);
-    if (job.status !== "running" && job.status !== "yielded" && job.status !== "queued") {
+    if (job.status !== "running" && job.status !== "waiting_on_jobs" && job.status !== "yielded" && job.status !== "queued") {
       throw new Error(`Job ${id} is ${job.status} and cannot receive a message.`);
     }
-    const pendingMessages = [...job.input.pendingMessages, message];
+    const pendingMessages = [...job.input.pendingMessages, { kind: "text" as const, text: message }];
     updateAgentJobRecord(this.db, id, {
       inputJson: JSON.stringify({ ...job.input, pendingMessages }),
-      ...(job.status === "yielded" ? { status: "queued", completedAt: null } : {}),
+      ...(job.status === "yielded" || job.status === "waiting_on_jobs" ? { status: "queued", completedAt: null } : {}),
     });
     const updated = this.get(id);
     if (updated === undefined) throw new Error(`Job ${id} disappeared after update.`);
-    return { job: updated, shouldRun: job.status === "yielded" };
+    return { job: updated, shouldRun: job.status === "yielded" || job.status === "waiting_on_jobs" };
   }
 
-  takePendingAgentMessages(id: string): string[] {
+  takePendingAgentMessages(id: string): AgentPendingMessage[] {
     const job = this.get(id);
     if (job === undefined || job.kind === "image_generation" || job.input.pendingMessages.length === 0) return [];
     const messages = [...job.input.pendingMessages];
@@ -364,6 +399,63 @@ export class AgentJobStore {
       inputJson: JSON.stringify({ ...job.input, pendingMessages: [] }),
     });
     return messages;
+  }
+
+  listOwnedImageJobs(ownerAgentJobId: string): ImageGenerationAgentJob[] {
+    return listOwnedImageJobRecords(this.db, ownerAgentJobId)
+      .map(fromRecord)
+      .filter((job): job is ImageGenerationAgentJob => job.kind === "image_generation");
+  }
+
+  queueOwnedImageResult(childJobId: string): { ownerAgentJobId?: string; shouldRun: boolean } {
+    const child = this.get(childJobId);
+    if (child === undefined || child.kind !== "image_generation" || child.input.ownerAgentJobId === undefined) {
+      return { shouldRun: false };
+    }
+    const parent = this.get(child.input.ownerAgentJobId);
+    if (parent === undefined || parent.kind === "image_generation") return { shouldRun: false };
+    if (!ACTIVE_STATUSES.has(parent.status)) return { ownerAgentJobId: parent.id, shouldRun: false };
+    const outstanding = this.listOwnedImageJobs(parent.id)
+      .filter((job) => ACTIVE_STATUSES.has(job.status) && job.id !== child.id)
+      .map((job) => job.id);
+    const result = child.result;
+    let event: AgentPendingMessage;
+    if (result?.stagedAssetRef !== undefined && result.workspacePath !== undefined && result.contentType !== undefined) {
+      const text = [
+        `Background image job ${child.id} completed.`,
+        `Staged asset ref: ${result.stagedAssetRef}.`,
+        `Workspace path: ${result.workspacePath}.`,
+        outstanding.length > 0 ? `Other image jobs still running: ${outstanding.join(", ")}.` : "No other image jobs remain.",
+        "The staged output is already suitable for the parent handoff. Do not move it only to preserve it; include both the staged ref and workspace path in the final handoff.",
+      ].join("\n");
+      event = {
+        kind: "image_result",
+        childJobId: child.id,
+        text,
+        stagedAssetRef: result.stagedAssetRef,
+        workspacePath: result.workspacePath,
+        contentType: result.contentType,
+      };
+    } else {
+      event = {
+        kind: "text",
+        text: [
+          `Background image job ${child.id} ${child.status}.`,
+          `Failure: ${child.error ?? child.cancelReason ?? "No image output was produced."}`,
+          outstanding.length > 0 ? `Other image jobs still running: ${outstanding.join(", ")}.` : "No other image jobs remain.",
+        ].join("\n"),
+      };
+    }
+    updateAgentJobRecord(this.db, parent.id, {
+      inputJson: JSON.stringify({ ...parent.input, pendingMessages: [...parent.input.pendingMessages, event] }),
+      ...(parent.status === "waiting_on_jobs" || parent.status === "yielded"
+        ? { status: "queued", completedAt: null }
+        : {}),
+    });
+    return {
+      ownerAgentJobId: parent.id,
+      shouldRun: parent.status === "waiting_on_jobs" || parent.status === "yielded",
+    };
   }
 
   requeueYieldedAgentWithPendingMessages(id: string): boolean {
@@ -448,6 +540,11 @@ export class AgentJobStore {
     });
     this.aborts.get(id)?.();
     this.aborts.delete(id);
+    if (job.kind !== "image_generation") {
+      for (const child of this.listOwnedImageJobs(job.id)) {
+        if (this.isActive(child)) this.cancel(child.id, { reason: `Parent agent ${job.id} was cancelled.`, mode: "explicit_cancel", now });
+      }
+    }
     return { ok: true, message: `Cancelled ${id}.`, job: this.get(id) };
   }
 
@@ -480,7 +577,7 @@ export class AgentJobStore {
         ? ` -> channel_id ${job.deliveryChannelId}`
         : "";
       return job.kind === "image_generation"
-        ? `ImageJob: ${job.id} ${job.status}${job.input.is4k ? " 4K" : ""}${delivery}`
+        ? `ImageJob: ${job.id} ${job.status}${job.input.is4k ? " 4K" : ""}${job.input.ownerAgentJobId !== undefined ? ` owned by ${job.input.ownerAgentJobId}` : ""}${delivery}`
         : `AgentJob: ${job.id} ${job.kind} ${job.status}${delivery}`;
     });
   }
@@ -521,7 +618,7 @@ export class AgentJobStore {
     return assetHistory;
   }
 
-  private createShortId(prefix: "img" | "agent" | "persona"): string {
+  private createShortId(prefix: "img" | "agent"): string {
     for (let i = 0; i < 10; i += 1) {
       const id = `${prefix}-${randomUUID().replace(/-/g, "").slice(0, 6)}`;
       if (this.get(id) === undefined) return id;
@@ -589,12 +686,12 @@ function fromRecord(record: AgentJobRecord): AgentJob {
     const result = record.resultJson === null ? undefined : JSON.parse(record.resultJson) as ImageGenerationJobResult;
     return { ...base, kind: "image_generation", input, ...(result !== undefined ? { result } : {}) };
   }
-  if (record.kind !== "workspace_agent" && record.kind !== "persona_task") {
+  if (record.kind !== "persona_task") {
     throw new Error(`Unknown agent job kind: ${record.kind}`);
   }
   const input = JSON.parse(record.inputJson) as AgentTaskJobInput;
   const result = record.resultJson === null ? undefined : JSON.parse(record.resultJson) as AgentTaskJobResult;
-  return { ...base, kind: record.kind, input, ...(result !== undefined ? { result } : {}) };
+  return { ...base, kind: "persona_task", input, ...(result !== undefined ? { result } : {}) };
 }
 
 const CancelAgentJobParams = Type.Object({

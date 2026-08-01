@@ -317,6 +317,11 @@ let enqueueChannelTaskImpl = (_guildId: string, _channelId: string, _task: () =>
   Promise.reject(new Error("Channel dispatcher is not ready."));
 let runAgentJobImpl = (_jobId: string): Promise<void> =>
   Promise.reject(new Error("Agent task runtime is not ready."));
+const resumeAgentJob = (jobId: string): void => {
+  void agentJobTasks.track(runAgentJobImpl(jobId)).catch((error: unknown) => {
+    log.error("owned image parent resume failed", { jobId, error: error instanceof Error ? error.message : String(error) });
+  });
+};
 
 const imageJobRuntime = createImageJobRuntime({
   db, client, log, requestLogStore, agentJobs, linkContentCache,
@@ -340,6 +345,7 @@ const imageJobRuntime = createImageJobRuntime({
   resolveGuildMemberReference,
   noteAmbientBotReply: (input) => ambientRuntime.noteAmbientBotReply(input),
   enqueueChannelTask: async (guildId, channelId, task) => await enqueueChannelTaskImpl(guildId, channelId, task),
+  resumeAgentJob,
 });
 const { runImageGenerationJob, loadExternalReference, loadGuildAvatarReference } = imageJobRuntime;
 
@@ -431,7 +437,6 @@ const agentTaskRuntime = createAgentTaskRuntime({
   getGlobalConfig: () => globalConfig,
   getPromptBundle: () => promptBundle,
   getGuildConfig,
-  buildContext,
   buildAgentTools,
   createBotDiscordMessageSender,
   createAssetAttachmentResolver,

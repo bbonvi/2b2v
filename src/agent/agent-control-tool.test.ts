@@ -36,17 +36,16 @@ test("spawn_agent starts a durable job and send_agent_message resumes it", async
   const spawned = await spawn.execute("spawn", {
     task_name: "build",
     message: "Build the project.",
-    kind: "workspace",
   });
   const jobId = (spawned.details as { jobId: string }).jobId;
-  expect(store.get(jobId)).toMatchObject({ kind: "workspace_agent", status: "queued" });
+  expect(store.get(jobId)).toMatchObject({ kind: "persona_task", status: "queued" });
+  expect((spawn.parameters as { properties?: Record<string, unknown> }).properties?.kind).toBeUndefined();
   store.start(jobId);
   store.markYielded(jobId, { handoff: "Done." });
 
   await send.execute("send", { target: jobId, message: "Also run tests." });
 
   const foreign = store.enqueueAgentTask({
-    kind: "persona_task",
     guildId: "g2",
     channelId: "c2",
     requesterId: "u2",

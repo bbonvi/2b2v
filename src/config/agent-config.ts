@@ -239,6 +239,12 @@ export function resolveGlobalAgentJobs(
     terminalVisibleMs: partial?.terminalVisibleMs ?? DEFAULT_AGENT_JOBS.terminalVisibleMs,
     yieldedAutoDismissMs: partial?.yieldedAutoDismissMs ?? DEFAULT_AGENT_JOBS.yieldedAutoDismissMs,
     maxImageReplacements: partial?.maxImageReplacements ?? DEFAULT_AGENT_JOBS.maxImageReplacements,
+    agentTimeoutMs: partial?.agentTimeoutMs ?? DEFAULT_AGENT_JOBS.agentTimeoutMs,
+    agentMaxToolCalls: partial?.agentMaxToolCalls !== undefined
+      ? partial.agentMaxToolCalls
+      : DEFAULT_AGENT_JOBS.agentMaxToolCalls,
+    agentCompactionReserveTokens: partial?.agentCompactionReserveTokens ?? DEFAULT_AGENT_JOBS.agentCompactionReserveTokens,
+    agentCompactionKeepRecentTokens: partial?.agentCompactionKeepRecentTokens ?? DEFAULT_AGENT_JOBS.agentCompactionKeepRecentTokens,
   };
   validateAgentJobsConfig(resolved, "agentJobs");
   return resolved;
@@ -254,6 +260,12 @@ export function resolveGuildAgentJobs(
     terminalVisibleMs: partial?.terminalVisibleMs ?? global.terminalVisibleMs,
     yieldedAutoDismissMs: partial?.yieldedAutoDismissMs ?? global.yieldedAutoDismissMs,
     maxImageReplacements: partial?.maxImageReplacements ?? global.maxImageReplacements,
+    agentTimeoutMs: partial?.agentTimeoutMs ?? global.agentTimeoutMs,
+    agentMaxToolCalls: partial?.agentMaxToolCalls !== undefined
+      ? partial.agentMaxToolCalls
+      : global.agentMaxToolCalls,
+    agentCompactionReserveTokens: partial?.agentCompactionReserveTokens ?? global.agentCompactionReserveTokens,
+    agentCompactionKeepRecentTokens: partial?.agentCompactionKeepRecentTokens ?? global.agentCompactionKeepRecentTokens,
   };
   validateAgentJobsConfig(resolved, "agentJobs");
   return resolved;
@@ -274,6 +286,18 @@ function validateAgentJobsConfig(config: AgentJobsConfig, keyPrefix: string): vo
   }
   if (!Number.isInteger(config.maxImageReplacements) || config.maxImageReplacements < 0) {
     throw new Error(`${keyPrefix}.maxImageReplacements must be >= 0`);
+  }
+  if (!Number.isFinite(config.agentTimeoutMs) || config.agentTimeoutMs < 10_000) {
+    throw new Error(`${keyPrefix}.agentTimeoutMs must be >= 10000`);
+  }
+  if (config.agentMaxToolCalls !== null && (!Number.isInteger(config.agentMaxToolCalls) || config.agentMaxToolCalls < 1)) {
+    throw new Error(`${keyPrefix}.agentMaxToolCalls must be null or >= 1`);
+  }
+  if (!Number.isInteger(config.agentCompactionReserveTokens) || config.agentCompactionReserveTokens < 1) {
+    throw new Error(`${keyPrefix}.agentCompactionReserveTokens must be >= 1`);
+  }
+  if (!Number.isInteger(config.agentCompactionKeepRecentTokens) || config.agentCompactionKeepRecentTokens < 1) {
+    throw new Error(`${keyPrefix}.agentCompactionKeepRecentTokens must be >= 1`);
   }
 }
 

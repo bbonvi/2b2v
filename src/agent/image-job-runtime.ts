@@ -56,8 +56,13 @@ export function createImageJobRuntime(input: {
   resolveGuildMemberReference: (guild: Guild, reference: string) => Promise<GuildMember | undefined>;
   noteAmbientBotReply: (input: { guildId: string; channelId: string; userId: string; sourceMessageId: string; botMessageId: string; allowLease: boolean; allowFollowUp: boolean }) => void;
   enqueueChannelTask: (guildId: string, channelId: string, task: () => Promise<void>) => Promise<void>;
+  resumeAgentJob: (jobId: string) => void;
 }) {
-  const { db, client, log, requestLogStore, agentJobs, linkContentCache, getGlobalConfig, getPromptBundle, getGuildConfig, runtimeContextTemplate, buildContext, getBuildAgentTools, blockToolsExcept, createPostReplyMaintenanceTools, runMemoryPostReplyExtraction, runRelationshipPostReplyExtraction, runInnerThreadPostReplyExtraction, createBotDiscordMessageSender, createTtsGenerator, createHandlerDeps, createAssetAttachmentResolver, persistIgnoredBotReply, fetchAccessibleGuildChannel, resolveGuildMemberReference, noteAmbientBotReply, enqueueChannelTask } = input;
+  const { db, client, log, requestLogStore, agentJobs, linkContentCache, getGlobalConfig, getPromptBundle, getGuildConfig, runtimeContextTemplate, buildContext, getBuildAgentTools, blockToolsExcept, createPostReplyMaintenanceTools, runMemoryPostReplyExtraction, runRelationshipPostReplyExtraction, runInnerThreadPostReplyExtraction, createBotDiscordMessageSender, createTtsGenerator, createHandlerDeps, createAssetAttachmentResolver, persistIgnoredBotReply, fetchAccessibleGuildChannel, resolveGuildMemberReference, noteAmbientBotReply, enqueueChannelTask, resumeAgentJob } = input;
+function resumeOwner(childJobId: string): void {
+  const queued = agentJobs.queueOwnedImageResult(childJobId);
+  if (queued.shouldRun && queued.ownerAgentJobId !== undefined) resumeAgentJob(queued.ownerAgentJobId);
+}
 async function runImageGenerationJob(jobId: string): Promise<void> {
   const job = agentJobs.get(jobId);
   if (job === undefined || job.kind !== "image_generation") return;
@@ -68,15 +73,18 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
   const guild = client.guilds.cache.get(job.deliveryGuildId);
   if (guild === undefined) {
     agentJobs.markFailed(job.id, "Delivery guild is unavailable.");
+    resumeOwner(job.id);
     return;
   }
   const channel = await client.channels.fetch(job.deliveryChannelId).catch(() => guild.channels.cache.get(job.deliveryChannelId) ?? null);
   if (channel === null || !("send" in channel) || !("sendTyping" in channel)) {
     agentJobs.markFailed(job.id, "Delivery channel is unavailable.");
+    resumeOwner(job.id);
     return;
   }
   if (!isSendableGuildChannel(channel)) {
     agentJobs.markFailed(job.id, "Delivery channel is not a supported guild text channel.");
+    resumeOwner(job.id);
     return;
   }
   const textChannel = channel;
@@ -84,7 +92,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     defaultChannel: textChannel,
     resolveTargetChannel: createTargetChannelResolver(client, textChannel),
   });
-  typing.startLoop();
+  if (job.input.ownerAgentJobId === undefined) typing.startLoop();
   const controller = new AbortController();
   const timeout = setTimeout(() => {
     controller.abort(new Error(`Image job ${job.id} timed out after ${deliveryGuildConfig.agentJobs.imageTimeoutMs}ms`));
@@ -305,6 +313,11 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
 
   try {
     if (job.status === "ready") {
+      if (job.input.ownerAgentJobId !== undefined) {
+        agentJobs.markOwnedImageCompleted(job.id);
+        resumeOwner(job.id);
+        return;
+      }
       const staged = getStagedAssetForJob(db, job.id);
       if (staged === null) {
         agentJobs.markFailed(job.id, "Ready job has no durable staged asset.");
@@ -455,6 +468,11 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       ...(details?.actualSize !== undefined ? { actualSize: details.actualSize } : {}),
       ...(typeof details?.revisedPrompt === "string" ? { revisedPrompt: details.revisedPrompt } : {}),
     } satisfies ImageGenerationJobResult);
+    if (job.input.ownerAgentJobId !== undefined) {
+      agentJobs.markOwnedImageCompleted(job.id);
+      resumeOwner(job.id);
+      return;
+    }
 
     const readyMetadata = buildAsyncImageReadyMetadata({
       requestedSize: details?.requestedSize,
@@ -518,6 +536,10 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     const timedOut = controller.signal.aborted && message.includes("timed out");
     agentJobs.markFailed(job.id, timedOut ? `Timed out: ${message}` : message);
     const latest = agentJobs.get(job.id);
+    if (job.input.ownerAgentJobId !== undefined) {
+      resumeOwner(job.id);
+      return;
+    }
     if (latest?.status === "failed") {
       try {
         const failureInstruction = runtimeContextTemplate("async-image-failed", {

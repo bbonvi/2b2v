@@ -277,8 +277,8 @@ export async function runNativeToolLoop(input: {
   messages: OpenRouterMessage[];
   tools: AgentTool[];
   initialToolNames?: ReadonlySet<string>;
-  maxToolCalls: number;
-  maxToolRounds: number;
+  maxToolCalls?: number;
+  maxToolRounds?: number;
   agentTimeBudgetMs: number;
   llmOutputTimeoutMs: number;
   retryDelayMs?: (attempt: number) => number;
@@ -303,7 +303,9 @@ export async function runNativeToolLoop(input: {
   terminateAfterSuccessfulToolRoundNames?: readonly string[];
   onActiveToolsChanged?: (tools: readonly AgentTool[]) => void;
   onActionCommitted?: () => void;
-  takePendingMessages?: () => string[];
+  takePendingMessages?: () => OpenRouterMessage[] | Promise<OpenRouterMessage[]>;
+  stopAfterAsyncImageJobCreated?: boolean;
+  beforeModelTurn?: (messages: OpenRouterMessage[]) => Promise<void>;
 }): Promise<{ text: string; stopReason?: string }> {
   const toolCatalog = new ToolCatalog(
     input.tools,
@@ -345,6 +347,7 @@ export async function runNativeToolLoop(input: {
   ): Promise<{ text: string; stopReason?: string }> => {
     let completedVisibleMessage = false;
     try {
+      await input.beforeModelTurn?.(input.messages);
       const result = await completeModelTurnWithRetries({
         complete: input.complete,
         request: {
@@ -424,9 +427,9 @@ export async function runNativeToolLoop(input: {
   };
 
   for (;;) {
-    for (const message of input.takePendingMessages?.() ?? []) {
-      input.messages.push({ role: "user", content: message });
-    }
+    const pendingMessages = await input.takePendingMessages?.() ?? [];
+    input.messages.push(...pendingMessages);
+    await input.beforeModelTurn?.(input.messages);
     let result: OpenRouterChatResult;
     let completedVisibleMessage = false;
     try {
@@ -462,6 +465,7 @@ export async function runNativeToolLoop(input: {
         log: input.log,
       });
       input.toolTiming?.markToolCallsReady();
+      for (const pendingMessage of pendingMessages) stripTransientImageData(pendingMessage);
     } catch (error) {
       if (
         isImageInputUnsupportedError(error)
@@ -560,7 +564,7 @@ export async function runNativeToolLoop(input: {
     const hasOperationalToolCall = replayableToolCalls.some((call) =>
       call.function.name !== "load_skill" && call.function.name !== "search_tools"
     );
-    if (hasOperationalToolCall && toolRounds >= input.maxToolRounds) {
+    if (hasOperationalToolCall && input.maxToolRounds !== undefined && toolRounds >= input.maxToolRounds) {
       input.messages.push(assistantMessageWithToolCalls(result, replayableToolCalls));
       for (const call of replayableToolCalls) {
         input.requestLog?.recordToolSkipped(
@@ -673,7 +677,7 @@ export async function runNativeToolLoop(input: {
           return await completeFinalWithoutTools();
         }
         internalToolLoads += 1;
-      } else if (toolCalls >= input.maxToolCalls) {
+      } else if (input.maxToolCalls !== undefined && toolCalls >= input.maxToolCalls) {
         await flushParallelCalls();
         if (isAgentTimeBudgetExceededSignal(input.signal)) {
           appendSkippedToolCallsForAgentTimeBudget(replayableToolCalls.slice(callIndex));
@@ -778,7 +782,7 @@ export async function runNativeToolLoop(input: {
     if (toolRoundState.sawTerminatingToolCall && !toolRoundState.needsRepair) {
       return { text: "" };
     }
-    if (asyncImageJobCreated) {
+    if (asyncImageJobCreated && input.stopAfterAsyncImageJobCreated !== false) {
       return { text: "" };
     }
     if (isAgentTimeBudgetExceededSignal(input.signal)) {
@@ -792,6 +796,16 @@ export async function runNativeToolLoop(input: {
   }
 
   throw new Error("Native tool loop ended without a final response.");
+}
+
+function stripTransientImageData(message: OpenRouterMessage): void {
+  if (!Array.isArray(message.content)) return;
+  const text = message.content
+    .filter((part): part is { type: "text"; text: string } => part.type === "text")
+    .map((part) => part.text)
+    .join("\n\n")
+    .trim();
+  message.content = text;
 }
 
 function normalizeRequiredSkills(required: string | string[] | undefined): string[] {

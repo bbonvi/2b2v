@@ -2,9 +2,11 @@ import type { AssembledContext } from "./context-assembly.ts";
 import type { GlobalConfig, GuildConfig, PromptTransportConfig } from "../config/types.ts";
 import type { RuntimePromptBundle } from "../config/instruction-bundle.ts";
 import type { ChatCompleteFn, HandlerDeps, IncomingMessage, MessageSender } from "./turn-types.ts";
+import { DEFAULT_AGENT_JOBS } from "../config/defaults.ts";
 
 export const TEST_RUNTIME_PROMPTS = {
   reply: "# Runtime Core\nReserved action directives.",
+  backgroundAgent: "## Background Agent Run\nComplete the delegated task before yielding.",
   finalActionInstruction: "## Final Action Instruction\nSend visible output or intentionally stay silent.",
   toolDescriptions: {},
   toolParameterDescriptions: {},
@@ -132,7 +134,7 @@ export function makeGlobalConfig(overrides: Partial<GlobalConfig> = {}): GlobalC
     defaultMembers: { include: true },
     defaultDispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
     defaultTypingSimulation: { enabled: false, inputReadingWpm: 450, inputMinDelayMs: 300, inputMaxDelayMs: 3500, outputTypingWpm: 180, outputMinHoldMs: 700, outputMaxHoldMs: 3500 },
-    defaultAgentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, yieldedAutoDismissMs: 3_600_000, maxImageReplacements: 2 },
+    defaultAgentJobs: { ...DEFAULT_AGENT_JOBS, terminalVisibleMs: 600_000 },
     defaultSchedulePressure: { maxRequesterRunsPerHour: 120, maxRequesterRunsPerDay: 500, maxGuildRunsPerHour: 600, maxGuildRunsPerDay: 3000 },
     defaultPromptTransport: makePromptTransportConfig(),
     defaultReplyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },
@@ -213,7 +215,7 @@ export function makeGuildConfig(overrides: Partial<GuildConfig> = {}): GuildConf
     members: { include: true },
     dispatcher: { enabled: true, mentionDebounceMs: 500, defaultDebounceMs: 2000 },
     typingSimulation: { enabled: false, inputReadingWpm: 450, inputMinDelayMs: 300, inputMaxDelayMs: 3500, outputTypingWpm: 180, outputMinHoldMs: 700, outputMaxHoldMs: 3500 },
-    agentJobs: { imageTimeoutMs: 300_000, imageCancelGraceMs: 60_000, terminalVisibleMs: 600_000, yieldedAutoDismissMs: 3_600_000, maxImageReplacements: 2 },
+    agentJobs: { ...DEFAULT_AGENT_JOBS, terminalVisibleMs: 600_000 },
     schedulePressure: { maxRequesterRunsPerHour: 120, maxRequesterRunsPerDay: 500, maxGuildRunsPerHour: 600, maxGuildRunsPerDay: 3000 },
     promptTransport: makePromptTransportConfig(),
     replyLoop: { maxToolCalls: 64, wallClockTimeoutMs: 45_000, llmOutputTimeoutMs: 12_000 },

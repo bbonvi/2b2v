@@ -309,6 +309,10 @@ export const DEFAULT_AGENT_JOBS: AgentJobsConfig = {
   terminalVisibleMs: 900_000,
   yieldedAutoDismissMs: 3_600_000,
   maxImageReplacements: 2,
+  agentTimeoutMs: 1_800_000,
+  agentMaxToolCalls: null,
+  agentCompactionReserveTokens: 16_384,
+  agentCompactionKeepRecentTokens: 20_000,
 };
 
 export const DEFAULT_SCHEDULE_PRESSURE: SchedulePressureConfig = {

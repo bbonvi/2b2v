@@ -39,7 +39,7 @@ export interface AgentJobRecordPatch {
   cancelReason?: string | null;
 }
 
-const ACTIVE_JOB_STATUSES = ["queued", "running", "ready", "yielded"] as const;
+const ACTIVE_JOB_STATUSES = ["queued", "running", "waiting_on_jobs", "ready", "yielded"] as const;
 
 /** Insert a newly accepted agent job before its worker starts. */
 export function createAgentJobRecord(db: Database, record: AgentJobRecord): void {
@@ -146,6 +146,15 @@ export function listAgentJobRecords(db: Database, input: {
   return rows.map(toRecord);
 }
 
+/** List image jobs owned by one background agent. Ownership is image-specific input state. */
+export function listOwnedImageJobRecords(db: Database, ownerAgentJobId: string): AgentJobRecord[] {
+  const rows = db.raw.prepare(`SELECT * FROM agent_jobs
+    WHERE kind = 'image_generation'
+      AND json_extract(input_json, '$.ownerAgentJobId') = ?
+    ORDER BY created_at ASC, id ASC`).all(ownerAgentJobId) as AgentJobRow[];
+  return rows.map(toRecord);
+}
+
 /** Close notified agent tasks that stayed yielded past their continuation window. */
 export function dismissStaleYieldedAgentJobs(
   db: Database,
@@ -154,7 +163,7 @@ export function dismissStaleYieldedAgentJobs(
 ): number {
   return db.raw.prepare(`UPDATE agent_jobs
     SET status = 'dismissed', completed_at = ?, cancel_reason = ?
-    WHERE kind IN ('workspace_agent', 'persona_task')
+    WHERE kind = 'persona_task'
       AND status = 'yielded'
       AND json_extract(result_json, '$.notificationPending') = 0
       AND COALESCE(json_extract(result_json, '$.notificationDeliveredAt'), completed_at) <= ?`)

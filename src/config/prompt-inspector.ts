@@ -27,6 +27,7 @@ export const PROMPT_SCENARIO_IDS = [
   "routed-reply",
   "private-life-actor",
   "voice-actor",
+  "background-agent",
   "memory-maintenance",
   "ambient-memory-maintenance",
   "relationship-maintenance",
@@ -327,6 +328,17 @@ const SCENARIOS: Record<PromptScenarioId, PromptScenarioDefinition> = {
     ],
     ["Immediate voice exchange, room history, participant state, durable room instructions, and ASR metadata."],
   ),
+  "background-agent": {
+    id: "background-agent",
+    label: "Background agent",
+    family: "actor",
+    description: "Long-running private 2B task without guild-scoped context.",
+    blocks: [
+      ...CORE_ACTOR_BLOCKS,
+      { groupId: "surface.background-agent.runtime", phase: "final", directPlacement: "control", reason: "Background execution and private-output boundary." },
+    ],
+    dynamicSections: ["The exact delegated task from 2B.", "Normal prior background-agent history when resumed.", "The normal persona tool catalog without guild-scoped prompt context."],
+  },
   "memory-maintenance": {
     id: "memory-maintenance",
     label: "Memory maintenance",

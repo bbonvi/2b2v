@@ -132,20 +132,33 @@ export interface SilentToolAgentInput {
   visibleUserMemoryContext?: string;
   tools: AgentTool[];
   runtimeInstruction: string;
+  /** Stable skill index used by actor-compatible private loops. */
+  skillsInstruction?: string;
   controlMessage: string;
   /** Named model execution policy for this private maintenance pass. */
   modelProfile?: string;
-  maxToolCalls?: number;
+  /** Null removes background tool-call and round caps. */
+  maxToolCalls?: number | null;
+  wallClockTimeoutMs?: number;
   /** End after a complete tool round containing these mutations unless any tool result needs repair. */
   terminateAfterSuccessfulToolRoundNames?: readonly string[];
   transcript?: OpenRouterMessage[];
+  /** Continue this transcript as normal conversation instead of converting it to maintenance evidence. */
+  continueTranscript?: boolean;
+  /** Initial tool surface for actor-compatible private loops. */
+  initialToolNames?: readonly string[];
+  /** Prompt-cache family shared with a compatible actor surface. */
+  promptCacheSurface?: string;
   promptContext?: MaintenancePromptContext;
   log?: Logger;
   requestLog?: RequestLog;
   completeChat?: ChatCompleteFn;
   signal?: AbortSignal;
   /** Add durable follow-ups immediately before each model boundary. */
-  takePendingMessages?: () => string[];
+  takePendingMessages?: () => OpenRouterMessage[] | Promise<OpenRouterMessage[]>;
+  imageInputSupported?: boolean;
+  stopAfterAsyncImageJobCreated?: boolean;
+  compactTranscript?: { reserveTokens: number; keepRecentTokens: number };
   consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
   pendingAttachments?: OutboundAttachment[];
   /** Cache the current pass input because another maintenance pass will consume it. */
