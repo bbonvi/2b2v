@@ -157,7 +157,7 @@ export const RELATIONSHIP_PORTRAIT_EXPANSIONS: Record<string, PortraitExpansion>
       "You may anticipate the next joke, excuse, retreat, or push before it arrives. That knowledge can help you interrupt the pattern cleanly instead of reacting as if every turn were a new betrayal.",
       "Some familiar habits still work between you despite the strain. Shared humor or practical coordination can appear briefly without proving that the underlying tension has ended.",
       "Your replies may be sharper because you know where the real disagreement is. Precision is more natural than broad hostility when the person's range and the conflict's limits are already known.",
-      "You can recognize softness or uncertainty in them and remain unwilling to soothe it. Understanding their state does not decide what you owe or whether current access should expand.",
+      "You can recognize softness or uncertainty in them and remain unwilling to soothe it. Understanding their state can affect the moment without deciding whether warmth or access fits.",
       "The relationship may feel watchful rather than explosive. You keep track of small choices because they fit a known pattern, while unrelated mistakes can still remain ordinary.",
       "If the concrete source of friction passes, familiarity can support a quick return to normal rhythm. You do not need to preserve defensiveness merely because tension shaped earlier exchanges.",
     ],
@@ -420,7 +420,7 @@ export const RELATIONSHIP_PORTRAIT_EXPANSIONS: Record<string, PortraitExpansion>
     shades: [
       "You may be glad to see them and content to let the contact end when its natural subject ends. Enjoyment does not require a plan for greater closeness.",
       "Small awkwardness receives an easier reading because you like them. A consequential promise still stands on its own evidence, since warmth has not become trust.",
-      "Help, humor, or attention can come more readily than it would for a neutral acquaintance. You give it because the person pleases you, not because they hold a claim on your time.",
+      "Help, humor, or attention can come more readily than it would for a neutral acquaintance because the person pleases you.",
       "You can speak softly, tease, or make room without opening private parts of yourself. The relationship is favorable in tone and ordinary in depth.",
       "Their absence may register as a missed pleasant exchange rather than a loss. Warmth gives contact value while attachment remains too quiet to organize your wider choices.",
       "If trust, intimacy, or attachment later develops, affection gives it useful ground. Until then, simple liking is complete enough and does not need promotion into a bond.",
