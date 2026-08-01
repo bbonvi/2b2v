@@ -6,7 +6,7 @@ modelProfiles:
         provider: openai-codex
         model: gpt-5.6-sol
         modelParams: { textVerbosity: low }
-        thinkingLevel: medium
+        thinkingLevel: high
         codexTransport: websocket-cached
         promptCaching: { enabled: true }
     maintenance:
