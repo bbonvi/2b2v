@@ -144,6 +144,10 @@ export interface SilentToolAgentInput {
   requestLog?: RequestLog;
   completeChat?: ChatCompleteFn;
   signal?: AbortSignal;
+  /** Add durable follow-ups immediately before each model boundary. */
+  takePendingMessages?: () => string[];
+  consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
+  pendingAttachments?: OutboundAttachment[];
   /** Cache the current pass input because another maintenance pass will consume it. */
 }
 

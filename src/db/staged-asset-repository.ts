@@ -2,7 +2,7 @@ import type { Database } from "./database.ts";
 
 export interface StagedAsset {
   ref: string;
-  jobId: string;
+  jobId?: string;
   ownerGuildId: string;
   ownerChannelId: string;
   filename: string;
@@ -16,7 +16,7 @@ export interface StagedAsset {
 
 interface StagedAssetRow {
   ref: string;
-  job_id: string;
+  job_id: string | null;
   owner_guild_id: string;
   owner_channel_id: string;
   filename: string;
@@ -31,7 +31,7 @@ interface StagedAssetRow {
 function fromRow(row: StagedAssetRow): StagedAsset {
   return {
     ref: row.ref,
-    jobId: row.job_id,
+    ...(row.job_id !== null ? { jobId: row.job_id } : {}),
     ownerGuildId: row.owner_guild_id,
     ownerChannelId: row.owner_channel_id,
     filename: row.filename,
@@ -55,7 +55,7 @@ export function createStagedAsset(db: Database, asset: StagedAsset): void {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     asset.ref,
-    asset.jobId,
+    asset.jobId ?? null,
     asset.ownerGuildId,
     asset.ownerChannelId,
     asset.filename,
@@ -82,7 +82,7 @@ export function getStagedAssetForJob(db: Database, jobId: string): StagedAsset |
 
 export function listStagedAssets(
   db: Database,
-  input: { guildId?: string; channelId?: string; unresolvedOnly?: boolean; limit?: number } = {},
+  input: { guildId?: string; channelId?: string; unresolvedOnly?: boolean; limit?: number; oldestFirst?: boolean } = {},
 ): StagedAsset[] {
   const conditions: string[] = [];
   const params: Array<string | number> = [];
@@ -97,8 +97,9 @@ export function listStagedAssets(
   if (input.unresolvedOnly === true) conditions.push("delivered_message_id IS NULL");
   params.push(input.limit ?? 100);
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const direction = input.oldestFirst === true ? "ASC" : "DESC";
   return (db.raw.prepare(
-    `SELECT * FROM staged_assets ${where} ORDER BY created_at DESC, ref DESC LIMIT ?`,
+    `SELECT * FROM staged_assets ${where} ORDER BY created_at ${direction}, ref ${direction} LIMIT ?`,
   ).all(...params) as StagedAssetRow[]).map(fromRow);
 }
 

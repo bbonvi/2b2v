@@ -17,14 +17,39 @@ services:
       DASHBOARD_TRUSTED_PROXY_CIDRS: ${DASHBOARD_TRUSTED_PROXY_CIDRS:-}
       VPN_API_URL: ${VPN_API_URL:-}
       VPN_PEER: ${VPN_PEER:-}
+      WORKSPACE_SOCKET_PATH: /run/2b2v/workspace.sock
+      WORKSPACE_STAGING_DIR: /app/workspace-staging
     volumes:
       - bot-data:/app/data
       - ./profiles:/app/profiles:ro
+      - workspace-control:/run/2b2v
+      - workspace-staging:/app/workspace-staging
     ports:
       - "127.0.0.1:${DASHBOARD_PORT:-31456}:3000"
     # Replies and image delivery remain live during coordinated shutdown.
     stop_grace_period: 30m
     restart: unless-stopped
 
+  workspace:
+    build:
+      context: .
+      target: workspace
+    environment:
+      WORKSPACE_SOCKET_PATH: /run/2b2v/workspace.sock
+      WORKSPACE_STAGING_DIR: /workspace/staged-assets
+    volumes:
+      - workspace-data:/workspace
+      - workspace-control:/run/2b2v
+      - workspace-staging:/workspace/staged-assets
+    networks:
+      - workspace-egress
+    restart: unless-stopped
+
 volumes:
   bot-data:
+  workspace-data:
+  workspace-control:
+  workspace-staging:
+
+networks:
+  workspace-egress:

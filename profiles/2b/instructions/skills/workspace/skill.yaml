@@ -1,0 +1,15 @@
+id: workspace
+title: Workspace and Agents
+description: Use for private computer work, workspace files, or asynchronous delegated tasks.
+required_for_tools:
+  - workspace_exec
+  - export_asset_to_workspace
+  - stage_workspace_file
+  - spawn_agent
+  - send_agent_message
+  - cancel_agent_job
+  - list_agent_jobs
+  - read_agent_job
+  - dismiss_agent_job
+instructions:
+  - 00-runtime.md

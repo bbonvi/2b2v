@@ -40,6 +40,8 @@ docker compose --env-file .env.prod.del -p 2b2v-delamain-prod up -d --build --re
 
 Do not run multiple stacks with the same Discord bot token unless they should connect as the same bot.
 
+Compose also starts a persistent root workspace for the 2B profile. It has outbound internet but no application-service network, bot data volume, database, host network, or Docker socket. The bot controls it through a Unix socket on a shared control volume. `/workspace` persists across rebuilds; `/workspace/staged-assets` is a shared temporary exchange with the bot.
+
 ## Environment
 
 Required: `DISCORD_TOKEN` and credentials for every provider declared in `modelProfiles`.
@@ -134,7 +136,9 @@ Web visuals use `search_images` for Brave image discovery, `fetch_url` for cache
 
 Actor turns start with a stable chat-first tool surface. `search_tools` additively loads uncommon capabilities for the next model turn, while `load_skill` loads specialized policy and its declared tool together. Skill-gated tools cannot be activated through generic discovery. Caller-owned extension tools require explicit initial-surface opt-in. Maintenance and scheduled/watch execution use separate tool surfaces.
 
-Async agent jobs are durable and channel-scoped. `list_agent_jobs` returns active or recent work, while `read_agent_job` exposes the exact effective input, lifecycle, result, replacement lineage, and output assets. Generated image assets retain their producer-job link, so `read_asset` returns both the image and its generation provenance for later revisions; unlinked terminal jobs expire after 30 days.
+Async agent jobs are durable and channel-scoped. They include image generation, serialized no-persona workspace agents, and parallel in-persona tasks. `spawn_agent` starts background work; `send_agent_message` queues a running follow-up or resumes a yielded agent. Completion handoffs re-enter the same per-channel dispatcher after queued user messages. `list_agent_jobs` and `read_agent_job` expose lifecycle, exact input, handoff, and output provenance. Running work interrupted by restart is retained as interrupted; queued work resumes.
+
+`export_asset_to_workspace` copies a chat or staged asset into persistent workspace storage. `stage_workspace_file` exposes a workspace path as a staged asset for reading, image references, or Discord delivery. Generated images are written to the same staged volume automatically. An hourly cleanup deletes unresolved staged files whose filesystem modification time is older than seven days; moving a file outside the staged directory preserves it.
 
 Verification:
 

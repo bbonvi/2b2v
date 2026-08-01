@@ -129,6 +129,22 @@ function getOrCreateDispatcher(guildId: string): ChannelDispatcher {
   return dispatcher;
 }
 
+function enqueueChannelTask(guildId: string, channelId: string, task: () => Promise<void>): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const accepted = getOrCreateDispatcher(guildId).enqueueTask(channelId, async () => {
+      try {
+        await task();
+        resolve();
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error("Serialized channel task failed.");
+        reject(failure);
+        throw failure;
+      }
+    });
+    if (!accepted) reject(new Error("Channel dispatcher is draining."));
+  });
+}
+
 function messageRepliesToOwnBot(message: Message): boolean {
   if (message.guildId === null || message.reference?.messageId === undefined) return false;
   const botUserId = client.user?.id ?? "";
@@ -866,5 +882,5 @@ async function processTriggeredMessage(
 }
 
 
-  return { dispatchers, getOrCreateDispatcher, evaluateMessageTrigger, normalizedWatchMessage, processEventWatchTurn, processSettledWatchedMessage, processTriggeredMessage };
+  return { dispatchers, getOrCreateDispatcher, enqueueChannelTask, evaluateMessageTrigger, normalizedWatchMessage, processEventWatchTurn, processSettledWatchedMessage, processTriggeredMessage };
 }

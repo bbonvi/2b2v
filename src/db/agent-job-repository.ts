@@ -30,6 +30,7 @@ export interface AgentJobRecord {
 
 export interface AgentJobRecordPatch {
   status?: string;
+  inputJson?: string;
   resultJson?: string | null;
   error?: string | null;
   startedAt?: number | null;
@@ -38,7 +39,7 @@ export interface AgentJobRecordPatch {
   cancelReason?: string | null;
 }
 
-const ACTIVE_JOB_STATUSES = ["queued", "running", "ready"] as const;
+const ACTIVE_JOB_STATUSES = ["queued", "running", "ready", "yielded"] as const;
 
 /** Insert a newly accepted agent job before its worker starts. */
 export function createAgentJobRecord(db: Database, record: AgentJobRecord): void {
@@ -87,6 +88,7 @@ export function updateAgentJobRecord(db: Database, id: string, patch: AgentJobRe
   const values: Array<string | number | null> = [];
   const fields: Array<[keyof AgentJobRecordPatch, string]> = [
     ["status", "status"],
+    ["inputJson", "input_json"],
     ["resultJson", "result_json"],
     ["error", "error"],
     ["startedAt", "started_at"],
@@ -139,11 +141,11 @@ export function listAgentJobRecords(db: Database, input: {
   return rows.map(toRecord);
 }
 
-/** Mark process-owned work left active after a crash as terminal and inspectable. */
+/** Mark non-replayable running work after a crash as interrupted and inspectable. */
 export function failInterruptedAgentJobs(db: Database, now = Date.now()): number {
   const result = db.raw.prepare(`UPDATE agent_jobs
-    SET status = 'failed', completed_at = ?, error = ?
-    WHERE status IN ('queued', 'running')`)
+    SET status = 'interrupted', completed_at = ?, error = ?
+    WHERE status = 'running'`)
     .run(now, "Interrupted before completion by a process restart.");
   return result.changes;
 }

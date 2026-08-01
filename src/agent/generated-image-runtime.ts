@@ -136,12 +136,13 @@ export function renderAgentJobsContext(
   now = Date.now(),
   assetsForJob: (jobId: string) => readonly { assetId: number }[] = () => [],
 ): string {
-  if (jobs.length === 0) return "";
+  const imageJobs = jobs.filter((job) => job.kind === "image_generation");
+  if (imageJobs.length === 0) return "";
   const lines = [
     "## Image Jobs",
     template,
   ];
-  for (const job of jobs) {
+  for (const job of imageJobs) {
     const state = isActiveJobStatus(job.status) ? "active" : "recent terminal";
     const replacement = job.replacesJobId !== undefined ? ` replaces ${job.replacesJobId}` : "";
     const sent = job.sentMessageId !== undefined ? ` sent MsgID ${job.sentMessageId}` : "";

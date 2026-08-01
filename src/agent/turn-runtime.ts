@@ -24,7 +24,7 @@ import { type PromptBundle } from "../config/instruction-bundle";
 import { createDiscordAssetSourceResolver } from "../discord/asset-resolver";
 import { type AsyncTaskTracker } from "../runtime/async-task-tracker";
 import { DEFAULT_ASSET_READING, DEFAULT_EXTERNAL_IMAGES } from "../config/defaults";
-import { unlink } from "fs/promises";
+import { unlinkStagedPath } from "./staged-path.ts";
 import type { Database } from "../db/database";
 import { type Client, type Guild, type TextChannel, type ThreadChannel } from "discord.js";
 
@@ -115,15 +115,16 @@ function createBotDiscordMessageSender(
           ...(permanent !== undefined ? { permanentAssetId: permanent.id } : {}),
         });
         if (!reconciled) continue;
-        if (permanent !== undefined) agentJobs.linkAsset(staged.jobId, permanent.id);
-        const job = agentJobs.get(staged.jobId);
-        if (job?.status === "ready") {
+        if (permanent !== undefined && staged.jobId !== undefined) agentJobs.linkAsset(staged.jobId, permanent.id);
+        const job = staged.jobId === undefined ? undefined : agentJobs.get(staged.jobId);
+        if (job?.status === "ready" && staged.jobId !== undefined) {
           agentJobs.markDelivered(staged.jobId, delivery.messageId, {
             ...(job.result ?? {}),
             stagedAssetRef: ref,
           });
         }
-        await unlink(staged.storagePath).catch((error: unknown) => {
+        const stagingRoot = process.env.WORKSPACE_STAGING_DIR ?? `${getGlobalConfig().dataDir}/staged-assets`;
+        await unlinkStagedPath(stagingRoot, staged.storagePath).catch((error: unknown) => {
           log.warn("delivered staged asset cleanup failed", {
             ref,
             error: error instanceof Error ? error.message : String(error),
@@ -253,6 +254,7 @@ function createAssetAttachmentResolver(guildId: string, guildConfig: GuildConfig
   return createStoredAssetAttachmentResolver({
     db,
     stagedGuildId: guildId,
+    stagedRoot: process.env.WORKSPACE_STAGING_DIR ?? `${getGlobalConfig().dataDir}/staged-assets`,
     maxDownloadBytes: guildConfig.assetReading?.maxDownloadBytes ?? DEFAULT_ASSET_READING.maxDownloadBytes,
     resolveSource,
     resolveLink: async (input, signal) => await resolveLinkContent({

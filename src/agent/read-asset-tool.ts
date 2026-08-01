@@ -51,6 +51,7 @@ export interface ReadAssetToolDeps {
   getAsset: (id: number) => MessageAsset | null;
   /** Resolve a durable generated output that has not yet become a Discord asset. */
   getStagedAsset?: (ref: string) => StagedAsset | null;
+  resolveStagedPath?: (storagePath: string) => Promise<string>;
   /** Resolve byte-derived metadata persisted with a staged generated output. */
   getStagedAssetMetadata?: (jobId: string) => { actualSize?: string } | null;
   /** Render private producer metadata for generated assets, when available. */
@@ -93,7 +94,7 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
     parameters: ReadAssetParams,
     async execute(_toolCallId, params, signal): Promise<AgentToolResult<
       | { assetId: number; origin: AssetOrigin; startLine?: number; endLine?: number; totalLines?: number }
-      | { assetRef: string; jobId: string }
+      | { assetRef: string; jobId?: string }
       | {
           assetId: number;
           origin: AssetOrigin;
@@ -122,7 +123,8 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
         if (staged === null) throw new Error(`Staged asset ${assetRef} was not found.`);
         const timeoutSignal = AbortSignal.timeout(deps.config.timeoutSeconds.image * 1000);
         const readSignal = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
-        const file = Bun.file(staged.storagePath);
+        const storagePath = await deps.resolveStagedPath?.(staged.storagePath) ?? staged.storagePath;
+        const file = Bun.file(storagePath);
         if (!await file.exists()) throw new Error(`Staged asset ${assetRef} file is unavailable.`);
         if (file.size > deps.config.maxDownloadBytes) {
           throw new Error(`Staged asset ${assetRef} exceeds the configured read limit.`);
@@ -132,7 +134,7 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
           staged.contentType,
         );
         readSignal.throwIfAborted();
-        const metadata = deps.getStagedAssetMetadata?.(staged.jobId) ?? null;
+        const metadata = staged.jobId === undefined ? null : deps.getStagedAssetMetadata?.(staged.jobId) ?? null;
         const facts = [
           `type: ${staged.contentType}`,
           `size: ${file.size.toLocaleString("en-US")} bytes`,
@@ -142,11 +144,11 @@ export function createReadAssetTool(deps: ReadAssetToolDeps): AgentTool {
           content: [
             {
               type: "text",
-              text: `Staged asset: ${staged.ref} — ${staged.filename}\nJob: ${staged.jobId}\n${facts.join("; ")}\nOwner room: guild ${staged.ownerGuildId}, channel ${staged.ownerChannelId}\nExpires: ${new Date(staged.expiresAt).toISOString()}`,
+              text: `Staged asset: ${staged.ref} — ${staged.filename}${staged.jobId !== undefined ? `\nJob: ${staged.jobId}` : ""}\n${facts.join("; ")}\nOwner room: guild ${staged.ownerGuildId}, channel ${staged.ownerChannelId}`,
             },
             { type: "image", data: image.data.toString("base64"), mimeType: image.mime },
           ],
-          details: { assetRef: staged.ref, jobId: staged.jobId },
+          details: { assetRef: staged.ref, ...(staged.jobId !== undefined ? { jobId: staged.jobId } : {}) },
         };
       }
       const assetId = assetRef;

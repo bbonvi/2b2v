@@ -303,6 +303,7 @@ export async function runNativeToolLoop(input: {
   terminateAfterSuccessfulToolRoundNames?: readonly string[];
   onActiveToolsChanged?: (tools: readonly AgentTool[]) => void;
   onActionCommitted?: () => void;
+  takePendingMessages?: () => string[];
 }): Promise<{ text: string; stopReason?: string }> {
   const toolCatalog = new ToolCatalog(
     input.tools,
@@ -423,6 +424,9 @@ export async function runNativeToolLoop(input: {
   };
 
   for (;;) {
+    for (const message of input.takePendingMessages?.() ?? []) {
+      input.messages.push({ role: "user", content: message });
+    }
     let result: OpenRouterChatResult;
     let completedVisibleMessage = false;
     try {
@@ -539,11 +543,11 @@ export async function runNativeToolLoop(input: {
       .filter((call) => !replayableToolCalls.includes(call))
       .map((call) => {
         const registeredTool = toolCatalog.registeredTool(call.function.name);
-        const requiredSkillId = input.runtimePrompts?.skills.requiredByTool[call.function.name];
+        const requiredSkillIds = normalizeRequiredSkills(input.runtimePrompts?.skills.requiredByTool[call.function.name]);
         const message = registeredTool === undefined
           ? `Unknown tool: ${call.function.name}`
-          : requiredSkillId !== undefined
-            ? `${call.function.name} is not active in this model turn. Call load_skill with skill="${requiredSkillId}", then call ${call.function.name} in the next model turn.`
+          : requiredSkillIds.length > 0
+            ? `${call.function.name} is not active in this model turn. Call load_skill with one of ${requiredSkillIds.map((id) => `skill="${id}"`).join(" or ")}, then call ${call.function.name} in the next model turn.`
             : `${call.function.name} is not active in this model turn. Call search_tools for this action, then call ${call.function.name} in the next model turn.`;
         input.requestLog?.recordToolSkipped(
           call.id,
@@ -692,13 +696,13 @@ export async function runNativeToolLoop(input: {
         toolCalls += 1;
       }
 
-      const requiredSkillId = input.runtimePrompts?.skills.requiredByTool[tool.name];
-      if (requiredSkillId !== undefined && !turnLoadedSkills.has(requiredSkillId)) {
+      const requiredSkillIds = normalizeRequiredSkills(input.runtimePrompts?.skills.requiredByTool[tool.name]);
+      if (requiredSkillIds.length > 0 && !requiredSkillIds.some((skillId) => turnLoadedSkills.has(skillId))) {
         await flushParallelCalls();
         const execution = blockedForMissingSkillExecution({
           call,
           tool,
-          requiredSkillId,
+          requiredSkillId: requiredSkillIds[0] ?? "",
           requestLog: input.requestLog,
         });
         const rendered = await renderExecutedToolCall({
@@ -788,6 +792,10 @@ export async function runNativeToolLoop(input: {
   }
 
   throw new Error("Native tool loop ended without a final response.");
+}
+
+function normalizeRequiredSkills(required: string | string[] | undefined): string[] {
+  return required === undefined ? [] : typeof required === "string" ? [required] : required;
 }
 
 function parseToolArgumentsSafe(call: OpenRouterToolCall): Record<string, unknown> {

@@ -20,14 +20,14 @@ import { type PromptBundle } from "../config/instruction-bundle";
 import { createDiscordReplyFallbackDeps } from "../discord/reply-fallback-runtime";
 import { createDiscordAssetSourceResolver } from "../discord/asset-resolver";
 import { DEFAULT_ASSET_READING, DEFAULT_EXTERNAL_IMAGES } from "../config/defaults";
-import { join } from "path";
-import { mkdirSync } from "fs";
+import { basename, join } from "path";
 import type { Database } from "../db/database";
 import { type Client, type Guild, type GuildMember, type Message, type TextChannel, type ThreadChannel } from "discord.js";
 import type { createContextRuntime } from "./context-runtime";
 import type { createMaintenanceRuntime } from "./maintenance-runtime";
 import type { createToolRuntime } from "./tool-runtime";
 import type { createTurnRuntime } from "./turn-runtime";
+import { ensureStagedDirectory } from "./staged-path.ts";
 
 export function createImageJobRuntime(input: {
   db: Database;
@@ -55,11 +55,13 @@ export function createImageJobRuntime(input: {
   fetchAccessibleGuildChannel: (channelId: string) => Promise<SendableGuildChannel | null>;
   resolveGuildMemberReference: (guild: Guild, reference: string) => Promise<GuildMember | undefined>;
   noteAmbientBotReply: (input: { guildId: string; channelId: string; userId: string; sourceMessageId: string; botMessageId: string; allowLease: boolean; allowFollowUp: boolean }) => void;
+  enqueueChannelTask: (guildId: string, channelId: string, task: () => Promise<void>) => Promise<void>;
 }) {
-  const { db, client, log, requestLogStore, agentJobs, linkContentCache, getGlobalConfig, getPromptBundle, getGuildConfig, runtimeContextTemplate, buildContext, getBuildAgentTools, blockToolsExcept, createPostReplyMaintenanceTools, runMemoryPostReplyExtraction, runRelationshipPostReplyExtraction, runInnerThreadPostReplyExtraction, createBotDiscordMessageSender, createTtsGenerator, createHandlerDeps, createAssetAttachmentResolver, persistIgnoredBotReply, fetchAccessibleGuildChannel, resolveGuildMemberReference, noteAmbientBotReply } = input;
+  const { db, client, log, requestLogStore, agentJobs, linkContentCache, getGlobalConfig, getPromptBundle, getGuildConfig, runtimeContextTemplate, buildContext, getBuildAgentTools, blockToolsExcept, createPostReplyMaintenanceTools, runMemoryPostReplyExtraction, runRelationshipPostReplyExtraction, runInnerThreadPostReplyExtraction, createBotDiscordMessageSender, createTtsGenerator, createHandlerDeps, createAssetAttachmentResolver, persistIgnoredBotReply, fetchAccessibleGuildChannel, resolveGuildMemberReference, noteAmbientBotReply, enqueueChannelTask } = input;
 async function runImageGenerationJob(jobId: string): Promise<void> {
   const job = agentJobs.get(jobId);
-  if (job === undefined) return;
+  if (job === undefined || job.kind !== "image_generation") return;
+  const stagingRoot = process.env.WORKSPACE_STAGING_DIR ?? join(getGlobalConfig().dataDir, "staged-assets");
   const sourceGuildConfig = getGuildConfig(job.guildId);
   const deliveryGuildConfig = getGuildConfig(job.deliveryGuildId);
   const sourceGuild = client.guilds.cache.get(job.guildId);
@@ -308,20 +310,23 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
         agentJobs.markFailed(job.id, "Ready job has no durable staged asset.");
         return;
       }
-      await runAsyncImageStatusTurn({
-        event: "ready",
-        instruction: [
-          `[Async Image Job Ready] Job ${job.id} remains ready after restart.`,
-          `Staged asset ref: ${staged.ref}.`,
-          `Original requester: @${job.requesterUsername} (${job.requesterId}).`,
-          `Source: guild ${job.guildId}, channel ${job.channelId}, MsgID ${job.sourceMessageId}; quote: ${JSON.stringify(job.sourceQuote)}.`,
-          `Intended delivery room: guild ${job.deliveryGuildId}, channel ${job.deliveryChannelId}.`,
-          "This event does not instruct you to send it. You may inspect it, deliver it explicitly, defer it, or dismiss the job deliberately.",
-        ].join("\n"),
+      await enqueueChannelTask(job.deliveryGuildId, job.deliveryChannelId, async () => {
+        await runAsyncImageStatusTurn({
+          event: "ready",
+          instruction: [
+            `[Async Image Job Ready] Job ${job.id} remains ready after restart.`,
+            `Staged asset ref: ${staged.ref}.`,
+            `Original requester: @${job.requesterUsername} (${job.requesterId}).`,
+            `Source: guild ${job.guildId}, channel ${job.channelId}, MsgID ${job.sourceMessageId}; quote: ${JSON.stringify(job.sourceQuote)}.`,
+            `Intended delivery room: guild ${job.deliveryGuildId}, channel ${job.deliveryChannelId}.`,
+            "This event does not instruct you to send it. You may inspect it, deliver it explicitly, defer it, or dismiss the job deliberately.",
+          ].join("\n"),
+        });
       });
       return;
     }
-    agentJobs.start(job.id, () => controller.abort(new Error(`Image job ${job.id} cancelled.`)));
+    const started = agentJobs.start(job.id, () => controller.abort(new Error(`Image job ${job.id} cancelled.`)));
+    if (started?.status !== "running") return;
     const generated = createGeneratedImageRuntime();
     const imageProfile = resolveModelProfile(
       getGlobalConfig(),
@@ -357,6 +362,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
                 asset: staged,
                 maxBytes: sourceGuildConfig.assetReading?.maxDownloadBytes
                   ?? DEFAULT_ASSET_READING.maxDownloadBytes,
+                stagingRoot,
               });
         }
         const asset = getAssetById(db, id);
@@ -421,16 +427,16 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     const generationInput = renderImageGenerationInput(job.input);
     const outboundAttachment: OutboundAttachment = attachment;
     const stagedRef = `job_${job.id.replace(/[^A-Za-z0-9]/g, "")}`;
-    const stagedDirectory = join(getGlobalConfig().dataDir, "staged-assets", stagedRef);
-    mkdirSync(stagedDirectory, { recursive: true });
-    const stagedPath = join(stagedDirectory, outboundAttachment.filename);
+    const stagedDirectory = await ensureStagedDirectory(stagingRoot, stagedRef);
+    const stagedFilename = basename(outboundAttachment.filename);
+    const stagedPath = join(stagedDirectory, stagedFilename);
     await Bun.write(stagedPath, outboundAttachment.buffer);
     createStagedAsset(db, {
       ref: stagedRef,
       jobId: job.id,
       ownerGuildId: job.deliveryGuildId,
       ownerChannelId: job.deliveryChannelId,
-      filename: outboundAttachment.filename,
+      filename: stagedFilename,
       contentType: outboundAttachment.contentType,
       storagePath: stagedPath,
       createdAt: Date.now(),
@@ -438,8 +444,9 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     });
     agentJobs.markReady(job.id, {
       stagedAssetRef: stagedRef,
+      workspacePath: `/workspace/staged-assets/${stagedRef}/${stagedFilename}`,
       attachmentId: outboundAttachment.id,
-      filename: outboundAttachment.filename,
+      filename: stagedFilename,
       contentType: outboundAttachment.contentType,
       byteSize: outboundAttachment.buffer.length,
       is4k: job.input.is4k,
@@ -461,6 +468,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     const completionInstruction = runtimeContextTemplate("async-image-ready", {
       jobId: job.id,
       stagedAssetRef: stagedRef,
+      workspacePath: `/workspace/staged-assets/${stagedRef}/${stagedFilename}`,
       requesterUsername: job.requesterUsername,
       requesterId: job.requesterId,
       ...readyMetadata,
@@ -473,14 +481,18 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     }, [
       `[Async Image Job Ready] Job ${job.id} generated an image.`,
       `Staged asset ref: ${stagedRef}.`,
+      `Workspace path: /workspace/staged-assets/${stagedRef}/${stagedFilename}.`,
       `Original requester: @${job.requesterUsername} (${job.requesterId}).`,
       `Source: guild ${job.guildId}, channel ${job.channelId}, MsgID ${job.sourceMessageId}; quote: ${JSON.stringify(job.sourceQuote)}.`,
       `Intended delivery room: guild ${job.deliveryGuildId}, channel ${job.deliveryChannelId}.`,
       "This event does not instruct you to send it. You may inspect it, deliver it with an explicit message asset_ids reference, defer it, or dismiss the job deliberately.",
     ].join("\n"));
-    const sentMessageId = await runAsyncImageStatusTurn({
-      event: "ready",
-      instruction: completionInstruction,
+    let sentMessageId: string | undefined;
+    await enqueueChannelTask(job.deliveryGuildId, job.deliveryChannelId, async () => {
+      sentMessageId = await runAsyncImageStatusTurn({
+        event: "ready",
+        instruction: completionInstruction,
+      });
     });
     if (sentMessageId !== undefined && agentJobs.get(job.id)?.status === "delivered") {
       noteAmbientBotReply({
@@ -517,9 +529,11 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
           generationInput: renderImageGenerationInput(job.input),
           failureDetail: message,
         }, `[Async Image Job Failed] Job ${job.id} ${latest.status}.`);
-        await runAsyncImageStatusTurn({
-          event: "failed",
-          instruction: failureInstruction,
+        await enqueueChannelTask(job.deliveryGuildId, job.deliveryChannelId, async () => {
+          await runAsyncImageStatusTurn({
+            event: "failed",
+            instruction: failureInstruction,
+          });
         });
       } catch (sendErr) {
         log.warn("async image failure notification failed", {
