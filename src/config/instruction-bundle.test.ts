@@ -209,7 +209,7 @@ describe("loadInstructionBundle", () => {
     expect(() => loadInstructionBundle(TEST_ROOT, "test", makeLogger())).toThrow("escapes skill directory");
   });
 
-  test("rejects duplicate required skill ownership for one tool", () => {
+  test("allows alternative skills to activate one tool", () => {
     mkdirSync(join(TEST_DIR, "skills", "other_skill"), { recursive: true });
     writeFileSync(join(TEST_DIR, "skills", "image_generation", "skill.yaml"), [
       "id: image_generation",
@@ -234,7 +234,11 @@ describe("loadInstructionBundle", () => {
     ].join("\n"));
     writeFileSync(join(TEST_DIR, "skills", "other_skill", "00-runtime.md"), "runtime");
 
-    expect(() => loadInstructionBundle(TEST_ROOT, "test", makeLogger())).toThrow("requires multiple skills");
+    const bundle = loadInstructionBundle(TEST_ROOT, "test", makeLogger());
+    expect(bundle.runtime.skills.requiredByTool.codex_generate_image).toEqual([
+      "image_generation",
+      "other_skill",
+    ]);
   });
 
   test("rejects invalid profile names", () => {

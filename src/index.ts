@@ -56,6 +56,7 @@ import { createConfigReloadRuntime } from "./config/reload-runtime";
 import { createStartupMessageQueue, registerMessageEvents } from "./discord/message-events";
 import { createMessageTurnRuntime, createScheduledAttentionGuard } from "./discord/message-turn-runtime";
 import { createVoiceApplication } from "./voice/application";
+import { createAgentTaskRuntime } from "./agent/agent-task-runtime.ts";
 
 const pkg = await Bun.file(new URL("../package.json", import.meta.url).pathname).json() as { version?: string };
 const version: string = pkg.version ?? "0.0.0";
@@ -65,6 +66,7 @@ const log = createLogger({ level: logLevel });
 const TYPING_INTERVAL_MS = 8_000;
 const inboundMessageTasks = new AsyncTaskTracker();
 const imageJobTasks = new AsyncTaskTracker();
+const agentJobTasks = new AsyncTaskTracker();
 const backgroundTasks = new AsyncTaskTracker();
 const assetBackfillController = new AbortController();
 log.info("bot starting", { version, runtime: `bun ${Bun.version}`, pid: process.pid });
@@ -311,6 +313,11 @@ const {
   createHandlerDeps, createAssetAttachmentResolver, runLoggedAgentTurn,
 } = turnRuntime;
 
+let enqueueChannelTaskImpl = (_guildId: string, _channelId: string, _task: () => Promise<void>): Promise<void> =>
+  Promise.reject(new Error("Channel dispatcher is not ready."));
+let runAgentJobImpl = (_jobId: string): Promise<void> =>
+  Promise.reject(new Error("Agent task runtime is not ready."));
+
 const imageJobRuntime = createImageJobRuntime({
   db, client, log, requestLogStore, agentJobs, linkContentCache,
   getGlobalConfig: () => globalConfig,
@@ -332,6 +339,7 @@ const imageJobRuntime = createImageJobRuntime({
   fetchAccessibleGuildChannel,
   resolveGuildMemberReference,
   noteAmbientBotReply: (input) => ambientRuntime.noteAmbientBotReply(input),
+  enqueueChannelTask: async (guildId, channelId, task) => await enqueueChannelTaskImpl(guildId, channelId, task),
 });
 const { runImageGenerationJob, loadExternalReference, loadGuildAvatarReference } = imageJobRuntime;
 
@@ -373,6 +381,12 @@ const toolRuntime = createToolRuntime({
   fetchEmojiCache, buildOutboundResolvers,
   runImageGenerationJob,
   trackImageJob: (task) => { void imageJobTasks.track(task); },
+  runAgentJob: async (jobId) => await runAgentJobImpl(jobId),
+  trackAgentJob: (task) => {
+    void agentJobTasks.track(task).catch((error: unknown) => {
+      log.error("agent task failed outside worker", { error: error instanceof Error ? error.message : String(error) });
+    });
+  },
   watchMatcher,
   getEventWatchRuntime: () => eventWatchRuntime,
   getEventWatchDiscordAdapters: () => messageEvents.getEventWatchDiscordAdapters(),
@@ -410,6 +424,21 @@ const messageTurnRuntime = createMessageTurnRuntime({
 });
 const { dispatchers, getOrCreateDispatcher, evaluateMessageTrigger, normalizedWatchMessage,
   processEventWatchTurn, processSettledWatchedMessage, processTriggeredMessage } = messageTurnRuntime;
+enqueueChannelTaskImpl = messageTurnRuntime.enqueueChannelTask;
+
+const agentTaskRuntime = createAgentTaskRuntime({
+  db, client, log, requestLogStore, agentJobs,
+  getGlobalConfig: () => globalConfig,
+  getPromptBundle: () => promptBundle,
+  getGuildConfig,
+  buildContext,
+  buildAgentTools,
+  createBotDiscordMessageSender,
+  createAssetAttachmentResolver,
+  fetchAccessibleGuildChannel,
+  enqueueChannelTask: messageTurnRuntime.enqueueChannelTask,
+});
+runAgentJobImpl = agentTaskRuntime.runAgentJob;
 
 const eventWatchRuntime = createEventWatchRuntime({
   db, matcher: watchMatcher, pressure: DEFAULT_EVENT_WATCH_PRESSURE,
@@ -684,15 +713,18 @@ void backgroundTasks.track(backfillMessageAssets({
 ambientRuntime.startAmbientInitiativeLoops();
 privateLifeRuntime.start();
 for (const row of db.raw.prepare(
-  "SELECT id FROM agent_jobs WHERE status = 'ready' ORDER BY completed_at ASC, created_at ASC",
+  "SELECT id FROM agent_jobs WHERE kind = 'image_generation' AND status IN ('queued', 'ready') ORDER BY completed_at ASC, created_at ASC",
 ).all() as Array<{ id: string }>) {
   void imageJobTasks.track(runImageGenerationJob(row.id)).catch((error: unknown) => {
-    log.error("ready staged image recovery failed", {
+    log.error("image job recovery failed", {
       jobId: row.id,
       error: error instanceof Error ? error.message : String(error),
     });
   });
 }
+void agentJobTasks.track(agentTaskRuntime.recover()).catch((error: unknown) => {
+  log.error("agent job recovery failed", { error: error instanceof Error ? error.message : String(error) });
+});
 
 const runPromptLab = createDiscordPromptLabRunner({
   client, db, getPromptBundle: () => promptBundle, requestLogStore, log,
@@ -763,8 +795,8 @@ async function shutdown(signal: string): Promise<void> {
   await eventWatchRuntime.drain();
   await voiceRuntime.shutdown();
   await dashboardStop;
-  while (imageJobTasks.activeCount() > 0 || backgroundTasks.activeCount() > 0) {
-    await Promise.all([imageJobTasks.drain(), backgroundTasks.drain()]);
+  while (imageJobTasks.activeCount() > 0 || agentJobTasks.activeCount() > 0 || backgroundTasks.activeCount() > 0) {
+    await Promise.all([imageJobTasks.drain(), agentJobTasks.drain(), backgroundTasks.drain()]);
   }
 
   ambientRuntime.clearAmbientAttentionState();

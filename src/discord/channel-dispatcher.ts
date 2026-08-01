@@ -88,6 +88,7 @@ interface ChannelState {
   suppressedOrder: string[];
   typingByUser: Map<string, number>;
   typingResumeGraceUntilByUser: Map<string, number>;
+  tasks: Array<() => Promise<void>>;
   activeDispatch: {
     trigger: SelectedDispatchTrigger | null;
     controller: AbortController;
@@ -99,6 +100,8 @@ interface ChannelState {
 export interface ChannelDispatcher {
   /** Enqueue a message for processing. Returns false after draining begins. */
   enqueue(message: unknown, options: EnqueueOptions): boolean;
+  /** Enqueue lower-priority background work behind user messages in this channel. */
+  enqueueTask(channelId: string, task: () => Promise<void>): boolean;
   /** Record a typing start event for a user in a channel. */
   recordTyping(channelId: string, userId: string): void;
   /** Stop accepting work, flush debounce waits, and resolve when all accepted work finishes. */
@@ -303,7 +306,7 @@ export function createChannelDispatcher(opts: {
 
   function allChannelsIdle(): boolean {
     for (const state of channels.values()) {
-      if (state.running || state.pending.length > 0 || state.queued.length > 0 || state.debounceTimer !== null) {
+      if (state.running || state.pending.length > 0 || state.queued.length > 0 || state.tasks.length > 0 || state.debounceTimer !== null) {
         return false;
       }
     }
@@ -339,6 +342,7 @@ export function createChannelDispatcher(opts: {
         suppressedOrder: [],
         typingByUser: new Map<string, number>(),
         typingResumeGraceUntilByUser: new Map<string, number>(),
+        tasks: [],
         activeDispatch: null,
       };
       channels.set(channelId, state);
@@ -446,6 +450,32 @@ export function createChannelDispatcher(opts: {
     );
   }
 
+  function startTaskIfIdle(channelId: string, state: ChannelState): void {
+    if (state.running || state.pending.length > 0 || state.queued.length > 0 || state.debounceTimer !== null) return;
+    const task = state.tasks.shift();
+    if (task === undefined) {
+      resolveDrainIfIdle();
+      return;
+    }
+    state.running = true;
+    void task().catch(() => {
+      // The task owner logs failures.
+    }).finally(() => {
+      state.running = false;
+      if (state.queued.length > 0) {
+        if (state.debounceTimer !== null) {
+          timers.clearTimeout(state.debounceTimer);
+          state.debounceTimer = null;
+        }
+        state.pending = [...state.queued, ...state.pending];
+        state.queued = [];
+      }
+      ensurePendingDebounce(channelId, state);
+      if (state.pending.length === 0 && state.debounceTimer === null) startTaskIfIdle(channelId, state);
+      resolveDrainIfIdle();
+    });
+  }
+
   function fireDebounce(channelId: string): void {
     const state = channels.get(channelId);
     if (state === undefined) return;
@@ -484,6 +514,7 @@ export function createChannelDispatcher(opts: {
     // Start handler with current pending batch
     const { batch, trigger: dispatchTrigger } = takeNextDispatchBatch(state);
     if (batch.length === 0) {
+      startTaskIfIdle(channelId, state);
       resolveDrainIfIdle();
       return;
     }
@@ -549,6 +580,7 @@ export function createChannelDispatcher(opts: {
           state.queued = [];
         }
         ensurePendingDebounce(channelId, state);
+        if (state.pending.length === 0 && state.debounceTimer === null) startTaskIfIdle(channelId, state);
         resolveDrainIfIdle();
       });
   }
@@ -638,6 +670,14 @@ export function createChannelDispatcher(opts: {
     return true;
   }
 
+  function enqueueTask(channelId: string, task: () => Promise<void>): boolean {
+    if (!accepting) return false;
+    const state = getOrCreateState(channelId);
+    state.tasks.push(task);
+    startTaskIfIdle(channelId, state);
+    return true;
+  }
+
   function recordTyping(channelId: string, userId: string): void {
     if (!accepting) return;
     const observedAt = timers.now();
@@ -676,7 +716,7 @@ export function createChannelDispatcher(opts: {
     resolveDrainIfIdle();
   }
 
-  return { enqueue, recordTyping, drain, dispose };
+  return { enqueue, enqueueTask, recordTyping, drain, dispose };
 }
 
 function triggerPriority(trigger: DispatchTrigger): number {

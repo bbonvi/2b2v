@@ -22,7 +22,7 @@ const DismissAgentJobParams = Type.Object({
   reason: Type.String(),
 });
 
-/** Render complete image-job provenance for private inspection and asset reads. */
+/** Render complete job provenance for private inspection and asset reads. */
 export function renderAgentJobDetails(
   job: AgentJob,
   assets: readonly { assetId: number; role: string }[] = [],
@@ -45,8 +45,8 @@ export function renderAgentJobDetails(
       ? `Assets: ${assets.map((asset) => `${asset.role} #${asset.assetId}`).join(", ")}`
       : "",
     `Source request quote: ${JSON.stringify(job.sourceQuote)}`,
-    `Original effective input: ${renderImageGenerationInput(job.input)}`,
-    job.result?.revisedPrompt !== undefined
+    `Original effective input: ${job.kind === "image_generation" ? renderImageGenerationInput(job.input) : JSON.stringify(job.input)}`,
+    job.kind === "image_generation" && job.result?.revisedPrompt !== undefined
       ? `Provider-revised prompt: ${job.result.revisedPrompt}`
       : "",
     job.result !== undefined ? `Result: ${JSON.stringify(job.result)}` : "",
@@ -82,7 +82,8 @@ export function createAgentJobInspectionTools(input: {
           ? ""
           : `; assets ${assets.map((asset) => `#${asset.assetId}`).join(", ")}`;
         const source = job.sentMessageId === undefined ? "" : `; sent MsgID ${job.sentMessageId}`;
-        return `- ${job.id} ${job.kind} ${job.status} for @${job.requesterUsername}; prompt: ${JSON.stringify(shortQuote(job.input.prompt, 180))}${source}${assetText}`;
+        const summary = job.kind === "image_generation" ? job.input.prompt : job.input.message;
+        return `- ${job.id} ${job.kind} ${job.status} for @${job.requesterUsername}; task: ${JSON.stringify(shortQuote(summary, 180))}${source}${assetText}`;
       });
       return Promise.resolve({
         content: [{ type: "text", text: lines.length === 0 ? "No matching jobs." : lines.join("\n") }],
@@ -118,8 +119,8 @@ export function createAgentJobInspectionTools(input: {
       if (job === undefined) {
         throw new Error(`Job ${parsed.job_id} was not found or is not visible in this channel.`);
       }
-      if (job.status !== "ready") {
-        throw new Error(`Job ${job.id} is ${job.status}; only ready jobs can be dismissed here.`);
+      if (job.status !== "ready" && job.status !== "yielded") {
+        throw new Error(`Job ${job.id} is ${job.status}; only ready or yielded jobs can be dismissed here.`);
       }
       const result = input.store.cancel(job.id, {
         reason: parsed.reason,

@@ -3,7 +3,7 @@ import { sanitizeMemoryContent } from "./memory-content";
 import { MEMORY_KIND_SQL_VALUES } from "./memory-kinds";
 import { memoriesTableSql, memorySchemaHasCurrentChecks, stagedAssetsTableSql } from "./schema";
 
-type TableColumn = { name: string; type: string };
+type TableColumn = { name: string; type: string; notnull: number };
 type ForeignKey = {
   table: string;
   from: string;
@@ -395,10 +395,12 @@ function stagedAssetReferenceUsesSetNull(raw: BunDatabase): boolean {
 /** Rebuild legacy staged assets without retired columns or blocking asset references. */
 function migrateStagedAssets(raw: BunDatabase): void {
   const columns = tableColumns(raw, "staged_assets");
+  const jobIdColumn = columns.find((column) => column.name === "job_id");
   if (
     !hasColumn(columns, "owner_room_kind")
     && !hasColumn(columns, "dismissed_at")
     && stagedAssetReferenceUsesSetNull(raw)
+    && jobIdColumn?.notnull === 0
   ) {
     createStagedAssetIndexes(raw);
     return;

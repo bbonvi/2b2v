@@ -8,6 +8,7 @@ import { getStagedAsset } from "../db/staged-asset-repository.ts";
 import { imageExtensionForMime, imageMimeFromBuffer } from "./image-buffer.ts";
 import type { LinkCacheMode, ResolvedLinkResult } from "./link-content.ts";
 import { extname } from "node:path";
+import { resolveStagedPath } from "./staged-path.ts";
 
 /** Resolve prompt-visible asset IDs into exact outgoing Discord uploads on demand. */
 export function createStoredAssetAttachmentResolver(input: {
@@ -16,6 +17,7 @@ export function createStoredAssetAttachmentResolver(input: {
   resolveSource: (asset: NonNullable<ReturnType<typeof getAssetById>>) => Promise<ResolvedAssetSource | null>;
   logger: Logger;
   stagedGuildId?: string;
+  stagedRoot?: string;
   fetchFn?: typeof fetch;
   resolveLink?: (input: { url: string; cacheMode?: LinkCacheMode; raw?: boolean }, signal?: AbortSignal) => Promise<ResolvedLinkResult>;
   canSendSticker?: (stickerId: string) => Promise<boolean>;
@@ -37,7 +39,10 @@ export function createStoredAssetAttachmentResolver(input: {
           continue;
         }
         try {
-          const file = Bun.file(staged.storagePath);
+          const storagePath = input.stagedRoot === undefined
+            ? staged.storagePath
+            : await resolveStagedPath(input.stagedRoot, staged.storagePath);
+          const file = Bun.file(storagePath);
           if (!await file.exists()) throw new Error("staged file is missing");
           if (file.size > input.maxDownloadBytes) {
             throw new Error(`staged file exceeds ${input.maxDownloadBytes} byte limit`);

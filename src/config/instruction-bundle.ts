@@ -78,8 +78,8 @@ export interface PromptSkillBundle {
   byId: Record<string, PromptSkill>;
   /** Compact stable prompt section listing available skills. */
   indexPrompt: string;
-  /** Required skill id keyed by tool name. */
-  requiredByTool: Record<string, string>;
+  /** Alternative required skill ids keyed by tool name. */
+  requiredByTool: Record<string, string | string[]>;
 }
 
 /** Runtime instruction groups loaded from the active instruction roots. */
@@ -474,14 +474,13 @@ function loadInstructionSkills(instructionRoots: InstructionRoot[], log: Logger)
   }
 
   const orderedSkills = Object.values(byId).sort((a, b) => a.id.localeCompare(b.id, "en"));
-  const requiredByTool: Record<string, string> = {};
+  const requiredByTool: Record<string, string | string[]> = {};
   for (const skill of orderedSkills) {
     for (const toolName of skill.requiredForTools) {
       const previous = requiredByTool[toolName];
-      if (previous !== undefined && previous !== skill.id) {
-        throw new Error(`Tool "${toolName}" requires multiple skills: "${previous}" and "${skill.id}"`);
-      }
-      requiredByTool[toolName] = skill.id;
+      if (previous === undefined) requiredByTool[toolName] = skill.id;
+      else if (typeof previous === "string" && previous !== skill.id) requiredByTool[toolName] = [previous, skill.id];
+      else if (Array.isArray(previous) && !previous.includes(skill.id)) previous.push(skill.id);
     }
   }
   return {

@@ -22,7 +22,7 @@ import { createListInnerThreadsTool } from "../agent/inner-thread-service";
 import { createListChannelMessagesTool } from "../agent/list-channel-messages-tool";
 import { createOwnMessageTools } from "../agent/own-message-tool";
 import { createBraveImageSearchTool, createBraveSearchTool } from "../agent/brave-search-tool";
-import { createReadAssetTool, extractPdfText, extractRemoteVideoFrame, type ReadAssetToolDeps } from "../agent/read-asset-tool";
+import { createReadAssetTool, extractPdfText, extractRemoteVideoFrame, fetchAssetBuffer, type ReadAssetToolDeps } from "../agent/read-asset-tool";
 import { createSearchAssetTool } from "../agent/search-asset-tool";
 import { createReadUserAvatarTool, type AvatarSize } from "../agent/read-user-avatar-tool";
 import { createFetchImagesTool } from "../agent/fetch-images-tool";
@@ -49,11 +49,14 @@ import { resolveReactionEmojiInput } from "../discord/reaction-emoji";
 import { syncDeletedOwnBotMessage, syncEditedOwnBotMessage } from "../discord/reply-fallback-runtime";
 import { createDiscordAssetSourceResolver } from "../discord/asset-resolver";
 import { DEFAULT_ASSET_READING, DEFAULT_EXTERNAL_IMAGES } from "../config/defaults";
-import { unlink } from "fs/promises";
 import type { Database } from "../db/database";
 import { ChannelType, PermissionFlagsBits, type Client, type Guild, type GuildBasedChannel, type GuildMember, type Message, type TextChannel, type ThreadChannel } from "discord.js";
 import { type VoiceRuntime } from "../voice/runtime.ts";
 import { createVoiceTools } from "../voice/tools.ts";
+import { WorkspaceClient } from "../workspace/client.ts";
+import { createWorkspaceTools } from "./workspace-tool.ts";
+import { createAgentControlTools } from "./agent-control-tool.ts";
+import { resolveStagedPath, unlinkStagedPath } from "./staged-path.ts";
 
 export function createToolRuntime(input: {
     db: Database;
@@ -75,6 +78,8 @@ export function createToolRuntime(input: {
     buildOutboundResolvers: (guild: Guild) => OutboundResolvers;
     runImageGenerationJob: (jobId: string) => Promise<void>;
     trackImageJob: (task: Promise<void>) => void;
+    runAgentJob: (jobId: string) => Promise<void>;
+    trackAgentJob: (task: Promise<void>) => void;
     watchMatcher: ReturnType<typeof createWatchMatcher>;
     getEventWatchRuntime: () => ReturnType<typeof createEventWatchRuntime>;
     getEventWatchDiscordAdapters: () => EventWatchDiscordAdapters | null;
@@ -86,7 +91,9 @@ export function createToolRuntime(input: {
     getVoiceRuntime: () => VoiceRuntime;
   }
 ) {
-  const { db, client, log, agentJobs, scheduler, linkContentCache, getGlobalConfig, getPromptBundle, getGuildConfig, notebooksEnabled, runtimeToolDescription, resolveClientGuild, fetchAccessibleGuildChannel, resolveGuildUsername, resolveGuildMemberReference, fetchEmojiCache, buildOutboundResolvers, runImageGenerationJob, trackImageJob, watchMatcher, getEventWatchRuntime, getEventWatchDiscordAdapters, emojiCache, innerThreadsEnabled, refreshEmojiCache, loadExternalReference, loadGuildAvatarReference, getVoiceRuntime } = input;
+  const { db, client, log, agentJobs, scheduler, linkContentCache, getGlobalConfig, getPromptBundle, getGuildConfig, notebooksEnabled, runtimeToolDescription, resolveClientGuild, fetchAccessibleGuildChannel, resolveGuildUsername, resolveGuildMemberReference, fetchEmojiCache, buildOutboundResolvers, runImageGenerationJob, trackImageJob, runAgentJob, trackAgentJob, watchMatcher, getEventWatchRuntime, getEventWatchDiscordAdapters, emojiCache, innerThreadsEnabled, refreshEmojiCache, loadExternalReference, loadGuildAvatarReference, getVoiceRuntime } = input;
+  const workspaceClient = new WorkspaceClient(process.env.WORKSPACE_SOCKET_PATH ?? "/run/2b2v/workspace.sock");
+  const workspaceStagingRoot = process.env.WORKSPACE_STAGING_DIR ?? `${getGlobalConfig().dataDir}/staged-assets`;
 const CONTEXT_IMAGE_MAX_DIMENSION = 1024;
 const EMOJI_TTL_MS = 10 * 60 * 1000;
 function buildAgentTools(
@@ -118,6 +125,7 @@ function buildAgentTools(
     deliverDiceRoll?: (input: DiceRollDelivery) => Promise<{ sentMessageId: string }>;
     visibleUserIds?: readonly string[];
     onVisibleOutput?: () => void;
+    forceSynchronousImageGeneration?: boolean;
   } = {},
 ) {
   const includeImageGenerationTools = options.includeImageGenerationTools ?? true;
@@ -523,6 +531,40 @@ function buildAgentTools(
       }
     },
   });
+  const workspaceTools = getPromptBundle().runtime.skills.byId.workspace === undefined ? [] : createWorkspaceTools({
+    db,
+    client: workspaceClient,
+    stagingRoot: workspaceStagingRoot,
+    guildId,
+    channelId,
+    loadAsset: async (assetId, signal) => {
+      if (typeof assetId === "string") {
+        const staged = getStagedAsset(db, assetId);
+        if (staged === null || staged.ownerGuildId !== guildId) throw new Error(`Staged asset ${assetId} was not found.`);
+        const file = Bun.file(await resolveStagedPath(workspaceStagingRoot, staged.storagePath));
+        if (!await file.exists()) throw new Error(`Staged asset ${assetId} file is unavailable.`);
+        return {
+          buffer: Buffer.from(await file.arrayBuffer()),
+          filename: staged.filename,
+          contentType: staged.contentType,
+        };
+      }
+      const asset = getAssetById(db, assetId);
+      if (asset === null) throw new Error(`Asset ${assetId} was not found.`);
+      const source = await resolveAssetSource(asset);
+      if (source === null) throw new Error(`Asset ${assetId} source is unavailable.`);
+      return {
+        buffer: await fetchAssetBuffer(
+          fetch,
+          source.url,
+          guildConfig.assetReading?.maxDownloadBytes ?? DEFAULT_ASSET_READING.maxDownloadBytes,
+          signal,
+        ),
+        filename: source.filename ?? asset.filename ?? `asset-${assetId}`,
+        contentType: source.contentType ?? asset.contentType ?? "application/octet-stream",
+      };
+    },
+  });
   const assetToolDeps = {
     config: guildConfig.assetReading ?? { ...DEFAULT_ASSET_READING, videoPreviewTimesSeconds: [...DEFAULT_ASSET_READING.videoPreviewTimesSeconds] },
     elevenLabsApiKey: getGlobalConfig().elevenLabsApiKey,
@@ -532,9 +574,11 @@ function buildAgentTools(
       return staged?.ownerGuildId === guildId ? staged : null;
     },
     getStagedAssetMetadata: (jobId) => {
-      const result = agentJobs.get(jobId)?.result;
+      const job = agentJobs.get(jobId);
+      const result = job?.kind === "image_generation" ? job.result : undefined;
       return result === undefined ? null : { actualSize: result.actualSize };
     },
+    resolveStagedPath: async (storagePath) => await resolveStagedPath(workspaceStagingRoot, storagePath),
     getProvenance: (id) => {
       const linked = agentJobs.getForAsset(id);
       return linked === undefined
@@ -673,11 +717,31 @@ function buildAgentTools(
     onDismiss: async (jobId) => {
       const staged = getStagedAssetForJob(db, jobId);
       if (staged === null) return;
-      await unlink(staged.storagePath).catch(() => {});
+      await unlinkStagedPath(workspaceStagingRoot, staged.storagePath).catch(() => {});
       deleteStagedAsset(db, staged.ref);
     },
   });
-  const tools = [searchTool, ...scheduleTools, ...eventWatchTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memorySearchTool, ...notebookTools, ...innerThreadTools, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, ...jobInspectionTools, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
+  const cancelJobTool = createCancelAgentJobTool({
+    store: agentJobs,
+    onCancelled: async (jobId) => {
+      const staged = getStagedAssetForJob(db, jobId);
+      if (staged === null) return;
+      await unlinkStagedPath(workspaceStagingRoot, staged.storagePath).catch(() => {});
+      deleteStagedAsset(db, staged.ref);
+    },
+  });
+  const agentControlTools = effectiveCurrentRequest === undefined || getPromptBundle().runtime.skills.byId.workspace === undefined ? [] : createAgentControlTools({
+    store: agentJobs,
+    guildId,
+    channelId,
+    requesterId: effectiveCurrentRequest.requesterId,
+    requesterUsername: effectiveCurrentRequest.requesterUsername,
+    sourceMessageId: effectiveCurrentRequest.sourceMessageId,
+    sourceQuote: effectiveCurrentRequest.sourceQuote,
+    runAgentJob,
+    trackAgentJob,
+  });
+  const tools = [searchTool, ...scheduleTools, ...eventWatchTools, chatUserListTool, channelListTool, emojiListTool, ...discordTimeoutTools, memorySearchTool, ...notebookTools, ...innerThreadTools, listChannelMessagesTool, ...ownMessageTools, readAssetTool, searchAssetTool, ...jobInspectionTools, cancelJobTool, ...agentControlTools, ...workspaceTools, readUserAvatarTool, fetchImagesTool, fetchUrlTool, summarizeVideoTool, reactToMessageTool];
   if (diceRollTool !== undefined) tools.push(diceRollTool);
   if (includeImageGenerationTools) {
     const imageProfile = resolveModelProfile(
@@ -707,6 +771,7 @@ function buildAgentTools(
             asset: staged,
             maxBytes: guildConfig.assetReading?.maxDownloadBytes
               ?? DEFAULT_ASSET_READING.maxDownloadBytes,
+            stagingRoot: workspaceStagingRoot,
           });
         }
         const asset = getAssetById(db, id);
@@ -729,7 +794,7 @@ function buildAgentTools(
       resolveExternalReference: loadExternalReference,
       resolveAvatarReference: (userId, signal) => loadGuildAvatarReference(guild, userId, signal),
       onGeneratedImage: onGeneratedImage ?? (() => {}),
-      ...(effectiveCurrentRequest === undefined ? {} : { enqueueImageJob: (input) => {
+      ...(effectiveCurrentRequest === undefined || options.forceSynchronousImageGeneration === true ? {} : { enqueueImageJob: (input) => {
         const deliveryChannelId = options.imageDelivery?.channelId ?? channelId;
         const deliveryGuildId = options.imageDelivery?.guildId
           ?? (client.channels.cache.get(deliveryChannelId) !== undefined && isSendableGuildChannel(client.channels.cache.get(deliveryChannelId))
@@ -762,16 +827,7 @@ function buildAgentTools(
       } }),
     });
 
-    const cancelJobTool = createCancelAgentJobTool({
-      store: agentJobs,
-      onCancelled: async (jobId) => {
-        const staged = getStagedAssetForJob(db, jobId);
-        if (staged === null) return;
-        await unlink(staged.storagePath).catch(() => {});
-        deleteStagedAsset(db, staged.ref);
-      },
-    });
-    tools.push(codexGenerateImageTool, cancelJobTool);
+    tools.push(codexGenerateImageTool);
   }
 
   // Brave search if API key configured

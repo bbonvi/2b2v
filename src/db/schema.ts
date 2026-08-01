@@ -60,7 +60,7 @@ export function memorySchemaHasCurrentChecks(sql: string | undefined): boolean {
 export function stagedAssetsTableSql(tableName: string, ifNotExists = false): string {
   return `CREATE TABLE ${ifNotExists ? "IF NOT EXISTS " : ""}${tableName} (
     ref                  TEXT PRIMARY KEY,
-    job_id               TEXT NOT NULL UNIQUE REFERENCES agent_jobs(id) ON DELETE CASCADE,
+    job_id               TEXT UNIQUE REFERENCES agent_jobs(id) ON DELETE CASCADE,
     owner_guild_id       TEXT NOT NULL,
     owner_channel_id     TEXT NOT NULL,
     filename             TEXT NOT NULL,

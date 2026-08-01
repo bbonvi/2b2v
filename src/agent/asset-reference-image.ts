@@ -5,6 +5,7 @@ import type { ResolvedAssetSource } from "./read-asset-tool.ts";
 import { fetchAssetBuffer } from "./read-asset-tool.ts";
 import type { StagedAsset } from "../db/staged-asset-repository.ts";
 import type { ResolvedLinkContent } from "./link-content.ts";
+import { resolveStagedPath } from "./staged-path.ts";
 
 /** Load an exact image attachment, or a static first frame for animated visual assets. */
 export async function loadAssetReferenceImage(input: {
@@ -33,9 +34,13 @@ export async function loadAssetReferenceImage(input: {
 export async function loadStagedAssetReferenceImage(input: {
   asset: StagedAsset;
   maxBytes: number;
+  stagingRoot?: string;
 }): Promise<ReferenceImageInput | null> {
   if (!input.asset.contentType.startsWith("image/")) return null;
-  const file = Bun.file(input.asset.storagePath);
+  const storagePath = input.stagingRoot === undefined
+    ? input.asset.storagePath
+    : await resolveStagedPath(input.stagingRoot, input.asset.storagePath);
+  const file = Bun.file(storagePath);
   if (!await file.exists() || file.size > input.maxBytes) return null;
   const buffer = Buffer.from(await file.arrayBuffer());
   const metadata = await sharp(buffer).metadata();

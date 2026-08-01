@@ -1,5 +1,6 @@
 [Async Image Job Ready] Job {{jobId}} finished an image.
 Staged asset ref: {{stagedAssetRef}}
+Workspace path: {{workspacePath}}
 Original requester: @{{requesterUsername}} ({{requesterId}})
 Requested: {{requestedMetadata}}
 Result: {{resultMetadata}}

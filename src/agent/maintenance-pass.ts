@@ -121,8 +121,8 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
 }
 
 /** Run a hidden post-reply maintenance loop with private tools and no Discord output hooks. */
-export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promise<void> {
-  if (input.tools.length === 0) return;
+export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promise<{ text: string; transcript: OpenRouterMessage[] }> {
+  if (input.tools.length === 0) return { text: "", transcript: [...(input.transcript ?? [])] };
 
   const wallController = new AbortController();
   const parent = input.signal;
@@ -240,7 +240,7 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
   const maxToolCalls = Math.max(1, input.maxToolCalls ?? input.tools.length);
   timingState.resetAgentLoopStart();
   try {
-    await runNativeToolLoop({
+    const result = await runNativeToolLoop({
       complete,
       requestBase: {
         provider,
@@ -279,7 +279,8 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
       llmOutputTimeoutMs: input.guildConfig.replyLoop.llmOutputTimeoutMs,
       requestLog: input.requestLog,
       imageInputSupported: false,
-      pendingAttachments: [],
+      consumeGeneratedAttachments: input.consumeGeneratedAttachments,
+      pendingAttachments: input.pendingAttachments ?? [],
       toolTiming: timingState,
       runtimePrompts: input.runtimePrompts,
       log: input.log,
@@ -293,7 +294,9 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
             inheritedPrompt.toolContractSignature = toolContractSignature(activeTools);
           }
         : undefined,
+      takePendingMessages: input.takePendingMessages,
     });
+    return { text: result.text, transcript: messages };
   } finally {
     clearTimeout(wallTimeout);
     if (parent !== undefined && onParentAbort !== undefined) {

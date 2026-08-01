@@ -130,7 +130,11 @@ describe("repository profile layout", () => {
         "read_agent_job",
         "dismiss_agent_job",
       ]) {
-        expect(bundle.runtime.skills.requiredByTool[tool]).toBe("image_generation");
+        expect(bundle.runtime.skills.requiredByTool[tool]).toEqual(
+          profile === "2b" && tool !== "codex_generate_image"
+            ? ["image_generation", "workspace"]
+            : "image_generation",
+        );
       }
       if (profile === "2b") {
         expect(bundle.runtime.privateLife?.length).toBeGreaterThan(500);

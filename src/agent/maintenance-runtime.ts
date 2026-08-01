@@ -24,7 +24,8 @@ import type { AgentJobStore } from "./job-runtime";
 import { deleteExpiredMemories } from "../db/memory-repository";
 import { clearExpiredPrivateLifeThoughts } from "../db/private-life-repository";
 import { deleteStagedAsset, listStagedAssets } from "../db/staged-asset-repository";
-import { unlink } from "fs/promises";
+import { stat } from "fs/promises";
+import { resolveStagedPath, unlinkStagedPath } from "./staged-path.ts";
 
 export function createMaintenanceRuntime(input: {
     db: Database;
@@ -752,18 +753,29 @@ function startCleanup(): () => void {
     const thoughtRetentionDays = getGlobalConfig().privateLife?.thoughtRetentionDays ?? 0;
     const clearedThoughts = clearExpiredPrivateLifeThoughts(db, Date.now() - thoughtRetentionDays * 86_400_000);
     if (clearedThoughts > 0) log.info("expired private-life thoughts cleared", { clearedThoughts, thoughtRetentionDays });
-    const expiredStaged = listStagedAssets(db, { unresolvedOnly: true, limit: 500 })
-      .filter((asset) => asset.expiresAt <= Date.now());
-    for (const staged of expiredStaged) {
-      agentJobs.markExpired(staged.jobId);
-      void unlink(staged.storagePath).catch(() => {});
-      deleteStagedAsset(db, staged.ref);
-    }
-    if (expiredStaged.length > 0) log.info("expired staged assets cleaned", { deleted: expiredStaged.length });
+    void cleanStagedAssets().catch((error: unknown) => {
+      log.warn("staged asset cleanup failed", { error: error instanceof Error ? error.message : String(error) });
+    });
     const deletedAgentJobs = agentJobs.cleanup();
     if (deletedAgentJobs > 0) log.info("expired unlinked agent jobs cleaned", { deleted: deletedAgentJobs });
   }, 60 * 60 * 1000);
   return () => { clearInterval(timer); };
+}
+
+async function cleanStagedAssets(): Promise<void> {
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const stagingRoot = process.env.WORKSPACE_STAGING_DIR ?? `${getGlobalConfig().dataDir}/staged-assets`;
+  let deleted = 0;
+  for (const staged of listStagedAssets(db, { unresolvedOnly: true, limit: 500, oldestFirst: true })) {
+    const safePath = await resolveStagedPath(stagingRoot, staged.storagePath).catch(() => null);
+    const modifiedAt = safePath === null ? 0 : await stat(safePath).then((value) => value.mtimeMs).catch(() => 0);
+    if (modifiedAt > cutoff) continue;
+    if (staged.jobId !== undefined) agentJobs.markExpired(staged.jobId);
+    if (safePath !== null) await unlinkStagedPath(stagingRoot, staged.storagePath).catch(() => {});
+    deleteStagedAsset(db, staged.ref);
+    deleted++;
+  }
+  if (deleted > 0) log.info("expired staged assets cleaned", { deleted });
 }
 
 

@@ -51,4 +51,23 @@ describe("staged asset repository", () => {
     expect(getStagedAsset(db, "job_img1")?.deliveredMessageId).toBe("m2");
     expect(listStagedAssets(db, { unresolvedOnly: true })).toEqual([]);
   });
+
+  test("stages workspace files without a producer job", () => {
+    createStagedAsset(db, {
+      ref: "workspace_file",
+      ownerGuildId: "g1",
+      ownerChannelId: "c1",
+      filename: "notes.txt",
+      contentType: "text/plain",
+      storagePath: "/tmp/notes.txt",
+      createdAt: 10,
+      expiresAt: 20,
+    });
+
+    expect(getStagedAsset(db, "workspace_file")).toMatchObject({
+      ref: "workspace_file",
+      filename: "notes.txt",
+    });
+    expect(getStagedAsset(db, "workspace_file")?.jobId).toBeUndefined();
+  });
 });

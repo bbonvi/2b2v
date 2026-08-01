@@ -189,16 +189,38 @@ describe("AgentJobStore", () => {
     expect(store.list("g1", "c1", "terminal")).toHaveLength(1);
   });
 
-  test("marks active jobs interrupted by a process restart as failed", () => {
+  test("marks running jobs interrupted by a process restart", () => {
     const first = enqueue(store, { now: 1_000 });
     store.start(first.job.id, undefined, 1_100);
 
     const restartedStore = new AgentJobStore(db, config);
 
     expect(restartedStore.get(first.job.id)).toMatchObject({
-      status: "failed",
+      status: "interrupted",
       error: "Interrupted before completion by a process restart.",
     });
+  });
+
+  test("persists agent follow-ups and resumes a yielded agent", () => {
+    const job = store.enqueueAgentTask({
+      kind: "workspace_agent",
+      guildId: "g1",
+      channelId: "c1",
+      requesterId: "u1",
+      requesterUsername: "alice",
+      sourceMessageId: "m1",
+      sourceQuote: "do it",
+      taskName: "build",
+      message: "Build the project.",
+    });
+    store.start(job.id);
+    store.markYielded(job.id, { handoff: "Done." });
+
+    const resumed = store.sendAgentMessage(job.id, "Run the tests too.");
+
+    expect(resumed.shouldRun).toBe(true);
+    expect(resumed.job.status).toBe("queued");
+    expect(store.takePendingAgentMessages(job.id)).toEqual(["Run the tests too."]);
   });
 
   test("persists generated asset provenance across store instances", () => {

@@ -51,6 +51,13 @@ COPY --link package.json bun.lock ./
 COPY --link patches/ ./patches/
 RUN bun install --frozen-lockfile
 
+# --- Disposable root workspace controlled only through its Unix socket ---
+FROM base AS workspace
+COPY src/workspace/ ./src/workspace/
+RUN mkdir -p /workspace /workspace/staged-assets /run/2b2v
+WORKDIR /workspace
+CMD ["bun", "run", "/app/src/workspace/server.ts"]
+
 # --- Production image ---
 FROM voice-base AS prod
 COPY --link --from=yt-dlp /yt-dlp /usr/local/bin/yt-dlp

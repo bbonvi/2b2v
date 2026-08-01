@@ -10,6 +10,8 @@ services:
       LOG_DIR: /tmp
       LOG_LEVEL: debug
       UNSAFELY_BYPASS_DASHBOARD_AUTH: "true"
+      WORKSPACE_SOCKET_PATH: /run/2b2v/workspace.sock
+      WORKSPACE_STAGING_DIR: /app/workspace-staging
     volumes:
       - ./src:/app/src
       - ./scripts:/app/scripts:ro
@@ -18,9 +20,32 @@ services:
       - ./package.json:/app/package.json
       - ./tsconfig.json:/app/tsconfig.json
       - dev-data:/app/data
+      - workspace-control:/run/2b2v
+      - workspace-staging:/app/workspace-staging
     ports:
       - "127.0.0.1:${DASHBOARD_PORT:-31457}:3000"
     stop_grace_period: 30m
 
+  workspace:
+    build:
+      context: .
+      target: workspace
+    environment:
+      WORKSPACE_SOCKET_PATH: /run/2b2v/workspace.sock
+      WORKSPACE_STAGING_DIR: /workspace/staged-assets
+    volumes:
+      - workspace-data:/workspace
+      - workspace-control:/run/2b2v
+      - workspace-staging:/workspace/staged-assets
+    networks:
+      - workspace-egress
+    restart: unless-stopped
+
 volumes:
   dev-data:
+  workspace-data:
+  workspace-control:
+  workspace-staging:
+
+networks:
+  workspace-egress:

@@ -46,8 +46,8 @@ const INITIAL_ACTOR_TOOL_NAMES = new Set([
 const TOOL_METADATA: Readonly<Record<string, Omit<ToolCatalogEntry, "tool">>> = {
   cancel_agent_job: {
     group: "jobs",
-    summary: "Cancel or replace an active asynchronous image job.",
-    aliases: ["stop image generation", "cancel generation", "replace image job"],
+    summary: "Cancel an active asynchronous job, or replace an active image job.",
+    aliases: ["stop agent", "cancel job", "stop image generation", "replace image job"],
   },
   close_thread: {
     group: "discord_conversation",
@@ -100,7 +100,7 @@ const TOOL_METADATA: Readonly<Record<string, Omit<ToolCatalogEntry, "tool">>> = 
   dismiss_agent_job: {
     group: "jobs",
     summary: "Discard a ready asynchronous job result instead of delivering it.",
-    aliases: ["discard image result", "abandon job result"],
+    aliases: ["discard job result", "abandon agent handoff", "discard image result"],
   },
   edit_own_message: {
     group: "discord_conversation",
@@ -135,7 +135,7 @@ const TOOL_METADATA: Readonly<Record<string, Omit<ToolCatalogEntry, "tool">>> = 
   list_agent_jobs: {
     group: "jobs",
     summary: "List active or recent asynchronous jobs in the current channel.",
-    aliases: ["image job status", "active jobs", "recent jobs"],
+    aliases: ["agent status", "active jobs", "recent jobs", "image job status"],
   },
   list_channel_messages: {
     group: "discord_history",
@@ -185,7 +185,7 @@ const TOOL_METADATA: Readonly<Record<string, Omit<ToolCatalogEntry, "tool">>> = 
   read_agent_job: {
     group: "jobs",
     summary: "Inspect the exact input, state, result, and lineage of one asynchronous job.",
-    aliases: ["inspect image job", "job details", "original image prompt"],
+    aliases: ["inspect agent", "job details", "agent handoff", "inspect image job"],
   },
   read_asset: {
     group: "chat_assets",
@@ -446,7 +446,7 @@ export function initialActorToolNames(
 export function initialMaintenanceToolNames(tools: readonly AgentTool[]): Set<string> {
   return new Set(tools
     .map((tool) => tool.name)
-    .filter((name) => name === "search_tools" || name.startsWith("record_")));
+    .filter((name) => name === "load_skill" || name === "search_tools" || name === "send_discord_message" || name.startsWith("record_")));
 }
 
 /** Create the actor's compact capability discovery tool. */
@@ -500,11 +500,13 @@ export function createSearchToolsTool(input: {
       const requiredSkills = new Map<string, string[]>();
       const activateToolNames: string[] = [];
       for (const match of matches) {
-        const skillId = input.skills.requiredByTool[match.tool.name];
-        if (skillId === undefined) {
+        const required = input.skills.requiredByTool[match.tool.name];
+        if (required === undefined) {
           activateToolNames.push(match.tool.name);
           continue;
         }
+        const skillId = typeof required === "string" ? required : required[0];
+        if (skillId === undefined) continue;
         const names = requiredSkills.get(skillId);
         if (names === undefined) {
           requiredSkills.set(skillId, [match.tool.name]);
@@ -514,8 +516,9 @@ export function createSearchToolsTool(input: {
       }
       const skillMatches = [...requiredSkills].map(([skillId, toolNames]) => ({ skillId, toolNames }));
       const lines = matches.map((entry) => {
-        const skillId = input.skills.requiredByTool[entry.tool.name];
-        const suffix = skillId === undefined ? "" : ` Load skill "${skillId}" first.`;
+        const required = input.skills.requiredByTool[entry.tool.name];
+        const skillIds = required === undefined ? [] : typeof required === "string" ? [required] : required;
+        const suffix = skillIds.length === 0 ? "" : ` Load one of: ${skillIds.map((id) => `"${id}"`).join(", ")}.`;
         return `- ${entry.tool.name}: ${entry.summary}${suffix}`;
       });
       return Promise.resolve({
