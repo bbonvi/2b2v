@@ -63,8 +63,8 @@ export function createAgentControlTools(input: {
     parameters: SendAgentMessageParams,
     execute: (_toolCallId, params): Promise<AgentToolResult<unknown>> => {
       const request = params as { target: string; message: string };
-      const visible = input.store.getVisible(request.target, input.guildId, input.channelId);
-      if (visible === undefined) throw new Error(`Agent ${request.target} was not found or is not visible in this channel.`);
+      const visible = input.store.get(request.target);
+      if (visible === undefined) throw new Error(`Agent ${request.target} was not found.`);
       const result = input.store.sendAgentMessage(request.target, request.message);
       if (result.shouldRun) input.trackAgentJob(input.runAgentJob(request.target));
       return Promise.resolve({

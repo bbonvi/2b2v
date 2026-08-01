@@ -107,19 +107,24 @@ export function updateAgentJobRecord(db: Database, id: string, patch: AgentJobRe
   return db.raw.prepare(`UPDATE agent_jobs SET ${assignments.join(", ")} WHERE id = ?`).run(...values).changes > 0;
 }
 
-/** List channel-visible jobs, optionally filtering active versus terminal lifecycle states. */
+/** List jobs globally or within one source/delivery channel. */
 export function listAgentJobRecords(db: Database, input: {
-  guildId: string;
-  channelId: string;
+  guildId?: string;
+  channelId?: string;
   state?: PersistedAgentJobState;
   completedAfter?: number;
   limit?: number;
   newestFirst?: boolean;
 }): AgentJobRecord[] {
-  const conditions = [
-    "((guild_id = ? AND channel_id = ?) OR (delivery_guild_id = ? AND delivery_channel_id = ?))",
-  ];
-  const params: Array<string | number> = [input.guildId, input.channelId, input.guildId, input.channelId];
+  if ((input.guildId === undefined) !== (input.channelId === undefined)) {
+    throw new Error("Agent job scope requires both guildId and channelId.");
+  }
+  const conditions: string[] = [];
+  const params: Array<string | number> = [];
+  if (input.guildId !== undefined && input.channelId !== undefined) {
+    conditions.push("((guild_id = ? AND channel_id = ?) OR (delivery_guild_id = ? AND delivery_channel_id = ?))");
+    params.push(input.guildId, input.channelId, input.guildId, input.channelId);
+  }
   if (input.state === "active") {
     conditions.push(`status IN (${ACTIVE_JOB_STATUSES.map(() => "?").join(", ")})`);
     params.push(...ACTIVE_JOB_STATUSES);
@@ -135,10 +140,26 @@ export function listAgentJobRecords(db: Database, input: {
   const limit = input.limit ?? 100;
   params.push(limit);
   const rows = db.raw.prepare(`SELECT * FROM agent_jobs
-    WHERE ${conditions.join(" AND ")}
+    WHERE ${conditions.length > 0 ? conditions.join(" AND ") : "1 = 1"}
     ORDER BY created_at ${direction}, id ${direction}
     LIMIT ?`).all(...params) as AgentJobRow[];
   return rows.map(toRecord);
+}
+
+/** Close notified agent tasks that stayed yielded past their continuation window. */
+export function dismissStaleYieldedAgentJobs(
+  db: Database,
+  notificationDeliveredBefore: number,
+  now = Date.now(),
+): number {
+  return db.raw.prepare(`UPDATE agent_jobs
+    SET status = 'dismissed', completed_at = ?, cancel_reason = ?
+    WHERE kind IN ('workspace_agent', 'persona_task')
+      AND status = 'yielded'
+      AND json_extract(result_json, '$.notificationPending') = 0
+      AND COALESCE(json_extract(result_json, '$.notificationDeliveredAt'), completed_at) <= ?`)
+    .run(now, "Automatically dismissed after the yielded agent stayed paused without a follow-up.", notificationDeliveredBefore)
+    .changes;
 }
 
 /** Mark non-replayable running work after a crash as interrupted and inspectable. */

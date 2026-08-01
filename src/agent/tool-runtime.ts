@@ -712,8 +712,6 @@ function buildAgentTools(
 
   const jobInspectionTools = createAgentJobInspectionTools({
     store: agentJobs,
-    guildId,
-    channelId,
     onDismiss: async (jobId) => {
       const staged = getStagedAssetForJob(db, jobId);
       if (staged === null) return;

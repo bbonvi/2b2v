@@ -56,11 +56,9 @@ export function renderAgentJobDetails(
   return lines.filter((line) => line !== "").join("\n");
 }
 
-/** Create scoped private tools for listing and inspecting durable agent jobs. */
+/** Create global private tools for listing and inspecting durable agent jobs. */
 export function createAgentJobInspectionTools(input: {
   store: AgentJobStore;
-  guildId: string;
-  channelId: string;
   onDismiss?: (jobId: string) => void | Promise<void>;
 }): AgentTool[] {
   const listTool: AgentTool = markReadOnlyTool({
@@ -70,12 +68,9 @@ export function createAgentJobInspectionTools(input: {
     parameters: ListAgentJobsParams,
     execute: (_toolCallId, params): Promise<AgentToolResult<{ jobIds: string[] }>> => {
       const parsed = params as { state?: "active" | "recent" | "all"; limit?: number };
-      const jobs = input.store.list(
-        input.guildId,
-        input.channelId,
-        parsed.state === "recent" ? "terminal" : parsed.state ?? "all",
-        parsed.limit ?? 10,
-      );
+      const jobs = parsed.state === "recent"
+        ? input.store.listGlobalRecent(parsed.limit ?? 10)
+        : input.store.listGlobal(parsed.state ?? "all", parsed.limit ?? 10);
       const lines = jobs.map((job) => {
         const assets = input.store.listAssets(job.id);
         const assetText = assets.length === 0
@@ -83,7 +78,7 @@ export function createAgentJobInspectionTools(input: {
           : `; assets ${assets.map((asset) => `#${asset.assetId}`).join(", ")}`;
         const source = job.sentMessageId === undefined ? "" : `; sent MsgID ${job.sentMessageId}`;
         const summary = job.kind === "image_generation" ? job.input.prompt : job.input.message;
-        return `- ${job.id} ${job.kind} ${job.status} for @${job.requesterUsername}; task: ${JSON.stringify(shortQuote(summary, 180))}${source}${assetText}`;
+        return `- ${job.id} ${job.kind} ${job.status} for @${job.requesterUsername}; origin guild ${job.guildId} channel ${job.channelId}; task: ${JSON.stringify(shortQuote(summary, 180))}${source}${assetText}`;
       });
       return Promise.resolve({
         content: [{ type: "text", text: lines.length === 0 ? "No matching jobs." : lines.join("\n") }],
@@ -99,8 +94,8 @@ export function createAgentJobInspectionTools(input: {
     parameters: ReadAgentJobParams,
     execute: (_toolCallId, params): Promise<AgentToolResult<{ jobId: string }>> => {
       const parsed = params as { job_id: string };
-      const job = input.store.getVisible(parsed.job_id, input.guildId, input.channelId);
-      if (job === undefined) throw new Error(`Job ${parsed.job_id} was not found or is not visible in this channel.`);
+      const job = input.store.get(parsed.job_id);
+      if (job === undefined) throw new Error(`Job ${parsed.job_id} was not found.`);
       return Promise.resolve({
         content: [{ type: "text", text: renderAgentJobDetails(job, input.store.listAssets(job.id)) }],
         details: { jobId: job.id },
@@ -115,12 +110,12 @@ export function createAgentJobInspectionTools(input: {
     parameters: DismissAgentJobParams,
     async execute(_toolCallId, params): Promise<AgentToolResult<{ jobId: string; dismissed: boolean }>> {
       const parsed = params as { job_id: string; reason: string };
-      const job = input.store.getVisible(parsed.job_id, input.guildId, input.channelId);
+      const job = input.store.get(parsed.job_id);
       if (job === undefined) {
-        throw new Error(`Job ${parsed.job_id} was not found or is not visible in this channel.`);
+        throw new Error(`Job ${parsed.job_id} was not found.`);
       }
       if (job.status !== "ready" && job.status !== "yielded") {
-        throw new Error(`Job ${job.id} is ${job.status}; only ready or yielded jobs can be dismissed here.`);
+        throw new Error(`Job ${job.id} is ${job.status}; only ready or yielded jobs can be dismissed.`);
       }
       const result = input.store.cancel(job.id, {
         reason: parsed.reason,

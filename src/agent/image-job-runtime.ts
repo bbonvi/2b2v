@@ -97,7 +97,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     sourceMessageId: job.sourceMessageId,
     sourceQuote: job.sourceQuote,
   });
-  requestLog.setTrigger({ type: "async_image_generation", jobId: job.id, sourceMessageId: job.sourceMessageId });
+  requestLog.setTrigger({ type: "async_image_generation", jobId: job.id, sourceMessageId: job.sourceMessageId, standalone: true });
   requestLog.setAgentRan(true);
   requestLogStore.incrementActive();
   const imageToolCallId = `async-image-generate-${job.id}`;

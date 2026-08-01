@@ -86,8 +86,34 @@ export function createAgentTaskRuntime(input: {
     if (started?.status !== "running" || started.kind === "image_generation") return;
     const taskJob = started;
     const requestLog = new RequestLog(taskJob.guildId, taskJob.channelId, requestLogStore);
+    const trigger = {
+      type: "async_agent_task",
+      jobId: taskJob.id,
+      kind: taskJob.kind,
+      taskName: taskJob.input.taskName,
+      status: "running",
+      standalone: true,
+    };
+    requestLog.setAuthor(taskJob.requesterUsername);
+    requestLog.setTriggerContext({
+      authorUsername: taskJob.requesterUsername,
+      content: taskJob.input.message,
+      sourceMessageId: taskJob.sourceMessageId,
+      sourceQuote: taskJob.sourceQuote,
+    });
+    requestLog.setTrigger(trigger);
+    requestLog.setAgentRan(true);
+    requestLogStore.incrementActive();
     try {
-      const runtime = await prepareRun(taskJob, taskJob.kind === "persona_task", controller.signal, requestLog);
+      const runtime = await prepareRun(taskJob, taskJob.kind === "persona_task", controller.signal);
+      requestLog.setTriggerContext({
+        guildName: runtime.incoming.guildName,
+        channelName: runtime.incoming.channelName,
+        authorUsername: taskJob.requesterUsername,
+        content: taskJob.input.message,
+        sourceMessageId: taskJob.sourceMessageId,
+        sourceQuote: taskJob.sourceQuote,
+      });
       const pendingAttachments: OutboundAttachment[] = [];
       const previousTranscript = taskJob.result?.transcript as OpenRouterMessage[] | undefined;
       const result = await runSilentToolAgentPass({
@@ -121,6 +147,7 @@ export function createAgentTaskRuntime(input: {
       ].filter((part) => part !== "").join("\n\n");
       const handoff = joinedHandoff !== "" ? joinedHandoff : "Task finished without a handoff note.";
       agentJobs.markYielded(taskJob.id, { handoff, transcript: result.transcript });
+      requestLog.setTrigger({ ...trigger, status: "yielded" });
       if (agentJobs.requeueYieldedAgentWithPendingMessages(taskJob.id)) {
         await executeAgentJob(taskJob.id);
         return;
@@ -132,8 +159,11 @@ export function createAgentTaskRuntime(input: {
         });
       });
     } catch (error) {
-      if (agentJobs.get(taskJob.id)?.status !== "dismissed") {
-        const message = error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
+      const dismissed = agentJobs.get(taskJob.id)?.status === "dismissed";
+      requestLog.setError(message);
+      requestLog.setTrigger({ ...trigger, status: dismissed ? "dismissed" : "failed" });
+      if (!dismissed) {
         agentJobs.markAgentFailed(taskJob.id, message);
         await notifyPrimary(taskJob.id).catch((notifyError: unknown) => {
           log.warn("agent failure notification failed", {
@@ -144,10 +174,11 @@ export function createAgentTaskRuntime(input: {
       }
     } finally {
       requestLog.emit(log);
+      requestLogStore.decrementActive();
     }
   }
 
-  async function prepareRun(job: AgentTaskJob, personaRun: boolean, signal: AbortSignal, requestLog: RequestLog) {
+  async function prepareRun(job: AgentTaskJob, personaRun: boolean, signal: AbortSignal) {
     const guild = client.guilds.cache.get(job.guildId);
     if (guild === undefined) throw new Error(`Guild ${job.guildId} is unavailable.`);
     const channel = await fetchAccessibleGuildChannel(job.channelId);
@@ -213,7 +244,6 @@ export function createAgentTaskRuntime(input: {
       createSearchToolsTool({ tools: selected, skills: getPromptBundle().runtime.skills }),
       createLoadSkillTool({ skills: getPromptBundle().runtime.skills }),
     ], getPromptBundle().runtime);
-    requestLog.setTrigger({ shouldRespond: true, reason: "scheduled" });
     return { guildConfig, context, incoming, tools: [...loaders, ...selected], generatedImages, sender, resolveAssets };
   }
 
@@ -226,9 +256,35 @@ export function createAgentTaskRuntime(input: {
       const completionTime = current.completedAt;
       if (completionTime === undefined) return;
       const requestLog = new RequestLog(current.guildId, current.channelId, requestLogStore);
+      const trigger = {
+        type: "async_agent_handoff",
+        jobId: current.id,
+        kind: current.kind,
+        taskName: current.input.taskName,
+        status: "running",
+        standalone: true,
+      };
+      requestLog.setAuthor(current.requesterUsername);
+      requestLog.setTriggerContext({
+        authorUsername: current.requesterUsername,
+        content: current.result.handoff ?? current.input.message,
+        sourceMessageId: current.sourceMessageId,
+        sourceQuote: current.sourceQuote,
+      });
+      requestLog.setTrigger(trigger);
+      requestLog.setAgentRan(true);
+      requestLogStore.incrementActive();
       try {
         const controller = new AbortController();
-        const runtime = await prepareRun(current, true, controller.signal, requestLog);
+        const runtime = await prepareRun(current, true, controller.signal);
+        requestLog.setTriggerContext({
+          guildName: runtime.incoming.guildName,
+          channelName: runtime.incoming.channelName,
+          authorUsername: current.requesterUsername,
+          content: current.result.handoff ?? current.input.message,
+          sourceMessageId: current.sourceMessageId,
+          sourceQuote: current.sourceQuote,
+        });
         const pendingAttachments: OutboundAttachment[] = [];
         const completion = await runSilentToolAgentPass({
           globalConfig: getGlobalConfig(),
@@ -265,8 +321,14 @@ export function createAgentTaskRuntime(input: {
           });
         }
         agentJobs.markNotificationDelivered(jobId, completionTime);
+        requestLog.setTrigger({ ...trigger, status: "delivered" });
+      } catch (error) {
+        requestLog.setError(error instanceof Error ? error.message : String(error));
+        requestLog.setTrigger({ ...trigger, status: "failed" });
+        throw error;
       } finally {
         requestLog.emit(log);
+        requestLogStore.decrementActive();
       }
     });
   }
@@ -340,7 +402,7 @@ function primaryHandoffControlMessage(job: AgentTaskJob): string {
     "## Background Agent Handoff",
     `Agent ${job.id} (${job.input.taskName}) yielded:`,
     job.result?.handoff ?? "No handoff note.",
-    "This is private runtime state. Decide whether to reply now, inspect work, send a follow-up with send_agent_message, or dismiss the job. Do not mechanically repeat the handoff.",
+    "This is private runtime state. Inspect or continue the work when needed. If no concrete follow-up remains, call dismiss_agent_job before ending this handoff turn; leave it yielded only for an expected continuation. Do not mechanically repeat the handoff.",
   ].join("\n\n");
 }
 

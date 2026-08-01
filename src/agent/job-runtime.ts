@@ -6,6 +6,7 @@ import { parseAssetId, type AssetRef } from "./asset-id.ts";
 import {
   createAgentJobRecord,
   deleteExpiredUnlinkedAgentJobs,
+  dismissStaleYieldedAgentJobs,
   failInterruptedAgentJobs,
   getAgentJobForAsset,
   getAgentJobRecord,
@@ -68,7 +69,9 @@ export interface AgentTaskJobInput {
 export interface AgentTaskJobResult {
   handoff?: string;
   transcript?: unknown[];
+  yieldedAt?: number;
   notificationPending?: boolean;
+  notificationDeliveredAt?: number;
 }
 
 export type AgentJobInput = ImageGenerationJobInput | AgentTaskJobInput;
@@ -114,6 +117,7 @@ export interface AgentJobConfig {
   imageTimeoutMs: number;
   imageCancelGraceMs: number;
   terminalVisibleMs: number;
+  yieldedAutoDismissMs: number;
   maxImageReplacements: number;
 }
 
@@ -262,6 +266,15 @@ export class AgentJobStore {
     return [...active, ...terminal].map(fromRecord).sort(compareJobsOldestFirst);
   }
 
+  listGlobalVisible(now = Date.now()): AgentJob[] {
+    const active = listAgentJobRecords(this.db, { state: "active" });
+    const terminal = listAgentJobRecords(this.db, {
+      state: "terminal",
+      completedAfter: now - this.config.terminalVisibleMs,
+    });
+    return [...active, ...terminal].map(fromRecord).sort(compareJobsOldestFirst);
+  }
+
   listActive(guildId: string, channelId: string): AgentJob[] {
     return this.list(guildId, channelId, "active");
   }
@@ -281,10 +294,17 @@ export class AgentJobStore {
     }).map(fromRecord);
   }
 
-  getVisible(id: string, guildId: string, channelId: string): AgentJob | undefined {
-    const job = this.get(id);
-    if (job === undefined) return undefined;
-    return jobIsInScope(job, guildId, channelId) ? job : undefined;
+  listGlobal(state: PersistedAgentJobState = "all", limit = 10): AgentJob[] {
+    return listAgentJobRecords(this.db, { state, limit, newestFirst: true }).map(fromRecord);
+  }
+
+  listGlobalRecent(limit = 10, now = Date.now()): AgentJob[] {
+    return listAgentJobRecords(this.db, {
+      state: "terminal",
+      completedAfter: now - this.config.terminalVisibleMs,
+      limit,
+      newestFirst: true,
+    }).map(fromRecord);
   }
 
   start(id: string, abort?: () => void, now = Date.now()): AgentJob | undefined {
@@ -313,7 +333,7 @@ export class AgentJobStore {
     updateAgentJobRecord(this.db, id, {
       status: "yielded",
       completedAt: now,
-      resultJson: JSON.stringify({ ...result, notificationPending: true }),
+      resultJson: JSON.stringify({ ...result, yieldedAt: now, notificationPending: true }),
     });
     this.aborts.delete(id);
     return this.get(id);
@@ -355,12 +375,12 @@ export class AgentJobStore {
     return true;
   }
 
-  markNotificationDelivered(id: string, expectedCompletedAt?: number): void {
+  markNotificationDelivered(id: string, expectedCompletedAt?: number, now = Date.now()): void {
     const job = this.get(id);
     if (job === undefined || job.kind === "image_generation" || job.result === undefined) return;
     if (expectedCompletedAt !== undefined && job.completedAt !== expectedCompletedAt) return;
     updateAgentJobRecord(this.db, id, {
-      resultJson: JSON.stringify({ ...job.result, notificationPending: false }),
+      resultJson: JSON.stringify({ ...job.result, notificationPending: false, notificationDeliveredAt: now }),
     });
   }
 
@@ -448,6 +468,10 @@ export class AgentJobStore {
     return deleteExpiredUnlinkedAgentJobs(this.db, now - UNLINKED_TERMINAL_RETENTION_MS);
   }
 
+  dismissStaleYielded(now = Date.now()): number {
+    return dismissStaleYieldedAgentJobs(this.db, now - this.config.yieldedAutoDismissMs, now);
+  }
+
   annotationForMessage(messageId: string, guildId: string, channelId: string, now = Date.now()): string[] {
     const jobs = this.listVisible(guildId, channelId, now)
       .filter((job) => job.sourceMessageId === messageId);
@@ -509,11 +533,6 @@ export class AgentJobStore {
 function compareJobsOldestFirst(a: AgentJob, b: AgentJob): number {
   const timeDiff = a.createdAt - b.createdAt;
   return timeDiff !== 0 ? timeDiff : a.id.localeCompare(b.id);
-}
-
-function jobIsInScope(job: AgentJob, guildId: string, channelId: string): boolean {
-  return (job.guildId === guildId && job.channelId === channelId)
-    || (job.deliveryGuildId === guildId && job.deliveryChannelId === channelId);
 }
 
 function toRecord(job: AgentJob): AgentJobRecord {

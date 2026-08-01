@@ -62,14 +62,16 @@ export interface TypingSimulationConfig {
   outputMaxHoldMs: number;
 }
 
-/** Async agent job configuration. Currently only image generation uses it. */
+/** Async image and delegated-agent job configuration. */
 export interface AgentJobsConfig {
   /** Maximum runtime for one async image generation job. Default 300000. */
   imageTimeoutMs: number;
   /** Window where active image jobs can be cancelled/replaced for corrections. Default 60000. */
   imageCancelGraceMs: number;
-  /** How long terminal jobs stay visible in prompt context. Default 600000. */
+  /** How long terminal jobs stay visible in prompt context. Default 900000. */
   terminalVisibleMs: number;
+  /** How long a notified yielded agent can remain paused before automatic dismissal. Default 3600000. */
+  yieldedAutoDismissMs: number;
   /** Maximum replacement cancellations per original image request. Default 2. */
   maxImageReplacements: number;
 }
@@ -695,6 +697,7 @@ export interface GuildConfigYaml {
     imageTimeoutMs?: number;
     imageCancelGraceMs?: number;
     terminalVisibleMs?: number;
+    yieldedAutoDismissMs?: number;
     maxImageReplacements?: number;
   };
   schedulePressure?: SchedulePressureConfigYaml;
@@ -775,6 +778,7 @@ export interface MainConfigYaml {
     imageTimeoutMs?: number;
     imageCancelGraceMs?: number;
     terminalVisibleMs?: number;
+    yieldedAutoDismissMs?: number;
     maxImageReplacements?: number;
   };
   schedulePressure?: SchedulePressureConfigYaml;

@@ -343,7 +343,7 @@ async function buildContext(
   } = {},
 ): Promise<AssembledContext> {
   // Chat history via the full processing pipeline
-  const visibleJobs = agentJobs.listVisible(guildId, channelId);
+  const visibleJobs = agentJobs.listGlobalVisible();
   const displayNamesByUserId = buildCurrentDisplayNameMap(guild);
   const appendLatestToHistory = historyOptions.appendLatestToHistory ?? true;
   const loadedHistoryMessages = historyOptions.includeHistory === false
@@ -709,7 +709,8 @@ async function buildContext(
   assembled.visibleUserIds = visibleUserIds;
   const activeJobsText = renderAgentJobsContext(
     visibleJobs,
-    runtimeContextTemplate("active-image-jobs", {}, "Image generation is asynchronous."),
+    guildId,
+    channelId,
     Date.now(),
     (jobId) => agentJobs.listAssets(jobId),
   );
@@ -719,7 +720,7 @@ async function buildContext(
     ? assembled.sections
     : [
       ...assembled.sections.slice(0, activeJobsInsertAt),
-      { label: "Image Jobs", text: activeJobsText, cached: false, role: "developer" as const },
+      { label: "Agent Jobs", text: activeJobsText, cached: false, role: "developer" as const },
       ...assembled.sections.slice(activeJobsInsertAt),
     ];
 

@@ -7,6 +7,7 @@ const config = {
   imageTimeoutMs: 300_000,
   imageCancelGraceMs: 60_000,
   terminalVisibleMs: 600_000,
+  yieldedAutoDismissMs: 3_600_000,
   maxImageReplacements: 2,
 };
 
@@ -138,6 +139,14 @@ describe("AgentJobStore", () => {
     expect(store.listVisible("delivery-guild", "thread-channel")).toHaveLength(1);
   });
 
+  test("lists active and recent jobs globally", () => {
+    const local = enqueue(store, { guildId: "g1", channelId: "c1", now: 1_000 }).job;
+    const elsewhere = enqueue(store, { guildId: "g2", channelId: "c2", now: 2_000 }).job;
+
+    expect(store.listVisible("g1", "c1").map((job) => job.id)).toEqual([local.id]);
+    expect(store.listGlobalVisible().map((job) => job.id)).toEqual([local.id, elsewhere.id]);
+  });
+
   test("renders cross-channel delivery annotations with channel_id", () => {
     const result = enqueue(store, {
       guildId: "source-guild",
@@ -185,6 +194,8 @@ describe("AgentJobStore", () => {
 
     expect(store.listVisible("g1", "c1", 2_000 + config.terminalVisibleMs)).toHaveLength(1);
     expect(store.listVisible("g1", "c1", 2_001 + config.terminalVisibleMs)).toHaveLength(0);
+    expect(store.listGlobalRecent(10, 2_000 + config.terminalVisibleMs)).toHaveLength(1);
+    expect(store.listGlobalRecent(10, 2_001 + config.terminalVisibleMs)).toHaveLength(0);
     expect(store.get(first.job.id)?.status).toBe("failed");
     expect(store.list("g1", "c1", "terminal")).toHaveLength(1);
   });
@@ -221,6 +232,38 @@ describe("AgentJobStore", () => {
     expect(resumed.shouldRun).toBe(true);
     expect(resumed.job.status).toBe("queued");
     expect(store.takePendingAgentMessages(job.id)).toEqual(["Run the tests too."]);
+  });
+
+  test("auto-dismisses only notified agents left yielded for an hour", () => {
+    const job = store.enqueueAgentTask({
+      kind: "workspace_agent",
+      guildId: "g1",
+      channelId: "c1",
+      requesterId: "u1",
+      requesterUsername: "alice",
+      sourceMessageId: "m1",
+      sourceQuote: "do it",
+      taskName: "build",
+      message: "Build the project.",
+      now: 1_000,
+    });
+    store.start(job.id, undefined, 1_500);
+    store.markYielded(job.id, { handoff: "Done." }, 2_000);
+
+    expect(store.dismissStaleYielded(4_000_000)).toBe(0);
+    store.markNotificationDelivered(job.id, 2_000, 3_000);
+    expect(store.dismissStaleYielded(3_000 + config.yieldedAutoDismissMs - 1)).toBe(0);
+    expect(store.dismissStaleYielded(3_000 + config.yieldedAutoDismissMs)).toBe(1);
+    expect(store.get(job.id)).toMatchObject({
+      status: "dismissed",
+      result: {
+        handoff: "Done.",
+        yieldedAt: 2_000,
+        notificationPending: false,
+        notificationDeliveredAt: 3_000,
+      },
+    });
+    expect(() => store.sendAgentMessage(job.id, "One more thing.")).toThrow("cannot receive a message");
   });
 
   test("persists generated asset provenance across store instances", () => {

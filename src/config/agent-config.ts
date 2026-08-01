@@ -237,6 +237,7 @@ export function resolveGlobalAgentJobs(
     imageTimeoutMs: partial?.imageTimeoutMs ?? DEFAULT_AGENT_JOBS.imageTimeoutMs,
     imageCancelGraceMs: partial?.imageCancelGraceMs ?? DEFAULT_AGENT_JOBS.imageCancelGraceMs,
     terminalVisibleMs: partial?.terminalVisibleMs ?? DEFAULT_AGENT_JOBS.terminalVisibleMs,
+    yieldedAutoDismissMs: partial?.yieldedAutoDismissMs ?? DEFAULT_AGENT_JOBS.yieldedAutoDismissMs,
     maxImageReplacements: partial?.maxImageReplacements ?? DEFAULT_AGENT_JOBS.maxImageReplacements,
   };
   validateAgentJobsConfig(resolved, "agentJobs");
@@ -251,6 +252,7 @@ export function resolveGuildAgentJobs(
     imageTimeoutMs: partial?.imageTimeoutMs ?? global.imageTimeoutMs,
     imageCancelGraceMs: partial?.imageCancelGraceMs ?? global.imageCancelGraceMs,
     terminalVisibleMs: partial?.terminalVisibleMs ?? global.terminalVisibleMs,
+    yieldedAutoDismissMs: partial?.yieldedAutoDismissMs ?? global.yieldedAutoDismissMs,
     maxImageReplacements: partial?.maxImageReplacements ?? global.maxImageReplacements,
   };
   validateAgentJobsConfig(resolved, "agentJobs");
@@ -266,6 +268,9 @@ function validateAgentJobsConfig(config: AgentJobsConfig, keyPrefix: string): vo
   }
   if (!Number.isFinite(config.terminalVisibleMs) || config.terminalVisibleMs < 0) {
     throw new Error(`${keyPrefix}.terminalVisibleMs must be >= 0`);
+  }
+  if (!Number.isFinite(config.yieldedAutoDismissMs) || config.yieldedAutoDismissMs < 0) {
+    throw new Error(`${keyPrefix}.yieldedAutoDismissMs must be >= 0`);
   }
   if (!Number.isInteger(config.maxImageReplacements) || config.maxImageReplacements < 0) {
     throw new Error(`${keyPrefix}.maxImageReplacements must be >= 0`);

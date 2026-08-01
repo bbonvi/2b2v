@@ -13,6 +13,7 @@ test("spawn_agent starts a durable job and send_agent_message resumes it", async
     imageTimeoutMs: 300_000,
     imageCancelGraceMs: 60_000,
     terminalVisibleMs: 600_000,
+    yieldedAutoDismissMs: 3_600_000,
     maxImageReplacements: 2,
   });
   const started: string[] = [];
@@ -44,6 +45,22 @@ test("spawn_agent starts a durable job and send_agent_message resumes it", async
 
   await send.execute("send", { target: jobId, message: "Also run tests." });
 
-  expect(started).toEqual([jobId, jobId]);
+  const foreign = store.enqueueAgentTask({
+    kind: "persona_task",
+    guildId: "g2",
+    channelId: "c2",
+    requesterId: "u2",
+    requesterUsername: "bob",
+    sourceMessageId: "m2",
+    sourceQuote: "check elsewhere",
+    taskName: "check",
+    message: "Check the other guild.",
+  });
+  store.start(foreign.id);
+  store.markYielded(foreign.id, { handoff: "Waiting." });
+  await send.execute("send-foreign", { target: foreign.id, message: "Continue globally." });
+
+  expect(started).toEqual([jobId, jobId, foreign.id]);
   expect(store.get(jobId)).toMatchObject({ status: "queued" });
+  expect(store.get(foreign.id)).toMatchObject({ status: "queued" });
 });
