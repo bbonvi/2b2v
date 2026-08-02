@@ -1,5 +1,8 @@
 # syntax=docker/dockerfile:1.7
 
+ARG DENO_VERSION=2.9.4
+ARG UV_VERSION=0.12.1
+
 FROM oven/bun:1.3-debian AS base
 WORKDIR /app
 RUN apt-get update \
@@ -39,6 +42,14 @@ FROM scratch AS yt-dlp
 ARG YT_DLP_URL=https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux
 ADD --chmod=755 ${YT_DLP_URL} /yt-dlp
 
+FROM scratch AS yt-dlp-nightly
+ARG YT_DLP_NIGHTLY_URL=https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp
+ADD --chmod=755 ${YT_DLP_NIGHTLY_URL} /yt-dlp
+
+FROM denoland/deno:bin-${DENO_VERSION} AS workspace-deno
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS workspace-uv
+FROM node:24-bookworm-slim AS workspace-node
+
 # --- Install dependencies ---
 FROM dependency-builder AS deps
 COPY --link package.json bun.lock ./
@@ -53,6 +64,34 @@ RUN bun install --frozen-lockfile
 
 # --- Disposable root workspace controlled only through its Unix socket ---
 FROM base AS workspace
+ARG PLAYWRIGHT_CLI_VERSION=0.1.17
+COPY --link --from=yt-dlp-nightly /yt-dlp /usr/local/bin/yt-dlp
+COPY --link --from=workspace-deno /deno /usr/local/bin/deno
+COPY --link --from=workspace-uv /uv /uvx /usr/local/bin/
+COPY --link --from=workspace-node /usr/local/bin/node /usr/local/bin/node
+COPY --link --from=workspace-node /usr/local/lib/node_modules/npm/ /usr/local/lib/node_modules/npm/
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+ENV PATH="/opt/workspace-python/bin:${PATH}"
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        git curl jq file zip unzip 7zip xz-utils zstd sqlite3 \
+        imagemagick libimage-exiftool-perl qpdf \
+        tesseract-ocr tesseract-ocr-eng \
+        fonts-noto-core fonts-noto-color-emoji \
+        build-essential pkg-config \
+        procps lsof iproute2 dnsutils rsync shellcheck \
+    && rm -rf /var/lib/apt/lists/*
+RUN uv venv --python /usr/bin/python3 /opt/workspace-python \
+    && uv pip install --python /opt/workspace-python/bin/python --no-cache \
+        Pillow numpy pandas matplotlib requests \
+        beautifulsoup4 lxml PyYAML \
+        pypdf openpyxl python-docx python-pptx reportlab
+RUN npm install --global "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}" \
+    && PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=120000 playwright-cli install-browser chromium --with-deps \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/*
+RUN printf '%s\n' 'export PATH="/opt/workspace-python/bin:$PATH"' > /etc/profile.d/workspace-python.sh
 COPY src/workspace/ ./src/workspace/
 RUN mkdir -p /workspace /workspace/staged-assets /run/2b2v
 WORKDIR /workspace
