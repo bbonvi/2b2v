@@ -301,10 +301,12 @@ export function buildInitialMessages(
   finalActionInstruction = "",
 ): OpenRouterMessage[] {
   const roleAt = (index: number): PromptTransportRole => roles[index] ?? "user";
-  const currentMessageMetadata = [
-    `## ${msg.eventPrompt?.metadataHeading ?? "Current Discord Message Metadata"}`,
-    msg.eventPrompt?.metadataText ?? buildCurrentMessageMetadata(msg, runtimePrompts),
-  ].join("\n");
+  const currentMessageMetadata = msg.bareCurrentTurn === true
+    ? ""
+    : [
+        `## ${msg.eventPrompt?.metadataHeading ?? "Current Discord Message Metadata"}`,
+        msg.eventPrompt?.metadataText ?? buildCurrentMessageMetadata(msg, runtimePrompts),
+      ].join("\n");
 
   const imageMetadata = (msg.imageInputs ?? [])
     .map((image, index) => image.metadataText !== undefined && image.metadataText !== ""
@@ -326,7 +328,9 @@ export function buildInitialMessages(
         ? "## Context Boundary\nThe latest available Discord activity is already included in Chat History."
         : currentMessageMetadata,
       imageMetadata !== "" ? `## Event Images\n${imageMetadata}` : "",
-      msg.currentContentInHistory === true ? "" : `## ${msg.eventPrompt?.contentHeading ?? "Current Discord Message"}`,
+      msg.currentContentInHistory === true || msg.bareCurrentTurn === true
+        ? ""
+        : `## ${msg.eventPrompt?.contentHeading ?? "Current Discord Message"}`,
       msg.currentContentInHistory === true ? "" : msg.eventContent ?? userContent,
   ].filter((part) => part !== "").join("\n\n");
   const images = imagePartsFromCurrentTurn(msg);

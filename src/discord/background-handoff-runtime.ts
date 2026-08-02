@@ -5,7 +5,13 @@ import type { SendableGuildChannel } from "./message-sender.ts";
 import type { DispatchOutcome } from "./channel-dispatcher.ts";
 
 interface HandoffTurnOptions {
-  currentTurnOverride: { messageId: string; timestamp: number; content: string };
+  currentTurnOverride: {
+    messageId: string;
+    timestamp: number;
+    content: string;
+    bare: boolean;
+    omitCurrentContext: boolean;
+  };
   dashboardTrigger: { type: string; jobId: string; taskName: string; status: string };
   initialToolNames: string[];
   preloadedSkillIds: string[];
@@ -56,6 +62,8 @@ export function createBackgroundHandoffRunner(input: {
           messageId: handoffMessageId,
           timestamp: statusChangedAt,
           content: backgroundHandoffMessage(current),
+          bare: true,
+          omitCurrentContext: true,
         },
         dashboardTrigger: {
           type: "background_agent_handoff",

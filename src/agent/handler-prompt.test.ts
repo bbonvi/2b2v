@@ -435,6 +435,36 @@ describe("handleMessage", () => {
     expect(currentTurn).not.toContain("Author:");
   });
 
+  test("renders a bare synthetic current turn as one message before actor instructions", async () => {
+    let promptMessages: string[] = [];
+    const completeChat: ChatCompleteFn = (request) => {
+      promptMessages = request.messages.map((message) => contentText(message.content));
+      return Promise.resolve({
+        text: "ok",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+
+    await handleMessage(
+      makeMessage({
+        translatedContent: "## Background Agent Handoff\n\nInspection complete.",
+        eventContent: "## Background Agent Handoff\n\nInspection complete.",
+        bareCurrentTurn: true,
+        mentionedUserIds: ["bot-1"],
+      }),
+      makeDeps({ completeChat }),
+    );
+
+    const handoffMessages = promptMessages.filter((message) => message.includes("## Background Agent Handoff"));
+    expect(handoffMessages).toEqual(["## Background Agent Handoff\n\nInspection complete."]);
+    expect(handoffMessages[0]).not.toContain("## Current Discord Message Metadata");
+    expect(handoffMessages[0]).not.toContain("## Current Discord Message");
+    const handoffIndex = promptMessages.findIndex((message) => message.includes("## Background Agent Handoff"));
+    expect(promptMessages[handoffIndex + 1]).toStartWith("## Execution Mode: Visible Reply");
+  });
+
   test("places a private-life instruction immediately before its synthetic event", async () => {
     let promptMessages: string[] = [];
     const completeChat: ChatCompleteFn = (request) => {

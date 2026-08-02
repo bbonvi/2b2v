@@ -66,5 +66,7 @@ test("hands a yielded job to a fresh actor with its loaded skill grants", async 
     "workspace_exec",
   ]);
   expect(turn?.currentTurnOverride.content).toContain("Inspection complete.");
+  expect(turn?.currentTurnOverride.bare).toBe(true);
+  expect(turn?.currentTurnOverride.omitCurrentContext).toBe(true);
   expect(jobs.get(job.id)?.handoffNotifiedAt).toBeNumber();
 });

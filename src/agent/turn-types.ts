@@ -28,6 +28,8 @@ export interface IncomingMessage {
   botRoleIds: string[];
   mentionedEveryone: boolean;
   translatedContent: string;
+  /** Render this synthetic current turn as its literal content, without Discord event wrappers. */
+  bareCurrentTurn?: boolean;
   /** The canonical chat-history section already contains this Discord content. */
   currentContentInHistory?: boolean;
   /** Full visible current-turn event text, including debounced same-author followups. */

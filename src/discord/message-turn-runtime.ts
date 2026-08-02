@@ -343,6 +343,8 @@ async function processTriggeredMessage(
       messageId: string;
       timestamp: number;
       content: string;
+      bare?: boolean;
+      omitCurrentContext?: boolean;
     };
     preSendCheck?: (draftText: string) => boolean | Promise<boolean>;
     onWriteToolStart?: (toolName: string) => void;
@@ -520,7 +522,8 @@ async function processTriggeredMessage(
       options.actorSurface === "private-life" ? "private-life" : "live",
       options.currentTurnOverride !== undefined ? currentTurnMessageIds : undefined,
       {
-        appendLatestToHistory: options.currentTurnOverride !== undefined,
+        // Synthetic runtime events belong in their own LLM message, not canonical Discord history.
+        appendLatestToHistory: options.currentTurnOverride === undefined,
         ...(options.focusUserId !== undefined
           ? { additionalVisibleUserIds: [options.focusUserId], memoryFocusUserId: options.focusUserId }
           : {}),
@@ -529,6 +532,9 @@ async function processTriggeredMessage(
           : {}),
       },
     );
+    if (options.currentTurnOverride?.omitCurrentContext === true) {
+      context.sections = context.sections.filter((section) => section.label !== "Current Context");
+    }
     for (const skillId of options.preloadedSkillIds ?? []) {
       const skill = getPromptBundle().runtime.skills.byId[skillId];
       if (skill === undefined) continue;
@@ -720,6 +726,7 @@ async function processTriggeredMessage(
       ...messageTriggerMentionFields(message),
       translatedContent: options.currentTurnOverride?.content ?? translatedContent,
       eventContent: currentTurnEventContent !== "" ? currentTurnEventContent : translatedContent,
+      bareCurrentTurn: options.currentTurnOverride?.bare === true,
       currentContentInHistory: options.currentTurnOverride === undefined,
       messageId: options.currentTurnOverride?.messageId ?? message.id,
       ...(options.currentTurnOverride === undefined
