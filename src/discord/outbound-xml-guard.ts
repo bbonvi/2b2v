@@ -1,4 +1,4 @@
-const XML_LIKE_TAG_RE = /<\/?[A-Za-z_][A-Za-z0-9_.:-]*(?=\s|\/?>|$)(?:[^<>]*>?|$)/;
+const XML_LIKE_TAG_RE = /<\/?[A-Za-z_]/;
 
 export class OutboundXmlTagError extends Error {
   constructor() {

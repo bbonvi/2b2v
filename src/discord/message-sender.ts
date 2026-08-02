@@ -416,6 +416,8 @@ export function createDiscordMessageSender(input: {
       markBotParticipating(input.db, targetChannelId);
     };
 
+    assertSafeDiscordText(text);
+
     if (voice !== undefined) {
       const attachment = new AttachmentBuilder(voice.buffer, { name: voice.filename });
       const imageAttachments = attachmentBuilders(attachments);
@@ -473,7 +475,6 @@ export function createDiscordMessageSender(input: {
 
     const warnings: string[] = [];
     const translated = translateOutbound(text, outboundResolvers, warnings);
-    assertSafeDiscordText(translated);
     const imageAttachments = attachmentBuilders(attachments);
     const nativeStickerIds = stickerIds(attachments);
     if (presentation?.kind === "components_v2_card") {
