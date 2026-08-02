@@ -3,10 +3,6 @@ title: Image Generation
 description: Use when Delamain has accepted a request to create or edit a raster image.
 required_for_tools:
   - codex_generate_image
-  - cancel_agent_job
-  - list_agent_jobs
-  - read_agent_job
-  - dismiss_agent_job
 instructions:
   - 00-runtime.md
   - 20-image-direction.md

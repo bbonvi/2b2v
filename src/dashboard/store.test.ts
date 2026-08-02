@@ -335,6 +335,41 @@ describe("RequestLogStore", () => {
     expect(group?.requestCount).toBe(2);
   });
 
+  test("keeps asynchronous roots separate from their source message", () => {
+    const store = new RequestLogStore();
+    const context = { messageId: "m1", authorUsername: "alice", content: "make it" };
+    store.push(makeEntry({ requestId: "reply", triggerContext: context, timestamp: "2026-07-20T00:00:01.000Z" }));
+    store.push(makeEntry({
+      requestId: "image-run",
+      trigger: { type: "image_generation_job", jobId: "img-1", sourceMessageId: "m1" },
+      triggerContext: { sourceMessageId: "m1", authorUsername: "alice", sourceQuote: "make it" },
+      timestamp: "2026-07-20T00:00:02.000Z",
+    }));
+    store.push(makeEntry({
+      requestId: "agent-run",
+      trigger: { type: "background_agent_run", jobId: "agent-1", sourceMessageId: "m1" },
+      triggerContext: { sourceMessageId: "m1", authorUsername: "alice", sourceQuote: "make it" },
+      timestamp: "2026-07-20T00:00:03.000Z",
+    }));
+    store.push(makeEntry({
+      requestId: "agent-handoff",
+      trigger: { type: "background_agent_handoff", jobId: "agent-1", sourceMessageId: "m1" },
+      triggerContext: { sourceMessageId: "m1", authorUsername: "alice", sourceQuote: "make it" },
+      timestamp: "2026-07-20T00:00:04.000Z",
+    }));
+
+    const groups = store.queryGroups();
+    expect(groups.map((group) => group.groupId)).toEqual([
+      "job:agent-1",
+      "job:img-1",
+      "message:g1:c1:m1",
+    ]);
+    expect(groups[0]?.requests.map((request) => request.requestId)).toEqual([
+      "agent-run",
+      "agent-handoff",
+    ]);
+  });
+
   test("orders lifecycles by their first phase when an older lifecycle finishes later", () => {
     const store = new RequestLogStore();
     const olderContext = { messageId: "older", authorUsername: "alice", content: "first" };

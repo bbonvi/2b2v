@@ -461,6 +461,10 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
     "ALTER TABLE voice_participants ADD COLUMN present_at_start INTEGER NOT NULL DEFAULT 0 CHECK(present_at_start IN (0, 1))",
     "ALTER TABLE voice_output_turns ADD COLUMN trigger_segment_id INTEGER REFERENCES voice_transcript_segments(id)",
     "ALTER TABLE voice_sessions ADD COLUMN handoff_json TEXT",
+    "ALTER TABLE agent_jobs ADD COLUMN parent_job_id TEXT REFERENCES agent_jobs(id) ON DELETE CASCADE",
+    "ALTER TABLE agent_jobs ADD COLUMN checkpoint_json TEXT",
+    "ALTER TABLE agent_jobs ADD COLUMN status_changed_at INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE agent_jobs ADD COLUMN handoff_notified_at INTEGER",
   ]) {
     ignoreExistingColumn(raw, sql);
   }
@@ -492,6 +496,23 @@ export function runDatabaseMigrations(raw: BunDatabase): void {
     ON voice_stt_usage(provider, started_at)`);
   raw.run(`CREATE INDEX IF NOT EXISTS idx_voice_stt_usage_session_time
     ON voice_stt_usage(session_id, started_at)`);
+
+  raw.run(`UPDATE agent_jobs
+    SET status_changed_at = COALESCE(completed_at, started_at, created_at)
+    WHERE status_changed_at = 0`);
+  raw.run("CREATE INDEX IF NOT EXISTS idx_agent_jobs_parent ON agent_jobs(parent_job_id, created_at)");
+  raw.run(`CREATE TABLE IF NOT EXISTS agent_job_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id        TEXT NOT NULL REFERENCES agent_jobs(id) ON DELETE CASCADE,
+    source_job_id TEXT REFERENCES agent_jobs(id) ON DELETE CASCADE,
+    kind          TEXT NOT NULL CHECK(kind IN ('message', 'child_result')),
+    payload_json  TEXT NOT NULL,
+    created_at    INTEGER NOT NULL,
+    consumed_at   INTEGER,
+    UNIQUE(job_id, source_job_id, kind)
+  )`);
+  raw.run(`CREATE INDEX IF NOT EXISTS idx_agent_job_events_pending
+    ON agent_job_events(job_id, consumed_at, created_at, id)`);
 
   raw.run(`UPDATE voice_output_turns AS output
     SET trigger_segment_id = (

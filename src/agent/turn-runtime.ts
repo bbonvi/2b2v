@@ -278,6 +278,7 @@ async function runLoggedAgentTurn(input: {
   logger: Logger;
   afterSuccess?: (result: HandleResult) => void | Promise<void>;
   onFinally?: (result: HandleResult | undefined, error: unknown) => void;
+  dashboardTrigger?: unknown;
 }): Promise<HandleResult> {
   let result: HandleResult | undefined;
   let error: unknown;
@@ -294,7 +295,7 @@ async function runLoggedAgentTurn(input: {
   } finally {
     input.onFinally?.(result, error);
     if (result !== undefined) {
-      input.requestLog.setTrigger(result.triggerResult);
+      input.requestLog.setTrigger(input.dashboardTrigger ?? result.triggerResult);
       input.requestLog.setAgentRan(result.agentRan);
     }
     input.requestLog.emit(input.logger);

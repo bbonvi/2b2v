@@ -13,6 +13,7 @@ test("spawn_agent starts a durable job and send_agent_message resumes it", async
     imageTimeoutMs: 300_000,
     imageCancelGraceMs: 60_000,
     terminalVisibleMs: 600_000,
+    yieldedAutoDismissMs: 3_600_000,
     maxImageReplacements: 2,
   });
   const started: string[] = [];
@@ -24,6 +25,7 @@ test("spawn_agent starts a durable job and send_agent_message resumes it", async
     requesterUsername: "alice",
     sourceMessageId: "m1",
     sourceQuote: "build it",
+    handoffTarget: { kind: "channel", guildId: "g1", channelId: "c1" },
     runAgentJob: (jobId) => {
       started.push(jobId);
       return Promise.resolve();
@@ -35,15 +37,39 @@ test("spawn_agent starts a durable job and send_agent_message resumes it", async
   const spawned = await spawn.execute("spawn", {
     task_name: "build",
     message: "Build the project.",
-    kind: "workspace",
   });
   const jobId = (spawned.details as { jobId: string }).jobId;
-  expect(store.get(jobId)).toMatchObject({ kind: "workspace_agent", status: "queued" });
+  expect(store.get(jobId)).toMatchObject({ kind: "background_agent", status: "queued" });
+  expect((spawn.parameters as { properties?: Record<string, unknown> }).properties?.kind).toBeUndefined();
   store.start(jobId);
-  store.markYielded(jobId, { handoff: "Done." });
+  store.finishBackgroundRun(jobId, {
+    checkpoint: { transcript: [], activeToolNames: [], loadedSkillIds: [] },
+    handoff: "Done.",
+    consumedEventIds: [],
+  });
 
   await send.execute("send", { target: jobId, message: "Also run tests." });
 
-  expect(started).toEqual([jobId, jobId]);
+  const foreign = store.enqueueBackgroundAgent({
+    guildId: "g2",
+    channelId: "c2",
+    requesterId: "u2",
+    requesterUsername: "bob",
+    sourceMessageId: "m2",
+    sourceQuote: "check elsewhere",
+    taskName: "check",
+    message: "Check the other guild.",
+    handoffTarget: { kind: "channel", guildId: "g2", channelId: "c2" },
+  });
+  store.start(foreign.id);
+  store.finishBackgroundRun(foreign.id, {
+    checkpoint: { transcript: [], activeToolNames: [], loadedSkillIds: [] },
+    handoff: "Waiting.",
+    consumedEventIds: [],
+  });
+  await send.execute("send-foreign", { target: foreign.id, message: "Continue globally." });
+
+  expect(started).toEqual([jobId, jobId, foreign.id]);
   expect(store.get(jobId)).toMatchObject({ status: "queued" });
+  expect(store.get(foreign.id)).toMatchObject({ status: "queued" });
 });

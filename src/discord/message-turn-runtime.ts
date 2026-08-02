@@ -32,6 +32,9 @@ import type { createContextRuntime } from "../agent/context-runtime";
 import type { createMaintenanceRuntime } from "../agent/maintenance-runtime";
 import type { createToolRuntime } from "../agent/tool-runtime";
 import type { createTurnRuntime } from "../agent/turn-runtime";
+import type { AgentJobStore } from "../agent/job-runtime.ts";
+import { runtimePromptsForPrivateLife } from "../private-life/runtime.ts";
+import { createBackgroundHandoffRunner } from "./background-handoff-runtime.ts";
 
 /** Coordinate scheduled and autonomous attention for one process. */
 export function createScheduledAttentionGuard() {
@@ -59,6 +62,7 @@ export function createMessageTurnRuntime(input: {
     client: Client;
     log: Logger;
     requestLogStore: typeof requestLogStore;
+    agentJobs: AgentJobStore;
     getGuildConfig: (guildId: string) => GuildConfig;
     getPromptBundle: () => PromptBundle;
     buildInboundResolvers: (guild: Guild) => InboundResolvers;
@@ -84,7 +88,7 @@ export function createMessageTurnRuntime(input: {
     preparePersonaModeTurn: (guildId: string) => ReturnType<ReturnType<typeof createPersonaModeRuntime>["prepareNaturalTurn"]>;
   }
 ) {
-  const { db, client, log, requestLogStore, getGuildConfig, getPromptBundle, buildInboundResolvers, authorDisplayName, buildContext, buildAgentTools, createBotDiscordMessageSender, createHandlerDeps, createAssetAttachmentResolver, runLoggedAgentTurn, createTtsGenerator, blockToolsExcept, createPostReplyMaintenanceTools, runMemoryPostReplyExtraction, runRelationshipPostReplyExtraction, runInnerThreadPostReplyExtraction, persistIgnoredBotReply, persistPrivateThoughts, fetchAccessibleGuildChannel, getAmbientRuntime, getEventWatchRuntime, runtimeContextTemplate, preparePersonaModeTurn } = input;
+  const { db, client, log, requestLogStore, agentJobs, getGuildConfig, getPromptBundle, buildInboundResolvers, authorDisplayName, buildContext, buildAgentTools, createBotDiscordMessageSender, createHandlerDeps, createAssetAttachmentResolver, runLoggedAgentTurn, createTtsGenerator, blockToolsExcept, createPostReplyMaintenanceTools, runMemoryPostReplyExtraction, runRelationshipPostReplyExtraction, runInnerThreadPostReplyExtraction, persistIgnoredBotReply, persistPrivateThoughts, fetchAccessibleGuildChannel, getAmbientRuntime, getEventWatchRuntime, runtimeContextTemplate, preparePersonaModeTurn } = input;
 type CurrentTurnBoundary = NonNullable<Parameters<typeof buildContext>[8]>;
 
 const dispatchers = new Map<string, ChannelDispatcher>();
@@ -144,6 +148,16 @@ function enqueueChannelTask(guildId: string, channelId: string, task: () => Prom
     if (!accepted) reject(new Error("Channel dispatcher is draining."));
   });
 }
+
+const runBackgroundHandoff = createBackgroundHandoffRunner({
+  agentJobs,
+  getPromptBundle,
+  fetchAccessibleGuildChannel,
+  enqueueChannelTask,
+  createCarrier: syntheticEventProxyMessage,
+  runActorTurn: async (carrier, options) =>
+    await processTriggeredMessage(carrier, { reason: "scheduled" }, [carrier], options),
+});
 
 function messageRepliesToOwnBot(message: Message): boolean {
   if (message.guildId === null || message.reference?.messageId === undefined) return false;
@@ -335,6 +349,17 @@ async function processTriggeredMessage(
     abortSignal?: AbortSignal;
     onActionCommitted?: () => void;
     eventWatchTurn?: EventWatchTurn;
+    dashboardTrigger?: unknown;
+    initialToolNames?: readonly string[];
+    preloadedSkillIds?: readonly string[];
+    focusUserId?: string;
+    currentRequest?: {
+      requesterId: string;
+      requesterUsername: string;
+      sourceMessageId: string;
+      sourceQuote: string;
+    };
+    actorSurface?: "channel" | "private-life";
   } = {},
 ): Promise<DispatchOutcome> {
   if (message.guild === null || message.guildId === null) return { coveredMessageIds: [] };
@@ -346,7 +371,7 @@ async function processTriggeredMessage(
   const requestLog = new RequestLog(guildId, channelId, requestLogStore);
   requestLog.setAuthor(message.author.username);
   // Keep the dashboard's active row identifiable before the agent turn completes.
-  requestLog.setTrigger(triggerOverride ?? null);
+  requestLog.setTrigger(options.dashboardTrigger ?? triggerOverride ?? null);
   let requestLogEmitted = false;
   let activeTyping: ReturnType<typeof createTypingController> | null = null;
 
@@ -373,6 +398,7 @@ async function processTriggeredMessage(
       translatedContent: options.currentTurnOverride?.content ?? translatedContent,
     });
     const currentChannelObj = message.channel as SendableGuildChannel;
+    const privateActorTurn = options.actorSurface === "private-life";
     const resolveTargetChannel = createTargetChannelResolver(client, currentChannelObj);
     const typing = createTypingController({
       defaultChannel: currentChannelObj,
@@ -380,10 +406,9 @@ async function processTriggeredMessage(
     });
     activeTyping = typing;
     const typingStartDelayMs = typingSimulationDelayMs(guildConfig.typingSimulation, "input", currentTurnEventContent);
-    if (guildConfig.typingSimulation.enabled) {
-      typing.scheduleStartLoop(typingStartDelayMs);
-    } else {
-      typing.startLoop();
+    if (!privateActorTurn) {
+      if (guildConfig.typingSimulation.enabled) typing.scheduleStartLoop(typingStartDelayMs);
+      else typing.startLoop();
     }
     const baseSender = createBotDiscordMessageSender({
       defaultChannel: currentChannelObj,
@@ -492,15 +517,39 @@ async function processTriggeredMessage(
       replyFallbackDeps,
       isThread,
       currentTurnBoundary,
-      "live",
+      options.actorSurface === "private-life" ? "private-life" : "live",
       options.currentTurnOverride !== undefined ? currentTurnMessageIds : undefined,
       {
         appendLatestToHistory: options.currentTurnOverride !== undefined,
+        ...(options.focusUserId !== undefined
+          ? { additionalVisibleUserIds: [options.focusUserId], memoryFocusUserId: options.focusUserId }
+          : {}),
         ...(triggerOverride !== undefined && shouldAnnotateTriggerMessage(triggerOverride)
           ? { triggerMessageIds: currentTurnMessageIds }
           : {}),
       },
     );
+    for (const skillId of options.preloadedSkillIds ?? []) {
+      const skill = getPromptBundle().runtime.skills.byId[skillId];
+      if (skill === undefined) continue;
+      context.sections.push({
+        label: `Loaded Skill: ${skill.title}`,
+        role: "developer",
+        cached: false,
+        text: skill.content,
+      });
+    }
+    if (options.actorSurface === "private-life") {
+      const privateLifeInstruction = getPromptBundle().runtime.privateLife?.trim() ?? "";
+      if (privateLifeInstruction !== "") {
+        context.sections.push({
+          label: "Private-Life Instruction",
+          role: "developer",
+          cached: false,
+          text: privateLifeInstruction,
+        });
+      }
+    }
     if (options.eventWatchTurn !== undefined) {
       const watchLines = options.eventWatchTurn.watches.flatMap((watch) => [
         `Watch ${watch.id}: ${watch.instruction}`,
@@ -594,7 +643,7 @@ async function processTriggeredMessage(
       },
     });
     const generatedImages = createGeneratedImageRuntime();
-    const toolRequest = options.eventWatchTurn === undefined
+    const toolRequest = options.currentRequest ?? (options.eventWatchTurn === undefined
       ? {
           requesterId: message.author.id,
           requesterUsername: message.author.username,
@@ -606,7 +655,7 @@ async function processTriggeredMessage(
           requesterUsername: client.user?.username ?? "persona",
           sourceMessageId: options.currentTurnOverride?.messageId ?? message.id,
           sourceQuote: shortQuote(options.currentTurnOverride?.content ?? translatedContent),
-        };
+        });
     const agentTools = buildAgentTools(
       guildId,
       channelId,
@@ -728,10 +777,25 @@ async function processTriggeredMessage(
       resolveAssetAttachments: createAssetAttachmentResolver(guildId, guildConfig,
         log.child({ component: "stored-asset-attachments", guildId, channelId, requestId: requestLog.requestId })),
       overrides: {
+        initialToolNames: options.initialToolNames,
+        loadedSkillIds: options.preloadedSkillIds,
+        ...(options.actorSurface === "private-life"
+          ? {
+              runtimePrompts: runtimePromptsForPrivateLife(getPromptBundle()),
+              externalResponseSink: {
+                startModelTurn: () => {},
+                push: () => Promise.resolve(false),
+                finish: (text: string) => Promise.resolve({ visible: false, memoryText: text, malformed: false }),
+                abort: () => {},
+              },
+            }
+          : {}),
         onTriggered: () => {
-          if (!guildConfig.typingSimulation.enabled) typing.startLoop();
+          if (!privateActorTurn && !guildConfig.typingSimulation.enabled) typing.startLoop();
         },
-        onStillWorking: (destinationChannelId) => { typing.startLoop(destinationChannelId); },
+        ...(privateActorTurn
+          ? {}
+          : { onStillWorking: (destinationChannelId: string | undefined) => { typing.startLoop(destinationChannelId); } }),
         getTypingStartedAt: typing.getTypingStartedAt,
         onVisibleOutput: typing.stopLoop,
         hasExternalVisibleOutput: () => externalVisibleOutputSent,
@@ -768,6 +832,7 @@ async function processTriggeredMessage(
           });
         },
         afterReply: async (memoryRequest) => {
+          if (options.actorSurface === "private-life") return;
           if (options.currentTurnOverride !== undefined && options.eventWatchTurn !== undefined) return;
           await runMemoryPostReplyExtraction({
             guildConfig,
@@ -806,6 +871,7 @@ async function processTriggeredMessage(
         deps,
         requestLog,
         logger: log,
+        dashboardTrigger: options.dashboardTrigger,
         afterSuccess: (result) => {
           persistPrivateThoughts({
             guildId,
@@ -881,5 +947,5 @@ async function processTriggeredMessage(
 }
 
 
-  return { dispatchers, getOrCreateDispatcher, enqueueChannelTask, evaluateMessageTrigger, normalizedWatchMessage, processEventWatchTurn, processSettledWatchedMessage, processTriggeredMessage };
+  return { dispatchers, getOrCreateDispatcher, enqueueChannelTask, runBackgroundHandoff, evaluateMessageTrigger, normalizedWatchMessage, processEventWatchTurn, processSettledWatchedMessage, processTriggeredMessage };
 }

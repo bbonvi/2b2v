@@ -306,8 +306,13 @@ export const DEFAULT_TYPING_SIMULATION: TypingSimulationConfig = {
 export const DEFAULT_AGENT_JOBS: AgentJobsConfig = {
   imageTimeoutMs: 300_000,
   imageCancelGraceMs: 60_000,
-  terminalVisibleMs: 600_000,
+  terminalVisibleMs: 900_000,
+  yieldedAutoDismissMs: 3_600_000,
   maxImageReplacements: 2,
+  agentTimeoutMs: 1_800_000,
+  agentMaxToolCalls: null,
+  agentCompactionReserveTokens: 16_384,
+  agentCompactionKeepRecentTokens: 20_000,
 };
 
 export const DEFAULT_SCHEDULE_PRESSURE: SchedulePressureConfig = {

@@ -1,1 +1,1 @@
-Image creation is asynchronous. A ready job creates a separate action turn with a staged result. Use `read_agent_job` when exact inputs, references, results, or replacement lineage matter. Do not duplicate a matching active job.
+Image creation is asynchronous. A ready job returns its staged result to its owning agent; an unowned job creates a separate action turn. Use `read_agent_job` when exact inputs, references, results, owner, or replacement lineage matter. Do not duplicate a matching active job.

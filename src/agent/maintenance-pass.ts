@@ -120,9 +120,15 @@ function memoryPassControlMessage(input: SilentMemoryAgentInput): string {
   ].filter((part) => part !== "").join("\n\n");
 }
 
-/** Run a hidden post-reply maintenance loop with private tools and no Discord output hooks. */
-export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promise<{ text: string; transcript: OpenRouterMessage[] }> {
-  if (input.tools.length === 0) return { text: "", transcript: [...(input.transcript ?? [])] };
+/** Run a private tool loop with no implicit Discord output. */
+export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promise<{
+  text: string;
+  transcript: OpenRouterMessage[];
+  activeToolNames: string[];
+}> {
+  if (input.tools.length === 0) {
+    return { text: "", transcript: [...(input.transcript ?? [])], activeToolNames: [] };
+  }
 
   const wallController = new AbortController();
   const parent = input.signal;
@@ -134,9 +140,10 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
     onParentAbort = () => wallController.abort(parent.reason);
     parent.addEventListener("abort", onParentAbort, { once: true });
   }
+  const wallClockTimeoutMs = input.wallClockTimeoutMs ?? input.guildConfig.replyLoop.wallClockTimeoutMs;
   const wallTimeout = setTimeout(() => {
-    wallController.abort(new AgentTimeBudgetExceededError(input.guildConfig.replyLoop.wallClockTimeoutMs));
-  }, input.guildConfig.replyLoop.wallClockTimeoutMs);
+    wallController.abort(new AgentTimeBudgetExceededError(wallClockTimeoutMs));
+  }, wallClockTimeoutMs);
 
   const complete = input.completeChat ?? completeLlmChat;
   const inheritedPrompt = input.promptContext;
@@ -228,59 +235,64 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
       ? initialMaintenanceToolNames(timedTools)
       : new Set(timedTools.map((tool) => tool.name));
   const maintenanceInitialToolNames = canContinueActorToolSurface
-    ? new Set([...inheritedActiveToolNames, ...maintenanceToolNames])
-    : fallbackMaintenanceInitialToolNames;
+      ? new Set([...inheritedActiveToolNames, ...maintenanceToolNames])
+      : fallbackMaintenanceInitialToolNames;
   const newlyActiveMaintenanceTools = maintenanceToolNames
     .filter((name) => !inheritedActiveToolNames.includes(name));
   if (canContinueActorToolSurface) {
     appendDeferredMaintenanceTools(messages, newlyActiveMaintenanceTools);
   }
-  messages.push({ role: "user", content: input.controlMessage });
+  if (input.controlMessage !== "") messages.push({ role: "user", content: input.controlMessage });
 
-  const maxToolCalls = Math.max(1, input.maxToolCalls ?? input.tools.length);
+  const maxToolCalls = input.maxToolCalls === null
+    ? undefined
+    : Math.max(1, input.maxToolCalls ?? input.tools.length);
+  let activeToolNames = [...maintenanceInitialToolNames];
   timingState.resetAgentLoopStart();
   try {
+    const requestBase = {
+      provider,
+      apiKey: streamOptions.apiKey,
+      model: model.id,
+      systemPrompt: provider === "openai-codex" ? codexSystemPromptForStableSections(stableSections, transport) : "",
+      providerParams,
+      sessionId,
+      promptCacheKey,
+      onPayload: (payload: unknown) => {
+        if (provider === "openrouter") {
+          prependStableSectionsToPayload(
+            payload,
+            stableSections,
+            promptCaching,
+            model.id,
+          );
+        } else if (transport.mode === "split-input") {
+          prependStableSectionsToCodexPayload(payload, stableSections, initialRoles, {
+            enabled: promptCaching.enabled,
+            promptCacheKey,
+          });
+        }
+        input.requestLog?.recordLLMRequest(payload);
+        input.log?.debug("memory_llm_request_payload", { payload });
+      },
+    };
     const result = await runNativeToolLoop({
       complete,
-      requestBase: {
-        provider,
-        apiKey: streamOptions.apiKey,
-        model: model.id,
-        systemPrompt: provider === "openai-codex" ? codexSystemPromptForStableSections(stableSections, transport) : "",
-        providerParams,
-        sessionId,
-        promptCacheKey,
-        onPayload: (payload: unknown) => {
-          if (provider === "openrouter") {
-            prependStableSectionsToPayload(
-              payload,
-              stableSections,
-              promptCaching,
-              model.id,
-            );
-          } else if (transport.mode === "split-input") {
-            prependStableSectionsToCodexPayload(payload, stableSections, initialRoles, {
-              enabled: promptCaching.enabled,
-              promptCacheKey,
-            });
-          }
-          input.requestLog?.recordLLMRequest(payload);
-          input.log?.debug("memory_llm_request_payload", { payload });
-        },
-      },
+      requestBase,
       messages,
       tools: timedTools,
       initialToolNames: maintenanceInitialToolNames,
       maxToolCalls,
-      maxToolRounds: input.maxToolCalls !== undefined
-        ? maxToolCalls
+      maxToolRounds: input.maxToolCalls === null
+        ? undefined
+        : input.maxToolCalls !== undefined
+          ? maxToolCalls
         : Math.min(input.guildConfig.replyLoop.maxToolCalls, 3),
-      agentTimeBudgetMs: input.guildConfig.replyLoop.wallClockTimeoutMs,
+      agentTimeBudgetMs: wallClockTimeoutMs,
       llmOutputTimeoutMs: input.guildConfig.replyLoop.llmOutputTimeoutMs,
       requestLog: input.requestLog,
       imageInputSupported: false,
-      consumeGeneratedAttachments: input.consumeGeneratedAttachments,
-      pendingAttachments: input.pendingAttachments ?? [],
+      pendingAttachments: [],
       toolTiming: timingState,
       runtimePrompts: input.runtimePrompts,
       log: input.log,
@@ -290,13 +302,15 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
       terminateAfterSuccessfulToolRoundNames: input.terminateAfterSuccessfulToolRoundNames,
       onActiveToolsChanged: canContinueActorToolSurface
         ? (activeTools) => {
+            activeToolNames = activeTools.map((tool) => tool.name);
             inheritedPrompt.activeToolNames = activeTools.map((tool) => tool.name);
             inheritedPrompt.toolContractSignature = toolContractSignature(activeTools);
           }
-        : undefined,
-      takePendingMessages: input.takePendingMessages,
+        : (activeTools) => {
+            activeToolNames = activeTools.map((tool) => tool.name);
+          },
     });
-    return { text: result.text, transcript: messages };
+    return { text: result.text, transcript: messages, activeToolNames };
   } finally {
     clearTimeout(wallTimeout);
     if (parent !== undefined && onParentAbort !== undefined) {

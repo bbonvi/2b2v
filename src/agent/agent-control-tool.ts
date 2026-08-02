@@ -1,11 +1,13 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { AgentJobStore } from "./job-runtime.ts";
+import type { AgentJobStore, BackgroundHandoffTarget } from "./job-runtime.ts";
 
 const SpawnAgentParams = Type.Object({
   task_name: Type.String({ minLength: 1, maxLength: 80 }),
-  message: Type.String({ minLength: 1 }),
-  kind: Type.Optional(Type.Union([Type.Literal("workspace"), Type.Literal("persona")])),
+  message: Type.String({
+    minLength: 1,
+    description: "Self-contained assignment: objective, purpose, relevant facts and identifiers, constraints, completion criteria, and whether visible Discord action is allowed.",
+  }),
   model_profile: Type.Optional(Type.String({ minLength: 1 })),
 });
 const SendAgentMessageParams = Type.Object({
@@ -21,23 +23,23 @@ export function createAgentControlTools(input: {
   requesterUsername: string;
   sourceMessageId: string;
   sourceQuote: string;
+  handoffTarget: BackgroundHandoffTarget;
+  parentJobId?: string;
   runAgentJob: (jobId: string) => Promise<void>;
   trackAgentJob: (task: Promise<void>) => void;
 }): AgentTool[] {
   const spawn: AgentTool = {
     name: "spawn_agent",
     label: "spawn_agent",
-    description: "Start a durable asynchronous workspace or in-persona agent task.",
+    description: "Start a durable asynchronous copy of 2B for one explicit, self-contained task.",
     parameters: SpawnAgentParams,
     execute: (_toolCallId, params): Promise<AgentToolResult<unknown>> => {
       const request = params as {
         task_name: string;
         message: string;
-        kind?: "workspace" | "persona";
         model_profile?: string;
       };
-      const job = input.store.enqueueAgentTask({
-        kind: request.kind === "persona" ? "persona_task" : "workspace_agent",
+      const job = input.store.enqueueBackgroundAgent({
         guildId: input.guildId,
         channelId: input.channelId,
         requesterId: input.requesterId,
@@ -46,6 +48,8 @@ export function createAgentControlTools(input: {
         sourceQuote: input.sourceQuote,
         taskName: request.task_name,
         message: request.message,
+        handoffTarget: input.handoffTarget,
+        ...(input.parentJobId !== undefined ? { parentJobId: input.parentJobId } : {}),
         ...(request.model_profile !== undefined ? { modelProfile: request.model_profile } : {}),
       });
       input.trackAgentJob(input.runAgentJob(job.id));
@@ -59,12 +63,12 @@ export function createAgentControlTools(input: {
   const send: AgentTool = {
     name: "send_agent_message",
     label: "send_agent_message",
-    description: "Send a follow-up to a running or yielded agent. A yielded agent resumes asynchronously.",
+    description: "Send a follow-up to a running, waiting, or yielded agent. A waiting or yielded agent resumes asynchronously.",
     parameters: SendAgentMessageParams,
     execute: (_toolCallId, params): Promise<AgentToolResult<unknown>> => {
       const request = params as { target: string; message: string };
-      const visible = input.store.getVisible(request.target, input.guildId, input.channelId);
-      if (visible === undefined) throw new Error(`Agent ${request.target} was not found or is not visible in this channel.`);
+      const visible = input.store.get(request.target);
+      if (visible === undefined) throw new Error(`Agent ${request.target} was not found.`);
       const result = input.store.sendAgentMessage(request.target, request.message);
       if (result.shouldRun) input.trackAgentJob(input.runAgentJob(request.target));
       return Promise.resolve({

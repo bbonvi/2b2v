@@ -230,28 +230,21 @@ export function resolveTypingSimulationConfig(
   };
 }
 
-export function resolveGlobalAgentJobs(
+export function resolveAgentJobs(
   partial: MainConfigYaml["agentJobs"] | undefined,
 ): AgentJobsConfig {
   const resolved = {
     imageTimeoutMs: partial?.imageTimeoutMs ?? DEFAULT_AGENT_JOBS.imageTimeoutMs,
     imageCancelGraceMs: partial?.imageCancelGraceMs ?? DEFAULT_AGENT_JOBS.imageCancelGraceMs,
     terminalVisibleMs: partial?.terminalVisibleMs ?? DEFAULT_AGENT_JOBS.terminalVisibleMs,
+    yieldedAutoDismissMs: partial?.yieldedAutoDismissMs ?? DEFAULT_AGENT_JOBS.yieldedAutoDismissMs,
     maxImageReplacements: partial?.maxImageReplacements ?? DEFAULT_AGENT_JOBS.maxImageReplacements,
-  };
-  validateAgentJobsConfig(resolved, "agentJobs");
-  return resolved;
-}
-
-export function resolveGuildAgentJobs(
-  global: AgentJobsConfig,
-  partial: GuildConfigYaml["agentJobs"] | undefined,
-): AgentJobsConfig {
-  const resolved = {
-    imageTimeoutMs: partial?.imageTimeoutMs ?? global.imageTimeoutMs,
-    imageCancelGraceMs: partial?.imageCancelGraceMs ?? global.imageCancelGraceMs,
-    terminalVisibleMs: partial?.terminalVisibleMs ?? global.terminalVisibleMs,
-    maxImageReplacements: partial?.maxImageReplacements ?? global.maxImageReplacements,
+    agentTimeoutMs: partial?.agentTimeoutMs ?? DEFAULT_AGENT_JOBS.agentTimeoutMs,
+    agentMaxToolCalls: partial?.agentMaxToolCalls !== undefined
+      ? partial.agentMaxToolCalls
+      : DEFAULT_AGENT_JOBS.agentMaxToolCalls,
+    agentCompactionReserveTokens: partial?.agentCompactionReserveTokens ?? DEFAULT_AGENT_JOBS.agentCompactionReserveTokens,
+    agentCompactionKeepRecentTokens: partial?.agentCompactionKeepRecentTokens ?? DEFAULT_AGENT_JOBS.agentCompactionKeepRecentTokens,
   };
   validateAgentJobsConfig(resolved, "agentJobs");
   return resolved;
@@ -267,8 +260,23 @@ function validateAgentJobsConfig(config: AgentJobsConfig, keyPrefix: string): vo
   if (!Number.isFinite(config.terminalVisibleMs) || config.terminalVisibleMs < 0) {
     throw new Error(`${keyPrefix}.terminalVisibleMs must be >= 0`);
   }
+  if (!Number.isFinite(config.yieldedAutoDismissMs) || config.yieldedAutoDismissMs < 0) {
+    throw new Error(`${keyPrefix}.yieldedAutoDismissMs must be >= 0`);
+  }
   if (!Number.isInteger(config.maxImageReplacements) || config.maxImageReplacements < 0) {
     throw new Error(`${keyPrefix}.maxImageReplacements must be >= 0`);
+  }
+  if (!Number.isFinite(config.agentTimeoutMs) || config.agentTimeoutMs < 10_000) {
+    throw new Error(`${keyPrefix}.agentTimeoutMs must be >= 10000`);
+  }
+  if (config.agentMaxToolCalls !== null && (!Number.isInteger(config.agentMaxToolCalls) || config.agentMaxToolCalls < 1)) {
+    throw new Error(`${keyPrefix}.agentMaxToolCalls must be null or >= 1`);
+  }
+  if (!Number.isInteger(config.agentCompactionReserveTokens) || config.agentCompactionReserveTokens < 1) {
+    throw new Error(`${keyPrefix}.agentCompactionReserveTokens must be >= 1`);
+  }
+  if (!Number.isInteger(config.agentCompactionKeepRecentTokens) || config.agentCompactionKeepRecentTokens < 1) {
+    throw new Error(`${keyPrefix}.agentCompactionKeepRecentTokens must be >= 1`);
   }
 }
 

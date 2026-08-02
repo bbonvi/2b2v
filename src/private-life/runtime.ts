@@ -279,7 +279,7 @@ function localTimeText(now: number, timezone: string, phase: PrivateLifeDayPhase
   ].join("\n");
 }
 
-function runtimePromptsForPrivateLife(bundle: PromptBundle): RuntimePromptBundle {
+export function runtimePromptsForPrivateLife(bundle: PromptBundle): RuntimePromptBundle {
   const actorTurn = bundle.runtime.contextTemplates["private-life-actor-turn"]?.trim()
     ?? "## Private-Life Actor Turn\nThis is a private opportunity, not a Discord reply. Visible output is optional; semantic maintenance runs afterward.";
   const actionBoundary = bundle.runtime.contextTemplates["private-life-action-boundary"]?.trim()
@@ -716,8 +716,21 @@ export function createPrivateLifeRuntime(deps: PrivateLifeRuntimeDeps): PrivateL
         location.guild,
         context.contextMessageIds ?? [],
         generatedImages.onGeneratedImage,
-        undefined,
-        { visibleUserIds: context.visibleUserIds ?? [] },
+        {
+          requesterId: botUserId,
+          requesterUsername: botUsername,
+          sourceMessageId: episodeId,
+          sourceQuote: text.slice(0, 240),
+        },
+        {
+          visibleUserIds: context.visibleUserIds ?? [],
+          handoffTarget: {
+            kind: "private_life",
+            guildId: location.guild.id,
+            channelId: location.channel.id,
+            episodeId,
+          },
+        },
       );
       const timeSafeTools = baseTools.map((tool) => {
         const timeBlockReason = privateLifeToolBlockReason(tool, phase, true);

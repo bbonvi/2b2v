@@ -62,16 +62,26 @@ export interface TypingSimulationConfig {
   outputMaxHoldMs: number;
 }
 
-/** Async agent job configuration. Currently only image generation uses it. */
+/** Async image and delegated-agent job configuration. */
 export interface AgentJobsConfig {
   /** Maximum runtime for one async image generation job. Default 300000. */
   imageTimeoutMs: number;
   /** Window where active image jobs can be cancelled/replaced for corrections. Default 60000. */
   imageCancelGraceMs: number;
-  /** How long terminal jobs stay visible in prompt context. Default 600000. */
+  /** How long terminal jobs stay visible in prompt context. Default 900000. */
   terminalVisibleMs: number;
+  /** How long a notified yielded agent can remain paused before automatic dismissal. Default 3600000. */
+  yieldedAutoDismissMs: number;
   /** Maximum replacement cancellations per original image request. Default 2. */
   maxImageReplacements: number;
+  /** Maximum runtime for one background agent pass. Default 1800000. */
+  agentTimeoutMs: number;
+  /** Optional background-agent tool-call cap. Null means unlimited. Default null. */
+  agentMaxToolCalls: number | null;
+  /** Tokens reserved before background transcript compaction. Default 16384. */
+  agentCompactionReserveTokens: number;
+  /** Approximate recent transcript tokens retained after compaction. Default 20000. */
+  agentCompactionKeepRecentTokens: number;
 }
 
 /** Hard caps for non-admin recurring scheduled-task pressure. */
@@ -549,8 +559,6 @@ export interface GuildConfig {
   dispatcher: DispatcherConfig;
   /** Human-paced typing indicator delays. */
   typingSimulation: TypingSimulationConfig;
-  /** Async agent job configuration. */
-  agentJobs: AgentJobsConfig;
   /** Non-admin recurring scheduled-task pressure caps. */
   schedulePressure: SchedulePressureConfig;
   /** Provider role/target placement for logical prompt sections. */
@@ -614,8 +622,8 @@ export interface GlobalConfig {
   defaultDispatcher: DispatcherConfig;
   /** Default human-paced typing indicator delays. */
   defaultTypingSimulation: TypingSimulationConfig;
-  /** Default async agent job configuration. */
-  defaultAgentJobs: AgentJobsConfig;
+  /** Profile-wide async agent job configuration. */
+  agentJobs: AgentJobsConfig;
   /** Default non-admin recurring scheduled-task pressure caps. */
   defaultSchedulePressure: SchedulePressureConfig;
   /** Default provider role/target placement for logical prompt sections. */
@@ -691,12 +699,6 @@ export interface GuildConfigYaml {
     defaultDebounceMs?: number;
   };
   typingSimulation?: Partial<TypingSimulationConfig>;
-  agentJobs?: {
-    imageTimeoutMs?: number;
-    imageCancelGraceMs?: number;
-    terminalVisibleMs?: number;
-    maxImageReplacements?: number;
-  };
   schedulePressure?: SchedulePressureConfigYaml;
   promptTransport?: PromptTransportConfigYaml;
   ambientAttention?: AmbientAttentionConfigYaml;
@@ -775,7 +777,12 @@ export interface MainConfigYaml {
     imageTimeoutMs?: number;
     imageCancelGraceMs?: number;
     terminalVisibleMs?: number;
+    yieldedAutoDismissMs?: number;
     maxImageReplacements?: number;
+    agentTimeoutMs?: number;
+    agentMaxToolCalls?: number | null;
+    agentCompactionReserveTokens?: number;
+    agentCompactionKeepRecentTokens?: number;
   };
   schedulePressure?: SchedulePressureConfigYaml;
   promptTransport?: PromptTransportConfigYaml;
