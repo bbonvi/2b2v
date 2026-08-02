@@ -47,10 +47,9 @@ import {
   resolveVoiceConfig,
 } from "./voice-config.ts";
 import {
-  resolveGlobalAgentJobs,
+  resolveAgentJobs,
   resolveGlobalMemoryExtraction,
   resolveGlobalReplyLoop,
-  resolveGuildAgentJobs,
   resolveGuildMemoryExtraction,
   resolveGuildReplyLoop,
   resolveInnerThreadsConfig,
@@ -244,7 +243,7 @@ export function loadGlobalConfig(
       defaultDebounceMs: yaml.dispatcher?.defaultDebounceMs ?? DEFAULT_DISPATCHER.defaultDebounceMs,
     },
     defaultTypingSimulation: resolveTypingSimulationConfig(DEFAULT_TYPING_SIMULATION, yaml.typingSimulation),
-    defaultAgentJobs: resolveGlobalAgentJobs(yaml.agentJobs),
+    agentJobs: resolveAgentJobs(yaml.agentJobs),
     defaultSchedulePressure: resolveSchedulePressure(DEFAULT_SCHEDULE_PRESSURE, yaml.schedulePressure, "schedulePressure"),
     defaultPromptTransport: resolveGlobalPromptTransport(yaml.promptTransport),
     defaultAmbientAttention,
@@ -340,7 +339,6 @@ export function resolveGuildConfig(
       defaultDebounceMs: partial.dispatcher?.defaultDebounceMs ?? global.defaultDispatcher.defaultDebounceMs,
     },
     typingSimulation: resolveTypingSimulationConfig(global.defaultTypingSimulation, partial.typingSimulation),
-    agentJobs: resolveGuildAgentJobs(global.defaultAgentJobs, partial.agentJobs),
     schedulePressure: resolveSchedulePressure(global.defaultSchedulePressure, partial.schedulePressure, "schedulePressure"),
     promptTransport: resolveGuildPromptTransport(global.defaultPromptTransport, partial.promptTransport),
     ambientAttention: resolveAmbientAttentionConfig(global.defaultAmbientAttention, partial.ambientAttention),

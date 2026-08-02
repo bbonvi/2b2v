@@ -1,1 +1,1 @@
-Started async image creation job {{jobId}}. A separate action turn will receive the staged result. Do not wait here or duplicate the request.
+Started async image creation job {{jobId}}. Its owning agent will receive the staged result. Continue other useful work or stop output to wait; do not duplicate the request.

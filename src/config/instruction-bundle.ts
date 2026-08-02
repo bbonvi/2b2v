@@ -86,6 +86,8 @@ export interface PromptSkillBundle {
 export interface RuntimePromptBundle {
   /** Normal visible reply loop runtime instructions. */
   reply: string;
+  /** Execution boundary for a long-running background persona agent. */
+  backgroundAgent: string;
   /** Final per-turn instruction placed after the current Discord event. */
   finalActionInstruction: string;
   /** Tool descriptions keyed by AgentTool.name. */
@@ -512,6 +514,13 @@ export function loadInstructionBundle(profilesDir: string, profile: string, log:
       log,
       "surface.text.final-action",
     ),
+    "surface.background-agent.runtime": loadRequiredDocumentGroup(
+      instructionRoots,
+      join("surfaces", "background-agent", "runtime.md"),
+      log,
+      "surface.background-agent.runtime",
+      false,
+    ),
     "surface.scheduled-task.execution-mode": loadRequiredDocumentGroup(
       instructionRoots,
       join("surfaces", "scheduled-task", "execution-mode.md"),
@@ -736,6 +745,7 @@ export function loadInstructionBundle(profilesDir: string, profile: string, log:
     corePrompt: [personaGroup.text, styleGroup.text].filter((text) => text !== "").join("\n\n"),
     runtime: {
       reply: runtimeGroup.text,
+      backgroundAgent: groups["surface.background-agent.runtime"]?.text ?? "",
       finalActionInstruction: finalActionGroup.text,
       toolDescriptions: textValues(toolDescriptions),
       toolParameterDescriptions: textValues(toolParameterDescriptions),

@@ -438,6 +438,10 @@ function requestLogGroupKey(
   sourceMessageId?: string;
 } {
   const trigger = isRecord(entry.trigger) ? entry.trigger : undefined;
+  if (typeof trigger?.jobId === "string" && trigger.jobId !== "") {
+    const jobId = trigger.jobId;
+    return { groupId: `job:${jobId}`, scope: "trigger" };
+  }
   const sourceRequestId = typeof trigger?.sourceRequestId === "string" ? trigger.sourceRequestId : undefined;
   if (sourceRequestId !== undefined && !visitedRequestIds.has(sourceRequestId)) {
     const sourceEntry = entriesByRequestId.get(sourceRequestId);

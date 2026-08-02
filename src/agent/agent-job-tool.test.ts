@@ -7,6 +7,7 @@ const config = {
   imageTimeoutMs: 300_000,
   imageCancelGraceMs: 60_000,
   terminalVisibleMs: 600_000,
+  yieldedAutoDismissMs: 3_600_000,
   maxImageReplacements: 2,
 };
 
@@ -38,7 +39,7 @@ function enqueue() {
 describe("agent job inspection tools", () => {
   test("lists compact prompt previews and reads exact effective input", async () => {
     const job = enqueue();
-    const [listTool, readTool] = createAgentJobInspectionTools({ store, guildId: "g1", channelId: "c1" });
+    const [listTool, readTool] = createAgentJobInspectionTools({ store });
     if (listTool === undefined || readTool === undefined) throw new Error("expected job tools");
 
     const listed = await listTool.execute("list", { state: "active" });
@@ -60,7 +61,7 @@ describe("agent job inspection tools", () => {
       contentType: "image/png",
       byteSize: 1_600_631,
     }, 2_000);
-    const [, readTool] = createAgentJobInspectionTools({ store, guildId: "g1", channelId: "c1" });
+    const [, readTool] = createAgentJobInspectionTools({ store });
     if (readTool === undefined) throw new Error("expected read tool");
 
     const read = await readTool.execute("read", { job_id: job.id });
@@ -70,15 +71,41 @@ describe("agent job inspection tools", () => {
     expect(text).toContain('"byteSize":1600631');
   });
 
-  test("keeps older terminal jobs readable but rejects another channel", async () => {
+  test("keeps older terminal jobs globally readable", async () => {
     const job = enqueue();
     store.markFailed(job.id, "blocked", 2_000);
-    const [, readHere] = createAgentJobInspectionTools({ store, guildId: "g1", channelId: "c1" });
-    const [, readElsewhere] = createAgentJobInspectionTools({ store, guildId: "g1", channelId: "c2" });
-    if (readHere === undefined || readElsewhere === undefined) throw new Error("expected read tools");
+    const [, readTool] = createAgentJobInspectionTools({ store });
+    if (readTool === undefined) throw new Error("expected read tool");
 
-    const read = await readHere.execute("read", { job_id: job.id });
+    const read = await readTool.execute("read", { job_id: job.id });
     expect(read.content[0]?.type === "text" && read.content[0].text).toContain("Error: blocked");
-    expect(() => readElsewhere.execute("read", { job_id: job.id })).toThrow("not found or is not visible");
+  });
+
+  test("globally dismisses a yielded agent", async () => {
+    const job = store.enqueueBackgroundAgent({
+      guildId: "other-guild",
+      channelId: "other-channel",
+      requesterId: "u2",
+      requesterUsername: "bob",
+      sourceMessageId: "m2",
+      sourceQuote: "look elsewhere",
+      taskName: "check",
+      message: "Check the other guild.",
+      handoffTarget: { kind: "channel", guildId: "other-guild", channelId: "other-channel" },
+    });
+    store.start(job.id);
+    store.finishBackgroundRun(job.id, {
+      checkpoint: { transcript: [], activeToolNames: [], loadedSkillIds: [] },
+      handoff: "Done.",
+      consumedEventIds: [],
+    });
+    const [listTool, , dismissTool] = createAgentJobInspectionTools({ store });
+    if (listTool === undefined || dismissTool === undefined) throw new Error("expected job tools");
+
+    const listed = await listTool.execute("list", { state: "active" });
+    expect(listed.content[0]?.type === "text" && listed.content[0].text).toContain("origin guild other-guild channel other-channel");
+    await dismissTool.execute("dismiss", { job_id: job.id, reason: "No follow-up remains." });
+
+    expect(store.get(job.id)).toMatchObject({ status: "dismissed", cancelReason: "No follow-up remains." });
   });
 });

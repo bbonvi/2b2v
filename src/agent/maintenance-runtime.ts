@@ -747,7 +747,13 @@ function createPrivateLifeMaintenanceTools(input: {
 }
 
 function startCleanup(): () => void {
-  const timer = setInterval(() => {
+  const dismissStaleAgents = (): void => {
+    const dismissed = agentJobs.dismissStaleYielded();
+    if (dismissed > 0) log.info("stale yielded agents dismissed", { dismissed });
+  };
+  dismissStaleAgents();
+  const staleAgentTimer = setInterval(dismissStaleAgents, 60 * 1000);
+  const cleanupTimer = setInterval(() => {
     const deleted = deleteExpiredMemories(db);
     if (deleted > 0) log.info("expired memories cleaned", { deleted });
     const thoughtRetentionDays = getGlobalConfig().privateLife?.thoughtRetentionDays ?? 0;
@@ -759,7 +765,10 @@ function startCleanup(): () => void {
     const deletedAgentJobs = agentJobs.cleanup();
     if (deletedAgentJobs > 0) log.info("expired unlinked agent jobs cleaned", { deleted: deletedAgentJobs });
   }, 60 * 60 * 1000);
-  return () => { clearInterval(timer); };
+  return () => {
+    clearInterval(staleAgentTimer);
+    clearInterval(cleanupTimer);
+  };
 }
 
 async function cleanStagedAssets(): Promise<void> {

@@ -99,7 +99,7 @@ const TOOL_METADATA: Readonly<Record<string, Omit<ToolCatalogEntry, "tool">>> = 
   },
   dismiss_agent_job: {
     group: "jobs",
-    summary: "Discard a ready asynchronous job result instead of delivering it.",
+    summary: "Close a ready or yielded asynchronous job that no longer needs action.",
     aliases: ["discard job result", "abandon agent handoff", "discard image result"],
   },
   edit_own_message: {
@@ -134,7 +134,7 @@ const TOOL_METADATA: Readonly<Record<string, Omit<ToolCatalogEntry, "tool">>> = 
   },
   list_agent_jobs: {
     group: "jobs",
-    summary: "List active or recent asynchronous jobs in the current channel.",
+    summary: "List active or recent asynchronous jobs across all guilds.",
     aliases: ["agent status", "active jobs", "recent jobs", "image job status"],
   },
   list_channel_messages: {
@@ -446,7 +446,7 @@ export function initialActorToolNames(
 export function initialMaintenanceToolNames(tools: readonly AgentTool[]): Set<string> {
   return new Set(tools
     .map((tool) => tool.name)
-    .filter((name) => name === "load_skill" || name === "search_tools" || name === "send_discord_message" || name.startsWith("record_")));
+    .filter((name) => name === "load_skill" || name === "search_tools" || name.startsWith("record_")));
 }
 
 /** Create the actor's compact capability discovery tool. */

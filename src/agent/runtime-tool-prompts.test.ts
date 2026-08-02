@@ -7,6 +7,7 @@ import type { RuntimePromptBundle } from "../config/instruction-bundle.ts";
 function runtimePrompts(): RuntimePromptBundle {
   return {
     reply: "",
+    backgroundAgent: "",
     finalActionInstruction: "",
     toolDescriptions: {
       demo_tool: "External description for {{name}}.",

@@ -9,6 +9,9 @@ describe("assertSafeDiscordText", () => {
       "<root>text</root>",
       "before </private>",
       '<internal value="secret">text',
+      "<tool_call?",
+      "<tool_call!",
+      "<tool_call=",
     ]) {
       expect(() => assertSafeDiscordText(text)).toThrow(OutboundXmlTagError);
     }

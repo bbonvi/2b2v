@@ -3,6 +3,7 @@ import { isActiveJobStatus, type AgentJob, type ImageGenerationJobInput, type Im
 import type { GeneratedImageAttachment } from "./codex-image-tool";
 import type { OutboundAttachment } from "./turn-types";
 import { formatFileSize } from "./format-file-size.ts";
+import { formatRelativeAgo } from "./history-dates.ts";
 
 export const DEFAULT_CODEX_IMAGE_ROUTER_MODEL = "gpt-5.2";
 
@@ -124,39 +125,61 @@ function formatJobErrorForContext(error: string): string {
   return ` error: ${shortQuote(error, 200)}`;
 }
 
-function formatJobAge(job: AgentJob, now: number): string {
-  const started = job.startedAt ?? job.createdAt;
-  const seconds = Math.max(0, Math.round((now - started) / 1000));
-  return `${seconds}s ago`;
+function contextJobStatus(job: AgentJob): string {
+  if (job.status === "yielded") return "yielded (paused)";
+  if (job.status === "waiting_on_jobs") return "waiting on child jobs";
+  if (job.status === "dismissed") return "dismissed (stopped)";
+  return job.status;
+}
+
+function jobTime(label: string, timestamp: number | undefined, now: number): string {
+  return timestamp === undefined
+    ? ""
+    : `; ${label} ${new Date(timestamp).toISOString()} (${formatRelativeAgo(timestamp, now)})`;
 }
 
 export function renderAgentJobsContext(
   jobs: AgentJob[],
-  template: string,
+  currentGuildId: string,
+  currentChannelId: string,
   now = Date.now(),
   assetsForJob: (jobId: string) => readonly { assetId: number }[] = () => [],
 ): string {
-  const imageJobs = jobs.filter((job) => job.kind === "image_generation");
-  if (imageJobs.length === 0) return "";
-  const lines = [
-    "## Image Jobs",
-    template,
-  ];
-  for (const job of imageJobs) {
-    const state = isActiveJobStatus(job.status) ? "active" : "recent terminal";
+  if (jobs.length === 0) return "";
+  const lines = ["## Agent Jobs"];
+  for (const job of jobs) {
+    const state = job.status === "yielded"
+      ? "resumable"
+      : isActiveJobStatus(job.status) ? "active" : "recent terminal";
+    const here = (job.guildId === currentGuildId && job.channelId === currentChannelId)
+      || (job.deliveryGuildId === currentGuildId && job.deliveryChannelId === currentChannelId);
     const replacement = job.replacesJobId !== undefined ? ` replaces ${job.replacesJobId}` : "";
+    const owner = job.parentJobId !== undefined
+      ? `; parent ${job.parentJobId}`
+      : "";
     const sent = job.sentMessageId !== undefined ? ` sent MsgID ${job.sentMessageId}` : "";
     const error = job.error !== undefined ? formatJobErrorForContext(job.error) : "";
-    const highRes = job.input.is4k ? " 4K" : "";
     const delivery = job.deliveryGuildId !== job.guildId || job.deliveryChannelId !== job.channelId
-      ? ` delivery channel ${job.deliveryChannelId}`
+      ? `; delivery guild ${job.deliveryGuildId} channel ${job.deliveryChannelId}`
       : "";
     const assets = assetsForJob(job.id);
     const assetText = assets.length === 0
       ? ""
-      : ` assets ${assets.map((asset) => `#${asset.assetId}`).join(", ")}`;
+      : `; assets ${assets.map((asset) => `#${asset.assetId}`).join(", ")}`;
+    const yieldedAt = job.kind === "background_agent" && job.status === "yielded"
+      ? job.statusChangedAt
+      : undefined;
+    const terminalAt = isActiveJobStatus(job.status) ? undefined : job.completedAt;
+    const terminalLabel = job.status === "dismissed" ? "stopped" : "finished";
+    const timing = `${jobTime("created", job.createdAt, now)}${jobTime("yielded", yieldedAt, now)}${jobTime(terminalLabel, terminalAt, now)}`;
+    const work = job.kind === "image_generation"
+      ? `prompt: ${JSON.stringify(shortQuote(job.input.prompt, 180))}${job.input.is4k ? "; 4K" : ""}`
+      : `task ${JSON.stringify(job.input.taskName)}: ${JSON.stringify(shortQuote(job.input.message, 180))}`;
+    const handoff = job.kind !== "image_generation" && job.result?.handoff !== undefined
+      ? `; handoff: ${JSON.stringify(shortQuote(job.result.handoff, 180))}`
+      : "";
     lines.push(
-      `- ${job.id} ${job.status}${highRes} (${state}) for @${job.requesterUsername} from MsgID ${job.sourceMessageId}${delivery}${replacement}; requested ${formatJobAge(job, now)}; prompt: ${JSON.stringify(shortQuote(job.input.prompt, 180))}${sent}${assetText}${error}`,
+      `- ${job.id} ${job.kind} ${contextJobStatus(job)} (${state}, ${here ? "here" : "elsewhere"}) for @${job.requesterUsername}; origin guild ${job.guildId} channel ${job.channelId} MsgID ${job.sourceMessageId}${delivery}${owner}${timing}; ${work}${handoff}${replacement}${sent}${assetText}${error}`,
     );
   }
   return lines.join("\n");

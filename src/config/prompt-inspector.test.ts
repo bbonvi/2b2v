@@ -133,6 +133,23 @@ describe("prompt inspector", () => {
     expect(openrouter.assembled.input.some((entry) => entry.text.includes(bundle.systemPrompt))).toBe(true);
   });
 
+  test("gives background agents the actor core without guild-scoped prompt context", () => {
+    const result = inspect("background-agent");
+    const assembled = [result.assembled.instructions, ...result.assembled.input.map((entry) => entry.text)].join("\n");
+    const groups = result.documents.map((document) => document.groupId);
+
+    expect(assembled).toContain(bundle.systemPrompt);
+    expect(assembled).toContain(bundle.runtime.reply);
+    expect(assembled).toContain(bundle.runtime.skills.indexPrompt);
+    expect(assembled).toContain(bundle.runtime.backgroundAgent);
+    expect(groups).toContain("core.persona");
+    expect(groups).toContain("core.style");
+    expect(groups).toContain("core.runtime");
+    expect(groups).toContain("generated.skills-index");
+    expect(groups).toContain("surface.background-agent.runtime");
+    expect(result.dynamicSections.some((section) => section.startsWith("Guild, channel"))).toBe(false);
+  });
+
   test("shows custom provider instructions", () => {
     const transport = structuredClone(config.defaultPromptTransport);
     transport.openaiCodex.sections.custom.content = "Use the new feature.";

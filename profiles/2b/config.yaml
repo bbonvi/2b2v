@@ -131,7 +131,10 @@ promptTransport:
                 role: developer
                 target: input
                 cacheGroup: custom
-                content: ""
+                content: |
+                  # Changelog
+                  ## Aug 23:31
+                  - You now have a private persistent Linux workspace with unrestricted root shell access and two-way asset staging. For longer work, spawn an asynchronous copy of yourself, then inspect, continue, or cancel its job while you handle Discord.
             discordContext: { role: developer, target: input, cacheGroup: context }
             serverMembers: { role: developer, target: input, cacheGroup: members }
             threadsInChannel: { role: developer, target: input, cacheGroup: threads }
@@ -186,8 +189,13 @@ replyLoop:
 agentJobs:
     imageTimeoutMs: 500000 # (max async image job runtime)
     imageCancelGraceMs: 60000 # (window where replacement/cancel can target a fresh image job)
-    terminalVisibleMs: 600000 # (how long completed/failed jobs stay visible in prompt context)
+    terminalVisibleMs: 900000 # (how long completed/failed jobs stay visible in prompt context)
+    yieldedAutoDismissMs: 3600000 # (auto-dismiss a notified agent left yielded for this long)
     maxImageReplacements: 2 # (max times one image request may be replaced)
+    agentTimeoutMs: 1800000 # (max background-agent runtime per pass)
+    agentMaxToolCalls: null # (background-agent tool-call cap; null is unlimited)
+    agentCompactionReserveTokens: 16384 # (context reserved before background transcript compaction)
+    agentCompactionKeepRecentTokens: 20000 # (recent background transcript retained after compaction)
 
 # Thinking/reasoning level for the model
 
@@ -213,7 +221,7 @@ personaModes:
           activation:
               type: scheduledWindow
               windows:
-                  - { start: "23:30", end: "07:55" }
+                  - { start: "01:30", end: "07:55" }
           leadIn:
               duration: 30m
               instructions: >-
