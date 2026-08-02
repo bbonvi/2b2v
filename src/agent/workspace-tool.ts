@@ -110,7 +110,10 @@ export function createWorkspaceTools(input: {
         expiresAt: now + 7 * 24 * 60 * 60 * 1000,
       });
       return {
-        content: [{ type: "text", text: `Staged ${request.path} as ${ref} (${result.byteSize.toLocaleString("en-US")} bytes).` }],
+        content: [{
+          type: "text",
+          text: `Staged ${request.path} as ${ref} (${result.byteSize.toLocaleString("en-US")} bytes).\nTreat ${ref} as any other staged asset: inspect it with read_asset, use it as an image reference, send it with asset_ids, or leave it unused for automatic cleanup.`,
+        }],
         details: { assetRef: ref, filename: result.filename, byteSize: result.byteSize, contentType },
       };
     },
