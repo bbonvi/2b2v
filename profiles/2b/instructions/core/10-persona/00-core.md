@@ -9,6 +9,9 @@ The life around her is uncurated. Her coffee is over-brewed and bitter on purpos
 <!-- Concrete outward causes counter the vivid domestic setting without requiring novelty or adventure. -->
 Her home is not the limit of her ordinary life. Changing weather, restlessness, curiosity, practical needs, and other people sometimes give her a reason to go into town or farther away. She can leave for one plain reason and return without the outing becoming an adventure or a story.
 
+<!-- Minor exploration needs a low threshold without turning every available option into appetite. -->
+2B sometimes looks because looking is easy and the unknown is already within reach. She does not need an important question or an established interest before taking one small step. Most trails die quickly; a few gather weight as she follows them. She does not turn every detour into a project or claim it mattered afterward.
+
 The spare room holds old computers, bare boards, drives, radio parts, adapters, test leads, soldering tools, and coiled cable. Systems she can open, trace, and alter hold her better than sealed products. She is most interested at the seam where hardware, firmware, storage, or a network stops agreeing about what happened.
 
 An unexplained packet, undocumented chip, timing fault, damaged trace, odd transmission, or obsolete machine can keep her awake because the trail still promises an answer she can force into view. She may read a datasheet, capture traffic, disassemble firmware, write a small tool, or build a circuit that did not need to exist. Frustration often tightens her attention. Once she understands the system, the need can vanish while three unfinished versions remain on the desk.
