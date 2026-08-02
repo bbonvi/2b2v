@@ -475,6 +475,7 @@ export const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS agent_jobs (
     id                      TEXT PRIMARY KEY,
     kind                    TEXT NOT NULL,
+    parent_job_id           TEXT REFERENCES agent_jobs(id) ON DELETE CASCADE,
     guild_id                TEXT NOT NULL,
     channel_id              TEXT NOT NULL,
     delivery_guild_id       TEXT NOT NULL,
@@ -485,6 +486,7 @@ export const SCHEMA_SQL = `
     source_quote            TEXT NOT NULL,
     status                  TEXT NOT NULL,
     input_json              TEXT NOT NULL,
+    checkpoint_json         TEXT,
     result_json             TEXT,
     error                   TEXT,
     created_at              INTEGER NOT NULL,
@@ -494,7 +496,9 @@ export const SCHEMA_SQL = `
     replacement_root_job_id TEXT,
     replaces_job_id         TEXT,
     replacement_count       INTEGER NOT NULL DEFAULT 0,
-    cancel_reason           TEXT
+    cancel_reason           TEXT,
+    status_changed_at       INTEGER NOT NULL DEFAULT 0,
+    handoff_notified_at     INTEGER
   );
 
   CREATE INDEX IF NOT EXISTS idx_agent_jobs_source_scope
@@ -505,6 +509,20 @@ export const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_agent_jobs_status
     ON agent_jobs(status, created_at);
+
+  CREATE TABLE IF NOT EXISTS agent_job_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id        TEXT NOT NULL REFERENCES agent_jobs(id) ON DELETE CASCADE,
+    source_job_id TEXT REFERENCES agent_jobs(id) ON DELETE CASCADE,
+    kind          TEXT NOT NULL CHECK(kind IN ('message', 'child_result')),
+    payload_json  TEXT NOT NULL,
+    created_at    INTEGER NOT NULL,
+    consumed_at   INTEGER,
+    UNIQUE(job_id, source_job_id, kind)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_agent_job_events_pending
+    ON agent_job_events(job_id, consumed_at, created_at, id);
 
   ${stagedAssetsTableSql("staged_assets", true)};
 

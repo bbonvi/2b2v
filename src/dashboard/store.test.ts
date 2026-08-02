@@ -341,19 +341,19 @@ describe("RequestLogStore", () => {
     store.push(makeEntry({ requestId: "reply", triggerContext: context, timestamp: "2026-07-20T00:00:01.000Z" }));
     store.push(makeEntry({
       requestId: "image-run",
-      trigger: { type: "async_image_generation", jobId: "img-1", sourceMessageId: "m1", standalone: true },
+      trigger: { type: "image_generation_job", jobId: "img-1", sourceMessageId: "m1" },
       triggerContext: { sourceMessageId: "m1", authorUsername: "alice", sourceQuote: "make it" },
       timestamp: "2026-07-20T00:00:02.000Z",
     }));
     store.push(makeEntry({
       requestId: "agent-run",
-      trigger: { type: "async_agent_task", jobId: "agent-1", sourceMessageId: "m1", standalone: true },
+      trigger: { type: "background_agent_run", jobId: "agent-1", sourceMessageId: "m1" },
       triggerContext: { sourceMessageId: "m1", authorUsername: "alice", sourceQuote: "make it" },
       timestamp: "2026-07-20T00:00:03.000Z",
     }));
     store.push(makeEntry({
       requestId: "agent-handoff",
-      trigger: { type: "async_agent_handoff", jobId: "agent-1", sourceMessageId: "m1", standalone: true },
+      trigger: { type: "background_agent_handoff", jobId: "agent-1", sourceMessageId: "m1" },
       triggerContext: { sourceMessageId: "m1", authorUsername: "alice", sourceQuote: "make it" },
       timestamp: "2026-07-20T00:00:04.000Z",
     }));

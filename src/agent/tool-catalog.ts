@@ -446,7 +446,7 @@ export function initialActorToolNames(
 export function initialMaintenanceToolNames(tools: readonly AgentTool[]): Set<string> {
   return new Set(tools
     .map((tool) => tool.name)
-    .filter((name) => name === "load_skill" || name === "search_tools" || name === "send_discord_message" || name.startsWith("record_")));
+    .filter((name) => name === "load_skill" || name === "search_tools" || name.startsWith("record_")));
 }
 
 /** Create the actor's compact capability discovery tool. */

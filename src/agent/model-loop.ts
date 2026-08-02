@@ -302,6 +302,8 @@ export async function runNativeToolLoop(input: {
   stopOnAgentTimeBudget?: boolean;
   terminateAfterSuccessfulToolRoundNames?: readonly string[];
   onActiveToolsChanged?: (tools: readonly AgentTool[]) => void;
+  initialLoadedSkillIds?: readonly string[];
+  onLoadedSkillsChanged?: (skillIds: readonly string[]) => void;
   onActionCommitted?: () => void;
   takePendingMessages?: () => OpenRouterMessage[] | Promise<OpenRouterMessage[]>;
   stopAfterAsyncImageJobCreated?: boolean;
@@ -311,8 +313,9 @@ export async function runNativeToolLoop(input: {
     input.tools,
     input.initialToolNames ?? new Set(input.tools.map((tool) => tool.name)),
   );
-  const loadedSkills = new Set<string>();
+  const loadedSkills = new Set(input.initialLoadedSkillIds ?? []);
   input.onActiveToolsChanged?.(toolCatalog.activeTools());
+  input.onLoadedSkillsChanged?.([...loadedSkills]);
   const terminateAfterSuccessfulToolRoundNames = new Set(input.terminateAfterSuccessfulToolRoundNames ?? []);
   const imageFollowUpSources = new Map<OpenRouterMessage, ImageFollowUpSource>();
   let toolCalls = 0;
@@ -629,7 +632,10 @@ export async function runNativeToolLoop(input: {
         noteToolExecution(execution);
         if (execution.tool.name === "load_skill" && execution.result !== undefined) {
           const skillId = loadedSkillIdFromResult(execution.result);
-          if (skillId !== undefined) loadedSkills.add(skillId);
+          if (skillId !== undefined) {
+            loadedSkills.add(skillId);
+            input.onLoadedSkillsChanged?.([...loadedSkills]);
+          }
         }
         const rendered = await renderExecutedToolCall({
           execution,
@@ -744,7 +750,10 @@ export async function runNativeToolLoop(input: {
       noteToolExecution(execution);
       if (execution.tool.name === "load_skill" && execution.result !== undefined) {
         const skillId = loadedSkillIdFromResult(execution.result);
-        if (skillId !== undefined) loadedSkills.add(skillId);
+        if (skillId !== undefined) {
+          loadedSkills.add(skillId);
+          input.onLoadedSkillsChanged?.([...loadedSkills]);
+        }
       }
       const rendered = await renderExecutedToolCall({
         execution,

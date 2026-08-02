@@ -230,7 +230,7 @@ export function resolveTypingSimulationConfig(
   };
 }
 
-export function resolveGlobalAgentJobs(
+export function resolveAgentJobs(
   partial: MainConfigYaml["agentJobs"] | undefined,
 ): AgentJobsConfig {
   const resolved = {
@@ -245,27 +245,6 @@ export function resolveGlobalAgentJobs(
       : DEFAULT_AGENT_JOBS.agentMaxToolCalls,
     agentCompactionReserveTokens: partial?.agentCompactionReserveTokens ?? DEFAULT_AGENT_JOBS.agentCompactionReserveTokens,
     agentCompactionKeepRecentTokens: partial?.agentCompactionKeepRecentTokens ?? DEFAULT_AGENT_JOBS.agentCompactionKeepRecentTokens,
-  };
-  validateAgentJobsConfig(resolved, "agentJobs");
-  return resolved;
-}
-
-export function resolveGuildAgentJobs(
-  global: AgentJobsConfig,
-  partial: GuildConfigYaml["agentJobs"] | undefined,
-): AgentJobsConfig {
-  const resolved = {
-    imageTimeoutMs: partial?.imageTimeoutMs ?? global.imageTimeoutMs,
-    imageCancelGraceMs: partial?.imageCancelGraceMs ?? global.imageCancelGraceMs,
-    terminalVisibleMs: partial?.terminalVisibleMs ?? global.terminalVisibleMs,
-    yieldedAutoDismissMs: partial?.yieldedAutoDismissMs ?? global.yieldedAutoDismissMs,
-    maxImageReplacements: partial?.maxImageReplacements ?? global.maxImageReplacements,
-    agentTimeoutMs: partial?.agentTimeoutMs ?? global.agentTimeoutMs,
-    agentMaxToolCalls: partial?.agentMaxToolCalls !== undefined
-      ? partial.agentMaxToolCalls
-      : global.agentMaxToolCalls,
-    agentCompactionReserveTokens: partial?.agentCompactionReserveTokens ?? global.agentCompactionReserveTokens,
-    agentCompactionKeepRecentTokens: partial?.agentCompactionKeepRecentTokens ?? global.agentCompactionKeepRecentTokens,
   };
   validateAgentJobsConfig(resolved, "agentJobs");
   return resolved;

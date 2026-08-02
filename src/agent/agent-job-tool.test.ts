@@ -82,7 +82,7 @@ describe("agent job inspection tools", () => {
   });
 
   test("globally dismisses a yielded agent", async () => {
-    const job = store.enqueueAgentTask({
+    const job = store.enqueueBackgroundAgent({
       guildId: "other-guild",
       channelId: "other-channel",
       requesterId: "u2",
@@ -91,9 +91,14 @@ describe("agent job inspection tools", () => {
       sourceQuote: "look elsewhere",
       taskName: "check",
       message: "Check the other guild.",
+      handoffTarget: { kind: "channel", guildId: "other-guild", channelId: "other-channel" },
     });
     store.start(job.id);
-    store.markYielded(job.id, { handoff: "Done." });
+    store.finishBackgroundRun(job.id, {
+      checkpoint: { transcript: [], activeToolNames: [], loadedSkillIds: [] },
+      handoff: "Done.",
+      consumedEventIds: [],
+    });
     const [listTool, , dismissTool] = createAgentJobInspectionTools({ store });
     if (listTool === undefined || dismissTool === undefined) throw new Error("expected job tools");
 

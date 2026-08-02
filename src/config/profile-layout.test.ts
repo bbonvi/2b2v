@@ -42,14 +42,20 @@ describe("repository profile layout", () => {
       expect(bundle.runtime.reply).not.toBe("");
       expect(bundle.runtime.finalActionInstruction).not.toBe("");
       const sharedToolDescriptions = [
+        "cancel_agent_job",
+        "dismiss_agent_job",
         "fetch_url",
+        "list_agent_jobs",
         "list_channel_messages",
         "list_inner_threads",
         "read_asset",
+        "read_agent_job",
         "search_asset",
         "search_channel_messages",
         "search_memories",
         "search_tools",
+        "send_agent_message",
+        "spawn_agent",
         "update_current_scheduled_task",
       ];
       const profileToolDescriptions = profile === "2b"
@@ -70,7 +76,6 @@ describe("repository profile layout", () => {
       );
 
       const sharedParameterDescriptions = [
-        "cancel_agent_job/mode",
         "list_channel_messages/around_message_id",
         "list_channel_messages/channel_id",
         "search_channel_messages/scope",
@@ -123,18 +128,16 @@ describe("repository profile layout", () => {
         }
         expect(bundle.runtime.skills.requiredByTool.read_notebook).toBeUndefined();
       }
-      for (const tool of [
-        "codex_generate_image",
-        "cancel_agent_job",
-        "list_agent_jobs",
-        "read_agent_job",
-        "dismiss_agent_job",
-      ]) {
-        expect(bundle.runtime.skills.requiredByTool[tool]).toEqual(
-          profile === "2b" && tool !== "codex_generate_image"
-            ? ["image_generation", "workspace"]
-            : "image_generation",
-        );
+      expect(bundle.runtime.skills.requiredByTool.codex_generate_image).toBe("image_generation");
+      for (const tool of ["cancel_agent_job", "list_agent_jobs", "read_agent_job", "dismiss_agent_job", "spawn_agent", "send_agent_message"]) {
+        expect(bundle.runtime.skills.requiredByTool[tool]).toBeUndefined();
+      }
+      if (profile === "2b") {
+        expect(bundle.runtime.skills.byId.workspace?.requiredForTools).toEqual([
+          "workspace_exec",
+          "export_asset_to_workspace",
+          "stage_workspace_file",
+        ]);
       }
       if (profile === "2b") {
         expect(bundle.runtime.privateLife?.length).toBeGreaterThan(500);

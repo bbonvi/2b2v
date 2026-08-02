@@ -27,7 +27,7 @@ import { createSearchAssetTool } from "../agent/search-asset-tool";
 import { createReadUserAvatarTool, type AvatarSize } from "../agent/read-user-avatar-tool";
 import { createFetchImagesTool } from "../agent/fetch-images-tool";
 import { createCodexGenerateImageTool, type GeneratedImageAttachment, type ReferenceImageInput } from "../agent/codex-image-tool";
-import { type AgentJobStore, createCancelAgentJobTool } from "../agent/job-runtime";
+import { type AgentJobStore, type BackgroundHandoffTarget, createCancelAgentJobTool } from "../agent/job-runtime";
 import { createAgentJobInspectionTools, renderAgentJobDetails } from "../agent/agent-job-tool";
 import { loadAssetReferenceImage, loadStagedAssetReferenceImage, resolvedLinkReferenceImage } from "../agent/asset-reference-image";
 import { createFetchUrlTool } from "../agent/fetch-url-tool";
@@ -125,8 +125,10 @@ function buildAgentTools(
     deliverDiceRoll?: (input: DiceRollDelivery) => Promise<{ sentMessageId: string }>;
     visibleUserIds?: readonly string[];
     onVisibleOutput?: () => void;
-    /** Background agent that owns async image results and receives their completion events. */
-    ownerAgentJobId?: string;
+    /** Durable parent for jobs started inside a background agent. */
+    parentJobId?: string;
+    /** Actor surface that receives a root background handoff. */
+    handoffTarget?: BackgroundHandoffTarget;
   } = {},
 ) {
   const includeImageGenerationTools = options.includeImageGenerationTools ?? true;
@@ -714,6 +716,8 @@ function buildAgentTools(
   const jobInspectionTools = createAgentJobInspectionTools({
     store: agentJobs,
     onDismiss: async (jobId) => {
+      const queued = agentJobs.publishChildResult(jobId);
+      if (queued.shouldRun && queued.parentJobId !== undefined) trackAgentJob(runAgentJob(queued.parentJobId));
       const staged = getStagedAssetForJob(db, jobId);
       if (staged === null) return;
       await unlinkStagedPath(workspaceStagingRoot, staged.storagePath).catch(() => {});
@@ -723,20 +727,15 @@ function buildAgentTools(
   const cancelJobTool = createCancelAgentJobTool({
     store: agentJobs,
     onCancelled: async (jobId) => {
-      const cancelled = agentJobs.get(jobId);
-      if (cancelled?.kind === "image_generation" && cancelled.input.ownerAgentJobId !== undefined) {
-        const queued = agentJobs.queueOwnedImageResult(jobId);
-        if (queued.shouldRun && queued.ownerAgentJobId !== undefined) {
-          trackAgentJob(runAgentJob(queued.ownerAgentJobId));
-        }
-      }
+      const queued = agentJobs.publishChildResult(jobId);
+      if (queued.shouldRun && queued.parentJobId !== undefined) trackAgentJob(runAgentJob(queued.parentJobId));
       const staged = getStagedAssetForJob(db, jobId);
       if (staged === null) return;
       await unlinkStagedPath(workspaceStagingRoot, staged.storagePath).catch(() => {});
       deleteStagedAsset(db, staged.ref);
     },
   });
-  const agentControlTools = effectiveCurrentRequest === undefined || getPromptBundle().runtime.skills.byId.workspace === undefined ? [] : createAgentControlTools({
+  const agentControlTools = effectiveCurrentRequest === undefined ? [] : createAgentControlTools({
     store: agentJobs,
     guildId,
     channelId,
@@ -744,6 +743,8 @@ function buildAgentTools(
     requesterUsername: effectiveCurrentRequest.requesterUsername,
     sourceMessageId: effectiveCurrentRequest.sourceMessageId,
     sourceQuote: effectiveCurrentRequest.sourceQuote,
+    handoffTarget: options.handoffTarget ?? { kind: "channel", guildId, channelId },
+    ...(options.parentJobId !== undefined ? { parentJobId: options.parentJobId } : {}),
     runAgentJob,
     trackAgentJob,
   });
@@ -820,7 +821,7 @@ function buildAgentTools(
           outputFormat: input.outputFormat,
           is4k: input.is4k,
           ...(input.replacesJobId !== undefined ? { replacesJobId: input.replacesJobId } : {}),
-          ...(options.ownerAgentJobId !== undefined ? { ownerAgentJobId: options.ownerAgentJobId } : {}),
+          ...(options.parentJobId !== undefined ? { parentJobId: options.parentJobId } : {}),
         });
         if (result.created) {
           trackImageJob(runImageGenerationJob(result.job.id).catch((err: unknown) => {

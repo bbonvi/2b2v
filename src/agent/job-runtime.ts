@@ -4,22 +4,25 @@ import { randomUUID } from "node:crypto";
 import type { Database } from "../db/database.ts";
 import { parseAssetId, type AssetRef } from "./asset-id.ts";
 import {
+  consumeAgentJobEvents,
+  createAgentJobEvent,
   createAgentJobRecord,
   deleteExpiredUnlinkedAgentJobs,
   dismissStaleYieldedAgentJobs,
-  failInterruptedAgentJobs,
+  requeueInterruptedAgentJobs,
   getAgentJobForAsset,
   getAgentJobRecord,
   linkAgentJobAsset,
   listAgentJobAssets,
   listAgentJobRecords,
-  listOwnedImageJobRecords,
+  listChildAgentJobRecords,
+  listPendingAgentJobEvents,
   updateAgentJobRecord,
   type AgentJobRecord,
   type PersistedAgentJobState,
 } from "../db/agent-job-repository.ts";
 
-export type AgentJobKind = "image_generation" | "persona_task";
+export type AgentJobKind = "image_generation" | "background_agent";
 export type AgentJobStatus =
   | "queued"
   | "running"
@@ -30,9 +33,11 @@ export type AgentJobStatus =
   | "delivered"
   | "dismissed"
   | "expired"
-  | "interrupted"
   | "failed";
-export type CancelMode = "replacement" | "explicit_cancel";
+
+export type BackgroundHandoffTarget =
+  | { kind: "channel"; guildId: string; channelId: string }
+  | { kind: "private_life"; guildId: string; channelId: string; episodeId: string };
 
 export type ImageReference =
   | { type: "asset"; assetId: AssetRef }
@@ -45,7 +50,6 @@ export interface ImageGenerationJobInput {
   outputFormat: "png" | "jpeg" | "webp";
   is4k: boolean;
   replacesJobId?: string;
-  ownerAgentJobId?: string;
 }
 
 export interface ImageGenerationJobResult {
@@ -62,11 +66,21 @@ export interface ImageGenerationJobResult {
   is4k?: boolean;
 }
 
-export interface AgentTaskJobInput {
+export interface BackgroundAgentJobInput {
   taskName: string;
   message: string;
+  handoffTarget: BackgroundHandoffTarget;
   modelProfile?: string;
-  pendingMessages: AgentPendingMessage[];
+}
+
+export interface BackgroundAgentCheckpoint {
+  transcript: unknown[];
+  activeToolNames: string[];
+  loadedSkillIds: string[];
+}
+
+export interface BackgroundAgentJobResult {
+  handoff: string;
 }
 
 export type AgentPendingMessage =
@@ -80,24 +94,11 @@ export type AgentPendingMessage =
     contentType: string;
   };
 
-export interface AgentTaskJobResult {
-  handoff?: string;
-  transcript?: unknown[];
-  activeToolNames?: string[];
-  yieldedAt?: number;
-  notificationPending?: boolean;
-  notificationDeliveredAt?: number;
-}
-
-export type AgentJobInput = ImageGenerationJobInput | AgentTaskJobInput;
-export type AgentJobResult = ImageGenerationJobResult | AgentTaskJobResult;
-
 interface AgentJobBase {
   id: string;
-  /** Guild/channel where the request originated and where source metadata belongs. */
+  parentJobId?: string;
   guildId: string;
   channelId: string;
-  /** Guild/channel where async job progress and completion should be delivered. */
   deliveryGuildId: string;
   deliveryChannelId: string;
   requesterId: string;
@@ -106,8 +107,10 @@ interface AgentJobBase {
   sourceQuote: string;
   status: AgentJobStatus;
   createdAt: number;
+  statusChangedAt: number;
   startedAt?: number;
   completedAt?: number;
+  handoffNotifiedAt?: number;
   sentMessageId?: string;
   error?: string;
   replacementRootJobId?: string;
@@ -121,12 +124,15 @@ export type ImageGenerationAgentJob = AgentJobBase & {
   input: ImageGenerationJobInput;
   result?: ImageGenerationJobResult;
 };
-export type AgentTaskJob = AgentJobBase & {
-  kind: "persona_task";
-  input: AgentTaskJobInput;
-  result?: AgentTaskJobResult;
+
+export type BackgroundAgentJob = AgentJobBase & {
+  kind: "background_agent";
+  input: BackgroundAgentJobInput;
+  checkpoint?: BackgroundAgentCheckpoint;
+  result?: BackgroundAgentJobResult;
 };
-export type AgentJob = ImageGenerationAgentJob | AgentTaskJob;
+
+export type AgentJob = ImageGenerationAgentJob | BackgroundAgentJob;
 
 export interface AgentJobConfig {
   imageTimeoutMs: number;
@@ -150,11 +156,11 @@ export interface EnqueueImageJobInput {
   outputFormat: "png" | "jpeg" | "webp";
   is4k: boolean;
   replacesJobId?: string;
-  ownerAgentJobId?: string;
+  parentJobId?: string;
   now?: number;
 }
 
-export interface EnqueueAgentTaskInput {
+export interface EnqueueBackgroundAgentInput {
   guildId: string;
   channelId: string;
   requesterId: string;
@@ -163,57 +169,59 @@ export interface EnqueueAgentTaskInput {
   sourceQuote: string;
   taskName: string;
   message: string;
+  handoffTarget: BackgroundHandoffTarget;
+  parentJobId?: string;
   modelProfile?: string;
   now?: number;
 }
 
 export type EnqueueImageJobResult =
-  | {
-    job: ImageGenerationAgentJob;
-    created: true;
-    reason: "created";
-  }
+  | { job: ImageGenerationAgentJob; created: true; reason: "created" }
   | {
     job: ImageGenerationAgentJob;
     created: false;
-    reason: "replacement_limit";
+    reason: "replacement_limit" | "replacement_too_old";
     assetHistory: number[];
   };
 
+export interface PendingAgentEvent {
+  id: number;
+  message: AgentPendingMessage;
+}
+
 const ACTIVE_STATUSES = new Set<AgentJobStatus>(["queued", "running", "waiting_on_jobs", "ready", "yielded"]);
-const TERMINAL_STATUSES = new Set<AgentJobStatus>(["completed", "delivered", "dismissed", "expired", "interrupted", "failed"]);
+const CANCELLABLE_STATUSES = new Set<AgentJobStatus>(["queued", "running", "waiting_on_jobs"]);
+const TERMINAL_STATUSES = new Set<AgentJobStatus>(["completed", "delivered", "dismissed", "expired", "failed"]);
+const IN_FLIGHT_CHILD_STATUSES = new Set<AgentJobStatus>(["queued", "running", "waiting_on_jobs", "ready"]);
 const UNLINKED_TERMINAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** Durable agent-job store with process-local cancellation handles for active workers. */
+/** Durable job store. Each lifecycle change has one owner here. */
 export class AgentJobStore {
-  private readonly db: Database;
-  private readonly config: AgentJobConfig;
   private readonly aborts = new Map<string, () => void>();
 
-  constructor(db: Database, config: AgentJobConfig) {
-    this.db = db;
-    this.config = config;
-    failInterruptedAgentJobs(db);
+  constructor(private readonly db: Database, private readonly config: AgentJobConfig) {
+    requeueInterruptedAgentJobs(db);
   }
 
   enqueueImageJob(input: EnqueueImageJobInput): EnqueueImageJobResult {
     const now = input.now ?? Date.now();
-    const candidate = input.replacesJobId !== undefined ? this.get(input.replacesJobId) : undefined;
+    const candidate = input.replacesJobId === undefined ? undefined : this.get(input.replacesJobId);
     const replacement = candidate?.kind === "image_generation" ? candidate : undefined;
     if (replacement !== undefined && replacement.replacementCount >= this.config.maxImageReplacements) {
-      return {
-        job: replacement,
-        created: false,
-        reason: "replacement_limit",
-        assetHistory: this.replacementAssetHistory(replacement),
-      };
+      return { job: replacement, created: false, reason: "replacement_limit", assetHistory: this.replacementAssetHistory(replacement) };
+    }
+    if (replacement !== undefined && CANCELLABLE_STATUSES.has(replacement.status)) {
+      const ageMs = now - (replacement.startedAt ?? replacement.createdAt);
+      if (ageMs > this.config.imageCancelGraceMs) {
+        return { job: replacement, created: false, reason: "replacement_too_old", assetHistory: this.replacementAssetHistory(replacement) };
+      }
     }
 
-    const id = this.createShortId("img");
     const replacementRootJobId = replacement?.replacementRootJobId ?? replacement?.id;
     const job: ImageGenerationAgentJob = {
-      id,
+      id: this.createShortId("img"),
       kind: "image_generation",
+      ...(input.parentJobId !== undefined ? { parentJobId: input.parentJobId } : {}),
       guildId: input.guildId,
       channelId: input.channelId,
       deliveryGuildId: input.deliveryGuildId ?? input.guildId,
@@ -224,26 +232,44 @@ export class AgentJobStore {
       sourceQuote: input.sourceQuote,
       status: "queued",
       createdAt: now,
+      statusChangedAt: now,
       input: {
         prompt: input.prompt,
         references: input.references,
         outputFormat: input.outputFormat,
         is4k: input.is4k,
         ...(input.replacesJobId !== undefined ? { replacesJobId: input.replacesJobId } : {}),
-        ...(input.ownerAgentJobId !== undefined ? { ownerAgentJobId: input.ownerAgentJobId } : {}),
       },
       ...(replacementRootJobId !== undefined ? { replacementRootJobId } : {}),
       ...(input.replacesJobId !== undefined ? { replacesJobId: input.replacesJobId } : {}),
       replacementCount: (replacement?.replacementCount ?? -1) + 1,
     };
-    createAgentJobRecord(this.db, toRecord(job));
+
+    const insert = this.db.raw.transaction(() => {
+      createAgentJobRecord(this.db, toRecord(job));
+      if (replacement !== undefined && CANCELLABLE_STATUSES.has(replacement.status)) {
+        updateAgentJobRecord(this.db, replacement.id, {
+          status: "dismissed",
+          completedAt: now,
+          statusChangedAt: now,
+          cancelReason: `Replaced by ${job.id}.`,
+        });
+      }
+    });
+    insert();
+    if (replacement !== undefined && CANCELLABLE_STATUSES.has(replacement.status)) {
+      this.aborts.get(replacement.id)?.();
+      this.aborts.delete(replacement.id);
+    }
     return { job, created: true, reason: "created" };
   }
 
-  enqueueAgentTask(input: EnqueueAgentTaskInput): AgentTaskJob {
-    const job: AgentTaskJob = {
+  enqueueBackgroundAgent(input: EnqueueBackgroundAgentInput): BackgroundAgentJob {
+    const now = input.now ?? Date.now();
+    const job: BackgroundAgentJob = {
       id: this.createShortId("agent"),
-      kind: "persona_task",
+      kind: "background_agent",
+      ...(input.parentJobId !== undefined ? { parentJobId: input.parentJobId } : {}),
       guildId: input.guildId,
       channelId: input.channelId,
       deliveryGuildId: input.guildId,
@@ -253,11 +279,12 @@ export class AgentJobStore {
       sourceMessageId: input.sourceMessageId,
       sourceQuote: input.sourceQuote,
       status: "queued",
-      createdAt: input.now ?? Date.now(),
+      createdAt: now,
+      statusChangedAt: now,
       input: {
         taskName: input.taskName,
         message: input.message,
-        pendingMessages: [],
+        handoffTarget: input.handoffTarget,
         ...(input.modelProfile !== undefined ? { modelProfile: input.modelProfile } : {}),
       },
       replacementCount: 0,
@@ -274,10 +301,7 @@ export class AgentJobStore {
   listVisible(guildId: string, channelId: string, now = Date.now()): AgentJob[] {
     const active = listAgentJobRecords(this.db, { guildId, channelId, state: "active" });
     const terminal = listAgentJobRecords(this.db, {
-      guildId,
-      channelId,
-      state: "terminal",
-      completedAfter: now - this.config.terminalVisibleMs,
+      guildId, channelId, state: "terminal", completedAfter: now - this.config.terminalVisibleMs,
     });
     return [...active, ...terminal].map(fromRecord).sort(compareJobsOldestFirst);
   }
@@ -285,29 +309,13 @@ export class AgentJobStore {
   listGlobalVisible(now = Date.now()): AgentJob[] {
     const active = listAgentJobRecords(this.db, { state: "active" });
     const terminal = listAgentJobRecords(this.db, {
-      state: "terminal",
-      completedAfter: now - this.config.terminalVisibleMs,
+      state: "terminal", completedAfter: now - this.config.terminalVisibleMs,
     });
     return [...active, ...terminal].map(fromRecord).sort(compareJobsOldestFirst);
   }
 
-  listActive(guildId: string, channelId: string): AgentJob[] {
-    return this.list(guildId, channelId, "active");
-  }
-
-  list(
-    guildId: string,
-    channelId: string,
-    state: PersistedAgentJobState = "all",
-    limit = 10,
-  ): AgentJob[] {
-    return listAgentJobRecords(this.db, {
-      guildId,
-      channelId,
-      state,
-      limit,
-      newestFirst: true,
-    }).map(fromRecord);
+  list(guildId: string, channelId: string, state: PersistedAgentJobState = "all", limit = 10): AgentJob[] {
+    return listAgentJobRecords(this.db, { guildId, channelId, state, limit, newestFirst: true }).map(fromRecord);
   }
 
   listGlobal(state: PersistedAgentJobState = "all", limit = 10): AgentJob[] {
@@ -316,174 +324,160 @@ export class AgentJobStore {
 
   listGlobalRecent(limit = 10, now = Date.now()): AgentJob[] {
     return listAgentJobRecords(this.db, {
-      state: "terminal",
-      completedAfter: now - this.config.terminalVisibleMs,
-      limit,
-      newestFirst: true,
+      state: "terminal", completedAfter: now - this.config.terminalVisibleMs, limit, newestFirst: true,
     }).map(fromRecord);
+  }
+
+  listChildren(parentJobId: string): AgentJob[] {
+    return listChildAgentJobRecords(this.db, parentJobId).map(fromRecord);
   }
 
   start(id: string, abort?: () => void, now = Date.now()): AgentJob | undefined {
     const job = this.get(id);
     if (job === undefined || job.status !== "queued") return job;
-    updateAgentJobRecord(this.db, id, { status: "running", startedAt: now });
+    updateAgentJobRecord(this.db, id, {
+      status: "running",
+      startedAt: job.startedAt ?? now,
+      completedAt: null,
+      statusChangedAt: now,
+    });
     if (abort !== undefined) this.aborts.set(id, abort);
     return this.get(id);
   }
 
   markReady(id: string, result: ImageGenerationJobResult, now = Date.now()): AgentJob | undefined {
     const job = this.get(id);
-    if (job === undefined || job.status !== "running") return job;
+    if (job === undefined || job.kind !== "image_generation" || job.status !== "running") return job;
     updateAgentJobRecord(this.db, id, {
-      status: "ready",
-      completedAt: now,
-      resultJson: JSON.stringify(result),
+      status: "ready", completedAt: null, statusChangedAt: now, resultJson: JSON.stringify(result),
     });
     this.aborts.delete(id);
     return this.get(id);
   }
 
-  markYielded(id: string, result: AgentTaskJobResult, now = Date.now()): AgentJob | undefined {
-    const job = this.get(id);
-    if (job === undefined || job.status !== "running" || job.kind === "image_generation") return job;
-    updateAgentJobRecord(this.db, id, {
-      status: "yielded",
-      completedAt: now,
-      resultJson: JSON.stringify({ ...result, yieldedAt: now, notificationPending: true }),
-    });
-    this.aborts.delete(id);
-    return this.get(id);
+  pendingEvents(id: string): PendingAgentEvent[] {
+    return listPendingAgentJobEvents(this.db, id).map((event) => ({
+      id: event.id,
+      message: JSON.parse(event.payloadJson) as AgentPendingMessage,
+    }));
   }
 
-  markWaitingOnJobs(id: string, result: AgentTaskJobResult): AgentJob | undefined {
-    const job = this.get(id);
-    if (job === undefined || job.status !== "running" || job.kind === "image_generation") return job;
-    updateAgentJobRecord(this.db, id, {
-      status: "waiting_on_jobs",
-      completedAt: null,
-      resultJson: JSON.stringify({ ...result, notificationPending: false }),
-    });
-    this.aborts.delete(id);
-    return this.get(id);
-  }
-
-  markOwnedImageCompleted(id: string): AgentJob | undefined {
-    const job = this.get(id);
-    if (job === undefined || job.kind !== "image_generation" || job.status !== "ready") return job;
-    updateAgentJobRecord(this.db, id, { status: "completed" });
-    return this.get(id);
-  }
-
-  sendAgentMessage(id: string, message: string): { job: AgentJob; shouldRun: boolean } {
+  sendAgentMessage(id: string, message: string, now = Date.now()): { job: AgentJob; shouldRun: boolean } {
     const job = this.get(id);
     if (job === undefined) throw new Error(`No job ${id} exists.`);
-    if (job.kind === "image_generation") throw new Error(`Job ${id} is not an agent.`);
-    if (job.status !== "running" && job.status !== "waiting_on_jobs" && job.status !== "yielded" && job.status !== "queued") {
+    if (job.kind !== "background_agent") throw new Error(`Job ${id} is not a background agent.`);
+    if (!["running", "waiting_on_jobs", "yielded", "queued"].includes(job.status)) {
       throw new Error(`Job ${id} is ${job.status} and cannot receive a message.`);
     }
-    const pendingMessages = [...job.input.pendingMessages, { kind: "text" as const, text: message }];
-    updateAgentJobRecord(this.db, id, {
-      inputJson: JSON.stringify({ ...job.input, pendingMessages }),
-      ...(job.status === "yielded" || job.status === "waiting_on_jobs" ? { status: "queued", completedAt: null } : {}),
+    const shouldRun = job.status === "waiting_on_jobs" || job.status === "yielded";
+    const write = this.db.raw.transaction(() => {
+      createAgentJobEvent(this.db, {
+        jobId: id, kind: "message", payloadJson: JSON.stringify({ kind: "text", text: message } satisfies AgentPendingMessage), createdAt: now,
+      });
+      if (shouldRun) {
+        updateAgentJobRecord(this.db, id, {
+          status: "queued", completedAt: null, statusChangedAt: now, handoffNotifiedAt: null,
+        });
+      }
     });
+    write();
     const updated = this.get(id);
     if (updated === undefined) throw new Error(`Job ${id} disappeared after update.`);
-    return { job: updated, shouldRun: job.status === "yielded" || job.status === "waiting_on_jobs" };
+    return { job: updated, shouldRun };
   }
 
-  takePendingAgentMessages(id: string): AgentPendingMessage[] {
-    const job = this.get(id);
-    if (job === undefined || job.kind === "image_generation" || job.input.pendingMessages.length === 0) return [];
-    const messages = [...job.input.pendingMessages];
-    updateAgentJobRecord(this.db, id, {
-      inputJson: JSON.stringify({ ...job.input, pendingMessages: [] }),
-    });
-    return messages;
-  }
-
-  listOwnedImageJobs(ownerAgentJobId: string): ImageGenerationAgentJob[] {
-    return listOwnedImageJobRecords(this.db, ownerAgentJobId)
-      .map(fromRecord)
-      .filter((job): job is ImageGenerationAgentJob => job.kind === "image_generation");
-  }
-
-  queueOwnedImageResult(childJobId: string): { ownerAgentJobId?: string; shouldRun: boolean } {
-    const child = this.get(childJobId);
-    if (child === undefined || child.kind !== "image_generation" || child.input.ownerAgentJobId === undefined) {
+  finishBackgroundRun(id: string, input: {
+    checkpoint: BackgroundAgentCheckpoint;
+    handoff: string;
+    consumedEventIds: readonly number[];
+    now?: number;
+  }): { job?: BackgroundAgentJob; shouldRun: boolean; parentJobId?: string } {
+    const now = input.now ?? Date.now();
+    const current = this.get(id);
+    if (current === undefined || current.kind !== "background_agent" || current.status !== "running") {
       return { shouldRun: false };
     }
-    const parent = this.get(child.input.ownerAgentJobId);
-    if (parent === undefined || parent.kind === "image_generation") return { shouldRun: false };
-    if (!ACTIVE_STATUSES.has(parent.status)) return { ownerAgentJobId: parent.id, shouldRun: false };
-    const outstanding = this.listOwnedImageJobs(parent.id)
-      .filter((job) => ACTIVE_STATUSES.has(job.status) && job.id !== child.id)
-      .map((job) => job.id);
-    const result = child.result;
-    let event: AgentPendingMessage;
-    if (result?.stagedAssetRef !== undefined && result.workspacePath !== undefined && result.contentType !== undefined) {
-      const text = [
-        `Background image job ${child.id} completed.`,
-        `Staged asset ref: ${result.stagedAssetRef}.`,
-        `Workspace path: ${result.workspacePath}.`,
-        outstanding.length > 0 ? `Other image jobs still running: ${outstanding.join(", ")}.` : "No other image jobs remain.",
-        "The staged output is already suitable for the parent handoff. Do not move it only to preserve it; include both the staged ref and workspace path in the final handoff.",
-      ].join("\n");
-      event = {
-        kind: "image_result",
-        childJobId: child.id,
-        text,
-        stagedAssetRef: result.stagedAssetRef,
-        workspacePath: result.workspacePath,
-        contentType: result.contentType,
-      };
-    } else {
-      event = {
-        kind: "text",
-        text: [
-          `Background image job ${child.id} ${child.status}.`,
-          `Failure: ${child.error ?? child.cancelReason ?? "No image output was produced."}`,
-          outstanding.length > 0 ? `Other image jobs still running: ${outstanding.join(", ")}.` : "No other image jobs remain.",
-        ].join("\n"),
-      };
-    }
-    updateAgentJobRecord(this.db, parent.id, {
-      inputJson: JSON.stringify({ ...parent.input, pendingMessages: [...parent.input.pendingMessages, event] }),
-      ...(parent.status === "waiting_on_jobs" || parent.status === "yielded"
-        ? { status: "queued", completedAt: null }
-        : {}),
+    const finish = this.db.raw.transaction(() => {
+      consumeAgentJobEvents(this.db, id, input.consumedEventIds, now);
+      const hasPending = listPendingAgentJobEvents(this.db, id).length > 0;
+      const hasInflightChildren = listChildAgentJobRecords(this.db, id)
+        .some((record) => IN_FLIGHT_CHILD_STATUSES.has(record.status as AgentJobStatus));
+      const nextStatus: "queued" | "waiting_on_jobs" | "yielded" = hasPending
+        ? "queued"
+        : hasInflightChildren
+          ? "waiting_on_jobs"
+          : "yielded";
+      updateAgentJobRecord(this.db, id, {
+        status: nextStatus,
+        checkpointJson: JSON.stringify(input.checkpoint),
+        resultJson: JSON.stringify({ handoff: input.handoff } satisfies BackgroundAgentJobResult),
+        completedAt: null,
+        statusChangedAt: now,
+        handoffNotifiedAt: nextStatus === "yielded" ? null : current.handoffNotifiedAt ?? null,
+      });
+      return nextStatus;
     });
+    const nextStatus = finish();
+    this.aborts.delete(id);
+    if (nextStatus === "yielded" && current.parentJobId !== undefined) this.publishChildResult(id, now);
+    const job = this.get(id);
     return {
-      ownerAgentJobId: parent.id,
-      shouldRun: parent.status === "waiting_on_jobs" || parent.status === "yielded",
+      ...(job?.kind === "background_agent" ? { job } : {}),
+      shouldRun: nextStatus === "queued",
+      ...(current.parentJobId !== undefined ? { parentJobId: current.parentJobId } : {}),
     };
   }
 
-  requeueYieldedAgentWithPendingMessages(id: string): boolean {
-    const job = this.get(id);
-    if (job === undefined || job.kind === "image_generation" || job.status !== "yielded" || job.input.pendingMessages.length === 0) {
-      return false;
+  publishChildResult(childJobId: string, now = Date.now()): { parentJobId?: string; shouldRun: boolean } {
+    const child = this.get(childJobId);
+    if (child?.parentJobId === undefined) return { shouldRun: false };
+    const parent = this.get(child.parentJobId);
+    if (parent === undefined || parent.kind !== "background_agent" || !ACTIVE_STATUSES.has(parent.status)) {
+      return { parentJobId: child.parentJobId, shouldRun: false };
     }
-    updateAgentJobRecord(this.db, id, { status: "queued", completedAt: null });
-    return true;
+    const otherInflight = this.listChildren(parent.id)
+      .filter((job) => job.id !== child.id && IN_FLIGHT_CHILD_STATUSES.has(job.status))
+      .map((job) => job.id);
+    const message = childResultMessage(child, otherInflight);
+    const shouldRun = parent.status === "waiting_on_jobs" || parent.status === "yielded";
+    const publish = this.db.raw.transaction(() => {
+      if (child.kind === "image_generation" && child.status === "ready") {
+        updateAgentJobRecord(this.db, child.id, {
+          status: "completed", completedAt: now, statusChangedAt: now,
+        });
+      }
+      if (child.kind === "background_agent" && child.handoffNotifiedAt === undefined) {
+        updateAgentJobRecord(this.db, child.id, { handoffNotifiedAt: now });
+      }
+      createAgentJobEvent(this.db, {
+        jobId: parent.id,
+        sourceJobId: child.id,
+        kind: "child_result",
+        payloadJson: JSON.stringify(message),
+        createdAt: now,
+      });
+      if (shouldRun) {
+        updateAgentJobRecord(this.db, parent.id, {
+          status: "queued", completedAt: null, statusChangedAt: now, handoffNotifiedAt: null,
+        });
+      }
+    });
+    publish();
+    return { parentJobId: parent.id, shouldRun };
   }
 
-  markNotificationDelivered(id: string, expectedCompletedAt?: number, now = Date.now()): void {
+  markNotificationDelivered(id: string, expectedStatusChangedAt?: number, now = Date.now()): void {
     const job = this.get(id);
-    if (job === undefined || job.kind === "image_generation" || job.result === undefined) return;
-    if (expectedCompletedAt !== undefined && job.completedAt !== expectedCompletedAt) return;
-    updateAgentJobRecord(this.db, id, {
-      resultJson: JSON.stringify({ ...job.result, notificationPending: false, notificationDeliveredAt: now }),
-    });
+    if (job === undefined || job.kind !== "background_agent") return;
+    if (expectedStatusChangedAt !== undefined && job.statusChangedAt !== expectedStatusChangedAt) return;
+    updateAgentJobRecord(this.db, id, { handoffNotifiedAt: now });
   }
 
   markDelivered(id: string, sentMessageId: string, result: ImageGenerationJobResult, now = Date.now()): AgentJob | undefined {
     const job = this.get(id);
-    if (job === undefined || job.status !== "ready") return job;
+    if (job === undefined || job.kind !== "image_generation" || job.status !== "ready") return job;
     updateAgentJobRecord(this.db, id, {
-      status: "delivered",
-      completedAt: now,
-      sentMessageId,
-      resultJson: JSON.stringify(result),
+      status: "delivered", completedAt: now, statusChangedAt: now, sentMessageId, resultJson: JSON.stringify(result),
     });
     return this.get(id);
   }
@@ -491,61 +485,67 @@ export class AgentJobStore {
   markFailed(id: string, error: string, now = Date.now()): AgentJob | undefined {
     const job = this.get(id);
     if (job === undefined || TERMINAL_STATUSES.has(job.status)) return job;
-    updateAgentJobRecord(this.db, id, { status: "failed", completedAt: now, error });
+    updateAgentJobRecord(this.db, id, {
+      status: "failed", completedAt: now, statusChangedAt: now, error,
+    });
     this.aborts.delete(id);
     return this.get(id);
   }
 
-  markAgentFailed(id: string, error: string, now = Date.now()): AgentJob | undefined {
+  markBackgroundFailed(id: string, error: string, now = Date.now()): BackgroundAgentJob | undefined {
     const job = this.get(id);
-    if (job === undefined || job.kind === "image_generation" || TERMINAL_STATUSES.has(job.status)) return job;
+    if (job === undefined || job.kind !== "background_agent" || TERMINAL_STATUSES.has(job.status)) return undefined;
     updateAgentJobRecord(this.db, id, {
       status: "failed",
       completedAt: now,
+      statusChangedAt: now,
       error,
-      resultJson: JSON.stringify({ handoff: `Agent failed: ${error}`, notificationPending: true } satisfies AgentTaskJobResult),
+      resultJson: JSON.stringify({ handoff: `Agent failed: ${error}` } satisfies BackgroundAgentJobResult),
+      handoffNotifiedAt: null,
     });
     this.aborts.delete(id);
-    return this.get(id);
+    if (job.parentJobId !== undefined) this.publishChildResult(id, now);
+    const updated = this.get(id);
+    return updated?.kind === "background_agent" ? updated : undefined;
   }
 
   markExpired(id: string, now = Date.now()): AgentJob | undefined {
     const job = this.get(id);
     if (job === undefined || job.status !== "ready") return job;
     updateAgentJobRecord(this.db, id, {
-      status: "expired",
-      completedAt: now,
-      error: "Staged output expired before delivery.",
+      status: "expired", completedAt: now, statusChangedAt: now, error: "Staged output expired before delivery.",
     });
     return this.get(id);
   }
 
-  cancel(id: string, input: { reason: string; mode: CancelMode; now?: number }): { ok: boolean; message: string; job?: AgentJob } {
+  cancel(id: string, reason: string, now = Date.now()): { ok: boolean; message: string; job?: AgentJob } {
     const job = this.get(id);
     if (job === undefined) return { ok: false, message: `No job ${id} exists.` };
-    if (!this.isActive(job)) return { ok: false, message: `Job ${id} is ${job.status} and cannot be cancelled.` };
-    const now = input.now ?? Date.now();
-    const ageMs = now - (job.startedAt ?? job.createdAt);
-    if (input.mode === "replacement" && ageMs > this.config.imageCancelGraceMs) {
-      return { ok: false, message: `Job ${id} is already ${Math.round(ageMs / 1000)}s old; do not cancel it for revisions, and start a separate variant only if explicitly requested.` };
+    if (!CANCELLABLE_STATUSES.has(job.status)) {
+      return { ok: false, message: `Job ${id} is ${job.status} and cannot be cancelled.` };
     }
-    if (input.mode === "replacement" && job.replacementCount >= this.config.maxImageReplacements) {
-      return { ok: false, message: `Job ${id} has already reached the replacement limit.` };
-    }
-
     updateAgentJobRecord(this.db, id, {
-      status: "dismissed",
-      completedAt: now,
-      cancelReason: input.reason,
+      status: "dismissed", completedAt: now, statusChangedAt: now, cancelReason: reason,
     });
     this.aborts.get(id)?.();
     this.aborts.delete(id);
-    if (job.kind !== "image_generation") {
-      for (const child of this.listOwnedImageJobs(job.id)) {
-        if (this.isActive(child)) this.cancel(child.id, { reason: `Parent agent ${job.id} was cancelled.`, mode: "explicit_cancel", now });
-      }
+    for (const child of this.listChildren(id)) {
+      if (CANCELLABLE_STATUSES.has(child.status)) this.cancel(child.id, `Parent agent ${id} was cancelled.`, now);
+      else if (child.status === "ready" || child.status === "yielded") this.dismiss(child.id, `Parent agent ${id} was cancelled.`, now);
     }
     return { ok: true, message: `Cancelled ${id}.`, job: this.get(id) };
+  }
+
+  dismiss(id: string, reason: string, now = Date.now()): { ok: boolean; message: string; job?: AgentJob } {
+    const job = this.get(id);
+    if (job === undefined) return { ok: false, message: `No job ${id} exists.` };
+    if (job.status !== "ready" && job.status !== "yielded") {
+      return { ok: false, message: `Job ${id} is ${job.status}; only ready or yielded jobs can be dismissed.` };
+    }
+    updateAgentJobRecord(this.db, id, {
+      status: "dismissed", completedAt: now, statusChangedAt: now, cancelReason: reason,
+    });
+    return { ok: true, message: `Dismissed ${id}.`, job: this.get(id) };
   }
 
   linkAsset(jobId: string, assetId: number, role = "output"): void {
@@ -570,24 +570,20 @@ export class AgentJobStore {
   }
 
   annotationForMessage(messageId: string, guildId: string, channelId: string, now = Date.now()): string[] {
-    const jobs = this.listVisible(guildId, channelId, now)
-      .filter((job) => job.sourceMessageId === messageId);
-    return jobs.map((job) => {
-      const delivery = job.deliveryGuildId !== job.guildId || job.deliveryChannelId !== job.channelId
-        ? ` -> channel_id ${job.deliveryChannelId}`
-        : "";
-      return job.kind === "image_generation"
-        ? `ImageJob: ${job.id} ${job.status}${job.input.is4k ? " 4K" : ""}${job.input.ownerAgentJobId !== undefined ? ` owned by ${job.input.ownerAgentJobId}` : ""}${delivery}`
-        : `AgentJob: ${job.id} ${job.kind} ${job.status}${delivery}`;
-    });
+    return this.listVisible(guildId, channelId, now)
+      .filter((job) => job.sourceMessageId === messageId)
+      .map((job) => {
+        const delivery = job.deliveryGuildId !== job.guildId || job.deliveryChannelId !== job.channelId
+          ? ` -> channel_id ${job.deliveryChannelId}`
+          : "";
+        const parent = job.parentJobId === undefined ? "" : ` child of ${job.parentJobId}`;
+        return job.kind === "image_generation"
+          ? `ImageJob: ${job.id} ${job.status}${job.input.is4k ? " 4K" : ""}${parent}${delivery}`
+          : `AgentJob: ${job.id} ${job.status}${parent}${delivery}`;
+      });
   }
 
-  private isActive(job: AgentJob): boolean {
-    return ACTIVE_STATUSES.has(job.status);
-  }
-
-  private replacementAssetHistory(job: AgentJob): number[] {
-    if (job.kind !== "image_generation") return [];
+  private replacementAssetHistory(job: ImageGenerationAgentJob): number[] {
     const lineage: AgentJob[] = [];
     const visitedJobs = new Set<string>();
     let current: AgentJob | undefined = job;
@@ -596,7 +592,6 @@ export class AgentJobStore {
       visitedJobs.add(current.id);
       current = current.replacesJobId === undefined ? undefined : this.get(current.replacesJobId);
     }
-
     const assetHistory: number[] = [];
     const visitedAssets = new Set<number>();
     const append = (assetId: number): void => {
@@ -611,31 +606,66 @@ export class AgentJobStore {
         const assetId = parseAssetId(reference.assetId);
         if (assetId !== null) append(assetId);
       }
-      for (const asset of this.listAssets(item.id)) {
-        if (asset.role === "output") append(asset.assetId);
-      }
+      for (const asset of this.listAssets(item.id)) if (asset.role === "output") append(asset.assetId);
     }
     return assetHistory;
   }
 
   private createShortId(prefix: "img" | "agent"): string {
     for (let i = 0; i < 10; i += 1) {
-      const id = `${prefix}-${randomUUID().replace(/-/g, "").slice(0, 6)}`;
+      const id = `${prefix}-${randomUUID().replaceAll("-", "").slice(0, 6)}`;
       if (this.get(id) === undefined) return id;
     }
-    return `${prefix}-${randomUUID().replace(/-/g, "").slice(0, 10)}`;
+    return `${prefix}-${randomUUID().replaceAll("-", "").slice(0, 10)}`;
   }
 }
 
+function childResultMessage(child: AgentJob, outstanding: readonly string[]): AgentPendingMessage {
+  const remaining = outstanding.length > 0
+    ? `Other child jobs still running: ${outstanding.join(", ")}.`
+    : "No other child jobs remain.";
+  if (
+    child.kind === "image_generation"
+    && child.result?.stagedAssetRef !== undefined
+    && child.result.workspacePath !== undefined
+    && child.result.contentType !== undefined
+  ) {
+    return {
+      kind: "image_result",
+      childJobId: child.id,
+      text: [
+        `Background image job ${child.id} completed.`,
+        `Staged asset ref: ${child.result.stagedAssetRef}.`,
+        `Workspace path: ${child.result.workspacePath}.`,
+        remaining,
+        "The staged output is ready for handoff. Include its staged ref and workspace path; do not move it only to preserve it.",
+      ].join("\n"),
+      stagedAssetRef: child.result.stagedAssetRef,
+      workspacePath: child.result.workspacePath,
+      contentType: child.result.contentType,
+    };
+  }
+  const handoff = child.kind === "background_agent" ? child.result?.handoff : undefined;
+  return {
+    kind: "text",
+    text: [
+      `Child job ${child.id} (${child.kind}) ${child.status}.`,
+      handoff !== undefined ? `Handoff:\n${handoff}` : `Result: ${child.error ?? child.cancelReason ?? "No output was produced."}`,
+      remaining,
+    ].join("\n"),
+  };
+}
+
 function compareJobsOldestFirst(a: AgentJob, b: AgentJob): number {
-  const timeDiff = a.createdAt - b.createdAt;
-  return timeDiff !== 0 ? timeDiff : a.id.localeCompare(b.id);
+  const time = a.createdAt - b.createdAt;
+  return time === 0 ? a.id.localeCompare(b.id) : time;
 }
 
 function toRecord(job: AgentJob): AgentJobRecord {
   return {
     id: job.id,
     kind: job.kind,
+    parentJobId: job.parentJobId ?? null,
     guildId: job.guildId,
     channelId: job.channelId,
     deliveryGuildId: job.deliveryGuildId,
@@ -646,6 +676,7 @@ function toRecord(job: AgentJob): AgentJobRecord {
     sourceQuote: job.sourceQuote,
     status: job.status,
     inputJson: JSON.stringify(job.input),
+    checkpointJson: job.kind === "background_agent" && job.checkpoint !== undefined ? JSON.stringify(job.checkpoint) : null,
     resultJson: job.result === undefined ? null : JSON.stringify(job.result),
     error: job.error ?? null,
     createdAt: job.createdAt,
@@ -656,12 +687,15 @@ function toRecord(job: AgentJob): AgentJobRecord {
     replacesJobId: job.replacesJobId ?? null,
     replacementCount: job.replacementCount,
     cancelReason: job.cancelReason ?? null,
+    statusChangedAt: job.statusChangedAt,
+    handoffNotifiedAt: job.handoffNotifiedAt ?? null,
   };
 }
 
 function fromRecord(record: AgentJobRecord): AgentJob {
   const base: AgentJobBase = {
     id: record.id,
+    ...(record.parentJobId !== null ? { parentJobId: record.parentJobId } : {}),
     guildId: record.guildId,
     channelId: record.channelId,
     deliveryGuildId: record.deliveryGuildId,
@@ -672,9 +706,11 @@ function fromRecord(record: AgentJobRecord): AgentJob {
     sourceQuote: record.sourceQuote,
     status: record.status as AgentJobStatus,
     createdAt: record.createdAt,
+    statusChangedAt: record.statusChangedAt,
     replacementCount: record.replacementCount,
     ...(record.startedAt !== null ? { startedAt: record.startedAt } : {}),
     ...(record.completedAt !== null ? { completedAt: record.completedAt } : {}),
+    ...(record.handoffNotifiedAt !== null ? { handoffNotifiedAt: record.handoffNotifiedAt } : {}),
     ...(record.sentMessageId !== null ? { sentMessageId: record.sentMessageId } : {}),
     ...(record.error !== null ? { error: record.error } : {}),
     ...(record.replacementRootJobId !== null ? { replacementRootJobId: record.replacementRootJobId } : {}),
@@ -686,21 +722,25 @@ function fromRecord(record: AgentJobRecord): AgentJob {
     const result = record.resultJson === null ? undefined : JSON.parse(record.resultJson) as ImageGenerationJobResult;
     return { ...base, kind: "image_generation", input, ...(result !== undefined ? { result } : {}) };
   }
-  if (record.kind !== "persona_task") {
-    throw new Error(`Unknown agent job kind: ${record.kind}`);
-  }
-  const input = JSON.parse(record.inputJson) as AgentTaskJobInput;
-  const result = record.resultJson === null ? undefined : JSON.parse(record.resultJson) as AgentTaskJobResult;
-  return { ...base, kind: "persona_task", input, ...(result !== undefined ? { result } : {}) };
+  if (record.kind !== "background_agent") throw new Error(`Unknown agent job kind: ${record.kind}`);
+  const input = JSON.parse(record.inputJson) as BackgroundAgentJobInput;
+  const checkpoint = record.checkpointJson === null ? undefined : JSON.parse(record.checkpointJson) as BackgroundAgentCheckpoint;
+  const result = record.resultJson === null ? undefined : JSON.parse(record.resultJson) as BackgroundAgentJobResult;
+  return {
+    ...base,
+    kind: "background_agent",
+    input,
+    ...(checkpoint !== undefined ? { checkpoint } : {}),
+    ...(result !== undefined ? { result } : {}),
+  };
 }
 
 const CancelAgentJobParams = Type.Object({
   job_id: Type.String(),
   reason: Type.String(),
-  mode: Type.Union([Type.Literal("replacement"), Type.Literal("explicit_cancel")]),
 });
 
-/** Create the narrow cancellation tool for cancellable async jobs. */
+/** Create the narrow cancellation tool for active async jobs. */
 export function createCancelAgentJobTool(deps: {
   store: AgentJobStore;
   onCancelled?: (jobId: string) => void | Promise<void>;
@@ -711,15 +751,12 @@ export function createCancelAgentJobTool(deps: {
     description: "",
     parameters: CancelAgentJobParams,
     async execute(_toolCallId, params): Promise<AgentToolResult<{ jobId: string; cancelled: boolean }>> {
-      const p = params as { job_id: string; reason: string; mode: CancelMode };
-      const result = deps.store.cancel(p.job_id, {
-        reason: p.reason,
-        mode: p.mode,
-      });
-      if (result.ok) await deps.onCancelled?.(p.job_id);
+      const request = params as { job_id: string; reason: string };
+      const result = deps.store.cancel(request.job_id, request.reason);
+      if (result.ok) await deps.onCancelled?.(request.job_id);
       return {
         content: [{ type: "text", text: result.message }],
-        details: { jobId: p.job_id, cancelled: result.ok },
+        details: { jobId: request.job_id, cancelled: result.ok },
       };
     },
   };

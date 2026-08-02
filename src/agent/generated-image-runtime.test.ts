@@ -76,6 +76,7 @@ test("renders compact actual prompts and durable output assets in job context", 
     sourceQuote: "make it better",
     status: "delivered",
     createdAt: 1_000,
+    statusChangedAt: 2_000,
     completedAt: 2_000,
     sentMessageId: "m2",
     input: {
@@ -96,8 +97,8 @@ test("renders compact actual prompts and durable output assets in job context", 
 test("renders global background-agent ownership, yield time, and handoff", () => {
   const yieldedAt = Date.parse("2026-08-01T12:00:00.000Z");
   const rendered = renderAgentJobsContext([{
-    id: "persona-abc123",
-    kind: "persona_task",
+    id: "agent-abc123",
+    kind: "background_agent",
     guildId: "other-guild",
     channelId: "other-channel",
     deliveryGuildId: "other-guild",
@@ -108,23 +109,22 @@ test("renders global background-agent ownership, yield time, and handoff", () =>
     sourceQuote: "check on them",
     status: "yielded",
     createdAt: yieldedAt - 60_000,
+    statusChangedAt: yieldedAt,
     startedAt: yieldedAt - 30_000,
     completedAt: yieldedAt,
     input: {
       taskName: "check-in",
       message: "Check another guild and report what happened.",
-      pendingMessages: [],
+      handoffTarget: { kind: "channel", guildId: "other-guild", channelId: "other-channel" },
     },
     result: {
       handoff: "The check is complete.",
-      yieldedAt,
-      notificationPending: false,
-      notificationDeliveredAt: yieldedAt + 1_000,
     },
+    handoffNotifiedAt: yieldedAt + 1_000,
     replacementCount: 0,
   }], "current-guild", "current-channel", yieldedAt + 120_000);
 
-  expect(rendered).toContain("persona_task yielded (paused) (active, elsewhere)");
+  expect(rendered).toContain("background_agent yielded (paused) (resumable, elsewhere)");
   expect(rendered).toContain("origin guild other-guild channel other-channel MsgID m2");
   expect(rendered).toContain(`yielded ${new Date(yieldedAt).toISOString()} (2m ago)`);
   expect(rendered).toContain('task "check-in": "Check another guild and report what happened."');
@@ -135,7 +135,7 @@ test("renders stopped time for dismissed agent jobs", () => {
   const stoppedAt = Date.parse("2026-08-01T12:00:00.000Z");
   const rendered = renderAgentJobsContext([{
     id: "agent-stopped",
-    kind: "persona_task",
+    kind: "background_agent",
     guildId: "g1",
     channelId: "c1",
     deliveryGuildId: "g1",
@@ -146,8 +146,13 @@ test("renders stopped time for dismissed agent jobs", () => {
     sourceQuote: "stop",
     status: "dismissed",
     createdAt: stoppedAt - 60_000,
+    statusChangedAt: stoppedAt,
     completedAt: stoppedAt,
-    input: { taskName: "done", message: "Done.", pendingMessages: [] },
+    input: {
+      taskName: "done",
+      message: "Done.",
+      handoffTarget: { kind: "channel", guildId: "g1", channelId: "c1" },
+    },
     replacementCount: 0,
   }], "g1", "c1", stoppedAt + 60_000);
 

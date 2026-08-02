@@ -68,6 +68,19 @@ export interface MaintenancePromptContext {
   toolContractSignature?: string;
   /** Active tool names in provider order, including transcript-deferred additions. */
   activeToolNames?: string[];
+  /** Skills loaded in this actor transcript. */
+  loadedSkillIds?: string[];
+}
+
+/** Durable continuation state for a long-running actor invocation. */
+export interface ActorContinuation {
+  transcript?: OpenRouterMessage[];
+  controlMessage: string;
+  loadedSkillIds?: readonly string[];
+  takePendingMessages?: () => OpenRouterMessage[] | Promise<OpenRouterMessage[]>;
+  maxToolCalls: number | null;
+  wallClockTimeoutMs: number;
+  compaction: { reserveTokens: number; keepRecentTokens: number };
 }
 
 export interface MemoryExtractionRequest {
@@ -132,8 +145,6 @@ export interface SilentToolAgentInput {
   visibleUserMemoryContext?: string;
   tools: AgentTool[];
   runtimeInstruction: string;
-  /** Stable skill index used by actor-compatible private loops. */
-  skillsInstruction?: string;
   controlMessage: string;
   /** Named model execution policy for this private maintenance pass. */
   modelProfile?: string;
@@ -143,24 +154,11 @@ export interface SilentToolAgentInput {
   /** End after a complete tool round containing these mutations unless any tool result needs repair. */
   terminateAfterSuccessfulToolRoundNames?: readonly string[];
   transcript?: OpenRouterMessage[];
-  /** Continue this transcript as normal conversation instead of converting it to maintenance evidence. */
-  continueTranscript?: boolean;
-  /** Initial tool surface for actor-compatible private loops. */
-  initialToolNames?: readonly string[];
-  /** Prompt-cache family shared with a compatible actor surface. */
-  promptCacheSurface?: string;
   promptContext?: MaintenancePromptContext;
   log?: Logger;
   requestLog?: RequestLog;
   completeChat?: ChatCompleteFn;
   signal?: AbortSignal;
-  /** Add durable follow-ups immediately before each model boundary. */
-  takePendingMessages?: () => OpenRouterMessage[] | Promise<OpenRouterMessage[]>;
-  imageInputSupported?: boolean;
-  stopAfterAsyncImageJobCreated?: boolean;
-  compactTranscript?: { reserveTokens: number; keepRecentTokens: number };
-  consumeGeneratedAttachments?: (ids: string[]) => OutboundAttachment[];
-  pendingAttachments?: OutboundAttachment[];
   /** Cache the current pass input because another maintenance pass will consume it. */
 }
 
@@ -251,6 +249,8 @@ export interface HandlerDeps {
   extraTools?: AgentTool[];
   /** Caller-owned extension tools that must be visible without discovery. */
   initialToolNames?: readonly string[];
+  /** Caller-preloaded skill prose and execution grants for this fresh turn. */
+  loadedSkillIds?: readonly string[];
   log?: Logger;
   onTriggered?: (result: NonNullable<TriggerResult>) => void;
   /** Called when work continues after a user-visible message so typing can be sent before later output. */
@@ -303,6 +303,8 @@ export interface HandlerDeps {
   /** Called immediately before final visible sends; false drops the reply as stale. */
   preSendCheck?: (draftText: string) => boolean | Promise<boolean>;
   scheduledTaskRun?: boolean;
+  /** Run the same actor loop as a durable background continuation. */
+  actorContinuation?: ActorContinuation;
 }
 
 export interface HandleResult {

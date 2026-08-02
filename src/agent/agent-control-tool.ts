@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { AgentJobStore } from "./job-runtime.ts";
+import type { AgentJobStore, BackgroundHandoffTarget } from "./job-runtime.ts";
 
 const SpawnAgentParams = Type.Object({
   task_name: Type.String({ minLength: 1, maxLength: 80 }),
@@ -23,6 +23,8 @@ export function createAgentControlTools(input: {
   requesterUsername: string;
   sourceMessageId: string;
   sourceQuote: string;
+  handoffTarget: BackgroundHandoffTarget;
+  parentJobId?: string;
   runAgentJob: (jobId: string) => Promise<void>;
   trackAgentJob: (task: Promise<void>) => void;
 }): AgentTool[] {
@@ -37,7 +39,7 @@ export function createAgentControlTools(input: {
         message: string;
         model_profile?: string;
       };
-      const job = input.store.enqueueAgentTask({
+      const job = input.store.enqueueBackgroundAgent({
         guildId: input.guildId,
         channelId: input.channelId,
         requesterId: input.requesterId,
@@ -46,6 +48,8 @@ export function createAgentControlTools(input: {
         sourceQuote: input.sourceQuote,
         taskName: request.task_name,
         message: request.message,
+        handoffTarget: input.handoffTarget,
+        ...(input.parentJobId !== undefined ? { parentJobId: input.parentJobId } : {}),
         ...(request.model_profile !== undefined ? { modelProfile: request.model_profile } : {}),
       });
       input.trackAgentJob(input.runAgentJob(job.id));

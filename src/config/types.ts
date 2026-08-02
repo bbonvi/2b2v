@@ -559,8 +559,6 @@ export interface GuildConfig {
   dispatcher: DispatcherConfig;
   /** Human-paced typing indicator delays. */
   typingSimulation: TypingSimulationConfig;
-  /** Async agent job configuration. */
-  agentJobs: AgentJobsConfig;
   /** Non-admin recurring scheduled-task pressure caps. */
   schedulePressure: SchedulePressureConfig;
   /** Provider role/target placement for logical prompt sections. */
@@ -624,8 +622,8 @@ export interface GlobalConfig {
   defaultDispatcher: DispatcherConfig;
   /** Default human-paced typing indicator delays. */
   defaultTypingSimulation: TypingSimulationConfig;
-  /** Default async agent job configuration. */
-  defaultAgentJobs: AgentJobsConfig;
+  /** Profile-wide async agent job configuration. */
+  agentJobs: AgentJobsConfig;
   /** Default non-admin recurring scheduled-task pressure caps. */
   defaultSchedulePressure: SchedulePressureConfig;
   /** Default provider role/target placement for logical prompt sections. */
@@ -701,17 +699,6 @@ export interface GuildConfigYaml {
     defaultDebounceMs?: number;
   };
   typingSimulation?: Partial<TypingSimulationConfig>;
-  agentJobs?: {
-    imageTimeoutMs?: number;
-    imageCancelGraceMs?: number;
-    terminalVisibleMs?: number;
-    yieldedAutoDismissMs?: number;
-    maxImageReplacements?: number;
-    agentTimeoutMs?: number;
-    agentMaxToolCalls?: number | null;
-    agentCompactionReserveTokens?: number;
-    agentCompactionKeepRecentTokens?: number;
-  };
   schedulePressure?: SchedulePressureConfigYaml;
   promptTransport?: PromptTransportConfigYaml;
   ambientAttention?: AmbientAttentionConfigYaml;

@@ -40,8 +40,8 @@ export function renderAgentJobDetails(
     job.sentMessageId !== undefined ? `Sent MsgID: ${job.sentMessageId}` : "",
     job.replacementRootJobId !== undefined ? `Replacement root: ${job.replacementRootJobId}` : "",
     job.replacesJobId !== undefined ? `Replaces: ${job.replacesJobId}` : "",
-    job.kind === "image_generation" && job.input.ownerAgentJobId !== undefined
-      ? `Owner agent: ${job.input.ownerAgentJobId}`
+    job.parentJobId !== undefined
+      ? `Parent job: ${job.parentJobId}`
       : "",
     `Replacement count: ${job.replacementCount}`,
     assets.length > 0
@@ -81,8 +81,8 @@ export function createAgentJobInspectionTools(input: {
           : `; assets ${assets.map((asset) => `#${asset.assetId}`).join(", ")}`;
         const source = job.sentMessageId === undefined ? "" : `; sent MsgID ${job.sentMessageId}`;
         const summary = job.kind === "image_generation" ? job.input.prompt : job.input.message;
-        const owner = job.kind === "image_generation" && job.input.ownerAgentJobId !== undefined
-          ? `; owner ${job.input.ownerAgentJobId}`
+        const owner = job.parentJobId !== undefined
+          ? `; parent ${job.parentJobId}`
           : "";
         return `- ${job.id} ${job.kind} ${job.status} for @${job.requesterUsername}; origin guild ${job.guildId} channel ${job.channelId}${owner}; task: ${JSON.stringify(shortQuote(summary, 180))}${source}${assetText}`;
       });
@@ -123,10 +123,7 @@ export function createAgentJobInspectionTools(input: {
       if (job.status !== "ready" && job.status !== "yielded") {
         throw new Error(`Job ${job.id} is ${job.status}; only ready or yielded jobs can be dismissed.`);
       }
-      const result = input.store.cancel(job.id, {
-        reason: parsed.reason,
-        mode: "explicit_cancel",
-      });
+      const result = input.store.dismiss(job.id, parsed.reason);
       if (result.ok) await input.onDismiss?.(job.id);
       return {
         content: [{ type: "text", text: result.message }],

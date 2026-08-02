@@ -148,12 +148,14 @@ export function renderAgentJobsContext(
   if (jobs.length === 0) return "";
   const lines = ["## Agent Jobs"];
   for (const job of jobs) {
-    const state = isActiveJobStatus(job.status) ? "active" : "recent terminal";
+    const state = job.status === "yielded"
+      ? "resumable"
+      : isActiveJobStatus(job.status) ? "active" : "recent terminal";
     const here = (job.guildId === currentGuildId && job.channelId === currentChannelId)
       || (job.deliveryGuildId === currentGuildId && job.deliveryChannelId === currentChannelId);
     const replacement = job.replacesJobId !== undefined ? ` replaces ${job.replacesJobId}` : "";
-    const owner = job.kind === "image_generation" && job.input.ownerAgentJobId !== undefined
-      ? `; owner ${job.input.ownerAgentJobId}`
+    const owner = job.parentJobId !== undefined
+      ? `; parent ${job.parentJobId}`
       : "";
     const sent = job.sentMessageId !== undefined ? ` sent MsgID ${job.sentMessageId}` : "";
     const error = job.error !== undefined ? formatJobErrorForContext(job.error) : "";
@@ -164,9 +166,9 @@ export function renderAgentJobsContext(
     const assetText = assets.length === 0
       ? ""
       : `; assets ${assets.map((asset) => `#${asset.assetId}`).join(", ")}`;
-    const yieldedAt = job.kind === "image_generation"
-      ? undefined
-      : job.result?.yieldedAt ?? (job.status === "yielded" ? job.completedAt : undefined);
+    const yieldedAt = job.kind === "background_agent" && job.status === "yielded"
+      ? job.statusChangedAt
+      : undefined;
     const terminalAt = isActiveJobStatus(job.status) ? undefined : job.completedAt;
     const terminalLabel = job.status === "dismissed" ? "stopped" : "finished";
     const timing = `${jobTime("created", job.createdAt, now)}${jobTime("yielded", yieldedAt, now)}${jobTime(terminalLabel, terminalAt, now)}`;

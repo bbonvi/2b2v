@@ -143,6 +143,49 @@ describe("database initialization", () => {
     expect(tables.map((row) => row.name).sort()).toEqual(["agent_job_assets", "agent_jobs"]);
   });
 
+  test("adds background lineage before creating its index on an existing job table", () => {
+    const dbPath = path.join(tmpDir, "legacy-agent-jobs.db");
+    const legacy = new BunDatabase(dbPath);
+    legacy.run(`CREATE TABLE agent_jobs (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      guild_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      delivery_guild_id TEXT NOT NULL,
+      delivery_channel_id TEXT NOT NULL,
+      requester_id TEXT NOT NULL,
+      requester_username TEXT NOT NULL,
+      source_message_id TEXT NOT NULL,
+      source_quote TEXT NOT NULL,
+      status TEXT NOT NULL,
+      input_json TEXT NOT NULL,
+      result_json TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      started_at INTEGER,
+      completed_at INTEGER,
+      sent_message_id TEXT,
+      replacement_root_job_id TEXT,
+      replaces_job_id TEXT,
+      replacement_count INTEGER NOT NULL DEFAULT 0,
+      cancel_reason TEXT
+    )`);
+    legacy.close();
+
+    const migrated = createDatabase(dbPath);
+    try {
+      const columns = migrated.raw.prepare("PRAGMA table_info(agent_jobs)").all() as Array<{ name: string }>;
+      const index = migrated.raw.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_agent_jobs_parent'",
+      ).get() as { name: string } | undefined;
+      expect(columns.some((column) => column.name === "parent_job_id")).toBe(true);
+      expect(columns.some((column) => column.name === "checkpoint_json")).toBe(true);
+      expect(index?.name).toBe("idx_agent_jobs_parent");
+    } finally {
+      migrated.close();
+    }
+  });
+
   test("migrates legacy staged asset room ownership without losing outputs", () => {
     const dbPath = path.join(tmpDir, "legacy-staged-assets.db");
     const existing = createDatabase(dbPath);

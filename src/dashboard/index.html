@@ -2423,9 +2423,9 @@
     if (kind === 'background_memory_extraction') return 'memory extraction';
     if (kind === 'relationships_extraction') return 'relationships extraction';
     if (kind === 'inner_thread_maintenance') return 'inner-thread maintenance';
-    if (kind === 'async_image_generation') return 'async image';
-    if (kind === 'async_agent_task') return 'async agent';
-    if (kind === 'async_agent_handoff') return 'agent handoff';
+    if (kind === 'image_generation_job') return 'image job';
+    if (kind === 'background_agent_run') return 'agent run';
+    if (kind === 'background_agent_handoff') return 'agent handoff';
     if (kind === 'prompt_lab') return 'prompt lab';
     if (kind === 'ambient_attention_evaluator') return 'ambient eval';
     if (kind === 'ambient_initiative_evaluator') return 'initiative eval';
@@ -2458,7 +2458,11 @@
     }
     if (typeof t.mode === 'string' && t.mode !== '') return t.mode;
     if (typeof t.source === 'string' && t.source !== '') return t.source;
-    if (typeof t.jobId === 'string' && t.jobId !== '') return shortId(t.jobId);
+    if (typeof t.jobId === 'string' && t.jobId !== '') {
+      return typeof t.status === 'string' && t.status !== ''
+        ? shortId(t.jobId) + ' / ' + t.status
+        : shortId(t.jobId);
+    }
     return '';
   }
 

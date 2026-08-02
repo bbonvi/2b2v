@@ -56,7 +56,7 @@ import { createConfigReloadRuntime } from "./config/reload-runtime";
 import { createStartupMessageQueue, registerMessageEvents } from "./discord/message-events";
 import { createMessageTurnRuntime, createScheduledAttentionGuard } from "./discord/message-turn-runtime";
 import { createVoiceApplication } from "./voice/application";
-import { createAgentTaskRuntime } from "./agent/agent-task-runtime.ts";
+import { createBackgroundAgentRuntime } from "./agent/background-agent-runtime.ts";
 
 const pkg = await Bun.file(new URL("../package.json", import.meta.url).pathname).json() as { version?: string };
 const version: string = pkg.version ?? "0.0.0";
@@ -167,7 +167,7 @@ client.on("shardResume", () => personaModeRuntime.reapplyPresentation());
 const guildConfigs = loadGuildConfigs(guildsDir, globalConfig);
 log.info("guild configs loaded", { count: guildConfigs.size });
 
-const agentJobs = new AgentJobStore(db, globalConfig.defaultAgentJobs);
+const agentJobs = new AgentJobStore(db, globalConfig.agentJobs);
 
 const modelImageSupport = createModelImageSupportStore({ log });
 await modelImageSupport.refresh(globalConfig, guildConfigs, "startup");
@@ -316,10 +316,10 @@ const {
 let enqueueChannelTaskImpl = (_guildId: string, _channelId: string, _task: () => Promise<void>): Promise<void> =>
   Promise.reject(new Error("Channel dispatcher is not ready."));
 let runAgentJobImpl = (_jobId: string): Promise<void> =>
-  Promise.reject(new Error("Agent task runtime is not ready."));
+  Promise.reject(new Error("Background agent runtime is not ready."));
 const resumeAgentJob = (jobId: string): void => {
   void agentJobTasks.track(runAgentJobImpl(jobId)).catch((error: unknown) => {
-    log.error("owned image parent resume failed", { jobId, error: error instanceof Error ? error.message : String(error) });
+    log.error("background agent resume failed", { jobId, error: error instanceof Error ? error.message : String(error) });
   });
 };
 
@@ -390,7 +390,7 @@ const toolRuntime = createToolRuntime({
   runAgentJob: async (jobId) => await runAgentJobImpl(jobId),
   trackAgentJob: (task) => {
     void agentJobTasks.track(task).catch((error: unknown) => {
-      log.error("agent task failed outside worker", { error: error instanceof Error ? error.message : String(error) });
+      log.error("background agent failed outside worker", { error: error instanceof Error ? error.message : String(error) });
     });
   },
   watchMatcher,
@@ -414,7 +414,7 @@ const voiceApplication = createVoiceApplication({
 const { voiceRuntime } = voiceApplication;
 
 const messageTurnRuntime = createMessageTurnRuntime({
-  db, client, log, requestLogStore, getGuildConfig,
+  db, client, log, requestLogStore, agentJobs, getGuildConfig,
   getPromptBundle: () => promptBundle,
   buildInboundResolvers, authorDisplayName, buildContext, buildAgentTools,
   createBotDiscordMessageSender, createHandlerDeps, createAssetAttachmentResolver,
@@ -432,18 +432,17 @@ const { dispatchers, getOrCreateDispatcher, evaluateMessageTrigger, normalizedWa
   processEventWatchTurn, processSettledWatchedMessage, processTriggeredMessage } = messageTurnRuntime;
 enqueueChannelTaskImpl = messageTurnRuntime.enqueueChannelTask;
 
-const agentTaskRuntime = createAgentTaskRuntime({
+const backgroundAgentRuntime = createBackgroundAgentRuntime({
   db, client, log, requestLogStore, agentJobs,
   getGlobalConfig: () => globalConfig,
   getPromptBundle: () => promptBundle,
   getGuildConfig,
   buildAgentTools,
-  createBotDiscordMessageSender,
-  createAssetAttachmentResolver,
+  createHandlerDeps,
   fetchAccessibleGuildChannel,
-  enqueueChannelTask: messageTurnRuntime.enqueueChannelTask,
+  dispatchRootHandoff: messageTurnRuntime.runBackgroundHandoff,
 });
-runAgentJobImpl = agentTaskRuntime.runAgentJob;
+runAgentJobImpl = backgroundAgentRuntime.runAgentJob;
 
 const eventWatchRuntime = createEventWatchRuntime({
   db, matcher: watchMatcher, pressure: DEFAULT_EVENT_WATCH_PRESSURE,
@@ -727,7 +726,7 @@ for (const row of db.raw.prepare(
     });
   });
 }
-void agentJobTasks.track(agentTaskRuntime.recover()).catch((error: unknown) => {
+void agentJobTasks.track(backgroundAgentRuntime.recover()).catch((error: unknown) => {
   log.error("agent job recovery failed", { error: error instanceof Error ? error.message : String(error) });
 });
 

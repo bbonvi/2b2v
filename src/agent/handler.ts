@@ -15,6 +15,7 @@ import { AgentTimeBudgetExceededError, assertActionCanCommit, makeToolErrorText 
 import { runNativeToolLoop } from "./model-loop.ts";
 import { DEFAULT_LIVE_MESSAGE_TYPING_HOLD_MS, LiveMessageDispatcher, sendResponseSegments, type DispatchSegment } from "./response-delivery.ts";
 import { memoryExtractionContext } from "./maintenance-pass.ts";
+import { compactBackgroundTranscript } from "./background-compaction.ts";
 import { buildCodexPromptCacheKey, buildFinalActionInstruction, buildInitialMessages, buildProviderSessionId, buildRuntimeInstruction, buildSkillsInstruction, buildVolatileTurnMessages, codexSystemPromptForStableSections, initialMessageRoles, promptTransportForProvider, sectionsForStablePrompt, toolContractSignature } from "./turn-prompt.ts";
 
 function privateThoughtsFromTranscript(
@@ -121,7 +122,9 @@ export async function handleMessage(
   );
   const userContent = context.userMessage !== "" ? context.userMessage : msg.translatedContent;
   const volatileMessages = buildVolatileTurnMessages(context);
-  const finalActionInstruction = buildFinalActionInstruction(deps.runtimePrompts, deps.scheduledTaskRun === true);
+  const finalActionInstruction = deps.actorContinuation === undefined
+    ? buildFinalActionInstruction(deps.runtimePrompts, deps.scheduledTaskRun === true)
+    : "";
   const initialRoles = initialMessageRoles(transport, volatileMessages, finalActionInstruction !== "");
   const reqLog = deps.requestLog;
   const visibleToolSignature = toolContractSignature(actorInitialTools);
@@ -147,8 +150,11 @@ export async function handleMessage(
     promptCaching: profile.promptCaching,
     toolContractSignature: visibleToolSignature,
     activeToolNames: actorInitialTools.map((tool) => tool.name),
+    loadedSkillIds: [...(deps.actorContinuation?.loadedSkillIds ?? deps.loadedSkillIds ?? [])],
   };
   const startedAt = Date.now();
+  const wallClockTimeoutMs = deps.actorContinuation?.wallClockTimeoutMs
+    ?? deps.guildConfig.replyLoop.wallClockTimeoutMs;
   let modelActionCommitted = false;
   const commitModelAction = (): void => {
     if (modelActionCommitted) return;
@@ -187,7 +193,7 @@ export async function handleMessage(
       toolNames: actorInitialTools.map((tool) => tool.name),
       registeredToolCount: timedTools.length,
       maxToolCalls: deps.guildConfig.replyLoop.maxToolCalls,
-      wallClockTimeoutMs: deps.guildConfig.replyLoop.wallClockTimeoutMs,
+      wallClockTimeoutMs,
       llmOutputTimeoutMs: deps.guildConfig.replyLoop.llmOutputTimeoutMs,
     });
 
@@ -199,8 +205,8 @@ export async function handleMessage(
       deps.abortSignal?.addEventListener("abort", onCallerAbort, { once: true });
     }
     const wallTimeout = setTimeout(() => {
-      wallController.abort(new AgentTimeBudgetExceededError(deps.guildConfig.replyLoop.wallClockTimeoutMs));
-    }, deps.guildConfig.replyLoop.wallClockTimeoutMs);
+      wallController.abort(new AgentTimeBudgetExceededError(wallClockTimeoutMs));
+    }, wallClockTimeoutMs);
 
     const pendingAttachments: OutboundAttachment[] = [];
     const intermediateStatus = { sent: false, sendCount: 0 };
@@ -283,14 +289,19 @@ export async function handleMessage(
     };
     try {
       timingState.resetAgentLoopStart();
-      const mainMessages = buildInitialMessages(
-        userContent,
-        volatileMessages,
-        msg,
-        deps.runtimePrompts,
-        model.llmProvider === "openai-codex" ? [] : initialRoles,
-        finalActionInstruction,
-      );
+      const mainMessages = deps.actorContinuation?.transcript === undefined
+        ? buildInitialMessages(
+            userContent,
+            volatileMessages,
+            msg,
+            deps.runtimePrompts,
+            model.llmProvider === "openai-codex" ? [] : initialRoles,
+            finalActionInstruction,
+          )
+        : [...deps.actorContinuation.transcript];
+      if (deps.actorContinuation !== undefined) {
+        mainMessages.push({ role: "user", content: deps.actorContinuation.controlMessage });
+      }
       maintenanceTranscript = mainMessages;
       const result = await runNativeToolLoop({
         complete,
@@ -308,10 +319,10 @@ export async function handleMessage(
             if (model.llmProvider === "openrouter") {
               prependStableSectionsToPayload(payload, stableSections, profile.promptCaching, model.id);
             } else if (transport.mode === "split-input") {
-            prependStableSectionsToCodexPayload(payload, stableSections, initialRoles, {
-              enabled: profile.promptCaching.enabled,
-              promptCacheKey,
-            });
+              prependStableSectionsToCodexPayload(payload, stableSections, initialRoles, {
+                enabled: profile.promptCaching.enabled,
+                promptCacheKey,
+              });
             }
             reqLog?.recordLLMRequest(payload);
             deps.log?.debug("llm_request_payload", { payload });
@@ -320,9 +331,13 @@ export async function handleMessage(
         messages: mainMessages,
         tools: timedTools,
         initialToolNames: actorInitialToolNames,
-        maxToolCalls: deps.guildConfig.replyLoop.maxToolCalls,
-        maxToolRounds: deps.guildConfig.replyLoop.maxToolCalls,
-        agentTimeBudgetMs: deps.guildConfig.replyLoop.wallClockTimeoutMs,
+        maxToolCalls: deps.actorContinuation?.maxToolCalls === null
+          ? undefined
+          : deps.actorContinuation?.maxToolCalls ?? deps.guildConfig.replyLoop.maxToolCalls,
+        maxToolRounds: deps.actorContinuation?.maxToolCalls === null
+          ? undefined
+          : deps.actorContinuation?.maxToolCalls ?? deps.guildConfig.replyLoop.maxToolCalls,
+        agentTimeBudgetMs: wallClockTimeoutMs,
         llmOutputTimeoutMs: deps.guildConfig.replyLoop.llmOutputTimeoutMs,
         retryDelayMs: deps.modelTurnRetryDelayMs,
         requestLog: reqLog,
@@ -374,6 +389,36 @@ export async function handleMessage(
           maintenancePromptContext.activeToolNames = activeTools.map((tool) => tool.name);
           maintenancePromptContext.toolContractSignature = toolContractSignature(activeTools);
         },
+        initialLoadedSkillIds: deps.actorContinuation?.loadedSkillIds ?? deps.loadedSkillIds,
+        onLoadedSkillsChanged: (skillIds) => {
+          maintenancePromptContext.loadedSkillIds = [...skillIds];
+        },
+        takePendingMessages: deps.actorContinuation?.takePendingMessages,
+        stopAfterAsyncImageJobCreated: deps.actorContinuation === undefined,
+        beforeModelTurn: deps.actorContinuation === undefined
+          ? undefined
+          : async (currentMessages) => await compactBackgroundTranscript({
+              messages: currentMessages,
+              fixedPromptTokens: Math.ceil(stableSections.reduce((chars, section) => chars + section.text.length, 0) / 4),
+              model,
+              reserveTokens: deps.actorContinuation?.compaction.reserveTokens ?? 16_384,
+              keepRecentTokens: deps.actorContinuation?.compaction.keepRecentTokens ?? 20_000,
+              complete,
+              requestBase: {
+                provider: model.llmProvider,
+                apiKey: baseStreamOptions.apiKey,
+                model: model.id,
+                systemPrompt: model.llmProvider === "openai-codex"
+                  ? codexSystemPromptForStableSections(stableSections, transport)
+                  : "",
+                providerParams,
+                sessionId,
+                promptCacheKey,
+              },
+              signal: wallController.signal,
+              requestLog: reqLog,
+              log: deps.log,
+            }),
         onActionCommitted: commitModelAction,
       });
       finalText = result.text;

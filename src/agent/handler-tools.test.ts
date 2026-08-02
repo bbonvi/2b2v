@@ -6,6 +6,84 @@ import type { ChatCompleteFn, MessageSender } from "./turn-types.ts";
 import { makeCodexGlobal, makeDeps, makeGuildConfig, makeMessage } from "./handler-test-support.ts";
 
 describe("handleMessage", () => {
+  test("continues a background transcript through the normal actor loop", async () => {
+    let executions = 0;
+    const imageTool: AgentTool = {
+      name: "codex_generate_image",
+      label: "Image",
+      description: "Generate an image.",
+      parameters: Type.Object({ prompt: Type.String() }),
+      execute: () => {
+        executions += 1;
+        return Promise.resolve({
+          content: [{ type: "text", text: "Started child image job img-1." }],
+          details: { asyncJobCreated: true },
+        });
+      },
+    };
+    let calls = 0;
+    let firstMessages: unknown[] = [];
+    const completeChat: ChatCompleteFn = (request) => {
+      calls += 1;
+      if (calls === 1) {
+        firstMessages = request.messages.map((message) => message.content);
+        return Promise.resolve({
+          text: "",
+          toolCalls: [{
+            id: "image-1",
+            type: "function",
+            function: { name: "codex_generate_image", arguments: '{"prompt":"variant"}' },
+          }],
+          rawResponse: {},
+          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+        });
+      }
+      expect(request.messages.some((message) => message.role === "tool" && message.name === "codex_generate_image")).toBe(true);
+      return Promise.resolve({
+        text: "Private handoff.",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: "Private handoff." },
+      });
+    };
+
+    const result = await handleMessage(makeMessage(), makeDeps({
+      extraTools: [imageTool],
+      initialToolNames: ["codex_generate_image"],
+      forceTrigger: true,
+      completeChat,
+      externalResponseSink: {
+        startModelTurn: () => {},
+        push: () => Promise.resolve(false),
+        finish: (text) => Promise.resolve({ visible: false, memoryText: text, malformed: false }),
+        abort: () => {},
+      },
+      actorContinuation: {
+        transcript: [
+          { role: "user", content: "Original assignment." },
+          { role: "assistant", content: "Prior progress." },
+        ],
+        controlMessage: "Background control.",
+        loadedSkillIds: ["image_generation"],
+        takePendingMessages: () => [{ role: "user", content: "New child result." }],
+        maxToolCalls: null,
+        wallClockTimeoutMs: 45_000,
+        compaction: { reserveTokens: 16_384, keepRecentTokens: 20_000 },
+      },
+    }));
+
+    expect(executions).toBe(1);
+    expect(calls).toBe(2);
+    expect(firstMessages).toEqual([
+      "Original assignment.",
+      "Prior progress.",
+      "Background control.",
+      "New child result.",
+    ]);
+    expect(result.responseText).toBe("Private handoff.");
+    expect(result.promptContext?.loadedSkillIds).toEqual(["image_generation"]);
+  });
+
   test("accepts an empty final model turn after a tool produced public output", async () => {
     let publicOutputSent = false;
     const tool: AgentTool = {

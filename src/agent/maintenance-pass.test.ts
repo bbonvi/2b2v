@@ -8,7 +8,6 @@ import { runSilentMemoryAgentPass, runSilentToolAgentPass } from "./maintenance-
 import { hasMaintenanceMaterial, type ChatCompleteFn } from "./turn-types.ts";
 import type { OpenRouterMessage } from "../llm/types.ts";
 import { buildCodexContext } from "../llm/codex-chat.ts";
-import { buildCodexPromptCacheKey } from "./turn-prompt.ts";
 import { TEST_RUNTIME_PROMPTS, makeCodexGlobal, makeContext, makeDeps, makeGlobalConfig, makeGuildConfig, makeMessage, makePromptTransportConfig } from "./handler-test-support.ts";
 
 describe("handleMessage", () => {
@@ -644,87 +643,6 @@ describe("handleMessage", () => {
     expect(serialized).toContain("web_search({\\\"query\\\":\\\"mechanism\\\"})");
     expect(serialized).toContain("A useful result.");
     expect(capturedMessages.some((message) => message.content === "Decide memory changes.")).toBe(true);
-  });
-
-  test("continues background-agent history without maintenance evidence wrapping", async () => {
-    const transcript: OpenRouterMessage[] = [
-      { role: "user", content: "Inspect the private workspace." },
-      {
-        role: "assistant",
-        content: null,
-        tool_calls: [{
-          id: "workspace-1",
-          type: "function",
-          function: { name: "workspace_exec", arguments: '{"command":"pwd"}' },
-        }],
-      },
-      {
-        role: "tool",
-        tool_call_id: "workspace-1",
-        name: "workspace_exec",
-        content: "/workspace",
-      },
-      { role: "assistant", content: "The workspace is available." },
-    ];
-    const workspaceTool: AgentTool = {
-      name: "workspace_exec",
-      label: "workspace_exec",
-      description: "Run a shell command.",
-      parameters: Type.Object({}),
-      execute: () => Promise.resolve({ content: [{ type: "text", text: "ok" }], details: {} }),
-    };
-    let capturedMessages: OpenRouterMessage[] = [];
-    let capturedToolNames: string[] = [];
-    let capturedSystemPrompt = "";
-    let capturedPayload: unknown;
-
-    await runSilentToolAgentPass({
-      globalConfig: makeCodexGlobal({ model: "gpt-5.6-sol" }),
-      guildConfig: makeGuildConfig(),
-      context: { sections: [], userMessage: "" },
-      systemPrompt: "2B system",
-      personaPrompt: "2B persona and style",
-      skillsInstruction: TEST_RUNTIME_PROMPTS.skills.indexPrompt,
-      incomingMessage: makeMessage(),
-      userContent: "",
-      assistantReply: "",
-      visibleReplySent: false,
-      tools: [workspaceTool],
-      runtimeInstruction: TEST_RUNTIME_PROMPTS.reply,
-      controlMessage: "",
-      transcript,
-      continueTranscript: true,
-      promptCacheSurface: "discord-actor",
-      completeChat: (request) => {
-        capturedMessages = structuredClone(request.messages);
-        capturedToolNames = (request.tools ?? []).map((entry) => entry.function.name);
-        capturedSystemPrompt = request.systemPrompt;
-        const payload = {
-          input: request.messages.map((message) => ({ type: "message", ...message })),
-        };
-        request.onPayload?.(payload);
-        capturedPayload = payload;
-        return Promise.resolve({
-          text: "Done.",
-          toolCalls: [],
-          rawResponse: {},
-          messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: "Done." },
-        });
-      },
-    });
-
-    const serialized = JSON.stringify(capturedMessages);
-    expect(serialized).toContain("Inspect the private workspace.");
-    expect(serialized).toContain("workspace_exec");
-    expect(serialized).not.toContain("Completed Actor Turn Evidence");
-    expect(capturedToolNames).toEqual(["workspace_exec"]);
-    expect(capturedSystemPrompt).toContain("2B system");
-    expect(JSON.stringify(capturedPayload)).toContain("2B persona and style");
-    expect(JSON.stringify(capturedPayload)).toContain("image_generation");
-    expect(JSON.stringify(capturedPayload)).toContain("Reserved action directives.");
-    expect(capturedPayload).toMatchObject({
-      prompt_cache_key: buildCodexPromptCacheKey("default", "main", "gpt-5.6-sol", "discord-actor"),
-    });
   });
 
 });

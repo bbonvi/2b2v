@@ -11,7 +11,6 @@ import { initialMaintenanceToolNames } from "./tool-catalog.ts";
 import type { IncomingMessage, SilentMemoryAgentInput, SilentToolAgentInput } from "./turn-types.ts";
 import { AgentTimeBudgetExceededError } from "./model-retry.ts";
 import { runNativeToolLoop, toolMessage } from "./model-loop.ts";
-import { compactBackgroundTranscript } from "./background-compaction.ts";
 import { textFromMessageParts } from "./image-fallback.ts";
 import { buildCodexPromptCacheKey, buildInitialMessages, buildProviderSessionId, buildRuntimeInstruction, buildVolatileTurnMessages, codexSystemPromptForStableSections, initialMessageRoles, maintenanceCacheSurface, promptTransportForProvider, runtimeContextTemplate, sectionsForStablePrompt, toolContractSignature } from "./turn-prompt.ts";
 
@@ -177,16 +176,15 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
     && inheritedPrompt.toolContractSignature !== undefined
     && toolContractSignature(inheritedActiveTools) === inheritedPrompt.toolContractSignature
     && inheritedActiveToolNames.includes("search_tools");
-  const continueTranscript = input.continueTranscript === true && input.transcript !== undefined;
-  const canReuseInheritedTranscript = continueTranscript
-    || (inheritedPromptCompatible && (provider !== "openai-codex" || canContinueActorToolSurface));
+  const canReuseInheritedTranscript = inheritedPromptCompatible
+    && (provider !== "openai-codex" || canContinueActorToolSurface);
 
   const stableSections = inheritedPromptCompatible ? inheritedPrompt.stableSections : sectionsForStablePrompt(
     input.systemPrompt ?? "",
     input.personaPrompt ?? "",
     "",
     input.context,
-    input.skillsInstruction ?? "",
+    "",
     input.runtimeInstruction,
     transport,
   );
@@ -201,7 +199,7 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
             input.globalConfig.runtimeProfileId ?? "default",
             profileId,
             model.id,
-            input.promptCacheSurface ?? maintenanceCacheSurface(input.tools),
+            maintenanceCacheSurface(input.tools),
           )
       : ""
     : undefined;
@@ -236,13 +234,9 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
     : hasMaintenanceSearchTool
       ? initialMaintenanceToolNames(timedTools)
       : new Set(timedTools.map((tool) => tool.name));
-  const requestedInitialToolNames = input.initialToolNames === undefined
-    ? undefined
-    : new Set(input.initialToolNames.filter((name) => timedToolsByName.has(name)));
-  const maintenanceInitialToolNames = requestedInitialToolNames
-    ?? (canContinueActorToolSurface
+  const maintenanceInitialToolNames = canContinueActorToolSurface
       ? new Set([...inheritedActiveToolNames, ...maintenanceToolNames])
-      : fallbackMaintenanceInitialToolNames);
+      : fallbackMaintenanceInitialToolNames;
   const newlyActiveMaintenanceTools = maintenanceToolNames
     .filter((name) => !inheritedActiveToolNames.includes(name));
   if (canContinueActorToolSurface) {
@@ -297,9 +291,8 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
       agentTimeBudgetMs: wallClockTimeoutMs,
       llmOutputTimeoutMs: input.guildConfig.replyLoop.llmOutputTimeoutMs,
       requestLog: input.requestLog,
-      imageInputSupported: input.imageInputSupported === true,
-      consumeGeneratedAttachments: input.consumeGeneratedAttachments,
-      pendingAttachments: input.pendingAttachments ?? [],
+      imageInputSupported: false,
+      pendingAttachments: [],
       toolTiming: timingState,
       runtimePrompts: input.runtimePrompts,
       log: input.log,
@@ -316,22 +309,6 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
         : (activeTools) => {
             activeToolNames = activeTools.map((tool) => tool.name);
           },
-      takePendingMessages: input.takePendingMessages,
-      stopAfterAsyncImageJobCreated: input.stopAfterAsyncImageJobCreated,
-      beforeModelTurn: input.compactTranscript === undefined
-        ? undefined
-        : async (currentMessages) => await compactBackgroundTranscript({
-          messages: currentMessages,
-          fixedPromptTokens: Math.ceil(stableSections.reduce((chars, section) => chars + section.text.length, 0) / 4),
-          model,
-          reserveTokens: input.compactTranscript?.reserveTokens ?? 16_384,
-          keepRecentTokens: input.compactTranscript?.keepRecentTokens ?? 20_000,
-          complete,
-          requestBase,
-          signal: wallController.signal,
-          requestLog: input.requestLog,
-          log: input.log,
-        }),
     });
     return { text: result.text, transcript: messages, activeToolNames };
   } finally {

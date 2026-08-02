@@ -60,8 +60,8 @@ export function createImageJobRuntime(input: {
 }) {
   const { db, client, log, requestLogStore, agentJobs, linkContentCache, getGlobalConfig, getPromptBundle, getGuildConfig, runtimeContextTemplate, buildContext, getBuildAgentTools, blockToolsExcept, createPostReplyMaintenanceTools, runMemoryPostReplyExtraction, runRelationshipPostReplyExtraction, runInnerThreadPostReplyExtraction, createBotDiscordMessageSender, createTtsGenerator, createHandlerDeps, createAssetAttachmentResolver, persistIgnoredBotReply, fetchAccessibleGuildChannel, resolveGuildMemberReference, noteAmbientBotReply, enqueueChannelTask, resumeAgentJob } = input;
 function resumeOwner(childJobId: string): void {
-  const queued = agentJobs.queueOwnedImageResult(childJobId);
-  if (queued.shouldRun && queued.ownerAgentJobId !== undefined) resumeAgentJob(queued.ownerAgentJobId);
+  const queued = agentJobs.publishChildResult(childJobId);
+  if (queued.shouldRun && queued.parentJobId !== undefined) resumeAgentJob(queued.parentJobId);
 }
 async function runImageGenerationJob(jobId: string): Promise<void> {
   const job = agentJobs.get(jobId);
@@ -92,11 +92,11 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     defaultChannel: textChannel,
     resolveTargetChannel: createTargetChannelResolver(client, textChannel),
   });
-  if (job.input.ownerAgentJobId === undefined) typing.startLoop();
+  if (job.parentJobId === undefined) typing.startLoop();
   const controller = new AbortController();
   const timeout = setTimeout(() => {
-    controller.abort(new Error(`Image job ${job.id} timed out after ${deliveryGuildConfig.agentJobs.imageTimeoutMs}ms`));
-  }, deliveryGuildConfig.agentJobs.imageTimeoutMs);
+    controller.abort(new Error(`Image job ${job.id} timed out after ${getGlobalConfig().agentJobs.imageTimeoutMs}ms`));
+  }, getGlobalConfig().agentJobs.imageTimeoutMs);
   const requestLog = new RequestLog(job.deliveryGuildId, job.deliveryChannelId, requestLogStore);
   requestLog.setAuthor(job.requesterUsername);
   requestLog.setTriggerContext({
@@ -105,7 +105,13 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     sourceMessageId: job.sourceMessageId,
     sourceQuote: job.sourceQuote,
   });
-  requestLog.setTrigger({ type: "async_image_generation", jobId: job.id, sourceMessageId: job.sourceMessageId, standalone: true });
+  const dashboardTrigger = {
+    type: "image_generation_job",
+    jobId: job.id,
+    ...(job.parentJobId !== undefined ? { parentJobId: job.parentJobId } : {}),
+    sourceMessageId: job.sourceMessageId,
+  };
+  requestLog.setTrigger(dashboardTrigger);
   requestLog.setAgentRan(true);
   requestLogStore.incrementActive();
   const imageToolCallId = `async-image-generate-${job.id}`;
@@ -313,8 +319,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
 
   try {
     if (job.status === "ready") {
-      if (job.input.ownerAgentJobId !== undefined) {
-        agentJobs.markOwnedImageCompleted(job.id);
+      if (job.parentJobId !== undefined) {
         resumeOwner(job.id);
         return;
       }
@@ -468,8 +473,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
       ...(details?.actualSize !== undefined ? { actualSize: details.actualSize } : {}),
       ...(typeof details?.revisedPrompt === "string" ? { revisedPrompt: details.revisedPrompt } : {}),
     } satisfies ImageGenerationJobResult);
-    if (job.input.ownerAgentJobId !== undefined) {
-      agentJobs.markOwnedImageCompleted(job.id);
+    if (job.parentJobId !== undefined) {
       resumeOwner(job.id);
       return;
     }
@@ -536,7 +540,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
     const timedOut = controller.signal.aborted && message.includes("timed out");
     agentJobs.markFailed(job.id, timedOut ? `Timed out: ${message}` : message);
     const latest = agentJobs.get(job.id);
-    if (job.input.ownerAgentJobId !== undefined) {
+    if (job.parentJobId !== undefined) {
       resumeOwner(job.id);
       return;
     }
@@ -567,6 +571,7 @@ async function runImageGenerationJob(jobId: string): Promise<void> {
   } finally {
     clearTimeout(timeout);
     typing.stopLoop();
+    requestLog.setTrigger({ ...dashboardTrigger, status: agentJobs.get(job.id)?.status ?? "missing" });
     requestLog.emit(log);
     requestLogStore.decrementActive();
   }
