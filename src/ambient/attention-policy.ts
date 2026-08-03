@@ -9,7 +9,7 @@ import type {
   GuildConfig,
 } from "../config/types";
 import type { HistoryMessage } from "../agent/history-types";
-import { formatHistoryContent } from "../agent/history-formatting";
+import { formatAssetMeta, formatHistoryContent } from "../agent/history-formatting";
 import { formatLocalWallClock } from "../time/agent-time";
 import { contentMentionsEveryone, shouldRespond, type TriggerResult } from "../agent/triggers";
 import { buildComputedContactContextForUser } from "../agent/contact-context";
@@ -24,6 +24,7 @@ import { completeLlmChat } from "../llm/chat";
 import type { OpenRouterMessage } from "../llm/types";
 import { getHistoryMessages } from "../db/message-history-repository";
 import { getMessageById } from "../db/message-search-repository";
+import { getAssetsByMessageId } from "../db/asset-repository";
 
 const CHANNEL_ACTIVITY_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_ACTIVITY_BUCKET_MS = 60_000;
@@ -95,8 +96,15 @@ export function renderAmbientHistory(input: {
         ? " <trigger>"
         : "";
     const reply = message.replyToId !== null ? ` reply_to=${message.replyToId}` : "";
-    return `[${formatLocalWallClock(message.timestamp, input.timezone)}] ${who} (${message.authorId})${reply}${marker}: ${formatHistoryContent(message)}`;
+    const assets = formatAssetMeta(message.assets ?? []);
+    const assetMeta = assets.length > 0 ? ` (${assets.join("; ")})` : "";
+    return `[${formatLocalWallClock(message.timestamp, input.timezone)}] ${who} (${message.authorId})${reply}${marker}${assetMeta}: ${formatHistoryContent(message)}`;
   }).join("\n");
+}
+
+/** Treat stored attachments as message content for ambient attention. */
+export function hasAmbientTriggerContent(db: Database, messageId: string, content: string): boolean {
+  return content.trim() !== "" || getAssetsByMessageId(db, messageId).length > 0;
 }
 
 function percentileBucketCount(counts: readonly number[], percentile: number): number {
@@ -473,7 +481,7 @@ export function createAmbientAttentionPolicy(input: {
 
     const trigger = getMessageById(db, candidate.triggerMessageId, candidate.guildId);
     if (trigger === null || trigger.channelId !== candidate.channelId) return { ok: false, reason: "trigger message missing" };
-    if (trigger.translatedContent.trim() === "") return { ok: false, reason: "empty trigger message" };
+    if (!hasAmbientTriggerContent(db, trigger.id, trigger.translatedContent)) return { ok: false, reason: "empty trigger message" };
 
     const history = getHistoryMessages(db, candidate.channelId, config.historyLimit);
     const afterTrigger = history.filter((message) =>
