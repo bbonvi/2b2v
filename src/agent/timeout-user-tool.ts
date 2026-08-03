@@ -91,9 +91,6 @@ export function createDiscordSetUserTimeoutTool(deps: TimeoutUserToolDeps): Agen
         return failure("discord_set_user_timeout only works in a Discord guild/server, not DMs.", "not_guild");
       }
 
-      const adminFailure = await adminFailureResult(deps);
-      if (adminFailure !== null) return adminFailure;
-
       const p = params as Partial<TimeoutUserInput>;
       const target = typeof p.target === "string" ? p.target.trim() : "";
       if (target === "") {
@@ -147,9 +144,6 @@ export function createDiscordRemoveUserTimeoutTool(deps: TimeoutUserToolDeps): A
         return failure("discord_remove_user_timeout only works in a Discord guild/server, not DMs.", "not_guild");
       }
 
-      const adminFailure = await adminFailureResult(deps);
-      if (adminFailure !== null) return adminFailure;
-
       const p = params as Partial<RemoveUserTimeoutInput>;
       const target = typeof p.target === "string" ? p.target.trim() : "";
       if (target === "") {
@@ -182,20 +176,6 @@ export function createDiscordRemoveUserTimeoutTool(deps: TimeoutUserToolDeps): A
       };
     },
   };
-}
-
-async function adminFailureResult(deps: TimeoutUserToolDeps): Promise<TimeoutFailureResult | null> {
-  let requesterAdmin: boolean;
-  try {
-    requesterAdmin = await deps.isRequesterAdmin();
-  } catch {
-    requesterAdmin = false;
-  }
-  if (requesterAdmin) return null;
-  return failure(
-    "Refusing to change a timeout unless the requesting Discord user is an admin.",
-    "requester_not_admin",
-  );
 }
 
 async function resolveModerationTarget(
