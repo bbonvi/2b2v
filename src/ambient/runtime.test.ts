@@ -4,6 +4,7 @@ import { DEFAULT_AMBIENT_ATTENTION } from "../config/defaults.ts";
 import { createDatabase, type Database } from "../db/database.ts";
 import {
   ambientPendingKey,
+  hasAmbientTriggerContent,
   renderAmbientHistory,
   resolveLocalChannelShape,
   shouldDeferAmbientCandidateForTyping,
@@ -114,6 +115,48 @@ describe("renderAmbientHistory", () => {
     });
 
     expect(text).toContain("removed text [deleted]");
+  });
+
+  test("renders image-only messages for evaluator context", () => {
+    const text = renderAmbientHistory({
+      history: [msg({
+        content: "",
+        assets: [{
+          id: 42,
+          kind: "image",
+          sourceKind: "attachment",
+          filename: "reaction.png",
+          contentType: "image/png",
+          size: 10,
+          width: 20,
+          height: 30,
+          durationSeconds: null,
+        }],
+      })],
+      timezone: "UTC",
+      triggerMessageIds: ["m1"],
+    });
+
+    expect(text).toContain("<trigger> (Images: #42):");
+  });
+});
+
+describe("hasAmbientTriggerContent", () => {
+  test("accepts attachment-only messages but rejects empty rows", () => {
+    const db = createDatabase(":memory:");
+    try {
+      insertStoredMessage(db, "image", { createdAt: Date.now() });
+      insertStoredMessage(db, "empty", { createdAt: Date.now() });
+      db.raw.prepare(`INSERT INTO message_assets
+        (message_id, guild_id, channel_id, source_kind, source_key, kind, filename, size, created_at)
+        VALUES ('image', 'g1', 'c1', 'attachment', 'a1', 'image', 'reaction.png', 10, ?)`)
+        .run(Date.now());
+
+      expect(hasAmbientTriggerContent(db, "image", "")).toBe(true);
+      expect(hasAmbientTriggerContent(db, "empty", "")).toBe(false);
+    } finally {
+      db.close();
+    }
   });
 });
 

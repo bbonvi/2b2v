@@ -23,6 +23,7 @@ import {
   ambientPendingKey,
   ambientModeConfig,
   createAmbientAttentionPolicy,
+  hasAmbientTriggerContent,
   shouldDeferAmbientCandidateForTyping,
   type AmbientCandidate,
 } from "./attention-policy";
@@ -687,7 +688,7 @@ export function createAmbientAttentionRuntime(input: AmbientAttentionRuntimeDeps
     }
     if (ambientNormalTriggerInFlight(message.guildId, message.channelId, message.author.id)) return;
     const translatedContent = translateInbound(message.content, buildInboundResolvers(message.guild));
-    if (translatedContent.trim() === "" && message.stickers.size === 0) return;
+    if (!hasAmbientTriggerContent(db, message.id, translatedContent)) return;
     const base = {
       message,
       createdAt: Date.now(),
