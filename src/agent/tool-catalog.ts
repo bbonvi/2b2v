@@ -154,7 +154,7 @@ const TOOL_METADATA: Readonly<Record<string, Omit<ToolCatalogEntry, "tool">>> = 
   },
   list_emojis: {
     group: "discord_context",
-    summary: "List custom Discord emojis available in the current guild.",
+    summary: "List custom Discord emojis from the current guild or all available guilds.",
     aliases: ["custom emoji", "server emoji"],
   },
   list_event_watches: {

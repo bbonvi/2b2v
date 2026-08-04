@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TextContent } from "@earendil-works/pi-ai";
-import { buildEmojiListOutput, createEmojiListTool, type EmojiListToolDeps } from "./emoji-list-tool.ts";
+import { buildAllGuildEmojiListOutput, buildEmojiListOutput, createEmojiListTool, type EmojiListToolDeps } from "./emoji-list-tool.ts";
 import type { EmojiEntry } from "../discord/emoji-cache.ts";
 
 const EMOJIS: EmojiEntry[] = [
@@ -14,6 +14,11 @@ function makeDeps(overrides: Partial<EmojiListToolDeps> = {}): EmojiListToolDeps
     getCachedEmojis: () => EMOJIS,
     shouldRefresh: () => false,
     refreshEmojis: () => Promise.resolve(EMOJIS),
+    getAllGuildEmojis: () => [{ guildId: "g1", guildName: "Current", emojis: EMOJIS }],
+    resolveEmoji: (name) => {
+      const emoji = EMOJIS.find((candidate) => candidate.name === name);
+      return emoji === undefined ? undefined : { id: emoji.id, animated: emoji.animated };
+    },
     ...overrides,
   };
 }
@@ -31,6 +36,19 @@ describe("buildEmojiListOutput", () => {
 
   test("handles no emojis gracefully", () => {
     expect(buildEmojiListOutput([])).toBe("No custom emojis available for this server.");
+  });
+});
+
+describe("buildAllGuildEmojiListOutput", () => {
+  test("groups current guild first and marks the selected duplicate", () => {
+    const output = buildAllGuildEmojiListOutput([
+      { guildId: "g2", guildName: "Remote", emojis: [{ name: "wave", id: "222", animated: true }] },
+      { guildId: "g1", guildName: "Current", emojis: [{ name: "wave", id: "111", animated: false }] },
+    ], "g1", () => ({ id: "111", animated: false }));
+
+    expect(output.indexOf("Server: Current")).toBeLessThan(output.indexOf("Server: Remote"));
+    expect(output).toContain("S | :wave: | 111 | duplicate, selected");
+    expect(output).toContain("A | :wave: | 222 | duplicate");
   });
 });
 
@@ -72,5 +90,28 @@ describe("createEmojiListTool", () => {
 
     expect(text).toContain(":dance:");
     expect((result.details as { count: number }).count).toBe(2);
+  });
+
+  test("lists all live guild caches only when requested", async () => {
+    let refreshed = false;
+    const tool = createEmojiListTool(makeDeps({
+      shouldRefresh: () => true,
+      refreshEmojis: () => {
+        refreshed = true;
+        return Promise.resolve(EMOJIS);
+      },
+      getAllGuildEmojis: () => [
+        { guildId: "g2", guildName: "Remote", emojis: [{ name: "remote", id: "444", animated: false }] },
+        { guildId: "g1", guildName: "Current", emojis: EMOJIS },
+      ],
+    }));
+
+    const result = await tool.execute("tc1", { scope: "all" }, AbortSignal.timeout(5000));
+    const text = (result.content[0] as TextContent).text;
+
+    expect(refreshed).toBe(false);
+    expect(text).toContain("Available custom emojis across 2 servers (3)");
+    expect(text).toContain(":remote:");
+    expect(result.details).toEqual({ count: 3, guildCount: 2 });
   });
 });

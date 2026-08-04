@@ -46,6 +46,7 @@ import { prepareImageBufferForContext } from "../agent/image-buffer";
 import { countUserMemoriesByUser } from "../db/memory-repository";
 import { type PromptBundle } from "../config/instruction-bundle";
 import { resolveReactionEmojiInput } from "../discord/reaction-emoji";
+import { guildEmojiEntries } from "../discord/emoji-cache-sync.ts";
 import { syncDeletedOwnBotMessage, syncEditedOwnBotMessage } from "../discord/reply-fallback-runtime";
 import { createDiscordAssetSourceResolver } from "../discord/asset-resolver";
 import { DEFAULT_ASSET_READING, DEFAULT_EXTERNAL_IMAGES } from "../config/defaults";
@@ -318,6 +319,12 @@ function buildAgentTools(
     getCachedEmojis: (gId) => emojiCache.get(gId),
     shouldRefresh: (gId) => emojiCache.isStale(gId, EMOJI_TTL_MS),
     refreshEmojis: async () => fetchEmojiCache(guild),
+    getAllGuildEmojis: () => client.guilds.cache.map((candidate) => ({
+      guildId: candidate.id,
+      guildName: candidate.name,
+      emojis: guildEmojiEntries(candidate),
+    })),
+    resolveEmoji: buildOutboundResolvers(guild).emoji,
   });
 
   const discordTimeoutTools = createDiscordTimeoutTools({
