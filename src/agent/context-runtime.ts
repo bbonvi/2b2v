@@ -3,7 +3,7 @@ import { type loadGlobalConfig } from "../config/loader";
 import type { GuildConfig } from "../config/types";
 import { buildDiscordContext } from "../discord/context-renderer";
 import { buildDisplayNameContext, type InboundResolvers, type OutboundResolvers } from "../discord/translation";
-import { type EmojiCache, buildEmojiContext, type EmojiEntry } from "../discord/emoji-cache";
+import { type EmojiCache, buildEmojiContext, resolveGuildEmoji, type EmojiEntry } from "../discord/emoji-cache";
 import { guildEmojiEntries, syncGuildEmojiCache } from "../discord/emoji-cache-sync";
 import { channelDisplayName, isSendableGuildChannel } from "../discord/message-sender";
 import { assembleContext, type AssembledContext, type ThreadMetadata } from "../agent/context-assembly";
@@ -78,7 +78,7 @@ function buildOutboundResolvers(guild: Guild): OutboundResolvers {
       const ch = guild.channels.cache.find((c) => c.name === name);
       return ch !== undefined ? ch.id : undefined;
     },
-    emoji: (name) => emojiCache.lookup(guild.id, name),
+    emoji: (name) => resolveGuildEmoji(client, guild, name),
   };
 }
 

@@ -655,7 +655,7 @@ function buildAgentTools(
       refreshEmojiCache(targetChannel.guild);
       const emoji = resolveReactionEmojiInput(
         input.emoji,
-        (name) => emojiCache.lookup(targetChannel.guildId, name),
+        buildOutboundResolvers(targetChannel.guild).emoji,
       );
       if (emoji === null) throw new Error("emoji is required.");
 

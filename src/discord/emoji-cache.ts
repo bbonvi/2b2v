@@ -1,7 +1,6 @@
-/**
- * Per-guild custom emoji cache with TTL-based staleness detection.
- * Provides emoji lookup for outbound translation and context generation for LLM.
- */
+import type { Client, Guild } from "discord.js";
+
+/** Per-guild custom emoji cache for model context and tool output. */
 
 export interface EmojiEntry {
   name: string;
@@ -11,8 +10,6 @@ export interface EmojiEntry {
 
 interface CacheEntry {
   emojis: EmojiEntry[];
-  /** Map of emoji name → entry for O(1) lookup. */
-  byName: Map<string, EmojiEntry>;
   updatedAt: number;
 }
 
@@ -20,23 +17,11 @@ export class EmojiCache {
   private guilds = new Map<string, CacheEntry>();
 
   set(guildId: string, emojis: EmojiEntry[]): void {
-    const byName = new Map<string, EmojiEntry>();
-    for (const e of emojis) byName.set(e.name, e);
-    this.guilds.set(guildId, { emojis, byName, updatedAt: Date.now() });
+    this.guilds.set(guildId, { emojis, updatedAt: Date.now() });
   }
 
   get(guildId: string): EmojiEntry[] | undefined {
     return this.guilds.get(guildId)?.emojis;
-  }
-
-  /** Fast name-based lookup for outbound translation. */
-  lookup(
-    guildId: string,
-    name: string
-  ): { id: string; animated: boolean } | undefined {
-    const entry = this.guilds.get(guildId)?.byName.get(name);
-    if (!entry) return undefined;
-    return { id: entry.id, animated: entry.animated };
   }
 
   clear(guildId: string): void {
@@ -49,6 +34,17 @@ export class EmojiCache {
     if (!entry) return true;
     return Date.now() - entry.updatedAt > ttlMs;
   }
+}
+
+/** Resolve from the destination guild first, then any other guild available to the bot. */
+export function resolveGuildEmoji(
+  client: Client,
+  destinationGuild: Guild,
+  name: string,
+): Pick<EmojiEntry, "id" | "animated"> | undefined {
+  const emoji = destinationGuild.emojis.cache.find((candidate) => candidate.name === name)
+    ?? client.emojis.cache.find((candidate) => candidate.name === name);
+  return emoji === undefined ? undefined : { id: emoji.id, animated: emoji.animated };
 }
 
 /**

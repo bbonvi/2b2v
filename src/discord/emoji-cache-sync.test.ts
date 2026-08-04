@@ -21,7 +21,7 @@ describe("registerEmojiCacheSync", () => {
       { name: "new", id: "2", animated: true },
     ]);
     client.emit("emojiCreate", { guild: createdGuild } as unknown as GuildEmoji);
-    expect(cache.lookup("guild1", "new")).toEqual({ id: "2", animated: true });
+    expect(cache.get("guild1")).toContainEqual({ name: "new", id: "2", animated: true });
 
     const updatedGuild = makeGuild("guild1", [
       { name: "renamed", id: "2", animated: true },
@@ -31,8 +31,8 @@ describe("registerEmojiCacheSync", () => {
       { guild: createdGuild } as unknown as GuildEmoji,
       { guild: updatedGuild } as unknown as GuildEmoji,
     );
-    expect(cache.lookup("guild1", "new")).toBeUndefined();
-    expect(cache.lookup("guild1", "renamed")).toEqual({ id: "2", animated: true });
+    expect(cache.get("guild1")).not.toContainEqual(expect.objectContaining({ name: "new" }));
+    expect(cache.get("guild1")).toContainEqual({ name: "renamed", id: "2", animated: true });
 
     const deletedGuild = makeGuild("guild1", []);
     client.emit("emojiDelete", { guild: deletedGuild } as unknown as GuildEmoji);

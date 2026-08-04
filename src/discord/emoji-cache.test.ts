@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bu
 import {
   EmojiCache,
   buildEmojiContext,
+  resolveGuildEmoji,
   type EmojiEntry,
 } from "./emoji-cache.ts";
+import { Collection, type Client, type Guild, type GuildEmoji } from "discord.js";
 
 function makeEmojis(): EmojiEntry[] {
   return [
@@ -42,21 +44,6 @@ describe("EmojiCache", () => {
     expect(updated).toEqual([{ name: "new", id: "444", animated: false }]);
   });
 
-  test("lookup finds emoji by name", () => {
-    cache.set("guild1", makeEmojis());
-    const emoji = cache.lookup("guild1", "dance");
-    expect(emoji).toEqual({ id: "222", animated: true });
-  });
-
-  test("lookup returns undefined for unknown emoji", () => {
-    cache.set("guild1", makeEmojis());
-    expect(cache.lookup("guild1", "nope")).toBeUndefined();
-  });
-
-  test("lookup returns undefined for unknown guild", () => {
-    expect(cache.lookup("unknown", "thumbsup")).toBeUndefined();
-  });
-
   test("clear removes guild entry", () => {
     cache.set("guild1", makeEmojis());
     cache.clear("guild1");
@@ -78,6 +65,28 @@ describe("EmojiCache", () => {
     cache.set("guild1", makeEmojis());
     setSystemTime(now + 120_000);
     expect(cache.isStale("guild1", 60_000)).toBe(true);
+  });
+});
+
+describe("resolveGuildEmoji", () => {
+  test("prefers the destination guild, then resolves from another guild", () => {
+    const localWave = { name: "wave", id: "111", animated: false } as GuildEmoji;
+    const remoteWave = { name: "wave", id: "222", animated: true } as GuildEmoji;
+    const remoteDance = { name: "dance", id: "333", animated: true } as GuildEmoji;
+    const destinationGuild = {
+      emojis: { cache: new Collection([[localWave.id, localWave]]) },
+    } as unknown as Guild;
+    const client = {
+      emojis: { cache: new Collection([
+        [remoteWave.id, remoteWave],
+        [remoteDance.id, remoteDance],
+        [localWave.id, localWave],
+      ]) },
+    } as unknown as Client;
+
+    expect(resolveGuildEmoji(client, destinationGuild, "wave")).toEqual({ id: "111", animated: false });
+    expect(resolveGuildEmoji(client, destinationGuild, "dance")).toEqual({ id: "333", animated: true });
+    expect(resolveGuildEmoji(client, destinationGuild, "missing")).toBeUndefined();
   });
 });
 
