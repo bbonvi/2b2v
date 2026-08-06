@@ -67,7 +67,7 @@ privateLife:
     wallClockTimeoutMs: 500000 # (wall-clock budget for one private-life actor turn and its maintenance)
     maintenance:
         modelProfile: maintenance
-    opportunitiesPerDay: 16
+    opportunitiesPerDay: 12
     intervalJitter: 0.45
     lateNightStart: "22:30"
     sleepStart: "23:30"
