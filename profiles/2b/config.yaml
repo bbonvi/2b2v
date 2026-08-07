@@ -361,7 +361,7 @@ ambientInitiative:
     mainChannelLookbackDays: 7 # (auto main-channel activity lookback)
     evaluator:
         modelProfile: evaluator
-        llmOutputTimeoutMs: 8000 # (timeout for evaluator JSON)
+        llmOutputTimeoutMs: 15000 # (timeout for evaluator JSON)
 # Default trigger settings (guilds can override)
 triggers:
     mention: true # (respond to direct mentions, replies, assigned-role mentions, and @everyone)
