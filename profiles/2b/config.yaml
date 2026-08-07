@@ -444,7 +444,7 @@ tts:
 voice:
     enabled: true
     modelProfile: realtimeVoice
-    wakeWords: ["2b", "туби"]
+    wakeWords: ["2b", "туби", "to be"]
     lingeringAttentionMs: 45000
     roomQuietMs: 100
     otherSpeakerGraceMs: 1500
