@@ -340,8 +340,8 @@ ambientInitiative:
     shadowMode: false # (when true, evaluate/log but do not send automatic initiatives)
     wallClockTimeoutMs: 500000 # (wall-clock budget for one autonomous actor turn)
     mainChannelId: "" # (empty auto-picks most active human channel over lookback)
-    checkIntervalMinMs: 300000 # (shortest jittered cheap opportunity check interval)
-    checkIntervalMaxMs: 600000 # (longest jittered cheap opportunity check interval)
+    checkIntervalMinMs: 400000 # (shortest jittered cheap opportunity check interval)
+    checkIntervalMaxMs: 700000 # (longest jittered cheap opportunity check interval)
     botContactIds:
         - "1398275457857622128" # (Delamain Discord user ID)
     activeHours:
