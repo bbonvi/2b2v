@@ -67,7 +67,7 @@ privateLife:
     wallClockTimeoutMs: 500000 # (wall-clock budget for one private-life actor turn and its maintenance)
     maintenance:
         modelProfile: maintenance
-    opportunitiesPerDay: 12
+    opportunitiesPerDay: 10
     intervalJitter: 0.45
     lateNightStart: "22:30"
     sleepStart: "23:30"
@@ -232,7 +232,7 @@ personaModes:
               status: dnd
 
 trim:
-    trimTrigger: 1000 # Start trimming when history exceeds this many messages
+    trimTrigger: 800 # Start trimming when history exceeds this many messages
     trimTarget: 600 # Trim down to this many messages
     windowSize: 100 # Recent messages kept uncached (newer slice)
     messageCharLimit: 300 # Max chars per message before truncation

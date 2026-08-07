@@ -1,2 +1,4 @@
 ambientInitiative:
     enabled: false
+ambientAttention:
+    enabled: false
