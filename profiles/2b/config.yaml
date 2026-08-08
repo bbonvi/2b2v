@@ -28,7 +28,7 @@ modelProfiles:
         model: gpt-5.6-luna
         modelParams: { textVerbosity: low }
         thinkingLevel: medium
-        serviceTier: priority
+        # serviceTier: priority
         codexTransport: websocket-cached
         promptCaching: { enabled: true }
     realtimeVoice:
