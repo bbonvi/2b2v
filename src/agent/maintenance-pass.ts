@@ -239,7 +239,7 @@ export async function runSilentToolAgentPass(input: SilentToolAgentInput): Promi
       : fallbackMaintenanceInitialToolNames;
   const newlyActiveMaintenanceTools = maintenanceToolNames
     .filter((name) => !inheritedActiveToolNames.includes(name));
-  if (canContinueActorToolSurface) {
+  if (provider === "openai-codex" && hasMaintenanceSearchTool) {
     appendDeferredMaintenanceTools(messages, newlyActiveMaintenanceTools);
   }
   if (input.controlMessage !== "") messages.push({ role: "user", content: input.controlMessage });

@@ -581,6 +581,79 @@ describe("handleMessage", () => {
     ]);
   });
 
+  test("Codex maintenance keeps one tool prefix when its model differs from the actor", async () => {
+    const makeTool = (name: string): AgentTool => ({
+      name,
+      label: name,
+      description: name,
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({ content: [{ type: "text", text: `${name} complete` }], details: {} }),
+    });
+    const searchTools = makeTool("search_tools");
+    const writerNames = ["record_memory", "record_relationship", "record_inner_threads"];
+    const tools = [searchTools, ...writerNames.map(makeTool)];
+    const placements: Array<{ promptCacheKey?: string; immediate: string[]; deferred: string[] }> = [];
+    const completeChat: ChatCompleteFn = (request) => {
+      const placement = splitDeferredTools(buildCodexContext(request), true);
+      placements.push({
+        ...(request.promptCacheKey !== undefined ? { promptCacheKey: request.promptCacheKey } : {}),
+        immediate: placement.immediate.map((tool) => tool.name),
+        deferred: [...placement.deferred.keys()],
+      });
+      return Promise.resolve({
+        text: "",
+        toolCalls: [],
+        rawResponse: {},
+        messageForLogs: { role: "assistant", usage: { input: 1, output: 1, totalTokens: 2 }, content: [] },
+      });
+    };
+    const common = {
+      globalConfig: makeCodexGlobal({ model: "gpt-5.6-luna" }),
+      guildConfig: makeGuildConfig(),
+      context: makeContext(),
+      personaPrompt: "You are a test bot.",
+      runtimePrompts: TEST_RUNTIME_PROMPTS,
+      incomingMessage: makeMessage(),
+      userContent: "hello bot",
+      assistantReply: "done",
+      visibleReplySent: true,
+      transcript: [
+        { role: "user" as const, content: "hello bot" },
+        { role: "assistant" as const, content: "done" },
+      ],
+      promptContext: {
+        provider: "openai-codex" as const,
+        model: "gpt-5.6-sol",
+        transport: makePromptTransportConfig().openaiCodex,
+        stableSections: [],
+        initialRoles: ["user" as const],
+        promptCacheKey: "actor-cache-key",
+        promptCaching: { enabled: true },
+        activeToolNames: ["search_tools"],
+      },
+      tools,
+      runtimeInstruction: "Private maintenance.",
+      completeChat,
+    };
+
+    for (const writerName of writerNames) {
+      await runSilentToolAgentPass({
+        ...common,
+        controlMessage: `${writerName} maintenance`,
+        terminateAfterSuccessfulToolRoundNames: [writerName],
+      });
+    }
+
+    expect(placements.map((placement) => placement.immediate)).toEqual([
+      ["search_tools"],
+      ["search_tools"],
+      ["search_tools"],
+    ]);
+    expect(placements.map((placement) => placement.deferred)).toEqual(writerNames.map((name) => [name]));
+    expect(new Set(placements.map((placement) => placement.promptCacheKey)).size).toBe(1);
+    expect(placements[0]?.promptCacheKey).toMatch(/^2b2v:prompt:/);
+  });
+
   test("incompatible maintenance models receive portable raw actor evidence", async () => {
     let capturedMessages: OpenRouterMessage[] = [];
     const transcript: OpenRouterMessage[] = [
