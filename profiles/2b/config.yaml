@@ -11,7 +11,7 @@ modelProfiles:
         promptCaching: { enabled: true }
     maintenance:
         provider: openai-codex
-        model: gpt-5.6-sol
+        model: gpt-5.6-terra
         modelParams: { textVerbosity: low }
         thinkingLevel: medium
         codexTransport: websocket-cached
