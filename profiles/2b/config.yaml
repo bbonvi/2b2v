@@ -308,7 +308,7 @@ ambientAttention:
         minQuietMs: 80000 # (minimum silence after trigger before pickup can pass)
     lingering:
         enabled: true # (keep temporary attention after 2B replies)
-        minDelayMs: 2500 # (minimum wait before evaluating same-user continuation)
+        minDelayMs: 2000 # (minimum wait before evaluating same-user continuation)
         maxDelayMs: 6000 # (maximum wait before evaluating same-user continuation)
         probabilityThreshold: 0.55 # (threshold during strong attention window)
         confidenceThreshold: 0.55 # (confidence threshold during strong window)
@@ -350,7 +350,7 @@ ambientInitiative:
     historyLimit: 60 # (recent channel messages shown to evaluator/generator)
     recentActivityMinMs: 300000 # (avoid speaking immediately after fresh human activity)
     recentActivityMaxMs: 10800000 # (avoid treating dead rooms as opportunities)
-    quietWindowMs: 360000 # (minimum quiet after human activity before opportunity)
+    quietWindowMs: 600000 # (minimum quiet after human activity before opportunity)
     botCooldownMs: 2700000 # (soft resistance window after visible 2B output)
     basePressure: 0.16 # (nominal opportunity pressure before room and inner-thread signals)
     probabilityThreshold: 0.5 # (minimum evaluator wake probability)
